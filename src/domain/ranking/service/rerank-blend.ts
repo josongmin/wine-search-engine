@@ -47,7 +47,7 @@ const RERANK_BLEND_BY_CLASS: Readonly<Record<QueryClass, number>> = {
  * @param queryClass - The classified query type.
  * @returns Blend weight in [0, 1] for the reranker score component.
  */
-export function rerankBlendWeight(queryClass: QueryClass): number {
+function rerankBlendWeight(queryClass: QueryClass): number {
   return RERANK_BLEND_BY_CLASS[queryClass];
 }
 

@@ -13,7 +13,7 @@
  */
 import type { Pool } from 'pg';
 
-export interface ActiveSnapshot {
+interface ActiveSnapshot {
   readonly activeSnapshotId: string;
   readonly previousSnapshotId: string | null;
   readonly contentHash: string;
@@ -103,39 +103,3 @@ export async function resolveActiveSnapshot(
 
   return value;
 }
-
-/**
- * Explicitly drop cached pointer entry for a specific pool.
- *
- * Primary use case: **test seam**. Tests that drive the resolver directly
- * against a mock pool need to flush the cached entry between scenarios so
- * each scenario sees a fresh pointer read.
- *
- * Not needed in the production publish flow:
- *  - `promoteActiveSearchSnapshotPointer` creates its own dedicated pool,
- *    writes the DB row, and ends the pool — the WeakMap entry is released
- *    by GC.
- *  - Long-lived app pools (readiness probes, read-path adapters) refresh
- *    automatically via `POINTER_CACHE_TTL_MS` within ~2 seconds of a
- *    promote.
- *
- * If future ops tooling needs <2s propagation, call this explicitly from
- * the publish script with the app pool handle.
- */
-export function invalidateActiveSnapshotCache(pool?: Pool): void {
-  if (pool === undefined) {
-    // WeakMap has no clear(); callers must pass a specific pool. Silent
-    // no-op here lets ad-hoc debug calls compile without throwing.
-    return;
-  }
-  cacheByPool.delete(pool);
-}
-
-/**
- * Exposed for test seams only. Production code should always go through
- * `resolveActiveSnapshot`.
- */
-export const __testInternals = {
-  POINTER_CACHE_TTL_MS,
-  cacheByPool,
-};

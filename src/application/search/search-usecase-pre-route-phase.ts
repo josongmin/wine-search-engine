@@ -25,9 +25,9 @@ import type { RequestExecutionContext } from '../../domain/shared/request-execut
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
 
-export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
+type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
-export type SearchPreRoutePhaseResult =
+type SearchPreRoutePhaseResult =
   | { readonly outcome: 'continue'; readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery }
   | { readonly outcome: 'return'; readonly response: SearchPreRouteEarlyResponse };
 

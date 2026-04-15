@@ -10,7 +10,7 @@ import {
 } from './search-constraint-extractor.js';
 
 /** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
-export const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
+const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
 
 const DECIMAL_RADIX = 10;
 /** USD thresholds for mapping numeric "under $X" hints to price_band labels.

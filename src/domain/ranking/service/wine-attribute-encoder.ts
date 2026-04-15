@@ -9,7 +9,7 @@ import {
 /**
  * Categorical label encoder for wine catalog attributes (ranking domain).
  */
-export class WineCatalogLabelEncoder {
+class WineCatalogLabelEncoder {
   private readonly mapping: Map<string, number>;
   private readonly oovCode: number = WINE_ATTRIBUTE_OOV_CODE;
 

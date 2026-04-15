@@ -298,6 +298,34 @@ describe('CandidatePoolService — TRACK-A A4 anchor-first path', () => {
     expect(denseSearch).toHaveBeenCalled();
   });
 
+  it('entity_exact intent with a single unique anchor suppresses generic semantic dense mixing', async () => {
+    const anchor = makeAnchor('opus-one-2018', 0.97);
+    const denseSearch = vi.fn(async (): Promise<DenseHit[]> => []);
+    const getDocument = vi.fn(async () => ({
+      entityId: createEntityId('opus-one-2018'),
+      semanticSummary: 'Opus One 2018 Napa Valley red blend',
+      embedding: [0.1, 0.2],
+    }));
+    const searchIndex = createSearchIndex({ denseSearch, getDocument });
+    const embeddingService = createEmbeddingService();
+
+    const pool = new CandidatePoolService(
+      searchIndex,
+      embeddingService,
+      new FusionService(),
+    );
+
+    const queryPlan = {
+      ...makePlan('short_entity', [anchor]),
+      intent: 'entity_exact' as const,
+    };
+
+    await pool.execute(makeInput('short_entity', [anchor], { queryPlan }));
+
+    // Exact-anchor lock keeps anchor ANN but suppresses generic semantic dense.
+    expect(denseSearch).toHaveBeenCalledTimes(1);
+  });
+
   it('exact_entity WITH anchors → anchor entity surfaces via multi-channel vote (anchor + dense)', async () => {
     // ANCHOR_ENTITY appears in BOTH anchor ANN and dense channels (2 votes).
     // OTHER_ENTITY appears only in sparse (1 vote).
@@ -456,6 +484,46 @@ describe('TA4: fuzzyEntityHypotheses in ExpansionBundle and HybridRetrievalInput
     const input = buildHybridRetrievalInputForPlan(planEmpty);
     // Empty array → field still omitted (length guard prevents spurious field)
     expect(input.entityHypothesisTerms).toBeUndefined();
+  });
+
+  it('buildHybridRetrievalInputForPlan preserves planner expansions and normalized query variants', async () => {
+    const { buildHybridRetrievalInputForPlan } = await import(
+      '../../src/application/search/search-usecase-hybrid-candidates.js'
+    );
+
+    const plan = {
+      ...makePlan('exact_entity', []),
+      rawQuery: '오푸스원 뭐야',
+      normalizedQuery: '오푸스원 뭐야',
+      normalizedQueryViews: {
+        raw: '오푸스원 뭐야',
+        strict: '오푸스원 뭐야',
+        accentless: '오푸스원 뭐야',
+        collapsedWhitespace: '오푸스원 뭐야',
+        punctuationStripped: '오푸스원 뭐야',
+        compact: '오푸스원뭐야',
+        vintageCanonicalized: '오푸스원 뭐야',
+        vintageStripped: '오푸스원 뭐야',
+        transliterated: 'opus one',
+      },
+      expansions: {
+        lexical: ['opus one', 'napa valley'],
+        semantic: ['premium napa wine'],
+      },
+    } as QueryPlanV1;
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+
+    expect(input.lexicalQueries).toEqual(expect.arrayContaining([
+      '오푸스원 뭐야',
+      'opus one',
+      'napa valley',
+    ]));
+    expect(input.semanticQueries).toEqual(expect.arrayContaining([
+      '오푸스원 뭐야',
+      'opus one',
+      'premium napa wine',
+    ]));
   });
 
   // TA4-CONSUME: entityHypothesisTerms merged into sparseSearch queries

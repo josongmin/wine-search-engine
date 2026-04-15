@@ -161,6 +161,10 @@ function constraintToSparseFilterTokens(
       return stringEq('region');
     case 'appellation':
       return stringEq('appellation');
+    case 'pairing':
+      return stringEq('pairing');
+    case 'occasion':
+      return stringEq('occasion');
     case 'grape_primary':
       // Exclusion must cover BOTH grape fields in the schema:
       // grape_primary (string) and grapes (array<string>).

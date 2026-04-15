@@ -41,16 +41,3 @@ export interface AtomicClaimVerifier {
     ctx: AtomicClaimVerifierContext,
   ): Promise<AtomicClaimVerification>;
 }
-
-/** Shared "no evidence" fallback. */
-export function noEvidenceVerification(
-  claim: AtomicClaim,
-  reason: string,
-): AtomicClaimVerification {
-  return {
-    claimId: claim.id,
-    verdict: 'not_entailed',
-    confidence: 0,
-    explanation: reason,
-  };
-}

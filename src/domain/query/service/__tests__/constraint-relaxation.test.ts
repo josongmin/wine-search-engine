@@ -97,6 +97,26 @@ describe('buildRelaxationLadder', () => {
     expect(ladder[1]?.relaxedAttributes).toEqual(['appellation', 'grape_primary']);
   });
 
+  it('preserves Bordeaux region before Cabernet grape relaxation', () => {
+    const bundle: ConstraintBundle = {
+      hard: [
+        makeConstraint('region', 'Bordeaux'),
+        makeConstraint('grape_primary', 'Cabernet Sauvignon'),
+      ],
+      soft: [],
+      inferred: [],
+    };
+
+    const ladder = buildRelaxationLadder(bundle);
+
+    expect(ladder).toHaveLength(2);
+    expect(ladder[0]?.relaxedAttributes).toEqual(['grape_primary']);
+    expect(ladder[0]?.constraints.hard).toEqual([
+      expect.objectContaining({ attribute: 'region', value: 'Bordeaux' }),
+    ]);
+    expect(ladder[1]?.relaxedAttributes).toEqual(['grape_primary', 'region']);
+  });
+
   it('soft and inferred constraints preserved unchanged across all steps', () => {
     const bundle = makeBundle(['region', 'vintage_year'], ['body', 'price_band']);
     const ladder = buildRelaxationLadder(bundle);
@@ -166,6 +186,24 @@ describe('relaxOneStep', () => {
   it('returns first rung of ladder (most specific constraint removed)', () => {
     const step = relaxOneStep(makeBundle(['wine_type', 'appellation', 'region']));
     expect(step?.relaxedAttributes).toEqual(['appellation']);
+  });
+
+  it('returns grape_primary first for Bordeaux Cabernet queries', () => {
+    const bundle: ConstraintBundle = {
+      hard: [
+        makeConstraint('region', 'Bordeaux'),
+        makeConstraint('grape_primary', 'Cabernet Sauvignon'),
+      ],
+      soft: [],
+      inferred: [],
+    };
+
+    const step = relaxOneStep(bundle);
+
+    expect(step?.relaxedAttributes).toEqual(['grape_primary']);
+    expect(step?.constraints.hard).toEqual([
+      expect.objectContaining({ attribute: 'region', value: 'Bordeaux' }),
+    ]);
   });
 
   it('returned plan constraints have correct hard count', () => {

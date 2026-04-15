@@ -11,7 +11,7 @@
  * (grounded-claim-emitter.ts), not here. This prompt is provider-agnostic.
  */
 
-export const GROUNDED_CLAIM_EMIT_PROMPT_VERSION = 'claim_emit_v1';
+const GROUNDED_CLAIM_EMIT_PROMPT_VERSION = 'claim_emit_v1';
 
 /** System prompt: instructs the model to emit a JSON object that
  *  strictly matches {@link GroundedPayloadSchema}. */
@@ -57,6 +57,7 @@ export function buildGroundedClaimEmitUserPrompt(input: {
   readonly prose: string;
 }): string {
   const payload = {
+    promptVersion: GROUNDED_CLAIM_EMIT_PROMPT_VERSION,
     instructions: [
       'Emit ONE JSON object matching the grounded payload schema.',
       'Ground every claim in a toolCallId from evidenceFrameSummary.',

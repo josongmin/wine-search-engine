@@ -8,7 +8,7 @@ import type {
   EntityResolveResponse,
 } from '@/shared/api';
 
-export const mockEntity: EntitySummary = {
+const mockEntity: EntitySummary = {
   entity_id: 'wine:abc123',
   canonical_label: 'Château Margaux 2018',
   type: 'wine',
@@ -75,7 +75,7 @@ export const mockResultItem: ResultItem = {
   },
 };
 
-export const mockEngineDecision: EngineDecision = {
+const mockEngineDecision: EngineDecision = {
   decision_status: 'resolved',
   next_action: 'return_result',
   route: 'hybrid',
@@ -189,7 +189,7 @@ export const mockClarification: ClarificationPayload = {
   suggestion_type: 'disambiguation',
 };
 
-export const mockEntityResolveResponse: EntityResolveResponse = {
+const mockEntityResolveResponse: EntityResolveResponse = {
   entity: mockEntity,
   confidence: 0.95,
 };

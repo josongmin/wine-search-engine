@@ -81,20 +81,14 @@ describe('ConstraintEvaluator', () => {
     it('exclude constraint: "gift" excluded, candidate has "gift" occasion → filtered', () => {
       const excludeConstraint = makeConstraint('occasion', 'exclude', 'gift');
       const bundle = makeBundle([excludeConstraint]);
-      evaluator.evaluate(bundle, {
+      const result = evaluator.evaluate(bundle, {
         body: 0.5,
         sweetness: 0.1,
         occasion: ['gift', 'dinner'],
       });
-      // The 'occasion' attribute is an array; 'exclude' checks attrValue !== constraintValue
-      // Since attrValue is an array ['gift', 'dinner'] and constraintValue is 'gift',
-      // evaluateOperator for 'exclude' checks attrValue !== constraintValue
-      // An array is never === 'gift', so it passes... let's check the actual implementation
-      // Actually the implementation uses case 'exclude': return attrValue !== constraintValue
-      // array !== string → true → satisfies the exclude constraint
-      // But logically we want to check if 'gift' is IN the occasion array
-      // The implementation uses the 'in' case for arrays; for 'exclude' it's a simple !=
-      // Let's test against a scalar attribute
+      expect(result.hardPass).toBe(false);
+      expect(result.unmet).toContain('occasion');
+
       const excludeFromScalar = makeConstraint('price_band', 'exclude', 'mid');
       const bundleScalar = makeBundle([excludeFromScalar]);
       const result2 = evaluator.evaluate(bundleScalar, { body: 0.5, sweetness: 0.1, priceBand: 'mid' });
@@ -176,6 +170,26 @@ describe('ConstraintEvaluator', () => {
       const bundle = makeBundle([makeConstraint('occasion', 'in', ['party'])]);
       const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.1, occasion: ['gift', 'dinner'] });
       expect(result.hardPass).toBe(false);
+    });
+
+    it('canonical gift query matches candidate occasion tag "gifting"', () => {
+      const bundle = makeBundle([makeConstraint('occasion', 'in', ['gift'])]);
+      const result = evaluator.evaluate(
+        bundle,
+        { body: 0.5, sweetness: 0.1, occasion: ['gifting', 'special dinner'] },
+      );
+      expect(result.hardPass).toBe(true);
+      expect(result.matched).toContain('occasion');
+    });
+
+    it('canonical date_night query matches candidate occasion tag "special dinner"', () => {
+      const bundle = makeBundle([makeConstraint('occasion', 'in', ['date_night'])]);
+      const result = evaluator.evaluate(
+        bundle,
+        { body: 0.5, sweetness: 0.1, occasion: ['celebration', 'special dinner'] },
+      );
+      expect(result.hardPass).toBe(true);
+      expect(result.matched).toContain('occasion');
     });
   });
 

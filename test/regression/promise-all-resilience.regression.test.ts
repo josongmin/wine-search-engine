@@ -96,16 +96,15 @@ describe('Promise.all → allSettled resilience (regression)', () => {
     });
   });
 
-  describe('VespaCandidateAttributes.loadAttributes (fallback path)', () => {
-    it('returns surviving attributes when one entity fetch fails', async () => {
+  describe('VespaCandidateAttributes.loadAttributes (batch path)', () => {
+    it('returns surviving attributes when batch getDocuments omits one entity', async () => {
       const goodId = createEntityId('good-1');
       const failId = createEntityId('fail-1');
       const goodDoc = makeDoc('good-1');
 
       const docs = new Map<string, RetrievalDocument>([[String(goodId), goodDoc]]);
-      const index = makeSearchIndexStub(docs, new Set([String(failId)]));
-      // Ensure the fallback path is used (no getDocuments method)
-      delete (index as Record<string, unknown>)['getDocuments'];
+      const index = makeSearchIndexStub(docs, new Set());
+      index.getDocuments = vi.fn(async () => new Map([[goodId, goodDoc]]));
 
       const attrs = new VespaCandidateAttributes(index);
       const result = await attrs.loadAttributes([goodId, failId]);

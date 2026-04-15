@@ -41,7 +41,7 @@ const HTTP_STATUS_4XX_MAX_EXCLUSIVE = 500;
  *      our retryWithBackoff helper when it exhausts retries on a persistent
  *      HTTP error (`... failed [HTTP 503]: ...`).
  */
-export function extractHttpStatus(err: unknown): number | undefined {
+function extractHttpStatus(err: unknown): number | undefined {
   if (typeof err !== 'object' || err === null) return undefined;
 
   // Shape 1: SDK-style `status` field
@@ -63,7 +63,7 @@ export function extractHttpStatus(err: unknown): number | undefined {
 }
 
 /** Returns true for AbortError-like exceptions that must not touch the breaker. */
-export function isAbortError(err: unknown): boolean {
+function isAbortError(err: unknown): boolean {
   if (err instanceof Error && err.name === 'AbortError') return true;
   if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') {
     return true;
@@ -80,7 +80,7 @@ export function isAbortError(err: unknown): boolean {
  *   - 'caller-fault'    → recordSuccess() (service was healthy)
  *   - 'abort'           → neither (caller cancelled, don't pollute stats)
  */
-export function classifyLlmError(err: unknown): 'service-failure' | 'caller-fault' | 'abort' {
+function classifyLlmError(err: unknown): 'service-failure' | 'caller-fault' | 'abort' {
   if (isAbortError(err)) return 'abort';
 
   if (err instanceof CircuitBreakerOpenError) {

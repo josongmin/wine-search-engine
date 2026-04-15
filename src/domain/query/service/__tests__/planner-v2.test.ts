@@ -8,6 +8,10 @@ import type { QueryUnderstandingSnapshot } from '../../model/query-understanding
 import type { AmbiguityDictionary } from '../../port/ambiguity-dictionary.port.js';
 import type { AliasMatcher, AliasMatchResult } from '../anchor-extractor.js';
 import type { NLMapper } from '../../../attribute/service/nl-mapper.js';
+import type { FuzzyMatcherPort } from '../../port/fuzzy-matcher.port.js';
+import type { ExpansionBundle } from '../../model/constraint-bundle.js';
+import type { QueryIntent } from '../../model/query-intent.js';
+import type { AnchorCandidate } from '../../model/anchor-candidate.js';
 
 // ── Stub helpers ───────────────────────────────────────────────────────────────
 
@@ -92,6 +96,40 @@ describe('Planner – constraint extraction metadata', () => {
       pShort.constraintExtraction!.candidatePhraseCount,
     );
   });
+
+  it('threads fuzzy-recovered anchors into expansion building', async () => {
+    let seenAnchors: readonly AnchorCandidate[] = [];
+    const expansionBuilder = {
+      build: (
+        _normalizedQuery: string,
+        _intent: QueryIntent,
+        anchors: readonly AnchorCandidate[],
+      ): ExpansionBundle => {
+        seenAnchors = anchors;
+        return { lexical: anchors.map((anchor) => anchor.normalizedForm), semantic: [] };
+      },
+    };
+    const fuzzyMatcher: FuzzyMatcherPort = {
+      match: () => [{ term: 'opus one', editDistance: 1, combinedScore: 0.92 }],
+    };
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new StubAliasMatcher(new Map([
+        ['opus one', makeMatchResult('Opus One', 0.93)],
+      ]))),
+      expansionBuilder as unknown as ExpansionBuilder,
+      noOpNLMapper,
+      fuzzyMatcher,
+    );
+
+    const plan = await planner.plan('opux one');
+
+    expect(plan.anchors).toHaveLength(1);
+    expect(plan.anchors[0]?.source).toBe('planner_heuristic');
+    expect(seenAnchors).toHaveLength(1);
+    expect(seenAnchors[0]?.source).toBe('planner_heuristic');
+    expect(plan.expansions.lexical).toContain('opus one');
+  });
 });
 
 // ── QueryPlanV2 shape ──────────────────────────────────────────────────────────
@@ -125,6 +163,16 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     const plan = await planner.plan('Opus One');
 
     expect(plan.suggestedRoute).toBe('entity');
+  });
+
+  it('exact wine metadata query keeps the entity route', async () => {
+    const entries = new Map([['오푸스원', makeMatchResult('오푸스원', 0.95)]]);
+    const planner = makePlanner(entries);
+    const plan = await planner.plan('오푸스원 지금 마시기 좋아?');
+
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
   });
 
   it('Korean mixed query with anchor → suggestedRoute is "mixed"', async () => {

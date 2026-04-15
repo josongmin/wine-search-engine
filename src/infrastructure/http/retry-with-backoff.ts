@@ -49,7 +49,7 @@ export interface RetryConfig {
 }
 
 /** Result returned by the attempt function on non-OK HTTP responses. */
-export interface RetryableHttpError {
+interface RetryableHttpError {
   readonly kind: 'http-error';
   readonly status: number;
   readonly bodyText: string;
@@ -58,28 +58,15 @@ export interface RetryableHttpError {
 }
 
 /** Result returned by the attempt function on success. */
-export interface RetryableSuccess<T> {
+interface RetryableSuccess<T> {
   readonly kind: 'success';
   readonly value: T;
 }
 
-export type AttemptResult<T> = RetryableSuccess<T> | RetryableHttpError;
+type AttemptResult<T> = RetryableSuccess<T> | RetryableHttpError;
 
 /** Truncate chars in error previews. */
 const ERROR_PREVIEW_CHARS = 200;
-
-// ---------------------------------------------------------------------------
-// Default config
-// ---------------------------------------------------------------------------
-
-export const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxAttempts: 4,
-  transientBackoffBaseMs: 250,
-  transientBackoffCapMs: 2_000,
-  rateLimitBackoffBaseMs: 2_000,
-  rateLimitBackoffCapMs: 30_000,
-  label: 'HTTP',
-};
 
 // ---------------------------------------------------------------------------
 // Core utility

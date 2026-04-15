@@ -23,7 +23,7 @@ export type { InterpretRequest } from './interpret-request.dto.js';
 /**
  * Dependencies injected into the InterpretUseCase.
  */
-export interface InterpretUseCaseDeps {
+interface InterpretUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   /** Shared public query entry guard: Layer 1 sanitizer is required. */
   readonly querySanitizer: QuerySanitizer;

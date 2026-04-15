@@ -12,8 +12,6 @@ export const ETL_ARTIFACT_FILES = {
   nlMappings: resolveDataPath('data/nl-mappings.json'),
 } as const;
 
-export const ETL_ARTIFACT_PATHS = ETL_ARTIFACT_FILES;
-
 export type EtlArtifactKey = keyof typeof ETL_ARTIFACT_FILES;
 
 export const ETL_CANONICAL_ARTIFACT_SEQUENCE = [

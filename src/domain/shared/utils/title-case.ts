@@ -15,7 +15,7 @@
  */
 
 /** Romance prepositions/articles kept lowercase in wine region names. */
-export const LOWERCASE_PREPOSITIONS: ReadonlySet<string> = new Set([
+const LOWERCASE_PREPOSITIONS: ReadonlySet<string> = new Set([
   'di', 'du', 'de', 'del', 'della', 'delle', 'dei', 'des', 'da',
   'la', 'le', 'les', 'los', 'las', 'el', 'al', 'do', 'das',
 ]);

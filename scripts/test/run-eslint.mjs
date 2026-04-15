@@ -11,6 +11,7 @@ const child = spawn(
     '--cache',
     '--cache-location',
     '.cache/eslint/changed',
+    '--no-warn-ignored',
     ...forwardedArgs,
   ],
   {

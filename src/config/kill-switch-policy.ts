@@ -3,13 +3,13 @@ import type { CacheReadRuntimeState } from '../domain/cache/cache-policy.js';
 import type { RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
 import type { RankerRuntimeSignal } from '../domain/ranking/model/ranking-runtime-signal.js';
 
-export type KillSwitchEffect =
+type KillSwitchEffect =
   | 'boot_fail'
   | 'request_fail'
   | 'degraded_only'
   | 'advisory_only';
 
-export interface KillSwitchPolicyRow {
+interface KillSwitchPolicyRow {
   key: string;
   effect: KillSwitchEffect;
   reason: string;
@@ -19,7 +19,7 @@ export interface KillSwitchPolicyRow {
  * Declarative policy for kill switches and related env flags.
  * When wiring changes, update this table and versioned audit docs.
  */
-export const KILL_SWITCH_POLICY: readonly KillSwitchPolicyRow[] = [
+const KILL_SWITCH_POLICY: readonly KillSwitchPolicyRow[] = [
   {
     key: 'KILL_SWITCH_ALIAS_OVERLAY',
     effect: 'degraded_only',

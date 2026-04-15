@@ -82,6 +82,30 @@ describe('Intent Detection — SOTA++ Improvements', () => {
       const plan = await planner.plan('opus one under 50');
       expect(plan.intent).toBe('mixed_query');
     });
+
+    it('should keep drinkability questions on entity_exact for a strong anchor', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['오푸스원', makeMatchResult('오푸스원', 0.95)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('오푸스원 지금 마시기 좋아?');
+      expect(plan.intent).toBe('entity_exact');
+      expect(plan.suggestedRoute).toBe('entity');
+      expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    });
+
+    it('should keep release-availability questions on entity_exact for a strong anchor', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['보졸레 누보', makeMatchResult('보졸레 누보', 0.93)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('보졸레누보 올해꺼 나왔어?');
+      expect(plan.intent).toBe('entity_exact');
+      expect(plan.suggestedRoute).toBe('entity');
+      expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    });
   });
 
   describe('Weak anchor (0.5-0.85 confidence) — SOTA++ improvement', () => {
@@ -254,6 +278,24 @@ describe('Intent Detection — SOTA++ Improvements', () => {
 
       const plan = await planner.plan('red wine goes with cheese');
       expect(plan.intent).toBe('pairing_search');
+    });
+
+    it('should treat gift occasions as pairing_search so recommendation mode is used', async () => {
+      const matcher = new StubAliasMatcher(new Map());
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로');
+      expect(plan.intent).toBe('pairing_search');
+      expect(plan.suggestedRetrievalMode).toBe('recommendation');
+    });
+
+    it('should treat anniversary occasions as pairing_search so recommendation mode is used', async () => {
+      const matcher = new StubAliasMatcher(new Map());
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('결혼기념일 디너에 마실 와인 추천해줘');
+      expect(plan.intent).toBe('pairing_search');
+      expect(plan.suggestedRetrievalMode).toBe('recommendation');
     });
   });
 

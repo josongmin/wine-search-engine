@@ -35,33 +35,26 @@ describe('Header', () => {
   it('renders site title', () => {
     currentPathname = '/';
     renderWithProviders(<Header />);
-    expect(screen.getByText('Wine Search')).toBeInTheDocument();
+    expect(screen.getByText('Cuvée')).toBeInTheDocument();
   });
 
   it('renders navigation links', () => {
     currentPathname = '/';
     renderWithProviders(<Header />);
-    expect(screen.getByText('홈')).toBeInTheDocument();
     expect(screen.getByText('탐색')).toBeInTheDocument();
-    expect(screen.getByText('워치리스트')).toBeInTheDocument();
+    expect(screen.getByText('위시리스트')).toBeInTheDocument();
+    expect(screen.getByText('에이전트 랩')).toBeInTheDocument();
   });
 
   it('does NOT show search input on home page', () => {
     currentPathname = '/';
     renderWithProviders(<Header />);
-    expect(screen.queryByPlaceholderText('와인, 무엇이든 물어보세요...')).not.toBeInTheDocument();
-  });
-
-  it('shows search input on non-home pages', () => {
-    currentPathname = '/search';
-    renderWithProviders(<Header />);
-    expect(screen.getByPlaceholderText('와인, 무엇이든 물어보세요...')).toBeInTheDocument();
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
   });
 
   it('renders theme toggle', () => {
     currentPathname = '/';
     renderWithProviders(<Header />);
-    // Theme toggle renders an icon button with aria-label
-    expect(screen.getByLabelText(/모드|설정/)).toBeInTheDocument();
+    expect(screen.getByLabelText('시스템 설정')).toBeInTheDocument();
   });
 });

@@ -1,2 +1,2 @@
-export { api, ApiError } from './client';
+export { api } from './client';
 export type * from './types';

@@ -6,30 +6,32 @@ import {
 } from '../../domain/shared/error/policy-blocked.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
-export type QueryEntrySecurityLayer = 'LAYER_1_BLOCKED' | 'LAYER_2_BLOCKED';
+type QueryEntrySecurityLayer = 'LAYER_1_BLOCKED' | 'LAYER_2_BLOCKED';
 
-export interface QueryEntrySecurityRejection {
+interface QueryEntrySecurityRejection {
   readonly layer: QueryEntrySecurityLayer;
   readonly reason: string;
 }
 
-export interface QueryEntrySecurityResult {
+interface QueryEntrySecurityResult {
   readonly sanitizedQuery: string;
   readonly rejection?: QueryEntrySecurityRejection | undefined;
 }
 
-export interface QueryEntrySecurityDeps {
+interface QueryEntrySecurityDeps {
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
   readonly observer?: QueryEntrySecurityObserver | undefined;
 }
 
-export function createPolicyBlockedDomainError(): PolicyBlockedError {
-  return new PolicyBlockedError();
+function createPolicyBlockedDomainError(
+  rejection?: QueryEntrySecurityRejection,
+): PolicyBlockedError {
+  return new PolicyBlockedError(undefined, rejection);
 }
 
-export async function evaluateQueryEntrySecurity(
+async function evaluateQueryEntrySecurity(
   query: string,
   deps: QueryEntrySecurityDeps,
 ): Promise<QueryEntrySecurityResult> {
@@ -112,7 +114,7 @@ export class QueryEntrySecurityGate {
   async getSafeQueryOrThrow(query: string): Promise<string> {
     const result = await evaluateQueryEntrySecurity(query, this.deps);
     if (result.rejection !== undefined) {
-      throw createPolicyBlockedDomainError();
+      throw createPolicyBlockedDomainError(result.rejection);
     }
 
     return result.sanitizedQuery;

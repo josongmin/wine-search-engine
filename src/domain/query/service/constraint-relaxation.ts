@@ -22,6 +22,9 @@
  *     downstream can attach a "results may not match all criteria" banner.
  *   - Conservative: wine_type and classification are NEVER relaxed — a user
  *     asking for red wine must not receive champagne.
+ *   - Domain-aware: Bordeaux + Cabernet queries preserve the Bordeaux anchor
+ *     before relaxing the Cabernet varietal, because Bordeaux is commonly a
+ *     blend category and production data often lacks grape-level coverage.
  */
 
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
@@ -50,6 +53,29 @@ const RELAXATION_PRIORITY: readonly string[] = [
   'alcohol',
   'grape_primary',
 ];
+
+const BORDEAUX_REGION_VALUES = new Set(['bordeaux']);
+const CABERNET_VALUES = new Set(['cabernet sauvignon', 'cabernet']);
+
+function normalizedStringValue(value: NormalizedConstraint['value']): string | undefined {
+  return typeof value === 'string' ? value.trim().toLowerCase() : undefined;
+}
+
+function shouldPreserveBordeauxBeforeCabernet(
+  constraints: readonly NormalizedConstraint[],
+): boolean {
+  const hasBordeauxRegion = constraints.some((c) =>
+    c.attribute === 'region' &&
+    c.operator === '=' &&
+    BORDEAUX_REGION_VALUES.has(normalizedStringValue(c.value) ?? ''),
+  );
+  const hasCabernetGrape = constraints.some((c) =>
+    c.attribute === 'grape_primary' &&
+    c.operator === '=' &&
+    CABERNET_VALUES.has(normalizedStringValue(c.value) ?? ''),
+  );
+  return hasBordeauxRegion && hasCabernetGrape;
+}
 
 export interface RelaxedConstraintPlan {
   /** Relaxed constraint bundle to retry with. */
@@ -110,7 +136,12 @@ export function buildRelaxationLadder(
   // Sort unique relaxable attributes by relaxation priority.
   // Attributes in RELAXATION_PRIORITY come first (index ascending),
   // then remaining attributes in original insertion order (stable sort).
+  const preserveBordeauxBeforeCabernet = shouldPreserveBordeauxBeforeCabernet(relaxableConstraints);
   const sortedAttributes = [...uniqueRelaxableAttributes].sort((a, b) => {
+    if (preserveBordeauxBeforeCabernet) {
+      if (a === 'grape_primary' && b === 'region') return -1;
+      if (a === 'region' && b === 'grape_primary') return 1;
+    }
     const ai = RELAXATION_PRIORITY.indexOf(a);
     const bi = RELAXATION_PRIORITY.indexOf(b);
     const aNorm = ai === -1 ? RELAXATION_PRIORITY.length : ai;

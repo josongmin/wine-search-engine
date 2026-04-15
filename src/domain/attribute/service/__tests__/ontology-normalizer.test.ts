@@ -153,6 +153,27 @@ describe('OntologyNormalizer', () => {
     expect(result!.canonicalValue).toBe('luxury');
   });
 
+  it('"gifting" → occasion/gift', () => {
+    const result = normalizer.normalize('gifting');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('occasion');
+    expect(result!.canonicalValue).toBe('gift');
+  });
+
+  it('"special dinner" → occasion/date_night', () => {
+    const result = normalizer.normalize('special dinner');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('occasion');
+    expect(result!.canonicalValue).toBe('date_night');
+  });
+
+  it('"힐링" → occasion/healing', () => {
+    const result = normalizer.normalize('힐링');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('occasion');
+    expect(result!.canonicalValue).toBe('healing');
+  });
+
   // ── Additional: style variants ────────────────────────────────────────────
   it('"sparkling" → style/sparkling', () => {
     const result = normalizer.normalize('sparkling');

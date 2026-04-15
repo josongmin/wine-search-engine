@@ -52,7 +52,7 @@ const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1, 'Food must not be empty'),
   max_price: z.number().finite().positive().optional(),
-  color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
+  color: z.enum(['red', 'white', 'rosé', 'sparkling', 'both']).optional(),
 });
 
 export type FoodPairingInput = z.infer<typeof FoodPairingInputSchema>;
@@ -298,7 +298,7 @@ export class WineToolExecutor {
 
     // Build dynamic query from food + optional color + price
     let query = `wine pairing for ${validated.food}`;
-    if (validated.color) {
+    if (validated.color !== undefined && validated.color !== 'both') {
       query += ` ${validated.color} wine`;
     }
     if (validated.max_price !== undefined) {

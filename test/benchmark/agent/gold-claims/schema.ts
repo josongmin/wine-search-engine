@@ -36,7 +36,7 @@ const EXPECTED_CLAIMS_MAX_PER_ROW = 150;
 
 // ─── Query-level (future ≥200 gate) ───────────────────────────────────────────
 
-export const GoldClaimRowSchema = z
+const GoldClaimRowSchema = z
   .object({
     queryId: z.string().min(1).max(FIXTURE_TEXT_MAX_LEN),
     query: z.string().min(1).max(FIXTURE_TEXT_MAX_LEN),
@@ -54,7 +54,7 @@ export type GoldClaimRow = z.infer<typeof GoldClaimRowSchema>;
  * result so harnesses can distinguish malformed rows from row-level
  * semantic mismatches.
  */
-export function parseGoldClaimRow(
+function _parseGoldClaimRow(
   raw: string,
 ): z.SafeParseReturnType<unknown, GoldClaimRow> {
   let json: unknown;
@@ -132,7 +132,7 @@ export const GoldClaimSchema = z
 export type GoldClaim = z.infer<typeof GoldClaimSchema>;
 
 /** Parse one JSONL line into a {@link GoldClaim}. */
-export function parseGoldClaim(
+function parseGoldClaim(
   raw: string,
 ): z.SafeParseReturnType<unknown, GoldClaim> {
   let json: unknown;

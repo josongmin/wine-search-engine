@@ -20,13 +20,10 @@ import {
   AtomicClaimTypeSchema,
   DEFAULT_TYPE_TO_CATEGORY_MAPPING,
 } from './atomic-claim-type.js';
-import type { AtomicClaimType } from './atomic-claim-type.js';
-import type { ClaimCategory } from '../../evaluation/model/claim.js';
 
 /** Schema version carried on every emitted claim. Blocking cutover
  *  gate — when v2 ships, every claim is upgraded or dropped. */
 export const GROUNDED_CLAIM_SCHEMA_VERSION = 'claim_schema_v1' as const;
-export type GroundedClaimSchemaVersion = typeof GROUNDED_CLAIM_SCHEMA_VERSION;
 
 /** 5-class routing axis (RFC-020). Mirrored here for schema use so
  *  the Zod refine can reference the same literal set without pulling
@@ -76,7 +73,7 @@ const DEGRADATION_REASON_MAX_LEN = 128;
 
 // ─── Provenance ───────────────────────────────────────────────────────────────
 
-export const ProvenanceRefSchema = z
+const ProvenanceRefSchema = z
   .object({
     /** Stable `ToolCallEvidenceFrame.toolCallId`. */
     toolCallId: z.string().min(1).max(TOOL_CALL_ID_MAX_LEN),
@@ -87,18 +84,14 @@ export const ProvenanceRefSchema = z
   })
   .strict();
 
-export type ProvenanceRef = z.infer<typeof ProvenanceRefSchema>;
-
 // ─── ProseSegment ─────────────────────────────────────────────────────────────
 
-export const ProseSegmentSchema = z
+const ProseSegmentSchema = z
   .object({
     id: z.string().min(1).max(TOOL_CALL_ID_MAX_LEN),
     text: z.string().min(1).max(PROSE_SEGMENT_MAX_LEN),
   })
   .strict();
-
-export type ProseSegment = z.infer<typeof ProseSegmentSchema>;
 
 // ─── AtomicClaim ──────────────────────────────────────────────────────────────
 
@@ -180,10 +173,4 @@ export function emptyGroundedPayload(
   };
 }
 
-/** Resolve the default `ClaimCategory` for a given 9-class type. */
-export function defaultCategoryFor(type: AtomicClaimType): ClaimCategory {
-  return DEFAULT_TYPE_TO_CATEGORY_MAPPING[type];
-}
-
 export { ATOMIC_CLAIM_TYPES } from './atomic-claim-type.js';
-export type { AtomicClaimType } from './atomic-claim-type.js';

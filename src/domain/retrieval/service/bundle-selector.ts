@@ -30,16 +30,17 @@ import {
   type AssignmentBudgetConstraint,
   type AssignmentSolverFailReason,
 } from './assignment-solver.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 
 /** Upper bound on cost-matrix width per subquery. Online pools are
  *  already bounded by retrieval top-K (O(50-200)); 256 is generous
  *  headroom and prevents accidental DoS via an unbounded pool. */
-export const BUNDLE_SELECTOR_MAX_POOL = 256;
+const BUNDLE_SELECTOR_MAX_POOL = 256;
 
 /** When a shared-budget edge is present but the graph omits an explicit
  *  ceiling, this floor is used so the penalty never grows unbounded.
  *  0 would make the whole assignment infeasible on the first cell. */
-export const BUDGET_CEILING_WHEN_MISSING = Number.MAX_SAFE_INTEGER;
+const BUDGET_CEILING_WHEN_MISSING = Number.MAX_SAFE_INTEGER;
 
 /**
  * Per-cell scoring functor supplied by the caller. Higher is better.
@@ -104,6 +105,18 @@ export interface BundleSelector {
     candidatesBySubquery: ReadonlyMap<string, readonly HybridCandidate[]>,
     opts: BundleSelectorOptions,
   ): AssignmentSolution;
+}
+
+function resolveRowCandidate(
+  candidatePools: readonly (readonly HybridCandidate[])[],
+  localIndexByRowCol: readonly (readonly (number | undefined)[])[],
+  rowIdx: number,
+  colIdx: number,
+): HybridCandidate | undefined {
+  const pool = candidatePools[rowIdx];
+  const localIndex = localIndexByRowCol[rowIdx]?.[colIdx];
+  if (pool === undefined || localIndex === undefined) return undefined;
+  return pool[localIndex];
 }
 
 function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
@@ -193,13 +206,13 @@ export class BundleSelectorImpl implements BundleSelector {
     // Unify pools into a shared candidate space indexed by entityId.
     // `sharedColumns[idx]` = candidate at that shared column.
     const columnIndexByEntity = new Map<string, number>();
-    const sharedColumns: HybridCandidate[] = [];
+    const sharedColumns: string[] = [];
     for (const pool of candidatePools) {
       for (const candidate of pool) {
         const key = String(candidate.entityId);
         if (!columnIndexByEntity.has(key)) {
           columnIndexByEntity.set(key, sharedColumns.length);
-          sharedColumns.push(candidate);
+          sharedColumns.push(key);
         }
       }
     }
@@ -229,21 +242,27 @@ export class BundleSelectorImpl implements BundleSelector {
       }
 
       for (let col = 0; col < sharedColumns.length; col += 1) {
-        const cand = sharedColumns[col];
-        if (cand === undefined) {
+        const entityKey = sharedColumns[col];
+        if (entityKey === undefined) {
           perRowLocal.push(undefined);
           row.push(Number.POSITIVE_INFINITY);
           continue;
         }
-        const localIdx = localIndexByEntity.get(String(cand.entityId));
+        const localIdx = localIndexByEntity.get(entityKey);
         if (localIdx === undefined) {
+          perRowLocal.push(undefined);
+          row.push(Number.POSITIVE_INFINITY);
+          continue;
+        }
+        const candidate = pool[localIdx];
+        if (candidate === undefined) {
           perRowLocal.push(undefined);
           row.push(Number.POSITIVE_INFINITY);
           continue;
         }
         const score = opts.scoreFor({
           subquery,
-          candidate: cand,
+          candidate,
           rowIdx: r,
           colIdx: localIdx,
         });
@@ -289,7 +308,12 @@ export class BundleSelectorImpl implements BundleSelector {
           cellCost: (rowIdx, colIdx) => {
             const subquery = subqueries[rowIdx];
             if (subquery === undefined) return 0;
-            const candidate = sharedColumns[colIdx];
+            const candidate = resolveRowCandidate(
+              candidatePools,
+              localIndexByRowCol,
+              rowIdx,
+              colIdx,
+            );
             if (candidate === undefined) return 0;
             return opts.priceFor({ subquery, candidate, resource });
           },
@@ -318,13 +342,13 @@ export class BundleSelectorImpl implements BundleSelector {
       const subquery = subqueries[r];
       const col = solverResult.assignedColumns[r];
       if (subquery === undefined || col === undefined) continue;
-      const candidate = sharedColumns[col];
+      const candidate = resolveRowCandidate(
+        candidatePools,
+        localIndexByRowCol,
+        r,
+        col,
+      );
       if (candidate === undefined) continue;
-      // Defensive: if a future refactor allows the solver to return a
-      // column that the row cannot fill (UNASSIGNABLE), skip it. Under
-      // the empty-pool / fail-closed branches above this never fires.
-      const localRow = localIndexByRowCol[r];
-      if (localRow === undefined || localRow[col] === undefined) continue;
       assignments.push({ subqueryId: subquery.nodeId, candidate });
     }
 
@@ -366,9 +390,16 @@ function resolveBudgetCeiling(
     return override;
   }
   if (resource === 'price_total') {
-    const price = graph.globalBudgets.priceTotal?.max;
-    if (typeof price === 'number' && Number.isFinite(price) && price >= 0) {
-      return price;
+    const price = graph.globalBudgets.priceTotal;
+    if (
+      price !== undefined
+      && typeof price.max === 'number'
+      && Number.isFinite(price.max)
+      && price.max >= 0
+    ) {
+      return price.currency === 'KRW'
+        ? price.max
+        : Math.round(price.max * KRW_PER_USD_APPROXIMATE);
     }
   }
   if (resource === 'count') {

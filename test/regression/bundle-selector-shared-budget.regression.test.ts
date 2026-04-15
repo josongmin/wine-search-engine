@@ -170,6 +170,41 @@ describe('BundleSelector shared-budget semantics (ADR-013)', () => {
     ]);
   });
 
+  it('preserves row-local candidate scoring when the same entity appears in multiple slot pools', () => {
+    scoreLookup.clear();
+    priceLookup.clear();
+    scoreLookup.set('row1:shared', 0.1);
+    scoreLookup.set('row1:other', 0.9);
+    scoreLookup.set('row2:shared', 0.95);
+    scoreLookup.set('row2:other', 0.2);
+    const selector = new BundleSelectorImpl();
+    const graph = mkHybridGraph(['row1', 'row2']);
+    const pools = new Map<string, readonly HybridCandidate[]>([
+      ['row1', [
+        mkCandidate('shared', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
+        mkCandidate('other', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
+      ]],
+      ['row2', [
+        mkCandidate('shared', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
+        mkCandidate('other', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
+      ]],
+    ]);
+    const opts: BundleSelectorOptions = {
+      scoreFor: ({ subquery, candidate }) => {
+        return scoreLookup.get(`${subquery.nodeId}:${String(candidate.entityId)}`) ?? 0;
+      },
+      priceFor: ({ candidate }) => priceLookup.get(String(candidate.entityId)) ?? 0,
+    };
+
+    const r = selector.chooseAssignment(graph, pools, opts);
+
+    expect(r.degradationReasons).toEqual([]);
+    expect(r.assignments.map((a) => `${a.subqueryId}:${String(a.candidate.entityId)}`)).toEqual([
+      'row1:other',
+      'row2:shared',
+    ]);
+  });
+
   it('computeBundleId is deterministic and order-independent', () => {
     const id1 = computeBundleId(['main', 'appetiser', 'dessert']);
     const id2 = computeBundleId(['dessert', 'main', 'appetiser']);

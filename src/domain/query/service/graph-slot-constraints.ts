@@ -42,7 +42,7 @@ function slotToConstraint(slot: SlotNode): NormalizedConstraint {
   };
 }
 
-export function extractTierConstraintsFromGraph(
+function extractTierConstraintsFromGraph(
   graph: ConstraintGraph,
   tier: ConstraintTier,
 ): readonly NormalizedConstraint[] {

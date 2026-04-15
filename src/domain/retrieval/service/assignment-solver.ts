@@ -38,18 +38,18 @@ export const K_EXACT_LIMIT = 5;
  *  infeasible-but-cheaper one. 1e12 is safe for any realistic wine
  *  retrieval cost (costs are unit-normalised negatives of `finalScore`
  *  which is in [0, 1]). */
-export const BUDGET_OVERFLOW_PENALTY = 1e12;
+const BUDGET_OVERFLOW_PENALTY = 1e12;
 
 /** Dominating penalty used to represent "unassignable" cells (no
  *  candidate available for (row, col)). Distinct from budget overflow
  *  to keep the trace audit-friendly. */
-export const UNASSIGNABLE_PENALTY = 1e11;
+const UNASSIGNABLE_PENALTY = 1e11;
 
 /** Epsilon for cost equality when breaking ties. Costs are finite
  *  arithmetic; 1e-9 is slack enough to absorb floating-point drift
  *  from three fused sub-scores without over-collapsing distinct
  *  optima. */
-export const COST_EQUALITY_EPSILON = 1e-9;
+const COST_EQUALITY_EPSILON = 1e-9;
 
 export interface AssignmentBudgetConstraint {
   readonly label: string;
@@ -60,7 +60,7 @@ export interface AssignmentBudgetConstraint {
   readonly ceiling: number;
 }
 
-export interface AssignmentSolverInput {
+interface AssignmentSolverInput {
   /**
    * K x M cost matrix. `costMatrix[row][col]` is the cost of assigning
    * column `col` to row `row`. `row` indexes a subquery, `col` indexes
@@ -78,7 +78,7 @@ export type AssignmentSolverFailReason =
   | 'bundle_selector_fail_closed:budget_infeasible'
   | 'bundle_selector_fail_closed:empty_slot_pool';
 
-export interface AssignmentSolverSuccess {
+interface AssignmentSolverSuccess {
   readonly solved: true;
   /** `assignedColumns[row]` = column index chosen for that row. */
   readonly assignedColumns: readonly number[];
@@ -91,12 +91,12 @@ export interface AssignmentSolverSuccess {
   readonly tieBreakReason: 'unique' | 'lex_smallest';
 }
 
-export interface AssignmentSolverFailure {
+interface AssignmentSolverFailure {
   readonly solved: false;
   readonly reason: AssignmentSolverFailReason;
 }
 
-export type AssignmentSolverResult =
+type AssignmentSolverResult =
   | AssignmentSolverSuccess
   | AssignmentSolverFailure;
 
@@ -177,6 +177,7 @@ export function solveAssignmentExact(
     readonly perm: readonly number[];
     readonly cost: number;
     readonly penalty: number;
+    readonly unassignableCount: number;
   };
 
   let best: Candidate | undefined;
@@ -188,6 +189,7 @@ export function solveAssignmentExact(
 
   const evaluate = (perm: readonly number[]): Candidate => {
     let cost = 0;
+    let unassignableCount = 0;
     for (let r = 0; r < k; r += 1) {
       const col = perm[r];
       if (col === undefined) continue;
@@ -196,6 +198,9 @@ export function solveAssignmentExact(
       const cell = row[col];
       if (cell === undefined) continue;
       cost += cell;
+      if (cell >= UNASSIGNABLE_PENALTY) {
+        unassignableCount += 1;
+      }
     }
     let penalty = 0;
     for (const budget of budgetConstraints) {
@@ -209,7 +214,7 @@ export function solveAssignmentExact(
         penalty += BUDGET_OVERFLOW_PENALTY * (subsetSum - budget.ceiling);
       }
     }
-    return { perm, cost, penalty };
+    return { perm, cost, penalty, unassignableCount };
   };
 
   /**
@@ -219,7 +224,14 @@ export function solveAssignmentExact(
    * so that the caller can still count cost-equal ties.
    */
   const compareTotals = (a: Candidate, b: Candidate): number => {
-    const diff = (a.cost + a.penalty) - (b.cost + b.penalty);
+    if (a.unassignableCount !== b.unassignableCount) {
+      return a.unassignableCount - b.unassignableCount;
+    }
+    const penaltyDiff = a.penalty - b.penalty;
+    if (Math.abs(penaltyDiff) > COST_EQUALITY_EPSILON) {
+      return penaltyDiff;
+    }
+    const diff = a.cost - b.cost;
     if (Math.abs(diff) <= COST_EQUALITY_EPSILON) return 0;
     return diff;
   };
@@ -279,7 +291,7 @@ export function solveAssignmentExact(
   // hard-infeasible and we fail closed. UNASSIGNABLE alone means a
   // virtual column was chosen (no real candidate), which is also
   // infeasible in selector terms.
-  const hasUnassignable = best.cost >= UNASSIGNABLE_PENALTY;
+  const hasUnassignable = best.unassignableCount > 0;
   const hasBudgetOverflow = best.penalty > 0;
   if (hasUnassignable) {
     return {

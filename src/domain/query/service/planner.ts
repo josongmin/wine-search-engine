@@ -256,14 +256,14 @@ export class Planner {
     // 3. Detect intent.
     const intent = detectQueryIntent(
       normalizedQuery,
-      anchors,
+      allAnchors,
       this.anchorExtractor,
       relativeQuery,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'intent_classification',
-        { normalizedQuery, anchorCount: anchors.length },
+        { normalizedQuery, anchorCount: allAnchors.length },
         [{ ruleId: 'intent.detected', description: 'Intent detected via detectQueryIntent', inputsMatched: { normalizedQuery }, outcome: intent }],
         [],
         intent,
@@ -272,12 +272,12 @@ export class Planner {
     }
 
     // 4. Determine route.
-    const route = this.determineRoute(intent, anchors);
+    const route = this.determineRoute(intent, allAnchors);
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'route_resolution',
-        { intent, anchorCount: anchors.length },
-        [{ ruleId: 'route.resolved', description: 'Route resolved via determineRoute', inputsMatched: { intent, anchorCount: anchors.length }, outcome: route }],
+        { intent, anchorCount: allAnchors.length },
+        [{ ruleId: 'route.resolved', description: 'Route resolved via determineRoute', inputsMatched: { intent, anchorCount: allAnchors.length }, outcome: route }],
         [],
         route,
         1.0,
@@ -287,13 +287,13 @@ export class Planner {
     // 5. Determine retrieval mode.
     const retrievalMode = this.determineRetrievalMode(
       intent,
-      anchors,
+      allAnchors,
       normalizedQuery,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'retrieval_mode_selection',
-        { intent, anchorCount: anchors.length, normalizedQuery },
+        { intent, anchorCount: allAnchors.length, normalizedQuery },
         [{ ruleId: 'retrieval_mode.resolved', description: 'Mode resolved via determineRetrievalMode', inputsMatched: { intent }, outcome: retrievalMode }],
         [],
         retrievalMode,
@@ -305,12 +305,12 @@ export class Planner {
     const queryClass = await this.determineQueryClass(
       normalizedQuery,
       intent,
-      anchors,
+      allAnchors,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'query_class_classification',
-        { normalizedQuery, intent, anchorCount: anchors.length },
+        { normalizedQuery, intent, anchorCount: allAnchors.length },
         [{ ruleId: 'query_class.classified', description: 'Query class classified via determineQueryClass', inputsMatched: { intent }, outcome: queryClass }],
         [],
         queryClass,
@@ -321,7 +321,7 @@ export class Planner {
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
     const constraintQuery = this.buildConstraintParsingQuery(
       normalizedQuery,
-      anchors,
+      allAnchors,
       relativeQuery,
     );
     const parsed = await this.parseConstraints(constraintQuery, intent, context?.abortSignal);
@@ -334,7 +334,7 @@ export class Planner {
     const baseExpansions = this.expansionBuilder.build(
       normalizedQuery,
       intent,
-      anchors,
+      allAnchors,
     );
 
     // Merge fuzzy-match results into lexical expansions.
@@ -353,14 +353,14 @@ export class Planner {
     // 8. Compute uncertainty.
     const uncertainty = await this.computeUncertainty(
       normalizedQuery,
-      anchors,
+      allAnchors,
       constraints,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'uncertainty_estimation',
-        { normalizedQuery, anchorCount: anchors.length, constraintCount: constraints.hard.length + constraints.soft.length + constraints.inferred.length },
-        [{ ruleId: 'uncertainty.computed', description: 'Uncertainty computed via computeUncertainty', inputsMatched: { anchorCount: anchors.length }, outcome: String(uncertainty.overall) }],
+        { normalizedQuery, anchorCount: allAnchors.length, constraintCount: constraints.hard.length + constraints.soft.length + constraints.inferred.length },
+        [{ ruleId: 'uncertainty.computed', description: 'Uncertainty computed via computeUncertainty', inputsMatched: { anchorCount: allAnchors.length }, outcome: String(uncertainty.overall) }],
         [],
         String(uncertainty.overall),
         1.0 - uncertainty.overall,
@@ -372,14 +372,14 @@ export class Planner {
     // 10. Infer target entity type for result grouping (Epic 8).
     const targetEntityType = this.inferTargetEntityType(
       normalizedQuery,
-      anchors,
+      allAnchors,
       constraints,
       intent,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'target_entity_inference',
-        { normalizedQuery, intent, anchorCount: anchors.length },
+        { normalizedQuery, intent, anchorCount: allAnchors.length },
         targetEntityType != null
           ? [{ ruleId: 'target_entity.inferred', description: 'Target entity type inferred', inputsMatched: { intent }, outcome: targetEntityType }]
           : [],
@@ -393,8 +393,8 @@ export class Planner {
 
     // Derive secondary intents from the 2nd+ anchor candidates.
     const secondaryIntents =
-      anchors.length >= 2
-        ? anchors.slice(1).map((a): QueryIntent =>
+      allAnchors.length >= 2
+        ? allAnchors.slice(1).map((a): QueryIntent =>
             a.confidence >= EXACT_ANCHOR_CONFIDENCE
               ? 'entity_exact'
               : 'entity_fuzzy',
@@ -410,7 +410,7 @@ export class Planner {
         intent === 'comparison_search' ||
         intent === 'mixed_query',
       requires_constraint_evidence: constraints.hard.length > 0,
-      requires_anchor_evidence: route === 'mixed' && anchors.length > 0,
+      requires_anchor_evidence: route === 'mixed' && allAnchors.length > 0,
     };
     const decompositionHint = analyzeQueryDecomposition(originalQuery).hint;
 

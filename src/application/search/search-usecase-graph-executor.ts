@@ -6,7 +6,7 @@
  * trivial graphs pass through byte-identically.
  *
  * **Engagement rule (precise):**
- *  - If `BUNDLE_SELECTOR_ENABLED !== 'true'` → pass-through (flag-off
+ *  - If `BUNDLE_SELECTOR_ENABLED === 'false'` → pass-through (flag-off
  *    rollback is byte-identical).
  *  - If `graph === undefined` → pass-through.
  *  - If `graph.origin !== 'hybrid'` → pass-through (trivial + planner-only
@@ -30,6 +30,10 @@ import type { CandidatePoolPort } from './port/search-pipeline-deps.port.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type {
+  CandidateDropRecord,
+  RrfFusionTrace,
+} from '../../domain/retrieval/model/candidate-envelope.js';
+import type {
   ConstraintGraph,
   SubqueryNode,
 } from '../../domain/query/model/constraint-graph.js';
@@ -44,12 +48,19 @@ import {
   type CriticDecision,
 } from '../../domain/retrieval/service/retrieval-critic.js';
 import type {
+  RetrievalDegradationCode,
+  RetrievalDegradationSignal,
+} from '../../domain/retrieval/port/retrieval-degradation-observer.port.js';
+import type {
   QueryRewriter,
   RewriteTrace,
 } from '../../domain/retrieval/service/query-rewriter.js';
 import type { BudgetLedger } from '../../domain/retrieval/service/budget-ledger.js';
 import { BudgetViolationError } from '../../domain/retrieval/service/budget-ledger.js';
-import { computeGraphCoverage } from '../../domain/query/service/compute-graph-coverage.js';
+import {
+  computeGraphCoverage,
+  type GraphCoverageSignals,
+} from '../../domain/query/service/compute-graph-coverage.js';
 import { globalBundleSelectorCounter } from '../../observability/bundle-selector-counters.js';
 import {
   classifyGraphPresence,
@@ -95,11 +106,18 @@ export interface GraphExecutorDeps {
 }
 
 export interface SubqueryRetriever {
+  /**
+   * Shared mutable candidate-pool getters (`getLast*`) are not per-call
+   * safe under concurrency. Retrievers that wrap a single CandidatePool
+   * instance must leave this as the default `'shared_mutable'`, which
+   * forces sequential execution in the graph executor.
+   */
+  readonly stateIsolation?: 'shared_mutable' | 'isolated';
   retrieve(
     base: HybridRetrievalInput,
     subquery: SubqueryNode,
     graph: ConstraintGraph,
-  ): Promise<readonly HybridCandidate[]>;
+  ): Promise<readonly HybridCandidate[] | SubqueryRetrievalResult>;
 }
 
 export interface GraphExecutorOptions extends BundleSelectorOptions {
@@ -125,6 +143,18 @@ export interface GraphExecutorOptions extends BundleSelectorOptions {
 
 export type GraphExecutionMode = 'passthrough' | 'bundle' | 'fail_closed';
 
+export interface GraphRetrievalTelemetry {
+  readonly degradationCodes: readonly RetrievalDegradationCode[];
+  readonly degradationSignals: readonly RetrievalDegradationSignal[];
+  readonly fusionTrace?: RrfFusionTrace | undefined;
+  readonly dropLog?: readonly CandidateDropRecord[] | undefined;
+}
+
+export interface SubqueryRetrievalResult {
+  readonly candidates: readonly HybridCandidate[];
+  readonly telemetry: GraphRetrievalTelemetry;
+}
+
 export interface GraphExecutionResult {
   readonly mode: GraphExecutionMode;
   /**
@@ -137,6 +167,7 @@ export interface GraphExecutionResult {
    */
   readonly candidates: readonly HybridCandidate[];
   readonly assignmentSolution?: AssignmentSolution | undefined;
+  readonly retrievalTelemetry?: GraphRetrievalTelemetry | undefined;
   /**
    * ADR-015 Axis 2: trace of critic-driven rewrites performed inside
    * this execution. Present (possibly empty) only when the
@@ -164,13 +195,10 @@ export interface GraphExecutionResult {
  * loop. Checked once per call — flipping the flag mid-flight cannot
  * produce a partial-loop state.
  *
- * Wave J2: default-on. The critic is deterministic-first — `decideRetry`
- * returns `retry=false` immediately on satisfied coverage or an absent
- * coverage object, so happy-path queries (golden set, entity-exact,
- * any pool with non-empty retrieval) see **zero** retry invocations
- * and remain byte-identical to the pre-PR6 one-shot path. Retries
- * only fire when the graph reports a coverage gap AND the rewriter
- * produces an actionable rewrite, bounded by `CRITIC_RETRY_MAX`.
+ * Wave J2: default-on. The critic is deterministic-first — satisfied
+ * graph coverage short-circuits immediately, while graphless requests
+ * may still retry on typed degradation codes (`no_matches`,
+ * `sparse_pool`). The loop remains bounded by `CRITIC_RETRY_MAX`.
  * Rollback via `RETRIEVAL_EXECUTOR_CRITIC=false`.
  *
  * Tests that pin the byte-identity of the one-shot/relaxation path
@@ -178,7 +206,7 @@ export interface GraphExecutionResult {
  * explicitly to `'false'` in `beforeEach` so the default-on flip
  * does not alter their call-count contracts.
  */
-export function isRetrievalCriticEnabled(
+function isRetrievalCriticEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return env['RETRIEVAL_EXECUTOR_CRITIC'] !== 'false';
@@ -196,7 +224,7 @@ function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
  * default only changes behaviour when a graph actually carries ≥2
  * subquery nodes. Rollback via `BUNDLE_SELECTOR_ENABLED=false`.
  */
-export function isBundleSelectorEnabled(
+function isBundleSelectorEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return env['BUNDLE_SELECTOR_ENABLED'] !== 'false';
@@ -221,23 +249,21 @@ export function shouldEngageBundlePath(
 /**
  * Inputs the executor-internal critic consults to decide whether to
  * retry. Supplied per-call by the caller (hybrid-candidates wiring)
- * because `computeGraphCoverage` needs the `satisfiedAttributes` set
- * which is derived from candidate annotator output — not from the
+ * because `computeGraphCoverage` needs graph-native satisfaction
+ * signals derived from the execution result — matched slot refs,
+ * winning subquery ids, and budget usage are not available on the
  * retrieval input alone.
  */
 export interface CriticSignalProbe {
-  /** Attributes the pipeline currently considers satisfied by the
-   *  returned candidate pool. Used as the input to
-   *  `computeGraphCoverage(graph, satisfiedAttributes)`. */
-  readonly satisfiedAttributesFor: (
-    candidates: readonly HybridCandidate[],
-  ) => ReadonlySet<string>;
+  /** Graph-aware satisfaction signals derived from the latest result. */
+  readonly coverageSignalsFor: (
+    result: GraphExecutionResult,
+  ) => GraphCoverageSignals;
   /** Retrieval-internal degradation reasons surfaced by the candidate
-   *  pool (e.g. `'sparse_pool'`, `'no_matches'`). Used verbatim in the
-   *  critic decision table. */
-  readonly degradationReasonsFor: (
-    candidates: readonly HybridCandidate[],
-  ) => readonly string[];
+   *  pool. These are structured categories, not free-form log strings. */
+  readonly degradationCodesFor: (
+    result: GraphExecutionResult,
+  ) => readonly RetrievalDegradationCode[];
 }
 
 /**
@@ -303,10 +329,10 @@ export async function executeGraphAware(
         graph !== undefined
           ? computeGraphCoverage(
               graph,
-              criticProbe.satisfiedAttributesFor(lastResult.candidates),
+              criticProbe.coverageSignalsFor(lastResult),
             )
           : undefined,
-      degradationReasons: criticProbe.degradationReasonsFor(lastResult.candidates),
+      degradationCodes: criticProbe.degradationCodesFor(lastResult),
       retryCount,
     });
 
@@ -391,7 +417,11 @@ async function runRetrievalOnce(
 ): Promise<GraphExecutionResult> {
   if (!shouldEngageBundlePath(graph)) {
     const flat = await runRootRetrieval(deps.candidatePool, input);
-    return { mode: 'passthrough', candidates: flat };
+    return {
+      mode: 'passthrough',
+      candidates: flat.candidates,
+      retrievalTelemetry: flat.telemetry,
+    };
   }
 
   // Narrowed by `shouldEngageBundlePath`.
@@ -407,23 +437,40 @@ async function runRetrievalOnce(
     'pipeline bundle selector engage',
   );
 
-  // Per-subquery retrieval. When no adapter is wired we degrade to a
-  // single root retrieval for all subqueries — this is a temporary
-  // passthrough that preserves behaviour; downstream PRs will swap in
-  // a real subquery-scoped retriever.
+  // Per-subquery retrieval. The executor snapshots telemetry
+  // immediately after each call and aggregates it into the result so
+  // downstream readers do not consult shared mutable candidate-pool
+  // getters after fan-out.
   const pools = new Map<string, readonly HybridCandidate[]>();
+  const telemetryParts: GraphRetrievalTelemetry[] = [];
   if (deps.subqueryRetriever !== undefined) {
     const retriever = deps.subqueryRetriever;
-    await Promise.all(
-      subqueries.map(async (sq) => {
-        const pool = await retriever.retrieve(input, sq, engagedGraph);
-        pools.set(sq.nodeId, pool);
-      }),
-    );
+    if (retriever.stateIsolation === 'isolated') {
+      const rawResults = await Promise.all(
+        subqueries.map(async (sq) => retriever.retrieve(input, sq, engagedGraph)),
+      );
+      for (let i = 0; i < subqueries.length; i += 1) {
+        const sq = subqueries[i];
+        const result = normalizeSubqueryRetrievalResult(rawResults[i]);
+        if (sq === undefined) continue;
+        pools.set(sq.nodeId, result.candidates);
+        telemetryParts.push(result.telemetry);
+      }
+    } else {
+      for (const sq of subqueries) {
+        const result = normalizeSubqueryRetrievalResult(
+          await retriever.retrieve(input, sq, engagedGraph),
+        );
+        pools.set(sq.nodeId, result.candidates);
+        telemetryParts.push(result.telemetry);
+      }
+    }
   } else {
     const fallback = await runRootRetrieval(deps.candidatePool, input);
-    for (const sq of subqueries) pools.set(sq.nodeId, fallback);
+    for (const sq of subqueries) pools.set(sq.nodeId, fallback.candidates);
+    telemetryParts.push(fallback.telemetry);
   }
+  const retrievalTelemetry = mergeGraphRetrievalTelemetry(telemetryParts);
 
   const solution = deps.bundleSelector.chooseAssignment(engagedGraph, pools, opts);
 
@@ -442,6 +489,7 @@ async function runRetrievalOnce(
       mode: 'fail_closed',
       candidates: [],
       assignmentSolution: solution,
+      retrievalTelemetry,
     };
   }
 
@@ -465,27 +513,30 @@ async function runRetrievalOnce(
     const reservedIds = new Set<string>();
     try {
       for (const a of solution.assignments) {
+        const reservationKey = `${a.subqueryId}:${a.candidate.entityId}`;
         if (ledger !== undefined) {
           ledger.reserve(a.subqueryId, a.candidate);
+          reservedIds.add(reservationKey);
         }
         if (callback !== undefined) {
           callback({ subqueryId: a.subqueryId, candidate: a.candidate });
-        }
-        reservedIds.add(`${a.subqueryId}:${a.candidate.entityId}`);
-      }
-    } catch (err) {
-      if (err instanceof BudgetViolationError) {
-        // Roll back any reservations we already committed on this
-        // assignment so the ledger state matches the fail-closed
-        // result. Pre-flight release keeps the ledger consistent with
-        // the executor's reported outcome.
-        if (ledger !== undefined) {
-          for (const a of solution.assignments) {
-            if (reservedIds.has(`${a.subqueryId}:${a.candidate.entityId}`)) {
-              ledger.release(a.subqueryId);
-            }
+          if (ledger === undefined) {
+            reservedIds.add(reservationKey);
           }
         }
+      }
+    } catch (err) {
+      // Roll back any reservations we already committed on this
+      // assignment so the ledger state always matches the executor's
+      // reported outcome, even when the legacy callback throws.
+      if (ledger !== undefined) {
+        for (const a of solution.assignments) {
+          if (reservedIds.has(`${a.subqueryId}:${a.candidate.entityId}`)) {
+            ledger.release(a.subqueryId);
+          }
+        }
+      }
+      if (err instanceof BudgetViolationError) {
         pipelineDebug(
           {
             step: 'retrieval.bundle_selector.budget_violation',
@@ -505,6 +556,7 @@ async function runRetrievalOnce(
             bundleScore: 0,
             degradationReasons: ['bundle_selector_fail_closed:budget_infeasible'],
           },
+          retrievalTelemetry,
         };
       }
       throw err;
@@ -526,17 +578,82 @@ async function runRetrievalOnce(
     mode: 'bundle',
     candidates,
     assignmentSolution: solution,
+    retrievalTelemetry,
   };
 }
 
 async function runRootRetrieval(
   candidatePool: CandidatePoolPort,
   input: HybridRetrievalInput,
-): Promise<readonly HybridCandidate[]> {
-  if (candidatePool.execute !== undefined) {
-    return candidatePool.execute(input);
+): Promise<SubqueryRetrievalResult> {
+  const candidates = candidatePool.execute !== undefined
+    ? await candidatePool.execute(input)
+    : await candidatePool.generate(input);
+  return {
+    candidates,
+    telemetry: snapshotCandidatePoolTelemetry(candidatePool),
+  };
+}
+
+function snapshotCandidatePoolTelemetry(
+  candidatePool: CandidatePoolPort,
+): GraphRetrievalTelemetry {
+  const degradationCodes = candidatePool.getLastDegradationCodes?.() ?? [];
+  const degradationSignals = candidatePool.getLastDegradationSignals?.() ?? [];
+  const fusionTrace = candidatePool.getLastFusionTrace?.();
+  const dropLog = candidatePool.getLastDropLog?.();
+  return {
+    degradationCodes: [...degradationCodes],
+    degradationSignals: [...degradationSignals],
+    ...(fusionTrace !== undefined ? { fusionTrace } : {}),
+    ...(dropLog !== undefined ? { dropLog: [...dropLog] } : {}),
+  };
+}
+
+function mergeGraphRetrievalTelemetry(
+  parts: readonly GraphRetrievalTelemetry[],
+): GraphRetrievalTelemetry {
+  const degradationCodes = new Set<RetrievalDegradationCode>();
+  const degradationSignals: RetrievalDegradationSignal[] = [];
+  const dropLog: CandidateDropRecord[] = [];
+  let fusionTrace: RrfFusionTrace | undefined;
+
+  for (const part of parts) {
+    for (const code of part.degradationCodes) degradationCodes.add(code);
+    degradationSignals.push(...part.degradationSignals);
+    if (part.dropLog !== undefined) dropLog.push(...part.dropLog);
+    if (parts.length === 1 && part.fusionTrace !== undefined) {
+      fusionTrace = part.fusionTrace;
+    }
   }
-  return candidatePool.generate(input);
+
+  return {
+    degradationCodes: [...degradationCodes],
+    degradationSignals,
+    ...(fusionTrace !== undefined ? { fusionTrace } : {}),
+    ...(dropLog.length > 0 ? { dropLog } : {}),
+  };
+}
+
+function normalizeSubqueryRetrievalResult(
+  result: readonly HybridCandidate[] | SubqueryRetrievalResult | undefined,
+): SubqueryRetrievalResult {
+  if (!isSubqueryRetrievalResult(result)) {
+    return {
+      candidates: result ?? [],
+      telemetry: {
+        degradationCodes: [],
+        degradationSignals: [],
+      },
+    };
+  }
+  return result;
+}
+
+function isSubqueryRetrievalResult(
+  result: readonly HybridCandidate[] | SubqueryRetrievalResult | undefined,
+): result is SubqueryRetrievalResult {
+  return result !== undefined && !Array.isArray(result);
 }
 
 /**

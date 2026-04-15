@@ -16,7 +16,7 @@ import { bootstrapLogger } from './bootstrap-logger.js';
  * Mirrors the relevant slices of {@link Config} without importing the full
  * module (avoids circular deps and keeps this module testable in isolation).
  */
-export interface StartupPreflightConfig {
+interface StartupPreflightConfig {
   readonly vespa?: { readonly url?: string | undefined } | undefined;
   readonly openai?: { readonly apiKey?: string | undefined } | undefined;
   readonly cohere?: { readonly apiKey?: string | undefined } | undefined;

@@ -40,7 +40,7 @@ export const WINE_TYPE_RULES: readonly (readonly [RegExp, WineTypeValue])[] = [
  * Used for membership checks — e.g. "is this token a wine type rather than a
  * style/flavor descriptor?" — without duplicating the wine type vocabulary.
  */
-export const WINE_TYPE_VALUES: ReadonlySet<string> = new Set<string>(
+const WINE_TYPE_VALUES: ReadonlySet<string> = new Set<string>(
   WINE_TYPE_RULES.map(([, value]) => value),
 );
 

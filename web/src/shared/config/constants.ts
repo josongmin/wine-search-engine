@@ -1,6 +1,3 @@
-export const SITE_NAME = 'Wine Search';
-export const SITE_DESCRIPTION = '와인, 무엇이든 물어보세요';
-
 export const EXAMPLE_QUERIES = [
   { label: '가벼운 화이트', query: '가벼운 화이트 와인 추천' },
   { label: '나파밸리 카베르네', query: 'Napa Valley Cabernet Sauvignon' },
@@ -10,11 +7,4 @@ export const EXAMPLE_QUERIES = [
   { label: '치즈 페어링', query: '치즈와 잘 어울리는 와인' },
   { label: '스테이크 디너', query: '스테이크에 어울리는 풀바디 레드' },
   { label: '선물용 샴페인', query: '선물하기 좋은 샴페인 추천' },
-] as const;
-
-export const PROFILE_ATTRIBUTES = [
-  { key: 'body', label: 'Body' },
-  { key: 'tannin', label: 'Tannin' },
-  { key: 'acidity', label: 'Acidity' },
-  { key: 'sweetness', label: 'Sweetness' },
 ] as const;

@@ -45,6 +45,14 @@ describe('hardConstraintsToSparseFilterTokens', () => {
     expect(tokens).toEqual(['region:Napa']);
   });
 
+  it('maps pairing and occasion as filter tokens', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      c({ attribute: 'pairing', operator: '=', value: 'beef' }),
+      c({ attribute: 'occasion', operator: 'in', value: ['gift', 'celebration'] }),
+    ]);
+    expect(tokens).toEqual(['pairing:beef', 'occasion_in:gift|celebration']);
+  });
+
   it('ignores truly unmapped attributes like free-text notes', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       c({ attribute: 'notes', operator: '=', value: 'something' }),

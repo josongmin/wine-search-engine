@@ -487,7 +487,7 @@ function mergeRouteDegradation(
 /**
  * Context for Steps 3b–7: entropy abstain → DecisionEngine → ResponseBuilder → optional cache write.
  */
-export interface SearchPostRouteExecutionContext {
+interface SearchPostRouteExecutionContext {
   readonly plan: QueryPlanV1;
   /** Compiled execution contract from ExecutionCompiler (E1-U3 carrier).
    *  T-E2-01: Required in production — downstream phases read route/mode from compiled only. */

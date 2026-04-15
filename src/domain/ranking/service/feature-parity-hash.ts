@@ -22,7 +22,7 @@ export const LTR_FEATURE_SCHEMA_VERSION = '2';
 /** Truncation length for the parity hash (sufficient collision resistance for our use). */
 const PARITY_HASH_LENGTH = 16;
 
-export function hashFeatureSchema(featureNames: readonly string[]): string {
+function hashFeatureSchema(featureNames: readonly string[]): string {
   const sorted = [...featureNames].sort();
   const joined = sorted.join('\n');
   return createHash('sha256').update(joined).digest('hex').slice(0, PARITY_HASH_LENGTH);

@@ -69,7 +69,7 @@ type NormalizableRetrievalHitSummary = {
 
 const RERANK_SUMMARY_SEARCH_TEXT_MAX = 800;
 
-export function trimNonEmptySummaryValue(value: string | undefined): string | undefined {
+function trimNonEmptySummaryValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
 }

@@ -3,13 +3,8 @@
  * so production bundles do not re-export training helpers from the main barrel.
  */
 
-export { buildTrainingExamples, trainAllModels, createModelRegistry } from './service/ltr-training-service.js';
-export type { LTRModelRegistry } from './service/ltr-training-service.js';
+export { buildTrainingExamples, trainAllModels } from './service/ltr-training-service.js';
 
-export {
-  trainLambdaMARTModel,
-  scoreDocument,
-} from './service/lambdamart-ranker.js';
 export type {
   RankingFeatures,
   LambdaMARTExample,

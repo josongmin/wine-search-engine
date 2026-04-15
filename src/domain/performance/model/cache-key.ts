@@ -47,32 +47,6 @@ export interface QueryCacheKey {
 }
 
 /**
- * Result-level cache key: Identifies ranked results post-retrieval.
- *
- * Used for memoizing ranked candidate sets (skips ranking recomputation).
- * Cacheable for stable retrieval modes (browse, attribute search).
- */
-export interface ResultCacheKey {
-  /** Retrieval profile identifier (sparse+dense balance). */
-  readonly retrievalProfile: string;
-
-  /** How many top results to cache. */
-  readonly topNResults: number;
-
-  /** Anchor entity if this is a similarity search. */
-  readonly anchorEntityId?: string;
-
-  /** Hash of applied filters (hard constraints). */
-  readonly filterSignature: string;
-
-  /** Retrieval mode (determines cacheability). */
-  readonly retrievalMode: RetrievalMode;
-
-  /** Computed deterministic key for Redis storage. */
-  readonly redisKey: string;
-}
-
-/**
  * Embedding cache key: Identifies embeddings for specific query text.
  *
  * Used for memoizing dense embeddings (reuse for repeated query terms).
@@ -174,69 +148,6 @@ export class QueryCacheKeyBuilder {
       expansionHash,
       ...(sessionId !== undefined ? { sessionId } : {}),
       ...(locale !== undefined ? { locale } : {}),
-      redisKey,
-    };
-  }
-}
-
-/**
- * Builder for deterministic result cache keys.
- *
- * Identifies a specific ranked candidate set (for memoization across requests).
- */
-export class ResultCacheKeyBuilder {
-  /**
-   * Build a deterministic cache key for ranked results.
-   *
-   * @param retrievalProfile - Vespa profile used (e.g., "hybrid")
-   * @param topNResults - Number of top results in cache
-   * @param filterTuples - Array of applied constraint tuples
-   * @param retrievalMode - Mode (determines cacheability)
-   * @param anchorEntityId - Optional anchor entity (for similarity search)
-   * @returns Deterministic cache key
-   */
-  build(
-    retrievalProfile: string,
-    topNResults: number,
-    filterTuples: readonly (readonly [string, string, string])[],
-    retrievalMode: RetrievalMode,
-    anchorEntityId?: string,
-  ): ResultCacheKey {
-    // Hash filters deterministically with length-prefix encoding to prevent
-    // delimiter-collision cache poisoning across distinct filter sets.
-    const encodeField = (s: string): string => `${s.length}:${s}`;
-    const sortedFilters = Array.from(filterTuples)
-      .sort(([a1, a2, a3], [b1, b2, b3]) =>
-        a1.localeCompare(b1) || a2.localeCompare(b2) || a3.localeCompare(b3))
-      .map((t) => t.map(encodeField).join('\u0000'))
-      .join('\u0001');
-    const filterSignature = hashDeterministic(sortedFilters);
-
-    // Build Redis key
-    const keyParts = [
-      'result',
-      retrievalProfile,
-      topNResults,
-      filterSignature,
-      retrievalMode,
-    ];
-    if (anchorEntityId !== undefined) {
-      // Length-prefix the entity ID so a `:` inside it cannot collide with
-      // the `keyParts.join(':')` delimiter below. EntityIds are
-      // system-generated branded strings today, but this defense-in-depth
-      // matches the `encodeField` pattern used for the filter signature so
-      // future ID format changes (e.g. composite keys) cannot poison the
-      // cache namespace.
-      keyParts.push(`anchor:${anchorEntityId.length}:${anchorEntityId}`);
-    }
-    const redisKey = keyParts.join(':');
-
-    return {
-      retrievalProfile,
-      topNResults,
-      ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
-      filterSignature,
-      retrievalMode,
       redisKey,
     };
   }

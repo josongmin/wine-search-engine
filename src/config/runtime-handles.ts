@@ -24,7 +24,7 @@ export interface RuntimeHandles {
   readonly createWatchlistSubscriber?: () => WatchlistSubscriberPort;
 }
 
-export interface ManagedRuntimeHandles extends RuntimeHandles {
+interface ManagedRuntimeHandles extends RuntimeHandles {
   close(): Promise<void>;
 }
 

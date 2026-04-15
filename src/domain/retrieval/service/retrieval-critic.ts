@@ -14,6 +14,7 @@
 
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { GraphCoverageResult } from '../../query/service/compute-graph-coverage.js';
+import type { RetrievalDegradationCode } from '../port/retrieval-degradation-observer.port.js';
 
 /**
  * ADR-015 §2: Type-level retry cap. NOT an env var.
@@ -70,7 +71,7 @@ export type CriticRetryReason =
 export interface CriticInput {
   readonly graph: ConstraintGraph | undefined;
   readonly coverage: GraphCoverageResult | undefined;
-  readonly degradationReasons: readonly string[];
+  readonly degradationCodes: readonly RetrievalDegradationCode[];
   readonly retryCount: number;
   /** Default `CRITIC_RETRY_MAX`. Parameterised so tests can inject a smaller
    *  cap without touching the module constant. Test-only — production
@@ -114,7 +115,7 @@ export function decideRetry(input: CriticInput): CriticDecision {
   // No coverage signal and no degradation reasons → nothing actionable.
   if (
     coverage === undefined
-    && input.degradationReasons.length === 0
+    && input.degradationCodes.length === 0
   ) {
     return { retry: false, reason: 'no_signal_to_act_on' };
   }
@@ -129,12 +130,8 @@ export function decideRetry(input: CriticInput): CriticDecision {
   }
 
   const subqueryId = pickSubqueryId(input.graph);
-  const hasNoMatches = input.degradationReasons.some(
-    (r) => r === 'no_matches' || r.endsWith(':no_matches'),
-  );
-  const hasSparsePool = input.degradationReasons.some(
-    (r) => r === 'sparse_pool' || r.endsWith(':sparse_pool'),
-  );
+  const hasNoMatches = input.degradationCodes.includes('no_matches');
+  const hasSparsePool = input.degradationCodes.includes('sparse_pool');
 
   // §5 row 4: low coverage + no_matches → expand_synonym.
   if (

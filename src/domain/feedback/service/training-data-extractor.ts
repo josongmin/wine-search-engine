@@ -13,7 +13,7 @@ import type { DebiasedRelevance } from './position-debias.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 
 /** Default minimum impressions per (query, entity) before it becomes a label. */
-export const DEFAULT_MIN_IMPRESSIONS = 5;
+const DEFAULT_MIN_IMPRESSIONS = 5;
 
 export interface TrainingExample {
   readonly query: string;

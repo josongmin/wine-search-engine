@@ -335,6 +335,7 @@ export class Transliterator {
     ['moet', '모엣'],
     ['dom pérignon', '돔 페리뇽'],
     ['dom perignon', '돔 페리뇽'],
+    ['beaujolais nouveau', '보졸레 누보'],
     ['château margaux', '샤또 마고'],
     ['chateau margaux', '샤또 마고'],
     ['château lafite rothschild', '샤또 라피트 로칠드'],

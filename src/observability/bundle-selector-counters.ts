@@ -23,7 +23,7 @@
 
 import type { AssignmentSolverFailReason } from '../domain/retrieval/service/assignment-solver.js';
 
-export type BundleSelectorCounterKind =
+type BundleSelectorCounterKind =
   | 'BUNDLE_SELECTOR_BUDGET_UNSELECTED_RESERVED_COUNT'
   | 'BUNDLE_SELECTOR_K_EXCEEDS_EXACT_LIMIT_COUNT'
   | 'BUNDLE_SELECTOR_BUDGET_INFEASIBLE_COUNT'
@@ -45,7 +45,7 @@ const REASON_TO_COUNTER: Readonly<Record<AssignmentSolverFailReason, BundleSelec
     'BUNDLE_SELECTOR_EMPTY_SLOT_POOL_COUNT',
 };
 
-export interface BundleSelectorCounter {
+interface BundleSelectorCounter {
   increment(kind: BundleSelectorCounterKind): void;
   incrementReason(reason: AssignmentSolverFailReason): void;
   incrementUnselectedReserved(): void;
@@ -59,7 +59,7 @@ function createZeroedCounts(): Record<BundleSelectorCounterKind, number> {
   return out;
 }
 
-export function createBundleSelectorCounter(): BundleSelectorCounter {
+function createBundleSelectorCounter(): BundleSelectorCounter {
   const counts = new Map<BundleSelectorCounterKind, number>(
     COUNTER_KINDS.map((k) => [k, 0] as const),
   );

@@ -19,7 +19,7 @@ export function resolveRouteFromPlanAndOptionMode(
   return mode;
 }
 
-export interface SearchRouteResolutionContext {
+interface SearchRouteResolutionContext {
   readonly apiOverrideMode: 'entity' | 'hybrid' | 'mixed' | undefined;
   readonly effectiveRoute: QueryRoute;
   readonly retrievalModeSource: 'planner' | 'api_override';

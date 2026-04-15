@@ -346,6 +346,62 @@ describe('SearchResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('keeps audit_extension open at the envelope level for future debug fields', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          future_debug_field: {
+            note: 'kept for forward compatibility',
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects unknown nested keys inside closed audit_extension trace objects', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          execution_trace: {
+            effective_route: 'entity',
+            extra_flag: true,
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('accepts sparse_zero_hits inside abstain_policy_trace.channel_degradation', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          abstain_policy_trace: {
+            evaluated: true,
+            decision: { should_abstain: true, reason: 'low_confidence' },
+            channel_degradation: {
+              dense_degraded: false,
+              anchor_degraded: false,
+              sparse_degraded: false,
+              sparse_zero_hits: true,
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it('EntitySummarySchema accepts lineage keys after deepKeysToSnake from domain camelCase', () => {
     const entity = deepKeysToSnake({
       entityId: 'wine:test',

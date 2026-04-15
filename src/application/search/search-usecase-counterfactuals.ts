@@ -30,7 +30,7 @@ import type { EntityResolveResult } from '../../domain/resolver/model/resolve-re
  * alternates. We track emitted entity IDs and skip any tail item whose ID
  * was already added from the resolver-alternate section.
  */
-export interface BuildCounterfactualsOptions {
+interface BuildCounterfactualsOptions {
   readonly topResultWindow?: number;
   /**
    * When true, the engine has abstained from picking a winner. The function

@@ -224,7 +224,7 @@ describe('ADR-012 Phase 1b.2 — topology planner flag-on integration (Wave B3)'
     expect(graph).toBeDefined();
     if (graph === undefined) return;
 
-    expect(graph.origin).toBe('hybrid');
+    expect(graph.origin).toBe('planner_emitted');
     expect(graph.graphSchemaVersion).toBe('constraint_graph_v1.1');
     expect(graph.rootNodeId).toBe('topology/root-xor');
     expect(graph.promptVersion).toBe('ctg_topology_v1');
@@ -333,7 +333,7 @@ describe('ADR-012 Phase 1b.2 — topology planner flag-on integration (Wave B3)'
     const graph = result.constraintGraph;
     expect(graph).toBeDefined();
     if (graph === undefined) return;
-    expect(graph.origin).toBe('hybrid');
+    expect(graph.origin).toBe('planner_emitted');
 
     // Candidate matches ONLY `wine_type` — one XOR branch satisfied.
     const oneBranchOnly = evaluateGraphHardGate({

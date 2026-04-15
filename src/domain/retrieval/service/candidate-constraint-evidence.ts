@@ -7,6 +7,10 @@ import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import { GEOGRAPHY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
+import {
+  normalizeConstraintComparableArray,
+  normalizeConstraintComparableString,
+} from '../../attribute/service/constraint-ontology-normalization.js';
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
@@ -150,6 +154,7 @@ function resolveCandidateValue(
 }
 
 function evaluateOperator(
+  attribute: string,
   operator: ConstraintOperator,
   attrValue: Exclude<CandidateValue, undefined>,
   constraintValue: NormalizedConstraint['value'],
@@ -157,15 +162,19 @@ function evaluateOperator(
   switch (operator) {
     case '=': {
       if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
-        return normalizeString(attrValue) === normalizeString(constraintValue);
+        return normalizeConstraintComparableString(attribute, attrValue)
+          === normalizeConstraintComparableString(attribute, constraintValue);
       }
       // Array attribute (e.g. flavorProfiles, certifications, pairing, occasion):
       // '=' means "the array contains this value" — mirrors 'in' single-value semantics.
       if (Array.isArray(attrValue) && typeof constraintValue === 'string') {
-        const norm = normalizeString(constraintValue);
-        return attrValue
-          .filter((v): v is string => typeof v === 'string')
-          .some((v) => normalizeString(v) === norm);
+        const attrValueSet = new Set(
+          normalizeConstraintComparableArray(
+            attribute,
+            attrValue.filter((v): v is string => typeof v === 'string'),
+          ),
+        );
+        return attrValueSet.has(normalizeConstraintComparableString(attribute, constraintValue));
       }
       return attrValue === constraintValue;
     }
@@ -200,32 +209,32 @@ function evaluateOperator(
 
     case 'in': {
       if (Array.isArray(attrValue)) {
-        const attrValueSet = new Set(
-          attrValue
-            .filter((value): value is string => typeof value === 'string')
-            .map(normalizeString),
-        );
+        const attrValueSet = new Set(normalizeConstraintComparableArray(
+          attribute,
+          attrValue.filter((value): value is string => typeof value === 'string'),
+        ));
         if (Array.isArray(constraintValue)) {
-          return constraintValue
-            .filter((value): value is string => typeof value === 'string')
-            .some((value) => attrValueSet.has(normalizeString(value)));
+          return normalizeConstraintComparableArray(
+            attribute,
+            constraintValue.filter((value): value is string => typeof value === 'string'),
+          ).some((value) => attrValueSet.has(value));
         }
         return typeof constraintValue === 'string' &&
-          attrValueSet.has(normalizeString(constraintValue));
+          attrValueSet.has(normalizeConstraintComparableString(attribute, constraintValue));
       }
       if (Array.isArray(constraintValue)) {
         if (typeof attrValue !== 'string') {
           return false;
         }
-        const constraintSet = new Set(
-          constraintValue
-            .filter((value): value is string => typeof value === 'string')
-            .map(normalizeString),
-        );
-        return constraintSet.has(normalizeString(attrValue));
+        const constraintSet = new Set(normalizeConstraintComparableArray(
+          attribute,
+          constraintValue.filter((value): value is string => typeof value === 'string'),
+        ));
+        return constraintSet.has(normalizeConstraintComparableString(attribute, attrValue));
       }
       if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
-        return normalizeString(attrValue) === normalizeString(constraintValue);
+        return normalizeConstraintComparableString(attribute, attrValue)
+          === normalizeConstraintComparableString(attribute, constraintValue);
       }
       return attrValue === constraintValue;
     }
@@ -233,20 +242,24 @@ function evaluateOperator(
     case 'exclude': {
       // Build the set of values to exclude — handles both scalar and array constraintValue.
       const excludeVals = Array.isArray(constraintValue)
-        ? constraintValue.filter((v): v is string => typeof v === 'string').map(normalizeString)
+        ? normalizeConstraintComparableArray(
+            attribute,
+            constraintValue.filter((v): v is string => typeof v === 'string'),
+          )
         : typeof constraintValue === 'string'
-          ? [normalizeString(constraintValue)]
+          ? [normalizeConstraintComparableString(attribute, constraintValue)]
           : [];
       const excludeSet = new Set(excludeVals);
 
       if (Array.isArray(attrValue)) {
         // attrValue is a list (e.g. certifications) — all elements must not be excluded.
-        return attrValue
-          .filter((v): v is string => typeof v === 'string')
-          .every((v) => !excludeSet.has(normalizeString(v)));
+        return normalizeConstraintComparableArray(
+          attribute,
+          attrValue.filter((v): v is string => typeof v === 'string'),
+        ).every((v) => !excludeSet.has(v));
       }
       if (typeof attrValue === 'string') {
-        return !excludeSet.has(normalizeString(attrValue));
+        return !excludeSet.has(normalizeConstraintComparableString(attribute, attrValue));
       }
       // Non-string, non-array — equality check (number case).
       return attrValue !== constraintValue;
@@ -257,18 +270,22 @@ function evaluateOperator(
       // Use Set for O(1) lookup instead of Array.includes O(n).
       const excludeSet = new Set(
         Array.isArray(constraintValue)
-          ? constraintValue.filter((v): v is string => typeof v === 'string').map(normalizeString)
+          ? normalizeConstraintComparableArray(
+              attribute,
+              constraintValue.filter((v): v is string => typeof v === 'string'),
+            )
           : typeof constraintValue === 'string'
-            ? [normalizeString(constraintValue)]
+            ? [normalizeConstraintComparableString(attribute, constraintValue)]
             : [],
       );
       if (Array.isArray(attrValue)) {
-        return attrValue
-          .filter((v): v is string => typeof v === 'string')
-          .every((v) => !excludeSet.has(normalizeString(v)));
+        return normalizeConstraintComparableArray(
+          attribute,
+          attrValue.filter((v): v is string => typeof v === 'string'),
+        ).every((v) => !excludeSet.has(v));
       }
       if (typeof attrValue === 'string') {
-        return !excludeSet.has(normalizeString(attrValue));
+        return !excludeSet.has(normalizeConstraintComparableString(attribute, attrValue));
       }
       return true;
     }
@@ -300,7 +317,7 @@ function satisfiesConstraint(
     ];
     if (allGrapes.length === 0) return false;
     // Delegate to evaluateOperator with the full grape list so array 'in' / exclude semantics work.
-    return evaluateOperator(operator, allGrapes, value);
+    return evaluateOperator(constraint.attribute, operator, allGrapes, value);
   }
 
   if (constraint.attribute === 'drinking_window') {
@@ -352,7 +369,12 @@ function satisfiesConstraint(
     }
   }
 
-  return evaluateOperator(constraint.operator, attrValue, constraint.value);
+  return evaluateOperator(
+    constraint.attribute,
+    constraint.operator,
+    attrValue,
+    constraint.value,
+  );
 }
 
 export function annotateCandidateConstraintEvidence(

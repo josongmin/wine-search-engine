@@ -62,8 +62,7 @@ type OrtModule = {
 };
 
 async function loadOrtModule(): Promise<OrtModule> {
-  const moduleName = 'onnxruntime-node';
-  return import(moduleName) as Promise<OrtModule>;
+  return import('onnxruntime-node') as Promise<OrtModule>;
 }
 
 /**

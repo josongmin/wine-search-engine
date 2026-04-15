@@ -51,6 +51,12 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { containsHangul } from '../../domain/shared/utils/hangul.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execution-observer.port.js';
+import { QueryNormalizer } from '../../domain/query/service/query-normalizer.js';
+import {
+  hasDrinkabilityKeyword,
+  hasEntityMetadataKeyword,
+} from '../../domain/query/service/planner-intent-detection.js';
+import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
@@ -228,6 +234,112 @@ function buildToolOutcome(
 const STEP_LOG_PREVIEW_CHARS = 500;
 /** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
 const CHARS_PER_TOKEN_ESTIMATE = 4;
+const QUERY_NORMALIZER = new QueryNormalizer();
+const EXACT_METADATA_ALLOWED_SEARCH_KEYS = new Set(['query', 'limit', 'retrieval_mode']);
+
+interface AgentQueryExecutionContract {
+  readonly requiresDrinkabilityCheck: boolean;
+  readonly hasEntityMetadataSignal: boolean;
+}
+
+function buildAgentQueryExecutionContract(query: string): AgentQueryExecutionContract {
+  const normalized = QUERY_NORMALIZER.normalize(query).accentless;
+  return {
+    requiresDrinkabilityCheck: hasDrinkabilityKeyword(normalized),
+    hasEntityMetadataSignal: hasEntityMetadataKeyword(normalized),
+  };
+}
+
+function isSpecificSkuLikeQuery(query: string): boolean {
+  return classifyQueryBudget(query)?.classification === 'specific_sku';
+}
+
+function getStructuredSearchFilterKeys(input: Record<string, unknown>): readonly string[] {
+  return Object.entries(input)
+    .filter(([key, value]) =>
+      !EXACT_METADATA_ALLOWED_SEARCH_KEYS.has(key) &&
+      value !== undefined &&
+      value !== null,
+    )
+    .map(([key]) => key);
+}
+
+function getCompletedDrinkabilityEntityIds(
+  steps: readonly AgentStep[],
+): ReadonlySet<string> {
+  const entityIds = new Set<string>();
+  for (const step of steps) {
+    if (step.action?.tool === 'check_drinking_window') {
+      const entityId = step.action.input['entity_id'];
+      if (typeof entityId === 'string' && entityId.trim().length > 0) {
+        entityIds.add(entityId);
+      }
+    }
+    for (const pair of step.actionPairs ?? []) {
+      if (pair.action.tool !== 'check_drinking_window') {
+        continue;
+      }
+      const entityId = pair.action.input['entity_id'];
+      if (typeof entityId === 'string' && entityId.trim().length > 0) {
+        entityIds.add(entityId);
+      }
+    }
+  }
+  return entityIds;
+}
+
+function extractPendingDrinkabilityEntityIds(
+  contract: AgentQueryExecutionContract,
+  steps: readonly AgentStep[],
+  toolOutcomes: readonly ToolOutcome[],
+): readonly string[] {
+  if (!contract.requiresDrinkabilityCheck) {
+    return [];
+  }
+  const completed = getCompletedDrinkabilityEntityIds(steps);
+  for (let i = toolOutcomes.length - 1; i >= 0; i--) {
+    const outcome = toolOutcomes[i]!;
+    const result = outcome.result;
+    if (typeof result !== 'object' || result === null) {
+      continue;
+    }
+    const record = result as Record<string, unknown>;
+    if (outcome.tool === 'search_wines' && record['queryType'] === 'search') {
+      const results = record['results'];
+      if (!Array.isArray(results) || results.length === 0) {
+        return [];
+      }
+      const [topResult] = results as readonly unknown[];
+      const entityId = getValueAtPath(topResult, 'entity.entityId');
+      if (typeof entityId === 'string' && entityId.length > 0) {
+        return completed.has(entityId) ? [] : [entityId];
+      }
+      return [];
+    }
+    if (outcome.tool === 'compare_wines' && record['queryType'] === 'comparison') {
+      const entities = record['entities'];
+      if (!Array.isArray(entities)) {
+        return [];
+      }
+      const pending = entities
+        .map((entity) => getValueAtPath(entity, 'topResult.entity.entityId'))
+        .filter((entityId): entityId is string => typeof entityId === 'string' && entityId.length > 0)
+        .filter((entityId) => !completed.has(entityId));
+      return pending;
+    }
+  }
+  return [];
+}
+
+function formatPolicyBlockedObservation(err: DomainError): string {
+  if (err instanceof PolicyBlockedError && err.rejection !== undefined) {
+    const { layer, reason } = err.rejection;
+    if (layer !== undefined || reason !== undefined) {
+      return `Policy blocked: ${err.message} [${layer ?? 'UNKNOWN_LAYER'}:${reason ?? 'UNKNOWN_REASON'}]`;
+    }
+  }
+  return `Policy blocked: ${err.message}`;
+}
 
 /** Parsed LLM output — either a tool call, a parallel batch, or a final answer. */
 interface LlmAction {
@@ -499,6 +611,7 @@ export class AgentOrchestrator {
     }
 
     const adaptive = overrides?.maxSteps === undefined ? classifyQueryBudget(query) : undefined;
+    const queryExecutionContract = buildAgentQueryExecutionContract(query);
     const effectiveConfig = {
       ...this.config,
       ...(adaptive !== undefined ? { maxSteps: adaptive.maxSteps } : {}),
@@ -560,6 +673,159 @@ export class AgentOrchestrator {
      * Cleared to undefined after it is consumed.
      */
     let pendingRefinementHint: string | undefined;
+
+    const runContractDrinkabilityChecks = async (): Promise<boolean> => {
+      const pendingIds = extractPendingDrinkabilityEntityIds(
+        queryExecutionContract,
+        steps,
+        toolOutcomes,
+      );
+      if (pendingIds.length === 0) {
+        return true;
+      }
+
+      const checkCalls = pendingIds.map((entityId) => ({
+        tool: 'check_drinking_window',
+        input: { entity_id: entityId },
+      }));
+      const budgetCheck = budget.recordParallelBatch(checkCalls, { skipNearDuplicate: true });
+      if (!budgetCheck.allowed) {
+        terminationReason = budgetCheck.reason ?? 'max_steps';
+        return false;
+      }
+
+      const stepIndex = steps.length;
+      const stepStartMs = Date.now();
+      const autoAbortController = new AbortController();
+      const propagateAutoAbort = (): void => { autoAbortController.abort(); };
+      abortSignal?.addEventListener('abort', propagateAutoAbort, { once: true });
+      let results: readonly AgentToolResult[];
+      try {
+        results = await withTimeout(
+          executeAgentToolsBatch(
+            checkCalls,
+            this.deps.toolDeps,
+            `${requestId}-step${stepIndex}`,
+            {
+              abortSignal: autoAbortController.signal,
+              toolCallId: toolCallIdForStep(requestId, stepIndex),
+            },
+          ),
+          effectiveConfig.parallelBatchTimeoutMs ?? DEFAULT_PARALLEL_BATCH_TIMEOUT_MS,
+          'Contract drinkability batch timed out',
+        );
+      } catch (err) {
+        autoAbortController.abort();
+        const durationMs = Math.max(0, Date.now() - stepStartMs);
+        if (isAbortError(err)) {
+          terminationReason = 'aborted';
+          const observation = '[ABORTED] Request cancelled during contract drinkability checks.';
+          for (let i = 0; i < checkCalls.length; i++) {
+            toolOutcomes.push(
+              buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, true, false, false),
+            );
+          }
+          steps.push({
+            index: stepIndex,
+            thought: 'contract: drinkability check after entity retrieval',
+            actionPairs: checkCalls.map((call) => ({ action: call, observation })),
+            actions: checkCalls,
+            observations: checkCalls.map(() => observation),
+            durationMs,
+            tokenCount: { input: 0, output: 0 },
+          });
+          return false;
+        }
+        if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
+          timeoutStats.parallelBatch += 1;
+          terminationReason = 'timeout';
+          const observation = '[TIMEOUT] Contract drinkability checks timed out.';
+          for (let i = 0; i < checkCalls.length; i++) {
+            toolOutcomes.push(
+              buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, true, false),
+            );
+          }
+          steps.push({
+            index: stepIndex,
+            thought: 'contract: drinkability check after entity retrieval',
+            actionPairs: checkCalls.map((call) => ({ action: call, observation })),
+            actions: checkCalls,
+            observations: checkCalls.map(() => observation),
+            durationMs,
+            tokenCount: { input: 0, output: 0 },
+          });
+          return false;
+        }
+        if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
+          policyBlocked = true;
+          terminationReason = 'blocked';
+          const observation = formatPolicyBlockedObservation(err);
+          for (let i = 0; i < checkCalls.length; i++) {
+            toolOutcomes.push(
+              buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, false, true),
+            );
+          }
+          steps.push({
+            index: stepIndex,
+            thought: 'contract: drinkability check after entity retrieval',
+            actionPairs: checkCalls.map((call) => ({ action: call, observation })),
+            actions: checkCalls,
+            observations: checkCalls.map(() => observation),
+            durationMs,
+            tokenCount: { input: 0, output: 0 },
+          });
+          return false;
+        }
+        reasoningFailureDetected = true;
+        terminationReason = 'error';
+        return false;
+      } finally {
+        autoAbortController.abort();
+        abortSignal?.removeEventListener('abort', propagateAutoAbort);
+      }
+
+      const durationMs = Math.max(0, Date.now() - stepStartMs);
+      const observations: string[] = [];
+      const actionPairs: AgentToolCallPair[] = [];
+      const frames: ToolCallEvidenceFrame[] = [];
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!;
+        const call = checkCalls[i]!;
+        const observation = truncateObservation(result.observation, effectiveConfig.maxContextChars);
+        observations.push(observation);
+        actionPairs.push({ action: call, observation });
+        if (result.evidenceFrame !== undefined) {
+          frames.push(result.evidenceFrame);
+          collectedFrames.push(result.evidenceFrame);
+        }
+        toolOutcomes.push(
+          buildToolOutcome(
+            requestId,
+            stepIndex,
+            i,
+            call.tool,
+            observation,
+            result.rawResult,
+            durationMs,
+            result.rawResult === null,
+            false,
+            false,
+          ),
+        );
+      }
+
+      steps.push({
+        index: stepIndex,
+        thought: 'contract: drinkability check after entity retrieval',
+        actionPairs,
+        actions: checkCalls,
+        observations,
+        durationMs,
+        tokenCount: { input: 0, output: 0 },
+        ...(frames.length > 0 ? { evidenceFrames: frames } : {}),
+      });
+      return true;
+    };
 
     try {
       for (;;) {
@@ -783,9 +1049,20 @@ export class AgentOrchestrator {
         // AG-02: trim BEFORE the length check so whitespace-only answers are rejected
         // consistently. The trimmed value is also what gets stored/returned — synthesis
         // paths (lines ~1068) already trim; the main-loop path must match.
+        const pendingDrinkabilityEntityIds = extractPendingDrinkabilityEntityIds(
+          queryExecutionContract,
+          steps,
+          toolOutcomes,
+        );
+
         if (typeof parsed.answer === 'string') {
           const trimmedAnswer = parsed.answer.trim();
           if (trimmedAnswer.length > 0) {
+            if (pendingDrinkabilityEntityIds.length > 0) {
+              pendingRefinementHint =
+                `HINT: This query asks about drinkability. Before answering, you MUST call check_drinking_window for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+              continue;
+            }
             steps.push({
               index: steps.length,
               thought: parsed.thought,
@@ -804,6 +1081,48 @@ export class AgentOrchestrator {
         // Policy-block (DomainError) from any tool → re-thrown, caught here, abort loop.
         if (parsed.actions !== undefined) {
           const batchCalls = parsed.actions;
+
+          if (pendingDrinkabilityEntityIds.length > 0) {
+            const requestedIds = new Set(
+              batchCalls
+                .filter((call) => call.tool === 'check_drinking_window')
+                .map((call) => call.input['entity_id'])
+                .filter((entityId): entityId is string => typeof entityId === 'string' && entityId.trim().length > 0),
+            );
+            const missingIds = pendingDrinkabilityEntityIds.filter((entityId) => !requestedIds.has(entityId));
+            const hasOnlyDrinkabilityChecks = batchCalls.every((call) => call.tool === 'check_drinking_window');
+            if (!hasOnlyDrinkabilityChecks || missingIds.length > 0) {
+              const contractMsg =
+                `Tool contract violation: drinkability queries must call check_drinking_window next for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')}.`;
+              const batchDurationMs = Math.max(0, Date.now() - stepStart);
+              for (let bi = 0; bi < batchCalls.length; bi++) {
+                toolOutcomes.push(
+                  buildToolOutcome(
+                    requestId,
+                    steps.length,
+                    bi,
+                    batchCalls[bi]!.tool,
+                    contractMsg,
+                    null,
+                    batchDurationMs,
+                    true,
+                    false,
+                    false,
+                  ),
+                );
+              }
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                actionPairs: batchCalls.map((a) => ({ action: a, observation: contractMsg })),
+                actions: batchCalls,
+                observations: batchCalls.map(() => contractMsg),
+                durationMs: batchDurationMs,
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+              continue;
+            }
+          }
 
           // Per-batch tool count limit: reject oversized batches to prevent
           // resource exhaustion via Promise.all with 100+ concurrent tool calls.
@@ -1005,7 +1324,7 @@ export class AgentOrchestrator {
               // entire batch is invalid; continuing would waste resources.
               batchAbortController.abort();
               {
-                const policyMsg = `Policy blocked: ${batchErr.message}`;
+                const policyMsg = formatPolicyBlockedObservation(batchErr);
                 const batchDurationMs = Math.max(0, Date.now() - stepStart);
                 for (let bi = 0; bi < batchCalls.length; bi++) {
                   toolOutcomes.push(
@@ -1117,11 +1436,92 @@ export class AgentOrchestrator {
             pendingRefinementHint =
               'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
           }
+
+          if (!await runContractDrinkabilityChecks()) {
+            break;
+          }
         }
 
         // ── Sequential single tool call ─────────────────────────────────────
         if (parsed.action !== undefined) {
           const { tool, input } = parsed.action;
+          let effectiveInput = input;
+
+          if (
+            tool === 'search_wines' &&
+            queryExecutionContract.hasEntityMetadataSignal
+          ) {
+            const searchQuery = input['query'];
+            const structuredFilterKeys = getStructuredSearchFilterKeys(input);
+            if (
+              typeof searchQuery === 'string' &&
+              isSpecificSkuLikeQuery(searchQuery) &&
+              structuredFilterKeys.length > 0
+            ) {
+              const stepDurationMs = Math.max(0, Date.now() - stepStart);
+              const contractMsg =
+                `Tool contract violation: exact wine metadata queries must use a bare entity search_wines query with no structured filters. Remove ${structuredFilterKeys.join(', ')} and retry with query="${searchQuery}".`;
+              toolOutcomes.push(
+                buildToolOutcome(
+                  requestId,
+                  steps.length,
+                  0,
+                  tool,
+                  contractMsg,
+                  null,
+                  stepDurationMs,
+                  true,
+                  false,
+                  false,
+                ),
+              );
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                action: { tool, input },
+                observation: contractMsg,
+                durationMs: stepDurationMs,
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+              continue;
+            }
+            if (
+              typeof searchQuery === 'string' &&
+              isSpecificSkuLikeQuery(searchQuery) &&
+              effectiveInput['limit'] !== 1
+            ) {
+              effectiveInput = { ...effectiveInput, limit: 1 };
+            }
+          }
+
+          if (pendingDrinkabilityEntityIds.length > 0 && tool !== 'check_drinking_window') {
+            const stepDurationMs = Math.max(0, Date.now() - stepStart);
+            const contractMsg =
+              `Tool contract violation: drinkability queries must call check_drinking_window next for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')}.`;
+            toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                steps.length,
+                0,
+                tool,
+                contractMsg,
+                null,
+                stepDurationMs,
+                true,
+                false,
+                false,
+              ),
+            );
+            steps.push({
+              index: steps.length,
+              thought: parsed.thought,
+              action: { tool, input: effectiveInput },
+              observation: contractMsg,
+              durationMs: stepDurationMs,
+              tokenCount: { input: inputTokens, output: outputTokens },
+            });
+            continue;
+          }
 
           // Unknown tool guard FIRST — do not consume budget on adversarial
           // LLM-emitted unknown tool names. Adds an observation step but
@@ -1155,7 +1555,7 @@ export class AgentOrchestrator {
             steps.push({
               index: steps.length,
               thought: parsed.thought,
-              action: { tool, input },
+              action: { tool, input: effectiveInput },
               observation: unknownToolMsg,
               durationMs: stepDurationMs,
               tokenCount: { input: inputTokens, output: outputTokens },
@@ -1164,7 +1564,7 @@ export class AgentOrchestrator {
           }
 
           // Loop detection (only for known tools)
-          const loopCheck = budget.recordStep(tool, input);
+          const loopCheck = budget.recordStep(tool, effectiveInput);
           if (!loopCheck.allowed) {
             terminationReason = loopCheck.reason ?? 'loop_detected';
             break;
@@ -1181,7 +1581,7 @@ export class AgentOrchestrator {
             const timedToolResult = await withTimeout(
               executeAgentTool(
                 tool,
-                input,
+                effectiveInput,
                 this.deps.toolDeps,
                 `${requestId}-step${steps.length}`,
                 {
@@ -1225,7 +1625,7 @@ export class AgentOrchestrator {
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
-                action: { tool, input },
+                action: { tool, input: effectiveInput },
                 observation,
                 durationMs: stepDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
@@ -1255,7 +1655,7 @@ export class AgentOrchestrator {
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
-                action: { tool, input },
+                action: { tool, input: effectiveInput },
                 observation: abortedObservation,
                 durationMs: stepDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
@@ -1268,7 +1668,7 @@ export class AgentOrchestrator {
               policyBlocked = true;
               terminationReason = 'blocked';
               const stepDurationMs = Math.max(0, Date.now() - stepStart);
-              const blockedObservation = `Policy blocked: ${toolErr.message}`;
+              const blockedObservation = formatPolicyBlockedObservation(toolErr);
               toolOutcomes.push(
                 buildToolOutcome(
                   requestId,
@@ -1286,7 +1686,7 @@ export class AgentOrchestrator {
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
-                action: { tool, input },
+                action: { tool, input: effectiveInput },
                 observation: blockedObservation,
                 durationMs: stepDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
@@ -1320,7 +1720,7 @@ export class AgentOrchestrator {
           steps.push({
             index: steps.length,
             thought: parsed.thought,
-            action: { tool, input },
+            action: { tool, input: effectiveInput },
             observation,
             durationMs: stepDurationMs,
             tokenCount: { input: inputTokens, output: outputTokens },
@@ -1360,6 +1760,10 @@ export class AgentOrchestrator {
             hasInjectedRefinementHint = true;
             pendingRefinementHint =
               'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
+          }
+
+          if (!await runContractDrinkabilityChecks()) {
+            break;
           }
         }
       }

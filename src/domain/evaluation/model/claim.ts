@@ -155,17 +155,6 @@ export type MatchType =
   | 'semantic_match'    // LLM-assessed meaning equivalence
   | 'no_match';         // failed all match strategies
 
-/** Match type priority for tie-breaking when multiple match strategies succeed.
- *  Higher = stronger evidence. */
-export const MATCH_TYPE_PRIORITY: Readonly<Record<MatchType, number>> = {
-  exact_match: 6,
-  normalized_match: 5,
-  hierarchy_match: 4,
-  range_match: 3,
-  semantic_match: 2,
-  no_match: 0,
-};
-
 /** Result of a single match attempt. */
 export interface MatchResult {
   /** Which match strategy succeeded (or no_match). */

@@ -90,7 +90,3 @@ export async function closeRedisClient(redisClient: RedisClient | null = client)
     connectPromise = null;
   }
 }
-
-export function peekRedisClient(): RedisClient | null {
-  return client;
-}

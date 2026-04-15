@@ -4,9 +4,13 @@ import type { ResolverInput } from '../../../domain/resolver/service/resolver.js
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
-import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
+import type {
+  RetrievalDocument,
+  RetrievalDrinkingWindowProjection,
+} from '../../../domain/retrieval/model/retrieval-document.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../../domain/retrieval/model/candidate-envelope.js';
 import type { RetrievalDegradationSignal } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
+import type { RetrievalDegradationCode } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
 import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
 import type { RankerRuntimeSignal } from '../../../domain/ranking/model/ranking-runtime-signal.js';
@@ -76,6 +80,12 @@ export interface CandidatePoolPort {
    * returning an empty pool. Optional so in-memory/test stubs remain minimal.
    */
   getLastDegradationSignals?(): readonly RetrievalDegradationSignal[];
+  /**
+   * Returns the structured degradation codes from the most recent execute()
+   * call. These are the critic-facing categories derived at producer
+   * boundaries; they intentionally exclude free-form log strings.
+   */
+  getLastDegradationCodes?(): readonly RetrievalDegradationCode[];
 }
 
 export interface EntityDocumentLookupPort {
@@ -95,6 +105,15 @@ export interface EntityDocumentLookupPort {
    * T-E4-01: Elevated to required -- entity route batch hydration depends on this.
    */
   getDocuments(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
+
+  /**
+   * Optional narrow projection for exact drinkability metadata lookups.
+   * Production index implementations should provide this so agent
+   * check_drinking_window does not depend on full document hydration.
+   */
+  getDrinkingWindowDocuments?(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDrinkingWindowProjection>>;
 }
 
 export interface BrowseRetrieverPort {

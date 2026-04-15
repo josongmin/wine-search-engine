@@ -17,15 +17,11 @@ import type { SearchExecutorPort } from './port/search-executor.port.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 export type {
-  BatchErrorCode,
   BatchSearchExecutionContext,
   BatchSearchOptions,
   BatchSearchRequestItem,
   BatchSearchResponse,
-  BatchSearchResultFailure,
   BatchSearchResultItem,
-  BatchSearchResultNotExecuted,
-  BatchSearchResultSuccess,
 } from './batch-search.dto.js';
 
 /**

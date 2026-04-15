@@ -9,6 +9,7 @@ const maxUnitThreads = resolveMaxThreads(1);
 const testInclude = [
   'test/unit/**/*.test.ts',
   'test/helpers/**/*.test.ts',
+  'test/regression/**/*.test.ts',
   'src/application/**/__tests__/**/*.test.ts',
   'src/config/**/__tests__/**/*.test.ts',
   'src/domain/**/__tests__/**/*.test.ts',

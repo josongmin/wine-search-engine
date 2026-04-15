@@ -111,7 +111,7 @@ const baseOpts: GraphExecutorOptions = {
 
 describe('executeGraphAware passthrough (ADR-013)', () => {
   beforeEach(() => {
-    delete process.env['BUNDLE_SELECTOR_ENABLED'];
+    process.env['BUNDLE_SELECTOR_ENABLED'] = 'false';
   });
   afterEach(() => {
     delete process.env['BUNDLE_SELECTOR_ENABLED'];
@@ -157,7 +157,7 @@ describe('executeGraphAware passthrough (ADR-013)', () => {
     expect(shouldEngageBundlePath(hybridGraph(1))).toBe(false);
     expect(shouldEngageBundlePath(hybridGraph(2))).toBe(true);
     expect(shouldEngageBundlePath(hybridGraph(5))).toBe(true);
-    delete process.env['BUNDLE_SELECTOR_ENABLED'];
+    process.env['BUNDLE_SELECTOR_ENABLED'] = 'false';
     expect(shouldEngageBundlePath(hybridGraph(2))).toBe(false);
   });
 });

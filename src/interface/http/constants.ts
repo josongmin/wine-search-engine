@@ -107,9 +107,6 @@ export const MAX_SESSION_ENTITY_ID_CHARS = 256;
 /** Session id string length (client-supplied correlation id). */
 export const MAX_SESSION_ID_CHARS = 256;
 
-/** Response hash string length (hex SHA-256 = 64 chars, add headroom). */
-export const MAX_RESPONSE_HASH_CHARS = 128;
-
 /** Interpret/query budget transport (ms ceiling for client hints). */
 export const MAX_QUERY_BUDGET_LATENCY_MS = 30_000;
 
@@ -168,9 +165,6 @@ export const WATCHLIST_PAGE_DEFAULT_LIMIT = 50;
 export const WATCHLIST_PAGE_MAX_LIMIT = 200;
 export const WATCHLIST_PAGE_MIN_LIMIT = 1;
 export const WATCHLIST_OFFSET_MIN = 0;
-
-/** Minimum length for secrets used as HMAC/debug keys (entropy floor). */
-export const MIN_SECRET_KEY_LENGTH = 16;
 
 /** Unsupported media type for JSON-only POST/PUT/PATCH (RFC 9110). */
 export const HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE = 415;

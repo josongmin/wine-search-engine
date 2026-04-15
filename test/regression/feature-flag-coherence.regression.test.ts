@@ -16,12 +16,12 @@ import {
   type FeatureFlagSnapshot,
 } from '../../src/config/feature-flag-coherence.js';
 
-/** Base: all flags at their defaults (only CONSTRAINT_GRAPH_EMIT on). */
+/** Base: all flags at their defaults (emit + selector + critic on). */
 const defaultSnapshot: FeatureFlagSnapshot = {
   constraintGraphEmit: true,
   constraintGraphTopologyLlm: false,
-  bundleSelectorEnabled: false,
-  retrievalExecutorCritic: false,
+  bundleSelectorEnabled: true,
+  retrievalExecutorCritic: true,
   gceShadowEmit: false,
   gcePrimary: false,
 };
@@ -33,7 +33,7 @@ function withOverrides(
 }
 
 describe('ADR-018 feature flag coherence — happy paths', () => {
-  it('default snapshot passes (emit on, everything else off)', () => {
+  it('default snapshot passes (emit, selector, critic on; everything else off)', () => {
     expect(() => validateFeatureFlagCoherence(defaultSnapshot)).not.toThrow();
   });
 
@@ -67,6 +67,7 @@ describe('ADR-018 feature flag coherence — rule violations', () => {
     const snapshot = withOverrides({
       constraintGraphEmit: false,
       bundleSelectorEnabled: true,
+      retrievalExecutorCritic: false,
     });
     expect.assertions(2);
     try {
@@ -83,6 +84,8 @@ describe('ADR-018 feature flag coherence — rule violations', () => {
     const snapshot = withOverrides({
       constraintGraphEmit: false,
       constraintGraphTopologyLlm: true,
+      bundleSelectorEnabled: false,
+      retrievalExecutorCritic: false,
     });
     expect.assertions(2);
     try {
@@ -98,6 +101,7 @@ describe('ADR-018 feature flag coherence — rule violations', () => {
   it('rule 3: RETRIEVAL_EXECUTOR_CRITIC without CONSTRAINT_GRAPH_EMIT throws', () => {
     const snapshot = withOverrides({
       constraintGraphEmit: false,
+      bundleSelectorEnabled: false,
       retrievalExecutorCritic: true,
     });
     expect.assertions(2);
@@ -154,13 +158,13 @@ describe('ADR-018 feature flag coherence — rule violations', () => {
 });
 
 describe('ADR-018 snapshotFeatureFlagsFromEnv — env parsing', () => {
-  it('empty env: emit defaults on, everything else defaults off', () => {
+  it('empty env: emit, selector, and critic default on; everything else defaults off', () => {
     const snapshot = snapshotFeatureFlagsFromEnv({});
     expect(snapshot).toEqual<FeatureFlagSnapshot>({
       constraintGraphEmit: true,
       constraintGraphTopologyLlm: false,
-      bundleSelectorEnabled: false,
-      retrievalExecutorCritic: false,
+      bundleSelectorEnabled: true,
+      retrievalExecutorCritic: true,
       gceShadowEmit: false,
       gcePrimary: false,
     });
@@ -182,7 +186,15 @@ describe('ADR-018 snapshotFeatureFlagsFromEnv — env parsing', () => {
     ).toBe(true);
   });
 
-  it('only literal "true" enables the opt-in flags', () => {
+  it('only literal "false" disables the default-on flags, and only literal "true" enables the opt-in flags', () => {
+    const offEnv: NodeJS.ProcessEnv = {
+      BUNDLE_SELECTOR_ENABLED: 'false',
+      RETRIEVAL_EXECUTOR_CRITIC: 'false',
+    };
+    const offSnapshot = snapshotFeatureFlagsFromEnv(offEnv);
+    expect(offSnapshot.bundleSelectorEnabled).toBe(false);
+    expect(offSnapshot.retrievalExecutorCritic).toBe(false);
+
     const onEnv: NodeJS.ProcessEnv = {
       CONSTRAINT_GRAPH_TOPOLOGY_LLM: 'true',
       BUNDLE_SELECTOR_ENABLED: 'true',
@@ -197,12 +209,14 @@ describe('ADR-018 snapshotFeatureFlagsFromEnv — env parsing', () => {
     expect(snapshot.gceShadowEmit).toBe(true);
     expect(snapshot.gcePrimary).toBe(true);
 
-    // And "1" / uppercase are NOT accepted as true — only literal 'true'.
+    // Default-on flags ignore wrong-case truthy strings unless they are the
+    // literal disabling token `'false'`. Opt-in flags still require the exact
+    // literal `'true'`.
     const wrongCaseSnapshot = snapshotFeatureFlagsFromEnv({
       BUNDLE_SELECTOR_ENABLED: 'TRUE',
       GCE_PRIMARY: '1',
     });
-    expect(wrongCaseSnapshot.bundleSelectorEnabled).toBe(false);
+    expect(wrongCaseSnapshot.bundleSelectorEnabled).toBe(true);
     expect(wrongCaseSnapshot.gcePrimary).toBe(false);
   });
 });

@@ -36,6 +36,12 @@ describe('Korean/i18n normalization regressions', () => {
       expect(correctKoreanWineTypos('오퍼스원')).toBe('오푸스원');
     });
 
+    it('QueryNormalizer applies typo correction before transliteration lookup', () => {
+      const views = normalizer.normalize('보졸레누보');
+      expect(views.punctuationStripped).toBe('보졸레 누보');
+      expect(views.transliterated).toBe('beaujolais nouveau');
+    });
+
     it('extractSearchConstraints NFC-normalizes decomposed Hangul price queries', () => {
       const nfd = '카베르네 빼고 5만원 이하'.normalize('NFD');
       const result = extractSearchConstraints(nfd);

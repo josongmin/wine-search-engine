@@ -73,8 +73,6 @@ export interface ResolvedEntity {
     | 'fuzzy_fallback';
 }
 
-const RESOLVER_VERSION = 'entity-resolver-v1.0';
-
 type ResolverEntry = Omit<ResolvedEntity, 'matchedSurface'>;
 
 export interface ResolveEntityOptions {
@@ -256,21 +254,6 @@ export function resolveEntity(
 
   return null;
 }
-
-/** Version identifier embedded in traces for replay parity. */
-export function resolverVersion(): string {
-  return RESOLVER_VERSION;
-}
-
-/** Size of the entity index (for observability / health check). */
-export function resolverEntryCount(): number {
-  let count = 0;
-  for (const entries of RESOLVER_INDEX.values()) {
-    count += entries.length;
-  }
-  return count;
-}
-
 
 function normalizeResolverKey(surface: string): string {
   return surface

@@ -24,7 +24,10 @@ import type {
 } from '../../domain/agent/model/tool-call-evidence-frame.js';
 import { buildToolCallEvidenceFrame } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import { KRW_PER_USD_APPROXIMATE, MAX_QUERY_LENGTH, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR } from '../../domain/shared/constants.js';
-import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import type {
+  RetrievalDocument,
+  RetrievalDrinkingWindowProjection,
+} from '../../domain/retrieval/model/retrieval-document.js';
 import { MAX_SOURCE_RECORD_REFS_PER_ENTITY } from '../../domain/entity/model/source-record-ref.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
@@ -168,7 +171,7 @@ const FoodPairingInputSchema = z.object({
   max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(MAX_PRICE_KRW_BOUND)).optional(),
   /** Legacy USD price field — accepted for backwards compat but converted internally. */
   max_price: coerceFiniteNumber.pipe(z.number().finite().min(1).max(MAX_PRICE_USD_BOUND)).optional(),
-  color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
+  color: z.enum(['red', 'white', 'rosé', 'sparkling', 'both']).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -241,6 +244,12 @@ export interface AgentToolDeps {
    *  When provided, check_drinking_window resolves entities via this port
    *  instead of running a search-as-lookup through searchUseCase. */
   readonly entityLookup?: ((id: CanonicalEntityId) => Promise<RetrievalDocument | undefined>) | undefined;
+  /** Narrow exact entity projection for check_drinking_window.
+   *  Production callers should provide this so drinkability checks are not
+   *  coupled to full RetrievalDocument hydration. */
+  readonly drinkingWindowEntityLookup?: (
+    id: CanonicalEntityId,
+  ) => Promise<RetrievalDrinkingWindowProjection | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -680,6 +689,41 @@ function stripNulls(input: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
+function buildDrinkingWindowToolResult(
+  entity: RetrievalDrinkingWindowProjection,
+  targetYear: number,
+): AgentToolInnerResult {
+  const start = entity.drinkingWindowStart;
+  const end = entity.drinkingWindowEnd;
+  if (start !== undefined && end !== undefined) {
+    const currentlyDrinkable = targetYear >= start && targetYear <= end;
+    const dw: DrinkingWindowBlock = {
+      drinkingWindowStart: start,
+      drinkingWindowEnd: end,
+      currentlyDrinkable,
+      confidence: 'medium',
+      ...(entity.drinkingWindowModelVersion !== undefined
+        ? { modelVersion: entity.drinkingWindowModelVersion }
+        : {}),
+    };
+    const statusLabel = currentlyDrinkable
+      ? `currently drinkable (peak: ${start}–${end})`
+      : targetYear < start
+        ? `not yet at peak — hold until ${start}`
+        : `past peak (window closed ${end})`;
+    return {
+      observation: `${sanitizeObservationField(entity.canonicalLabel)}: drinking window ${start}-${end}. As of ${targetYear}: ${statusLabel}.`,
+      rawResult: dw,
+      structuredOutput: { kind: 'drinking_window', entityId: entity.entityId, window: dw, targetYear },
+    };
+  }
+  return {
+    observation: `${sanitizeObservationField(entity.canonicalLabel)}: no drinking window data available.`,
+    rawResult: null,
+    structuredOutput: { kind: 'no_op', reason: 'drinking window data absent on entity' },
+  };
+}
+
 async function executeAgentToolInner(
   toolName: string,
   input: Record<string, unknown>,
@@ -964,13 +1008,25 @@ async function executeAgentToolInner(
       }
       const parsed = parseResult.data;
       const targetYear = parsed.target_year ?? new Date().getFullYear();
+      const entityId = createCanonicalEntityId(parsed.entity_id);
+
+      if (deps.drinkingWindowEntityLookup !== undefined) {
+        const entity = await deps.drinkingWindowEntityLookup(entityId);
+        if (entity === undefined) {
+          return {
+            observation: `Wine ${parsed.entity_id} not found.`,
+            rawResult: null,
+            structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
+          };
+        }
+        return buildDrinkingWindowToolResult(entity, targetYear);
+      }
 
       // Prefer direct entity lookup (O(1) Vespa GET) over the full search
       // pipeline (planner → retrieval → ranking → decision). The search-as-lookup
       // approach was fundamentally broken: it used the entity_id as a natural-language
       // query, which ran NL parsing, fuzzy matching, and ranking on an opaque ID.
       if (deps.entityLookup !== undefined) {
-        const entityId = createCanonicalEntityId(parsed.entity_id);
         const doc = await deps.entityLookup(entityId);
         if (doc === undefined) {
           return {
@@ -979,35 +1035,7 @@ async function executeAgentToolInner(
             structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
           };
         }
-        const start = doc.drinkingWindowStart;
-        const end = doc.drinkingWindowEnd;
-        if (start !== undefined && end !== undefined) {
-          const currentlyDrinkable = targetYear >= start && targetYear <= end;
-          const dw: DrinkingWindowBlock = {
-            drinkingWindowStart: start,
-            drinkingWindowEnd: end,
-            currentlyDrinkable,
-            confidence: 'medium',
-            ...(doc.drinkingWindowModelVersion !== undefined
-              ? { modelVersion: doc.drinkingWindowModelVersion }
-              : {}),
-          };
-          const statusLabel = currentlyDrinkable
-            ? `currently drinkable (peak: ${start}–${end})`
-            : targetYear < start
-              ? `not yet at peak — hold until ${start}`
-              : `past peak (window closed ${end})`;
-          return {
-            observation: `${sanitizeObservationField(doc.canonicalLabel)}: drinking window ${start}-${end}. As of ${targetYear}: ${statusLabel}.`,
-            rawResult: dw,
-            structuredOutput: { kind: 'drinking_window', entityId, window: dw, targetYear },
-          };
-        }
-        return {
-          observation: `${sanitizeObservationField(doc.canonicalLabel)}: no drinking window data available.`,
-          rawResult: null,
-          structuredOutput: { kind: 'no_op', reason: 'drinking window data absent on entity' },
-        };
+        return buildDrinkingWindowToolResult(doc, targetYear);
       }
 
       // Fallback: search-as-lookup when entityLookup port is not wired.
@@ -1074,7 +1102,10 @@ async function executeAgentToolInner(
               })()
             : undefined
         );
-      const queryBase = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}`;
+      const colorClause = parsed.color !== undefined && parsed.color !== 'both'
+        ? ` ${parsed.color}`
+        : '';
+      const queryBase = `wines for ${parsed.food}${colorClause}`;
       const query = appendStructuredQueryClauses(
         queryBase,
         budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],

@@ -308,9 +308,10 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
 
   // Occasion extended
   ['기념일', { phrase: '기념일', mappedAttribute: 'occasion', operator: 'in', value: 'anniversary', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
-  ['데이트', { phrase: '데이트', mappedAttribute: 'occasion', operator: 'in', value: 'date', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['데이트', { phrase: '데이트', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['혼술', { phrase: '혼술', mappedAttribute: 'occasion', operator: 'in', value: 'solo', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['집들이', { phrase: '집들이', mappedAttribute: 'occasion', operator: 'in', value: 'housewarming', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['힐링', { phrase: '힐링', mappedAttribute: 'occasion', operator: 'in', value: 'healing', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
   // ── Wine types (Korean + English) ──────────────────────────────────
   // Maps to wine_type attribute via '=' operator for hard Vespa filter.

@@ -405,12 +405,12 @@ const noOpScorer: GraphExecutorOptions['scoreFor'] = () => 1;
 function oneRetryProbe(): CriticSignalProbe {
   let callIdx = 0;
   return {
-    satisfiedAttributesFor: () => {
+    coverageSignalsFor: () => {
       const satisfied = callIdx >= 1 ? new Set(['wine_type']) : new Set<string>();
       callIdx += 1;
-      return satisfied;
+      return { satisfiedAttributes: satisfied };
     },
-    degradationReasonsFor: () => [],
+    degradationCodesFor: () => [],
   };
 }
 

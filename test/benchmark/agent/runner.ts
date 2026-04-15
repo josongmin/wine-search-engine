@@ -16,7 +16,7 @@
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
  *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off, retries 1
- *   npx tsx test/benchmark/agent/runner.ts --profile quick-realdata             # 60 high-signal scenarios, concurrency 7, judge on (~5-8 min)
+ *   npx tsx test/benchmark/agent/runner.ts --profile quick-realdata             # 60 high-signal scenarios, concurrency 5, judge on (~6-10 min)
  *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 80 curated scenarios, concurrency 3, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 233 scenarios, concurrency 3, judge on (3 samples)
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # agent benchmark on scenarios with golden retrieval IDs
@@ -96,7 +96,7 @@ const QUICK_SCENARIO_IDS = new Set([
  *   - Weak tiers: single_shot×5, negation_complex×4, wine_type_basic×3, korean_colloquial×4
  *   - Healthy regression guards: nested_condition×4, comparison_nested×3, multi_step×3
  *   - Broad tier sampling: negation, situation_based, gift_refined, knowledge_hybrid, extreme
- * Concurrency 7 (10 hits gpt-5.4-mini TPM limits → 429 cascades), judge on, ~5-8 min wall clock.
+ * Concurrency 5 (keeps the initial burst below the observed gpt-5.4-mini TPM ceiling), judge on, ~6-10 min wall clock.
  */
 const QUICK_REALDATA_SCENARIO_IDS = new Set([
   // Worst performers (regression must-haves)
@@ -227,13 +227,13 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
   }
 
   if (profile === 'quick-realdata') {
-    // 60 high-signal scenarios, concurrency 7, judge on — ~5-8 min wall clock
-    // concurrency 10 hits gpt-5.4-mini TPM limits → cascading 429s → Ctx Recall 0%
+    // 60 high-signal scenarios, concurrency 5, judge on — still fast enough for
+    // iteration while reducing the initial burst that previously triggered 429 cascades.
     if (explicitId === undefined) {
       args = { ...args, idFilter: [...QUICK_REALDATA_SCENARIO_IDS] };
     }
     if (explicitConcurrency === undefined) {
-      args = { ...args, concurrency: 7 };
+      args = { ...args, concurrency: 5 };
     }
     if (!explicitJudge) {
       args = { ...args, enableJudge: true };
@@ -338,6 +338,18 @@ async function buildRealToolDeps(): Promise<{
               requestId,
               startTime,
             ),
+        }
+      : {}),
+    entityLookup: async (id) => {
+      const docs = await container.entityLookup.getDocuments([id]);
+      return docs.get(id) ?? undefined;
+    },
+    ...(container.entityLookup.getDrinkingWindowDocuments !== undefined
+      ? {
+          drinkingWindowEntityLookup: async (id) => {
+            const docs = await container.entityLookup.getDrinkingWindowDocuments!([id]);
+            return docs.get(id) ?? undefined;
+          },
         }
       : {}),
   };
@@ -479,18 +491,38 @@ function isRateLimitError(err: unknown): boolean {
   return msg.includes('rate limit') || msg.includes('429');
 }
 
-async function withRetry<T>(
+function normalizeRunnerError(err: unknown): Error {
+  if (err instanceof Error) {
+    return err;
+  }
+  if (err === undefined) {
+    return new Error('Scenario failed with undefined rejection (upstream threw/rejected undefined)');
+  }
+  if (err === null) {
+    return new Error('Scenario failed with null rejection (upstream threw/rejected null)');
+  }
+  if (typeof err === 'string' || typeof err === 'number' || typeof err === 'boolean' || typeof err === 'bigint') {
+    return new Error(`Scenario failed with non-Error rejection: ${String(err)}`);
+  }
+  return new Error('Scenario failed with non-Error rejection: [non-stringifiable object]');
+}
+
+export async function withRetry<T>(
   fn: () => Promise<T>,
-  maxAttempts: number,
+  maxRetries: number,
   shouldRetry: (err: unknown) => boolean,
 ): Promise<T> {
+  // `--max-retries N` means "initial attempt + up to N retries".
+  // N=0 must still execute fn() once; otherwise the runner skips the scenario
+  // entirely and falls through to `throw undefined`.
+  const totalAttempts = Math.max(1, maxRetries + 1);
   let lastErr: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (attempt >= maxAttempts || !shouldRetry(err)) throw err;
+      if (attempt >= totalAttempts || !shouldRetry(err)) throw normalizeRunnerError(err);
       // Rate-limit errors (429/TPM): slow exponential backoff — quota windows
       // are 60s; fast retries just keep hitting the wall.
       // Other transient errors (5xx, network): light exponential backoff.
@@ -500,7 +532,7 @@ async function withRetry<T>(
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
-  throw lastErr;
+  throw normalizeRunnerError(lastErr);
 }
 
 function isTransient(err: unknown): boolean {
@@ -1195,13 +1227,14 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         );
         return scored;
       } catch (err) {
+        const normalizedErr = normalizeRunnerError(err);
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
         completedCount++;
         console.error(
           `  [FAIL] #${String(scenario.id).padEnd(3)} [${scenario.tier.slice(0, 16).padEnd(16)}] `
-          + `${err instanceof Error ? err.message.slice(0, 80) : String(err)} `
+          + `${normalizedErr.message.slice(0, 80)} `
           + `${(elapsed / 1000).toFixed(1)}s `
           + `[${completedCount}/${totalToRun}]`,
         );
@@ -1210,7 +1243,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           null,
           undefined,
           undefined,
-          err instanceof Error ? err.message : String(err),
+          normalizedErr.message,
         );
       }
     },

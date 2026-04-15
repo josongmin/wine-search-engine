@@ -92,7 +92,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     } },
   { id: 5, tier: 'single_shot', query: '오푸스원 지금 마시기 좋아?', description: 'Drinking window',
     expectation: {
-      tools: [{ tool: 'check_drinking_window' }],
+      tools: [{ tool: 'search_wines' }, { tool: 'check_drinking_window' }],
       maxSteps: 3, maxDurationMs: 90_000, maxTotalTokens: 8_000,
       drinkingWindowStatus: 'any',
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)'],

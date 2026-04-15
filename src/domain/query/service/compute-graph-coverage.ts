@@ -20,6 +20,7 @@
  */
 
 import type {
+  BudgetResource,
   ConstraintGraph,
   ConstraintGraphNode,
   GroupAndNode,
@@ -51,6 +52,31 @@ export interface GraphCoverageResult {
   readonly rootSatisfied: boolean;
 }
 
+export interface GraphCoverageSignals {
+  /** Legacy flat attribute-satisfaction surface. */
+  readonly satisfiedAttributes: ReadonlySet<string>;
+  /**
+   * Optional precise node-level satisfaction. When present, slot and
+   * subquery nodes prefer this set over attribute-name fallback.
+   */
+  readonly satisfiedNodeIds?: ReadonlySet<string> | undefined;
+  /**
+   * Optional budget resources that are known satisfied for this
+   * execution. Used to validate `shares_budget` edges after node
+   * aggregation succeeds.
+   */
+  readonly satisfiedBudgetResources?: ReadonlySet<BudgetResource> | undefined;
+}
+
+function isGraphCoverageSignals(
+  candidate: ReadonlySet<string> | GraphCoverageSignals,
+): candidate is GraphCoverageSignals {
+  return (
+    typeof candidate === 'object'
+    && 'satisfiedAttributes' in candidate
+  );
+}
+
 function indexNodes(
   graph: ConstraintGraph,
 ): ReadonlyMap<string, ConstraintGraphNode> {
@@ -62,9 +88,19 @@ function indexNodes(
 /** Attribute match is the unit primitive — caller supplies the satisfied set. */
 function isSlotSatisfied(
   slot: SlotNode,
-  satisfiedAttributes: ReadonlySet<string>,
+  signals: GraphCoverageSignals,
 ): boolean {
-  return satisfiedAttributes.has(slot.attribute);
+  return (
+    signals.satisfiedNodeIds?.has(slot.nodeId) === true
+    || signals.satisfiedAttributes.has(slot.attribute)
+  );
+}
+
+function isSubquerySatisfied(
+  nodeId: string,
+  signals: GraphCoverageSignals,
+): boolean {
+  return signals.satisfiedNodeIds?.has(nodeId) === true;
 }
 
 interface EvalResult {
@@ -79,11 +115,11 @@ interface EvalResult {
 function evaluateNode(
   node: ConstraintGraphNode,
   nodesById: ReadonlyMap<string, ConstraintGraphNode>,
-  satisfiedAttributes: ReadonlySet<string>,
+  signals: GraphCoverageSignals,
 ): EvalResult {
   switch (node.kind) {
     case 'slot': {
-      const ok = isSlotSatisfied(node, satisfiedAttributes);
+      const ok = isSlotSatisfied(node, signals);
       return {
         satisfied: ok,
         matched: ok ? [node.nodeId] : [],
@@ -91,30 +127,30 @@ function evaluateNode(
       };
     }
     case 'subquery':
-      // Phase 1b.1: subquery nodes carry no child slots themselves — they
-      // are referenced as children of groups. Treat a raw subquery as
-      // trivially satisfied; real subquery-scoped coverage lands in
-      // Phase 1b.2 (multi-subquery decomposition).
-      return { satisfied: true, matched: [], unmet: [] };
+      return {
+        satisfied: isSubquerySatisfied(node.nodeId, signals),
+        matched: [],
+        unmet: [],
+      };
     case 'group_and':
-      return evaluateAnd(node, nodesById, satisfiedAttributes);
+      return evaluateAnd(node, nodesById, signals);
     case 'group_or':
-      return evaluateOr(node, nodesById, satisfiedAttributes);
+      return evaluateOr(node, nodesById, signals);
     case 'group_xor':
-      return evaluateXor(node, nodesById, satisfiedAttributes);
+      return evaluateXor(node, nodesById, signals);
   }
 }
 
 function evaluateChildren(
   group: GroupAndNode | GroupOrNode | GroupXorNode,
   nodesById: ReadonlyMap<string, ConstraintGraphNode>,
-  satisfiedAttributes: ReadonlySet<string>,
+  signals: GraphCoverageSignals,
 ): readonly EvalResult[] {
   const out: EvalResult[] = [];
   for (const childId of group.children) {
     const child = nodesById.get(childId);
     if (child === undefined) continue; // dangling references are silently skipped
-    out.push(evaluateNode(child, nodesById, satisfiedAttributes));
+    out.push(evaluateNode(child, nodesById, signals));
   }
   return out;
 }
@@ -122,9 +158,9 @@ function evaluateChildren(
 function evaluateAnd(
   group: GroupAndNode,
   nodesById: ReadonlyMap<string, ConstraintGraphNode>,
-  satisfiedAttributes: ReadonlySet<string>,
+  signals: GraphCoverageSignals,
 ): EvalResult {
-  const children = evaluateChildren(group, nodesById, satisfiedAttributes);
+  const children = evaluateChildren(group, nodesById, signals);
   // AND: every child contributes to matched/unmet. Satisfied iff every child satisfied.
   const matched: string[] = [];
   const unmet: string[] = [];
@@ -142,9 +178,9 @@ function evaluateAnd(
 function evaluateOr(
   group: GroupOrNode,
   nodesById: ReadonlyMap<string, ConstraintGraphNode>,
-  satisfiedAttributes: ReadonlySet<string>,
+  signals: GraphCoverageSignals,
 ): EvalResult {
-  const children = evaluateChildren(group, nodesById, satisfiedAttributes);
+  const children = evaluateChildren(group, nodesById, signals);
   // OR: at least one child satisfied → group satisfied.
   //   - If any child is satisfied, only its matched slots count; other children
   //     (matched or not) do not add to unmet.
@@ -168,9 +204,9 @@ function evaluateOr(
 function evaluateXor(
   group: GroupXorNode,
   nodesById: ReadonlyMap<string, ConstraintGraphNode>,
-  satisfiedAttributes: ReadonlySet<string>,
+  signals: GraphCoverageSignals,
 ): EvalResult {
-  const children = evaluateChildren(group, nodesById, satisfiedAttributes);
+  const children = evaluateChildren(group, nodesById, signals);
   // XOR: exactly one satisfied. "Too many" matches is a group failure —
   // the user's disjunction picked more than one mutually exclusive option.
   const satisfiedChildren = children.filter((c) => c.satisfied);
@@ -201,8 +237,13 @@ function uniqueAttributesFromSlots(
 
 export function computeGraphCoverage(
   graph: ConstraintGraph,
-  satisfiedAttributes: ReadonlySet<string>,
+  satisfied:
+    | ReadonlySet<string>
+    | GraphCoverageSignals,
 ): GraphCoverageResult {
+  const signals = isGraphCoverageSignals(satisfied)
+    ? satisfied
+    : { satisfiedAttributes: satisfied };
   const nodesById = indexNodes(graph);
   const root = nodesById.get(graph.rootNodeId);
   if (root === undefined) {
@@ -216,11 +257,24 @@ export function computeGraphCoverage(
       rootSatisfied: true,
     };
   }
-  const rootEval = evaluateNode(root, nodesById, satisfiedAttributes);
+  const rootEval = evaluateNode(root, nodesById, signals);
   const matchedNodeIds = rootEval.matched;
   const unmetNodeIds = rootEval.unmet;
   const denom = matchedNodeIds.length + unmetNodeIds.length;
   const coverageRatio = denom === 0 ? 1 : matchedNodeIds.length / denom;
+  let rootSatisfied = rootEval.satisfied;
+
+  if (rootSatisfied && graph.edges.length > 0) {
+    for (const edge of graph.edges) {
+      if (edge.kind !== 'shares_budget') continue;
+      const fromSatisfied = signals.satisfiedNodeIds?.has(edge.from) === true;
+      const toSatisfied = signals.satisfiedNodeIds?.has(edge.to) === true;
+      if (!fromSatisfied || !toSatisfied) continue;
+      if (signals.satisfiedBudgetResources?.has(edge.resource) === true) continue;
+      rootSatisfied = false;
+      break;
+    }
+  }
 
   return {
     matchedAttributes: uniqueAttributesFromSlots(matchedNodeIds, nodesById),
@@ -228,6 +282,6 @@ export function computeGraphCoverage(
     matchedNodeIds,
     unmetNodeIds,
     coverageRatio,
-    rootSatisfied: rootEval.satisfied,
+    rootSatisfied,
   };
 }

@@ -11,13 +11,6 @@ export type CacheGetResult<T> =
   | { readonly kind: 'infra_error'; readonly errorClass: string; readonly message: string }
   | { readonly kind: 'corrupt_entry'; readonly reason: string };
 
-export type CacheWriteResult =
-  | { readonly kind: 'ok' }
-  | { readonly kind: 'breaker_open' }
-  | { readonly kind: 'infra_error'; readonly errorClass: string; readonly message: string };
-
-export type CacheDeleteResult = CacheWriteResult;
-
 /**
  * Backwards-compatible alias retained for legacy imports while callers
  * migrate to the typed `CacheGetResult` name.
@@ -44,27 +37,4 @@ export function cacheInfraError<T>(err: unknown): CacheGetResult<T> {
 
 export function cacheCorruptEntry<T>(reason: string): CacheGetResult<T> {
   return { kind: 'corrupt_entry', reason };
-}
-
-export function writeOk(): CacheWriteResult {
-  return { kind: 'ok' };
-}
-
-export function writeBreakerOpen(): CacheWriteResult {
-  return { kind: 'breaker_open' };
-}
-
-export function writeInfraError(err: unknown): CacheWriteResult {
-  const errorClass = err instanceof Error ? err.constructor.name : typeof err;
-  const message = err instanceof Error ? err.message : String(err);
-  return { kind: 'infra_error', errorClass, message };
-}
-
-/**
- * Convenience for callers that haven't migrated to the typed surface yet:
- * collapses any non-hit outcome to null. Use sparingly — prefer branching on
- * `kind` at observability-sensitive call sites.
- */
-export function toLegacyGetValue<T>(result: CacheGetResult<T>): T | null {
-  return result.kind === 'hit' ? result.value : null;
 }

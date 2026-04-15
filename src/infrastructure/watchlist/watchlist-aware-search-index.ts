@@ -1,6 +1,9 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
-import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import type {
+  RetrievalDocument,
+  RetrievalDrinkingWindowProjection,
+} from '../../domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 import type { WatchlistPublisherPort } from './redis-watchlist-publisher.js';
@@ -44,6 +47,15 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     entityIds: readonly CanonicalEntityId[],
   ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>> {
     return this.inner.getDocuments(entityIds);
+  }
+
+  getDrinkingWindowDocuments(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDrinkingWindowProjection>> {
+    if (this.inner.getDrinkingWindowDocuments === undefined) {
+      throw new Error('getDrinkingWindowDocuments: inner search index does not implement drinking-window projection');
+    }
+    return this.inner.getDrinkingWindowDocuments(entityIds);
   }
 
   async upsertDocument(doc: RetrievalDocument): Promise<void> {

@@ -81,7 +81,7 @@ export class InMemoryWatchlistPoisonStore implements WatchlistPoisonStore {
 const DEFAULT_HANDLER_RETRY_DELAY_1_MS = 50;
 const DEFAULT_HANDLER_RETRY_DELAY_2_MS = 150;
 const DEFAULT_HANDLER_RETRY_DELAY_3_MS = 350;
-export const DEFAULT_HANDLER_RETRY_DELAYS_MS: readonly number[] = [
+const DEFAULT_HANDLER_RETRY_DELAYS_MS: readonly number[] = [
   DEFAULT_HANDLER_RETRY_DELAY_1_MS,
   DEFAULT_HANDLER_RETRY_DELAY_2_MS,
   DEFAULT_HANDLER_RETRY_DELAY_3_MS,

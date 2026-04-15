@@ -98,7 +98,7 @@ const LLM_PROMPT_INJECTION_MARKERS: readonly RegExp[] = [
  *
  * @internal exported for tests.
  */
-export function sanitizeLlmPhrase(phrase: string): string | null {
+function sanitizeLlmPhrase(phrase: string): string | null {
   if (phrase.length === 0) {
     return null;
   }
@@ -128,7 +128,7 @@ Allowed attributes: body, sweetness, acidity, tannin, price_band, occasion, wine
 Price band values: budget, mid, premium, luxury.
 Wine type values: red, white, rosé, sparkling, natural, dessert, fortified, orange.
 Body/sweetness/acidity/tannin/critic_score/producer_prestige: numeric 0-1.
-Occasion values: gift, party, date, anniversary, celebration, daily.
+Occasion values: gift, party, celebration, anniversary, wedding, date_night, housewarming, solo, healing.
 
 Return a JSON array. Each item: { "phrase": string, "attribute": string, "operator": "=" | "<=" | ">=" | "range" | "in", "value": string | number | { "min": number, "max": number }, "confidence": 0-1 }.
 

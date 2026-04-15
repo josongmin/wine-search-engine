@@ -40,12 +40,3 @@ export function toFiniteInteger(value: unknown): number | null {
   if (n === null) return null;
   return Number.isInteger(n) ? n : null;
 }
-
-/**
- * Coerce an unknown value to a finite number, or return the provided
- * default. Convenience wrapper for the common `?? default` pattern.
- */
-export function toFiniteNumberOr(value: unknown, defaultValue: number): number {
-  const n = toFiniteNumber(value);
-  return n ?? defaultValue;
-}

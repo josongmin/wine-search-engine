@@ -35,29 +35,3 @@ export const RETRIEVAL_MODES = [
 ] as const;
 
 export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
-
-/**
- * Bidirectional mapping: RetrievalMode → QueryRoute.
- * Used by Planner and Resolver.
- */
-export function retrievalModeToRoute(
-  mode: RetrievalMode,
-): 'entity' | 'hybrid' | 'mixed' {
-  switch (mode) {
-    case 'entity_lookup':
-    case 'entity_resolution':
-    case 'no_match_detection':
-      return 'entity';
-
-    case 'attribute_search':
-    case 'constraint_filter':
-    case 'producer_browse':
-    case 'region_browse':
-    case 'compare_candidates':
-    case 'recommendation':
-      return 'hybrid';
-
-    case 'similar_items':
-      return 'mixed';
-  }
-}

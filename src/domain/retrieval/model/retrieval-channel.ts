@@ -40,20 +40,6 @@ export const RETRIEVAL_CHANNELS = [
 export type RetrievalChannel = (typeof RETRIEVAL_CHANNELS)[number];
 
 // ---------------------------------------------------------------------------
-// Channel family groupings
-// ---------------------------------------------------------------------------
-
-export const LEXICAL_CHANNELS = ['sparse_bm25', 'learned_sparse'] as const satisfies readonly RetrievalChannel[];
-export const SEMANTIC_CHANNELS = ['dense_semantic'] as const satisfies readonly RetrievalChannel[];
-export const STRUCTURAL_CHANNELS = ['anchor_similarity', 'relative_filter'] as const satisfies readonly RetrievalChannel[];
-export const SPECIALIZED_CHANNELS = ['browse_producer', 'browse_region', 'compare_anchor'] as const satisfies readonly RetrievalChannel[];
-
-export type LexicalChannel = (typeof LEXICAL_CHANNELS)[number];
-export type SemanticChannel = (typeof SEMANTIC_CHANNELS)[number];
-export type StructuralChannel = (typeof STRUCTURAL_CHANNELS)[number];
-export type SpecializedChannel = (typeof SPECIALIZED_CHANNELS)[number];
-
-// ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
 
@@ -61,18 +47,6 @@ const CHANNEL_SET = new Set<string>(RETRIEVAL_CHANNELS);
 
 export function isRetrievalChannel(value: string): value is RetrievalChannel {
   return CHANNEL_SET.has(value);
-}
-
-export function isLexicalChannel(ch: RetrievalChannel): ch is LexicalChannel {
-  return (LEXICAL_CHANNELS as readonly string[]).includes(ch);
-}
-
-export function isSemanticChannel(ch: RetrievalChannel): ch is SemanticChannel {
-  return (SEMANTIC_CHANNELS as readonly string[]).includes(ch);
-}
-
-export function isSpecializedChannel(ch: RetrievalChannel): ch is SpecializedChannel {
-  return (SPECIALIZED_CHANNELS as readonly string[]).includes(ch);
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +57,7 @@ export function isSpecializedChannel(ch: RetrievalChannel): ch is SpecializedCha
  * Maps old ad-hoc trace strings ('sparse', 'dense', 'anchor') to canonical
  * RetrievalChannel values. Used by migration shims.
  */
-export const LEGACY_CHANNEL_ALIAS: Readonly<Record<string, RetrievalChannel>> = {
+const LEGACY_CHANNEL_ALIAS: Readonly<Record<string, RetrievalChannel>> = {
   sparse: 'sparse_bm25',
   dense: 'dense_semantic',
   anchor: 'anchor_similarity',
@@ -96,7 +70,7 @@ export const LEGACY_CHANNEL_ALIAS: Readonly<Record<string, RetrievalChannel>> = 
  * The map is intentionally empty after compat removal; the helper remains as
  * the SSOT seam for any future raw-input aliases.
  */
-export const PREFERRED_CHANNEL_ALIAS: Readonly<Record<string, string>> = {} as const;
+const PREFERRED_CHANNEL_ALIAS: Readonly<Record<string, string>> = {} as const;
 
 /**
  * Coerce a legacy channel alias to canonical RetrievalChannel.
@@ -156,7 +130,7 @@ export function preferCanonicalRetrievalChannelLabels(
  * Type guard: is this string a known CandidateChannel (= RetrievalChannel)?
  * Delegates to isRetrievalChannel.
  */
-export function isCandidateChannel(value: string): value is RetrievalChannel {
+function isCandidateChannel(value: string): value is RetrievalChannel {
   return isRetrievalChannel(value);
 }
 

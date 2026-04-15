@@ -1,5 +1,9 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
-import type { RetrievalDocument, RetrievalHitProjection } from '../model/retrieval-document.js';
+import type {
+  RetrievalDocument,
+  RetrievalDrinkingWindowProjection,
+  RetrievalHitProjection,
+} from '../model/retrieval-document.js';
 
 /**
  * Summary fields from an index hit, used for cross-encoder passages and display.
@@ -217,6 +221,17 @@ export interface SearchIndexPort {
    * T-E4-01: Elevated to required -- entity route batch hydration depends on this.
    */
   getDocuments(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
+
+  /**
+   * Batch-fetch the exact fields required by drinkability checks.
+   *
+   * This narrow projection is keyed by public `entity_id` and must not require
+   * full document hydration; agent drinkability is a metadata lookup, not a
+   * display/search document reconstruction path.
+   */
+  getDrinkingWindowDocuments?(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDrinkingWindowProjection>>;
 
   /**
    * Insert or update a single document in the index.

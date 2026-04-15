@@ -22,7 +22,7 @@ export const SASSICAIA_ID = createEntityId('sassicaia-2018');
 export const PENFOLDS_GRANGE_ID = createEntityId('penfolds-grange-2017');
 export const ROMANEE_CONTI_ID = createEntityId('romanee-conti-2015');
 export const CLOUDY_BAY_ID = createEntityId('cloudy-bay-2022');
-export const MOET_BRUT_ID = createEntityId('moet-brut-nv');
+const MOET_BRUT_ID = createEntityId('moet-brut-nv');
 export const SAUTERNES_ID = createEntityId('yquem-2015');
 export const BAROLO_GIACOMO_ID = createEntityId('barolo-conterno-2015');
 export const MASI_AMARONE_ID = createEntityId('masi-amarone-2015');
@@ -31,13 +31,13 @@ export const MASI_AMARONE_ID = createEntityId('masi-amarone-2015');
 // Alias definitions
 // ---------------------------------------------------------------------------
 
-export interface VespaTestAlias {
+interface VespaTestAlias {
   readonly surfaceForm: string;
   readonly entityId: EntityId;
   readonly confidence: number;
 }
 
-export const VESPA_TEST_ALIASES: readonly VespaTestAlias[] = [
+const _VESPA_TEST_ALIASES: readonly VespaTestAlias[] = [
   // Opus One
   { surfaceForm: 'Opus One 2018',  entityId: OPUS_ONE_ID, confidence: 1.0 },
   { surfaceForm: 'Opus One',       entityId: OPUS_ONE_ID, confidence: 0.95 },
@@ -102,7 +102,7 @@ function makeEmbedding(entityId: string, dim = 1024): readonly number[] {
   return vec.map((v) => v / norm);
 }
 
-export const VESPA_TEST_DOCUMENTS: readonly RetrievalDocument[] = [
+const VESPA_TEST_DOCUMENTS: readonly RetrievalDocument[] = [
   {
     entityId: OPUS_ONE_ID,
     entityType: 'wine',
@@ -341,21 +341,21 @@ export const VESPA_TEST_DOCUMENTS: readonly RetrievalDocument[] = [
 // ---------------------------------------------------------------------------
 
 /** Entity IDs of all documents that have availability=true and body >= 0.8 */
-export const FULL_BODY_AVAILABLE_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
+const _FULL_BODY_AVAILABLE_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
   .filter((d) => d.availability && d.body >= 0.8)
   .map((d) => d.entityId);
 
 /** Entity IDs of documents with style='full-body red' */
-export const FULL_BODY_RED_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
+const _FULL_BODY_RED_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
   .filter((d) => d.style === 'full-body red')
   .map((d) => d.entityId);
 
 /** Entity IDs of documents with sweetness >= 0.5 */
-export const SWEET_WINE_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
+const _SWEET_WINE_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
   .filter((d) => d.sweetness >= 0.5)
   .map((d) => d.entityId);
 
 /** Entity IDs of sparkling wines */
-export const SPARKLING_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
+const _SPARKLING_IDS: readonly EntityId[] = VESPA_TEST_DOCUMENTS
   .filter((d) => d.style === 'sparkling')
   .map((d) => d.entityId);

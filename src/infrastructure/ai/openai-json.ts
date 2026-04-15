@@ -29,7 +29,7 @@ function isEmbeddingObject(v: unknown): v is EmbeddingObject {
   return isNumberArray(obj['embedding']) && typeof obj['index'] === 'number';
 }
 
-export function isEmbeddingApiResponse(v: unknown): v is EmbeddingApiResponse {
+function isEmbeddingApiResponse(v: unknown): v is EmbeddingApiResponse {
   if (typeof v !== 'object' || v === null) return false;
   const obj = v as Record<string, unknown>;
   return (

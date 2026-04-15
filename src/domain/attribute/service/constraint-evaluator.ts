@@ -1,6 +1,10 @@
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { AttributeSpace } from '../model/attributes.js';
 import type { ConstraintEvaluationResult } from '../model/constraint.js';
+import {
+  normalizeConstraintComparableArray,
+  normalizeConstraintComparableString,
+} from './constraint-ontology-normalization.js';
 
 /** Soft constraint treated as "met" at or above this score. */
 const SOFT_CONSTRAINT_MATCH_THRESHOLD = 0.5;
@@ -93,7 +97,12 @@ export class ConstraintEvaluator {
       return false;
     }
 
-    return this.evaluateOperator(constraint.operator, attrValue, constraint.value);
+    return this.evaluateOperator(
+      constraint.attribute,
+      constraint.operator,
+      attrValue,
+      constraint.value,
+    );
   }
 
   /**
@@ -111,7 +120,12 @@ export class ConstraintEvaluator {
       return SOFT_SCORE_MISSING_ATTRIBUTE;
     }
 
-    if (this.evaluateOperator(constraint.operator, attrValue, constraint.value)) {
+    if (this.evaluateOperator(
+      constraint.attribute,
+      constraint.operator,
+      attrValue,
+      constraint.value,
+    )) {
       return 1.0;
     }
 
@@ -146,12 +160,21 @@ export class ConstraintEvaluator {
    * Evaluates an operator against an attribute value.
    */
   private evaluateOperator(
+    attribute: string,
     operator: NormalizedConstraint['operator'],
     attrValue: string | number | readonly string[],
     constraintValue: NormalizedConstraint['value'],
   ): boolean {
     switch (operator) {
       case '=':
+        if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
+          return normalizeConstraintComparableString(attribute, attrValue)
+            === normalizeConstraintComparableString(attribute, constraintValue);
+        }
+        if (Array.isArray(attrValue) && typeof constraintValue === 'string') {
+          return new Set(normalizeConstraintComparableArray(attribute, attrValue))
+            .has(normalizeConstraintComparableString(attribute, constraintValue));
+        }
         return attrValue === constraintValue;
 
       case '<=':
@@ -180,21 +203,39 @@ export class ConstraintEvaluator {
       case 'in': {
         if (Array.isArray(attrValue)) {
           // Attribute is an array (e.g. occasion, pairing); check overlap
+          const attrSet = new Set(normalizeConstraintComparableArray(attribute, attrValue));
           if (Array.isArray(constraintValue)) {
-            return (constraintValue as readonly string[]).some(
-              (v) => (attrValue as readonly string[]).includes(v),
+            return normalizeConstraintComparableArray(attribute, constraintValue).some(
+              (v) => attrSet.has(v),
             );
           }
-          return (attrValue as readonly string[]).includes(constraintValue as string);
+          return attrSet.has(normalizeConstraintComparableString(attribute, constraintValue as string));
         }
         if (Array.isArray(constraintValue)) {
-          return (constraintValue as readonly string[]).includes(attrValue as string);
+          return new Set(normalizeConstraintComparableArray(attribute, constraintValue))
+            .has(normalizeConstraintComparableString(attribute, attrValue as string));
         }
-        return attrValue === constraintValue;
+        return normalizeConstraintComparableString(attribute, attrValue as string)
+          === normalizeConstraintComparableString(attribute, constraintValue as string);
       }
 
-      case 'exclude':
+      case 'exclude': {
+        const excludeSet = new Set(
+          Array.isArray(constraintValue)
+            ? normalizeConstraintComparableArray(attribute, constraintValue)
+            : typeof constraintValue === 'string'
+              ? [normalizeConstraintComparableString(attribute, constraintValue)]
+              : [],
+        );
+        if (Array.isArray(attrValue)) {
+          return normalizeConstraintComparableArray(attribute, attrValue)
+            .every((value) => !excludeSet.has(value));
+        }
+        if (typeof attrValue === 'string') {
+          return !excludeSet.has(normalizeConstraintComparableString(attribute, attrValue));
+        }
         return attrValue !== constraintValue;
+      }
 
       default:
         return false;

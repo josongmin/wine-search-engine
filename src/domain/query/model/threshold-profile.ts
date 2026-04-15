@@ -138,28 +138,6 @@ export interface ThresholdProfileV1 {
  * See computeDynamicGapThreshold() for query-class-specific logic.
  */
 /**
- * LTR-calibrated thresholds (original). Designed for LTR logit scores with
- * wide spread (~2-10 range, sigmoid to [0,1]).
- *
- * NOT ACTIVE — retained for reference when LTR is trained.
- */
-export const LTR_THRESHOLD_PROFILE: ThresholdProfileV1 = {
-  id: 'ltr-v2.1',
-  version: '2.1.0',
-  perQueryClass: {
-    exact_entity: { resolveTau: 0.55, gapTau: 0.03 },
-    short_entity: { resolveTau: 0.60, gapTau: 0.03 },
-    ambiguous_short_form: { resolveTau: 0.75, gapTau: 0.08 },
-    anchored_similarity: { resolveTau: 0.55, gapTau: 0.03 },
-    pure_constraint: { resolveTau: 0.50, gapTau: 0.05 },
-    semantic_preference: { resolveTau: 0.45, gapTau: 0.015 },
-    comparison_query: { resolveTau: 0.65, gapTau: 0.10 },
-    unknown: { resolveTau: 0.65, gapTau: 0.10 },
-  },
-  ambiguityPenaltyDefault: 0.10,
-} as const;
-
-/**
  * Heuristic-mode thresholds. Heuristic scores (clamp01 weighted sum) cluster
  * in [0.3, 0.7] with small gaps (~0.02-0.04). Thresholds are lowered so
  * that a clear top-1 winner resolves instead of every query being ambiguous.

@@ -70,7 +70,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: undefined,
       coverage: coverage({ coverageRatio: 1, rootSatisfied: true }),
-      degradationReasons: [],
+      degradationCodes: [],
       retryCount: 0,
     });
     expect(decision.retry).toBe(false);
@@ -83,7 +83,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: undefined,
       coverage: coverage({ coverageRatio: 0, rootSatisfied: false }),
-      degradationReasons: [],
+      degradationCodes: [],
       retryCount: 0,
     });
     expect(decision.retry).toBe(true);
@@ -97,7 +97,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: undefined,
       coverage: coverage({ coverageRatio: 0.2, rootSatisfied: false }),
-      degradationReasons: ['retrieval_degraded:sparse:no_matches'],
+      degradationCodes: ['no_matches'],
       retryCount: 0,
     });
     expect(decision.retry).toBe(true);
@@ -110,7 +110,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: multiSubqueryGraph(),
       coverage: coverage({ coverageRatio: 0.6, rootSatisfied: false }),
-      degradationReasons: [],
+      degradationCodes: [],
       retryCount: 0,
     });
     expect(decision.retry).toBe(true);
@@ -123,7 +123,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: singleSubqueryGraph(),
       coverage: coverage({ coverageRatio: 0.6, rootSatisfied: false }),
-      degradationReasons: [],
+      degradationCodes: [],
       retryCount: 0,
     });
     expect(decision.retry).toBe(true);
@@ -136,7 +136,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: undefined,
       coverage: coverage({ coverageRatio: 0, rootSatisfied: false }),
-      degradationReasons: ['no_matches'],
+      degradationCodes: ['no_matches'],
       retryCount: CRITIC_RETRY_MAX,
     });
     expect(decision.retry).toBe(false);
@@ -149,7 +149,7 @@ describe('retrieval-critic.decideRetry', () => {
     const decision = decideRetry({
       graph: undefined,
       coverage: undefined,
-      degradationReasons: [],
+      degradationCodes: [],
       retryCount: 0,
     });
     expect(decision.retry).toBe(false);
@@ -162,7 +162,7 @@ describe('retrieval-critic.decideRetry', () => {
     const input: CriticInput = {
       graph: multiSubqueryGraph(),
       coverage: coverage({ coverageRatio: 0.5, rootSatisfied: false }),
-      degradationReasons: ['retrieval_degraded:sparse:sparse_pool'],
+      degradationCodes: ['sparse_pool'],
       retryCount: 1,
     };
     const first = decideRetry(input);

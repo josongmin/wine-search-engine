@@ -31,7 +31,7 @@ export const MASI_AMARONE_ID = createEntityId('masi-amarone');
 // Entity fixture objects (entityId + display metadata)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const OPUS_ONE_2018 = {
+const OPUS_ONE_2018 = {
   entityId: OPUS_ONE_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Opus One 2018',
@@ -44,7 +44,7 @@ export const OPUS_ONE_2018 = {
   popularityScore: 0.95,
 };
 
-export const CHATEAU_MARGAUX_2015 = {
+const CHATEAU_MARGAUX_2015 = {
   entityId: CHATEAU_MARGAUX_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Château Margaux 2015',
@@ -57,7 +57,7 @@ export const CHATEAU_MARGAUX_2015 = {
   popularityScore: 0.93,
 };
 
-export const ROMANEE_CONTI_2019 = {
+const ROMANEE_CONTI_2019 = {
   entityId: ROMANEE_CONTI_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Romanée-Conti 2019',
@@ -70,7 +70,7 @@ export const ROMANEE_CONTI_2019 = {
   popularityScore: 0.91,
 };
 
-export const SASSICAIA_2018 = {
+const SASSICAIA_2018 = {
   entityId: SASSICAIA_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Sassicaia 2018',
@@ -83,7 +83,7 @@ export const SASSICAIA_2018 = {
   popularityScore: 0.88,
 };
 
-export const PENFOLDS_GRANGE_2017 = {
+const PENFOLDS_GRANGE_2017 = {
   entityId: PENFOLDS_GRANGE_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Penfolds Grange 2017',
@@ -96,7 +96,7 @@ export const PENFOLDS_GRANGE_2017 = {
   popularityScore: 0.87,
 };
 
-export const CLOUDY_BAY_2022 = {
+const CLOUDY_BAY_2022 = {
   entityId: CLOUDY_BAY_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Cloudy Bay Sauvignon Blanc 2022',
@@ -109,7 +109,7 @@ export const CLOUDY_BAY_2022 = {
   popularityScore: 0.82,
 };
 
-export const MOET_BRUT = {
+const MOET_BRUT = {
   entityId: MOET_BRUT_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Moët & Chandon Brut Impérial',
@@ -122,7 +122,7 @@ export const MOET_BRUT = {
   popularityScore: 0.90,
 };
 
-export const SAUTERNES_2015 = {
+const SAUTERNES_2015 = {
   entityId: SAUTERNES_ID,
   entityType: 'wine' as const,
   canonicalLabel: "Château d'Yquem Sauternes 2015",
@@ -135,7 +135,7 @@ export const SAUTERNES_2015 = {
   popularityScore: 0.85,
 };
 
-export const BAROLO_GIACOMO = {
+const BAROLO_GIACOMO = {
   entityId: BAROLO_GIACOMO_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Giacomo Conterno Barolo Monfortino',
@@ -148,7 +148,7 @@ export const BAROLO_GIACOMO = {
   popularityScore: 0.83,
 };
 
-export const MASI_AMARONE = {
+const MASI_AMARONE = {
   entityId: MASI_AMARONE_ID,
   entityType: 'wine' as const,
   canonicalLabel: 'Masi Amarone della Valpolicella Classico',
@@ -165,7 +165,7 @@ export const MASI_AMARONE = {
 // All fixture entities as an array
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ALL_TEST_FIXTURES = [
+const ALL_TEST_FIXTURES = [
   OPUS_ONE_2018,
   CHATEAU_MARGAUX_2015,
   ROMANEE_CONTI_2019,
@@ -188,7 +188,7 @@ export const ALL_TEST_FIXTURES = [
  *
  * The neighborhoods below are intentionally small but real-world shaped.
  */
-export interface MixedNeighborhoodFixture {
+interface MixedNeighborhoodFixture {
   readonly anchorId: EntityId;
   readonly candidateIds: readonly EntityId[];
 }
@@ -424,7 +424,7 @@ export function toHybridCandidate(
 // Alias definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface TestAlias {
+interface TestAlias {
   surfaceForm: string;
   entityId: EntityId;
   confidence: number;
@@ -719,12 +719,12 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
 // Convenience: all full-body wines (body >= 0.7) for query assertions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const FULL_BODY_ENTITY_IDS: readonly EntityId[] = ALL_TEST_FIXTURES
+const _FULL_BODY_ENTITY_IDS: readonly EntityId[] = ALL_TEST_FIXTURES
   .filter((f) => f.body >= 0.7)
   .map((f) => f.entityId);
 
-export const SPARKLING_ENTITY_IDS: readonly EntityId[] = [MOET_BRUT_ID];
+const _SPARKLING_ENTITY_IDS: readonly EntityId[] = [MOET_BRUT_ID];
 
-export const SWEET_ENTITY_IDS: readonly EntityId[] = [SAUTERNES_ID];
+const _SWEET_ENTITY_IDS: readonly EntityId[] = [SAUTERNES_ID];
 
-export const WHITE_ENTITY_IDS: readonly EntityId[] = [CLOUDY_BAY_ID, SAUTERNES_ID];
+const _WHITE_ENTITY_IDS: readonly EntityId[] = [CLOUDY_BAY_ID, SAUTERNES_ID];

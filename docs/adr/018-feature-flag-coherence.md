@@ -13,8 +13,8 @@ The 7-PR SOTA train (ADRs 010-016) introduced five process-level env flags that 
 |---|---|---|
 | `CONSTRAINT_GRAPH_EMIT` | on | 010 |
 | `CONSTRAINT_GRAPH_TOPOLOGY_LLM` | off | 012 |
-| `BUNDLE_SELECTOR_ENABLED` | off | 013 |
-| `RETRIEVAL_EXECUTOR_CRITIC` | off | 015 |
+| `BUNDLE_SELECTOR_ENABLED` | on | 013 |
+| `RETRIEVAL_EXECUTOR_CRITIC` | on | 015 |
 | `GCE_SHADOW_EMIT` / `GCE_PRIMARY` | off / off | 016 |
 
 Each downstream gate reads its flag inline and silently degrades when the flag is off. That is the correct local behaviour, but it hides the fact that several combinations of flags are **incoherent** — i.e. they leave the system in a state where one stage is asked to consume the output of a stage that was never produced.
@@ -26,7 +26,7 @@ The 100-point SOTA++ acceptance criteria require that such combinations be **rej
 Introduce `src/config/feature-flag-coherence.ts` with:
 
 1. `FeatureFlagSnapshot` — an immutable typed view of the six relevant env flags.
-2. `snapshotFeatureFlagsFromEnv(env)` — pure parser honouring the same default semantics as the downstream readers (`CONSTRAINT_GRAPH_EMIT` defaults on, everything else defaults off).
+2. `snapshotFeatureFlagsFromEnv(env)` — pure parser honouring the same default semantics as the downstream readers (`CONSTRAINT_GRAPH_EMIT`, `BUNDLE_SELECTOR_ENABLED`, and `RETRIEVAL_EXECUTOR_CRITIC` default on; the remaining flags default off).
 3. `validateFeatureFlagCoherence(snapshot)` — pure validator that collects **all** rule violations before throwing `FlagCoherenceError`.
 4. `validateFeatureFlagsAtStartup(env)` — cached wrapper called once per process from the composition root (`buildQueryPlanner`).
 
@@ -55,7 +55,7 @@ The composition root calls `validateFeatureFlagsAtStartup()` at the top of `buil
 - Cached validation avoids re-parsing env on every builder invocation while still providing a test hook (`resetFeatureFlagCoherenceCacheForTests`) for focused coverage.
 
 **Negative**
-- Tests that previously set individual flags to study local behaviour must now ensure the combination is coherent. The default-off / default-on posture is deliberately chosen so that a plain default environment passes the validator without any change.
+- Tests that previously set individual flags to study local behaviour must now ensure the combination is coherent. The default-on posture for the graph executor flags is deliberately chosen so that a plain default environment passes the validator without any change.
 
 **Out of scope**
 - The validator only checks **static** pre-conditions on env flags. Runtime coherence (e.g. graph emission disabled at request time via a per-query override) is still the responsibility of the individual downstream readers.

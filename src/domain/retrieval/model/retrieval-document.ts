@@ -72,6 +72,22 @@ export interface RetrievalFeatureProjection {
 }
 
 /**
+ * Exact projection for the agent `check_drinking_window` tool.
+ *
+ * This intentionally avoids the full {@link RetrievalDocument} contract. Runtime
+ * drinkability checks only need identity + precomputed window fields, and tying
+ * that path to all display/search required fields makes exact entity lookups
+ * fail when a legacy Vespa document is otherwise sufficient for the tool.
+ */
+export interface RetrievalDrinkingWindowProjection {
+  readonly entityId: CanonicalEntityId;
+  readonly canonicalLabel: string;
+  readonly drinkingWindowStart?: number | undefined;
+  readonly drinkingWindowEnd?: number | undefined;
+  readonly drinkingWindowModelVersion?: string | undefined;
+}
+
+/**
  * Projection schema for a document stored in the search index (RFC-012 S11).
  *
  * Full retrieval document = hit projection + feature projection + payload fields.

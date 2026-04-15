@@ -177,6 +177,10 @@ describe('AnchorExtractor', () => {
       expect(extractor.hasComparisonMarkers('opus one compared to margaux')).toBe(true);
     });
 
+    it('detects Korean comparison phrasing', () => {
+      expect(extractor.hasComparisonMarkers('보르도랑 나파 카베르네 비교해줘')).toBe(true);
+    });
+
     it('returns false for plain queries', () => {
       expect(extractor.hasComparisonMarkers('red wine recommendation')).toBe(false);
     });

@@ -278,6 +278,10 @@ export const ParsedConstraintsExternSchema = z.object({
 //   - rerank_decision_trace
 //   - execution_trace
 //   - resolver_provenance_trace
+//
+// Only the top-level audit_extension envelope remains passthrough so future
+// debug fields can be added without breaking consumers. Nested trace payloads
+// are strict to keep the structured security boundary closed.
 
 export const AuditExtensionSchema = z.object({
   /**
@@ -301,8 +305,8 @@ export const AuditExtensionSchema = z.object({
       atom_index: z.number().int(),
       outcome: z.enum(['kept', 'dropped', 'shadowed']),
       reason: z.string(),
-    }).passthrough()).max(MAX_AUDIT_POLICY_OUTCOMES),
-  }).passthrough().optional(),
+    }).strict()).max(MAX_AUDIT_POLICY_OUTCOMES),
+  }).strict().optional(),
 
   /**
    * E4: RRF fusion trace — per-query fusion parameters and candidate counts.
@@ -323,7 +327,7 @@ export const AuditExtensionSchema = z.object({
     safety_envelope_blocks: z.number().int(),
     protected_candidate_evictions: z.number().int().optional(),
     drift: z.unknown(),
-  }).passthrough().optional(),
+  }).strict().optional(),
 
   /**
    * Rerank gate decision — was LTR applied, skipped, or blocked?
@@ -343,7 +347,7 @@ export const AuditExtensionSchema = z.object({
     ltr_feature_dimension: z.number().int().optional(),
     score_contract: z.enum(['bounded_normalized_0_1']).optional(),
     blocked_reason_counts: z.record(z.string(), z.number().int()).optional(),
-  }).passthrough().optional(),
+  }).strict().optional(),
 
   /**
    * E6: Abstain policy trace — always emitted when abstain occurs.
@@ -359,8 +363,9 @@ export const AuditExtensionSchema = z.object({
       dense_degraded: z.boolean(),
       anchor_degraded: z.boolean(),
       sparse_degraded: z.boolean(),
-    }).passthrough().optional(),
-  }).passthrough().optional(),
+      sparse_zero_hits: z.boolean().optional(),
+    }).strict().optional(),
+  }).strict().optional(),
 
   /**
    * E4: Hard-filter dropout log — top-N candidates dropped by hard constraint filter.
@@ -391,14 +396,14 @@ export const AuditExtensionSchema = z.object({
     compiled_budget: z.object({
       max_candidates: z.number().int(),
       enable_precision_rerank: z.boolean(),
-    }).passthrough().optional(),
+    }).strict().optional(),
     provenance_policy: z.object({
       require_identity_seal: z.boolean(),
       require_constraint_evidence: z.boolean(),
       require_anchor_evidence: z.boolean(),
-    }).passthrough().optional(),
+    }).strict().optional(),
     provenance_closure: z.unknown().optional(),
-  }).passthrough().optional(),
+  }).strict().optional(),
 
   /**
    * Exact-recovery resolver provenance (noisy entity lookup audit).
@@ -410,10 +415,10 @@ export const AuditExtensionSchema = z.object({
       source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']),
       entity_ids: z.array(z.string()).max(MAX_AUDIT_SOURCE_BREAKDOWN_ENTITY_IDS),
       count: z.number().int(),
-    }).passthrough()).max(MAX_AUDIT_RESOLVER_SOURCE_BREAKDOWN_ITEMS).optional(),
+    }).strict()).max(MAX_AUDIT_RESOLVER_SOURCE_BREAKDOWN_ITEMS).optional(),
     blocker_seed_entity_ids: z.array(z.string()).max(MAX_AUDIT_BLOCKER_SEED_ENTITY_IDS).optional(),
     blocker_seed_count: z.number().int().optional(),
-  }).passthrough().optional(),
+  }).strict().optional(),
 
   /**
    * TA5: Calibrated posterior confidence from corrective retry.
@@ -432,7 +437,7 @@ export const AuditExtensionSchema = z.object({
     reasoning_failure: z.boolean(),
     failed_synthesis_attempts: z.number().int(),
     fallback_search_used: z.boolean(),
-  }).passthrough().optional(),
+  }).strict().optional(),
 
   /**
    * E1-T5: Determinism fingerprint — normally in meta, but can appear here too.

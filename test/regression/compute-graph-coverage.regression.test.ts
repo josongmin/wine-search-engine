@@ -224,6 +224,55 @@ describe('computeGraphCoverage — AND/OR/XOR semantics', () => {
     expect(unmet.unmetAttributes).toEqual(['wine_type']);
   });
 
+  it('subquery-only graph is unsatisfied until the subquery node id is explicitly satisfied', () => {
+    const g = graph('root', [
+      { kind: 'group_and', nodeId: 'root', children: ['sq_a', 'sq_b'] },
+      { kind: 'subquery', nodeId: 'sq_a', purpose: 'main', targetCardinality: 1 },
+      { kind: 'subquery', nodeId: 'sq_b', purpose: 'dessert', targetCardinality: 1 },
+    ]);
+    const none = computeGraphCoverage(g, { satisfiedAttributes: new Set<string>() });
+    expect(none.coverageRatio).toBe(1);
+    expect(none.rootSatisfied).toBe(false);
+
+    const both = computeGraphCoverage(g, {
+      satisfiedAttributes: new Set<string>(),
+      satisfiedNodeIds: new Set(['sq_a', 'sq_b']),
+    });
+    expect(both.coverageRatio).toBe(1);
+    expect(both.rootSatisfied).toBe(true);
+  });
+
+  it('shares_budget edge is part of root satisfaction when both endpoint subqueries are selected', () => {
+    const g: ConstraintGraph = {
+      graphSchemaVersion: 'constraint_graph_v1.1',
+      origin: 'hybrid',
+      rootNodeId: 'root',
+      nodes: [
+        { kind: 'group_and', nodeId: 'root', children: ['sq_a', 'sq_b'] },
+        { kind: 'subquery', nodeId: 'sq_a', purpose: 'main', targetCardinality: 1 },
+        { kind: 'subquery', nodeId: 'sq_b', purpose: 'dessert', targetCardinality: 1 },
+      ],
+      edges: [
+        { kind: 'shares_budget', from: 'sq_a', to: 'sq_b', resource: 'price_total' },
+      ],
+      globalBudgets: {},
+      promptVersion: 'ctg_topology_v1',
+    };
+
+    const budgetUnknown = computeGraphCoverage(g, {
+      satisfiedAttributes: new Set<string>(),
+      satisfiedNodeIds: new Set(['sq_a', 'sq_b']),
+    });
+    expect(budgetUnknown.rootSatisfied).toBe(false);
+
+    const budgetSatisfied = computeGraphCoverage(g, {
+      satisfiedAttributes: new Set<string>(),
+      satisfiedNodeIds: new Set(['sq_a', 'sq_b']),
+      satisfiedBudgetResources: new Set(['price_total']),
+    });
+    expect(budgetSatisfied.rootSatisfied).toBe(true);
+  });
+
   it('deterministic: identical input yields byte-identical matched/unmet ordering', () => {
     const g = graph('root', [
       { kind: 'group_and', nodeId: 'root', children: ['s1', 's2', 's3'] },

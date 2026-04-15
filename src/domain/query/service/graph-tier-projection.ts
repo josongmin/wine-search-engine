@@ -138,9 +138,3 @@ export function projectHardTierSubgraph(graph: ConstraintGraph): ConstraintGraph
 export function projectSoftTierSubgraph(graph: ConstraintGraph): ConstraintGraph {
   return projectForTier(graph, 'soft');
 }
-
-export function projectInferredTierSubgraph(
-  graph: ConstraintGraph,
-): ConstraintGraph {
-  return projectForTier(graph, 'inferred');
-}

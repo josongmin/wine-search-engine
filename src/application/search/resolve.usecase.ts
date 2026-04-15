@@ -29,7 +29,7 @@ export type { ResolveResponse } from './resolve-response.dto.js';
 /**
  * Dependencies injected into the ResolveUseCase.
  */
-export interface ResolveUseCaseDeps {
+interface ResolveUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;

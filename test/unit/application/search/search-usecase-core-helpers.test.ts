@@ -91,6 +91,17 @@ describe('buildHybridRetrievalInputForPlan', () => {
   it('attaches a structured retrieval plan derived from constraints', () => {
     const plan = {
       ...minimalPlan(),
+      normalizedQueryViews: {
+        raw: '오푸스원',
+        strict: '오푸스원',
+        accentless: '오푸스원',
+        collapsedWhitespace: '오푸스원',
+        punctuationStripped: '오푸스원',
+        compact: '오푸스원',
+        vintageCanonicalized: '오푸스원',
+        vintageStripped: '오푸스원',
+        lookupVariants: ['오푸스원', 'opus one', 'opusone'],
+      },
       constraints: {
         hard: [
           {
@@ -112,15 +123,26 @@ describe('buildHybridRetrievalInputForPlan', () => {
             confidence: 0.75,
             mapping_version: 'test',
           },
+          {
+            attribute: 'occasion',
+            operator: 'in',
+            value: ['gift'],
+            source_phrase: '선물용',
+            confidence: 0.8,
+            mapping_version: 'test',
+          },
         ],
       },
     } as QueryPlanV1;
     const input = buildHybridRetrievalInputForPlan(plan);
 
     expect(input.retrievalPlan?.hardFilterTokens.length).toBeGreaterThan(0);
-    expect(input.retrievalPlan?.inferredBoosts).toHaveLength(1);
+    expect(input.retrievalPlan?.inferredBoosts).toHaveLength(2);
     expect(input.lexicalQueries).toEqual(
-      expect.arrayContaining(['q', 'Bordeaux', 'Cabernet Merlot']),
+      expect.arrayContaining(['q', '오푸스원', 'opus one', 'opusone', 'Bordeaux', 'Cabernet Merlot', 'gift']),
+    );
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining(['q', '오푸스원', 'opus one', 'opusone', 'Bordeaux', 'Cabernet Merlot', 'gift']),
     );
   });
 });

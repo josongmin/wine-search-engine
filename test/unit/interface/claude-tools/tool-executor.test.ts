@@ -232,6 +232,20 @@ describe('WineToolExecutor', () => {
       expect(request.query).toContain('red wine');
     });
 
+    it('should treat color both as no hard color filter', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'get_food_pairings',
+        { food: 'ssam', color: 'both' },
+        'req-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toContain('wine pairing for ssam');
+      expect(request.query).not.toContain('both wine');
+    });
+
     it('should include max_price in query when provided', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
 

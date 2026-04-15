@@ -216,19 +216,21 @@ const noOpOpts: GraphExecutorOptions = {
 function coverageAfterNCallsProbe(satisfiedAfter: number): CriticSignalProbe {
   let callCount = 0;
   return {
-    satisfiedAttributesFor: () => {
+    coverageSignalsFor: () => {
       const satisfied = callCount >= satisfiedAfter ? new Set(['color']) : new Set<string>();
       callCount += 1;
-      return satisfied;
+      return { satisfiedAttributes: satisfied };
     },
-    degradationReasonsFor: () => [],
+    degradationCodesFor: () => [],
   };
 }
 
 /** Always-zero-coverage probe used by the exhaustion scenario. */
 const alwaysZeroCoverageProbe: CriticSignalProbe = {
-  satisfiedAttributesFor: () => new Set<string>(),
-  degradationReasonsFor: () => ['no_matches'],
+  coverageSignalsFor: () => ({
+    satisfiedAttributes: new Set<string>(),
+  }),
+  degradationCodesFor: () => ['no_matches'],
 };
 
 // ─── Scenarios ──────────────────────────────────────────────────────────────
@@ -352,7 +354,7 @@ describe('retrieval critic flag-on integration (ADR-015 Axis 2, Wave B2)', () =>
   });
 
   it('scenario 3 — flag off: byte-identical one-shot behaviour preserved', async () => {
-    // Explicitly leave RETRIEVAL_EXECUTOR_CRITIC unset.
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
     let executeCalls = 0;
     const emptyPool: CandidatePoolPort = {
       execute: async () => {

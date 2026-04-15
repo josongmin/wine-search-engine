@@ -38,7 +38,22 @@ function listTsFiles(dir) {
   return out;
 }
 
-/** @typedef {{ name: string; severity: 'error' | 'warn'; test: (line: string, filePath: string) => boolean }} Pattern */
+/** @typedef {{ name: string; severity: 'error' | 'warn'; test: (line: string, filePath: string, lines: readonly string[], lineIndex: number) => boolean }} Pattern */
+
+function zObjectStatementHasExplicitUnknownKeyPolicy(lines, startIndex) {
+  const statementLines = [];
+  for (let i = startIndex; i < lines.length && i < startIndex + 120; i++) {
+    const line = lines[i];
+    statementLines.push(line);
+    if (line.trimEnd().endsWith(';')) break;
+  }
+  const statement = statementLines.join('\n');
+  return (
+    statement.includes('.strict()') ||
+    statement.includes('.passthrough()') ||
+    statement.includes('.catchall(')
+  );
+}
 
 /** @type {Pattern[]} */
 const PATTERNS = [
@@ -76,12 +91,16 @@ const PATTERNS = [
   {
     name: 'z.object() without .strict() in schema file',
     severity: 'warn',
-    test: (line, filePath) => {
+    test: (line, filePath, lines, lineIndex) => {
       if (!filePath.includes('/schemas/')) return false;
       if (line.trimStart().startsWith('//')) return false;
-      // Detect z.object({ ... }) not followed by .strict() on the same line
-      // (multi-line chains are harder to detect statically — this catches the common case)
-      return /z\.object\(\{/.test(line) && !line.includes('.strict()');
+      // Detect z.object({ ... }) whose full statement lacks an
+      // explicit unknown-key policy. Multiline schemas are the common
+      // style in this repo, so same-line checks produce false positives.
+      return (
+        /z\.object\(\{/.test(line) &&
+        !zObjectStatementHasExplicitUnknownKeyPolicy(lines, lineIndex)
+      );
     },
   },
 ];
@@ -99,7 +118,7 @@ for (const filePath of files) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     for (const pattern of PATTERNS) {
-      if (pattern.test(line, filePath)) {
+      if (pattern.test(line, filePath, lines, i)) {
         const prefix = pattern.severity === 'error' ? '❌ ERROR' : '⚠️  WARN';
         console.log(`${prefix}: ${pattern.name}`);
         console.log(`  ${relPath}:${i + 1}`);

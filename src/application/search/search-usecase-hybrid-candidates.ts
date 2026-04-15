@@ -9,6 +9,12 @@ import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieva
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
+import type {
+  BudgetResource,
+  ConstraintGraph,
+  SlotNode,
+  SubqueryNode,
+} from '../../domain/query/model/constraint-graph.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import type {
   BrowseRetrieverPort,
@@ -29,6 +35,7 @@ import {
   executeGraphAware,
   type CriticSignalProbe,
   type GraphExecutorOptions,
+  type SubqueryRetrievalResult,
 } from './search-usecase-graph-executor.js';
 import {
   BundleSelectorImpl,
@@ -45,6 +52,11 @@ import {
   classifyGraphPresence,
   recordGraphPathDecision,
 } from '../../observability/graph-path-telemetry.js';
+import { collectApplicableSlotIdsForSubquery } from '../../domain/query/service/subquery-slot-scope.js';
+import {
+  collectConjunctivelyRequiredSlotIds,
+  projectConstraintGraphForSubquery,
+} from '../../domain/query/service/project-subquery-constraint-graph.js';
 
 /**
  * ADR-015 Axis 2: per-call critic context surfaced from
@@ -246,8 +258,8 @@ export function buildHybridRetrievalInputForPlan(
     queryPlan: plan,
     route,
     ...(compiled !== undefined ? { compiledRetrievalMode: compiled.execution.effectiveRetrievalMode } : {}),
-    lexicalQueries: uniqueStrings([plan.normalizedQuery, ...structuredQueries.lexical]),
-    semanticQueries: uniqueStrings([plan.rawQuery, ...structuredQueries.semantic]),
+    lexicalQueries: buildPlanLexicalQueryVariants(plan, structuredQueries.lexical),
+    semanticQueries: buildPlanSemanticQueryVariants(plan, structuredQueries.semantic),
     hardConstraints: plan.constraints.hard,
     softConstraints: plan.constraints.soft,
     retrievalPlan,
@@ -277,7 +289,7 @@ function buildStructuredQueryExpansions(
     const phrase = retrievalValueToPhrase(constraint.value);
     if (phrase !== undefined) {
       lexical.push(phrase);
-      if (constraint.attribute === 'region' || constraint.attribute === 'country' || constraint.attribute === 'appellation') {
+      if (isSemanticRetrievalExpansionAttribute(constraint.attribute)) {
         semantic.push(phrase);
       }
     }
@@ -288,11 +300,21 @@ function buildStructuredQueryExpansions(
       continue;
     }
     lexical.push(phrase);
-    if (boost.attribute === 'region' || boost.attribute === 'country' || boost.attribute === 'grape_family') {
+    if (isSemanticRetrievalExpansionAttribute(boost.attribute)) {
       semantic.push(phrase);
     }
   }
   return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
+}
+
+function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
+  return attribute === 'region'
+    || attribute === 'country'
+    || attribute === 'appellation'
+    || attribute === 'grape_family'
+    || attribute === 'grape_primary'
+    || attribute === 'pairing'
+    || attribute === 'occasion';
 }
 
 function retrievalValueToPhrase(value: unknown): string | undefined {
@@ -321,6 +343,192 @@ function retrievalValueToPhrase(value: unknown): string | undefined {
 
 function uniqueStrings(values: readonly string[]): readonly string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function buildPlanLexicalQueryVariants(
+  plan: QueryPlanV1,
+  extraTerms: readonly string[] = [],
+): readonly string[] {
+  return uniqueStrings([
+    plan.normalizedQuery,
+    ...(plan.normalizedQueryViews?.lookupVariants ?? []),
+    ...plan.expansions.lexical,
+    ...extraTerms,
+  ]);
+}
+
+function buildPlanSemanticQueryVariants(
+  plan: QueryPlanV1,
+  extraTerms: readonly string[] = [],
+): readonly string[] {
+  return uniqueStrings([
+    plan.rawQuery,
+    ...(plan.normalizedQueryViews?.lookupVariants ?? []),
+    ...(plan.normalizedQueryViews?.transliterated !== undefined
+      ? [plan.normalizedQueryViews.transliterated]
+      : []),
+    ...plan.expansions.semantic,
+    ...extraTerms,
+  ]);
+}
+
+function isSlotNode(node: unknown): node is SlotNode {
+  return typeof node === 'object' && node !== null && (node as { kind?: string }).kind === 'slot';
+}
+
+interface ScopedConstraintSelection {
+  readonly slotIds: ReadonlySet<string>;
+  readonly scopedGraph: ConstraintGraph;
+  readonly constraints: QueryPlanV1['constraints'];
+}
+
+function buildScopedConstraintBundleFromGraph(
+  _base: HybridRetrievalInput,
+  graph: ConstraintGraph,
+  subqueryId: string,
+): ScopedConstraintSelection | null {
+  const scopedGraph = projectConstraintGraphForSubquery(graph, subqueryId);
+  if (scopedGraph === undefined) return null;
+  const ownedSlotIds = collectApplicableSlotIdsForSubquery(graph, subqueryId);
+  const mandatorySlotIds = collectConjunctivelyRequiredSlotIds(scopedGraph);
+
+  const hard: Array<QueryPlanV1['constraints']['hard'][number]> = [];
+  const soft: Array<QueryPlanV1['constraints']['soft'][number]> = [];
+  const inferred: Array<QueryPlanV1['constraints']['inferred'][number]> = [];
+
+  for (const node of scopedGraph.nodes) {
+    if (!isSlotNode(node)) continue;
+    const projected = {
+      attribute: node.attribute,
+      operator: node.operator,
+      value: node.value,
+      confidence: node.confidence,
+      source_phrase: `graph_slot(${node.attribute})`,
+    };
+    switch (node.sourceTier) {
+      case 'hard':
+        if (mandatorySlotIds.has(node.nodeId)) {
+          hard.push(projected);
+        }
+        break;
+      case 'soft':
+        soft.push(projected);
+        break;
+      case 'inferred':
+        inferred.push(projected);
+        break;
+    }
+  }
+
+  if (scopedGraph.nodes.every((node) => !isSlotNode(node))) {
+    return null;
+  }
+
+  return {
+    slotIds: ownedSlotIds,
+    scopedGraph,
+    constraints: { hard, soft, inferred },
+  };
+}
+
+function scopeHybridRetrievalInputToSubquery(
+  base: HybridRetrievalInput,
+  subquery: SubqueryNode,
+  graph: ConstraintGraph,
+): HybridRetrievalInput {
+  const scopedSelection = buildScopedConstraintBundleFromGraph(
+    base,
+    graph,
+    subquery.nodeId,
+  );
+  if (scopedSelection === null) return base;
+  const scopedConstraints = scopedSelection.constraints;
+
+  const scopedPlan: QueryPlanV1 = {
+    ...base.queryPlan,
+    constraints: scopedConstraints,
+  };
+  const scopedRetrievalPlan = buildRetrievalPlan(scopedConstraints);
+  const expansions = buildStructuredQueryExpansions(scopedPlan, scopedRetrievalPlan);
+  const graphExpansions = buildStructuredQueryExpansionsFromGraph(
+    scopedSelection.scopedGraph,
+  );
+
+  return {
+    ...base,
+    queryPlan: scopedPlan,
+    hardConstraints: scopedConstraints.hard,
+    softConstraints: scopedConstraints.soft,
+    retrievalPlan: scopedRetrievalPlan,
+    lexicalQueries: buildPlanLexicalQueryVariants(scopedPlan, [
+      ...expansions.lexical,
+      ...graphExpansions.lexical,
+    ]),
+    semanticQueries: buildPlanSemanticQueryVariants(scopedPlan, [
+      ...expansions.semantic,
+      ...graphExpansions.semantic,
+    ]),
+    constraintGraph: scopedSelection.scopedGraph,
+  };
+}
+
+function buildStructuredQueryExpansionsFromGraph(
+  graph: ConstraintGraph,
+): {
+  readonly lexical: readonly string[];
+  readonly semantic: readonly string[];
+} {
+  const lexical: string[] = [];
+  const semantic: string[] = [];
+  for (const node of graph.nodes) {
+    if (!isSlotNode(node)) continue;
+    const phrase = retrievalValueToPhrase(node.value);
+    if (phrase === undefined) continue;
+    lexical.push(phrase);
+    if (
+      node.attribute === 'region'
+      || node.attribute === 'country'
+      || node.attribute === 'appellation'
+      || node.attribute === 'grape_family'
+    ) {
+      semantic.push(phrase);
+    }
+  }
+  return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
+}
+
+function buildProductionSubqueryRetriever(
+  candidatePool: CandidatePoolPort,
+): {
+  readonly stateIsolation: 'shared_mutable';
+  retrieve(
+    base: HybridRetrievalInput,
+    subquery: SubqueryNode,
+    graph: ConstraintGraph,
+  ): Promise<SubqueryRetrievalResult>;
+} {
+  return {
+    stateIsolation: 'shared_mutable',
+    async retrieve(base, subquery, graph) {
+      const scopedInput = scopeHybridRetrievalInputToSubquery(base, subquery, graph);
+      const candidates = candidatePool.execute !== undefined
+        ? await candidatePool.execute(scopedInput)
+        : await candidatePool.generate(scopedInput);
+      const degradationCodes = candidatePool.getLastDegradationCodes?.() ?? [];
+      const degradationSignals = candidatePool.getLastDegradationSignals?.() ?? [];
+      const fusionTrace = candidatePool.getLastFusionTrace?.();
+      const dropLog = candidatePool.getLastDropLog?.();
+      return {
+        candidates,
+        telemetry: {
+          degradationCodes: [...degradationCodes],
+          degradationSignals: [...degradationSignals],
+          ...(fusionTrace !== undefined ? { fusionTrace } : {}),
+          ...(dropLog !== undefined ? { dropLog: [...dropLog] } : {}),
+        },
+      };
+    },
+  };
 }
 
 /**
@@ -586,7 +794,6 @@ export async function retrieveHybridCandidatesForPlan(
   const probe = buildCriticSignalProbeForCompiledQuery(
     plan,
     compiled,
-    ports.candidatePool,
   );
   const queryRewriter = createQueryRewriter(
     ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
@@ -608,6 +815,7 @@ export async function retrieveHybridCandidatesForPlan(
     {
       candidatePool: ports.candidatePool,
       bundleSelector: new BundleSelectorImpl(),
+      subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
       queryRewriter,
       budgetLedger,
     },
@@ -619,9 +827,9 @@ export async function retrieveHybridCandidatesForPlan(
   // Only available when candidatePool implements these methods (CandidatePoolService).
   // Specialized browse/compare paths that return early above do NOT have these traces
   // (they bypass the RRF fusion step entirely), so these are intentionally absent there.
-  const retrievalFusionTrace = ports.candidatePool.getLastFusionTrace?.();
-  const hardFilterDropLog = ports.candidatePool.getLastDropLog?.();
-  const retrievalDegradationSignals = ports.candidatePool.getLastDegradationSignals?.() ?? [];
+  const retrievalFusionTrace = graphResult.retrievalTelemetry?.fusionTrace;
+  const hardFilterDropLog = graphResult.retrievalTelemetry?.dropLog;
+  const retrievalDegradationSignals = graphResult.retrievalTelemetry?.degradationSignals ?? [];
   const retrievalInternalReasons = retrievalSignalsToReasons(retrievalDegradationSignals);
   const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
   const provenanceShortfall = buildMissingProvenanceObligations(
@@ -673,10 +881,9 @@ export async function retrieveHybridCandidatesForPlan(
  *
  * Scoring + pricing are conservative defaults that preserve pre-PR4
  * behaviour on the bundle path: every cell is scored by retrieval
- * fusion score (higher = better), and price is `0` so shared-budget
- * edges become inert until a downstream PR teaches the bundle path
- * about price/popularity. The pricer **does not** read locale-dependent
- * fields — outputs are integers from the candidate metadata.
+ * fusion score (higher = better), and price uses canonical KRW
+ * conversion from `HybridCandidate.priceUsd` so `shares_budget`
+ * feasibility is solved inside the exact assignment stage.
  */
 const DEFAULT_BUNDLE_SCORER: BundleCellScorer = ({ candidate }) =>
   // ADR-013 / RFC-012 candidate score migration: prefer fusionRrfTotal
@@ -687,7 +894,16 @@ const DEFAULT_BUNDLE_SCORER: BundleCellScorer = ({ candidate }) =>
   // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback per CLAUDE.md rule 31
   candidate.fusionRrfTotal ?? candidate.retrievalFusionScore ?? 0;
 
-const DEFAULT_BUNDLE_PRICER: BundleCellPricer = () => 0;
+const DEFAULT_BUNDLE_PRICER: BundleCellPricer = ({ candidate, resource }) => {
+  if (resource === 'price_total') {
+    const priceUsd = candidate.priceUsd;
+    return typeof priceUsd === 'number' && Number.isFinite(priceUsd) && priceUsd >= 0
+      ? Math.round(priceUsd * KRW_PER_USD_APPROXIMATE)
+      : 0;
+  }
+  if (resource === 'count') return 1;
+  return 0;
+};
 
 const DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS: GraphExecutorOptions = {
   scoreFor: DEFAULT_BUNDLE_SCORER,
@@ -718,31 +934,51 @@ function deriveBudgetLedgerOptionsFromCompiled(
 /**
  * ADR-015 Axis 2: build the per-call probe the executor uses to feed
  * `decideRetry`. The probe pulls degradation signals from the candidate
- * pool's per-call accessor and computes the satisfied-attribute set
- * directly from each candidate's `matchedConstraints`.
+ * pool's per-call accessor and computes graph-native satisfaction
+ * signals from each result's matched slot refs / assignments.
  */
 function buildCriticSignalProbeForCompiledQuery(
   _plan: QueryPlanV1,
-  _compiled: CompiledWineQuery,
-  candidatePool: CandidatePoolPort,
+  compiled: CompiledWineQuery,
 ): CriticSignalProbe {
+  const graph = compiled.constraintGraph;
   return {
-    satisfiedAttributesFor(candidates) {
+    coverageSignalsFor(result) {
+      const candidates = result.candidates;
+      const satisfiedNodeIds = new Set<string>();
       const out = new Set<string>();
       for (const candidate of candidates) {
         for (const attribute of candidate.matchedConstraints) {
           out.add(attribute);
         }
+        for (const atomRef of candidate.matchedAtomRefs ?? []) {
+          satisfiedNodeIds.add(atomRef);
+        }
       }
-      return out;
+      if (graph !== undefined) {
+        for (const assignment of result.assignmentSolution?.assignments ?? []) {
+          const matchedAtomRefs = new Set(assignment.candidate.matchedAtomRefs ?? []);
+          const applicableSlotIds = collectApplicableSlotIdsForSubquery(
+            graph,
+            assignment.subqueryId,
+          );
+          if ([...applicableSlotIds].some((slotId) => matchedAtomRefs.has(slotId))) {
+            satisfiedNodeIds.add(assignment.subqueryId);
+          }
+        }
+      }
+      const satisfiedBudgetResources = new Set<BudgetResource>();
+      for (const usage of result.assignmentSolution?.budgetUsage ?? []) {
+        if (usage.used <= usage.max) satisfiedBudgetResources.add(usage.resource);
+      }
+      return {
+        satisfiedAttributes: out,
+        ...(satisfiedNodeIds.size > 0 ? { satisfiedNodeIds } : {}),
+        ...(satisfiedBudgetResources.size > 0 ? { satisfiedBudgetResources } : {}),
+      };
     },
-    degradationReasonsFor() {
-      // Retrieval-internal reasons are surfaced via the per-call
-      // accessor (not the candidate stream). When the pool does not
-      // implement the accessor (e.g. test stubs), the critic sees an
-      // empty list and falls through to coverage-based decisions only.
-      const signals = candidatePool.getLastDegradationSignals?.() ?? [];
-      return signals.map((signal) => signal.reason);
+    degradationCodesFor(result) {
+      return result.retrievalTelemetry?.degradationCodes ?? [];
     },
   };
 }

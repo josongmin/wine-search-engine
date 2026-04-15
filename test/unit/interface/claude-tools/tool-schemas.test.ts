@@ -90,7 +90,7 @@ describe('WINE_SEARCH_TOOLS', () => {
     it('should have optional color property with wine colors', () => {
       const colorProp = tool.input_schema.properties.color as any;
       expect(colorProp).toBeDefined();
-      expect(colorProp.enum).toEqual(['red', 'white', 'rosé', 'sparkling']);
+      expect(colorProp.enum).toEqual(['red', 'white', 'rosé', 'sparkling', 'both']);
     });
   });
 

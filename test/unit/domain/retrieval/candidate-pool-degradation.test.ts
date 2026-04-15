@@ -126,6 +126,24 @@ describe('CandidatePoolService degradation observer', () => {
     expect(signals[0]!.severity).toBe('error');
     expect(signals[0]!.reason).toContain('vespa timeout');
     expect(signals[0]!.fallbackApplied).toBe('dense-only retrieval');
+    expect(pool.getLastDegradationCodes()).toEqual(['no_matches']);
+  });
+
+  it('derives sparse_pool and no_matches codes for a successful but empty pool', async () => {
+    const { observer } = createMockObserver();
+    const pool = new CandidatePoolService(
+      createSearchIndex(),
+      createEmbeddingService(),
+      new FusionService(),
+      undefined,
+      'bge-m3',
+      false,
+      observer,
+    );
+
+    await pool.generate(createInput());
+
+    expect(pool.getLastDegradationCodes()).toEqual(['sparse_pool', 'no_matches']);
   });
 
   it('emits dense_semantic degradation when dense search throws', async () => {

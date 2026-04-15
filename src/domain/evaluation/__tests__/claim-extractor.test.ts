@@ -12,6 +12,41 @@ describe('extractClaims', () => {
     expect(claims.some((c) => c.category === 'identity_claim' && c.value === '오푸스원')).toBe(true);
   });
 
+  it('normalizes Korean typo wine names before identity extraction', () => {
+    const claims = extractClaims('오퍼스원을 추천드립니다.');
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === '오푸스원')).toBe(true);
+  });
+
+  it('does not extract generic Korean prose as identity claims', () => {
+    const claims = extractClaims('검색 결과 기준으로 지금은 맞아요.');
+    const ids = claims.filter((c) => c.category === 'identity_claim');
+    expect(ids).toHaveLength(0);
+  });
+
+  it('extracts curated multi-word Korean wine labels only', () => {
+    const claims = extractClaims('보졸레누보 올해 거 있나?');
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === '보졸레 누보')).toBe(true);
+  });
+
+  it('does not extract structured Latin geography as identity claims', () => {
+    const claims = extractClaims('France / Ribera del Duero / Castilla y León');
+    const ids = claims.filter((c) => c.category === 'identity_claim');
+    expect(ids).toHaveLength(0);
+    expect(claims.some((c) => c.field === 'region' && c.value === 'Ribera del Duero')).toBe(true);
+  });
+
+  it('does not extract appellations as identity claims', () => {
+    const claims = extractClaims('Brunello and Barolo are classic Italian appellations.');
+    const ids = claims.filter((c) => c.category === 'identity_claim');
+    expect(ids).toHaveLength(0);
+  });
+
+  it('extracts full Latin labels with numeric tokens instead of split fragments', () => {
+    const claims = extractClaims('검색 결과: 2020 Cepa 21 Malabrigo');
+    const ids = claims.filter((c) => c.category === 'identity_claim');
+    expect(ids.map((c) => c.value)).toEqual(['Cepa 21 Malabrigo']);
+  });
+
   it('extracts vintage year', () => {
     const claims = extractClaims('Château Margaux 2015 is excellent.');
     const vintage = claims.find((c) => c.field === 'vintage_year');

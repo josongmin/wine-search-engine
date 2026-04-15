@@ -578,6 +578,105 @@ describe('AgentOrchestrator', () => {
     expect(result.answer.length).toBeGreaterThan(0);
   });
 
+  it('rejects structured filters on exact metadata lookup and forces a bare entity query', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'exact metadata lookup',
+          action: {
+            tool: 'search_wines',
+            input: { query: 'opus one', country: 'United States' },
+          },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'retry with bare entity',
+          action: { tool: 'search_wines', input: { query: 'opus one', limit: 2 } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'answer after contract check',
+          answer: '오퍼스 원 2018은 지금 마시기 좋은 상태입니다.',
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const searchExecute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const entityLookup = vi.fn().mockResolvedValue({
+      entityId: 'wine-1',
+      canonicalLabel: 'Opus One 2018',
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2038,
+    } as never);
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: searchExecute,
+      } as never,
+      entityLookup,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 5 });
+    const result = await orchestrator.execute('오푸스원 지금 마시기 좋아?', 'req-exact-drinkability');
+
+    expect(result.terminationReason).toBe('answer');
+    expect(result.answer).toContain('오퍼스 원 2018');
+    expect(result.steps[0]?.observation).toContain('bare entity search_wines query');
+    expect(searchExecute).toHaveBeenCalledTimes(1);
+    expect(searchExecute).toHaveBeenCalledWith(
+      { query: 'opus one', limit: 1 },
+      'req-exact-drinkability-step1',
+      expect.any(Object),
+    );
+    expect(entityLookup).toHaveBeenCalledWith('wine-1');
+  });
+
+  it('rejects a final answer until check_drinking_window is executed for drinkability queries', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'find the wine first',
+          action: { tool: 'search_wines', input: { query: 'opus one' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'answer after contract check',
+          answer: '오퍼스 원 2018은 현재 음용 적기 안에 있습니다.',
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+      entityLookup: vi.fn().mockResolvedValue({
+        entityId: 'wine-1',
+        canonicalLabel: 'Opus One 2018',
+        drinkingWindowStart: 2024,
+        drinkingWindowEnd: 2038,
+      } as never),
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 4 });
+    const result = await orchestrator.execute('오푸스원 지금 마시기 좋아?', 'req-drinkability-contract');
+
+    expect(result.terminationReason).toBe('answer');
+    expect(result.answer).toContain('음용 적기');
+    expect(result.toolCallCount).toBe(2);
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
   // E4-T1: BUG-DS01 — circuit open on synthesis attempt 1 → attempt 2 NOT called
   it('does NOT call synthesis attempt 2 when synthesis attempt 1 throws CircuitBreakerOpenError', async () => {
     // Arrange: main LLM step succeeds (tool call), synthesis attempt 1 throws circuit open.

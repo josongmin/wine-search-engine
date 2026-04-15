@@ -37,7 +37,7 @@ export interface LtrRerankResult {
 /**
  * LTR Ranker: applies learned models to rerank documents.
  */
-export function rerank(
+function rerank(
   documents: readonly RankableDocument[],
   _queryClass: QueryClass,
   model?: QueryClassWeights,
@@ -93,7 +93,7 @@ export function rerank(
 /**
  * Computes blended score combining retrieval + LTR.
  */
-export function blendScores(
+function blendScores(
   retrievalScore: number,
   ltrScore: number,
   alpha: number = 0.5,
@@ -104,7 +104,7 @@ export function blendScores(
 /**
  * Detects significant reranking to monitor for quality regressions.
  */
-export function measureRerankingShift(
+function measureRerankingShift(
   beforeRerank: readonly (string | number)[],
   afterRerank: readonly (string | number)[],
 ): number {

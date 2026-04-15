@@ -41,6 +41,7 @@ import { globalSilentSkipCounter } from '../../../observability/silent-skip-coun
 import type { CacheService } from '../../performance/index.js';
 import type {
   RetrievalDegradationObserver,
+  RetrievalDegradationCode,
   RetrievalDegradationSignal,
 } from '../port/retrieval-degradation-observer.port.js';
 import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port.js';
@@ -117,6 +118,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   private _lastFusionTrace: RrfFusionTrace | undefined = undefined;
   /** E4: Drop log from the most recent execute() call's hard-filter step. */
   private _lastDropLog: readonly CandidateDropRecord[] = [];
+  /** Critic-facing structured degradation codes from the most recent call. */
+  private _lastDegradationCodes: readonly RetrievalDegradationCode[] = [];
   /**
    * Bugbash 2026-04-14: structured retrieval degradation signals from the most
    * recent execute() call. The `degradationObserver` callback alone is not
@@ -162,6 +165,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     this.degradationObserver?.onRetrievalStarted();
     const degradationSignals: RetrievalDegradationSignal[] = [];
     this._lastDegradationSignals = degradationSignals;
+    const degradationCodes: RetrievalDegradationCode[] = [];
+    this._lastDegradationCodes = degradationCodes;
     const queryFamily = deriveQueryFamily(input.queryPlan);
     const retrievalMode = this.resolveRuntimeRetrievalMode(input);
     // Specialized routing (producer_browse / region_browse / compare_candidates)
@@ -756,6 +761,18 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       buildAssemblyPolicy(profile.finalTopK),
     );
 
+    // Critic-facing structured degradation codes are derived from
+    // production-observable pool states rather than log strings:
+    //   - sparse_pool: sparse retrieval returned no hits even though the
+    //     sparse channel was active and completed successfully.
+    //   - no_matches: the final assembled candidate pool is empty.
+    if (activeChannels.has('sparse_bm25') && !sparseResult.degraded && sparseHits.length === 0) {
+      degradationCodes.push('sparse_pool');
+    }
+    if (assembled.candidates.length === 0) {
+      degradationCodes.push('no_matches');
+    }
+
     this._lastFusionTrace = {
       queryClass: input.queryPlan.queryClass,
       fusionClass: fusionQueryClass,
@@ -836,6 +853,15 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   }
 
   /**
+   * Critic-facing structured degradation categories derived from the
+   * most recent execute() call. Empty before the first call or when no
+   * production-reachable sparse/no-match condition was observed.
+   */
+  getLastDegradationCodes(): readonly RetrievalDegradationCode[] {
+    return this._lastDegradationCodes;
+  }
+
+  /**
    * Heuristic estimate of alias match strength for cascade routing.
    * CandidatePool intentionally stays downstream of planning/anchor extraction,
    * so it uses anchor confidence propagated by the planner rather than reaching
@@ -854,6 +880,29 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       if (a.confidence > max) max = a.confidence;
     }
     return max;
+  }
+
+  /**
+   * Deterministic exact-anchor lock.
+   *
+   * When planning has already collapsed the query onto a single anchor entity
+   * under `entity_exact` / `mixed_query`, semantic dense expansion is more likely
+   * to dilute the exact target than to help. In that case we keep lexical +
+   * anchor-ANN and suppress generic semantic ANN.
+   */
+  private isDeterministicExactAnchorQuery(input: HybridRetrievalInput): boolean {
+    const intent = input.queryPlan.intent;
+    if (intent !== 'entity_exact' && intent !== 'mixed_query') {
+      return false;
+    }
+    if (input.queryPlan.queryClass === 'ambiguous_short_form') {
+      return false;
+    }
+
+    const uniqueEntityIds = new Set(
+      input.queryPlan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
+    );
+    return uniqueEntityIds.size === 1;
   }
 
   private resolveRuntimeRetrievalMode(input: HybridRetrievalInput): string | undefined {
@@ -892,8 +941,22 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   ): ReadonlySet<CandidateChannel> {
     const dispatchChannels = new Set(dispatchDecision.channelsToActivate);
     const active = new Set<CandidateChannel>();
+    const exactAnchorLocked =
+      runtimeMode === 'entity_anchor_first' &&
+      this.isDeterministicExactAnchorQuery(input);
 
     for (const channel of profileChannels) {
+      // Deterministic exact-anchor lock: when planning already resolved a single
+      // anchor entity for an entity/mixed query, keep the anchor ANN plus lexical
+      // evidence and suppress generic semantic ANN. This prevents exact targets
+      // like Opus One from being diluted by nearby semantic neighbors.
+      if (exactAnchorLocked) {
+        if (channel === 'anchor_similarity' || channel === 'sparse_bm25') {
+          active.add(channel);
+        }
+        continue;
+      }
+
       if (dispatchChannels.has(channel)) {
         active.add(channel);
         continue;

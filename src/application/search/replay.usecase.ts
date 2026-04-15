@@ -86,7 +86,7 @@ export class UnexpectedReplayResponseError extends DomainError {
 /**
  * Dependencies injected into the ReplayUseCase.
  */
-export interface ReplayUseCaseDeps {
+interface ReplayUseCaseDeps {
   readonly searchUseCase: SearchExecutorPort;
   /** Version strings for RFC-015 snapshot population. */
   readonly snapshotVersions?: SnapshotVersions | undefined;

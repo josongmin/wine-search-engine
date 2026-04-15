@@ -3,7 +3,7 @@ import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { SearchRequest } from './search-request.dto.js';
 
-export type BuildPlannerContextOptions = RequestExecutionContext;
+type BuildPlannerContextOptions = RequestExecutionContext;
 
 /**
  * Maps HTTP/application {@link SearchRequest} to domain {@link PlannerContext}.

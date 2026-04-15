@@ -192,6 +192,22 @@ describe('unmetHardConstraints annotation', () => {
     expect(result.unmetHardConstraints).toContain('wine_type');
     expect(result.unmetHardConstraints).toContain('region');
   });
+
+  it('matches canonical gift occasion against raw candidate tag "gifting"', () => {
+    const candidate = makeCandidate({ occasion: ['gifting', 'special dinner'] });
+    const bundle = makeBundle([makeConstraint('occasion', 'in', ['gift'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('occasion');
+    expect(result.unmetHardConstraints).toBeUndefined();
+  });
+
+  it('matches canonical date_night occasion against raw candidate tag "special dinner"', () => {
+    const candidate = makeCandidate({ occasion: ['celebration', 'special dinner'] });
+    const bundle = makeBundle([makeConstraint('occasion', 'in', ['date_night'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('occasion');
+    expect(result.unmetHardConstraints).toBeUndefined();
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

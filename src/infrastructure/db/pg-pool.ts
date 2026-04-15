@@ -58,17 +58,6 @@ export function shouldUsePgPool(pgConfig: PgPoolConfig = config.pg): boolean {
   return (pgConfig.connectionString?.length ?? 0) > 0 || pgConfig.password.length > 0;
 }
 
-export function getOptionalPgPool(pgConfig: PgPoolConfig = config.pg): Pool | undefined {
-  if (!shouldUsePgPool(pgConfig)) {
-    return undefined;
-  }
-  return getPgPool(pgConfig);
-}
-
-export function peekPgPool(): Pool | null {
-  return pool;
-}
-
 export async function closePgPool(targetPool: Pool | null = pool): Promise<void> {
   if (targetPool) {
     await targetPool.end();

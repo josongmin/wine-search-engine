@@ -6,7 +6,7 @@
  *
  * Format: [typo/slang, canonical form]
  */
-export const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Map([
+const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Map([
   // Typos (common misspellings)
   ['오퍼스원', '오푸스원'],
   ['오퍼스 원', '오푸스원'],

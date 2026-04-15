@@ -1,0 +1,43 @@
+{
+  "ignoreUnresolved": [
+    "embedding-service\\.js$",
+    "reranker\\.js$"
+  ],
+  "typescript": true,
+  "vitest": true,
+  "workspaces": {
+    ".": {
+      "entry": [
+        "config/vitest/*.config.ts",
+        "scripts/**/*.ts",
+        "test/**/*.test.ts",
+        "src/**/*.test.ts",
+        "src/**/__tests__/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "scripts/**/*.ts",
+        "test/**/*.{ts,tsx}",
+        "config/**/*.ts"
+      ],
+      "ignoreBinaries": [
+        "semgrep",
+        "concurrently"
+      ]
+    },
+    "web": {
+      "next": true,
+      "postcss": true,
+      "tailwind": true,
+      "typescript": true,
+      "vitest": true,
+      "entry": [
+        "src/app/**/*.{ts,tsx,css}",
+        "src/**/*.test.{ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
+    }
+  }
+}

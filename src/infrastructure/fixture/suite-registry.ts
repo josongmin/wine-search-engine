@@ -7,7 +7,7 @@
  *  - case ID prefix (the 2-3 letter prefix before the dash, e.g. "eek" in eek-001)
  *
  * Adding a new suite requires exactly ONE change: append a row here.
- * ALL_SUITE_IDS, SUITE_DIR_MAP, SUITE_ID_TO_DIR, and CASE_PREFIX_TO_SUITE
+ * ALL_SUITE_IDS, SUITE_ID_TO_DIR, and CASE_PREFIX_TO_SUITE
  * are ALL derived from this registry — never edit them directly.
  *
  * @module suite-registry
@@ -34,11 +34,6 @@ export type SuiteId = SuiteRegistryEntry['id'];
 
 /** All 9 suite IDs in definition order. Used for z.enum() and iteration. */
 export const ALL_SUITE_IDS = SUITE_REGISTRY.map((r) => r.id) as unknown as readonly [SuiteId, ...SuiteId[]];
-
-/** fixture-repo directory name → SuiteId */
-export const SUITE_DIR_MAP: Readonly<Record<string, SuiteId>> = Object.fromEntries(
-  SUITE_REGISTRY.map((r) => [r.dir, r.id]),
-);
 
 /** SuiteId → fixture-repo directory name */
 export const SUITE_ID_TO_DIR: Readonly<Record<SuiteId, string>> = Object.fromEntries(

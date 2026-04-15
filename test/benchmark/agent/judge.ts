@@ -99,14 +99,6 @@ Output STRICTLY a single JSON object:
 
 Output ONLY the JSON. No markdown, no preamble, no trailing commentary.`;
 
-export async function judgeAnswer(
-  judgeLlm: ChatLlmPort,
-  scenario: AgentBenchmarkScenario,
-  answer: string,
-): Promise<JudgeResult> {
-  return judgeAnswerN(judgeLlm, scenario, answer, 1);
-}
-
 /**
  * Judge with N samples + median voting (majority semantics).
  *

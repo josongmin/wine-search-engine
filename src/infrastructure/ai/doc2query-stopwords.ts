@@ -88,7 +88,7 @@ function tokenize(query: string): string[] {
  * Returns true when the query provides no BM25 signal — either empty
  * after tokenization, or every content-bearing token is a stopword.
  */
-export function isStopwordOnly(query: string): boolean {
+function isStopwordOnly(query: string): boolean {
   const tokens = tokenize(query);
   if (tokens.length === 0) return true;
   return tokens.every((t) => STOPWORD_SET.has(t));

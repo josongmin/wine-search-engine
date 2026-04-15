@@ -12,10 +12,6 @@ import {
   type ResolveResponseBody,
   type SearchResponseBody,
 } from '../../../src/interface/http/schemas/search-response.schema.js';
-import {
-  BatchSearchResponseSchema,
-  type BatchSearchResponseBody,
-} from '../../../src/interface/http/schemas/batch-search.schema.js';
 
 export interface JsonHttpResponse {
   readonly statusCode: number;
@@ -133,10 +129,6 @@ export function parseResolveResponse(response: JsonHttpResponse): ResolveRespons
   return parseWithSchema(response, ResolveResponseSchema, 'resolve response');
 }
 
-export function parseBatchSearchResponse(response: JsonHttpResponse): BatchSearchResponseBody {
-  return parseWithSchema(response, BatchSearchResponseSchema, 'batch search response');
-}
-
 export function getSearchDecision(body: SearchResponseBody): SearchResponseBody['engine_decision'] {
   return body.engine_decision;
 }
@@ -165,12 +157,4 @@ export function getSearchEntityIds(body: SearchResponseBody): string[] {
 
 export function getSearchRelevanceScores(body: SearchResponseBody): number[] {
   return body.results.map((result) => result.relevance_score);
-}
-
-export function getSearchEvidenceItems(
-  body: SearchResponseBody,
-  index: number,
-): SearchResponseBody['results'][number]['evidence_items'] {
-  const result = body.results[index];
-  return result?.evidence_items ?? [];
 }

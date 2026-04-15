@@ -10,7 +10,7 @@ import type {
   QueryEntrySecurityObserver,
 } from '../../domain/security/port/security-observer.port.js';
 
-export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObserver {
+class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObserver {
   private layer1Blocks = 0;
   private layer2Blocks = 0;
   private judgeErrors = 0;

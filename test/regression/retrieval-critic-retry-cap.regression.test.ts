@@ -94,8 +94,10 @@ function alwaysReformulateRewriter(): QueryRewriter {
 
 /** Probe that always reports zero coverage so the critic always wants to retry. */
 const zeroCoverageProbe: CriticSignalProbe = {
-  satisfiedAttributesFor: () => new Set<string>(),
-  degradationReasonsFor: () => ['retrieval_degraded:sparse:no_matches'],
+  coverageSignalsFor: () => ({
+    satisfiedAttributes: new Set<string>(),
+  }),
+  degradationCodesFor: () => ['no_matches'],
 };
 
 describe('executor critic retry loop termination', () => {
@@ -184,7 +186,7 @@ describe('executor critic retry loop termination', () => {
   });
 
   it('flag off → byte-identical to one-shot path; counter does not increment', async () => {
-    delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
     let executeCalls = 0;
     const countingPool: CandidatePoolPort = {
       execute: async () => {

@@ -370,9 +370,12 @@ describe('BundleSelector flag-on integration (ADR-013 Phase 1c.x + Wave B1)', ()
   });
 
   describe('flag OFF: passthrough leaves the ledger untouched', () => {
-    // Do NOT set BUNDLE_SELECTOR_ENABLED — the executor reads the env
-    // per call, so deletion is enough to restore pre-PR4 behaviour.
+    // Default is now ON; force the explicit rollback token.
     beforeEach(() => {
+      process.env['BUNDLE_SELECTOR_ENABLED'] = 'false';
+    });
+
+    afterEach(() => {
       delete process.env['BUNDLE_SELECTOR_ENABLED'];
     });
 

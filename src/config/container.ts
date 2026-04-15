@@ -33,6 +33,7 @@ import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import { AgentOrchestrator } from '../application/agent/agent-orchestrator.js';
 import { getAgentExecutionMetricsCollector } from '../infrastructure/observability/agent-execution-metrics.js';
+import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
@@ -44,6 +45,7 @@ export interface Container extends LearningContainerServices {
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly mixedSolver: MixedSolverPort;
+  readonly entityLookup: EntityDocumentLookupPort;
   readonly searchUseCase: SearchExecutorPort;
   readonly replayUseCase: ReplayUseCasePort;
   readonly interpretUseCase: InterpretUseCasePort;
@@ -90,6 +92,7 @@ export async function createContainer(
     ...(core.chatLlm !== undefined ? { chatLlm: core.chatLlm } : {}),
     queryPlanner: core.queryPlanner,
     entityResolver: core.entityResolver,
+    entityLookup: core.entityLookup,
     candidatePool: core.candidatePool,
     ranker: core.ranker,
     decisionEngine: core.decisionEngine,
@@ -123,6 +126,14 @@ export async function createContainer(
                   const docs = await core.entityLookup.getDocuments([id]);
                   return docs.get(id) ?? undefined;
                 },
+                ...(core.entityLookup.getDrinkingWindowDocuments !== undefined
+                  ? {
+                      drinkingWindowEntityLookup: async (id) => {
+                        const docs = await core.entityLookup.getDrinkingWindowDocuments!([id]);
+                        return docs.get(id) ?? undefined;
+                      },
+                    }
+                  : {}),
               },
             },
             {

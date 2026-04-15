@@ -15,7 +15,7 @@ export interface CircuitBreakerSnapshot {
   readonly metrics: ReturnType<CircuitBreaker['getMetrics']>;
 }
 
-export class CircuitBreakerRegistry {
+class CircuitBreakerRegistry {
   private readonly breakers = new Map<string, CircuitBreaker>();
 
   register(name: string, breaker: CircuitBreaker): void {

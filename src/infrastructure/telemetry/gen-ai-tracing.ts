@@ -25,7 +25,7 @@ export interface ModelPricing {
 }
 
 /** Static pricing table — fail-open: unknown models have undefined cost. */
-export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
+const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
   // OpenAI GPT-5 series (2025+) — prompt caching discount is 50% of input price.
   'gpt-5': { inputPerMillion: 1.25, outputPerMillion: 10.0, cachedInputPerMillion: 0.625 },
   'gpt-5.4': { inputPerMillion: 2.5, outputPerMillion: 10.0, cachedInputPerMillion: 1.25 },
@@ -53,7 +53,7 @@ export interface GenAiUsage {
 const UNKNOWN_MODEL_WARNED = new Set<string>();
 
 /** Compute USD cost from token usage and model pricing. Returns undefined for unknown models. */
-export function computeGenAiCost(model: string, usage: GenAiUsage): number | undefined {
+function computeGenAiCost(model: string, usage: GenAiUsage): number | undefined {
   // Try exact match first, then strip version suffix (claude-haiku-4-5-20251001 → claude-haiku-4-5)
   const pricing = MODEL_PRICING[model] ?? MODEL_PRICING[stripVersionSuffix(model)];
   if (pricing === undefined) {

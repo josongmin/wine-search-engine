@@ -60,7 +60,7 @@ export function producerBrowseRankScore(hit: SparseHit): number {
 /**
  * Composite retrieval ranking for region browse (prestige-weighted exploration).
  */
-export function regionBrowseRankScore(hit: SparseHit): number {
+function regionBrowseRankScore(hit: SparseHit): number {
   const c = critic01(hit.summary?.criticScoreNormalized);
   const pr = prestige01(hit.summary?.producerPrestige);
   return hit.score * (1 + REGION_BROWSE_CRITIC_LIFT * c + REGION_BROWSE_PRESTIGE_LIFT * pr);
@@ -261,7 +261,7 @@ export function diversifyRegionBrowseHits(
 
 /** Over-fetch multiplier for sparse browse before diversity selection. */
 const BROWSE_SPARSE_OVERFETCH_MULTIPLIER = 8;
-export const BROWSE_SPARSE_OVERFETCH_FACTOR = BROWSE_SPARSE_OVERFETCH_MULTIPLIER;
+const BROWSE_SPARSE_OVERFETCH_FACTOR = BROWSE_SPARSE_OVERFETCH_MULTIPLIER;
 
 export function browseSparseFetchLimit(resultLimit: number): number {
   const raw = resultLimit * BROWSE_SPARSE_OVERFETCH_FACTOR;

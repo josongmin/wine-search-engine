@@ -223,13 +223,13 @@ export function isFullRuntimeSearchReplayFixture(
     && fixture.metadata?.runtime_mode === 'full_runtime';
 }
 
-export function isSearchHttpFixture(
+function _isSearchHttpFixture(
   fixture: SearchReplayFixtureFile,
 ): fixture is SearchHttpFixtureFile {
   return fixture.endpoint === '/v1/search';
 }
 
-export function isReplayHttpFixture(
+function isReplayHttpFixture(
   fixture: SearchReplayFixtureFile,
 ): fixture is ReplayHttpFixtureFile {
   return fixture.endpoint === '/v1/search/replay';
@@ -383,13 +383,13 @@ export interface FixtureDriftClassification {
 }
 
 /** Result drift: the behaviorally-meaningful fields. */
-export const RESULT_DRIFT_FIELDS = [
+const RESULT_DRIFT_FIELDS = [
   'execution_mode',
   'degradation_reasons',
 ] as const;
 
 /** Trace drift: provenance/identity envelope fields. */
-export const TRACE_DRIFT_FIELDS = [
+const TRACE_DRIFT_FIELDS = [
   'authority_trace_ref',
   'runtime_correlation_ref',
   'decision_snapshot.snapshot_id',
@@ -564,7 +564,7 @@ export async function runSearchFixture(
   };
 }
 
-export function assertSearchFixtureExpectation(
+function assertSearchFixtureExpectation(
   body: SearchResponseBody,
   fixture: SearchReplayFixtureFile,
 ): void {
@@ -634,7 +634,7 @@ export function assertSearchFixtureExpectation(
   }
 }
 
-export function assertComparisonFixtureExpectation(
+function assertComparisonFixtureExpectation(
   body: ComparisonSearchResponseBody,
   fixture: SearchReplayFixtureFile,
 ): void {

@@ -10,6 +10,7 @@ import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type {
   RetrievalDocument,
+  RetrievalDrinkingWindowProjection,
   RetrievalHitProjection,
   RetrievalFeatureProjection,
 } from '../../domain/retrieval/model/retrieval-document.js';
@@ -85,6 +86,31 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function isString(v: unknown): v is string {
   return typeof v === 'string';
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function parseDrinkingWindowSummary(raw: Record<string, unknown>): RetrievalDrinkingWindowProjection {
+  const entityIdRaw = raw['entity_id'];
+  if (!isString(entityIdRaw) || entityIdRaw.length === 0) {
+    throw new Error('parseDrinkingWindowSummary: missing or empty entity_id');
+  }
+  const canonicalLabelRaw = raw['canonical_label'];
+  if (!isString(canonicalLabelRaw) || canonicalLabelRaw.length === 0) {
+    throw new Error('parseDrinkingWindowSummary: missing or empty canonical_label');
+  }
+  const drinkingWindowStart = raw['drinking_window_start'];
+  const drinkingWindowEnd = raw['drinking_window_end'];
+  const modelVersion = raw['drinking_window_model_version'];
+  return {
+    entityId: createCanonicalEntityId(entityIdRaw),
+    canonicalLabel: canonicalLabelRaw,
+    ...(isFiniteNumber(drinkingWindowStart) ? { drinkingWindowStart } : {}),
+    ...(isFiniteNumber(drinkingWindowEnd) ? { drinkingWindowEnd } : {}),
+    ...(isString(modelVersion) && modelVersion.length > 0 ? { drinkingWindowModelVersion: modelVersion } : {}),
+  };
 }
 
 /**
@@ -589,17 +615,62 @@ export class VespaSearchIndex implements SearchIndexPort {
     if (entityIds.length > MAX_BULK_FETCH_IDS) {
       throw new Error(`getDocuments: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
     }
-    const settled = await Promise.allSettled(entityIds.map(async (entityId) => {
-      const doc = await this.getDocument(entityId);
-      return doc === null ? null : [entityId, doc] as const;
+    const batches: CanonicalEntityId[][] = [];
+    for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
+      batches.push([...entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE)]);
+    }
+    const settled = await Promise.allSettled(batches.map(async (batch) => {
+      const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
+      const yql = `select * from ${SCHEMA} where entity_id in (${idList}) limit ${batch.length}`;
+      const response = await this.queryUnderBreaker(yql, {
+        'presentation.summary': 'full',
+      });
+      const children = response.root.children ?? [];
+      return children.map((hit) => fromVespaFields(hit.fields));
     }));
     const docs = new Map<CanonicalEntityId, RetrievalDocument>();
     for (const result of settled) {
-      if (result.status === 'fulfilled' && result.value !== null) {
-        docs.set(result.value[0], result.value[1]);
+      if (result.status === 'rejected') {
+        bootstrapLogger.warn(
+          { err: result.reason instanceof Error ? result.reason.message : String(result.reason) },
+          '[VespaSearchIndex] getDocuments: batch query failed',
+        );
+        throw new Error(
+          `getDocuments: Vespa batch failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        );
+      }
+      for (const doc of result.value) {
+        docs.set(doc.entityId, doc);
       }
     }
-    return docs;
+    const ordered = new Map<CanonicalEntityId, RetrievalDocument>();
+    for (const entityId of entityIds) {
+      const doc = docs.get(entityId);
+      if (doc !== undefined) {
+        ordered.set(entityId, doc);
+      }
+    }
+    return ordered;
+  }
+
+  async getDrinkingWindowDocuments(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDrinkingWindowProjection>> {
+    const projections = await this.batchFetchBySummary({
+      entityIds,
+      callerName: 'getDrinkingWindowDocuments',
+      selectFields:
+        'entity_id, canonical_label, drinking_window_start,' +
+        ' drinking_window_end, drinking_window_model_version',
+      summaryName: 'full',
+      parseHit: (fields) => parseDrinkingWindowSummary(fields),
+      entityIdOf: (proj) => String(proj.entityId),
+    });
+    const byId = new Map<CanonicalEntityId, RetrievalDrinkingWindowProjection>();
+    for (const projection of projections) {
+      byId.set(projection.entityId, projection);
+    }
+    return byId;
   }
 
   // -------------------------------------------------------------------------

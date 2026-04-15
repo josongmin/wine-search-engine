@@ -43,7 +43,7 @@ export const VespaHitSchema = z
   .passthrough();
 
 /** Coverage block reported by Vespa (how much of the corpus was scanned). */
-export const VespaCoverageSchema = z
+const VespaCoverageSchema = z
   .object({
     coverage: z.number().finite().optional(),
     documents: z.number().int().nonnegative().optional(),
@@ -55,7 +55,7 @@ export const VespaCoverageSchema = z
   .passthrough();
 
 /** Timing block reported by Vespa (optional, only when tracing is enabled). */
-export const VespaTimingSchema = z
+const VespaTimingSchema = z
   .object({
     querytime: z.number().finite().optional(),
     summaryfetchtime: z.number().finite().optional(),
@@ -64,7 +64,7 @@ export const VespaTimingSchema = z
   .passthrough();
 
 /** Top-level `root` element of a Vespa query response. */
-export const VespaRootSchema = z
+const VespaRootSchema = z
   .object({
     id: z.string().optional(),
     relevance: z.number().finite().optional(),

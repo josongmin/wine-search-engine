@@ -19,7 +19,6 @@ const CONTRACT_ROUTE_FILES = [
   'src/interface/http/routes/feedback.route.ts',
   'src/interface/http/routes/agent.route.ts',
   'src/interface/http/routes/agent-benchmark-scenarios.route.ts',
-  'src/interface/http/routes/search-v2.route.ts',
 ] as const;
 
 function readRouteFile(routePath: string): string {

@@ -19,6 +19,13 @@ export interface RetrievalDegradationSignal {
   readonly fallbackApplied: string;
 }
 
+/**
+ * Structured degradation categories that the retrieval critic is allowed to
+ * consume directly. These are intentionally narrower than the free-form
+ * human-readable `reason` strings surfaced to metrics / logs.
+ */
+export type RetrievalDegradationCode = 'sparse_pool' | 'no_matches';
+
 export interface RetrievalDegradationMetrics {
   readonly totalRetrievals: number;
   readonly degradations: Readonly<Record<string, number>>; // component → count

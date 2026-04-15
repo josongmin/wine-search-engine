@@ -38,12 +38,11 @@ import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { createStageTimer } from '../../observability/stage-timer.js';
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
-export type { HybridExecutionOptions } from './port/search-route-usecases.port.js';
 
 /**
  * Dependencies injected into the HybridUseCase.
  */
-export interface HybridUseCaseDeps {
+interface HybridUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   /**
    * Explicit test / special-seam escape hatch for planners that only implement

@@ -206,7 +206,7 @@ type VespaRetrievalSummaryFieldSpec = {
   readonly kind: RetrievalSummaryFieldKind;
 };
 type RetrievalDocumentSummaryKey = Extract<RetrievalHitSummaryKey, keyof RetrievalDocument>;
-export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
+const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   canonicalLabel: { vespaField: 'canonical_label', kind: 'string' },
   producer: { vespaField: 'producer', kind: 'string' },
   region: { vespaField: 'region', kind: 'string' },
@@ -295,7 +295,7 @@ export function readRawVespaRetrievalSummary(
   return summary;
 }
 
-export function writeVespaRetrievalSummaryFields(
+function writeVespaRetrievalSummaryFields(
   target: Record<string, unknown>,
   source: Pick<RetrievalDocument, RetrievalDocumentSummaryKey>,
 ): void {
@@ -762,6 +762,8 @@ const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
   ['country',          { type: 'contains',  field: 'country' }],
   ['region',           { type: 'contains',  field: 'region' }],
   ['appellation',      { type: 'contains',  field: 'appellation' }],
+  ['pairing',          { type: 'contains',  field: 'pairing' }],
+  ['occasion',         { type: 'contains',  field: 'occasion' }],
   ['grape_primary',    { type: 'contains',  field: 'grape_primary' }],
   ['price_band',       { type: 'contains',  field: 'price_band' }],
   ['flavor_profile',   { type: 'contains',  field: 'flavor_profiles' }],
@@ -808,6 +810,8 @@ const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
   ['country_not',       { type: 'not_contains', field: 'country' }],
   ['region_not',        { type: 'not_contains', field: 'region' }],
   ['appellation_not',   { type: 'not_contains', field: 'appellation' }],
+  ['pairing_not',       { type: 'not_contains', field: 'pairing' }],
+  ['occasion_not',      { type: 'not_contains', field: 'occasion' }],
   // style field is attribute-only — `contains` does NOT do substring matching on multi-token
   // values like "full red". Must use `matches` (regex substring) so exclusions like
   // `style_not:full` correctly produce `!(style matches "full")` and exclude "full red" wines.
@@ -829,11 +833,11 @@ const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
  * Must stay in sync with FILTER_TOKEN_REGISTRY — validated by unit tests.
  */
 const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
-  'wine_type', 'country', 'region', 'appellation', 'grape_primary', 'style',
+  'wine_type', 'country', 'region', 'appellation', 'pairing', 'occasion', 'grape_primary', 'style',
   'style_matches', 'price_band', 'flavor_profile', 'classification', 'certification',
   'soil_type', 'producer_type', 'grape_family', 'grape_or',
   // Negation variants
-  'wine_type_not', 'country_not', 'region_not', 'appellation_not',
+  'wine_type_not', 'country_not', 'region_not', 'appellation_not', 'pairing_not', 'occasion_not',
   'grape_primary_not', 'grapes_not',
   'style_not', 'price_band_not', 'flavor_profile_not', 'classification_not',
   'certification_not', 'soil_type_not', 'producer_type_not', 'grape_family_not',

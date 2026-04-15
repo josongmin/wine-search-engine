@@ -102,6 +102,43 @@ describe('executeAgentTool', () => {
     expect(request?.limit).toBe(3);
   });
 
+  it('uses the narrow drinking-window projection before full entity hydration', async () => {
+    const drinkingWindowEntityLookup = vi.fn().mockResolvedValue({
+      entityId: 'wine-opus-one-2018',
+      canonicalLabel: 'Opus One 2018',
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2038,
+      drinkingWindowModelVersion: 'dw-v1',
+    });
+    const entityLookup = vi.fn().mockRejectedValue(new Error('full hydration must not run'));
+    deps = {
+      searchUseCase: mockSearchUseCase,
+      drinkingWindowEntityLookup,
+      entityLookup,
+    };
+
+    const result = await executeAgentTool(
+      'check_drinking_window',
+      {
+        entity_id: 'wine-opus-one-2018',
+        target_year: 2026,
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(drinkingWindowEntityLookup).toHaveBeenCalledWith('wine-opus-one-2018');
+    expect(entityLookup).not.toHaveBeenCalled();
+    expect(result.observation).toContain('Opus One 2018: drinking window 2024-2038');
+    expect(result.observation).toContain('currently drinkable');
+    expect(result.rawResult).toMatchObject({
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2038,
+      currentlyDrinkable: true,
+      modelVersion: 'dw-v1',
+    });
+  });
+
   it('forwards abortSignal to search use case execution context', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -144,6 +181,26 @@ describe('executeAgentTool', () => {
 
     const parsed = extractSearchConstraints(request!.query);
     expect(parsed.maxPriceKrw).toBe(30_000);
+  });
+
+  it('accepts pairing color both without adding an impossible color filter', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'get_food_pairings',
+      {
+        food: '쌈싸먹을 때',
+        color: 'both',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toContain('wines for 쌈싸먹을 때');
+    expect(request?.query).not.toContain('both');
   });
 
   it('post-filters results using structured exclusion inputs', async () => {

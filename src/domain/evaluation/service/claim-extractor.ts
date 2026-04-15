@@ -14,8 +14,12 @@
 import crypto from 'node:crypto';
 import { KRW_PER_MAN_WON, KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import { containsHangul } from '../../shared/utils/hangul.js';
+import { Transliterator } from '../../alias/service/transliterator.js';
+import { resolveEntity } from '../../attribute/service/entity-resolver.js';
 import type { ExtractedClaim, ClaimCategory, WineField } from '../model/claim.js';
-import { resolveGrapeAlias, normalizeWineType } from './wine-ontology.js';
+import { resolveGrapeAlias, normalizeWineType, REGION_PARENTS } from './wine-ontology.js';
+import { correctKoreanWineTypos } from '../../query/service/korean-wine-aliases.js';
+import { GENERATED_REGION_PARENTS } from './region-parents.generated.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants (module-scope per CLAUDE.md rule 16)
@@ -128,6 +132,31 @@ const VINTAGE_YEAR_CHAR_LEN = 4;
 const VINTAGE_WINDOW_GAP_MAX = 30;
 /** Prefix length for claim ID (sha256 hex truncated to first N chars). */
 const CLAIM_ID_PREFIX_LEN = 16;
+/** Maximum token width for Korean multi-word identity candidates. */
+const KOREAN_IDENTITY_MAX_TOKENS = 4;
+/** Korean-only phrase segments to scan for curated wine-name matches. */
+const KOREAN_IDENTITY_SEGMENT_RE = /[\uAC00-\uD7A3]+(?:\s+[\uAC00-\uD7A3]+)*/gu;
+/** Latin-script candidate spans for wine labels / producers. */
+const LATIN_IDENTITY_RE = /(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]*\.?|[A-Z]{2,})(?:\s+(?:(?:d[eu]s?|d'|de|del|du|des|la|le|les|y|of|and|van|von|di)\s+)?(?:[A-Z][a-zA-Z'\u00C0-\u017F-]*\.?|[A-Z]{2,}|\d{1,4}))*(?=$|[\s,;:.)/])/gu;
+/** Accent-folded geography surfaces derived from deterministic ontology sources only. */
+const STRUCTURED_GEOGRAPHY_SURFACES: ReadonlySet<string> = (() => {
+  const surfaces = new Set<string>();
+  const register = (surface: string): void => {
+    const normalized = normalizeStructuredEntityKey(surface);
+    if (normalized.length > 0) surfaces.add(normalized);
+  };
+
+  for (const [region, ancestors] of REGION_PARENTS) {
+    register(region);
+    for (const ancestor of ancestors) register(ancestor);
+  }
+  for (const [region, ancestors] of GENERATED_REGION_PARENTS) {
+    register(region);
+    for (const ancestor of ancestors) register(ancestor);
+  }
+
+  return surfaces;
+})();
 
 /** Hangul (Korean) syllable range check. Delegates to @shared/utils/hangul (SSoT). */
 const isHangul = containsHangul;
@@ -203,10 +232,8 @@ export function extractClaims(
 function extractIdentityClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
 
-  // Latin proper nouns: "Opus One", "Château Margaux"
-  const latinMatches = text.match(
-    /(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+(?:d[eu]s?\s+|d')?[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)(?=$|[\s,;:.)])/g,
-  );
+  // Latin proper nouns: "Opus One", "Château Margaux", "Cepa 21 Malabrigo"
+  const latinMatches = text.match(LATIN_IDENTITY_RE);
   if (latinMatches) {
     for (const name of latinMatches) {
       const trimmed = name.trim();
@@ -216,28 +243,82 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
       if (KNOWN_REGIONS.has(lowered)) continue;
       if (WINE_TYPE_KEYWORDS.has(lowered)) continue;
       if (LATIN_IDENTITY_STOPWORDS.has(lowered)) continue;
+      if (isStructuredEntitySurface(trimmed)) continue;
       claims.push(makeClaim('identity_claim', 'canonical_label', trimmed, trimmed));
     }
   }
 
-  // Korean wine names: 2+ Hangul syllables
-  const koreanMatches = text.match(/[\uAC00-\uD7A3]{2,}/g);
-  if (koreanMatches) {
-    for (const raw of koreanMatches) {
-      // Strip trailing particles ("오푸스원을" → "오푸스원")
-      const stripped = raw.replace(KOREAN_PARTICLE_RE, '');
-      const name = stripped.length >= 2 ? stripped : raw;
-
-      if (KOREAN_STOPWORDS.has(name)) continue;
-      if (KNOWN_REGIONS.has(name.toLowerCase())) continue;
-      if (WINE_TYPE_KEYWORDS.has(name.toLowerCase())) continue;
-      if (name.length < 2) continue;
-      if (KOREAN_PREDICATE_SUFFIX_RE.test(name)) continue;
-      claims.push(makeClaim('identity_claim', 'canonical_label', name, raw));
-    }
+  // Korean identity claims are precision-gated via the curated transliteration
+  // dictionary. This avoids turning generic Korean prose ("검색", "결과", "기준")
+  // into entity claims while still preserving well-known wine labels.
+  for (const { value, sourceText } of extractKoreanIdentityCandidates(text)) {
+    claims.push(makeClaim('identity_claim', 'canonical_label', value, sourceText));
   }
 
   return claims;
+}
+
+function extractKoreanIdentityCandidates(
+  text: string,
+): readonly { readonly value: string; readonly sourceText: string }[] {
+  const matches = text.match(KOREAN_IDENTITY_SEGMENT_RE);
+  if (matches === null) return [];
+
+  const candidates = new Map<string, { readonly value: string; readonly sourceText: string }>();
+
+  for (const segment of matches) {
+    const tokens = segment
+      .trim()
+      .split(/\s+/u)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+
+    for (let start = 0; start < tokens.length; start++) {
+      for (let width = 1; width <= KOREAN_IDENTITY_MAX_TOKENS && start + width <= tokens.length; width++) {
+        const rawCandidate = tokens.slice(start, start + width).join(' ');
+        const normalizedCandidate = normalizeKoreanIdentityCandidate(rawCandidate);
+        if (normalizedCandidate === undefined) continue;
+
+        const romanized = Transliterator.romanizeWineTerm(normalizedCandidate);
+        if (romanized === undefined) continue;
+
+        const key = normalizedCandidate.toLowerCase().normalize('NFKC');
+        if (!candidates.has(key)) {
+          candidates.set(key, {
+            value: normalizedCandidate,
+            sourceText: rawCandidate,
+          });
+        }
+      }
+    }
+  }
+
+  return [...candidates.values()];
+}
+
+function normalizeKoreanIdentityCandidate(candidate: string): string | undefined {
+  const corrected = correctKoreanWineTypos(candidate).trim();
+  if (corrected.length < 2) return undefined;
+
+  const parts = corrected.split(/\s+/u);
+  const last = parts.at(-1);
+  if (last === undefined) return undefined;
+
+  const strippedLast = last.replace(KOREAN_PARTICLE_RE, '');
+  const normalizedParts = [
+    ...parts.slice(0, -1),
+    strippedLast.length >= 2 ? strippedLast : last,
+  ];
+  const normalized = normalizedParts.join(' ').trim();
+
+  if (normalized.length < 2) return undefined;
+  if (KOREAN_STOPWORDS.has(normalized)) return undefined;
+  if (KNOWN_REGIONS.has(normalized.toLowerCase())) return undefined;
+  if (WINE_TYPE_KEYWORDS.has(normalized.toLowerCase())) return undefined;
+  if (KOREAN_PREDICATE_SUFFIX_RE.test(normalized)) return undefined;
+  if (isStructuredEntitySurface(normalized)) return undefined;
+
+  return normalized;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -426,4 +507,41 @@ function deduplicateClaims(claims: ExtractedClaim[]): ExtractedClaim[] {
     }
   }
   return result;
+}
+
+function isStructuredEntitySurface(surface: string): boolean {
+  if (STRUCTURED_GEOGRAPHY_SURFACES.has(normalizeStructuredEntityKey(surface))) return true;
+  if (resolveStructuredEntity(surface)) return true;
+
+  const accentFolded = stripLatinDiacritics(surface);
+  if (accentFolded !== surface && resolveStructuredEntity(accentFolded)) return true;
+
+  const coordinatedParts = surface
+    .split(/\s+(?:and|&|y)\s+/iu)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (coordinatedParts.length >= 2) {
+    return coordinatedParts.every((part) => {
+      if (resolveStructuredEntity(part)) return true;
+      const foldedPart = stripLatinDiacritics(part);
+      return foldedPart !== part && resolveStructuredEntity(foldedPart);
+    });
+  }
+
+  return false;
+}
+
+function resolveStructuredEntity(surface: string): boolean {
+  return resolveEntity(surface, { preferEntityOverStyle: true }) !== null;
+}
+
+function stripLatinDiacritics(surface: string): string {
+  return surface.normalize('NFKD').replace(/\p{M}+/gu, '').normalize('NFKC');
+}
+
+function normalizeStructuredEntityKey(surface: string): string {
+  return stripLatinDiacritics(surface)
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/gu, ' ');
 }

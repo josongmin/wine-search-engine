@@ -4,15 +4,13 @@ export {
   type EntityId,
   type SourceRecordId,
   createCanonicalEntityId,
-  createDocumentId,
   createEntityId,
   createSourceRecordId,
   isCanonicalPublicEntityId,
-  isEntityId,
 } from './entity-id.js';
-export { DECISION_STATUSES, type DecisionStatus } from './decision-status.js';
-export { NEXT_ACTIONS, type NextAction } from './next-action.js';
-export { QUERY_CLASSES, type QueryClass } from './query-class.js';
+export { type DecisionStatus } from './decision-status.js';
+export { type NextAction } from './next-action.js';
+export { type QueryClass } from './query-class.js';
 export {
   type ConstraintOperator,
   type NormalizedConstraint,
@@ -25,13 +23,10 @@ export {
   type ConstraintSourceKind,
   type ConstraintSemanticScope,
   type ConstraintConflictPolicy,
-  CONSTRAINT_AUTHORITY_BY_SOURCE_KIND,
-  liftToAtom,
   liftBundleToAtoms,
 } from './constraint-atom.js';
 export {
   type DecisionSnapshot,
-  CORRUPTED_SNAPSHOT_ID,
   isCorruptedSnapshot,
 } from './decision-snapshot.js';
 export { type SignalSet } from './signal-set.js';
@@ -49,5 +44,4 @@ export {
   type LearnedMatcherShortfall,
   type SpecializedRouteShortfall,
   type MixedRouteShortfall,
-  classifyShortfallLayer,
 } from './provenance-shortfall-taxonomy.js';

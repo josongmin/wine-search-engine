@@ -46,7 +46,7 @@ export function makeClickSignal(
   };
 }
 
-export function makeSessionSuccessSignal(
+function makeSessionSuccessSignal(
   query: string,
   entityId: ReturnType<typeof createEntityId>,
   sessionId: string,

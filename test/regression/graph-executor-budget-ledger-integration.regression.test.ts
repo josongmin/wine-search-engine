@@ -182,6 +182,33 @@ describe('graph executor ↔ BudgetLedger integration (ADR-013 P1-C.x)', () => {
     expect(ledger.snapshot().candidateCount).toBe(2);
   });
 
+  it('callback throw rolls back prior ledger reservations before rethrowing', async () => {
+    const ledger = new InMemoryBudgetLedger();
+    const subqueryRetriever: SubqueryRetriever = {
+      retrieve: async (_base, sq) => [mkCandidate(`${sq.nodeId}:w1`, 25)],
+    };
+    const deps: GraphExecutorDeps = {
+      candidatePool,
+      bundleSelector: new BundleSelectorImpl(),
+      subqueryRetriever,
+      budgetLedger: ledger,
+    };
+    const opts: GraphExecutorOptions = {
+      scoreFor: () => 1,
+      priceFor: () => 0,
+      onReserveAssignment: ({ subqueryId }) => {
+        if (subqueryId === 'sq_1') {
+          throw new Error('legacy callback exploded');
+        }
+      },
+    };
+
+    await expect(
+      executeGraphAware(stubInput, hybridGraph(2), deps, opts),
+    ).rejects.toThrow('legacy callback exploded');
+    expect(ledger.snapshot().candidateCount).toBe(0);
+  });
+
   it('ledger violation surfaces as fail_closed budget_infeasible and rolls back reservations', async () => {
     // Ceiling = 50 000 KRW ≈ 37 USD at the SSoT FX. Three w1 picks
     // at 20 USD each would accumulate to 81 000 KRW > 50 000 and
@@ -277,8 +304,10 @@ describe('graph executor ↔ BudgetLedger integration (ADR-013 P1-C.x)', () => {
       {
         // Stub probe: always report unsatisfied coverage so the critic
         // recommends a retry until the cap.
-        satisfiedAttributesFor: () => new Set(),
-        degradationReasonsFor: () => ['no_matches'],
+        coverageSignalsFor: () => ({
+          satisfiedAttributes: new Set(),
+        }),
+        degradationCodesFor: () => ['no_matches'],
       },
     );
     // Pre-flight release contract: every retriever invocation saw an

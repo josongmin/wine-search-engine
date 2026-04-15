@@ -20,6 +20,30 @@ function makeQueryResponse(entityIds: string[]): VespaQueryResponse {
   };
 }
 
+function makeDocumentFields(entityId: string): Record<string, unknown> {
+  return {
+    entity_id: entityId,
+    entity_type: 'wine',
+    canonical_label: `Label for ${entityId}`,
+    aliases_identity_safe: [`Label for ${entityId}`],
+    aliases_noisy_recall: [`Alias for ${entityId}`],
+    producer: 'Producer',
+    region: 'Region',
+    grapes: ['Cabernet Sauvignon'],
+    search_text_ko: '와인 검색어',
+    search_text_en: 'Wine search text',
+    semantic_summary: 'Wine semantic summary',
+    style: 'red',
+    price_band: 'premium',
+    pairing: ['steak'],
+    availability: true,
+    popularity_score: 0.8,
+    country: 'United States',
+    drinking_window_start: 2024,
+    drinking_window_end: 2038,
+  };
+}
+
 describe('VespaSearchIndex', () => {
   describe('YQL injection prevention in fetchWithHitSummary', () => {
     it('escapes double-quotes in entity IDs to prevent YQL injection', async () => {
@@ -120,6 +144,77 @@ describe('VespaSearchIndex', () => {
       expect(result).toHaveLength(0);
       expect(client.query).not.toHaveBeenCalled();
     });
+  });
+
+  it('hydrates getDocuments by public entity_id even when the Vespa doc id differs', async () => {
+    const publicEntityId = createEntityId('wine-ce-public-entity-id');
+    const client = {
+      get: vi.fn().mockResolvedValue(null),
+      query: vi.fn().mockResolvedValue({
+        root: {
+          id: 'root',
+          relevance: 1,
+          children: [
+            {
+              id: 'id:wine:wine_entity::internal-doc-id-123',
+              relevance: 1,
+              source: 'content',
+              fields: makeDocumentFields(publicEntityId),
+            },
+          ],
+        },
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    const docs = await index.getDocuments([publicEntityId]);
+
+    expect(docs.get(publicEntityId)?.canonicalLabel).toBe(`Label for ${publicEntityId}`);
+    expect(client.get).not.toHaveBeenCalled();
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query.mock.calls[0]?.[0]).toContain(`entity_id in ("${publicEntityId}")`);
+  });
+
+  it('hydrates drinking-window projection by public entity_id without full document fields', async () => {
+    const publicEntityId = createEntityId('wine-ce-drinking-window-only');
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        root: {
+          id: 'root',
+          relevance: 1,
+          children: [
+            {
+              id: 'id:wine:wine_entity::internal-doc-id-456',
+              relevance: 1,
+              source: 'content',
+              fields: {
+                entity_id: publicEntityId,
+                canonical_label: 'Opus One 2018',
+                drinking_window_start: 2024,
+                drinking_window_end: 2038,
+                drinking_window_model_version: 'dw-v1',
+              },
+            },
+          ],
+        },
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    const docs = await index.getDrinkingWindowDocuments([publicEntityId]);
+
+    expect(docs.get(publicEntityId)).toEqual({
+      entityId: publicEntityId,
+      canonicalLabel: 'Opus One 2018',
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2038,
+      drinkingWindowModelVersion: 'dw-v1',
+    });
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query.mock.calls[0]?.[0]).toContain(
+      'select entity_id, canonical_label, drinking_window_start, drinking_window_end, drinking_window_model_version',
+    );
+    expect(client.query.mock.calls[0]?.[1]).toEqual({ 'presentation.summary': 'full' });
   });
 
   it('maps hit summaries through the shared retrieval summary transport', async () => {

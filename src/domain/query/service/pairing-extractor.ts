@@ -148,23 +148,6 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
 };
 
 /**
- * Extracts a pairing tag from a query string.
- * Returns the first matching tag or null if no match found.
- *
- * @param query - Normalized query string
- * @returns A single PairingTag or null
- */
-export function extractPairingConstraint(query: string): PairingTag | null {
-  for (const tag of PAIRING_TAXONOMY) {
-    const patterns = PAIRING_PATTERNS[tag];
-    if (patterns.some((p) => p.test(query))) {
-      return tag;
-    }
-  }
-  return null;
-}
-
-/**
  * Extracts all matching pairing tags from a query.
  * Useful for queries like "wines for beef and mushrooms".
  *

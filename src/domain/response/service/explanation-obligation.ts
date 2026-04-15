@@ -24,7 +24,7 @@
 
 import type { QueryFamily } from '../../retrieval/service/channel-mix-policy.js';
 
-export interface ExplanationObligation {
+interface ExplanationObligation {
   /** At least one EvidenceItem must be present in results for this family. */
   readonly requiresEvidenceItems: boolean;
 
@@ -53,7 +53,7 @@ export interface ExplanationObligation {
  * Every QUERY_FAMILY_LABELS entry must be represented here.
  * Extend when a new label is added to query-observability-vocab.ts.
  */
-export const EXPLANATION_OBLIGATION_MAP: Record<QueryFamily, ExplanationObligation> = {
+const EXPLANATION_OBLIGATION_MAP: Record<QueryFamily, ExplanationObligation> = {
   // Exact entity lookup — high confidence, minimal explanation needed
   entity_exact: {
     requiresEvidenceItems: false,

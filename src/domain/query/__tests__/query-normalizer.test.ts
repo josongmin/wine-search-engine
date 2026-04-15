@@ -38,6 +38,14 @@ describe('QueryNormalizer', () => {
     expect(views.lookupVariants).toContain('moet chandon');
   });
 
+  it('applies Korean typo correction before transliteration lookup', () => {
+    const views = normalizer.normalize('보졸레누보');
+
+    expect(views.punctuationStripped).toBe('보졸레 누보');
+    expect(views.transliterated).toBe('beaujolais nouveau');
+    expect(views.lookupVariants).toContain('beaujolais nouveau');
+  });
+
   it('keeps empty queries empty across derived views', () => {
     const views = normalizer.normalize('');
 

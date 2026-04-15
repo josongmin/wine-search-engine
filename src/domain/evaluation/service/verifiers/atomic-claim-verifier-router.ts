@@ -47,7 +47,7 @@ const VERIFIER_REGISTRY: Readonly<Record<AtomicClaimType, AtomicClaimVerifier>> 
 /** Resolve the verifier for a given atomic claim type. Throws on
  *  unknown type so the schema refine / router branch-coverage
  *  regression catches drift. */
-export function resolveAtomicClaimVerifier(type: AtomicClaimType): AtomicClaimVerifier {
+function resolveAtomicClaimVerifier(type: AtomicClaimType): AtomicClaimVerifier {
   return VERIFIER_REGISTRY[type];
 }
 

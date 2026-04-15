@@ -34,6 +34,10 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     ).rejects.toMatchObject<PolicyBlockedError>({
       code: POLICY_BLOCKED_CODE,
       message: POLICY_BLOCKED_MESSAGE,
+      rejection: {
+        layer: 'LAYER_1_BLOCKED',
+        reason: expect.any(String),
+      },
     });
   });
 
@@ -141,6 +145,10 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     await expect(useCase.execute({ query: 'find Bordeaux wines' })).rejects.toMatchObject<DomainError>({
       code: 'POLICY_BLOCKED',
       message: 'Query blocked by security policy.',
+      rejection: {
+        layer: 'LAYER_2_BLOCKED',
+        reason: 'LLM_JUDGE_REJECTION',
+      },
     });
     expect(queryPlanner.plan).not.toHaveBeenCalled();
   });

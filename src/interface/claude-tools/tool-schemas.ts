@@ -74,8 +74,8 @@ export const WINE_SEARCH_TOOLS: readonly ClaudeToolDefinition[] = [
         },
         color: {
           type: 'string',
-          enum: ['red', 'white', 'rosé', 'sparkling'],
-          description: 'Optional wine color filter',
+          enum: ['red', 'white', 'rosé', 'sparkling', 'both'],
+          description: 'Optional wine color filter. Use "both" when red and white are both acceptable.',
         },
       },
       required: ['food'],

@@ -22,7 +22,7 @@
  *     LLM-backed `reformulate` branch in production traffic.
  */
 
-export type RetrievalCriticCounterKind =
+type RetrievalCriticCounterKind =
   | 'RETRIEVAL_CRITIC_RETRY_COUNT'
   | 'RETRIEVAL_CRITIC_RETRIES_EXHAUSTED_COUNT'
   | 'RETRIEVAL_CRITIC_REWRITE_RELAX_COUNT'
@@ -39,7 +39,7 @@ const COUNTER_KINDS: readonly RetrievalCriticCounterKind[] = [
   'RETRIEVAL_CRITIC_REWRITE_REFORMULATE_COUNT',
 ] as const;
 
-export type CriticRewriteTypeForCounter =
+type CriticRewriteTypeForCounter =
   | 'relax'
   | 'decompose'
   | 'expand_synonym'
@@ -54,7 +54,7 @@ const REWRITE_TYPE_TO_COUNTER: Readonly<
   reformulate: 'RETRIEVAL_CRITIC_REWRITE_REFORMULATE_COUNT',
 };
 
-export interface RetrievalCriticCounter {
+interface RetrievalCriticCounter {
   increment(kind: RetrievalCriticCounterKind): void;
   incrementRewrite(rewriteType: CriticRewriteTypeForCounter): void;
   incrementRetriesExhausted(): void;
@@ -68,7 +68,7 @@ function createZeroedCounts(): Record<RetrievalCriticCounterKind, number> {
   return out;
 }
 
-export function createRetrievalCriticCounter(): RetrievalCriticCounter {
+function createRetrievalCriticCounter(): RetrievalCriticCounter {
   const counts = new Map<RetrievalCriticCounterKind, number>(
     COUNTER_KINDS.map((k) => [k, 0] as const),
   );

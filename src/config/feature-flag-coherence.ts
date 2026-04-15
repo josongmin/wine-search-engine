@@ -68,13 +68,14 @@ export class FlagCoherenceError extends Error {
 /**
  * Parse an env record into a {@link FeatureFlagSnapshot}.
  *
- * Semantics mirror the historical per-flag inline reads so that this
- * validator can never disagree with the downstream consumers:
- *  - `CONSTRAINT_GRAPH_EMIT` defaults to **on**. Only the literal string
- *    `'false'` disables it. This matches
- *    `isConstraintGraphEmitEnabled()` in constraint-graph-flags.ts.
- *  - Every other flag defaults to **off**. Only the literal string
- *    `'true'` enables it.
+ * Semantics mirror the downstream inline readers so that this
+ * validator can never disagree with the consumers:
+ *  - `CONSTRAINT_GRAPH_EMIT`, `BUNDLE_SELECTOR_ENABLED`, and
+ *    `RETRIEVAL_EXECUTOR_CRITIC` default to **on**. Only the literal
+ *    string `'false'` disables them.
+ *  - `CONSTRAINT_GRAPH_TOPOLOGY_LLM`, `GCE_SHADOW_EMIT`, and
+ *    `GCE_PRIMARY` default to **off**. Only the literal string `'true'`
+ *    enables them.
  */
 export function snapshotFeatureFlagsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -82,8 +83,8 @@ export function snapshotFeatureFlagsFromEnv(
   return {
     constraintGraphEmit: env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
     constraintGraphTopologyLlm: env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true',
-    bundleSelectorEnabled: env['BUNDLE_SELECTOR_ENABLED'] === 'true',
-    retrievalExecutorCritic: env['RETRIEVAL_EXECUTOR_CRITIC'] === 'true',
+    bundleSelectorEnabled: env['BUNDLE_SELECTOR_ENABLED'] !== 'false',
+    retrievalExecutorCritic: env['RETRIEVAL_EXECUTOR_CRITIC'] !== 'false',
     gceShadowEmit: env['GCE_SHADOW_EMIT'] === 'true',
     gcePrimary: env['GCE_PRIMARY'] === 'true',
   };
@@ -154,13 +155,4 @@ export function validateFeatureFlagsAtStartup(
   }
   validateFeatureFlagCoherence(snapshotFeatureFlagsFromEnv(env));
   cachedValidationEnvRef = env;
-}
-
-/**
- * Test-only hook: clear the cached validation marker so the next call to
- * {@link validateFeatureFlagsAtStartup} re-runs the full validation.
- * Production code must not call this.
- */
-export function resetFeatureFlagCoherenceCacheForTests(): void {
-  cachedValidationEnvRef = undefined;
 }

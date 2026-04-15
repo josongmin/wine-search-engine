@@ -192,7 +192,7 @@ const DETERMINISTIC_RULES: readonly InsightRule[] = [
 /**
  * Run all deterministic insight rules and return formatted output lines.
  */
-export function generateDeterministicInsights(report: BenchmarkReportSlice): readonly string[] {
+function generateDeterministicInsights(report: BenchmarkReportSlice): readonly string[] {
   const lines: string[] = [];
   for (const rule of DETERMINISTIC_RULES) {
     const result = rule.check(report);
@@ -231,7 +231,7 @@ Output format:
  * Generate LLM-powered contextual insights from benchmark metrics.
  * Returns null if LLM is unavailable or call fails.
  */
-export async function generateLlmInsights(
+async function generateLlmInsights(
   report: BenchmarkReportSlice,
   llm: ChatLlmPort,
 ): Promise<string | null> {

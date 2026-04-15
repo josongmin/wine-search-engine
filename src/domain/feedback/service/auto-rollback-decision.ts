@@ -13,13 +13,6 @@
 
 import type { QualitySnapshot } from './online-quality-monitor.js';
 
-/** Default: a 10% relative CTR drop is meaningful enough to roll back. */
-export const DEFAULT_CTR_DROP_PCT = 0.10;
-/** Default: a 5 percentage-point absolute rise in zero-result rate is bad. */
-export const DEFAULT_ZERO_RESULT_RISE_ABS = 0.05;
-/** Default: fewer than 1K impressions = not enough signal to act. */
-export const DEFAULT_MIN_SAMPLES = 1000;
-
 export interface RollbackThresholds {
   readonly ctrDropPct: number;
   readonly zeroResultRiseAbs: number;

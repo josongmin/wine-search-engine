@@ -5,6 +5,7 @@ import {
 } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
 const COMPACT_RE = /[^\p{L}\p{N}]+/gu;
@@ -50,6 +51,7 @@ const KOREAN_TRANSLITERATION_RULES: readonly [RegExp, string][] = [
   [/샤토\s*마고/gu, 'chateau margaux'],
   [/샤또\s*마고/gu, 'chateau margaux'],
   [/샤또\s*마르고/gu, 'chateau margaux'],
+  [/보졸레\s*누보/gu, 'beaujolais nouveau'],
   [/모에\s*샹동/gu, 'moet chandon'],
   [/모엣\s*샹동/gu, 'moet chandon'],
   [/오퍼스\s*원/gu, 'opus one'],
@@ -62,6 +64,8 @@ const KOREAN_TRANSLITERATION_COMPONENT_RULES: readonly [RegExp, string][] = [
   [/샤토/gu, 'chateau'],
   [/샤또/gu, 'chateau'],
   [/오브리옹/gu, 'haut brion'],
+  [/보졸레/gu, 'beaujolais'],
+  [/누보/gu, 'nouveau'],
   [/페트뤼스/gu, 'petrus'],
   [/페트루스/gu, 'petrus'],
   [/모엣/gu, 'moet'],
@@ -226,7 +230,8 @@ const buildReorderedVariants = (value: string): readonly string[] => {
 export class QueryNormalizer {
   normalize(query: string): NormalizedQueryViews {
     const raw = query;
-    const strict = collapseWhitespace(normalizeUnicodeWithHomoglyphs(query)).toLowerCase();
+    const typoCorrected = correctKoreanWineTypos(query);
+    const strict = collapseWhitespace(normalizeUnicodeWithHomoglyphs(typoCorrected)).toLowerCase();
     const accentless = stripAccents(strict);
     const collapsedWhitespace = collapseWhitespace(accentless);
     const punctuationStripped = stripPunctuation(accentless);

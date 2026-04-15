@@ -14,9 +14,6 @@
 /** Vendor media type for human/UX-oriented responses. */
 export const MEDIA_TYPE_HUMAN = 'application/vnd.cuvee.human+json';
 
-/** Standard JSON media type — engine response (default). */
-export const MEDIA_TYPE_JSON = 'application/json';
-
 /**
  * Determines whether the client is requesting a human-oriented response.
  *

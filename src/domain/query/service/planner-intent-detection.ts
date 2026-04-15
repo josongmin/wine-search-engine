@@ -30,6 +30,35 @@ const PAIRING_KEYWORDS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:어울리|곁들|맞는|페어링)(?=$|[^\p{L}\p{N}])/u,
   /(?<!\p{L})(?<!\p{N})(?:steak|fish|cheese|chicken|pasta|pizza|beef|pork|seafood)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:스테이크|생선|치즈|치킨|파스타|피자|소고기|돼지고기|해산물)(?=$|[^\p{L}\p{N}])/u,
+  /(?<!\p{L})(?<!\p{N})(?:gift|anniversary|date\s+night|birthday|celebration|party|housewarming|dinner)(?!\p{L})(?!\p{N})/iu,
+  /(?:선물(?:용|할|하려|하고)?|(?:결혼)?기념일|데이트|생일|축하|파티|집들이|디너)/u,
+] as const;
+
+const OCCASION_SUBSTRINGS: readonly string[] = [
+  '선물',
+  '기념일',
+  '생일',
+  '축하',
+  '파티',
+  '집들이',
+  '소개팅',
+  '데이트',
+  '디너',
+  '힐링',
+] as const;
+
+/** Exact-entity metadata questions should stay on the entity route.
+ * These phrases ask about a known wine's properties (price, drinkability,
+ * release/availability) rather than requesting discovery/filtering. */
+const DRINKABILITY_KEYWORDS: readonly RegExp[] = [
+  /(?<!\p{L})(?<!\p{N})(?:drinkability|drinking\s+window|when\s+to\s+drink)(?!\p{L})(?!\p{N})/iu,
+  /(?:^|[^\p{L}\p{N}])(?:마시기\s*좋(?:아|은|을|을까|을지)?|마실\s*시기|음용\s*시기|피크)(?=$|[^\p{L}\p{N}])/u,
+] as const;
+
+const ENTITY_METADATA_KEYWORDS: readonly RegExp[] = [
+  /(?<!\p{L})(?<!\p{N})(?:price|cost|worth|release(?:d)?|availability|available|in\s+stock)(?!\p{L})(?!\p{N})/iu,
+  /(?:^|[^\p{L}\p{N}])(?:가격|얼마|시세|출시|나왔어|나왔나|재고|구할\s*수\s*있|살\s*수\s*있)(?=$|[^\p{L}\p{N}])/u,
+  ...DRINKABILITY_KEYWORDS,
 ] as const;
 
 /** Constraint keywords indicating structured filtering.
@@ -54,6 +83,14 @@ export type IntentDetectionAnchorExtractor = Pick<
   AnchorExtractor,
   'hasComparisonMarkers' | 'hasKoreanMixedQueryMarkers'
 >;
+
+export function hasDrinkabilityKeyword(normalizedQuery: string): boolean {
+  return DRINKABILITY_KEYWORDS.some((re) => re.test(normalizedQuery));
+}
+
+export function hasEntityMetadataKeyword(normalizedQuery: string): boolean {
+  return ENTITY_METADATA_KEYWORDS.some((re) => re.test(normalizedQuery));
+}
 
 /**
  * Detects the primary intent based on anchors, patterns, and keywords.
@@ -89,10 +126,16 @@ export function detectQueryIntent(
   );
   const hasPairingKeyword = PAIRING_KEYWORDS.some((re) =>
     re.test(normalizedQuery),
-  );
+  ) || OCCASION_SUBSTRINGS.some((token) => normalizedQuery.includes(token));
+  const hasEntityMetadataSignal = hasEntityMetadataKeyword(normalizedQuery);
   const hasConstraintKeyword = CONSTRAINT_KEYWORDS.some((re) =>
     re.test(normalizedQuery),
   );
+  const strongAnchorEntityCount = new Set(
+    anchors
+      .filter((a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE)
+      .flatMap((a) => a.candidateEntityIds),
+  ).size;
 
   if (hasComparisonMarker && hasAnyAnchor) {
     return 'comparison_search';
@@ -107,6 +150,10 @@ export function detectQueryIntent(
 
   if (hasRelativeAnchorQuery) {
     return 'mixed_query';
+  }
+
+  if (hasStrongAnchor && hasEntityMetadataSignal) {
+    return strongAnchorEntityCount > 1 ? 'facet_search' : 'entity_exact';
   }
 
   if (hasStrongAnchor && hasConstraintKeyword) {
@@ -132,6 +179,10 @@ export function detectQueryIntent(
   }
 
   if (hasWeakAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
+    return 'entity_fuzzy';
+  }
+
+  if (hasWeakAnchor && hasEntityMetadataSignal) {
     return 'entity_fuzzy';
   }
 

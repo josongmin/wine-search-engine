@@ -47,7 +47,7 @@ import type {
  * evidence (any verdict divergence is then due to pipeline semantics,
  * not input drift).
  */
-export const BOOTSTRAP_EVIDENCE_RECORDS: readonly EvidenceRecord[] = Object.freeze([
+const BOOTSTRAP_EVIDENCE_RECORDS: readonly EvidenceRecord[] = Object.freeze([
   {
     entity_id: 'opus-one-2018',
     canonical_label: 'Opus One 2018',
@@ -205,7 +205,7 @@ export const BOOTSTRAP_EVIDENCE_RECORDS: readonly EvidenceRecord[] = Object.free
 /** Flattened prose of the evidence records. Passed to verifiers that
  *  take `evidenceContext: string` (LLM NLI verifiers build their prompt
  *  from this buffer). */
-export function buildEvidenceContext(
+function buildEvidenceContext(
   records: readonly EvidenceRecord[],
 ): string {
   return records
@@ -235,7 +235,7 @@ export function buildEvidenceContext(
  * `PARTIAL` token so both the new and legacy paths see the same
  * deterministic verdict. This keeps the bootstrap numbers replayable.
  */
-export class CannedLlmPort implements ChatLlmPort {
+class CannedLlmPort implements ChatLlmPort {
   private readonly entailedPatterns: readonly RegExp[];
 
   constructor(entailedPatterns: readonly RegExp[]) {
@@ -301,7 +301,7 @@ export class CannedLlmPort implements ChatLlmPort {
 /** Default canned-entailment patterns for the bootstrap set. Picks up
  *  pairing and comparative claims that the bootstrap expects to land
  *  on the `entailed` verdict. */
-export const DEFAULT_ENTAILED_PATTERNS: readonly RegExp[] = Object.freeze([
+const DEFAULT_ENTAILED_PATTERNS: readonly RegExp[] = Object.freeze([
   /pairs?\s+with/iu,
   /pairs?\s+well\s+with/iu,
   /more\s+powerful\s+than/iu,

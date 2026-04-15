@@ -5,7 +5,7 @@ import type { HttpRouteContract } from './route-contracts.js';
 import { deepKeysToSnake } from '../middleware/snake-case-hook.js';
 import { getRequestId } from '../request-id.js';
 
-export function validateContractResponse<T>(
+function validateContractResponse<T>(
   request: FastifyRequest,
   schema: z.ZodType<T>,
   payload: unknown,

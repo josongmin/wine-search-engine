@@ -18,7 +18,7 @@ import type {
 import { buildAdaptiveToolExecutor, buildEvalRunner } from './container-aux-features.js';
 import { buildUseCaseContainerServices } from './container-usecases.js';
 
-export interface FeatureContainerServices {
+interface FeatureContainerServices {
   readonly searchUseCase: SearchExecutorPort;
   readonly replayUseCase: ReplayUseCasePort;
   readonly interpretUseCase: InterpretUseCasePort;

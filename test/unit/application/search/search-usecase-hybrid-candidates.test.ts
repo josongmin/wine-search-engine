@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { retrieveHybridCandidatesForPlan } from '../../../../src/application/search/search-usecase-hybrid-candidates.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
+import type { ConstraintGraph } from '../../../../src/domain/query/model/constraint-graph.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
@@ -101,6 +102,194 @@ function failedResolveResult(): EntityResolveResult {
       outcomeReasonCodes: [],
     },
     conformalSetSize: 0,
+  };
+}
+
+function scopedHybridGraph(): ConstraintGraph {
+  return {
+    graphSchemaVersion: 'constraint_graph_v1.1',
+    origin: 'hybrid',
+    rootNodeId: 'root',
+    nodes: [
+      { kind: 'group_and', nodeId: 'root', children: ['slot_region', 'scope_red', 'scope_white'] },
+      { kind: 'group_and', nodeId: 'scope_red', children: ['sq_red', 'slot_red'] },
+      { kind: 'group_and', nodeId: 'scope_white', children: ['sq_white', 'slot_white'] },
+      { kind: 'subquery', nodeId: 'sq_red', purpose: 'red_course', targetCardinality: 1 },
+      { kind: 'subquery', nodeId: 'sq_white', purpose: 'white_course', targetCardinality: 1 },
+      {
+        kind: 'slot',
+        nodeId: 'slot_region',
+        atomRef: '2',
+        attribute: 'region',
+        operator: '=',
+        value: 'Bordeaux',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_red',
+        atomRef: '0',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'red',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_white',
+        atomRef: '1',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'white',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+    ],
+    edges: [],
+    globalBudgets: {},
+    promptVersion: 'ctg_topology_v1',
+  };
+}
+
+function xorScopedHybridGraph(): ConstraintGraph {
+  return {
+    graphSchemaVersion: 'constraint_graph_v1.1',
+    origin: 'hybrid',
+    rootNodeId: 'root',
+    nodes: [
+      { kind: 'group_and', nodeId: 'root', children: ['slot_region', 'scope_pair', 'scope_white'] },
+      { kind: 'group_and', nodeId: 'scope_pair', children: ['sq_pair', 'type_choice'] },
+      { kind: 'group_xor', nodeId: 'type_choice', children: ['slot_red', 'slot_rose'] },
+      { kind: 'group_and', nodeId: 'scope_white', children: ['sq_white', 'slot_white'] },
+      { kind: 'subquery', nodeId: 'sq_pair', purpose: 'pair_course', targetCardinality: 1 },
+      { kind: 'subquery', nodeId: 'sq_white', purpose: 'white_course', targetCardinality: 1 },
+      {
+        kind: 'slot',
+        nodeId: 'slot_region',
+        atomRef: '0',
+        attribute: 'region',
+        operator: '=',
+        value: 'Bordeaux',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_red',
+        atomRef: '1',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'red',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_rose',
+        atomRef: '2',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'rose',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_white',
+        atomRef: '3',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'white',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+    ],
+    edges: [],
+    globalBudgets: {},
+  };
+}
+
+function pureDisjunctiveHybridGraph(): ConstraintGraph {
+  return {
+    graphSchemaVersion: 'constraint_graph_v1.1',
+    origin: 'hybrid',
+    rootNodeId: 'root',
+    nodes: [
+      { kind: 'group_and', nodeId: 'root', children: ['scope_pair', 'scope_white'] },
+      { kind: 'group_and', nodeId: 'scope_pair', children: ['sq_pair', 'type_choice'] },
+      { kind: 'group_xor', nodeId: 'type_choice', children: ['slot_red', 'slot_rose'] },
+      { kind: 'group_and', nodeId: 'scope_white', children: ['sq_white', 'slot_white'] },
+      { kind: 'subquery', nodeId: 'sq_pair', purpose: 'pair_course', targetCardinality: 1 },
+      { kind: 'subquery', nodeId: 'sq_white', purpose: 'white_course', targetCardinality: 1 },
+      {
+        kind: 'slot',
+        nodeId: 'slot_red',
+        atomRef: '1',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'red',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_rose',
+        atomRef: '2',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'rose',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+      {
+        kind: 'slot',
+        nodeId: 'slot_white',
+        atomRef: '3',
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'white',
+        sourceTier: 'hard',
+        sourceKind: 'explicit_utterance',
+        confidence: 1,
+      },
+    ],
+    edges: [],
+    globalBudgets: {},
+  };
+}
+
+function sharedBudgetHybridGraph(): ConstraintGraph {
+  return {
+    graphSchemaVersion: 'constraint_graph_v1.1',
+    origin: 'hybrid',
+    rootNodeId: 'root',
+    nodes: [
+      { kind: 'group_and', nodeId: 'root', children: ['sq_app', 'sq_main'] },
+      { kind: 'subquery', nodeId: 'sq_app', purpose: 'appetiser', targetCardinality: 1 },
+      { kind: 'subquery', nodeId: 'sq_main', purpose: 'main', targetCardinality: 1 },
+    ],
+    edges: [
+      {
+        kind: 'shares_budget',
+        from: 'sq_app',
+        to: 'sq_main',
+        resource: 'price_total',
+      },
+    ],
+    globalBudgets: {
+      priceTotal: { currency: 'KRW', max: 160_000 },
+    },
   };
 }
 
@@ -227,5 +416,315 @@ describe('retrieveHybridCandidatesForPlan', () => {
       anchorSignalTypes: [],
     });
     expect(result.routeDegradation).toBeUndefined();
+  });
+
+  it('fans generic hybrid retrieval out through a production subquery retriever when the graph carries explicit subquery-scoped slots', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        constraints: {
+          hard: [
+            {
+              attribute: 'region',
+              operator: '=',
+              value: 'Bordeaux',
+              source_phrase: 'bordeaux',
+              confidence: 1,
+            },
+            {
+              attribute: 'wine_type',
+              operator: '=',
+              value: 'red',
+              source_phrase: 'red',
+              confidence: 1,
+            },
+            {
+              attribute: 'wine_type',
+              operator: '=',
+              value: 'white',
+              source_phrase: 'white',
+              confidence: 1,
+            },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      });
+      const compiled = {
+        ...buildCompiled(plan, {
+          effectiveRetrievalMode: 'attribute_search',
+        }),
+        constraintGraph: scopedHybridGraph(),
+      } satisfies CompiledWineQuery;
+
+      const seenHardValues: string[][] = [];
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          const values = input.hardConstraints
+            .map((constraint) => `${constraint.attribute}:${String(constraint.value)}`)
+            .sort();
+          seenHardValues.push(values);
+          const suffix = values.find((value) => value.startsWith('wine_type:'))?.replace('wine_type:', '') ?? 'root';
+          return [
+            makeCandidate({
+              entityId: createEntityId(`wine-${suffix}`),
+              matchedConstraints: values.length > 0 ? ['wine_type', 'region'] : [],
+              matchedAtomRefs:
+                suffix === 'red'
+                  ? ['slot_red', 'slot_region']
+                  : suffix === 'white'
+                  ? ['slot_white', 'slot_region']
+                  : [],
+            }),
+          ];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        {
+          candidatePool: candidatePool as never,
+        },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(2);
+      expect(seenHardValues).toEqual([
+        ['region:Bordeaux', 'wine_type:red'],
+        ['region:Bordeaux', 'wine_type:white'],
+      ]);
+      expect(result.retrievalKind).toBe('generic_hybrid');
+      expect(result.candidates).toHaveLength(2);
+      expect(result.candidates.map((candidate) => String(candidate.entityId)).sort()).toEqual([
+        'wine-red',
+        'wine-white',
+      ]);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('preserves scoped XOR topology while only materialising conjunctively-required hard filters', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan();
+      const compiled = {
+        ...buildCompiled(plan),
+        constraintGraph: xorScopedHybridGraph(),
+      } satisfies CompiledWineQuery;
+
+      const seenInputs: Array<{
+        hardValues: string[];
+        graph: ConstraintGraph | undefined;
+      }> = [];
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          seenInputs.push({
+            hardValues: input.hardConstraints
+              .map((constraint) => `${constraint.attribute}:${String(constraint.value)}`)
+              .sort(),
+            graph: input.constraintGraph,
+          });
+          return [
+            makeCandidate({
+              entityId: createEntityId(`wine-${seenInputs.length}`),
+              matchedConstraints: ['region'],
+              matchedAtomRefs: ['slot_region'],
+            }),
+          ];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+      };
+
+      await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(2);
+      expect(seenInputs[0]?.hardValues).toEqual(['region:Bordeaux']);
+      expect(seenInputs[1]?.hardValues).toEqual(['region:Bordeaux', 'wine_type:white']);
+
+      const firstGraph = seenInputs[0]?.graph;
+      expect(firstGraph?.rootNodeId).toBe('root');
+      const xorNode = firstGraph?.nodes.find((node) => node.nodeId === 'type_choice');
+      expect(xorNode).toEqual({
+        kind: 'group_xor',
+        nodeId: 'type_choice',
+        children: ['slot_red', 'slot_rose'],
+      });
+      expect(firstGraph?.nodes.some((node) => node.nodeId === 'slot_white')).toBe(false);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('keeps pure disjunctive subqueries on the scoped graph path instead of falling back to base retrieval', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        constraints: {
+          hard: [
+            {
+              attribute: 'wine_type',
+              operator: '=',
+              value: 'red',
+              source_phrase: 'red',
+              confidence: 1,
+            },
+            {
+              attribute: 'wine_type',
+              operator: '=',
+              value: 'rose',
+              source_phrase: 'rose',
+              confidence: 1,
+            },
+            {
+              attribute: 'wine_type',
+              operator: '=',
+              value: 'white',
+              source_phrase: 'white',
+              confidence: 1,
+            },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      });
+      const compiled = {
+        ...buildCompiled(plan),
+        constraintGraph: pureDisjunctiveHybridGraph(),
+      } satisfies CompiledWineQuery;
+
+      const seenInputs: Array<{
+        hardValues: string[];
+        graph: ConstraintGraph | undefined;
+        lexicalQueries: readonly string[];
+      }> = [];
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          seenInputs.push({
+            hardValues: input.hardConstraints
+              .map((constraint) => `${constraint.attribute}:${String(constraint.value)}`)
+              .sort(),
+            graph: input.constraintGraph,
+            lexicalQueries: input.lexicalQueries,
+          });
+          return [makeCandidate({ entityId: createEntityId(`wine-${seenInputs.length}`) })];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+      };
+
+      await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(2);
+      expect(seenInputs[0]?.hardValues).toEqual([]);
+      expect(seenInputs[0]?.graph?.nodes.some((node) => node.nodeId === 'type_choice')).toBe(true);
+      expect(seenInputs[0]?.graph?.nodes.some((node) => node.nodeId === 'slot_white')).toBe(false);
+      expect(seenInputs[0]?.lexicalQueries).toContain('red');
+      expect(seenInputs[0]?.lexicalQueries).toContain('rose');
+      expect(seenInputs[1]?.hardValues).toEqual(['wine_type:white']);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('uses the default bundle pricer to choose the cheapest feasible shared-budget bundle', async () => {
+    const previousBundleFlag = process.env['BUNDLE_SELECTOR_ENABLED'];
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['BUNDLE_SELECTOR_ENABLED'] = 'true';
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan();
+      const compiled = {
+        ...buildCompiled(plan),
+        constraintGraph: sharedBudgetHybridGraph(),
+      } satisfies CompiledWineQuery;
+
+      let callCount = 0;
+      const candidatePool = {
+        execute: vi.fn(async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return [
+              makeCandidate({
+                entityId: createEntityId('app-expensive'),
+                priceUsd: 100,
+                fusionRrfTotal: 0.95,
+              }),
+              makeCandidate({
+                entityId: createEntityId('app-cheap'),
+                priceUsd: 50,
+                fusionRrfTotal: 0.6,
+              }),
+            ];
+          }
+          return [
+            makeCandidate({
+              entityId: createEntityId('main-expensive'),
+              priceUsd: 100,
+              fusionRrfTotal: 0.96,
+            }),
+            makeCandidate({
+              entityId: createEntityId('main-cheap'),
+              priceUsd: 50,
+              fusionRrfTotal: 0.59,
+            }),
+          ];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(result.retrievalKind).toBe('generic_hybrid');
+      expect(result.candidates.map((candidate) => String(candidate.entityId)).sort()).toEqual([
+        'app-cheap',
+        'main-cheap',
+      ]);
+      expect(result.routeDegradation?.degradationReasons ?? []).not.toContain(
+        'bundle_selector_fail_closed:budget_infeasible',
+      );
+    } finally {
+      if (previousBundleFlag === undefined) {
+        delete process.env['BUNDLE_SELECTOR_ENABLED'];
+      } else {
+        process.env['BUNDLE_SELECTOR_ENABLED'] = previousBundleFlag;
+      }
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
   });
 });

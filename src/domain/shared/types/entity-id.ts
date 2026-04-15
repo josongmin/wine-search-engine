@@ -54,13 +54,6 @@ export function createSourceRecordId(value: string): SourceRecordId {
   return value as SourceRecordId;
 }
 
-export function createDocumentId(value: string): DocumentId {
-  if (value.length === 0) {
-    throw new Error('DocumentId cannot be an empty string');
-  }
-  return value as DocumentId;
-}
-
 /**
  * Creates a new {@link CanonicalEntityId}, optionally from an existing string.
  * When no value is provided, generates an opaque id with prefix `nx-` (never the source-record namespace).
@@ -74,14 +67,6 @@ export function createEntityId(value?: string): CanonicalEntityId {
   }
   // nanoid() is URL-safe and does not use the forbidden `vivino-` public namespace; prefix keeps audits obvious.
   return createCanonicalEntityId(`nx-${nanoid()}`);
-}
-
-/**
- * Non-empty string guard (legacy). Does **not** assert ADR-007 namespace rules;
- * use {@link isCanonicalPublicEntityId} when rejecting source-style ids is required.
- */
-export function isEntityId(value: unknown): value is CanonicalEntityId {
-  return typeof value === 'string' && value.length > 0;
 }
 
 /** ADR-007: true when `value` is a non-empty string and not a forbidden public `vivino-` namespace id. */

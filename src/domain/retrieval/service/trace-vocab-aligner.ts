@@ -14,7 +14,7 @@ import type {
   CandidateProvenance,
 } from '../model/candidate-envelope.js';
 import type { EvalProvenanceSlice, ProvenanceChannel } from '../model/provenance.js';
-import { isProvenanceChannel, PROVENANCE_CHANNELS } from '../model/provenance.js';
+import { isProvenanceChannel } from '../model/provenance.js';
 import {
   preferCanonicalRetrievalChannelLabel,
   preferCanonicalRetrievalChannelLabels,
@@ -186,9 +186,3 @@ export function rankedResultsToEvalSlices(
   }
   return slices;
 }
-
-/**
- * All recognized canonical channel names (from provenance vocabulary).
- * Useful for log pipeline validation.
- */
-export const RECOGNIZED_CHANNELS: readonly ProvenanceChannel[] = PROVENANCE_CHANNELS;

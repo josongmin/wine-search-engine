@@ -1,14 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
 import { SNAPSHOT_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schema-version.js';
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
-import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import { canonicalJsonStringify } from '../../domain/shared/utils/canonical-json.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import type { SnapshotVersions } from './search.usecase.js';
-import type { SnapshotVersionContractV2 } from './snapshot-version-contract.js';
 
 const DEFAULT_POLICY_RULE_VERSION = '1.0.0';
 const DEFAULT_THRESHOLD_PROFILE_ID = 'default';
@@ -47,7 +45,7 @@ export function buildDecisionSnapshotId(snapshot: {
   ].join(':');
 }
 
-export interface ComparableDecisionSnapshot {
+interface ComparableDecisionSnapshot {
   readonly snapshot_id: DecisionSnapshot['snapshot_id'];
   readonly model_versions: DecisionSnapshot['model_versions'];
   readonly index_versions: DecisionSnapshot['index_versions'];
@@ -80,7 +78,7 @@ export function buildDecisionSnapshotFromRuntimeVersions(
   };
 }
 
-export function toComparableDecisionSnapshot(
+function toComparableDecisionSnapshot(
   snapshot: DecisionSnapshot,
 ): ComparableDecisionSnapshot {
   return {
@@ -122,37 +120,6 @@ export function readDecisionSnapshotFromSearchResponse(
     throw new Error('DecisionSnapshot missing from both meta and engineDecision');
   }
   return snapshot;
-}
-
-/**
- * E1-U6: Project CompiledWineQuery execution fields → SnapshotVersionContractV2.
- *
- * Field mapping (compiled → snapshot vocabulary):
- *   compiled.query.plannerVersion       → plannerVersion
- *   compiled.query.policyRuleVersion    → policyRuleVersion
- *   compiled.query.thresholdProfileId   → thresholdProfileId
- *   compiled.execution.effectiveRoute   → executionRoute
- *   compiled.execution.effectiveRetrievalMode → retrievalMode
- *
- * This is the authoritative projection spec for cache-key enrichment and
- * observability consumers that need route/mode in the snapshot contract.
- *
- * Activation guide (separate epic):
- *   1. Call this function in buildDecisionSnapshotFromPlan when compiled is available
- *   2. Pass result to buildDeterministicSnapshotIdV2 for enriched cache keys
- *   3. Update PgSnapshotStore.save() to persist V2 contract fields
- *   4. Update cache-service.ts QueryCacheKeyBuilder to include route/mode in key
- */
-export function buildSnapshotVersionContractV2FromCompiled(
-  compiled: CompiledWineQuery,
-): SnapshotVersionContractV2 {
-  return {
-    plannerVersion: compiled.query.plannerVersion,
-    policyRuleVersion: compiled.query.policyRuleVersion,
-    thresholdProfileId: compiled.query.thresholdProfileId,
-    executionRoute: compiled.execution.effectiveRoute,
-    retrievalMode: compiled.execution.effectiveRetrievalMode,
-  };
 }
 
 /**
