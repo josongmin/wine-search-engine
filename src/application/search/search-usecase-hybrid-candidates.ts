@@ -291,37 +291,28 @@ export async function retrieveHybridCandidatesForPlan(
           );
           if (candidates.length > 0) {
             const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
-            const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
-              ? buildMissingProvenanceObligations(
-                  compiled.execution.provenancePolicy,
-                  retrievalProvenanceCoverage,
-                )
-              : [];
+            const provenanceShortfall = buildMissingProvenanceObligations(
+              compiled.execution.provenancePolicy,
+              retrievalProvenanceCoverage,
+            );
             pipelineDebug(
               {
                 step: 'retrieval.producer_browse',
                 candidate_count: candidates.length,
-                ...(retrievalProvenanceCoverage !== undefined
-                  ? {
-                      retrieval_provenance_satisfied: provenanceShortfall.length === 0,
-                      retrieval_provenance_missing: provenanceShortfall,
-                    }
-                  : {}),
+                retrieval_provenance_satisfied: provenanceShortfall.length === 0,
+                retrieval_provenance_missing: provenanceShortfall,
               },
               'pipeline specialized retrieval',
             );
+            const routeDegradation = mergeRetrievalDegradation(degradationReasons, provenanceShortfall);
             return {
               candidates,
               effectiveRetrievalMode: effectiveMode,
               retrievalKind: 'specialized_hybrid',
               sparseExecuted: false,
               usedCompiledExecution,
-              ...(retrievalProvenanceCoverage !== undefined
-                ? { retrievalProvenanceCoverage }
-                : {}),
-              ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
-                ? { routeDegradation: mergeRetrievalDegradation(degradationReasons, provenanceShortfall) }
-                : {}),
+              retrievalProvenanceCoverage,
+              ...(routeDegradation !== undefined ? { routeDegradation } : {}),
               specializedRouteObservability: {
                 specializedRouteRequested: 'producer_browse',
                 specializedRouteExecuted: 'producer_browse',
@@ -362,37 +353,28 @@ export async function retrieveHybridCandidatesForPlan(
           );
           if (candidates.length > 0) {
             const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
-            const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
-              ? buildMissingProvenanceObligations(
-                  compiled.execution.provenancePolicy,
-                  retrievalProvenanceCoverage,
-                )
-              : [];
+            const provenanceShortfall = buildMissingProvenanceObligations(
+              compiled.execution.provenancePolicy,
+              retrievalProvenanceCoverage,
+            );
             pipelineDebug(
               {
                 step: 'retrieval.region_browse',
                 candidate_count: candidates.length,
-                ...(retrievalProvenanceCoverage !== undefined
-                  ? {
-                      retrieval_provenance_satisfied: provenanceShortfall.length === 0,
-                      retrieval_provenance_missing: provenanceShortfall,
-                    }
-                  : {}),
+                retrieval_provenance_satisfied: provenanceShortfall.length === 0,
+                retrieval_provenance_missing: provenanceShortfall,
               },
               'pipeline specialized retrieval',
             );
+            const routeDegradation = mergeRetrievalDegradation(degradationReasons, provenanceShortfall);
             return {
               candidates,
               effectiveRetrievalMode: effectiveMode,
               retrievalKind: 'specialized_hybrid',
               sparseExecuted: false,
               usedCompiledExecution,
-              ...(retrievalProvenanceCoverage !== undefined
-                ? { retrievalProvenanceCoverage }
-                : {}),
-              ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
-                ? { routeDegradation: mergeRetrievalDegradation(degradationReasons, provenanceShortfall) }
-                : {}),
+              retrievalProvenanceCoverage,
+              ...(routeDegradation !== undefined ? { routeDegradation } : {}),
               specializedRouteObservability: {
                 specializedRouteRequested: 'region_browse',
                 specializedRouteExecuted: 'region_browse',
@@ -434,37 +416,28 @@ export async function retrieveHybridCandidatesForPlan(
             );
             if (candidates.length > 0) {
               const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
-              const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
-                ? buildMissingProvenanceObligations(
-                    compiled.execution.provenancePolicy,
-                    retrievalProvenanceCoverage,
-                  )
-                : [];
+              const provenanceShortfall = buildMissingProvenanceObligations(
+                compiled.execution.provenancePolicy,
+                retrievalProvenanceCoverage,
+              );
               pipelineDebug(
                 {
                   step: 'retrieval.compare_candidates',
                   candidate_count: candidates.length,
-                  ...(retrievalProvenanceCoverage !== undefined
-                    ? {
-                        retrieval_provenance_satisfied: provenanceShortfall.length === 0,
-                        retrieval_provenance_missing: provenanceShortfall,
-                      }
-                    : {}),
+                  retrieval_provenance_satisfied: provenanceShortfall.length === 0,
+                  retrieval_provenance_missing: provenanceShortfall,
                 },
                 'pipeline specialized retrieval',
               );
+              const routeDegradation = mergeRetrievalDegradation(degradationReasons, provenanceShortfall);
               return {
                 candidates,
                 effectiveRetrievalMode: effectiveMode,
                 retrievalKind: 'specialized_hybrid',
                 sparseExecuted: false,
                 usedCompiledExecution,
-                ...(retrievalProvenanceCoverage !== undefined
-                  ? { retrievalProvenanceCoverage }
-                  : {}),
-                ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
-                  ? { routeDegradation: mergeRetrievalDegradation(degradationReasons, provenanceShortfall) }
-                  : {}),
+                retrievalProvenanceCoverage,
+                ...(routeDegradation !== undefined ? { routeDegradation } : {}),
                 specializedRouteObservability: {
                   specializedRouteRequested: 'compare_candidates',
                   specializedRouteExecuted: 'compare_candidates',
@@ -517,12 +490,10 @@ export async function retrieveHybridCandidatesForPlan(
   const retrievalDegradationSignals = ports.candidatePool.getLastDegradationSignals?.() ?? [];
   const retrievalInternalReasons = retrievalSignalsToReasons(retrievalDegradationSignals);
   const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
-  const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
-    ? buildMissingProvenanceObligations(
-        compiled.execution.provenancePolicy,
-        retrievalProvenanceCoverage,
-      )
-    : [];
+  const provenanceShortfall = buildMissingProvenanceObligations(
+    compiled.execution.provenancePolicy,
+    retrievalProvenanceCoverage,
+  );
   const mergedDegradation = mergeRetrievalDegradation(
     degradationReasons,
     provenanceShortfall,
@@ -534,7 +505,7 @@ export async function retrieveHybridCandidatesForPlan(
     retrievalKind: 'generic_hybrid',
     sparseExecuted: true,
     usedCompiledExecution,
-    ...(retrievalProvenanceCoverage !== undefined ? { retrievalProvenanceCoverage } : {}),
+    retrievalProvenanceCoverage,
     ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
     ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
       ? { hardFilterDropLog }
