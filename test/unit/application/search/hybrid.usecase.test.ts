@@ -391,6 +391,8 @@ describe('HybridUseCase', () => {
       'Ridge Vineyards',
       plan.constraints,
       20,
+      // ADR-014 Phase 1b.3b: compiled.constraintGraph threaded through.
+      undefined,
     );
     expect(candidatePool.generate).not.toHaveBeenCalled();
   });
@@ -542,6 +544,8 @@ describe('HybridUseCase', () => {
       anchorEntityId,
       plan.constraints,
       20,
+      // ADR-014 Phase 1b.3b: compiled.constraintGraph threaded through.
+      undefined,
     );
     expect(candidatePool.generate).not.toHaveBeenCalled();
   });
@@ -584,6 +588,8 @@ describe('HybridUseCase', () => {
       anchorEntityId,
       plan.constraints,
       20,
+      // ADR-014 Phase 1b.3b: compiled.constraintGraph threaded through.
+      undefined,
     );
     expect(candidatePool.generate).toHaveBeenCalledWith(
       expect.objectContaining({

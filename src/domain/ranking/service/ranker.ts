@@ -1,5 +1,6 @@
 import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
 import { liftBundleToAtoms } from '../../shared/types/index.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
@@ -107,6 +108,17 @@ export interface ScoredEntry {
   readonly matchedConstraints: readonly string[];
   readonly unmetConstraints: readonly string[];
   readonly inferredConstraints: readonly string[];
+  /**
+   * ADR-014 Phase 1b.3b: graph slot-node IDs the candidate matched.
+   * Absent when the compiled query carried no graph — the flat
+   * `matchedConstraints` above is the legacy surface in that case.
+   */
+  readonly matchedAtomRefs?: readonly string[] | undefined;
+  /**
+   * ADR-014 Phase 1b.3b: graph slot-node IDs required-but-unmet under
+   * graph semantics. Absent when no graph is present.
+   */
+  readonly unmetAtomRefs?: readonly string[] | undefined;
   readonly retrievalProvenance?: CandidateProvenance | undefined;
   /**
    * E1-T3: sparse (BM25) rank from retrieval — used as tie-break stage after
@@ -625,10 +637,13 @@ function buildQueryConstraintContext(input: RankingInput): QueryConstraintContex
 function buildConstraintState(
   candidate: HybridCandidate,
   queryCtx: QueryConstraintContext,
+  graph?: ConstraintGraph  ,
 ): {
   readonly matchedConstraints: readonly string[];
   readonly unmetConstraints: readonly string[];
   readonly inferredConstraints: readonly string[];
+  readonly matchedAtomRefs?: readonly string[] | undefined;
+  readonly unmetAtomRefs?: readonly string[] | undefined;
 } {
   const matchedSet = new Set(candidate.matchedConstraints);
 
@@ -655,6 +670,43 @@ function buildConstraintState(
   const matchedConstraints: string[] = [];
   for (const attribute of candidate.matchedConstraints) {
     if (tracked.has(attribute)) matchedConstraints.push(attribute);
+  }
+
+  // ADR-014 Phase 1b.3b: prefer annotator-provided `matchedAtomRefs` /
+  // `unmetAtomRefs` when the candidate already carries them (batch
+  // annotator path); otherwise reconstruct from the graph nodes here so
+  // unit tests and non-annotated inputs still see the graph-derived slot
+  // IDs. Absent graph → keep the flat legacy shape unchanged.
+  if (graph !== undefined) {
+    if (
+      candidate.matchedAtomRefs !== undefined &&
+      candidate.unmetAtomRefs !== undefined
+    ) {
+      return {
+        matchedConstraints,
+        unmetConstraints,
+        inferredConstraints: queryCtx.inferredConstraints,
+        matchedAtomRefs: candidate.matchedAtomRefs,
+        unmetAtomRefs: candidate.unmetAtomRefs,
+      };
+    }
+    const matchedAtomRefs: string[] = [];
+    const unmetAtomRefs: string[] = [];
+    for (const node of graph.nodes) {
+      if (node.kind !== 'slot') continue;
+      if (matchedSet.has(node.attribute)) {
+        matchedAtomRefs.push(node.nodeId);
+      } else {
+        unmetAtomRefs.push(node.nodeId);
+      }
+    }
+    return {
+      matchedConstraints,
+      unmetConstraints,
+      inferredConstraints: queryCtx.inferredConstraints,
+      matchedAtomRefs,
+      unmetAtomRefs,
+    };
   }
 
   return {
@@ -812,6 +864,12 @@ export class Ranker {
     // are gated out (-Infinity) rather than silently served on zeroed state.
     const rankingInvalidSignalReasons = new Set<string>();
 
+    // ADR-014 Phase 1b.3b: thread the constraint graph (when the compiled
+    // query carries one) into the signal-computer so hard/soft gate
+    // predicates evaluate under AND / OR / XOR root-satisfied semantics.
+    // Absent graph → flat AND-all path byte-identical to pre-PR5.
+    const constraintGraph = input.compiled.constraintGraph;
+
     for (const candidate of candidates) {
       const componentScores = this.signalComputer.computeAll(
         candidate,
@@ -821,8 +879,9 @@ export class Ranker {
         input.retrievalPlan,
         referenceYear,
         queryContainsHangul,
+        constraintGraph,
       );
-      const constraintState = buildConstraintState(candidate, queryConstraintCtx);
+      const constraintState = buildConstraintState(candidate, queryConstraintCtx, constraintGraph);
 
       // Step 3: Aggregate signals into final score.
       // T5.3: Adjust weights based on which retrieval channels contributed
@@ -872,6 +931,14 @@ export class Ranker {
         matchedConstraints: constraintState.matchedConstraints,
         unmetConstraints: constraintState.unmetConstraints,
         inferredConstraints: constraintState.inferredConstraints,
+        // ADR-014: conditional spread preserves exactOptionalPropertyTypes
+        // semantics — absent graph → fields absent entirely.
+        ...(constraintState.matchedAtomRefs !== undefined
+          ? { matchedAtomRefs: constraintState.matchedAtomRefs }
+          : {}),
+        ...(constraintState.unmetAtomRefs !== undefined
+          ? { unmetAtomRefs: constraintState.unmetAtomRefs }
+          : {}),
         componentScores,
         finalScore,
       });
@@ -1037,6 +1104,13 @@ export class Ranker {
         matchedConstraints: entry.matchedConstraints,
         unmetConstraints: entry.unmetConstraints,
         inferredConstraints: entry.inferredConstraints,
+        // ADR-014 Phase 1b.3b: propagate graph-derived slot IDs when present.
+        ...(entry.matchedAtomRefs !== undefined
+          ? { matchedAtomRefs: entry.matchedAtomRefs }
+          : {}),
+        ...(entry.unmetAtomRefs !== undefined
+          ? { unmetAtomRefs: entry.unmetAtomRefs }
+          : {}),
         coarsePruneMeta: {
           preGateScore: entry.finalScore,
           hardConstraintPassed: entry.componentScores.hardConstraintPass,

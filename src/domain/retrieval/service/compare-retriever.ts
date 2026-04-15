@@ -1,6 +1,7 @@
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ConstraintBundle } from '../../shared/types/index.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { dedupeSparseHitsByEntity } from './browse-diversity.js';
@@ -8,6 +9,7 @@ import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint
 import { ConstraintFilter } from './constraint-filter.js';
 import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
+import { extractHardConstraintsFromGraph } from '../../query/service/graph-slot-constraints.js';
 
 /** Compatibility alias for older callers. */
 export type ComparisonCandidate = HybridCandidate;
@@ -82,6 +84,7 @@ export class CompareRetriever {
     anchorEntityId: CanonicalEntityId,
     constraints: ConstraintBundle,
     limit: number,
+    graph?: ConstraintGraph  ,
   ): Promise<readonly HybridCandidate[]> {
     const anchor = await this.searchIndex.getDocument(anchorEntityId);
     if (anchor === null) {
@@ -93,7 +96,12 @@ export class CompareRetriever {
       return [];
     }
 
-    const filters = [...hardConstraintsToSparseFilterTokens(constraints.hard)];
+    // ADR-014 Phase 1b.3b: graph-aware filter extraction. Trivial-graph
+    // emission is byte-identical to the pre-PR5 `constraints.hard` path.
+    const hardForFilter = graph !== undefined
+      ? extractHardConstraintsFromGraph(graph)
+      : constraints.hard;
+    const filters = [...hardConstraintsToSparseFilterTokens(hardForFilter)];
     const rawHits = await this.searchIndex.sparseSearch(
       lexicalQueries,
       filters.length > 0 ? filters : undefined,
@@ -106,7 +114,8 @@ export class CompareRetriever {
     const candidates = annotateCandidateConstraintEvidenceBatch(
       CompareRetriever.hitsToCandidates(hits, lexicalQueries, filters),
       constraints,
+      graph,
     );
-    return this.constraintFilter.applyHardFilters(candidates, constraints.hard);
+    return this.constraintFilter.applyHardFilters(candidates, hardForFilter);
   }
 }

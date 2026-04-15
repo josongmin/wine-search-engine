@@ -18,6 +18,7 @@ import type {
   ConstraintBundle,
   DecisionSnapshot,
 } from '../../../domain/shared/types/index.js';
+import type { ConstraintGraph } from '../../../domain/query/model/constraint-graph.js';
 import type { ResponseBuildParams } from '../../../domain/response/service/response-builder.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { MixedQueryResult } from '../../../domain/mixed/model/mixed-query-result.js';
@@ -97,16 +98,23 @@ export interface EntityDocumentLookupPort {
 }
 
 export interface BrowseRetrieverPort {
+  /**
+   * ADR-014 Phase 1b.3b: `graph` arg is optional and — when present —
+   * overrides the flat `constraints.hard` bundle as the filter-token
+   * source. Trivial-graph emission remains byte-identical.
+   */
   browseProducer(
     producerName: string,
     constraints: ConstraintBundle,
     limit: number,
+    graph?: ConstraintGraph  ,
   ): Promise<readonly HybridCandidate[]>;
 
   browseRegion(
     regionName: string,
     constraints: ConstraintBundle,
     limit: number,
+    graph?: ConstraintGraph  ,
   ): Promise<readonly HybridCandidate[]>;
 }
 
@@ -115,6 +123,7 @@ export interface CompareRetrieverPort {
     anchorEntityId: CanonicalEntityId,
     constraints: ConstraintBundle,
     limit: number,
+    graph?: ConstraintGraph  ,
   ): Promise<readonly HybridCandidate[]>;
 }
 

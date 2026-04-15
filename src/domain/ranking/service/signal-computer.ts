@@ -2,9 +2,12 @@ import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js'
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { ComponentScores } from '../model/ranked-result.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
+import { evaluateGraphHardGate } from './graph-hard-gate.js';
+import { computeGraphSoftWeight } from './graph-soft-weight.js';
 
 /**
  * Minimum entity integrity score to be considered viable.
@@ -169,7 +172,25 @@ export class SignalComputer {
     candidate: HybridCandidate,
     constraints: ConstraintBundle,
     matchedSet?: ReadonlySet<string>,
+    graph?: ConstraintGraph  ,
   ): boolean {
+    // ADR-014 Phase 1b.3b: when a ConstraintGraph is present, the hard gate
+    // is the hard-tier subgraph's `rootSatisfied` under AND / OR / XOR
+    // semantics. The flat AND-all fallback below is preserved byte-for-byte
+    // for graph-absent callers (feature flag CONSTRAINT_GRAPH_EMIT=false
+    // and pre-graph test harnesses).
+    if (graph !== undefined) {
+      // Explicitly recorded `unmetHardConstraints` still short-circuits the
+      // gate to FALSE — this preserves the pre-PR5 escape-hatch where the
+      // retrieval/annotation layer flagged a mismatch.
+      const unmet = candidate.unmetHardConstraints ?? [];
+      if (unmet.length > 0) {
+        return false;
+      }
+      const effective = matchedSet ?? new Set(candidate.matchedConstraints);
+      return evaluateGraphHardGate({ graph, matchedAttributes: effective });
+    }
+
     // If there are no hard constraints, the gate passes trivially
     if (constraints.hard.length === 0) {
       return true;
@@ -203,6 +224,7 @@ export class SignalComputer {
     constraints: ConstraintBundle,
     retrievalPlan?: RetrievalPlan,
     precomputedMatchedSet?: ReadonlySet<string>,
+    graph?: ConstraintGraph  ,
   ): number {
     const softConstraints = constraints.soft;
     const structuredSoftBoosts = retrievalPlan?.softBoosts ?? [];
@@ -216,6 +238,20 @@ export class SignalComputer {
     }
 
     const matchedSet = precomputedMatchedSet ?? new Set(candidate.matchedConstraints);
+
+    // ADR-014 Phase 1b.3b: when a ConstraintGraph is present AND no
+    // structured retrieval boosts apply, delegate soft scoring to the
+    // graph-aware coverage ratio. Boost-driven paths (with explicit
+    // per-attribute confidence weights from retrievalPlan) retain the
+    // pre-PR5 branch unchanged — PR5 is a gate-predicate rewrite, not a
+    // signal redesign.
+    if (
+      graph !== undefined
+      && structuredSoftBoosts.length === 0
+      && structuredInferredBoosts.length === 0
+    ) {
+      return computeGraphSoftWeight({ graph, matchedAttributes: matchedSet });
+    }
     let weightedSum = 0;
     let totalWeight = 0;
 
@@ -520,6 +556,7 @@ export class SignalComputer {
     retrievalPlan?: RetrievalPlan,
     referenceYear: number = new Date().getFullYear(),
     queryContainsHangul = false,
+    graph?: ConstraintGraph  ,
   ): ComponentScores {
     // Precompute matched constraint set once (Rule 16: avoid per-function Set allocation)
     const matchedConstraintSet = new Set(candidate.matchedConstraints);
@@ -537,8 +574,8 @@ export class SignalComputer {
         ? this.computeAnchorSimilarity(candidate, anchorProfile)
         : undefined,
       ...(semantic !== undefined ? { semantic } : {}),
-      hardConstraintPass: this.evaluateHardConstraints(candidate, constraints, matchedConstraintSet),
-      softConstraint: this.computeSoftConstraint(candidate, constraints, retrievalPlan, matchedConstraintSet),
+      hardConstraintPass: this.evaluateHardConstraints(candidate, constraints, matchedConstraintSet, graph),
+      softConstraint: this.computeSoftConstraint(candidate, constraints, retrievalPlan, matchedConstraintSet, graph),
       ...(attributeAlignment !== undefined ? { attributeAlignment } : {}),
       ...(preferenceAlignment !== undefined ? { preferenceAlignment } : {}),
       ...(popularity !== undefined ? { popularity } : {}),

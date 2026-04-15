@@ -145,6 +145,23 @@ export interface RankedResult {
   /** Constraint attribute names that originated from inferred query constraints. */
   readonly inferredConstraints: readonly string[];
 
+  /**
+   * ADR-014 Phase 1b.3b: slot-node IDs (keyed to
+   * `ConstraintGraph.nodes[].nodeId`) for the slots the ranked result
+   * satisfied under graph semantics. Absent when the compiled query
+   * carried no constraint graph (flag `CONSTRAINT_GRAPH_EMIT=false`).
+   * The flat `matchedConstraints` above remains the legacy surface and
+   * is preserved for every request so no consumer is forced to migrate
+   * in PR5.
+   */
+  readonly matchedAtomRefs?: readonly string[] | undefined;
+
+  /**
+   * ADR-014 Phase 1b.3b: slot-node IDs required-but-unmet under graph
+   * semantics. Absent when no graph is present.
+   */
+  readonly unmetAtomRefs?: readonly string[] | undefined;
+
   // ─────────────────────────────────────────────────────────────────
   // Epic 15: Wine attributes for drinking window prediction
   // (Populated from Vespa documents during ranking pipeline)

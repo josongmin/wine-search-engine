@@ -175,6 +175,11 @@ export function buildHybridRetrievalInputForPlan(
     hardConstraints: plan.constraints.hard,
     softConstraints: plan.constraints.soft,
     retrievalPlan,
+    // ADR-014 Phase 1b.3b: propagate the compiled constraint graph so
+    // candidate-pool's annotator can emit per-atom slot records.
+    ...(compiled?.constraintGraph !== undefined
+      ? { constraintGraph: compiled.constraintGraph }
+      : {}),
     ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
     ...(requestContext !== undefined ? { requestContext } : {}),
     ...(fuzzyEntityHypotheses != null && fuzzyEntityHypotheses.length > 0
@@ -293,6 +298,9 @@ export async function retrieveHybridCandidatesForPlan(
             producerName,
             plan.constraints,
             limit,
+            // ADR-014 Phase 1b.3b: thread the compiled constraint graph so
+            // browse filter extraction + annotator use graph-native semantics.
+            compiled.constraintGraph,
           );
           if (candidates.length > 0) {
             const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
@@ -355,6 +363,8 @@ export async function retrieveHybridCandidatesForPlan(
             regionName,
             plan.constraints,
             limit,
+            // ADR-014 Phase 1b.3b: thread the compiled constraint graph.
+            compiled.constraintGraph,
           );
           if (candidates.length > 0) {
             const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
@@ -418,6 +428,8 @@ export async function retrieveHybridCandidatesForPlan(
               anchorEntityId,
               plan.constraints,
               limit,
+              // ADR-014 Phase 1b.3b: thread the compiled constraint graph.
+              compiled.constraintGraph,
             );
             if (candidates.length > 0) {
               const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);

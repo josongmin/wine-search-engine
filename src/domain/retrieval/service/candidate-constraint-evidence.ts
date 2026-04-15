@@ -4,6 +4,7 @@ import type {
   NormalizedConstraint,
 } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import { GEOGRAPHY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 
@@ -357,6 +358,7 @@ function satisfiesConstraint(
 export function annotateCandidateConstraintEvidence(
   candidate: HybridCandidate,
   constraints: ConstraintBundle,
+  graph?: ConstraintGraph  ,
 ): HybridCandidate {
   const matched = new Set(candidate.matchedConstraints);
   const unmetHardSet = new Set<string>();
@@ -390,6 +392,26 @@ export function annotateCandidateConstraintEvidence(
     }
   }
 
+  // ADR-014 Phase 1b.3b: when a ConstraintGraph is present, emit
+  // `matchedAtomRefs` / `unmetAtomRefs` keyed to `SlotNode.nodeId`. These
+  // are NOT deduplicated — two slot nodes with the same attribute but
+  // distinct nodeIds each emit their own record, so downstream consumers
+  // can distinguish "matched via slot A vs slot B" under XOR.
+  let matchedAtomRefs: string[] | undefined;
+  let unmetAtomRefs: string[] | undefined;
+  if (graph !== undefined) {
+    matchedAtomRefs = [];
+    unmetAtomRefs = [];
+    for (const node of graph.nodes) {
+      if (node.kind !== 'slot') continue;
+      if (matched.has(node.attribute)) {
+        matchedAtomRefs.push(node.nodeId);
+      } else {
+        unmetAtomRefs.push(node.nodeId);
+      }
+    }
+  }
+
   // Use Object.assign on a fresh object to avoid destructuring + spreading
   // the full HybridCandidate (~40 fields). The result shares property
   // references with the original (safe: all fields are readonly primitives,
@@ -404,20 +426,32 @@ export function annotateCandidateConstraintEvidence(
   } else {
     delete (result as { unmetHardConstraints?: readonly string[] }).unmetHardConstraints;
   }
+  if (matchedAtomRefs !== undefined) {
+    (result as { matchedAtomRefs: readonly string[] }).matchedAtomRefs = matchedAtomRefs;
+  } else {
+    delete (result as { matchedAtomRefs?: readonly string[] }).matchedAtomRefs;
+  }
+  if (unmetAtomRefs !== undefined) {
+    (result as { unmetAtomRefs: readonly string[] }).unmetAtomRefs = unmetAtomRefs;
+  } else {
+    delete (result as { unmetAtomRefs?: readonly string[] }).unmetAtomRefs;
+  }
   return result;
 }
 
 export function annotateCandidateConstraintEvidenceBatch(
   candidates: readonly HybridCandidate[],
   constraints: ConstraintBundle,
+  graph?: ConstraintGraph  ,
 ): readonly HybridCandidate[] {
   if (
     constraints.hard.length === 0 &&
     constraints.soft.length === 0 &&
-    constraints.inferred.length === 0
+    constraints.inferred.length === 0 &&
+    graph === undefined
   ) {
     return candidates;
   }
   return candidates.map((candidate) =>
-    annotateCandidateConstraintEvidence(candidate, constraints));
+    annotateCandidateConstraintEvidence(candidate, constraints, graph));
 }

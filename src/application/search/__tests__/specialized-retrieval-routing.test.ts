@@ -215,6 +215,9 @@ describe('SearchUseCase specialized retrieval routing', () => {
       'Opus One',
       plan.constraints,
       20,
+      // ADR-014 Phase 1b.3b: compiled.constraintGraph threaded through; fixture
+      // compiles without a graph so this is undefined.
+      undefined,
     );
     expect(deps.candidatePool.generate).not.toHaveBeenCalled();
   });
@@ -239,6 +242,8 @@ describe('SearchUseCase specialized retrieval routing', () => {
       'wine-1',
       plan.constraints,
       20,
+      // ADR-014 Phase 1b.3b: compiled.constraintGraph threaded through.
+      undefined,
     );
     expect(deps.candidatePool.generate).not.toHaveBeenCalled();
   });
@@ -264,6 +269,7 @@ describe('SearchUseCase specialized retrieval routing', () => {
       'wine-1',
       plan.constraints,
       20,
+      undefined,
     );
     expect(deps.candidatePool.generate).toHaveBeenCalledWith(
       expect.objectContaining({

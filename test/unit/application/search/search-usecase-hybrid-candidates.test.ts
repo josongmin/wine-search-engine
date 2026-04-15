@@ -205,6 +205,8 @@ describe('retrieveHybridCandidatesForPlan', () => {
       'Opus One',
       plan.constraints,
       20,
+      // ADR-014 Phase 1b.3b: compiled.constraintGraph threaded through.
+      undefined,
     );
     expect(result.effectiveRetrievalMode).toBe('producer_browse');
     expect(result.retrievalKind).toBe('specialized_hybrid');

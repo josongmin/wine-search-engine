@@ -210,6 +210,24 @@ export interface HybridCandidate {
   /** Hard constraint attribute names this candidate fails to satisfy. */
   readonly unmetHardConstraints?: readonly string[] | undefined;
 
+  /**
+   * ADR-014 Phase 1b.3b: graph slot-node IDs the candidate matched
+   * (keyed to `ConstraintGraph.nodes[].nodeId`). Populated by the
+   * annotator when a graph is present on the compiled query; absent
+   * otherwise.
+   *
+   * Distinct from {@link matchedConstraints} which records flat
+   * attribute names. The atomRef shape distinguishes "same attribute
+   * matched via slot A vs slot B" under XOR disjunction.
+   */
+  readonly matchedAtomRefs?: readonly string[] | undefined;
+
+  /**
+   * ADR-014 Phase 1b.3b: graph slot-node IDs the candidate failed to
+   * match. Populated by the annotator when a graph is present.
+   */
+  readonly unmetAtomRefs?: readonly string[] | undefined;
+
   /** Diagnostic trace for observability and debugging. */
   readonly retrievalTrace: RetrievalTrace;
 

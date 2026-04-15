@@ -1,10 +1,12 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
+import { extractHardConstraintsFromGraph } from '../../query/service/graph-slot-constraints.js';
 import {
   browseSparseFetchLimit,
   dedupeSparseHitsByEntity,
@@ -52,12 +54,20 @@ export class BrowseRetriever {
     producerName: string,
     constraints: ConstraintBundle,
     limit: number,
+    graph?: ConstraintGraph  ,
   ): Promise<readonly HybridCandidate[]> {
     const q = producerName.trim();
     if (q.length === 0) {
       return [];
     }
-    const filters = [...hardConstraintsToSparseFilterTokens(constraints.hard)];
+    // ADR-014 Phase 1b.3b: when a graph is present, hard-tier slot values
+    // are the authoritative filter source (the flat bundle silently drops
+    // OR/XOR context in hybrid graphs). Trivial-graph emission is
+    // byte-identical to the pre-PR5 `constraints.hard` path.
+    const hardForFilter = graph !== undefined
+      ? extractHardConstraintsFromGraph(graph)
+      : constraints.hard;
+    const filters = [...hardConstraintsToSparseFilterTokens(hardForFilter)];
     const fetchLimit = browseSparseFetchLimit(limit);
     const lexical = expandProducerBrowseLexicalQueries(q);
     const queries = lexical.length > 0 ? [...lexical] : [q];
@@ -71,20 +81,25 @@ export class BrowseRetriever {
     const candidates = annotateCandidateConstraintEvidenceBatch(
       sparseHitsToBrowseCandidates(diversified, 'producer_browse', queries, filters),
       constraints,
+      graph,
     );
-    return this.constraintFilter.applyHardFilters(candidates, constraints.hard);
+    return this.constraintFilter.applyHardFilters(candidates, hardForFilter);
   }
 
   async browseRegion(
     regionName: string,
     constraints: ConstraintBundle,
     limit: number,
+    graph?: ConstraintGraph  ,
   ): Promise<readonly HybridCandidate[]> {
     const q = regionName.trim();
     if (q.length === 0) {
       return [];
     }
-    const filters = [...hardConstraintsToSparseFilterTokens(constraints.hard)];
+    const hardForFilter = graph !== undefined
+      ? extractHardConstraintsFromGraph(graph)
+      : constraints.hard;
+    const filters = [...hardConstraintsToSparseFilterTokens(hardForFilter)];
     const queries = expandRegionBrowseLexicalQueries(q);
     const lexical = queries.length > 0 ? queries : [q];
     const fetchLimit = browseSparseFetchLimit(limit);
@@ -95,12 +110,11 @@ export class BrowseRetriever {
     );
     const hits = dedupeSparseHitsByEntity(rawHits);
     const diversified = diversifyRegionBrowseHits(hits, limit);
-    const candidates = annotateCandidateConstraintEvidenceBatch(sparseHitsToBrowseCandidates(
-      diversified,
-      'region_browse',
-      lexical,
-      filters,
-    ), constraints);
-    return this.constraintFilter.applyHardFilters(candidates, constraints.hard);
+    const candidates = annotateCandidateConstraintEvidenceBatch(
+      sparseHitsToBrowseCandidates(diversified, 'region_browse', lexical, filters),
+      constraints,
+      graph,
+    );
+    return this.constraintFilter.applyHardFilters(candidates, hardForFilter);
   }
 }

@@ -1,6 +1,7 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { CanonicalEntityId } from '../../shared/types/index.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import type { RetrievalPlan } from '../service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
@@ -75,6 +76,15 @@ export interface HybridRetrievalInput {
    * Optional so non-HTTP callers (background jobs, unit tests) can omit it.
    */
   readonly requestContext?: RequestExecutionContext | undefined;
+
+  /**
+   * ADR-014 Phase 1b.3b: optional constraint graph projected from the
+   * compiled query. When present, the retrieval annotator emits
+   * `matchedAtomRefs` / `unmetAtomRefs` on each candidate so the ranker
+   * can distinguish "matched via slot A vs slot B" under XOR.
+   * Absent → flat annotator path, byte-identical to pre-PR5.
+   */
+  readonly constraintGraph?: ConstraintGraph | undefined;
 
   /**
    * TA4: Entity hypothesis sources from fuzzy planner hits.

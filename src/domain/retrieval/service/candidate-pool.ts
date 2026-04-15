@@ -725,11 +725,19 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       }
     }
 
-    candidates = annotateCandidateConstraintEvidenceBatch(candidates, {
-      hard: input.hardConstraints,
-      soft: input.softConstraints,
-      inferred: input.queryPlan.constraints.inferred,
-    });
+    candidates = annotateCandidateConstraintEvidenceBatch(
+      candidates,
+      {
+        hard: input.hardConstraints,
+        soft: input.softConstraints,
+        inferred: input.queryPlan.constraints.inferred,
+      },
+      // ADR-014 Phase 1b.3b: thread the compiled query's constraint graph
+      // so the annotator emits `matchedAtomRefs` / `unmetAtomRefs` on each
+      // candidate. Absent graph → flat annotator output, byte-identical to
+      // pre-PR5.
+      input.constraintGraph,
+    );
 
     // Step 5: Apply hard constraint filter (with drop log for E4 audit).
     const { filtered: hardFiltered, drops: hardFilterDrops } =
