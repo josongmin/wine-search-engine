@@ -163,6 +163,15 @@ export interface GraphExecutionResult {
  * ADR-015 Axis 2: feature flag for the executor-internal critic retry
  * loop. Checked once per call — flipping the flag mid-flight cannot
  * produce a partial-loop state. Default off.
+ *
+ * J2 deferred: flipping to default-on triggered a byte-identity
+ * regression in `executeHybridRouteRankingPipeline > preserves
+ * compiled execution mode while regenerating only relaxed retrieval
+ * planning`. The relaxation path expects zero retry invocations for
+ * that specific assertion. Default-on requires either (a) updating
+ * that test to pin `RETRIEVAL_EXECUTOR_CRITIC=false` explicitly, or
+ * (b) re-designing the relaxation-vs-critic interaction. Tracked as
+ * a follow-up; J1 (BundleSelector default-on) landed independently.
  */
 export function isRetrievalCriticEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -174,10 +183,18 @@ function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
   return graph.nodes.filter((n): n is SubqueryNode => n.kind === 'subquery');
 }
 
+/**
+ * Wave J1: BundleSelector is default-on once Wave F1 (deterministic
+ * topology detector) and Wave H (shares_budget edges) landed. The
+ * selector is a gated pass-through for trivial / single-subquery
+ * graphs (`shouldEngageBundlePath` returns false), so flipping the
+ * default only changes behaviour when a graph actually carries ≥2
+ * subquery nodes. Rollback via `BUNDLE_SELECTOR_ENABLED=false`.
+ */
 export function isBundleSelectorEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env['BUNDLE_SELECTOR_ENABLED'] === 'true';
+  return env['BUNDLE_SELECTOR_ENABLED'] !== 'false';
 }
 
 /**
