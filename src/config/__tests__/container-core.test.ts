@@ -48,6 +48,20 @@ const buildDecisionEngine = vi.fn(() => decisionEngine);
 const buildMixedSolver = vi.fn(() => mixedSolver);
 const buildResponseBuilder = vi.fn(() => responseBuilder);
 const buildBlockingUseCaseAdapter = vi.fn(() => ({ block: vi.fn() }));
+// ADR-013 Phase 1c.x: expose a minimal factory mock so
+// `buildCoreContainerServices` can populate `budgetLedgerFactory`
+// without pulling the concrete InMemoryBudgetLedger through the unit
+// test boundary.
+const buildBudgetLedgerFactory = vi.fn(() => () => ({
+  reserve: vi.fn(),
+  release: vi.fn(),
+  snapshot: vi.fn(() => ({
+    priceTotalKrw: 0,
+    candidateCount: 0,
+    reservations: new Map(),
+  })),
+  remainingPriceKrw: vi.fn(() => undefined),
+}));
 
 vi.mock('../container-adapters.js', () => ({
   buildCoreAdapterServices,
@@ -63,6 +77,7 @@ vi.mock('../container-runtime-support.js', () => ({
 
 vi.mock('../container-core-builders.js', () => ({
   buildBlockingUseCaseAdapter,
+  buildBudgetLedgerFactory,
   buildCandidatePool,
   buildBrowseRetriever,
   buildCompareRetriever,

@@ -47,6 +47,8 @@ import type {
   QueryRewriter,
   RewriteTrace,
 } from '../../domain/retrieval/service/query-rewriter.js';
+import type { BudgetLedger } from '../../domain/retrieval/service/budget-ledger.js';
+import { BudgetViolationError } from '../../domain/retrieval/service/budget-ledger.js';
 import { computeGraphCoverage } from '../../domain/query/service/compute-graph-coverage.js';
 import { globalBundleSelectorCounter } from '../../observability/bundle-selector-counters.js';
 import { globalRetrievalCriticCounter } from '../../observability/retrieval-critic-counters.js';
@@ -70,6 +72,22 @@ export interface GraphExecutorDeps {
    * to pre-PR6 behaviour).
    */
   readonly queryRewriter?: QueryRewriter | undefined;
+  /**
+   * ADR-013 Phase 1c.x: optional per-request budget ledger. When wired,
+   * the executor calls `budgetLedger.reserve(subqueryId, candidate)`
+   * exactly once per winning assignment tuple AFTER the solver
+   * succeeds — mirroring the PR4 `onReserveAssignment` contract but
+   * now backed by a concrete service. When both the ledger and the
+   * deprecated `opts.onReserveAssignment` hook are present, the ledger
+   * wins and the hook is invoked for parity (legacy test-seam only).
+   *
+   * On critic-retry paths (ADR-015 Axis 2), the executor calls
+   * `release(subqueryId)` BEFORE the retried retrieval runs so the
+   * retry does not reserve against stale slots. A single ledger
+   * instance is threaded through the entire critic loop; callers MUST
+   * NOT share one across requests (race condition).
+   */
+  readonly budgetLedger?: BudgetLedger | undefined;
 }
 
 export interface SubqueryRetriever {
@@ -81,9 +99,20 @@ export interface SubqueryRetriever {
 }
 
 export interface GraphExecutorOptions extends BundleSelectorOptions {
-  /** Optional post-assignment hook for budget ledger / book-keeping.
-   *  Invoked exactly once per winning assignment AFTER the solver
-   *  returns success. Never invoked on pass-through or fail-closed. */
+  /**
+   * Deprecated post-assignment hook for budget ledger / book-keeping.
+   * Invoked exactly once per winning assignment AFTER the solver
+   * returns success. Never invoked on pass-through or fail-closed.
+   *
+   * @deprecated ADR-013 Phase 1c.x landed a concrete
+   * {@link BudgetLedger} plumbed through {@link GraphExecutorDeps};
+   * production wiring MUST use the ledger dep instead. The callback
+   * is kept alive as a test-seam so unit tests that have not yet
+   * migrated can still assert reserve ordering without constructing
+   * a ledger. When both are supplied the ledger wins (the callback is
+   * still invoked for parity, to preserve pre-migration fixture
+   * assertions).
+   */
   readonly onReserveAssignment?: (assignment: {
     readonly subqueryId: string;
     readonly candidate: HybridCandidate;
@@ -278,6 +307,14 @@ export async function executeGraphAware(
     globalRetrievalCriticCounter.incrementRewrite(decision.rewriteType);
     rewriteTraces.push(rewritten.trace);
     currentInput = rewritten.input;
+    // ADR-013 Phase 1c.x: release any prior assignment slots on the
+    // ledger BEFORE the retried retrieval runs. Without this step the
+    // retry would re-reserve against a ledger that still carries the
+    // previous attempt's picks, double-counting the budget and potentially
+    // tripping `BudgetViolationError` on an otherwise-legal bundle.
+    // The release happens pre-flight (rule 20) so we never execute
+    // retrieval with a stale ledger.
+    releaseLedgerReservations(deps.budgetLedger, lastResult);
     lastResult = await runRetrievalOnce(currentInput, graph, deps, opts);
   }
 
@@ -372,11 +409,68 @@ async function runRetrievalOnce(
   }
 
   // Post-assignment reservation — the P1-C fix call-site.
-  if (opts.onReserveAssignment !== undefined) {
+  //
+  // ADR-013 Phase 1c.x: prefer the concrete budget ledger when wired;
+  // fall through to the deprecated callback for legacy test seams.
+  // When both are present the ledger commits first and the callback
+  // is still invoked for parity so pre-migration fixture assertions
+  // keep working. A ledger `reserve` violation surfaces as a
+  // fail-closed result with the `bundle_selector_fail_closed:budget_infeasible`
+  // reason — we do NOT silently swallow the violation.
+  const ledger = deps.budgetLedger;
+  // TODO(cleanup): remove after pre-PR4 test suites migrate to the
+  // ledger dep. Reading the deprecated callback here is the migration
+  // fallback — parity invocation so existing fixture assertions keep
+  // working until they switch over.
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback per CLAUDE.md rule 31
+  const callback = opts.onReserveAssignment;
+  if (ledger !== undefined || callback !== undefined) {
     const reservedIds = new Set<string>();
-    for (const a of solution.assignments) {
-      opts.onReserveAssignment({ subqueryId: a.subqueryId, candidate: a.candidate });
-      reservedIds.add(`${a.subqueryId}:${a.candidate.entityId}`);
+    try {
+      for (const a of solution.assignments) {
+        if (ledger !== undefined) {
+          ledger.reserve(a.subqueryId, a.candidate);
+        }
+        if (callback !== undefined) {
+          callback({ subqueryId: a.subqueryId, candidate: a.candidate });
+        }
+        reservedIds.add(`${a.subqueryId}:${a.candidate.entityId}`);
+      }
+    } catch (err) {
+      if (err instanceof BudgetViolationError) {
+        // Roll back any reservations we already committed on this
+        // assignment so the ledger state matches the fail-closed
+        // result. Pre-flight release keeps the ledger consistent with
+        // the executor's reported outcome.
+        if (ledger !== undefined) {
+          for (const a of solution.assignments) {
+            if (reservedIds.has(`${a.subqueryId}:${a.candidate.entityId}`)) {
+              ledger.release(a.subqueryId);
+            }
+          }
+        }
+        pipelineDebug(
+          {
+            step: 'retrieval.bundle_selector.budget_violation',
+            entity_id: err.entityId,
+            would_become_krw: err.wouldBecomeKrw,
+            ceiling_krw: err.ceilingKrw,
+          },
+          'pipeline bundle selector budget violation',
+        );
+        globalBundleSelectorCounter.increment('BUNDLE_SELECTOR_BUDGET_INFEASIBLE_COUNT');
+        return {
+          mode: 'fail_closed',
+          candidates: [],
+          assignmentSolution: {
+            ...solution,
+            assignments: [],
+            bundleScore: 0,
+            degradationReasons: ['bundle_selector_fail_closed:budget_infeasible'],
+          },
+        };
+      }
+      throw err;
     }
     // Defensive: if a future refactor accidentally reserves a
     // candidate not in the final assignment via the same hook, the
@@ -406,4 +500,22 @@ async function runRootRetrieval(
     return candidatePool.execute(input);
   }
   return candidatePool.generate(input);
+}
+
+/**
+ * ADR-013 Phase 1c.x: release every ledger slot the previous
+ * retrieval result reserved, so a critic retry can start from a clean
+ * ledger state. No-op when the ledger is unwired or when the prior
+ * result did not engage the bundle path.
+ */
+function releaseLedgerReservations(
+  ledger: BudgetLedger | undefined,
+  prior: GraphExecutionResult,
+): void {
+  if (ledger === undefined) return;
+  if (prior.mode !== 'bundle') return;
+  const assignments = prior.assignmentSolution?.assignments ?? [];
+  for (const a of assignments) {
+    ledger.release(a.subqueryId);
+  }
 }

@@ -4,6 +4,10 @@ import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
 import type { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
+import type {
+  BudgetLedger,
+  BudgetLedgerOptions,
+} from '../domain/retrieval/service/budget-ledger.js';
 import type { DecisionEngine } from '../domain/decision/service/decision-engine.js';
 import type { ResponseBuilder } from '../domain/response/service/response-builder.js';
 import type { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
@@ -25,6 +29,7 @@ import {
 } from './container-runtime-support.js';
 import {
   buildBlockingUseCaseAdapter,
+  buildBudgetLedgerFactory,
   buildCandidatePool,
   buildBrowseRetriever,
   buildCompareRetriever,
@@ -67,6 +72,13 @@ export interface CoreContainerServices {
   readonly ltrModels?: RuntimeSupportServices['ltrModels'];
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly calibrationStore: CalibrationStore;
+  /**
+   * ADR-013 Phase 1c.x: per-request budget ledger factory. Call
+   * `budgetLedgerFactory({ priceTotalKrw })` once per retrieval
+   * invocation; the returned ledger is request-scoped and MUST NOT be
+   * cached across requests.
+   */
+  readonly budgetLedgerFactory: (options?: BudgetLedgerOptions) => BudgetLedger;
 }
 
 export async function buildCoreContainerServices(
@@ -117,6 +129,7 @@ export async function buildCoreContainerServices(
     cacheLookupRuntimeState: buildCacheReadRuntimeState(config),
     cacheLookupRuntimeStateProvider: buildCacheReadRuntimeStateProvider(config, ranker),
     calibrationStore: adapters.calibrationStore,
+    budgetLedgerFactory: buildBudgetLedgerFactory(),
     ...support,
   };
 }

@@ -35,6 +35,8 @@ import {
   type BundleCellPricer,
   type BundleCellScorer,
 } from '../../domain/retrieval/service/bundle-selector.js';
+import { InMemoryBudgetLedger } from '../../domain/retrieval/service/budget-ledger.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import { createQueryRewriter } from '../../domain/retrieval/service/query-rewriter.js';
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
@@ -569,6 +571,17 @@ export async function retrieveHybridCandidatesForPlan(
   const queryRewriter = createQueryRewriter(
     ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
   );
+  // ADR-013 Phase 1c.x: instantiate a per-request `InMemoryBudgetLedger`
+  // and thread it through the executor deps. This is the production
+  // wiring that replaces PR4's `onReserveAssignment` callback stub —
+  // every winning subquery candidate now reserves against a real
+  // ledger. The instance is per-call (scoped to this retrieval
+  // invocation) so there is no cross-request race window; the
+  // reservation state dies with the request. The optional KRW ceiling
+  // is read from the compiled graph's global budget when present.
+  const budgetLedger = new InMemoryBudgetLedger(
+    deriveBudgetLedgerOptionsFromCompiled(compiled),
+  );
   const graphResult = await executeGraphAware(
     retrievalInput,
     compiled.constraintGraph,
@@ -576,6 +589,7 @@ export async function retrieveHybridCandidatesForPlan(
       candidatePool: ports.candidatePool,
       bundleSelector: new BundleSelectorImpl(),
       queryRewriter,
+      budgetLedger,
     },
     DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
     probe,
@@ -659,6 +673,27 @@ const DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS: GraphExecutorOptions = {
   scoreFor: DEFAULT_BUNDLE_SCORER,
   priceFor: DEFAULT_BUNDLE_PRICER,
 };
+
+/**
+ * ADR-013 Phase 1c.x: derive a per-request `BudgetLedgerOptions` from
+ * the compiled query's constraint graph. When the graph carries a
+ * `globalBudgets.priceTotal` entry, we surface it as the ledger's KRW
+ * ceiling (converting USD → KRW via the SSoT constant when needed).
+ * Otherwise the ledger runs in unlimited / telemetry-only mode.
+ */
+function deriveBudgetLedgerOptionsFromCompiled(
+  compiled: CompiledWineQuery,
+): { readonly priceTotalKrw?: number } {
+  const priceTotal = compiled.constraintGraph?.globalBudgets.priceTotal;
+  if (priceTotal === undefined) return {};
+  if (!Number.isFinite(priceTotal.max) || priceTotal.max < 0) return {};
+  if (priceTotal.currency === 'KRW') {
+    return { priceTotalKrw: priceTotal.max };
+  }
+  // currency === 'USD' — convert to the ledger's canonical KRW unit
+  // via the shared SSoT constant (rule 30, single source of truth).
+  return { priceTotalKrw: Math.round(priceTotal.max * KRW_PER_USD_APPROXIMATE) };
+}
 
 /**
  * ADR-015 Axis 2: build the per-call probe the executor uses to feed

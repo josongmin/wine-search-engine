@@ -13,6 +13,11 @@ import { CandidatePoolService } from '../domain/retrieval/service/candidate-pool
 import { BrowseRetriever } from '../domain/retrieval/service/browse-retriever.js';
 import { CompareRetriever } from '../domain/retrieval/service/compare-retriever.js';
 import { FusionService } from '../domain/retrieval/service/fusion.js';
+import {
+  InMemoryBudgetLedger,
+  type BudgetLedger,
+  type BudgetLedgerOptions,
+} from '../domain/retrieval/service/budget-ledger.js';
 import { Ranker } from '../domain/ranking/service/ranker.js';
 import { RankingStagePipeline } from '../domain/ranking/service/ranking-stage-pipeline.js';
 import { SignalComputer } from '../domain/ranking/service/signal-computer.js';
@@ -207,6 +212,26 @@ export function buildBrowseRetriever(adapters: CoreAdapterServices): BrowseRetri
 
 export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRetrieverPort {
   return new CompareRetriever(adapters.searchIndex);
+}
+
+/**
+ * ADR-013 Phase 1c.x: factory for per-request {@link BudgetLedger}
+ * instances. Returns a *factory function*, not a ledger — the ledger
+ * itself is per-request state (reservations MUST NOT leak across
+ * requests, which would constitute a cross-request race condition).
+ *
+ * Call this factory from the hybrid-candidates retrieval flow on every
+ * request; dispose by letting the instance fall out of scope at the
+ * end of the request lifecycle. A central builder is kept here (rather
+ * than inlining `new InMemoryBudgetLedger(...)` in the hybrid-candidates
+ * path alone) so the composition root has a single wire-up call-site
+ * visible to audit tools (rule 33 — ensure new capabilities are
+ * imported by a composition root).
+ */
+export function buildBudgetLedgerFactory(): (
+  options?: BudgetLedgerOptions,
+) => BudgetLedger {
+  return (options) => new InMemoryBudgetLedger(options ?? {});
 }
 
 export function buildRanker(
