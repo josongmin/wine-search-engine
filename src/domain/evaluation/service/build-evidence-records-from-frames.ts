@@ -47,10 +47,13 @@ function recordsForStructuredOutput(
     case 'food_pairing':
       return output.resultSet.map(resultItemToEvidenceRecord);
     case 'comparison_result': {
-      // ComparisonSearchResponse.entities[n].topResult — flatten top_result per side.
-      // `entities` and `topResult` are required on the domain type; no defensive
-      // null guard needed beyond the type system.
-      return output.response.entities.map((entry) => resultItemToEvidenceRecord(entry.topResult));
+      // ComparisonSearchResponse.entities[n].topResult may be null (e.g.
+      // no-match side in a comparison). Drop those entries; nothing
+      // verifiable lives inside a null top result.
+      const tops = output.response.entities
+        .map((entry) => entry.topResult)
+        .filter((top): top is NonNullable<typeof top> => top !== null);
+      return tops.map(resultItemToEvidenceRecord);
     }
     case 'drinking_window': {
       const rec: Record<string, string | number | readonly string[] | null | undefined> = {
