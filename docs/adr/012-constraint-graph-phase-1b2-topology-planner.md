@@ -114,13 +114,40 @@ amendment — drift-proof against ad-hoc keyword grooming.
 
 ### Feature flag
 
-`CONSTRAINT_GRAPH_TOPOLOGY_LLM` — env flag, default **off**. Read once
-at compiler construction time (not per request). Off → the compiler
-never constructs the planner branch and falls through to trivial.
+`CONSTRAINT_GRAPH_TOPOLOGY_LLM` — env flag, default **off**. Off → the
+compiler skips the planner branch on every request and falls through to
+the deterministic detector / trivial graph.
 
 Coexists with `CONSTRAINT_GRAPH_EMIT`: `EMIT=false` suppresses graph
 entirely, `TOPOLOGY_LLM=false` suppresses only LLM topology but keeps
 trivial. Two-level rollback.
+
+### Runtime flag flip (Wave I4)
+
+The flag is **re-read per `compile()` call** by
+[`isConstraintGraphTopologyLlmEnabled()`](../../src/domain/query/service/constraint-compiler.ts)
+so `CONSTRAINT_GRAPH_TOPOLOGY_LLM=true` can be flipped on an
+already-booted process and takes effect on the very next request — no
+restart required.
+
+This requires a corresponding split of concerns in the composition
+root ([`container-core-builders.ts`](../../src/config/container-core-builders.ts)):
+
+- **Container gate** (construction): the composition root
+  auto-instantiates {@link ConstraintTopologyPlanner} whenever a
+  {@link ChatLlmPort} is available. The env flag is **not** read here.
+- **Compiler gate** (invocation): the compiler re-reads
+  `CONSTRAINT_GRAPH_TOPOLOGY_LLM` on every `compile()` and only invokes
+  the planner when `'true'`.
+
+Pre-I4 the container also pre-read the env flag at boot, so flipping it
+at runtime was silently a no-op (the planner was `undefined` and could
+not be constructed without a restart). I4 makes the flag the single
+effective runtime toggle, with no cost when off: the compiler short-
+circuits before any LLM call, and the `ConstraintTopologyPlanner`
+instance is a stateless wrapper around `ChatLlmPort` (no warmup, no
+side-effects at construction). Composition wiring is locked by
+[`test/regression/topology-planner-composition-wiring.regression.test.ts`](../../test/regression/topology-planner-composition-wiring.regression.test.ts).
 
 ### Prompt versioning
 
@@ -142,7 +169,7 @@ regression failing — at which point the ADR requires a bump to
 | `src/domain/query/service/prompts/constraint-graph-topology.prompt.ts` | **NEW** — frozen prompt. |
 | `src/domain/query/service/constraint-compiler.ts` | Constructor widens: optional `topologyPlanner`; hot path gated on env flag + intent gate. |
 | `src/domain/query/service/planner.ts` | Forward planner instance. |
-| `src/config/container-core-builders.ts` | Flag-gated instantiation from `ChatLlmPort`. |
+| `src/config/container-core-builders.ts` | Auto-instantiation from `ChatLlmPort` (I4: construction is flag-independent; the flag is re-read per request by the compiler for runtime flips). |
 | **Regression tests** | Schema migration, planner semantics, replay stability. |
 
 ## Cutover gate

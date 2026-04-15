@@ -140,11 +140,25 @@ export async function buildQueryPlanner(
     ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
-  // ADR-012 Phase 1b.2: wire optional ConstraintTopologyPlanner when a
-  // ChatLlmPort is available AND the env flag is on. When unavailable,
-  // ConstraintCompiler falls through to the deterministic trivial graph.
+  // ADR-012 Phase 1b.2 + Wave I4: auto-instantiate the
+  // ConstraintTopologyPlanner whenever a ChatLlmPort is available.
+  //
+  // Container-vs-compiler gate separation:
+  //   - The container gate (here) controls *construction*: the planner
+  //     instance must exist for the compiler to ever invoke it.
+  //   - The compiler gate (constraint-compiler.ts
+  //     `isConstraintGraphTopologyLlmEnabled()`) controls *invocation*
+  //     per-request by re-reading `CONSTRAINT_GRAPH_TOPOLOGY_LLM` on
+  //     every `compile()` call.
+  //
+  // Pre-I4 the container also pre-read the env flag at boot, so flipping
+  // `CONSTRAINT_GRAPH_TOPOLOGY_LLM=true` at runtime on an already-booted
+  // process was a no-op (the planner was `undefined` and could not be
+  // constructed without a restart). Auto-instantiating here lets the
+  // runtime flip actually take effect, with no cost when the flag stays
+  // off: the compiler's per-request check still skips the planner call.
   const topologyPlanner =
-    chatLlm !== undefined && process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true'
+    chatLlm !== undefined
       ? new ConstraintTopologyPlanner(chatLlm)
       : undefined;
 
