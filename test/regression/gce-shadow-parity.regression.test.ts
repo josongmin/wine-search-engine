@@ -1,7 +1,7 @@
 /**
- * ADR-016 Axis 3 Wave D/I6 bootstrap — shadow parity harness regression.
+ * ADR-016 Axis 3 Wave D/I6/J3 bootstrap — shadow parity harness regression.
  *
- * Runs `runShadowParity` over the checked-in 60-claim `gold-claims.jsonl`
+ * Runs `runShadowParity` over the checked-in 120-claim `gold-claims.jsonl`
  * bootstrap set and locks three invariants:
  *
  * 1. The harness runs to completion and produces BOTH
@@ -27,6 +27,15 @@
  *     in the legacy extractor (especially on price/vintage contradictions
  *     and drinking-window), balanced by better coverage on comparative
  *     and pairing types.
+ *   - Wave J3 (120 claims): overall parity measured by the harness on
+ *     the doubled set — the new claims expand contradicted/not_entailed
+ *     coverage (Korean phonetic entity surface forms, white-vs-red-meat
+ *     pairing mismatches, NV vintage claims on Moet). The new
+ *     (9-class) path is authoritative on these; the legacy (5-class)
+ *     extractor bulk-emits `entailed`, so contradictions are systematic
+ *     legacy-path misses, not new-path verifier bugs. Bootstrap gate
+ *     remains ≥ 0.40; production cutover still requires a ≥200-row
+ *     human-annotated set (80 more to reach the gate).
  *
  * The legacy 5-class regex extractor is intentionally weak on the
  * 9-class field axis — every bootstrap miss traces to a legacy
@@ -43,12 +52,12 @@ import {
 } from '../../test/benchmark/evaluator/shadow-parity-harness.js';
 import { ATOMIC_CLAIM_TYPES } from '../../src/domain/response/model/grounded-claim.js';
 
-const BOOTSTRAP_CLAIM_COUNT = 60;
+const BOOTSTRAP_CLAIM_COUNT = 120;
 const BOOTSTRAP_PARITY_FLOOR = 0.40;
 const BOOTSTRAP_EVIDENCE_WINE_COUNT = 8;
 
 describe('ADR-016 Axis 3 — shadow parity bootstrap harness', () => {
-  it('loads exactly 60 gold claims from gold-claims.jsonl', () => {
+  it('loads exactly 120 gold claims from gold-claims.jsonl', () => {
     const claims = loadBootstrapGoldClaims();
     expect(claims).toHaveLength(BOOTSTRAP_CLAIM_COUNT);
   });
