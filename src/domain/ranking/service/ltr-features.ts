@@ -15,6 +15,9 @@
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import { containsHangul } from '../../shared/utils/hangul.js';
 import type { NormalizedConstraint } from '../../shared/types/index.js';
+import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
+import { computeGraphCoverage } from '../../query/service/compute-graph-coverage.js';
+import { projectHardTierSubgraph } from '../../query/service/graph-tier-projection.js';
 
 /** Default neutral confidence when a signal cannot be measured. */
 const DEFAULT_NEUTRAL_CONFIDENCE = 0.5;
@@ -71,6 +74,42 @@ export interface LTRFeatureVector {
   readonly is_sparse_degraded: number;
   readonly is_anchor_degraded: number;
   readonly degraded_channel_count: number;
+
+  // Graph-aware signals (4) — Wave I3.
+  // Absent graph → all four are 0 (backward-compatible).
+  /**
+   * 1 if the candidate matches the hard-tier subgraph's rootSatisfied
+   * predicate (AND/OR/XOR semantics applied via `computeGraphCoverage`).
+   * 0 when no graph is present or the hard-tier subgraph is unsatisfied.
+   */
+  readonly graph_root_satisfied: number;
+  /**
+   * Fraction of hard-tier slot nodes matched by the candidate (under
+   * graph node-kind semantics — OR branches with one matched child
+   * count as satisfied, XOR with exactly one counts as satisfied,
+   * beyond-one counts as unsatisfied). 0..1 ratio.
+   */
+  readonly graph_hard_tier_coverage: number;
+  /**
+   * 1 if the graph contains at least one `group_xor` node AND at least
+   * one of its children was satisfied by this candidate (i.e. the
+   * XOR decision is not a gate fail for this candidate). 0 otherwise.
+   *
+   * Signals to the LTR model that "candidate respects a user XOR
+   * choice" which is semantically distinct from AND hard-match.
+   */
+  readonly graph_xor_branch_match: number;
+  /**
+   * Origin tag encoded as ordered integer so LTR can learn from it:
+   *   0 = no graph
+   *   1 = `deterministic_from_atoms` (Phase 1a trivial projection)
+   *   2 = `planner_emitted` (deterministic detector — F1/H)
+   *   3 = `hybrid` (LLM-sourced topology — Phase 1b.2)
+   *
+   * Monotonic so tree-based models can treat it as a simple ordinal;
+   * categorical encoders can still split on exact values.
+   */
+  readonly graph_origin_encoded: number;
 }
 
 export interface LTRFeatureExtractionInput {
@@ -86,6 +125,17 @@ export interface LTRFeatureExtractionInput {
     readonly anchor: boolean;
   };
   readonly entityLinkConfidence?: number;
+  /**
+   * ADR-010/011 Wave I3: when the compiled query carries a
+   * ConstraintGraph, the extractor emits graph-aware features
+   * (`graph_root_satisfied`, `graph_hard_tier_coverage`,
+   * `graph_xor_branch_match`, `graph_origin_encoded`). Absent →
+   * all four features are 0 (backward-compatible). Extracted via
+   * the shared `computeGraphCoverage` helper so the 9-class XOR /
+   * OR / AND semantics does not drift across LTR + hard gate +
+   * provenance closure.
+   */
+  readonly constraintGraph?: ConstraintGraph | undefined;
 }
 
 function safeNumber(value: unknown, fallback = 0): number {
@@ -175,6 +225,9 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
   const dSparse = input.degradationFlags.sparse ? 1 : 0;
   const dAnchor = input.degradationFlags.anchor ? 1 : 0;
 
+  // Wave I3: graph-aware features. Absent graph → all four = 0.
+  const graphFeatures = extractGraphFeatures(matchedSet, input.constraintGraph);
+
   return {
     bm25_score: bm25,
     dense_score: dense,
@@ -213,6 +266,91 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
     is_sparse_degraded: dSparse,
     is_anchor_degraded: dAnchor,
     degraded_channel_count: dDense + dSparse + dAnchor,
+
+    graph_root_satisfied: graphFeatures.rootSatisfied,
+    graph_hard_tier_coverage: graphFeatures.hardTierCoverage,
+    graph_xor_branch_match: graphFeatures.xorBranchMatch,
+    graph_origin_encoded: graphFeatures.originEncoded,
+  };
+}
+
+// ─── Wave I3: graph-aware feature helpers ────────────────────────────────────
+
+interface GraphFeatureBundle {
+  readonly rootSatisfied: number;
+  readonly hardTierCoverage: number;
+  readonly xorBranchMatch: number;
+  readonly originEncoded: number;
+}
+
+function encodeGraphOrigin(graph: ConstraintGraph): number {
+  switch (graph.origin) {
+    case 'deterministic_from_atoms': return 1;
+    case 'planner_emitted': return 2;
+    case 'hybrid': return 3;
+  }
+}
+
+/**
+ * Extract the 4-feature graph bundle. Pure — no IO, no clamping, no
+ * per-feature caching; the ranker calls this per-candidate so a tight
+ * O(|graph.nodes|) body is all we allow.
+ *
+ * When `graph === undefined`, every feature is 0 (backward-compatible
+ * with pre-I3 consumers and with `CONSTRAINT_GRAPH_EMIT=false` rollback).
+ */
+function extractGraphFeatures(
+  matchedAttributes: ReadonlySet<string>,
+  graph: ConstraintGraph | undefined,
+): GraphFeatureBundle {
+  if (graph === undefined) {
+    return {
+      rootSatisfied: 0,
+      hardTierCoverage: 0,
+      xorBranchMatch: 0,
+      originEncoded: 0,
+    };
+  }
+
+  // Hard-tier root-satisfaction + coverage ratio come from the shared
+  // `computeGraphCoverage` helper (same one Phase 1b.1 provenance-closure
+  // + Phase 1b.3b ranker hard-gate use). Guarantees LTR-gate semantic
+  // alignment.
+  const hardSubgraph = projectHardTierSubgraph(graph);
+  const hardCoverage = computeGraphCoverage(hardSubgraph, matchedAttributes);
+  const rootSatisfied = hardCoverage.rootSatisfied ? 1 : 0;
+  const hardTierCoverage = hardCoverage.coverageRatio;
+
+  // XOR branch-match: does the candidate satisfy at least one branch of
+  // ANY xor group anywhere in the graph? O(|nodes|) scan. Matches only
+  // slot children of XOR groups so `group_xor` over nested groups is
+  // treated fairly (the recursive coverage result decides satisfaction).
+  let xorBranchMatch = 0;
+  let sawXor = false;
+  for (const node of graph.nodes) {
+    if (node.kind !== 'group_xor') continue;
+    sawXor = true;
+    for (const childId of node.children) {
+      const child = graph.nodes.find((n) => n.nodeId === childId);
+      if (child === undefined) continue;
+      if (child.kind === 'slot' && matchedAttributes.has(child.attribute)) {
+        xorBranchMatch = 1;
+        break;
+      }
+    }
+    if (xorBranchMatch === 1) break;
+  }
+  // When there is no XOR group at all, the feature is 0 (not 1) — the
+  // signal is "this candidate respects a user XOR choice". Absence of
+  // the XOR group is informationally equivalent to "no XOR choice was
+  // expressed", so 0 is correct.
+  void sawXor;
+
+  return {
+    rootSatisfied,
+    hardTierCoverage,
+    xorBranchMatch,
+    originEncoded: encodeGraphOrigin(graph),
   };
 }
 
@@ -244,4 +382,8 @@ export const LTR_FEATURE_NAMES: readonly (keyof LTRFeatureVector)[] = [
   'is_sparse_degraded',
   'is_anchor_degraded',
   'degraded_channel_count',
+  'graph_root_satisfied',
+  'graph_hard_tier_coverage',
+  'graph_xor_branch_match',
+  'graph_origin_encoded',
 ] as const;
