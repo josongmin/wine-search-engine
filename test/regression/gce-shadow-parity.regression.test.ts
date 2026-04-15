@@ -1,7 +1,7 @@
 /**
- * ADR-016 Axis 3 Wave D bootstrap — shadow parity harness regression.
+ * ADR-016 Axis 3 Wave D/I6 bootstrap — shadow parity harness regression.
  *
- * Runs `runShadowParity` over the checked-in 30-claim `gold-claims.jsonl`
+ * Runs `runShadowParity` over the checked-in 60-claim `gold-claims.jsonl`
  * bootstrap set and locks three invariants:
  *
  * 1. The harness runs to completion and produces BOTH
@@ -20,12 +20,19 @@
  *    gates extractor deletion on a sibling `gold-set-proof.json`
  *    file that this repo does not yet carry.
  *
- * Observed bootstrap parity at commit time: overall 0.50 (15/30). The
- * legacy 5-class regex extractor is intentionally weak on the 9-class
- * field axis — every bootstrap miss traces to a legacy extraction gap,
- * NOT a new-path verifier bug. Honest measurement: the new path IS the
- * authoritative path once the annotation set reaches the production
- * threshold.
+ * Observed bootstrap parity history:
+ *   - Wave D (30 claims): overall 0.50 (15/30).
+ *   - Wave I6 (60 claims): overall 0.50 (30/60) — parity held at 0.50
+ *     after doubling the set. The new claims exposed additional gaps
+ *     in the legacy extractor (especially on price/vintage contradictions
+ *     and drinking-window), balanced by better coverage on comparative
+ *     and pairing types.
+ *
+ * The legacy 5-class regex extractor is intentionally weak on the
+ * 9-class field axis — every bootstrap miss traces to a legacy
+ * extraction gap, NOT a new-path verifier bug. Honest measurement:
+ * the new path IS the authoritative path once the annotation set
+ * reaches the production threshold.
  *
  * Append-only test: never delete this file.
  */
@@ -36,12 +43,12 @@ import {
 } from '../../test/benchmark/evaluator/shadow-parity-harness.js';
 import { ATOMIC_CLAIM_TYPES } from '../../src/domain/response/model/grounded-claim.js';
 
-const BOOTSTRAP_CLAIM_COUNT = 30;
+const BOOTSTRAP_CLAIM_COUNT = 60;
 const BOOTSTRAP_PARITY_FLOOR = 0.40;
 const BOOTSTRAP_EVIDENCE_WINE_COUNT = 8;
 
 describe('ADR-016 Axis 3 — shadow parity bootstrap harness', () => {
-  it('loads exactly 30 gold claims from gold-claims.jsonl', () => {
+  it('loads exactly 60 gold claims from gold-claims.jsonl', () => {
     const claims = loadBootstrapGoldClaims();
     expect(claims).toHaveLength(BOOTSTRAP_CLAIM_COUNT);
   });
