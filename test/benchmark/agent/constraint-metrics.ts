@@ -11,8 +11,13 @@
  */
 
 import type { ConstraintBundle, NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
+import type { ConstraintGraph } from '../../../src/domain/query/model/constraint-graph.js';
 import type { ExpectedConstraint, ExpectedEntity } from './scenario.js';
 import { resolveEntity } from '../../../src/domain/attribute/service/entity-resolver.js';
+import {
+  computeScrInferredGraph,
+  computeCsrInferredGraph,
+} from './graph-coverage-metric.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared tier weights (Rule 25: single source-of-truth for SCR + CSR)
@@ -169,6 +174,15 @@ export interface ConstraintRecallScore {
   readonly scrSoft: number | null;
   /** inferred bucket recall [0,1] or null. */
   readonly scrInferred: number | null;
+  /**
+   * ADR-011 PR2 dual-emit: graph-aware inferred-bucket recall.
+   * `null` when no `ConstraintGraph` is supplied OR no expected inferred
+   * constraints exist. On a trivial graph (all-AND-root), the value is
+   * byte-identical to `scrInferred` — parity is locked in the regression
+   * `bench-graph-metric-dual-emit.regression.test.ts`. Divergence on
+   * XOR / OR / nested groups is the intended telemetry signal.
+   */
+  readonly scrInferredGraph: number | null;
   /** Weighted overall SCR (hard=0.6, soft=0.2, inferred=0.2) or null if no buckets measurable. */
   readonly scrOverall: number | null;
   /** Diagnostic: which expected constraints were MISSED (for debugging). */
@@ -191,6 +205,13 @@ export function scoreSemanticConstraintRecall(
     readonly inferred?: readonly ExpectedConstraint[];
   },
   mode: MatchMode = 'relaxed',
+  /**
+   * ADR-011 PR2 dual-emit: optional `ConstraintGraph` threaded from the
+   * compiler. When present, `scrInferredGraph` is populated alongside the
+   * flat `scrInferred`. When absent, `scrInferredGraph` stays `null` and
+   * the flat path is authoritative (historical behaviour).
+   */
+  graph?: ConstraintGraph,
 ): ConstraintRecallScore {
   const missed: ExpectedConstraint[] = [];
 
@@ -221,10 +242,19 @@ export function scoreSemanticConstraintRecall(
 
   const scrOverall = totalWeight > 0 ? weightedSum / totalWeight : null;
 
+  // ADR-011 PR2 dual-emit: graph-aware inferred recall. Reported alongside
+  // the flat `scrInferred` — never replaces it.
+  const scrInferredGraph = computeScrInferredGraph({
+    graph,
+    extractedInferred: extracted.inferred,
+    expectedInferred: expected.inferred,
+  }).value;
+
   return {
     scrHard,
     scrSoft,
     scrInferred,
+    scrInferredGraph,
     scrOverall,
     missedConstraints: missed,
   };
@@ -386,6 +416,12 @@ export interface ConstraintSatisfactionScore {
   readonly csrHard: number | null;
   readonly csrSoft: number | null;
   readonly csrInferred: number | null;
+  /**
+   * ADR-011 PR2 dual-emit: graph-aware inferred-tier satisfaction.
+   * `null` when no `ConstraintGraph` is supplied OR no extracted inferred
+   * constraints exist. Trivial graph → byte-identical to `csrInferred`.
+   */
+  readonly csrInferredGraph: number | null;
   readonly csrOverall: number | null;
 }
 
@@ -458,6 +494,12 @@ function constraintEvidenced(constraint: NormalizedConstraint, observations: rea
 export function scoreConstraintSatisfactionRate(
   extractedConstraints: ConstraintBundle,
   observations: readonly string[],
+  /**
+   * ADR-011 PR2 dual-emit: optional `ConstraintGraph`. When present,
+   * `csrInferredGraph` is populated alongside the flat `csrInferred`.
+   * When absent, `csrInferredGraph` stays `null`.
+   */
+  graph?: ConstraintGraph,
 ): ConstraintSatisfactionScore {
   const tierScore = (constraints: readonly NormalizedConstraint[]): number | null => {
     if (constraints.length === 0) return null;
@@ -481,7 +523,22 @@ export function scoreConstraintSatisfactionRate(
 
   const csrOverall = totalWeight > 0 ? weightedSum / totalWeight : null;
 
-  return { csrHard, csrSoft, csrInferred, csrOverall };
+  // ADR-011 PR2 dual-emit: graph-aware inferred satisfaction.
+  // `observationAttributes` = the set of inferred-tier attributes actually
+  // evidenced in the observation haystack — i.e. the `constraintEvidenced`
+  // check applied per attribute. The graph's AND/OR/XOR aggregation decides
+  // whether that evidence is sufficient at the group level.
+  const observationAttributes = new Set<string>();
+  for (const c of extractedConstraints.inferred) {
+    if (constraintEvidenced(c, observations)) observationAttributes.add(c.attribute);
+  }
+  const csrInferredGraph = computeCsrInferredGraph({
+    graph,
+    extractedInferred: extractedConstraints.inferred,
+    observationAttributes,
+  }).value;
+
+  return { csrHard, csrSoft, csrInferred, csrInferredGraph, csrOverall };
 }
 
 // ─────────────────────────────────────────────────────────────────────────

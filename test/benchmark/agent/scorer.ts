@@ -161,6 +161,11 @@ export interface ScenarioScores {
   readonly scrSoft: number | null;
   /** SCR inferred bucket [0,1] or null. */
   readonly scrInferred: number | null;
+  /**
+   * ADR-011 PR2 dual-emit: graph-aware inferred recall. `null` when no graph
+   * or no expected inferred bucket. Trivial graph = `scrInferred` byte-for-byte.
+   */
+  readonly scrInferredGraph: number | null;
   /** Entity Linking Accuracy @1 (P2). null when no expectedEntities. */
   readonly entityLinkingAccuracy: number | null;
   /** Slot F1 entity-level strict mode (P3). null when no expectedConstraints. */
@@ -175,6 +180,12 @@ export interface ScenarioScores {
   readonly csrSoft: number | null;
   /** CSR inferred tier (P4). null when no inferred constraints or no observations. */
   readonly csrInferred: number | null;
+  /**
+   * ADR-011 PR2 dual-emit: graph-aware inferred satisfaction. `null` when no
+   * graph or no extracted inferred constraints. Trivial graph = `csrInferred`
+   * byte-for-byte.
+   */
+  readonly csrInferredGraph: number | null;
 }
 
 export interface ScenarioResult {
@@ -247,6 +258,7 @@ const ZERO_SCORES: ScenarioScores = {
   scrHard: null,
   scrSoft: null,
   scrInferred: null,
+  scrInferredGraph: null,
   entityLinkingAccuracy: null,
   slotF1Strict: null,
   slotF1Relaxed: null,
@@ -254,6 +266,7 @@ const ZERO_SCORES: ScenarioScores = {
   csrHard: null,
   csrSoft: null,
   csrInferred: null,
+  csrInferredGraph: null,
 };
 
 /**
@@ -550,6 +563,8 @@ export interface ConstraintExtractionMetricsInput {
   readonly scrHard: number | null;
   readonly scrSoft: number | null;
   readonly scrInferred: number | null;
+  /** ADR-011 PR2 dual-emit: graph-aware inferred recall. */
+  readonly scrInferredGraph: number | null;
   readonly entityLinkingAccuracy: number | null;
   readonly slotF1Strict: number | null;
   readonly slotF1Relaxed: number | null;
@@ -561,6 +576,8 @@ export interface ConstraintExtractionMetricsInput {
   readonly csrSoft: number | null;
   /** P4: CSR inferred tier [0,1]. null when no inferred constraints or no observations. */
   readonly csrInferred: number | null;
+  /** ADR-011 PR2 dual-emit: graph-aware inferred satisfaction. */
+  readonly csrInferredGraph: number | null;
 }
 
 export function scoreScenario(
@@ -815,6 +832,7 @@ export function scoreScenario(
       scrHard: constraintMetrics?.scrHard ?? null,
       scrSoft: constraintMetrics?.scrSoft ?? null,
       scrInferred: constraintMetrics?.scrInferred ?? null,
+      scrInferredGraph: constraintMetrics?.scrInferredGraph ?? null,
       entityLinkingAccuracy: constraintMetrics?.entityLinkingAccuracy ?? null,
       slotF1Strict: constraintMetrics?.slotF1Strict ?? null,
       slotF1Relaxed: constraintMetrics?.slotF1Relaxed ?? null,
@@ -822,6 +840,7 @@ export function scoreScenario(
       csrHard: constraintMetrics?.csrHard ?? null,
       csrSoft: constraintMetrics?.csrSoft ?? null,
       csrInferred: constraintMetrics?.csrInferred ?? null,
+      csrInferredGraph: constraintMetrics?.csrInferredGraph ?? null,
     },
     ...(diagnostics.length > 0 ? { diagnostics, diagnosticStrings } : {}),
     judgeRequiredButSkipped,

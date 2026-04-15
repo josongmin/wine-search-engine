@@ -1,4 +1,5 @@
 {
+  "baselineVersion": "v4",
   "timestamp": "2026-04-09T16:20:00.000Z",
   "model": "gpt-5.4-mini",
   "judgeModel": "gpt-5.4-mini",
@@ -10,7 +11,7 @@
     "overallCi95": { "lower": 0.720, "upper": 0.869 },
     "n": 20,
     "version": "V6-SOTA++",
-    "notes": "V6 baseline: RFC-019 (span parser, entity resolver, ontology expansion, compositional inference, retrieval plan builder, RFC-018 sensory priors) + RFC-020 (SCR/ELA/SlotF1 measurement framework). Judge N=3 median, CoT+few-shot prompt, NLI atomic claim faithfulness, bootstrap CI, latency SLA, judge floor=0.05. DEFAULT_MAPPINGS 150 phrases. Placeholder hallucination blocked. Bare tool call recovery. finishReason=length truncation recovery. Near-duplicate skipNearDuplicate for parallel batches.",
+    "notes": "V6 baseline: RFC-019 (span parser, entity resolver, ontology expansion, compositional inference, retrieval plan builder, RFC-018 sensory priors) + RFC-020 (SCR/ELA/SlotF1 measurement framework). Judge N=3 median, CoT+few-shot prompt, NLI atomic claim faithfulness, bootstrap CI, latency SLA, judge floor=0.05. DEFAULT_MAPPINGS 150 phrases. Placeholder hallucination blocked. Bare tool call recovery. finishReason=length truncation recovery. Near-duplicate skipNearDuplicate for parallel batches. ADR-011 PR2 dual-emit: scrInferredGraph / csrInferredGraph added alongside flat values — first run populates from null.",
     "dimensions": {
       "executionEfficiency": 0.961,
       "answerQuality": 1.0,
@@ -26,9 +27,12 @@
       "scrHard": 0.667,
       "scrSoft": 0.333,
       "scrInferred": 0.0,
+      "scrInferredGraph": null,
       "entityLinkingAccuracy": 0.900,
       "slotF1Strict": 0.531,
       "slotF1Relaxed": 0.531,
+      "csrInferred": null,
+      "csrInferredGraph": null,
       "evaluatedScenarios": 6
     },
     "latency": {

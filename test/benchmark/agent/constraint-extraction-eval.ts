@@ -30,6 +30,7 @@ import type { ResolvedEntity } from '../../../src/domain/attribute/service/entit
 import { QueryNormalizer } from '../../../src/domain/query/service/query-normalizer.js';
 import { correctKoreanWineTypos } from '../../../src/domain/query/service/korean-wine-aliases.js';
 import { ConstraintCompiler } from '../../../src/domain/query/service/constraint-compiler.js';
+import type { ConstraintGraph } from '../../../src/domain/query/model/constraint-graph.js';
 
 /**
  * Minimal no-op mapping table adapter for the offline rig. Returns empty
@@ -65,6 +66,12 @@ export interface ExtractionResult {
   readonly spans: readonly Span[];
   readonly resolvedEntities: readonly ResolvedEntity[];
   readonly trace: ConstraintExtractionTrace;
+  /**
+   * ADR-011 PR2: trivial ConstraintGraph emitted by the compiler.
+   * Absent when the `CONSTRAINT_GRAPH_EMIT` flag is off — the graph-aware
+   * bench metrics stay `null` in that case (flat path authoritative).
+   */
+  readonly constraintGraph?: ConstraintGraph | undefined;
 }
 
 /**
@@ -88,6 +95,10 @@ export async function runConstraintExtraction(query: string): Promise<Extraction
     bundle: compiled.bundle,
     spans,
     resolvedEntities: [...compiled.resolvedEntities],
+    // exactOptionalPropertyTypes: only set the key when defined.
+    ...(compiled.constraintGraph !== undefined
+      ? { constraintGraph: compiled.constraintGraph }
+      : {}),
     trace: compiled.constraintExtraction ?? {
       candidatePhraseCount: spans.length,
       ruleTableHitCount: 0,

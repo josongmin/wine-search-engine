@@ -384,9 +384,15 @@ async function computeConstraintMetricsForScenario(
   }
 
   const extraction = await runConstraintExtraction(scenario.query);
+  const graph = extraction.constraintGraph;
   const scr = hasExpectedConstraints && scenario.expectation.expectedConstraints
-    ? scoreSemanticConstraintRecall(extraction.bundle, scenario.expectation.expectedConstraints)
-    : { scrOverall: null, scrHard: null, scrSoft: null, scrInferred: null };
+    ? scoreSemanticConstraintRecall(
+        extraction.bundle,
+        scenario.expectation.expectedConstraints,
+        'relaxed',
+        graph,
+      )
+    : { scrOverall: null, scrHard: null, scrSoft: null, scrInferred: null, scrInferredGraph: null };
   const ela = hasExpectedEntities && scenario.expectation.expectedEntities
     ? scoreEntityLinkingAccuracy(
       scenario.expectation.expectedEntities,
@@ -400,15 +406,18 @@ async function computeConstraintMetricsForScenario(
   // P4: Constraint Satisfaction Rate — measures whether retrieval results
   // actually satisfy the constraints that the NL extraction pipeline produced.
   // Requires observations (agent tool results) to check evidence.
+  // ADR-011 PR2 dual-emit: graph threaded so `csrInferredGraph` is populated
+  // alongside the flat `csrInferred`.
   const csr = observations.length > 0
-    ? scoreConstraintSatisfactionRate(extraction.bundle, observations)
-    : { csrHard: null, csrSoft: null, csrInferred: null, csrOverall: null };
+    ? scoreConstraintSatisfactionRate(extraction.bundle, observations, graph)
+    : { csrHard: null, csrSoft: null, csrInferred: null, csrInferredGraph: null, csrOverall: null };
 
   return {
     semanticConstraintRecall: scr.scrOverall,
     scrHard: scr.scrHard,
     scrSoft: scr.scrSoft,
     scrInferred: scr.scrInferred,
+    scrInferredGraph: scr.scrInferredGraph,
     entityLinkingAccuracy: ela.ela1,
     slotF1Strict: slot.strict,
     slotF1Relaxed: slot.relaxed,
@@ -416,6 +425,7 @@ async function computeConstraintMetricsForScenario(
     csrHard: csr.csrHard,
     csrSoft: csr.csrSoft,
     csrInferred: csr.csrInferred,
+    csrInferredGraph: csr.csrInferredGraph,
   };
 }
 
@@ -706,7 +716,26 @@ export interface BenchmarkWallClock {
   readonly concurrency: number;
 }
 
+/**
+ * ADR-011 PR2 dual-emit: structural version of the `baseline.json` contract.
+ *
+ * - `"v3"`: legacy shape (no `scrInferredGraph` / `csrInferredGraph`). Readers
+ *   fall back to `null` for the graph-aware means.
+ * - `"v4"`: adds `scrInferredGraph` / `csrInferredGraph` to the summary block.
+ *
+ * The `compareBaseline` reader accepts both `"v3"` and `"v4"` (one-release
+ * compatibility window). Unknown versions fail loudly — never silent.
+ */
+export const BASELINE_VERSION_CURRENT = 'v4' as const;
+export const BASELINE_VERSION_COMPATIBLE = new Set<string>(['v3', 'v4']);
+
 export interface BenchmarkReport {
+  /**
+   * ADR-011 PR2 dual-emit: explicit structural version of the baseline file
+   * so downstream readers can fail loudly on unknown shapes. See
+   * {@link BASELINE_VERSION_CURRENT}.
+   */
+  readonly baselineVersion: typeof BASELINE_VERSION_CURRENT;
   readonly timestamp: string;
   readonly model: string;
   readonly judgeModel: string | null;
@@ -786,6 +815,13 @@ export interface BenchmarkReport {
     readonly scrSoft: number | null;
     /** RFC-020 P1: SCR inferred bucket mean. */
     readonly scrInferred: number | null;
+    /**
+     * ADR-011 PR2 dual-emit: graph-aware SCR inferred mean, null-safe across
+     * scenarios. Mean over scenarios with non-null `scrInferredGraph` — mixed
+     * scenarios (some with graph, some without) are handled correctly because
+     * the denominator only counts present values.
+     */
+    readonly scrInferredGraph: number | null;
     /** RFC-020 P2: Entity Linking Accuracy @1 mean. */
     readonly entityLinkingAccuracy: number | null;
     /** RFC-020 P3: Slot F1 strict mode mean. */
@@ -800,6 +836,11 @@ export interface BenchmarkReport {
     readonly csrSoft: number | null;
     /** RFC-020 P4: CSR inferred tier mean. */
     readonly csrInferred: number | null;
+    /**
+     * ADR-011 PR2 dual-emit: graph-aware CSR inferred mean, null-safe across
+     * scenarios. Mean over scenarios with non-null `csrInferredGraph`.
+     */
+    readonly csrInferredGraph: number | null;
     /** Number of scenarios that received constraint extraction evaluation. */
     readonly constraintEvaluatedCount: number;
     readonly avgSteps: number;
@@ -1328,6 +1369,7 @@ function buildReport(
   const scrHardScores = executedForAggregate.map((r) => r.scores.scrHard);
   const scrSoftScores = executedForAggregate.map((r) => r.scores.scrSoft);
   const scrInferredScores = executedForAggregate.map((r) => r.scores.scrInferred);
+  const scrInferredGraphScores = executedForAggregate.map((r) => r.scores.scrInferredGraph);
   const elaScores = executedForAggregate.map((r) => r.scores.entityLinkingAccuracy);
   const slotF1StrictScores = executedForAggregate.map((r) => r.scores.slotF1Strict);
   const slotF1RelaxedScores = executedForAggregate.map((r) => r.scores.slotF1Relaxed);
@@ -1335,6 +1377,7 @@ function buildReport(
   const csrHardScores = executedForAggregate.map((r) => r.scores.csrHard);
   const csrSoftScores = executedForAggregate.map((r) => r.scores.csrSoft);
   const csrInferredScores = executedForAggregate.map((r) => r.scores.csrInferred);
+  const csrInferredGraphScores = executedForAggregate.map((r) => r.scores.csrInferredGraph);
   const constraintEvaluatedCount = executedForAggregate.filter(
     (r) => r.scores.semanticConstraintRecall !== null || r.scores.entityLinkingAccuracy !== null,
   ).length;
@@ -1382,6 +1425,7 @@ function buildReport(
   const overallBootstrapCi95 = bootstrapCi95(overallScores);
 
   return {
+    baselineVersion: BASELINE_VERSION_CURRENT,
     timestamp: new Date().toISOString(),
     model,
     judgeModel,
@@ -1429,6 +1473,7 @@ function buildReport(
       scrHard: nullableMean(scrHardScores),
       scrSoft: nullableMean(scrSoftScores),
       scrInferred: nullableMean(scrInferredScores),
+      scrInferredGraph: nullableMean(scrInferredGraphScores),
       entityLinkingAccuracy: nullableMean(elaScores),
       slotF1Strict: nullableMean(slotF1StrictScores),
       slotF1Relaxed: nullableMean(slotF1RelaxedScores),
@@ -1436,6 +1481,7 @@ function buildReport(
       csrHard: nullableMean(csrHardScores),
       csrSoft: nullableMean(csrSoftScores),
       csrInferred: nullableMean(csrInferredScores),
+      csrInferredGraph: nullableMean(csrInferredGraphScores),
       constraintEvaluatedCount,
       avgSteps:
         executed.length > 0
@@ -1503,6 +1549,23 @@ async function compareBaseline(
       // The previous behavior (regressed: false) meant a corrupted or missing
       // baseline file always reported "PASSED" — masking real regressions.
       console.error(`  [BASELINE] ⚠ Baseline file has unexpected shape — treating as regression (fail-safe)`);
+      return { regressed: true, delta: 0 };
+    }
+
+    // ADR-011 PR2 dual-emit: baseline version compatibility.
+    // - Missing `baselineVersion` → treat as legacy "v3" (one-release compat
+    //   window). Graph-aware fields stay null; overallScore comparison unchanged.
+    // - Known version (`v3`, `v4`) → read normally.
+    // - Unknown version → fail-safe (regressed: true). Silent acceptance of an
+    //   unknown shape could mask a schema migration bug downstream.
+    const baselineRecord = baselineUnknown as Record<string, unknown>;
+    const rawVersion = baselineRecord['baselineVersion'];
+    const effectiveVersion: string = typeof rawVersion === 'string' ? rawVersion : 'v3';
+    if (!BASELINE_VERSION_COMPATIBLE.has(effectiveVersion)) {
+      console.error(
+        `  [BASELINE] ⚠ Unknown baselineVersion="${effectiveVersion}" — compatible: `
+        + `${[...BASELINE_VERSION_COMPATIBLE].join(', ')}. Treating as regression (fail-safe).`,
+      );
       return { regressed: true, delta: 0 };
     }
     const baseline = baselineUnknown as BenchmarkReport;
@@ -1645,6 +1708,11 @@ async function main(): Promise<void> {
     console.error(`  ELA@1:        ${fmt(s.entityLinkingAccuracy)}`);
     console.error(`  Slot F1 strict: ${fmt(s.slotF1Strict)}   relaxed: ${fmt(s.slotF1Relaxed)}`);
     console.error(`  CSR overall:  ${fmt(s.csrOverall)}   CSR hard: ${fmt(s.csrHard)}   CSR soft: ${fmt(s.csrSoft)}   CSR inferred: ${fmt(s.csrInferred)}`);
+    // ADR-011 PR2 dual-emit: graph-aware siblings. Columns sit next to the flat
+    // inferred values so divergence (XOR / OR / subquery-bundled scenarios) is
+    // immediately visible. Flat value = legacy bucket-set equality; graph value
+    // = AND/OR/XOR-aware root satisfaction.
+    console.error(`  SCR inferred (graph): ${fmt(s.scrInferredGraph)}   CSR inferred (graph): ${fmt(s.csrInferredGraph)}`);
     console.error(`  Evaluated:    ${s.constraintEvaluatedCount} scenario(s)`);
   }
   console.error('  ────── execution ───────');
