@@ -173,6 +173,10 @@ export class ExecutionCompiler {
       provenancePolicy,
     };
 
-    return { query, execution };
+    return {
+      query,
+      execution,
+      ...(plan.constraintGraph !== undefined ? { constraintGraph: plan.constraintGraph } : {}),
+    };
   }
 }

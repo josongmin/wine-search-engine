@@ -279,8 +279,18 @@ export async function runHybridRankingPipeline(
   const provenanceClosure = buildExecutionProvenanceClosureFromStages(
     compiled.execution.provenancePolicy,
     retrievalProvenanceCoverage
-      ?? buildHybridCandidateCoverageStage(plan, candidates, compiled.execution.provenancePolicy),
-    buildRankedResultCoverageStage(plan, rankedResults, compiled.execution.provenancePolicy),
+      ?? buildHybridCandidateCoverageStage(
+        plan,
+        candidates,
+        compiled.execution.provenancePolicy,
+        compiled.constraintGraph,
+      ),
+    buildRankedResultCoverageStage(
+      plan,
+      rankedResults,
+      compiled.execution.provenancePolicy,
+      compiled.constraintGraph,
+    ),
   );
   const rankerDegradation = mergeProvenanceShortfall(
     rankingMetadata.runtimeSignal?.degradation ?? ranker.getLastRuntimeSignal?.()?.degradation,

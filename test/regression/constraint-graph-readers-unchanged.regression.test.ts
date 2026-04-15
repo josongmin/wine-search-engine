@@ -1,10 +1,22 @@
 /**
- * ADR-010 Phase 1a: Downstream readers MUST remain on `constraints` /
- * `constraintAtoms` in Phase 1a. No reader is allowed to consume
- * `plan.constraintGraph` yet — Phase 1b migrates the first reader
- * (`provenance-closure`) explicitly.
+ * ADR-010 / ADR-011: downstream readers must only consume
+ * `plan.constraintGraph` / `compiled.constraintGraph` after their ADR-011
+ * Phase-1b migration is explicit. The allow-list below enumerates every
+ * file authorised to reference `.constraintGraph` on a plan / compiled
+ * query / compiler result.
  *
- * Guards against accidental Phase-1b leaks into Phase-1a code.
+ * Phase 1a (ADR-010): type + projector + compiler emission + planner thread.
+ * Phase 1b.1 (ADR-011): first-reader migration —
+ *   - `compiled-wine-query.ts`   (passthrough field)
+ *   - `execution-compiler.ts`    (plan → compiled copy)
+ *   - `compute-graph-coverage.ts`(graph-aware AND/OR/XOR coverage)
+ *   - `search-usecase-provenance-closure.ts` (first migrated reader)
+ *   - `search-usecase-hybrid-ranking-pipeline.ts`
+ *     (call-site that threads `compiled.constraintGraph` into the stage builders)
+ *
+ * Future Phase-1b.* migrations MUST append their source files to the
+ * allow-list in the same PR that migrates them. Bare `.constraintGraph`
+ * leaks elsewhere fail this test.
  *
  * Append-only test: never delete this file.
  */
@@ -28,11 +40,19 @@ const REPO_ROOT = resolve(
  * - Regression tests that lock the contract
  */
 const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
+  // Phase 1a (ADR-010): type + projector + planner/compiler emission.
   /src\/domain\/query\/model\/constraint-graph\.ts$/,
   /src\/domain\/query\/model\/query-plan\.ts$/,
   /src\/domain\/query\/service\/build-trivial-graph-from-atoms\.ts$/,
   /src\/domain\/query\/service\/constraint-compiler\.ts$/,
   /src\/domain\/query\/service\/planner\.ts$/,
+  // Phase 1b.1 (ADR-011): first-reader migration + passthrough plumbing.
+  /src\/domain\/query\/model\/compiled-wine-query\.ts$/,
+  /src\/domain\/query\/service\/execution-compiler\.ts$/,
+  /src\/domain\/query\/service\/compute-graph-coverage\.ts$/,
+  /src\/application\/search\/search-usecase-provenance-closure\.ts$/,
+  /src\/application\/search\/search-usecase-hybrid-ranking-pipeline\.ts$/,
+  // Docs / tests / benchmarks remain globally allowed.
   /docs\//,
   /test\/regression\//,
   /test\/benchmark\//,
@@ -52,7 +72,7 @@ function listTsFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-describe('Phase 1a — no unauthorised constraintGraph readers', () => {
+describe('ConstraintGraph reader allow-list (ADR-010 / ADR-011)', () => {
   it('no src/ file outside the allow-list references plan.constraintGraph', () => {
     const srcRoot = join(REPO_ROOT, 'src');
     const files = listTsFiles(srcRoot);

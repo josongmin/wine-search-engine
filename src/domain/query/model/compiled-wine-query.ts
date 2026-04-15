@@ -1,6 +1,7 @@
 import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.js';
 import type { EngineExecutionContract } from './engine-execution-contract.js';
 import type { PolicyDecisionRecord } from './policy-decision-record.js';
+import type { ConstraintGraph } from './constraint-graph.js';
 
 /**
  * CompiledWineQuery — the complete compiled query ready for engine execution.
@@ -26,4 +27,17 @@ export interface CompiledWineQuery {
    * needing to thread QueryPlanV2 separately through the pipeline.
    */
   readonly plannerTrace?: readonly PolicyDecisionRecord[] | undefined;
+
+  /**
+   * ADR-011 Phase 1b.1: optional passthrough of `QueryPlanV2.constraintGraph`.
+   *
+   * Populated by the ExecutionCompiler when the planner emitted a graph
+   * (feature flag `CONSTRAINT_GRAPH_EMIT`). Consumers that have migrated to
+   * graph-aware logic (currently: provenance-closure) prefer this field;
+   * legacy readers ignore it and continue reading `query.constraints`.
+   *
+   * Absent when `CONSTRAINT_GRAPH_EMIT=false` or when the planner produced
+   * no atoms — rollback is a runtime flag flip, not a code change.
+   */
+  readonly constraintGraph?: ConstraintGraph | undefined;
 }
