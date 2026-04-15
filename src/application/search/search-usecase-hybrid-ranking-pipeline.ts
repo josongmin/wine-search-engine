@@ -26,6 +26,9 @@ import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { buildRelaxationLadder } from '../../domain/query/service/constraint-relaxation.js';
+import { buildTrivialGraphFromAtoms } from '../../domain/query/service/build-trivial-graph-from-atoms.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
+import { liftBundleToAtoms } from '../../domain/shared/types/constraint-atom.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type {
   ExecutionProvenanceClosure,
@@ -89,24 +92,50 @@ function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResul
   };
 }
 
-function buildRelaxedCompiledQuery(
+export function buildRelaxedCompiledQuery(
   compiled: CompiledWineQuery,
   relaxedPlan: QueryPlanV1,
 ): CompiledWineQuery {
-  // ADR-011/014 hotfix: constraint relaxation drops hard attributes from
-  // `compiled.query.constraints` but the pre-relaxation `constraintGraph`
-  // still carries slot nodes for those dropped attributes. Graph-aware
-  // readers (provenance-closure, decision-input, ranker hard-gate) would
-  // then fail candidates on stale graph obligations while the flat path
-  // happily accepts them — the exact split golden-set `Masi Amarone` /
-  // `Barolo Monfortino` tripped.
+  // ADR-011/014 + Phase 1b.4: constraint relaxation drops hard attributes
+  // from `compiled.query.constraints`, but the pre-relaxation
+  // `constraintGraph` still carries slot nodes for those dropped
+  // attributes. Graph-aware readers (provenance-closure, decision-input,
+  // ranker hard-gate) would fail candidates on stale obligations while
+  // the flat path happily accepts them — the exact split that golden-set
+  // `Masi Amarone` / `Barolo Monfortino` tripped. The Wave 1 hotfix
+  // (commit e909609) stripped `constraintGraph` entirely from the relaxed
+  // compiled query so every reader fell back to the flat bundle path.
+  // That was a safety patch: correct, but graph-aware semantics were LOST
+  // for relaxed queries. Under LLM topology (XOR/OR branches from
+  // Phase 1b.2) the strip would silently demote a valid topology to
+  // flat AND-all — a SOTA++ regression.
   //
-  // Strip the graph from the relaxed compiled query so every graph-aware
-  // reader falls back to the flat (relaxed) bundle path. Byte-identical
-  // to pre-PR5 relaxation behaviour. A faithful "regenerate the graph
-  // from the relaxed atoms" path is the Phase 1b.4 follow-up; until then
-  // the stripped form is the safe contract for relaxation.
+  // Phase 1b.4 regenerates the graph from the relaxed bundle instead.
+  // Because relaxation only DROPS attributes from the hard list (see
+  // `buildRelaxationLadder` — the soft/inferred lists are preserved
+  // verbatim), `liftBundleToAtoms(relaxedPlan.constraints)` is a subset
+  // of the original atom list and the trivial graph over that subset is
+  // trivially consistent with the flat `relaxedPlan.constraints` path.
+  //
+  // We regenerate as a TRIVIAL graph only — even if the original graph
+  // was `origin: 'hybrid'` or `'planner_emitted'` from an LLM topology
+  // planner, a relaxed query may drop slots that the XOR/OR branches
+  // referenced, so preserving the LLM topology is unsound without
+  // per-node rewriting. Demoting to deterministic trivial is the
+  // strictly-correct contract for Phase 1b.4. A future Phase 1c.x could
+  // add topology-preserving rewriting where the relaxed slot set still
+  // satisfies every LLM-emitted branch, but until then demotion is the
+  // conservative floor.
+  //
+  // Feature-flag gating: the regeneration is suppressed when
+  // `CONSTRAINT_GRAPH_EMIT=false`, mirroring the compiler's SSoT helper.
+  // In that rollback mode the relaxed compiled query carries no graph at
+  // all — identical to the Phase 1a rollback semantics at the compiler
+  // seam.
   const { constraintGraph: _droppedStaleGraph, ...compiledSansGraph } = compiled;
+  const regeneratedGraph = isConstraintGraphEmitEnabled()
+    ? buildTrivialGraphFromAtoms(liftBundleToAtoms(relaxedPlan.constraints))
+    : undefined;
   return {
     ...compiledSansGraph,
     query: {
@@ -114,6 +143,7 @@ function buildRelaxedCompiledQuery(
       constraints: relaxedPlan.constraints,
       retrievalPlan: buildRetrievalPlan(relaxedPlan.constraints),
     },
+    ...(regeneratedGraph !== undefined ? { constraintGraph: regeneratedGraph } : {}),
   };
 }
 

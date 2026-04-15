@@ -16,6 +16,7 @@ import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.j
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { ConstraintReasoner, type ConstraintReasonerOutput } from './constraint-reasoner.js';
 import { buildTrivialGraphFromAtoms } from './build-trivial-graph-from-atoms.js';
+import { isConstraintGraphEmitEnabled } from './constraint-graph-flags.js';
 import type { ConstraintGraph } from '../model/constraint-graph.js';
 import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js';
 import { isTopologyIntentGateOpen } from './constraint-topology-planner.js';
@@ -49,10 +50,12 @@ export interface ConstraintCompilerResult {
 /**
  * ADR-010 Phase 1a feature flag. Default on; set to literal string 'false'
  * to suppress graph emission at the compiler seam (rollback).
+ *
+ * The helper itself lives in `./constraint-graph-flags.ts` so Phase 1b.4
+ * (graph regeneration on constraint relaxation) can share the same
+ * on/off semantics without a second inline `process.env` read — see
+ * Rule 30 in `CLAUDE.md`.
  */
-function isConstraintGraphEmitEnabled(): boolean {
-  return process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false';
-}
 
 /**
  * ADR-012 Phase 1b.2 feature flag. Default OFF; set to literal 'true' to

@@ -1,5 +1,5 @@
 /**
- * Post-Wave1 hotfix: constraint relaxation and graph consistency.
+ * Post-Wave1 hotfix + Phase 1b.4: constraint relaxation and graph consistency.
  *
  * Two guarantees locked here:
  *
@@ -10,19 +10,21 @@
  *    as ghost hard-tier slots and the ranker's graph hard-gate fails
  *    legitimate candidates.
  *
- * 2. `buildRelaxedCompiledQuery` on the no-result-recovery path strips
- *    `constraintGraph` from the relaxed compiled query. The graph is
- *    produced once at compile time; relaxation mutates
- *    `compiled.query.constraints` but cannot mutate the graph in place.
- *    Stripping forces every graph-aware reader onto the flat fallback
- *    path (byte-identical to pre-Phase-1b.1 behaviour) for relaxed
- *    queries, which is the only consistent contract until a later phase
- *    introduces graph regeneration on relaxation.
+ * 2. `buildRelaxedCompiledQuery` on the no-result-recovery path
+ *    REGENERATES `constraintGraph` from the relaxed bundle (Phase 1b.4).
+ *    The Wave 1 hotfix (commit e909609) stripped the graph entirely to
+ *    force every reader onto the flat fallback path — correct but a
+ *    semantic loss, since relaxed queries no longer benefited from
+ *    graph-aware evaluation. Phase 1b.4 upgrades to regeneration: the
+ *    relaxed bundle is lifted to atoms and a deterministic trivial graph
+ *    is built over the subset, always stamping
+ *    `origin: 'deterministic_from_atoms'`. Topology-preserving rewriting
+ *    of LLM-emitted graphs is a Phase 1c.x follow-up.
  *
  * Regression trigger: golden-set `'Masi Amarone'` and `'Barolo Monfortino'`
- * returned zero results between PR5 landing and this hotfix because the
- * relaxed query's stale graph still carried a `region` hard slot that the
- * relaxed bundle had already dropped.
+ * returned zero results between PR5 landing and the Wave 1 hotfix because
+ * the relaxed query's stale graph still carried a `region` hard slot
+ * that the relaxed bundle had already dropped.
  *
  * Append-only test: never delete this file.
  */
@@ -113,13 +115,42 @@ describe('ConstraintCompiler uses survivingAtoms for the graph path', () => {
   });
 });
 
-describe('buildRelaxedCompiledQuery strips the stale constraintGraph', () => {
+describe('buildRelaxedCompiledQuery regenerates the stale constraintGraph (Phase 1b.4)', () => {
   const src = readFileSync(RANKING_PIPELINE_SRC, 'utf8');
 
   it('the relaxed compiled query does NOT inherit compiled.constraintGraph', () => {
-    // The old bug spread ...compiled without stripping constraintGraph. The
-    // hotfix extracts constraintGraph via destructuring and spreads the rest.
+    // The Wave 1 hotfix (commit e909609) spread over constraintGraph via
+    // destructuring; Phase 1b.4 still destructures it off the original
+    // compiled query — we never inherit the stale graph.
     expect(src).toMatch(/const \{ constraintGraph: _droppedStaleGraph, \.\.\.compiledSansGraph \} = compiled/);
     expect(src).toMatch(/function buildRelaxedCompiledQuery[\s\S]*\.\.\.compiledSansGraph/);
+  });
+
+  it('buildRelaxedCompiledQuery regenerates a trivial graph from the relaxed bundle', () => {
+    // Phase 1b.4: instead of leaving the graph absent, lift the relaxed
+    // bundle to atoms and project a deterministic trivial graph.
+    expect(src).toMatch(
+      /buildTrivialGraphFromAtoms\(liftBundleToAtoms\(relaxedPlan\.constraints\)\)/,
+    );
+  });
+
+  it('regeneration is gated on the shared CONSTRAINT_GRAPH_EMIT helper', () => {
+    // Rollback parity with the compiler seam: when `CONSTRAINT_GRAPH_EMIT=false`,
+    // the relaxed compiled query must carry no graph at all, exactly as
+    // the compiler does under the same flag.
+    expect(src).toMatch(/isConstraintGraphEmitEnabled\(\)/);
+    expect(src).toMatch(/import \{ isConstraintGraphEmitEnabled \} from/);
+  });
+
+  it('the module imports liftBundleToAtoms from the constraint-atom SSoT', () => {
+    expect(src).toMatch(
+      /import \{ liftBundleToAtoms \} from '\.\.\/\.\.\/domain\/shared\/types\/constraint-atom\.js'/,
+    );
+  });
+
+  it('the module imports buildTrivialGraphFromAtoms from the domain projector', () => {
+    expect(src).toMatch(
+      /import \{ buildTrivialGraphFromAtoms \} from '\.\.\/\.\.\/domain\/query\/service\/build-trivial-graph-from-atoms\.js'/,
+    );
   });
 });

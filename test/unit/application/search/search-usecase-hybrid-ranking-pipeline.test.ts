@@ -163,6 +163,16 @@ describe('executeHybridRouteRankingPipeline', () => {
     expect(result.retrievalKind).toBe('generic_hybrid');
     expect(result.sparseExecuted).toBe(true);
     expect(result.usedCompiledExecution).toBe(true);
+    // Phase 1b.4: the relaxed compiled query carries a regenerated
+    // trivial graph built from the relaxed bundle. Since relaxation
+    // drops `region` — the only hard constraint on this minimal plan —
+    // the regenerated graph has zero hard slots and constraint
+    // evidence is vacuously satisfied. Pre-Phase-1b.4 the graph was
+    // stripped and provenance closure fell back to the flat bundle
+    // path, which stamped `constraintEvidenceSatisfied: false`
+    // because no matched attributes existed. The new contract is
+    // strictly more correct: a relaxed-away constraint is no longer
+    // an evidence obligation.
     expect(result.rankingMetadata?.provenanceClosure).toEqual({
       policy: {
         requireIdentitySeal: false,
@@ -172,7 +182,7 @@ describe('executeHybridRouteRankingPipeline', () => {
       preRank: {
         candidateCount: 1,
         identityEvidenceSatisfied: true,
-        constraintEvidenceSatisfied: false,
+        constraintEvidenceSatisfied: true,
         anchorEvidenceSatisfied: true,
         matchedConstraintAttributes: [],
         unmetConstraintAttributes: [],
@@ -181,15 +191,30 @@ describe('executeHybridRouteRankingPipeline', () => {
       postRank: {
         candidateCount: 1,
         identityEvidenceSatisfied: true,
-        constraintEvidenceSatisfied: false,
+        constraintEvidenceSatisfied: true,
         anchorEvidenceSatisfied: true,
         matchedConstraintAttributes: [],
         unmetConstraintAttributes: [],
         anchorSignalTypes: [],
       },
-      missing: ['constraint_evidence'],
-      satisfied: false,
+      missing: [],
+      satisfied: true,
     });
+    // Phase 1b.4: the relaxed compiled query threaded into the ranker
+    // now carries a regenerated deterministic graph, not undefined.
+    expect(ranker.rank.mock.calls[1]?.[0]?.compiled?.constraintGraph).toBeDefined();
+    expect(ranker.rank.mock.calls[1]?.[0]?.compiled?.constraintGraph?.origin).toBe(
+      'deterministic_from_atoms',
+    );
+    // With a fully-relaxed bundle (no hard constraints), the
+    // regenerated graph should have a single `group_and` root and
+    // zero `slot` children.
+    const regeneratedGraphOnRelaxedCall =
+      ranker.rank.mock.calls[1]?.[0]?.compiled?.constraintGraph;
+    expect(
+      regeneratedGraphOnRelaxedCall?.nodes.filter((n: { kind: string }) => n.kind === 'slot')
+        .length,
+    ).toBe(0);
   });
 
   it('materializes provenance shortfall into ranking metadata and route degradation before decision', async () => {
