@@ -36,6 +36,7 @@ import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import { ConstraintTopologyPlanner } from '../domain/query/service/constraint-topology-planner.js';
+import { validateFeatureFlagsAtStartup } from './feature-flag-coherence.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
@@ -81,6 +82,12 @@ export async function buildQueryPlanner(
   llmQueryInterpreterTimeoutMs?: number,
   phraseCache?: PhraseCachePort,
 ): Promise<Planner> {
+  // Wave G1 (ADR-018): refuse to start if the feature-flag snapshot is
+  // incoherent (e.g. BUNDLE_SELECTOR_ENABLED=true without
+  // CONSTRAINT_GRAPH_EMIT). Idempotent across calls via the per-env
+  // cache in `feature-flag-coherence.ts`.
+  validateFeatureFlagsAtStartup();
+
   let fuzzyMatcher: FuzzyMatcherPort | undefined;
 
   if (pool !== undefined) {
