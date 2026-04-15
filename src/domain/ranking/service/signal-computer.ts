@@ -8,6 +8,10 @@ import type { ComponentScores } from '../model/ranked-result.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import { evaluateGraphHardGate } from './graph-hard-gate.js';
 import { computeGraphSoftWeight } from './graph-soft-weight.js';
+import {
+  classifyGraphPresence,
+  recordGraphPathDecision,
+} from '../../../observability/graph-path-telemetry.js';
 
 /**
  * Minimum entity integrity score to be considered viable.
@@ -174,6 +178,15 @@ export class SignalComputer {
     matchedSet?: ReadonlySet<string>,
     graph?: ConstraintGraph  ,
   ): boolean {
+    // Wave G2: unified graph-path telemetry.
+    recordGraphPathDecision({
+      reader: 'ranker_hard_gate',
+      outcome: classifyGraphPresence({
+        graphPresent: graph !== undefined,
+        ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
+        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      }),
+    });
     // ADR-014 Phase 1b.3b: when a ConstraintGraph is present, the hard gate
     // is the hard-tier subgraph's `rootSatisfied` under AND / OR / XOR
     // semantics. The flat AND-all fallback below is preserved byte-for-byte
@@ -226,6 +239,15 @@ export class SignalComputer {
     precomputedMatchedSet?: ReadonlySet<string>,
     graph?: ConstraintGraph  ,
   ): number {
+    // Wave G2: unified graph-path telemetry.
+    recordGraphPathDecision({
+      reader: 'ranker_soft_weight',
+      outcome: classifyGraphPresence({
+        graphPresent: graph !== undefined,
+        ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
+        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      }),
+    });
     const softConstraints = constraints.soft;
     const structuredSoftBoosts = retrievalPlan?.softBoosts ?? [];
     const structuredInferredBoosts = retrievalPlan?.inferredBoosts ?? [];

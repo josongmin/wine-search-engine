@@ -7,6 +7,10 @@ import type {
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
 import {
+  classifyGraphPresence,
+  recordGraphPathDecision,
+} from '../../observability/graph-path-telemetry.js';
+import {
   type DecisionInput,
   type DecisionInputCriticRewrite,
   type EvidenceSummary,
@@ -142,6 +146,15 @@ export function buildSearchDecisionInput(
     plan.constraints.hard.map((constraint) => constraint.attribute),
   );
   const constraintGraph = executionContext?.constraintGraph;
+  // Wave G2: emit unified graph-path telemetry for the decision reader.
+  recordGraphPathDecision({
+    reader: 'decision_input',
+    outcome: classifyGraphPresence({
+      graphPresent: constraintGraph !== undefined,
+      ...(constraintGraph !== undefined ? { graphOrigin: constraintGraph.origin } : {}),
+      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+    }),
+  });
   const graphResolution =
     constraintGraph !== undefined && topResult !== undefined
       ? resolveRequiredAttributes({

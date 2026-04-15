@@ -41,6 +41,10 @@ import { createQueryRewriter } from '../../domain/retrieval/service/query-rewrit
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
 import type { RewriteTrace } from '../../domain/retrieval/service/query-rewriter.js';
+import {
+  classifyGraphPresence,
+  recordGraphPathDecision,
+} from '../../observability/graph-path-telemetry.js';
 
 /**
  * ADR-015 Axis 2: per-call critic context surfaced from
@@ -197,6 +201,22 @@ function buildRetrievalCoverage(
   compiled: CompiledWineQuery,
   candidates: readonly HybridCandidate[],
 ): ProvenanceCoverageStage {
+  // Wave G2: emit `pre_rank_coverage` telemetry BEFORE delegating to
+  // `buildHybridCandidateCoverageStage` (which would otherwise double-count
+  // under `provenance_closure`). The stage builder's own emission is still
+  // semantically correct — it records every call-site it was invoked from,
+  // including the ranked-result post-phase — so the two readers distinguish
+  // pre-rank (specialized + generic retrieval) vs post-rank provenance.
+  recordGraphPathDecision({
+    reader: 'pre_rank_coverage',
+    outcome: classifyGraphPresence({
+      graphPresent: compiled.constraintGraph !== undefined,
+      ...(compiled.constraintGraph !== undefined
+        ? { graphOrigin: compiled.constraintGraph.origin }
+        : {}),
+      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+    }),
+  });
   // ADR-011 Phase 1b.3a: thread `compiled.constraintGraph` so specialized +
   // generic pre-rank coverage uses the same graph-aware AND/OR/XOR semantics
   // that ADR-011 Phase 1b.1 landed for `provenance-closure`. Flat path is
