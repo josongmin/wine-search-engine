@@ -69,7 +69,7 @@ function buildStructuredClarifyPayload(
  */
 export function buildConstraintContradictionResponseParams(options: {
   readonly plan: QueryPlanV1;
-  readonly compiled?: CompiledWineQuery | undefined;
+  readonly compiled: CompiledWineQuery;
   readonly snapshot: DecisionSnapshot;
   readonly requestId: string;
   readonly startTime: number;
@@ -110,9 +110,7 @@ export function buildConstraintContradictionResponseParams(options: {
       queryPlan: plan,
       snapshot,
       route: effectiveRoute,
-      ...(compiled !== undefined
-        ? { retrievalMode: compiled.execution.effectiveRetrievalMode }
-        : {}),
+      retrievalMode: compiled.execution.effectiveRetrievalMode,
       decisionStatus: 'failed',
       nextAction: 'fail',
       failureReason: 'HARD_CONSTRAINT_VIOLATION',
@@ -128,7 +126,7 @@ export function buildConstraintContradictionResponseParams(options: {
       },
       signals: {
         decisionConfidence: 0,
-        calibratedGap: 0,
+        calibratedGap: undefined,
         ambiguity: false,
       },
       thresholds: {
@@ -148,7 +146,7 @@ export function buildConstraintContradictionResponseParams(options: {
 
   return {
     queryPlan: plan,
-    ...(compiled !== undefined ? { compiled } : {}),
+    compiled,
     decisionOutput,
     results: [],
     requestId,
@@ -164,7 +162,7 @@ export function buildConstraintContradictionResponseParams(options: {
  */
 export function buildEntropyAbstainResponseParams(options: {
   readonly plan: QueryPlanV1;
-  readonly compiled?: CompiledWineQuery | undefined;
+  readonly compiled: CompiledWineQuery;
   readonly snapshot: DecisionSnapshot;
   readonly requestId: string;
   readonly startTime: number;
@@ -213,9 +211,7 @@ export function buildEntropyAbstainResponseParams(options: {
       queryPlan: plan,
       snapshot,
       route: effectiveRoute,
-      ...(compiled !== undefined
-        ? { retrievalMode: compiled.execution.effectiveRetrievalMode }
-        : {}),
+      retrievalMode: compiled.execution.effectiveRetrievalMode,
       decisionStatus: 'ambiguous',
       nextAction: 'clarify',
     }),
@@ -229,7 +225,7 @@ export function buildEntropyAbstainResponseParams(options: {
       },
       signals: {
         decisionConfidence: 0,
-        calibratedGap: 0,
+        calibratedGap: undefined,
         ambiguity: true,
       },
       thresholds: {
@@ -252,7 +248,7 @@ export function buildEntropyAbstainResponseParams(options: {
 
   return {
     queryPlan: plan,
-    ...(compiled !== undefined ? { compiled } : {}),
+    compiled,
     decisionOutput,
     abstainReason: abstainDecision.reason,
     results,

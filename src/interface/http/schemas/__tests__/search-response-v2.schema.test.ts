@@ -73,9 +73,7 @@ const validResultItemV2Machine = {
     hardConstraintPass: true,
     softConstraint: 0.75,
     attributeAlignment: 0.82,
-    preferenceAlignment: 0.65,
     popularity: 0.91,
-    availability: 1.0,
     uncertaintyPenalty: 0.05,
   },
   evidenceItems: [
@@ -219,6 +217,22 @@ describe('SearchResponseV2MachineSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts omitted unsupported component scores on machine responses', () => {
+    const result = SearchResponseV2MachineSchema.safeParse({
+      ...validSearchResponseV2Machine,
+      results: [{
+        ...validResultItemV2Machine,
+        componentScores: {
+          entityIntegrity: 0.98,
+          hardConstraintPass: true,
+          softConstraint: 0.75,
+          uncertaintyPenalty: 0.05,
+        },
+      }],
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('version field is the string literal "2"', () => {
     const result = SearchResponseV2MachineSchema.safeParse(validSearchResponseV2Machine);
     if (!result.success) throw new Error('Parse failed');
@@ -277,6 +291,14 @@ describe('SearchResponseV2MachineSchema', () => {
 describe('InterpretResponseV2Schema', () => {
   it('parses a valid InterpretResponseV2 object', () => {
     const result = InterpretResponseV2Schema.safeParse(validInterpretResponseV2);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts omitted confidence when explain uncertainty input is invalid', () => {
+    const result = InterpretResponseV2Schema.safeParse({
+      ...validInterpretResponseV2,
+      confidence: undefined,
+    });
     expect(result.success).toBe(true);
   });
 

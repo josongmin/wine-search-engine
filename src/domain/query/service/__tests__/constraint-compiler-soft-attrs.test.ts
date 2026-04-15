@@ -176,7 +176,7 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     expect(inHard).toBe(true);
   });
 
-  it('NLMapper failure is surfaced instead of degrading to an empty bundle', async () => {
+  it('NLMapper failure degrades gracefully to an empty bundle with fallbackTriggered (T-planner resilience)', async () => {
     const nlMapper: NLMapper = {
       mapConstraints: async () => {
         throw new Error('mapper exploded');
@@ -184,6 +184,9 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     } as unknown as NLMapper;
     const compiler = new ConstraintCompiler(nlMapper);
 
-    await expect(compiler.compile('test query')).rejects.toThrow('mapper exploded');
+    const result = await compiler.compile('test query');
+    expect(result.bundle.hard).toHaveLength(0);
+    expect(result.bundle.soft).toHaveLength(0);
+    expect(result.constraintExtraction?.fallbackTriggered).toBe(true);
   });
 });

@@ -71,10 +71,12 @@ interface NamespaceSealOverride {
 function createPoolMock(overrides?: {
   readonly canonicalAliasJoinCount?: string;
   readonly canonicalAmbiguityTotalCount?: string;
+  readonly canonicalIdentityAuthorityCount?: string;
   readonly namespaceSeal?: NamespaceSealOverride;
 }): Pick<Pool, 'query'> {
   const aliasJoin = overrides?.canonicalAliasJoinCount ?? '10';
   const ambiguityTotal = overrides?.canonicalAmbiguityTotalCount ?? '2';
+  const identityAuthority = overrides?.canonicalIdentityAuthorityCount ?? '10';
   const seal = {
     entities_violations: overrides?.namespaceSeal?.entitiesViolations ?? '0',
     canonical_entities_violations: overrides?.namespaceSeal?.canonicalEntitiesViolations ?? '0',
@@ -99,10 +101,12 @@ function createPoolMock(overrides?: {
         case 4:
           return { rows: [{ c: '10' }] };
         case 5:
-          return { rows: [seal] };
+          return { rows: [{ c: identityAuthority }] };
         case 6:
-          return { rows: [{ c: aliasJoin }] };
+          return { rows: [seal] };
         case 7:
+          return { rows: [{ c: aliasJoin }] };
+        case 8:
           return { rows: [{ c: ambiguityTotal }] };
         default:
           throw new Error(`Unexpected pool.query call index ${i}`);
@@ -175,7 +179,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           runtimeState,
         }),
       ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
-      expect(pool.query).toHaveBeenCalledTimes(8);
+      expect(pool.query).toHaveBeenCalledTimes(9);
     } finally {
       fetchSpy.mockRestore();
     }
@@ -223,6 +227,53 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           runtimeState,
         }),
       ).rejects.toThrow(/Canonical ambiguity projection mismatch/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when canonical_identity_authority does not match runtime entity count', async () => {
+    const dir = await makeTempDir();
+    const nlPath = path.join(dir, 'nl.json');
+    const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+    await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+
+    const activeLtrHash = activeLtrHashFromRows();
+    const runtimeState: LoadedSearchSnapshotRuntimeState = {
+      schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+      snapshotId: 'snap-test-1',
+      contentHash: 'hash',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/m.json',
+      nlMappingsRuntimePath: nlPath,
+      allowMissingLtr: false,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 2,
+        nlMappings: 1,
+        activeLtrModels: 1,
+      },
+      hashes: {
+        entities: 'entities',
+        aliases: 'aliases',
+        ambiguityRegistry: 'ambiguity',
+        nlMappings: hashRuntimeNlMappings(nlPayload),
+        activeLtrModels: activeLtrHash,
+      },
+    };
+
+    const fetchSpy = mockVespaResponses();
+
+    try {
+      const pool = createPoolMock({ canonicalIdentityAuthorityCount: '9' }) as unknown as Pool;
+      await expect(
+        verifySearchSnapshotRuntimeStateLive({
+          pool,
+          vespaUrl: 'http://vespa.test:8080',
+          runtimeState,
+        }),
+      ).rejects.toThrow(/Canonical identity authority mismatch/);
     } finally {
       fetchSpy.mockRestore();
     }

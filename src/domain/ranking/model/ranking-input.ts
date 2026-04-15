@@ -62,9 +62,9 @@ export interface RankingInput {
   readonly rerankForced?: boolean;
 
   /**
-   * E3-U5: Compiled execution contract hint.
-   * When present, Ranker uses compiled.execution.effectiveRetrievalMode for
+   * E3-U5: Compiled execution contract.
+   * Ranker uses compiled.execution.effectiveRetrievalMode for
    * getModeWeights() instead of queryPlan.retrievalMode (V1 fallback).
    */
-  readonly compiled?: CompiledWineQuery | undefined;
+  readonly compiled: CompiledWineQuery;
 }

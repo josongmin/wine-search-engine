@@ -138,12 +138,13 @@ describe('extractExtendedLTRFeatures (BUG-13)', () => {
     expect(features.criticScoreFeature).toBe(0.0);
   });
 
-  it('producerPrestige undefined → 0.5 default (neutral, not 0 — absence is not low prestige)', () => {
+  it('producerPrestige undefined in LTR scores → 0.0 (do not fabricate neutral at extractor layer; SignalComputer handles neutrality upstream)', () => {
     const scores: LTRScoreComponents = {
       semantic: 0.5, popularity: 0.5, attributeAlignment: 0.5, preferenceAlignment: 0.5,
     };
     const features = extractExtendedLTRFeatures(scores);
-    expect(features.producerPrestigeFeature).toBe(0.5);
+    // LTR extractor does not fabricate; 0.5 neutrality is applied upstream in SignalComputer.
+    expect(features.producerPrestigeFeature).toBe(0);
   });
 
   it('criticScore=0 (explicit zero) is preserved, not replaced by default', () => {

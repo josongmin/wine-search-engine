@@ -52,22 +52,68 @@ const CanonicalEntitiesFileSchema = z
   .passthrough();
 
 export type GoldCanonicalResolution = 'gold_overlay' | 'identity_signature';
+export const RUNTIME_PUBLIC_ID_AUTHORITY = 'identity_signature' as const;
+export const BENCHMARK_LINKAGE_AUTHORITY = 'benchmark_linkage' as const;
 
+export type RuntimePublicIdAuthority = typeof RUNTIME_PUBLIC_ID_AUTHORITY;
+export type BenchmarkLinkageAuthority = typeof BENCHMARK_LINKAGE_AUTHORITY;
+
+/**
+ * T-011/W3: two-authority identity model.
+ *
+ *   runtime public-id authority = `identity_signature` — immutable
+ *                        deterministic id derived from
+ *                        (canonicalLabel, producerId, regionId) hash. This is
+ *                        the public id exposed to clients, Vespa, and the
+ *                        read path. Once a snapshot containing this id has
+ *                        been promoted, the id must NEVER change.
+ *
+ *   benchmark linkage authority = `benchmark_linkage` — benchmark/gold
+ *                        fixture id used ONLY for linking runtime results to
+ *                        evaluation sets. Mutable on the benchmark side.
+ *                        MUST NOT be used as a runtime public id.
+ *
+ *   `resolution` records which authority attached the benchmark linkage. It
+ *   does NOT
+ *   choose the runtime public id — that is always `entityId`.
+ *
+ * Consequence: a gold overlay can only ATTACH a benchmark link to an existing
+ * runtime entity; it can never rename an entity's runtime public id.
+ */
 export interface WineSnapshotEntityResolution {
+  /** Runtime public id (immutable authority). */
   readonly entityId: CanonicalEntityId;
   readonly identitySignature: string;
+  readonly runtimePublicIdAuthority: RuntimePublicIdAuthority;
   readonly producerId: string;
   readonly regionId: string;
   readonly resolution: GoldCanonicalResolution;
+  /** Benchmark/gold linkage id (mutable; benchmark-only; NEVER a runtime id). */
   readonly benchmarkEntityId?: CanonicalEntityId;
+  readonly benchmarkLinkageAuthority?: BenchmarkLinkageAuthority;
 }
 
 /**
- * Resolves gold canonical lookup for ETL CLIs: explicit `--fixture-repo`, else
- * `FIXTURE_REPO_PATH` / sibling `wine-engine-fixture` when present.
+ * Wave 4 (fail-loud): explicit "fixture required" mode for build/eval/publish
+ * paths where missing gold linkage would silently degrade benchmark coverage
+ * to zero.
+ *
+ * Lookup precedence:
+ *   1. options.fixtureRepoRoot (explicit `--fixture-repo`)
+ *   2. FIXTURE_REPO_PATH env
+ *   3. sibling `wine-engine-fixture` directory
+ *
+ * If `requireFixtureRepo: true` and none of the above resolves, the loader
+ * throws with operator-actionable guidance. Returning `new Map()` silently
+ * masks this state and turns evaluations into "all zero coverage" with no
+ * surface signal.
+ *
+ * Default `requireFixtureRepo: false` preserves the previous behavior for
+ * dev/local use cases that legitimately have no fixture.
  */
 export async function loadGoldCanonicalLookupForBuild(options: {
   readonly fixtureRepoRoot?: string | undefined;
+  readonly requireFixtureRepo?: boolean | undefined;
 }): Promise<ReadonlyMap<string, string>> {
   if (options.fixtureRepoRoot != null && options.fixtureRepoRoot.length > 0) {
     const root = normalize(
@@ -82,6 +128,14 @@ export async function loadGoldCanonicalLookupForBuild(options: {
   }
   const def = resolveDefaultFixtureRepoRoot();
   if (def == null) {
+    if (options.requireFixtureRepo === true) {
+      throw new Error(
+        'Gold fixture repo is required for this path but none was found. ' +
+        'Set FIXTURE_REPO_PATH env var, pass --fixture-repo <path>, or clone ' +
+        '`wine-engine-fixture` as a sibling directory. Returning an empty map ' +
+        'would silently zero benchmark coverage — refusing fail-open.',
+      );
+    }
     return new Map();
   }
   return await loadGoldCanonicalLookup(def);
@@ -167,10 +221,12 @@ export function resolveWineSnapshotEntity(
     return {
       entityId: publicEntityId,
       identitySignature,
+      runtimePublicIdAuthority: RUNTIME_PUBLIC_ID_AUTHORITY,
       producerId,
       regionId,
       resolution: 'gold_overlay',
       benchmarkEntityId: createCanonicalEntityId(goldHit),
+      benchmarkLinkageAuthority: BENCHMARK_LINKAGE_AUTHORITY,
     };
   }
 
@@ -181,6 +237,7 @@ export function resolveWineSnapshotEntity(
   return {
     entityId: publicEntityId,
     identitySignature,
+    runtimePublicIdAuthority: RUNTIME_PUBLIC_ID_AUTHORITY,
     producerId,
     regionId,
     resolution: 'identity_signature',

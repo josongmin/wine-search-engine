@@ -126,6 +126,65 @@ describe('mapRankedResultsToResultItems', () => {
     expect(items[0]?.match.scoreComponents.lexical).toBeCloseTo(0.41);
   });
 
+  it('T-E6-01: NaN uncertaintyPenalty omits uncertaintyConfidence instead of masking to 0.5', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        componentScores: {
+          ...makeRankedResult().componentScores,
+          uncertaintyPenalty: NaN,
+        },
+      },
+    ], undefined, 2025);
+
+    // Must NOT contain the field at all — no 0.5 neutral masking
+    expect(items[0]?.uncertainty).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(items[0]?.uncertainty, 'uncertaintyConfidence')).toBe(false);
+    expect(items[0]?.uncertainty.uncertaintyConfidence).toBeUndefined();
+  });
+
+  it('T-E6-01: Infinity uncertaintyPenalty omits uncertaintyConfidence', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        componentScores: {
+          ...makeRankedResult().componentScores,
+          uncertaintyPenalty: Infinity,
+        },
+      },
+    ], undefined, 2025);
+
+    expect(Object.prototype.hasOwnProperty.call(items[0]?.uncertainty, 'uncertaintyConfidence')).toBe(false);
+  });
+
+  it('T-E6-01: valid uncertaintyPenalty still populates uncertaintyConfidence', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        componentScores: {
+          ...makeRankedResult().componentScores,
+          uncertaintyPenalty: 0.15,
+        },
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.uncertainty.uncertaintyConfidence).toBeCloseTo(0.85);
+  });
+
+  it('T-E6-01: zero uncertaintyPenalty yields confidence 1.0', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        componentScores: {
+          ...makeRankedResult().componentScores,
+          uncertaintyPenalty: 0,
+        },
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.uncertainty.uncertaintyConfidence).toBe(1);
+  });
+
   it('omits missing sensory priors instead of injecting a 0.5 midpoint into predictor input', async () => {
     vi.useFakeTimers();
     const drinkingWindow = {

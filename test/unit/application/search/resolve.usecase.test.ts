@@ -190,12 +190,16 @@ describe('ResolveUseCase', () => {
       }),
     };
 
+    const opusDoc = {
+      entityId: createEntityId('opus-one-2018'),
+      entityType: 'wine' as const,
+      canonicalLabel: 'Opus One 2018',
+    };
     const entityLookup = {
-      getDocument: vi.fn().mockResolvedValue({
-        entityId: createEntityId('opus-one-2018'),
-        entityType: 'wine',
-        canonicalLabel: 'Opus One 2018',
-      }),
+      getDocument: vi.fn().mockResolvedValue(opusDoc),
+      getDocuments: vi.fn().mockResolvedValue(
+        new Map([[createEntityId('opus-one-2018'), opusDoc]]),
+      ),
     };
 
     const useCase = new ResolveUseCase({
@@ -207,7 +211,7 @@ describe('ResolveUseCase', () => {
 
     await useCase.execute({ query: '오푸스원' });
 
-    expect(entityLookup.getDocument).toHaveBeenCalledWith(createEntityId('opus-one-2018'));
+    expect(entityLookup.getDocuments).toHaveBeenCalledWith([createEntityId('opus-one-2018')]);
     expect(entityResolver.resolve).toHaveBeenCalledWith(
       expect.objectContaining({
         candidateEntities: [
@@ -270,11 +274,19 @@ describe('ResolveUseCase', () => {
     }
 
     function makeEntityLookup(entityId: string, label: string): EntityDocumentLookupPort {
+      const doc = {
+        entityId: createEntityId(entityId),
+        entityType: 'wine' as const,
+        canonicalLabel: label,
+      };
       return {
-        getDocument: vi.fn().mockResolvedValue({
-          entityId: createEntityId(entityId),
-          entityType: 'wine',
-          canonicalLabel: label,
+        getDocument: vi.fn().mockResolvedValue(doc),
+        getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+          const map = new Map();
+          for (const id of ids) {
+            map.set(id, doc);
+          }
+          return map;
         }),
       };
     }
@@ -386,6 +398,17 @@ describe('ResolveUseCase', () => {
           entityType: 'wine',
           canonicalLabel: String(id) === String(sharedId) ? 'Opus One 2019' : 'Opus One 2018',
         })),
+        getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+          const map = new Map();
+          for (const id of ids) {
+            map.set(id, {
+              entityId: id,
+              entityType: 'wine',
+              canonicalLabel: String(id) === String(sharedId) ? 'Opus One 2019' : 'Opus One 2018',
+            });
+          }
+          return map;
+        }),
       };
       const resolver = makeResolver('resolved');
 

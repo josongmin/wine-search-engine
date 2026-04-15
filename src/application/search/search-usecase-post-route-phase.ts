@@ -59,6 +59,7 @@ import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
 } from './specialized-route-observability.js';
+import { classifyShortfallLayer } from '../../domain/shared/types/provenance-shortfall-taxonomy.js';
 /** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
 const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
 const retrievalProfileService = new RetrievalProfileService();
@@ -78,7 +79,7 @@ const retrievalProfileService = new RetrievalProfileService();
 const AUDIT_DROP_LOG_MAX = 5;
 
 function deriveAuditExtension(
-  compiled: CompiledWineQuery | undefined,
+  compiled: CompiledWineQuery,
   rankingMetadata: RankingMetadata | undefined,
   rankedResults: readonly RankedResult[],
   executionTrace: AuditExtension['execution_trace'] | undefined,
@@ -90,7 +91,7 @@ function deriveAuditExtension(
   correctiveRetryCalibration?: number,
   resolverProvenanceTrace?: AuditExtension['resolver_provenance_trace'],
 ): AuditExtension | undefined {
-  const plannerTrace = compiled?.plannerTrace;
+  const plannerTrace = compiled.plannerTrace;
   // E1-T4: Read scoreDriftRecord from rerankDecision (structured contract).
   // The top-level RankingMetadata.scoreDriftRecord field is @deprecated —
   // all new reads must go through rerankDecision.scoreDriftRecord.
@@ -207,54 +208,38 @@ function buildExecutionAuditTrace(
   effectiveRoute: QueryRoute,
   retrievalModeSource: 'planner' | 'api_override',
   routeExecutionFacts: {
-    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
-    readonly retrievalKind?: SearchRouteRetrievalKind | undefined;
-    readonly sparseExecuted?: boolean | undefined;
-    readonly specializedRouteExecuted?: SpecializedRouteObservability['specializedRouteExecuted'] | undefined;
-    readonly usedCompiledExecution?: boolean | undefined;
+    readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+    readonly retrievalKind: SearchRouteRetrievalKind;
+    readonly sparseExecuted: boolean;
+    readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'] | undefined;
+    readonly usedCompiledExecution: boolean;
   },
-  rankingMetadata?: RankingMetadata,
-  compiled?: CompiledWineQuery,
+  rankingMetadata: RankingMetadata | undefined,
+  compiled: CompiledWineQuery,
 ): NonNullable<AuditExtension['execution_trace']> {
-  const executionBudget = compiled?.execution.budget;
-  const provenancePolicy = compiled?.execution.provenancePolicy;
+  const executionBudget = compiled.execution.budget;
+  const provenancePolicy = compiled.execution.provenancePolicy;
   const provenanceClosure = rankingMetadata?.provenanceClosure;
 
   return {
     effective_route: effectiveRoute,
     retrieval_mode_source: retrievalModeSource,
-    ...(routeExecutionFacts.effectiveRetrievalMode !== undefined
-      ? { effective_retrieval_mode: routeExecutionFacts.effectiveRetrievalMode }
-      : {}),
-    ...(routeExecutionFacts.retrievalKind !== undefined
-      ? { retrieval_kind: routeExecutionFacts.retrievalKind }
-      : {}),
-    ...(routeExecutionFacts.sparseExecuted !== undefined
-      ? { sparse_executed: routeExecutionFacts.sparseExecuted }
-      : {}),
+    effective_retrieval_mode: routeExecutionFacts.effectiveRetrievalMode,
+    retrieval_kind: routeExecutionFacts.retrievalKind,
+    sparse_executed: routeExecutionFacts.sparseExecuted,
     ...(routeExecutionFacts.specializedRouteExecuted !== undefined
       ? { specialized_route_executed: routeExecutionFacts.specializedRouteExecuted }
       : {}),
-    ...(routeExecutionFacts.usedCompiledExecution !== undefined
-      ? { used_compiled_execution: routeExecutionFacts.usedCompiledExecution }
-      : {}),
-    ...(executionBudget !== undefined
-      ? {
-          compiled_budget: {
-            max_candidates: executionBudget.maxCandidates,
-            enable_precision_rerank: executionBudget.enablePrecisionRerank,
-          },
-        }
-      : {}),
-    ...(provenancePolicy !== undefined
-      ? {
-          provenance_policy: {
-            require_identity_seal: provenancePolicy.requireIdentitySeal,
-            require_constraint_evidence: provenancePolicy.requireConstraintEvidence,
-            require_anchor_evidence: provenancePolicy.requireAnchorEvidence,
-          },
-        }
-      : {}),
+    used_compiled_execution: routeExecutionFacts.usedCompiledExecution,
+    compiled_budget: {
+      max_candidates: executionBudget.maxCandidates,
+      enable_precision_rerank: executionBudget.enablePrecisionRerank,
+    },
+    provenance_policy: {
+      require_identity_seal: provenancePolicy.requireIdentitySeal,
+      require_constraint_evidence: provenancePolicy.requireConstraintEvidence,
+      require_anchor_evidence: provenancePolicy.requireAnchorEvidence,
+    },
     ...(provenanceClosure !== undefined
       ? { provenance_closure: provenanceClosure }
       : {}),
@@ -262,10 +247,10 @@ function buildExecutionAuditTrace(
 }
 
 function shouldEmitConstraintResolutionTrace(
-  compiled: CompiledWineQuery | undefined,
+  compiled: CompiledWineQuery,
   requestExplain?: boolean,
 ): boolean {
-  return requestExplain === true || (compiled?.plannerTrace?.length ?? 0) > 0;
+  return requestExplain === true || (compiled.plannerTrace?.length ?? 0) > 0;
 }
 
 function buildConstraintPolicyOutcomes(
@@ -348,7 +333,7 @@ function buildDeterminismFingerprintParams(
   snapshot: DecisionSnapshot,
   snapshotVersions: SnapshotVersionInjection,
   plan: QueryPlanV1,
-  compiled: CompiledWineQuery | undefined,
+  compiled: CompiledWineQuery,
   rankingMetadata?: RankingMetadata,
 ): DeterminismFingerprintParams {
   const modelVersions = snapshotVersions?.modelVersions ?? {};
@@ -500,9 +485,9 @@ function mergeRouteDegradation(
  */
 export interface SearchPostRouteExecutionContext {
   readonly plan: QueryPlanV1;
-  /** Compiled execution contract from ExecutionCompiler (E1-U3 carrier). When present,
-   *  downstream phases read route/mode decisions from here rather than re-deriving from V1. */
-  readonly compiled?: CompiledWineQuery | undefined;
+  /** Compiled execution contract from ExecutionCompiler (E1-U3 carrier).
+   *  T-E2-01: Required in production — downstream phases read route/mode from compiled only. */
+  readonly compiled: CompiledWineQuery;
   readonly request: SearchRequest;
   readonly requestId: string;
   readonly startTime: number;
@@ -539,8 +524,8 @@ export interface SearchPostRouteExecutionContext {
 
 export interface RankedRouteDecisionPhaseContext {
   readonly plan: QueryPlanV1;
-  /** Compiled execution contract (E1-U3 carrier). When present, passed to ResponseBuilder for effectiveRetrievalMode. */
-  readonly compiled?: CompiledWineQuery | undefined;
+  /** Compiled execution contract (E1-U3 carrier). T-E2-01: Required — passed to ResponseBuilder. */
+  readonly compiled: CompiledWineQuery;
   readonly requestId: string;
   readonly startTime: number;
   /**
@@ -632,7 +617,7 @@ function resolveTargetYear(ctx: { readonly startTime: number; readonly nowYear?:
 
 function shouldIncludeCounterfactualsForRequest(
   plan: QueryPlanV1,
-  compiled: CompiledWineQuery | undefined,
+  compiled: CompiledWineQuery,
   includeCounterfactuals: boolean | undefined,
 ): boolean {
   const queryFamily = deriveQueryFamily(plan, compiled);
@@ -717,9 +702,7 @@ export async function runRankedRouteDecisionPhase(
     {
       effectiveRetrievalMode: ctx.effectiveRetrievalMode,
       retrievalKind: ctx.retrievalKind,
-      ...(ctx.compiled !== undefined
-        ? { provenancePolicy: ctx.compiled.execution.provenancePolicy }
-        : {}),
+      provenancePolicy: ctx.compiled.execution.provenancePolicy,
     },
     toAdmissionHonestyContract(mergedRouteDegradation),
   );
@@ -762,7 +745,7 @@ export async function runRankedRouteDecisionPhase(
   // inference so wines with sparse indexed sensory attributes can still
   // trigger drinking window prediction.
   const sensoryPriors =
-    extractSensoryPriorsFromRetrievalPlan(ctx.compiled?.query.retrievalPlan)
+    extractSensoryPriorsFromRetrievalPlan(ctx.compiled.query.retrievalPlan)
     ?? extractSensoryPriorsFromConstraints(ctx.plan.constraints);
   const results = await mapRankedResultsToResultItems(
     ctx.rankedResults,
@@ -839,7 +822,7 @@ export async function runRankedRouteDecisionPhase(
   try {
     built = ctx.responseBuilder.build({
       queryPlan: ctx.plan,
-      ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+      compiled: ctx.compiled,
       decisionOutput,
       results,
       ...(counterfactuals.length > 0 ? { counterfactuals } : {}),
@@ -1055,7 +1038,7 @@ export async function runSearchPostRoutePhase(
     );
     // RFC-019 Phase 7: query-level sensory priors for drinking window fallback.
     const sensoryPriorsAbstain =
-      extractSensoryPriorsFromRetrievalPlan(ctx.compiled?.query.retrievalPlan)
+      extractSensoryPriorsFromRetrievalPlan(ctx.compiled.query.retrievalPlan)
       ?? extractSensoryPriorsFromConstraints(ctx.plan.constraints);
     const results = await mapRankedResultsToResultItems(
       limitedRankedResults,
@@ -1087,21 +1070,19 @@ export async function runSearchPostRoutePhase(
       {
         effectiveRetrievalMode: ctx.effectiveRetrievalMode,
         retrievalKind: ctx.retrievalKind,
-        ...(ctx.compiled !== undefined
-          ? { provenancePolicy: ctx.compiled.execution.provenancePolicy }
-          : {}),
+        provenancePolicy: ctx.compiled.execution.provenancePolicy,
       },
       toAdmissionHonestyContract(mergedRouteDegradation),
     );
     const abstainAdmissionClosure = evaluateAdmissionClosure(abstainDecisionInput, snapshot);
     try {
-      // Fix D: buildEntropyAbstainResponseParams already includes compiled conditionally —
-      // do not spread it again outside to avoid silent override if the builder ever transforms it.
+      // buildEntropyAbstainResponseParams includes compiled (required) — do not spread
+      // it again outside to avoid silent override if the builder ever transforms it.
       response = ctx.responseBuilder.build(
         {
           ...buildEntropyAbstainResponseParams({
             plan: ctx.plan,
-            ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+            compiled: ctx.compiled,
             snapshot,
             requestId: ctx.requestId,
             startTime: ctx.startTime,
@@ -1150,9 +1131,7 @@ export async function runSearchPostRoutePhase(
         queryPlan: ctx.plan,
         snapshot,
         route: ctx.effectiveRoute,
-        ...(ctx.compiled !== undefined
-          ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
-          : {}),
+        retrievalMode: ctx.compiled.execution.effectiveRetrievalMode,
         decisionStatus: 'failed',
         nextAction: 'fail',
         failureReason: 'INTERNAL_INCONSISTENCY',
@@ -1186,7 +1165,7 @@ export async function runSearchPostRoutePhase(
   } else {
     response = await runRankedRouteDecisionPhase({
       plan: ctx.plan,
-      ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+      compiled: ctx.compiled,
       requestId: ctx.requestId,
       startTime: ctx.startTime,
       resolveResult: ctx.resolveResult,
@@ -1223,6 +1202,11 @@ export async function runSearchPostRoutePhase(
     | undefined;
   const responseSnapshot = engineDecision?.decisionSnapshot;
   if (responseSnapshot !== undefined) {
+    const provenanceTrace = response.meta.provenanceTrace;
+    const shortfallTimeline = provenanceTrace?.shortfalls.map((reasonCode) => ({
+      reason_code: reasonCode,
+      layer: classifyShortfallLayer(reasonCode),
+    }));
     logSearchEvent({
       ...(response.meta.authorityTraceRef !== undefined
         ? { authority_trace_ref: response.meta.authorityTraceRef }
@@ -1233,6 +1217,15 @@ export async function runSearchPostRoutePhase(
         : {}),
       ...(response.meta.degradationReasons !== undefined
         ? { degradation_reasons: response.meta.degradationReasons }
+        : {}),
+      ...(provenanceTrace !== undefined
+        ? {
+            provenance_missing: provenanceTrace.missing,
+            provenance_shortfalls: provenanceTrace.shortfalls,
+            admission_gate_decision: provenanceTrace.gateDecisions.admission,
+            decision_gate_decision: provenanceTrace.gateDecisions.decision,
+            shortfall_timeline: shortfallTimeline,
+          }
         : {}),
       ...toSpecializedRouteMeta(ctx.specializedRouteObservability),
       route_name: ctx.effectiveRoute,

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   dedupeSparseHitsByEntity,
   diversifyProducerBrowseHits,
@@ -10,6 +10,7 @@ import {
 } from '../../../../src/domain/retrieval/service/browse-diversity.js';
 import type { SparseHit } from '../../../../src/domain/retrieval/port/search-index.port.js';
 import { createEntityId } from '../../../../src/domain/shared/types/entity-id.js';
+import { globalSilentSkipCounter } from '../../../../src/observability/silent-skip-counters.js';
 
 function hit(
   id: string,
@@ -26,6 +27,10 @@ function hit(
 }
 
 describe('browse diversity helpers', () => {
+  beforeEach(() => {
+    globalSilentSkipCounter.reset();
+  });
+
   it('stripVintageFromLabel removes 4-digit years', () => {
     expect(stripVintageFromLabel('Opus One 2018')).toBe('Opus One');
   });
@@ -78,6 +83,27 @@ describe('browse diversity helpers', () => {
     expect(out.map((h) => h.entityId)).toContain(createEntityId('b'));
   });
 
+  it('diversifyProducerBrowseHits exposes label fallback when structured metadata is missing', () => {
+    const out = diversifyProducerBrowseHits([
+      hit('fallback-label', 10, {
+        canonicalLabel: 'Mystery Wine 2018',
+      }),
+    ], 1);
+
+    expect(out).toHaveLength(1);
+    expect(globalSilentSkipCounter.snapshot().browse_diversity_product_line_fallback_label).toBe(1);
+    expect(globalSilentSkipCounter.snapshot().browse_diversity_product_line_fallback_entity_id).toBe(0);
+  });
+
+  it('diversifyProducerBrowseHits exposes entity-id fallback when even label metadata is missing', () => {
+    const out = diversifyProducerBrowseHits([
+      hit('fallback-id', 10, {}),
+    ], 1);
+
+    expect(out).toHaveLength(1);
+    expect(globalSilentSkipCounter.snapshot().browse_diversity_product_line_fallback_entity_id).toBe(1);
+  });
+
   it('diversifyRegionBrowseHits spreads producers', () => {
     const rows: SparseHit[] = [];
     for (let i = 0; i < 10; i++) {
@@ -115,5 +141,17 @@ describe('browse diversity helpers', () => {
     const producers = new Set(out.map((h) => h.summary?.producer));
     expect(producers.size).toBe(1);
     expect([...producers][0]).toBe('OnlyProducer');
+  });
+
+  it('diversifyRegionBrowseHits exposes missing producer metadata via silent-skip counter', () => {
+    const rows: SparseHit[] = [
+      hit('w1', 10, { canonicalLabel: 'Wine 1' }),
+      hit('w2', 9, { canonicalLabel: 'Wine 2' }),
+    ];
+
+    const out = diversifyRegionBrowseHits(rows, 2);
+
+    expect(out).toHaveLength(2);
+    expect(globalSilentSkipCounter.snapshot().browse_diversity_region_producer_missing).toBe(2);
   });
 });

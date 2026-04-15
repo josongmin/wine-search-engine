@@ -15,7 +15,14 @@ import { isCorruptedSnapshot } from '../../shared/types/index.js';
 import type { QueryCachePort } from '../port/query-cache.port.js';
 import type { EmbeddingCachePort } from '../port/embedding-cache.port.js';
 import type { SearchResponseCachePort } from '../port/search-response-cache.port.js';
-import type { CacheResult } from '../model/cache-result.js';
+import {
+  cacheBreakerOpen,
+  cacheCorruptEntry,
+  cacheHit,
+  cacheInfraError,
+  cacheMiss,
+  type CacheGetResult,
+} from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
@@ -105,7 +112,7 @@ export class CacheService implements SearchResponseCachePort {
    * @param plan - Query plan
    * @param request - Original request
    * @param currentSnapshot - Current snapshot version info
-   * @returns Cache result with hit status and data
+   * @returns Typed cache result with discriminated `kind`
    */
   async getSearchResponse(
     plan: QueryPlanV1,
@@ -116,42 +123,31 @@ export class CacheService implements SearchResponseCachePort {
     currentSnapshot: DecisionSnapshot,
     runtimeState?: CacheReadRuntimeState,
     compiled?: CompiledWineQuery,
-  ): Promise<CacheResult<SearchResponseV1>> {
-    const startTime = Date.now();
-
+  ): Promise<CacheGetResult<SearchResponseV1>> {
     // Corrupted snapshots must never participate in cache lookups — the
     // sentinel snapshot_id ('__corrupted__') would either pollute a cache
     // slot or return stale data keyed under a nonsense version string.
     if (isCorruptedSnapshot(currentSnapshot)) {
       log.warn('Skipping cache read: corrupted decision snapshot');
-      return {
-        hit: false,
-        reason: 'corrupted_snapshot',
-        durationMs: Date.now() - startTime,
-      };
+      return cacheMiss();
     }
 
     // Check circuit breaker
     if (this.isCircuitBreakerOpen()) {
-      return {
-        hit: false,
-        reason: 'circuit_breaker_open',
-        durationMs: Date.now() - startTime,
-      };
+      return cacheBreakerOpen();
     }
 
     // Check eligibility
     const eligibility = this.eligibilityAnalyzer.analyze(plan, compiled);
     if (!eligibility.isCacheable || !this.queryCache) {
-      return {
-        hit: false,
-        reason: `not_cacheable:${compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode}`,
-        durationMs: Date.now() - startTime,
-      };
+      return cacheMiss();
     }
 
     try {
-      const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
+      if (compiled === undefined) {
+        return cacheMiss();
+      }
+      const effectiveRetrievalMode = compiled.execution.effectiveRetrievalMode;
       // Build cache key. Include snapshot_id so a deploy with a new
       // policy/model snapshot automatically isolates fresh keys from
       // prior-epoch entries — avoiding stale-result reads while old
@@ -172,15 +168,28 @@ export class CacheService implements SearchResponseCachePort {
         currentSnapshot.snapshot_id,
       );
 
-      // Get from cache
-      const cached = await this.queryCache.get(cacheKey);
-      if (!cached) {
+      // Wave 2 / Fix 1: typed cache read.
+      //
+      // Branch on kind so miss / breaker_open / infra_error / corrupt_entry
+      // stay observable as first-class states instead of collapsing to null.
+      const diag = await this.queryCache.getWithDiagnostics(cacheKey);
+      if (diag.kind !== 'hit') {
+        if (diag.kind === 'miss') {
+          return cacheMiss();
+        }
+        if (diag.kind === 'breaker_open') {
+          return cacheBreakerOpen();
+        }
+        if (diag.kind === 'corrupt_entry') {
+          return cacheCorruptEntry(diag.reason);
+        }
         return {
-          hit: false,
-          reason: 'cache_miss',
-          durationMs: Date.now() - startTime,
+          kind: 'infra_error',
+          errorClass: diag.errorClass,
+          message: diag.message,
         };
       }
+      const cached = diag.value;
 
       const cachedSnapshot = cached.meta.decisionSnapshot ?? cached.engineDecision.decisionSnapshot;
       const cachedBlockingEligible = cached.meta.blockingEligible ?? cached.engineDecision.blockingEligible;
@@ -206,27 +215,14 @@ export class CacheService implements SearchResponseCachePort {
             log.warn({ err }, 'failed to delete stale entry');
           }
         }
-        return {
-          hit: false,
-          isStale: true,
-          ...(readPolicy.reason !== undefined ? { reason: readPolicy.reason } : {}),
-          durationMs: Date.now() - startTime,
-        };
+        return cacheMiss();
       }
 
       this.recordCacheSuccess();
-      return {
-        hit: true,
-        data: cached,
-        durationMs: Date.now() - startTime,
-      };
+      return cacheHit(cached);
     } catch (err) {
       this.recordCacheError(err);
-      return {
-        hit: false,
-        reason: `error:${(err as Error).message}`,
-        durationMs: Date.now() - startTime,
-      };
+      return cacheInfraError(err);
     }
   }
 
@@ -249,6 +245,9 @@ export class CacheService implements SearchResponseCachePort {
   ): Promise<boolean> {
     const eligibility = this.eligibilityAnalyzer.analyze(plan, compiled);
     if (!eligibility.isCacheable || !this.queryCache) {
+      return false;
+    }
+    if (compiled === undefined) {
       return false;
     }
 
@@ -279,7 +278,7 @@ export class CacheService implements SearchResponseCachePort {
     }
 
     try {
-      const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
+      const effectiveRetrievalMode = compiled.execution.effectiveRetrievalMode;
       const cacheKey = this.queryCacheKeyBuilder.build(
         plan.normalizedQuery,
         effectiveRetrievalMode,

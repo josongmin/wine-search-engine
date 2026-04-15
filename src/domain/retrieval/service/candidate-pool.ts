@@ -39,7 +39,10 @@ import { applyRelativeFilter } from './relative-filter-policy.js';
 import { combineSemanticEmbeddings } from './semantic-embedding-combiner.js';
 import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 import type { CacheService } from '../../performance/index.js';
-import type { RetrievalDegradationObserver } from '../port/retrieval-degradation-observer.port.js';
+import type {
+  RetrievalDegradationObserver,
+  RetrievalDegradationSignal,
+} from '../port/retrieval-degradation-observer.port.js';
 import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { pipelineDebug } from '../../../observability/request-pipeline-debug.js';
@@ -114,6 +117,15 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   private _lastFusionTrace: RrfFusionTrace | undefined = undefined;
   /** E4: Drop log from the most recent execute() call's hard-filter step. */
   private _lastDropLog: readonly CandidateDropRecord[] = [];
+  /**
+   * Bugbash 2026-04-14: structured retrieval degradation signals from the most
+   * recent execute() call. The `degradationObserver` callback alone is not
+   * enough — its payload never reaches the HTTP response because the observer
+   * only pipes to metrics. The use case must read these signals and merge
+   * them into `routeDegradation.degradationReasons` so the wire contract
+   * reflects sub-channel failures (sparse/dense/anchor/relative_filter).
+   */
+  private _lastDegradationSignals: readonly RetrievalDegradationSignal[] = [];
 
   constructor(
     private readonly searchIndex: SearchIndexPort,
@@ -148,6 +160,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    */
   async execute(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
     this.degradationObserver?.onRetrievalStarted();
+    const degradationSignals: RetrievalDegradationSignal[] = [];
+    this._lastDegradationSignals = degradationSignals;
     const queryFamily = deriveQueryFamily(input.queryPlan);
     const retrievalMode = this.resolveRuntimeRetrievalMode(input);
     // Specialized routing (producer_browse / region_browse / compare_candidates)
@@ -626,6 +640,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     ]) {
       if (report !== undefined) {
         this.degradationObserver?.onDegradation(report);
+        degradationSignals.push(report);
       }
     }
 
@@ -698,12 +713,14 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         !candidates.some((c) => c.entityId === input.anchorEntityId) &&
         candidates.length === preFilterCount
       ) {
-        this.degradationObserver?.onDegradation({
+        const relativeFilterSignal: RetrievalDegradationSignal = {
           component: 'relative_filter',
           severity: 'error',
           reason: 'anchor entity not found in candidate pool or document store',
           fallbackApplied: 'return no candidates',
-        });
+        };
+        this.degradationObserver?.onDegradation(relativeFilterSignal);
+        degradationSignals.push(relativeFilterSignal);
         candidates = [];
       }
     }
@@ -800,6 +817,17 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   }
 
   /**
+   * Bugbash 2026-04-14: returns structured retrieval degradation signals from
+   * the most recent execute() call. Consumed by search-usecase-hybrid-candidates
+   * to merge into route-level `routeDegradation.degradationReasons` so the HTTP
+   * wire contract reflects sub-channel failures. Empty array before any execute()
+   * or when no degradations occurred.
+   */
+  getLastDegradationSignals(): readonly RetrievalDegradationSignal[] {
+    return this._lastDegradationSignals;
+  }
+
+  /**
    * Heuristic estimate of alias match strength for cascade routing.
    * CandidatePool intentionally stays downstream of planning/anchor extraction,
    * so it uses anchor confidence propagated by the planner rather than reaching
@@ -821,8 +849,10 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   }
 
   private resolveRuntimeRetrievalMode(input: HybridRetrievalInput): string | undefined {
-    // E2-U3: compiled-first — prefer compiledRetrievalMode from ExecutionContract
-    const baseMode = input.compiledRetrievalMode ?? input.queryPlan.retrievalMode;
+    if (input.compiledRetrievalMode === undefined) {
+      throw new Error('CandidatePoolService requires compiledRetrievalMode from compiled execution');
+    }
+    const baseMode = input.compiledRetrievalMode;
     if (baseMode === 'compare_candidates' && input.anchorEntityId !== undefined) {
       return 'relative';
     }

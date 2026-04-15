@@ -604,13 +604,29 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
   });
 
   describe('PIPELINE-AUDIT: uncertaintyConfidence NaN guard', () => {
-    it('NaN uncertaintyPenalty produces neutral 0.5 (not NaN)', () => {
+    it('NaN uncertaintyPenalty omits field instead of masking to 0.5 (T-E6-01)', () => {
       const penalty = NaN;
+      // T-E6-01: invalid penalty → omit field entirely, no 0.5 neutral masking.
       const confidence = Number.isFinite(penalty)
         ? Math.max(0, Math.min(1, 1 - penalty))
-        : 0.5;
-      expect(confidence).toBe(0.5);
-      expect(Number.isNaN(confidence)).toBe(false);
+        : undefined;
+      expect(confidence).toBeUndefined();
+    });
+
+    it('valid uncertaintyPenalty still produces correct confidence', () => {
+      const penalty = 0.1;
+      const confidence = Number.isFinite(penalty)
+        ? Math.max(0, Math.min(1, 1 - penalty))
+        : undefined;
+      expect(confidence).toBeCloseTo(0.9);
+    });
+
+    it('Infinity uncertaintyPenalty omits field (T-E6-01)', () => {
+      const penalty = Infinity;
+      const confidence = Number.isFinite(penalty)
+        ? Math.max(0, Math.min(1, 1 - penalty))
+        : undefined;
+      expect(confidence).toBeUndefined();
     });
   });
 

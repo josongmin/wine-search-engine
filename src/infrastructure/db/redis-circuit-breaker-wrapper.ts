@@ -17,6 +17,19 @@ import {
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import {
+  cacheBreakerOpen,
+  cacheHit,
+  cacheInfraError,
+  cacheMiss,
+  toLegacyGetValue,
+  writeBreakerOpen,
+  writeInfraError,
+  writeOk,
+  type CacheGetResult,
+  type CacheWriteResult,
+} from './cache-result.js';
+import { globalSilentSkipCounter as silentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'RedisCircuitBreakerWrapper' });
 
@@ -70,48 +83,80 @@ export class RedisCircuitBreakerWrapper {
   }
 
   /**
-   * Read a key. Returns null (cache miss) when the breaker is open or
-   * when the underlying Redis client throws. Failures trip the breaker.
+   * Wave 2 typed read. Distinguishes miss / breaker_open / infra_error
+   * so callers can attribute observability correctly.
    */
-  async get(key: string): Promise<string | null> {
+  async getTyped(key: string): Promise<CacheGetResult<string>> {
     if (this.breaker.state === 'OPEN') {
-      return null;
+      silentSkipCounter.increment('cache_read_failure', { reason: 'breaker_open' });
+      return cacheBreakerOpen();
     }
     try {
-      return await this.breaker.execute(() => this.client.get(key));
+      const raw = await this.breaker.execute(() => this.client.get(key));
+      if (raw === null) {
+        return cacheMiss();
+      }
+      return cacheHit(raw);
     } catch (err) {
-      log.debug({ err, key }, 'Redis get failed — treating as cache miss');
-      return null;
+      log.debug({ err, key }, 'Redis get failed — treating as cache infra_error');
+      silentSkipCounter.increment('cache_read_failure', {
+        reason: err instanceof Error ? err.constructor.name : 'unknown',
+      });
+      return cacheInfraError(err);
     }
   }
 
   /**
-   * Write a key/value pair. Silently dropped when the breaker is open.
-   * Failures trip the breaker.
+   * Legacy read — collapses typed result to `string | null`. Prefer getTyped()
+   * at ops-sensitive call sites.
    */
-  async set(key: string, value: string | number, options?: unknown): Promise<void> {
+  async get(key: string): Promise<string | null> {
+    return toLegacyGetValue(await this.getTyped(key));
+  }
+
+  /**
+   * Wave 2 typed write.
+   */
+  async setTyped(key: string, value: string | number, options?: unknown): Promise<CacheWriteResult> {
     if (this.breaker.state === 'OPEN') {
-      return;
+      silentSkipCounter.increment('cache_write_failure', { reason: 'breaker_open' });
+      return writeBreakerOpen();
     }
     try {
       await this.breaker.execute(() => this.client.set(key, value, options));
+      return writeOk();
     } catch (err) {
       log.debug({ err, key }, 'Redis set failed — cache write dropped');
+      silentSkipCounter.increment('cache_write_failure', {
+        reason: err instanceof Error ? err.constructor.name : 'unknown',
+      });
+      return writeInfraError(err);
     }
   }
 
-  /**
-   * Delete a key. Silently dropped when the breaker is open.
-   */
-  async del(key: string | string[]): Promise<void> {
+  async set(key: string, value: string | number, options?: unknown): Promise<void> {
+    await this.setTyped(key, value, options);
+  }
+
+  async delTyped(key: string | string[]): Promise<CacheWriteResult> {
     if (this.breaker.state === 'OPEN') {
-      return;
+      silentSkipCounter.increment('cache_write_failure', { reason: 'breaker_open' });
+      return writeBreakerOpen();
     }
     try {
       await this.breaker.execute(() => this.client.del(key));
+      return writeOk();
     } catch (err) {
       log.debug({ err, key }, 'Redis del failed — delete dropped');
+      silentSkipCounter.increment('cache_write_failure', {
+        reason: err instanceof Error ? err.constructor.name : 'unknown',
+      });
+      return writeInfraError(err);
     }
+  }
+
+  async del(key: string | string[]): Promise<void> {
+    await this.delTyped(key);
   }
 
   /**

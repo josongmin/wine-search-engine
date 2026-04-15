@@ -8,7 +8,7 @@ import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
 import type { EntityResolveResult } from '../model/resolve-result.js';
 import type { ResolvedCandidate, ResolverCandidate } from '../model/resolved-candidate.js';
-import type { ResolverDecisionTrace } from '../model/decision-trace.js';
+import type { ResolverDecisionTrace, ResolverCandidateTrace } from '../model/decision-trace.js';
 import type { EntityCandidateSource } from '../model/entity-candidate-generator-input.js';
 import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
 import type { AmbiguityState } from '../model/ambiguity-state.js';
@@ -238,9 +238,16 @@ export class Resolver {
     const lookupStrategyAdjustments = this.collectLookupStrategyAdjustments(input);
     const adjustedScored = this.applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
 
-    // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2)
+    // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2).
+    //
+    // C3 (fail-loud): a learned-matcher failure is NOT equivalent to the
+    // matcher being absent. When the matcher is configured but fails, we
+    // flag `learnedMatcherDegraded` so the boundary logic can downgrade
+    // "resolved" to "ambiguous" instead of silently proceeding with
+    // adjusted-only scores. This is a structural signal, not a log line.
     let blendedScored = adjustedScored;
     let learnedMatcherOutputs: readonly LearnedMatcherOutput[] | undefined;
+    let learnedMatcherDegraded = false;
     const degradationReasons = new Set<string>();
     if (this.learnedMatcher !== undefined && adjustedScored.length > 0) {
       try {
@@ -254,6 +261,7 @@ export class Resolver {
         learnedMatcherOutputs = blended.learnedOutputs;
       } catch (error) {
         blendedScored = adjustedScored;
+        learnedMatcherDegraded = true;
         degradationReasons.add(classifyLearnedMatcherFailureReason(error));
       }
     }
@@ -268,16 +276,61 @@ export class Resolver {
       return String(a.candidate.entityId).localeCompare(String(b.candidate.entityId));
     });
 
-    // Step 4: Calibrate top scores. Default to 0 when no second candidate
-    // exists — the gap (top1 - top2) is what the calibrator + ambiguity
-    // classifier consume to distinguish a confidently-resolved single
-    // candidate from a true ambiguity. (See resolver-learned-matcher-context
-    // regression test.)
-    const top1RawScore = blendedScored[0]?.rawScore ?? 0;
-    const top2RawScore = blendedScored[1]?.rawScore ?? 0;
-
+    // Step 4: Calibrate top scores.
+    //
+    // C2 (fail-loud): runner-up absence is structurally distinct from
+    // "runner-up scored 0". A singleton → top2 undefined → calibratedGap
+    // undefined. Downstream boundary logic MUST branch on hasRunnerUp
+    // rather than reading a synthetic 0 gap.
+    //
+    // Zero-candidate early return: the blocker legitimately returns an
+    // empty set for many production queries (e.g. gibberish, out-of-domain
+    // searches). Calling calibrate() with zero candidates is a contract
+    // violation — but it is NOT an invariant violation at the resolver
+    // boundary. Surface a 'failed' suggestion with empty candidates and let
+    // the decision engine decide how to respond (typically NOT_FOUND).
+    const top1Entry = blendedScored[0];
+    if (top1Entry === undefined) {
+      const emptyThresholds = this.getThresholds(input.queryClass);
+      const emptyTrace: ResolverDecisionTrace = {
+        queryClass: input.queryClass,
+        top1CalibratedScore: 0,
+        top2CalibratedScore: undefined,
+        calibratedGap: undefined,
+        decisionConfidenceC: 0,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        appliedThresholds: {
+          resolveThreshold: emptyThresholds.resolveTau,
+          gapThreshold: emptyThresholds.gapTau,
+        },
+        // C2 diagnostic gap fix: distinguish "learned matcher broke us" from
+        // "blocking naturally returned zero" so ops can root-cause the empty
+        // result without reading degradation.reasons separately.
+        outcomeReasonCodes: learnedMatcherDegraded
+          ? ['NO_CANDIDATES_AFTER_BLOCKING', 'LEARNED_MATCHER_DEGRADED']
+          : ['NO_CANDIDATES_AFTER_BLOCKING'],
+      };
+      const emptyResult: EntityResolveResult = {
+        status: 'failed',
+        recommendedNextAction: 'fail',
+        decisionConfidenceC: 0,
+        candidates: [],
+        ...(learnedMatcherDegraded
+          ? { degradation: { reasons: [...degradationReasons] } }
+          : {}),
+        decisionTrace: emptyTrace,
+        conformalSetSize: 0,
+      };
+      return emptyResult;
+    }
+    const top2Entry = blendedScored[1];
     const calibrated = await this.calibrator.calibrate(
-      { top1: top1RawScore, top2: top2RawScore },
+      {
+        top1: top1Entry.rawScore,
+        top2: top2Entry?.rawScore,
+        candidateCount: blendedScored.length,
+      },
       input.queryClass,
     );
 
@@ -290,11 +343,12 @@ export class Resolver {
 
     // Step 5.5: Singleton candidate fast-path.
     // Only bypass multi-candidate ambiguity/gap logic when the singleton
-    // already clears the calibrated resolve threshold. Low-confidence
-    // singletons must still flow through the normal boundary so TA3
-    // corrective retry can fire.
+    // already clears the calibrated resolve threshold AND the learned
+    // matcher did not degrade. C3: a degraded learned matcher must never
+    // short-circuit to "resolved" via the singleton path.
     const thresholds = this.getThresholds(input.queryClass);
-    const singletonBypass = blendedScored.length === 1
+    const singletonBypass = !learnedMatcherDegraded
+      && blendedScored.length === 1
       && calibrated.decisionConfidenceC >= thresholds.resolveTau;
 
     // Step 6: Apply decision boundary
@@ -309,10 +363,16 @@ export class Resolver {
           calibrated,
           ambiguityState,
           thresholds,
+          learnedMatcherDegraded,
         );
 
     // Step 7: Build result
-    const resolvedCandidates = this.buildResolvedCandidates(blendedScored, calibrated);
+    const resolvedCandidates = this.buildResolvedCandidates(
+      blendedScored,
+      calibrated,
+      status,
+      singletonBypass,
+    );
     const topCandidate = resolvedCandidates[0];
 
     const trace = this.buildTrace(
@@ -394,11 +454,18 @@ export class Resolver {
     calibrated: CalibratedResolutionScore,
     ambiguity: AmbiguityState,
     thresholds: ThresholdEntry,
+    learnedMatcherDegraded = false,
   ): { status: DecisionStatus; nextAction: NextAction; reasonCodes: string[] } {
     const reasonCodes: string[] = [];
 
     const cMeetsThreshold = calibrated.decisionConfidenceC >= thresholds.resolveTau;
-    const gapMeetsThreshold = calibrated.calibratedGap >= thresholds.gapTau;
+    // C2 (fail-loud): when there is no runner-up, the gap is meaningless.
+    // Treat gap-threshold as "not applicable" rather than silently reading
+    // a synthetic 0 gap. Singletons below the confidence threshold still
+    // flow to corrective retry / failed paths below.
+    const gapMeetsThreshold = calibrated.hasRunnerUp
+      ? (calibrated.calibratedGap ?? 0) >= thresholds.gapTau
+      : true;
     const isAmbiguous = ambiguity.detected;
 
     if (cMeetsThreshold) {
@@ -407,10 +474,20 @@ export class Resolver {
       reasonCodes.push('CONFIDENCE_BELOW_THRESHOLD');
     }
 
-    if (gapMeetsThreshold) {
+    if (!calibrated.hasRunnerUp) {
+      reasonCodes.push('NO_RUNNER_UP_GAP_NOT_APPLICABLE');
+    } else if (gapMeetsThreshold) {
       reasonCodes.push('GAP_ABOVE_THRESHOLD');
     } else {
       reasonCodes.push('GAP_BELOW_THRESHOLD');
+    }
+
+    // C3 (fail-loud): a configured-but-failed learned matcher cannot produce
+    // "resolved". Downgrade to ambiguous/clarify so operators see the
+    // degradation instead of serving a decision made on unblended scores.
+    if (learnedMatcherDegraded) {
+      reasonCodes.push('LEARNED_MATCHER_DEGRADED_NO_RESOLVE');
+      return { status: 'ambiguous', nextAction: 'clarify', reasonCodes };
     }
 
     if (isAmbiguous) {
@@ -507,6 +584,8 @@ export class Resolver {
   private buildResolvedCandidates(
     scored: readonly { candidate: ResolverCandidate; rawScore: number }[],
     calibrated: CalibratedResolutionScore,
+    status: DecisionStatus,
+    singletonBypass: boolean,
   ): readonly ResolvedCandidate[] {
     return scored.map((entry, index) => {
       // The top-1 and top-2 get their calibrated scores; others get
@@ -515,6 +594,14 @@ export class Resolver {
       if (index === 0) {
         calibratedScore = calibrated.top1CalibratedScore;
       } else if (index === 1) {
+        // C2: structural invariant — if we are at index 1 we DO have a
+        // runner-up, so top2CalibratedScore must be defined. A missing value
+        // here is a contract violation (calibrator lost track of runnerup).
+        if (calibrated.top2CalibratedScore === undefined) {
+          throw new Error(
+            'Resolver invariant: calibrated.top2CalibratedScore is undefined but scored array has index 1 — calibrator/resolver contract violated.',
+          );
+        }
         calibratedScore = calibrated.top2CalibratedScore;
       } else {
         // For candidates beyond top-2, estimate by proportional scaling
@@ -524,6 +611,19 @@ export class Resolver {
       }
 
       const candidateSources = this.collectCandidateSources(entry.candidate);
+      const primarySource = candidateSources[0] ?? 'alias';
+
+      // T-E4-02: Per-candidate structured trace
+      const candidateTrace = this.buildCandidateTrace(
+        entry.rawScore,
+        calibratedScore,
+        index,
+        scored.length,
+        status,
+        singletonBypass,
+        primarySource,
+      );
+
       return {
         entityId: entry.candidate.entityId,
         canonicalLabel: entry.candidate.canonicalLabel,
@@ -536,8 +636,78 @@ export class Resolver {
         ...(candidateSources.includes('blocker_seed')
           ? { blockerSeed: true as const }
           : {}),
+        trace: candidateTrace,
       };
     });
+  }
+
+  /**
+   * T-E4-02: Builds per-candidate trace with score/calibration/boundary state.
+   *
+   * The boundary decision is derived from the candidate's rank and the overall
+   * resolver status:
+   * - `singleton`: only one candidate existed and it passed the singleton bypass
+   * - `admitted`: rank-1 candidate that was resolved (or all candidates when ambiguous)
+   * - `rejected`: non-top candidate in a resolved outcome (resolver chose a different entity)
+   */
+  private buildCandidateTrace(
+    rawScore: number,
+    calibratedConfidence: number,
+    index: number,
+    totalCandidates: number,
+    status: DecisionStatus,
+    singletonBypass: boolean,
+    matchSource: EntityCandidateSource,
+  ): ResolverCandidateTrace {
+    const boundaryDecision = this.classifyBoundaryDecision(
+      index,
+      totalCandidates,
+      status,
+      singletonBypass,
+    );
+
+    const admissionGateReason = boundaryDecision === 'rejected'
+      ? (status === 'resolved'
+        ? 'outranked_by_top_candidate'
+        : 'below_decision_boundary')
+      : undefined;
+
+    return {
+      score: rawScore,
+      calibratedConfidence,
+      boundaryDecision,
+      ...(admissionGateReason !== undefined ? { admissionGateReason } : {}),
+      matchSource,
+    };
+  }
+
+  /**
+   * Classifies the boundary decision for a single candidate.
+   */
+  private classifyBoundaryDecision(
+    index: number,
+    totalCandidates: number,
+    status: DecisionStatus,
+    singletonBypass: boolean,
+  ): ResolverCandidateTrace['boundaryDecision'] {
+    // Single candidate that passed the singleton bypass gate
+    if (totalCandidates === 1 && singletonBypass) {
+      return 'singleton';
+    }
+
+    // Top candidate in a resolved outcome
+    if (index === 0 && status === 'resolved') {
+      return 'admitted';
+    }
+
+    // Non-resolved outcomes: all candidates are admitted (ambiguous / failed
+    // status means the resolver did not select a single winner)
+    if (status !== 'resolved') {
+      return 'admitted';
+    }
+
+    // Non-top candidate in a resolved outcome — resolver chose someone else
+    return 'rejected';
   }
 
   /**

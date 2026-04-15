@@ -81,3 +81,116 @@ export const PipelineDebugStep = {
 } as const;
 
 export type PipelineDebugStepId = (typeof PipelineDebugStep)[keyof typeof PipelineDebugStep];
+
+/**
+ * T-E10-02: Canonical pipeline stages for shortfall timeline reconstruction.
+ *
+ * Each stage groups related `PipelineDebugStep` values and documents the
+ * fields that MUST be present when that step is emitted. Operators and
+ * agents use this to detect gaps — a missing stage in the log means the
+ * pipeline exited early or degraded before reaching that point.
+ *
+ * The human-readable table is in `.ai/pipeline-debug-steps.md`.
+ */
+export const PIPELINE_STAGE_ORDER = [
+  'search_entry',
+  'pre_route',
+  'resolve_interpret',
+  'route_dispatch',
+  'entity_route',
+  'hybrid_execution',
+  'retrieval',
+  'anchor_resolution',
+  'ranking',
+  'decision',
+  'post_route',
+  'completion',
+  'batch',
+  'infra_http',
+] as const;
+
+export type PipelineStage = (typeof PIPELINE_STAGE_ORDER)[number];
+
+/**
+ * Maps each pipeline stage to the step IDs that belong to it.
+ * Used for shortfall timeline analysis: given a set of observed steps,
+ * determine which stages were reached and which were skipped.
+ */
+export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly PipelineDebugStepId[]>> = {
+  search_entry: [
+    PipelineDebugStep.SEARCH_EXECUTE_START,
+    PipelineDebugStep.SEARCH_PRE_ROUTE_EARLY_EXIT,
+    PipelineDebugStep.SEARCH_ROUTE_RESOLUTION,
+  ],
+  pre_route: [
+    PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
+    PipelineDebugStep.PRE_ROUTE_CONSTRAINT_CONTRADICTION,
+    PipelineDebugStep.PRE_ROUTE_CACHE_HIT,
+    PipelineDebugStep.PRE_ROUTE_CONTINUE,
+  ],
+  resolve_interpret: [
+    PipelineDebugStep.RESOLVE_USE_CASE_START,
+    PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED,
+    PipelineDebugStep.RESOLVE_USE_CASE_DONE,
+    PipelineDebugStep.INTERPRET_PLANNER_DONE,
+  ],
+  route_dispatch: [
+    PipelineDebugStep.DISPATCH_ROUTE,
+    PipelineDebugStep.DISPATCH_ENTITY_COMPLETE,
+    PipelineDebugStep.DISPATCH_HYBRID_COMPLETE,
+    PipelineDebugStep.DISPATCH_MIXED_COMPLETE,
+  ],
+  entity_route: [
+    PipelineDebugStep.ROUTE_ENTITY_ONLY_START,
+    PipelineDebugStep.ROUTE_ENTITY_ONLY_DONE,
+  ],
+  hybrid_execution: [
+    PipelineDebugStep.HYBRID_EXECUTE_START,
+    PipelineDebugStep.HYBRID_EXECUTE_RANKED,
+  ],
+  retrieval: [
+    PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_START,
+    PipelineDebugStep.RETRIEVAL_PRODUCER_BROWSE,
+    PipelineDebugStep.RETRIEVAL_REGION_BROWSE,
+    PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES,
+    PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_FALLBACK,
+    PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_ASSEMBLED,
+  ],
+  anchor_resolution: [
+    PipelineDebugStep.RESOLVER_ANCHOR_MISSING,
+    PipelineDebugStep.RESOLVER_ANCHOR_START,
+    PipelineDebugStep.RESOLVER_ANCHOR_DONE,
+  ],
+  ranking: [
+    PipelineDebugStep.RANKING_HYBRID_COMPLETE,
+  ],
+  decision: [
+    PipelineDebugStep.DECISION_PHASE_ENTER,
+    PipelineDebugStep.DECISION_ENGINE_REQUEST,
+    PipelineDebugStep.DECISION_ENGINE_RESPONSE,
+  ],
+  post_route: [
+    PipelineDebugStep.POST_ROUTE_ENTER,
+    PipelineDebugStep.POST_ROUTE_ENTROPY_ABSTAIN,
+    PipelineDebugStep.CACHE_SET_SKIPPED,
+  ],
+  completion: [
+    PipelineDebugStep.SEARCH_EXECUTE_DONE,
+  ],
+  batch: [
+    PipelineDebugStep.BATCH_SEARCH_START,
+  ],
+  infra_http: [
+    PipelineDebugStep.HTTP_EMBEDDING_OK,
+    PipelineDebugStep.HTTP_EMBEDDING_HTTP_ERROR,
+    PipelineDebugStep.HTTP_EMBEDDING_TIMEOUT,
+    PipelineDebugStep.HTTP_EMBEDDING_NETWORK_ERROR,
+    PipelineDebugStep.HTTP_EMBEDDING_PARSE_ERROR,
+    PipelineDebugStep.HTTP_RERANKER_OK,
+    PipelineDebugStep.HTTP_RERANKER_HTTP_ERROR,
+    PipelineDebugStep.HTTP_RERANKER_TIMEOUT,
+    PipelineDebugStep.HTTP_RERANKER_NETWORK_ERROR,
+    PipelineDebugStep.HTTP_RERANKER_PARSE_ERROR,
+    PipelineDebugStep.VESPA_QUERY,
+  ],
+} as const;

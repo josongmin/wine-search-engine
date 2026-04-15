@@ -9,6 +9,9 @@ import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-po
 import { PgLtrModelRegistry } from '../../src/infrastructure/adapter/pg-ltr-model-registry.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
+// Cache invalidation is handled automatically via WeakMap pool-keyed cache
+// + 2s TTL. Publish creates a dedicated pool per pointer write, so its
+// cache does not affect readiness probes running on separate pools.
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { buildSearchSnapshot } from './build-search-snapshot.js';
 import { publishRuntimeSubstrates } from './publish-runtime-substrates.js';
@@ -133,6 +136,153 @@ async function promoteStagedFile(stagingPath: string, activePath: string): Promi
   const raw = await fs.readFile(stagingPath, 'utf8');
   await atomicWriteFile(activePath, raw);
   await fs.rm(stagingPath, { force: true });
+}
+
+/**
+ * T-010/W1: atomic pointer promote.
+ *
+ * Single DB write that flips the read path to the new snapshot_id.
+ *
+ * Contract:
+ *  - Writes the `active_search_snapshot` singleton row (id = 1) and appends
+ *    to `active_search_snapshot_history` inside the same transaction.
+ *  - Called AFTER: staged runtime substrates committed, Vespa doc plane
+ *    indexed, readiness verified. Called BEFORE: runtime-state JSON promote.
+ *  - If this step throws, nothing globally visible has changed — callers
+ *    must drop the staged runtime-state file and treat the publish as failed.
+ *  - Idempotent: setting the same active_snapshot_id is a no-op.
+ */
+export async function promoteActiveSearchSnapshotPointer(args: {
+  readonly snapshotId: string;
+  readonly previousSnapshotId?: string | undefined;
+  readonly contentHash: string;
+  readonly promoter?: string | undefined;
+}): Promise<void> {
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
+    throw new Error('Postgres configuration is required to promote the active snapshot pointer');
+  }
+  const pool = createPgPool(config.pg);
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const existing = await client.query<{
+        active_snapshot_id: string;
+        previous_snapshot_id: string | null;
+      }>(`SELECT active_snapshot_id, previous_snapshot_id FROM active_search_snapshot WHERE id = 1 FOR UPDATE`);
+      const current = existing.rows[0];
+
+      if (current?.active_snapshot_id === args.snapshotId) {
+        // Idempotent: pointer already points here. No-op.
+        await client.query('COMMIT');
+        return;
+      }
+
+      const previousSnapshotId = args.previousSnapshotId ?? current?.active_snapshot_id ?? null;
+      const promoter = args.promoter ?? 'publish-search-snapshot';
+
+      if (current === undefined) {
+        // First publish — insert singleton.
+        await client.query(
+          `INSERT INTO active_search_snapshot
+             (id, active_snapshot_id, previous_snapshot_id, content_hash, promoted_at, promoter)
+           VALUES (1, $1, $2, $3, NOW(), $4)`,
+          [args.snapshotId, previousSnapshotId, args.contentHash, promoter],
+        );
+      } else {
+        await client.query(
+          `UPDATE active_search_snapshot
+             SET active_snapshot_id = $1,
+                 previous_snapshot_id = $2,
+                 content_hash = $3,
+                 promoted_at = NOW(),
+                 promoter = $4
+           WHERE id = 1`,
+          [args.snapshotId, previousSnapshotId, args.contentHash, promoter],
+        );
+      }
+
+      await client.query(
+        `INSERT INTO active_search_snapshot_history
+           (active_snapshot_id, previous_snapshot_id, content_hash, promoter)
+         VALUES ($1, $2, $3, $4)`,
+        [args.snapshotId, previousSnapshotId, args.contentHash, promoter],
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
+ * T-010/W1: pointer rollback.
+ *
+ * Flips the active snapshot back to previous_snapshot_id. Data on both
+ * snapshots remains in place (snapshot-bound append-only) so rollback is
+ * just a pointer swap. Fails if there is no previous snapshot.
+ */
+export async function rollbackActiveSearchSnapshotPointer(): Promise<{
+  readonly rolledBackTo: string;
+  readonly from: string;
+}> {
+  const config = loadConfig();
+  if (!shouldUsePgPool(config.pg)) {
+    throw new Error('Postgres configuration is required to rollback the active snapshot pointer');
+  }
+  const pool = createPgPool(config.pg);
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const res = await client.query<{
+        active_snapshot_id: string;
+        previous_snapshot_id: string | null;
+        content_hash: string;
+      }>(`SELECT active_snapshot_id, previous_snapshot_id, content_hash
+          FROM active_search_snapshot WHERE id = 1 FOR UPDATE`);
+      const row = res.rows[0];
+      if (row === undefined) {
+        throw new Error('No active_search_snapshot row exists; nothing to rollback');
+      }
+      if (row.previous_snapshot_id == null) {
+        throw new Error(`Cannot rollback: no previous snapshot for ${row.active_snapshot_id}`);
+      }
+      const rolledBackTo = row.previous_snapshot_id;
+      await client.query(
+        `UPDATE active_search_snapshot
+           SET active_snapshot_id = $1,
+               previous_snapshot_id = $2,
+               promoted_at = NOW(),
+               promoter = 'rollback'
+         WHERE id = 1`,
+        [rolledBackTo, row.active_snapshot_id],
+      );
+      await client.query(
+        `INSERT INTO active_search_snapshot_history
+           (active_snapshot_id, previous_snapshot_id, content_hash, promoter)
+         VALUES ($1, $2, $3, 'rollback')`,
+        [rolledBackTo, row.active_snapshot_id, row.content_hash],
+      );
+      await client.query('COMMIT');
+      return { rolledBackTo, from: row.active_snapshot_id };
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+  }
 }
 
 export async function loadPublishedRuntimeState(runtimeStatePath: string) {
@@ -288,6 +438,22 @@ async function rollbackToPreviousSnapshot(args: {
   readonly newSnapshotEntityIds: readonly string[];
   readonly fixtureRepoRoot?: string | undefined;
 }): Promise<void> {
+  // T-010/W1: pointer-first rollback. If the DB pointer was already flipped,
+  // flip it back before touching Vespa. rollbackActiveSearchSnapshotPointer
+  // no-ops (throws) if pointer still points to the previous snapshot — which
+  // is the expected state when the publish failed BEFORE pointer promote.
+  try {
+    const { rolledBackTo, from } = await rollbackActiveSearchSnapshotPointer();
+    console.log(`↩️ Active snapshot pointer rolled back: ${from} → ${rolledBackTo}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Pointer was never promoted to the new snapshot — expected for most
+    // failure paths. Continue with Vespa rollback.
+    if (!/no previous snapshot|No active_search_snapshot/.test(msg)) {
+      console.warn(`↩️ Pointer rollback non-fatal: ${msg}`);
+    }
+  }
+
   const previousState = args.previousRuntimeState;
   if (previousState === undefined || args.previousManifest === undefined) {
     await deleteStaleVespaDocuments(args.newSnapshotEntityIds);
@@ -419,6 +585,23 @@ async function ensureSnapshotBoundLtrModels(args: {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // Wave 4 (fail-loud): --allow-missing-ltr lets a publish proceed without
+  // any trained LTR model, silently degrading production search quality.
+  // Production paths must require an explicit operator ack via env var;
+  // dev/test paths can still pass the flag freely.
+  if (args.allowMissingLtr) {
+    const ack = process.env['ETL_PUBLISH_LTR_BYPASS_ACK'];
+    const env = process.env['NODE_ENV'];
+    if (env === 'production' && ack !== 'YES') {
+      throw new Error(
+        '--allow-missing-ltr was set in NODE_ENV=production without operator ack. ' +
+        'Set ETL_PUBLISH_LTR_BYPASS_ACK=YES to acknowledge that the published ' +
+        'snapshot will run with NO learned-to-rank model — search quality will ' +
+        'fall back to lexical-only ranking. Refusing fail-open.',
+      );
+    }
+  }
+
   const built = await buildSearchSnapshot({
     input: args.input,
     outputDir: args.outputDir,
@@ -513,6 +696,18 @@ async function run(): Promise<void> {
     } finally {
       await coveragePool.end();
     }
+    console.log('🔁 Atomic DB pointer promote — active_search_snapshot');
+    await promoteActiveSearchSnapshotPointer({
+      snapshotId: manifestWithExactFeed.snapshotId,
+      previousSnapshotId: previousRuntimeState?.snapshotId,
+      contentHash: runtimeState.contentHash ?? manifestWithExactFeed.snapshotId,
+    });
+    console.log('🔁 Re-verifying readiness with pointer parity (post-promote)');
+    await verifySearchSnapshotReadiness({
+      runtimeStatePath: stagedRuntimeStatePath,
+      manifestPath: built.manifestPath,
+      requirePointerParity: true,
+    });
     console.log('📌 Promoting staged runtime state');
     await promoteStagedFile(stagedRuntimeStatePath, args.runtimeStatePath);
   } catch (error) {

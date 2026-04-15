@@ -10,6 +10,7 @@
 
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { QueryCacheKey } from '../model/cache-key.js';
+import type { CacheGetResult } from '../../../infrastructure/db/cache-result.js';
 
 /**
  * Query cache port: Store and retrieve complete search responses.
@@ -27,8 +28,24 @@ export interface QueryCachePort {
    * @param cacheKey - Deterministic cache key
    * @returns Cached response if hit, undefined if miss or expired
    * @throws Only on infrastructure errors (not on miss)
+   *
+   * Wave 2 / Fix 1: legacy method retained for callers that don't need to
+   * distinguish miss / breaker_open / infra_error / corrupt_entry. Prefer
+   * `getWithDiagnostics()` at ops-sensitive call sites.
    */
   get(cacheKey: QueryCacheKey): Promise<SearchResponseV1 | undefined>;
+
+  /**
+   * Typed read. Surfaces the full CacheGetResult union so the caller
+   * (CacheService) can branch on `kind` and emit distinct silent-skip
+   * counters for infra_error vs miss vs corrupt_entry. A fallback
+   * implementation that only wraps the legacy `get()` is acceptable —
+   * implementations should emit the richer union when they have the
+   * information.
+   */
+  getWithDiagnostics(
+    cacheKey: QueryCacheKey,
+  ): Promise<CacheGetResult<SearchResponseV1>>;
 
   /**
    * Store a response in cache with TTL.

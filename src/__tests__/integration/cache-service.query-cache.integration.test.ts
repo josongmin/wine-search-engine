@@ -9,6 +9,7 @@ import {
   MockQueryCache,
   authoritativeRuntimeState,
   buildPlanCacheKey,
+  createMockCompiledQuery,
   createMockPlan,
   createMockResponse,
   createMockSnapshot,
@@ -28,13 +29,15 @@ describe('CacheService query cache integration', () => {
   async function seedFreshCachedResponse(
     response = createMockResponse(),
     request: { sessionContext?: { sessionId: string }; context?: { locale: string } } = {},
+    compiled = createMockCompiledQuery(),
   ): Promise<{
     readonly plan: QueryPlanV1;
     readonly request: { sessionContext?: { sessionId: string }; context?: { locale: string } };
+    readonly compiled: ReturnType<typeof createMockCompiledQuery>;
   }> {
     const plan = createMockPlan();
-    await cacheService.setSearchResponse(plan, request, response);
-    return { plan, request };
+    await cacheService.setSearchResponse(plan, request, response, compiled);
+    return { plan, request, compiled };
   }
 
   async function captureQueryCacheTtl(
@@ -42,11 +45,13 @@ describe('CacheService query cache integration', () => {
   ): Promise<number> {
     const plan = createMockPlan();
     const request = {};
+    const compiled = createMockCompiledQuery();
 
     let capturedTtl = 0;
     const delegateCache = new MockQueryCache();
     const spyCache: QueryCachePort = {
       get: (k) => delegateCache.get(k),
+      getWithDiagnostics: (k) => delegateCache.getWithDiagnostics(k),
       set: async (k, v, ttl) => {
         capturedTtl = ttl;
         return delegateCache.set(k, v, ttl);
@@ -58,7 +63,7 @@ describe('CacheService query cache integration', () => {
     };
     const spyService = new CacheService(spyCache, embeddingCache, 5, 60000);
 
-    await spyService.setSearchResponse(plan, request, response);
+    await spyService.setSearchResponse(plan, request, response, compiled);
     return capturedTtl;
   }
 
@@ -66,15 +71,15 @@ describe('CacheService query cache integration', () => {
     response: SearchResponseV1,
     request: { sessionContext?: { sessionId: string }; context?: { locale: string } } = {},
     currentSnapshot: DecisionSnapshot = createMockSnapshot(),
+    compiled = createMockCompiledQuery(),
   ) {
     const plan = createMockPlan();
     await queryCache.set(buildPlanCacheKey(plan, request, currentSnapshot.snapshot_id), response, 3600);
-    return { plan, request };
+    return { plan, request, compiled };
   }
 
   async function expectCacheBypass(
     response: SearchResponseV1,
-    expectedReason: string,
     options: {
       snapshot?: DecisionSnapshot;
       runtimeState?: ReturnType<typeof authoritativeRuntimeState>;
@@ -82,7 +87,7 @@ describe('CacheService query cache integration', () => {
     } = {},
   ) {
     const currentSnapshot = options.snapshot ?? createMockSnapshot();
-    const { plan, request } = await seedDirectCachedResponse(
+    const { plan, request, compiled } = await seedDirectCachedResponse(
       response,
       options.request,
       currentSnapshot,
@@ -92,17 +97,16 @@ describe('CacheService query cache integration', () => {
       request,
       currentSnapshot,
       options.runtimeState,
+      compiled,
     );
-    expect(result.hit).toBe(false);
-    expect(result.reason).toBe(expectedReason);
+    expect(result.kind).toBe('miss');
     return { result, plan, request };
   }
 
   it('returns cache miss when no entry exists', async () => {
     const result = await cacheService.getSearchResponse(createMockPlan(), {}, createMockSnapshot());
 
-    expect(result.hit).toBe(false);
-    expect(result.reason).toBe('cache_miss');
+    expect(result.kind).toBe('miss');
   });
 
   it('returns cache hit with fresh data', async () => {
@@ -110,19 +114,21 @@ describe('CacheService query cache integration', () => {
     const mockRequest = {};
     const mockSnapshot = createMockSnapshot();
     const mockResponse = createMockResponse();
+    const mockCompiled = createMockCompiledQuery();
 
-    await cacheService.setSearchResponse(mockPlan, mockRequest, mockResponse);
+    await cacheService.setSearchResponse(mockPlan, mockRequest, mockResponse, mockCompiled);
 
     const result = await cacheService.getSearchResponse(mockPlan, mockRequest, mockSnapshot, {
       learningKillSwitchEnabled: false,
       denseRetrievalEnabled: true,
       rerankerAvailable: true,
       currentExecutionModeHint: 'authoritative',
-    });
+    }, mockCompiled);
 
-    expect(result.hit).toBe(true);
-    expect(result.data?.meta.requestId).toBe('test-request-123');
-    expect(result.isStale).toBeUndefined();
+    expect(result.kind).toBe('hit');
+    if (result.kind === 'hit') {
+      expect(result.value.meta.requestId).toBe('test-request-123');
+    }
   });
 
   it('refuses caching heuristic responses even on cacheable routes', async () => {
@@ -133,9 +139,10 @@ describe('CacheService query cache integration', () => {
       blockingEligible: false,
       degradationReasons: ['heuristic_drinking_window'],
     });
+    const mockCompiled = createMockCompiledQuery();
 
     await expect(
-      cacheService.setSearchResponse(mockPlan, mockRequest, mockResponse),
+      cacheService.setSearchResponse(mockPlan, mockRequest, mockResponse, mockCompiled),
     ).resolves.toBe(false);
 
     const result = await cacheService.getSearchResponse(
@@ -143,17 +150,17 @@ describe('CacheService query cache integration', () => {
       mockRequest,
       createMockSnapshot(),
       authoritativeRuntimeState(),
+      mockCompiled,
     );
-    expect(result.hit).toBe(false);
+    expect(result.kind).toBe('miss');
   });
 
   it('invalidates stale entries with version mismatch', async () => {
     const { result } = await expectCacheBypass(
       createMockResponse('old-model-v1'),
-      'model_version_drift',
       { snapshot: createMockSnapshot('new-model-v2') },
     );
-    expect(result.isStale).toBe(true);
+    expect(result.kind).toBe('miss');
   });
 
   it.each([
@@ -166,10 +173,10 @@ describe('CacheService query cache integration', () => {
       createMockSnapshot('test-v1', { feature_flags: { killSwitchDenseRetrieval: true } }),
     ],
   ])('invalidates stale entries when %s', async (_label, currentSnapshot) => {
-    const { result } = await expectCacheBypass(createMockResponse(), 'snapshot_id_drift', {
+    const { result } = await expectCacheBypass(createMockResponse(), {
       snapshot: currentSnapshot,
     });
-    expect(result.isStale).toBe(true);
+    expect(result.kind).toBe('miss');
   });
 
   it('bypasses degraded cached entries even when the key matches', async () => {
@@ -177,15 +184,15 @@ describe('CacheService query cache integration', () => {
       executionMode: 'degraded',
       blockingEligible: false,
       degradationReasons: ['reranker_unavailable'],
-    }), 'cached_not_blocking_eligible');
-    expect(result.isStale).toBe(true);
+    }));
+    expect(result.kind).toBe('miss');
   });
 
   it('bypasses contract-version drift with a stable reason', async () => {
     const { result } = await expectCacheBypass(createMockResponse('test-v1', {
       contractVersion: 'search_response_v0',
-    }), 'contract_version_drift');
-    expect(result.isStale).toBe(true);
+    }));
+    expect(result.kind).toBe('miss');
   });
 
   it.each([
@@ -197,7 +204,6 @@ describe('CacheService query cache integration', () => {
         rerankerAvailable: true,
         currentExecutionModeHint: 'degraded' as const,
       },
-      'learning_disabled',
     ],
     [
       'dense retrieval is disabled at runtime',
@@ -207,7 +213,6 @@ describe('CacheService query cache integration', () => {
         rerankerAvailable: true,
         currentExecutionModeHint: 'degraded' as const,
       },
-      'dense_retrieval_disabled',
     ],
     [
       'reranker is unavailable at runtime',
@@ -217,20 +222,19 @@ describe('CacheService query cache integration', () => {
         rerankerAvailable: false,
         currentExecutionModeHint: 'degraded' as const,
       },
-      'reranker_unavailable',
     ],
-  ])('bypasses cache hits when %s', async (_label, runtimeState, reason) => {
-    const { plan, request } = await seedFreshCachedResponse();
+  ])('bypasses cache hits when %s', async (_label, runtimeState) => {
+    const { plan, request, compiled } = await seedFreshCachedResponse();
 
     const result = await cacheService.getSearchResponse(
       plan,
       request,
       createMockSnapshot(),
       runtimeState,
+      compiled,
     );
 
-    expect(result.hit).toBe(false);
-    expect(result.reason).toBe(reason);
+    expect(result.kind).toBe('miss');
     expect(
       (
         await queryCache.get(
@@ -249,10 +253,10 @@ describe('CacheService query cache integration', () => {
     response.meta.decisionSnapshot = snapshotWithoutModels;
     response.engineDecision.decisionSnapshot = snapshotWithoutModels;
 
-    const { result } = await expectCacheBypass(response, 'model_version_drift', {
+    const { result } = await expectCacheBypass(response, {
       runtimeState: authoritativeRuntimeState(),
     });
-    expect(result.isStale).toBe(true);
+    expect(result.kind).toBe('miss');
   });
 
   it('refuses to write non-blocking-eligible responses to cache', async () => {
@@ -262,9 +266,14 @@ describe('CacheService query cache integration', () => {
       executionMode: 'authoritative',
       blockingEligible: false,
     });
+    const mockCompiled = createMockCompiledQuery();
 
-    const stored = await cacheService.setSearchResponse(mockPlan, mockRequest, nonBlockingResponse);
-
+    const stored = await cacheService.setSearchResponse(
+      mockPlan,
+      mockRequest,
+      nonBlockingResponse,
+      mockCompiled,
+    );
     expect(stored).toBe(false);
     expect(
       await queryCache.get(

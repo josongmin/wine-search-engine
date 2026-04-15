@@ -20,12 +20,17 @@ export function SearchInput({
 }: SearchInputProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [value, setValue] = useState(searchParams.get('q') ?? '');
+  const urlQuery = searchParams.get('q') ?? '';
+  const [value, setValue] = useState(urlQuery);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
   }, [autoFocus]);
+
+  useEffect(() => {
+    setValue(urlQuery);
+  }, [urlQuery]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {

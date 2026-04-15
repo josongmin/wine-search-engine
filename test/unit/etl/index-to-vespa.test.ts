@@ -189,13 +189,13 @@ describe('index-to-vespa bridge', () => {
 });
 
 describe('taxonomy field ingest contract', () => {
-  it('omits grape_family when no authoritative upstream value is present', () => {
+  it('derives grape_family from GRAPE_FAMILY_MAP when no authoritative upstream value is present', () => {
     const record = makeEnrichedRecord({ grapePrimary: 'Cabernet Sauvignon', grapeFamily: undefined });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
     const fields = toVespaFields(doc);
 
-    expect(doc.grapeFamily).toBeUndefined();
-    expect(fields).not.toHaveProperty('grape_family');
+    expect(doc.grapeFamily).toBe('Cabernet Sauvignon');
+    expect(fields['grape_family']).toBe('Cabernet Sauvignon');
   });
 
   it('preserves authoritative grape_family when provided upstream', () => {
@@ -218,11 +218,11 @@ describe('taxonomy field ingest contract', () => {
     ).toThrow(/wineType is required/);
   });
 
-  it('omits grape_family instead of heuristic synonym/fallback derivation', () => {
+  it('derives grape_family via split fallback when grapePrimary is not in GRAPE_FAMILY_MAP', () => {
     const record = makeEnrichedRecord({ grapePrimary: 'Shiraz', grapeFamily: undefined });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
 
-    expect(doc.grapeFamily).toBeUndefined();
+    expect(doc.grapeFamily).toBe('Shiraz');
   });
 
   it('omits grape_family when grapePrimary is null', () => {

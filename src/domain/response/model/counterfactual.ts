@@ -4,11 +4,14 @@ import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type { AdmissionClosureSummary } from '../../decision/model/decision-input.js';
 import type {
   ExecutionBudget,
+  MissingProvenanceObligation,
   ExecutionProvenanceClosure,
   ExecutionRetrievalMode,
   ProvenancePolicy,
 } from '../../query/model/engine-execution-contract.js';
 import type { QueryRoute } from '../../query/model/query-route.js';
+import type { DecisionStatus, NextAction } from '../../shared/types/index.js';
+import type { FailureReason } from '../../decision/model/failure-reason.js';
 import type {
   SpecializedFallbackReason,
   SpecializedRouteName,
@@ -69,6 +72,38 @@ export interface ExecutionContractMeta {
   readonly budget?: ExecutionBudget | undefined;
   readonly provenancePolicy?: ProvenancePolicy | undefined;
   readonly provenanceClosure?: ExecutionProvenanceClosure | undefined;
+  readonly admissionClosure?: AdmissionClosureSummary | undefined;
+}
+
+/**
+ * Stable provenance closure surfaced on the public response contract.
+ *
+ * This is the canonical public projection of the compiled execution contract
+ * plus the final decision-layer gate outcome. `auditExtension.execution_trace`
+ * remains debug-only; clients should rely on this block instead.
+ */
+export interface ProvenanceTraceMeta {
+  readonly policy: ProvenancePolicy;
+  readonly observed: {
+    readonly topEntityPresent: boolean;
+    readonly preRank: ExecutionProvenanceClosure['preRank'];
+    readonly postRank: ExecutionProvenanceClosure['postRank'];
+  };
+  readonly missing: readonly MissingProvenanceObligation[];
+  readonly shortfalls: readonly string[];
+  readonly gateDecisions: {
+    readonly admission:
+      | 'admission_gate_passed'
+      | 'admission_gate_rejected'
+      | 'admission_gate_not_applicable';
+    readonly decision:
+      | 'decision_gate_resolved'
+      | 'decision_gate_ambiguous'
+      | 'decision_gate_failed';
+    readonly decisionStatus: DecisionStatus;
+    readonly nextAction: NextAction;
+    readonly failureReason?: FailureReason | undefined;
+  };
   readonly admissionClosure?: AdmissionClosureSummary | undefined;
 }
 
@@ -140,6 +175,9 @@ export interface ResponseMeta {
 
   /** Stable execution-contract projection for downstream observability/debugging. */
   readonly executionContract?: ExecutionContractMeta | undefined;
+
+  /** Stable provenance closure for public consumers. */
+  readonly provenanceTrace?: ProvenanceTraceMeta | undefined;
 
   /**
    * Optional audit payload populated when `options.explain = true` on the request.

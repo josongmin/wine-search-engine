@@ -4,7 +4,7 @@
 
 Engine repo as of this ADR revision:
 
-- **Phase 1 (partial):** `009_canonical_entity_graph.sql` plus `scripts/etl/canonical-entity-graph-sync.ts` populate `canonical_entities` / links / canonical aliases / canonical ambiguity from the active search snapshot.
+- **Phase 1 (partial):** `009_canonical_entity_graph.sql` plus `scripts/etl/canonical-entity-graph-sync.ts` populate and exact-reconcile `canonical_entities` / links / canonical aliases / canonical ambiguity from the active search snapshot.
 - **Phase 2 (partial):** `scripts/etl/build-search-snapshot.ts` resolves snapshot `entityId` via `snapshot-entity-identity.ts` (fixture gold overlay + deterministic `wine-ce-{identitySignature}` fallback — not raw `sourceId`); `source_record_refs` carries Vivino lineage separately.
 - **Phase 0 (partial):** `entity-id.ts` brands `CanonicalEntityId` / `SourceRecordId` / `DocumentId`; `scripts/etl/types.ts` now types Silver `sourceId` as `SourceRecordId` and indexable `entityId` as `CanonicalEntityId`; Vivino silver ETL wraps `sourceId` with `createSourceRecordId`; PG/Vespa/HTTP ingress paths that hydrate public ids use `createCanonicalEntityId` (fail-loud on `vivino-`). Full call-site migration across `src/` is not finished.
 - **Phase 3 (open):** Runtime `entities.entity_id` canonical reload and full HTTP surface audit remain.
@@ -110,6 +110,8 @@ exact entity recovery benchmark는 영원히 다른 우주를 보게 된다.
 - runtime `entities.entity_id`
 - alias graph primary identity
 - ambiguity registry entity refs
+
+`canonical_entities` / `entity_source_links` / `canonical_aliases` / `canonical_ambiguity_registry`는 snapshot-bound exact reconcile 대상이다. stale row가 남으면 publish/readiness가 실패해야 한다.
 
 ### 3. fixture gold catalog is a contract oracle, not the production truth source
 

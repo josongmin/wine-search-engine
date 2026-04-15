@@ -205,8 +205,14 @@ async function run(): Promise<void> {
   );
 }
 
-void run().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
-  process.exit(1);
-});
+// Only execute when invoked directly as a CLI (not when imported by tests).
+import { fileURLToPath as _fileURLToPath } from 'node:url';
+const _invokedAsMain = process.argv[1] != null
+  && _fileURLToPath(import.meta.url) === process.argv[1];
+if (_invokedAsMain) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

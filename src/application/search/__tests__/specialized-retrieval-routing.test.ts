@@ -114,7 +114,22 @@ describe('SearchUseCase specialized retrieval routing', () => {
         }),
       },
       entityLookup: {
-        getDocument: vi.fn(),
+        getDocument: vi.fn().mockImplementation(async (id: unknown) => ({
+          entityId: id,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+        })),
+        getDocuments: vi.fn().mockImplementation(async (ids: readonly unknown[]) => {
+          const map = new Map();
+          for (const id of ids) {
+            map.set(id, {
+              entityId: id,
+              entityType: 'wine',
+              canonicalLabel: 'Opus One 2018',
+            });
+          }
+          return map;
+        }),
       },
       candidatePool: {
         generate: vi.fn(),
@@ -265,16 +280,19 @@ describe('SearchUseCase specialized retrieval routing', () => {
       retrievalMode: 'entity_lookup',
     });
     vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
-    vi.mocked(deps.entityLookup!.getDocument).mockResolvedValue({
+    const wine1Doc = {
       entityId: createEntityId('wine-1'),
-      entityType: 'wine',
+      entityType: 'wine' as const,
       canonicalLabel: 'Opus One 2018',
-    });
+    };
+    vi.mocked(deps.entityLookup!.getDocuments).mockResolvedValue(
+      new Map([[createEntityId('wine-1'), wine1Doc]]),
+    );
 
     const useCase = new SearchUseCase(deps);
     await useCase.execute({ query: 'Opus One' }, 'req-entity');
 
-    expect(deps.entityLookup?.getDocument).toHaveBeenCalledWith('wine-1');
+    expect(deps.entityLookup?.getDocuments).toHaveBeenCalledWith([createEntityId('wine-1')]);
     expect(deps.entityResolver.resolve).toHaveBeenCalledWith(
       expect.objectContaining({
         candidateEntities: [

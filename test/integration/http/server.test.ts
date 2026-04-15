@@ -630,7 +630,7 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
               { from: 'sweetness:eq:dry', to: 'sweetness:eq:sweet', type: 'contradiction' },
             ],
             policy_outcomes: [
-              { atom_key: 'sweetness:eq:sweet', outcome: 'dropped', reason: 'conflict' },
+              { atomIndex: 1, outcome: 'dropped', reason: 'conflict' },
             ],
           },
         },

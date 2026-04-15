@@ -261,16 +261,18 @@ export class AdmissionGate {
     input: DecisionInput,
     snapshot: DecisionSnapshot,
   ): AdmissionResult {
+    if (input.effectiveRoute === undefined) {
+      throw new Error('DecisionInput.effectiveRoute is required for compiled-only execution');
+    }
+    if (input.effectiveRetrievalMode === undefined) {
+      throw new Error('DecisionInput.effectiveRetrievalMode is required for compiled-only execution');
+    }
     const traceRef = buildAdmissionAuthorityTraceRef({
       queryPlan: input.queryPlan,
       snapshot,
       reason,
-      ...(input.effectiveRoute !== undefined
-        ? { route: input.effectiveRoute }
-        : {}),
-      ...(input.effectiveRetrievalMode !== undefined
-        ? { retrievalMode: input.effectiveRetrievalMode }
-        : {}),
+      route: input.effectiveRoute,
+      retrievalMode: input.effectiveRetrievalMode,
       ...(input.retrievalKind !== undefined
         ? { retrievalKind: input.retrievalKind }
         : {}),

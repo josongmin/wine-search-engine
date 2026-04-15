@@ -59,13 +59,13 @@ const EvidenceItemV2Schema = z.object({
 const ComponentScoresV2Schema = z.object({
   entityIntegrity: z.number().finite(),
   anchorSimilarity: z.number().finite().optional(),
-  semantic: z.number().finite(),
+  semantic: z.number().finite().optional(),
   hardConstraintPass: z.boolean(),
   softConstraint: z.number().finite(),
-  attributeAlignment: z.number().finite(),
-  preferenceAlignment: z.number().finite(),
-  popularity: z.number().finite(),
-  availability: z.number().finite(),
+  attributeAlignment: z.number().finite().optional(),
+  preferenceAlignment: z.number().finite().optional(),
+  popularity: z.number().finite().optional(),
+  availability: z.number().finite().optional(),
   uncertaintyPenalty: z.number().finite(),
 }).strict();
 
@@ -241,8 +241,8 @@ export const InterpretResponseV2Schema = z.object({
   appliedConstraints: z.array(z.string().min(1)).max(MAX_SEARCH_METADATA_OBJECT_KEYS),
   /** Ranking signal names that influenced scoring for this query. */
   rankingSignals: z.array(z.string().min(1)).max(MAX_SEARCH_METADATA_OBJECT_KEYS),
-  /** Planner confidence in the detected intent, in [0, 1]. */
-  confidence: z.number().finite().min(0).max(1),
+  /** Planner confidence in the detected intent, in [0, 1]. Omitted when uncertainty input is invalid. */
+  confidence: z.number().finite().min(0).max(1).optional(),
   version: z.literal('2'),
   responseType: z.literal('interpret'),
 }).strict();

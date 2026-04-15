@@ -337,8 +337,60 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   readonly runtimeStatePath?: string;
   readonly runtimeState?: LoadedSearchSnapshotRuntimeState;
   readonly strictHashes?: boolean | undefined;
+  /** T-010/W2: when true, additionally verify active_search_snapshot pointer matches runtime state. */
+  readonly requirePointerParity?: boolean | undefined;
 }): Promise<LoadedSearchSnapshotRuntimeState> {
   const runtimeState = args.runtimeState ?? await loadSearchSnapshotRuntimeState(args.runtimeStatePath);
+
+  // T-010/W2: pointer-aware readiness.
+  //
+  // The DB pointer is the runtime authority for "which snapshot is served".
+  // If it drifts from the runtime-state file the read path will filter on a
+  // different snapshot_id than the one the file advertises — pointing users
+  // at one version in logs/ops and serving another version of data. Fail
+  // loudly.
+  //
+  // Opt-in via requirePointerParity to keep legacy callers (tests, the
+  // initial bootstrap step before the first publish) unaffected. The
+  // publish flow should pass requirePointerParity=true once migration 010
+  // is live on all environments.
+  if (args.requirePointerParity === true) {
+    try {
+      const pointerRes = await args.pool.query<{ active_snapshot_id: string; content_hash: string }>(
+        `SELECT active_snapshot_id, content_hash FROM active_search_snapshot WHERE id = 1`,
+      );
+      const pointerRow = pointerRes.rows[0];
+      if (pointerRow === undefined) {
+        throw new Error(
+          '[readiness] active_search_snapshot pointer row is missing. ' +
+          'The publish has not flipped the pointer — refusing to mark runtime live.',
+        );
+      }
+      if (pointerRow.active_snapshot_id !== runtimeState.snapshotId) {
+        throw new Error(
+          `[readiness] pointer/runtime-state drift: ` +
+          `active_search_snapshot.active_snapshot_id=${pointerRow.active_snapshot_id} ` +
+          `vs runtime-state.snapshotId=${runtimeState.snapshotId}. ` +
+          `The DB is serving a different snapshot than the runtime-state file advertises.`,
+        );
+      }
+      if (
+        runtimeState.contentHash.length > 0
+        && pointerRow.content_hash.length > 0
+        && pointerRow.content_hash !== runtimeState.contentHash
+      ) {
+        throw new Error(
+          `[readiness] content_hash drift for snapshot ${runtimeState.snapshotId}: ` +
+          `pointer=${pointerRow.content_hash} vs runtime-state=${runtimeState.contentHash}.`,
+        );
+      }
+    } catch (err: unknown) {
+      // 42P01 is only tolerable in environments without the pointer migration
+      // applied. When requirePointerParity=true the caller has asked for
+      // strict mode — treat the missing table as a fatal readiness failure.
+      throw err;
+    }
+  }
 
   const [
     entityResult,
@@ -348,6 +400,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     nlMappingsRuntime,
     vespaDocumentCount,
     canonicalGraphEntityResult,
+    canonicalIdentityAuthorityResult,
     vivinoNamespaceSealResult,
     canonicalAliasJoinResult,
     canonicalAmbiguityTotalResult,
@@ -412,7 +465,16 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     args.pool.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM canonical_entities
-       WHERE source_provenance->>'search_snapshot_id' = $1`,
+       WHERE search_snapshot_id = $1`,
+      [runtimeState.snapshotId],
+    ),
+    args.pool.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM entities e
+       INNER JOIN canonical_identity_authority cia
+         ON cia.identity_signature = e.identity_signature
+        AND cia.canonical_entity_id = e.entity_id
+       WHERE e.search_snapshot_id = $1`,
       [runtimeState.snapshotId],
     ),
     args.pool.query<{
@@ -427,7 +489,8 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
             WHERE search_snapshot_id = $1 AND entity_id LIKE $2)::text
            AS entities_violations,
          (SELECT COUNT(*) FROM canonical_entities
-            WHERE canonical_entity_id LIKE $2)::text
+            WHERE search_snapshot_id = $1
+              AND canonical_entity_id LIKE $2)::text
            AS canonical_entities_violations,
          (SELECT COUNT(*) FROM aliases
             WHERE search_snapshot_id = $1 AND entity_id LIKE $2)::text
@@ -440,7 +503,8 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
               ))::text
            AS ambiguity_registry_violations,
          (SELECT COUNT(*) FROM canonical_ambiguity_registry
-            WHERE EXISTS (
+            WHERE search_snapshot_id = $1
+              AND EXISTS (
               SELECT 1
                 FROM jsonb_array_elements_text(canonical_entity_ids) AS eid
                WHERE eid LIKE $2
@@ -452,10 +516,17 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       `SELECT COUNT(*)::text AS c
        FROM canonical_aliases ca
        INNER JOIN entities e
-         ON e.entity_id = ca.canonical_entity_id AND e.search_snapshot_id = $1`,
+         ON e.entity_id = ca.canonical_entity_id
+        AND e.search_snapshot_id = $1
+       WHERE ca.search_snapshot_id = $1`,
       [runtimeState.snapshotId],
     ),
-    args.pool.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM canonical_ambiguity_registry`),
+    args.pool.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM canonical_ambiguity_registry
+       WHERE search_snapshot_id = $1`,
+      [runtimeState.snapshotId],
+    ),
   ]);
 
   const entityCount = parseSqlCountText(entityResult.rows[0]?.snapshot_count, 'entities.snapshot_count');
@@ -475,6 +546,15 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   if (canonicalGraphEntityCount !== runtimeState.counts.entities) {
     throw new Error(
       `Canonical graph entity count mismatch: canonical_entities for snapshot=${canonicalGraphEntityCount}, runtime entities=${runtimeState.counts.entities}`,
+    );
+  }
+  const canonicalIdentityAuthorityCount = parseSqlCountText(
+    canonicalIdentityAuthorityResult.rows[0]?.c,
+    'canonical_identity_authority.runtime_join',
+  );
+  if (canonicalIdentityAuthorityCount !== runtimeState.counts.entities) {
+    throw new Error(
+      `Canonical identity authority mismatch: canonical_identity_authority runtime join=${canonicalIdentityAuthorityCount}, runtime entities=${runtimeState.counts.entities}`,
     );
   }
   const sealRow = vivinoNamespaceSealResult.rows[0];
@@ -502,13 +582,13 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   const canonicalAliasJoinCount = parseSqlCountText(canonicalAliasJoinResult.rows[0]?.c, 'canonical_aliases_join');
   if (canonicalAliasJoinCount !== aliasCount) {
     throw new Error(
-      `Canonical alias projection mismatch: canonical_aliases joined to active snapshot=${canonicalAliasJoinCount}, runtime aliases=${aliasCount}`,
+      `Canonical alias projection mismatch: canonical_aliases for snapshot=${canonicalAliasJoinCount}, runtime aliases=${aliasCount}`,
     );
   }
   const canonicalAmbiguityTotalCount = parseSqlCountText(canonicalAmbiguityTotalResult.rows[0]?.c, 'canonical_ambiguity_registry');
   if (canonicalAmbiguityTotalCount !== ambiguityCount) {
     throw new Error(
-      `Canonical ambiguity projection mismatch: canonical_ambiguity_registry=${canonicalAmbiguityTotalCount}, runtime ambiguity=${ambiguityCount}`,
+      `Canonical ambiguity projection mismatch: canonical_ambiguity_registry for snapshot=${canonicalAmbiguityTotalCount}, runtime ambiguity=${ambiguityCount}`,
     );
   }
 

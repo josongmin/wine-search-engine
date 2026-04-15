@@ -33,6 +33,7 @@ import {
   type MixedFallbackReason,
 } from '../model/mixed-degradation.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { annotateCandidateConstraintEvidenceBatch } from '../../retrieval/service/candidate-constraint-evidence.js';
 export type {
   AnchorResolverPort,
   SimilarRetrievalPort,
@@ -141,12 +142,13 @@ export class MixedSolver {
     let fallbackReason: MixedFallbackReason | undefined;
 
     // Step 3a: For similar_items mode (mixed route), apply set-specific constraints
-    if (queryPlan.retrievalMode === 'similar_items') {
+    if (compiled.execution.effectiveRetrievalMode === 'similar_items') {
       candidates = this.applySetConstraintsForSimilarItems(
         candidates,
         anchorEntityId,
       );
     }
+    candidates = [...annotateCandidateConstraintEvidenceBatch(candidates, queryPlan.constraints)];
     if (candidates.length === 0) {
       fallbackReason = 'mixed_similar_retrieval_fallback';
     }

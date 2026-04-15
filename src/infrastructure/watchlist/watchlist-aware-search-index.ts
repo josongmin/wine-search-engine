@@ -40,29 +40,10 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     return this.inner.getDocument(...args);
   }
 
-  async getDocuments(
+  getDocuments(
     entityIds: readonly CanonicalEntityId[],
   ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>> {
-    if (this.inner.getDocuments !== undefined) {
-      return this.inner.getDocuments(entityIds);
-    }
-    // Use allSettled so a single getDocument failure doesn't abort the entire
-    // batch — remaining documents are still useful for event comparison.
-    const settled = await Promise.allSettled(
-      entityIds.map(async (entityId) => [entityId, await this.inner.getDocument(entityId)] as const),
-    );
-    const docs = new Map<CanonicalEntityId, RetrievalDocument>();
-    for (const result of settled) {
-      if (result.status === 'fulfilled') {
-        const [entityId, doc] = result.value;
-        if (doc !== null) {
-          docs.set(entityId, doc);
-        }
-      } else {
-        log.warn({ err: result.reason }, 'getDocuments: single document fetch failed');
-      }
-    }
-    return docs;
+    return this.inner.getDocuments(entityIds);
   }
 
   async upsertDocument(doc: RetrievalDocument): Promise<void> {

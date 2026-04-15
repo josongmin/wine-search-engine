@@ -181,6 +181,14 @@ describe('buildInterpretResponseV2', () => {
     expect(result.confidence).toBe(0);
   });
 
+  it('omits confidence when uncertainty is non-finite', () => {
+    const result = buildInterpretResponseV2(makeInput({
+      observabilitySlice: makeSlice({ overallUncertainty: Number.NaN }),
+    }));
+    expect(Object.prototype.hasOwnProperty.call(result, 'confidence')).toBe(false);
+    expect(result.confidence).toBeUndefined();
+  });
+
   it('surfaces hard constraint count label when hard constraints are present', () => {
     const result = buildInterpretResponseV2(makeInput({
       observabilitySlice: makeSlice({ hardConstraintCount: 2, softConstraintCount: 0 }),

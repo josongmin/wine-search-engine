@@ -79,9 +79,11 @@ function makeInput(
   anchors: readonly AnchorCandidate[] = [],
   overrides: Partial<HybridRetrievalInput> = {},
 ): HybridRetrievalInput {
+  const queryPlan = overrides.queryPlan ?? makePlan(queryClass, anchors);
   return {
-    queryPlan: makePlan(queryClass, anchors),
+    queryPlan,
     route: 'hybrid',
+    compiledRetrievalMode: queryClass === 'hybrid' ? 'semantic_hybrid' : 'entity_lookup',
     lexicalQueries: ['opus one 2018'],
     semanticQueries: ['opus one 2018'],
     hardConstraints: [],

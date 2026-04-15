@@ -75,8 +75,8 @@ export function buildFailedMixedRouteExecution(
     decisionTrace: {
       queryClass: plan.queryClass,
       top1CalibratedScore: 0,
-      top2CalibratedScore: 0,
-      calibratedGap: 0,
+      top2CalibratedScore: undefined,
+      calibratedGap: undefined,
       decisionConfidenceC: 0,
       ambiguityDetected: false,
       ambiguityTypes: [],

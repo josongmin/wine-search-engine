@@ -137,7 +137,7 @@ describe('Resolver learned matcher context', () => {
     );
   });
 
-  it('falls back to heuristic resolver scoring when the learned matcher fails', async () => {
+  it('downgrades to ambiguous with learned_matcher_failed reason when the learned matcher fails (C3)', async () => {
     const match = vi.fn<LearnedMatcherPort['match']>().mockRejectedValue(
       new Error('matcher unavailable'),
     );
@@ -190,9 +190,14 @@ describe('Resolver learned matcher context', () => {
     const result = await resolver.resolve(input);
 
     expect(match).toHaveBeenCalledTimes(1);
-    expect(result.status).toBe('resolved');
+    // C3 (Wave 1 fail-loud): a failed learned matcher is NOT equivalent to
+    // the matcher being absent. The resolver now downgrades to 'ambiguous'
+    // with recommendedNextAction='clarify' rather than silently returning
+    // heuristic-only 'resolved'.
+    expect(result.status).toBe('ambiguous');
+    expect(result.recommendedNextAction).toBe('clarify');
     expect(result.decisionTrace.learnedMatcherTrace).toBeUndefined();
-    expect(result.degradation?.reasons).toEqual(['learned_matcher_failed']);
+    expect(result.degradation?.reasons).toContain('learned_matcher_failed');
   });
 
   it('classifies learned matcher timeouts as degraded timeout reasons', async () => {

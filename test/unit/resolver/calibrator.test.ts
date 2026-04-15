@@ -211,6 +211,14 @@ describe('Calibrator', () => {
       // Flat distribution (T=2) must be closer to 0.5 than normal (T=1)
       expect(distFlat).toBeLessThan(distNormal);
     });
+
+    it('case 12b – temperature=0 is rejected instead of silently falling back to 1', async () => {
+      const calibrator = makeTempCalibrator(0);
+
+      await expect(
+        calibrator.calibrate({ top1: 0.8, top2: 0.2 }, 'anchored_similarity'),
+      ).rejects.toThrow(/temperature must be finite and > 0/);
+    });
   });
 
   // -------------------------------------------------------------------------

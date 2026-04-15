@@ -32,7 +32,8 @@ export type RerankDecisionCode =
   | 'no_model_for_query_class'
   | 'empty_candidates'
   | 'feature_dimension_mismatch'
-  | 'gate_blocked';
+  | 'gate_blocked'
+  | 'normalization_failed';
 
 export interface RerankDecision {
   /** Whether the reranker was actually applied. */
@@ -45,6 +46,9 @@ export interface RerankDecision {
    *   - `feature_dimension_mismatch` — weight vector length ≠ LTR_MODEL_FEATURE_DIMENSION
    *   - `gate_blocked`               — rerank gate policy suppressed reranking
    *                                    (e.g. has_anchor, too_few_candidates)
+   *   - `normalization_failed`       — cross-encoder ran but score normalization
+   *                                    failed for ALL candidates (collapsed/NaN batch);
+   *                                    heuristic scores were kept, rerank was NOT applied
    */
   readonly decision: RerankDecisionCode;
   /**

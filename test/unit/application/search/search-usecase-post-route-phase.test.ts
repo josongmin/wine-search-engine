@@ -5,6 +5,7 @@ import {
 } from '../../../../src/application/search/search-usecase-post-route-phase.js';
 import { DomainError } from '../../../../src/domain/shared/error/domain-error.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker.port.js';
@@ -52,6 +53,24 @@ function minimalPlan(): QueryPlanV1 {
     policyRuleVersion: '1',
     thresholdProfileId: 'default',
   } as QueryPlanV1;
+}
+
+function makeTestCompiled(overrides?: Partial<CompiledWineQuery>): CompiledWineQuery {
+  return {
+    query: {
+      rawQuery: 'q', normalizedQuery: 'q', intent: 'semantic_discovery',
+      queryClass: 'unknown', anchors: [], constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] }, uncertainty: {} as never,
+      plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
+      retrievalPlan: { hardFilterTokens: [], softBoosts: [], inferredBoosts: [], sensoryPriors: [], planVersion: 'retrieval-plan-v1.0' },
+    },
+    execution: {
+      effectiveRoute: 'hybrid', effectiveRetrievalMode: 'attribute_search', routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+    },
+    ...overrides,
+  } as CompiledWineQuery;
 }
 
 function makeRankedResult(overrides: Record<string, unknown> = {}) {
@@ -208,6 +227,7 @@ async function runRankedPhaseForContract(
 ) {
   await runRankedRouteDecisionPhase({
     plan: minimalPlan(),
+    compiled: makeTestCompiled(),
     requestId: 'req-contract',
     startTime: Date.now() - 10,
     resolveResult: makeResolveResult({
@@ -277,6 +297,7 @@ describe('runSearchPostRoutePhase', () => {
 
     const out = await runSearchPostRoutePhase({
       plan,
+      compiled: makeTestCompiled(),
       request,
       requestId: 'r1',
       startTime: Date.now() - 10,
@@ -528,6 +549,7 @@ describe('runSearchPostRoutePhase', () => {
 
       await runSearchPostRoutePhase({
         plan,
+        compiled: makeTestCompiled(),
         request,
         requestId: `r-no-explain-${String(includeCounterfactuals)}`,
         startTime: Date.now() - 10,
@@ -682,6 +704,7 @@ describe('runSearchPostRoutePhase', () => {
 
     await runSearchPostRoutePhase({
       plan,
+      compiled: makeTestCompiled(),
       request,
       requestId: 'r2',
       startTime: Date.now() - 10,
@@ -815,6 +838,7 @@ describe('runSearchPostRoutePhase', () => {
 
     const rankedRouteResponse = await runRankedRouteDecisionPhase({
       plan,
+      compiled: makeTestCompiled(),
       requestId: 'req-ranked',
       startTime,
       resolveResult,
@@ -837,6 +861,7 @@ describe('runSearchPostRoutePhase', () => {
 
     const mainRouteResponse = await runSearchPostRoutePhase({
       plan,
+      compiled: makeTestCompiled(),
       request,
       requestId: 'req-ranked',
       startTime,
@@ -889,6 +914,7 @@ describe('runSearchPostRoutePhase', () => {
 
     await runRankedRouteDecisionPhase({
       plan: { ...minimalPlan(), rawQuery: '오퍼스원', normalizedQuery: 'opus one' },
+      compiled: makeTestCompiled(),
       requestId: 'req-fingerprint-a',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
@@ -902,6 +928,7 @@ describe('runSearchPostRoutePhase', () => {
 
     await runRankedRouteDecisionPhase({
       plan: { ...minimalPlan(), rawQuery: '샤또 마고', normalizedQuery: 'chateau margaux' },
+      compiled: makeTestCompiled(),
       requestId: 'req-fingerprint-b',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
@@ -954,6 +981,7 @@ describe('runSearchPostRoutePhase', () => {
 
     await runRankedRouteDecisionPhase({
       plan: minimalPlan(),
+      compiled: makeTestCompiled(),
       requestId: 'req-audit',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
@@ -1160,15 +1188,13 @@ describe('runSearchPostRoutePhase', () => {
 
     await runRankedRouteDecisionPhase({
       plan: minimalPlan(),
-      compiled: {
+      compiled: makeTestCompiled({
         execution: {
+          effectiveRoute: 'hybrid',
           effectiveRetrievalMode: 'semantic_hybrid',
-        },
-        query: {
-          retrievalPlan: {
-            mode: 'semantic_hybrid',
-            sensoryPriors: [],
-          },
+          routeSource: 'planner',
+          budget: { maxCandidates: 20, enablePrecisionRerank: true },
+          provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
         },
         plannerTrace: [
           {
@@ -1180,7 +1206,7 @@ describe('runSearchPostRoutePhase', () => {
             confidence: 1,
           },
         ],
-      } as never,
+      } as Partial<CompiledWineQuery>),
       requestId: 'req-rerank-trace',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
@@ -1233,15 +1259,13 @@ describe('runSearchPostRoutePhase', () => {
           inferred: [],
         },
       },
-      compiled: {
+      compiled: makeTestCompiled({
         execution: {
+          effectiveRoute: 'hybrid',
           effectiveRetrievalMode: 'semantic_hybrid',
-        },
-        query: {
-          retrievalPlan: {
-            mode: 'semantic_hybrid',
-            sensoryPriors: [],
-          },
+          routeSource: 'planner',
+          budget: { maxCandidates: 20, enablePrecisionRerank: true },
+          provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
         },
         plannerTrace: [
           {
@@ -1253,7 +1277,7 @@ describe('runSearchPostRoutePhase', () => {
             confidence: 1,
           },
         ],
-      } as never,
+      } as Partial<CompiledWineQuery>),
       requestId: 'req-constraint-trace',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
@@ -1294,6 +1318,7 @@ describe('runSearchPostRoutePhase', () => {
 
     await runSearchPostRoutePhase({
       plan,
+      compiled: makeTestCompiled(),
       request,
       requestId: 'req-clarify',
       startTime: Date.now() - 10,
@@ -1508,6 +1533,7 @@ describe('runSearchPostRoutePhase', () => {
     await expect(
       runRankedRouteDecisionPhase({
         plan: minimalPlan(),
+        compiled: makeTestCompiled(),
         requestId: 'req-decision-throw',
         startTime: Date.now() - 10,
         resolveResult: makeResolveResult(),
@@ -1532,6 +1558,15 @@ describe('runSearchPostRoutePhase', () => {
         retrievalMode: 'compare_candidates',
         queryClass: 'comparison_query',
       },
+      compiled: makeTestCompiled({
+        execution: {
+          effectiveRoute: 'hybrid',
+          effectiveRetrievalMode: 'compare_candidates',
+          routeSource: 'planner',
+          budget: { maxCandidates: 20, enablePrecisionRerank: true },
+          provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+        },
+      } as Partial<CompiledWineQuery>),
       requestId: 'req-comparison-suppress',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult({

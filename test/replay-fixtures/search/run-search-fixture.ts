@@ -4,19 +4,85 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { SearchRequestBody } from '../../../src/interface/http/schemas/search-request.schema.js';
 import { ReplayRequestSchema, SearchRequestSchema } from '../../../src/interface/http/schemas/search-request.schema.js';
-import type { ErrorResponseBody, SearchResponseBody } from '../../../src/interface/http/schemas/search-response.schema.js';
+import type {
+  ComparisonSearchResponseBody,
+  ErrorResponseBody,
+  SearchResponseBody,
+} from '../../../src/interface/http/schemas/search-response.schema.js';
 import type { ReplayRequestBody } from '../../../src/interface/http/schemas/search-request.schema.js';
-import { parseErrorResponse, parseSearchResponse, postJson } from '../../e2e/helpers/http-transport.js';
+import {
+  parseComparisonResponse,
+  parseErrorResponse,
+  parseSearchResponse,
+  postJson,
+} from '../../e2e/helpers/http-transport.js';
+import { QUERY_ROUTES } from '../../../src/domain/query/model/query-route.js';
+import { RETRIEVAL_MODES } from '../../../src/domain/query/model/retrieval-mode.js';
 import {
   decodeAuthorityTraceRefDetailed,
   decodeSnapshotIdDetailed,
 } from '../../../src/domain/decision/service/id-schema-decoder.js';
 import { buildDecisionSnapshotId } from '../../../src/application/search/search-usecase-decision-snapshot.js';
 
+const SearchReplayFixtureExecutionTraceExpectationSchema = z.object({
+  effective_route: z.enum(QUERY_ROUTES).optional(),
+  retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
+  effective_retrieval_mode: z.enum(RETRIEVAL_MODES).optional(),
+  retrieval_kind: z.enum([
+    'entity_lookup',
+    'generic_hybrid',
+    'specialized_hybrid',
+    'mixed_similarity',
+  ]).optional(),
+  sparse_executed: z.boolean().optional(),
+  specialized_route_executed: z.enum([
+    'producer_browse',
+    'region_browse',
+    'compare_candidates',
+  ]).nullable().optional(),
+  used_compiled_execution: z.boolean().optional(),
+  compiled_budget: z.object({
+    max_candidates: z.number().int().positive(),
+    enable_precision_rerank: z.boolean(),
+  }).strict().optional(),
+  provenance_policy: z.object({
+    require_identity_seal: z.boolean(),
+    require_constraint_evidence: z.boolean(),
+    require_anchor_evidence: z.boolean(),
+  }).strict().optional(),
+}).strict();
+
+const SearchReplayFixtureResolverProvenanceExpectationSchema = z.object({
+  candidate_source_breakdown: z.array(z.object({
+    source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']),
+    entity_ids: z.array(z.string().min(1)),
+    count: z.number().int().nonnegative(),
+  }).strict()).optional(),
+  blocker_seed_entity_ids: z.array(z.string().min(1)).optional(),
+  blocker_seed_count: z.number().int().nonnegative().optional(),
+}).strict();
+
+const SearchReplayFixtureTraceExpectationSchema = z.object({
+  authority_trace_ref: z.string().min(1).optional(),
+  snapshot_id: z.string().min(1).optional(),
+  determinism_fingerprint: z.string().min(1).optional(),
+  execution_trace: SearchReplayFixtureExecutionTraceExpectationSchema.optional(),
+  resolver_provenance_trace: SearchReplayFixtureResolverProvenanceExpectationSchema.optional(),
+}).strict();
+
 
 const SearchReplayFixtureSuccessExpectationSchema = z.object({
   execution_mode: z.string().min(1),
   degradation_reasons: z.array(z.string()),
+  golden_trace: SearchReplayFixtureTraceExpectationSchema.optional(),
+}).strict();
+
+const SearchReplayFixtureComparisonExpectationSchema = z.object({
+  comparison_intent: z.enum(['compare', 'recommend_one', 'list_both']),
+  overall_status: z.enum(['resolved', 'ambiguous', 'failed']),
+  authority_trace_ref: z.string().min(1).optional(),
+  top_result_entity_ids: z.tuple([z.string().min(1), z.string().min(1)]).optional(),
+  runtime_correlation_matches_request_id: z.boolean().optional(),
 }).strict();
 
 const SearchReplayFixtureErrorExpectationSchema = z.object({
@@ -32,8 +98,10 @@ const SearchReplayFixtureCommonFieldsSchema = z.object({
   name: z.string().min(1),
   endpoint: z.enum(['/v1/search', '/v1/search/replay']),
   execution_lane: z.enum(['self_contained', 'runtime_required']),
+  response_family: z.enum(['search', 'comparison']).optional(),
   expected: z.union([
     SearchReplayFixtureSuccessExpectationSchema,
+    SearchReplayFixtureComparisonExpectationSchema,
     SearchReplayFixtureErrorExpectationSchema,
   ]),
   requires_runtime_capability: z.array(z.string().min(1)).optional(),
@@ -217,6 +285,14 @@ export function buildSearchFixturePayload(
   });
 }
 
+function assertExactMatch(actual: unknown, expected: unknown, label: string): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `Expected ${label}=${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
 async function buildLiveSnapshotReplayPayload(
   fixture: ReplayHttpFixtureFile,
   app: FastifyInstance,
@@ -289,18 +365,51 @@ async function buildExecutableReplayFixturePayload(
   return buildLiveSnapshotReplayPayload(fixture, app);
 }
 
+/**
+ * Drift classification for replay fixture assertions.
+ *
+ * Separates **result drift** (execution_mode, degradation_reasons — the user-visible
+ * outcome changed) from **trace drift** (authority_trace_ref, snapshot_id,
+ * determinism_fingerprint — the provenance/identity envelope changed but results
+ * may still be correct). This lets CI surface "trace-only drift" as a warning
+ * rather than a hard failure, keeping the fixture suite stable across snapshot
+ * version bumps while still catching behavioral regressions.
+ */
+export interface FixtureDriftClassification {
+  /** Fields that assert user-visible search result correctness. */
+  readonly resultFields: readonly string[];
+  /** Fields that assert execution provenance / trace identity. */
+  readonly traceFields: readonly string[];
+}
+
+/** Result drift: the behaviorally-meaningful fields. */
+export const RESULT_DRIFT_FIELDS = [
+  'execution_mode',
+  'degradation_reasons',
+] as const;
+
+/** Trace drift: provenance/identity envelope fields. */
+export const TRACE_DRIFT_FIELDS = [
+  'authority_trace_ref',
+  'runtime_correlation_ref',
+  'decision_snapshot.snapshot_id',
+  'determinism_fingerprint',
+] as const;
+
 export async function runSearchFixture(
   fixture: SearchReplayFixtureFile,
   options: { readonly app: FastifyInstance },
 ): Promise<{
-  readonly response?: SearchResponseBody;
+  readonly response?: SearchResponseBody | ComparisonSearchResponseBody;
   readonly error?: ErrorResponseBody;
   readonly assertionSummary: {
     readonly endpoint: '/v1/search' | '/v1/search/replay';
+    readonly responseFamily: 'search' | 'comparison';
     readonly runtimeMode?: 'inmemory' | 'full_runtime' | undefined;
     readonly usedLiveSnapshot: boolean;
     readonly skipped: boolean;
     readonly assertedFields: readonly string[];
+    readonly driftClassification: FixtureDriftClassification;
     readonly executionMode?: string;
     readonly degradationReasons?: readonly string[];
     readonly errorCode?: string;
@@ -313,6 +422,7 @@ export async function runSearchFixture(
 }> {
   const mode = classifySearchFixtureMode(fixture);
   const endpoint = fixture.endpoint;
+  const responseFamily = fixture.response_family ?? 'search';
   const usedLiveSnapshot = isReplayHttpFixture(fixture)
     && fixture.metadata?.use_live_snapshot === true
     && !('error_code' in fixture.expected);
@@ -332,12 +442,54 @@ export async function runSearchFixture(
       error,
       assertionSummary: {
         endpoint,
+        responseFamily,
         runtimeMode: fixture.metadata?.runtime_mode,
         usedLiveSnapshot,
         skipped: false,
         assertedFields: ['error.code'],
+        driftClassification: { resultFields: ['error.code'], traceFields: [] },
         errorCode: fixture.expected.error_code,
         decodedIds: {},
+      },
+      mode,
+    };
+  }
+
+  if (responseFamily === 'comparison') {
+    const response = parseComparisonResponse(httpResponse);
+    assertComparisonFixtureExpectation(response, fixture);
+    const authorityTraceRef = response.authority_trace_ref;
+    if (authorityTraceRef === undefined) {
+      throw new Error('missing authority_trace_ref on comparison replay fixture response');
+    }
+    const authorityDecode = decodeAuthorityTraceRefDetailed(authorityTraceRef);
+    if (!authorityDecode.ok) {
+      throw new Error(JSON.stringify(authorityDecode.error));
+    }
+    return {
+      response,
+      assertionSummary: {
+        endpoint,
+        responseFamily,
+        runtimeMode: fixture.metadata?.runtime_mode,
+        usedLiveSnapshot,
+        skipped: false,
+        assertedFields: [
+          'comparison_intent',
+          'overall_status',
+          'authority_trace_ref',
+          'runtime_correlation_ref',
+          'entity_top_result_ids',
+        ],
+        driftClassification: {
+          resultFields: ['comparison_intent', 'overall_status'],
+          traceFields: ['authority_trace_ref', 'runtime_correlation_ref'],
+        },
+        executionMode: undefined,
+        degradationReasons: undefined,
+        decodedIds: {
+          authorityTraceRef: authorityDecode,
+        },
       },
       mode,
     };
@@ -370,17 +522,37 @@ export async function runSearchFixture(
     response,
     assertionSummary: {
       endpoint,
+      responseFamily,
       runtimeMode: fixture.metadata?.runtime_mode,
       usedLiveSnapshot,
       skipped: false,
-      assertedFields: [
-        'execution_mode',
-        'degradation_reasons',
-        'authority_trace_ref',
-        'runtime_correlation_ref',
-        'decision_snapshot.snapshot_id',
-        'determinism_fingerprint',
-      ],
+      assertedFields: fixture.expected.golden_trace !== undefined
+        ? [
+            ...RESULT_DRIFT_FIELDS,
+            'authority_trace_ref',
+            'runtime_correlation_ref',
+            'decision_snapshot.snapshot_id',
+            'determinism_fingerprint',
+            'execution_trace',
+            'resolver_provenance_trace',
+          ]
+        : [
+            ...RESULT_DRIFT_FIELDS,
+            ...TRACE_DRIFT_FIELDS,
+          ],
+      driftClassification: {
+        resultFields: [...RESULT_DRIFT_FIELDS],
+        traceFields: fixture.expected.golden_trace !== undefined
+          ? [
+              'authority_trace_ref',
+              'runtime_correlation_ref',
+              'decision_snapshot.snapshot_id',
+              'determinism_fingerprint',
+              'execution_trace',
+              'resolver_provenance_trace',
+            ]
+          : [...TRACE_DRIFT_FIELDS],
+      },
       executionMode: fixture.expected.execution_mode,
       degradationReasons: fixture.expected.degradation_reasons,
       decodedIds: {
@@ -420,5 +592,83 @@ export function assertSearchFixtureExpectation(
 
   if (body.meta.determinism_fingerprint === undefined) {
     throw new Error('Expected meta.determinism_fingerprint to be present');
+  }
+
+  if ('golden_trace' in fixture.expected && fixture.expected.golden_trace !== undefined) {
+    const goldenTrace = fixture.expected.golden_trace;
+    const auditExtension = body.meta.audit_extension;
+    if (auditExtension === undefined) {
+      throw new Error('Expected meta.audit_extension to be present when golden_trace is declared');
+    }
+    if (goldenTrace.authority_trace_ref !== undefined) {
+      assertExactMatch(body.meta.authority_trace_ref, goldenTrace.authority_trace_ref, 'authority_trace_ref');
+    }
+    if (goldenTrace.snapshot_id !== undefined) {
+      assertExactMatch(
+        body.meta.decision_snapshot?.snapshot_id,
+        goldenTrace.snapshot_id,
+        'decision_snapshot.snapshot_id',
+      );
+    }
+    if (goldenTrace.determinism_fingerprint !== undefined) {
+      assertExactMatch(
+        body.meta.determinism_fingerprint,
+        goldenTrace.determinism_fingerprint,
+        'determinism_fingerprint',
+      );
+    }
+    if (goldenTrace.execution_trace !== undefined) {
+      assertExactMatch(
+        auditExtension.execution_trace,
+        goldenTrace.execution_trace,
+        'audit_extension.execution_trace',
+      );
+    }
+    if (goldenTrace.resolver_provenance_trace !== undefined) {
+      assertExactMatch(
+        auditExtension.resolver_provenance_trace,
+        goldenTrace.resolver_provenance_trace,
+        'audit_extension.resolver_provenance_trace',
+      );
+    }
+  }
+}
+
+export function assertComparisonFixtureExpectation(
+  body: ComparisonSearchResponseBody,
+  fixture: SearchReplayFixtureFile,
+): void {
+  if ('error_code' in fixture.expected) {
+    throw new Error('error fixture cannot be asserted with success expectation helper');
+  }
+  if (fixture.response_family !== 'comparison') {
+    throw new Error('comparison expectation helper requires response_family=comparison');
+  }
+  if (body.query_type !== 'comparison') {
+    throw new Error(`Expected query_type=comparison, received ${body.query_type}`);
+  }
+  const expected = fixture.expected;
+  if (!('comparison_intent' in expected)) {
+    throw new Error('comparison fixtures must declare comparison expectations');
+  }
+  if (body.comparison_intent !== expected.comparison_intent) {
+    throw new Error(
+      `Expected comparison_intent=${expected.comparison_intent}, received ${body.comparison_intent}`,
+    );
+  }
+  if (body.overall_status !== expected.overall_status) {
+    throw new Error(
+      `Expected overall_status=${expected.overall_status}, received ${body.overall_status}`,
+    );
+  }
+  if (expected.authority_trace_ref !== undefined) {
+    assertExactMatch(body.authority_trace_ref, expected.authority_trace_ref, 'authority_trace_ref');
+  }
+  if (expected.top_result_entity_ids !== undefined) {
+    const actualTopResultEntityIds = body.entities.map((entity) => entity.top_result?.entity.entity_id ?? '');
+    assertExactMatch(actualTopResultEntityIds, expected.top_result_entity_ids, 'top_result_entity_ids');
+  }
+  if (expected.runtime_correlation_matches_request_id === true) {
+    assertExactMatch(body.runtime_correlation_ref, body.request_id, 'runtime_correlation_ref');
   }
 }

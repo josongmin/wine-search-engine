@@ -30,10 +30,10 @@ import type { QueryTargetType } from '../../query/model/query-target-type.js';
  *   multilingualScore  → multilingualScore (Korean query × Korean alias match)
  */
 export interface LTRScoreComponents {
-  readonly semantic: number;
-  readonly popularity: number;
-  readonly attributeAlignment: number;
-  readonly preferenceAlignment: number;
+  readonly semantic?: number | undefined;
+  readonly popularity?: number | undefined;
+  readonly attributeAlignment?: number | undefined;
+  readonly preferenceAlignment?: number | undefined;
   /** Critic score [0,1]: Track-C criticProxy or Vivino ratingAvg/5. Undefined = absent. */
   readonly criticScore?: number | undefined;
   /** Vintage recency signal [0,1]. Undefined when vintageYear is absent. */
@@ -70,10 +70,10 @@ export interface LTRScoreComponents {
 export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures {
   return {
     // Core signals — directly from score components
-    semanticScore: scores.semantic,
-    popularityScore: scores.popularity,
-    attributeMatchScore: scores.attributeAlignment,
-    classMatchScore: scores.preferenceAlignment,
+    semanticScore: scores.semantic ?? 0.0,
+    popularityScore: scores.popularity ?? 0.0,
+    attributeMatchScore: scores.attributeAlignment ?? 0.0,
+    classMatchScore: scores.preferenceAlignment ?? 0.0,
 
     // SOTA++ signals — now real values (previously zero sentinels)
     // recencyScore: 0.0 = "no recency data" which is intentionally neutral-to-negative
@@ -142,8 +142,8 @@ export function extractExtendedLTRFeatures(
   return {
     ...extractLTRFeatures(scores),
     criticScoreFeature: scores.criticScore ?? 0.0,
-    // Missing producer prestige stays absent-like (0.0) instead of being
-    // fabricated as a neutral 0.5 producer.
+    // Do not fabricate neutral prestige at LTR feature extraction. Missing
+    // prestige remains absent and is mapped to 0 only at the model boundary.
     producerPrestigeFeature: scores.producerPrestige ?? 0.0,
     ...encodeQueryTargetType(targetType),
   };

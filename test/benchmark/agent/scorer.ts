@@ -70,6 +70,12 @@ export interface ScenarioExecution {
   readonly terminationReason: TerminationReason;
   readonly totalDurationMs: number;
   readonly totalTokens: { input: number; output: number };
+  /**
+   * ADR-009 Phase 0: number of tool calls that emitted a typed evidence frame.
+   * `evidenceFrameCount / toolCallCount` is the per-scenario frame coverage;
+   * the bench summary aggregates this into `evidenceFrameCoverage`.
+   */
+  readonly evidenceFrameCount?: number | undefined;
 }
 
 /**
@@ -184,6 +190,12 @@ export interface ScenarioResult {
   readonly terminationReason?: string;
   readonly totalDurationMs?: number;
   readonly totalTokens?: { input: number; output: number };
+  /**
+   * ADR-009 Phase 0: count of tool calls that emitted a typed evidence frame.
+   * The top-level summary divides sum(evidenceFrameCount) by sum(toolCallCount)
+   * to compute the cutover-gate `evidenceFrameCoverage`.
+   */
+  readonly evidenceFrameCount?: number;
   readonly error?: string;
   readonly scores: ScenarioScores;
   readonly diagnostics?: readonly Diagnostic[];

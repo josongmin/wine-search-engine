@@ -9,6 +9,7 @@ import type { AnchorProfiler } from '../../../../src/domain/mixed/service/anchor
 import type { SimilarityScorer } from '../../../../src/domain/mixed/service/similarity-scorer.js';
 import type { ConstraintOverlay } from '../../../../src/domain/mixed/service/constraint-overlay.js';
 import type { RankerPort } from '../../../../src/domain/ranking/port/ranker.port.js';
+import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { RankerRuntimeSignal } from '../../../../src/domain/ranking/model/ranking-runtime-signal.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
@@ -38,6 +39,43 @@ function minimalPlan(): QueryPlanV1 {
     policyRuleVersion: '1.0.0',
     thresholdProfileId: 'default',
   } as QueryPlanV1;
+}
+
+function minimalCompiled(): CompiledWineQuery {
+  const plan = minimalPlan();
+  return {
+    query: {
+      rawQuery: plan.rawQuery,
+      normalizedQuery: plan.normalizedQuery,
+      intent: plan.intent,
+      queryClass: plan.queryClass,
+      anchors: plan.anchors,
+      constraints: plan.constraints,
+      expansions: plan.expansions,
+      uncertainty: plan.uncertainty,
+      plannerVersion: plan.plannerVersion,
+      policyRuleVersion: plan.policyRuleVersion,
+      thresholdProfileId: plan.thresholdProfileId,
+      retrievalPlan: {
+        hardFilterTokens: [],
+        softBoosts: [],
+        inferredBoosts: [],
+        sensoryPriors: [],
+        planVersion: 'retrieval-plan-v1.0',
+      },
+    },
+    execution: {
+      effectiveRoute: 'mixed',
+      effectiveRetrievalMode: 'similar_items',
+      routeSource: 'planner',
+      budget: { maxCandidates: 100, enablePrecisionRerank: true },
+      provenancePolicy: {
+        requireIdentitySeal: false,
+        requireConstraintEvidence: false,
+        requireAnchorEvidence: true,
+      },
+    },
+  };
 }
 
 function buildSolver(runtimeSignal?: RankerRuntimeSignal): MixedSolver {
@@ -112,7 +150,7 @@ describe('MixedSolver', () => {
       },
     });
 
-    const result = await solver.solve(minimalPlan());
+    const result = await solver.solve(minimalPlan(), minimalCompiled());
 
     expect(result.routeDegradation).toEqual({
       executionMode: 'degraded',
@@ -133,7 +171,7 @@ describe('MixedSolver', () => {
       },
     });
 
-    const result = await solver.solve(minimalPlan());
+    const result = await solver.solve(minimalPlan(), minimalCompiled());
 
     expect(result.routeDegradation).toEqual({
       executionMode: 'degraded',
@@ -217,7 +255,7 @@ describe('MixedSolver', () => {
       ranker,
     );
 
-    await expect(solver.solve(minimalPlan(), {} as never)).rejects.toMatchObject<Partial<MixedRouteDegradationError>>({
+    await expect(solver.solve(minimalPlan(), minimalCompiled())).rejects.toMatchObject<Partial<MixedRouteDegradationError>>({
       reason: 'mixed_constraint_overlay_failed',
     });
   });

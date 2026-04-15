@@ -21,7 +21,7 @@ import type { ScoringWeights } from '../model/scoring-weights.js';
 import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
-import { type ScoreAggregator } from './score-aggregator.js';
+import { type ScoreAggregator, RankComputationError } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
 import { WineAttributeEncoders } from './wine-attribute-encoder.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
@@ -39,6 +39,8 @@ import {
 } from './rerank-safety.js';
 import type { SafetyCandidateDescriptor } from './rerank-safety.js';
 import type { ScoreDecomposition, ScoreDriftRecord } from '../model/score-decomposition.js';
+import type { LTRScoreComponents } from './ltr-feature-extractor.js';
+import { incrementLtrInferenceComponentScoreAbsent } from '../../../observability/silent-skip-counters.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -227,6 +229,39 @@ const NON_PENALTY_WEIGHT_FIELDS = [
   'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
   'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
 ] as const;
+
+function buildObservedLtrInferenceScoreComponents(
+  componentScores: ComponentScores,
+): LTRScoreComponents {
+  const semantic =
+    componentScores.semantic !== undefined
+      ? { semantic: componentScores.semantic }
+      : (incrementLtrInferenceComponentScoreAbsent('semantic'), {});
+  const popularity =
+    componentScores.popularity !== undefined
+      ? { popularity: componentScores.popularity }
+      : (incrementLtrInferenceComponentScoreAbsent('popularity'), {});
+  const attributeAlignment =
+    componentScores.attributeAlignment !== undefined
+      ? { attributeAlignment: componentScores.attributeAlignment }
+      : (incrementLtrInferenceComponentScoreAbsent('attributeAlignment'), {});
+  const preferenceAlignment =
+    componentScores.preferenceAlignment !== undefined
+      ? { preferenceAlignment: componentScores.preferenceAlignment }
+      : (incrementLtrInferenceComponentScoreAbsent('preferenceAlignment'), {});
+  const multilingualScore =
+    componentScores.multilingualScore !== undefined
+      ? { multilingualScore: componentScores.multilingualScore }
+      : (incrementLtrInferenceComponentScoreAbsent('multilingualScore'), {});
+
+  return {
+    ...semantic,
+    ...popularity,
+    ...attributeAlignment,
+    ...preferenceAlignment,
+    ...multilingualScore,
+  };
+}
 
 function sumNonPenaltyWeights(weights: ScoringWeights): number {
   let total = 0;
@@ -418,25 +453,9 @@ function applyLearnedLtrRerank(
   // carry the raw input for debugging / drift analysis.
   const ltrFeatureVectorMap = new Map<string, readonly number[]>();
   const rankableDocuments = rankedResults.map((doc, idx) => {
-    const features = extractLTRFeatures({
-      semantic: doc.componentScores.semantic,
-      popularity: doc.componentScores.popularity,
-      attributeAlignment: doc.componentScores.attributeAlignment,
-      preferenceAlignment: doc.componentScores.preferenceAlignment,
-      // SOTA++ signals — forward all optional fields so LTR model can use them
-      ...(doc.componentScores.criticScore !== undefined
-        ? { criticScore: doc.componentScores.criticScore }
-        : {}),
-      ...(doc.componentScores.recency !== undefined
-        ? { recency: doc.componentScores.recency }
-        : {}),
-      ...(doc.componentScores.producerPrestige !== undefined
-        ? { producerPrestige: doc.componentScores.producerPrestige }
-        : {}),
-      ...(doc.componentScores.multilingualScore !== undefined
-        ? { multilingualScore: doc.componentScores.multilingualScore }
-        : {}),
-    });
+    const features = extractLTRFeatures(
+      buildObservedLtrInferenceScoreComponents(doc.componentScores),
+    );
     // Store as ordered vector matching lambdamart-ranker scoreFeaturesRaw order
     ltrFeatureVectorMap.set(String(doc.entityId), [
       features.bm25Score,
@@ -513,11 +532,11 @@ function applyLearnedLtrRerank(
         // Keep heuristic score + rank; only attach decomposition with no delta
         const decomp: ScoreDecomposition = {
           lexicalContribution: 0,
-          semanticContribution: original.componentScores.semantic,
+          semanticContribution: original.componentScores.semantic ?? 0,
           anchorContribution: original.componentScores.anchorSimilarity ?? 0,
-          attributeSatisfaction: original.componentScores.attributeAlignment,
-          popularityContribution: original.componentScores.popularity,
-          preferenceAlignmentContribution: original.componentScores.preferenceAlignment,
+          attributeSatisfaction: original.componentScores.attributeAlignment ?? 0,
+          popularityContribution: original.componentScores.popularity ?? 0,
+          preferenceAlignmentContribution: original.componentScores.preferenceAlignment ?? 0,
           heuristicScoreRaw: original.finalScore,
           heuristicScoreNormalized: Number.isFinite(original.finalScore) ? original.finalScore : 0,
           finalScore: original.finalScore,
@@ -533,13 +552,13 @@ function applyLearnedLtrRerank(
       const ltrNorm = Number.isFinite(reranked.ltrScore) ? reranked.ltrScore : heuristicNorm;
       const rerankDelta = ltrNorm - heuristicNorm;
 
-      const decomp: ScoreDecomposition = {
-        lexicalContribution: 0,
-        semanticContribution: original.componentScores.semantic,
+        const decomp: ScoreDecomposition = {
+          lexicalContribution: 0,
+        semanticContribution: original.componentScores.semantic ?? 0,
         anchorContribution: original.componentScores.anchorSimilarity ?? 0,
-        attributeSatisfaction: original.componentScores.attributeAlignment,
-        popularityContribution: original.componentScores.popularity,
-        preferenceAlignmentContribution: original.componentScores.preferenceAlignment,
+        attributeSatisfaction: original.componentScores.attributeAlignment ?? 0,
+        popularityContribution: original.componentScores.popularity ?? 0,
+        preferenceAlignmentContribution: original.componentScores.preferenceAlignment ?? 0,
         heuristicScoreRaw: heuristicNorm,
         heuristicScoreNormalized: heuristicNorm,
         ltrScoreNormalized: ltrNorm,
@@ -751,7 +770,7 @@ export class Ranker {
     // Step 2: Select weights based on query class, then overlay retrieval-mode
     // specific boosts from mode-weights.ts (producer prestige, recency, geo).
     // E3-U5: compiled-first — use ExecutionCompiler's resolved mode when available.
-    const effectiveRetrievalMode = input.compiled?.execution.effectiveRetrievalMode ?? queryPlan.retrievalMode;
+    const effectiveRetrievalMode = input.compiled.execution.effectiveRetrievalMode;
     const baseWeights = resolveWeights(queryPlan.queryClass);
     const modeProfile = getModeWeights(effectiveRetrievalMode);
     // Mode overlay: max(queryClass base, mode boost). All 12 non-penalty
@@ -786,6 +805,13 @@ export class Ranker {
     // Sets allocated); now O(1) Set per request.
     const queryConstraintCtx = buildQueryConstraintContext(input);
 
+    // C4 (fail-loud): accumulate `ranking_invalid_signal:<name>` reasons for
+    // any candidate whose signal set contained a non-finite COMPUTED signal.
+    // These flow into the ranking runtime signal's degradation list so ops
+    // can identify which feature is corrupt. Candidates with invalid signals
+    // are gated out (-Infinity) rather than silently served on zeroed state.
+    const rankingInvalidSignalReasons = new Set<string>();
+
     for (const candidate of candidates) {
       const componentScores = this.signalComputer.computeAll(
         candidate,
@@ -805,10 +831,28 @@ export class Ranker {
         candidate.retrievalTrace.candidateSources,
         weights,
       );
-      const finalScore = this.scoreAggregator.aggregate(
-        componentScores,
-        candidateWeights,
-      );
+      // C4 (fail-loud): score-aggregator throws RankComputationError when a
+      // COMPUTED signal is non-finite (signal-computer bug). Convert to a
+      // gated-out result (-Infinity finalScore) and record the corrupt
+      // signal name on the runtime signal so ops can trace which input
+      // poisoned the candidate — rather than silently zeroing the feature
+      // and serving a decision made on corrupted state.
+      let finalScore: number;
+      try {
+        finalScore = this.scoreAggregator.aggregate(
+          componentScores,
+          candidateWeights,
+        );
+      } catch (aggErr) {
+        if (aggErr instanceof RankComputationError) {
+          rankingInvalidSignalReasons.add(
+            `ranking_invalid_signal:${aggErr.signalName}`,
+          );
+          finalScore = -Infinity;
+        } else {
+          throw aggErr;
+        }
+      }
 
       scored.push({
         entityId: candidate.entityId,
@@ -899,7 +943,7 @@ export class Ranker {
     }
     if (this.reranker !== undefined || hasConfiguredLearnedRerank) {
       // E3-U5: compiled-first route for gate — falls back to V1 plan.route
-      const gateEffectiveRoute = input.compiled?.execution.effectiveRoute ?? queryPlan.route;
+      const gateEffectiveRoute = input.compiled.execution.effectiveRoute;
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
         queryClass: queryPlan.queryClass,
@@ -922,11 +966,27 @@ export class Ranker {
               effectiveTopK,
             );
             finalOrder = rerankOutcome.results;
-            localRerankExecuted = true;
-            localRerankDecisionCode = 'applied';
             localRerankInputCount = preRerankCount;
             localRerankOutputCount = finalOrder.length;
-            localRuntimeSignal = rerankOutcome.runtimeSignal ?? { rerankerStatus: 'executed' };
+            // T-E6-02: When batch normalization failed, the reranker scores
+            // could not be normalized and heuristic scores were kept for all
+            // candidates. The rerank was NOT meaningfully applied — surface
+            // this as applied=false, decision='normalization_failed'.
+            if (rerankOutcome.normalizationFailed === true) {
+              localRerankExecuted = false;
+              localRerankDecisionCode = 'normalization_failed';
+              localRuntimeSignal = rerankOutcome.runtimeSignal ?? {
+                rerankerStatus: 'executed',
+                degradation: {
+                  executionMode: 'degraded',
+                  degradationReasons: [RERANK_SCORE_NORMALIZATION_FAILED_REASON],
+                },
+              };
+            } else {
+              localRerankExecuted = true;
+              localRerankDecisionCode = 'applied';
+              localRuntimeSignal = rerankOutcome.runtimeSignal ?? { rerankerStatus: 'executed' };
+            }
           } catch (err) {
             const rerankerFailureReason = classifyRerankerFailureReason(err);
             bootstrapLogger.warn(
@@ -1168,12 +1228,32 @@ export class Ranker {
           ...(localRerankOutputCount !== undefined ? { outputCount: localRerankOutputCount } : {}),
         };
 
+    // C4 (fail-loud): fold ranking_invalid_signal reasons into the runtime
+    // signal so ops see which COMPUTED signals were non-finite. We merge
+    // with any existing degradation (e.g. ltr_dimension_mismatch) rather
+    // than overwriting.
+    let runtimeSignalWithInvalids = localRuntimeSignal;
+    if (rankingInvalidSignalReasons.size > 0) {
+      const extraReasons = [...rankingInvalidSignalReasons];
+      const existingDegradation = localRuntimeSignal?.degradation;
+      runtimeSignalWithInvalids = {
+        ...(localRuntimeSignal ?? { rerankerStatus: 'skipped' as const }),
+        degradation: {
+          executionMode: 'degraded' as const,
+          degradationReasons: [
+            ...(existingDegradation?.degradationReasons ?? []),
+            ...extraReasons,
+          ],
+        },
+      };
+    }
+
     const metadata: RankingMetadata = {
       coarsePruneSummary: localCoarsePruneSummary,
       rerankExecuted: localRerankExecuted,
       rerankGateReason: localRerankGateReason,
       rerankDecision,
-      runtimeSignal: localRuntimeSignal,
+      runtimeSignal: runtimeSignalWithInvalids,
       preRerankTop5: localPreRerankTop5,
       ...(localScoreDriftRecord !== undefined ? { scoreDriftRecord: localScoreDriftRecord } : {}),
       ...(localLtrSaturated ? { ltrSaturated: true } : {}),
@@ -1198,6 +1278,8 @@ export class Ranker {
   ): Promise<{
     readonly results: readonly ScoredEntry[];
     readonly runtimeSignal?: RankerRuntimeSignal | undefined;
+    /** True when normalization failed for ALL top-K candidates (collapsed/NaN batch). */
+    readonly normalizationFailed?: boolean | undefined;
   }> {
     const topK = viable.slice(0, topKLimit);
     const rest = viable.slice(topKLimit);
@@ -1260,6 +1342,14 @@ export class Ranker {
       return (raw - minRaw) / rawRange;
     }
 
+    // T-E6-02: Detect batch-level normalization failure BEFORE per-candidate loop.
+    // When rawRange is NaN or below epsilon, normalizeRerankScore returns
+    // originalScore for every candidate — the rerank has zero effect but
+    // previously reported applied=true. Surface this as normalizationFailed
+    // so the caller can set the correct RerankDecision.
+    const batchNormalizationFailed =
+      !Number.isFinite(rawRange) || rawRange < RERANK_SCORE_MIN_MAX_RANGE_EPSILON;
+
     // Reorder top-K by rerank score, blending with original score
     const rerankedTopK: ScoredEntry[] = [];
 
@@ -1304,6 +1394,7 @@ export class Ranker {
     combined.sort(compareScoredEntriesByFinalScoreDesc);
     return {
       results: combined,
+      ...(batchNormalizationFailed ? { normalizationFailed: true } : {}),
       ...(degradationReasons.length > 0
         ? {
             runtimeSignal: {

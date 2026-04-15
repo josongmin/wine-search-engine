@@ -29,58 +29,16 @@ const CONSTRAINT_MATCH_RATIO_BONUS_SCALE = 0.1;
 const MISSING_ANCHOR_RANK_PENALTY = 0.1;
 /** Inferred constraints contribute at this fraction of listed confidence. */
 const INFERRED_CONSTRAINT_WEIGHT_FACTOR = 0.5;
-/**
- * Neutral attribute alignment when the plan specifies no structured attrs.
- *
- * Domain rationale: when the query has no structured constraints (e.g. a
- * free-text entity query like "opus one"), attribute alignment is undefined.
- * 0.5 is the sigmoid midpoint so it contributes zero net ranking pressure.
- * This is correct: without constraints there is nothing to align against.
- */
-const ATTRIBUTE_ALIGNMENT_NEUTRAL = 0.5;
 /** Sigmoid steepness mapping raw RRF-style fusion to (0,1). */
 const SEMANTIC_SIGMOID_STEEPNESS = 10;
 /** RRF-style fusion value at sigmoid inflection (tuned for typical scores). */
 const SEMANTIC_SIGMOID_MIDPOINT = 0.05;
-/**
- * Semantic score for candidates that did not go through fusion (browse/compare).
- * sigmoid(midpoint) ≈ 0.5 — neutral, no ranking pressure.
- */
-const SEMANTIC_SCORE_NEUTRAL_WHEN_UNFUSED = 0.5;
-/**
- * Popularity baseline when BM25 sparse rank is unavailable.
- *
- * Domain rationale: absence of sparse rank means the candidate came
- * exclusively from the dense channel (embedding-only hit). Such candidates
- * have no lexical popularity signal but are semantically relevant. 0.3
- * is below the median sparse-rank popularity (~0.5 at rank 3) but above
- * zero, so dense-only candidates are mildly demoted rather than crushed.
- * The asymmetry toward demotion reflects that BM25 absence usually
- * correlates with lower catalog prominence.
- */
-const POPULARITY_NO_SPARSE_BASELINE = 0.3;
 /** Blend: query-level uncertainty weight. */
 const UNCERTAINTY_BLEND_QUERY_WEIGHT = 0.6;
 /** Blend: candidate unmatched-ratio weight. */
 const UNCERTAINTY_BLEND_CANDIDATE_WEIGHT = 0.4;
 /** Caps contribution from unmatched constraint ratio to uncertainty penalty. */
 const UNCERTAINTY_UNMATCHED_RATIO_SCALE = 0.5;
-/**
- * IDX-06: preferenceAlignment always returns this neutral value.
- *
- * Investigation finding: the preferenceAlignment signal IS wired into the
- * ranking pipeline (score-aggregator.ts, ranker.ts) and IS included in
- * ComponentScores, but signal-computer.ts always returns the neutral 0.5
- * because there is no user history / preference profile available at
- * query time. This is NOT dead code — it contributes 0 net ranking pressure
- * (sigmoid midpoint), which is correct behavior until Epic-18 user history
- * wiring is complete.
- *
- * TODO(IDX-06): wire to pg-feedback-repository user preference aggregations
- * once Epic-18 click pipeline is live. The scoring formula is already in
- * place; only the data source (UserPreferencePort) is missing.
- */
-const PREFERENCE_ALIGNMENT_NEUTRAL = 0.5;
 /**
  * Vintage recency half-life in years.
  *
@@ -308,14 +266,14 @@ export class SignalComputer {
    * @param candidate - The hybrid candidate with a retrieval fusion score.
    * @returns Normalized semantic score in [0, 1].
    */
-  computeSemanticScore(candidate: HybridCandidate): number {
+  computeSemanticScore(candidate: HybridCandidate): number | undefined {
     // fusionRrfTotal is the canonical RRF total, set only by FusionService.
     // Browse/Compare candidates do not go through fusion, so fusionRrfTotal
-    // is absent — in that case return the sigmoid midpoint (neutral 0.5)
-    // because there is no fusion score to normalize.
+    // is absent. Preserve that missingness instead of fabricating a neutral
+    // midpoint.
     const raw = candidate.fusionRrfTotal;
     if (raw === undefined || !Number.isFinite(raw)) {
-      return SEMANTIC_SCORE_NEUTRAL_WHEN_UNFUSED;
+      return undefined;
     }
     const safeRaw = raw;
 
@@ -343,7 +301,7 @@ export class SignalComputer {
     candidate: HybridCandidate,
     queryPlan: QueryPlanV1,
     precomputedMatchedSet?: ReadonlySet<string>,
-  ): number {
+  ): number | undefined {
     const expectedAttributes = new Set<string>();
 
     // Collect all attribute names from constraints
@@ -358,8 +316,8 @@ export class SignalComputer {
     }
 
     if (expectedAttributes.size === 0) {
-      // No structured expectations → neutral score
-      return ATTRIBUTE_ALIGNMENT_NEUTRAL;
+      // No structured expectations → unsupported signal, not a midpoint.
+      return undefined;
     }
 
     const matchedSet = precomputedMatchedSet ?? new Set(candidate.matchedConstraints);
@@ -388,11 +346,11 @@ export class SignalComputer {
    * @param candidate - The hybrid candidate to evaluate.
    * @returns Popularity score in [0, 1], intentionally small.
    */
-  computePopularity(candidate: HybridCandidate): number {
+  computePopularity(candidate: HybridCandidate): number | undefined {
     // Sparse rank serves as a proxy: lower rank = more popular/relevant
     const sparseRank = candidate.sparseRank;
     if (sparseRank === undefined) {
-      return POPULARITY_NO_SPARSE_BASELINE;
+      return undefined;
     }
 
     // log-decay: 1 / (1 + log(rank))
@@ -403,17 +361,24 @@ export class SignalComputer {
    * Computes availability signal.
    *
    * Penalizes candidates that are unavailable. Since the current
-   * HybridCandidate model doesn't carry availability data, we return
-   * a default high-availability score. Infrastructure adapters would
-   * enrich candidates with availability before ranking.
+   * HybridCandidate model doesn't carry availability data. Preserve
+   * missingness until the infrastructure wires a real availability field.
    *
    * @param _candidate - The hybrid candidate to evaluate.
-   * @returns Availability score in [0, 1]. 1.0 = fully available.
+   * @returns Availability score in [0, 1], or undefined when unavailable.
    */
-  computeAvailability(_candidate: HybridCandidate): number {
-    // Default: assume available. Real implementation would check
-    // candidate.metadata.availability or similar enriched field.
-    return 1.0;
+  computeAvailability(_candidate: HybridCandidate): number | undefined {
+    return undefined;
+  }
+
+  /**
+   * Computes preference alignment.
+   *
+   * User-preference data is not wired into the production ranking path yet.
+   * Preserve absence instead of fabricating a neutral midpoint.
+   */
+  computePreferenceAlignment(): number | undefined {
+    return undefined;
   }
 
   /**
@@ -457,8 +422,8 @@ export class SignalComputer {
    * Computes producer prestige signal from the candidate's indexed prestige score.
    *
    * Producer prestige is stored in Vespa as [0, 1] (winery_rating / 5).
-   * When absent we return undefined so downstream stages can preserve
-   * missingness instead of fabricating a neutral producer.
+   * When absent we return undefined so downstream layers can preserve
+   * missingness instead of fabricating a neutral midpoint.
    *
    * @param candidate - The hybrid candidate to evaluate.
    * @returns Producer prestige in [0, 1], or undefined when absent.
@@ -561,18 +526,23 @@ export class SignalComputer {
     const recency = this.computeRecency(candidate, referenceYear);
     const criticScore = this.computeCriticScore(candidate);
     const producerPrestige = this.computeProducerPrestige(candidate);
+    const semantic = this.computeSemanticScore(candidate);
+    const attributeAlignment = this.computeAttributeAlignment(candidate, queryPlan, matchedConstraintSet);
+    const preferenceAlignment = this.computePreferenceAlignment();
+    const popularity = this.computePopularity(candidate);
+    const availability = this.computeAvailability(candidate);
     return {
       entityIntegrity: this.computeEntityIntegrity(candidate, queryPlan),
       anchorSimilarity: anchorProfile !== undefined
         ? this.computeAnchorSimilarity(candidate, anchorProfile)
         : undefined,
-      semantic: this.computeSemanticScore(candidate),
+      ...(semantic !== undefined ? { semantic } : {}),
       hardConstraintPass: this.evaluateHardConstraints(candidate, constraints, matchedConstraintSet),
       softConstraint: this.computeSoftConstraint(candidate, constraints, retrievalPlan, matchedConstraintSet),
-      attributeAlignment: this.computeAttributeAlignment(candidate, queryPlan, matchedConstraintSet),
-      preferenceAlignment: PREFERENCE_ALIGNMENT_NEUTRAL,
-      popularity: this.computePopularity(candidate),
-      availability: this.computeAvailability(candidate),
+      ...(attributeAlignment !== undefined ? { attributeAlignment } : {}),
+      ...(preferenceAlignment !== undefined ? { preferenceAlignment } : {}),
+      ...(popularity !== undefined ? { popularity } : {}),
+      ...(availability !== undefined ? { availability } : {}),
       uncertaintyPenalty: this.computeUncertaintyPenalty(candidate, queryPlan),
       ...(producerPrestige !== undefined
         ? { producerPrestige }

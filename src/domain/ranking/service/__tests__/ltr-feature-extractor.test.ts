@@ -41,7 +41,7 @@ function makeQueryPlan(): QueryPlanV1 {
 }
 
 describe('producer prestige missingness', () => {
-  it('SignalComputer preserves missing producerPrestige as undefined', () => {
+  it('SignalComputer preserves missing producerPrestige instead of fabricating a neutral midpoint', () => {
     const signalComputer = new SignalComputer();
     const scores = signalComputer.computeAll(
       makeCandidate(),

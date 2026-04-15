@@ -21,6 +21,7 @@ import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js
 import { RedisCache } from '../adapter/redis-cache.js';
 import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
 
@@ -89,9 +90,17 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
         ttlSeconds,
       );
       if (!written) {
+        globalSilentSkipCounter.increment('cache_write_failure', {
+          surface: 'embedding',
+          errorClass: 'shape_validation',
+        });
         log.warn({ key: cacheKey.redisKey, dims: embedding.length }, 'embedding cache write skipped: shape validation failed');
       }
     } catch (error) {
+      globalSilentSkipCounter.increment('cache_write_failure', {
+        surface: 'embedding.write',
+        errorClass: error instanceof Error ? error.constructor.name : 'unknown',
+      });
       log.error({ err: error }, 'write error');
     }
   }
@@ -100,6 +109,10 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
     try {
       await this.cache.del(cacheKey.redisKey);
     } catch (error) {
+      globalSilentSkipCounter.increment('cache_write_failure', {
+        surface: 'embedding.delete',
+        errorClass: error instanceof Error ? error.constructor.name : 'unknown',
+      });
       log.error({ err: error }, 'delete error');
     }
   }

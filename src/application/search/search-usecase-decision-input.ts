@@ -73,10 +73,18 @@ export function buildSearchDecisionInput(
           entity_integrity_score: topResult.componentScores.entityIntegrity,
           hard_constraint_pass: topResult.componentScores.hardConstraintPass ? 1 : 0,
           soft_constraint_score: topResult.componentScores.softConstraint,
-          semantic_relevance_score: topResult.componentScores.semantic,
-          preference_alignment_score: topResult.componentScores.preferenceAlignment,
-          popularity_score: topResult.componentScores.popularity,
-          availability_score: topResult.componentScores.availability,
+          ...(topResult.componentScores.semantic !== undefined
+            ? { semantic_relevance_score: topResult.componentScores.semantic }
+            : {}),
+          ...(topResult.componentScores.preferenceAlignment !== undefined
+            ? { preference_alignment_score: topResult.componentScores.preferenceAlignment }
+            : {}),
+          ...(topResult.componentScores.popularity !== undefined
+            ? { popularity_score: topResult.componentScores.popularity }
+            : {}),
+          ...(topResult.componentScores.availability !== undefined
+            ? { availability_score: topResult.componentScores.availability }
+            : {}),
           uncertainty_penalty: topResult.componentScores.uncertaintyPenalty,
         }
       : undefined;

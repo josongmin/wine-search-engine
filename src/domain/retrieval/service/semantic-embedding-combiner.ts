@@ -3,52 +3,140 @@ import { globalSilentSkipCounter } from '../../../observability/silent-skip-coun
 
 const log = bootstrapLogger.child({ component: 'SemanticEmbeddingCombiner' });
 
+/**
+ * C1 (fail-loud): reasons the combiner may return undefined.
+ *
+ * The caller (CandidatePool) treats undefined as "dense retrieval not
+ * possible for this query" and degrades to sparse-only. Distinguishing
+ * reasons lets the degradation be visible in logs/metrics rather than
+ * folded into a generic "dense skipped".
+ */
+export type EmbeddingCombineSkipReason =
+  | 'empty_input'
+  | 'empty_vector'
+  | 'dim_mismatch'
+  | 'non_finite_element'
+  | 'zero_norm';
+
+function isFiniteNumberVector(
+  vec: readonly number[],
+  expectedLength: number,
+): { ok: true } | { ok: false; reason: 'dim_mismatch' | 'non_finite_element'; index?: number; value?: number } {
+  if (vec.length !== expectedLength) {
+    return { ok: false, reason: 'dim_mismatch' };
+  }
+  for (let i = 0; i < vec.length; i++) {
+    const v = vec[i];
+    if (v === undefined || !Number.isFinite(v)) {
+      return { ok: false, reason: 'non_finite_element', index: i, value: v ?? NaN };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Combines N unit-norm embeddings into a single unit-norm vector.
+ *
+ * C1 (fail-loud) contract:
+ *  - Input: N embeddings of the SAME length, all elements finite (no NaN,
+ *    Infinity, hole, undefined). Single-embedding case returns the vector
+ *    verbatim after validation.
+ *  - If any embedding violates this contract, the combination is aborted
+ *    and `undefined` is returned with a specific skip counter/log tag.
+ *    The caller must treat this as "dense retrieval unavailable" and
+ *    degrade sparse-only. NEVER substitute 0 for missing/corrupt elements —
+ *    that silently warps the vector geometry.
+ *  - Zero-norm output (all embeddings cancelled) also returns `undefined`
+ *    with a distinct tag.
+ */
 export function combineSemanticEmbeddings(
   embeddings: readonly (readonly number[])[],
 ): readonly number[] | undefined {
   const first = embeddings[0];
-  if (first === undefined || first.length === 0) {
-    if (first !== undefined && first.length === 0) {
-      globalSilentSkipCounter.increment('embedding_empty_vector', {
-        position: 0,
-        expected: 'non-empty',
-      });
-    }
+  if (first === undefined) {
     return undefined;
   }
+  if (first.length === 0) {
+    globalSilentSkipCounter.increment('embedding_empty_vector', {
+      position: 0,
+      expected: 'non-empty',
+    });
+    return undefined;
+  }
+
+  // Validate the primary embedding. A corrupt primary means the combiner
+  // cannot safely produce anything — fail-loud for dense retrieval.
+  const firstCheck = isFiniteNumberVector(first, first.length);
+  if (!firstCheck.ok) {
+    log.warn(
+      { reason: firstCheck.reason, index: firstCheck.index, value: firstCheck.value },
+      'Primary embedding contains non-finite element(s) — aborting combination',
+    );
+    globalSilentSkipCounter.increment(
+      firstCheck.reason === 'dim_mismatch'
+        ? 'embedding_dim_mismatch'
+        : 'embedding_non_finite_element',
+      {
+        embeddingCount: embeddings.length,
+      },
+    );
+    return undefined;
+  }
+
   if (embeddings.length === 1) {
     return first;
   }
 
   const combined = new Array<number>(first.length).fill(0);
-  for (const embedding of embeddings) {
-    if (embedding.length !== first.length) {
+  for (let e = 0; e < embeddings.length; e++) {
+    const embedding = embeddings[e];
+    if (embedding === undefined) {
+      // Hole in the array — impossible under TS typing but defensive. Treat
+      // as contract violation: fail the whole combination.
+      log.warn(
+        { position: e, embeddingCount: embeddings.length },
+        'Hole detected in embeddings array — aborting combination',
+      );
+      globalSilentSkipCounter.increment('embedding_array_hole', { position: e });
+      return undefined;
+    }
+    const check = isFiniteNumberVector(embedding, first.length);
+    if (!check.ok) {
+      // C1: a single corrupt embedding aborts the ENTIRE combination.
+      // Skipping just this embedding and continuing would warp the combined
+      // vector's geometry relative to what the caller expects.
       log.warn(
         {
+          position: e,
+          reason: check.reason,
+          index: check.index,
+          value: check.value,
           expectedDim: first.length,
           gotDim: embedding.length,
           embeddingCount: embeddings.length,
         },
-        'Skipping embedding with mismatched dimension during combination',
+        'Embedding contains non-finite element or dimension mismatch — aborting combination',
       );
-      globalSilentSkipCounter.increment('embedding_dim_mismatch', {
-        expected: first.length,
-        got: embedding.length,
-      });
-      continue;
+      globalSilentSkipCounter.increment(
+        check.reason === 'dim_mismatch'
+          ? 'embedding_dim_mismatch'
+          : 'embedding_non_finite_element',
+        { position: e, embeddingCount: embeddings.length },
+      );
+      return undefined;
     }
     for (let i = 0; i < embedding.length; i++) {
-      combined[i] = (combined[i] ?? 0) + (embedding[i] ?? 0);
+      // All elements validated finite above. Direct addition is safe; no
+      // nullish coalescing that could silently rescue a corrupt value.
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- validated by isFiniteNumberVector above
+      combined[i] = combined[i]! + embedding[i]!;
     }
   }
 
   const norm = Math.sqrt(combined.reduce((sum, value) => sum + value * value, 0));
   if (!Number.isFinite(norm) || norm === 0) {
-    // Zero-norm means all embeddings cancelled out or were all-zero.
-    // Returning first (unnormalized) would produce a valid-length vector
-    // that ANN interprets as a real query — yielding garbage results.
-    // Returning undefined lets CandidatePool detect the failure and
-    // degrade to sparse-only retrieval (which is the correct fallback).
+    // Zero-norm means all embeddings cancelled out. Returning the first
+    // vector unnormalized would produce a geometrically invalid query.
     log.warn(
       {
         embeddingCount: embeddings.length,

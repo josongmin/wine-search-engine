@@ -13,9 +13,20 @@ import {
   MAX_SOURCE_RECORD_SOURCE_SYSTEM_CHARS,
 } from '../../../domain/entity/model/source-record-ref.js';
 import { RETRIEVAL_MODES } from '../../../domain/query/model/retrieval-mode.js';
+import { QUERY_ROUTES } from '../../../domain/query/model/query-route.js';
 import { QUERY_CLASSES } from '../../../domain/shared/types/query-class.js';
+import { NEXT_ACTIONS } from '../../../domain/shared/types/next-action.js';
 import {
   AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH,
+  MAX_AUDIT_BLOCKER_SEED_ENTITY_IDS,
+  MAX_AUDIT_CONSTRAINT_ATOMS,
+  MAX_AUDIT_CONSTRAINT_RELATIONS,
+  MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS,
+  MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS,
+  MAX_AUDIT_POLICY_OUTCOMES,
+  MAX_AUDIT_RANKING_TOP_N,
+  MAX_AUDIT_RESOLVER_SOURCE_BREAKDOWN_ITEMS,
+  MAX_AUDIT_SOURCE_BREAKDOWN_ENTITY_IDS,
   MAX_CLARIFICATION_CANDIDATES,
   MAX_ENTITY_SUMMARY_CERTIFICATIONS,
   MAX_ENTITY_SUMMARY_GRAPES,
@@ -122,7 +133,7 @@ export const MatchDetailSchema = z.object({
     semantic: z.number().finite(),
     attribute: z.number().finite(),
     popularity: z.number().finite(),
-    preference_alignment: z.number().finite(),
+    preference_alignment: z.number().finite().optional(),
   }).strict(),
 }).strict();
 
@@ -133,7 +144,7 @@ export const ConstraintEvaluationSchema = z.object({
 }).strict();
 
 export const UncertaintyBlockSchema = z.object({
-  uncertainty_confidence: z.number().finite().min(0).max(1),
+  uncertainty_confidence: z.number().finite().min(0).max(1).optional(),
   missing_info: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST),
   approximation_used: z.boolean(),
   ambiguity_flags: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
@@ -207,7 +218,7 @@ export const CounterfactualRejectSchema = z.object({
 export const EngineDecisionSchema = z.object({
   decision_status: z.enum(['resolved', 'ambiguous', 'failed']),
   next_action: z.enum(['return_result', 'clarify', 'hybrid_search', 'fail']),
-  route: z.string().min(1),
+  route: z.enum(QUERY_ROUTES),
   decision_confidence: z.number().finite().min(0).max(1),
   confidence_semantics: z.literal('calibrated_decision_confidence'),
   decision_trace_ref: z
@@ -226,7 +237,7 @@ export const EngineDecisionSchema = z.object({
   admission_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   abstain_reason: z.enum(['no_match', 'low_confidence', 'semantic_conflict', 'insufficient_evidence']).optional(),
   retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
-  planner_suggested_mode: z.string().min(1).optional(),
+  planner_suggested_mode: z.enum(RETRIEVAL_MODES).optional(),
 }).strict();
 
 export const ParsedConstraintsExternSchema = z.object({
@@ -243,10 +254,227 @@ export const ParsedConstraintsExternSchema = z.object({
   unparsed: z.array(z.string()).max(MAX_SEARCH_PARSED_UNPARSED_FRAGMENTS),
 }).strict();
 
+// ─── T-E5-01: AuditExtension typed surface ──────────────────────────────────
+//
+// Typed "enough" for client autocompletion and basic validation.
+// All fields optional — audit fields are gated by explain/debug.
+// .passthrough() on sub-objects tolerates future field additions.
+// Complex/deeply-nested trace payloads stay z.unknown() to avoid fragile coupling.
+//
+// T-E5-03: Stable vs Debug boundary
+//
+// STABLE fields (always emitted when trigger condition is met — public contract):
+//   - abstain_policy_trace
+//   - fallback_trace
+//   - hard_filter_drop_log
+//   - corrective_retry_calibrated_confidence
+//   - determinism_fingerprint
+//
+// DEBUG-ONLY fields (gated by explain=true or X-Debug-Key — shape may change):
+//   - planner_policy_trace
+//   - constraint_resolution_trace
+//   - retrieval_fusion_trace
+//   - ranking_delta_trace
+//   - rerank_decision_trace
+//   - execution_trace
+//   - resolver_provenance_trace
+
+export const AuditExtensionSchema = z.object({
+  /**
+   * E3: Planner policy trace — one record per decision stage.
+   * Opaque records: typed as unknown[] because PolicyDecisionRecord has
+   * free-form inputFacts and open-ended stage values.
+   *
+   * @stability debug
+   */
+  planner_policy_trace: z.array(z.unknown()).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS).optional(),
+
+  /**
+   * E2: Constraint resolution trace — atoms, relations, and outcomes.
+   *
+   * @stability debug
+   */
+  constraint_resolution_trace: z.object({
+    atoms: z.array(z.unknown()).max(MAX_AUDIT_CONSTRAINT_ATOMS),
+    relations: z.array(z.unknown()).max(MAX_AUDIT_CONSTRAINT_RELATIONS),
+    policy_outcomes: z.array(z.object({
+      atom_index: z.number().int(),
+      outcome: z.enum(['kept', 'dropped', 'shadowed']),
+      reason: z.string(),
+    }).passthrough()).max(MAX_AUDIT_POLICY_OUTCOMES),
+  }).passthrough().optional(),
+
+  /**
+   * E4: RRF fusion trace — per-query fusion parameters and candidate counts.
+   * Complex nested structure; kept opaque.
+   *
+   * @stability debug
+   */
+  retrieval_fusion_trace: z.unknown().optional(),
+
+  /**
+   * E5: Ranking delta trace — pre/post rerank positions + Kendall tau drift.
+   *
+   * @stability debug
+   */
+  ranking_delta_trace: z.object({
+    pre_rerank_top5: z.array(z.string()).max(MAX_AUDIT_RANKING_TOP_N),
+    post_rerank_top5: z.array(z.string()).max(MAX_AUDIT_RANKING_TOP_N),
+    safety_envelope_blocks: z.number().int(),
+    protected_candidate_evictions: z.number().int().optional(),
+    drift: z.unknown(),
+  }).passthrough().optional(),
+
+  /**
+   * Rerank gate decision — was LTR applied, skipped, or blocked?
+   *
+   * @stability debug
+   */
+  rerank_decision_trace: z.object({
+    gate_decision: z.enum([
+      'applied',
+      'no_model_for_query_class',
+      'empty_candidates',
+      'feature_dimension_mismatch',
+      'gate_blocked',
+      'normalization_failed',
+    ]),
+    applied_model: z.string().optional(),
+    ltr_feature_dimension: z.number().int().optional(),
+    score_contract: z.enum(['bounded_normalized_0_1']).optional(),
+    blocked_reason_counts: z.record(z.string(), z.number().int()).optional(),
+  }).passthrough().optional(),
+
+  /**
+   * E6: Abstain policy trace — always emitted when abstain occurs.
+   *
+   * @stability stable
+   */
+  abstain_policy_trace: z.object({
+    evaluated: z.boolean(),
+    decision: z.unknown(),
+    top_k_entropy: z.number().finite().optional(),
+    constraint_conflicts: z.array(z.unknown()).max(MAX_AUDIT_CONSTRAINT_RELATIONS).optional(),
+    channel_degradation: z.object({
+      dense_degraded: z.boolean(),
+      anchor_degraded: z.boolean(),
+      sparse_degraded: z.boolean(),
+    }).passthrough().optional(),
+  }).passthrough().optional(),
+
+  /**
+   * E4: Hard-filter dropout log — top-N candidates dropped by hard constraint filter.
+   * CandidateDropRecord shape kept opaque per entry.
+   *
+   * @stability stable
+   */
+  hard_filter_drop_log: z.array(z.unknown()).max(MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS).optional(),
+
+  /**
+   * Request-level execution contract facts (debug/explain traces).
+   *
+   * @stability debug
+   */
+  execution_trace: z.object({
+    effective_route: z.enum(QUERY_ROUTES),
+    retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
+    effective_retrieval_mode: z.string().optional(),
+    retrieval_kind: z.enum([
+      'entity_lookup',
+      'generic_hybrid',
+      'specialized_hybrid',
+      'mixed_similarity',
+    ]).optional(),
+    sparse_executed: z.boolean().optional(),
+    specialized_route_executed: z.string().nullable().optional(),
+    used_compiled_execution: z.boolean().optional(),
+    compiled_budget: z.object({
+      max_candidates: z.number().int(),
+      enable_precision_rerank: z.boolean(),
+    }).passthrough().optional(),
+    provenance_policy: z.object({
+      require_identity_seal: z.boolean(),
+      require_constraint_evidence: z.boolean(),
+      require_anchor_evidence: z.boolean(),
+    }).passthrough().optional(),
+    provenance_closure: z.unknown().optional(),
+  }).passthrough().optional(),
+
+  /**
+   * Exact-recovery resolver provenance (noisy entity lookup audit).
+   *
+   * @stability debug
+   */
+  resolver_provenance_trace: z.object({
+    candidate_source_breakdown: z.array(z.object({
+      source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']),
+      entity_ids: z.array(z.string()).max(MAX_AUDIT_SOURCE_BREAKDOWN_ENTITY_IDS),
+      count: z.number().int(),
+    }).passthrough()).max(MAX_AUDIT_RESOLVER_SOURCE_BREAKDOWN_ITEMS).optional(),
+    blocker_seed_entity_ids: z.array(z.string()).max(MAX_AUDIT_BLOCKER_SEED_ENTITY_IDS).optional(),
+    blocker_seed_count: z.number().int().optional(),
+  }).passthrough().optional(),
+
+  /**
+   * TA5: Calibrated posterior confidence from corrective retry.
+   *
+   * @stability stable
+   */
+  corrective_retry_calibrated_confidence: z.number().finite().optional(),
+
+  /**
+   * Agent fallback trace — always emitted when agent fallback occurs.
+   *
+   * @stability stable
+   */
+  fallback_trace: z.object({
+    fallback_applied: z.enum(['layer2', 'layer3', 'layer4']).nullable(),
+    reasoning_failure: z.boolean(),
+    failed_synthesis_attempts: z.number().int(),
+    fallback_search_used: z.boolean(),
+  }).passthrough().optional(),
+
+  /**
+   * E1-T5: Determinism fingerprint — normally in meta, but can appear here too.
+   *
+   * @stability stable
+   */
+  determinism_fingerprint: z.string().optional(),
+}).passthrough();
+
+export type AuditExtensionWire = z.infer<typeof AuditExtensionSchema>;
+
+/**
+ * T-E5-03: Audit extension field keys classified by stability boundary.
+ *
+ * STABLE fields are always emitted when their trigger condition is met.
+ * Clients MAY depend on their presence and shape.
+ *
+ * DEBUG fields are gated by explain=true or X-Debug-Key header.
+ * Clients MUST NOT depend on their presence in production responses.
+ */
+export const AUDIT_EXTENSION_STABLE_FIELDS = [
+  'abstain_policy_trace',
+  'fallback_trace',
+  'hard_filter_drop_log',
+  'corrective_retry_calibrated_confidence',
+  'determinism_fingerprint',
+] as const satisfies readonly (keyof AuditExtensionWire)[];
+
+export const AUDIT_EXTENSION_DEBUG_FIELDS = [
+  'planner_policy_trace',
+  'constraint_resolution_trace',
+  'retrieval_fusion_trace',
+  'ranking_delta_trace',
+  'rerank_decision_trace',
+  'execution_trace',
+  'resolver_provenance_trace',
+] as const satisfies readonly (keyof AuditExtensionWire)[];
+
 export const SearchResponseMetaSchema = z.object({
   request_id: z.string().min(1).optional(),
   query_time_ms: z.number().finite().min(0),
-  route: z.string().min(1),
+  route: z.enum(QUERY_ROUTES),
   version: z.string().min(1),
   engine_schema_version: z.literal('search_response_v1'),
   decision_snapshot: DecisionSnapshotSchema.optional(),
@@ -341,9 +569,71 @@ export const SearchResponseMetaSchema = z.object({
         'identity_evidence',
         'constraint_evidence',
         'anchor_evidence',
-      ])),
+      ])).max(3),
       satisfied: z.boolean(),
     }).strict().optional(),
+    admission_closure: z.object({
+      required: z.object({
+        identity_seal: z.boolean(),
+        constraint_evidence: z.boolean(),
+        anchor_evidence: z.boolean(),
+      }).strict(),
+      satisfied: z.object({
+        identity_seal: z.boolean(),
+        constraint_evidence: z.boolean(),
+        anchor_evidence: z.boolean(),
+      }).strict(),
+      all_satisfied: z.boolean(),
+    }).strict().optional(),
+  }).strict().optional(),
+  provenance_trace: z.object({
+    policy: z.object({
+      require_identity_seal: z.boolean(),
+      require_constraint_evidence: z.boolean(),
+      require_anchor_evidence: z.boolean(),
+    }).strict(),
+    observed: z.object({
+      top_entity_present: z.boolean(),
+      pre_rank: z.object({
+        candidate_count: z.number().int().nonnegative(),
+        identity_evidence_satisfied: z.boolean(),
+        constraint_evidence_satisfied: z.boolean(),
+        anchor_evidence_satisfied: z.boolean(),
+        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+      }).strict(),
+      post_rank: z.object({
+        candidate_count: z.number().int().nonnegative(),
+        identity_evidence_satisfied: z.boolean(),
+        constraint_evidence_satisfied: z.boolean(),
+        anchor_evidence_satisfied: z.boolean(),
+        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+      }).strict(),
+    }).strict(),
+    missing: z.array(z.enum([
+      'identity_evidence',
+      'constraint_evidence',
+      'anchor_evidence',
+    ])).max(3),
+    shortfalls: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),
+    gate_decisions: z.object({
+      admission: z.enum([
+        'admission_gate_passed',
+        'admission_gate_rejected',
+        'admission_gate_not_applicable',
+      ]),
+      decision: z.enum([
+        'decision_gate_resolved',
+        'decision_gate_ambiguous',
+        'decision_gate_failed',
+      ]),
+      decision_status: z.enum(['resolved', 'ambiguous', 'failed']),
+      next_action: z.enum(NEXT_ACTIONS),
+      failure_reason: z.string().min(1).optional(),
+    }).strict(),
     admission_closure: z.object({
       required: z.object({
         identity_seal: z.boolean(),
@@ -372,14 +662,15 @@ export const SearchResponseMetaSchema = z.object({
   /**
    * E8: Audit extension — structured trace payloads from EPIC-3 through EPIC-7.
    *
-   * Not validated at the Zod boundary — AuditExtension is a typed domain object
-   * that is serialized as-is. Consumers should treat it as `unknown` and narrow
-   * via the AuditExtension TypeScript type from the domain layer.
+   * T-E5-01: Upgraded from z.unknown() to AuditExtensionSchema.
+   * The schema uses .passthrough() extensively so future field additions
+   * do not break existing clients. Complex nested traces (fusion, drift,
+   * abstain decision) remain z.unknown() to avoid fragile coupling.
    *
    * Gating: fields within the envelope are populated per the field gating policy
    * in AuditExtension (explain=true / debug header / always-on for abstain+fallback).
    */
-  audit_extension: z.unknown().optional(),
+  audit_extension: AuditExtensionSchema.optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({
@@ -575,6 +866,14 @@ export const InterpretResponseSchema = z.object({
 
 export type InterpretResponseBody = z.infer<typeof InterpretResponseSchema>;
 
+const ResolveCandidateTraceSchema = z.object({
+  score: z.number().finite(),
+  calibrated_confidence: z.number().finite().min(0).max(1),
+  boundary_decision: z.enum(['singleton', 'admitted', 'rejected']),
+  admission_gate_reason: z.string().min(1).optional(),
+  match_source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']),
+}).strict();
+
 export const ResolveCandidateSchema = z.object({
   entity_id: z.string().min(1),
   canonical_label: z.string().min(1),
@@ -592,6 +891,7 @@ export const ResolveCandidateSchema = z.object({
     (obj) => Object.keys(obj).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
     'metadata must have at most 50 keys',
   ).optional(),
+  trace: ResolveCandidateTraceSchema.optional(),
 }).strict();
 
 export const ResolveTopEntitySchema = z.object({

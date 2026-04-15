@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Ranker } from '../../../src/domain/ranking/service/ranker.js';
 import type { SignalComputer } from '../../../src/domain/ranking/service/signal-computer.js';
 import type { ScoreAggregator } from '../../../src/domain/ranking/service/score-aggregator.js';
@@ -8,11 +8,13 @@ import type { RankingInput } from '../../../src/domain/ranking/model/ranking-inp
 import type { ComponentScores } from '../../../src/domain/ranking/model/ranked-result.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled-wine-query.js';
 import type { ConstraintBundle, EvidenceItem } from '../../../src/domain/shared/types/index.js';
 import type { QueryClassWeights } from '../../../src/domain/ranking/service/lambdamart-ranker.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import { resolveChannelAwareWeights, resolveWeights } from '../../../src/domain/ranking/model/scoring-weights.js';
 import { getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
+import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -94,12 +96,42 @@ function makeConstraints(): ConstraintBundle {
   return { hard: [], soft: [], inferred: [] };
 }
 
+/** Minimal CompiledWineQuery for test helpers. */
+function makeCompiled(plan?: QueryPlanV1): CompiledWineQuery {
+  const p = plan ?? makeQueryPlan();
+  return {
+    query: {
+      rawQuery: p.rawQuery,
+      normalizedQuery: p.normalizedQuery,
+      intent: p.intent,
+      queryClass: p.queryClass,
+      anchors: p.anchors,
+      constraints: p.constraints,
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: p.uncertainty,
+      plannerVersion: p.plannerVersion,
+      policyRuleVersion: p.policyRuleVersion,
+      thresholdProfileId: p.thresholdProfileId,
+      retrievalPlan: { hardFilterTokens: [], softBoosts: [], inferredBoosts: [], sensoryPriors: [], planVersion: 'retrieval-plan-v1.0' },
+    },
+    execution: {
+      effectiveRoute: p.route,
+      effectiveRetrievalMode: p.retrievalMode,
+      routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+    },
+  };
+}
+
 /** Minimal RankingInput for N candidates. */
 function makeInput(candidates: HybridCandidate[], rerankForced?: boolean): RankingInput {
+  const plan = makeQueryPlan();
   return {
-    queryPlan: makeQueryPlan(),
+    queryPlan: plan,
     candidates,
     constraints: makeConstraints(),
+    compiled: makeCompiled(plan),
     ...(rerankForced !== undefined ? { rerankForced } : {}),
   };
 }
@@ -108,13 +140,15 @@ function makeInputWithOverrides(
   candidates: HybridCandidate[],
   overrides: Partial<RankingInput> & { queryPlan?: Partial<QueryPlanV1> } = {},
 ): RankingInput {
+  const plan = {
+    ...makeQueryPlan(),
+    ...overrides.queryPlan,
+  } as QueryPlanV1;
   return {
-    queryPlan: {
-      ...makeQueryPlan(),
-      ...overrides.queryPlan,
-    } as QueryPlanV1,
+    queryPlan: plan,
     candidates,
     constraints: makeConstraints(),
+    compiled: overrides.compiled ?? makeCompiled(plan),
     ...(overrides.anchorProfile !== undefined ? { anchorProfile: overrides.anchorProfile } : {}),
     ...(overrides.rerankForced !== undefined ? { rerankForced: overrides.rerankForced } : {}),
   };
@@ -298,6 +332,10 @@ function makeBm25DominantLtrModel(): QueryClassWeights {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('Ranker', () => {
+  beforeEach(() => {
+    globalSilentSkipCounter.reset();
+  });
+
   describe('empty and single-candidate cases', () => {
     it('empty candidates → returns []', async () => {
       const ranker = makeRanker(makeScoreAggregator(0.9));
@@ -499,13 +537,15 @@ describe('Ranker', () => {
         ],
       };
 
+      const plan = {
+        ...makeQueryPlan(),
+        constraints: sharedConstraints,
+      } as QueryPlanV1;
       const input: RankingInput = {
-        queryPlan: {
-          ...makeQueryPlan(),
-          constraints: sharedConstraints,
-        },
+        queryPlan: plan,
         candidates: [candidate],
         constraints: sharedConstraints,
+        compiled: makeCompiled(plan),
       };
 
       const ranker = makeRanker(makeScoreAggregator(0.9), { evidenceItems: [STUB_EVIDENCE] });
@@ -958,6 +998,35 @@ describe('Ranker', () => {
   });
 
   describe('wave 2 ranking observability', () => {
+    it('counts absent inference LTR component scores before they collapse to 0', async () => {
+      const candidates = makeCandidates(1, 'wine-ltr-observability');
+      const sparseScores: ComponentScores = {
+        entityIntegrity: 0.9,
+        hardConstraintPass: true,
+        softConstraint: 0.2,
+        availability: 1.0,
+        uncertaintyPenalty: 0.05,
+      };
+      const ranker = new Ranker(
+        makeSignalComputer(sparseScores),
+        makeScoreAggregatorSequence([0.88]),
+        makeEvidenceMapper(),
+        { ltrModels: new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]) },
+      );
+
+      const { results, metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(metadata.rerankExecuted).toBe(true);
+      expect(results).toHaveLength(1);
+      expect(globalSilentSkipCounter.snapshot()).toMatchObject({
+        ltr_inference_component_score_absent_semantic: 1,
+        ltr_inference_component_score_absent_popularity: 1,
+        ltr_inference_component_score_absent_attribute_alignment: 1,
+        ltr_inference_component_score_absent_preference_alignment: 1,
+        ltr_inference_component_score_absent_multilingual_score: 1,
+      });
+    });
+
     it('emits scoreDriftRecord when learned LTR rerank executes', async () => {
       const candidates = makeCandidates(3, 'wine-drift');
       const scoresByEntityId: Record<string, ComponentScores> = {

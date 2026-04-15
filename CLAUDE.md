@@ -4,6 +4,8 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 
 **HTTP debug & tracing requests:** agents read **`.ai/llm-debugging-playbook.md`** first; setup and limits: **`.ai/debug-mode.md`**. Canonical `step` strings: **`src/observability/pipeline-debug-steps.ts`**. Index: **`.ai/README.md`**.
 
+**ETL operator acks:** two publish guardrails require explicit env-var ack — see **`docs/runbook-etl-operator-acks.md`** before setting `ETL_INDEX_PARTIAL_FAILURE_ACK=YES` or `ETL_PUBLISH_LTR_BYPASS_ACK=YES`.
+
 **Assistant ↔ developer:** Use **Korean (한국어)** for natural-language explanations unless the user asks otherwise; keep code and identifiers consistent with existing English-heavy repo style.
 
 **Execution baseline:** Do **not** introduce heuristic shortcuts, heuristic fallbacks, or rule-of-thumb approximations unless the user explicitly approves that direction first. If a heuristic seems necessary, stop and ask. Unless the user requests a cheaper/faster trade-off, the default baseline is to pursue the strongest known **SOTA++** direction regardless of ROI.

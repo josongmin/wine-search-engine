@@ -189,6 +189,8 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
   return {
     queryPlan,
     resolverResult,
+    effectiveRoute: overrides.effectiveRoute ?? queryPlan.route,
+    effectiveRetrievalMode: overrides.effectiveRetrievalMode ?? queryPlan.retrievalMode,
     policy: {
       requireExact: false,
       allowApproximate: true,
@@ -257,6 +259,18 @@ describe('DecisionEngine', () => {
 
   beforeEach(() => {
     engine = new DecisionEngine(new StubThresholdStore());
+  });
+
+  it('keeps corrupted snapshot failure trace gap undefined', async () => {
+    const corruptedSnapshot = {
+      snapshot_id: '__corrupted__',
+    } as DecisionSnapshot;
+
+    const output = await engine.decide(makeInput(), corruptedSnapshot);
+
+    expect(output.decisionStatus).toBe('failed');
+    expect(output.decisionTrace.rulesApplied).toContain('CORRUPTED_SNAPSHOT_REJECTED');
+    expect(output.decisionTrace.signals.calibratedGap).toBeUndefined();
   });
 
   async function expectDecisionStatus(
@@ -880,6 +894,8 @@ describe('DecisionEngine', () => {
         'ambiguous_short_form class uses higher T_resolve=0.50',
         {
           queryPlan: makeQueryPlan('ambiguous_short_form'),
+          effectiveRoute: 'entity',
+          effectiveRetrievalMode: 'entity_lookup',
           resolverResult: makeResolverResult(0.40, 0.20, false),
           policy: makeClarifyPolicy(),
           uncertainty: {

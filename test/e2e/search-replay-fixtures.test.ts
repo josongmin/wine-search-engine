@@ -17,6 +17,9 @@ describe('search replay fixtures — executable HTTP subset', () => {
     !isSelfContainedSearchReplayFixture(fixture));
   const executableReplayFixtures = executableFixtures.filter(({ fixture }) =>
     fixture.replay_request !== undefined);
+  const comparisonFixtures = executableFixtures.filter(({ fixture }) => fixture.response_family === 'comparison');
+  const traceGoldenFixtures = executableFixtures.filter(({ fixture }) =>
+    fixture.response_family !== 'comparison' && 'golden_trace' in fixture.expected && fixture.expected.golden_trace !== undefined);
 
   let server: TestServer;
 
@@ -38,6 +41,14 @@ describe('search replay fixtures — executable HTTP subset', () => {
     expect(executableReplayFixtures.every(({ fixture }) => fixture.replay_request !== undefined)).toBe(true);
   });
 
+  it('keeps at least one comparison replay fixture in the executable HTTP lane', () => {
+    expect(comparisonFixtures.length).toBeGreaterThan(0);
+  });
+
+  it('keeps at least one trace-golden search fixture in the executable replay lane', () => {
+    expect(traceGoldenFixtures.length).toBeGreaterThan(0);
+  });
+
   it('keeps at least one successful replay fixture across the full replay suite', () => {
     expect(allReplaySuccessFixtures.length).toBeGreaterThan(0);
   });
@@ -50,6 +61,7 @@ describe('search replay fixtures — executable HTTP subset', () => {
         fixture.request !== undefined ? '/v1/search' : '/v1/search/replay',
       );
       expect(assertionSummary.skipped).toBe(false);
+      expect(assertionSummary.responseFamily).toBe(fixture.response_family ?? 'search');
       if ('error_code' in fixture.expected) {
         expect(assertionSummary.errorCode).toBe(fixture.expected.error_code);
         expect(assertionSummary.assertedFields).toEqual(['error.code']);
@@ -57,19 +69,75 @@ describe('search replay fixtures — executable HTTP subset', () => {
         return;
       }
       expect(body).toBeDefined();
+      if (fixture.response_family === 'comparison') {
+        expect(assertionSummary.assertedFields).toEqual([
+          'comparison_intent',
+          'overall_status',
+          'authority_trace_ref',
+          'runtime_correlation_ref',
+          'entity_top_result_ids',
+        ]);
+        expect(assertionSummary.driftClassification.resultFields).toEqual([
+          'comparison_intent',
+          'overall_status',
+        ]);
+        expect(assertionSummary.driftClassification.traceFields).toEqual([
+          'authority_trace_ref',
+          'runtime_correlation_ref',
+        ]);
+        expect(assertionSummary.degradationReasons).toBeUndefined();
+        expect(assertionSummary.executionMode).toBeUndefined();
+        expect(assertionSummary.decodedIds.authorityTraceRef?.ok).toBe(true);
+        return;
+      }
+      const expectedTrace = 'golden_trace' in fixture.expected ? fixture.expected.golden_trace : undefined;
       expect(body?.meta.execution_mode).toBe(fixture.expected.execution_mode);
-      expect(assertionSummary.assertedFields).toEqual([
+      expect(assertionSummary.assertedFields).toEqual(expectedTrace !== undefined
+        ? [
+            'execution_mode',
+            'degradation_reasons',
+            'authority_trace_ref',
+            'runtime_correlation_ref',
+            'decision_snapshot.snapshot_id',
+            'determinism_fingerprint',
+            'execution_trace',
+            'resolver_provenance_trace',
+          ]
+        : [
+            'execution_mode',
+            'degradation_reasons',
+            'authority_trace_ref',
+            'runtime_correlation_ref',
+            'decision_snapshot.snapshot_id',
+            'determinism_fingerprint',
+          ]);
+      // T-E10-01: drift classification separates result vs trace assertions
+      expect(assertionSummary.driftClassification.resultFields).toEqual([
         'execution_mode',
         'degradation_reasons',
-        'authority_trace_ref',
-        'runtime_correlation_ref',
-        'decision_snapshot.snapshot_id',
-        'determinism_fingerprint',
       ]);
+      expect(assertionSummary.driftClassification.traceFields).toEqual(expectedTrace !== undefined
+        ? [
+            'authority_trace_ref',
+            'runtime_correlation_ref',
+            'decision_snapshot.snapshot_id',
+            'determinism_fingerprint',
+            'execution_trace',
+            'resolver_provenance_trace',
+          ]
+        : [
+            'authority_trace_ref',
+            'runtime_correlation_ref',
+            'decision_snapshot.snapshot_id',
+            'determinism_fingerprint',
+          ]);
       expect(assertionSummary.executionMode).toBe(fixture.expected.execution_mode);
       expect(assertionSummary.degradationReasons).toEqual(fixture.expected.degradation_reasons);
       expect(assertionSummary.decodedIds.authorityTraceRef?.ok).toBe(true);
       expect(assertionSummary.decodedIds.snapshotId?.ok).toBe(true);
+      if (expectedTrace !== undefined) {
+        expect(assertionSummary.degradationReasons).toEqual(fixture.expected.degradation_reasons);
+      }
     });
   }
 });

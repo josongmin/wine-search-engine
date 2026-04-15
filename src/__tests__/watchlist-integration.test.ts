@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHmac } from 'crypto';
 import { randomUUID } from 'node:crypto';
+import { promises as dnsPromises } from 'node:dns';
 import { MS_PER_DAY } from '../domain/shared/utils/time-units.js';
 import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber, type WatchlistEventHandler } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
@@ -19,7 +20,18 @@ import { WebhookDelivery, type WebhookPayload } from '../infrastructure/watchlis
 import type { WatchlistEntry, WatchlistChangeEvent } from '../domain/watchlist/model/watchlist-entry.js';
 import type { RedisClientType } from 'redis';
 
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock: vi.fn(),
+}));
+
+vi.mock('node:dns', () => ({
+  promises: {
+    lookup: lookupMock,
+  },
+}));
+
 const WEBHOOK_SECRET = 'test-secret-min-16-characters!!!!';
+const PUBLIC_DNS_LOOKUP_RESULT = [{ address: '93.184.216.34', family: 4 }] as const;
 type RedisSubscriberStub = Pick<
   RedisClientType,
   'isOpen' | 'on' | 'connect' | 'pSubscribe' | 'quit'
@@ -59,9 +71,11 @@ describe('Watchlist Integration', () => {
     );
     webhookDelivery = new WebhookDelivery(WEBHOOK_SECRET, async () => {});
     vi.clearAllMocks();
+    vi.mocked(dnsPromises.lookup).mockResolvedValue(PUBLIC_DNS_LOOKUP_RESULT as never);
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (subscriber.isRunning()) {
       await subscriber.stop();
     }

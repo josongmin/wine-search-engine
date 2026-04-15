@@ -102,15 +102,20 @@ describe('snapshot-entity-identity', () => {
     const lookup = await loadGoldCanonicalLookup(dir);
     const resolved = resolveWineSnapshotEntity(opusRecord(), lookup);
     expect(resolved.entityId.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
+    expect(resolved.runtimePublicIdAuthority).toBe('identity_signature');
     expect(resolved.resolution).toBe('gold_overlay');
     expect(resolved.benchmarkEntityId).toBe('opus-one-2018');
+    expect(resolved.benchmarkLinkageAuthority).toBe('benchmark_linkage');
   });
 
   it('resolveWineSnapshotEntity uses deterministic wine-ce signature fallback', () => {
     const resolved = resolveWineSnapshotEntity(opusRecord(), new Map());
     expect(resolved.entityId.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
+    expect(resolved.runtimePublicIdAuthority).toBe('identity_signature');
     expect(resolved.resolution).toBe('identity_signature');
     expect(resolved.entityId.includes('vivino')).toBe(false);
+    expect(resolved.benchmarkEntityId).toBeUndefined();
+    expect(resolved.benchmarkLinkageAuthority).toBeUndefined();
   });
 
   it('resolveWineSnapshotEntity accepts a minimal WineSnapshotIdentityRow (no full EnrichedSilverRecord)', () => {
@@ -124,6 +129,7 @@ describe('snapshot-entity-identity', () => {
     };
     const resolved = resolveWineSnapshotEntity(row, new Map());
     expect(resolved.entityId.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
+    expect(resolved.runtimePublicIdAuthority).toBe('identity_signature');
     expect(resolved.resolution).toBe('identity_signature');
   });
 

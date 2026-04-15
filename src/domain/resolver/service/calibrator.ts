@@ -47,34 +47,68 @@ export class Calibrator {
   ) {}
 
   /**
-   * Calibrates the raw top-1 and top-2 scores into a {@link CalibratedResolutionScore}.
+   * Calibrates the raw top-1 and (optionally) top-2 scores into a
+   * {@link CalibratedResolutionScore}.
    *
-   * @param rawScores - The raw (uncalibrated) scores for the top two candidates.
-   * @param queryClass - The query class used to select calibration parameters.
-   * @returns Calibrated scores including decision confidence C and gap delta.
+   * C2 (fail-loud): the runner-up is optional. When absent, the returned
+   * `top2CalibratedScore` and `calibratedGap` are `undefined`; callers must
+   * branch on `hasRunnerUp` rather than treating a missing runner-up as a
+   * synthetic 0.
+   *
+   * @param rawScores.top1 - Raw top-1 score (required; must be finite).
+   * @param rawScores.top2 - Raw top-2 score. `undefined` when there is no
+   *                        runner-up. Must be finite when provided.
+   * @param rawScores.candidateCount - Number of candidates actually scored.
+   * @param queryClass - Query class for parameter lookup.
    */
   async calibrate(
-    rawScores: { readonly top1: number; readonly top2: number },
+    rawScores: {
+      readonly top1: number;
+      readonly top2: number | undefined;
+      readonly candidateCount: number;
+    },
     queryClass: QueryClass,
   ): Promise<CalibratedResolutionScore> {
-    // Guard non-finite inputs before any calibration logic. A NaN/Infinity
-    // rawScore propagates silently through plattScaling (NaN arithmetic) and
-    // normalizeFallbackRawScores (NaN/NaN = NaN), corrupting decisionConfidenceC.
-    const safeTop1 = Number.isFinite(rawScores.top1) ? rawScores.top1 : 0;
-    const safeTop2 = Number.isFinite(rawScores.top2) ? rawScores.top2 : 0;
+    if (!Number.isFinite(rawScores.top1)) {
+      throw new Error(
+        `Calibrator.calibrate: top1 raw score is not finite (got ${String(rawScores.top1)}); ` +
+        'resolver must not surface a non-finite score to the calibrator. This is a contract violation.',
+      );
+    }
+    if (rawScores.candidateCount < 1) {
+      throw new Error(
+        `Calibrator.calibrate: candidateCount must be >= 1 when calibrate() is called (got ${rawScores.candidateCount}).`,
+      );
+    }
+    if (rawScores.top2 !== undefined && !Number.isFinite(rawScores.top2)) {
+      throw new Error(
+        `Calibrator.calibrate: top2 raw score is not finite (got ${String(rawScores.top2)}); ` +
+        'pass undefined for absent runner-up, never NaN/Infinity.',
+      );
+    }
+    const hasRunnerUp = rawScores.top2 !== undefined;
+
     const params = await this.loadParams(queryClass);
-    const safeRawScores = { top1: safeTop1, top2: safeTop2 };
-    const normalizedRawScores = this.isDefaultFallbackParams(params)
-      ? this.normalizeFallbackRawScores(safeRawScores)
-      : safeRawScores;
+    // Normalize only when the default isotonic fallback is used. The gap
+    // between top1 and top2 must be preserved under the same monotonic
+    // transform so the calibrated gap is comparable.
+    const { normalizedTop1, normalizedTop2 } = this.isDefaultFallbackParams(params)
+      ? this.normalizeFallbackRawScores(rawScores.top1, rawScores.top2)
+      : { normalizedTop1: rawScores.top1, normalizedTop2: rawScores.top2 };
 
-    const top1Calibrated = this.applyCalibration(normalizedRawScores.top1, params);
-    const top2Calibrated = this.applyCalibration(normalizedRawScores.top2, params);
+    const top1Calibrated = this.applyCalibration(normalizedTop1, params);
+    const top2Calibrated = normalizedTop2 !== undefined
+      ? this.applyCalibration(normalizedTop2, params)
+      : undefined;
 
-    const calibratedGap = top1Calibrated - top2Calibrated;
+    const calibratedGap = top2Calibrated !== undefined
+      ? top1Calibrated - top2Calibrated
+      : undefined;
 
     return {
       top1CalibratedScore: top1Calibrated,
+      hasRunnerUp,
+      candidateCount: rawScores.candidateCount,
       top2CalibratedScore: top2Calibrated,
       calibratedGap,
       decisionConfidenceC: top1Calibrated,
@@ -104,15 +138,17 @@ export class Calibrator {
 
   /**
    * Keeps the default fallback monotonic when the additive resolver score
-   * exceeds 1.0 by scaling both scores with the same top-score factor.
+   * exceeds 1.0 by scaling top1 (and optionally top2) with the same factor.
+   * top2 stays `undefined` when there is no runner-up.
    */
   private normalizeFallbackRawScores(
-    rawScores: { readonly top1: number; readonly top2: number },
-  ): { readonly top1: number; readonly top2: number } {
-    const factor = Math.max(1, rawScores.top1);
+    top1: number,
+    top2: number | undefined,
+  ): { readonly normalizedTop1: number; readonly normalizedTop2: number | undefined } {
+    const factor = Math.max(1, top1);
     return {
-      top1: rawScores.top1 / factor,
-      top2: rawScores.top2 / factor,
+      normalizedTop1: top1 / factor,
+      normalizedTop2: top2 !== undefined ? top2 / factor : undefined,
     };
   }
 
@@ -127,19 +163,42 @@ export class Calibrator {
   private applyCalibration(rawScore: number, params: CalibrationParams): number {
     switch (params.method) {
       case 'platt': {
-        const a = params.params['a'] ?? 1.0;
-        const b = params.params['b'] ?? 0.0;
+        // Fix 6 (fail-loud): Platt scaling REQUIRES 'a' and 'b' params. Silent
+        // fallback to identity (a=1, b=0) masked stored-params corruption as a
+        // successfully-calibrated score. Throw instead so the calibrator caller
+        // (resolver) surfaces it as degradation_reasons rather than serving a
+        // decision made on uncalibrated state.
+        const a = params.params['a'];
+        const b = params.params['b'];
+        if (a === undefined || b === undefined) {
+          throw new Error(
+            `Calibrator: Platt method requires 'a' and 'b' params, got ${JSON.stringify(Object.keys(params.params))}. ` +
+            'Stored calibration params are corrupt or incomplete — refusing identity fallback.',
+          );
+        }
         return plattScaling(rawScore, a, b);
       }
       case 'temperature': {
-        const temperature = params.params['temperature'] ?? 1.0;
+        // Fix 6 (fail-loud): temperature method REQUIRES 'temperature' param.
+        const temperature = params.params['temperature'];
+        if (temperature === undefined) {
+          throw new Error(
+            `Calibrator: temperature method requires 'temperature' param, got ${JSON.stringify(Object.keys(params.params))}. ` +
+            'Stored calibration params are corrupt or incomplete — refusing identity fallback.',
+          );
+        }
+        if (!Number.isFinite(temperature) || temperature <= 0) {
+          throw new Error(
+            `Calibrator: temperature must be finite and > 0, got ${String(temperature)}. ` +
+            'Stored calibration params are corrupt or invalid — refusing silent fallback.',
+          );
+        }
         // Temperature-scaled sigmoid: P(positive) = 1/(1+exp(-rawScore/T)).
         // The previous implementation built `[rawScore, 1-rawScore]` and ran
         // softmax over them, which capped the output at 0.731 for any
         // rawScore ≥ 1.0 — silently destroying precision for trivially
         // resolved candidates. A direct sigmoid preserves full dynamic range.
-        const safeT = temperature !== 0 ? temperature : 1;
-        const sigmoid = 1 / (1 + Math.exp(-rawScore / safeT));
+        const sigmoid = 1 / (1 + Math.exp(-rawScore / temperature));
         return clamp01(sigmoid);
       }
       case 'isotonic': {

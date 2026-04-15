@@ -88,6 +88,7 @@ export interface TestContainerOptions {
   readonly snapshotVersions?: SnapshotVersions;
   readonly reranker?: RerankerPort;
   readonly learnedMatcher?: LearnedMatcherPort;
+  readonly signalComputer?: SignalComputer;
   readonly drinkingWindowPredictor?: DrinkingWindowPredictorPort;
   readonly rerankThreshold?: number;
   readonly stripCachedDrinkingWindow?: boolean;
@@ -193,7 +194,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const compareRetriever = new CompareRetriever(searchIndex);
 
   // Domain services — ranking
-  const signalComputer = new SignalComputer();
+  const signalComputer = options.signalComputer ?? new SignalComputer();
   const scoreAggregator = new ScoreAggregator();
   const evidenceMapper = new EvidenceMapper();
   const ranker = new Ranker(

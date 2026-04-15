@@ -119,23 +119,21 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
   const qTokens = q.length === 0 ? 0 : q.split(/\s+/u).filter((s) => s.length > 0).length;
   const hasKorean = containsHangul(input.query) ? 1 : 0;
 
-  // Retrieval signals
-  const bm25 = safeNumber((c as { sparseRawScore?: number }).sparseRawScore, 0);
-  const dense = safeNumber((c as { denseRawScore?: number }).denseRawScore, 0);
-  const anchor = safeNumber((c as { anchorRawScore?: number }).anchorRawScore, 0);
+  // Retrieval signals — read directly from HybridCandidate. These fields are
+  // all optional on the canonical IR type; `?? 0` collapses absence into "no
+  // contribution from this channel", which is the correct LTR semantic for
+  // browse/compare candidates that legitimately bypass a channel.
+  const bm25 = safeNumber(c.sparseRawScore, 0);
+  const dense = safeNumber(c.denseRawScore, 0);
+  const anchor = safeNumber(c.anchorRawScore, 0);
   // fusionRrfTotal is the canonical RRF total, set only by FusionService.
   // Browse/Compare candidates bypass fusion → fusionRrfTotal absent → 0.
-  // 0 is correct: absence of fusion data means "no multi-channel agreement"
-  // which the LTR model can learn to weight accordingly.
-  const fusion = safeNumber(
-    (c as { fusionRrfTotal?: number }).fusionRrfTotal,
-    0,
-  );
+  const fusion = safeNumber(c.fusionRrfTotal, 0);
   let crossChannel = 0;
-  if ((c as { sparseRank?: number }).sparseRank !== undefined) crossChannel++;
-  if ((c as { denseRank?: number }).denseRank !== undefined) crossChannel++;
-  if ((c as { anchorRank?: number }).anchorRank !== undefined) crossChannel++;
-  if ((c as { learnedSparseRank?: number }).learnedSparseRank !== undefined) crossChannel++;
+  if (c.sparseRank !== undefined) crossChannel++;
+  if (c.denseRank !== undefined) crossChannel++;
+  if (c.anchorRank !== undefined) crossChannel++;
+  if (c.learnedSparseRank !== undefined) crossChannel++;
 
   // Constraint match signals — precompute matched set once (Rule 16: avoid
   // per-function Set allocation when the same data is reused across calls).
@@ -143,7 +141,7 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
   const hardMatch = countSatisfiedConstraints(matchedSet, input.hardConstraints);
   const softMatch = countSatisfiedConstraints(matchedSet, input.softConstraints);
   const inferredMatch = countSatisfiedConstraints(matchedSet, input.inferredConstraints ?? []);
-  const violationList = (c as { unmetHardConstraints?: readonly unknown[] }).unmetHardConstraints ?? [];
+  const violationList = c.unmetHardConstraints ?? [];
 
   // Entity signals — lowercase query once, reuse across all comparisons
   // (avoids N string allocations per candidate for each .toLowerCase() call)

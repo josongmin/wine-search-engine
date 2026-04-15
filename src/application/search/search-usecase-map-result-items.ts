@@ -21,9 +21,6 @@ const drinkingWindowLogger = bootstrapLogger.child({
 
 const DRINKING_WINDOW_CHECK_TIMEOUT_MS = 2_000;
 
-/** Neutral confidence when uncertaintyPenalty is NaN/unavailable.
- *  0.5 = "no opinion" in [0,1] confidence space. */
-const UNCERTAINTY_CONFIDENCE_NEUTRAL = 0.5;
 const EXACT_MATCH_TYPES = new Set<MatchDetail['matchType']>(['exact', 'alias_exact', 'alias_fuzzy']);
 
 function findIdentityEvidence(
@@ -102,6 +99,71 @@ function deriveLexicalScore(
   }
 
   return 0;
+}
+
+/**
+ * T-E6-03: Route-aware score projection matrix.
+ *
+ * Entity route results bypass the heuristic ranker — their componentScores
+ * are synthetic (entityIntegrity=1, semantic=calibratedScore, others=0).
+ * Projecting those directly into the API's scoreComponents would be
+ * misleading: the "semantic" field would carry the resolver's calibrated
+ * posterior (e.g. 0.97) rather than an actual embedding similarity score.
+ *
+ * When a result originated from the entity route (detected via identity
+ * evidence from entity_resolver source AND scoreDecomposition present),
+ * we project scores from the entity-native decomposition instead:
+ *
+ *   Route   | lexical           | semantic              | attribute | popularity | preferenceAlignment
+ *   --------|-------------------|-----------------------|-----------|------------|--------------------
+ *   entity  | decomp.lexical    | decomp.semantic (=cal)| 0         | 0          | 0
+ *   hybrid  | deriveLexicalScore| components.semantic   | comp.attr | comp.pop   | comp.pref
+ *
+ * This ensures that API consumers see provenance-consistent scores:
+ * entity-route results expose resolver-calibrated signals, hybrid-route
+ * results expose retrieval + ranking pipeline signals.
+ */
+function isEntityRouteResult(result: RankedResult): boolean {
+  const identityEvidence = findIdentityEvidence(result.evidenceItems);
+  return identityEvidence?.source === 'entity_resolver'
+    && result.scoreDecomposition !== undefined;
+}
+
+function deriveScoreComponents(
+  result: RankedResult,
+): {
+  readonly lexical: number;
+  readonly semantic: number;
+  readonly attribute: number;
+  readonly popularity: number;
+  readonly preferenceAlignment?: number | undefined;
+} {
+  if (isEntityRouteResult(result)) {
+    // Entity route: project from entity-native ScoreDecomposition.
+    // The decomposition's semanticContribution IS the calibratedScore —
+    // this is correct and intentional for entity route provenance.
+    const decomp = result.scoreDecomposition!;
+    return {
+      lexical: clamp01(decomp.lexicalContribution),
+      semantic: clamp01(decomp.semanticContribution),
+      attribute: clamp01(decomp.attributeSatisfaction),
+      popularity: clamp01(decomp.popularityContribution),
+      ...(decomp.preferenceAlignmentContribution !== 0
+        ? { preferenceAlignment: clamp01(decomp.preferenceAlignmentContribution) }
+        : {}),
+    };
+  }
+
+  // Hybrid route: project from ranking pipeline componentScores.
+  return {
+    lexical: deriveLexicalScore(result),
+    semantic: result.componentScores.semantic ?? 0,
+    attribute: result.componentScores.attributeAlignment ?? 0,
+    popularity: result.componentScores.popularity ?? 0,
+    ...(result.componentScores.preferenceAlignment !== undefined
+      ? { preferenceAlignment: result.componentScores.preferenceAlignment }
+      : {}),
+  };
 }
 
 async function withDrinkingWindowTimeout(
@@ -332,13 +394,8 @@ export async function mapRankedResultsToResultItems(
       match: {
         matchType,
         ...(matchedAlias !== undefined ? { matchedAlias } : {}),
-        scoreComponents: {
-          lexical: deriveLexicalScore(r),
-          semantic: r.componentScores.semantic,
-          attribute: r.componentScores.attributeAlignment,
-          popularity: r.componentScores.popularity,
-          preferenceAlignment: r.componentScores.preferenceAlignment,
-        },
+        // T-E6-03: Route-aware score projection — see deriveScoreComponents() doc.
+        scoreComponents: deriveScoreComponents(r),
       },
       constraints: {
         matched: matchedConstraints,
@@ -346,11 +403,11 @@ export async function mapRankedResultsToResultItems(
         inferred: inferredConstraints,
       },
       uncertainty: {
-        // NaN guard: if uncertaintyPenalty is NaN (upstream bug), 1 - NaN → NaN,
-        // and Math.max/min do NOT filter NaN — they propagate it to the client.
-        uncertaintyConfidence: Number.isFinite(r.componentScores.uncertaintyPenalty)
-          ? clamp01(1 - r.componentScores.uncertaintyPenalty)
-          : UNCERTAINTY_CONFIDENCE_NEUTRAL,
+        // T-E6-01: NaN/invalid uncertaintyPenalty → omit field entirely.
+        // Previously masked with 0.5 neutral midpoint, hiding the real state.
+        ...(Number.isFinite(r.componentScores.uncertaintyPenalty)
+          ? { uncertaintyConfidence: clamp01(1 - r.componentScores.uncertaintyPenalty) }
+          : {}),
         missingInfo,
         approximationUsed,
       },

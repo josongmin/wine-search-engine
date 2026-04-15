@@ -26,6 +26,20 @@ function minimalPlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
   } as QueryPlanV1;
 }
 
+function createInput(overrides: Partial<HybridRetrievalInput> = {}): HybridRetrievalInput {
+  const queryPlan = overrides.queryPlan ?? minimalPlan();
+  return {
+    queryPlan,
+    route: 'hybrid',
+    compiledRetrievalMode: queryPlan.retrievalMode,
+    lexicalQueries: ['red wine'],
+    semanticQueries: ['red wine'],
+    hardConstraints: [],
+    softConstraints: [],
+    ...overrides,
+  };
+}
+
 describe('CandidatePoolService sparse filter tokens', () => {
   it('passes hardConstraintsToSparseFilterTokens to sparse and dense search', async () => {
     const sparseFilters: (readonly string[] | undefined)[] = [];
@@ -57,11 +71,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
       ),
     };
 
-    const input: HybridRetrievalInput = {
-      queryPlan: minimalPlan(),
-      route: 'hybrid',
-      lexicalQueries: ['red wine'],
-      semanticQueries: ['red wine'],
+    const input: HybridRetrievalInput = createInput({
       hardConstraints: [
         {
           attribute: 'wine_type',
@@ -72,7 +82,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
         },
       ],
       softConstraints: [],
-    };
+    });
 
     const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
     await pool.generate(input);
@@ -112,10 +122,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
     };
 
     const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
-    const out = await pool.generate({
-      queryPlan: minimalPlan(),
-      route: 'hybrid',
-      lexicalQueries: ['red wine'],
+    const out = await pool.generate(createInput({
       semanticQueries: [],
       hardConstraints: [
         {
@@ -127,7 +134,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
         },
       ],
       softConstraints: [],
-    });
+    }));
 
     expect(out.map((candidate) => candidate.entityId)).toEqual(['wine-red']);
     expect(out[0]?.matchedConstraints).toContain('wine_type');
@@ -151,14 +158,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
     const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
 
     // Dense retrieval degrades gracefully — returns empty candidates instead of throwing.
-    const results = await pool.generate({
-      queryPlan: minimalPlan(),
-      route: 'hybrid',
-      lexicalQueries: ['red wine'],
-      semanticQueries: ['red wine'],
-      hardConstraints: [],
-      softConstraints: [],
-    });
+    const results = await pool.generate(createInput());
     expect(results).toEqual([]);
     expect(searchIndex.denseSearch).not.toHaveBeenCalled();
   });
@@ -191,17 +191,14 @@ describe('CandidatePoolService sparse filter tokens', () => {
     };
 
     const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
-    const out = await pool.generate({
+    const out = await pool.generate(createInput({
       queryPlan: minimalPlan({
         queryClass: 'semantic_preference',
         retrievalMode: 'semantic_hybrid',
       }),
-      route: 'hybrid',
       lexicalQueries: ['structured cabernet'],
       semanticQueries: ['structured cabernet'],
-      hardConstraints: [],
-      softConstraints: [],
-    });
+    }));
 
     expect(searchIndex.searchLearnedSparse).toHaveBeenCalledOnce();
     expect(out[0]?.retrievalTrace.candidateSources).toContain('learned_sparse');
@@ -260,18 +257,15 @@ describe('CandidatePoolService sparse filter tokens', () => {
     };
 
     const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
-    const out = await pool.generate({
+    const out = await pool.generate(createInput({
       queryPlan: minimalPlan({
         queryClass: 'comparison_query',
         retrievalMode: 'compare_candidates',
       }),
-      route: 'hybrid',
       lexicalQueries: ['wines like opus one'],
       semanticQueries: [],
-      hardConstraints: [],
-      softConstraints: [],
       anchorEntityId: 'wine-anchor',
-    });
+    }));
 
     expect(searchIndex.getDocument).toHaveBeenCalledWith('wine-anchor');
     expect(searchIndex.denseSearch).not.toHaveBeenCalled();
@@ -327,7 +321,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
     } as unknown as FusionService;
 
     const pool = new CandidatePoolService(searchIndex, embeddingService, fusionService);
-    const out = await pool.generate({
+    const out = await pool.generate(createInput({
       queryPlan: minimalPlan({
         queryClass: 'anchored_similarity',
         route: 'mixed',
@@ -336,9 +330,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
       route: 'mixed',
       lexicalQueries: ['like sassicaia'],
       semanticQueries: ['like sassicaia'],
-      hardConstraints: [],
-      softConstraints: [],
-    });
+    }));
 
     expect(out).toHaveLength(1);
     expect(out[0]?.retrievalProvenance?.channels).toEqual(['anchor_similarity', 'dense_semantic']);

@@ -1,5 +1,6 @@
 import type { QueryIntent } from '../model/query-intent.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
+import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { WINE_TYPE_DETECTION_PATTERNS } from '../model/wine-type-patterns.js';
 import type { AnchorExtractor } from './anchor-extractor.js';
 
@@ -63,6 +64,7 @@ export function detectQueryIntent(
   normalizedQuery: string,
   anchors: readonly AnchorCandidate[],
   anchorExtractor: IntentDetectionAnchorExtractor,
+  relativeQuery: AnchorConditionedQuery | null = null,
 ): QueryIntent {
   const hasStrongAnchor = anchors.some(
     (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
@@ -78,6 +80,10 @@ export function detectQueryIntent(
     anchorExtractor.hasComparisonMarkers(normalizedQuery);
   const hasKoreanMixed =
     anchorExtractor.hasKoreanMixedQueryMarkers(normalizedQuery);
+  const hasRelativeAnchorQuery =
+    relativeQuery !== null &&
+    relativeQuery.relativeExpressions.length > 0 &&
+    anchors.length > 0;
   const hasPriceKeyword = PRICE_KEYWORDS.some((re) =>
     re.test(normalizedQuery),
   );
@@ -96,6 +102,10 @@ export function detectQueryIntent(
   }
 
   if (hasKoreanMixed && hasAnyAnchor) {
+    return 'mixed_query';
+  }
+
+  if (hasRelativeAnchorQuery) {
     return 'mixed_query';
   }
 

@@ -57,12 +57,9 @@ export interface HybridRankedRoutePipelineDeps
 function capAnchorResolverBlockerSeedIds(
   plan: QueryPlanV1,
   blockerOnlyIds: readonly CanonicalEntityId[],
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
 ): readonly CanonicalEntityId[] {
-  const maxCandidates = compiled?.execution.budget.maxCandidates;
-  if (maxCandidates === undefined) {
-    return blockerOnlyIds;
-  }
+  const maxCandidates = compiled.execution.budget.maxCandidates;
 
   const anchorCoveredIds = new Set(
     plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
@@ -78,8 +75,8 @@ function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResul
     decisionTrace: {
       queryClass: plan.queryClass,
       top1CalibratedScore: 0,
-      top2CalibratedScore: 0,
-      calibratedGap: 0,
+      top2CalibratedScore: undefined,
+      calibratedGap: undefined,
       decisionConfidenceC: 0,
       ambiguityDetected: false,
       ambiguityTypes: [],
@@ -107,7 +104,7 @@ function buildRelaxedCompiledQuery(
 
 function buildHybridExecutionFacts(params: {
   readonly plan: QueryPlanV1;
-  readonly compiled?: CompiledWineQuery | undefined;
+  readonly compiled: CompiledWineQuery;
   readonly specializedRouteExecuted?: SearchRouteExecutionResult['specializedRouteExecuted'] | undefined;
   readonly sparseExecuted?: boolean | undefined;
 }): Pick<SearchRouteExecutionResult,
@@ -117,8 +114,8 @@ function buildHybridExecutionFacts(params: {
   | 'specializedRouteExecuted'
   | 'usedCompiledExecution'
 > {
-  const effectiveRetrievalMode = params.compiled?.execution.effectiveRetrievalMode ?? params.plan.retrievalMode;
-  const usedCompiledExecution = params.compiled !== undefined;
+  const effectiveRetrievalMode = params.compiled.execution.effectiveRetrievalMode;
+  const usedCompiledExecution = true;
   const specializedRouteExecuted = params.specializedRouteExecuted ?? null;
   const sparseExecuted = params.sparseExecuted ?? true;
   return {
@@ -132,7 +129,7 @@ function buildHybridExecutionFacts(params: {
 
 function buildHybridExecutionFactsFromRetrieval(
   plan: QueryPlanV1,
-  compiled: CompiledWineQuery | undefined,
+  compiled: CompiledWineQuery,
   retrieval: HybridCandidateRetrievalResult,
 ): Pick<SearchRouteExecutionResult,
   'effectiveRetrievalMode'
@@ -178,7 +175,7 @@ function mergeProvenanceShortfall(
 export async function resolveEntityRouteForPlan(
   plan: QueryPlanV1,
   deps: RankedRouteEntityResolutionDeps,
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
 ): Promise<EntityResolveResult> {
   if (deps.entityResolver === undefined) {
     pipelineDebug(
@@ -253,7 +250,7 @@ export async function resolveEntityRouteForPlan(
  */
 export function createRankedRouteEntityResolver(
   deps: RankedRouteEntityResolutionDeps,
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
 ): (plan: QueryPlanV1) => Promise<EntityResolveResult> {
   return (plan) => resolveEntityRouteForPlan(plan, deps, compiled);
 }
@@ -279,21 +276,17 @@ export async function runHybridRankingPipeline(
   };
 
   const { results: rankedResults, metadata: rankingMetadata } = await ranker.rank(rankingInput);
-  const provenanceClosure = compiled !== undefined
-    ? buildExecutionProvenanceClosureFromStages(
-        compiled.execution.provenancePolicy,
-        retrievalProvenanceCoverage
-          ?? buildHybridCandidateCoverageStage(plan, candidates, compiled.execution.provenancePolicy),
-        buildRankedResultCoverageStage(plan, rankedResults, compiled.execution.provenancePolicy),
-      )
-    : undefined;
+  const provenanceClosure = buildExecutionProvenanceClosureFromStages(
+    compiled.execution.provenancePolicy,
+    retrievalProvenanceCoverage
+      ?? buildHybridCandidateCoverageStage(plan, candidates, compiled.execution.provenancePolicy),
+    buildRankedResultCoverageStage(plan, rankedResults, compiled.execution.provenancePolicy),
+  );
   const rankerDegradation = mergeProvenanceShortfall(
     rankingMetadata.runtimeSignal?.degradation ?? ranker.getLastRuntimeSignal?.()?.degradation,
     provenanceClosure,
   );
-  const enrichedRankingMetadata = provenanceClosure === undefined
-    ? rankingMetadata
-    : { ...rankingMetadata, provenanceClosure };
+  const enrichedRankingMetadata = { ...rankingMetadata, provenanceClosure };
   // Prefer metadata.funnelMetrics (per-call, concurrency-safe) over the legacy
   // getter (instance state, race-prone under concurrent rank() calls).
   const funnelMetrics = enrichedRankingMetadata.funnelMetrics ?? ranker.getLastFunnelMetrics?.();
@@ -316,12 +309,8 @@ export async function runHybridRankingPipeline(
       input_candidates: candidates.length,
       ranked_count: rankedResults.length,
       has_funnel_metrics: funnelMetrics !== undefined,
-      ...(provenanceClosure !== undefined
-        ? {
-            provenance_satisfied: provenanceClosure.satisfied,
-            provenance_missing: provenanceClosure.missing,
-          }
-        : {}),
+      provenance_satisfied: provenanceClosure.satisfied,
+      provenance_missing: provenanceClosure.missing,
     },
     'pipeline hybrid ranking',
   );
@@ -366,6 +355,7 @@ export async function executeHybridRouteRankingPipeline(
   resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
   compiled: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
+  anchorEntityId?: CanonicalEntityId,
 ): Promise<SearchRouteExecutionResult> {
   const retrieval = await retrieveHybridCandidatesForPlan(
     plan,
@@ -377,6 +367,7 @@ export async function executeHybridRouteRankingPipeline(
     resolveEntity,
     compiled,
     requestContext,
+    anchorEntityId,
   );
   const ranked = await runHybridRankingPipeline(
     plan,
@@ -435,6 +426,7 @@ export async function executeHybridRouteRankingPipeline(
         resolveEntity,
         relaxedCompiled,
         requestContext,
+        anchorEntityId,
       );
       const relaxedRanked = await runHybridRankingPipeline(
         relaxedPlan,
@@ -578,7 +570,7 @@ export async function executeHybridRankedRoutePlan(
   return executeHybridRouteRankingPipeline(
     plan,
     deps,
-    createRankedRouteEntityResolver(deps),
+    createRankedRouteEntityResolver(deps, compiled),
     compiled,
   );
 }

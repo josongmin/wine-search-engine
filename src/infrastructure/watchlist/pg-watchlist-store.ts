@@ -235,10 +235,48 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
       await client.query('COMMIT');
       return result;
     } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
+      // Wave 3 (fail-loud): previously the rollback rejection was swallowed
+      // with `.catch(() => {})`. Now we capture it and, if rollback fails
+      // (e.g. connection dropped mid-transaction), we throw a TransactionRollbackFailedError
+      // that wraps BOTH the original error and the rollback error. Operators
+      // see the compound failure instead of only the original error while the
+      // transaction silently stays in an unknown state.
+      let rollbackError: unknown;
+      try {
+        await client.query('ROLLBACK');
+      } catch (rbErr) {
+        rollbackError = rbErr;
+      }
+      if (rollbackError !== undefined) {
+        throw new TransactionRollbackFailedError(err, rollbackError);
+      }
       throw err;
     } finally {
       client.release();
     }
+  }
+}
+
+/**
+ * Wave 3 (fail-loud): thrown when a transactional rollback itself fails.
+ * The original business error and the rollback error are both preserved —
+ * operators cannot diagnose "connection dropped mid-commit" without seeing
+ * both.
+ */
+export class TransactionRollbackFailedError extends Error {
+  readonly originalError: unknown;
+  readonly rollbackError: unknown;
+
+  constructor(originalError: unknown, rollbackError: unknown) {
+    const origMsg = originalError instanceof Error ? originalError.message : String(originalError);
+    const rbMsg = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+    super(
+      `Transaction rollback FAILED after business error. ` +
+      `Original: ${origMsg}. Rollback error: ${rbMsg}. ` +
+      'Transaction state is unknown — check PG state and connection pool health immediately.',
+    );
+    this.name = 'TransactionRollbackFailedError';
+    this.originalError = originalError;
+    this.rollbackError = rollbackError;
   }
 }

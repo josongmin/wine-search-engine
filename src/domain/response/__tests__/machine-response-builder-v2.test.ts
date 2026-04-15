@@ -22,9 +22,7 @@ function makeComponentScores(overrides?: Partial<ComponentScores>): ComponentSco
     hardConstraintPass: true,
     softConstraint: 0.75,
     attributeAlignment: 0.70,
-    preferenceAlignment: 0.65,
     popularity: 0.50,
-    availability: 1.0,
     uncertaintyPenalty: 0.05,
     ...overrides,
   };
@@ -150,7 +148,7 @@ describe('buildMachineResponseV2', () => {
     expect(read(item!)).toBe(expected);
   });
 
-  it('serialises full ComponentScores object (all required numeric fields present)', () => {
+  it('serialises supported ComponentScores fields and omits unsupported ones', () => {
     const scores = makeComponentScores({ anchorSimilarity: 0.61 });
     const response = buildSingleResultResponse({ componentScores: scores });
     const cs = response.results[0]!.componentScores;
@@ -160,10 +158,10 @@ describe('buildMachineResponseV2', () => {
     expect(cs.hardConstraintPass).toBe(true);
     expect(cs.softConstraint).toBe(0.75);
     expect(cs.attributeAlignment).toBe(0.70);
-    expect(cs.preferenceAlignment).toBe(0.65);
     expect(cs.popularity).toBe(0.50);
-    expect(cs.availability).toBe(1.0);
     expect(cs.uncertaintyPenalty).toBe(0.05);
+    expect('preferenceAlignment' in cs).toBe(false);
+    expect('availability' in cs).toBe(false);
   });
 
   it('omits anchorSimilarity from componentScores when undefined', () => {

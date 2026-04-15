@@ -249,7 +249,7 @@ describe('E8: SearchResponseMetaSchema audit_extension field', () => {
   it('E8-11: schema accepts object with audit_extension present', () => {
     const metaPayload = {
       query_time_ms: 42,
-      route: 'entity_exact',
+      route: 'entity',
       version: '1.0.0',
       engine_schema_version: 'search_response_v1' as const,
       audit_extension: {
@@ -264,7 +264,7 @@ describe('E8: SearchResponseMetaSchema audit_extension field', () => {
   it('E8-11b: schema accepts object WITHOUT audit_extension (optional)', () => {
     const metaPayload = {
       query_time_ms: 42,
-      route: 'entity_exact',
+      route: 'entity',
       version: '1.0.0',
       engine_schema_version: 'search_response_v1' as const,
     };

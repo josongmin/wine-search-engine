@@ -2,6 +2,30 @@ import type { QueryLookupProvenance } from '../../query/model/query-lookup-prove
 import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
 
 /**
+ * Per-candidate structured trace capturing the resolver's internal
+ * score/calibration/boundary state at the moment each candidate was ranked.
+ *
+ * Attached to {@link ResolvedCandidate.trace} so that exact-route failures
+ * can be fully reproduced from a single request trace without access to logs.
+ */
+export interface ResolverCandidateTrace {
+  /** Raw score assigned by the candidate scorer (post-adjustment, post-blend). */
+  readonly score: number;
+
+  /** Calibrated confidence for this candidate in [0, 1]. */
+  readonly calibratedConfidence: number;
+
+  /** Boundary outcome: how the resolver classified this candidate. */
+  readonly boundaryDecision: 'singleton' | 'admitted' | 'rejected';
+
+  /** Human-readable reason for the admission gate outcome (present on rejected candidates). */
+  readonly admissionGateReason?: string | undefined;
+
+  /** Source provenance that produced this candidate. */
+  readonly matchSource: EntityCandidateSource;
+}
+
+/**
  * Query-side provenance attached to resolver traces for noisy lookup debugging.
  *
  * Extends {@link QueryLookupProvenance} with resolver-only score-adjustment detail.
@@ -50,11 +74,17 @@ export interface ResolverDecisionTrace {
   /** Calibrated probability for the top-1 candidate. */
   readonly top1CalibratedScore: number;
 
-  /** Calibrated probability for the top-2 candidate. */
-  readonly top2CalibratedScore: number;
+  /**
+   * Calibrated probability for the top-2 candidate, or undefined when
+   * no runner-up exists. C2: never 0-as-absence.
+   */
+  readonly top2CalibratedScore: number | undefined;
 
-  /** Gap between top-1 and top-2 calibrated scores. */
-  readonly calibratedGap: number;
+  /**
+   * Gap between top-1 and top-2 calibrated scores, or undefined when
+   * no runner-up exists (the gap is not meaningful for a singleton).
+   */
+  readonly calibratedGap: number | undefined;
 
   /** THE calibrated decision confidence C. */
   readonly decisionConfidenceC: number;

@@ -84,6 +84,43 @@ export class AnchorExtractor {
     queryViews?: NormalizedQueryViews,
   ): Promise<readonly AnchorCandidate[]> {
     const lookupQueries = queryViews?.lookupVariants ?? [normalizedQuery];
+    return this.extractFromLookupQueries(lookupQueries);
+  }
+
+  /**
+   * Extracts anchor candidates AND a relative/similarity query expression in
+   * a single pass.
+   *
+   * The existing {@link extract} method is unchanged; this method augments its
+   * output with structured relative-query information from
+   * {@link RelativeQueryExtractor}.
+   *
+   * @param normalizedQuery - Lowercased, accent-stripped query string.
+   * @param queryViews - Optional multi-view lookup variants.
+   * @returns An object with `anchors` and `relativeQuery` fields.
+   */
+  async extractWithRelative(
+    normalizedQuery: string,
+    queryViews?: NormalizedQueryViews,
+  ): Promise<AnchorExtractionWithRelative> {
+    const relativeQuery = this.relativeQueryExtractor.extract(normalizedQuery);
+    const lookupQueries = new Set<string>(queryViews?.lookupVariants ?? [normalizedQuery]);
+
+    for (const anchorSurface of relativeQuery?.relativeExpressions.map((expr) => expr.anchorSurfaceForm) ?? []) {
+      const trimmed = anchorSurface.trim();
+      if (trimmed.length > 0) {
+        lookupQueries.add(trimmed);
+      }
+    }
+
+    const anchors = await this.extractFromLookupQueries([...lookupQueries]);
+
+    return { anchors, relativeQuery };
+  }
+
+  private async extractFromLookupQueries(
+    lookupQueries: readonly string[],
+  ): Promise<readonly AnchorCandidate[]> {
     const aliasMatches = await this.lookupAliasMatches(lookupQueries);
 
     const candidates: AnchorCandidate[] = aliasMatches.map((match) => ({
@@ -109,30 +146,6 @@ export class AnchorExtractor {
     );
 
     return candidates;
-  }
-
-  /**
-   * Extracts anchor candidates AND a relative/similarity query expression in
-   * a single pass.
-   *
-   * The existing {@link extract} method is unchanged; this method augments its
-   * output with structured relative-query information from
-   * {@link RelativeQueryExtractor}.
-   *
-   * @param normalizedQuery - Lowercased, accent-stripped query string.
-   * @param queryViews - Optional multi-view lookup variants.
-   * @returns An object with `anchors` and `relativeQuery` fields.
-   */
-  async extractWithRelative(
-    normalizedQuery: string,
-    queryViews?: NormalizedQueryViews,
-  ): Promise<AnchorExtractionWithRelative> {
-    const [anchors, relativeQuery] = await Promise.all([
-      this.extract(normalizedQuery, queryViews),
-      Promise.resolve(this.relativeQueryExtractor.extract(normalizedQuery)),
-    ]);
-
-    return { anchors, relativeQuery };
   }
 
   private async lookupAliasMatches(

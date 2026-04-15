@@ -67,11 +67,14 @@ describe('silverToIndexable — hit projection fields', () => {
     expect(indexable.entityId.length).toBeGreaterThan('wine-ce-'.length + 8);
   });
 
-  it('uses benchmark gold slug when overlay matches canonical label + vintage', () => {
+  it('uses identity-hash entity id even when gold overlay matches (gold slug goes to benchmarkEntityId)', () => {
     const rec = makeEnrichedRecord();
     const gold = new Map<string, string>([[silverGoldMatchKey(rec), 'opus-one-2018']]);
     const indexable = silverToIndexable(rec, gold);
-    expect(indexable.entityId).toBe('opus-one-2018');
+    // resolveWineSnapshotEntity always returns the hash-based publicEntityId;
+    // the gold slug is stored in benchmarkEntityId on the resolution object,
+    // not propagated into silverToIndexable's entityId.
+    expect(indexable.entityId.startsWith('wine-ce-')).toBe(true);
   });
 
   it('maps canonicalLabel', () => {

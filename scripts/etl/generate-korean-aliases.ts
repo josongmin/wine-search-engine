@@ -326,8 +326,16 @@ async function run(): Promise<void> {
   console.log(`  Written to: ${args.output}`);
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+// Only execute when invoked directly as a CLI (not when imported by tests).
+// Without this guard, importing the module triggers run() and process.exit(1)
+// which vitest records as an unhandled rejection even when tests pass.
+import { fileURLToPath as _fileURLToPath } from 'node:url';
+const _invokedAsMain = process.argv[1] != null
+  && _fileURLToPath(import.meta.url) === process.argv[1];
+if (_invokedAsMain) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

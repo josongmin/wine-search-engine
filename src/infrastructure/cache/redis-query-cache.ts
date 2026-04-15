@@ -15,8 +15,15 @@ import type { QueryCachePort } from '../../domain/performance/port/query-cache.p
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
 import { RedisCache } from '../adapter/redis-cache.js';
-import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import {
+  cacheHit,
+  cacheMiss,
+  cacheCorruptEntry,
+  cacheInfraError,
+  type CacheGetResult,
+} from '../db/cache-result.js';
 
 /**
  * Lightweight Zod schema for cached SearchResponseV1 structural validation.
@@ -41,12 +48,6 @@ const SearchResponseCacheSchema = z.object({
 const STATS_KEY_HITS = 'cache:stats:query:hits';
 const STATS_KEY_MISSES = 'cache:stats:query:misses';
 
-const QUERY_STATS: GetValidatedStatsOptions = {
-  statsKeyHits: STATS_KEY_HITS,
-  statsKeyMisses: STATS_KEY_MISSES,
-  logComponent: 'RedisQueryCache',
-};
-
 /**
  * Redis query cache: Store complete search responses.
  *
@@ -70,13 +71,80 @@ export class RedisQueryCache implements QueryCachePort {
   }
 
   async get(cacheKey: QueryCacheKey): Promise<SearchResponseV1 | undefined> {
-    const result = await this.cache.getValidatedWithStats(
-      cacheKey.redisKey,
-      SearchResponseCacheSchema,
-      QUERY_STATS,
-    );
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- SearchResponseCacheSchema validates structural shape (engineDecision=object, results=array, meta=object) with passthrough; full type coverage is the serializer's responsibility
-    return (result as SearchResponseV1 | null) ?? undefined;
+    const diag = await this.getWithDiagnostics(cacheKey);
+    return diag.kind === 'hit' ? diag.value : undefined;
+  }
+
+  /**
+   * Wave 2 / Fix 1: surface typed CacheGetResult so the CacheService
+   * layer can branch on kind and emit distinct silent-skip counters.
+   *
+   * Branches:
+   *  - underlying RedisCache throws (infra) → infra_error
+   *  - schema validation fails → corrupt_entry
+   *  - redis null → miss
+   *  - valid payload → hit(value)
+   *
+   * The getValidatedWithStats helper already emits its own silent-skip
+   * counters at the low level; this method promotes the raw outcome to a
+   * typed result without duplicating that accounting.
+   */
+  async getWithDiagnostics(
+    cacheKey: QueryCacheKey,
+  ): Promise<CacheGetResult<SearchResponseV1>> {
+    // Raw pipeline (not delegating to getValidatedWithStats) so infra_error
+    // reaches the caller. getValidatedWithStats swallows redis throws and
+    // returns null — that is correct for the legacy "treat as miss" contract,
+    // but it collapses the typed union. We re-implement read → parse →
+    // validate → classify here and let the CacheService route on kind.
+    const redis = this.cache.redis;
+    let raw: string | null;
+    try {
+      raw = await redis.get(cacheKey.redisKey);
+    } catch (err) {
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: 'RedisQueryCache.getWithDiagnostics',
+        errorClass: err instanceof Error ? err.constructor.name : 'unknown',
+      });
+      log.error({ err, key: cacheKey.redisKey }, 'redis get error (infra_error)');
+      return cacheInfraError(err);
+    }
+    if (raw === null) {
+      void Promise.resolve(redis.incr(STATS_KEY_MISSES)).catch(() => { /* best-effort */ });
+      return cacheMiss();
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseErr) {
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: 'RedisQueryCache.getWithDiagnostics',
+        errorClass: 'corrupt_entry_json_parse',
+      });
+      log.warn(
+        { key: cacheKey.redisKey, reason: 'json_parse_error' },
+        'cache entry poisoned (invalid JSON); corrupt_entry',
+      );
+      void Promise.resolve(redis.del(cacheKey.redisKey)).catch(() => { /* best-effort */ });
+      void parseErr;
+      return cacheCorruptEntry('json_parse_error');
+    }
+    const result = SearchResponseCacheSchema.safeParse(parsed);
+    if (!result.success) {
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: 'RedisQueryCache.getWithDiagnostics',
+        errorClass: 'corrupt_entry_schema_mismatch',
+      });
+      log.warn(
+        { key: cacheKey.redisKey, issues: result.error.issues.slice(0, 3) },
+        'cache entry poisoned (schema mismatch); corrupt_entry',
+      );
+      void Promise.resolve(redis.del(cacheKey.redisKey)).catch(() => { /* best-effort */ });
+      return cacheCorruptEntry('schema_mismatch');
+    }
+    void Promise.resolve(redis.incr(STATS_KEY_HITS)).catch(() => { /* best-effort */ });
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- SearchResponseCacheSchema validates structural shape with passthrough
+    return cacheHit(result.data as unknown as SearchResponseV1);
   }
 
   async set(
@@ -178,7 +246,14 @@ export class RedisQueryCache implements QueryCachePort {
         entriesCount,
       };
     } catch (error) {
-      log.error({ err: error }, 'stats error');
+      // Wave 2: stats collection failure is an infra_error, NOT "zero activity".
+      // Returning all-zero makes dashboards silently read "cache idle" when in
+      // fact Redis INFO is unreachable. Count separately so ops can alert.
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: 'redis-query-cache.stats',
+        errorClass: error instanceof Error ? error.constructor.name : 'unknown',
+      });
+      log.error({ err: error }, 'stats error (infra_error; returning zero as fallback — verify via metrics)');
       return { hits: 0, misses: 0, size: 0, entriesCount: 0 };
     }
   }

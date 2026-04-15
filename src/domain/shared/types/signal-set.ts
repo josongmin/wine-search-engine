@@ -16,16 +16,16 @@ export interface SignalSet {
   readonly soft_constraint_score: number;
 
   /** Cosine or dot-product similarity from dense/semantic retrieval, in [0, 1]. */
-  readonly semantic_relevance_score: number;
+  readonly semantic_relevance_score?: number | undefined;
 
   /** Score reflecting alignment with user taste preferences, in [0, 1]. */
-  readonly preference_alignment_score: number;
+  readonly preference_alignment_score?: number | undefined;
 
   /** Popularity or trending score derived from external signals, in [0, 1]. */
-  readonly popularity_score: number;
+  readonly popularity_score?: number | undefined;
 
   /** Availability score (e.g. in-stock likelihood), in [0, 1]. */
-  readonly availability_score: number;
+  readonly availability_score?: number | undefined;
 
   /** Penalty applied for uncertainty in the resolution, in [0, 1]. Higher means more penalty. */
   readonly uncertainty_penalty: number;

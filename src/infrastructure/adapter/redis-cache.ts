@@ -2,6 +2,7 @@ import type { ZodType } from 'zod';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
 import type { RedisClient } from '../db/redis-client.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'RedisCache' });
 
@@ -73,12 +74,25 @@ export class RedisCache {
     }
     const result = schema.safeParse(parsed);
     if (!result.success) {
+      // Wave 2: corrupt_entry is distinct from miss. Count separately so
+      // ops dashboards can alert on schema drift or cache poisoning rates.
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: 'getValidated',
+        errorClass: 'corrupt_entry',
+      });
       log.warn(
         { key, issues: result.error.issues.slice(0, 3) },
-        'redis cache entry has unexpected shape; treating as miss',
+        'redis cache entry has unexpected shape (corrupt_entry); treating as miss',
       );
       // Best-effort: delete the poisoned entry so subsequent reads don't keep paying.
-      void this.client.del(key).catch(() => undefined);
+      // A failed delete is itself a cache_write_failure — record it so stale
+      // corrupt entries don't silently keep poisoning reads.
+      void this.client.del(key).catch((delErr: unknown) => {
+        globalSilentSkipCounter.increment('cache_write_failure', {
+          surface: 'getValidated.del_corrupt',
+          errorClass: delErr instanceof Error ? delErr.constructor.name : 'unknown',
+        });
+      });
       return null;
     }
     return result.data;
@@ -106,7 +120,13 @@ export class RedisCache {
     try {
       raw = await this.client.get(key);
     } catch (error) {
-      log.error({ err: error, component: stats.logComponent }, 'redis get error');
+      // Wave 2: infra_error is not a miss — record separately so ops alerts
+      // fire on Redis connectivity issues distinct from working-but-empty.
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: stats.logComponent,
+        errorClass: error instanceof Error ? error.constructor.name : 'unknown',
+      });
+      log.error({ err: error, component: stats.logComponent }, 'redis get error (infra_error)');
       await bestEffortIncr(this.client, stats.statsKeyMisses);
       return null;
     }
@@ -120,9 +140,13 @@ export class RedisCache {
     try {
       parsed = JSON.parse(raw);
     } catch {
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: stats.logComponent,
+        errorClass: 'corrupt_entry_json_parse',
+      });
       log.warn(
         { key, reason: 'json_parse_error', component: stats.logComponent },
-        'cache entry poisoned (invalid JSON); treating as miss',
+        'cache entry poisoned (invalid JSON, corrupt_entry); treating as miss',
       );
       await bestEffortIncr(this.client, stats.statsKeyMisses);
       await bestEffortDel(this.client, key);
@@ -131,9 +155,13 @@ export class RedisCache {
 
     const result = schema.safeParse(parsed);
     if (!result.success) {
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: stats.logComponent,
+        errorClass: 'corrupt_entry_schema_mismatch',
+      });
       log.warn(
         { key, issues: result.error.issues.slice(0, 3), component: stats.logComponent },
-        'cache entry poisoned (schema mismatch); treating as miss',
+        'cache entry poisoned (schema mismatch, corrupt_entry); treating as miss',
       );
       await bestEffortIncr(this.client, stats.statsKeyMisses);
       await bestEffortDel(this.client, key);

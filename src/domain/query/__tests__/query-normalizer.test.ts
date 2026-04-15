@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { QueryNormalizer } from '../service/query-normalizer.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 
 describe('QueryNormalizer', () => {
   const normalizer = new QueryNormalizer();
+
+  beforeEach(() => {
+    globalSilentSkipCounter.reset();
+  });
 
   it('builds multiple lookup views for noisy entity names', () => {
     const views = normalizer.normalize('  Opús-One 18!  ');
@@ -31,6 +36,21 @@ describe('QueryNormalizer', () => {
 
     expect(views.transliterated).toBe('moet chandon');
     expect(views.lookupVariants).toContain('moet chandon');
+  });
+
+  it('keeps empty queries empty across derived views', () => {
+    const views = normalizer.normalize('');
+
+    expect(views.strict).toBe('');
+    expect(views.accentless).toBe('');
+    expect(views.punctuationStripped).toBe('');
+    expect(views.compact).toBe('');
+    expect(views.vintageCanonicalized).toBe('');
+    expect(views.vintageStripped).toBe('');
+    expect(views.transliterated).toBeUndefined();
+    expect(views.phoneticNormalized).toBeUndefined();
+    expect(views.phoneticCompact).toBeUndefined();
+    expect(views.lookupVariants).toEqual([]);
   });
 
   it('adds phonetic compact for latin-script noisy lookup', () => {
@@ -113,6 +133,14 @@ describe('QueryNormalizer', () => {
 
     expect(views.transliterated).toBeDefined();
     expect(views.lookupVariants).toContain(views.transliterated);
+  });
+
+  it('counts Hangul transliteration coverage gaps instead of hiding empty fallback variants', () => {
+    const views = normalizer.normalize('한글미등록');
+
+    expect(views.transliterated).toBeUndefined();
+    expect(views.lookupVariants).not.toContain('');
+    expect(globalSilentSkipCounter.snapshot().query_transliteration_variant_absent).toBe(1);
   });
 
   it('vintage query: vintageCanonicalized differs from vintageStripped', () => {

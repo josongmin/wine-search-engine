@@ -44,6 +44,35 @@ const DOC_TYPE = 'wine_entity';
  *  for mTLS cloud endpoints; bump to 5-10 for self-hosted Vespa. */
 const BATCH_SIZE = 5;
 
+/**
+ * GRAPE_FAMILY_MAP — lookup table for multi-word grape variety → canonical family.
+ * Rule 27 (CLAUDE.md): "Nero d'Avola" → "Nero" and "Sauvignon Blanc" → "Sauvignon" are wrong.
+ * Use this map before falling back to split()[0] for single-word varieties.
+ */
+const GRAPE_FAMILY_MAP = new Map<string, string>([
+  // Multi-word varieties whose family is NOT the first word
+  ["nero d'avola", "Nero d'Avola"],
+  ['sauvignon blanc', 'Sauvignon Blanc'],
+  ['grüner veltliner', 'Grüner Veltliner'],
+  ['cabernet sauvignon', 'Cabernet Sauvignon'],
+  ['cabernet franc', 'Cabernet Franc'],
+  ['pinot noir', 'Pinot Noir'],
+  ['pinot grigio', 'Pinot Grigio'],
+  ['pinot gris', 'Pinot Gris'],
+  ['pinot blanc', 'Pinot Blanc'],
+  ['pinot meunier', 'Pinot Meunier'],
+  ['chenin blanc', 'Chenin Blanc'],
+  ['petite sirah', 'Petite Sirah'],
+  ['petit verdot', 'Petit Verdot'],
+  ['gamay noir', 'Gamay Noir'],
+  ['muscat blanc', 'Muscat Blanc'],
+  ['müller-thurgau', 'Müller-Thurgau'],
+  ['touriga nacional', 'Touriga Nacional'],
+  ['touriga franca', 'Touriga Franca'],
+  ['garnacha tinta', 'Garnacha Tinta'],
+  ['moscato bianco', 'Moscato Bianco'],
+]);
+
 function openAiBaseUrl(): string {
   return (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
 }
@@ -431,7 +460,10 @@ export function silverToIndexable(
   const style = deriveStyle(gold);
   const soilType = trimNonEmpty(rec.soilType);
   const producerType = trimNonEmpty(rec.producerType);
-  const grapeFamily = trimNonEmpty(rec.grapeFamily);
+  const grapeFamily = trimNonEmpty(rec.grapeFamily)
+    ?? (rec.grapePrimary != null
+      ? (GRAPE_FAMILY_MAP.get(rec.grapePrimary.toLowerCase()) ?? rec.grapePrimary.split(/\s+/)[0])
+      : undefined);
   const regionHierarchy = normalizeStringArray(rec.regionHierarchy);
   const occasion = normalizeStringArray(
     rec.occasionClassification?.values ?? rec.occasion,
@@ -767,14 +799,28 @@ async function feedPreparedVespaDocuments(
 
   const totalRecords = indexed + failures;
   const failureRate = totalRecords > 0 ? failures / totalRecords : 0;
+  // Wave 4 (fail-loud): a non-zero `maxFailureRate` lets a publish proceed
+  // with a partially-indexed snapshot. This is a real ops escape hatch but
+  // must NOT be used silently in production. Require an explicit
+  // env var `ETL_INDEX_PARTIAL_FAILURE_ACK=YES` from the operator.
   const maxFailureRate = options?.maxFailureRate ?? 0;
+  if (maxFailureRate > 0) {
+    const ack = process.env['ETL_INDEX_PARTIAL_FAILURE_ACK'];
+    if (ack !== 'YES') {
+      console.error(
+        `\n  REFUSING to apply maxFailureRate=${maxFailureRate} (>0) without operator ack. ` +
+        `Set ETL_INDEX_PARTIAL_FAILURE_ACK=YES to acknowledge that an incomplete snapshot will be published.`,
+      );
+      process.exit(1);
+    }
+  }
   console.log(`\n  Done: ${indexed} indexed, ${failures} failed (${(failureRate * 100).toFixed(1)}%)`);
   if (failureRate > maxFailureRate) {
     console.error(`  Failure rate ${(failureRate * 100).toFixed(1)}% exceeds ${maxFailureRate * 100}% threshold`);
     process.exit(1);
   }
   if (failures > 0 && maxFailureRate > 0) {
-    console.warn(`  ${failures} documents failed but within tolerance — proceeding`);
+    console.warn(`  ${failures} documents failed but within tolerance — proceeding (ETL_INDEX_PARTIAL_FAILURE_ACK=YES)`);
   }
 }
 

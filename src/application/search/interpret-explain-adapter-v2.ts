@@ -102,16 +102,14 @@ function deriveAppliedConstraints(
  * Derive the confidence value from the observability slice.
  *
  * The slice carries `overallUncertainty` in [0, 1] where higher means more
- * uncertain. We map this to a confidence value: confidence = 1 − uncertainty,
- * falling back to a neutral mid-point if the value is not finite.
+ * uncertain. We map this to a confidence value: confidence = 1 − uncertainty.
+ * Invalid/non-finite inputs are omitted rather than masked with a midpoint.
  */
-const NEUTRAL_CONFIDENCE_WHEN_UNCERTAINTY_INVALID = 0.5;
-
-function deriveConfidence(slice: QueryObservabilitySlice): number {
+function deriveConfidence(slice: QueryObservabilitySlice): number | undefined {
   const raw = 1 - slice.overallUncertainty;
   return Number.isFinite(raw)
     ? clamp01(raw)
-    : NEUTRAL_CONFIDENCE_WHEN_UNCERTAINTY_INVALID;
+    : undefined;
 }
 
 /**
@@ -139,6 +137,7 @@ export function buildInterpretResponseV2(input: ExplainAdapterV2Input): Interpre
     strategyValue !== undefined && strategyValue !== 'none';
 
   const canonicalActiveChannels = preferCanonicalRetrievalChannelLabels(activeChannels);
+  const confidence = deriveConfidence(observabilitySlice);
 
   // Ranking signals — fixed baseline, extended with anchor signal when active
   const hasAnchorChannel = canonicalActiveChannels.some(isAnchorChannel);
@@ -157,7 +156,9 @@ export function buildInterpretResponseV2(input: ExplainAdapterV2Input): Interpre
     activeChannels: canonicalActiveChannels,
     appliedConstraints: deriveAppliedConstraints(observabilitySlice, hardConstraints, softConstraints),
     rankingSignals,
-    confidence: deriveConfidence(observabilitySlice),
+    ...(confidence !== undefined
+      ? { confidence }
+      : {}),
     version: '2',
     responseType: 'interpret',
   };

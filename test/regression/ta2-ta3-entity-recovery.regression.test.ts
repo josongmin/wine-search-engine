@@ -78,7 +78,7 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
       anchors: [],
       // blockerOnlyIds 없음
     };
-    const result = await buildResolverCandidatesFromGenerator(input, { getDocument: async () => null });
+    const result = await buildResolverCandidatesFromGenerator(input, { getDocument: async () => null, getDocuments: async () => new Map() });
     const blockerSeeds = result.filter((c) => c.source === 'blocker_seed');
     expect(blockerSeeds).toHaveLength(0);
   });
@@ -96,6 +96,7 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
     };
     const result = await buildResolverCandidatesFromGenerator(input, {
       getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Opus One' }),
+      getDocuments: async (ids) => { const m = new Map(); for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One' }); return m; },
     });
     expect(result).toHaveLength(1);
     expect(result[0]?.source).toBe('blocker_seed');
@@ -116,8 +117,10 @@ describe('EntityCandidateGeneratorInput (TA2-1)', () => {
       anchors: [makeAnchor({ candidateEntityIds: [entityId] })],
       preloadedDocs,
     };
-    await buildResolverCandidatesFromGenerator(input, { getDocument });
+    const getDocuments = vi.fn(async () => new Map());
+    await buildResolverCandidatesFromGenerator(input, { getDocument, getDocuments });
     expect(getDocument).not.toHaveBeenCalled();
+    expect(getDocuments).not.toHaveBeenCalled();
   });
 });
 
@@ -138,6 +141,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
     };
     const result = await buildResolverCandidatesFromGenerator(input, {
       getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Test' }),
+      getDocuments: async (ids) => { const m = new Map(); for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Test' }); return m; },
     });
     expect(result[0]?.source).toBe('blocker_seed');
   });
@@ -159,6 +163,7 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
     };
     const result = await buildResolverCandidatesFromGenerator(input, {
       getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Wine' }),
+      getDocuments: async (ids) => { const m = new Map(); for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Wine' }); return m; },
     });
     const aliasCandidate = result.find((c) => String(c.entityId) === String(idA));
     const heuristicCandidate = result.find((c) => String(c.entityId) === String(idB));
@@ -187,6 +192,15 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
         String(id) === String(existingId)
           ? { entityId: id, entityType: 'wine', canonicalLabel: 'Exists' }
           : null,
+      getDocuments: async (ids) => {
+        const m = new Map();
+        for (const id of ids) {
+          if (String(id) === String(existingId)) {
+            m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Exists' });
+          }
+        }
+        return m;
+      },
     })).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
     });
@@ -224,7 +238,7 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       anchors: [],
     };
     // entityLookup provided but no IDs to look up
-    const fakeLookup = { getDocument: async () => null };
+    const fakeLookup = { getDocument: async () => null, getDocuments: async () => new Map() };
     const result = await buildResolverCandidatesFromGenerator(input, fakeLookup);
     expect(result).toHaveLength(0);
   });
@@ -247,6 +261,11 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
         entityType: 'wine',
         canonicalLabel: 'Opus One 2019',
       }),
+      getDocuments: async (ids: readonly string[]) => {
+        const m = new Map();
+        for (const id of ids) m.set(id, { entityId: id, entityType: 'wine', canonicalLabel: 'Opus One 2019' });
+        return m;
+      },
     };
     const result = await buildResolverCandidatesFromGenerator(
       input,
@@ -500,6 +519,12 @@ describe('shouldTriggerCorrectiveRetry (TA3-1)', () => {
     expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
   });
 
+  it('missing confidence: remains retry-eligible without collapsing absence into 0', () => {
+    const plan = makePlan({ anchors: [makeAnchor()] });
+    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: undefined });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
+  });
+
   // T6: resolver now emits corrective_retry as recommendedNextAction — honour it
   it("returns true when resolver explicitly recommends corrective_retry (T6)", () => {
     // High-confidence plan with anchors — would not trigger via C1/C2 conditions alone
@@ -560,6 +585,11 @@ describe('resolveCorrectiveRetryOutcome (TA3-2)', () => {
 
   it('NaN confidence: treated as below threshold → clarify', () => {
     const result = makeResolveResult({ status: 'failed', decisionConfidenceC: NaN });
+    expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
+  });
+
+  it('missing confidence: clarify after retry rather than accepting synthetic certainty', () => {
+    const result = makeResolveResult({ status: 'failed', decisionConfidenceC: undefined });
     expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
   });
 });
@@ -764,11 +794,20 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
   // ── helper: minimal entity lookup ──────────────────────────────────────────
   function makeEntityLookup(entries: Array<[string, string]>): EntityDocumentLookupPort {
     const map = new Map(entries);
+    const singleFetch = async (id: unknown) => {
+      const label = map.get(String(id));
+      if (label == null) return null;
+      return { entityId: id, entityType: 'wine' as const, canonicalLabel: label };
+    };
     return {
-      getDocument: async (id) => {
-        const label = map.get(String(id));
-        if (label == null) return null;
-        return { entityId: id, entityType: 'wine', canonicalLabel: label };
+      getDocument: singleFetch,
+      getDocuments: async (ids: readonly unknown[]) => {
+        const result = new Map();
+        for (const id of ids) {
+          const doc = await singleFetch(id);
+          if (doc != null) result.set(id, doc);
+        }
+        return result;
       },
     };
   }
@@ -1083,7 +1122,7 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
   it('P0-2-N: preloadedDocs cache — entity lookup not called for cached IDs', async () => {
     const id = createEntityId('cached-wine');
     const getDocumentSpy = vi.fn().mockResolvedValue(null); // spy returns null for all
-    const lookup: EntityDocumentLookupPort = { getDocument: getDocumentSpy };
+    const lookup: EntityDocumentLookupPort = { getDocument: getDocumentSpy, getDocuments: vi.fn(async () => new Map()) };
 
     const preloadedDocs: ReadonlyMap<string, { entityId: unknown; entityType: string; canonicalLabel: string }> =
       new Map([['cached-wine', { entityId: id, entityType: 'wine', canonicalLabel: 'Cached Wine' }]]);

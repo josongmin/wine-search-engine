@@ -173,6 +173,36 @@ describe('Intent Detection — SOTA++ Improvements', () => {
       const plan = await planner.plan('오푸스원 말고 다른 와인');
       expect(plan.intent).toBe('mixed_query');
     });
+
+    it('should detect mixed_query for English "like X" relative-anchor queries', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['sassicaia', makeMatchResult('Sassicaia', 0.93)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('wines like Sassicaia');
+      expect(plan.intent).toBe('mixed_query');
+    });
+
+    it('should detect mixed_query for English comparative relative-anchor queries', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['opus one', makeMatchResult('Opus One', 0.93)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('wines cheaper than Opus One');
+      expect(plan.intent).toBe('mixed_query');
+    });
+
+    it('should detect mixed_query for structured relative-anchor queries even below generic anchor-present confidence', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['sassicaia', makeMatchResult('Sassicaia', 0.42)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('wines like Sassicaia');
+      expect(plan.intent).toBe('mixed_query');
+    });
   });
 
   describe('Constraint keywords without anchors', () => {

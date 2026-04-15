@@ -81,7 +81,24 @@ function ResultsContent() {
 
   if (!data) return null;
 
+  // T-E9-01: Union-safe discriminant check before accessing response fields.
+  // Guard against future response union types (e.g. AgentExecuteResponse)
+  // by verifying query_type before accessing search-specific fields.
+  if (data.query_type !== 'search') return null;
+
   const isComparison = data.result_type === 'comparison';
+
+  if (isComparison && data.results.length < 2) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-32 text-center" role="alert">
+        <AlertTriangle className="h-12 w-12 text-red-400/60" />
+        <div className="space-y-1">
+          <p className="font-medium text-foreground">비교 결과 형식이 올바르지 않습니다</p>
+          <p className="text-sm text-muted-foreground">비교 응답이 불완전해서 표시를 중단했습니다.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="animate-fade-in">
@@ -98,7 +115,7 @@ function ResultsContent() {
         </div>
       )}
 
-      {isComparison && data.results.length >= 2 ? (
+      {isComparison ? (
         <div className="px-4 pb-36">
           <ComparisonTable items={data.results} />
         </div>

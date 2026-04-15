@@ -9,6 +9,20 @@ export type EvidenceStrength = 'low' | 'medium' | 'high';
 export type MatchType = 'exact' | 'alias_exact' | 'alias_fuzzy' | 'semantic' | 'hybrid';
 export type DrinkingWindowConfidence = 'high' | 'medium' | 'low';
 export type ExecutionMode = 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+export type QueryRoute = 'entity' | 'hybrid' | 'mixed';
+export type RetrievalMode =
+  | 'entity_lookup'
+  | 'entity_resolution'
+  | 'attribute_search'
+  | 'constraint_filter'
+  | 'producer_browse'
+  | 'region_browse'
+  | 'compare_candidates'
+  | 'recommendation'
+  | 'similar_items'
+  | 'no_match_detection';
+export type RetrievalModeSource = 'planner' | 'api_override';
+export type SpecializedRoute = 'producer_browse' | 'region_browse' | 'compare_candidates';
 
 export type ResultType =
   | 'single_entity'
@@ -43,31 +57,53 @@ export interface SearchRequest {
     rerank_limit?: number;
   };
   options?: {
-    mode?: 'auto' | 'entity' | 'hybrid' | 'mixed';
+    mode?: 'auto' | QueryRoute;
     explain?: boolean;
     clarification?: boolean;
   };
-  retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed';
+  retrieval_mode?: 'auto' | QueryRoute;
 }
 
 // ── Search Response ──
 
-export interface SearchResponse {
+export interface SearchResponseV1 {
   query_type: 'search';
   engine_decision: EngineDecision;
   results: readonly ResultItem[];
   counterfactuals?: readonly CounterfactualReject[];
   clarification?: ClarificationPayload | null;
   meta: ResponseMeta;
-  retrieval_mode?: string;
+  retrieval_mode?: RetrievalMode;
   result_type?: ResultType;
   parsed_constraints?: ParsedConstraints;
 }
 
+export interface ComparisonEntity {
+  sub_query: string;
+  top_result: ResultItem | null;
+  result_count: number;
+  resolution_status: DecisionStatus;
+  all_results: readonly ResultItem[];
+}
+
+export interface ComparisonSearchResponse {
+  query_type: 'comparison';
+  original_query: string;
+  comparison_intent: 'compare' | 'recommend_one' | 'list_both';
+  entities: readonly [ComparisonEntity, ComparisonEntity];
+  overall_status: DecisionStatus;
+  request_id: string;
+  execution_time_ms: number;
+  authority_trace_ref?: string;
+  runtime_correlation_ref?: string;
+}
+
+export type SearchResponse = SearchResponseV1 | ComparisonSearchResponse;
+
 export interface EngineDecision {
   decision_status: DecisionStatus;
   next_action: NextAction;
-  route: string;
+  route: QueryRoute;
   decision_confidence: number;
   confidence_semantics: string;
   decision_trace_ref: string;
@@ -78,8 +114,8 @@ export interface EngineDecision {
   decision_snapshot: DecisionSnapshot;
   failure_reason?: string;
   abstain_reason?: string;
-  retrieval_mode_source?: 'planner' | 'api_override';
-  planner_suggested_mode?: string;
+  retrieval_mode_source?: RetrievalModeSource;
+  planner_suggested_mode?: RetrievalMode;
 }
 
 export interface DecisionSnapshot {
@@ -126,7 +162,7 @@ export interface MatchDetail {
     semantic: number;
     attribute: number;
     popularity: number;
-    preference_alignment: number;
+    preference_alignment?: number;
   };
 }
 
@@ -137,7 +173,7 @@ export interface ConstraintEvaluation {
 }
 
 export interface UncertaintyBlock {
-  uncertainty_confidence: number;
+  uncertainty_confidence?: number;
   missing_info: readonly string[];
   approximation_used: boolean;
   ambiguity_flags?: readonly string[];
@@ -184,22 +220,22 @@ export interface CounterfactualReject {
 export interface ResponseMeta {
   request_id?: string;
   query_time_ms: number;
-  route: string;
+  route: QueryRoute;
   version: string;
   engine_schema_version: string;
   decision_snapshot?: DecisionSnapshot;
   execution_mode?: ExecutionMode;
   execution_contract?: {
-    effective_retrieval_mode: string;
-    retrieval_mode_source: 'planner' | 'api_override';
-    planner_suggested_mode: string;
+    effective_retrieval_mode: RetrievalMode;
+    retrieval_mode_source: RetrievalModeSource;
+    planner_suggested_mode: RetrievalMode;
     retrieval_kind:
       | 'entity_lookup'
       | 'generic_hybrid'
       | 'specialized_hybrid'
       | 'mixed_similarity';
     sparse_executed: boolean;
-    specialized_route_executed?: 'producer_browse' | 'region_browse' | 'compare_candidates' | null;
+    specialized_route_executed?: SpecializedRoute | null;
     used_compiled_execution: boolean;
     budget?: {
       max_candidates: number;
@@ -236,6 +272,62 @@ export interface ResponseMeta {
       };
       missing: Array<'identity_evidence' | 'constraint_evidence' | 'anchor_evidence'>;
       satisfied: boolean;
+    };
+    admission_closure?: {
+      required: {
+        identity_seal: boolean;
+        constraint_evidence: boolean;
+        anchor_evidence: boolean;
+      };
+      satisfied: {
+        identity_seal: boolean;
+        constraint_evidence: boolean;
+        anchor_evidence: boolean;
+      };
+      all_satisfied: boolean;
+    };
+  };
+  provenance_trace?: {
+    policy: {
+      require_identity_seal: boolean;
+      require_constraint_evidence: boolean;
+      require_anchor_evidence: boolean;
+    };
+    observed: {
+      top_entity_present: boolean;
+      pre_rank: {
+        candidate_count: number;
+        identity_evidence_satisfied: boolean;
+        constraint_evidence_satisfied: boolean;
+        anchor_evidence_satisfied: boolean;
+        matched_constraint_attributes: string[];
+        unmet_constraint_attributes: string[];
+        anchor_signal_types: string[];
+      };
+      post_rank: {
+        candidate_count: number;
+        identity_evidence_satisfied: boolean;
+        constraint_evidence_satisfied: boolean;
+        anchor_evidence_satisfied: boolean;
+        matched_constraint_attributes: string[];
+        unmet_constraint_attributes: string[];
+        anchor_signal_types: string[];
+      };
+    };
+    missing: Array<'identity_evidence' | 'constraint_evidence' | 'anchor_evidence'>;
+    shortfalls: string[];
+    gate_decisions: {
+      admission:
+        | 'admission_gate_passed'
+        | 'admission_gate_rejected'
+        | 'admission_gate_not_applicable';
+      decision:
+        | 'decision_gate_resolved'
+        | 'decision_gate_ambiguous'
+        | 'decision_gate_failed';
+      decision_status: DecisionStatus;
+      next_action: NextAction;
+      failure_reason?: string;
     };
     admission_closure?: {
       required: {

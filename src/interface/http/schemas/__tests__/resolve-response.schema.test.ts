@@ -42,6 +42,25 @@ describe('ResolveResponseSchema', () => {
     }
   });
 
+  it('accepts canonical resolver candidate trace on V1 candidates', () => {
+    const parsed = ResolveResponseSchema.safeParse({
+      ...makeValidResolveResponse(),
+      candidates: [
+        {
+          ...makeValidResolveResponse().candidates[0],
+          trace: {
+            score: 0.981,
+            calibrated_confidence: 0.97,
+            boundary_decision: 'singleton',
+            match_source: 'alias',
+          },
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it('rejects V2 envelope fields on the V1 resolve contract', () => {
     const parsed = ResolveResponseSchema.safeParse({
       ...makeValidResolveResponse(),

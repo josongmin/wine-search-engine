@@ -6,6 +6,7 @@ import type { AgentStep, AgentTerminationReason } from './agent-step.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { SynthesisContext, ToolOutcome } from '../../../application/agent/tool-outcome.js';
 import type { AuditExtension } from '../../audit/model/audit-extension.js';
+import type { ToolCallEvidenceFrame } from './tool-call-evidence-frame.js';
 
 export interface AgentResult {
   readonly answer: string;
@@ -36,4 +37,14 @@ export interface AgentResult {
    * Uses the canonical AuditExtension fallback_trace shape as SSOT.
    */
   readonly fallbackTrace?: AuditExtension['fallback_trace'] | undefined;
+
+  /**
+   * ADR-009 Phase 0: flat aggregate of every evidence frame emitted across
+   * the run, in tool-call order. Enables bench harness + evaluator to consume
+   * typed structured outputs directly without walking step records.
+   *
+   * Absent when feature flag `EVIDENCE_FRAME_EMIT` is off. Present but empty
+   * when the agent produced zero tool calls.
+   */
+  readonly evidenceFrames?: readonly ToolCallEvidenceFrame[] | undefined;
 }

@@ -404,8 +404,8 @@ describe('HybridUseCase', () => {
     const responseBuilder = createResponseBuilder();
     const cacheService = {
       getSearchResponse: vi.fn().mockResolvedValue({
-        hit: true,
-        data: cachedResponse,
+        kind: 'hit',
+        value: cachedResponse,
       }),
       setSearchResponse: vi.fn(),
     };
@@ -505,6 +505,13 @@ describe('HybridUseCase', () => {
     };
     const entityLookup = {
       getDocument: vi.fn().mockResolvedValue(createAnchorDocument(anchorEntityId)),
+      getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+        const map = new Map();
+        for (const id of ids) {
+          map.set(id, createAnchorDocument(anchorEntityId));
+        }
+        return map;
+      }),
     };
     const entityResolver = {
       resolve: vi.fn().mockResolvedValue(createResolvedResolverResult(plan, anchorEntityId)),
@@ -547,6 +554,13 @@ describe('HybridUseCase', () => {
     };
     const entityLookup = {
       getDocument: vi.fn().mockResolvedValue(createAnchorDocument(anchorEntityId)),
+      getDocuments: vi.fn(async (ids: readonly unknown[]) => {
+        const map = new Map();
+        for (const id of ids) {
+          map.set(id, createAnchorDocument(anchorEntityId));
+        }
+        return map;
+      }),
     };
     const entityResolver = {
       resolve: vi.fn().mockResolvedValue(createResolvedResolverResult(plan, anchorEntityId)),

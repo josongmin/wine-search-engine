@@ -20,8 +20,13 @@ export function buildRankedRouteResolveResult(
 ): EntityResolveResult {
   const topResult = rankedResults[0];
   const top1Score = clamp01(rankedResults[0]?.finalScore ?? 0);
-  const top2Score = clamp01(rankedResults[1]?.finalScore ?? 0);
-  const calibratedGap = Math.max(0, top1Score - top2Score);
+  const top2Result = rankedResults[1];
+  const top2Score = top2Result !== undefined
+    ? clamp01(top2Result.finalScore)
+    : undefined;
+  const calibratedGap = top2Score !== undefined
+    ? Math.max(0, top1Score - top2Score)
+    : undefined;
   const topEntity = options.topEntity
     ?? (topResult !== undefined
       ? {

@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import { AUTHORITY_TRACE_SCHEMA_VERSION } from '../model/id-schema-version.js';
@@ -11,14 +12,14 @@ export function buildAuthorityTraceRef(input: {
   decisionStatus: string;
   nextAction: string;
   failureReason?: FailureReason;
-  retrievalMode?: string;
+  retrievalMode: string;
   retrievalKind?: string;
-  route?: string;
+  route: QueryRoute;
 }): string {
   const digest = deterministicHash({
     queryClass: input.queryPlan.queryClass,
-    route: input.route ?? input.queryPlan.route,
-    retrievalMode: input.retrievalMode ?? input.queryPlan.retrievalMode,
+    route: input.route,
+    retrievalMode: input.retrievalMode,
     retrievalKind: input.retrievalKind ?? '',
     threshold_profile_id: input.snapshot.threshold_profile_id,
     planner_version: input.snapshot.planner_version,
@@ -36,14 +37,14 @@ export function buildAdmissionAuthorityTraceRef(input: {
   queryPlan: QueryPlanV1;
   snapshot: DecisionSnapshot;
   reason: FailureReason;
-  retrievalMode?: string;
+  retrievalMode: string;
   retrievalKind?: string;
-  route?: string;
+  route: QueryRoute;
 }): string {
   const digest = deterministicHash({
     queryClass: input.queryPlan.queryClass,
-    route: input.route ?? input.queryPlan.route,
-    retrievalMode: input.retrievalMode ?? input.queryPlan.retrievalMode,
+    route: input.route,
+    retrievalMode: input.retrievalMode,
     retrievalKind: input.retrievalKind ?? '',
     threshold_profile_id: input.snapshot.threshold_profile_id,
     planner_version: input.snapshot.planner_version,

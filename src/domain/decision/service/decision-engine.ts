@@ -12,6 +12,8 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import { isCorruptedSnapshot } from '../../shared/types/index.js';
 import { isLegacyRequireClarificationHardGate } from '../../query/model/query-policy.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE, computeDynamicGapThreshold } from '../../query/model/threshold-profile.js';
@@ -25,6 +27,8 @@ import { identityHash } from '../../shared/utils/hash.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { buildAuthorityTraceRef } from './authority-trace.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import type { EvidenceItem } from '../../shared/types/evidence-item.js';
 
 /**
  * Internal intermediate state used during decision processing.
@@ -41,6 +45,17 @@ const NOISY_SHORT_QUERY_STRATEGIES = new Set([
   'fuzzy_char_ngram',
   'transliterated_fuzzy',
 ]);
+
+function requireDecisionEvidenceItems(input: DecisionInput): readonly EvidenceItem[] {
+  if (input.evidenceItems === undefined) {
+    globalSilentSkipCounter.increment('decision_evidence_items_absent', {
+      queryClass: input.queryPlan.queryClass,
+      route: input.queryPlan.route,
+    });
+    return [];
+  }
+  return input.evidenceItems;
+}
 const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
@@ -66,6 +81,20 @@ const EXPLORATORY_RETRIEVAL_MODES = new Set([
 
 function isExploratoryRetrievalMode(mode: string | undefined): boolean {
   return mode !== undefined && EXPLORATORY_RETRIEVAL_MODES.has(mode);
+}
+
+function requireEffectiveRetrievalMode(input: DecisionInput): ExecutionRetrievalMode {
+  if (input.effectiveRetrievalMode === undefined) {
+    throw new Error('DecisionInput.effectiveRetrievalMode is required for compiled-only execution');
+  }
+  return input.effectiveRetrievalMode;
+}
+
+function requireEffectiveRoute(input: DecisionInput): QueryRoute {
+  if (input.effectiveRoute === undefined) {
+    throw new Error('DecisionInput.effectiveRoute is required for compiled-only execution');
+  }
+  return input.effectiveRoute;
 }
 
 /**
@@ -138,10 +167,8 @@ export class DecisionEngine {
         nextAction: 'fail',
         inputs: {
           queryClass: input.queryPlan.queryClass,
-          effectiveRoute: input.effectiveRoute ?? input.queryPlan.route,
-          ...(input.effectiveRetrievalMode !== undefined
-            ? { effectiveRetrievalMode: input.effectiveRetrievalMode }
-            : {}),
+          effectiveRoute: requireEffectiveRoute(input),
+          effectiveRetrievalMode: requireEffectiveRetrievalMode(input),
           ...(input.retrievalKind !== undefined
             ? { retrievalKind: input.retrievalKind }
             : {}),
@@ -152,7 +179,7 @@ export class DecisionEngine {
             fallbackMode: input.policy.fallbackMode,
           },
         },
-        signals: { decisionConfidence: 0, calibratedGap: 0, ambiguity: false },
+        signals: { decisionConfidence: 0, calibratedGap: undefined, ambiguity: false },
         thresholds: { resolveThreshold: 0, gapThreshold: 0 },
         versions: {
           plannerVersion: input.queryPlan.plannerVersion,
@@ -178,7 +205,7 @@ export class DecisionEngine {
           availability_score: 0,
           uncertainty_penalty: 0,
         },
-        evidenceItems: input.evidenceItems ?? [],
+        evidenceItems: requireDecisionEvidenceItems(input),
         decisionTraceRef: 'corrupted_snapshot',
         decisionSnapshot: snapshot,
         decisionTrace: failedTrace,
@@ -402,7 +429,11 @@ export class DecisionEngine {
     // Without this, NaN flows through gates (NaN >= x is false), the response
     // ships with literal "NaN" in the finalReason text, and operators see
     // misleading "low confidence" failures instead of the real upstream defect.
-    if (!Number.isFinite(C) || !Number.isFinite(delta)) {
+    //
+    // C2 (fail-loud): `delta === undefined` is a legitimate singleton state,
+    // NOT an upstream defect. Non-finite (NaN/Infinity) on a PRESENT delta IS
+    // a defect and must fail closed.
+    if (!Number.isFinite(C) || (delta !== undefined && !Number.isFinite(delta))) {
       rulesApplied.push('NUMERIC_GATE_NONFINITE');
       bootstrapLogger.error(
         {
@@ -443,7 +474,11 @@ export class DecisionEngine {
     // loadThresholds() via computeDynamicGapThreshold(). Using it directly
     // avoids a redundant computation with identical arguments (Rule 30: SSoT).
     const effectiveGapTau = thresholds.gapTau;
-    const gapMeetsThreshold = delta >= effectiveGapTau;
+    // C2 (fail-loud): a singleton has no meaningful gap. Treat gap as
+    // "not applicable" (==true) rather than silently reading `0 < gapTau`
+    // and forcing ambiguous.
+    const gapMeetsThreshold = delta === undefined ? true : delta >= effectiveGapTau;
+    const deltaForLog = delta === undefined ? 'n/a' : delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES);
 
     // Gate 1: Full resolution (conformal set size blocks resolution per §6.2)
     if (cMeetsThreshold && gapMeetsThreshold && !A && conformalSetSize < 2) {
@@ -452,7 +487,7 @@ export class DecisionEngine {
         status: 'resolved',
         nextAction: 'return_result',
         rulesApplied: [...rulesApplied],
-        finalReason: `Calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, no ambiguity.`,
+        finalReason: `Calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}, gap=${deltaForLog} >= T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, no ambiguity.`,
       };
     }
 
@@ -472,7 +507,7 @@ export class DecisionEngine {
         rulesApplied.push('AMBIGUITY_DETECTED');
       }
       if (!gapMeetsThreshold) {
-        reasons.push(`gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}`);
+        reasons.push(`gap=${deltaForLog} < T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}`);
         rulesApplied.push('GAP_BELOW_THRESHOLD');
       }
       return {
@@ -568,7 +603,7 @@ export class DecisionEngine {
     state: DecisionState,
     rulesApplied: string[],
   ): DecisionState {
-    const effectiveRetrievalMode = input.effectiveRetrievalMode ?? input.queryPlan.retrievalMode;
+    const effectiveRetrievalMode = requireEffectiveRetrievalMode(input);
 
     // require_exact: if resolved but the richer identity trail does not
     // support an exact match, downgrade
@@ -650,9 +685,14 @@ export class DecisionEngine {
 
     const resolverTrace = input.resolverResult.decisionTrace;
     const requiredGap = Math.max(dynamicGapThreshold, NOISY_SHORT_QUERY_GAP_FLOOR);
+    // C2 (fail-loud): singleton → no runner-up → no gap. A singleton on a
+    // noisy short query can still bypass the guard via high confidence,
+    // but we never synthesize a "gap=0" to silently fail the margin check.
+    const gap = resolverTrace.calibratedGap;
+    const gapBypass = gap !== undefined && gap >= requiredGap;
     if (
       resolverTrace.decisionConfidenceC >= NOISY_SHORT_QUERY_CONFIDENCE_FLOOR &&
-      resolverTrace.calibratedGap >= requiredGap
+      (gap === undefined /* singleton */ || gapBypass)
     ) {
       rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE');
       return state;
@@ -660,13 +700,14 @@ export class DecisionEngine {
 
     rulesApplied.push('NOISY_SHORT_QUERY_GUARD');
     rulesApplied.push('NOISY_LOOKUP_STRATEGY_DETECTED');
+    const gapLog = gap === undefined ? 'n/a' : gap.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES);
     return {
       status: 'ambiguous',
       nextAction: 'clarify',
       rulesApplied: [...rulesApplied],
       finalReason:
         `Short query used noisy lookup strategy (${strategies.join(', ')}) without enough margin ` +
-        `(C=${resolverTrace.decisionConfidenceC.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, gap=${resolverTrace.calibratedGap.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}).`,
+        `(C=${resolverTrace.decisionConfidenceC.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, gap=${gapLog}).`,
     };
   }
 
@@ -772,10 +813,8 @@ export class DecisionEngine {
       nextAction: state.nextAction,
       inputs: {
         queryClass: input.queryPlan.queryClass,
-        effectiveRoute: input.effectiveRoute ?? input.queryPlan.route,
-        ...(input.effectiveRetrievalMode !== undefined
-          ? { effectiveRetrievalMode: input.effectiveRetrievalMode }
-          : {}),
+        effectiveRoute: requireEffectiveRoute(input),
+        effectiveRetrievalMode: requireEffectiveRetrievalMode(input),
         ...(input.retrievalKind !== undefined
           ? { retrievalKind: input.retrievalKind }
           : {}),
@@ -845,16 +884,12 @@ export class DecisionEngine {
         : {}),
       candidates: input.resolverResult.candidates,
       signalSet,
-      evidenceItems: input.evidenceItems ?? [],
+      evidenceItems: requireDecisionEvidenceItems(input),
       decisionTraceRef: buildAuthorityTraceRef({
         queryPlan: input.queryPlan,
         snapshot,
-        ...(input.effectiveRoute !== undefined
-          ? { route: input.effectiveRoute }
-          : {}),
-        ...(input.effectiveRetrievalMode !== undefined
-          ? { retrievalMode: input.effectiveRetrievalMode }
-          : {}),
+        route: requireEffectiveRoute(input),
+        retrievalMode: requireEffectiveRetrievalMode(input),
         ...(input.retrievalKind !== undefined
           ? { retrievalKind: input.retrievalKind }
           : {}),

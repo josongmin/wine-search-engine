@@ -6,12 +6,46 @@
     "query": "Opus One 2018",
     "options": {
       "mode": "entity",
-      "explain": false,
+      "explain": true,
       "clarification": false
     }
   },
   "expected": {
     "execution_mode": "authoritative",
-    "degradation_reasons": []
+    "degradation_reasons": [],
+    "golden_trace": {
+      "authority_trace_ref": "decision:v1:short_entity:1c58bb68a876413ed82e8402ee0a6d16b0d811f75b8e5b1301800ca03849f33b",
+      "snapshot_id": "snapshot:v1:heuristic-v1.0:1.0.0:1.0.0:26ad8eee92719cc0e4f4477e7cff24cc5ca9b3c1bb0b7c0128d3f033822a1c1b",
+      "determinism_fingerprint": "7d8cae6e831a7eb1",
+      "execution_trace": {
+        "effective_route": "entity",
+        "retrieval_mode_source": "planner",
+        "effective_retrieval_mode": "entity_lookup",
+        "retrieval_kind": "entity_lookup",
+        "sparse_executed": false,
+        "specialized_route_executed": null,
+        "used_compiled_execution": true,
+        "compiled_budget": {
+          "max_candidates": 10,
+          "enable_precision_rerank": false
+        },
+        "provenance_policy": {
+          "require_identity_seal": true,
+          "require_constraint_evidence": false,
+          "require_anchor_evidence": false
+        }
+      },
+      "resolver_provenance_trace": {
+        "candidate_source_breakdown": [
+          {
+            "source": "alias",
+            "entity_ids": [
+              "opus-one-2018"
+            ],
+            "count": 1
+          }
+        ]
+      }
+    }
   }
 }

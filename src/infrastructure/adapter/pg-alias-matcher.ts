@@ -4,6 +4,7 @@ import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
+import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
 
 interface AliasRow {
   entity_id: string;
@@ -211,6 +212,25 @@ export class PgAliasMatcher implements AliasMatcher {
     const trimmed = normalizedQuery.trim();
     if (trimmed.length === 0) return [];
 
+    // T-010/W2: pre-flight the pointer resolve so a missing `active_search_snapshot`
+    // table (fresh dev DB, unit-test mock pool without the pointer row) degrades
+    // to the same "no aliases available" behavior as a missing aliases table.
+    // A present-but-empty pointer table is still a hard error (publish never ran).
+    try {
+      // warm cache + surface migration/empty-pointer errors once here
+      const resolverModule = await import('../db/active-snapshot-resolver.js');
+      await resolverModule.resolveActiveSnapshot(this.pool);
+    } catch (err: unknown) {
+      const code = readPgSqlState(err);
+      if (code === '42P01') {
+        bootstrapLogger.info(
+          '[PgAliasMatcher] active_search_snapshot table missing — alias matching disabled for this request',
+        );
+        return [];
+      }
+      throw err;
+    }
+
     const views = buildNormalizedQueryViews(trimmed);
 
     // Build candidate lookup tokens: full phrase + individual words + bigrams
@@ -259,40 +279,42 @@ export class PgAliasMatcher implements AliasMatcher {
     const transliteratedList = Array.from(transliteratedTokens).filter((token) => token.length > 0);
     const phoneticList = Array.from(phoneticTokens).filter((token) => token.length > 0);
 
+    const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
     const result = await this.queryAliases(
       `SELECT entity_id, surface_form, normalized_value, confidence
        FROM aliases
-       WHERE (
-         normalized_value = ANY($1)
-         OR regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g') = ANY($2)
-         OR lower(regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g')) = ANY($3)
-         OR regexp_replace(
-              lower(
-                regexp_replace(
+       WHERE search_snapshot_id = $5
+         AND (
+           normalized_value = ANY($1)
+           OR regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g') = ANY($2)
+           OR lower(regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g')) = ANY($3)
+           OR regexp_replace(
+                lower(
                   regexp_replace(
                     regexp_replace(
                       regexp_replace(
                         regexp_replace(
                           regexp_replace(
-                            regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g'),
-                            'sch', 'ch', 'g'
+                            regexp_replace(
+                              regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g'),
+                              'sch', 'ch', 'g'
+                            ),
+                            'sh', 'ch', 'g'
                           ),
-                          'sh', 'ch', 'g'
+                          'ph', 'f', 'g'
                         ),
-                        'ph', 'f', 'g'
+                        'eaux', 'o', 'g'
                       ),
-                      'eaux', 'o', 'g'
+                      'eau', 'o', 'g'
                     ),
-                    'eau', 'o', 'g'
-                  ),
-                  'aux', 'o', 'g'
-                )
-              ),
-              '[aeiouy]', '', 'g'
-            ) = ANY($4)
-       ) AND is_suppressed = FALSE
+                    'aux', 'o', 'g'
+                  )
+                ),
+                '[aeiouy]', '', 'g'
+              ) = ANY($4)
+         ) AND is_suppressed = FALSE
        ORDER BY confidence DESC`,
-      [tokenList, compactList, transliteratedList, phoneticList],
+      [tokenList, compactList, transliteratedList, phoneticList, activeSnapshotId],
     );
 
     if (result.rows.length > 0) {
@@ -353,10 +375,12 @@ export class PgAliasMatcher implements AliasMatcher {
       new Set(fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
     ).map((gram) => gram.replace(/[%_\\]/g, '\\$&'));
 
+    // activeSnapshotId already resolved above; reuse within same method scope.
     const fuzzyCandidates = await this.queryAliases(
       `SELECT entity_id, surface_form, normalized_value, confidence
        FROM aliases
-       WHERE is_suppressed = FALSE
+       WHERE search_snapshot_id = $3
+         AND is_suppressed = FALSE
          AND EXISTS (
            SELECT 1
            FROM unnest($1::text[]) AS gram
@@ -365,7 +389,7 @@ export class PgAliasMatcher implements AliasMatcher {
          )
        ORDER BY confidence DESC
        LIMIT $2`,
-      [fuzzyGrams, MAX_FUZZY_CANDIDATES],
+      [fuzzyGrams, MAX_FUZZY_CANDIDATES, activeSnapshotId],
     );
 
     const fuzzyRows: FuzzyAliasRow[] = fuzzyCandidates.rows

@@ -54,12 +54,14 @@ export class EvidenceMapper {
       });
     }
 
-    this.addIfNonZero(items, {
-      value: scores.semantic,
-      type: 'semantic_relevance',
-      source: 'ranking_signal_computer',
-      provenance: 'Semantic relevance from dense retrieval similarity',
-    });
+    if (scores.semantic !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.semantic,
+        type: 'semantic_relevance',
+        source: 'ranking_signal_computer',
+        provenance: 'Semantic relevance from dense retrieval similarity',
+      });
+    }
 
     // Hard constraint pass is always included as it's a critical gate
     items.push({
@@ -77,33 +79,41 @@ export class EvidenceMapper {
       provenance: 'Weighted satisfaction of soft and inferred constraints',
     });
 
-    this.addIfNonZero(items, {
-      value: scores.attributeAlignment,
-      type: 'attribute_alignment',
-      source: 'ranking_signal_computer',
-      provenance: 'Structured attribute match with query plan expectations',
-    });
+    if (scores.attributeAlignment !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.attributeAlignment,
+        type: 'attribute_alignment',
+        source: 'ranking_signal_computer',
+        provenance: 'Structured attribute match with query plan expectations',
+      });
+    }
 
-    this.addIfNonZero(items, {
-      value: scores.preferenceAlignment,
-      type: 'preference_alignment',
-      source: 'ranking_signal_computer',
-      provenance: 'Alignment with user taste preferences',
-    });
+    if (scores.preferenceAlignment !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.preferenceAlignment,
+        type: 'preference_alignment',
+        source: 'ranking_signal_computer',
+        provenance: 'Alignment with user taste preferences',
+      });
+    }
 
-    this.addIfNonZero(items, {
-      value: scores.popularity,
-      type: 'popularity',
-      source: 'ranking_signal_computer',
-      provenance: 'Popularity signal from engagement data (tie-breaker)',
-    });
+    if (scores.popularity !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.popularity,
+        type: 'popularity',
+        source: 'ranking_signal_computer',
+        provenance: 'Popularity signal from engagement data (tie-breaker)',
+      });
+    }
 
-    this.addIfNonZero(items, {
-      value: scores.availability,
-      type: 'availability',
-      source: 'ranking_signal_computer',
-      provenance: 'Product availability signal',
-    });
+    if (scores.availability !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.availability,
+        type: 'availability',
+        source: 'ranking_signal_computer',
+        provenance: 'Product availability signal',
+      });
+    }
 
     if (scores.producerPrestige !== undefined) {
       this.addIfNonZero(items, {

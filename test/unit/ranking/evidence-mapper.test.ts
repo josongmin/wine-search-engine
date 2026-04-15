@@ -61,6 +61,18 @@ describe('EvidenceMapper', () => {
       expect(passItems.find((i) => i.type === 'hard_constraint_pass')).toBeDefined();
       expect(failItems.find((i) => i.type === 'hard_constraint_pass')).toBeDefined();
     });
+
+    it('omits unsupported preference and availability signals entirely when absent', () => {
+      const scores = makeScores({
+        entityIntegrity: 0.5,
+        preferenceAlignment: undefined,
+        availability: undefined,
+      });
+
+      const items = mapper.mapToEvidence(scores);
+      expect(items.find((i) => i.type === 'preference_alignment')).toBeUndefined();
+      expect(items.find((i) => i.type === 'availability')).toBeUndefined();
+    });
   });
 
   describe('contribution string format', () => {

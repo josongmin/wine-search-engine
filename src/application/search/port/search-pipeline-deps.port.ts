@@ -6,6 +6,7 @@ import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retri
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../../domain/retrieval/model/candidate-envelope.js';
+import type { RetrievalDegradationSignal } from '../../../domain/retrieval/port/retrieval-degradation-observer.port.js';
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
 import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
 import type { RankerRuntimeSignal } from '../../../domain/ranking/model/ranking-runtime-signal.js';
@@ -65,11 +66,34 @@ export interface CandidatePoolPort {
    * do not need to be updated.
    */
   getLastDropLog?(): readonly CandidateDropRecord[] | undefined;
+  /**
+   * Returns structured retrieval degradation signals emitted during the most
+   * recent execute() call (sparse/dense/anchor/embedding-combiner/relative_filter
+   * fallbacks). These are observability signals that the hybrid-candidates
+   * use case must merge into route-level `routeDegradation.degradationReasons`
+   * so the HTTP wire contract reflects the degradation instead of silently
+   * returning an empty pool. Optional so in-memory/test stubs remain minimal.
+   */
+  getLastDegradationSignals?(): readonly RetrievalDegradationSignal[];
 }
 
 export interface EntityDocumentLookupPort {
-  getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
-  getDocuments?(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
+  /**
+   * @deprecated Test-only escape hatch. Production callers MUST use getDocuments().
+   * Retained so minimal test stubs compile without providing a batch implementation.
+   * Will be removed once all test helpers migrate to getDocuments-first stubs.
+   */
+  getDocument?(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
+
+  /**
+   * Batch-fetch entity documents by ID. This is the **required production path**.
+   *
+   * Returned map contains only found documents; missing IDs are omitted.
+   * Implementations MUST prefer backend-native batching over N single fetches.
+   *
+   * T-E4-01: Elevated to required -- entity route batch hydration depends on this.
+   */
+  getDocuments(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
 }
 
 export interface BrowseRetrieverPort {

@@ -6,7 +6,9 @@ import {
 import type { QueryCachePort } from '../../../domain/performance/port/query-cache.port.js';
 import type { EmbeddingCachePort } from '../../../domain/performance/port/embedding-cache.port.js';
 import type { QueryCacheKey, EmbeddingCacheKey } from '../../../domain/performance/model/cache-key.js';
+import type { CacheGetResult } from '../../../domain/performance/model/cache-result.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../../domain/query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
 import {
@@ -90,6 +92,9 @@ export function createFailingQueryCache(message = 'Persistent error'): QueryCach
     get: async () => {
       throw new Error(message);
     },
+    getWithDiagnostics: async () => {
+      throw new Error(message);
+    },
     set: async () => {
       throw new Error(message);
     },
@@ -105,6 +110,14 @@ export class MockQueryCache implements QueryCachePort {
 
   async get(cacheKey: QueryCacheKey): Promise<SearchResponseV1 | undefined> {
     return this.store.get(cacheKey.redisKey);
+  }
+
+  async getWithDiagnostics(cacheKey: QueryCacheKey): Promise<CacheGetResult<SearchResponseV1>> {
+    const value = this.store.get(cacheKey.redisKey);
+    if (value === undefined) {
+      return { kind: 'miss' };
+    }
+    return { kind: 'hit', value };
   }
 
   async set(cacheKey: QueryCacheKey, response: SearchResponseV1, _ttlSeconds: number): Promise<void> {
@@ -218,6 +231,44 @@ export function createMockPlan(_modelVersion = 'test-v1'): QueryPlanV1 {
     thresholdProfileId: 'default',
     plannerVersion: '1',
   } as unknown as QueryPlanV1;
+}
+
+export function createMockCompiledQuery(
+  effectiveRetrievalMode: CompiledWineQuery['execution']['effectiveRetrievalMode'] = 'entity_lookup',
+): CompiledWineQuery {
+  return {
+    query: {
+      rawQuery: 'test query',
+      normalizedQuery: 'test query',
+      intent: 'search',
+      queryClass: 'simple',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {} as never,
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      retrievalPlan: {
+        hardFilterTokens: [],
+        softBoosts: [],
+        inferredBoosts: [],
+        sensoryPriors: [],
+        planVersion: 'retrieval-plan-v1.0',
+      },
+    },
+    execution: {
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode,
+      routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: {
+        requireIdentitySeal: false,
+        requireConstraintEvidence: false,
+        requireAnchorEvidence: false,
+      },
+    },
+  } as CompiledWineQuery;
 }
 
 export function createMockSnapshot(

@@ -4,11 +4,13 @@ import {
   isPotentialVintageToken,
 } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
 const COMPACT_RE = /[^\p{L}\p{N}]+/gu;
 const SPACE_RE = /\s+/g;
 const LATIN_VOWEL_RE = /[aeiouy]/g;
+const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u;
 const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
   [/sch/g, 'ch'],
   [/sh/g, 'ch'],
@@ -166,11 +168,18 @@ const transliterateByComponents = (value: string): string | undefined => {
   return changed ? normalized : undefined;
 };
 
-const buildTransliterationVariants = (value: string): readonly string[] =>
-  dedupeVariants([
-    transliterateExact(value) ?? '',
-    transliterateByComponents(value) ?? '',
-  ]);
+const buildTransliterationVariants = (value: string): readonly string[] => {
+  const variants = dedupeVariants([
+    transliterateExact(value),
+    transliterateByComponents(value),
+  ].filter((variant): variant is string => variant !== undefined));
+
+  if (variants.length === 0 && HANGUL_RE.test(value)) {
+    globalSilentSkipCounter.increment('query_transliteration_variant_absent');
+  }
+
+  return variants;
+};
 
 /** Minimum tokens to generate reorder variants (pairwise permutations). */
 const QUERY_REORDER_VARIANT_MIN_TOKENS = 2;

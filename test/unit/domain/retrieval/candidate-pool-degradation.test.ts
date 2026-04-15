@@ -70,9 +70,11 @@ function createEmbeddingService(overrides?: Partial<EmbeddingServicePort>): Embe
 }
 
 function createInput(overrides?: Partial<HybridRetrievalInput>): HybridRetrievalInput {
+  const queryPlan = overrides?.queryPlan ?? minimalPlan();
   return {
-    queryPlan: minimalPlan(),
+    queryPlan,
     route: 'hybrid',
+    compiledRetrievalMode: queryPlan.retrievalMode,
     lexicalQueries: ['red wine'],
     semanticQueries: ['red wine'],
     hardConstraints: [],

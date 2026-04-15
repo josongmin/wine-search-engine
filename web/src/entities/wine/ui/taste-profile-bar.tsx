@@ -6,7 +6,7 @@ interface TasteProfileBarProps {
     semantic: number;
     attribute: number;
     popularity: number;
-    preference_alignment: number;
+    preference_alignment?: number;
   };
 }
 
@@ -25,7 +25,7 @@ export function TasteProfileBar({ scores }: TasteProfileBarProps) {
         Score Components
       </p>
       {BARS.map(({ key, label, color }) => {
-        const value = scores[key];
+        const value = scores[key] ?? 0;
         if (value <= 0) return null;
         const width = Math.min(value * 100, 100);
         return (

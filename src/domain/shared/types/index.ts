@@ -35,3 +35,19 @@ export {
   isCorruptedSnapshot,
 } from './decision-snapshot.js';
 export { type SignalSet } from './signal-set.js';
+export {
+  type ProvenanceShortfallCode,
+  type ShortfallLayer,
+  type RetrievalProvenanceShortfall,
+  type DenseChannelShortfall,
+  type EntityResolverShortfall,
+  type ProvenanceClosureShortfall,
+  type RerankerShortfall,
+  type RerankQualityShortfall,
+  type LtrShortfall,
+  type ConstraintRelaxationShortfall,
+  type LearnedMatcherShortfall,
+  type SpecializedRouteShortfall,
+  type MixedRouteShortfall,
+  classifyShortfallLayer,
+} from './provenance-shortfall-taxonomy.js';

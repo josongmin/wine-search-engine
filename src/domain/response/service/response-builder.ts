@@ -41,6 +41,7 @@ import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type {
   CounterfactualReject,
   ExecutionContractMeta,
+  ProvenanceTraceMeta,
   ResponseMeta,
 } from '../model/counterfactual.js';
 import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-response.js';
@@ -66,8 +67,8 @@ export interface ResponseBuildParams {
   /** Query plan (for extracting constraints and retrieval mode). Optional for backward compat. */
   readonly queryPlan?: QueryPlanV1 | undefined;
 
-  /** Compiled execution contract (E1-U3 carrier). When present, effectiveRetrievalMode takes precedence over queryPlan.retrievalMode. */
-  readonly compiled?: CompiledWineQuery | undefined;
+  /** Compiled execution contract (E1-U3 carrier). effectiveRetrievalMode takes precedence over queryPlan.retrievalMode. */
+  readonly compiled: CompiledWineQuery;
 
   /** Ranked result items to include in the response. */
   readonly results: readonly ResultItem[];
@@ -240,9 +241,18 @@ export class ResponseBuilder {
         ? {
             executionContract: this.buildExecutionContractMeta(
               params.executionContract,
-              params.retrievalModeSource ?? params.compiled?.execution.routeSource ?? 'planner',
+              params.retrievalModeSource ?? params.compiled.execution.routeSource ?? 'planner',
               params.plannerSuggestedMode,
               params.compiled,
+            ),
+          }
+        : {}),
+      ...(params.executionContract !== undefined
+        ? {
+            provenanceTrace: this.buildProvenanceTraceMeta(
+              params.executionContract,
+              params.decisionOutput,
+              contract.degradationReasons,
             ),
           }
         : {}),
@@ -250,7 +260,7 @@ export class ResponseBuilder {
     };
 
     // Extract LLM envelope fields (Epic 9)
-    const retrievalMode = params.compiled?.execution.effectiveRetrievalMode;
+    const retrievalMode = params.compiled.execution.effectiveRetrievalMode;
     const resultType = this.computeResultType(
       enrichedResults,
       params.decisionOutput.decisionStatus,
@@ -339,8 +349,19 @@ export class ResponseBuilder {
       inferredReasons.add('heuristic_drinking_window');
     }
 
-    const executionMode = params.contract?.executionMode
+    const declaredExecutionMode = params.contract?.executionMode
       ?? (hasHeuristicDrinkingWindow ? 'heuristic' : 'authoritative');
+
+    // Wire-contract invariant (bugbash 2026-04-14): if ANY degradation reason
+    // is present, the response MUST NOT advertise `authoritative` — that would
+    // be the wire lying to operators. Flip to `degraded` here rather than
+    // depending on every upstream call site to remember the coupling.
+    // `heuristic` and `advisory` stay as-is (they already encode non-authoritative
+    // execution with their own semantics).
+    const executionMode: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' =
+      inferredReasons.size > 0 && declaredExecutionMode === 'authoritative'
+        ? 'degraded'
+        : declaredExecutionMode;
 
     const blockingEligible = params.contract?.blockingEligible
       ?? (
@@ -359,7 +380,7 @@ export class ResponseBuilder {
     executionContract: NonNullable<ResponseBuildParams['executionContract']>,
     retrievalModeSource: NonNullable<ResponseBuildParams['retrievalModeSource']>,
     plannerSuggestedMode: ExecutionRetrievalMode | undefined,
-    compiled: CompiledWineQuery | undefined,
+    compiled: CompiledWineQuery,
   ): ExecutionContractMeta {
     return {
       effectiveRetrievalMode: executionContract.effectiveRetrievalMode,
@@ -371,11 +392,58 @@ export class ResponseBuilder {
         ? { specializedRouteExecuted: executionContract.specializedRouteExecuted }
         : {}),
       usedCompiledExecution: executionContract.usedCompiledExecution,
-      ...(compiled !== undefined ? { budget: compiled.execution.budget } : {}),
-      ...(compiled !== undefined ? { provenancePolicy: compiled.execution.provenancePolicy } : {}),
+      budget: compiled.execution.budget,
+      provenancePolicy: compiled.execution.provenancePolicy,
       ...(executionContract.provenanceClosure !== undefined
         ? { provenanceClosure: executionContract.provenanceClosure }
         : {}),
+      ...(executionContract.admissionClosure !== undefined
+        ? { admissionClosure: executionContract.admissionClosure }
+        : {}),
+    };
+  }
+
+  private buildProvenanceTraceMeta(
+    executionContract: NonNullable<ResponseBuildParams['executionContract']>,
+    decisionOutput: DecisionOutput,
+    degradationReasons: readonly string[],
+  ): ProvenanceTraceMeta | undefined {
+    const provenanceClosure = executionContract.provenanceClosure;
+    if (provenanceClosure === undefined) {
+      return undefined;
+    }
+
+    const admissionDecision =
+      decisionOutput.decisionStatus === 'resolved'
+        ? 'admission_gate_passed'
+        : decisionOutput.failureReason !== undefined || decisionOutput.admissionTraceRef !== undefined
+          ? 'admission_gate_rejected'
+          : 'admission_gate_not_applicable';
+    const decisionGate =
+      decisionOutput.decisionStatus === 'resolved'
+        ? 'decision_gate_resolved'
+        : decisionOutput.decisionStatus === 'ambiguous'
+          ? 'decision_gate_ambiguous'
+          : 'decision_gate_failed';
+
+    return {
+      policy: provenanceClosure.policy,
+      observed: {
+        topEntityPresent: decisionOutput.selectedEntity !== undefined,
+        preRank: provenanceClosure.preRank,
+        postRank: provenanceClosure.postRank,
+      },
+      missing: provenanceClosure.missing,
+      shortfalls: degradationReasons,
+      gateDecisions: {
+        admission: admissionDecision,
+        decision: decisionGate,
+        decisionStatus: decisionOutput.decisionStatus,
+        nextAction: decisionOutput.nextAction,
+        ...(decisionOutput.failureReason !== undefined
+          ? { failureReason: decisionOutput.failureReason }
+          : {}),
+      },
       ...(executionContract.admissionClosure !== undefined
         ? { admissionClosure: executionContract.admissionClosure }
         : {}),

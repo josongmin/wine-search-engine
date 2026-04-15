@@ -55,7 +55,8 @@ function serializeProvenance(
  * Build a machine-optimised V2 search response from ranked results.
  *
  * Each {@link RankedResult} is projected to a {@link ResultItemV2Machine}:
- * - Full ComponentScores object serialised as-is (all numeric fields).
+ * - Full ComponentScores object serialised as-is, preserving unsupported
+ *   signals as omitted optional fields rather than synthetic defaults.
  * - EvidenceItems mapped to structured signal/value/weight objects.
  * - retrievalProvenance included as a compact string when present.
  *
@@ -92,13 +93,23 @@ export function buildMachineResponseV2(
         ...(result.componentScores.anchorSimilarity !== undefined
           ? { anchorSimilarity: result.componentScores.anchorSimilarity }
           : {}),
-        semantic: result.componentScores.semantic,
+        ...(result.componentScores.semantic !== undefined
+          ? { semantic: result.componentScores.semantic }
+          : {}),
         hardConstraintPass: result.componentScores.hardConstraintPass,
         softConstraint: result.componentScores.softConstraint,
-        attributeAlignment: result.componentScores.attributeAlignment,
-        preferenceAlignment: result.componentScores.preferenceAlignment,
-        popularity: result.componentScores.popularity,
-        availability: result.componentScores.availability,
+        ...(result.componentScores.attributeAlignment !== undefined
+          ? { attributeAlignment: result.componentScores.attributeAlignment }
+          : {}),
+        ...(result.componentScores.preferenceAlignment !== undefined
+          ? { preferenceAlignment: result.componentScores.preferenceAlignment }
+          : {}),
+        ...(result.componentScores.popularity !== undefined
+          ? { popularity: result.componentScores.popularity }
+          : {}),
+        ...(result.componentScores.availability !== undefined
+          ? { availability: result.componentScores.availability }
+          : {}),
         uncertaintyPenalty: result.componentScores.uncertaintyPenalty,
       },
       evidenceItems,

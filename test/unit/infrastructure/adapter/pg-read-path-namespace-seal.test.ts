@@ -17,6 +17,12 @@ interface FakeRow extends QueryResultRow {
 }
 
 function fakePoolReturning(rows: readonly FakeRow[]): Pool {
+  const pointerRow = {
+    active_snapshot_id: 'snap-active',
+    previous_snapshot_id: null,
+    content_hash: 'hash-active',
+    promoted_at: new Date('2026-04-14T00:00:00Z'),
+  };
   const result = {
     rows: [...rows],
     rowCount: rows.length,
@@ -26,7 +32,18 @@ function fakePoolReturning(rows: readonly FakeRow[]): Pool {
   } satisfies QueryResult<FakeRow>;
   // Minimal Pool surface used by these adapters: just `query`.
   return {
-    query: async () => result,
+    query: async (sql: string) => {
+      if (sql.includes('FROM active_search_snapshot')) {
+        return {
+          rows: [pointerRow],
+          rowCount: 1,
+          command: 'SELECT',
+          oid: 0,
+          fields: [],
+        } satisfies QueryResult<FakeRow>;
+      }
+      return result;
+    },
   } as unknown as Pool;
 }
 

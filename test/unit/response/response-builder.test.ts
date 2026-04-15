@@ -4,6 +4,7 @@ import type { ResponseBuildParams } from '../../../src/domain/response/service/r
 import type { DecisionOutput } from '../../../src/domain/decision/model/decision-output.js';
 import type { ResultItem } from '../../../src/domain/response/model/result-item.js';
 import type { ClarificationPayload } from '../../../src/domain/response/model/clarification.js';
+import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled-wine-query.js';
 import type {
   EvidenceItem,
   DecisionSnapshot,
@@ -118,6 +119,24 @@ function makeResultItem(evidenceItems: readonly EvidenceItem[]): ResultItem {
   };
 }
 
+function makeCompiled(overrides?: Partial<CompiledWineQuery>): CompiledWineQuery {
+  return {
+    query: {
+      rawQuery: 'test', normalizedQuery: 'test', intent: 'semantic_discovery',
+      queryClass: 'unknown', anchors: [], constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] }, uncertainty: {} as never,
+      plannerVersion: '1.0.0', policyRuleVersion: '1.0.0', thresholdProfileId: 'default-v1',
+      retrievalPlan: { hardFilterTokens: [], softBoosts: [], inferredBoosts: [], sensoryPriors: [], planVersion: 'retrieval-plan-v1.0' },
+    },
+    execution: {
+      effectiveRoute: 'hybrid', effectiveRetrievalMode: 'attribute_search', routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+    },
+    ...overrides,
+  } as CompiledWineQuery;
+}
+
 function makeBaseParams(
   overrides?: Partial<ResponseBuildParams>,
 ): ResponseBuildParams {
@@ -126,6 +145,7 @@ function makeBaseParams(
     results: [],
     queryTimeMs: 42,
     route: 'hybrid',
+    compiled: makeCompiled(),
     ...overrides,
   };
 }
@@ -481,6 +501,55 @@ describe('ResponseBuilder', () => {
           },
           missing: ['identity_evidence'],
           satisfied: false,
+        },
+        admissionClosure: {
+          required: {
+            identitySeal: true,
+            constraintEvidence: true,
+            anchorEvidence: false,
+          },
+          satisfied: {
+            identitySeal: true,
+            constraintEvidence: true,
+            anchorEvidence: true,
+          },
+          allSatisfied: true,
+        },
+      });
+      expect(response.meta.provenanceTrace).toEqual({
+        policy: {
+          requireIdentitySeal: true,
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: false,
+        },
+        observed: {
+          topEntityPresent: false,
+          preRank: {
+            candidateCount: 12,
+            identityEvidenceSatisfied: false,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            matchedConstraintAttributes: ['grape_primary'],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+          postRank: {
+            candidateCount: 5,
+            identityEvidenceSatisfied: false,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            matchedConstraintAttributes: ['grape_primary'],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+        },
+        missing: ['identity_evidence'],
+        shortfalls: [],
+        gateDecisions: {
+          admission: 'admission_gate_passed',
+          decision: 'decision_gate_resolved',
+          decisionStatus: 'resolved',
+          nextAction: 'return_result',
         },
         admissionClosure: {
           required: {

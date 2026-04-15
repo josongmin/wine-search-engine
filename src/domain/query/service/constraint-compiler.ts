@@ -52,13 +52,30 @@ export class ConstraintCompiler {
       candidatePhrases,
       abortSignal !== undefined ? { abortSignal } : undefined,
     ).catch((err: unknown) => {
-      // NLMapper failure must fail closed. A silent empty bundle would let the
-      // query continue with broad-recall fallback, hiding extraction failures.
+      // NLMapper failure: return empty constraints so Tier 6 rule-based
+      // extraction and entity resolver can still run. The query proceeds
+      // with reduced precision rather than aborting entirely.
       bootstrapLogger.warn(
         { err: err instanceof Error ? err.message : String(err) },
-        '[constraint-compiler] NLMapper.mapConstraints failed — rethrowing',
+        '[constraint-compiler] NLMapper.mapConstraints failed — falling back to Tier 6 rules only',
       );
-      throw err instanceof Error ? err : new Error(String(err));
+      return {
+        constraints: [],
+        constraintExtraction: {
+          candidatePhraseCount: candidatePhrases.length,
+          ruleTableHitCount: 0,
+          llmHitCount: 0,
+          llmSkippedCount: 0,
+          fallbackTriggered: true,
+          source: 'fallback' as const,
+          llmLatencyMs: null,
+          phraseCacheHits: 0,
+          phraseCacheNegativeSkipped: 0,
+          phraseCacheMisses: 0,
+          missedPhrases: [...candidatePhrases],
+          fallbackReason: 'nlmapper_exception' as const,
+        },
+      };
     });
     const matched = mapped.constraints;
     const mapperTrace = mapped.constraintExtraction;

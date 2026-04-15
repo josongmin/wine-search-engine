@@ -27,6 +27,14 @@ class EmptyAliasMatcher implements AliasMatcher {
   }
 }
 
+class ExactAliasMatcher implements AliasMatcher {
+  constructor(private readonly responses: Map<string, readonly AliasMatchResult[]> = new Map()) {}
+
+  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+    return this.responses.get(normalizedQuery) ?? [];
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function makeMatchResult(
@@ -235,6 +243,22 @@ describe('AnchorExtractor', () => {
 
       // relativeQuery should be null — no relative pattern
       expect(result.relativeQuery).toBeNull();
+    });
+
+    it('13. anchor-conditioned negation reuses extracted anchor surface as direct lookup query', async () => {
+      const aliasMatcher = new ExactAliasMatcher(
+        new Map([['클라우디베이', [makeMatchResult('클라우디베이', ['entity-cloudy-bay'], 0.94)]]]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const result = await extractor.extractWithRelative('클라우디베이 말고 다른 화이트');
+
+      expect(result.relativeQuery?.relativeExpressions[0]?.operator).toBe('not');
+      expect(result.anchors).toHaveLength(1);
+      expect(result.anchors[0]?.surfaceForm).toBe('클라우디베이');
+      expect(result.anchors[0]?.lookupVariants).toEqual(
+        expect.arrayContaining(['클라우디베이']),
+      );
     });
   });
 

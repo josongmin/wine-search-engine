@@ -109,7 +109,7 @@ export interface MatchDetail {
     readonly semantic: number;
     readonly attribute: number;
     readonly popularity: number;
-    readonly preferenceAlignment: number;
+    readonly preferenceAlignment?: number | undefined;
   };
 }
 
@@ -134,8 +134,10 @@ export interface UncertaintyBlock {
   /**
    * Confidence that this result is the correct answer, in [0, 1].
    * This is a per-result uncertainty score, distinct from decision confidence.
+   * Omitted when upstream uncertaintyPenalty is NaN/invalid — never masked
+   * with a neutral 0.5 midpoint (T-E6-01).
    */
-  readonly uncertaintyConfidence: number;
+  readonly uncertaintyConfidence?: number | undefined;
 
   /** Information the system would need to increase confidence. */
   readonly missingInfo: readonly string[];

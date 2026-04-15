@@ -2,16 +2,19 @@ import type { Pool, QueryResultRow } from 'pg';
 import type { AmbiguityDictionary } from '../../domain/query/port/ambiguity-dictionary.port.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
+import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
 
 export class PgAmbiguityDictionary implements AmbiguityDictionary {
   constructor(private readonly pool: Pool) {}
 
   async isKnownAmbiguous(surfaceForm: string): Promise<boolean> {
+    const snap = await this.resolveActiveSnapshotOrNull();
+    if (snap === null) return false;
     const result = await this.queryAmbiguity(
       `SELECT EXISTS(
-        SELECT 1 FROM ambiguity_registry WHERE normalized_form = $1
+        SELECT 1 FROM ambiguity_registry WHERE normalized_form = $1 AND search_snapshot_id = $2
       ) AS exists`,
-      [surfaceForm],
+      [surfaceForm, snap.activeSnapshotId],
     );
     const row0 = result.rows[0];
     const existsRaw: unknown = row0 != null ? Reflect.get(row0, 'exists') : undefined;
@@ -21,9 +24,11 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
   async getAmbiguityInfo(
     surfaceForm: string,
   ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
+    const snap = await this.resolveActiveSnapshotOrNull();
+    if (snap === null) return null;
     const result = await this.queryAmbiguity(
-      `SELECT * FROM ambiguity_registry WHERE normalized_form = $1`,
-      [surfaceForm],
+      `SELECT * FROM ambiguity_registry WHERE normalized_form = $1 AND search_snapshot_id = $2`,
+      [surfaceForm, snap.activeSnapshotId],
     );
     const row = result.rows[0];
     if (row == null) return null;
@@ -42,6 +47,25 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
       types: typesRaw,
       severity: severityRaw,
     };
+  }
+
+  /**
+   * T-010/W2: degrade gracefully when the pointer table is missing (fresh
+   * dev DB before migration). A present-but-empty pointer row is still a
+   * loud error upstream.
+   */
+  private async resolveActiveSnapshotOrNull(): Promise<{ activeSnapshotId: string } | null> {
+    try {
+      return await resolveActiveSnapshot(this.pool);
+    } catch (err: unknown) {
+      if (readPgSqlState(err) === '42P01') {
+        bootstrapLogger.info(
+          '[PgAmbiguityDictionary] active_search_snapshot table missing — ambiguity lookup disabled for this request',
+        );
+        return null;
+      }
+      throw err;
+    }
   }
 
   private async queryAmbiguity(

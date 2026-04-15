@@ -2,6 +2,7 @@ import type { SparseHit } from '../port/search-index.port.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 
 /** BM25 multiplier weights for critic / prestige lifts (producer browse). */
 const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;
@@ -138,8 +139,12 @@ function productLineVintageKey(hit: SparseHit): string {
     producer.length > 0 && grape.length > 0 && geo.length > 0
       ? `${producer}|${grape}|${geo}`
       : lineFromLabel.length > 0
-        ? lineFromLabel.toLowerCase()
-        : String(hit.entityId);
+        ? (globalSilentSkipCounter.increment('browse_diversity_product_line_fallback_label', {
+          entityId: String(hit.entityId),
+        }), lineFromLabel.toLowerCase())
+        : (globalSilentSkipCounter.increment('browse_diversity_product_line_fallback_entity_id', {
+          entityId: String(hit.entityId),
+        }), String(hit.entityId));
 
   const vy = s?.vintageYear;
   const vintagePart =
@@ -211,7 +216,13 @@ export function diversifyRegionBrowseHits(
   const counts = new Map<string, number>();
   const producerKey = (hit: SparseHit): string => {
     const p = hit.summary?.producer?.trim().toLowerCase() ?? '';
-    return p.length > 0 ? p : `__id:${String(hit.entityId)}`;
+    if (p.length > 0) {
+      return p;
+    }
+    globalSilentSkipCounter.increment('browse_diversity_region_producer_missing', {
+      entityId: String(hit.entityId),
+    });
+    return `__id:${String(hit.entityId)}`;
   };
 
   const selected: SparseHit[] = [];

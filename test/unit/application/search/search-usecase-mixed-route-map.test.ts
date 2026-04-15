@@ -130,6 +130,8 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
     });
     expect(out.fallbackReason).toBe('mixed_similar_retrieval_fallback');
     expect(out.resolveResult.decisionTrace.outcomeReasonCodes).toContain('MIXED_ROUTE');
+    expect(out.resolveResult.decisionTrace.top2CalibratedScore).toBeUndefined();
+    expect(out.resolveResult.decisionTrace.calibratedGap).toBeUndefined();
   });
 
   it('keeps the mixed fallback taxonomy stable', () => {
@@ -159,5 +161,7 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
     expect(out.fallbackReason).toBe('mixed_anchor_resolution_failed');
     expect(out.resolveResult.status).toBe('failed');
     expect(out.resolveResult.degradation?.reasons).toEqual(['mixed_anchor_resolution_failed']);
+    expect(out.resolveResult.decisionTrace.top2CalibratedScore).toBeUndefined();
+    expect(out.resolveResult.decisionTrace.calibratedGap).toBeUndefined();
   });
 });

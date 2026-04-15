@@ -186,7 +186,15 @@ export class AmbiguityClassifier {
 
     // Count candidates with strong scores relative to the top candidate.
     // We use the canonicalNormalizedMatch as a proxy for query length impact.
-    const topScore = candidates[0]?.sourceSignals.canonicalNormalizedMatch ?? 0;
+    //
+    // Fix 6 (fail-loud): canonicalNormalizedMatch is a REQUIRED field in
+    // MatchSignalSet (see match-signal-set.ts:13). The previous `?? 0`
+    // masked a contract violation as a legitimate zero score. Empty
+    // candidate list is the only legitimate reason to bail — treat it
+    // separately.
+    const top = candidates[0];
+    if (top === undefined) return false;
+    const topScore = top.sourceSignals.canonicalNormalizedMatch;
     if (topScore === 0) {
       return false;
     }

@@ -8,14 +8,30 @@ interface AliasRow {
   confidence: number;
 }
 
+// T-010/W2: MockPool now intercepts active_search_snapshot pointer reads so
+// the production read path (which resolves the pointer before every lookup)
+// can run against mocked aliases data.
+const POINTER_ROW = Object.freeze({
+  active_snapshot_id: 'test-snapshot-id',
+  previous_snapshot_id: null,
+  content_hash: 'test-hash',
+  promoted_at: new Date('2026-04-14T00:00:00Z'),
+});
+
 class MockPool {
   readonly queries: Array<{ sql: string; params: readonly unknown[] }> = [];
+  private aliasQueryIdx = 0;
 
   constructor(private readonly responses: readonly AliasRow[][]) {}
 
-  async query(sql: string, params: readonly unknown[]): Promise<{ rows: AliasRow[] }> {
+  async query(sql: string, params: readonly unknown[]): Promise<{ rows: unknown[] }> {
+    if (sql.includes('FROM active_search_snapshot')) {
+      // Pointer queries are invisible to the alias-query index (tests count alias calls, not pointer calls).
+      return { rows: [POINTER_ROW] };
+    }
     this.queries.push({ sql, params });
-    const next = this.responses[this.queries.length - 1] ?? [];
+    const next = this.responses[this.aliasQueryIdx] ?? [];
+    this.aliasQueryIdx++;
     return { rows: [...next] };
   }
 }

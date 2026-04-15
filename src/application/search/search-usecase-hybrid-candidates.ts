@@ -107,10 +107,12 @@ export interface HybridCandidateRetrievalResult {
 function mergeRetrievalDegradation(
   reasons: ReadonlySet<SpecializedFallbackReason>,
   provenanceShortfall: readonly string[],
+  retrievalInternalReasons: readonly string[] = [],
 ): RankingDegradationSignal | undefined {
   const degradationReasons = [
     ...reasons,
     ...provenanceShortfall.map((obligation) => `retrieval_provenance_shortfall:${obligation}`),
+    ...retrievalInternalReasons,
   ];
   if (degradationReasons.length === 0) {
     return undefined;
@@ -119,6 +121,19 @@ function mergeRetrievalDegradation(
     executionMode: 'degraded',
     degradationReasons,
   };
+}
+
+/**
+ * Bugbash 2026-04-14: translate structured retrieval degradation signals from
+ * CandidatePoolService into opaque wire-contract strings. The HTTP response
+ * carries these in `meta.degradation_reasons` so operators can distinguish
+ * "sparse channel failed" from "dense channel failed" from "anchor missing"
+ * without reaching into the decision trace.
+ */
+function retrievalSignalsToReasons(
+  signals: readonly { readonly component: string; readonly reason: string }[],
+): readonly string[] {
+  return signals.map((signal) => `retrieval_degraded:${signal.component}:${signal.reason}`);
 }
 
 function buildRetrievalCoverage(
@@ -140,7 +155,7 @@ export function buildHybridRetrievalInputForPlan(
   compiled?: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
 ): HybridRetrievalInput {
-  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints); // TODO(T-E2-01): compiled optional for test seam; production callers always pass compiled
+  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
   // TA4: Propagate fuzzy entity hypothesis terms from the planner into the retrieval
   // input. When the planner's fuzzy matcher fires on an anchor-miss query, these terms
@@ -235,12 +250,13 @@ export async function retrieveHybridCandidatesForPlan(
   resolveEntity: (p: QueryPlanV1) => Promise<EntityResolveResult>,
   compiled: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
+  anchorEntityIdOverride?: CanonicalEntityId,
 ): Promise<HybridCandidateRetrievalResult> {
   const effectiveMode = compiled.execution.effectiveRetrievalMode;
   const usedCompiledExecution = true;
 
   const limit = SPECIALIZED_HYBRID_RETRIEVAL_LIMIT;
-  let fallbackAnchorEntityId: CanonicalEntityId | undefined;
+  let fallbackAnchorEntityId: CanonicalEntityId | undefined = anchorEntityIdOverride;
   const degradationReasons = new Set<SpecializedFallbackReason>();
   const requestedRoute = (
     effectiveMode === 'producer_browse' ||
@@ -498,6 +514,8 @@ export async function retrieveHybridCandidatesForPlan(
   // (they bypass the RRF fusion step entirely), so these are intentionally absent there.
   const retrievalFusionTrace = ports.candidatePool.getLastFusionTrace?.();
   const hardFilterDropLog = ports.candidatePool.getLastDropLog?.();
+  const retrievalDegradationSignals = ports.candidatePool.getLastDegradationSignals?.() ?? [];
+  const retrievalInternalReasons = retrievalSignalsToReasons(retrievalDegradationSignals);
   const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
   const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
     ? buildMissingProvenanceObligations(
@@ -505,6 +523,11 @@ export async function retrieveHybridCandidatesForPlan(
         retrievalProvenanceCoverage,
       )
     : [];
+  const mergedDegradation = mergeRetrievalDegradation(
+    degradationReasons,
+    provenanceShortfall,
+    retrievalInternalReasons,
+  );
   return {
     candidates,
     effectiveRetrievalMode: effectiveMode,
@@ -516,14 +539,7 @@ export async function retrieveHybridCandidatesForPlan(
     ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
       ? { hardFilterDropLog }
       : {}),
-    ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
-      ? {
-          routeDegradation: mergeRetrievalDegradation(
-            degradationReasons,
-            provenanceShortfall,
-          ),
-        }
-      : {}),
+    ...(mergedDegradation !== undefined ? { routeDegradation: mergedDegradation } : {}),
     ...(requestedRoute !== null
       ? {
           specializedRouteObservability: {

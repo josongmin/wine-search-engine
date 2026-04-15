@@ -42,6 +42,9 @@ describe('search replay fixtures', () => {
       expect(typeof fixture.name).toBe('string');
       if ('error_code' in fixture.expected) {
         expect(typeof fixture.expected.error_code).toBe('string');
+      } else if (fixture.response_family === 'comparison') {
+        expect(fixture.expected.comparison_intent).toBeDefined();
+        expect(fixture.expected.overall_status).toBeDefined();
       } else {
         expect(fixture.expected.execution_mode).toBeDefined();
         expect(Array.isArray(fixture.expected.degradation_reasons)).toBe(true);

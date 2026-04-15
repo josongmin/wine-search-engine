@@ -1,8 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildResolverCandidatesFromGenerator } from '../../../../src/application/search/search-usecase-resolver-candidates.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../../../src/domain/shared/types/index.js';
+import type { RetrievalDocument } from '../../../../src/domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityCandidateGeneratorInput } from '../../../../src/domain/resolver/model/entity-candidate-generator-input.js';
+
+/**
+ * T-E4-01: Helper to build a batch-capable lookup port from a single-document
+ * resolver function. Mirrors the production contract where getDocuments() is
+ * the required path and getDocument() is deprecated/test-only.
+ */
+function makeBatchLookup(
+  singleFn: (id: CanonicalEntityId) => Promise<RetrievalDocument | null>,
+): EntityDocumentLookupPort {
+  return {
+    getDocuments: vi.fn(async (ids: readonly CanonicalEntityId[]) => {
+      const map = new Map<CanonicalEntityId, RetrievalDocument>();
+      for (const id of ids) {
+        const doc = await singleFn(id);
+        if (doc != null) {
+          map.set(id, doc);
+        }
+      }
+      return map;
+    }),
+  };
+}
 
 function makeGeneratorInput(): EntityCandidateGeneratorInput {
   return {
@@ -22,19 +46,21 @@ function makeGeneratorInput(): EntityCandidateGeneratorInput {
 }
 
 describe('buildResolverCandidatesFromGenerator', () => {
-  it('hydrates resolver candidates from anchor entity ids and preserves provenance signals', async () => {
-    const getDocument = vi.fn().mockResolvedValue({
-      entityId: createEntityId('opus-one-2018'),
-      entityType: 'wine',
+  it('hydrates resolver candidates via batch getDocuments and preserves provenance signals', async () => {
+    const entityId = createEntityId('opus-one-2018');
+    const doc = {
+      entityId,
+      entityType: 'wine' as const,
       canonicalLabel: 'Opus One 2018',
-    });
+    };
+    const lookup = makeBatchLookup(async () => doc);
 
-    const candidates = await buildResolverCandidatesFromGenerator(makeGeneratorInput(), { getDocument });
+    const candidates = await buildResolverCandidatesFromGenerator(makeGeneratorInput(), lookup);
 
-    expect(getDocument).toHaveBeenCalledWith(createEntityId('opus-one-2018'));
+    expect(lookup.getDocuments).toHaveBeenCalledWith([entityId]);
     expect(candidates).toEqual([
       expect.objectContaining({
-        entityId: createEntityId('opus-one-2018'),
+        entityId,
         entityType: 'wine',
         canonicalLabel: 'Opus One 2018',
         aliasMatches: [
@@ -56,11 +82,13 @@ describe('buildResolverCandidatesFromGenerator', () => {
   });
 
   it('merges mixed-source support for the same entity without losing provenance', async () => {
-    const getDocument = vi.fn().mockResolvedValue({
-      entityId: createEntityId('opus-one-2018'),
-      entityType: 'wine',
+    const entityId = createEntityId('opus-one-2018');
+    const doc = {
+      entityId,
+      entityType: 'wine' as const,
       canonicalLabel: 'Opus One 2018',
-    });
+    };
+    const lookup = makeBatchLookup(async () => doc);
 
     const candidates = await buildResolverCandidatesFromGenerator(
       {
@@ -81,7 +109,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           },
         ],
       },
-      { getDocument },
+      lookup,
     );
 
     expect(candidates).toHaveLength(1);
@@ -94,7 +122,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.aliasMatches).toHaveLength(2);
   });
 
-  it('prefers batch document hydration when getDocuments is available', async () => {
+  it('uses batch getDocuments as the sole production hydration path', async () => {
     const entityId = createEntityId('opus-one-2018');
     const getDocuments = vi.fn().mockResolvedValue(
       new Map([
@@ -105,20 +133,29 @@ describe('buildResolverCandidatesFromGenerator', () => {
         }],
       ]),
     );
-    const getDocument = vi.fn();
 
     const candidates = await buildResolverCandidatesFromGenerator(
       makeGeneratorInput(),
-      { getDocuments, getDocument },
+      { getDocuments },
     );
 
     expect(getDocuments).toHaveBeenCalledWith([entityId]);
-    expect(getDocument).not.toHaveBeenCalled();
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.canonicalLabel).toBe('Opus One 2018');
   });
 
-  it('rejects when hydration remains incomplete after batch and single fetches', async () => {
+  it('throws batch_lookup_failed when getDocuments rejects', async () => {
+    const getDocuments = vi.fn().mockRejectedValue(new Error('Vespa timeout'));
+
+    await expect(
+      buildResolverCandidatesFromGenerator(makeGeneratorInput(), { getDocuments }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_INCONSISTENCY',
+      message: expect.stringContaining('batch_lookup_failed'),
+    });
+  });
+
+  it('throws partial_resolution_forbidden when batch returns incomplete results', async () => {
     const missingId = createEntityId('missing-wine');
     const presentId = createEntityId('present-wine');
     const getDocuments = vi.fn().mockResolvedValue(
@@ -130,16 +167,6 @@ describe('buildResolverCandidatesFromGenerator', () => {
         }],
       ]),
     );
-    const getDocument = vi.fn(async (id) => {
-      if (String(id) === String(presentId)) {
-        return {
-          entityId: presentId,
-          entityType: 'wine',
-          canonicalLabel: 'Present Wine',
-        };
-      }
-      return null;
-    });
 
     const input = {
       rawQuery: '오푸스원',
@@ -157,9 +184,10 @@ describe('buildResolverCandidatesFromGenerator', () => {
     };
 
     await expect(
-      buildResolverCandidatesFromGenerator(input, { getDocuments, getDocument }),
+      buildResolverCandidatesFromGenerator(input, { getDocuments }),
     ).rejects.toMatchObject({
       code: 'INTERNAL_INCONSISTENCY',
+      message: expect.stringContaining('partial_resolution_forbidden'),
     });
   });
 });
@@ -177,13 +205,12 @@ describe('buildResolverCandidatesFromGenerator', () => {
 
 describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-anchor max)', () => {
   function makeLookup(entityId: string): EntityDocumentLookupPort {
-    return {
-      getDocument: vi.fn().mockResolvedValue({
-        entityId: createEntityId(entityId),
-        entityType: 'wine',
-        canonicalLabel: 'Test Wine',
-      }),
+    const doc = {
+      entityId: createEntityId(entityId),
+      entityType: 'wine' as const,
+      canonicalLabel: 'Test Wine',
     };
+    return makeBatchLookup(async () => doc);
   }
 
   it('MS-COMM-01: 교환법칙 — anchor(A=0.9, B=0.6) vs anchor(B=0.6, A=0.9) 동일 신호', async () => {

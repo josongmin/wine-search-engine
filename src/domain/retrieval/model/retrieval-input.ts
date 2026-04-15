@@ -25,9 +25,9 @@ export interface AnchorProfile {
  *
  * Produced by the query planner and consumed by {@link CandidatePoolService}.
  *
- * E2-U3: compiled hint fields allow retrieval to use ExecutionCompiler decisions
- * without re-deriving route/mode from QueryPlanV1. When present, consumers should
- * prefer compiledRetrievalMode over queryPlan.retrievalMode.
+ * E2-U3: retrieval runtime meaning comes from compiled execution.
+ * Consumers must use compiledRetrievalMode as the authoritative mode and must
+ * not re-derive runtime mode from QueryPlanV1.
  */
 export interface HybridRetrievalInput {
   /** The full query plan driving this retrieval. */
@@ -38,8 +38,8 @@ export interface HybridRetrievalInput {
 
   /**
    * E2-U3: Compiled retrieval mode from EngineExecutionContract.
-   * When present, this is the authoritative mode for profile selection and
-   * specialised path dispatch. Absent for legacy callers using V1-only path.
+   * This is the authoritative mode for profile selection and specialised
+   * path dispatch. Production callers must provide it.
    */
   readonly compiledRetrievalMode?: ExecutionRetrievalMode | undefined;
 

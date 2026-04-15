@@ -225,3 +225,55 @@ export const MAX_AGENT_STEPS_CAP = 10;
 
 /** Claude tool `search_wines` result limit (Zod max, aligns with browse UX). */
 export const MAX_WINE_TOOL_SEARCH_RESULTS = 50;
+
+// ─── Audit extension bounds ──────────────────────────────────────────────────
+
+/**
+ * Max planner policy decision records in audit_extension.planner_policy_trace.
+ * One record per planner stage (6 stages documented); headroom for future stages.
+ */
+export const MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS = 20;
+
+/**
+ * Max hard-filter drop records in audit_extension.hard_filter_drop_log.
+ * Production caps at 5 (AUDIT_DROP_LOG_MAX in post-route phase); headroom for expansion.
+ */
+export const MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS = 10;
+
+/**
+ * Max candidate source breakdown entries in resolver_provenance_trace.
+ * One entry per resolver channel enum value (alias, planner_heuristic, entity_lookup, blocker_seed).
+ */
+export const MAX_AUDIT_RESOLVER_SOURCE_BREAKDOWN_ITEMS = 10;
+
+/**
+ * Max entity IDs per source breakdown entry.
+ * Bounded by MAX_RESOLVE_CANDIDATES; practical limit is much smaller in trace payloads.
+ */
+export const MAX_AUDIT_SOURCE_BREAKDOWN_ENTITY_IDS = 200;
+
+/**
+ * Max blocker seed entity IDs in resolver_provenance_trace.
+ */
+export const MAX_AUDIT_BLOCKER_SEED_ENTITY_IDS = 50;
+
+/**
+ * Max constraint atoms in constraint_resolution_trace.
+ */
+export const MAX_AUDIT_CONSTRAINT_ATOMS = 100;
+
+/**
+ * Max constraint relations in constraint_resolution_trace.
+ */
+export const MAX_AUDIT_CONSTRAINT_RELATIONS = 100;
+
+/**
+ * Max policy outcomes in constraint_resolution_trace.
+ */
+export const MAX_AUDIT_POLICY_OUTCOMES = 100;
+
+/**
+ * Max top-N entity IDs in ranking_delta_trace preRerankTop5 / postRerankTop5.
+ * Named "top5" in the domain model but we allow a generous bound for schema stability.
+ */
+export const MAX_AUDIT_RANKING_TOP_N = 20;

@@ -5,12 +5,24 @@
  * All retry tests inject a no-op sleepFn so they run without real delays.
  */
 
+import { promises as dnsPromises } from 'node:dns';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { WebhookDelivery } from '../infrastructure/watchlist/webhook-delivery.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../domain/watchlist/model/watchlist-entry.js';
 
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock: vi.fn(),
+}));
+
+vi.mock('node:dns', () => ({
+  promises: {
+    lookup: lookupMock,
+  },
+}));
+
 const SECRET = 'test-secret-min-16-characters!!!!';
 const noopSleep = (_ms: number): Promise<void> => Promise.resolve();
+const PUBLIC_DNS_LOOKUP_RESULT = [{ address: '93.184.216.34', family: 4 }] as const;
 
 describe('WebhookDelivery', () => {
   let delivery: WebhookDelivery;
@@ -19,6 +31,7 @@ describe('WebhookDelivery', () => {
     // Inject no-op sleep so retry tests finish instantly.
     delivery = new WebhookDelivery(SECRET, noopSleep);
     vi.clearAllMocks();
+    vi.mocked(dnsPromises.lookup).mockResolvedValue(PUBLIC_DNS_LOOKUP_RESULT as never);
   });
 
   afterEach(() => {

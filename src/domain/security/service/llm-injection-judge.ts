@@ -4,6 +4,7 @@ import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
 import type { InjectionJudgeOptions, InjectionJudgePort } from '../port/injection-judge.port.js';
 import { SECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../shared/utils/time-units.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
 
@@ -78,20 +79,48 @@ export class LLMInjectionJudge implements InjectionJudgePort {
       throw error;
     }
 
-    // Try cache first
+    // Try cache first. Wave 2: distinguish infra_error / corrupt_entry / miss
+    // in observability — corrupt entry on a SECURITY surface is particularly
+    // important to alert on (potential cache poisoning attack).
     try {
       const cached = await this.cache.get(cacheKey);
       if (cached !== null) {
-        const parsed: unknown = JSON.parse(cached);
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(cached);
+        } catch (parseErr) {
+          globalSilentSkipCounter.increment('cache_read_failure', {
+            surface: 'injection_judge',
+            errorClass: 'corrupt_entry_json_parse',
+          });
+          log.error(
+            { err: parseErr, keyPrefix: cacheKey.slice(0, 32) },
+            'injection judge cache entry has invalid JSON (corrupt_entry); treating as miss. Possible cache poisoning — investigate.',
+          );
+          parsed = null;
+        }
         if (typeof parsed === 'object' && parsed !== null && 'is_injection' in parsed && typeof (parsed as Record<string, unknown>)['is_injection'] === 'boolean') {
           return (parsed as Record<string, unknown>)['is_injection'] as boolean;
         }
-        // Corrupted cache entry — treat as cache miss, not as "safe"
-        log.warn('injection judge cache entry has unexpected shape, treating as miss');
+        if (parsed !== null) {
+          // Shape mismatch (JSON parsed but not our format).
+          globalSilentSkipCounter.increment('cache_read_failure', {
+            surface: 'injection_judge',
+            errorClass: 'corrupt_entry_shape_mismatch',
+          });
+          log.error(
+            { keyPrefix: cacheKey.slice(0, 32) },
+            'injection judge cache entry has unexpected shape (corrupt_entry); treating as miss. Possible cache poisoning — investigate.',
+          );
+        }
       }
     } catch (err) {
-      // Redis error — log and continue to LLM query
-      log.warn({ err }, 'redis cache get error (treating as miss)');
+      // Redis error — infra_error, NOT a miss. Log loudly and continue to LLM.
+      globalSilentSkipCounter.increment('cache_read_failure', {
+        surface: 'injection_judge',
+        errorClass: err instanceof Error ? err.constructor.name : 'unknown',
+      });
+      log.warn({ err }, 'redis cache get error (infra_error on security surface) — continuing to LLM query');
     }
     if (options?.abortSignal?.aborted) {
       const error = new Error('Injection judge aborted');

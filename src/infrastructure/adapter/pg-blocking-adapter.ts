@@ -3,6 +3,8 @@ import type { BlockingPort } from '../../domain/resolver/port/blocking.port.js';
 import { createCanonicalEntityId, type EntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
+import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 interface CandidateRow {
   entity_id: string;
@@ -30,6 +32,29 @@ export class PgBlockingAdapter implements BlockingPort {
     // Strategy 2: prefix match on normalized_value
     // Strategy 3: ILIKE fallback on surface_form using the raw query
     // All three unioned, deduplicated, ordered by priority.
+    let activeSnapshotId: string;
+    try {
+      ({ activeSnapshotId } = await resolveActiveSnapshot(this.pool));
+    } catch (err: unknown) {
+      if (readPgSqlState(err) === '42P01') {
+        // Snapshot pointer table missing = fresh DB, pre-publish. This is
+        // distinct from "aliases table exists but query failed" (counted
+        // below) — operators need the distinction to decide between
+        // "publish a snapshot" vs "investigate PG outage".
+        globalSilentSkipCounter.increment('blocker_disabled_snapshot_pointer_missing', {
+          surface: 'PgBlockingAdapter',
+        });
+        bootstrapLogger.info(
+          '[PgBlockingAdapter] active_search_snapshot table missing — blocker alias lookup disabled for this request',
+        );
+        return [];
+      }
+      globalSilentSkipCounter.increment('blocker_snapshot_resolve_failure', {
+        surface: 'PgBlockingAdapter',
+        errorClass: err instanceof Error ? err.constructor.name : 'unknown',
+      });
+      throw err;
+    }
     let result: { rows: CandidateRow[] };
     try {
       result = await this.pool.query<CandidateRow>(
@@ -37,12 +62,14 @@ export class PgBlockingAdapter implements BlockingPort {
           SELECT entity_id, 1 AS priority
           FROM aliases
           WHERE normalized_value = $1
+            AND search_snapshot_id = $5
             AND is_suppressed = FALSE
         ),
         prefix_match AS (
           SELECT entity_id, 2 AS priority
           FROM aliases
           WHERE normalized_value LIKE $2
+            AND search_snapshot_id = $5
             AND is_suppressed = FALSE
             AND entity_id NOT IN (SELECT entity_id FROM exact_match)
         ),
@@ -50,6 +77,7 @@ export class PgBlockingAdapter implements BlockingPort {
           SELECT entity_id, 3 AS priority
           FROM aliases
           WHERE (surface_form ILIKE $3 OR normalized_value ILIKE $3)
+            AND search_snapshot_id = $5
             AND is_suppressed = FALSE
             AND entity_id NOT IN (SELECT entity_id FROM exact_match)
             AND entity_id NOT IN (SELECT entity_id FROM prefix_match)
@@ -75,13 +103,21 @@ export class PgBlockingAdapter implements BlockingPort {
           `${escapeLikePattern(normalizedQuery)}%`,
           `%${escapeLikePattern(query)}%`,
           limit,
+          activeSnapshotId,
         ],
       );
     } catch (err: unknown) {
       const code = readPgSqlState(err);
       if (code !== '42P01') {
+        globalSilentSkipCounter.increment('blocker_alias_query_failure', {
+          surface: 'PgBlockingAdapter',
+          errorClass: err instanceof Error ? err.constructor.name : 'unknown',
+        });
         throw err;
       }
+      globalSilentSkipCounter.increment('blocker_disabled_aliases_table_missing', {
+        surface: 'PgBlockingAdapter',
+      });
       bootstrapLogger.info(
         '[PgBlockingAdapter] aliases table does not exist yet — blocker alias lookup disabled for this request',
       );

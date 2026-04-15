@@ -457,10 +457,17 @@ export class BatchSearchUseCase {
         };
       }
 
+      const batchVisibleResponse = req.explain === true
+        ? response
+        : (() => {
+          const { counterfactuals: _counterfactuals, ...minimalResponse } = response;
+          return minimalResponse;
+        })();
+
       return {
         id: req.id,
         status: 'succeeded',
-        response,
+        response: batchVisibleResponse,
       };
     } catch (err) {
       const { code, message } = this.mapError(err);

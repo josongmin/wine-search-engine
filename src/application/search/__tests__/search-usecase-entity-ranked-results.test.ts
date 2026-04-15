@@ -209,6 +209,162 @@ describe('buildEntityRouteRankedResults', () => {
     expect(rankedResults[0]?.evidenceItems.some((item) => item.type === 'constraint_fail')).toBe(true);
   });
 
+  it('T-E4-03: includes entity-route-native scoreDecomposition with lexical contribution from alias match type', () => {
+    const rankedResults = buildEntityRouteRankedResults(
+      makePlan(),
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [{ aliasValue: 'Kalaris Merlot', aliasType: 'canonical', matchScore: 0.95 }],
+        attributeHints: {
+          grape_primary: 'Merlot',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(rankedResults).toHaveLength(1);
+    const decomp = rankedResults[0]?.scoreDecomposition;
+    expect(decomp).toBeDefined();
+    // Canonical exact match -> lexicalContribution = 1
+    expect(decomp?.lexicalContribution).toBe(1);
+    expect(decomp?.semanticContribution).toBe(0.97);
+    expect(decomp?.finalScore).toBe(0.97);
+    expect(decomp?.heuristicScoreNormalized).toBe(0.97);
+    expect(decomp?.anchorContribution).toBe(0);
+  });
+
+  it('T-E4-03: scoreDecomposition lexicalContribution reflects alias_fuzzy match type', () => {
+    const rankedResults = buildEntityRouteRankedResults(
+      makePlan(),
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [],
+        attributeHints: {
+          grape_primary: 'Merlot',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 0,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 1,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(rankedResults).toHaveLength(1);
+    const decomp = rankedResults[0]?.scoreDecomposition;
+    expect(decomp).toBeDefined();
+    // Fuzzy match -> lexicalContribution = 0.7
+    expect(decomp?.lexicalContribution).toBe(0.7);
+  });
+
+  it('T-E4-03: scoreDecomposition lexicalContribution reflects alias_exact match type', () => {
+    const rankedResults = buildEntityRouteRankedResults(
+      makePlan(),
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [],
+        attributeHints: {
+          grape_primary: 'Merlot',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 0,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(rankedResults).toHaveLength(1);
+    const decomp = rankedResults[0]?.scoreDecomposition;
+    expect(decomp).toBeDefined();
+    // Alias exact match -> lexicalContribution = 0.9
+    expect(decomp?.lexicalContribution).toBe(0.9);
+  });
+
+  it('T-E4-03: scoreDecomposition lexicalContribution is 0 when no alias signals available', () => {
+    const rankedResults = buildEntityRouteRankedResults(
+      makePlan(),
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [],
+        attributeHints: {
+          grape_primary: 'Merlot',
+        },
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 0,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 0,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(rankedResults).toHaveLength(1);
+    const decomp = rankedResults[0]?.scoreDecomposition;
+    expect(decomp).toBeDefined();
+    // No alias match -> lexicalContribution = 0
+    expect(decomp?.lexicalContribution).toBe(0);
+  });
+
   it('preserves resolver rank instead of rebuilding rank from synthetic order', () => {
     const rankedResults = buildEntityRouteRankedResults(
       makePlan(),

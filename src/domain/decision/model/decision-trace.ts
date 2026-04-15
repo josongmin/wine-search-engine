@@ -57,8 +57,11 @@ export interface DecisionTrace {
   readonly signals: {
     /** The calibrated decision confidence C. */
     readonly decisionConfidence: number;
-    /** Gap between top-1 and top-2 calibrated scores. */
-    readonly calibratedGap: number;
+    /**
+     * Gap between top-1 and top-2 calibrated scores, or undefined when
+     * no runner-up exists (singleton). C2: never 0-as-absence.
+     */
+    readonly calibratedGap: number | undefined;
     /** Whether ambiguity was detected. */
     readonly ambiguity: boolean;
   };

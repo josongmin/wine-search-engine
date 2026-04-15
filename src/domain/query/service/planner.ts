@@ -8,6 +8,7 @@ import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
 import type { RetrievalMode } from '../model/retrieval-mode.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
+import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { QueryUncertainty } from '../model/query-uncertainty.js';
 import type { SessionContext } from '../model/session-context.js';
 import type { QueryBudget } from '../model/query-budget.js';
@@ -93,6 +94,9 @@ const REGION_KEYWORDS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:나파|샤블리|보르도|투지|롱글로|토스카나)(?=$|[^\p{L}\p{N}])/u,
   /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
+
+const KOREAN_NOT_MARKER_PATTERN = '\\s*(?:말고|대신)\\s*';
+const ENGLISH_NOT_MARKER_PATTERN = '(?<!\\p{L})(?<!\\p{N})instead\\s+of\\s+';
 
 /**
  * Context passed to the planner alongside the raw query.
@@ -188,7 +192,7 @@ export class Planner {
     const plannerTrace: PolicyDecisionRecord[] = [];
 
     // 2. Extract anchors.
-    const anchors = await this.anchorExtractor.extract(normalizedQuery, queryViews);
+    const { anchors, relativeQuery } = await this.anchorExtractor.extractWithRelative(normalizedQuery, queryViews);
 
     // 2b. Fuzzy-match fallback: when anchor extraction finds nothing, try
     //     approximate matching against the known-term index.
@@ -248,6 +252,7 @@ export class Planner {
       normalizedQuery,
       anchors,
       this.anchorExtractor,
+      relativeQuery,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
@@ -308,7 +313,12 @@ export class Planner {
     }
 
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
-    const parsed = await this.parseConstraints(normalizedQuery, intent, context?.abortSignal);
+    const constraintQuery = this.buildConstraintParsingQuery(
+      normalizedQuery,
+      anchors,
+      relativeQuery,
+    );
+    const parsed = await this.parseConstraints(constraintQuery, intent, context?.abortSignal);
     const constraints = this.mergePairingIntoBundle(
       parsed.bundle,
       normalizedQuery,
@@ -665,6 +675,43 @@ export class Planner {
     return this.constraintCompiler.compile(normalizedQuery, abortSignal);
   }
 
+  private buildConstraintParsingQuery(
+    normalizedQuery: string,
+    anchors: readonly AnchorCandidate[],
+    relativeQuery: AnchorConditionedQuery | null,
+  ): string {
+    if (anchors.length === 0 || relativeQuery === null) {
+      return normalizedQuery;
+    }
+
+    const matchedAnchorForms = new Set(
+      anchors.flatMap((anchor) => [
+        anchor.surfaceForm,
+        anchor.normalizedForm,
+        ...(anchor.lookupVariants ?? []),
+      ].map((value) => value.trim().toLowerCase()).filter((value) => value.length > 0)),
+    );
+
+    let sanitizedQuery = normalizedQuery;
+    for (const expression of relativeQuery.relativeExpressions) {
+      if (expression.operator !== 'not') {
+        continue;
+      }
+
+      const anchorSurface = expression.anchorSurfaceForm.trim();
+      if (anchorSurface.length === 0 || !matchedAnchorForms.has(anchorSurface.toLowerCase())) {
+        continue;
+      }
+
+      const escapedAnchor = escapeRegex(anchorSurface);
+      sanitizedQuery = sanitizedQuery
+        .replace(new RegExp(`${escapedAnchor}${KOREAN_NOT_MARKER_PATTERN}`, 'u'), ' ')
+        .replace(new RegExp(`${ENGLISH_NOT_MARKER_PATTERN}${escapedAnchor}`, 'iu'), ' ');
+    }
+
+    return sanitizedQuery.replace(/\s+/gu, ' ').trim();
+  }
+
   /**
    * Computes the uncertainty assessment for the query.
    */
@@ -863,6 +910,10 @@ export class Planner {
     // No clear signal detected.
     return undefined;
   }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Build a PolicyDecisionRecord for a planner decision stage. */

@@ -204,6 +204,8 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
   };
   return {
     queryPlan,
+    effectiveRoute: 'hybrid',
+    effectiveRetrievalMode: 'hybrid',
     resolverResult,
     policy: {
       requireExact: false,

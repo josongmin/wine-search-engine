@@ -47,6 +47,8 @@ describe('id schema decoder', () => {
     const ref = buildAuthorityTraceRef({
       queryPlan: makeQueryPlan(),
       snapshot: makeSnapshot(),
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
       chosenEntityId: 'wine-opus-one-2018',
       decisionStatus: 'resolved',
       nextAction: 'return_result',

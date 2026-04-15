@@ -173,7 +173,7 @@ export class RankingStagePipeline {
       const policyContext: PolicyContext = {
         queryClass: input.queryPlan.queryClass,
         // compiled-first: use compiled execution contract when available (E3-U1)
-        effectiveRoute: input.compiled?.execution.effectiveRoute ?? input.queryPlan.route,
+        effectiveRoute: input.compiled.execution.effectiveRoute,
       };
       const policyOutput = this.policy.apply(results, policyContext);
       // policyApplied = true only when the policy actually changed something:

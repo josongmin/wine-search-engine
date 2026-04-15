@@ -31,8 +31,25 @@ async function makeFixtureRepo(spec: FixtureSpec): Promise<string> {
 }
 
 interface RuntimeFakePoolSpec {
-  readonly entitiesPresent: ReadonlyArray<string>;
-  readonly canonicalEntitiesPresent: ReadonlyArray<string>;
+  readonly runtimeRows: ReadonlyArray<{
+    readonly entity_id: string;
+    readonly benchmark_entity_id: string | null;
+  }>;
+  readonly canonicalRows: ReadonlyArray<{
+    readonly canonical_entity_id: string;
+    readonly benchmark_entity_id: string | null;
+  }>;
+  readonly identityParityRows: ReadonlyArray<{
+    readonly entity_id: string;
+    readonly runtime_signature: string;
+    readonly authority_signature: string | null;
+    readonly authority_entity_id: string | null;
+  }>;
+  readonly benchmarkParityRows?: ReadonlyArray<{
+    readonly entity_id: string;
+    readonly runtime_benchmark_entity_id: string | null;
+    readonly canonical_benchmark_entity_id: string | null;
+  }>;
 }
 
 function fakePool(spec: RuntimeFakePoolSpec): Pool {
@@ -43,12 +60,28 @@ function fakePool(spec: RuntimeFakePoolSpec): Pool {
       const i = callIdx;
       callIdx++;
       if (i === 0) {
-        const present = spec.entitiesPresent.filter((id) => requested.includes(id));
-        return { rows: present.map((entity_id) => ({ entity_id })) };
+        const rows = spec.runtimeRows.filter((row) =>
+          requested.includes(row.entity_id) || (row.benchmark_entity_id != null && requested.includes(row.benchmark_entity_id)));
+        return { rows };
       }
       if (i === 1) {
-        const present = spec.canonicalEntitiesPresent.filter((id) => requested.includes(id));
-        return { rows: present.map((canonical_entity_id) => ({ canonical_entity_id })) };
+        const rows = spec.canonicalRows.filter((row) =>
+          requested.includes(row.canonical_entity_id) || (row.benchmark_entity_id != null && requested.includes(row.benchmark_entity_id)));
+        return { rows };
+      }
+      if (i === 2) {
+        const rows = spec.benchmarkParityRows ?? spec.runtimeRows.map((row) => ({
+          entity_id: row.entity_id,
+          runtime_benchmark_entity_id: row.benchmark_entity_id,
+          canonical_benchmark_entity_id: row.benchmark_entity_id,
+        }));
+        return { rows };
+      }
+      if (i === 3) {
+        // T-011/W3: identity_signature parity query. Return matched
+        // signatures so parity passes by default in existing happy-path
+        // tests. Tests that want to exercise drift override this pool.
+        return { rows: spec.identityParityRows };
       }
       throw new Error(`Unexpected pool.query call index ${i}`);
     }),
@@ -69,8 +102,28 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       },
     });
     const pool = fakePool({
-      entitiesPresent: ['opus-one-2018', 'sassicaia-2017'],
-      canonicalEntitiesPresent: ['opus-one-2018', 'sassicaia-2017'],
+      runtimeRows: [
+        { entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+        { entity_id: 'sassicaia-2017', benchmark_entity_id: 'sassicaia-2017' },
+      ],
+      canonicalRows: [
+        { canonical_entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+        { canonical_entity_id: 'sassicaia-2017', benchmark_entity_id: 'sassicaia-2017' },
+      ],
+      identityParityRows: [
+        {
+          entity_id: 'opus-one-2018',
+          runtime_signature: 'sig-opus',
+          authority_signature: 'sig-opus',
+          authority_entity_id: 'opus-one-2018',
+        },
+        {
+          entity_id: 'sassicaia-2017',
+          runtime_signature: 'sig-sass',
+          authority_signature: 'sig-sass',
+          authority_entity_id: 'sassicaia-2017',
+        },
+      ],
     });
     const result = await verifyRuntimeGoldCatalogCoverage({
       pool,
@@ -78,6 +131,10 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       fixtureRepoRoot: fixtureRoot,
     });
     expect(result.requiredCanonicalIds).toBe(2);
+    expect(result.runtimePublicIdMatches).toBe(2);
+    expect(result.runtimeBenchmarkLinkageMatches).toBe(2);
+    expect(result.canonicalPublicIdMatches).toBe(2);
+    expect(result.canonicalBenchmarkLinkageMatches).toBe(2);
     expect(result.missingFromEntities).toEqual([]);
     expect(result.missingFromCanonicalEntities).toEqual([]);
   });
@@ -90,8 +147,11 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       targetMap: { 'case-1': 'opus-one-2018' },
     });
     const pool = fakePool({
-      entitiesPresent: [],
-      canonicalEntitiesPresent: ['opus-one-2018'],
+      runtimeRows: [],
+      canonicalRows: [
+        { canonical_entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+      ],
+      identityParityRows: [],
     });
     await expect(
       verifyRuntimeGoldCatalogCoverage({
@@ -99,7 +159,7 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
         snapshotId: 'snap-test-1',
         fixtureRepoRoot: fixtureRoot,
       }),
-    ).rejects.toThrow(/entities \(snapshot=snap-test-1\) missing 1: opus-one-2018/);
+    ).rejects.toThrow(/entities \(snapshot=snap-test-1\) missing 1 runtime\/public-linkage id\(s\): opus-one-2018/);
   });
 
   it('fails when a required id is missing from canonical_entities graph plane', async () => {
@@ -110,8 +170,18 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       targetMap: { 'case-1': 'opus-one-2018' },
     });
     const pool = fakePool({
-      entitiesPresent: ['opus-one-2018'],
-      canonicalEntitiesPresent: [],
+      runtimeRows: [
+        { entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+      ],
+      canonicalRows: [],
+      identityParityRows: [
+        {
+          entity_id: 'opus-one-2018',
+          runtime_signature: 'sig-opus',
+          authority_signature: null,
+          authority_entity_id: null,
+        },
+      ],
     });
     await expect(
       verifyRuntimeGoldCatalogCoverage({
@@ -119,7 +189,7 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
         snapshotId: 'snap-test-1',
         fixtureRepoRoot: fixtureRoot,
       }),
-    ).rejects.toThrow(/canonical_entities missing 1: opus-one-2018/);
+    ).rejects.toThrow(/canonical_entities missing 1 runtime\/public-linkage id\(s\): opus-one-2018/);
   });
 
   it('fails when target-entity-map references a source-style id', async () => {
@@ -129,7 +199,11 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       ],
       targetMap: { 'case-1': 'vivino-12345' },
     });
-    const pool = fakePool({ entitiesPresent: [], canonicalEntitiesPresent: [] });
+    const pool = fakePool({
+      runtimeRows: [],
+      canonicalRows: [],
+      identityParityRows: [],
+    });
     await expect(
       verifyRuntimeGoldCatalogCoverage({
         pool,
@@ -146,7 +220,11 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       ],
       targetMap: { 'case-1': 'undeclared-canonical-id' },
     });
-    const pool = fakePool({ entitiesPresent: [], canonicalEntitiesPresent: [] });
+    const pool = fakePool({
+      runtimeRows: [],
+      canonicalRows: [],
+      identityParityRows: [],
+    });
     await expect(
       verifyRuntimeGoldCatalogCoverage({
         pool,
@@ -163,7 +241,11 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
       ],
       targetMap: { 'case-1': null, 'case-2': null },
     });
-    const pool = fakePool({ entitiesPresent: [], canonicalEntitiesPresent: [] });
+    const pool = fakePool({
+      runtimeRows: [],
+      canonicalRows: [],
+      identityParityRows: [],
+    });
     const result = await verifyRuntimeGoldCatalogCoverage({
       pool,
       snapshotId: 'snap-test-1',
@@ -171,5 +253,76 @@ describe('verifyRuntimeGoldCatalogCoverage (ADR-007 cutover gate)', () => {
     });
     expect(result.requiredCanonicalIds).toBe(0);
     expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('fails when runtime benchmark linkage drifts from canonical benchmark linkage', async () => {
+    const fixtureRoot = await makeFixtureRepo({
+      canonicalEntities: [
+        { entity_id: 'opus-one-2018', canonical_label: 'Opus One', vintage: 2018 },
+      ],
+      targetMap: { 'case-1': 'opus-one-2018' },
+    });
+    const pool = fakePool({
+      runtimeRows: [
+        { entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+      ],
+      canonicalRows: [
+        { canonical_entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018-drift' },
+      ],
+      benchmarkParityRows: [
+        {
+          entity_id: 'opus-one-2018',
+          runtime_benchmark_entity_id: 'opus-one-2018',
+          canonical_benchmark_entity_id: 'opus-one-2018-drift',
+        },
+      ],
+      identityParityRows: [
+        {
+          entity_id: 'opus-one-2018',
+          runtime_signature: 'sig-opus',
+          authority_signature: 'sig-opus',
+          authority_entity_id: 'opus-one-2018',
+        },
+      ],
+    });
+    await expect(
+      verifyRuntimeGoldCatalogCoverage({
+        pool,
+        snapshotId: 'snap-test-1',
+        fixtureRepoRoot: fixtureRoot,
+      }),
+    ).rejects.toThrow(/Benchmark linkage drift/);
+  });
+
+  it('fails when runtime identity authority drifts from canonical_identity_authority', async () => {
+    const fixtureRoot = await makeFixtureRepo({
+      canonicalEntities: [
+        { entity_id: 'opus-one-2018', canonical_label: 'Opus One', vintage: 2018 },
+      ],
+      targetMap: { 'case-1': 'opus-one-2018' },
+    });
+    const pool = fakePool({
+      runtimeRows: [
+        { entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+      ],
+      canonicalRows: [
+        { canonical_entity_id: 'opus-one-2018', benchmark_entity_id: 'opus-one-2018' },
+      ],
+      identityParityRows: [
+        {
+          entity_id: 'opus-one-2018',
+          runtime_signature: 'sig-opus',
+          authority_signature: 'sig-opus',
+          authority_entity_id: 'opus-one-2019',
+        },
+      ],
+    });
+    await expect(
+      verifyRuntimeGoldCatalogCoverage({
+        pool,
+        snapshotId: 'snap-test-1',
+        fixtureRepoRoot: fixtureRoot,
+      }),
+    ).rejects.toThrow(/Identity authority drift/);
   });
 });

@@ -59,15 +59,17 @@ describe('buildAliasArtifact', () => {
     const entityIdBySourceId = buildEntityIdBySourceId([record], goldLookup);
     const aliases = buildAliasArtifact([record], entityIdBySourceId);
 
+    // entityId is an identity-hash canonical ID, not the gold fixture ID.
+    // Find by scope + source instead of hardcoded entityId.
     const transliteratedProducer = aliases.find(
       (alias) =>
-        alias.entityId === 'opus-one-2018'
-        && alias.scope === 'locale_ko'
+        alias.scope === 'locale_ko'
         && alias.source.includes('rule:producer_identity_v1'),
     );
 
     expect(transliteratedProducer).toBeDefined();
     expect(transliteratedProducer?.value).toContain('오');
+    // EXCEPTIONS: 'opus one' → '오푸스원' (compound form includes typo correction)
     expect(transliteratedProducer?.value.replace(/\s+/g, '')).toContain('오푸스');
   });
 });

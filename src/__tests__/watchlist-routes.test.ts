@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { promises as dnsPromises } from 'node:dns';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { WatchlistService } from '../application/watchlist/watchlist.service.js';
 import { deepKeysToSnake } from '../interface/http/middleware/snake-case-hook.js';
@@ -9,6 +10,18 @@ import {
   configureAuthenticatedSubjectTrust,
 } from '../interface/http/authenticated-subject.js';
 import { InMemoryWatchlistStore } from '../infrastructure/watchlist/in-memory-watchlist-store.js';
+
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock: vi.fn(),
+}));
+
+vi.mock('node:dns', () => ({
+  promises: {
+    lookup: lookupMock,
+  },
+}));
+
+const PUBLIC_DNS_LOOKUP_RESULT = [{ address: '93.184.216.34', family: 4 }] as const;
 
 function authHeaders(subject = 'user-1'): Record<string, string> {
   return { [AUTHENTICATED_SUBJECT_HEADER]: subject };
@@ -34,6 +47,8 @@ describe('Watchlist Routes', () => {
   let watchlistService: WatchlistService;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(dnsPromises.lookup).mockResolvedValue(PUBLIC_DNS_LOOKUP_RESULT as never);
     app = Fastify();
     watchlistService = new WatchlistService({
       storage: new InMemoryWatchlistStore(),
@@ -52,6 +67,7 @@ describe('Watchlist Routes', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app.close();
   });
 

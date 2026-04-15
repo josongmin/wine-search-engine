@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from 'vitest';
 import { runSearchPostRoutePhase } from '../search-usecase-post-route-phase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
+import type { CompiledWineQuery } from '../../../domain/query/model/compiled-wine-query.js';
+
+function makeTestCompiled(): CompiledWineQuery {
+  return {
+    query: {
+      rawQuery: 'q', normalizedQuery: 'q', intent: 'semantic_discovery',
+      queryClass: 'unknown', anchors: [], constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] }, uncertainty: {} as never,
+      plannerVersion: '1', policyRuleVersion: '1', thresholdProfileId: 'default',
+      retrievalPlan: { hardFilterTokens: [], softBoosts: [], inferredBoosts: [], sensoryPriors: [], planVersion: 'retrieval-plan-v1.0' },
+    },
+    execution: {
+      effectiveRoute: 'hybrid', effectiveRetrievalMode: 'attribute_search', routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+    },
+  } as CompiledWineQuery;
+}
 
 const GENERIC_HYBRID_EXECUTION_FACTS = {
   effectiveRetrievalMode: 'attribute_search',
@@ -98,6 +116,7 @@ describe('runSearchPostRoutePhase', () => {
         thresholdProfileId: 'default',
         plannerVersion: '1.0.0',
       } as never,
+      compiled: makeTestCompiled(),
       request: { query: 'find bordeaux' },
       requestId: 'req-1',
       startTime: Date.now(),
@@ -132,7 +151,7 @@ describe('runSearchPostRoutePhase', () => {
       expect.objectContaining({ normalizedQuery: 'find bordeaux' }),
       {},
       response,
-      undefined,
+      expect.objectContaining({ execution: expect.any(Object) }),
     );
   });
 
@@ -273,6 +292,7 @@ describe('runSearchPostRoutePhase', () => {
         thresholdProfileId: 'default',
         plannerVersion: '1.0.0',
       } as never,
+      compiled: makeTestCompiled(),
       request: { query: 'Kalaris Merlot' },
       requestId: 'req-entity-1',
       startTime: Date.now(),
@@ -475,6 +495,7 @@ describe('runSearchPostRoutePhase', () => {
         thresholdProfileId: 'default',
         plannerVersion: '1.0.0',
       } as never,
+      compiled: makeTestCompiled(),
       request: { query: 'specialized browse' },
       requestId: 'req-specialized',
       startTime: Date.now() - 10,
@@ -703,6 +724,7 @@ describe('runSearchPostRoutePhase', () => {
         thresholdProfileId: 'default',
         plannerVersion: '1.0.0',
       } as never,
+      compiled: makeTestCompiled(),
       request: { query: 'Kalaris Merlot' },
       requestId: 'req-entity-constraint',
       startTime: Date.now(),

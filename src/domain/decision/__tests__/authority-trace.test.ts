@@ -51,6 +51,8 @@ describe('authority trace refs', () => {
     const a = buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -58,6 +60,8 @@ describe('authority trace refs', () => {
     const b = buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -72,6 +76,8 @@ describe('authority trace refs', () => {
     const a = buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -79,6 +85,8 @@ describe('authority trace refs', () => {
     const b = buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       chosenEntityId: 'e2',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -92,6 +100,8 @@ describe('authority trace refs', () => {
     const plannerModeRef = buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -99,6 +109,7 @@ describe('authority trace refs', () => {
     const compiledModeRef = buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
       retrievalMode: 'recommendation',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
@@ -115,6 +126,7 @@ describe('authority trace refs', () => {
       queryPlan: plan,
       snapshot: snap,
       route: 'entity',
+      retrievalMode: 'attribute_search',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -123,6 +135,7 @@ describe('authority trace refs', () => {
       queryPlan: plan,
       snapshot: snap,
       route: 'hybrid',
+      retrievalMode: 'attribute_search',
       chosenEntityId: 'e1',
       decisionStatus: 'resolved',
       nextAction: 'return_result',
@@ -137,11 +150,15 @@ describe('authority trace refs', () => {
     const a = buildAdmissionAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       reason: 'EVIDENCE_INSUFFICIENT',
     });
     const b = buildAdmissionAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       reason: 'EVIDENCE_INSUFFICIENT',
     });
     expect(a).toBe(b);
@@ -154,12 +171,15 @@ describe('authority trace refs', () => {
     const plannerModeRef = buildAdmissionAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
+      route: 'entity',
+      retrievalMode: 'entity_resolution',
       reason: 'POLICY_BLOCKED',
     });
     const compiledModeRef = buildAdmissionAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
       reason: 'POLICY_BLOCKED',
+      route: 'entity',
       retrievalMode: 'recommendation',
     });
 
@@ -174,12 +194,14 @@ describe('authority trace refs', () => {
       snapshot: snap,
       reason: 'POLICY_BLOCKED',
       route: 'entity',
+      retrievalMode: 'attribute_search',
     });
     const hybridRef = buildAdmissionAuthorityTraceRef({
       queryPlan: plan,
       snapshot: snap,
       reason: 'POLICY_BLOCKED',
       route: 'hybrid',
+      retrievalMode: 'attribute_search',
     });
 
     expect(hybridRef).not.toBe(entityRef);

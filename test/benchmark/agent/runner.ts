@@ -819,6 +819,20 @@ export interface BenchmarkReport {
       readonly totalP95: number;
     };
     readonly byTier: Record<string, { readonly count: number; readonly avgScore: number }>;
+    /**
+     * ADR-009 Phase 0: fraction of tool calls across the run that emitted a
+     * typed evidence frame. Cutover gate is >= 0.99 on two consecutive
+     * nightly runs before Phase 1 (ConstraintGraph) begins.
+     *
+     * null when the bench run had zero tool calls (rare edge — edge_case
+     * scenarios that answer without invoking any tool).
+     */
+    readonly evidenceFrameCoverage: number | null;
+    /** Absolute counts behind the coverage ratio, for audit. */
+    readonly evidenceFrameCounts: {
+      readonly framedToolCalls: number;
+      readonly totalToolCalls: number;
+    };
   };
 }
 
@@ -968,11 +982,19 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           return [];
         });
 
-        const observations = result.steps.flatMap((s) => {
-          if (s.actionPairs !== undefined) return s.actionPairs.map((p) => p.observation).filter((o) => o.length > 0);
-          if (s.observation !== undefined) return [s.observation];
-          return [];
-        });
+        // ADR-009 Phase 0: prefer typed evidence-frame observationSnapshots when
+        // available — byte-equivalent to what the LLM saw, but backed by a
+        // structured output the evaluator could alternatively read directly.
+        // Fallback to legacy actionPairs/observation strings when frames absent.
+        const observations = result.evidenceFrames !== undefined && result.evidenceFrames.length > 0
+          ? result.evidenceFrames.map((f) => f.observationSnapshot).filter((o) => o.length > 0)
+          : result.steps.flatMap((s) => {
+              if (s.actionPairs !== undefined) return s.actionPairs.map((p) => p.observation).filter((o) => o.length > 0);
+              if (s.observation !== undefined) return [s.observation];
+              return [];
+            });
+
+        const evidenceFrameCount = result.evidenceFrames?.length ?? 0;
 
         const execution: ScenarioExecution = {
           answer: result.answer,
@@ -983,6 +1005,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           terminationReason: mapTerminationReason(result.terminationReason),
           totalDurationMs: result.totalDurationMs,
           totalTokens: result.totalTokens,
+          ...(result.evidenceFrames !== undefined ? { evidenceFrameCount } : {}),
         };
 
         // Map AgentStep[] → StepTrace[] for triage profiling in the result JSON.
@@ -1436,6 +1459,23 @@ function buildReport(
         totalP95: percentile(sortedTokens, 0.95),
       },
       byTier,
+      // ADR-009 Phase 0 cutover metric: framed / total tool calls.
+      // Scenarios that never invoked a tool (terminationReason='answer',
+      // stepCount=1) contribute nothing to either numerator or denominator.
+      ...(() => {
+        const framedToolCalls = executed.reduce(
+          (n, r) => n + (r.evidenceFrameCount ?? 0),
+          0,
+        );
+        const totalToolCalls = executed.reduce(
+          (n, r) => n + (r.toolCallCount ?? 0),
+          0,
+        );
+        return {
+          evidenceFrameCoverage: totalToolCalls > 0 ? framedToolCalls / totalToolCalls : null,
+          evidenceFrameCounts: { framedToolCalls, totalToolCalls },
+        };
+      })(),
     },
   };
 }

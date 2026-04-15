@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { topKFinalScores } from '../../../../src/application/search/search-usecase-ranking-scores.js';
 import { buildEntityResolverInputFromPlan } from '../../../../src/application/search/search-usecase-entity-resolver-input.js';
 import { buildHybridRetrievalInputForPlan } from '../../../../src/application/search/search-usecase-hybrid-candidates.js';
@@ -7,6 +7,11 @@ import { buildConstraintContradictionExitParams } from '../../../../src/applicat
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
+import { globalSilentSkipCounter } from '../../../../src/observability/silent-skip-counters.js';
+
+afterEach(() => {
+  globalSilentSkipCounter.reset();
+});
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -124,8 +129,8 @@ describe('tryGetCachedSearchResponse', () => {
   it('returns data on cache hit', async () => {
     const cached = { queryType: 'search' as const, engineDecision: {} as any, results: [], meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
     const getSearchResponse = vi.fn(async () => ({
-      hit: true,
-      data: cached,
+      kind: 'hit',
+      value: cached,
     }));
     const plan = minimalPlan();
     const request: SearchRequest = { query: 'x' };
@@ -141,7 +146,7 @@ describe('tryGetCachedSearchResponse', () => {
   });
 
   it('returns undefined on miss', async () => {
-    const getSearchResponse = vi.fn(async () => ({ hit: false }));
+    const getSearchResponse = vi.fn(async () => ({ kind: 'miss' }));
     const plan = minimalPlan();
     const out = await tryGetCachedSearchResponse(
       { getSearchResponse } as import('../../../../src/domain/performance/port/search-response-cache.port.js').SearchResponseCachePort,
@@ -151,6 +156,42 @@ describe('tryGetCachedSearchResponse', () => {
       undefined,
     );
     expect(out).toBeUndefined();
+  });
+
+  it('returns undefined and counts breaker_open separately', async () => {
+    const getSearchResponse = vi.fn(async () => ({ kind: 'breaker_open' }));
+    const plan = minimalPlan();
+    const before = globalSilentSkipCounter.snapshot().cache_read_failure;
+    const out = await tryGetCachedSearchResponse(
+      { getSearchResponse } as import('../../../../src/domain/performance/port/search-response-cache.port.js').SearchResponseCachePort,
+      plan,
+      undefined,
+      { query: 'x' },
+      undefined,
+    );
+    const after = globalSilentSkipCounter.snapshot().cache_read_failure;
+    expect(out).toBeUndefined();
+    expect(after).toBe(before + 1);
+  });
+
+  it('returns undefined and counts infra_error separately', async () => {
+    const getSearchResponse = vi.fn(async () => ({
+      kind: 'infra_error',
+      errorClass: 'Error',
+      message: 'redis down',
+    }));
+    const plan = minimalPlan();
+    const before = globalSilentSkipCounter.snapshot().cache_read_failure;
+    const out = await tryGetCachedSearchResponse(
+      { getSearchResponse } as import('../../../../src/domain/performance/port/search-response-cache.port.js').SearchResponseCachePort,
+      plan,
+      undefined,
+      { query: 'x' },
+      undefined,
+    );
+    const after = globalSilentSkipCounter.snapshot().cache_read_failure;
+    expect(out).toBeUndefined();
+    expect(after).toBe(before + 1);
   });
 });
 

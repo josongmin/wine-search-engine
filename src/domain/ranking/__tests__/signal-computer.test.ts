@@ -24,8 +24,8 @@ describe('SignalComputer SOTA++ signals', () => {
 
   // ── computeProducerPrestige ──────────────────────────────────────────────────
   describe('computeProducerPrestige', () => {
-    it('returns 0.5 (neutral) when producerPrestige is absent', () => {
-      expect(computer.computeProducerPrestige(makeCandidate())).toBe(0.5);
+    it('returns undefined when producerPrestige is absent', () => {
+      expect(computer.computeProducerPrestige(makeCandidate())).toBeUndefined();
     });
     it('returns value as-is when in [0, 1]', () => {
       expect(computer.computeProducerPrestige(makeCandidate({ producerPrestige: 0.8 }))).toBeCloseTo(0.8);
@@ -111,8 +111,7 @@ describe('SignalComputer.computePopularity (SCAN4-01)', () => {
 
   it('returns baseline when sparseRank is absent', () => {
     const score = computer.computePopularity(makeCandidate());
-    expect(score).toBeGreaterThanOrEqual(0);
-    expect(score).toBeLessThanOrEqual(1);
+    expect(score).toBeUndefined();
   });
 
   it('never produces NaN or out-of-[0,1] values', () => {
@@ -122,6 +121,46 @@ describe('SignalComputer.computePopularity (SCAN4-01)', () => {
       expect(score).toBeGreaterThanOrEqual(0);
       expect(score).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe('SignalComputer unsupported-signal omission', () => {
+  const computer = new SignalComputer();
+
+  it('omits semantic score when the candidate never went through fusion', () => {
+    expect(computer.computeSemanticScore(makeCandidate({ fusionRrfTotal: undefined }))).toBeUndefined();
+  });
+
+  it('omits attribute alignment when the query has no structured expectations', () => {
+    const score = computer.computeAttributeAlignment(
+      makeCandidate({ matchedConstraints: [] }),
+      {
+        route: 'hybrid',
+        queryClass: 'known_item',
+        plannerVersion: 'test',
+        policyRuleVersion: 'test',
+        thresholdProfileId: 'default',
+        queryTargetType: 'wine',
+        intent: 'lookup_known_item',
+        normalizedQuery: 'opus one',
+        constraints: { hard: [], soft: [], inferred: [] },
+        anchors: [],
+        retrievalMode: 'known_item',
+        explanation: '',
+        ambiguitySignals: [],
+        uncertainty: { overall: 0, ambiguitySignals: [], decisionEffect: 'trace_only' },
+        policy: { requireExact: false, allowApproximate: true, clarificationBias: 0, fallbackMode: 'allow' },
+      } as never,
+    );
+    expect(score).toBeUndefined();
+  });
+
+  it('omits preference alignment when no preference plane is wired', () => {
+    expect(computer.computePreferenceAlignment()).toBeUndefined();
+  });
+
+  it('omits availability when the candidate has no availability field', () => {
+    expect(computer.computeAvailability(makeCandidate())).toBeUndefined();
   });
 });
 

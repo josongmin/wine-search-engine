@@ -34,6 +34,15 @@ import type { EntityResolveResult } from '../../domain/resolver/model/resolve-re
 
 import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../../domain/resolver/model/corrective-retry-thresholds.js';
 
+function readFiniteDecisionConfidence(
+  result: EntityResolveResult,
+): number | undefined {
+  const rawConfidence = result.decisionConfidenceC;
+  return rawConfidence !== undefined && Number.isFinite(rawConfidence)
+    ? rawConfidence
+    : undefined;
+}
+
 /**
  * Evaluate whether a corrective exact-recovery retry should be attempted.
  *
@@ -71,11 +80,12 @@ export function shouldTriggerCorrectiveRetry(
   const zeroAnchors = plan.anchors.length === 0;
 
   // C2: Low confidence (non-ambiguous miss with C below retry threshold).
-  // NaN/non-finite confidence is treated as 0 (worst-case, trigger retry).
-  // Rule 28: guard Number.isFinite() before numeric comparison.
-  const rawConfidence = result.decisionConfidenceC ?? 0;
-  const confidence = Number.isFinite(rawConfidence) ? rawConfidence : 0;
-  const lowConfidence = confidence < CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD;
+  // Missing/non-finite confidence is treated as "untrustworthy posterior" and
+  // therefore remains retry-eligible, but we branch explicitly instead of
+  // collapsing absence into a synthetic 0.
+  const confidence = readFiniteDecisionConfidence(result);
+  const lowConfidence = confidence === undefined
+    || confidence < CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD;
 
   return zeroAnchors || lowConfidence;
 }
@@ -112,8 +122,8 @@ export function resolveCorrectiveRetryOutcome(
 
   // Confidence still below threshold after retry → clarify (not hybrid fallback).
   // RFC: corrective retry is exact recovery, NOT broad search fallback.
-  const confidence = retryResult.decisionConfidenceC ?? 0;
-  if (!Number.isFinite(confidence) || confidence < CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD) {
+  const confidence = readFiniteDecisionConfidence(retryResult);
+  if (confidence === undefined || confidence < CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD) {
     return 'clarify';
   }
 

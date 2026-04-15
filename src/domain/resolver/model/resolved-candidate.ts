@@ -3,6 +3,7 @@ import type { AliasType } from '../../alias/model/alias.js';
 import type { MatchSignalSet } from './match-signal-set.js';
 import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
+import type { ResolverCandidateTrace } from './decision-trace.js';
 
 /**
  * A candidate that has been scored, calibrated, and ranked by the resolver.
@@ -48,6 +49,15 @@ export interface ResolvedCandidate {
    * Used downstream for provenance tagging and corrective retry logging.
    */
   readonly blockerSeed?: true | undefined;
+
+  /**
+   * T-E4-02: Per-candidate structured trace capturing the resolver's internal
+   * score/calibration/boundary state at ranking time.
+   *
+   * Present when the resolver populates trace data. Enables exact-route failure
+   * reproduction from a single request trace without access to separate logs.
+   */
+  readonly trace?: ResolverCandidateTrace | undefined;
 }
 
 /**

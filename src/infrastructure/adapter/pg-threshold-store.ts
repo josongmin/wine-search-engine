@@ -12,7 +12,6 @@
 import type { Pool } from 'pg';
 import type { ThresholdStore } from '../../domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../domain/query/model/threshold-profile.js';
-import { DEFAULT_THRESHOLD_PROFILE } from '../../domain/query/model/threshold-profile.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'PgThresholdStore' });
@@ -77,20 +76,17 @@ export class PgThresholdStore implements ThresholdStore {
     if (row != null) {
       const parsed = rowToProfile(row, 'getDefault');
       if (parsed !== null) return parsed;
-      // Row exists but JSONB shape drift — surface as a fallback signal so
-      // operators see "shape drift" distinct from "no row at all".
-      log.error(
-        { fallbackReason: 'invalid_shape', profileId: row.profile_id },
-        '[PgThresholdStore] default threshold profile JSONB invalid; falling back to in-memory DEFAULT_THRESHOLD_PROFILE',
+      // T-E7-02: fail-closed — JSONB shape drift is a deployment/seeding error.
+      throw new Error(
+        `[PgThresholdStore] default threshold profile JSONB invalid for profile_id="${row.profile_id}". ` +
+        'Fix the seeded data or re-run the threshold migration.',
       );
-      return DEFAULT_THRESHOLD_PROFILE;
     }
-    // No row — table empty or never seeded. Distinct log from the shape-drift case.
-    log.warn(
-      { fallbackReason: 'no_default_row' },
-      '[PgThresholdStore] no default threshold profile in DB; using in-memory DEFAULT_THRESHOLD_PROFILE',
+    // T-E7-02: fail-closed — no default row means table never seeded.
+    throw new Error(
+      '[PgThresholdStore] no default threshold profile in DB. ' +
+      'Seed the threshold_profiles table before starting the service.',
     );
-    return DEFAULT_THRESHOLD_PROFILE;
   }
 
   async save(profile: ThresholdProfileV1): Promise<void> {

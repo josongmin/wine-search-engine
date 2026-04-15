@@ -350,10 +350,11 @@ describe('POST /v1/search/interpret + Accept human — V2 interpret response sha
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
 
-    expect(body['detected_intent']).toBe('entity_fuzzy');
+    expect(body['detected_intent']).toBe('recommendation');
     expect(body['active_channels']).toEqual([
       'sparse_bm25',
       'dense_semantic',
+      'anchor_similarity',
     ]);
     expect(new Set(body['active_channels'] as string[]).size).toBe(
       (body['active_channels'] as string[]).length,
@@ -361,6 +362,7 @@ describe('POST /v1/search/interpret + Accept human — V2 interpret response sha
     expect(body['active_channels']).not.toContain('sparse');
     expect(body['active_channels']).not.toContain('dense');
     expect(body['active_channels']).not.toContain('compare_anchor');
+    expect(body['ranking_signals']).toContain('anchor_similarity');
   });
 
   it('surfaces decomposition strategy for comparison queries without leaking V1 planner fields', async () => {

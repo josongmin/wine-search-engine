@@ -212,9 +212,11 @@ export interface SearchIndexPort {
    * Retrieve multiple documents by entity IDs.
    *
    * Returned map contains only found documents; missing IDs are omitted.
-   * Implementations should prefer backend-native batching over N single fetches.
+   * Implementations MUST prefer backend-native batching over N single fetches.
+   *
+   * T-E4-01: Elevated to required -- entity route batch hydration depends on this.
    */
-  getDocuments?(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
+  getDocuments(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
 
   /**
    * Insert or update a single document in the index.

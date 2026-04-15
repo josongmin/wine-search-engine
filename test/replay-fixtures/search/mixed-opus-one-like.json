@@ -1,0 +1,40 @@
+{
+  "name": "mixed-opus-one-like",
+  "endpoint": "/v1/search",
+  "execution_lane": "self_contained",
+  "request": {
+    "query": "오푸스원 같은 와인",
+    "options": {
+      "mode": "auto",
+      "explain": true,
+      "clarification": false
+    }
+  },
+  "expected": {
+    "execution_mode": "authoritative",
+    "degradation_reasons": [],
+    "golden_trace": {
+      "authority_trace_ref": "decision:v1:anchored_similarity:7a417647b21075b1f52b6e96601742668296e003c807de96587699e2b8ee3786",
+      "snapshot_id": "snapshot:v1:heuristic-v1.0:1.0.0:1.0.0:26ad8eee92719cc0e4f4477e7cff24cc5ca9b3c1bb0b7c0128d3f033822a1c1b",
+      "determinism_fingerprint": "fa669d1d6255406e",
+      "execution_trace": {
+        "effective_route": "mixed",
+        "retrieval_mode_source": "planner",
+        "effective_retrieval_mode": "similar_items",
+        "retrieval_kind": "mixed_similarity",
+        "sparse_executed": false,
+        "specialized_route_executed": null,
+        "used_compiled_execution": true,
+        "compiled_budget": {
+          "max_candidates": 20,
+          "enable_precision_rerank": false
+        },
+        "provenance_policy": {
+          "require_identity_seal": true,
+          "require_constraint_evidence": false,
+          "require_anchor_evidence": true
+        }
+      }
+    }
+  }
+}

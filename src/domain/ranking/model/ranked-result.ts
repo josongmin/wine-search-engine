@@ -36,8 +36,11 @@ export interface ComponentScores {
    */
   readonly anchorSimilarity?: number | undefined;
 
-  /** Semantic relevance from dense retrieval, normalized to [0, 1]. */
-  readonly semantic: number;
+  /**
+   * Semantic relevance from dense retrieval, normalized to [0, 1].
+   * Absent when the candidate did not traverse a dense/fusion lane.
+   */
+  readonly semantic?: number | undefined;
 
   /**
    * Gate flag: whether all hard constraints are satisfied.
@@ -48,17 +51,29 @@ export interface ComponentScores {
   /** Weighted satisfaction of soft constraints, in [0, 1]. */
   readonly softConstraint: number;
 
-  /** Structured attribute alignment with query plan attributes. */
-  readonly attributeAlignment: number;
+  /**
+   * Structured attribute alignment with query plan attributes.
+   * Absent when the query had no structured attribute expectations.
+   */
+  readonly attributeAlignment?: number | undefined;
 
-  /** Alignment with user taste preferences, in [0, 1]. */
-  readonly preferenceAlignment: number;
+  /**
+   * Alignment with user taste preferences, in [0, 1].
+   * Absent when the runtime path has no authoritative preference signal.
+   */
+  readonly preferenceAlignment?: number | undefined;
 
-  /** Popularity signal derived from engagement data, tie-breaker level. */
-  readonly popularity: number;
+  /**
+   * Popularity signal derived from engagement data, tie-breaker level.
+   * Absent when no authoritative sparse/engagement popularity signal exists.
+   */
+  readonly popularity?: number | undefined;
 
-  /** Availability signal; penalizes unavailable items. */
-  readonly availability: number;
+  /**
+   * Availability signal; penalizes unavailable items.
+   * Absent when no availability data plane is wired into the candidate.
+   */
+  readonly availability?: number | undefined;
 
   /** Penalty for uncertainty/ambiguity; subtracted from final score. */
   readonly uncertaintyPenalty: number;

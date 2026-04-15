@@ -328,4 +328,22 @@ describe('executeHybridRouteRankingPipeline', () => {
       expect.objectContaining({ entityId: blockerEntityIdA }),
     ]));
   });
+
+  it('marks missing entity resolver as failed with undefined runner-up fields', async () => {
+    const plan = minimalPlan();
+
+    const result = await resolveEntityRouteForPlan(
+      plan,
+      {
+        entityLookup: { getDocument: vi.fn(), getDocuments: vi.fn() } as never,
+      },
+      buildCompiled(plan),
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.degradation?.reasons).toEqual(['entity_resolver_unavailable']);
+    expect(result.decisionTrace.outcomeReasonCodes).toEqual(['HYBRID_ROUTE_MISSING_ENTITY_RESOLVER']);
+    expect(result.decisionTrace.top2CalibratedScore).toBeUndefined();
+    expect(result.decisionTrace.calibratedGap).toBeUndefined();
+  });
 });

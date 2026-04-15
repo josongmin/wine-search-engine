@@ -43,6 +43,10 @@ export interface RuntimeGoldCoverageArgs {
 export interface RuntimeGoldCoverageResult {
   readonly snapshotId: string;
   readonly requiredCanonicalIds: number;
+  readonly runtimePublicIdMatches: number;
+  readonly runtimeBenchmarkLinkageMatches: number;
+  readonly canonicalPublicIdMatches: number;
+  readonly canonicalBenchmarkLinkageMatches: number;
   readonly missingFromEntities: readonly string[];
   readonly missingFromCanonicalEntities: readonly string[];
 }
@@ -99,51 +103,201 @@ export async function verifyRuntimeGoldCatalogCoverage(
     return {
       snapshotId: args.snapshotId,
       requiredCanonicalIds: 0,
+      runtimePublicIdMatches: 0,
+      runtimeBenchmarkLinkageMatches: 0,
+      canonicalPublicIdMatches: 0,
+      canonicalBenchmarkLinkageMatches: 0,
       missingFromEntities: [],
       missingFromCanonicalEntities: [],
     };
   }
 
+  const requiredSet = new Set(required);
   const [entitiesResult, canonicalResult] = await Promise.all([
-    args.pool.query<{ entity_id: string }>(
-      `SELECT entity_id
+    args.pool.query<{ entity_id: string; benchmark_entity_id: string | null }>(
+      `SELECT
+         entity_id,
+         metadata->>'benchmarkEntityId' AS benchmark_entity_id
          FROM entities
         WHERE search_snapshot_id = $1
-          AND COALESCE(metadata->>'benchmarkEntityId', entity_id) = ANY($2::text[])`,
+          AND (
+            entity_id = ANY($2::text[])
+            OR metadata->>'benchmarkEntityId' = ANY($2::text[])
+          )`,
       [args.snapshotId, required],
     ),
-    args.pool.query<{ canonical_entity_id: string }>(
-      `SELECT COALESCE(source_provenance->>'benchmark_entity_id', canonical_entity_id) AS canonical_entity_id
+    args.pool.query<{ canonical_entity_id: string; benchmark_entity_id: string | null }>(
+      `SELECT
+         canonical_entity_id,
+         source_provenance->>'benchmark_entity_id' AS benchmark_entity_id
          FROM canonical_entities
-        WHERE COALESCE(source_provenance->>'benchmark_entity_id', canonical_entity_id) = ANY($1::text[])`,
-      [required],
+        WHERE
+          search_snapshot_id = $1
+          AND (
+            canonical_entity_id = ANY($2::text[])
+            OR source_provenance->>'benchmark_entity_id' = ANY($2::text[])
+          )`,
+      [args.snapshotId, required],
     ),
   ]);
 
-  const presentInEntities = new Set(entitiesResult.rows.map((r) => r.entity_id));
-  const presentInCanonical = new Set(canonicalResult.rows.map((r) => r.canonical_entity_id));
+  const runtimePublicIdMatches = new Set<string>();
+  const runtimeBenchmarkLinkageMatches = new Set<string>();
+  for (const row of entitiesResult.rows) {
+    if (requiredSet.has(row.entity_id)) {
+      runtimePublicIdMatches.add(row.entity_id);
+    }
+    if (row.benchmark_entity_id != null && requiredSet.has(row.benchmark_entity_id)) {
+      runtimeBenchmarkLinkageMatches.add(row.benchmark_entity_id);
+    }
+  }
 
-  const missingFromEntities = required.filter((id) => !presentInEntities.has(id));
-  const missingFromCanonicalEntities = required.filter((id) => !presentInCanonical.has(id));
+  const canonicalPublicIdMatches = new Set<string>();
+  const canonicalBenchmarkLinkageMatches = new Set<string>();
+  for (const row of canonicalResult.rows) {
+    if (requiredSet.has(row.canonical_entity_id)) {
+      canonicalPublicIdMatches.add(row.canonical_entity_id);
+    }
+    if (row.benchmark_entity_id != null && requiredSet.has(row.benchmark_entity_id)) {
+      canonicalBenchmarkLinkageMatches.add(row.benchmark_entity_id);
+    }
+  }
+
+  const runtimePlaneCoverage = new Set<string>([
+    ...runtimePublicIdMatches,
+    ...runtimeBenchmarkLinkageMatches,
+  ]);
+  const canonicalPlaneCoverage = new Set<string>([
+    ...canonicalPublicIdMatches,
+    ...canonicalBenchmarkLinkageMatches,
+  ]);
+
+  const missingFromEntities = required.filter((id) => !runtimePlaneCoverage.has(id));
+  const missingFromCanonicalEntities = required.filter((id) => !canonicalPlaneCoverage.has(id));
 
   if (missingFromEntities.length > 0 || missingFromCanonicalEntities.length > 0) {
     const parts: string[] = [];
     if (missingFromEntities.length > 0) {
       parts.push(
-        `entities (snapshot=${args.snapshotId}) missing ${missingFromEntities.length}: ${missingFromEntities.slice(0, 10).join(', ')}${missingFromEntities.length > 10 ? ', …' : ''}`,
+        `entities (snapshot=${args.snapshotId}) missing ${missingFromEntities.length} runtime/public-linkage id(s): ${missingFromEntities.slice(0, 10).join(', ')}${missingFromEntities.length > 10 ? ', …' : ''}`,
       );
     }
     if (missingFromCanonicalEntities.length > 0) {
       parts.push(
-        `canonical_entities missing ${missingFromCanonicalEntities.length}: ${missingFromCanonicalEntities.slice(0, 10).join(', ')}${missingFromCanonicalEntities.length > 10 ? ', …' : ''}`,
+        `canonical_entities missing ${missingFromCanonicalEntities.length} runtime/public-linkage id(s): ${missingFromCanonicalEntities.slice(0, 10).join(', ')}${missingFromCanonicalEntities.length > 10 ? ', …' : ''}`,
       );
     }
     throw new Error(`Runtime gold coverage failed: ${parts.join(' | ')}`);
   }
 
+  const benchmarkLinkageParityResult = await args.pool.query<{
+    entity_id: string;
+    runtime_benchmark_entity_id: string | null;
+    canonical_benchmark_entity_id: string | null;
+  }>(
+    `SELECT
+       e.entity_id,
+       e.metadata->>'benchmarkEntityId' AS runtime_benchmark_entity_id,
+       ce.source_provenance->>'benchmark_entity_id' AS canonical_benchmark_entity_id
+     FROM entities e
+     LEFT JOIN canonical_entities ce
+       ON ce.search_snapshot_id = e.search_snapshot_id
+      AND ce.canonical_entity_id = e.entity_id
+     WHERE e.search_snapshot_id = $1
+       AND e.metadata ? 'benchmarkEntityId'`,
+    [args.snapshotId],
+  );
+
+  const benchmarkLinkageDrift: { entityId: string; runtime: string; canonical: string | null }[] = [];
+  for (const row of benchmarkLinkageParityResult.rows) {
+    if (row.runtime_benchmark_entity_id == null) {
+      continue;
+    }
+    if (row.canonical_benchmark_entity_id == null) {
+      benchmarkLinkageDrift.push({
+        entityId: row.entity_id,
+        runtime: row.runtime_benchmark_entity_id,
+        canonical: null,
+      });
+      continue;
+    }
+    if (row.runtime_benchmark_entity_id !== row.canonical_benchmark_entity_id) {
+      benchmarkLinkageDrift.push({
+        entityId: row.entity_id,
+        runtime: row.runtime_benchmark_entity_id,
+        canonical: row.canonical_benchmark_entity_id,
+      });
+    }
+  }
+  if (benchmarkLinkageDrift.length > 0) {
+    const sample = benchmarkLinkageDrift.slice(0, 5).map((d) =>
+      `${d.entityId}: runtime benchmarkEntityId=${d.runtime} vs canonical benchmark_entity_id=${d.canonical}`,
+    ).join(' | ');
+    throw new Error(
+      `Benchmark linkage drift: ${benchmarkLinkageDrift.length} entity row(s) disagree on benchmark linkage. ${sample}${benchmarkLinkageDrift.length > 5 ? ' | …' : ''}`,
+    );
+  }
+
+  // T-011/W3: identity authority parity.
+  //
+  // For every runtime entity_id in the active snapshot, the matching
+  // canonical_identity_authority row must map the SAME identity_signature
+  // to the SAME canonical_entity_id. A mismatch means one plane has been
+  // re-hashed or re-bound relative to the global authority table — the
+  // runtime is serving an id whose identity authority has drifted.
+  const parityResult = await args.pool.query<{
+    entity_id: string;
+    runtime_signature: string;
+    authority_signature: string | null;
+    authority_entity_id: string | null;
+  }>(
+    `SELECT
+       e.entity_id,
+       e.identity_signature AS runtime_signature,
+       cia.identity_signature AS authority_signature,
+       cia.canonical_entity_id AS authority_entity_id
+     FROM entities e
+     LEFT JOIN canonical_identity_authority cia
+       ON cia.identity_signature = e.identity_signature
+     WHERE e.search_snapshot_id = $1`,
+    [args.snapshotId],
+  );
+  const identityDrift: { entityId: string; runtime: string; authoritySignature: string | null; authorityEntityId: string | null }[] = [];
+  for (const row of parityResult.rows) {
+    if (row.authority_signature == null || row.authority_entity_id == null) {
+      identityDrift.push({
+        entityId: row.entity_id,
+        runtime: row.runtime_signature,
+        authoritySignature: row.authority_signature,
+        authorityEntityId: row.authority_entity_id,
+      });
+      continue;
+    }
+    if (row.runtime_signature !== row.authority_signature || row.entity_id !== row.authority_entity_id) {
+      identityDrift.push({
+        entityId: row.entity_id,
+        runtime: row.runtime_signature,
+        authoritySignature: row.authority_signature,
+        authorityEntityId: row.authority_entity_id,
+      });
+    }
+  }
+  if (identityDrift.length > 0) {
+    const sample = identityDrift.slice(0, 5).map((d) =>
+      `${d.entityId}: runtime_signature=${d.runtime} vs authority_signature=${d.authoritySignature}, authority_entity_id=${d.authorityEntityId}`,
+    ).join(' | ');
+    throw new Error(
+      `Identity authority drift: ${identityDrift.length} runtime row(s) disagree with canonical_identity_authority. ${sample}${identityDrift.length > 5 ? ' | …' : ''}`,
+    );
+  }
+
   return {
     snapshotId: args.snapshotId,
     requiredCanonicalIds: required.length,
+    runtimePublicIdMatches: runtimePublicIdMatches.size,
+    runtimeBenchmarkLinkageMatches: runtimeBenchmarkLinkageMatches.size,
+    canonicalPublicIdMatches: canonicalPublicIdMatches.size,
+    canonicalBenchmarkLinkageMatches: canonicalBenchmarkLinkageMatches.size,
     missingFromEntities,
     missingFromCanonicalEntities,
   };

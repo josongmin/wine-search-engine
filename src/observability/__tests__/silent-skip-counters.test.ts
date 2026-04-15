@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createSilentSkipCounter,
+  incrementLtrInferenceComponentScoreAbsent,
   globalSilentSkipCounter,
   type SilentSkipKind,
 } from '../silent-skip-counters.js';
@@ -58,5 +59,17 @@ describe('silent-skip-counters', () => {
   it('globalSilentSkipCounter is a shared singleton across imports', () => {
     globalSilentSkipCounter.increment('embedding_empty_vector');
     expect(globalSilentSkipCounter.snapshot().embedding_empty_vector).toBe(1);
+  });
+
+  it('tracks LTR inference component-score absences with explicit taxonomy', () => {
+    incrementLtrInferenceComponentScoreAbsent('semantic');
+    incrementLtrInferenceComponentScoreAbsent('multilingualScore');
+
+    const snap = globalSilentSkipCounter.snapshot();
+    expect(snap.ltr_inference_component_score_absent_semantic).toBe(1);
+    expect(snap.ltr_inference_component_score_absent_multilingual_score).toBe(1);
+    expect(snap.ltr_inference_component_score_absent_popularity).toBe(0);
+    expect(snap.ltr_inference_component_score_absent_attribute_alignment).toBe(0);
+    expect(snap.ltr_inference_component_score_absent_preference_alignment).toBe(0);
   });
 });

@@ -35,6 +35,8 @@ import {
   type AgentToolDeps,
   type AgentToolResult,
 } from './agent-tools.js';
+import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-evidence-frame.js';
+import { toolCallIdForStep } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import { evaluateBatchPolicy } from './tool-batch-policy.js';
 import {
   buildSynthesisContext,
@@ -512,6 +514,8 @@ export class AgentOrchestrator {
     const steps: AgentStep[] = [];
     // E7-T2: Typed tool outcomes, generated alongside AgentStep for each tool invocation.
     const toolOutcomes: ToolOutcome[] = [];
+    // ADR-009 Phase 0: flat aggregate of typed evidence frames across the run.
+    const collectedFrames: ToolCallEvidenceFrame[] = [];
     let lastSearchResult: SearchResponseV1 | undefined;
     let terminationReason: AgentTerminationReason = 'max_steps';
     let totalInputTokens = 0;
@@ -933,7 +937,10 @@ export class AgentOrchestrator {
                 batchCalls,
                 this.deps.toolDeps,
                 `${requestId}-step${steps.length}`,
-                { abortSignal: batchAbortController.signal },
+                {
+                  abortSignal: batchAbortController.signal,
+                  toolCallId: toolCallIdForStep(requestId, steps.length),
+                },
               ),
               effectiveConfig.parallelBatchTimeoutMs ?? DEFAULT_PARALLEL_BATCH_TIMEOUT_MS,
               'Parallel tool batch timed out',
@@ -1060,6 +1067,14 @@ export class AgentOrchestrator {
 
           const batchDurationMs = Math.max(0, Date.now() - stepStart);
           const batchStepIndex = steps.length;
+          // ADR-009 Phase 0: collect per-item evidence frames (aligned 1:1 with batchPairs).
+          const batchFrames: ToolCallEvidenceFrame[] = [];
+          for (const r of batchResults) {
+            if (r.evidenceFrame !== undefined) {
+              batchFrames.push(r.evidenceFrame);
+              collectedFrames.push(r.evidenceFrame);
+            }
+          }
           steps.push({
             index: batchStepIndex,
             thought: parsed.thought,
@@ -1068,6 +1083,7 @@ export class AgentOrchestrator {
             observations,
             durationMs: batchDurationMs,
             tokenCount: { input: inputTokens, output: outputTokens },
+            ...(batchFrames.length > 0 ? { evidenceFrames: batchFrames } : {}),
           });
 
           // E7-T2: Generate typed ToolOutcome for each tool in the batch.
@@ -1157,6 +1173,7 @@ export class AgentOrchestrator {
           // Execute tool
           let observation: string;
           let rawResult: unknown;
+          let sequentialEvidenceFrame: ToolCallEvidenceFrame | undefined;
           const toolAbortController = new AbortController();
           const propagateToolAbort = (): void => { toolAbortController.abort(); };
           abortSignal?.addEventListener('abort', propagateToolAbort, { once: true });
@@ -1167,13 +1184,20 @@ export class AgentOrchestrator {
                 input,
                 this.deps.toolDeps,
                 `${requestId}-step${steps.length}`,
-                { abortSignal: toolAbortController.signal },
+                {
+                  abortSignal: toolAbortController.signal,
+                  toolCallId: toolCallIdForStep(requestId, steps.length),
+                },
               ),
               effectiveConfig.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
               `Tool "${tool}" timed out`,
             );
             observation = truncateObservation(timedToolResult.observation, effectiveConfig.maxContextChars);
             rawResult = timedToolResult.rawResult;
+            sequentialEvidenceFrame = timedToolResult.evidenceFrame;
+            if (sequentialEvidenceFrame !== undefined) {
+              collectedFrames.push(sequentialEvidenceFrame);
+            }
           } catch (toolErr) {
             if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
               timeoutStats.tool += 1;
@@ -1300,6 +1324,9 @@ export class AgentOrchestrator {
             observation,
             durationMs: stepDurationMs,
             tokenCount: { input: inputTokens, output: outputTokens },
+            ...(sequentialEvidenceFrame !== undefined
+              ? { evidenceFrames: [sequentialEvidenceFrame] }
+              : {}),
           });
 
           // E7-T2: Generate typed ToolOutcome alongside AgentStep.
@@ -1720,6 +1747,9 @@ export class AgentOrchestrator {
       ...(lastSearchResult !== undefined ? { searchResults: lastSearchResult } : {}),
       // E7-T2: Include typed tool outcomes when at least one tool was invoked.
       ...(toolOutcomes.length > 0 ? { toolOutcomes } : {}),
+      // ADR-009 Phase 0: aggregate of typed evidence frames across the run.
+      // Present when at least one tool call emitted a frame (feature flag on).
+      ...(collectedFrames.length > 0 ? { evidenceFrames: collectedFrames } : {}),
       synthesisContext,
       ...(fallbackApplied
         ? {

@@ -143,7 +143,7 @@ describe('search snapshot runtime readiness', () => {
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
 
-  it('registers search snapshot runtime readiness and requires it only in production', () => {
+  it('registers search snapshot runtime readiness as required in all environments (T-E7-02 strict fail-closed)', () => {
     const prodConfig = parseEnv({
       NODE_ENV: 'production',
       WEBHOOK_SECRET: 'prod-secret-1234',
@@ -159,7 +159,7 @@ describe('search snapshot runtime readiness', () => {
     expect(prodHealth.readiness?.search_snapshot_runtime).toBeDefined();
     expect(prodHealth.readiness?.search_snapshot_runtime?.required).toBe(true);
     expect(testHealth.readiness?.search_snapshot_runtime).toBeDefined();
-    expect(testHealth.readiness?.search_snapshot_runtime?.required).toBe(false);
+    expect(testHealth.readiness?.search_snapshot_runtime?.required).toBe(true);
   });
 
   it('uses strict hash verification when the runtime readiness probe runs with a pool', async () => {

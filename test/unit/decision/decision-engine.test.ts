@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect } from 'vitest';
 import { DecisionEngine } from '../../../src/domain/decision/service/decision-engine.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../../src/domain/query/model/threshold-profile.js';
 import type { ThresholdStore } from '../../../src/domain/query/port/threshold-store.port.js';
@@ -14,6 +14,7 @@ import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js'
 import type { EntityResolveResult } from '../../../src/domain/resolver/model/resolve-result.js';
 import type { QueryPolicy } from '../../../src/domain/query/model/query-policy.js';
 import type { QueryUncertainty } from '../../../src/domain/query/model/query-uncertainty.js';
+import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
 
 // ── Stub: ThresholdStore returning DEFAULT_THRESHOLD_PROFILE ──────────────────
 class StubThresholdStore implements ThresholdStore {
@@ -199,6 +200,8 @@ function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
   };
   return {
     queryPlan,
+    effectiveRoute: 'hybrid',
+    effectiveRetrievalMode: 'hybrid',
     resolverResult,
     policy: makePolicy(),
     uncertainty: makeUncertainty(),
@@ -221,6 +224,10 @@ describe('DecisionEngine', () => {
   const store = new StubThresholdStore();
   const engine = new DecisionEngine(store);
   const snapshot = makeSnapshot();
+
+  beforeEach(() => {
+    globalSilentSkipCounter.reset();
+  });
 
   // short_entity thresholds: resolveTau=0.50, gapTau=0.02
 
@@ -298,6 +305,15 @@ describe('DecisionEngine', () => {
     expect(trace.versions).toBeDefined();
     expect(trace.rulesApplied).toBeInstanceOf(Array);
     expect(trace.finalReason).toBeTypeOf('string');
+  });
+
+  it('counts absent decision evidenceItems before returning the legacy empty evidence surface', async () => {
+    const input = makeDecisionInput({ evidenceItems: undefined });
+
+    const output = await engine.decide(input, snapshot);
+
+    expect(output.evidenceItems).toEqual([]);
+    expect(globalSilentSkipCounter.snapshot().decision_evidence_items_absent).toBe(1);
   });
 
   it('nextAction=return_result when resolved', async () => {

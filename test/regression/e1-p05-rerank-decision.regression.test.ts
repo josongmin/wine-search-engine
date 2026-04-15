@@ -20,6 +20,7 @@ import { EvidenceMapper } from '../../src/domain/ranking/service/evidence-mapper
 import type { QueryClassWeights } from '../../src/domain/ranking/service/lambdamart-ranker.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../src/domain/ranking/model/ranking-input.js';
+import type { CompiledWineQuery } from '../../src/domain/query/model/compiled-wine-query.js';
 import type { ComponentScores } from '../../src/domain/ranking/model/ranked-result.js';
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
@@ -85,6 +86,21 @@ function makeRankingInput(
     },
     candidates,
     constraints: { hard: [], soft: [], inferred: [] },
+    compiled: {
+      query: {
+        rawQuery: 'test wine', normalizedQuery: 'test wine', intent: 'known_entity',
+        queryClass, anchors: [], constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] }, uncertainty: { level: 'low', sources: [] },
+        plannerVersion: '1.0.0', policyRuleVersion: '1.0.0', thresholdProfileId: 'default-v1',
+        retrievalPlan: { hardFilterTokens: [], softBoosts: [], inferredBoosts: [], sensoryPriors: [], planVersion: 'retrieval-plan-v1.0' },
+      },
+      execution: {
+        effectiveRoute: route, effectiveRetrievalMode: 'hybrid',
+        routeSource: 'planner',
+        budget: { maxCandidates: 20, enablePrecisionRerank: true },
+        provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+      },
+    } as CompiledWineQuery,
     ...(rerankForced !== undefined ? { rerankForced } : {}),
   };
 }
@@ -297,7 +313,7 @@ describe('E1-P0-5 RerankDecision: applied', () => {
 
 describe('E1-P0-5 RerankDecision: LtrRerankSkipReason type-level assertion', () => {
   it('RerankDecisionCode union covers all expected branches (compile-time check)', () => {
-    // This test verifies that all five RerankDecisionCode values are valid string literals.
+    // This test verifies that all six RerankDecisionCode values are valid string literals.
     // If the type changes, TypeScript will flag the cast below at build time.
     const codes: readonly string[] = [
       'applied',
@@ -305,8 +321,9 @@ describe('E1-P0-5 RerankDecision: LtrRerankSkipReason type-level assertion', () 
       'empty_candidates',
       'feature_dimension_mismatch',
       'gate_blocked',
+      'normalization_failed',
     ];
-    expect(codes).toHaveLength(5);
+    expect(codes).toHaveLength(6);
     for (const code of codes) {
       expect(typeof code).toBe('string');
     }

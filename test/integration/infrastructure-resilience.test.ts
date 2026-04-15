@@ -87,9 +87,48 @@ function createMockSnapshot(modelVersion = 'test-v1'): DecisionSnapshot {
   return { snapshot_id: buildDecisionSnapshotId(base), ...base };
 }
 
+function createMockCompiledQuery() {
+  return {
+    query: {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      intent: 'search',
+      queryClass: 'simple',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {} as never,
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      retrievalPlan: {
+        hardFilterTokens: [],
+        softBoosts: [],
+        inferredBoosts: [],
+        sensoryPriors: [],
+        planVersion: 'retrieval-plan-v1.0',
+      },
+    },
+    execution: {
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode: 'entity_lookup' as const,
+      routeSource: 'planner' as const,
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: {
+        requireIdentitySeal: false,
+        requireConstraintEvidence: false,
+        requireAnchorEvidence: false,
+      },
+    },
+  };
+}
+
 function makeFailingQueryCache(): QueryCachePort {
   return {
     get: async () => {
+      throw new Error('Redis connection refused');
+    },
+    getWithDiagnostics: async () => {
       throw new Error('Redis connection refused');
     },
     set: async () => {
@@ -106,6 +145,10 @@ function makeCountingFailingQueryCache(message = 'Redis connection refused') {
   let callCount = 0;
   const cache: QueryCachePort = {
     get: async () => {
+      callCount++;
+      throw new Error(message);
+    },
+    getWithDiagnostics: async () => {
       callCount++;
       throw new Error(message);
     },
@@ -292,33 +335,46 @@ describe('CacheService — circuit breaker', () => {
   let cacheService: CacheService;
   let mockPlan: QueryPlanV1;
   let mockSnapshot: DecisionSnapshot;
+  let mockCompiled: ReturnType<typeof createMockCompiledQuery>;
 
   beforeEach(() => {
     cacheService = new CacheService(makeFailingQueryCache(), undefined, THRESHOLD, RESET_MS);
     mockPlan = createMockPlan();
     mockSnapshot = createMockSnapshot();
+    mockCompiled = createMockCompiledQuery();
   });
 
-  it('returns an error reason (not circuit_breaker_open) on the first failure', async () => {
-    const result = await cacheService.getSearchResponse(mockPlan, {}, mockSnapshot);
+  it('returns infra_error on the first failure', async () => {
+    const result = await cacheService.getSearchResponse(
+      mockPlan,
+      {},
+      mockSnapshot,
+      undefined,
+      mockCompiled,
+    );
 
-    expect(result.hit).toBe(false);
-    // Before threshold is reached the circuit is still closed — reason is the error message.
-    expect(result.reason).toMatch(/^error:/);
-    expect(result.reason).not.toBe('circuit_breaker_open');
+    expect(result.kind).toBe('infra_error');
+    if (result.kind === 'infra_error') {
+      expect(result.message).toBe('Redis connection refused');
+    }
   });
 
   it('opens the circuit breaker after threshold consecutive errors', async () => {
     // Trigger THRESHOLD failures to trip the breaker.
     for (let i = 0; i < THRESHOLD; i++) {
-      await cacheService.getSearchResponse(mockPlan, {}, mockSnapshot);
+      await cacheService.getSearchResponse(mockPlan, {}, mockSnapshot, undefined, mockCompiled);
     }
 
     // The next call should be short-circuited.
-    const result = await cacheService.getSearchResponse(mockPlan, {}, mockSnapshot);
+    const result = await cacheService.getSearchResponse(
+      mockPlan,
+      {},
+      mockSnapshot,
+      undefined,
+      mockCompiled,
+    );
 
-    expect(result.hit).toBe(false);
-    expect(result.reason).toBe('circuit_breaker_open');
+    expect(result.kind).toBe('breaker_open');
   });
 
   it('skips Redis entirely while the circuit is open (no further cache calls)', async () => {
@@ -327,14 +383,14 @@ describe('CacheService — circuit breaker', () => {
 
     // Trigger THRESHOLD failures to trip the breaker.
     for (let i = 0; i < THRESHOLD; i++) {
-      await svc.getSearchResponse(mockPlan, {}, mockSnapshot);
+      await svc.getSearchResponse(mockPlan, {}, mockSnapshot, undefined, mockCompiled);
     }
 
     const callsBeforeOpen = countingFailingCache.getCallCount();
 
     // Now the circuit is open; this call should NOT touch Redis.
-    await svc.getSearchResponse(mockPlan, {}, mockSnapshot);
-    await svc.getSearchResponse(mockPlan, {}, mockSnapshot);
+    await svc.getSearchResponse(mockPlan, {}, mockSnapshot, undefined, mockCompiled);
+    await svc.getSearchResponse(mockPlan, {}, mockSnapshot, undefined, mockCompiled);
 
     expect(countingFailingCache.getCallCount()).toBe(callsBeforeOpen); // no new cache calls
   });
@@ -349,12 +405,18 @@ describe('CacheService — circuit breaker', () => {
 
     // Trip the breaker.
     for (let i = 0; i < THRESHOLD; i++) {
-      await svc.getSearchResponse(mockPlan, {}, mockSnapshot);
+      await svc.getSearchResponse(mockPlan, {}, mockSnapshot, undefined, mockCompiled);
     }
 
     // Confirm breaker is open.
-    const openResult = await svc.getSearchResponse(mockPlan, {}, mockSnapshot);
-    expect(openResult.reason).toBe('circuit_breaker_open');
+    const openResult = await svc.getSearchResponse(
+      mockPlan,
+      {},
+      mockSnapshot,
+      undefined,
+      mockCompiled,
+    );
+    expect(openResult.kind).toBe('breaker_open');
 
     const callsWhenOpen = countingCache.getCallCount();
 
@@ -362,7 +424,7 @@ describe('CacheService — circuit breaker', () => {
     vi.advanceTimersByTime(SHORT_RESET_MS + 1);
 
     // Now the breaker should have auto-reset; the next call should attempt Redis again.
-    await svc.getSearchResponse(mockPlan, {}, mockSnapshot);
+    await svc.getSearchResponse(mockPlan, {}, mockSnapshot, undefined, mockCompiled);
     expect(countingCache.getCallCount()).toBeGreaterThan(callsWhenOpen);
 
     vi.useRealTimers();

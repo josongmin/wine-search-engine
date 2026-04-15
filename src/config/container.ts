@@ -117,9 +117,12 @@ export async function createContainer(
                     startTime,
                   ),
                 // Direct entity lookup by ID — bypasses the full search pipeline
-                // for check_drinking_window. Uses the Vespa search index's
-                // getDocument method which is a single O(1) GET, not a search.
-                entityLookup: async (id) => (await core.entityLookup.getDocument(id)) ?? undefined,
+                // for check_drinking_window. Uses batch getDocuments() with a
+                // single-element array (T-E4-01: getDocument is deprecated).
+                entityLookup: async (id) => {
+                  const docs = await core.entityLookup.getDocuments([id]);
+                  return docs.get(id) ?? undefined;
+                },
               },
             },
             {

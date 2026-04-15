@@ -65,19 +65,16 @@ function makeSearchIndexStub(
 
 describe('Promise.all → allSettled resilience (regression)', () => {
   describe('buildResolverCandidatesFromGenerator', () => {
-    it('rejects when one getDocument rejects and hydration becomes incomplete', async () => {
+    it('rejects when batch getDocuments returns partial results (T-E4-01: batch-only path)', async () => {
       const goodId = 'entity-good';
       const failId = 'entity-fail';
       const doc = makeDoc(goodId);
       const input = makeGeneratorInputWithAnchors([goodId, failId]);
 
+      // T-E4-01: getDocuments is the required path. Return only the good doc
+      // to simulate a partial result — the failId is missing from the map.
       const entityLookup = {
-        getDocument: vi.fn(async (id: EntityId) => {
-          if (String(id) === failId) {
-            throw new Error('Vespa timeout');
-          }
-          return doc;
-        }),
+        getDocuments: vi.fn(async () => new Map([[goodId, doc]])),
       };
 
       await expect(buildResolverCandidatesFromGenerator(input, entityLookup)).rejects.toMatchObject({
@@ -85,10 +82,10 @@ describe('Promise.all → allSettled resilience (regression)', () => {
       });
     });
 
-    it('rejects when all getDocument calls reject', async () => {
+    it('rejects when batch getDocuments throws (T-E4-01: batch_lookup_failed)', async () => {
       const input = makeGeneratorInputWithAnchors(['a', 'b']);
       const entityLookup = {
-        getDocument: vi.fn(async () => {
+        getDocuments: vi.fn(async () => {
           throw new Error('total Vespa outage');
         }),
       };
@@ -120,24 +117,20 @@ describe('Promise.all → allSettled resilience (regression)', () => {
   });
 
   describe('WatchlistAwareSearchIndex.getDocuments (fallback path)', () => {
-    it('returns surviving docs when one getDocument fails', async () => {
+    it('T-E4-01: delegates batch getDocuments to inner when partial results (fallback removed)', async () => {
+      // T-E4-01: getDocuments is now required on SearchIndexPort; the single-fetch
+      // fallback has been removed. This test verifies that WatchlistAwareSearchIndex
+      // delegates to inner.getDocuments and returns partial results as-is.
       const goodId = createEntityId('wl-good');
       const failId = createEntityId('wl-fail');
       const goodDoc = makeDoc('wl-good');
 
-      const docs = new Map<string, RetrievalDocument>([[String(goodId), goodDoc]]);
-      const inner = makeSearchIndexStub(docs, new Set([String(failId)]));
-      // Ensure the fallback path is used (no getDocuments method)
-      delete (inner as Record<string, unknown>)['getDocuments'];
+      const inner = makeSearchIndexStub(new Map([[String(goodId), goodDoc]]), new Set());
+      // Override getDocuments to return only the good doc (simulating Vespa partial return)
+      inner.getDocuments = vi.fn(async () => new Map([[goodId, goodDoc]]));
 
-      const publisher = {
-        publishUpdate: vi.fn(),
-      };
-
-      const index = new WatchlistAwareSearchIndex({
-        inner,
-        publisher,
-      });
+      const publisher = { publishUpdate: vi.fn() };
+      const index = new WatchlistAwareSearchIndex({ inner, publisher });
 
       const result = await index.getDocuments([goodId, failId]);
 
@@ -146,9 +139,11 @@ describe('Promise.all → allSettled resilience (regression)', () => {
       expect(result.has(failId)).toBe(false);
     });
 
-    it('returns empty map when all getDocument calls reject', async () => {
-      const inner = makeSearchIndexStub(new Map(), new Set(['a', 'b']));
-      delete (inner as Record<string, unknown>)['getDocuments'];
+    it('T-E4-01: returns empty map when inner getDocuments returns empty', async () => {
+      // T-E4-01: getDocuments is now required on SearchIndexPort.
+      // Verify that WatchlistAwareSearchIndex delegates empty results correctly.
+      const inner = makeSearchIndexStub(new Map(), new Set());
+      inner.getDocuments = vi.fn(async () => new Map());
 
       const publisher = { publishUpdate: vi.fn() };
       const index = new WatchlistAwareSearchIndex({ inner, publisher });

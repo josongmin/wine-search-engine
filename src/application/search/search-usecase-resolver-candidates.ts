@@ -173,59 +173,40 @@ export async function buildResolverCandidatesFromGenerator(
     }
   }
 
-  // Fetch IDs not covered by the prefetch cache. Returning a partial set is
-  // not acceptable in production, so any unresolved IDs become a loud error.
+  // -- Batch hydration (required production path) ----------------------------
+  // Fetch IDs not covered by the prefetch cache via the batch port.
+  // Single-fetch supplement has been removed (T-E4-01): getDocuments() is the
+  // only production hydration path. Partial resolution is forbidden -- any
+  // unresolved IDs are a loud error.
   const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
   if (missingIds.length > 0) {
-    let batchLookupError: unknown;
-    if (entityLookup.getDocuments !== undefined) {
-      try {
-        const docs = await entityLookup.getDocuments(missingIds);
-        for (const [id, doc] of docs) {
-          docMap.set(id, doc);
-        }
-      } catch (error: unknown) {
-        batchLookupError = error;
+    try {
+      const docs = await entityLookup.getDocuments(missingIds);
+      for (const [id, doc] of docs) {
+        docMap.set(id, doc);
       }
+    } catch (error: unknown) {
+      // Failure taxonomy: batch_lookup_failed -- the entire batch fetch errored.
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        `batch_lookup_failed: getDocuments() threw for ${missingIds.length} ids | ${message}`,
+      );
     }
 
-    const stillMissingIds = missingIds.filter((id) => !docMap.has(id));
-    if (stillMissingIds.length > 0) {
-      const settled = await Promise.allSettled(
-        stillMissingIds.map(async (id) => {
-          const doc = await entityLookup.getDocument(id);
-          return { id, doc } as const;
-        }),
-      );
-      const rejectedIds: CanonicalEntityId[] = [];
-      for (const [index, result] of settled.entries()) {
-        const id = stillMissingIds[index];
-        if (id === undefined) {
-          continue;
-        }
-        if (result.status === 'fulfilled') {
-          const { doc } = result.value;
-          if (doc != null) {
-            docMap.set(id, doc);
-          }
-        } else {
-          rejectedIds.push(id);
-        }
-      }
-
-      const unresolvedIds = [...allEntityIds].filter((id) => !docMap.has(id));
-      if (unresolvedIds.length > 0) {
-        const details = [
-          `Entity candidate hydration incomplete: requested=${allEntityIds.size}`,
+    // Failure taxonomy: document_missing / partial_resolution_forbidden --
+    // batch returned successfully but some documents were absent.
+    const unresolvedIds = [...allEntityIds].filter((id) => !docMap.has(id));
+    if (unresolvedIds.length > 0) {
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        [
+          'partial_resolution_forbidden: entity candidate hydration incomplete',
+          `requested=${allEntityIds.size}`,
           `resolved=${docMap.size}`,
-          `missing=[${describeEntityIds(unresolvedIds)}]`,
-          batchLookupError !== undefined
-            ? `batchError=${batchLookupError instanceof Error ? batchLookupError.message : String(batchLookupError)}`
-            : undefined,
-          rejectedIds.length > 0 ? `singleFetchRejected=[${describeEntityIds(rejectedIds)}]` : undefined,
-        ].filter((part): part is string => part !== undefined);
-        throw new DomainError('INTERNAL_INCONSISTENCY', details.join(' | '));
-      }
+          `document_missing=[${describeEntityIds(unresolvedIds)}]`,
+        ].join(' | '),
+      );
     }
   }
 

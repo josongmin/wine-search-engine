@@ -38,7 +38,15 @@ export class CacheEligibilityAnalyzer {
    * @returns Eligibility decision with TTL
    */
   analyze(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): CacheEligibilityResult {
-    const mode = compiled?.execution.effectiveRetrievalMode ?? queryPlan.retrievalMode;
+    if (compiled === undefined) {
+      return {
+        isCacheable: false,
+        ttlSeconds: 0,
+        reason: 'compiled_execution_missing',
+      };
+    }
+
+    const mode = compiled.execution.effectiveRetrievalMode;
 
     // Step 1: Check if mode is cacheable at all
     const modeConfig = CACHE_MODE_CONFIG[mode];

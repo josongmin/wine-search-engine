@@ -58,9 +58,17 @@ export function soundexKo(word: string): string {
   const HANGUL_END = 0xd7a3;
   const JAMO_PER_INITIAL = 588; // 21 vowels × 28 finals
 
+  if (word.length === 0) {
+    return '';
+  }
+
   let key = '';
   for (const ch of word) {
-    const code = ch.codePointAt(0) ?? 0;
+    const code = ch.codePointAt(0);
+    if (code === undefined) {
+      key += ch;
+      continue;
+    }
     if (code >= HANGUL_BASE && code <= HANGUL_END) {
       const initialIndex = Math.floor((code - HANGUL_BASE) / JAMO_PER_INITIAL);
       key += String.fromCodePoint(INITIAL_JAMO_BASE + initialIndex);

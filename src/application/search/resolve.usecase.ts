@@ -115,6 +115,7 @@ export class ResolveUseCase {
         queryPlan: plan,
         snapshot,
         route: 'entity',
+        retrievalMode: plan.retrievalMode,
         decisionStatus: 'failed',
         nextAction: 'fail',
         failureReason: 'HARD_CONSTRAINT_VIOLATION',
@@ -190,6 +191,7 @@ export class ResolveUseCase {
       snapshot,
       ...(result.topEntity !== undefined ? { chosenEntityId: result.topEntity.entityId } : {}),
       route: 'entity',
+      retrievalMode: plan.retrievalMode,
       decisionStatus,
       nextAction,
     });

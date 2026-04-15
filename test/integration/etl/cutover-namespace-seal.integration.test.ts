@@ -60,6 +60,7 @@ async function truncateAll(pool: Pool): Promise<void> {
     TRUNCATE TABLE
       canonical_aliases,
       canonical_ambiguity_registry,
+      canonical_identity_authority,
       entity_source_links,
       canonical_entities,
       ambiguity_registry,
@@ -74,11 +75,21 @@ async function truncateAll(pool: Pool): Promise<void> {
 async function seedHappyState(pool: Pool): Promise<void> {
   // canonical_entities (graph plane) — must mirror runtime entity count
   await pool.query(
-    `INSERT INTO canonical_entities (canonical_entity_id, entity_type, canonical_label, identity_signature, attributes, approval_state, source_provenance)
+    `INSERT INTO canonical_entities (search_snapshot_id, canonical_entity_id, entity_type, canonical_label, identity_signature, attributes, approval_state, source_provenance)
      VALUES
-       ($1, 'wine', 'Opus One 2018', 'sig:opus', '{}'::jsonb, 'approved', $3::jsonb),
-       ($2, 'wine', 'Sassicaia 2017', 'sig:sass', '{}'::jsonb, 'approved', $3::jsonb)`,
-    [CANONICAL_OPUS, CANONICAL_SASS, JSON.stringify({ search_snapshot_id: SNAPSHOT_ID })],
+       ($1, $2, 'wine', 'Opus One 2018', 'sig:opus', '{}'::jsonb, 'approved', $4::jsonb),
+       ($1, $3, 'wine', 'Sassicaia 2017', 'sig:sass', '{}'::jsonb, 'approved', $4::jsonb)`,
+    [SNAPSHOT_ID, CANONICAL_OPUS, CANONICAL_SASS, JSON.stringify({ search_snapshot_id: SNAPSHOT_ID })],
+  );
+
+  // canonical_identity_authority (global authority plane) — must exactly
+  // match the runtime public ids for the active snapshot.
+  await pool.query(
+    `INSERT INTO canonical_identity_authority (identity_signature, canonical_entity_id)
+     VALUES
+       ('sig:opus', $1),
+       ('sig:sass', $2)`,
+    [CANONICAL_OPUS, CANONICAL_SASS],
   );
 
   // entities (runtime plane), bound to the active snapshot
@@ -108,18 +119,18 @@ async function seedHappyState(pool: Pool): Promise<void> {
 
   // canonical_aliases (graph plane) — joined to entities by FK shape; one row per alias
   await pool.query(
-    `INSERT INTO canonical_aliases (alias_id, canonical_entity_id, surface_form, normalized_surface, alias_type, scope, approval_state, source, source_trust)
+    `INSERT INTO canonical_aliases (search_snapshot_id, alias_id, canonical_entity_id, surface_form, normalized_surface, alias_type, scope, approval_state, source, source_trust)
      VALUES
-       ('ca-opus', $1, 'Opus One', 'opus one', 'canonical', 'global', 'approved', 'seed', 1.0),
-       ('ca-sass', $2, 'Sassicaia', 'sassicaia', 'canonical', 'global', 'approved', 'seed', 1.0)`,
-    [CANONICAL_OPUS, CANONICAL_SASS],
+       ($3, 'ca-opus', $1, 'Opus One', 'opus one', 'canonical', 'global', 'approved', 'seed', 1.0),
+       ($3, 'ca-sass', $2, 'Sassicaia', 'sassicaia', 'canonical', 'global', 'approved', 'seed', 1.0)`,
+    [CANONICAL_OPUS, CANONICAL_SASS, SNAPSHOT_ID],
   );
 
   // canonical_ambiguity_registry (JSONB canonical_entity_ids)
   await pool.query(
-    `INSERT INTO canonical_ambiguity_registry (registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state)
-     VALUES ('camb-1', 'opus', $1::jsonb, '["homonym"]'::jsonb, 'low', 'approved')`,
-    [JSON.stringify([CANONICAL_OPUS, CANONICAL_SASS])],
+    `INSERT INTO canonical_ambiguity_registry (search_snapshot_id, registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state)
+     VALUES ($2, 'camb-1', 'opus', $1::jsonb, '["homonym"]'::jsonb, 'low', 'approved')`,
+    [JSON.stringify([CANONICAL_OPUS, CANONICAL_SASS]), SNAPSHOT_ID],
   );
 
   // ltr_model_registry — at least one active row bound to the snapshot
@@ -250,9 +261,9 @@ describe.skipIf(!PG_TEST_URL)('ADR-007 cutover gates (live PG integration)', () 
 
   it('detects canonical_entities namespace seal violation', async () => {
     await pool.query(
-      `INSERT INTO canonical_entities (canonical_entity_id, entity_type, canonical_label, identity_signature, attributes, approval_state, source_provenance)
-       VALUES ($1, 'wine', 'Legacy', 'sig:legacy-c', '{}'::jsonb, 'approved', '{}'::jsonb)`,
-      [FORBIDDEN_ID],
+      `INSERT INTO canonical_entities (search_snapshot_id, canonical_entity_id, entity_type, canonical_label, identity_signature, attributes, approval_state, source_provenance)
+       VALUES ($2, $1, 'wine', 'Legacy', 'sig:legacy-c', '{}'::jsonb, 'approved', $3::jsonb)`,
+      [FORBIDDEN_ID, SNAPSHOT_ID, JSON.stringify({ search_snapshot_id: SNAPSHOT_ID })],
     );
     const fetchSpy = mockVespa();
     try {
@@ -310,9 +321,9 @@ describe.skipIf(!PG_TEST_URL)('ADR-007 cutover gates (live PG integration)', () 
 
   it('detects canonical_ambiguity_registry JSONB namespace seal violation via jsonb_array_elements_text()', async () => {
     await pool.query(
-      `INSERT INTO canonical_ambiguity_registry (registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state)
-       VALUES ('camb-legacy', 'legacy', $1::jsonb, '["homonym"]'::jsonb, 'low', 'approved')`,
-      [JSON.stringify([FORBIDDEN_ID])],
+      `INSERT INTO canonical_ambiguity_registry (search_snapshot_id, registry_id, normalized_form, canonical_entity_ids, ambiguity_types, severity, approval_state)
+       VALUES ($2, 'camb-legacy', 'legacy', $1::jsonb, '["homonym"]'::jsonb, 'low', 'approved')`,
+      [JSON.stringify([FORBIDDEN_ID]), SNAPSHOT_ID],
     );
     const fetchSpy = mockVespa();
     try {
@@ -380,19 +391,25 @@ describe.skipIf(!PG_TEST_URL)('ADR-007 cutover gates (live PG integration)', () 
           snapshotId: SNAPSHOT_ID,
           fixtureRepoRoot: root,
         }),
-      ).rejects.toThrow(new RegExp(`entities \\(snapshot=${SNAPSHOT_ID}\\) missing 1: ${CANONICAL_OPUS}`));
+      ).rejects.toThrow(
+        new RegExp(
+          `entities \\(snapshot=${SNAPSHOT_ID}\\) missing 1 runtime/public-linkage id\\(s\\): ${CANONICAL_OPUS}`,
+        ),
+      );
     });
 
     it('fails when a required id is missing from canonical_entities graph plane', async () => {
       const root = await makeFixtureRepo({ 'case-1': CANONICAL_OPUS, 'case-2': CANONICAL_SASS });
-      await pool.query('DELETE FROM canonical_entities WHERE canonical_entity_id = $1', [CANONICAL_SASS]);
+      await pool.query('DELETE FROM canonical_entities WHERE search_snapshot_id = $1 AND canonical_entity_id = $2', [SNAPSHOT_ID, CANONICAL_SASS]);
       await expect(
         verifyRuntimeGoldCatalogCoverage({
           pool,
           snapshotId: SNAPSHOT_ID,
           fixtureRepoRoot: root,
         }),
-      ).rejects.toThrow(new RegExp(`canonical_entities missing 1: ${CANONICAL_SASS}`));
+      ).rejects.toThrow(
+        new RegExp(`canonical_entities missing 1 runtime/public-linkage id\\(s\\): ${CANONICAL_SASS}`),
+      );
     });
   });
 });

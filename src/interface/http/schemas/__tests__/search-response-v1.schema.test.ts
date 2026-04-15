@@ -108,6 +108,56 @@ describe('SearchResponseSchema', () => {
             all_satisfied: true,
           },
         },
+        provenance_trace: {
+          policy: {
+            require_identity_seal: true,
+            require_constraint_evidence: false,
+            require_anchor_evidence: false,
+          },
+          observed: {
+            top_entity_present: false,
+            pre_rank: {
+              candidate_count: 20,
+              identity_evidence_satisfied: false,
+              constraint_evidence_satisfied: true,
+              anchor_evidence_satisfied: true,
+              matched_constraint_attributes: ['grape_primary'],
+              unmet_constraint_attributes: [],
+              anchor_signal_types: [],
+            },
+            post_rank: {
+              candidate_count: 5,
+              identity_evidence_satisfied: false,
+              constraint_evidence_satisfied: true,
+              anchor_evidence_satisfied: true,
+              matched_constraint_attributes: ['grape_primary'],
+              unmet_constraint_attributes: [],
+              anchor_signal_types: [],
+            },
+          },
+          missing: ['identity_evidence'],
+          shortfalls: ['provenance_shortfall:identity_evidence'],
+          gate_decisions: {
+            admission: 'admission_gate_rejected',
+            decision: 'decision_gate_failed',
+            decision_status: 'failed',
+            next_action: 'fail',
+            failure_reason: 'HARD_CONSTRAINT_VIOLATION',
+          },
+          admission_closure: {
+            required: {
+              identity_seal: true,
+              constraint_evidence: false,
+              anchor_evidence: false,
+            },
+            satisfied: {
+              identity_seal: true,
+              constraint_evidence: true,
+              anchor_evidence: true,
+            },
+            all_satisfied: true,
+          },
+        },
       },
     });
 
@@ -230,6 +280,48 @@ describe('SearchResponseSchema', () => {
               attribute: 0.5,
               popularity: 0.5,
               preference_alignment: 0.5,
+            },
+          },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: {
+            uncertainty_confidence: 0.9,
+            missing_info: [],
+            approximation_used: false,
+          },
+          evidence_items: [
+            {
+              type: 'retrieval',
+              source: 'hybrid',
+              contribution: 'ranked candidate',
+              strength: 'high',
+              provenance: 'unit-test',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts omitted unsupported preference_alignment on result score components', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      results: [
+        {
+          entity: {
+            entity_id: 'wine:test-lineage',
+            canonical_label: 'Test Wine',
+            type: 'wine',
+          },
+          relevance_score: 0.9,
+          match: {
+            match_type: 'hybrid',
+            score_components: {
+              lexical: 0.5,
+              semantic: 0.5,
+              attribute: 0.5,
+              popularity: 0.5,
             },
           },
           constraints: { matched: [], unmet: [], inferred: [] },

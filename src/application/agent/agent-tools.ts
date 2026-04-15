@@ -18,6 +18,11 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
+import type {
+  ToolCallEvidenceFrame,
+  ToolCallStructuredOutput,
+} from '../../domain/agent/model/tool-call-evidence-frame.js';
+import { buildToolCallEvidenceFrame } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import { KRW_PER_USD_APPROXIMATE, MAX_QUERY_LENGTH, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import { MAX_SOURCE_RECORD_REFS_PER_ENTITY } from '../../domain/entity/model/source-record-ref.js';
@@ -175,10 +180,36 @@ export interface AgentToolResult {
   readonly observation: string;
   /** Raw structured result (for inclusion in final response). */
   readonly rawResult: unknown;
+  /**
+   * ADR-009 Phase 0: optional typed evidence frame. Emitted when the caller
+   * (orchestrator / parallel batch dispatcher) supplies a `toolCallId` in
+   * {@link AgentToolExecutionOptions}. Absent when the caller is a legacy
+   * pre-ADR-009 site (feature flag off, direct unit-test invocation).
+   */
+  readonly evidenceFrame?: ToolCallEvidenceFrame | undefined;
+}
+
+/**
+ * Internal-only result shape from each per-tool branch. Not part of the
+ * public dispatcher contract — the wrapper translates this into
+ * `AgentToolResult` and optionally attaches an `evidenceFrame`.
+ */
+interface AgentToolInnerResult {
+  readonly observation: string;
+  readonly rawResult: unknown;
+  readonly structuredOutput: ToolCallStructuredOutput;
 }
 
 export interface AgentToolExecutionOptions {
   readonly abortSignal?: AbortSignal | undefined;
+  /**
+   * ADR-009 Phase 0: when provided, the wrapper builds a
+   * {@link ToolCallEvidenceFrame} keyed on this ID and attaches it to the
+   * result. Callers that do not need frames (legacy tests, shadow-disabled
+   * runs) omit this field; the wrapper then returns only observation +
+   * rawResult.
+   */
+  readonly toolCallId?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -502,6 +533,40 @@ function capObservation(obs: string): string {
   return obs.slice(0, MAX_OBSERVATION_CHARS) + `\n[observation truncated at ${MAX_OBSERVATION_CHARS} chars]`;
 }
 
+/**
+ * Wrap an inner tool result into the public `AgentToolResult`, capping the
+ * observation and optionally building the ADR-009 evidence frame.
+ *
+ * Frame emission is gated on the caller supplying a `toolCallId` in
+ * `options`. Legacy callers that don't provide one get the pre-ADR-009
+ * shape (`observation` + `rawResult` only).
+ */
+function finalizeToolResult(
+  inner: AgentToolInnerResult,
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  requestId: string,
+  toolCallId: string | undefined,
+  invokedAt: Date,
+  durationMs: number,
+): AgentToolResult {
+  const observation = capObservation(inner.observation);
+  if (toolCallId === undefined) {
+    return { observation, rawResult: inner.rawResult };
+  }
+  const evidenceFrame = buildToolCallEvidenceFrame({
+    toolCallId,
+    toolName,
+    requestId,
+    input,
+    structuredOutput: inner.structuredOutput,
+    observation,
+    invokedAt,
+    durationMs,
+  });
+  return { observation, rawResult: inner.rawResult, evidenceFrame };
+}
+
 export async function executeAgentTool(
   toolName: string,
   input: Record<string, unknown>,
@@ -509,9 +574,20 @@ export async function executeAgentTool(
   requestId: string,
   options?: AgentToolExecutionOptions,
 ): Promise<AgentToolResult> {
+  const invokedAt = new Date();
+  const startMs = Date.now();
+  const toolCallId = options?.toolCallId;
   try {
-    const result = await executeAgentToolInner(toolName, input, deps, requestId, options);
-    return { ...result, observation: capObservation(result.observation) };
+    const inner = await executeAgentToolInner(toolName, input, deps, requestId, options);
+    return finalizeToolResult(
+      inner,
+      toolName,
+      input,
+      requestId,
+      toolCallId,
+      invokedAt,
+      Date.now() - startMs,
+    );
   } catch (err) {
     // AbortError signals cooperative cancellation (caller disconnect, timeout abort).
     // MUST propagate so the orchestrator classifies it as terminationReason='aborted'
@@ -531,10 +607,20 @@ export async function executeAgentTool(
         { err, tool: toolName, requestId, code: err.code },
         '[agent-tools] domain error returned as observation',
       );
-      return {
+      const inner: AgentToolInnerResult = {
         observation: `Tool "${toolName}" failed with ${err.code}: ${err.message}`,
         rawResult: null,
+        structuredOutput: { kind: 'tool_error', errorCode: err.code, message: err.message },
       };
+      return finalizeToolResult(
+        inner,
+        toolName,
+        input,
+        requestId,
+        toolCallId,
+        invokedAt,
+        Date.now() - startMs,
+      );
     }
     // Unknown errors are NOT enumerated tool-level failures — they are
     // infrastructure or programmer errors (DB outage, OOM, type confusion).
@@ -555,6 +641,11 @@ export async function executeAgentTool(
  *    (orchestrator) wraps executeAgentToolsBatch in try-catch for this.
  *
  * requestId convention: `${baseRequestId}-p${toolIndex}`
+ *
+ * ADR-009: when the caller provides `options.toolCallId`, each batch item
+ * receives a derived `toolCallId` of the form `${baseToolCallId}-p${i}` so
+ * every evidence frame in the batch has a unique id aligned with its
+ * position in the `actionPairs` array.
  */
 export async function executeAgentToolsBatch(
   toolCalls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
@@ -562,10 +653,15 @@ export async function executeAgentToolsBatch(
   baseRequestId: string,
   options?: AgentToolExecutionOptions,
 ): Promise<readonly AgentToolResult[]> {
+  const baseToolCallId = options?.toolCallId;
   return Promise.all(
-    toolCalls.map((call, i) =>
-      executeAgentTool(call.tool, call.input, deps, `${baseRequestId}-p${i}`, options),
-    ),
+    toolCalls.map((call, i) => {
+      const perItemOptions: AgentToolExecutionOptions = {
+        ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+        ...(baseToolCallId !== undefined ? { toolCallId: `${baseToolCallId}-p${i}` } : {}),
+      };
+      return executeAgentTool(call.tool, call.input, deps, `${baseRequestId}-p${i}`, perItemOptions);
+    }),
   );
 }
 
@@ -590,12 +686,17 @@ async function executeAgentToolInner(
   deps: AgentToolDeps,
   requestId: string,
   options?: AgentToolExecutionOptions,
-): Promise<AgentToolResult> {
+): Promise<AgentToolInnerResult> {
   switch (toolName) {
     case 'search_wines': {
       const parseResult = SearchInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
-        return { observation: `Invalid input for search_wines: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
+        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
+        return {
+          observation: `Invalid input for search_wines: ${msg}`,
+          rawResult: null,
+          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
+        };
       }
       const parsed = parseResult.data;
 
@@ -641,6 +742,7 @@ async function executeAgentToolInner(
         return {
           observation: summarizeComparison(response),
           rawResult: response,
+          structuredOutput: { kind: 'comparison_result', response },
         };
       }
 
@@ -696,6 +798,11 @@ async function executeAgentToolInner(
                 + `If all wines match, tell the user and suggest broadening.]\n`
                 + summarizeSearchResults(response, wantsDiversity),
               rawResult: response,
+              structuredOutput: {
+                kind: 'search_result_set',
+                resultSet: response.results,
+                resultCount: response.results.length,
+              },
             };
           }
           return {
@@ -703,6 +810,11 @@ async function executeAgentToolInner(
               summarizeSearchResults(filteredResponse, wantsDiversity)
               + `\n[Excluded ${response.results.length - filtered.length} result(s) matching negation terms: ${negTerms.join(', ')}]`,
             rawResult: filteredResponse,
+            structuredOutput: {
+              kind: 'search_result_set',
+              resultSet: filteredResponse.results,
+              resultCount: filteredResponse.results.length,
+            },
           };
         }
       }
@@ -764,6 +876,7 @@ async function executeAgentToolInner(
         return {
           observation: `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
           rawResult: response,
+          structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
         };
       }
 
@@ -799,17 +912,31 @@ async function executeAgentToolInner(
       return {
         observation: obs,
         rawResult: response,
+        structuredOutput: {
+          kind: 'search_result_set',
+          resultSet: response.results,
+          resultCount: response.results.length,
+        },
       };
     }
 
     case 'compare_wines': {
       const parseResult = CompareInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
-        return { observation: `Invalid input for compare_wines: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
+        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
+        return {
+          observation: `Invalid input for compare_wines: ${msg}`,
+          rawResult: null,
+          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
+        };
       }
       const parsed = parseResult.data;
       if (deps.decomposedSearchExecute === undefined) {
-        return { observation: 'Compare tool not available.', rawResult: null };
+        return {
+          observation: 'Compare tool not available.',
+          rawResult: null,
+          structuredOutput: { kind: 'no_op', reason: 'decomposedSearchExecute port not wired' },
+        };
       }
       const response = await deps.decomposedSearchExecute(
         [parsed.query_a, parsed.query_b],
@@ -821,13 +948,19 @@ async function executeAgentToolInner(
       return {
         observation: summarizeComparison(response),
         rawResult: response,
+        structuredOutput: { kind: 'comparison_result', response },
       };
     }
 
     case 'check_drinking_window': {
       const parseResult = DrinkingWindowInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
-        return { observation: `Invalid input for check_drinking_window: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
+        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
+        return {
+          observation: `Invalid input for check_drinking_window: ${msg}`,
+          rawResult: null,
+          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
+        };
       }
       const parsed = parseResult.data;
       const targetYear = parsed.target_year ?? new Date().getFullYear();
@@ -840,7 +973,11 @@ async function executeAgentToolInner(
         const entityId = createCanonicalEntityId(parsed.entity_id);
         const doc = await deps.entityLookup(entityId);
         if (doc === undefined) {
-          return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };
+          return {
+            observation: `Wine ${parsed.entity_id} not found.`,
+            rawResult: null,
+            structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
+          };
         }
         const start = doc.drinkingWindowStart;
         const end = doc.drinkingWindowEnd;
@@ -863,11 +1000,13 @@ async function executeAgentToolInner(
           return {
             observation: `${sanitizeObservationField(doc.canonicalLabel)}: drinking window ${start}-${end}. As of ${targetYear}: ${statusLabel}.`,
             rawResult: dw,
+            structuredOutput: { kind: 'drinking_window', entityId, window: dw, targetYear },
           };
         }
         return {
           observation: `${sanitizeObservationField(doc.canonicalLabel)}: no drinking window data available.`,
           rawResult: null,
+          structuredOutput: { kind: 'no_op', reason: 'drinking window data absent on entity' },
         };
       }
 
@@ -879,7 +1018,11 @@ async function executeAgentToolInner(
       );
       const firstResult = searchResult.queryType === 'search' ? searchResult.results[0] : undefined;
       if (firstResult === undefined) {
-        return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };
+        return {
+          observation: `Wine ${parsed.entity_id} not found.`,
+          rawResult: null,
+          structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found via search fallback` },
+        };
       }
       const dw = firstResult.drinkingWindow;
       if (dw !== undefined) {
@@ -891,18 +1034,30 @@ async function executeAgentToolInner(
         return {
           observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}. As of ${targetYear}: ${statusLabelFallback}. Confidence: ${dw.confidence}`,
           rawResult: dw,
+          structuredOutput: {
+            kind: 'drinking_window',
+            entityId: firstResult.entity.entityId,
+            window: dw,
+            targetYear,
+          },
         };
       }
       return {
         observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: no drinking window data available.`,
         rawResult: null,
+        structuredOutput: { kind: 'no_op', reason: 'drinking window data absent on entity (search fallback)' },
       };
     }
 
     case 'get_food_pairings': {
       const parseResult = FoodPairingInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
-        return { observation: `Invalid input for get_food_pairings: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
+        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
+        return {
+          observation: `Invalid input for get_food_pairings: ${msg}`,
+          rawResult: null,
+          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
+        };
       }
       const parsed = parseResult.data;
       // Prefer explicit KRW budget; fall back to legacy USD field (converted).
@@ -931,7 +1086,11 @@ async function executeAgentToolInner(
       );
 
       if (responseWithContext.queryType !== 'search') {
-        return { observation: 'Unexpected response type for pairing search.', rawResult: responseWithContext };
+        return {
+          observation: 'Unexpected response type for pairing search.',
+          rawResult: responseWithContext,
+          structuredOutput: { kind: 'tool_error', errorCode: 'UNEXPECTED_RESPONSE_TYPE', message: `expected search, got ${responseWithContext.queryType}` },
+        };
       }
       // Enrich with pairing context so the LLM gives a richer answer that
       // explains WHY each wine pairs with the food (not just "here are results").
@@ -945,11 +1104,21 @@ async function executeAgentToolInner(
       return {
         observation: baseObs + pairingHint,
         rawResult: responseWithContext,
+        structuredOutput: {
+          kind: 'food_pairing',
+          resultSet: responseWithContext.results,
+          resultCount: responseWithContext.results.length,
+          food: parsed.food,
+        },
       };
     }
 
     default:
-      return { observation: `Unknown tool: ${toolName}`, rawResult: null };
+      return {
+        observation: `Unknown tool: ${toolName}`,
+        rawResult: null,
+        structuredOutput: { kind: 'no_op', reason: `unknown tool: ${toolName}` },
+      };
   }
 }
 

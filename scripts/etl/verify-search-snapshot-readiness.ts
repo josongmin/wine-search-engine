@@ -21,6 +21,8 @@ const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot
 interface Args {
   readonly runtimeStatePath: string;
   readonly manifestPath?: string;
+  /** T-010/W2: when true, assert active_search_snapshot pointer = runtime state snapshotId. */
+  readonly requirePointerParity?: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -73,6 +75,7 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
       vespaUrl: config.vespa.url,
       runtimeState,
       strictHashes: true,
+      ...(args.requirePointerParity === true ? { requirePointerParity: true } : {}),
     });
 
     if (runtimeState.counts.aliases !== manifest.counts.aliases) {

@@ -1,7 +1,9 @@
 import { WatchlistService } from '../application/watchlist/watchlist.service.js';
 import { InMemoryWatchlistStore } from '../infrastructure/watchlist/in-memory-watchlist-store.js';
 import { PgWatchlistStore } from '../infrastructure/watchlist/pg-watchlist-store.js';
+import { PgWatchlistPoisonStore } from '../infrastructure/watchlist/pg-watchlist-poison-store.js';
 import { RedisWatchlistSubscriber } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
+import type { WatchlistPoisonStore } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { WatchlistDeliveryRuntime } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import { WebhookDelivery } from '../infrastructure/watchlist/webhook-delivery.js';
 import type { WatchlistServicePort } from '../application/watchlist/watchlist.service.js';
@@ -29,11 +31,22 @@ export function buildWatchlistContainerServices(
   const watchlistService: WatchlistServicePort = new WatchlistService({
     storage: store,
   });
+  // Wave 3 / H12: bind a durable PG-backed DLQ when a pool is available.
+  // The in-memory fallback (default inside RedisWatchlistSubscriber) is only
+  // acceptable for dev/test where persistence-across-restart is not required.
+  const poisonStore: WatchlistPoisonStore | undefined = runtime.pool !== undefined
+    ? new PgWatchlistPoisonStore(runtime.pool)
+    : undefined;
+
   const watchlistRuntime: WatchlistRuntimePort | null = isWatchlistEnabled(config)
     ? new WatchlistDeliveryRuntime({
         watchlistService,
         subscriber: runtime.createWatchlistSubscriber?.()
-          ?? new RedisWatchlistSubscriber(config.redis),
+          ?? new RedisWatchlistSubscriber(
+            config.redis,
+            undefined,
+            poisonStore !== undefined ? { poisonStore } : undefined,
+          ),
         webhookDelivery: new WebhookDelivery(getWatchlistWebhookSecret(config)),
       })
     : null;

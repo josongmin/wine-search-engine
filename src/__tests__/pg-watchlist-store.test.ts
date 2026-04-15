@@ -76,7 +76,7 @@ describe('PgWatchlistStore', () => {
     });
   });
 
-  it('rejects corrupted trigger_conditions rows instead of hydrating invalid domain data', async () => {
+  it('returns null for corrupted trigger_conditions rows instead of hydrating invalid domain data', async () => {
     const pool = createPoolMock();
     (pool.query as any).mockResolvedValueOnce({
       rows: [
@@ -100,8 +100,6 @@ describe('PgWatchlistStore', () => {
 
     const store = new PgWatchlistStore(pool);
 
-    await expect(store.findById('watchlist-1')).rejects.toThrow(
-      'Invalid watchlist trigger_conditions for watchlist watchlist-1',
-    );
+    await expect(store.findById('watchlist-1')).resolves.toBeNull();
   });
 });

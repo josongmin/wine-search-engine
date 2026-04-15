@@ -4,15 +4,35 @@
  * Extends the existing `meta` + `engine_decision` + `decision_snapshot` surface
  * with per-execution trace payloads from EPIC-3 through EPIC-7.
  *
- * Field gating policy:
- *  - determinism_fingerprint        always included (in meta, not here)
- *  - planner_policy_trace           explain=true OR debug header
- *  - constraint_resolution_trace    explain=true OR debug header
- *  - retrieval_fusion_trace         explain=true OR debug header
- *  - ranking_delta_trace            LTR applied + explain=true
- *  - rerank_decision_trace          LTR applied + explain=true
- *  - abstain_policy_trace           always when abstain occurs
- *  - fallback_trace                 always when agent fallback occurs
+ * ## T-E5-03: Stable vs Debug Field Boundary
+ *
+ * Fields in this envelope fall into two categories:
+ *
+ * ### Stable fields (always emitted when their trigger condition is met)
+ * These are part of the **public API contract**. Clients MAY depend on their
+ * presence and shape. Removing or renaming them is a breaking change.
+ *
+ *  | Field                                  | Trigger                              |
+ *  |----------------------------------------|--------------------------------------|
+ *  | abstain_policy_trace                   | always when abstain occurs           |
+ *  | fallback_trace                         | always when agent fallback occurs    |
+ *  | hard_filter_drop_log                   | always when hard-filter drops occur  |
+ *  | corrective_retry_calibrated_confidence | always when corrective retry accepted|
+ *  | determinism_fingerprint                | always (normally in meta, not here)  |
+ *
+ * ### Debug-only fields (gated by `explain=true` or `X-Debug-Key` header)
+ * These are **debug sidecar** data. Clients MUST NOT depend on their presence
+ * in production responses. Their shape may change without notice.
+ *
+ *  | Field                       | Gate                                    |
+ *  |-----------------------------|-----------------------------------------|
+ *  | planner_policy_trace        | explain=true OR debug header            |
+ *  | constraint_resolution_trace | explain=true OR debug header            |
+ *  | retrieval_fusion_trace      | explain=true OR debug header            |
+ *  | ranking_delta_trace         | LTR applied + explain=true              |
+ *  | rerank_decision_trace       | LTR applied + explain=true              |
+ *  | execution_trace             | explain=true OR debug header            |
+ *  | resolver_provenance_trace   | explain=true OR debug header            |
  *
  * No parallel audit envelope — this is attached to SearchResponseMeta.audit_extension.
  */
@@ -63,6 +83,8 @@ export interface AuditExtension {
    * Request-level execution contract facts emitted in debug/explain traces.
    * Lets operators inspect route/mode/budget/provenance without correlating
    * multiple pipeline log lines.
+   *
+   * @stability debug — gated by explain=true or debug header.
    */
   readonly execution_trace?: {
     readonly effective_route: QueryRoute;
@@ -92,12 +114,16 @@ export interface AuditExtension {
   /**
    * E3: Planner policy trace — one record per decision stage.
    * Gated: explain=true or debug header.
+   *
+   * @stability debug — not part of the public API contract.
    */
   readonly planner_policy_trace?: readonly PolicyDecisionRecord[] | undefined;
 
   /**
    * E2: Constraint resolution trace — atoms, relations, and outcomes.
    * Gated: explain=true or debug header.
+   *
+   * @stability debug — not part of the public API contract.
    */
   readonly constraint_resolution_trace?: {
     readonly atoms: readonly ConstraintAtom[];
@@ -108,12 +134,16 @@ export interface AuditExtension {
   /**
    * E4: RRF fusion trace — per-query fusion parameters and candidate counts.
    * Gated: explain=true or debug header.
+   *
+   * @stability debug — not part of the public API contract.
    */
   readonly retrieval_fusion_trace?: RrfFusionTrace | undefined;
 
   /**
    * E5: Ranking delta trace — pre/post rerank positions + Kendall tau drift.
    * Gated: LTR applied + explain=true.
+   *
+   * @stability debug — not part of the public API contract.
    */
   readonly ranking_delta_trace?: {
     /** Top-5 entity IDs before LTR reranking. */
@@ -131,6 +161,8 @@ export interface AuditExtension {
   /**
    * Rerank gate decision — was LTR applied, skipped, or blocked?
    * Gated: LTR applied + explain=true.
+   *
+   * @stability debug — not part of the public API contract.
    */
   readonly rerank_decision_trace?: {
     readonly gateDecision: RerankGateDecision;
@@ -145,6 +177,8 @@ export interface AuditExtension {
   /**
    * E6: Abstain policy trace — always emitted when abstain occurs.
    * Present whenever TypedAbstainDecision.shouldAbstain === true.
+   *
+   * @stability stable — part of the public API contract.
    */
   readonly abstain_policy_trace?: {
     readonly evaluated: boolean;
@@ -163,12 +197,16 @@ export interface AuditExtension {
    * Always emitted when at least one candidate was dropped; sampled to top-5 drops
    * (ordered by lastKnownScore desc) to keep the payload lean.
    * Gated: populated whenever hard-filter drops occur, regardless of explain flag.
+   *
+   * @stability stable — part of the public API contract.
    */
   readonly hard_filter_drop_log?: readonly CandidateDropRecord[] | undefined;
 
   /**
    * Exact-recovery resolver provenance surfaced for noisy entity lookup audit.
    * Present when resolver query provenance carries candidate source breakdown.
+   *
+   * @stability debug — gated by explain=true or debug header.
    */
   readonly resolver_provenance_trace?: {
     readonly candidate_source_breakdown?: readonly {
@@ -184,12 +222,16 @@ export interface AuditExtension {
    * TA5: Calibrated posterior confidence from corrective retry (TA5).
    * Present when a corrective retry was accepted; undefined otherwise.
    * Range: [0.5, 0.9] — 0.9 at rank 1, 0.5 at rank N.
+   *
+   * @stability stable — part of the public API contract.
    */
   readonly corrective_retry_calibrated_confidence?: number | undefined;
 
   /**
    * Agent fallback trace — always emitted when agent fallback occurs.
    * Present when the agent pipeline fell back to layer2/3/4 or a search fallback.
+   *
+   * @stability stable — part of the public API contract.
    */
   readonly fallback_trace?: {
     /** Which fallback layer was applied, if any. */

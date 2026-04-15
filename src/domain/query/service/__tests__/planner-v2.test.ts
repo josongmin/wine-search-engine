@@ -141,6 +141,32 @@ describe('Planner – suggestedRoute matches expected routing', () => {
 
     expect(plan.suggestedRoute).toBe('hybrid');
   });
+
+  it('anchor-conditioned negation keeps anchor semantics and does not leak anchor text into exclude constraints', async () => {
+    const entries = new Map([['클라우디베이', makeMatchResult('클라우디베이', 0.94, ['cloudy-bay-2022'])]]);
+    const planner = makePlanner(entries);
+    const plan = await planner.plan('클라우디베이 말고 다른 화이트');
+
+    expect(plan.intent).toBe('mixed_query');
+    expect(plan.suggestedRoute).toBe('mixed');
+    expect(plan.anchors[0]?.surfaceForm).toBe('클라우디베이');
+    expect(
+      plan.constraints.hard.some(
+        (constraint) =>
+          constraint.attribute === 'region'
+          && constraint.operator === 'exclude'
+          && constraint.value === '클라우디베이',
+      ),
+    ).toBe(false);
+    expect(
+      plan.constraints.hard.some(
+        (constraint) =>
+          constraint.attribute === 'wine_type'
+          && constraint.operator === '='
+          && constraint.value === 'white',
+      ),
+    ).toBe(true);
+  });
 });
 
 // ── suggestedRetrievalMode matches old retrievalMode logic ────────────────────

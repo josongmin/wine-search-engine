@@ -15,7 +15,7 @@ import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { parseNdjson } from './ndjson.js';
 import { normalizePairingsBatch } from './generate-pairings.js';
-import { atomicWriteFileSync, appendDeadLetter } from './etl-utils.js';
+import { atomicWriteFileSync, appendDeadLetter, backupFile } from './etl-utils.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 interface SilverRecord {
@@ -44,123 +44,145 @@ async function main() {
 
   if (!fs.existsSync(DATA_FILE)) {
     console.error(`  File not found: ${DATA_FILE}`);
-    process.exit(1);
+    throw new Error(`File not found: ${DATA_FILE}`);
   }
 
-  const content = fs.readFileSync(DATA_FILE, 'utf-8');
-  const { records, skipped } = parseNdjson<SilverRecord>(content, DATA_FILE);
+  const backupPath = await backupFile(DATA_FILE);
+  try {
+    const content = fs.readFileSync(DATA_FILE, 'utf-8');
+    const { records, skipped } = parseNdjson<SilverRecord>(content, DATA_FILE);
 
-  console.log(`  Loaded: ${records.length} records (${skipped} malformed lines)`);
+    console.log(`  Loaded: ${records.length} records (${skipped} malformed lines)`);
 
-  const alreadyDone = records.filter((r) => r._pairingsNormalized === true).length;
-  if (alreadyDone > 0) {
-    console.log(`  Idempotency: ${alreadyDone} records already normalized, skipping those`);
-  }
+    const alreadyDone = records.filter((r) => r._pairingsNormalized === true).length;
+    if (alreadyDone > 0) {
+      console.log(`  Idempotency: ${alreadyDone} records already normalized, skipping those`);
+    }
 
-  const client = new Anthropic({
-    apiKey: process.env['ANTHROPIC_API_KEY'],
-  });
+    const client = new Anthropic({
+      apiKey: process.env['ANTHROPIC_API_KEY'],
+    });
 
-  let processed = 0;
-  let failed = 0;
-  let skippedIdempotent = 0;
-  const enrichedRecords: SilverRecord[] = [];
+    let processed = 0;
+    let failed = 0;
+    let skippedIdempotent = 0;
+    const enrichedRecords: SilverRecord[] = [];
 
-  let highConfidence = 0;
-  let mediumConfidence = 0;
-  let lowConfidence = 0;
+    let highConfidence = 0;
+    let mediumConfidence = 0;
+    let lowConfidence = 0;
 
-  for (let i = 0; i < records.length; i += BATCH_SIZE) {
-    const batch = records.slice(i, i + BATCH_SIZE);
-    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(records.length / BATCH_SIZE);
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(records.length / BATCH_SIZE);
 
-    const toDo: SilverRecord[] = [];
-    const done: EnrichedRecord[] = [];
-    for (const r of batch) {
-      if (r._pairingsNormalized === true) {
-        done.push(r as EnrichedRecord);
-        skippedIdempotent++;
-      } else {
-        toDo.push(r);
+      const toDo: SilverRecord[] = [];
+      const done: EnrichedRecord[] = [];
+      for (const r of batch) {
+        if (r._pairingsNormalized === true) {
+          done.push(r as EnrichedRecord);
+          skippedIdempotent++;
+        } else {
+          toDo.push(r);
+        }
+      }
+
+      enrichedRecords.push(...done);
+
+      if (toDo.length === 0) continue;
+
+      console.log(`\n  Batch ${batchNum}/${totalBatches} (${toDo.length} to process)...`);
+
+      const pairingMap = await normalizePairingsBatch(
+        toDo.map((r) => ({
+          canonicalLabel: r.canonicalLabel,
+          searchTextEn: r.searchTextEn,
+          foodPairings: (r.pairingTags as string[] | undefined) ?? [],
+        })),
+        client,
+        10,
+      );
+
+      for (const record of toDo) {
+        const pairing = pairingMap.get(record.canonicalLabel);
+        if (pairing) {
+          enrichedRecords.push({
+            ...record,
+            pairingTags: pairing.tags,
+            _pairingsNormalized: true,
+          });
+
+          if (pairing.confidence === 'high') highConfidence++;
+          else if (pairing.confidence === 'medium') mediumConfidence++;
+          else lowConfidence++;
+          processed++;
+        } else {
+          enrichedRecords.push(record);
+          failed++;
+          const id = record.sourceId ?? record.canonicalLabel;
+          await appendDeadLetter(DEAD_LETTER_FILE, {
+            sourceId: id,
+            step: 'pairings',
+            error: 'Pairing normalization failed',
+          });
+        }
+      }
+
+      if (batchNum % FLUSH_INTERVAL === 0) {
+        const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+        atomicWriteFileSync(DATA_FILE, output);
+        console.log(`  [checkpoint] Flushed ${enrichedRecords.length} records to disk`);
+      }
+
+      const pct = Math.round(enrichedRecords.length / records.length * 100);
+      console.log(
+        `  Processed: ${processed}/${records.length} (${pct}%) | Failed: ${failed}`,
+      );
+    }
+
+    if (failed > 0) {
+      throw new Error(`Refusing final write: ${failed} record(s) failed step 3`);
+    }
+    const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    atomicWriteFileSync(DATA_FILE, output);
+
+    console.log('\n' + '='.repeat(60));
+    console.log('Step 3 Complete: Food Pairing Generation');
+    console.log('='.repeat(60));
+    console.log(`Total records: ${enrichedRecords.length}`);
+    console.log(`New enrichments: ${processed}`);
+    console.log(`  - High confidence: ${highConfidence}`);
+    console.log(`  - Medium confidence: ${mediumConfidence}`);
+    console.log(`  - Low confidence: ${lowConfidence}`);
+    console.log(`Already normalized: ${skippedIdempotent}`);
+    console.log(`Failed: ${failed}`);
+    if (failed > 0) console.log(`Dead-letter log: ${DEAD_LETTER_FILE}`);
+    console.log(`Output: ${DATA_FILE}`);
+  } catch (error) {
+    if (backupPath !== null) {
+      fs.copyFileSync(backupPath, DATA_FILE);
+    }
+    throw error;
+  } finally {
+    if (backupPath !== null) {
+      try {
+        fs.unlinkSync(backupPath);
+      } catch {
+        // best-effort cleanup only
       }
     }
-
-    enrichedRecords.push(...done);
-
-    if (toDo.length === 0) continue;
-
-    console.log(`\n  Batch ${batchNum}/${totalBatches} (${toDo.length} to process)...`);
-
-    const pairingMap = await normalizePairingsBatch(
-      toDo.map((r) => ({
-        canonicalLabel: r.canonicalLabel,
-        searchTextEn: r.searchTextEn,
-        foodPairings: (r.pairingTags as string[] | undefined) ?? [],
-      })),
-      client,
-      10,
-    );
-
-    for (const record of toDo) {
-      const pairing = pairingMap.get(record.canonicalLabel);
-      if (pairing) {
-        enrichedRecords.push({
-          ...record,
-          pairingTags: pairing.tags,
-          _pairingsNormalized: true,
-        });
-
-        if (pairing.confidence === 'high') highConfidence++;
-        else if (pairing.confidence === 'medium') mediumConfidence++;
-        else lowConfidence++;
-        processed++;
-      } else {
-        enrichedRecords.push(record);
-        failed++;
-        const id = record.sourceId ?? record.canonicalLabel;
-        await appendDeadLetter(DEAD_LETTER_FILE, {
-          sourceId: id,
-          step: 'pairings',
-          error: 'Pairing normalization failed',
-        });
-      }
-    }
-
-    if (batchNum % FLUSH_INTERVAL === 0) {
-      const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
-      atomicWriteFileSync(DATA_FILE, output);
-      console.log(`  [checkpoint] Flushed ${enrichedRecords.length} records to disk`);
-    }
-
-    const pct = Math.round(enrichedRecords.length / records.length * 100);
-    console.log(
-      `  Processed: ${processed}/${records.length} (${pct}%) | Failed: ${failed}`,
-    );
   }
-
-  if (failed > 0) {
-    console.error(`  Refusing final write: ${failed} record(s) failed step 3`);
-    process.exit(1);
-  }
-  const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
-  atomicWriteFileSync(DATA_FILE, output);
-
-  console.log('\n' + '='.repeat(60));
-  console.log('Step 3 Complete: Food Pairing Generation');
-  console.log('='.repeat(60));
-  console.log(`Total records: ${enrichedRecords.length}`);
-  console.log(`New enrichments: ${processed}`);
-  console.log(`  - High confidence: ${highConfidence}`);
-  console.log(`  - Medium confidence: ${mediumConfidence}`);
-  console.log(`  - Low confidence: ${lowConfidence}`);
-  console.log(`Already normalized: ${skippedIdempotent}`);
-  console.log(`Failed: ${failed}`);
-  if (failed > 0) console.log(`Dead-letter log: ${DEAD_LETTER_FILE}`);
-  console.log(`Output: ${DATA_FILE}`);
 }
 
-main().catch((error) => {
-  console.error('Error:', error);
-  process.exit(1);
-});
+// Only execute when invoked directly as a CLI (not when imported by tests).
+import { fileURLToPath as _fileURLToPath } from 'node:url';
+const _invokedAsMain = process.argv[1] != null
+  && _fileURLToPath(import.meta.url) === process.argv[1];
+if (_invokedAsMain) {
+  void main().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

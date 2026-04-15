@@ -22,6 +22,7 @@
  */
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -31,8 +32,15 @@ import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 export const TRACK_C_SOURCE_FILE = ETL_ARTIFACT_FILES.docquery;
 export const TRACK_C_OUTPUT_FILE = ETL_ARTIFACT_FILES.trackc;
+export const TRACK_C_SOURCE_STATE_FILE = resolveDataPath('.silver-trackc.source-state.json');
 const LOCK_FILE = resolveDataPath('.etl-track-c.lock');
 const MIN_RECORDS_FOR_TRACK_C = 100; // fail fast: don't spend LLM credits on tiny datasets
+
+export interface TrackCSourceState {
+  readonly sourcePath: string;
+  readonly sourceHash: string;
+  readonly sourceRecordCount: number;
+}
 
 function getFileSize(filePath: string): string {
   const stats = fs.statSync(filePath);
@@ -45,17 +53,90 @@ function getRecordCount(filePath: string): number {
   return content.trim().split('\n').filter((line) => line.length > 0).length;
 }
 
+function getRecordCountFromContent(content: string): number {
+  return content.trim().split('\n').filter((line) => line.length > 0).length;
+}
+
+function hashContent(content: string): string {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
+
+export function buildTrackCSourceState(sourcePath: string, content: string): TrackCSourceState {
+  return {
+    sourcePath,
+    sourceHash: hashContent(content),
+    sourceRecordCount: getRecordCountFromContent(content),
+  };
+}
+
+function readTrackCSourceState(statePath: string): TrackCSourceState {
+  const raw = fs.readFileSync(statePath, 'utf-8');
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`Invalid Track C source state at ${statePath}`);
+  }
+  const rec = parsed as Record<string, unknown>;
+  if (
+    typeof rec.sourcePath !== 'string'
+    || typeof rec.sourceHash !== 'string'
+    || typeof rec.sourceRecordCount !== 'number'
+  ) {
+    throw new Error(`Invalid Track C source state at ${statePath}`);
+  }
+  return {
+    sourcePath: rec.sourcePath,
+    sourceHash: rec.sourceHash,
+    sourceRecordCount: rec.sourceRecordCount,
+  };
+}
+
+function writeTrackCSourceState(statePath: string, state: TrackCSourceState): void {
+  fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf-8');
+}
+
+export function assertTrackCSourceStateMatches(
+  current: TrackCSourceState,
+  recorded: TrackCSourceState,
+): void {
+  if (current.sourcePath !== recorded.sourcePath) {
+    throw new Error(
+      `Track C working copy source path mismatch: current=${current.sourcePath} recorded=${recorded.sourcePath}`,
+    );
+  }
+  if (current.sourceHash !== recorded.sourceHash) {
+    throw new Error(
+      `Track C working copy source hash mismatch for ${current.sourcePath}; rerun step 1 to reseed the working copy`,
+    );
+  }
+  if (current.sourceRecordCount !== recorded.sourceRecordCount) {
+    throw new Error(
+      `Track C working copy source record count mismatch: current=${current.sourceRecordCount} recorded=${recorded.sourceRecordCount}`,
+    );
+  }
+}
+
 function seedTrackCWorkingCopy(fromStep: number): void {
+  const sourceContent = fs.readFileSync(TRACK_C_SOURCE_FILE, 'utf-8');
+  const currentSourceState = buildTrackCSourceState(TRACK_C_SOURCE_FILE, sourceContent);
+
   if (fromStep > 1 && !fs.existsSync(TRACK_C_OUTPUT_FILE)) {
     throw new Error(
       `Missing working artifact ${TRACK_C_OUTPUT_FILE}. Run step 1 first or seed the track-c artifact before resuming.`,
     );
   }
-  if (fromStep === 1 || !fs.existsSync(TRACK_C_OUTPUT_FILE)) {
-    if (!fs.existsSync(TRACK_C_SOURCE_FILE)) {
-      throw new Error(`Input file not found: ${TRACK_C_SOURCE_FILE}`);
+  if (fromStep > 1 && fs.existsSync(TRACK_C_OUTPUT_FILE)) {
+    if (!fs.existsSync(TRACK_C_SOURCE_STATE_FILE)) {
+      throw new Error(
+        `Missing Track C source state ${TRACK_C_SOURCE_STATE_FILE}; rerun step 1 to reseed from ${TRACK_C_SOURCE_FILE}`,
+      );
     }
+    const recordedState = readTrackCSourceState(TRACK_C_SOURCE_STATE_FILE);
+    assertTrackCSourceStateMatches(currentSourceState, recordedState);
+    return;
+  }
+  if (fromStep === 1 || !fs.existsSync(TRACK_C_OUTPUT_FILE)) {
     fs.copyFileSync(TRACK_C_SOURCE_FILE, TRACK_C_OUTPUT_FILE);
+    writeTrackCSourceState(TRACK_C_SOURCE_STATE_FILE, currentSourceState);
   }
 }
 
@@ -173,7 +254,7 @@ async function main() {
   // Validate input
   if (!fs.existsSync(TRACK_C_SOURCE_FILE)) {
     console.error(`  Input file not found: ${TRACK_C_SOURCE_FILE}`);
-    process.exit(1);
+    throw new Error(`Input file not found: ${TRACK_C_SOURCE_FILE}`);
   }
 
   const fromStep = parseFromStep(process.argv.slice(2));
@@ -190,7 +271,9 @@ async function main() {
       `  Record count ${initialRecordCount} < ${MIN_RECORDS_FOR_TRACK_C}. ` +
       `Too few records for Track C enrichment — check upstream Silver pipeline.`,
     );
-    process.exit(1);
+    throw new Error(
+      `Track C record count ${initialRecordCount} < ${MIN_RECORDS_FOR_TRACK_C}`,
+    );
   }
 
   const initialSize = getFileSize(TRACK_C_OUTPUT_FILE);
@@ -208,7 +291,7 @@ async function main() {
     unlock = await acquireLock(LOCK_FILE);
   } catch (e) {
     console.error(`  ${e instanceof Error ? e.message : String(e)}`);
-    process.exit(1);
+    throw e instanceof Error ? e : new Error(String(e));
   }
 
   const startTime = Date.now();
@@ -327,7 +410,9 @@ async function main() {
 
   console.log(`\nFile: ${TRACK_C_OUTPUT_FILE}`);
   console.log(`\n${'='.repeat(70)}\n`);
-  process.exit(allPassed ? 0 : 1);
+  if (!allPassed) {
+    throw new Error('Track C pipeline completed with failures');
+  }
 }
 
 const isEntrypoint =

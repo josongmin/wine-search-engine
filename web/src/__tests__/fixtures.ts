@@ -1,6 +1,7 @@
 import type {
   ResultItem,
-  SearchResponse,
+  SearchResponseV1,
+  ComparisonSearchResponse,
   EntitySummary,
   EngineDecision,
   ClarificationPayload,
@@ -92,7 +93,7 @@ export const mockEngineDecision: EngineDecision = {
   },
 };
 
-export const mockSearchResponse: SearchResponse = {
+export const mockSearchResponse: SearchResponseV1 = {
   query_type: 'search',
   engine_decision: mockEngineDecision,
   results: [mockResultItem],
@@ -106,7 +107,7 @@ export const mockSearchResponse: SearchResponse = {
   result_type: 'wine_set',
 };
 
-export const mockComparisonResponse: SearchResponse = {
+export const mockComparisonResponse: SearchResponseV1 = {
   ...mockSearchResponse,
   result_type: 'comparison',
   results: [
@@ -122,6 +123,53 @@ export const mockComparisonResponse: SearchResponse = {
       },
     },
   ],
+};
+
+export const mockComparisonEnvelope: ComparisonSearchResponse = {
+  query_type: 'comparison',
+  original_query: 'Château Margaux vs Opus One',
+  comparison_intent: 'compare',
+  entities: [
+    {
+      sub_query: 'Château Margaux 2018',
+      top_result: mockResultItem,
+      result_count: 1,
+      resolution_status: 'resolved',
+      all_results: [mockResultItem],
+    },
+    {
+      sub_query: 'Opus One 2019',
+      top_result: {
+        ...mockResultItem,
+        entity: {
+          ...mockEntity,
+          entity_id: 'wine:def456',
+          canonical_label: 'Opus One 2019',
+          producer: 'Opus One',
+          region: 'Napa Valley',
+        },
+      },
+      result_count: 1,
+      resolution_status: 'resolved',
+      all_results: [
+        {
+          ...mockResultItem,
+          entity: {
+            ...mockEntity,
+            entity_id: 'wine:def456',
+            canonical_label: 'Opus One 2019',
+            producer: 'Opus One',
+            region: 'Napa Valley',
+          },
+        },
+      ],
+    },
+  ],
+  overall_status: 'resolved',
+  request_id: 'req-compare-001',
+  execution_time_ms: 412,
+  authority_trace_ref: 'trace-compare-001',
+  runtime_correlation_ref: 'req-compare-001',
 };
 
 export const mockClarification: ClarificationPayload = {

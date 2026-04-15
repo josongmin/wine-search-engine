@@ -4,7 +4,19 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/shared/api';
 import type { SearchRequest, SearchResponse } from '@/shared/api';
 
+/**
+ * SSoT: Must match server's MAX_QUERY_LENGTH (src/domain/shared/constants.ts).
+ * QueryStringSchema.max(500) — the server rejects queries longer than this.
+ */
 const MAX_QUERY_LENGTH = 500;
+
+/**
+ * SSoT: Must match server's QueryStringSchema.min(1).
+ * The server accepts queries as short as 1 character (single-char CJK characters
+ * like "酒" are legitimate searches). Previous value of 2 silently blocked
+ * valid 1-char queries at the client without a server rejection.
+ */
+const MIN_QUERY_LENGTH = 1;
 
 /**
  * Sanitize a user-supplied query before it leaves the browser.
@@ -28,13 +40,22 @@ export function useSearch(query: string, enabled = true) {
     queryFn: ({ signal }) => {
       const body: SearchRequest = {
         query: safeQuery,
-        options: { mode: 'auto', explain: true, clarification: true },
+        // T-E9-02: explain defaults to false — opt-in only.
+        // explain=true adds significant payload (evidence, decomposition, counterfactuals)
+        // that is only useful in dev/debug mode. Production clients should not pay
+        // the serialization + transfer cost unless explicitly requesting it.
+        options: { mode: 'auto', clarification: true },
       };
       return api.search(body, { signal });
     },
-    enabled: enabled && safeQuery.length >= 2,
+    // T-E9-02: Query length gate matches server's QueryStringSchema.min(1).
+    // Previously gated at >= 2, silently blocking valid 1-char queries.
+    enabled: enabled && safeQuery.length >= MIN_QUERY_LENGTH,
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
     retry: 1,
   });
 }
+
+// Exported for test parity assertions (T-E9-02).
+export { MAX_QUERY_LENGTH, MIN_QUERY_LENGTH, sanitizeQuery };

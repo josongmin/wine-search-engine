@@ -13,6 +13,7 @@ import type { RankingInput } from '../../../src/domain/ranking/model/ranking-inp
 import type { ComponentScores } from '../../../src/domain/ranking/model/ranked-result.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled-wine-query.js';
 import type { ConstraintBundle, EvidenceItem } from '../../../src/domain/shared/types/index.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import { RANKING_STAGES } from '../../../src/domain/ranking/model/ranking-stage.js';
@@ -81,11 +82,33 @@ function makeConstraints(): ConstraintBundle {
   return { hard: [], soft: [], inferred: [] };
 }
 
-function makeInput(candidates: HybridCandidate[], rerankForced?: boolean): RankingInput {
+function makeCompiled(plan?: QueryPlanV1): CompiledWineQuery {
+  const p = plan ?? makeQueryPlan();
   return {
-    queryPlan: makeQueryPlan(),
+    query: {
+      rawQuery: p.rawQuery, normalizedQuery: p.normalizedQuery, intent: p.intent,
+      queryClass: p.queryClass, anchors: p.anchors, constraints: p.constraints,
+      expansions: { lexical: [], semantic: [] }, uncertainty: p.uncertainty,
+      plannerVersion: p.plannerVersion, policyRuleVersion: p.policyRuleVersion,
+      thresholdProfileId: p.thresholdProfileId,
+      retrievalPlan: { hardFilterTokens: [], softBoosts: [], inferredBoosts: [], sensoryPriors: [], planVersion: 'retrieval-plan-v1.0' },
+    },
+    execution: {
+      effectiveRoute: p.route, effectiveRetrievalMode: p.retrievalMode ?? 'attribute_search',
+      routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+    },
+  } as CompiledWineQuery;
+}
+
+function makeInput(candidates: HybridCandidate[], rerankForced?: boolean): RankingInput {
+  const plan = makeQueryPlan();
+  return {
+    queryPlan: plan,
     candidates,
     constraints: makeConstraints(),
+    compiled: makeCompiled(plan),
     ...(rerankForced !== undefined ? { rerankForced } : {}),
   };
 }

@@ -174,6 +174,14 @@ describe('unmetHardConstraints annotation', () => {
     expect(result.matchedConstraints).toContain('country');
   });
 
+  it('treats sweet white styles as white for wine_type constraints', () => {
+    const candidate = makeCandidate({ style: 'sweet white' });
+    const bundle = makeBundle([makeConstraint('wine_type', '=', 'white')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.unmetHardConstraints).toBeUndefined();
+    expect(result.matchedConstraints).toContain('wine_type');
+  });
+
   it('accumulates multiple unmet attributes', () => {
     const candidate = makeCandidate({ wineType: 'white', region: 'Tuscany' });
     const bundle = makeBundle([
@@ -205,6 +213,20 @@ describe('unknown attribute — silent-drop guard (Fix 4)', () => {
     expect(() => annotateCandidateConstraintEvidence(candidate, bundle)).toThrow(
       /Unknown constraint attribute/,
     );
+  });
+
+  it('evaluates max_price_krw against candidate priceUsd via the shared approximate KRW conversion', () => {
+    const candidate = makeCandidate({ priceUsd: 60 });
+    const bundle = makeBundle([], [makeConstraint('max_price_krw', '<=', 100000)]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('max_price_krw');
+  });
+
+  it('evaluates min_price_krw against candidate priceUsd via the shared approximate KRW conversion', () => {
+    const candidate = makeCandidate({ priceUsd: 120 });
+    const bundle = makeBundle([], [makeConstraint('min_price_krw', '>=', 100000)]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('min_price_krw');
   });
 });
 

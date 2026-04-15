@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ScoreAggregator } from '../../../src/domain/ranking/service/score-aggregator.js';
+import { ScoreAggregator, RankComputationError } from '../../../src/domain/ranking/service/score-aggregator.js';
 import { DEFAULT_WEIGHTS } from '../../../src/domain/ranking/model/scoring-weights.js';
 import type { ComponentScores } from '../../../src/domain/ranking/model/ranked-result.js';
 import type { ScoringWeights } from '../../../src/domain/ranking/model/scoring-weights.js';
@@ -101,11 +101,25 @@ describe('ScoreAggregator', () => {
       expect(result).toBe(1);
     });
 
-    it('NaN 신호는 NaN을 반환하지 않음 (non-finite guard)', () => {
-      // entityIntegrity=NaN → aggregate는 절대 NaN을 반환하면 안 됨
+    it('NaN 신호는 RankComputationError를 throw한다 (C4 fail-loud)', () => {
+      // Wave 1 C4 fail-loud: a COMPUTED signal that is non-finite is a
+      // contract violation from the signal-computer. ScoreAggregator MUST
+      // throw RankComputationError instead of silently substituting 0.
+      // The ranker is responsible for catching this and gating the candidate
+      // out with reason `ranking_invalid_signal`.
       const scores = makeScores({ entityIntegrity: NaN, hardConstraintPass: true });
-      const result = aggregator.aggregate(scores, DEFAULT_WEIGHTS);
-      expect(Number.isNaN(result)).toBe(false);
+      expect(() => aggregator.aggregate(scores, DEFAULT_WEIGHTS)).toThrow(RankComputationError);
+    });
+
+    it('Infinity semantic 신호도 RankComputationError를 throw한다', () => {
+      // Adjacent-case regression: not just NaN — any non-finite computed
+      // signal (Infinity, -Infinity) triggers the same fail-loud path.
+      const scores = makeScores({
+        entityIntegrity: 0.5,
+        semantic: Number.POSITIVE_INFINITY,
+        hardConstraintPass: true,
+      });
+      expect(() => aggregator.aggregate(scores, DEFAULT_WEIGHTS)).toThrow(RankComputationError);
     });
 
     it('score is clamped to 0 for heavy uncertainty penalty', () => {
