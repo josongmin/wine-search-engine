@@ -1,6 +1,6 @@
 {
   "baselineVersion": "v4",
-  "timestamp": "2026-04-09T16:20:00.000Z",
+  "timestamp": "2026-04-15T00:00:00.000Z",
   "model": "gpt-5.4-mini",
   "judgeModel": "gpt-5.4-mini",
   "judgeSamples": 3,
@@ -11,7 +11,7 @@
     "overallCi95": { "lower": 0.720, "upper": 0.869 },
     "n": 20,
     "version": "V6-SOTA++",
-    "notes": "V6 baseline: RFC-019 (span parser, entity resolver, ontology expansion, compositional inference, retrieval plan builder, RFC-018 sensory priors) + RFC-020 (SCR/ELA/SlotF1 measurement framework). Judge N=3 median, CoT+few-shot prompt, NLI atomic claim faithfulness, bootstrap CI, latency SLA, judge floor=0.05. DEFAULT_MAPPINGS 150 phrases. Placeholder hallucination blocked. Bare tool call recovery. finishReason=length truncation recovery. Near-duplicate skipNearDuplicate for parallel batches. ADR-011 PR2 dual-emit: scrInferredGraph / csrInferredGraph added alongside flat values — first run populates from null.",
+    "notes": "V6 baseline: RFC-019 (span parser, entity resolver, ontology expansion, compositional inference, retrieval plan builder, RFC-018 sensory priors) + RFC-020 (SCR/ELA/SlotF1 measurement framework). Judge N=3 median, CoT+few-shot prompt, NLI atomic claim faithfulness, bootstrap CI, latency SLA, judge floor=0.05. DEFAULT_MAPPINGS 150 phrases. Placeholder hallucination blocked. Bare tool call recovery. finishReason=length truncation recovery. Near-duplicate skipNearDuplicate for parallel batches. ADR-011 PR2 dual-emit: scrInferredGraph / csrInferredGraph added alongside flat values. Wave C 2026-04-15 local measurement: scrInferred/scrInferredGraph populated from an LLM-free offline symbolic extraction run (runConstraintExtraction + ConstraintCompiler, no OpenAI/Vespa/PG), evaluating all 32 scenarios in AGENT_SCENARIOS that carry expectedConstraints, of which 6 declare an inferred-tier expectation. scrInferredGraph improved by +8.33pp over flat scrInferred on the inferred-only subset (0.5 vs 0.4166667), driven by scenario id=30 (comparison_nested, Barolo/Brunello OR-group over grape_primary) where the flat set intersection scored 0.5 but the graph-aware root satisfaction scored 1.0 — exactly the XOR/OR credit case ADR-011 PR2 was written to measure. csrInferred / csrInferredGraph remain null because constraint satisfaction requires agent tool observations, which need the full PG+Redis+Vespa+LLM container that this offline run intentionally avoids; those will populate on the next real-container nightly.",
     "dimensions": {
       "executionEfficiency": 0.961,
       "answerQuality": 1.0,
@@ -26,14 +26,49 @@
       "semanticConstraintRecall": 0.517,
       "scrHard": 0.667,
       "scrSoft": 0.333,
-      "scrInferred": 0.0,
-      "scrInferredGraph": null,
+      "scrInferred": 0.417,
+      "scrInferredGraph": 0.500,
       "entityLinkingAccuracy": 0.900,
       "slotF1Strict": 0.531,
       "slotF1Relaxed": 0.531,
       "csrInferred": null,
       "csrInferredGraph": null,
       "evaluatedScenarios": 6
+    },
+    "waveCOfflineMeasurement": {
+      "timestamp": "2026-04-15T00:00:00.000Z",
+      "methodology": "LLM-free runConstraintExtraction() over all AGENT_SCENARIOS with expectedConstraints. Symbolic path only (QueryNormalizer + ConstraintCompiler + NLMapper(NO_OP) + Entity Resolver + Ontology Expansion + Reasoner). CONSTRAINT_GRAPH_EMIT default-on → trivial graphs emitted per scenario. csrInferred[Graph] NOT measured (requires observations / full container).",
+      "evaluatedScenarios": 32,
+      "scenariosWithInferredExpected": 6,
+      "scenariosWithGraphEmitted": 32,
+      "all": {
+        "semanticConstraintRecall": 0.587,
+        "scrHard": 0.513,
+        "scrSoft": 0.762,
+        "scrInferred": 0.417,
+        "scrInferredGraph": 0.500,
+        "entityLinkingAccuracy": 0.913,
+        "slotF1Strict": 0.413,
+        "slotF1Relaxed": 0.436
+      },
+      "inferredOnly": {
+        "count": 6,
+        "scrInferred": 0.4166666666666667,
+        "scrInferredGraph": 0.5,
+        "deltaPp": 8.333333333333332
+      },
+      "divergentScenarios": [
+        {
+          "id": 30,
+          "tier": "comparison_nested",
+          "query": "바롤로랑 브루넬로 비교해주고, 둘 중 지금 마시기 좋은 거로 골라줘",
+          "flatScrInferred": 0.5,
+          "graphScrInferred": 1.0,
+          "deltaPp": 50,
+          "explanation": "Two expected inferred grape_primary atoms (Nebbiolo from Barolo, Sangiovese from Brunello). Flat set-intersection credits only the single arm the extractor happens to emit first (0.5). The graph-aware metric recognises the OR grouping over the two appellations and counts the whole group as satisfied once any branch is covered (1.0) — the exact XOR/OR credit case ADR-011 PR2 was designed to measure."
+        }
+      ],
+      "reproCommand": "node_modules/.bin/tsx /tmp/measure-scr-inferred-graph.mts  # LLM-free; writes full JSON to stdout"
     },
     "latency": {
       "p50Ms": 6462,
