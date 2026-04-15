@@ -51,6 +51,13 @@
  *   - `bundle-selector-counters.ts` (telemetry counters; reads graph
  *     origin + subquery count for audit paths)
  *
+ * Axis 2 (ADR-015 PR6): executor-internal retrieval critic + rewriter —
+ *   - `retrieval-critic.ts` (deterministic critic; reads
+ *     `compiled.constraintGraph` indirectly via computeGraphCoverage)
+ *   - `query-rewriter.ts` (rewrites; reads queryPlan / retrieval-input
+ *     graph fields when applicable)
+ *   - `retrieval-critic-counters.ts` (telemetry counters)
+ *
  * Future Phase-1b.* migrations MUST append their source files to the
  * allow-list in the same PR that migrates them. Bare `.constraintGraph`
  * leaks elsewhere fail this test.

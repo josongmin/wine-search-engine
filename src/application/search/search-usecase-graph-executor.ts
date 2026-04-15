@@ -38,7 +38,18 @@ import type {
   BundleSelectorOptions,
   AssignmentSolution,
 } from '../../domain/retrieval/service/bundle-selector.js';
+import {
+  CRITIC_RETRY_MAX,
+  decideRetry,
+  type CriticDecision,
+} from '../../domain/retrieval/service/retrieval-critic.js';
+import type {
+  QueryRewriter,
+  RewriteTrace,
+} from '../../domain/retrieval/service/query-rewriter.js';
+import { computeGraphCoverage } from '../../domain/query/service/compute-graph-coverage.js';
 import { globalBundleSelectorCounter } from '../../observability/bundle-selector-counters.js';
+import { globalRetrievalCriticCounter } from '../../observability/retrieval-critic-counters.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 export interface GraphExecutorDeps {
@@ -52,6 +63,13 @@ export interface GraphExecutorDeps {
    * may swap in subquery-aware retrievers.
    */
   readonly subqueryRetriever?: SubqueryRetriever;
+  /**
+   * ADR-015 Axis 2: optional query rewriter for the executor-internal
+   * critic loop. When `undefined` OR the `RETRIEVAL_EXECUTOR_CRITIC`
+   * flag is off, the executor runs one-shot retrieval (byte-identical
+   * to pre-PR6 behaviour).
+   */
+  readonly queryRewriter?: QueryRewriter | undefined;
 }
 
 export interface SubqueryRetriever {
@@ -86,6 +104,37 @@ export interface GraphExecutionResult {
    */
   readonly candidates: readonly HybridCandidate[];
   readonly assignmentSolution?: AssignmentSolution | undefined;
+  /**
+   * ADR-015 Axis 2: trace of critic-driven rewrites performed inside
+   * this execution. Present (possibly empty) only when the
+   * `RETRIEVAL_EXECUTOR_CRITIC` flag is on. Absent on the one-shot path.
+   */
+  readonly criticRewrites?: readonly RewriteTrace[] | undefined;
+  /**
+   * ADR-015 Axis 2: `true` when the retry loop exhausted
+   * `CRITIC_RETRY_MAX` iterations without reaching a satisfied coverage
+   * decision. The executor hands the last retrieval result to the
+   * ranker with `'critic_retries_exhausted'` signalled via
+   * `criticDegradationReasons`.
+   */
+  readonly criticRetriesExhausted?: boolean | undefined;
+  /**
+   * ADR-015 Axis 2: auxiliary retrieval degradation reasons produced
+   * inside the critic loop (e.g. `'critic_retries_exhausted'`). Callers
+   * merge these with their own `routeDegradation`.
+   */
+  readonly criticDegradationReasons?: readonly string[] | undefined;
+}
+
+/**
+ * ADR-015 Axis 2: feature flag for the executor-internal critic retry
+ * loop. Checked once per call — flipping the flag mid-flight cannot
+ * produce a partial-loop state. Default off.
+ */
+export function isRetrievalCriticEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env['RETRIEVAL_EXECUTOR_CRITIC'] === 'true';
 }
 
 function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
@@ -115,11 +164,152 @@ export function shouldEngageBundlePath(
 }
 
 /**
+ * Inputs the executor-internal critic consults to decide whether to
+ * retry. Supplied per-call by the caller (hybrid-candidates wiring)
+ * because `computeGraphCoverage` needs the `satisfiedAttributes` set
+ * which is derived from candidate annotator output — not from the
+ * retrieval input alone.
+ */
+export interface CriticSignalProbe {
+  /** Attributes the pipeline currently considers satisfied by the
+   *  returned candidate pool. Used as the input to
+   *  `computeGraphCoverage(graph, satisfiedAttributes)`. */
+  readonly satisfiedAttributesFor: (
+    candidates: readonly HybridCandidate[],
+  ) => ReadonlySet<string>;
+  /** Retrieval-internal degradation reasons surfaced by the candidate
+   *  pool (e.g. `'sparse_pool'`, `'no_matches'`). Used verbatim in the
+   *  critic decision table. */
+  readonly degradationReasonsFor: (
+    candidates: readonly HybridCandidate[],
+  ) => readonly string[];
+}
+
+/**
  * Runs the root retrieval through the candidate pool when the graph
  * does not engage the bundle path. Otherwise, retrieves per subquery
  * and hands off to the bundle selector.
+ *
+ * ADR-015 Axis 2: when `RETRIEVAL_EXECUTOR_CRITIC=true` AND a
+ * `queryRewriter` is wired AND a `criticProbe` is supplied, the
+ * retrieval is wrapped in a bounded self-critique loop (hard
+ * `CRITIC_RETRY_MAX` type-level cap). The loop terminates on:
+ *   - critic `retry=false` (coverage satisfied / cap reached / no signal)
+ *   - rewriter returning `null` (no actionable rewrite)
+ *   - `CRITIC_RETRY_MAX` iterations without success (exhausted)
  */
 export async function executeGraphAware(
+  input: HybridRetrievalInput,
+  graph: ConstraintGraph | undefined,
+  deps: GraphExecutorDeps,
+  opts: GraphExecutorOptions,
+  criticProbe?: CriticSignalProbe,
+): Promise<GraphExecutionResult> {
+  const rewriter = deps.queryRewriter;
+  if (
+    !isRetrievalCriticEnabled()
+    || rewriter === undefined
+    || criticProbe === undefined
+  ) {
+    // Pre-PR6 one-shot path — byte-identical to the original PR4
+    // behaviour. Flag-off rollback falls through here.
+    return runRetrievalOnce(input, graph, deps, opts);
+  }
+
+  const rewriteTraces: RewriteTrace[] = [];
+  let currentInput = input;
+  let lastResult: GraphExecutionResult = await runRetrievalOnce(
+    currentInput,
+    graph,
+    deps,
+    opts,
+  );
+
+  // CRITIC_RETRY_MAX is a module-scope `const` imported from
+  // retrieval-critic.ts. `retryCount` is a local `let`; no mutable
+  // reference escapes this function. Pre-flight check (rule 20) —
+  // the cap is evaluated BEFORE the retrieval call so we never
+  // execute a (CRITIC_RETRY_MAX+1)-th retrieval.
+  for (let retryCount = 0; retryCount < CRITIC_RETRY_MAX; retryCount += 1) {
+    const decision: CriticDecision = decideRetry({
+      graph,
+      coverage:
+        graph !== undefined
+          ? computeGraphCoverage(
+              graph,
+              criticProbe.satisfiedAttributesFor(lastResult.candidates),
+            )
+          : undefined,
+      degradationReasons: criticProbe.degradationReasonsFor(lastResult.candidates),
+      retryCount,
+    });
+
+    if (!decision.retry) {
+      pipelineDebug(
+        {
+          step: 'retrieval.critic.decision',
+          retry: false,
+          reason: decision.reason,
+          iterations: retryCount,
+        },
+        'pipeline critic decision',
+      );
+      return {
+        ...lastResult,
+        criticRewrites: rewriteTraces,
+      };
+    }
+
+    const rewritten = await rewriter.apply(currentInput, decision);
+    if (rewritten === null) {
+      // No actionable rewrite — break out of the loop. The executor
+      // will mark this as exhausted below.
+      pipelineDebug(
+        {
+          step: 'retrieval.critic.rewriter_declined',
+          rewrite_type: decision.rewriteType,
+          iteration: retryCount,
+        },
+        'pipeline critic rewriter declined',
+      );
+      break;
+    }
+
+    globalRetrievalCriticCounter.incrementRewrite(decision.rewriteType);
+    rewriteTraces.push(rewritten.trace);
+    currentInput = rewritten.input;
+    lastResult = await runRetrievalOnce(currentInput, graph, deps, opts);
+  }
+
+  // Retries exhausted (either cap reached with unsatisfied coverage,
+  // or rewriter declined). Graceful handoff: last retrieval result +
+  // exhaustion signal. The ranker receives whatever candidates were
+  // produced by the final attempt.
+  globalRetrievalCriticCounter.incrementRetriesExhausted();
+  pipelineDebug(
+    {
+      step: 'retrieval.critic.retries_exhausted',
+      iterations: rewriteTraces.length,
+    },
+    'pipeline critic retries exhausted',
+  );
+  return {
+    ...lastResult,
+    criticRewrites: rewriteTraces,
+    criticRetriesExhausted: true,
+    criticDegradationReasons: [
+      ...(lastResult.criticDegradationReasons ?? []),
+      'critic_retries_exhausted',
+    ],
+  };
+}
+
+/**
+ * Single pass through the graph-aware executor — the pre-PR6 behaviour
+ * factored out so the critic loop above can call it multiple times
+ * without re-expressing the passthrough / bundle / fail-closed tree.
+ */
+async function runRetrievalOnce(
   input: HybridRetrievalInput,
   graph: ConstraintGraph | undefined,
   deps: GraphExecutorDeps,

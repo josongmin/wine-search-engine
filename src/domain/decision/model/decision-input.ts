@@ -420,4 +420,24 @@ export interface DecisionInput {
 
   /** When true with heuristic execution mode, admission rejects blocking paths. */
   readonly blockingRequested?: boolean;
+
+  /**
+   * ADR-015 Axis 2: trace of executor-internal critic rewrites that
+   * occurred during retrieval for this decision. Empty (or absent) when
+   * the `RETRIEVAL_EXECUTOR_CRITIC` flag is off OR when no retry was
+   * needed. Each entry references the subquery the rewrite targeted and
+   * a stable trace ref the response builder can use to anchor a claim.
+   */
+  readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+}
+
+/**
+ * ADR-015 Axis 2: minimal projection of an executor critic rewrite
+ * suitable for inclusion in the decision input. The full rewrite trace
+ * (with prompt versions, deltas, etc.) is owned by the retrieval layer.
+ */
+export interface DecisionInputCriticRewrite {
+  readonly subqueryId: string;
+  readonly type: 'relax' | 'decompose' | 'expand_synonym' | 'reformulate';
+  readonly rewriteTraceRef: string;
 }

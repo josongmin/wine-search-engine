@@ -328,6 +328,8 @@ export class SearchUseCase {
       retrievalFusionTrace,
       hardFilterDropLog,
       correctiveRetryCalibration,
+      criticRewrites,
+      criticRetriesExhausted,
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
@@ -389,6 +391,10 @@ export class SearchUseCase {
         ? { hardFilterDropLog }
         : {}),
       ...(correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration } : {}),
+      ...(criticRewrites !== undefined && criticRewrites.length > 0
+        ? { criticRewrites }
+        : {}),
+      ...(criticRetriesExhausted === true ? { criticRetriesExhausted: true } : {}),
       // Wire HTTP options.explain → includeCounterfactuals symmetrically:
       //   explain=true  → includeCounterfactuals=true (force on)
       //   explain=false → includeCounterfactuals=false (force off)

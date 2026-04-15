@@ -11,6 +11,7 @@ import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { SpecializedRouteName } from '../../domain/response/model/specialized-route.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
+import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
 
 export type SearchRouteRetrievalKind =
   | 'entity_lookup'
@@ -46,6 +47,13 @@ export interface SearchRouteExecutionResult {
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
   /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
   readonly correctiveRetryCalibration?: number | undefined;
+  /**
+   * ADR-015 Axis 2: rewrites + exhaustion signal from the executor-internal
+   * critic loop. Absent when the `RETRIEVAL_EXECUTOR_CRITIC` flag was off
+   * or the route bypassed the generic hybrid retrieval path.
+   */
+  readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+  readonly criticRetriesExhausted?: boolean | undefined;
 }
 
 /**

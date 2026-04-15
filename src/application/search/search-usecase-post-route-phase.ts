@@ -31,7 +31,10 @@ import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js'
 import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
 import { deriveQueryFamily } from '../../domain/query/model/query-observability-vocab.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
-import type { AdmissionClosureSummary } from '../../domain/decision/model/decision-input.js';
+import type {
+  AdmissionClosureSummary,
+  DecisionInputCriticRewrite,
+} from '../../domain/decision/model/decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
@@ -521,6 +524,13 @@ export interface SearchPostRouteExecutionContext {
   readonly correctiveRetryCalibration?: number | undefined;
   /** When true (options.explain=true), counterfactuals are always included. */
   readonly includeCounterfactuals?: boolean | undefined;
+  /**
+   * ADR-015 Axis 2: critic rewrite trace forwarded from the ranking
+   * pipeline. Threaded into `buildSearchDecisionInput.executionContext`
+   * so the decision input carries the full critic-loop history.
+   */
+  readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+  readonly criticRetriesExhausted?: boolean | undefined;
 }
 
 export interface RankedRouteDecisionPhaseContext {
@@ -577,6 +587,13 @@ export interface RankedRouteDecisionPhaseContext {
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
   /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
   readonly correctiveRetryCalibration?: number | undefined;
+  /**
+   * ADR-015 Axis 2: critic rewrite trace forwarded from the ranking
+   * pipeline through the route execution result. Optional; absent when
+   * the critic loop did not engage.
+   */
+  readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+  readonly criticRetriesExhausted?: boolean | undefined;
 }
 
 function assertSearchRouteExecutionFacts(
@@ -706,6 +723,9 @@ export async function runRankedRouteDecisionPhase(
       provenancePolicy: ctx.compiled.execution.provenancePolicy,
       ...(ctx.compiled.constraintGraph !== undefined
         ? { constraintGraph: ctx.compiled.constraintGraph }
+        : {}),
+      ...(ctx.criticRewrites !== undefined && ctx.criticRewrites.length > 0
+        ? { criticRewrites: ctx.criticRewrites }
         : {}),
     },
     toAdmissionHonestyContract(mergedRouteDegradation),
@@ -1078,6 +1098,9 @@ export async function runSearchPostRoutePhase(
         ...(ctx.compiled.constraintGraph !== undefined
           ? { constraintGraph: ctx.compiled.constraintGraph }
           : {}),
+        ...(ctx.criticRewrites !== undefined && ctx.criticRewrites.length > 0
+          ? { criticRewrites: ctx.criticRewrites }
+          : {}),
       },
       toAdmissionHonestyContract(mergedRouteDegradation),
     );
@@ -1200,6 +1223,10 @@ export async function runSearchPostRoutePhase(
         ? { hardFilterDropLog: ctx.hardFilterDropLog }
         : {}),
       ...(ctx.correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration: ctx.correctiveRetryCalibration } : {}),
+      ...(ctx.criticRewrites !== undefined && ctx.criticRewrites.length > 0
+        ? { criticRewrites: ctx.criticRewrites }
+        : {}),
+      ...(ctx.criticRetriesExhausted === true ? { criticRetriesExhausted: true } : {}),
     });
   }
 

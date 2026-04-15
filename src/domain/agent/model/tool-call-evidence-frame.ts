@@ -21,9 +21,18 @@ import type { CanonicalEntityId } from '../../shared/types/index.js';
  * Schema version tag. Carried per-frame so replay and bench harnesses can
  * detect schema drift deterministically. Increment when adding new
  * `structuredOutput.kind` variants or breaking a shape.
+ *
+ * ADR-015 Axis 2: v1.1 is a **pure superset** of v1. The only structural
+ * change is an optional `retryCount` field used by the executor-internal
+ * critic retry loop to break `observationHash` collisions on byte-identical
+ * retries. Builders emit v1.1 when `retryCount !== undefined`; otherwise
+ * they continue emitting v1 so pre-PR6 replays and hashes stay stable.
  */
 export const TOOL_EVIDENCE_FRAME_SCHEMA_VERSION = 'tool_evidence_v1';
-export type ToolEvidenceFrameSchemaVersion = typeof TOOL_EVIDENCE_FRAME_SCHEMA_VERSION;
+export const TOOL_EVIDENCE_FRAME_SCHEMA_VERSION_V1_1 = 'tool_evidence_v1_1';
+export type ToolEvidenceFrameSchemaVersion =
+  | typeof TOOL_EVIDENCE_FRAME_SCHEMA_VERSION
+  | typeof TOOL_EVIDENCE_FRAME_SCHEMA_VERSION_V1_1;
 
 /** Closed tuple of tool names that emit frames (all current agent tools). */
 export const FRAME_EMITTING_TOOLS = [
@@ -100,6 +109,15 @@ export interface ToolCallEvidenceFrame {
   readonly observationSnapshot: string;
   readonly observationHash: string;              // sha256 hex, 64 chars
   readonly durationMs: number;
+  /**
+   * ADR-015 Axis 2: internal critic retry attempt number (0-based). Present
+   * only when the frame was produced by a retry iteration of the
+   * executor-internal self-critique loop. When present, it is folded into
+   * `observationHash` input so byte-identical observations across retries
+   * do not collide. Absent on all pre-PR6 frames and on the first
+   * (non-retry) iteration; the absence preserves v1 hash stability.
+   */
+  readonly retryCount?: number | undefined;
 }
 
 // ─── Zod schema (runtime validation / replay contract) ────────────────────────
@@ -158,8 +176,16 @@ const ToolCallStructuredOutputSchema = z.discriminatedUnion('kind', [
   }).strict(),
 ]);
 
+/** Upper bound on retryCount — `CRITIC_RETRY_MAX = 3` in
+ *  retrieval-critic; 16 leaves headroom for future loop-cap bumps while
+ *  keeping the validation bound auditable. */
+const RETRY_COUNT_MAX = 16;
+
 export const ToolCallEvidenceFrameSchema = z.object({
-  frameSchemaVersion: z.literal(TOOL_EVIDENCE_FRAME_SCHEMA_VERSION),
+  frameSchemaVersion: z.union([
+    z.literal(TOOL_EVIDENCE_FRAME_SCHEMA_VERSION),
+    z.literal(TOOL_EVIDENCE_FRAME_SCHEMA_VERSION_V1_1),
+  ]),
   toolCallId: z.string().min(1).max(TOOL_CALL_ID_MAX_LEN),
   toolName: z.string().min(1).max(TOOL_NAME_MAX_LEN),
   invokedAt: z.string().min(1),
@@ -169,6 +195,7 @@ export const ToolCallEvidenceFrameSchema = z.object({
   observationSnapshot: z.string().max(OBSERVATION_SNAPSHOT_MAX_LEN),
   observationHash: z.string().length(OBSERVATION_HASH_LEN),
   durationMs: z.number().finite().nonnegative(),
+  retryCount: z.number().int().nonnegative().max(RETRY_COUNT_MAX).optional(),
 }).strict();
 
 export type ToolCallEvidenceFrameValidated = z.infer<typeof ToolCallEvidenceFrameSchema>;

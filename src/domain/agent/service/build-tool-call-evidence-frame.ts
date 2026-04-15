@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import {
   TOOL_EVIDENCE_FRAME_SCHEMA_VERSION,
+  TOOL_EVIDENCE_FRAME_SCHEMA_VERSION_V1_1,
   type ToolCallEvidenceFrame,
   type ToolCallStructuredOutput,
 } from '../model/tool-call-evidence-frame.js';
@@ -23,6 +24,14 @@ export interface BuildToolCallEvidenceFrameInput {
   readonly observation: string;
   readonly invokedAt: Date;
   readonly durationMs: number;
+  /**
+   * ADR-015 Axis 2: internal critic retry attempt number (0-based). When
+   * supplied, the frame is emitted at schema v1.1 and the retry count is
+   * folded into `observationHash` so byte-identical observations across
+   * retries produce distinct hashes. `undefined` (the default) preserves
+   * pre-PR6 v1 behaviour byte-for-byte.
+   */
+  readonly retryCount?: number | undefined;
 }
 
 /** SHA-256 hex digest, 64 lowercase chars. */
@@ -33,8 +42,23 @@ function sha256Hex(text: string): string {
 export function buildToolCallEvidenceFrame(
   input: BuildToolCallEvidenceFrameInput,
 ): ToolCallEvidenceFrame {
+  // ADR-015 hash contract:
+  //   - retryCount === undefined  → hash = sha256(observation)
+  //                                 (v1 behaviour, byte-identical pre-PR6)
+  //   - retryCount !== undefined  → hash = sha256(observation + `|retry=${n}`)
+  //                                 (v1.1 behaviour; collision-breaking)
+  // The suffix is only appended when `retryCount` is set so that v1 frames
+  // re-emitted without critic context stay hash-stable.
+  const hashInput =
+    input.retryCount === undefined
+      ? input.observation
+      : `${input.observation}|retry=${input.retryCount}`;
+  const frameSchemaVersion =
+    input.retryCount === undefined
+      ? TOOL_EVIDENCE_FRAME_SCHEMA_VERSION
+      : TOOL_EVIDENCE_FRAME_SCHEMA_VERSION_V1_1;
   return {
-    frameSchemaVersion: TOOL_EVIDENCE_FRAME_SCHEMA_VERSION,
+    frameSchemaVersion,
     toolCallId: input.toolCallId,
     toolName: input.toolName,
     invokedAt: input.invokedAt.toISOString(),
@@ -45,8 +69,9 @@ export function buildToolCallEvidenceFrame(
     },
     structuredOutput: input.structuredOutput,
     observationSnapshot: input.observation,
-    observationHash: sha256Hex(input.observation),
+    observationHash: sha256Hex(hashInput),
     durationMs: input.durationMs,
+    ...(input.retryCount !== undefined ? { retryCount: input.retryCount } : {}),
   };
 }
 

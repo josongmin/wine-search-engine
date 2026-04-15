@@ -8,6 +8,7 @@ import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
 import {
   type DecisionInput,
+  type DecisionInputCriticRewrite,
   type EvidenceSummary,
   hasAnchorEvidence,
   hasConstraintEvidence,
@@ -66,6 +67,12 @@ export function buildSearchDecisionInput(
      * the pre-Phase-1b.3a behaviour.
      */
     readonly constraintGraph?: ConstraintGraph | undefined;
+    /**
+     * ADR-015 Axis 2: executor-internal critic rewrites observed for
+     * this request. Empty / undefined when the critic loop did not
+     * engage (default off via `RETRIEVAL_EXECUTOR_CRITIC=false`).
+     */
+    readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
   },
   honestyContract?: {
     readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
@@ -334,5 +341,9 @@ export function buildSearchDecisionInput(
     evidenceSummary,
     ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
     conformalSetSize: resolverResult.conformalSetSize,
+    ...(executionContext?.criticRewrites !== undefined
+      && executionContext.criticRewrites.length > 0
+      ? { criticRewrites: executionContext.criticRewrites }
+      : {}),
   };
 }

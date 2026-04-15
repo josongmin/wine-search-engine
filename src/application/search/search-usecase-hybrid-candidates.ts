@@ -25,6 +25,45 @@ import {
   buildHybridCandidateCoverageStage,
   buildMissingProvenanceObligations,
 } from './search-usecase-provenance-closure.js';
+import {
+  executeGraphAware,
+  type CriticSignalProbe,
+  type GraphExecutorOptions,
+} from './search-usecase-graph-executor.js';
+import {
+  BundleSelectorImpl,
+  type BundleCellPricer,
+  type BundleCellScorer,
+} from '../../domain/retrieval/service/bundle-selector.js';
+import { createQueryRewriter } from '../../domain/retrieval/service/query-rewriter.js';
+import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
+import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
+import type { RewriteTrace } from '../../domain/retrieval/service/query-rewriter.js';
+
+/**
+ * ADR-015 Axis 2: per-call critic context surfaced from
+ * `retrieveHybridCandidatesForPlan` so callers can thread the rewrite
+ * trace into `buildSearchDecisionInput.executionContext.criticRewrites`.
+ */
+export interface CriticRetrievalObservability {
+  readonly rewrites: readonly RewriteTrace[];
+  readonly retriesExhausted: boolean;
+  readonly degradationReasons: readonly string[];
+}
+
+/** Convert a critic rewrite trace into the projection the decision-input
+ *  contract carries downstream. */
+export function projectRewritesForDecisionInput(
+  rewrites: readonly RewriteTrace[],
+): readonly DecisionInputCriticRewrite[] {
+  return rewrites.map((trace, index) => ({
+    subqueryId: trace.subqueryId,
+    type: trace.rewriteType,
+    // Stable ref: monotonic per-request index so the response builder
+    // can cross-reference the rewrite without reading internal pointers.
+    rewriteTraceRef: `critic-rewrite-${index}`,
+  }));
+}
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
@@ -85,6 +124,13 @@ export interface HybridCandidateRetrievalPorts {
   readonly candidatePool: CandidatePoolPort;
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
+  /**
+   * ADR-015 Axis 2: optional ChatLlmPort for the critic's `reformulate`
+   * branch. When absent, `reformulate` rewrites decline gracefully and
+   * the retry loop falls through to retries-exhausted. The deterministic
+   * branches (`relax` / `decompose` / `expand_synonym`) work without it.
+   */
+  readonly chatLlm?: ChatLlmPort | undefined;
 }
 
 export interface HybridCandidateRetrievalResult {
@@ -102,6 +148,14 @@ export interface HybridCandidateRetrievalResult {
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
+  /**
+   * ADR-015 Axis 2: trace of executor-internal critic rewrites that
+   * occurred during the generic hybrid retrieval. Only populated when
+   * the `RETRIEVAL_EXECUTOR_CRITIC` flag is on AND the generic hybrid
+   * path executed (specialized browse/compare paths bypass the critic
+   * loop). Empty array when the flag is on but no retry was needed.
+   */
+  readonly criticObservability?: CriticRetrievalObservability | undefined;
 }
 
 function mergeRetrievalDegradation(
@@ -495,9 +549,38 @@ export async function retrieveHybridCandidatesForPlan(
   );
 
   pipelineDebug({ step: 'retrieval.candidate_pool.fallback' }, 'pipeline candidate pool generate');
-  const candidates = ports.candidatePool.execute !== undefined
-    ? await ports.candidatePool.execute(retrievalInput)
-    : await ports.candidatePool.generate(retrievalInput);
+
+  // ADR-015 Axis 2 + ADR-013 Phase 1c: route the generic hybrid
+  // retrieval through `executeGraphAware`. This is the wiring PR4
+  // deferred — without it neither the BundleSelector nor the critic
+  // ever runs in production. The wrapper:
+  //   - passes through (one-shot, byte-identical to pre-PR4) when the
+  //     graph carries no multi-subquery hybrid topology AND the critic
+  //     flag is off,
+  //   - engages the BundleSelector when the graph carries a multi-
+  //     subquery hybrid (BUNDLE_SELECTOR_ENABLED gate),
+  //   - wraps either path with a bounded critic retry loop when
+  //     RETRIEVAL_EXECUTOR_CRITIC=true AND a rewriter is wired.
+  const probe = buildCriticSignalProbeForCompiledQuery(
+    plan,
+    compiled,
+    ports.candidatePool,
+  );
+  const queryRewriter = createQueryRewriter(
+    ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
+  );
+  const graphResult = await executeGraphAware(
+    retrievalInput,
+    compiled.constraintGraph,
+    {
+      candidatePool: ports.candidatePool,
+      bundleSelector: new BundleSelectorImpl(),
+      queryRewriter,
+    },
+    DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
+    probe,
+  );
+  const candidates = graphResult.candidates;
   // E4: Retrieve the RRF fusion trace and hard-filter drop log produced during execute()/generate().
   // Only available when candidatePool implements these methods (CandidatePoolService).
   // Specialized browse/compare paths that return early above do NOT have these traces
@@ -516,6 +599,14 @@ export async function retrieveHybridCandidatesForPlan(
     provenanceShortfall,
     retrievalInternalReasons,
   );
+  const criticObservability: CriticRetrievalObservability | undefined =
+    graphResult.criticRewrites !== undefined
+      ? {
+          rewrites: graphResult.criticRewrites,
+          retriesExhausted: graphResult.criticRetriesExhausted ?? false,
+          degradationReasons: graphResult.criticDegradationReasons ?? [],
+        }
+      : undefined;
   return {
     candidates,
     effectiveRetrievalMode: effectiveMode,
@@ -538,5 +629,65 @@ export async function retrieveHybridCandidatesForPlan(
           },
         }
       : {}),
+    ...(criticObservability !== undefined ? { criticObservability } : {}),
+  };
+}
+
+/**
+ * ADR-015 Axis 2 + ADR-013 Phase 1c: default options for the
+ * graph-aware executor when called from the hybrid candidates flow.
+ *
+ * Scoring + pricing are conservative defaults that preserve pre-PR4
+ * behaviour on the bundle path: every cell is scored by retrieval
+ * fusion score (higher = better), and price is `0` so shared-budget
+ * edges become inert until a downstream PR teaches the bundle path
+ * about price/popularity. The pricer **does not** read locale-dependent
+ * fields — outputs are integers from the candidate metadata.
+ */
+const DEFAULT_BUNDLE_SCORER: BundleCellScorer = ({ candidate }) =>
+  // ADR-013 / RFC-012 candidate score migration: prefer fusionRrfTotal
+  // (the post-fusion canonical score). Fall back to the deprecated
+  // retrievalFusionScore field for compatibility with retrievers that
+  // have not yet migrated. Returning 0 keeps the cell assignable but
+  // de-prioritised when both fields are absent.
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback per CLAUDE.md rule 31
+  candidate.fusionRrfTotal ?? candidate.retrievalFusionScore ?? 0;
+
+const DEFAULT_BUNDLE_PRICER: BundleCellPricer = () => 0;
+
+const DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS: GraphExecutorOptions = {
+  scoreFor: DEFAULT_BUNDLE_SCORER,
+  priceFor: DEFAULT_BUNDLE_PRICER,
+};
+
+/**
+ * ADR-015 Axis 2: build the per-call probe the executor uses to feed
+ * `decideRetry`. The probe pulls degradation signals from the candidate
+ * pool's per-call accessor and computes the satisfied-attribute set
+ * directly from each candidate's `matchedConstraints`.
+ */
+function buildCriticSignalProbeForCompiledQuery(
+  _plan: QueryPlanV1,
+  _compiled: CompiledWineQuery,
+  candidatePool: CandidatePoolPort,
+): CriticSignalProbe {
+  return {
+    satisfiedAttributesFor(candidates) {
+      const out = new Set<string>();
+      for (const candidate of candidates) {
+        for (const attribute of candidate.matchedConstraints) {
+          out.add(attribute);
+        }
+      }
+      return out;
+    },
+    degradationReasonsFor() {
+      // Retrieval-internal reasons are surfaced via the per-call
+      // accessor (not the candidate stream). When the pool does not
+      // implement the accessor (e.g. test stubs), the critic sees an
+      // empty list and falls through to coverage-based decisions only.
+      const signals = candidatePool.getLastDegradationSignals?.() ?? [];
+      return signals.map((signal) => signal.reason);
+    },
   };
 }

@@ -18,6 +18,7 @@ import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
 import {
   retrieveHybridCandidatesForPlan,
+  projectRewritesForDecisionInput,
   type HybridCandidateRetrievalResult,
 } from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
@@ -553,6 +554,20 @@ export async function executeHybridRouteRankingPipeline(
       : {}),
     ...(retrieval.hardFilterDropLog !== undefined && retrieval.hardFilterDropLog.length > 0
       ? { hardFilterDropLog: retrieval.hardFilterDropLog }
+      : {}),
+    // ADR-015 Axis 2: surface the executor-internal critic rewrites
+    // (and exhaustion signal) so the post-route phase can thread them
+    // into the decision-input contract.
+    ...(retrieval.criticObservability !== undefined
+      && retrieval.criticObservability.rewrites.length > 0
+      ? {
+          criticRewrites: projectRewritesForDecisionInput(
+            retrieval.criticObservability.rewrites,
+          ),
+        }
+      : {}),
+    ...(retrieval.criticObservability?.retriesExhausted === true
+      ? { criticRetriesExhausted: true }
       : {}),
   };
 }
