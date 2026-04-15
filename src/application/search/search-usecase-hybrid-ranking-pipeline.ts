@@ -93,8 +93,22 @@ function buildRelaxedCompiledQuery(
   compiled: CompiledWineQuery,
   relaxedPlan: QueryPlanV1,
 ): CompiledWineQuery {
+  // ADR-011/014 hotfix: constraint relaxation drops hard attributes from
+  // `compiled.query.constraints` but the pre-relaxation `constraintGraph`
+  // still carries slot nodes for those dropped attributes. Graph-aware
+  // readers (provenance-closure, decision-input, ranker hard-gate) would
+  // then fail candidates on stale graph obligations while the flat path
+  // happily accepts them — the exact split golden-set `Masi Amarone` /
+  // `Barolo Monfortino` tripped.
+  //
+  // Strip the graph from the relaxed compiled query so every graph-aware
+  // reader falls back to the flat (relaxed) bundle path. Byte-identical
+  // to pre-PR5 relaxation behaviour. A faithful "regenerate the graph
+  // from the relaxed atoms" path is the Phase 1b.4 follow-up; until then
+  // the stripped form is the safe contract for relaxation.
+  const { constraintGraph: _droppedStaleGraph, ...compiledSansGraph } = compiled;
   return {
-    ...compiled,
+    ...compiledSansGraph,
     query: {
       ...compiled.query,
       constraints: relaxedPlan.constraints,

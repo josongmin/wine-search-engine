@@ -259,7 +259,14 @@ export class ConstraintCompiler {
     // schema rejection) falls back to the trivial graph byte-for-byte.
     let constraintGraph: ConstraintGraph | undefined;
     if (isConstraintGraphEmitEnabled()) {
-      const trivial = buildTrivialGraphFromAtoms(reasonerOutput.atoms);
+      // ADR-014 post-hotfix: build the graph from **surviving** atoms, not
+      // the raw list. The pre-resolution atoms include constraints the
+      // reasoner dropped (contradiction / redundancy / overshadow). If we
+      // leak those into the graph's hard-tier subgraph the ranker's graph
+      // hard-gate will reject candidates that the flat `effectiveBundle`
+      // path would accept — golden-set regression on Italian wines
+      // (`Masi Amarone`, `Barolo Monfortino`) traced this exact leak.
+      const trivial = buildTrivialGraphFromAtoms(reasonerOutput.survivingAtoms);
       constraintGraph = trivial;
 
       if (
@@ -274,7 +281,7 @@ export class ConstraintCompiler {
           .filter((n) => n.kind === 'slot')
           .map((n) => n.nodeId);
         const topology = await this.topologyPlanner.plan({
-          atoms: reasonerOutput.atoms,
+          atoms: reasonerOutput.survivingAtoms,
           normalizedQuery,
           slotIds,
           ...(decompositionHint !== undefined ? { decompositionHint } : {}),

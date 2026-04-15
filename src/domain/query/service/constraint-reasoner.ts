@@ -69,6 +69,20 @@ export type ConstraintRelationType =
 export interface ConstraintReasonerOutput {
   /** All atoms lifted from the original bundle. */
   readonly atoms: readonly ConstraintAtom[];
+  /**
+   * Atoms that survived conflict resolution — those that were NOT dropped
+   * via contradiction / redundancy / overshadow. This is the set the
+   * runtime ranker/executor should see: anything dropped from
+   * `resolvedBundle` must also be absent from the derived graph.
+   *
+   * ADR-010 Phase 1a invariant fix: the graph was originally built from
+   * the raw `atoms` list, which leaks dropped hard-tier slots into the
+   * hard-gate subgraph and fails legitimate candidates (see golden-set
+   * regression `Masi Amarone`, `Barolo Monfortino`). Graph consumers MUST
+   * use `survivingAtoms`. Audit consumers (policy-outcomes, dropped-trace)
+   * keep using `atoms` + `droppedAtoms` to reconstruct the full picture.
+   */
+  readonly survivingAtoms: readonly ConstraintAtom[];
 
   /** Pairwise semantic relations detected between atoms. */
   readonly relations: readonly ConstraintRelation[];
@@ -178,6 +192,7 @@ export class ConstraintReasoner {
 
     return {
       atoms,
+      survivingAtoms,
       relations,
       resolvedBundle,
       droppedAtoms,
