@@ -35,6 +35,41 @@
       "csrInferredGraph": null,
       "evaluatedScenarios": 6
     },
+    "waveJ4RealContainerMeasurement": {
+      "timestamp": "2026-04-15T18:10:00.000Z",
+      "container": "real (Vespa Cloud p0-lab.wine-searcher dev-aws-us-east-1c + PG + Redis + OpenAI gpt-5.4-mini)",
+      "headline": "First end-to-end real-container measurement of scrInferredGraph + csrInferred[Graph]. scrInferredGraph confirms the offline +50pp graph-aware boost on scenario id=30 (Barolo/Brunello OR-group over grape_primary). csrInferred[Graph] populated as 0 (no longer null) on the comparison_nested tier — observations did flow through the constraint scorer for 2 of 5 scenarios, but neither candidate satisfied the inferred-tier expected constraints, so csrInferred = csrInferredGraph = 0. This is a real measurement, not a measurement-pipeline gap.",
+      "tiers": [
+        {
+          "tier": "nested_condition",
+          "scenarios": 31,
+          "csrOverall": 0.8333,
+          "csrHard": 1.0,
+          "csrSoft": 0.3333,
+          "csrInferred": null,
+          "csrInferredGraph": null,
+          "constraintEvaluatedCount": 3,
+          "scrInferred": 0,
+          "scrInferredGraph": 0,
+          "note": "Only 1 of 31 (id=25) carries `inferred:` expectations; that scenario didn't produce constraint-scorable observations on this run."
+        },
+        {
+          "tier": "comparison_nested",
+          "scenarios": 5,
+          "csrOverall": 0.4,
+          "csrHard": 0.5,
+          "csrSoft": 0.5,
+          "csrInferred": 0,
+          "csrInferredGraph": 0,
+          "constraintEvaluatedCount": 2,
+          "scrInferred": 0.5,
+          "scrInferredGraph": 1.0,
+          "deltaPp": 50,
+          "note": "scrInferredGraph +50pp over scrInferred — the offline Wave C result (id=30 Barolo/Brunello OR-group, +8.33pp on the inferred-only subset) replicated end-to-end on real container. Headline ADR-011 PR2 graph-aware credit confirmation."
+        }
+      ],
+      "interpretation": "ADR-011 PR2 dual-emit graph-aware metrics now have first real-container measurements. (1) scrInferredGraph proves the OR/XOR credit case in production wiring, not just offline. (2) csrInferred[Graph] = 0 (not null) means candidate quality on inferred constraints is the next bottleneck — graph wiring is fine, the candidates aren't winning the inferred slots. (3) Remaining inferred-bearing scenarios across single_shot/multi_step/edge_case/knowledge_hybrid/extreme tiers will refine the csrInferred[Graph] denominator on the next full bench."
+    },
     "waveCOfflineMeasurement": {
       "timestamp": "2026-04-15T00:00:00.000Z",
       "methodology": "LLM-free runConstraintExtraction() over all AGENT_SCENARIOS with expectedConstraints. Symbolic path only (QueryNormalizer + ConstraintCompiler + NLMapper(NO_OP) + Entity Resolver + Ontology Expansion + Reasoner). CONSTRAINT_GRAPH_EMIT default-on → trivial graphs emitted per scenario. csrInferred[Graph] NOT measured (requires observations / full container).",
