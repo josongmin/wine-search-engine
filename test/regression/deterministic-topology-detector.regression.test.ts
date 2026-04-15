@@ -206,6 +206,105 @@ describe('DeterministicTopologyDetector — null branches', () => {
   });
 });
 
+// ─── Wave I1 — broadened lexicon integration ─────────────────────────────────
+
+describe('DeterministicTopologyDetector — Wave I1 lexicon integration', () => {
+  it('Korean negation XOR "보르도 말고 부르고뉴" + two region atoms → group_xor', () => {
+    const detector = new DeterministicTopologyDetector();
+    // We use a 2-atom wine_type bundle so the detector's XOR branch has
+    // an attribute tier ≥2 to wrap; the lexicon match is the trigger.
+    const bundle: ConstraintBundle = {
+      hard: [
+        { attribute: 'wine_type', operator: '=', value: 'red', source_phrase: '보르도', confidence: 1 },
+        { attribute: 'wine_type', operator: '=', value: 'white', source_phrase: '부르고뉴', confidence: 1 },
+      ],
+      soft: [],
+      inferred: [],
+    };
+    const atoms = liftBundleToAtoms(bundle);
+    const slotIds = slotIdsFor(bundle);
+    const result = detector.detect({
+      atoms,
+      normalizedQuery: '보르도 말고 부르고뉴',
+      slotIds,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.nodes.some((n) => n.kind === 'group_xor')).toBe(true);
+  });
+
+  it('Korean negation XOR does NOT fire on 말고기 (horse meat) substring trap', () => {
+    const detector = new DeterministicTopologyDetector();
+    const bundle = makeXorBundle();
+    const atoms = liftBundleToAtoms(bundle);
+    const slotIds = slotIdsFor(bundle);
+    const result = detector.detect({
+      atoms,
+      // No other XOR markers in this query — only the `말고` substring
+      // inside `말고기`. Must NOT match.
+      normalizedQuery: '말고기 페어링 red white',
+      slotIds,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('Korean 전식 본식 후식 통틀어 20만원 → multi-course + shares_budget edges', () => {
+    const detector = new DeterministicTopologyDetector();
+    const result = detector.detect({
+      atoms: [],
+      normalizedQuery: '전식 본식 후식 통틀어 20만원',
+      slotIds: [],
+    });
+    expect(result).not.toBeNull();
+    if (result === null) return;
+    const subqueries = result.nodes.filter((n) => n.kind === 'subquery');
+    expect(subqueries).toHaveLength(3);
+    // C(3,2) = 3 pairwise shares_budget edges.
+    expect(result.edges).toHaveLength(3);
+    expect(result.edges.every((e) => e.kind === 'shares_budget')).toBe(true);
+    // Canonical purposes ordered: appetizer, main_course, dessert.
+    const purposes = subqueries.map((n) =>
+      n.kind === 'subquery' ? n.purpose : null,
+    );
+    expect(purposes).toEqual(['appetizer', 'main_course', 'dessert']);
+  });
+
+  it('English "cheese course and main dish, budget of $200" → multi-course + shares_budget', () => {
+    const detector = new DeterministicTopologyDetector();
+    const result = detector.detect({
+      atoms: [],
+      normalizedQuery: 'cheese course and main dish, budget of $200',
+      slotIds: [],
+    });
+    expect(result).not.toBeNull();
+    if (result === null) return;
+    const subqueries = result.nodes.filter((n) => n.kind === 'subquery');
+    expect(subqueries).toHaveLength(2);
+    // 2 subqueries → 1 pairwise shares_budget edge.
+    expect(result.edges).toHaveLength(1);
+    expect(result.edges[0]?.kind).toBe('shares_budget');
+    // Canonical ordering: main_course before dessert (cheese course
+    // canonicalizes to dessert per the 3-bucket vocabulary).
+    const purposes = subqueries.map((n) =>
+      n.kind === 'subquery' ? n.purpose : null,
+    );
+    expect(purposes).toEqual(['main_course', 'dessert']);
+  });
+
+  it('English disjunction "red and/or white" fires XOR branch with 2 wine_type atoms', () => {
+    const detector = new DeterministicTopologyDetector();
+    const bundle = makeXorBundle();
+    const atoms = liftBundleToAtoms(bundle);
+    const slotIds = slotIdsFor(bundle);
+    const result = detector.detect({
+      atoms,
+      normalizedQuery: 'red and/or white wine',
+      slotIds,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.nodes.some((n) => n.kind === 'group_xor')).toBe(true);
+  });
+});
+
 describe('DeterministicTopologyDetector — merge compatibility', () => {
   it('output merges cleanly into trivial graph via mergeTopologyIntoTrivial', () => {
     const detector = new DeterministicTopologyDetector();

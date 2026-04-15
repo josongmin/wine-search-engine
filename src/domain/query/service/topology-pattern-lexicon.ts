@@ -1,5 +1,5 @@
 /**
- * Wave F1 — topology-pattern-lexicon SSoT.
+ * Wave F1 / I1 — topology-pattern-lexicon SSoT.
  *
  * Single source of truth for the Korean + English keyword sets that drive
  * the deterministic topology detector (see
@@ -12,12 +12,31 @@
  * chain in ConstraintCompiler depends on these patterns being stable and
  * audited.
  *
+ * Amendment history:
+ *  - F1 (base): XOR keywords (`또는`, `반반`, `각각`, `따로`, `either/or`),
+ *    course keywords (`메인`, `디저트`, `에피타이저`, `main course`, `dessert`,
+ *    `appetizer`, `starter`).
+ *  - H  (shared-budget): `총`/`합산`/`도합`/`합계`/`합쳐`/`전체` +
+ *    `total`/`combined`/`altogether` with numeric amount or multi-subquery
+ *    co-occurrence discipline.
+ *  - I1 (this wave): XOR-negation patterns (`말고`/`빼고`/`외에는` +
+ *    `not A but B`/`except X`/`other than`), disjunction markers (`아니면`,
+ *    `혹은`, `and/or`, `whichever`), extended course vocabulary (`전식`,
+ *    `본식`, `후식`, `샐러드 코스`, `entrée`, `salad course`,
+ *    `cheese course`, `main dish`), broader shared-budget phrasing
+ *    (`전체 예산`, `통틀어`, `모두 합해서`, `다 해서`, `in total`, `all in`,
+ *    `spend up to`, `budget of`).
+ *
  * Unicode-safety contract (CLAUDE.md rule 8):
- *  - Korean keywords are matched via whole-syllable `.includes()` — safe
- *    because Hangul characters are not ASCII-word characters and cannot
- *    be partially matched inside another Korean word without surrounding
- *    context (the detector itself guards against false positives by
- *    requiring accompanying course / XOR evidence).
+ *  - Simple Korean keywords whose 2-4 syllables are not a substring of
+ *    any plausible wine-domain word (e.g. `또는`, `합산`, `통틀어`) are
+ *    matched via whole-syllable `.includes()`.
+ *  - Korean tokens with known substring collisions (e.g. `말고` inside
+ *    `말고기` "horse meat", `빼고` inside `빼고치다`, `아니면` inside
+ *    `아니면서`) use a Unicode-aware boundary regex of the form
+ *    `(?:^|[^\p{L}\p{N}])KEYWORD(?=$|[^\p{L}\p{N}])` with the `/u` flag.
+ *    Rule 24: single character class — `[\p{L}\p{N}]` — not a two-char
+ *    sequence `\p{L}\p{N}`.
  *  - English regexes use `(?:^|[^\p{L}\p{N}])...(?=$|[^\p{L}\p{N}])`
  *    lookaround pairs (single character class, not a 2-char sequence —
  *    rule 24) with the `/u` flag. `\b` is ASCII-only and silently fails
@@ -56,15 +75,100 @@ export const TOPOLOGY_XOR_KEYWORDS_KO: readonly string[] = [
 export const TOPOLOGY_XOR_REGEX_EN: RegExp =
   /(?:^|[^\p{L}\p{N}])(?:either|or|one\s+[\p{L}\p{N}\s]*?\s+other)(?=$|[^\p{L}\p{N}])/iu;
 
+// ─── XOR-negation keywords (Wave I1) ─────────────────────────────────────────
+
 /**
- * Returns true iff the query contains any XOR-smell keyword. Pure,
- * allocation-free, O(|query| × |KO keywords| + |EN regex|).
+ * Korean XOR-negation markers — "A 말고 B", "X 빼고 Y", "… 외에는 …".
+ * These express the same disjoint-alternative semantics as the bare XOR
+ * lexicon ("그 말고 다른 것 없어?") and feed the same `group_xor` topology
+ * branch.
+ *
+ * Matched via a Unicode-aware boundary regex (NOT `.includes()`) because
+ * the short 2-syllable forms have concrete substring collisions:
+ *  - `말고` is a substring of `말고기` (horse meat). `.includes('말고')`
+ *    would fire on "말고기 페어링" — a wine pairing query for horse meat
+ *    would be wrongly flagged as an XOR query.
+ *  - `빼고` is itself a conjugated verb that can appear in non-XOR
+ *    contexts; requiring a boundary avoids latching onto compound forms.
+ *  - `외에는` is rarer as a substring but kept under the same discipline.
+ *
+ * Rule 24: character class `[\p{L}\p{N}]`, not sequence `\p{L}\p{N}`.
+ */
+export const TOPOLOGY_XOR_NEGATION_KEYWORDS_KO: readonly string[] = [
+  '말고',
+  '빼고',
+  '외에는',
+];
+
+/**
+ * Unicode-safe boundary regex for the Korean negation keywords above.
+ * Exported so the regression test can exercise each keyword against its
+ * specific substring trap (e.g. `말고기`).
+ */
+export const TOPOLOGY_XOR_NEGATION_REGEX_KO: RegExp =
+  /(?:^|[^\p{L}\p{N}])(?:말고|빼고|외에는)(?=$|[^\p{L}\p{N}])/u;
+
+/**
+ * English XOR-negation regex — `not A but B`, `except X`, `other than`.
+ *
+ * - `not\s+[\p{L}\p{N}]+\s+but` keeps the nominal A short (one word) so
+ *   the `but` anchor is near; `[\p{L}\p{N}]+` tolerates accented Latin.
+ * - `except\s+[\p{L}\p{N}]+` requires something follow `except` so the
+ *   bare adverbial "except" doesn't fire.
+ * - `other\s+than` — Rule 23: must NOT fire on "other wines" or "other
+ *   than expected" in a non-choice context. The `other than` sequence
+ *   requiring a following word is handled by downstream multi-wine-type
+ *   atom requirement in the detector.
+ *
+ * Unicode-safe lookaround pair; source regex is non-`/g` so `.test()`
+ * stays stateless.
+ */
+export const TOPOLOGY_XOR_NEGATION_REGEX_EN: RegExp =
+  /(?:^|[^\p{L}\p{N}])(?:not\s+[\p{L}\p{N}]+\s+but|except\s+[\p{L}\p{N}]+|other\s+than)(?=$|[^\p{L}\p{N}])/iu;
+
+// ─── Disjunction markers (Wave I1) ───────────────────────────────────────────
+
+/**
+ * Additional Korean disjunction markers — `아니면` (or, otherwise),
+ * `혹은` (or, alternatively). Both are clean multi-syllable tokens with
+ * minimal substring collision surface, but `아니면` can appear inside the
+ * longer conjunction `아니면서` ("while not being…"), so it uses the
+ * boundary regex below.
+ */
+export const TOPOLOGY_XOR_DISJUNCTION_KEYWORDS_KO: readonly string[] = [
+  '아니면',
+  '혹은',
+];
+
+/**
+ * Unicode-safe regex form for the Korean disjunction markers. Exists so
+ * the regression test can lock the `아니면` vs `아니면서` behaviour.
+ */
+export const TOPOLOGY_XOR_DISJUNCTION_REGEX_KO: RegExp =
+  /(?:^|[^\p{L}\p{N}])(?:아니면|혹은)(?=$|[^\p{L}\p{N}])/u;
+
+/**
+ * English disjunction markers — `and/or`, `whichever`. `and/or` requires
+ * an inline forward slash so we match it literally; `whichever` is a
+ * single content word. Both feed the same XOR branch as `either … or`.
+ */
+export const TOPOLOGY_XOR_DISJUNCTION_REGEX_EN: RegExp =
+  /(?:^|[^\p{L}\p{N}])(?:and\s*\/\s*or|whichever)(?=$|[^\p{L}\p{N}])/iu;
+
+/**
+ * Returns true iff the query contains any XOR-smell keyword — bare XOR,
+ * negation-XOR, or disjunction marker. Pure, allocation-free.
  */
 export function matchesXorLexicon(query: string): boolean {
   for (const kw of TOPOLOGY_XOR_KEYWORDS_KO) {
     if (query.includes(kw)) return true;
   }
-  return TOPOLOGY_XOR_REGEX_EN.test(query);
+  if (TOPOLOGY_XOR_REGEX_EN.test(query)) return true;
+  if (TOPOLOGY_XOR_NEGATION_REGEX_KO.test(query)) return true;
+  if (TOPOLOGY_XOR_NEGATION_REGEX_EN.test(query)) return true;
+  if (TOPOLOGY_XOR_DISJUNCTION_REGEX_KO.test(query)) return true;
+  if (TOPOLOGY_XOR_DISJUNCTION_REGEX_EN.test(query)) return true;
+  return false;
 }
 
 // ─── Multi-course (pairing) keywords ─────────────────────────────────────────
@@ -80,6 +184,28 @@ export const TOPOLOGY_COURSE_KEYWORDS_KO: readonly string[] = [
   '에피타이저',
   '전채',
   '애피타이저',
+  // Wave I1 — 전식 / 본식 / 후식 are the Sino-Korean course labels
+  // ("pre-meal / main-meal / post-meal"). Distinctive multi-syllable
+  // compounds; no known substring collisions in the wine / dining
+  // vocabulary (cf. `말고` vs `말고기` trap — these words are safer).
+  '전식',
+  '본식',
+  '후식',
+];
+
+/**
+ * Multi-word Korean course phrases that we ONLY want to match when the
+ * qualifier ` 코스` is present — this suppresses false positives on
+ * standalone `샐러드` / `치즈` tokens which can appear as side-dish or
+ * ingredient mentions rather than course labels.
+ *
+ * Rule 23 discipline: "샐러드와 빵 주세요" must NOT be parsed as
+ * "salad course + bread" — it's a side + bread. Requiring `코스` anchors
+ * the intent.
+ */
+export const TOPOLOGY_COURSE_PHRASES_KO: readonly string[] = [
+  '샐러드 코스',
+  '치즈 코스',
 ];
 
 /**
@@ -96,7 +222,7 @@ export const TOPOLOGY_COURSE_KEYWORDS_KO: readonly string[] = [
  * match.
  */
 export const TOPOLOGY_COURSE_REGEX_EN: RegExp =
-  /(?:^|[^\p{L}\p{N}])(?:main\s+course|dessert|appetizer|appetiser|starter)(?=$|[^\p{L}\p{N}])/iu;
+  /(?:^|[^\p{L}\p{N}])(?:main\s+course|main\s+dish|entr[ée]e|dessert|appetizer|appetiser|starter|salad\s+course|cheese\s+course)(?=$|[^\p{L}\p{N}])/iu;
 
 /**
  * Returns true iff the query contains ≥2 distinct course keywords. The
@@ -108,14 +234,33 @@ export function matchesCourseKeywords(query: string): boolean {
   for (const kw of TOPOLOGY_COURSE_KEYWORDS_KO) {
     if (query.includes(kw)) hit.add(`ko:${kw}`);
   }
-  // Collapse 애피타이저 / 에피타이저 / 전채 to a single "starter" bucket so
-  // two spellings of the same course don't spuriously count as two.
-  const starterAliases = ['에피타이저', '애피타이저', '전채'];
+  // Collapse 애피타이저 / 에피타이저 / 전채 / 전식 to a single "starter"
+  // bucket (all canonicalize to `appetizer`) so two spellings of the
+  // same course don't spuriously count as two.
+  const starterAliases = ['에피타이저', '애피타이저', '전채', '전식'];
   const starterHit = starterAliases.some((s) => hit.has(`ko:${s}`));
   if (starterHit) {
     for (const s of starterAliases) hit.delete(`ko:${s}`);
     hit.add('ko:starter');
   }
+  // Collapse 메인 / 본식 to a single "main_course" bucket.
+  if (hit.has('ko:메인') || hit.has('ko:본식')) {
+    hit.delete('ko:메인');
+    hit.delete('ko:본식');
+    hit.add('ko:main_course');
+  }
+  // Collapse 디저트 / 후식 to a single "dessert" bucket.
+  if (hit.has('ko:디저트') || hit.has('ko:후식')) {
+    hit.delete('ko:디저트');
+    hit.delete('ko:후식');
+    hit.add('ko:dessert');
+  }
+  // Anchored multi-word Korean phrases (샐러드 코스 / 치즈 코스). These
+  // map to `appetizer` (salad course) and `dessert` (cheese course) per
+  // the 3-bucket canonical vocabulary. Requiring the ` 코스` anchor is
+  // the false-positive guard from rule 23.
+  if (query.includes('샐러드 코스')) hit.add('ko:starter');
+  if (query.includes('치즈 코스')) hit.add('ko:dessert');
   // English — use a fresh regex per call so /g state doesn't leak.
   // Clone with /g so exec() can iterate all matches — source export is
   // intentionally non-global to keep `.test()` stateless for external users.
@@ -125,9 +270,17 @@ export function matchesCourseKeywords(query: string): boolean {
     // Capture the course word itself (match includes its left boundary
     // so we normalise by stripping non-letter leads).
     const normalised = m[0].replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase();
-    if (normalised.startsWith('main')) hit.add('en:main_course');
-    else if (normalised.startsWith('dessert')) hit.add('en:dessert');
-    else if (normalised.startsWith('appet') || normalised.startsWith('starter')) hit.add('en:starter');
+    if (normalised.startsWith('main') || normalised.startsWith('entr')) {
+      hit.add('en:main_course');
+    } else if (normalised.startsWith('dessert') || normalised.startsWith('cheese')) {
+      hit.add('en:dessert');
+    } else if (
+      normalised.startsWith('appet') ||
+      normalised.startsWith('starter') ||
+      normalised.startsWith('salad')
+    ) {
+      hit.add('en:starter');
+    }
   }
   return hit.size >= 2;
 }
@@ -156,16 +309,27 @@ const CANONICAL_COURSE_ORDER: readonly string[] = [
 export function classifyCourseHits(query: string): readonly ClassifiedCourseHit[] {
   if (!matchesCourseKeywords(query)) return [];
   const present = new Set<string>();
-  // Korean mapping
-  if (query.includes('메인')) present.add('main_course');
-  if (query.includes('디저트')) present.add('dessert');
+  // Korean mapping — collapse 메인/본식 → main_course, 디저트/후식 → dessert,
+  // 에피타이저/애피타이저/전채/전식 → appetizer. The multi-word phrases
+  // `샐러드 코스` and `치즈 코스` map to appetizer / dessert respectively
+  // (rule 23: require the ` 코스` anchor to avoid "샐러드" / "치즈" as
+  // side dishes / ingredients).
+  if (query.includes('메인') || query.includes('본식')) {
+    present.add('main_course');
+  }
+  if (query.includes('디저트') || query.includes('후식')) {
+    present.add('dessert');
+  }
   if (
     query.includes('에피타이저') ||
     query.includes('애피타이저') ||
-    query.includes('전채')
+    query.includes('전채') ||
+    query.includes('전식')
   ) {
     present.add('appetizer');
   }
+  if (query.includes('샐러드 코스')) present.add('appetizer');
+  if (query.includes('치즈 코스')) present.add('dessert');
   // English — reuse the course regex to classify
   // Clone with /g so exec() can iterate all matches — source export is
   // intentionally non-global to keep `.test()` stateless for external users.
@@ -173,9 +337,17 @@ export function classifyCourseHits(query: string): readonly ClassifiedCourseHit[
   let m: RegExpExecArray | null;
   while ((m = enRegex.exec(query)) !== null) {
     const normalised = m[0].replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase();
-    if (normalised.startsWith('main')) present.add('main_course');
-    else if (normalised.startsWith('dessert')) present.add('dessert');
-    else if (normalised.startsWith('appet') || normalised.startsWith('starter')) present.add('appetizer');
+    if (normalised.startsWith('main') || normalised.startsWith('entr')) {
+      present.add('main_course');
+    } else if (normalised.startsWith('dessert') || normalised.startsWith('cheese')) {
+      present.add('dessert');
+    } else if (
+      normalised.startsWith('appet') ||
+      normalised.startsWith('starter') ||
+      normalised.startsWith('salad')
+    ) {
+      present.add('appetizer');
+    }
   }
   return CANONICAL_COURSE_ORDER
     .filter((c) => present.has(c))
@@ -198,6 +370,17 @@ export const TOPOLOGY_SHARES_BUDGET_KEYWORDS_KO: readonly string[] = [
   '합계',
   '합쳐',
   '전체',
+  // Wave I1 — broader shared-budget phrasing.
+  // `통틀어` (all together), `다 해서` (all in all), `전체 예산` (total
+  // budget), `모두 합해서` (sum of all). Each is a multi-syllable /
+  // multi-word phrase with no known substring collision in the wine
+  // domain; `.includes()` is safe. The detector's co-occurrence rule
+  // (numeric amount OR multi-subquery) still guards against false
+  // positives on loose phrases like `다 해서`.
+  '통틀어',
+  '전체 예산',
+  '모두 합해서',
+  '다 해서',
 ];
 
 /**
@@ -207,7 +390,7 @@ export const TOPOLOGY_SHARES_BUDGET_KEYWORDS_KO: readonly string[] = [
  * no `/g` on the export.
  */
 export const TOPOLOGY_SHARES_BUDGET_REGEX_EN: RegExp =
-  /(?:^|[^\p{L}\p{N}])(?:total(?:ly)?|combined|altogether|all\s+together|overall\s+budget)(?=$|[^\p{L}\p{N}])/iu;
+  /(?:^|[^\p{L}\p{N}])(?:total(?:ly)?|combined|altogether|all\s+together|overall\s+budget|in\s+total|all\s+in|spend\s+up\s+to|budget\s+of)(?=$|[^\p{L}\p{N}])/iu;
 
 /**
  * KRW / USD numeric budget pattern, e.g. `15만원`, `150,000 KRW`,
