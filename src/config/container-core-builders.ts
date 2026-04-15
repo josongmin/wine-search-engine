@@ -30,6 +30,7 @@ import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
+import { ConstraintTopologyPlanner } from '../domain/query/service/constraint-topology-planner.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
@@ -127,12 +128,21 @@ export async function buildQueryPlanner(
     ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
+  // ADR-012 Phase 1b.2: wire optional ConstraintTopologyPlanner when a
+  // ChatLlmPort is available AND the env flag is on. When unavailable,
+  // ConstraintCompiler falls through to the deterministic trivial graph.
+  const topologyPlanner =
+    chatLlm !== undefined && process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true'
+      ? new ConstraintTopologyPlanner(chatLlm)
+      : undefined;
+
   return new Planner(
     adapters.ambiguityDict,
     new AnchorExtractor(adapters.aliasMatcher),
     new ExpansionBuilder(),
     nlMapper,
     fuzzyMatcher,
+    topologyPlanner,
   );
 }
 

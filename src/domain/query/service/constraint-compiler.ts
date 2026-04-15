@@ -17,6 +17,10 @@ import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-at
 import { ConstraintReasoner, type ConstraintReasonerOutput } from './constraint-reasoner.js';
 import { buildTrivialGraphFromAtoms } from './build-trivial-graph-from-atoms.js';
 import type { ConstraintGraph } from '../model/constraint-graph.js';
+import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js';
+import { isTopologyIntentGateOpen } from './constraint-topology-planner.js';
+import { mergeTopologyIntoTrivial } from './merge-topology-into-trivial.js';
+import type { QueryDecompositionHint } from '../model/query-decomposition.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
@@ -50,6 +54,16 @@ function isConstraintGraphEmitEnabled(): boolean {
   return process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false';
 }
 
+/**
+ * ADR-012 Phase 1b.2 feature flag. Default OFF; set to literal 'true' to
+ * enable LLM topology planner. When off (or when the planner is not
+ * injected, e.g. no `ChatLlmPort` at composition root), the compiler
+ * falls through to the deterministic trivial graph.
+ */
+function isConstraintGraphTopologyLlmEnabled(): boolean {
+  return process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true';
+}
+
 // SOFT_CONSTRAINT_ATTRIBUTES is imported from SSoT: ../../shared/constants/constraint-attributes.js
 const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 
@@ -59,11 +73,13 @@ export class ConstraintCompiler {
   constructor(
     private readonly nlMapper: NLMapper,
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
+    private readonly topologyPlanner?: ConstraintTopologyPlanner | undefined,
   ) {}
 
   async compile(
     normalizedQuery: string,
     abortSignal?: AbortSignal,
+    decompositionHint?: QueryDecompositionHint,
   ): Promise<ConstraintCompilerResult> {
     const spans = parseSpans(normalizedQuery);
     const candidatePhrases = spans.map((s) => s.text);
@@ -235,9 +251,43 @@ export class ConstraintCompiler {
     // a trivial ConstraintGraph. Additive — no existing reader consumes
     // this field in Phase 1a. The flag lets ops disable emission without
     // a code change if the projector ever needs to be bypassed.
-    const constraintGraph = isConstraintGraphEmitEnabled()
-      ? buildTrivialGraphFromAtoms(reasonerOutput.atoms)
-      : undefined;
+    //
+    // ADR-012 Phase 1b.2: when `CONSTRAINT_GRAPH_TOPOLOGY_LLM` is on AND
+    // a topology planner was injected AND the intent gate opens, we ask
+    // the LLM for AND/OR/XOR/subquery topology on top of the trivial
+    // projection. Any failure (null planner return, merge collision,
+    // schema rejection) falls back to the trivial graph byte-for-byte.
+    let constraintGraph: ConstraintGraph | undefined;
+    if (isConstraintGraphEmitEnabled()) {
+      const trivial = buildTrivialGraphFromAtoms(reasonerOutput.atoms);
+      constraintGraph = trivial;
+
+      if (
+        isConstraintGraphTopologyLlmEnabled() &&
+        this.topologyPlanner !== undefined &&
+        isTopologyIntentGateOpen({
+          normalizedQuery,
+          ...(decompositionHint !== undefined ? { decompositionHint } : {}),
+        })
+      ) {
+        const slotIds = trivial.nodes
+          .filter((n) => n.kind === 'slot')
+          .map((n) => n.nodeId);
+        const topology = await this.topologyPlanner.plan({
+          atoms: reasonerOutput.atoms,
+          normalizedQuery,
+          slotIds,
+          ...(decompositionHint !== undefined ? { decompositionHint } : {}),
+          ...(abortSignal !== undefined ? { abortSignal } : {}),
+        });
+        if (topology !== null) {
+          const merged = mergeTopologyIntoTrivial(trivial, topology);
+          if (merged !== null) {
+            constraintGraph = merged;
+          }
+        }
+      }
+    }
 
     return {
       bundle: effectiveBundle,

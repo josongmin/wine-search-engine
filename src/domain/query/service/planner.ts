@@ -23,6 +23,7 @@ import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import { ConstraintCompiler, type ConstraintCompilerResult } from './constraint-compiler.js';
+import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js';
 import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vintage.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
@@ -138,8 +139,13 @@ export class Planner {
     private readonly expansionBuilder: ExpansionBuilder,
     nlMapper: NLMapper,
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
+    topologyPlanner?: ConstraintTopologyPlanner,
   ) {
-    this.constraintCompiler = new ConstraintCompiler(nlMapper, fuzzyMatcher);
+    this.constraintCompiler = new ConstraintCompiler(
+      nlMapper,
+      fuzzyMatcher,
+      topologyPlanner,
+    );
   }
 
   /**

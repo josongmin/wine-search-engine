@@ -21,8 +21,19 @@ import type { ConstraintOperator } from '../../shared/types/constraint-bundle.js
 
 // ─── Schema version ──────────────────────────────────────────────────────────
 
+/**
+ * v1: trivial / deterministic graphs (ADR-010 Phase 1a).
+ * v1.1: adds optional replay metadata (`promptVersion`, `generatedAt`,
+ *       `llmModel`) carried by LLM-sourced topology graphs (ADR-012 Phase 1b.2).
+ *
+ * v1.1 is a pure superset of v1 — every v1 envelope parses under v1.1 Zod
+ * unchanged. Rollback is a Zod version-pin with no data migration.
+ */
 export const CONSTRAINT_GRAPH_SCHEMA_VERSION = 'constraint_graph_v1';
-export type ConstraintGraphSchemaVersion = typeof CONSTRAINT_GRAPH_SCHEMA_VERSION;
+export const CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1 = 'constraint_graph_v1.1';
+export type ConstraintGraphSchemaVersion =
+  | typeof CONSTRAINT_GRAPH_SCHEMA_VERSION
+  | typeof CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1;
 
 // ─── Origin — audit the graph's upstream producer ────────────────────────────
 
@@ -143,6 +154,14 @@ export interface ConstraintGraph {
   readonly nodes: readonly ConstraintGraphNode[];
   readonly edges: readonly ConstraintGraphEdge[];
   readonly globalBudgets: GlobalBudgetSet;
+  /**
+   * ADR-012 Phase 1b.2 replay metadata. Present on LLM-sourced graphs
+   * (`origin='planner_emitted' | 'hybrid'`); absent on deterministic
+   * graphs. `generatedAt` is excluded from replay-hash comparisons.
+   */
+  readonly promptVersion?: string;
+  readonly generatedAt?: string;
+  readonly llmModel?: string;
 }
 
 // ─── Zod schema (runtime validation / replay contract) ───────────────────────
@@ -247,13 +266,22 @@ const GlobalBudgetSetSchema = z.object({
   walltime: z.number().int().nonnegative().optional(),
 }).strict();
 
+/** Upper bound on the replay-metadata strings (ADR-012 Phase 1b.2). */
+const REPLAY_METADATA_MAX_LEN = 256;
+
 export const ConstraintGraphSchema = z.object({
-  graphSchemaVersion: z.literal(CONSTRAINT_GRAPH_SCHEMA_VERSION),
+  graphSchemaVersion: z.union([
+    z.literal(CONSTRAINT_GRAPH_SCHEMA_VERSION),
+    z.literal(CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1),
+  ]),
   origin: z.enum(['deterministic_from_atoms', 'planner_emitted', 'hybrid']),
   rootNodeId: z.string().min(1).max(NODE_ID_MAX_LEN),
   nodes: z.array(ConstraintGraphNodeSchema).max(GRAPH_MAX_NODES),
   edges: z.array(ConstraintGraphEdgeSchema).max(GRAPH_MAX_EDGES),
   globalBudgets: GlobalBudgetSetSchema,
+  promptVersion: z.string().min(1).max(REPLAY_METADATA_MAX_LEN).optional(),
+  generatedAt: z.string().min(1).max(REPLAY_METADATA_MAX_LEN).optional(),
+  llmModel: z.string().min(1).max(REPLAY_METADATA_MAX_LEN).optional(),
 }).strict();
 
 export type ConstraintGraphValidated = z.infer<typeof ConstraintGraphSchema>;

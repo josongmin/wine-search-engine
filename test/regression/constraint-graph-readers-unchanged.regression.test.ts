@@ -21,6 +21,25 @@
  *   - `search-usecase-post-route-phase.ts` (threads `compiled.constraintGraph` into
  *     `buildSearchDecisionInput`'s executionContext bag)
  *
+ * Phase 1b.2 (ADR-012 PR3): LLM topology planner —
+ *   - `constraint-topology-planner.ts` (LLM seam, intent gate, Zod validation)
+ *   - `merge-topology-into-trivial.ts` (deterministic merge; fail-closed on collision)
+ *   - `prompts/constraint-graph-topology.prompt.ts` (frozen prompt v1)
+ *   - `container-core-builders.ts` (flag-gated composition)
+ *
+ * Phase 1b.3b (ADR-014 PR5): ranker + retrieval annotator graph-native —
+ *   - `graph-tier-projection.ts` (hard/soft/inferred subgraph projection)
+ *   - `graph-slot-constraints.ts` (slot→NormalizedConstraint projection)
+ *   - `graph-hard-gate.ts` (ranker hard gate delegating to `computeGraphCoverage`)
+ *   - `graph-soft-weight.ts` (ranker soft weight helper)
+ *   - `signal-computer.ts` (accepts optional `graph` in hard/soft predicates)
+ *   - `ranker.ts` (threads `compiled.constraintGraph` + emits atomRefs)
+ *   - `candidate-pool.ts` (annotator receives graph for atomRef emission)
+ *   - `candidate-constraint-evidence.ts` (atomRef-keyed match records)
+ *   - `browse-retriever.ts`, `compare-retriever.ts` (graph-slot filter extraction)
+ *   - `search-usecase-hybrid-candidates.ts` (specialized retriever call-sites
+ *     pass compiled.constraintGraph)
+ *
  * Future Phase-1b.* migrations MUST append their source files to the
  * allow-list in the same PR that migrates them. Bare `.constraintGraph`
  * leaks elsewhere fail this test.
@@ -64,6 +83,24 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/application\/search\/search-usecase-decision-input\.ts$/,
   /src\/application\/search\/search-usecase-hybrid-candidates\.ts$/,
   /src\/application\/search\/search-usecase-post-route-phase\.ts$/,
+  // Phase 1b.2 (ADR-012 PR3): LLM topology planner + merge + wiring.
+  /src\/domain\/query\/service\/constraint-topology-planner\.ts$/,
+  /src\/domain\/query\/service\/merge-topology-into-trivial\.ts$/,
+  /src\/domain\/query\/service\/prompts\/constraint-graph-topology\.prompt\.ts$/,
+  /src\/config\/container-core-builders\.ts$/,
+  // Phase 1b.3b (ADR-014 PR5): ranker + retrieval annotator graph-native.
+  /src\/domain\/query\/service\/graph-tier-projection\.ts$/,
+  /src\/domain\/query\/service\/graph-slot-constraints\.ts$/,
+  /src\/domain\/ranking\/service\/graph-hard-gate\.ts$/,
+  /src\/domain\/ranking\/service\/graph-soft-weight\.ts$/,
+  /src\/domain\/ranking\/service\/signal-computer\.ts$/,
+  /src\/domain\/ranking\/service\/ranker\.ts$/,
+  /src\/domain\/retrieval\/service\/candidate-pool\.ts$/,
+  /src\/domain\/retrieval\/service\/candidate-constraint-evidence\.ts$/,
+  /src\/domain\/retrieval\/service\/browse-retriever\.ts$/,
+  /src\/domain\/retrieval\/service\/compare-retriever\.ts$/,
+  /src\/domain\/retrieval\/model\/retrieval-input\.ts$/,
+  /src\/application\/search\/port\/search-pipeline-deps\.port\.ts$/,
   // Docs / tests / benchmarks remain globally allowed.
   /docs\//,
   /test\/regression\//,
