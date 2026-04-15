@@ -1,6 +1,28 @@
 # 2026-04-15 Improvement Plan — Planner / Execution / Provenance Contract Migration
 
-> **Status**: Draft. Supersedes the rough `ADR-009 Grounded Claim Emission` sketch from 2026-04-14.
+> **Status**: rev 2 (2026-04-15 PM) — post codebase re-scan. Supersedes the rough
+> `ADR-009 Grounded Claim Emission` sketch from 2026-04-14.
+>
+> **rev 2 findings against HEAD**: Two pieces the rev 1 plan treated as "new"
+> already exist on main:
+> - `QueryPlanV2` is already defined ([query-plan.ts:126](../../src/domain/query/model/query-plan.ts#L126)).
+>   Phase 1 no longer creates V2 — it adds `constraintGraph?: ConstraintGraph`
+>   as a new optional field on the existing V2.
+> - `ConstraintAtom` IR already exists ([constraint-atom.ts:17](../../src/domain/shared/types/constraint-atom.ts#L17))
+>   with `source_tier`, `source_kind`, `authority_level`, `semantic_scope`,
+>   `conflict_policy`. It is produced by the ConstraintReasoner from the flat
+>   `ConstraintBundle` and exposed via `QueryPlanV2.constraintAtoms?`.
+>
+> **Implication**: `ConstraintGraph` is NOT a replacement for atoms — it is a
+> **super-structure over atoms**. Graph nodes reference atoms by ID, and
+> edges carry the grouping / budget / pairing relationships atoms lack by
+> design (atoms are flat-list IR; graph adds topology).
+>
+> The migration therefore becomes cheaper than rev 1 estimated: Phase 1a
+> can ship a deterministic projector (`atoms → trivial graph`) with zero LLM
+> integration, giving every existing request a graph emission from day one.
+> Phase 1b then upgrades the projector with LLM-emitted graph topology
+> (XOR, shared budgets, multi-subquery) where real scenarios demand it.
 >
 > **Why this is NOT "evaluator redesign"**: the reviewer was correct. The 2026-04-14 RCA named the evaluator as the surface bug, but the structural blockers live one layer up — **the planner, the execution pipeline, and the provenance carriers are flat, and the V1 response envelope is frozen.** Fixing the evaluator without touching these is a dead end. This plan therefore reframes the work as a **contract migration** across the planner → execution → provenance → response chain, with the evaluator replacement riding on top.
 >

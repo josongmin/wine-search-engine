@@ -15,6 +15,8 @@ import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { ConstraintReasoner, type ConstraintReasonerOutput } from './constraint-reasoner.js';
+import { buildTrivialGraphFromAtoms } from './build-trivial-graph-from-atoms.js';
+import type { ConstraintGraph } from '../model/constraint-graph.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
@@ -28,6 +30,24 @@ export interface ConstraintCompilerResult {
    * and ranker MUST prefer this over the raw bundle when present.
    */
   readonly reasonerOutput: ConstraintReasonerOutput;
+  /**
+   * ADR-010 Phase 1a: ConstraintGraph — super-structure over
+   * `reasonerOutput.atoms`. Phase 1a emits a trivial graph (one AND root
+   * over every atom); downstream readers remain on atoms/bundle until
+   * Phase 1b migrates them.
+   *
+   * Absent when the feature flag `CONSTRAINT_GRAPH_EMIT` is off. Field is
+   * additive — existing consumers never read it and are unaffected.
+   */
+  readonly constraintGraph?: ConstraintGraph | undefined;
+}
+
+/**
+ * ADR-010 Phase 1a feature flag. Default on; set to literal string 'false'
+ * to suppress graph emission at the compiler seam (rollback).
+ */
+function isConstraintGraphEmitEnabled(): boolean {
+  return process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false';
 }
 
 // SOFT_CONSTRAINT_ATTRIBUTES is imported from SSoT: ../../shared/constants/constraint-attributes.js
@@ -211,12 +231,21 @@ export class ConstraintCompiler {
       unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
     });
 
+    // ADR-010 Phase 1a: deterministic projection from reasoner atoms into
+    // a trivial ConstraintGraph. Additive — no existing reader consumes
+    // this field in Phase 1a. The flag lets ops disable emission without
+    // a code change if the projector ever needs to be bypassed.
+    const constraintGraph = isConstraintGraphEmitEnabled()
+      ? buildTrivialGraphFromAtoms(reasonerOutput.atoms)
+      : undefined;
+
     return {
       bundle: effectiveBundle,
       ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
       retrievalPlan,
       resolvedEntities,
       reasonerOutput,
+      ...(constraintGraph !== undefined ? { constraintGraph } : {}),
     };
   }
 }

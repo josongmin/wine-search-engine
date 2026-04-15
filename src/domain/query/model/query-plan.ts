@@ -15,6 +15,7 @@ import type { QueryDecompositionHint } from './query-decomposition.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import type { PolicyDecisionRecord } from './policy-decision-record.js';
+import type { ConstraintGraph } from './constraint-graph.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -157,6 +158,22 @@ export interface QueryPlanV2 {
    * when absent.
    */
   readonly constraintAtoms?: readonly ConstraintAtom[] | undefined;
+
+  /**
+   * ADR-010 Phase 1a: ConstraintGraph — super-structure over
+   * `constraintAtoms`. Slot nodes reference atoms by `atomRef` (stringified
+   * index into `constraintAtoms`); edges carry grouping / budget / ordering
+   * topology that atoms cannot express.
+   *
+   * Phase 1a emits a trivial graph (one `group_and` root over every atom).
+   * Phase 1b will upgrade the projector with LLM-emitted topology (XOR,
+   * shared budgets, multi-subquery decomposition).
+   *
+   * Optional: absent when the feature flag `CONSTRAINT_GRAPH_EMIT` is off
+   * or when there are no atoms. Phase 1a readers remain on
+   * `constraints` / `constraintAtoms`; do NOT migrate to this field yet.
+   */
+  readonly constraintGraph?: ConstraintGraph | undefined;
 
   /**
    * E3: Planner policy trace — machine-readable record of each decision stage.

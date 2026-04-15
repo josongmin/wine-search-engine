@@ -437,6 +437,10 @@ export class Planner {
       retrievalPlan: parsed.retrievalPlan,
       // E2-T3: Expose conflict-resolved ConstraintAtoms from reasoner for ranker + safety consumers.
       constraintAtoms: parsed.reasonerOutput.atoms,
+      // ADR-010 Phase 1a: surface the trivial ConstraintGraph when the
+      // compiler emitted one. Field is optional and additive — existing
+      // readers remain on `constraintAtoms` / `constraints` until Phase 1b.
+      ...(parsed.constraintGraph !== undefined ? { constraintGraph: parsed.constraintGraph } : {}),
       ...(plannerTrace.length > 0 ? { plannerTrace } : {}),
     };
   }
