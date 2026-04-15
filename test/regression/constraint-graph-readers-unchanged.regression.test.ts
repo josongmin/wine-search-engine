@@ -14,6 +14,13 @@
  *   - `search-usecase-hybrid-ranking-pipeline.ts`
  *     (call-site that threads `compiled.constraintGraph` into the stage builders)
  *
+ * Phase 1b.3a (ADR-011 PR1): second-reader migration —
+ *   - `graph-required-attributes.ts` (shared helper for provenance / decision)
+ *   - `search-usecase-decision-input.ts` (graph-aware matched/unmet when graph present)
+ *   - `search-usecase-hybrid-candidates.ts` (pre-rank coverage call-site now passes graph)
+ *   - `search-usecase-post-route-phase.ts` (threads `compiled.constraintGraph` into
+ *     `buildSearchDecisionInput`'s executionContext bag)
+ *
  * Future Phase-1b.* migrations MUST append their source files to the
  * allow-list in the same PR that migrates them. Bare `.constraintGraph`
  * leaks elsewhere fail this test.
@@ -52,6 +59,11 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/query\/service\/compute-graph-coverage\.ts$/,
   /src\/application\/search\/search-usecase-provenance-closure\.ts$/,
   /src\/application\/search\/search-usecase-hybrid-ranking-pipeline\.ts$/,
+  // Phase 1b.3a (ADR-011 PR1): shared helper + decision-input + pre-rank coverage.
+  /src\/domain\/query\/service\/graph-required-attributes\.ts$/,
+  /src\/application\/search\/search-usecase-decision-input\.ts$/,
+  /src\/application\/search\/search-usecase-hybrid-candidates\.ts$/,
+  /src\/application\/search\/search-usecase-post-route-phase\.ts$/,
   // Docs / tests / benchmarks remain globally allowed.
   /docs\//,
   /test\/regression\//,

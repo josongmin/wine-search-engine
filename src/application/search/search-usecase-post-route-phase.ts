@@ -31,6 +31,7 @@ import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js'
 import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
 import { deriveQueryFamily } from '../../domain/query/model/query-observability-vocab.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
+import type { AdmissionClosureSummary } from '../../domain/decision/model/decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
@@ -653,7 +654,7 @@ function buildResponseExecutionContract(
     readonly usedCompiledExecution: boolean;
   },
   rankingMetadata?: RankingMetadata,
-  admissionClosure?: import('../../domain/decision/model/decision-input.js').AdmissionClosureSummary,
+  admissionClosure?: AdmissionClosureSummary,
 ): NonNullable<ResponseBuilderPort['build'] extends (params: infer T) => unknown ? T : never>['executionContract'] {
   return {
     effectiveRetrievalMode: routeExecutionFacts.effectiveRetrievalMode,
@@ -703,6 +704,9 @@ export async function runRankedRouteDecisionPhase(
       effectiveRetrievalMode: ctx.effectiveRetrievalMode,
       retrievalKind: ctx.retrievalKind,
       provenancePolicy: ctx.compiled.execution.provenancePolicy,
+      ...(ctx.compiled.constraintGraph !== undefined
+        ? { constraintGraph: ctx.compiled.constraintGraph }
+        : {}),
     },
     toAdmissionHonestyContract(mergedRouteDegradation),
   );
@@ -1071,6 +1075,9 @@ export async function runSearchPostRoutePhase(
         effectiveRetrievalMode: ctx.effectiveRetrievalMode,
         retrievalKind: ctx.retrievalKind,
         provenancePolicy: ctx.compiled.execution.provenancePolicy,
+        ...(ctx.compiled.constraintGraph !== undefined
+          ? { constraintGraph: ctx.compiled.constraintGraph }
+          : {}),
       },
       toAdmissionHonestyContract(mergedRouteDegradation),
     );

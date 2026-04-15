@@ -141,10 +141,15 @@ function buildRetrievalCoverage(
   compiled: CompiledWineQuery,
   candidates: readonly HybridCandidate[],
 ): ProvenanceCoverageStage {
+  // ADR-011 Phase 1b.3a: thread `compiled.constraintGraph` so specialized +
+  // generic pre-rank coverage uses the same graph-aware AND/OR/XOR semantics
+  // that ADR-011 Phase 1b.1 landed for `provenance-closure`. Flat path is
+  // byte-identical when the graph is absent.
   return buildHybridCandidateCoverageStage(
     plan,
     candidates,
     compiled.execution.provenancePolicy,
+    compiled.constraintGraph,
   );
 }
 

@@ -4,6 +4,8 @@ import type {
   ExecutionRetrievalMode,
   ProvenancePolicy,
 } from '../../domain/query/model/engine-execution-contract.js';
+import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
+import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
 import {
   type DecisionInput,
   type EvidenceSummary,
@@ -55,6 +57,15 @@ export function buildSearchDecisionInput(
       | 'mixed_similarity'
       | undefined;
     readonly provenancePolicy?: ProvenancePolicy | undefined;
+    /**
+     * ADR-011 Phase 1b.3a: when the planner emitted a ConstraintGraph
+     * (`compiled.constraintGraph`), callers pass it through here so the
+     * decision-input's matched/unmet computation follows the same AND / OR
+     * / XOR group semantics as the provenance-closure reader. Absent in
+     * the flat/rollback path — computation falls back byte-identical to
+     * the pre-Phase-1b.3a behaviour.
+     */
+    readonly constraintGraph?: ConstraintGraph | undefined;
   },
   honestyContract?: {
     readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
@@ -115,11 +126,27 @@ export function buildSearchDecisionInput(
     (topResult === undefined
       ? true
       : rankedTopResultMatchesTopEntity);
+  // ADR-011 Phase 1b.3a: when a ConstraintGraph is threaded through
+  // `executionContext.constraintGraph`, matched/unmet attributes are resolved
+  // via the shared helper under AND / OR / XOR group semantics so
+  // provenance-closure and decision-input stay in lockstep. In the flat path
+  // the computation is unchanged from pre-Phase-1b.3a behaviour.
   const requiredConstraintAttributes = unique(
     plan.constraints.hard.map((constraint) => constraint.attribute),
   );
+  const constraintGraph = executionContext?.constraintGraph;
+  const graphResolution =
+    constraintGraph !== undefined && topResult !== undefined
+      ? resolveRequiredAttributes({
+          plan,
+          graph: constraintGraph,
+          satisfiedAttributes: topResult.matchedConstraints,
+        })
+      : undefined;
   const matchedRequiredAttributes =
-    topResult !== undefined
+    graphResolution !== undefined
+      ? graphResolution.matched
+      : topResult !== undefined
       ? unique(
           topResult.matchedConstraints.filter((attribute) =>
             requiredConstraintAttributes.includes(attribute),
@@ -127,7 +154,9 @@ export function buildSearchDecisionInput(
         )
       : [];
   const unmetRequiredAttributes =
-    topResult !== undefined
+    graphResolution !== undefined
+      ? graphResolution.unmet
+      : topResult !== undefined
       ? unique(
           topResult.unmetConstraints.filter((attribute) =>
             requiredConstraintAttributes.includes(attribute),
