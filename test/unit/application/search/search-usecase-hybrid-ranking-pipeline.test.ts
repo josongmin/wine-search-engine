@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   executeHybridRouteRankingPipeline,
   resolveEntityRouteForPlan,
@@ -96,6 +96,28 @@ function buildCompiled(plan: QueryPlanV1): CompiledWineQuery {
 }
 
 describe('executeHybridRouteRankingPipeline', () => {
+  // Wave J2: `RETRIEVAL_EXECUTOR_CRITIC` defaulted to ON once the
+  // executor-internal critic loop landed. The byte-identity assertion
+  // in the relaxation test below (two `candidatePool.execute` calls,
+  // two `ranker.rank` calls — one original + one relaxed) measures the
+  // NON-critic path. Default-on would add retry invocations on
+  // coverage=0 pools, breaking the exact call-count contract. Pinning
+  // the flag off per-test (not globally) keeps intent visible and
+  // matches the `restoreEnv` pattern used by the
+  // compiler-topology-priority-chain regression.
+  let savedRetrievalCritic: string | undefined;
+  beforeEach(() => {
+    savedRetrievalCritic = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+  });
+  afterEach(() => {
+    if (savedRetrievalCritic === undefined) {
+      delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    } else {
+      process.env['RETRIEVAL_EXECUTOR_CRITIC'] = savedRetrievalCritic;
+    }
+  });
+
   it('preserves compiled execution mode while regenerating only relaxed retrieval planning', async () => {
     const plan = minimalPlan();
     const compiled = buildCompiled(plan);

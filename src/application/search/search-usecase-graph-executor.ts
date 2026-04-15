@@ -162,21 +162,26 @@ export interface GraphExecutionResult {
 /**
  * ADR-015 Axis 2: feature flag for the executor-internal critic retry
  * loop. Checked once per call — flipping the flag mid-flight cannot
- * produce a partial-loop state. Default off.
+ * produce a partial-loop state.
  *
- * J2 deferred: flipping to default-on triggered a byte-identity
- * regression in `executeHybridRouteRankingPipeline > preserves
- * compiled execution mode while regenerating only relaxed retrieval
- * planning`. The relaxation path expects zero retry invocations for
- * that specific assertion. Default-on requires either (a) updating
- * that test to pin `RETRIEVAL_EXECUTOR_CRITIC=false` explicitly, or
- * (b) re-designing the relaxation-vs-critic interaction. Tracked as
- * a follow-up; J1 (BundleSelector default-on) landed independently.
+ * Wave J2: default-on. The critic is deterministic-first — `decideRetry`
+ * returns `retry=false` immediately on satisfied coverage or an absent
+ * coverage object, so happy-path queries (golden set, entity-exact,
+ * any pool with non-empty retrieval) see **zero** retry invocations
+ * and remain byte-identical to the pre-PR6 one-shot path. Retries
+ * only fire when the graph reports a coverage gap AND the rewriter
+ * produces an actionable rewrite, bounded by `CRITIC_RETRY_MAX`.
+ * Rollback via `RETRIEVAL_EXECUTOR_CRITIC=false`.
+ *
+ * Tests that pin the byte-identity of the one-shot/relaxation path
+ * (e.g. the hybrid-ranking-pipeline relaxation test) set the flag
+ * explicitly to `'false'` in `beforeEach` so the default-on flip
+ * does not alter their call-count contracts.
  */
 export function isRetrievalCriticEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env['RETRIEVAL_EXECUTOR_CRITIC'] === 'true';
+  return env['RETRIEVAL_EXECUTOR_CRITIC'] !== 'false';
 }
 
 function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
