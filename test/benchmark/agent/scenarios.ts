@@ -24,6 +24,7 @@
 import type { AgentBenchmarkScenario } from './scenario.js';
 import { ADVERSARIAL_SCENARIOS } from './scenarios.adversarial.js';
 import { COVERAGE_SCENARIOS } from './scenarios.coverage.js';
+import { BUNDLE_SCENARIOS } from './scenarios.bundle.js';
 
 const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // ─────────────────────────────────────────────────────────────────────
@@ -892,6 +893,7 @@ export const AGENT_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   ...MAIN_SCENARIOS,
   ...ADVERSARIAL_SCENARIOS,
   ...COVERAGE_SCENARIOS,
+  ...BUNDLE_SCENARIOS,
 ];
 
 /**

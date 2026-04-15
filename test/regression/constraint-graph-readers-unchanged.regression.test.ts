@@ -40,6 +40,17 @@
  *   - `search-usecase-hybrid-candidates.ts` (specialized retriever call-sites
  *     pass compiled.constraintGraph)
  *
+ * Phase 1c (ADR-013 PR4): BundleSelector + graph-aware executor —
+ *   - `assignment-solver.ts` (pure K≤5 Hungarian-style exact solver)
+ *   - `bundle-selector.ts` (graph → assignment orchestrator; reads
+ *     subquery nodes + shares_budget edges + globalBudgets)
+ *   - `bundle-ranked-result.ts` (carrier model composing RankedResult[]
+ *     across subqueries with bundle-scoped metadata)
+ *   - `search-usecase-graph-executor.ts` (wraps candidatePool.execute;
+ *     pass-through on trivial graphs, bundle path on hybrid multi-subquery)
+ *   - `bundle-selector-counters.ts` (telemetry counters; reads graph
+ *     origin + subquery count for audit paths)
+ *
  * Future Phase-1b.* migrations MUST append their source files to the
  * allow-list in the same PR that migrates them. Bare `.constraintGraph`
  * leaks elsewhere fail this test.
@@ -101,6 +112,12 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/retrieval\/service\/compare-retriever\.ts$/,
   /src\/domain\/retrieval\/model\/retrieval-input\.ts$/,
   /src\/application\/search\/port\/search-pipeline-deps\.port\.ts$/,
+  // Phase 1c (ADR-013 PR4): BundleSelector + graph-aware executor.
+  /src\/domain\/retrieval\/service\/assignment-solver\.ts$/,
+  /src\/domain\/retrieval\/service\/bundle-selector\.ts$/,
+  /src\/domain\/response\/model\/bundle-ranked-result\.ts$/,
+  /src\/application\/search\/search-usecase-graph-executor\.ts$/,
+  /src\/observability\/bundle-selector-counters\.ts$/,
   // Docs / tests / benchmarks remain globally allowed.
   /docs\//,
   /test\/regression\//,
