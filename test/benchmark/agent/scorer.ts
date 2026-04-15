@@ -792,6 +792,10 @@ export function scoreScenario(
     terminationReason: execution.terminationReason,
     totalDurationMs: execution.totalDurationMs,
     totalTokens: execution.totalTokens,
+    // ADR-009 Phase 0: evidence frame count for cutover-gate aggregation.
+    ...(execution.evidenceFrameCount !== undefined
+      ? { evidenceFrameCount: execution.evidenceFrameCount }
+      : {}),
     scores: {
       executionEfficiency,
       toolAccuracy,

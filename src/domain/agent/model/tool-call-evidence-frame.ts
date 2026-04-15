@@ -111,9 +111,13 @@ const OBSERVATION_SNAPSHOT_MAX_LEN = 2_200;
 const OBSERVATION_HASH_LEN = 64;
 /** Upper bound on toolCallId — request-id derived, bounded by agent step budget. */
 const TOOL_CALL_ID_MAX_LEN = 256;
+/** Upper bound on tool names. The closed `FRAME_EMITTING_TOOLS` tuple above is
+ *  ≤20 chars today; 128 leaves headroom for future tool names without
+ *  unbounded growth. Repeated for both the request wrapper and the envelope. */
+const TOOL_NAME_MAX_LEN = 128;
 
 const ToolCallRequestSchema = z.object({
-  toolName: z.string().min(1).max(128),
+  toolName: z.string().min(1).max(TOOL_NAME_MAX_LEN),
   input: z.record(z.unknown()),
 }).strict();
 
@@ -157,7 +161,7 @@ const ToolCallStructuredOutputSchema = z.discriminatedUnion('kind', [
 export const ToolCallEvidenceFrameSchema = z.object({
   frameSchemaVersion: z.literal(TOOL_EVIDENCE_FRAME_SCHEMA_VERSION),
   toolCallId: z.string().min(1).max(TOOL_CALL_ID_MAX_LEN),
-  toolName: z.string().min(1).max(128),
+  toolName: z.string().min(1).max(TOOL_NAME_MAX_LEN),
   invokedAt: z.string().min(1),
   requestId: z.string().min(1).max(TOOL_CALL_ID_MAX_LEN),
   request: ToolCallRequestSchema,
