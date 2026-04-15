@@ -294,7 +294,7 @@ hybrid graphs for the first time.
 | # | Commit | Scope |
 |---|--------|-------|
 | G1 | `f45c7a1` | Wire F3 `validateFeatureFlagsAtStartup` into `buildQueryPlanner` — incoherent flags now throw at container boot. |
-| G2 | `4a9f3a5` | Wire F4 `recordGraphPathDecision` into 5 readers (provenance_closure, decision_input, ranker_hard_gate, ranker_soft_weight, pre_rank_coverage). `graph_executor` and `bundle_selector` readers pending a future pass. |
+| G2 | `4a9f3a5` | Wire F4 `recordGraphPathDecision` into 5 readers (provenance_closure, decision_input, ranker_hard_gate, ranker_soft_weight, pre_rank_coverage). `graph_executor` and `bundle_selector` readers pending a future pass. Wave **I2** closed the 7-reader coverage by wiring those two remaining readers + regression tests. |
 
 ### Wave H — shared-budget edge emission (1 commit)
 

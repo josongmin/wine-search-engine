@@ -118,6 +118,8 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/ranking\/service\/graph-soft-weight\.ts$/,
   /src\/domain\/ranking\/service\/signal-computer\.ts$/,
   /src\/domain\/ranking\/service\/ranker\.ts$/,
+  // Wave I3 (ADR-017): 4 graph-aware LTR features landed in c92cb50.
+  /src\/domain\/ranking\/service\/ltr-features\.ts$/,
   /src\/domain\/retrieval\/service\/candidate-pool\.ts$/,
   /src\/domain\/retrieval\/service\/candidate-constraint-evidence\.ts$/,
   /src\/domain\/retrieval\/service\/browse-retriever\.ts$/,

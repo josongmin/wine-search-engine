@@ -51,6 +51,10 @@ import type { BudgetLedger } from '../../domain/retrieval/service/budget-ledger.
 import { BudgetViolationError } from '../../domain/retrieval/service/budget-ledger.js';
 import { computeGraphCoverage } from '../../domain/query/service/compute-graph-coverage.js';
 import { globalBundleSelectorCounter } from '../../observability/bundle-selector-counters.js';
+import {
+  classifyGraphPresence,
+  recordGraphPathDecision,
+} from '../../observability/graph-path-telemetry.js';
 import { globalRetrievalCriticCounter } from '../../observability/retrieval-critic-counters.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
@@ -234,6 +238,17 @@ export async function executeGraphAware(
   opts: GraphExecutorOptions,
   criticProbe?: CriticSignalProbe,
 ): Promise<GraphExecutionResult> {
+  // Wave I2: emit unified graph-path telemetry for the graph-executor
+  // reader. Recorded once per public invocation so retries inside the
+  // critic loop do not double-count.
+  recordGraphPathDecision({
+    reader: 'graph_executor',
+    outcome: classifyGraphPresence({
+      graphPresent: graph !== undefined,
+      ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
+      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+    }),
+  });
   const rewriter = deps.queryRewriter;
   if (
     !isRetrievalCriticEnabled()

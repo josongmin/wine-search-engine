@@ -148,3 +148,119 @@ describe('classifyGraphPresence — outcome derivation', () => {
     ).toBe('flat_fallback_flag_off');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Wave I2: graph_executor + bundle_selector reader-side wiring
+// ─────────────────────────────────────────────────────────────────────
+
+describe('graph-path-telemetry — graph_executor reader wiring (Wave I2)', () => {
+  beforeEach(() => {
+    resetGraphPathCounters();
+  });
+  afterEach(() => {
+    resetGraphPathCounters();
+  });
+
+  it('executeGraphAware on a trivial graph increments byReader.graph_executor.graph_aware_trivial', async () => {
+    const { executeGraphAware } = await import(
+      '../../src/application/search/search-usecase-graph-executor.js'
+    );
+    const { BundleSelectorImpl } = await import(
+      '../../src/domain/retrieval/service/bundle-selector.js'
+    );
+    type HybridCandidateT =
+      import('../../src/domain/retrieval/model/hybrid-candidate.js').HybridCandidate;
+    type CandidatePoolPortT =
+      import('../../src/application/search/port/search-pipeline-deps.port.js').CandidatePoolPort;
+    type HybridRetrievalInputT =
+      import('../../src/domain/retrieval/model/retrieval-input.js').HybridRetrievalInput;
+    type ConstraintGraphT =
+      import('../../src/domain/query/model/constraint-graph.js').ConstraintGraph;
+
+    const stubCandidatePool: CandidatePoolPortT = {
+      execute: async () => [] as readonly HybridCandidateT[],
+      generate: async () => [] as readonly HybridCandidateT[],
+    };
+    const stubInput = {
+      queryPlan: {} as never,
+      route: 'hybrid',
+      lexicalQueries: [],
+      semanticQueries: [],
+      hardConstraints: [],
+      softConstraints: [],
+    } as unknown as HybridRetrievalInputT;
+
+    const trivial: ConstraintGraphT = {
+      graphSchemaVersion: 'constraint_graph_v1',
+      origin: 'deterministic_from_atoms',
+      rootNodeId: 'root',
+      nodes: [{ kind: 'group_and', nodeId: 'root', children: [] }],
+      edges: [],
+      globalBudgets: {},
+    };
+
+    await executeGraphAware(
+      stubInput,
+      trivial,
+      { candidatePool: stubCandidatePool, bundleSelector: new BundleSelectorImpl() },
+      { scoreFor: () => 0, priceFor: () => 0 },
+    );
+
+    const snap = snapshotGraphPathCounters();
+    expect(snap.byReader['graph_executor']?.['graph_aware_trivial']).toBeGreaterThanOrEqual(1);
+    // Other reader buckets must not leak.
+    expect(snap.byReader['bundle_selector']?.['graph_aware_trivial']).toBe(0);
+  });
+});
+
+describe('graph-path-telemetry — bundle_selector reader wiring (Wave I2)', () => {
+  beforeEach(() => {
+    resetGraphPathCounters();
+  });
+  afterEach(() => {
+    resetGraphPathCounters();
+  });
+
+  it('BundleSelectorImpl.chooseAssignment increments byReader.bundle_selector', async () => {
+    const { BundleSelectorImpl } = await import(
+      '../../src/domain/retrieval/service/bundle-selector.js'
+    );
+    type HybridCandidateT =
+      import('../../src/domain/retrieval/model/hybrid-candidate.js').HybridCandidate;
+    type ConstraintGraphT =
+      import('../../src/domain/query/model/constraint-graph.js').ConstraintGraph;
+
+    // Minimal hybrid graph with two subqueries — sufficient to reach the
+    // telemetry call at the top of chooseAssignment. The solver path past
+    // the telemetry is not under test here (the reader increments BEFORE
+    // the k==0 / k>K_EXACT_LIMIT / empty-slot branches execute).
+    const hybrid: ConstraintGraphT = {
+      graphSchemaVersion: 'constraint_graph_v1.1',
+      origin: 'hybrid',
+      rootNodeId: 'root',
+      nodes: [
+        { kind: 'group_and', nodeId: 'root', children: ['sq_0', 'sq_1'] },
+        { kind: 'subquery', nodeId: 'sq_0', purpose: 'p0', targetCardinality: 1 },
+        { kind: 'subquery', nodeId: 'sq_1', purpose: 'p1', targetCardinality: 1 },
+      ],
+      edges: [],
+      globalBudgets: {},
+    };
+
+    const pools = new Map<string, readonly HybridCandidateT[]>([
+      ['sq_0', []],
+      ['sq_1', []],
+    ]);
+
+    new BundleSelectorImpl().chooseAssignment(hybrid, pools, {
+      scoreFor: () => 0,
+      priceFor: () => 0,
+    });
+
+    const snap = snapshotGraphPathCounters();
+    // hybrid graph → graph_aware_hybrid outcome
+    expect(snap.byReader['bundle_selector']?.['graph_aware_hybrid']).toBeGreaterThanOrEqual(1);
+    // graph_executor reader must NOT be touched by a direct chooseAssignment call.
+    expect(snap.byReader['graph_executor']?.['graph_aware_hybrid']).toBe(0);
+  });
+});

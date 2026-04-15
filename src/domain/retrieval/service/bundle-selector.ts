@@ -21,6 +21,10 @@ import type {
 } from '../../query/model/constraint-graph.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import {
+  classifyGraphPresence,
+  recordGraphPathDecision,
+} from '../../../observability/graph-path-telemetry.js';
+import {
   solveAssignmentExact,
   K_EXACT_LIMIT,
   type AssignmentBudgetConstraint,
@@ -124,6 +128,20 @@ export class BundleSelectorImpl implements BundleSelector {
     candidatesBySubquery: ReadonlyMap<string, readonly HybridCandidate[]>,
     opts: BundleSelectorOptions,
   ): AssignmentSolution {
+    // Wave I2: emit unified graph-path telemetry for the bundle-selector
+    // reader. `graph` is non-nullable here (the executor only calls the
+    // selector with an engaged hybrid graph), so `graphPresent` is
+    // unconditionally true; the origin discriminator still determines
+    // which `graph_aware_*` bucket receives the increment.
+    recordGraphPathDecision({
+      reader: 'bundle_selector',
+      outcome: classifyGraphPresence({
+        graphPresent: true,
+        graphOrigin: graph.origin,
+        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      }),
+    });
+
     const subqueries = extractSubqueryNodes(graph);
     const k = subqueries.length;
 
