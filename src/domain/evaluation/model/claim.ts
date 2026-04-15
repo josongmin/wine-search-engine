@@ -311,8 +311,14 @@ export interface CategoryDiagnostic {
  */
 export interface DiagnosticVector {
   // ── Primary metric ──────────────────────────────────────────────────
-  /** Weighted mean of claim verdict scores. */
+  /** Weighted mean of claim verdict scores (status='ok' subset only).
+   *  See ADR-016 §2.8 for dual-reporting rationale. */
   readonly faithfulnessScore: number;
+  /** ADR-016 §2.8 — weighted mean across ALL verifications (no
+   *  `status === 'ok'` filter; skipped claims count as `not_entailed`).
+   *  Surfaced so operators can't cherry-pick the favourable number —
+   *  the effective gate is `min(faithfulnessScore, faithfulnessScoreAll)`. */
+  readonly faithfulnessScoreAll: number;
 
   // ── Error rates ─────────────────────────────────────────────────────
   /** contradicted / (entailed + partially_entailed + contradicted). Excludes not_entailed. */

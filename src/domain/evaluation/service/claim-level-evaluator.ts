@@ -105,8 +105,10 @@ function aggregate(
   verifications: readonly ClaimVerification[],
   taskType: TaskType,
 ): DiagnosticVector {
-  // Verifications that did not run successfully (LLM failed, no LLM, parse failed)
-  // are excluded from faithfulness/contradiction denominators.
+  // ADR-016 §2.8 — evaluator-bias dual reporting. We compute two
+  // aggregates: one with `status === 'ok'` filter (legacy behaviour)
+  // and one without (treats skipped as `not_entailed`). The summary
+  // reports BOTH; the ADR prescribes the LOWER as the effective gate.
   const validVerifications = verifications.filter((v) => v.status === 'ok');
   const validVerificationMap = new Map<string, ClaimVerification>();
   for (const v of validVerifications) {
@@ -114,6 +116,14 @@ function aggregate(
   }
   const verifiedClaimCount = validVerifications.length;
   const skippedClaimCount = verifications.length - validVerifications.length;
+
+  // Second-pass aggregate without the status filter. Computed alongside
+  // the main aggregate so the dual-report pair is always consistent
+  // (same `claims` / `verifications` inputs, different denominator).
+  const faithfulnessScoreAll = computeFaithfulnessAcrossAllVerifications(
+    claims,
+    verifications,
+  );
 
   // ── Per-category aggregation ────────────────────────────────────────
   const perCategory = {} as Record<ClaimCategory, CategoryDiagnostic>;
@@ -230,9 +240,11 @@ function aggregate(
 
   // Invariant: hardFail=true ⇒ faithfulnessScore=0 (consistency)
   const finalFaithfulnessScore = hardFail ? 0 : faithfulnessScore;
+  const finalFaithfulnessScoreAll = hardFail ? 0 : faithfulnessScoreAll;
 
   return {
     faithfulnessScore: finalFaithfulnessScore,
+    faithfulnessScoreAll: finalFaithfulnessScoreAll,
     contradictionRate,
     criticalErrorRate,
     unsupportedSoftClaimRate,
@@ -250,6 +262,39 @@ function aggregate(
   };
 }
 
+/**
+ * ADR-016 §2.8 — faithfulness score across ALL verifications (no status
+ * filter). Skipped / LLM-failed / parse-failed verifications count as
+ * `not_entailed` (score = 0.0).
+ */
+function computeFaithfulnessAcrossAllVerifications(
+  claims: readonly ExtractedClaim[],
+  verifications: readonly ClaimVerification[],
+): number {
+  if (claims.length === 0) return 1.0;
+  const verMap = new Map<string, ClaimVerification>();
+  for (const v of verifications) verMap.set(v.claimId, v);
+
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (const cat of ALL_CATEGORIES) {
+    const catClaims = claims.filter((c) => c.category === cat);
+    if (catClaims.length === 0) continue;
+    let catScoreSum = 0;
+    for (const c of catClaims) {
+      const v = verMap.get(c.id);
+      // Skipped verifications count as 0 (not_entailed equivalent).
+      catScoreSum += v !== undefined && v.status === 'ok'
+        ? VERDICT_SCORES[v.verdict]
+        : 0;
+    }
+    const weight = CLAIM_CATEGORY_WEIGHTS[cat];
+    weightedSum += catScoreSum * weight;
+    weightTotal += weight * catClaims.length;
+  }
+  return weightTotal > 0 ? weightedSum / weightTotal : 1.0;
+}
+
 function emptyDiagnostic(
   claims: readonly ExtractedClaim[],
   verifications: readonly ClaimVerification[],
@@ -260,6 +305,7 @@ function emptyDiagnostic(
   }
   return {
     faithfulnessScore: 1.0, // no claims = no contradictions = perfect
+    faithfulnessScoreAll: 1.0,
     contradictionRate: 0,
     criticalErrorRate: 0,
     unsupportedSoftClaimRate: 0,

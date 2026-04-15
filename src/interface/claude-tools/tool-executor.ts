@@ -17,6 +17,8 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-evidence-frame.js';
+import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
 import { buildMachineResponseV2 } from '../../domain/response/service/machine-response-builder-v2.js';
@@ -105,6 +107,25 @@ export interface ToolExecutionV2Options {
   readonly rankedResults: readonly RankedResult[];
   /** Query identifier for the V2 envelope. Falls back to requestId when omitted. */
   readonly queryId?: string | undefined;
+  /**
+   * ADR-016 Axis 3 — optional tool-call evidence frames gathered during
+   * pipeline execution. Passed into the V2 builder so `grounded`
+   * provenance refs can be validated against them.
+   */
+  readonly evidenceFrames?: readonly ToolCallEvidenceFrame[] | undefined;
+  /** ADR-016 — compiled constraint graph (ADR-010/011). */
+  readonly constraintGraph?: ConstraintGraph | undefined;
+  /** ADR-016 — natural-language prose the response will carry. */
+  readonly generatedProse?: string | undefined;
+  /** ADR-016 §2.5 — critic rewrites (ADR-015 PR6) to surface as
+   *  `recommendation` claims upstream. Serialised to degradation reasons
+   *  at builder time. */
+  readonly criticRewrites?: readonly string[] | undefined;
+  /** ADR-015 PR6 — critic retry exhaustion flag. When true, we emit a
+   *  `critic_retries_exhausted` degradation reason. */
+  readonly criticRetriesExhausted?: boolean | undefined;
+  /** ADR-013 — BundleSelector degradation reasons. */
+  readonly bundleSelectorDegradationReasons?: readonly string[] | undefined;
 }
 
 /**
@@ -183,9 +204,35 @@ export class WineToolExecutor {
             return { error: `Invalid input for search_wines: ${validation.error.issues.map((i) => i.message).join(', ')}` };
           }
           const queryId = v2Options.queryId ?? requestId;
+          // ADR-016 Axis 3 — assemble upstream degradation reasons from
+          // critic rewrites / retries-exhausted / BundleSelector, and pass
+          // evidence frames + graph + prose so the V2 builder can attach
+          // the grounded sidecar when GCE_SHADOW_EMIT is on.
+          const upstreamDegradationReasons: string[] = [];
+          for (const rw of v2Options.criticRewrites ?? []) {
+            upstreamDegradationReasons.push(`critic_rewrite:${rw}`);
+          }
+          if (v2Options.criticRetriesExhausted === true) {
+            upstreamDegradationReasons.push('critic_retries_exhausted');
+          }
+          for (const r of v2Options.bundleSelectorDegradationReasons ?? []) {
+            upstreamDegradationReasons.push(`bundle_selector:${r}`);
+          }
           return buildMachineResponseV2({
             queryId,
             results: v2Options.rankedResults,
+            ...(v2Options.evidenceFrames !== undefined
+              ? { evidenceFrames: v2Options.evidenceFrames }
+              : {}),
+            ...(v2Options.constraintGraph !== undefined
+              ? { constraintGraph: v2Options.constraintGraph }
+              : {}),
+            ...(v2Options.generatedProse !== undefined
+              ? { generatedProse: v2Options.generatedProse }
+              : {}),
+            ...(upstreamDegradationReasons.length > 0
+              ? { upstreamDegradationReasons }
+              : {}),
           });
         }
         return this.executeSearchWines(input, requestId);

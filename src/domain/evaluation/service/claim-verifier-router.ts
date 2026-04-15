@@ -19,8 +19,15 @@ import { VERIFIER_ROUTING } from '../model/claim.js';
 import { verifyDeterministic } from './claim-verifier-deterministic.js';
 import type { EvidenceRecord } from './claim-verifier-deterministic.js';
 import { verifySemanticBatch } from './claim-verifier-semantic.js';
+import type { AtomicClaim } from '../../response/model/grounded-claim.js';
+import {
+  verifyAtomicClaims,
+  resolveAtomicClaimVerifier,
+} from './verifiers/atomic-claim-verifier-router.js';
+import type { AtomicClaimVerification } from './verifiers/atomic-claim-verifier.port.js';
 
 export type { EvidenceRecord } from './claim-verifier-deterministic.js';
+export { resolveAtomicClaimVerifier };
 
 /**
  * Route and verify all claims against evidence.
@@ -135,5 +142,38 @@ export async function routeAndVerify(
       confidence: 0,
       explanation: 'claim not routed (internal error)',
     };
+  });
+}
+
+/**
+ * ADR-016 Axis 3 — dispatch a batch of 9-class {@link AtomicClaim}s to
+ * their per-type verifiers. Each of the 9 `AtomicClaimType` variants
+ * has a dedicated branch (registered in `verifiers/atomic-claim-verifier-router.ts`):
+ *
+ *   entity_reference           → EntityReferenceVerifier
+ *   attribute_assertion        → AttributeAssertionVerifier
+ *   price_assertion            → PriceAssertionVerifier   (±10%)
+ *   vintage_assertion          → VintageAssertionVerifier (exact)
+ *   pairing_assertion          → PairingAssertionVerifier (LLM NLI)
+ *   comparative_assertion      → ComparativeAssertionVerifier (LLM NLI)
+ *   drinking_window_assertion  → DrinkingWindowAssertionVerifier
+ *   style_assertion            → StyleAssertionVerifier  (similarity ≥ 0.7)
+ *   recommendation             → NoopVerifier (no ground truth)
+ *
+ * This dispatcher is orthogonal to {@link routeAndVerify} which still
+ * owns the legacy RFC-020 5-class path. Both coexist — the legacy path
+ * stays alive in shadow mode until gold annotations reach ≥ 200 + 2
+ * nightlies green (see ADR-016 §2.6).
+ */
+export async function routeAndVerifyAtomicClaims(
+  claims: readonly AtomicClaim[],
+  evidenceRecords: readonly EvidenceRecord[],
+  evidenceContext: string,
+  llm: ChatLlmPort | null,
+): Promise<readonly AtomicClaimVerification[]> {
+  return verifyAtomicClaims(claims, {
+    evidenceRecords,
+    evidenceContext,
+    llm,
   });
 }
