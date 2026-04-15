@@ -154,20 +154,11 @@ export async function runSearchPreRoutePhase(
     ...(ctx.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
   });
   let plan: QueryPlanV1;
-  let compiled: CompiledWineQuery | undefined;
+  let compiled: CompiledWineQuery;
   if (ctx.queryPlanner.planWithCompiled !== undefined) {
     const result = await ctx.queryPlanner.planWithCompiled(sanitizedQuery, plannerContext);
     plan = result.v1;
-    if (result.compiled !== undefined) {
-      compiled = result.compiled;
-    } else if (ctx.allowCompiledFallback === true) {
-      compiled = compileFromLegacyPlan(plan);
-    } else {
-      throw new Error(
-        'Search pre-route requires QueryPlanner.planWithCompiled() to return a CompiledWineQuery; ' +
-        'set allowCompiledFallback=true only for tests or explicit special seams.',
-      );
-    }
+    compiled = result.compiled;
   } else if (ctx.allowCompiledFallback === true) {
     plan = await ctx.queryPlanner.plan(sanitizedQuery, plannerContext);
     compiled = compileFromLegacyPlan(plan);
@@ -226,23 +217,21 @@ export async function runSearchPreRoutePhase(
       ...plan,
       admission_context: admissionContext,
     };
-    if (compiled !== undefined) {
-      compiled = {
-        ...compiled,
-        query: {
-          ...compiled.query,
-          constraints: plan.constraints,
-          retrievalPlan: buildRetrievalPlan(plan.constraints),
+    compiled = {
+      ...compiled,
+      query: {
+        ...compiled.query,
+        constraints: plan.constraints,
+        retrievalPlan: buildRetrievalPlan(plan.constraints),
+      },
+      execution: {
+        ...compiled.execution,
+        provenancePolicy: {
+          ...compiled.execution.provenancePolicy,
+          requireConstraintEvidence: admissionContext.requires_constraint_evidence,
         },
-        execution: {
-          ...compiled.execution,
-          provenancePolicy: {
-            ...compiled.execution.provenancePolicy,
-            requireConstraintEvidence: admissionContext.requires_constraint_evidence,
-          },
-        },
-      };
-    }
+      },
+    };
   }
 
   logSearchEvent({

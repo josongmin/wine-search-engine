@@ -128,7 +128,6 @@ export function combineSemanticEmbeddings(
     for (let i = 0; i < embedding.length; i++) {
       // All elements validated finite above. Direct addition is safe; no
       // nullish coalescing that could silently rescue a corrupt value.
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- validated by isFiniteNumberVector above
       combined[i] = combined[i]! + embedding[i]!;
     }
   }

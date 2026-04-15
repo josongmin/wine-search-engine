@@ -111,9 +111,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
-      };
+      }>();
       expect(body.meta?.degradation_reasons).toContain('ranking_invalid_signal:semantic');
     } finally {
       await app.close();
@@ -143,10 +143,10 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
         engine_decision?: { decision_status?: string; degradation_reasons?: readonly string[] };
-      };
+      }>();
       expect(body.engine_decision?.decision_status).toBe('ambiguous');
       expect(body.meta?.degradation_reasons).toContain('learned_matcher_failed');
     } finally {
@@ -171,10 +171,10 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
         engine_decision?: { degradation_reasons?: readonly string[] };
-      };
+      }>();
       // Reason MUST be present in meta.degradation_reasons — this is the
       // ops-visible surface. If it's missing, the wire contract is lying.
       expect(body.meta?.degradation_reasons).toBeDefined();
@@ -201,9 +201,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
-      };
+      }>();
       expect(body.meta?.degradation_reasons).toContain('learned_matcher_failed');
     } finally {
       await app.close();
@@ -232,9 +232,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
-      };
+      }>();
       expect(body.meta?.degradation_reasons).toEqual(reasons);
     } finally {
       await app.close();
@@ -258,9 +258,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { execution_mode?: string; degradation_reasons?: readonly string[] };
-      };
+      }>();
       expect(body.meta?.execution_mode).toBe('degraded');
       expect(body.meta?.degradation_reasons).toContain('ranking_invalid_signal:attributeAlignment');
     } finally {
@@ -290,9 +290,9 @@ describe('HTTP /v1/search — fail-loud degradation reason propagation', () => {
         }),
       });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         meta?: { degradation_reasons?: readonly string[] };
-      };
+      }>();
       // Empty reasons may be present as [] or omitted — both acceptable.
       // The important thing is it's not null/undefined/corrupt.
       if (body.meta?.degradation_reasons !== undefined) {

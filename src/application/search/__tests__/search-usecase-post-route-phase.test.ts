@@ -3,6 +3,7 @@ import { runSearchPostRoutePhase } from '../search-usecase-post-route-phase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { CompiledWineQuery } from '../../../domain/query/model/compiled-wine-query.js';
+import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 
 function makeTestCompiled(): CompiledWineQuery {
   return {
@@ -542,7 +543,7 @@ describe('runSearchPostRoutePhase', () => {
         unmetConstraints: [],
         inferredConstraints: [],
         evidenceItems: [],
-      }] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      }] as RankedResult[],
       effectiveRoute: 'hybrid',
       ...SPECIALIZED_HYBRID_EXECUTION_FACTS,
       specializedRouteObservability: {

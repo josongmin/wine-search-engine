@@ -121,7 +121,7 @@ describe('entity type hard-fail validation (regression)', () => {
       'valid entity_type "%s" passes through rowToEntity without error',
       async (type) => {
         const pool = createMockPool(type);
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+         
         const repo = new PgEntityRepository(pool as never);
         const testId = createCanonicalEntityId('wine:test-123');
 
@@ -133,7 +133,7 @@ describe('entity type hard-fail validation (regression)', () => {
 
     it('invalid entity_type "invalid" throws with descriptive error', async () => {
       const pool = createMockPool('invalid');
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:test-123');
 
@@ -142,7 +142,7 @@ describe('entity type hard-fail validation (regression)', () => {
 
     it('invalid entity_type error message contains the valid types', async () => {
       const pool = createMockPool('bogus');
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:test-123');
 
@@ -153,7 +153,7 @@ describe('entity type hard-fail validation (regression)', () => {
 
     it('empty string entity_type throws', async () => {
       const pool = createMockPool('');
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:test-123');
 
@@ -162,7 +162,7 @@ describe('entity type hard-fail validation (regression)', () => {
 
     it('no silent coercion to "wine" default — uppercase "Wine" throws', async () => {
       const pool = createMockPool('Wine');
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:test-123');
 
@@ -206,7 +206,7 @@ describe('entity type hard-fail validation (regression)', () => {
         end: vi.fn(),
         on: vi.fn(),
       };
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:test-null');
 
@@ -216,7 +216,7 @@ describe('entity type hard-fail validation (regression)', () => {
 
     it('findById fails loud when active snapshot pointer is missing', async () => {
       const pool = createEmptyMockPool();
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:nonexistent');
 
@@ -247,7 +247,7 @@ describe('entity type hard-fail validation (regression)', () => {
         end: vi.fn(),
         on: vi.fn(),
       };
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:nonexistent');
 
@@ -289,7 +289,7 @@ describe('entity type hard-fail validation (regression)', () => {
         end: vi.fn(),
         on: vi.fn(),
       };
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool for test
+       
       const repo = new PgEntityRepository(pool as never);
       const testId = createCanonicalEntityId('wine:debug-entity-456');
 

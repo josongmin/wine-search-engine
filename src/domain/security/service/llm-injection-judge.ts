@@ -39,6 +39,14 @@ export class LLMInjectionJudge implements InjectionJudgePort {
   private static readonly CACHE_KEY_PREFIX = 'injection_judge:';
 
   /**
+   * Max characters of the SHA-256 cache key to include in error logs.
+   * 32 chars = 128 bits of the 256-bit hash — enough to correlate log lines
+   * uniquely while preventing the full key (which could aid poisoning) from
+   * landing in centralized logs.
+   */
+  private static readonly CACHE_KEY_LOG_PREFIX_LEN = 32;
+
+  /**
    * Constructs the LLM injection judge.
    *
    * @param classifier - LLM-backed classifier for borderline queries
@@ -94,7 +102,7 @@ export class LLMInjectionJudge implements InjectionJudgePort {
             errorClass: 'corrupt_entry_json_parse',
           });
           log.error(
-            { err: parseErr, keyPrefix: cacheKey.slice(0, 32) },
+            { err: parseErr, keyPrefix: cacheKey.slice(0, LLMInjectionJudge.CACHE_KEY_LOG_PREFIX_LEN) },
             'injection judge cache entry has invalid JSON (corrupt_entry); treating as miss. Possible cache poisoning — investigate.',
           );
           parsed = null;
@@ -109,7 +117,7 @@ export class LLMInjectionJudge implements InjectionJudgePort {
             errorClass: 'corrupt_entry_shape_mismatch',
           });
           log.error(
-            { keyPrefix: cacheKey.slice(0, 32) },
+            { keyPrefix: cacheKey.slice(0, LLMInjectionJudge.CACHE_KEY_LOG_PREFIX_LEN) },
             'injection judge cache entry has unexpected shape (corrupt_entry); treating as miss. Possible cache poisoning — investigate.',
           );
         }

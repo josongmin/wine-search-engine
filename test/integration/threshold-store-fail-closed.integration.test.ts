@@ -40,7 +40,7 @@ describe('Threshold Store Fail-Closed (T-E7-02)', () => {
   describe('getDefault() — empty DB', () => {
     it('throws when no default row exists', async () => {
       const pool = makeMockPool(() => ({ rows: [], rowCount: 0 }));
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool
+       
       const store = new PgThresholdStore(pool as never);
 
       await expect(store.getDefault()).rejects.toThrow('no default threshold profile in DB');
@@ -53,7 +53,7 @@ describe('Threshold Store Fail-Closed (T-E7-02)', () => {
         rows: [{ profile_id: 'p1', profile_data: null, is_default: true, created_at: new Date(), updated_at: new Date() }],
         rowCount: 1,
       }));
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool
+       
       const store = new PgThresholdStore(pool as never);
 
       await expect(store.getDefault()).rejects.toThrow('JSONB invalid');
@@ -64,7 +64,7 @@ describe('Threshold Store Fail-Closed (T-E7-02)', () => {
         rows: [{ profile_id: 'p2', profile_data: 'not-json', is_default: true, created_at: new Date(), updated_at: new Date() }],
         rowCount: 1,
       }));
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool
+       
       const store = new PgThresholdStore(pool as never);
 
       await expect(store.getDefault()).rejects.toThrow('JSONB invalid');
@@ -75,7 +75,7 @@ describe('Threshold Store Fail-Closed (T-E7-02)', () => {
         rows: [{ profile_id: 'p3', profile_data: {}, is_default: true, created_at: new Date(), updated_at: new Date() }],
         rowCount: 1,
       }));
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool
+       
       const store = new PgThresholdStore(pool as never);
 
       await expect(store.getDefault()).rejects.toThrow('JSONB invalid');
@@ -86,7 +86,7 @@ describe('Threshold Store Fail-Closed (T-E7-02)', () => {
         rows: [{ profile_id: 'p4', profile_data: { ...DB_PROFILE, ambiguityPenaltyDefault: NaN }, is_default: true, created_at: new Date(), updated_at: new Date() }],
         rowCount: 1,
       }));
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool
+       
       const store = new PgThresholdStore(pool as never);
 
       await expect(store.getDefault()).rejects.toThrow('JSONB invalid');
@@ -99,7 +99,7 @@ describe('Threshold Store Fail-Closed (T-E7-02)', () => {
         rows: [{ profile_id: 'valid-1', profile_data: DB_PROFILE, is_default: true, created_at: new Date(), updated_at: new Date() }],
         rowCount: 1,
       }));
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock pool
+       
       const store = new PgThresholdStore(pool as never);
 
       const result = await store.getDefault();

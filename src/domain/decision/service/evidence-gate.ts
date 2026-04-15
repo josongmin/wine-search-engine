@@ -86,7 +86,7 @@ export class EvidenceGate {
     }
 
     // Rule 1: resolved + no identity evidence → downgrade
-    if (provenanceContract.observed.identityEvidenceSatisfied !== true) {
+    if (!provenanceContract.observed.identityEvidenceSatisfied) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',
@@ -98,7 +98,7 @@ export class EvidenceGate {
     // Rule 2: resolved + constraints present but no constraint evidence → downgrade
     if (
       provenanceContract.policy.requireConstraintEvidence &&
-      provenanceContract.observed.constraintEvidenceSatisfied !== true
+      !provenanceContract.observed.constraintEvidenceSatisfied
     ) {
       return {
         passed: false,
@@ -111,7 +111,7 @@ export class EvidenceGate {
     // Rule 3: anchor present but no anchor evidence → downgrade
     if (
       provenanceContract.policy.requireAnchorEvidence &&
-      provenanceContract.observed.anchorEvidenceSatisfied !== true
+      !provenanceContract.observed.anchorEvidenceSatisfied
     ) {
       return {
         passed: false,

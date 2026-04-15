@@ -645,7 +645,9 @@ export function assertComparisonFixtureExpectation(
     throw new Error('comparison expectation helper requires response_family=comparison');
   }
   if (body.query_type !== 'comparison') {
-    throw new Error(`Expected query_type=comparison, received ${body.query_type}`);
+    // body.query_type is narrowed to `never` here, so we cast to unknown to
+    // produce a human-readable diagnostic string for the error message.
+    throw new Error(`Expected query_type=comparison, received ${String(body.query_type as unknown)}`);
   }
   const expected = fixture.expected;
   if (!('comparison_intent' in expected)) {

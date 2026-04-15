@@ -148,7 +148,7 @@ export function buildCoreAdapterServices(
         apiKey: config.openai.apiKey,
         model: config.openai.embeddingModel,
         httpTimeoutMs: config.openai.httpTimeoutMs,
-        ...(config.embedding.dimension !== undefined ? { dimensions: config.embedding.dimension } : {}),
+        dimensions: config.embedding.dimension,
       });
     }
     // No embedding source configured — dense retrieval won't work.

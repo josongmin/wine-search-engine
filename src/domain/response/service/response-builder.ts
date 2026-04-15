@@ -241,7 +241,7 @@ export class ResponseBuilder {
         ? {
             executionContract: this.buildExecutionContractMeta(
               params.executionContract,
-              params.retrievalModeSource ?? params.compiled.execution.routeSource ?? 'planner',
+              params.retrievalModeSource ?? params.compiled.execution.routeSource,
               params.plannerSuggestedMode,
               params.compiled,
             ),
@@ -284,7 +284,7 @@ export class ResponseBuilder {
       ...(params.counterfactuals !== undefined ? { counterfactuals: params.counterfactuals } : {}),
       clarification: params.clarification ?? null,
       meta,
-      ...(retrievalMode !== undefined ? { retrievalMode } : {}),
+      retrievalMode,
       ...(resultType !== undefined ? { resultType } : {}),
       ...(parsedConstraints !== undefined ? { parsedConstraints } : {}),
     };

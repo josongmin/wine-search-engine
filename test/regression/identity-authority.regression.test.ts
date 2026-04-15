@@ -34,7 +34,7 @@ describe('T-011/W3 WineSnapshotEntityResolution doc boundary', () => {
 describe('T-011/W3 assertSourceLinkRemapBlocked', () => {
   it('is a no-op for empty link rows', async () => {
     const client = { query: vi.fn() };
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock
+     
     await expect(assertSourceLinkRemapBlocked(client as never, [])).resolves.toBeUndefined();
     expect(client.query).not.toHaveBeenCalled();
   });
@@ -49,7 +49,7 @@ describe('T-011/W3 assertSourceLinkRemapBlocked', () => {
         }],
       }),
     };
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock
+     
     await expect(assertSourceLinkRemapBlocked(client as never, [{
       canonical_entity_id: 'cid-same',
       source_system: 'sys-a',
@@ -61,7 +61,7 @@ describe('T-011/W3 assertSourceLinkRemapBlocked', () => {
     const client = {
       query: vi.fn().mockResolvedValue({ rows: [] }),
     };
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock
+     
     await expect(assertSourceLinkRemapBlocked(client as never, [{
       canonical_entity_id: 'cid-new',
       source_system: 'sys-a',
@@ -79,7 +79,7 @@ describe('T-011/W3 assertSourceLinkRemapBlocked', () => {
         }],
       }),
     };
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock
+     
     await expect(assertSourceLinkRemapBlocked(client as never, [{
       canonical_entity_id: 'cid-DIFFERENT',
       source_system: 'sys-a',
@@ -98,7 +98,7 @@ describe('T-011/W3 assertSourceLinkRemapBlocked', () => {
       }),
     };
     try {
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock
+       
       await assertSourceLinkRemapBlocked(client as never, [{
         canonical_entity_id: 'cid-NEW',
         source_system: 'sys-a',
@@ -124,7 +124,7 @@ describe('T-011/W3 assertSourceLinkRemapBlocked', () => {
         }],
       }),
     };
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock
+     
     await expect(assertSourceLinkRemapBlocked(client as never, [{
       canonical_entity_id: 'cid-NEW',
       source_system: 'sys-a',

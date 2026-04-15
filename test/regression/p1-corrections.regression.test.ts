@@ -123,7 +123,7 @@ describe('Fix 1 / Wave 2: QueryCachePort.getWithDiagnostics', () => {
   });
 
   it('RedisQueryCache.getWithDiagnostics returns hit on successful read', async () => {
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test mock
+     
     const fakeRedis = {
       get: vi.fn().mockResolvedValue(JSON.stringify({
         query_type: 'search',
@@ -157,7 +157,7 @@ describe('Fix 1 / Wave 2: QueryCachePort.getWithDiagnostics', () => {
       incr: vi.fn(),
       info: vi.fn(),
     };
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test mock
+     
     const cache = new RedisQueryCache(fakeRedis as never);
     const result = await cache.getWithDiagnostics({
       redisKey: 'test-key',

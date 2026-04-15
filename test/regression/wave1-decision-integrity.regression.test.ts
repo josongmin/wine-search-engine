@@ -43,7 +43,7 @@ describe('Wave 1 / C1: semantic embedding combiner fail-loud', () => {
 
   it('returns undefined on hole in outer array', () => {
     const a = [0.1, 0.2, 0.3];
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentional hole for test
+     
     const embeddings = [a, undefined as unknown as readonly number[], a];
     const result = combineSemanticEmbeddings(embeddings);
     expect(result).toBeUndefined();

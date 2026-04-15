@@ -20,7 +20,10 @@ const GENERIC_HYBRID_EXECUTION_FACTS = {
   usedCompiledExecution: false,
 } as const;
 
-const ENTITY_ROUTE_EXECUTION_FACTS = {
+// Kept as reference scaffolding for future test cases that exercise the
+// entity-route / specialized-hybrid branches; prefixed with `_` so the lint
+// rule allows the declaration without an import site.
+const _ENTITY_ROUTE_EXECUTION_FACTS = {
   effectiveRetrievalMode: 'entity_lookup',
   retrievalKind: 'entity_lookup',
   sparseExecuted: false,
@@ -28,7 +31,7 @@ const ENTITY_ROUTE_EXECUTION_FACTS = {
   usedCompiledExecution: false,
 } as const;
 
-const SPECIALIZED_HYBRID_EXECUTION_FACTS = {
+const _SPECIALIZED_HYBRID_EXECUTION_FACTS = {
   effectiveRetrievalMode: 'region_browse',
   retrievalKind: 'specialized_hybrid',
   sparseExecuted: false,

@@ -24,11 +24,11 @@ describe('HTTP /v1/search — mixed empty-result fallback', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      const body = res.json() as {
+      const body = res.json<{
         results?: readonly { entity_id?: string }[];
         meta?: { route?: string; degradation_reasons?: readonly string[] };
         engine_decision?: { degradation_reasons?: readonly string[] };
-      };
+      }>();
 
       expect(body.meta?.route).toMatch(/^(mixed|hybrid)$/);
       expect(body.results?.length ?? 0).toBeGreaterThan(0);

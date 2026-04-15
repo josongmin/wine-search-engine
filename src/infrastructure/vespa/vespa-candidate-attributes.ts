@@ -81,30 +81,11 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
 
     const map = new Map<CanonicalEntityId, Readonly<Record<string, unknown>>>();
 
-    // Epic-07 T07-2: prefer backend-native batch fetch over N single GETs.
-    // Falls back to per-id concurrent fetches when the adapter doesn't
-    // implement the optional `getDocuments` contract (e.g. in tests).
-    if (this.searchIndex.getDocuments !== undefined) {
-      const docs = await this.searchIndex.getDocuments(entityIds);
-      for (const [id, doc] of docs) {
-        map.set(id, validateAttributes(id, doc));
-      }
-      return map;
-    }
-
-    // Use allSettled so a single Vespa/network error for one entity doesn't
-    // abort the entire attribute load — remaining entities are still useful
-    // for mixed-query scoring.
-    const settled = await Promise.allSettled(
-      entityIds.map(async (id) => {
-        const doc = await this.searchIndex.getDocument(id);
-        return { id, doc };
-      }),
-    );
-    for (const result of settled) {
-      if (result.status === 'fulfilled' && result.value.doc !== null) {
-        map.set(result.value.id, validateAttributes(result.value.id, result.value.doc));
-      }
+    // Epic-07 T07-2 / T-E4-01: `getDocuments` is now a required port contract,
+    // so we always prefer the backend-native batch fetch over N single GETs.
+    const docs = await this.searchIndex.getDocuments(entityIds);
+    for (const [id, doc] of docs) {
+      map.set(id, validateAttributes(id, doc));
     }
     return map;
   }

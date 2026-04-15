@@ -59,11 +59,12 @@ export interface WatchlistPoisonRecord {
  */
 export class InMemoryWatchlistPoisonStore implements WatchlistPoisonStore {
   private readonly records: WatchlistPoisonRecord[] = [];
-  async push(record: WatchlistPoisonRecord): Promise<void> {
+  push(record: WatchlistPoisonRecord): Promise<void> {
     this.records.push(record);
+    return Promise.resolve();
   }
-  async size(): Promise<number> {
-    return this.records.length;
+  size(): Promise<number> {
+    return Promise.resolve(this.records.length);
   }
   /** Test helper — production code MUST NOT iterate the live store. */
   snapshot(): readonly WatchlistPoisonRecord[] {
@@ -71,8 +72,20 @@ export class InMemoryWatchlistPoisonStore implements WatchlistPoisonStore {
   }
 }
 
-/** Default retry policy: 3 attempts with linear backoff (50ms, 150ms, 350ms). */
-export const DEFAULT_HANDLER_RETRY_DELAYS_MS: readonly number[] = [50, 150, 350];
+/**
+ * Default handler retry policy: 3 attempts with linear backoff.
+ * Values are milliseconds — first retry after 50ms, second after 150ms,
+ * third after 350ms. Tuned for transient Redis hiccups, not for slow
+ * downstream services (which should surface their own backpressure).
+ */
+const DEFAULT_HANDLER_RETRY_DELAY_1_MS = 50;
+const DEFAULT_HANDLER_RETRY_DELAY_2_MS = 150;
+const DEFAULT_HANDLER_RETRY_DELAY_3_MS = 350;
+export const DEFAULT_HANDLER_RETRY_DELAYS_MS: readonly number[] = [
+  DEFAULT_HANDLER_RETRY_DELAY_1_MS,
+  DEFAULT_HANDLER_RETRY_DELAY_2_MS,
+  DEFAULT_HANDLER_RETRY_DELAY_3_MS,
+];
 
 type RedisSubscriberClient = ReturnType<typeof createClient>;
 type RedisSubscriberFactory = (redisConfig: RedisConfig) => RedisSubscriberClient;

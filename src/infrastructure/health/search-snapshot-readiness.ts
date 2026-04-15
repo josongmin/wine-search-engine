@@ -355,40 +355,37 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   // publish flow should pass requirePointerParity=true once migration 010
   // is live on all environments.
   if (args.requirePointerParity === true) {
-    try {
-      const pointerRes = await args.pool.query<{ active_snapshot_id: string; content_hash: string }>(
-        `SELECT active_snapshot_id, content_hash FROM active_search_snapshot WHERE id = 1`,
+    // 42P01 (undefined_table) is only tolerable in environments without the
+    // pointer migration applied. When requirePointerParity=true the caller
+    // has asked for strict mode — we let the raw PG error propagate so the
+    // missing table surfaces as a fatal readiness failure.
+    const pointerRes = await args.pool.query<{ active_snapshot_id: string; content_hash: string }>(
+      `SELECT active_snapshot_id, content_hash FROM active_search_snapshot WHERE id = 1`,
+    );
+    const pointerRow = pointerRes.rows[0];
+    if (pointerRow === undefined) {
+      throw new Error(
+        '[readiness] active_search_snapshot pointer row is missing. ' +
+        'The publish has not flipped the pointer — refusing to mark runtime live.',
       );
-      const pointerRow = pointerRes.rows[0];
-      if (pointerRow === undefined) {
-        throw new Error(
-          '[readiness] active_search_snapshot pointer row is missing. ' +
-          'The publish has not flipped the pointer — refusing to mark runtime live.',
-        );
-      }
-      if (pointerRow.active_snapshot_id !== runtimeState.snapshotId) {
-        throw new Error(
-          `[readiness] pointer/runtime-state drift: ` +
-          `active_search_snapshot.active_snapshot_id=${pointerRow.active_snapshot_id} ` +
-          `vs runtime-state.snapshotId=${runtimeState.snapshotId}. ` +
-          `The DB is serving a different snapshot than the runtime-state file advertises.`,
-        );
-      }
-      if (
-        runtimeState.contentHash.length > 0
-        && pointerRow.content_hash.length > 0
-        && pointerRow.content_hash !== runtimeState.contentHash
-      ) {
-        throw new Error(
-          `[readiness] content_hash drift for snapshot ${runtimeState.snapshotId}: ` +
-          `pointer=${pointerRow.content_hash} vs runtime-state=${runtimeState.contentHash}.`,
-        );
-      }
-    } catch (err: unknown) {
-      // 42P01 is only tolerable in environments without the pointer migration
-      // applied. When requirePointerParity=true the caller has asked for
-      // strict mode — treat the missing table as a fatal readiness failure.
-      throw err;
+    }
+    if (pointerRow.active_snapshot_id !== runtimeState.snapshotId) {
+      throw new Error(
+        `[readiness] pointer/runtime-state drift: ` +
+        `active_search_snapshot.active_snapshot_id=${pointerRow.active_snapshot_id} ` +
+        `vs runtime-state.snapshotId=${runtimeState.snapshotId}. ` +
+        `The DB is serving a different snapshot than the runtime-state file advertises.`,
+      );
+    }
+    if (
+      runtimeState.contentHash.length > 0
+      && pointerRow.content_hash.length > 0
+      && pointerRow.content_hash !== runtimeState.contentHash
+    ) {
+      throw new Error(
+        `[readiness] content_hash drift for snapshot ${runtimeState.snapshotId}: ` +
+        `pointer=${pointerRow.content_hash} vs runtime-state=${runtimeState.contentHash}.`,
+      );
     }
   }
 

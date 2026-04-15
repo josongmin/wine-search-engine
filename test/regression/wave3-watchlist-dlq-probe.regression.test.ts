@@ -73,15 +73,15 @@ describe('Wave 3 / H12: Watchlist subscriber DLQ + retry', () => {
   it('RedisWatchlistSubscriber handleEvent retries then poisons on persistent failure', async () => {
     const store = new InMemoryWatchlistPoisonStore();
     const sub = new RedisWatchlistSubscriber(
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test stub for redis config
+       
       {} as never,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- factory unused in this test
+       
       (() => ({})) as never,
       { poisonStore: store, retryDelaysMs: [0, 0, 0] }, // 4 attempts total, no real wait
     );
     const handler = vi.fn().mockRejectedValue(new Error('persistent failure'));
     // Reach into the private method via a typed helper for the test only.
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- access private for test
+     
     const handleEvent = (sub as unknown as {
       handleEvent: (id: string, payload: string, h: typeof handler) => Promise<void>;
     }).handleEvent.bind(sub);
@@ -99,9 +99,9 @@ describe('Wave 3 / H12: Watchlist subscriber DLQ + retry', () => {
   it('handleEvent succeeds on second attempt — no DLQ entry', async () => {
     const store = new InMemoryWatchlistPoisonStore();
     const sub = new RedisWatchlistSubscriber(
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test stub
+       
       {} as never,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- factory unused
+       
       (() => ({})) as never,
       { poisonStore: store, retryDelaysMs: [0] },
     );
@@ -111,7 +111,7 @@ describe('Wave 3 / H12: Watchlist subscriber DLQ + retry', () => {
       if (calls === 1) throw new Error('transient');
       return undefined;
     });
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- private access for test
+     
     const handleEvent = (sub as unknown as {
       handleEvent: (id: string, payload: string, h: typeof handler) => Promise<void>;
     }).handleEvent.bind(sub);
@@ -124,14 +124,14 @@ describe('Wave 3 / H12: Watchlist subscriber DLQ + retry', () => {
   it('invalid payload poisons immediately after retry exhaustion (parse never recovers)', async () => {
     const store = new InMemoryWatchlistPoisonStore();
     const sub = new RedisWatchlistSubscriber(
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- test stub
+       
       {} as never,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- factory unused
+       
       (() => ({})) as never,
       { poisonStore: store, retryDelaysMs: [0, 0] }, // 3 total attempts
     );
     const handler = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- private access for test
+     
     const handleEvent = (sub as unknown as {
       handleEvent: (id: string, payload: string, h: typeof handler) => Promise<void>;
     }).handleEvent.bind(sub);
