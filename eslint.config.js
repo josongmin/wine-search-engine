@@ -30,6 +30,24 @@ export default tseslint.config(
     files: ['scripts/**/*.ts', 'tools/**/*.ts', 'config/**/*.ts', '*.config.ts', '*.config.*.ts'],
     ...tseslint.configs.disableTypeChecked,
   },
+  //
+  // NOTE: scripts/ files are excluded from type-checked linting by the block
+  // above (which sets parserOptions.project = false). The generic
+  // "__tests__" block further down re-enables
+  // @typescript-eslint/restrict-template-expressions for test code — but
+  // re-enabling a type-aware rule on a file with no parser services loaded
+  // crashes ESLint with:
+  //
+  //   Error: Error while loading rule
+  //     '@typescript-eslint/restrict-template-expressions':
+  //     You have used a rule which requires type information, but don't
+  //     have parserOptions set to generate type information for this file.
+  //
+  // The final override near the bottom of this file re-applies
+  // disableTypeChecked to scripts/**/__tests__ and similar paths AFTER the
+  // general test block so typed rules stay off there. Without it,
+  // `pnpm run lint` fails repo-wide the moment a new test file lands
+  // under scripts/etl/__tests__/.
   {
     files: ['scripts/**/*.ts', 'tools/**/*.ts'],
     rules: {
@@ -598,5 +616,27 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  //
+  // Final override: re-disable type-checked linting for test files under
+  // scripts/, tools/, and config/. The scripts/ block near the top turns
+  // parserOptions.project off for those paths (they are compiled via
+  // tsconfig.scripts.json, not tsconfig.eslint.json), but the generic
+  // "__tests__" block re-enables
+  // @typescript-eslint/restrict-template-expressions — a typed rule —
+  // which crashes when it runs against a file with no parser services.
+  //
+  // Keeping this override LAST in the config array guarantees it has the
+  // final say on scripts/etl/__tests__/*.test.ts and equivalents.
+  {
+    files: [
+      'scripts/**/__tests__/**/*.ts',
+      'scripts/**/*.test.ts',
+      'tools/**/__tests__/**/*.ts',
+      'tools/**/*.test.ts',
+      'config/**/__tests__/**/*.ts',
+      'config/**/*.test.ts',
+    ],
+    ...tseslint.configs.disableTypeChecked,
   },
 );
