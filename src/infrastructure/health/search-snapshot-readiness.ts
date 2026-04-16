@@ -19,6 +19,9 @@ const VespaCountResponseSchema = z.object({
   }),
 });
 
+const CRITICAL_WINE_TYPES = ['red', 'white', 'sparkling'] as const;
+type CriticalWineType = typeof CRITICAL_WINE_TYPES[number];
+
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 
 /**
@@ -242,6 +245,31 @@ async function fetchVespaSnapshotDocumentCount(vespaUrl: string, snapshotId: str
   return parsed.data.root.fields.totalCount;
 }
 
+async function fetchVespaWineTypeDocumentCount(
+  vespaUrl: string,
+  snapshotId: string,
+  wineType: CriticalWineType,
+): Promise<number> {
+  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      yql: `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} and wine_type contains ${JSON.stringify(wineType)} limit 0;`,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vespa wine_type readiness query failed with status ${response.status} for ${wineType}`);
+  }
+
+  const body: unknown = await response.json();
+  const parsed = VespaCountResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error(`Vespa wine_type readiness query returned unexpected response shape for ${wineType}: ${parsed.error.message}`);
+  }
+  return parsed.data.root.fields.totalCount;
+}
+
 export function canonicalizeEntityRuntimeRows(
   rows: readonly {
     readonly entity_id: string;
@@ -396,9 +424,13 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     ltrResult,
     nlMappingsRuntime,
     vespaDocumentCount,
+    vespaWineTypeCounts,
     canonicalGraphEntityResult,
     canonicalIdentityAuthorityResult,
     vivinoNamespaceSealResult,
+    runtimeRedWineTypeCountResult,
+    runtimeWhiteWineTypeCountResult,
+    runtimeSparklingWineTypeCountResult,
     canonicalAliasJoinResult,
     canonicalAmbiguityTotalResult,
   ] = await Promise.all([
@@ -459,6 +491,12 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     ),
     loadNlMappingsRuntimeInfo(runtimeState.nlMappingsRuntimePath),
     fetchVespaSnapshotDocumentCount(args.vespaUrl, runtimeState.snapshotId),
+    Promise.all(
+      CRITICAL_WINE_TYPES.map(async (wineType) => ({
+        wineType,
+        count: await fetchVespaWineTypeDocumentCount(args.vespaUrl, runtimeState.snapshotId, wineType),
+      })),
+    ),
     args.pool.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM canonical_entities
@@ -511,6 +549,27 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     ),
     args.pool.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
+       FROM entities
+       WHERE search_snapshot_id = $1
+         AND COALESCE(attributes->>'wineType', attributes->>'wine_type') = $2`,
+      [runtimeState.snapshotId, 'red'],
+    ),
+    args.pool.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM entities
+       WHERE search_snapshot_id = $1
+         AND COALESCE(attributes->>'wineType', attributes->>'wine_type') = $2`,
+      [runtimeState.snapshotId, 'white'],
+    ),
+    args.pool.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM entities
+       WHERE search_snapshot_id = $1
+         AND COALESCE(attributes->>'wineType', attributes->>'wine_type') = $2`,
+      [runtimeState.snapshotId, 'sparkling'],
+    ),
+    args.pool.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
        FROM canonical_aliases ca
        INNER JOIN entities e
          ON e.entity_id = ca.canonical_entity_id
@@ -534,9 +593,28 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   const ambiguityTotalCount = parseSqlCountText(ambiguityResult.rows[0]?.total_count, 'ambiguity_registry.total_count');
   const activeLtrCount = parseSqlCountText(ltrResult.rows[0]?.snapshot_count, 'ltr_model_registry.snapshot_count');
   const activeLtrTotalCount = parseSqlCountText(ltrResult.rows[0]?.total_count, 'ltr_model_registry.total_count');
+  const runtimeWineTypeCounts = {
+    red: parseSqlCountText(runtimeRedWineTypeCountResult.rows[0]?.c, 'entities.wine_type.red'),
+    white: parseSqlCountText(runtimeWhiteWineTypeCountResult.rows[0]?.c, 'entities.wine_type.white'),
+    sparkling: parseSqlCountText(runtimeSparklingWineTypeCountResult.rows[0]?.c, 'entities.wine_type.sparkling'),
+  } satisfies Record<CriticalWineType, number>;
 
   if (entityCount !== runtimeState.counts.entities || entityCount <= 0 || entityTotalCount !== entityCount) {
     throw new Error(`Entity runtime count mismatch: runtime=${entityCount}/${entityTotalCount}, state=${runtimeState.counts.entities}`);
+  }
+  const missingRuntimeWineTypes = CRITICAL_WINE_TYPES.filter((wineType) => runtimeWineTypeCounts[wineType] <= 0);
+  if (missingRuntimeWineTypes.length > 0) {
+    throw new Error(
+      `Critical wine_type runtime coverage missing for snapshot ${runtimeState.snapshotId}: ${missingRuntimeWineTypes.join(', ')}`,
+    );
+  }
+  const missingVespaWineTypes = vespaWineTypeCounts
+    .filter(({ count }) => count <= 0)
+    .map(({ wineType }) => wineType);
+  if (missingVespaWineTypes.length > 0) {
+    throw new Error(
+      `Critical wine_type Vespa coverage missing for snapshot ${runtimeState.snapshotId}: ${missingVespaWineTypes.join(', ')}`,
+    );
   }
 
   const canonicalGraphEntityCount = parseSqlCountText(canonicalGraphEntityResult.rows[0]?.c, 'canonical_entities.snapshot');

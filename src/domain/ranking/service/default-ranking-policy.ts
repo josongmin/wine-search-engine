@@ -5,10 +5,11 @@
  *   1. Producer diversity: if 3 or more results from the same producer appear
  *      in the top-10 positions, any extras beyond the 3rd are demoted to after
  *      position 10 (appended in their original relative order).
- *   2. Wine-type diversity for semantic-preference queries without an explicit
- *      wine_type hard constraint: if 3 or more results from the same wine type
- *      appear in the top-10 positions and there are other wine types available
- *      in that window, extras beyond the 2nd are demoted.
+ *   2. Wine-type diversity for recommendation-style or semantic-preference
+ *      queries without an explicit wine_type hard constraint: if 3 or more
+ *      results from the same wine type appear in the top-10 positions and
+ *      there are other wine types available in that window, extras beyond the
+ *      2nd are demoted.
  *   3. Max-results truncation: if context.maxResults is set, the list is
  *      truncated to that count.
  *
@@ -101,7 +102,7 @@ function applyWineTypeDiversity(
   results: readonly RankedResult[],
   context: PolicyContext,
 ): readonly RankedResult[] {
-  if (context.queryClass !== 'semantic_preference' || context.hasExplicitWineTypeConstraint === true) {
+  if (!shouldApplyWineTypeDiversity(context)) {
     return results;
   }
 
@@ -156,6 +157,23 @@ function applyWineTypeDiversity(
 
   const remainingTail = tail.filter((_, index) => !promotedTailIndices.has(index));
   return [...retained, ...demoted, ...remainingTail];
+}
+
+/**
+ * Wine-type diversity applies to recommendation-style execution contracts:
+ * explicit recommendation retrieval mode, plus the anchor-conditioned
+ * query classes the planner currently emits for the same family.
+ */
+function shouldApplyWineTypeDiversity(context: PolicyContext): boolean {
+  if (context.hasExplicitWineTypeConstraint === true) {
+    return false;
+  }
+
+  if (context.effectiveRetrievalMode === 'recommendation') {
+    return true;
+  }
+
+  return context.queryClass === 'semantic_preference' || context.queryClass === 'anchored_similarity';
 }
 
 /**

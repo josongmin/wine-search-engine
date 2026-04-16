@@ -72,6 +72,7 @@ function createPoolMock(overrides?: {
   readonly canonicalAliasJoinCount?: string;
   readonly canonicalAmbiguityTotalCount?: string;
   readonly canonicalIdentityAuthorityCount?: string;
+  readonly runtimeWineTypeCounts?: Partial<Record<'red' | 'white' | 'sparkling', string>>;
   readonly namespaceSeal?: NamespaceSealOverride;
 }): Pick<Pool, 'query'> {
   const aliasJoin = overrides?.canonicalAliasJoinCount ?? '10';
@@ -83,6 +84,11 @@ function createPoolMock(overrides?: {
     aliases_violations: overrides?.namespaceSeal?.aliasesViolations ?? '0',
     ambiguity_registry_violations: overrides?.namespaceSeal?.ambiguityRegistryViolations ?? '0',
     canonical_ambiguity_violations: overrides?.namespaceSeal?.canonicalAmbiguityViolations ?? '0',
+  };
+  const runtimeWineTypeCounts = {
+    red: overrides?.runtimeWineTypeCounts?.red ?? '4',
+    white: overrides?.runtimeWineTypeCounts?.white ?? '3',
+    sparkling: overrides?.runtimeWineTypeCounts?.sparkling ?? '3',
   };
   let callIdx = 0;
   return {
@@ -105,8 +111,14 @@ function createPoolMock(overrides?: {
         case 6:
           return { rows: [seal] };
         case 7:
-          return { rows: [{ c: aliasJoin }] };
+          return { rows: [{ c: runtimeWineTypeCounts.red }] };
         case 8:
+          return { rows: [{ c: runtimeWineTypeCounts.white }] };
+        case 9:
+          return { rows: [{ c: runtimeWineTypeCounts.sparkling }] };
+        case 10:
+          return { rows: [{ c: aliasJoin }] };
+        case 11:
           return { rows: [{ c: ambiguityTotal }] };
         default:
           throw new Error(`Unexpected pool.query call index ${i}`);
@@ -116,20 +128,34 @@ function createPoolMock(overrides?: {
 }
 
 /**
- * Build a fetch mock returning two distinct Vespa responses (Promise.all
- * snapshot doc count followed by the namespace seal violation count).
- * Defaults: 42 docs in snapshot, 0 namespace violations.
+ * Build a fetch mock returning five Vespa responses:
+ * snapshot doc count, red count, white count, sparkling count, namespace seal count.
  */
 function mockVespaResponses(args?: {
   readonly snapshotDocCount?: number;
+  readonly wineTypeCounts?: Partial<Record<'red' | 'white' | 'sparkling', number>>;
   readonly namespaceSealViolations?: number;
 }) {
   const docCount = args?.snapshotDocCount ?? 10;
+  const wineTypeCounts = {
+    red: args?.wineTypeCounts?.red ?? 4,
+    white: args?.wineTypeCounts?.white ?? 3,
+    sparkling: args?.wineTypeCounts?.sparkling ?? 3,
+  };
   const violations = args?.namespaceSealViolations ?? 0;
   return vi
     .spyOn(globalThis, 'fetch')
     .mockResolvedValueOnce(
       new Response(JSON.stringify({ root: { fields: { totalCount: docCount } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { fields: { totalCount: wineTypeCounts.red } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { fields: { totalCount: wineTypeCounts.white } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { fields: { totalCount: wineTypeCounts.sparkling } } }), { status: 200 }),
     )
     .mockResolvedValueOnce(
       new Response(JSON.stringify({ root: { fields: { totalCount: violations } } }), { status: 200 }),
@@ -179,7 +205,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           runtimeState,
         }),
       ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
-      expect(pool.query).toHaveBeenCalledTimes(9);
+      expect(pool.query).toHaveBeenCalledTimes(12);
     } finally {
       fetchSpy.mockRestore();
     }
@@ -469,6 +495,100 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           runtimeState,
         }),
       ).rejects.toThrow(/Vespa snapshot document count mismatch/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when runtime snapshot is missing a critical wine_type family', async () => {
+    const dir = await makeTempDir();
+    const nlPath = path.join(dir, 'nl.json');
+    const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+    await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+
+    const activeLtrHash = activeLtrHashFromRows();
+    const runtimeState: LoadedSearchSnapshotRuntimeState = {
+      schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+      snapshotId: 'snap-test-1',
+      contentHash: 'hash',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/m.json',
+      nlMappingsRuntimePath: nlPath,
+      allowMissingLtr: false,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 2,
+        nlMappings: 1,
+        activeLtrModels: 1,
+      },
+      hashes: {
+        entities: 'entities',
+        aliases: 'aliases',
+        ambiguityRegistry: 'ambiguity',
+        nlMappings: hashRuntimeNlMappings(nlPayload),
+        activeLtrModels: activeLtrHash,
+      },
+    };
+
+    const fetchSpy = mockVespaResponses();
+
+    try {
+      const pool = createPoolMock({ runtimeWineTypeCounts: { sparkling: '0' } }) as unknown as Pool;
+      await expect(
+        verifySearchSnapshotRuntimeStateLive({
+          pool,
+          vespaUrl: 'http://vespa.test:8080',
+          runtimeState,
+        }),
+      ).rejects.toThrow(/Critical wine_type runtime coverage missing.*sparkling/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when Vespa snapshot is missing a critical wine_type family', async () => {
+    const dir = await makeTempDir();
+    const nlPath = path.join(dir, 'nl.json');
+    const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+    await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+
+    const activeLtrHash = activeLtrHashFromRows();
+    const runtimeState: LoadedSearchSnapshotRuntimeState = {
+      schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+      snapshotId: 'snap-test-1',
+      contentHash: 'hash',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/m.json',
+      nlMappingsRuntimePath: nlPath,
+      allowMissingLtr: false,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 2,
+        nlMappings: 1,
+        activeLtrModels: 1,
+      },
+      hashes: {
+        entities: 'entities',
+        aliases: 'aliases',
+        ambiguityRegistry: 'ambiguity',
+        nlMappings: hashRuntimeNlMappings(nlPayload),
+        activeLtrModels: activeLtrHash,
+      },
+    };
+
+    const fetchSpy = mockVespaResponses({ wineTypeCounts: { white: 0 } });
+
+    try {
+      const pool = createPoolMock() as unknown as Pool;
+      await expect(
+        verifySearchSnapshotRuntimeStateLive({
+          pool,
+          vespaUrl: 'http://vespa.test:8080',
+          runtimeState,
+        }),
+      ).rejects.toThrow(/Critical wine_type Vespa coverage missing.*white/);
     } finally {
       fetchSpy.mockRestore();
     }

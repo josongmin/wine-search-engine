@@ -12,6 +12,9 @@ import { DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } from '../../domain/drinking-win
 import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
+import {
+  sanitizeOptionalToolNulls,
+} from '../../application/search/search-tool-contract.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
@@ -21,152 +24,140 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
 import { buildMachineResponseV2 } from '../../domain/response/service/machine-response-builder-v2.js';
 import {
-  MAX_PRODUCED_VINTAGE_YEAR,
-  MIN_PRODUCED_VINTAGE_YEAR,
+  buildFoodPairingColorClause,
+  resolveFoodPairingBudgetKrw,
+} from '../../application/search/food-pairing-tool-policy.js';
+import {
+  appendStructuredQueryClauses,
+  buildSearchToolSoftClauses,
+} from '../../application/search/search-tool-query-policy.js';
+import { buildSearchToolRetrievalCoreQuery } from '../../application/search/search-tool-retrieval-core.js';
+import {
+  applySearchToolBudgetResultPolicy,
+  applySearchToolNegationResultPolicy,
+  collectSearchToolNegationTerms,
+} from '../../application/search/search-tool-result-policy.js';
+import {
   KRW_PER_USD_APPROXIMATE,
 } from '../../domain/shared/constants.js';
-import { MAX_WINE_TOOL_SEARCH_RESULTS } from '../http/constants.js';
+import {
+  SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
+  SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
+  SEARCH_TOOL_WANTS_DIVERSITY_RE,
+  executeSearchWithTypedWineDiversityDiscovery,
+  shouldRunTypedWineDiversityDiscovery,
+  withWineTypeFilter,
+} from '../../application/search/search-tool-diversity.js';
+import {
+  CompareWinesInputSchema,
+  DrinkingWindowInputSchema,
+  FoodPairingInputSchema,
+  SearchToolInputSchema,
+} from './tool-schemas.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 /** criticScoreNormalized is 0–1; predictor wants 0–100 proxy points. */
 const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
-const TOOL_VINTAGE_MIN = 1600;
-const TOOL_VINTAGE_MAX = 2100;
-const SEARCH_TOOL_MAX_STYLES = 5;
+const CLAUDE_TOOL_FILTER_MAPPING_VERSION = 'claude_tool_v1' as const;
+const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as const;
 
-/**
- * Zod schema for search_wines tool input.
- * Validates: query (required, string), limit (1-50), retrieval_mode (auto/entity/hybrid/mixed)
- */
-const SearchToolInputSchema = z.object({
-  query: z.string().min(1, 'Query must not be empty'),
-  limit: z.number().int().min(1).max(MAX_WINE_TOOL_SEARCH_RESULTS).optional().default(10),
-  retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional().default('auto'),
-  exclude_grapes: z.array(z.string().trim().min(1)).max(10).optional(),
-  exclude_regions: z.array(z.string().trim().min(1)).max(10).optional(),
-  max_price_krw: z.number().int().min(1).optional(),
-  wine_type: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
-  country: z.string().trim().min(1).optional(),
-  vintage_min: z.number().int().min(TOOL_VINTAGE_MIN).max(TOOL_VINTAGE_MAX).optional(),
-  vintage_max: z.number().int().min(TOOL_VINTAGE_MIN).max(TOOL_VINTAGE_MAX).optional(),
-  appellation: z.string().trim().min(1).optional(),
-  style: z.string().trim().min(1).optional(),
-  styles: z.array(z.string().trim().min(1)).max(SEARCH_TOOL_MAX_STYLES).optional(),
-  certification: z.string().trim().min(1).optional(),
-  want_diversity: z.boolean().optional(),
-}).superRefine((data, ctx) => {
-  if (data.vintage_min !== undefined && data.vintage_max !== undefined && data.vintage_min > data.vintage_max) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['vintage_max'],
-      message: `vintage_max (${data.vintage_max}) must be >= vintage_min (${data.vintage_min})`,
-    });
-  }
-});
+type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
 
 const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
 
-/**
- * Zod schema for get_food_pairings tool input.
- * Validates: food (required), max_price (optional), color (optional)
- */
-const FoodPairingInputSchema = z.object({
-  food: z.string().min(1, 'Food must not be empty'),
-  max_price: z.number().finite().positive().optional(),
-  max_price_krw: z.number().int().positive().optional(),
-  color: z.enum(['red', 'white', 'rosé', 'sparkling', 'both']).optional(),
-});
+function formatValidationError(toolName: string, error: z.ZodError): { error: string } {
+  return {
+    error: `Invalid input for ${toolName}: ${error.issues.map((issue) => issue.message).join(', ')}`,
+  };
+}
 
-function buildSearchToolStructuredFilters(input: z.infer<typeof SearchToolInputSchema>): readonly NormalizedConstraint[] {
+function parseToolInput<T extends z.ZodTypeAny>(
+  toolName: string,
+  schema: T,
+  input: unknown,
+): { success: true; data: z.output<T> } | { success: false; result: { error: string } } {
+  const validation = schema.safeParse(sanitizeOptionalToolNulls(input));
+  if (!validation.success) {
+    return {
+      success: false,
+      result: formatValidationError(toolName, validation.error),
+    };
+  }
+  return {
+    success: true,
+    data: validation.data,
+  };
+}
+
+function pushSearchToolStructuredFilter(
+  filters: NormalizedConstraint[],
+  attribute: string,
+  operator: NormalizedConstraint['operator'],
+  value: NormalizedConstraint['value'],
+  sourcePhrase: string,
+): void {
+  filters.push({
+    attribute,
+    operator,
+    value,
+    source_phrase: sourcePhrase,
+    confidence: 1.0,
+    mapping_version: CLAUDE_TOOL_FILTER_MAPPING_VERSION,
+  });
+}
+
+function buildSearchToolStructuredFilters(input: SearchToolInput): readonly NormalizedConstraint[] {
   const filters: NormalizedConstraint[] = [];
 
   for (const grape of input.exclude_grapes ?? []) {
-    filters.push({ attribute: 'grape_primary', operator: 'exclude', value: grape, source_phrase: grape, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'grape_primary', 'exclude', grape, grape);
   }
   for (const region of input.exclude_regions ?? []) {
-    filters.push({ attribute: 'region', operator: 'exclude', value: region, source_phrase: region, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'region', 'exclude', region, region);
   }
   if (input.wine_type !== undefined) {
-    filters.push({ attribute: 'wine_type', operator: '=', value: input.wine_type, source_phrase: input.wine_type, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'wine_type', '=', input.wine_type, input.wine_type);
   }
   if (input.country !== undefined) {
-    filters.push({ attribute: 'country', operator: '=', value: input.country, source_phrase: input.country, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'country', '=', input.country, input.country);
   }
   if (input.vintage_min !== undefined) {
-    filters.push({ attribute: 'vintage_year', operator: '>=', value: input.vintage_min, source_phrase: `${input.vintage_min}년 이후`, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'vintage_year', '>=', input.vintage_min, `${input.vintage_min}년 이후`);
   }
   if (input.vintage_max !== undefined) {
-    filters.push({ attribute: 'vintage_year', operator: '<=', value: input.vintage_max, source_phrase: `${input.vintage_max}년 이전`, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'vintage_year', '<=', input.vintage_max, `${input.vintage_max}년 이전`);
   }
   if (input.appellation !== undefined) {
-    filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+    pushSearchToolStructuredFilter(filters, 'appellation', '=', input.appellation, input.appellation);
   }
 
   return filters;
 }
 
-function resolveStyleClauses(
-  input: z.infer<typeof SearchToolInputSchema>,
-): readonly string[] {
-  const renderSemanticStyleQueryTerm = (style: string): string => {
-    switch (style) {
-      case 'crowd_pleasing':
-        return 'crowd pleasing';
-      case 'screw_cap':
-        return 'screw cap';
-      case 'off_dry':
-        return 'off dry';
-      default:
-        return style;
-    }
-  };
-
-  if (input.styles !== undefined && input.styles.length > 0) {
-    return [...new Set(input.styles)].map(renderSemanticStyleQueryTerm);
-  }
-  return input.style !== undefined ? [renderSemanticStyleQueryTerm(input.style)] : [];
-}
-
-function buildSearchToolQuery(input: z.infer<typeof SearchToolInputSchema>): string {
-  const clauses: string[] = [];
-  for (const grape of input.exclude_grapes ?? []) {
-    clauses.push(`not ${grape}`);
-  }
-  for (const region of input.exclude_regions ?? []) {
-    clauses.push(`not ${region}`);
-  }
-  if (input.max_price_krw !== undefined) {
-    clauses.push(`${input.max_price_krw}원 이하`);
-  }
-  for (const style of resolveStyleClauses(input)) {
-    clauses.push(style);
-  }
-  if (input.certification !== undefined) {
-    clauses.push(input.certification);
-  }
+function buildSearchToolQuery(input: SearchToolInput): string {
+  const clauses = buildSearchToolSoftClauses(input);
+  const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
   if (clauses.length === 0) {
-    return input.query;
+    return retrievalCoreQuery;
   }
-  return `${input.query}, ${clauses.join(', ')}`;
+  return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
 }
 
-/**
- * Zod schema for check_drinking_window tool input.
- * Validates: entity_id (required), target_year (optional, defaults to current year)
- */
-const DrinkingWindowInputSchema = z.object({
-  entity_id: z.string().min(1, 'Entity ID must not be empty'),
-  target_year: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR).optional(),
-});
-
-/**
- * Zod schema for compare_wines tool input.
- * Validates: query_a and query_b (both required, non-empty)
- */
-const CompareWinesInputSchema = z.object({
-  query_a: z.string().min(1, 'Query A must not be empty'),
-  query_b: z.string().min(1, 'Query B must not be empty'),
-});
+function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
+  const filters = buildSearchToolStructuredFilters(input);
+  const limit = input.limit ?? 10;
+  const retrievalMode = input.retrieval_mode ?? 'auto';
+  return {
+    query: buildSearchToolQuery(input),
+    limit,
+    options: {
+      mode: retrievalMode,
+      explain: false,
+      clarification: false,
+    },
+    ...(filters.length > 0 ? { filters } : {}),
+  };
+}
 
 /**
  * T6.3: Options for machine V2 response format migration seam.
@@ -234,15 +225,15 @@ export class WineToolExecutor {
    * Execute a tool call with validated input.
    *
    * Dispatches to the appropriate use case based on toolName.
-   * Input is validated using Zod schemas before execution.
+   * Input is validated using Zod schemas before execution. Validation failures
+   * are returned as in-band `{ error }` tool results so HTTP/adapter callers
+   * keep a single success-shaped tool envelope instead of mixing throw vs return.
    *
    * @param toolName - Name of the tool to execute
    * @param input - Raw input (will be validated against schema)
    * @param requestId - Parent request ID for tracking
    * @param v2Options - Optional V2 machine format migration seam (T6.3)
    * @returns Tool result
-   * @throws ZodError if input validation fails
-   * @throws Error if tool execution fails
    */
   async execute(
     toolName: string,
@@ -260,9 +251,9 @@ export class WineToolExecutor {
         if (v2Options !== undefined) {
           // Always validate the raw input even on the V2 path so that
           // malformed query metadata is rejected, not silently dropped.
-          const validation = SearchToolInputSchema.safeParse(input);
+          const validation = parseToolInput('search_wines', SearchToolInputSchema, input);
           if (!validation.success) {
-            return { error: `Invalid input for search_wines: ${validation.error.issues.map((i) => i.message).join(', ')}` };
+            return validation.result;
           }
           const queryId = v2Options.queryId ?? requestId;
           return buildMachineResponseV2({
@@ -299,24 +290,58 @@ export class WineToolExecutor {
    *
    * @param input - Raw input (validated against SearchToolInputSchema)
    * @param requestId - Parent request ID
-   * @returns SearchResponseV1
+   * @returns SearchResponseV1 or an in-band `{ error }` tool result on validation failure
    */
-  private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse> {
-    const validated = SearchToolInputSchema.parse(input);
-    const filters = buildSearchToolStructuredFilters(validated);
+  private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+    const validation = parseToolInput('search_wines', SearchToolInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    const validated = validation.data;
+    const normalizedLimit = validated.limit ?? 10;
+    const wantsDiversity =
+      validated.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(validated.query);
+    const effectiveLimit = wantsDiversity
+      ? Math.max(normalizedLimit, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
+      : normalizedLimit;
+    const structuredFilters = buildSearchToolStructuredFilters(validated);
+    const fallbackRequest = buildSearchToolRequest({
+      ...validated,
+      limit: effectiveLimit,
+    });
 
-    const request: SearchRequest = {
-      query: buildSearchToolQuery(validated),
-      limit: validated.limit,
-      options: {
-        mode: validated.retrieval_mode,
-        explain: false,
-        clarification: false,
-      },
-      ...(filters.length > 0 ? { filters } : {}),
-    };
-
-    return this.deps.searchUseCase.execute(request, requestId);
+    const response = await executeSearchWithTypedWineDiversityDiscovery({
+      searchUseCase: this.deps.searchUseCase,
+      requestId,
+      fallbackRequest,
+      effectiveLimit,
+      shouldRun: shouldRunTypedWineDiversityDiscovery({
+        query: validated.query,
+        wantsDiversity,
+        wineType: validated.wine_type,
+      }),
+      buildTypedRequest: (wineType) => ({
+        ...fallbackRequest,
+        limit: SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
+        filters: withWineTypeFilter(
+          structuredFilters,
+          wineType,
+          CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION,
+        ),
+      }),
+    });
+    if (response.queryType !== 'search') {
+      return response;
+    }
+    const negationFiltered = applySearchToolNegationResultPolicy(
+      response,
+      collectSearchToolNegationTerms(validated),
+    );
+    return applySearchToolBudgetResultPolicy(
+      negationFiltered.response,
+      validated.max_price_krw,
+      { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+    ).response;
   }
 
   /**
@@ -329,21 +354,23 @@ export class WineToolExecutor {
    *
    * @param input - Raw input (validated against FoodPairingInputSchema)
    * @param requestId - Parent request ID
-   * @returns SearchResponseV1 with paired wines
+   * @returns SearchResponseV1 with paired wines, or an in-band `{ error }` result on validation failure
    */
-  private async executeFoodPairings(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse> {
-    const validated = FoodPairingInputSchema.parse(input);
+  private async executeFoodPairings(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+    const validation = parseToolInput('get_food_pairings', FoodPairingInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    const validated = validation.data;
 
-    // Build dynamic query from food + optional color + price
-    let query = `wine pairing for ${validated.food}`;
-    if (validated.color !== undefined && validated.color !== 'both') {
-      query += ` ${validated.color} wine`;
-    }
-    if (validated.max_price_krw !== undefined) {
-      query += ` under ${validated.max_price_krw} KRW`;
-    } else if (validated.max_price !== undefined) {
-      query += ` under ${Math.round(validated.max_price * KRW_PER_USD_APPROXIMATE)} KRW`;
-    }
+    const budgetKrw = resolveFoodPairingBudgetKrw(validated, {
+      krwPerUsd: KRW_PER_USD_APPROXIMATE,
+      maxPriceKrwCap: Number.MAX_SAFE_INTEGER,
+    });
+    const query = appendStructuredQueryClauses(
+      `wines for ${validated.food}${buildFoodPairingColorClause(validated)}`,
+      budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],
+    );
 
     const request: SearchRequest = {
       query,
@@ -372,7 +399,11 @@ export class WineToolExecutor {
     input: unknown,
     requestId: string,
   ): Promise<DrinkingWindowBlock | { error: string }> {
-    const validated = DrinkingWindowInputSchema.parse(input);
+    const validation = parseToolInput('check_drinking_window', DrinkingWindowInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    const validated = validation.data;
     const targetYear = validated.target_year ?? new Date().getFullYear();
 
     if (!this.deps.entityLookup) {
@@ -445,10 +476,14 @@ export class WineToolExecutor {
    *
    * @param input - Raw input (validated against CompareWinesInputSchema)
    * @param requestId - Parent request ID
-   * @returns ComparisonSearchResponse
+   * @returns ComparisonSearchResponse, or an in-band `{ error }` result on validation failure
    */
-  private async executeCompareWines(input: unknown, requestId: string): Promise<ComparisonSearchResponse> {
-    const validated = CompareWinesInputSchema.parse(input);
+  private async executeCompareWines(input: unknown, requestId: string): Promise<ComparisonSearchResponse | { error: string }> {
+    const validation = parseToolInput('compare_wines', CompareWinesInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    const validated = validation.data;
     const startTime = Date.now();
 
     return this.deps.decomposedSearchUseCase.execute(

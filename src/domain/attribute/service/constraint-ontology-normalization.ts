@@ -5,6 +5,7 @@ const COMBINING_MARKS_RE = /[\u0300-\u036f]/g;
 const ONTOLOGY_AXES_BY_ATTRIBUTE = {
   occasion: 'occasion',
   pairing: 'pairing',
+  style: 'style',
 } as const;
 
 type OntologyComparableAttribute = keyof typeof ONTOLOGY_AXES_BY_ATTRIBUTE;

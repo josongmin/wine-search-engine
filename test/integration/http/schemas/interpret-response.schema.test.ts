@@ -45,4 +45,33 @@ describe('InterpretResponseSchema', () => {
 
     expect(InterpretResponseSchema.safeParse(polluted).success).toBe(false);
   });
+
+  it('rejects unexpected keys inside typed interpret policy and anchors', async () => {
+    const parts = createTestContainer();
+
+    const plan = await parts.container.interpretUseCase.execute({
+      query: '오푸스원',
+    });
+
+    const polluted = {
+      ...deepKeysToSnake(plan),
+      policy: {
+        ...deepKeysToSnake(plan).policy,
+        stray_flag: true,
+      },
+      anchors: [
+        ...deepKeysToSnake(plan).anchors,
+        {
+          surface_form: 'x',
+          normalized_form: 'x',
+          candidate_entity_ids: ['x'],
+          confidence: 0.5,
+          source: 'alias',
+          stray_flag: true,
+        },
+      ],
+    };
+
+    expect(InterpretResponseSchema.safeParse(polluted).success).toBe(false);
+  });
 });

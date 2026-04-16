@@ -154,6 +154,42 @@ describe('AgentPlannerPhaseRunner', () => {
     }));
   });
 
+  it('restores Korean search query anchors when the planner drifts into English paraphrase', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '검색 필요',
+            action: {
+              tool: 'search_wines',
+              input: {
+                query: 'gift recommendation for someone who does not know wine',
+                styles: ['approachable', 'crowd_pleasing'],
+              },
+            },
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+      'req-korean-anchor',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.action?.tool).toBe('search_wines');
+    expect(result?.parsed.action?.input).toEqual(expect.objectContaining({
+      query: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+      styles: ['approachable', 'crowd_pleasing'],
+    }));
+  });
+
   it('keeps a higher output cap on the last step to allow final answers', async () => {
     const complete = vi.fn().mockResolvedValue({
       text: JSON.stringify({ thought: 'done', answer: '오퍼스 원 2018입니다.' }),

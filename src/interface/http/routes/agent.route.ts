@@ -23,6 +23,13 @@ import {
   MAX_SESSION_ENTITY_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
 } from '../constants.js';
+import {
+  ClaudeToolNameSchema,
+  CompareWinesAttemptInputSchema,
+  DrinkingWindowAttemptInputSchema,
+  FoodPairingAttemptInputSchema,
+  SearchToolAttemptInputSchema,
+} from '../../claude-tools/tool-schemas.js';
 
 const AgentRequestSchema = z.object({
   query: z.string().min(1).max(MAX_AGENT_HTTP_QUERY_CHARS),
@@ -35,10 +42,37 @@ const AgentRequestSchema = z.object({
   }).strict().optional(),
 }).strict();
 
-const AgentToolCallSchema = z.object({
-  tool: z.string(),
+const AgentKnownToolCallSchema = z.discriminatedUnion('tool', [
+  z.object({
+    tool: z.literal('search_wines'),
+    input: SearchToolAttemptInputSchema,
+  }).strict(),
+  z.object({
+    tool: z.literal('get_food_pairings'),
+    input: FoodPairingAttemptInputSchema,
+  }).strict(),
+  z.object({
+    tool: z.literal('check_drinking_window'),
+    input: DrinkingWindowAttemptInputSchema,
+  }).strict(),
+  z.object({
+    tool: z.literal('compare_wines'),
+    input: CompareWinesAttemptInputSchema,
+  }).strict(),
+]);
+
+const AgentUnknownToolCallSchema = z.object({
+  tool: z.string().min(1).refine(
+    (tool) => !ClaudeToolNameSchema.safeParse(tool).success,
+    { message: 'Unknown tool calls must not use a registered tool name.' },
+  ),
   input: z.record(z.unknown()),
 }).strict();
+
+const AgentToolCallSchema = z.union([
+  AgentKnownToolCallSchema,
+  AgentUnknownToolCallSchema,
+]);
 
 const AgentStepSchema = z.object({
   index: z.number().int().nonnegative(),

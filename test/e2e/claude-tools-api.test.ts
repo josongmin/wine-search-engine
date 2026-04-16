@@ -58,6 +58,14 @@ describe('GET /v1/claude-tools', () => {
         'compare_wines',
       ]),
     );
+
+    const searchTool = (body.tools as Array<Record<string, unknown>>)
+      .find((tool) => tool.name === 'search_wines');
+    expect(searchTool).toBeDefined();
+    expect(searchTool?.input_schema).toEqual(expect.objectContaining({
+      type: 'object',
+      required: ['query'],
+    }));
   });
 });
 
@@ -110,5 +118,46 @@ describe('POST /v1/claude-tools', () => {
     expect(body.error.code).toBe('VALIDATION_ERROR');
     expect(body.error.message.length).toBeGreaterThan(0);
     expect(body.error.request_id).toBe(headerRequestId);
+  });
+
+  it('rejects placeholder tool input with RFC-014 validation error (400)', async () => {
+    const res = await postJson(server.app, '/v1/claude-tools', {
+      tool_name: 'search_wines',
+      tool_input: {
+        query: '__TO_BE_FILLED__',
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+
+    const body = res.json() as {
+      error: { code: string; message: string; request_id: string };
+    };
+    const headerRequestId = getHeader(res, 'x-request-id');
+    expect(headerRequestId).toBeTruthy();
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.request_id).toBe(headerRequestId);
+    expect(body.error.message).toMatch(/placeholder/i);
+  });
+
+  it('rejects unexpected tool_input fields with RFC-014 validation error (400)', async () => {
+    const res = await postJson(server.app, '/v1/claude-tools', {
+      tool_name: 'search_wines',
+      tool_input: {
+        query: 'Opus One 2018',
+        unexpected: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const headerRequestId = getHeader(res, 'x-request-id');
+    expect(headerRequestId).toBeTruthy();
+
+    const body = res.json() as {
+      error: { code: string; message: string; request_id: string };
+    };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.request_id).toBe(headerRequestId);
+    expect(body.error.message).toContain('unexpected');
   });
 });

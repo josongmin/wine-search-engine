@@ -109,6 +109,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       relations: {},
       attributes: {
         grapes: record.grapes,
+        wineType: record.wineType,
         style: record.wineType,
         ...(record.body != null ? { body: record.body } : {}),
         ...(record.sweetness != null ? { sweetness: record.sweetness } : {}),
@@ -145,7 +146,6 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const nlMappings = parseNlMappings(nlMappingsRaw);
 
   const documentsNdjson = serializeNdjson(records);
-  const vespaFeedNdjson = recordContent;
   const entitiesNdjson = serializeNdjson(entityArtifact);
   const aliasesNdjson = serializeNdjson(resolvedAliases);
   const ambiguityNdjson = serializeNdjson(ambiguityRows);
@@ -153,7 +153,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
 
   const hashes = {
     documents: hashText(documentsNdjson),
-    vespaFeed: hashText(vespaFeedNdjson),
+    vespaFeed: hashText(''),
     entities: hashStableJson(entityArtifact),
     aliases: hashStableJson(resolvedAliases),
     ambiguityRegistry: hashStableJson(ambiguityRows),
@@ -181,7 +181,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     },
     counts: {
       documents: records.length,
-      vespaFeed: records.length,
+      vespaFeed: 0,
       entities: entityArtifact.length,
       aliases: resolvedAliases.length,
       ambiguityRegistry: ambiguityRows.length,
@@ -201,7 +201,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   await fs.mkdir(snapshotRoot, { recursive: true });
   await Promise.all([
     atomicWriteFile(manifest.artifacts.documentsNdjson, documentsNdjson),
-    fs.copyFile(args.input, manifest.artifacts.vespaFeedNdjson),
+    fs.rm(manifest.artifacts.vespaFeedNdjson, { force: true }),
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
     atomicWriteFile(manifest.artifacts.ambiguityRegistryNdjson, ambiguityNdjson),

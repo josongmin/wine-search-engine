@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunnerArgs } from '../../../../test/benchmark/agent/runner.js';
+import {
+  assertCriticalWineTypeCoverage,
+  fetchCriticalWineTypeCoverage,
+  parseRunnerArgs,
+} from '../../../../test/benchmark/agent/runner.js';
+import { MESSY_SEARCH_SCENARIO_IDS } from '../../../../test/benchmark/agent/scenarios.js';
 import {
   entityIdsMatch,
   gradedRelevance,
@@ -15,6 +20,45 @@ describe('parseRunnerArgs', () => {
   it('drops invalid ids instead of producing NaN filters', () => {
     const args = parseRunnerArgs(['--id', '1,foo,3']);
     expect(args.idFilter).toEqual([1, 3]);
+  });
+
+  it('applies messy-search defaults for judge and scenario selection', () => {
+    const args = parseRunnerArgs(['--profile', 'messy-search']);
+    expect(args.profile).toBe('messy-search');
+    expect(args.enableJudge).toBe(true);
+    expect(args.concurrency).toBe(2);
+    expect(args.idFilter).toEqual([...MESSY_SEARCH_SCENARIO_IDS]);
+  });
+});
+
+describe('agent benchmark coverage preflight', () => {
+  it('throws when a critical wine_type family is missing', () => {
+    expect(() =>
+      assertCriticalWineTypeCoverage({ red: 7040, white: 0, sparkling: 0 }),
+    ).toThrow(/critical Vespa wine_type coverage missing \(white, sparkling\)/);
+  });
+
+  it('loads Vespa coverage counts through the client query contract', async () => {
+    const seenYql: string[] = [];
+    const client = {
+      async query(yql: string) {
+        seenYql.push(yql);
+        if (yql.includes('"red"')) return { root: { fields: { totalCount: 7 } } };
+        if (yql.includes('"white"')) return { root: { fields: { totalCount: 3 } } };
+        return { root: { fields: { totalCount: 2 } } };
+      },
+    };
+
+    await expect(fetchCriticalWineTypeCoverage(client)).resolves.toEqual({
+      red: 7,
+      white: 3,
+      sparkling: 2,
+    });
+    expect(seenYql).toEqual([
+      'select * from sources * where wine_type contains "red" limit 0',
+      'select * from sources * where wine_type contains "white" limit 0',
+      'select * from sources * where wine_type contains "sparkling" limit 0',
+    ]);
   });
 });
 

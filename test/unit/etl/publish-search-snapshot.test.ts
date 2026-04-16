@@ -1,10 +1,44 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+vi.mock('../../../scripts/etl/index-to-vespa.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../scripts/etl/index-to-vespa.js')>(
+    '../../../scripts/etl/index-to-vespa.js',
+  );
+  return {
+    ...actual,
+    materializePreparedVespaFeedArtifact: vi.fn(async (args: {
+      readonly outputPath: string;
+      readonly snapshotId: string;
+    }) => {
+      const serialized = actual.serializePreparedVespaFeedDocuments([
+        {
+          id: 'legacy-1',
+          fields: {
+            entity_id: 'legacy-1',
+            canonical_label: 'Legacy Sparkling Wine',
+            wine_type: 'sparkling',
+            search_snapshot_id: args.snapshotId,
+          },
+        },
+      ]);
+      await fs.writeFile(args.outputPath, serialized, 'utf8');
+      return {
+        count: 1,
+        hash: 'mock-vespa-feed-hash',
+      };
+    }),
+  };
+});
 import {
+  assertSnapshotArtifactCriticalWineTypeCoverage,
   assertPreparedRollbackFeedAvailable,
+  ensurePreparedRollbackFeedAvailable,
+  collectCriticalWineTypeCoverageFromEntities,
+  collectCriticalWineTypeCoverageFromPreparedFeed,
   loadPublishedRuntimeState,
+  resolveAllowMissingLtrForPublish,
   resolvePublishFixtureRepoRoot,
   FIXTURE_REPO_REQUIRED_ERROR,
 } from '../../../scripts/etl/publish-search-snapshot.js';
@@ -15,7 +49,7 @@ import {
 import {
   serializePreparedVespaFeedDocuments,
 } from '../../../scripts/etl/index-to-vespa.js';
-import type { SearchSnapshotManifest } from '../../../scripts/etl/search-snapshot-schema.js';
+import { serializeNdjson, type SearchSnapshotManifest } from '../../../scripts/etl/search-snapshot-schema.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'publish-search-snapshot-'));
@@ -23,7 +57,7 @@ async function makeTempDir(): Promise<string> {
 
 function makeManifest(feedPath: string): SearchSnapshotManifest {
   return {
-    schemaVersion: 'search_snapshot_manifest.v1',
+    schemaVersion: 'search_snapshot.v1',
     snapshotId: 'search-snapshot:v1:test',
     generatedAt: '2026-04-14T00:00:00.000Z',
     contentHash: 'content-hash',
@@ -41,6 +75,41 @@ function makeManifest(feedPath: string): SearchSnapshotManifest {
       documents: 1,
       vespaFeed: 1,
       entities: 1,
+      aliases: 1,
+      ambiguityRegistry: 0,
+      nlMappings: 1,
+    },
+    hashes: {
+      documents: 'documents-hash',
+      vespaFeed: 'vespa-feed-hash',
+      entities: 'entities-hash',
+      aliases: 'aliases-hash',
+      ambiguityRegistry: 'ambiguity-hash',
+      nlMappings: 'nl-hash',
+    },
+  };
+}
+
+function makeCoverageManifest(dir: string): SearchSnapshotManifest {
+  return {
+    schemaVersion: 'search_snapshot.v1',
+    snapshotId: 'search-snapshot:v1:coverage',
+    generatedAt: '2026-04-16T00:00:00.000Z',
+    contentHash: 'coverage-hash',
+    sourceInputPath: '/tmp/silver-trackc.ndjson',
+    artifacts: {
+      documentsNdjson: path.join(dir, 'documents.ndjson'),
+      vespaFeedNdjson: path.join(dir, 'vespa-feed.ndjson'),
+      entitiesNdjson: path.join(dir, 'entities.ndjson'),
+      aliasesNdjson: path.join(dir, 'aliases.ndjson'),
+      ambiguityRegistryNdjson: path.join(dir, 'ambiguity.ndjson'),
+      nlMappingsJson: path.join(dir, 'nl-mappings.json'),
+      metadataJson: path.join(dir, 'metadata.json'),
+    },
+    counts: {
+      documents: 3,
+      vespaFeed: 3,
+      entities: 3,
       aliases: 1,
       ambiguityRegistry: 0,
       nlMappings: 1,
@@ -82,6 +151,153 @@ describe('assertPreparedRollbackFeedAvailable', () => {
     await expect(assertPreparedRollbackFeedAvailable(makeManifest(feedPath))).rejects.toThrow(
       /exact rollback artifact/i,
     );
+  });
+
+  it('materializes an exact rollback artifact from a legacy manifest when missing', async () => {
+    const dir = await makeTempDir();
+    const manifestPath = path.join(dir, 'manifest.json');
+    const documentsPath = path.join(dir, 'documents.ndjson');
+    const feedPath = path.join(dir, 'vespa-feed.ndjson');
+    const manifest = makeManifest(feedPath);
+    await fs.writeFile(
+      documentsPath,
+      `${JSON.stringify({
+        canonicalLabel: 'Legacy Sparkling Wine',
+        producer: 'Legacy House',
+        wineType: 'sparkling',
+        sourceId: 'legacy-1',
+        sourceSystem: 'vivino',
+      })}\n`,
+    );
+    await fs.writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        ...manifest,
+        artifacts: {
+          ...manifest.artifacts,
+          documentsNdjson: documentsPath,
+        },
+      }, null, 2)}\n`,
+    );
+
+    const preparedManifest = await ensurePreparedRollbackFeedAvailable({
+      manifest: {
+        ...manifest,
+        artifacts: {
+          ...manifest.artifacts,
+          documentsNdjson: documentsPath,
+        },
+      },
+      manifestPath,
+    });
+
+    await expect(assertPreparedRollbackFeedAvailable(preparedManifest)).resolves.toBeUndefined();
+    const preparedRaw = await fs.readFile(feedPath, 'utf8');
+    expect(preparedRaw).toContain('"fields"');
+    expect(preparedRaw).toContain('"wine_type":"sparkling"');
+  });
+});
+
+describe('snapshot artifact critical wine_type coverage', () => {
+  it('counts critical wine types from entity and prepared-feed artifacts', async () => {
+    const dir = await makeTempDir();
+    const manifest = makeCoverageManifest(dir);
+    await fs.writeFile(
+      manifest.artifacts.entitiesNdjson,
+      serializeNdjson([
+        {
+          entityId: 'wine-red',
+          entityType: 'wine',
+          canonicalLabel: 'Red Wine',
+          identitySignature: 'sig-red',
+          relations: {},
+          attributes: { wineType: 'red' },
+          metadata: {},
+        },
+        {
+          entityId: 'wine-white',
+          entityType: 'wine',
+          canonicalLabel: 'White Wine',
+          identitySignature: 'sig-white',
+          relations: {},
+          attributes: { wineType: 'white' },
+          metadata: {},
+        },
+        {
+          entityId: 'wine-sparkling',
+          entityType: 'wine',
+          canonicalLabel: 'Sparkling Wine',
+          identitySignature: 'sig-sparkling',
+          relations: {},
+          attributes: { wineType: 'sparkling' },
+          metadata: {},
+        },
+      ]),
+    );
+    await fs.writeFile(
+      manifest.artifacts.vespaFeedNdjson,
+      serializePreparedVespaFeedDocuments([
+        { id: 'wine-red', fields: { entity_id: 'wine-red', wine_type: 'red' } },
+        { id: 'wine-white', fields: { entity_id: 'wine-white', wine_type: 'white' } },
+        { id: 'wine-sparkling', fields: { entity_id: 'wine-sparkling', wine_type: 'sparkling' } },
+      ]),
+    );
+
+    await expect(assertSnapshotArtifactCriticalWineTypeCoverage(manifest)).resolves.toEqual({
+      entityCoverage: { red: 1, white: 1, sparkling: 1 },
+      vespaCoverage: { red: 1, white: 1, sparkling: 1 },
+    });
+  });
+
+  it('fails fast when critical wine types are missing from snapshot artifacts', async () => {
+    const dir = await makeTempDir();
+    const manifest = makeCoverageManifest(dir);
+    await fs.writeFile(
+      manifest.artifacts.entitiesNdjson,
+      serializeNdjson([
+        {
+          entityId: 'wine-red',
+          entityType: 'wine',
+          canonicalLabel: 'Red Wine',
+          identitySignature: 'sig-red',
+          relations: {},
+          attributes: { wineType: 'red' },
+          metadata: {},
+        },
+      ]),
+    );
+    await fs.writeFile(
+      manifest.artifacts.vespaFeedNdjson,
+      serializePreparedVespaFeedDocuments([
+        { id: 'wine-red', fields: { entity_id: 'wine-red', wine_type: 'red' } },
+      ]),
+    );
+
+    await expect(assertSnapshotArtifactCriticalWineTypeCoverage(manifest)).rejects.toThrow(
+      /missing critical wine_type coverage in entities artifact: white, sparkling/i,
+    );
+  });
+
+  it('counts only canonical critical wine types', () => {
+    expect(
+      collectCriticalWineTypeCoverageFromEntities([
+        {
+          entityId: 'wine-1',
+          entityType: 'wine',
+          canonicalLabel: 'Wine 1',
+          identitySignature: 'sig-1',
+          relations: {},
+          attributes: { wineType: 'rosé' },
+          metadata: {},
+        },
+      ]),
+    ).toEqual({ red: 0, white: 0, sparkling: 0 });
+
+    expect(
+      collectCriticalWineTypeCoverageFromPreparedFeed([
+        { id: 'wine-1', fields: { wine_type: 'dessert' } },
+      ]),
+    ).toEqual({ red: 0, white: 0, sparkling: 0 });
   });
 });
 
@@ -187,5 +403,20 @@ describe('resolvePublishFixtureRepoRoot', () => {
     expect(resolvePublishFixtureRepoRoot('/tmp/fixture-repo', undefined)).toBe(
       '/tmp/fixture-repo',
     );
+  });
+});
+
+describe('resolveAllowMissingLtrForPublish', () => {
+  it('inherits allowMissingLtr from the active runtime state when CLI flag is absent', () => {
+    expect(resolveAllowMissingLtrForPublish(false, { allowMissingLtr: true })).toBe(true);
+  });
+
+  it('keeps strict mode when neither CLI nor active runtime allow missing LTR', () => {
+    expect(resolveAllowMissingLtrForPublish(false, { allowMissingLtr: false })).toBe(false);
+    expect(resolveAllowMissingLtrForPublish(false, undefined)).toBe(false);
+  });
+
+  it('preserves explicit CLI allow-missing-ltr', () => {
+    expect(resolveAllowMissingLtrForPublish(true, { allowMissingLtr: false })).toBe(true);
   });
 });

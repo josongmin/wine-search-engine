@@ -85,10 +85,11 @@ describe('buildSearchSnapshot', () => {
     });
 
     expect(result.manifest.counts.documents).toBe(1);
-    expect(result.manifest.counts.vespaFeed).toBe(1);
+    expect(result.manifest.counts.vespaFeed).toBe(0);
     expect(result.manifest.counts.entities).toBe(1);
     expect(result.manifest.hashes.entities).toMatch(/^[a-f0-9]{64}$/);
     expect(result.manifest.artifacts.vespaFeedNdjson).toMatch(/vespa-feed\.ndjson$/);
+    await expect(fs.access(result.manifest.artifacts.vespaFeedNdjson)).rejects.toThrow();
 
     const entitiesRaw = await fs.readFile(result.manifest.artifacts.entitiesNdjson, 'utf8');
     const entityRows = parseNdjson<EntitySnapshotRecord>(
@@ -110,6 +111,7 @@ describe('buildSearchSnapshot', () => {
       sourceRecordRefs: [{ sourceSystem: 'vivino-silver', sourceRecordId: 'wine-opus-one' }],
     });
     expect(entityRows[0]?.attributes).toMatchObject({
+      wineType: 'red',
       style: 'red',
       vintage: 2018,
       region: 'Napa Valley',

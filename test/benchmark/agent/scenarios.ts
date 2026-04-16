@@ -974,3 +974,36 @@ export const STANDARD_SCENARIO_IDS: ReadonlySet<number> = new Set([
   // cellar_aging (2)
   340, 343,
 ]);
+
+/**
+ * Messy-search profile: in-domain "real user typed this like a human" slice.
+ *
+ * Selection criteria:
+ *   - Korean colloquial / abbreviations / typos / beginner phrasing
+ *   - Gift / mood / situation intents where retrieval alignment matters more
+ *     than exact attribute matching
+ *   - Korean food pairing and practical lifestyle asks (camping, chillable)
+ *   - Bilingual / mixed-language wine-search queries
+ *   - Coverage-expansion cases that specifically target beginner-safe /
+ *     unknown-preference / crowd-pleasing recommendation behavior
+ *
+ * Deliberately excludes adversarial/security-only and exact entity lookup
+ * cases: this profile measures messy in-domain wine search quality, not
+ * jailbreak resistance or strict canonical lookup.
+ */
+export const MESSY_SEARCH_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  // situation_based / gift / practical semantics
+  41, 42, 43,
+  // korean_colloquial (typo, abbreviation, chat-style, beginner phrasing)
+  61, 62, 63, 65, 66, 67,
+  // mood_atmosphere (underspecified emotional intent)
+  75, 76, 77, 80,
+  // korean_food_pairing (real Korean food pairing asks)
+  81, 82, 83, 84, 85,
+  // gift_refined (unknown preference / safe gift / formal gift)
+  88, 90, 91, 92,
+  // bilingual_mixed (English+Korean overlap / drift risk)
+  320, 322, 323,
+  // coverage: beginner / unknown preference / safe respectable gifts
+  460, 471, 473, 475, 480, 487,
+]);

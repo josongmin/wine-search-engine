@@ -11,6 +11,7 @@ import {
   normalizeConstraintComparableArray,
   normalizeConstraintComparableString,
 } from '../../attribute/service/constraint-ontology-normalization.js';
+import { resolveSemanticStyleEvidenceProfile } from '../../query/service/semantic-style-query-terms.js';
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
@@ -69,6 +70,99 @@ function priceUsdToApproxKrw(priceUsd: number | undefined): number | undefined {
     return undefined;
   }
   return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
+}
+
+function normalizeWineType(value: string): string {
+  const normalized = normalizeString(value);
+  return normalized === 'rose' ? 'rosé' : normalized;
+}
+
+function collectCandidateStyleFragments(candidate: HybridCandidate): readonly string[] {
+  const style = candidate.style?.trim();
+  if (style === undefined || style.length === 0) {
+    return [];
+  }
+
+  return [
+    style,
+    ...style.split(/\s+/u),
+  ];
+}
+
+function candidateMatchesSemanticStyleProfile(
+  candidate: HybridCandidate,
+  profile: NonNullable<ReturnType<typeof resolveSemanticStyleEvidenceProfile>>,
+): boolean {
+  const candidateWineTypes = [
+    candidate.wineType,
+    deriveWineType(candidate),
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map(normalizeWineType);
+  const candidateGrapes = [
+    candidate.grapePrimary,
+    candidate.grapeFamily,
+    ...(candidate.grapes ?? []),
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => normalizeString(value));
+  const candidateStyleFragments = collectCandidateStyleFragments(candidate)
+    .map((value) => normalizeString(value));
+
+  if (profile.wineTypes.some((wineType) => candidateWineTypes.includes(normalizeWineType(wineType)))) {
+    return true;
+  }
+
+  if (profile.grapeTerms.some((term) => candidateGrapes.includes(normalizeString(term)))) {
+    return true;
+  }
+
+  if (profile.styleTerms.some((term) => candidateStyleFragments.includes(normalizeString(term)))) {
+    return true;
+  }
+
+  const easyDrinkingStructuralMatch =
+    (candidate.body === undefined || candidate.body <= 3)
+    && (candidate.tannin === undefined || candidate.tannin <= 3);
+  if (easyDrinkingStructuralMatch && profile.styleTerms.some((term) => normalizeString(term) === 'easy drinking')) {
+    return true;
+  }
+
+  return false;
+}
+
+function satisfiesSemanticStyleConstraint(
+  candidate: HybridCandidate,
+  constraint: NormalizedConstraint,
+): boolean | undefined {
+  if (constraint.attribute !== 'style') {
+    return undefined;
+  }
+
+  const requestedStyles =
+    typeof constraint.value === 'string'
+      ? [constraint.value]
+      : Array.isArray(constraint.value)
+        ? constraint.value.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+  if (requestedStyles.length === 0) {
+    return undefined;
+  }
+
+  const semanticProfiles = requestedStyles
+    .map((value) => normalizeConstraintComparableString('style', value))
+    .map((style) => resolveSemanticStyleEvidenceProfile(style))
+    .filter((profile): profile is NonNullable<typeof profile> => profile !== undefined);
+
+  if (semanticProfiles.length === 0) {
+    return undefined;
+  }
+
+  if (constraint.operator !== '=' && constraint.operator !== 'in') {
+    return undefined;
+  }
+
+  return semanticProfiles.some((profile) => candidateMatchesSemanticStyleProfile(candidate, profile));
 }
 
 function resolveCandidateValue(
@@ -302,6 +396,11 @@ function satisfiesConstraint(
   candidate: HybridCandidate,
   constraint: NormalizedConstraint,
 ): boolean {
+  const semanticStyleMatch = satisfiesSemanticStyleConstraint(candidate, constraint);
+  if (semanticStyleMatch !== undefined) {
+    return semanticStyleMatch;
+  }
+
   // grape_primary uses OR semantics at retrieval time (grape_or filter covers both
   // grape_primary AND grapes fields). Annotation must mirror Vespa's retrieval logic:
   // a candidate satisfies grape_primary = X if X appears in EITHER grapePrimary OR grapes[].

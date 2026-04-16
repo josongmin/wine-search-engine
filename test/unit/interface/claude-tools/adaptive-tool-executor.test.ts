@@ -322,6 +322,21 @@ describe('AdaptiveToolExecutor', () => {
 
       expect(result.fallbackApplied).toBeUndefined();
     });
+
+    it('should return search input validation errors without fallback retries', async () => {
+      const invalidInputResult = { error: 'Invalid input for search_wines: query cannot be a placeholder.' };
+      const executeSpyOn = vi.spyOn(baseExecutor, 'execute').mockResolvedValue(invalidInputResult as any);
+
+      const result = await adaptiveExecutor.executeWithFallback(
+        'search_wines',
+        { query: '__TO_BE_FILLED__' },
+        'req-invalid-search',
+      );
+
+      expect(result.result).toEqual(invalidInputResult);
+      expect(result.fallbackApplied).toBeUndefined();
+      expect(executeSpyOn).toHaveBeenCalledOnce();
+    });
   });
 
   describe('isEmptyResult - helper', () => {

@@ -415,7 +415,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     // Build query parameters — one @queryN binding per query string.
     const queryParams: Record<string, unknown> = {
       'ranking.profile': rankProfile,
-      'presentation.summary': 'default',
+      'presentation.summary': 'hit_summary',
       ...buildStructuredQueryFeatureParams(queries, effectiveFilters),
     };
     for (let i = 0; i < queries.length; i++) {
@@ -500,7 +500,7 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     const response = await this.queryUnderBreaker(yql, {
       'ranking.profile': rankProfile,
-      'presentation.summary': 'default',
+      'presentation.summary': 'hit_summary',
       'input.query(query_embedding)': embedding,
       ...buildStructuredQueryFeatureParams([], effectiveFilters),
     }, undefined, requestId);
@@ -573,7 +573,7 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     const response = await this.queryUnderBreaker(yql, {
       'ranking.profile': 'learned_sparse',
-      'presentation.summary': 'default',
+      'presentation.summary': 'hit_summary',
       'input.query(sparse_query_embedding)': sparseQueryTensor,
     }, undefined, requestId);
 

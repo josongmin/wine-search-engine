@@ -182,6 +182,44 @@ describe('unmetHardConstraints annotation', () => {
     expect(result.matchedConstraints).toContain('wine_type');
   });
 
+  it('matches approachable style for white beginner-friendly candidates', () => {
+    const candidate = makeCandidate({
+      wineType: 'white',
+      grapePrimary: 'Riesling',
+      style: 'medium white',
+      body: 2,
+      tannin: 1,
+    });
+    const bundle = makeBundle([], [makeConstraint('style', 'in', ['approachable'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('style');
+  });
+
+  it('matches crowd_pleasing style for sparkling crowd-pleaser candidates', () => {
+    const candidate = makeCandidate({
+      wineType: 'sparkling',
+      style: 'sparkling white',
+      body: 2,
+      tannin: 1,
+    });
+    const bundle = makeBundle([], [makeConstraint('style', 'in', ['crowd_pleasing'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('style');
+  });
+
+  it('matches approachable style for soft reds that surface approachable archetype grapes', () => {
+    const candidate = makeCandidate({
+      wineType: 'red',
+      grapePrimary: 'Merlot',
+      style: 'medium red',
+      body: 3,
+      tannin: 2,
+    });
+    const bundle = makeBundle([], [makeConstraint('style', 'in', ['approachable'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('style');
+  });
+
   it('accumulates multiple unmet attributes', () => {
     const candidate = makeCandidate({ wineType: 'white', region: 'Tuscany' });
     const bundle = makeBundle([

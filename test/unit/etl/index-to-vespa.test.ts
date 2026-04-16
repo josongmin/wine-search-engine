@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
 import {
+  buildReusableEmbeddingIndex,
   buildSearchTextKo,
   deterministicEmbedding,
   parsePreparedVespaFeedDocuments,
+  preparePreparedVespaFeedDocuments,
   serializePreparedVespaFeedDocuments,
   silverToRetrievalDoc,
 } from '../../../scripts/etl/index-to-vespa.js';
@@ -16,6 +18,11 @@ import {
   LEARNED_SPARSE_ETL_KEY,
   validateLearnedSparseVector,
 } from '../../../scripts/etl/learned-sparse-spec.js';
+
+afterEach(() => {
+  delete process.env['OPENAI_API_KEY'];
+  vi.unstubAllGlobals();
+});
 
 function makeEnrichedRecord(
   overrides: Partial<EnrichedSilverRecord> = {},
@@ -185,6 +192,99 @@ describe('index-to-vespa bridge', () => {
     expect(() => parsePreparedVespaFeedDocuments(legacyRaw, 'legacy-feed.ndjson')).toThrow(
       /prepared Vespa feed artifact/,
     );
+  });
+
+  it('reuses embeddings from a prepared feed when entity_id and semantic_summary match exactly', async () => {
+    const record = makeEnrichedRecord();
+    const reusedEmbedding = deterministicEmbedding(0.1, 0.2, 0.3, 0.4);
+    const previousDoc = silverToRetrievalDoc(record, reusedEmbedding, 'search-snapshot:v1:prev');
+    const reusablePreparedDocs = [
+      {
+        id: String(previousDoc.entityId),
+        fields: toVespaFields(previousDoc),
+      },
+    ] as const;
+
+    const docs = await preparePreparedVespaFeedDocuments({
+      records: [record],
+      snapshotId: 'search-snapshot:v1:next',
+      reusablePreparedDocs,
+    });
+
+    const embedding = (((docs[0]?.fields['embedding'] as { values: number[] }).values));
+    expect(embedding).toEqual(reusedEmbedding);
+    expect(docs[0]?.fields['search_snapshot_id']).toBe('search-snapshot:v1:next');
+  });
+
+  it('re-embeds only changed records when reusable prepared docs do not match semantic_summary', async () => {
+    const unchanged = makeEnrichedRecord();
+    const changed = makeEnrichedRecord({
+      sourceId: 'vivino:opus-one-2019',
+      externalId: '124',
+      canonicalLabel: 'Opus One 2019',
+      vintageYear: 2019,
+      searchTextEn: 'Structured Napa blend with fresher cassis and graphite.',
+    });
+    const reusedEmbedding = deterministicEmbedding(0.11, 0.21, 0.31, 0.41);
+    const previousUnchanged = silverToRetrievalDoc(unchanged, reusedEmbedding, 'search-snapshot:v1:prev');
+    const previousChanged = silverToRetrievalDoc(changed, deterministicEmbedding(0.5, 0.5, 0.5, 0.5), 'search-snapshot:v1:prev');
+    const reusablePreparedDocs = [
+      { id: String(previousUnchanged.entityId), fields: toVespaFields(previousUnchanged) },
+      {
+        id: String(previousChanged.entityId),
+        fields: {
+          ...toVespaFields(previousChanged),
+          semantic_summary: 'stale semantic summary',
+        },
+      },
+    ] as const;
+
+    process.env['OPENAI_API_KEY'] = 'test-key';
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [{ index: 0, embedding: deterministicEmbedding(0.7, 0.6, 0.5, 0.4) }],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const docs = await preparePreparedVespaFeedDocuments({
+      records: [unchanged, changed],
+      snapshotId: 'search-snapshot:v1:next',
+      reusablePreparedDocs,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((((docs[0]?.fields['embedding'] as { values: number[] }).values))).toEqual(reusedEmbedding);
+    expect((((docs[1]?.fields['embedding'] as { values: number[] }).values))).toEqual(
+      deterministicEmbedding(0.7, 0.6, 0.5, 0.4),
+    );
+  });
+
+  it('indexes only prepared docs with usable embedding payloads for reuse', () => {
+    const index = buildReusableEmbeddingIndex([
+      {
+        id: 'wine-1',
+        fields: {
+          entity_id: 'wine-1',
+          semantic_summary: 'same summary',
+          embedding: { values: [0.1, 0.2, 0.3] },
+        },
+      },
+      {
+        id: 'wine-2',
+        fields: {
+          entity_id: 'wine-2',
+          semantic_summary: 'missing embedding',
+        },
+      },
+    ]);
+
+    expect(index.get('wine-1')).toEqual({
+      semanticSummary: 'same summary',
+      embedding: [0.1, 0.2, 0.3],
+    });
+    expect(index.has('wine-2')).toBe(false);
   });
 });
 

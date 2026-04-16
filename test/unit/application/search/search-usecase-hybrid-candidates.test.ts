@@ -327,6 +327,83 @@ describe('retrieveHybridCandidatesForPlan', () => {
     );
   });
 
+  it('expands approachable/crowd-pleasing style semantics into retrieval archetype terms', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: ['approachable'],
+            source_phrase: '입문자',
+            confidence: 0.85,
+          },
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: ['crowd_pleasing'],
+            source_phrase: '실패 없는',
+            confidence: 0.82,
+          },
+        ],
+        inferred: [],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining(['approachable', 'crowd pleasing', 'easy drinking', 'merlot', 'red blend']),
+    );
+  });
+
+  it('keeps typed diversity style expansion branch-local for white and sparkling probes', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [{
+          attribute: 'wine_type',
+          operator: '=',
+          value: 'white',
+          source_phrase: 'white',
+          confidence: 1,
+        }],
+        soft: [
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: ['approachable'],
+            source_phrase: '입문자',
+            confidence: 0.85,
+          },
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: ['crowd_pleasing'],
+            source_phrase: '실패 없는',
+            confidence: 0.82,
+          },
+        ],
+        inferred: [],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining([
+        'approachable',
+        'crowd pleasing',
+        'easy drinking',
+        'pinot grigio',
+        'riesling',
+        'sauvignon blanc',
+        'chardonnay',
+      ]),
+    );
+    expect(input.semanticQueries).not.toEqual(
+      expect.arrayContaining(['merlot', 'red blend']),
+    );
+  });
+
   it('projects retrieval provenance coverage and shortfall on the generic candidate-pool path', async () => {
     const plan = minimalPlan({
       constraints: {

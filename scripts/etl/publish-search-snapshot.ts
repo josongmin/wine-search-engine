@@ -30,6 +30,7 @@ import { parseManifest, type EntitySnapshotRecord, type SearchSnapshotManifest }
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 import {
   materializePreparedVespaFeedArtifact,
+  type PreparedVespaFeedDocument,
   parsePreparedVespaFeedDocuments,
 } from './index-to-vespa.js';
 import {
@@ -63,6 +64,16 @@ interface Args {
   readonly skipIndex: boolean;
   readonly fixtureRepoRoot?: string | undefined;
 }
+
+export function resolveAllowMissingLtrForPublish(
+  cliAllowMissingLtr: boolean,
+  previousRuntimeState?: Pick<Awaited<ReturnType<typeof loadPublishedRuntimeState>>, 'allowMissingLtr'> | undefined,
+): boolean {
+  return cliAllowMissingLtr || previousRuntimeState?.allowMissingLtr === true;
+}
+
+type CriticalWineType = 'red' | 'white' | 'sparkling';
+type CriticalWineTypeCoverage = Record<CriticalWineType, number>;
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 
@@ -330,6 +341,90 @@ export function resolvePublishFixtureRepoRoot(
   return fallback;
 }
 
+function emptyCriticalWineTypeCoverage(): CriticalWineTypeCoverage {
+  return { red: 0, white: 0, sparkling: 0 };
+}
+
+function toCriticalWineType(value: unknown): CriticalWineType | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'red' || normalized === 'white' || normalized === 'sparkling') {
+    return normalized;
+  }
+  return undefined;
+}
+
+export function collectCriticalWineTypeCoverageFromEntities(
+  entities: readonly EntitySnapshotRecord[],
+): CriticalWineTypeCoverage {
+  const coverage = emptyCriticalWineTypeCoverage();
+  for (const entity of entities) {
+    const wineType = toCriticalWineType(entity.attributes['wineType'] ?? entity.attributes['wine_type']);
+    if (wineType !== undefined) {
+      coverage[wineType] += 1;
+    }
+  }
+  return coverage;
+}
+
+export function collectCriticalWineTypeCoverageFromPreparedFeed(
+  docs: readonly PreparedVespaFeedDocument[],
+): CriticalWineTypeCoverage {
+  const coverage = emptyCriticalWineTypeCoverage();
+  for (const doc of docs) {
+    const wineType = toCriticalWineType(doc.fields['wine_type']);
+    if (wineType !== undefined) {
+      coverage[wineType] += 1;
+    }
+  }
+  return coverage;
+}
+
+export function assertCriticalWineTypeCoverageForPublish(
+  coverage: CriticalWineTypeCoverage,
+  source: string,
+  snapshotId: string,
+): void {
+  const missing = (Object.entries(coverage) as Array<[CriticalWineType, number]>)
+    .filter(([, count]) => count <= 0)
+    .map(([wineType]) => wineType);
+  if (missing.length === 0) {
+    return;
+  }
+  throw new Error(
+    `Snapshot ${snapshotId} is missing critical wine_type coverage in ${source}: ${missing.join(', ')}. `
+    + `counts=${JSON.stringify(coverage)}`,
+  );
+}
+
+export async function assertSnapshotArtifactCriticalWineTypeCoverage(
+  manifest: Pick<SearchSnapshotManifest, 'snapshotId' | 'artifacts'>,
+): Promise<{
+  readonly entityCoverage: CriticalWineTypeCoverage;
+  readonly vespaCoverage: CriticalWineTypeCoverage;
+}> {
+  const [entitiesRaw, vespaFeedRaw] = await Promise.all([
+    fs.readFile(manifest.artifacts.entitiesNdjson, 'utf8'),
+    fs.readFile(manifest.artifacts.vespaFeedNdjson, 'utf8'),
+  ]);
+  const entities = parseNdjson<EntitySnapshotRecord>(
+    entitiesRaw,
+    manifest.artifacts.entitiesNdjson,
+  ).records;
+  const preparedDocs = parsePreparedVespaFeedDocuments(
+    vespaFeedRaw,
+    manifest.artifacts.vespaFeedNdjson,
+  );
+
+  const entityCoverage = collectCriticalWineTypeCoverageFromEntities(entities);
+  const vespaCoverage = collectCriticalWineTypeCoverageFromPreparedFeed(preparedDocs);
+  assertCriticalWineTypeCoverageForPublish(entityCoverage, 'entities artifact', manifest.snapshotId);
+  assertCriticalWineTypeCoverageForPublish(vespaCoverage, 'prepared Vespa feed', manifest.snapshotId);
+  return { entityCoverage, vespaCoverage };
+}
+
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
   return parseManifest(await fs.readFile(manifestPath, 'utf8'), manifestPath);
 }
@@ -367,16 +462,43 @@ export async function assertPreparedRollbackFeedAvailable(
   }
 }
 
-async function materializeExactVespaFeedForSnapshot(args: {
+export async function ensurePreparedRollbackFeedAvailable(args: {
   readonly manifest: SearchSnapshotManifest;
   readonly manifestPath: string;
   readonly fixtureRepoRoot?: string | undefined;
 }): Promise<SearchSnapshotManifest> {
+  try {
+    await assertPreparedRollbackFeedAvailable(args.manifest);
+    return args.manifest;
+  } catch {
+    return materializeExactVespaFeedForSnapshot({
+      manifest: args.manifest,
+      manifestPath: args.manifestPath,
+      ...(args.fixtureRepoRoot !== undefined ? { fixtureRepoRoot: args.fixtureRepoRoot } : {}),
+    });
+  }
+}
+
+async function materializeExactVespaFeedForSnapshot(args: {
+  readonly manifest: SearchSnapshotManifest;
+  readonly manifestPath: string;
+  readonly fixtureRepoRoot?: string | undefined;
+  readonly previousPreparedManifest?: Pick<SearchSnapshotManifest, 'artifacts'> | undefined;
+}): Promise<SearchSnapshotManifest> {
+  try {
+    await assertPreparedRollbackFeedAvailable(args.manifest);
+    return args.manifest;
+  } catch {
+    // Fall through to exact-feed materialization when the artifact is absent or legacy.
+  }
   const exactFeed = await materializePreparedVespaFeedArtifact({
     inputPath: args.manifest.artifacts.documentsNdjson,
     outputPath: args.manifest.artifacts.vespaFeedNdjson,
     snapshotId: args.manifest.snapshotId,
     ...(args.fixtureRepoRoot !== undefined ? { fixtureRepoRoot: args.fixtureRepoRoot } : {}),
+    ...(args.previousPreparedManifest !== undefined
+      ? { reuseEmbeddingFromPreparedFeedPath: args.previousPreparedManifest.artifacts.vespaFeedNdjson }
+      : {}),
   });
   return rewriteSnapshotManifest(args.manifestPath, (manifest) => ({
     ...manifest,
@@ -607,23 +729,6 @@ async function ensureSnapshotBoundLtrModels(args: {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  // Wave 4 (fail-loud): --allow-missing-ltr lets a publish proceed without
-  // any trained LTR model, silently degrading production search quality.
-  // Production paths must require an explicit operator ack via env var;
-  // dev/test paths can still pass the flag freely.
-  if (args.allowMissingLtr) {
-    const ack = process.env['ETL_PUBLISH_LTR_BYPASS_ACK'];
-    const env = process.env['NODE_ENV'];
-    if (env === 'production' && ack !== 'YES') {
-      throw new Error(
-        '--allow-missing-ltr was set in NODE_ENV=production without operator ack. ' +
-        'Set ETL_PUBLISH_LTR_BYPASS_ACK=YES to acknowledge that the published ' +
-        'snapshot will run with NO learned-to-rank model — search quality will ' +
-        'fall back to lexical-only ranking. Refusing fail-open.',
-      );
-    }
-  }
-
   const built = await buildSearchSnapshot({
     input: args.input,
     outputDir: args.outputDir,
@@ -646,6 +751,21 @@ async function run(): Promise<void> {
     loadPublishedRuntimeState(args.runtimeStatePath),
     loadSnapshotEntityIds(built.manifest.artifacts.entitiesNdjson),
   ]);
+  const allowMissingLtr = resolveAllowMissingLtrForPublish(args.allowMissingLtr, previousRuntimeState);
+  // Wave 4 (fail-loud): allow-missing-ltr lets a publish proceed without any
+  // trained LTR model. In production this still requires an explicit operator ack.
+  if (allowMissingLtr) {
+    const ack = process.env['ETL_PUBLISH_LTR_BYPASS_ACK'];
+    const env = process.env['NODE_ENV'];
+    if (env === 'production' && ack !== 'YES') {
+      throw new Error(
+        '--allow-missing-ltr was enabled for publish without operator ack. '
+        + 'Set ETL_PUBLISH_LTR_BYPASS_ACK=YES to acknowledge that the published '
+        + 'snapshot will run with NO learned-to-rank model — search quality will '
+        + 'fall back to lexical-only ranking. Refusing fail-open.',
+      );
+    }
+  }
   const [previousRuntimeStateContents, previousRuntimeNlMappingsContents] = await Promise.all([
     readOptionalTextFile(args.runtimeStatePath),
     readOptionalTextFile(args.runtimeNlMappingsPath),
@@ -653,10 +773,13 @@ async function run(): Promise<void> {
   const previousManifest = previousRuntimeState !== undefined
     ? await loadManifest(previousRuntimeState.manifestPath)
     : undefined;
-
-  if (previousManifest !== undefined) {
-    await assertPreparedRollbackFeedAvailable(previousManifest);
-  }
+  const previousPreparedManifest = previousManifest !== undefined
+    ? await ensurePreparedRollbackFeedAvailable({
+      manifest: previousManifest,
+      manifestPath: previousRuntimeState!.manifestPath,
+      fixtureRepoRoot: fixtureRoot,
+    })
+    : undefined;
 
   const publishLock = await acquireSnapshotPublishLock();
   let runtimeState: Awaited<ReturnType<typeof publishRuntimeSubstrates>> | undefined;
@@ -668,14 +791,22 @@ async function run(): Promise<void> {
         manifest: built.manifest,
         manifestPath: built.manifestPath,
         fixtureRepoRoot: fixtureRoot,
+        previousPreparedManifest,
       });
+      const artifactCoverage = await assertSnapshotArtifactCriticalWineTypeCoverage(
+        manifestWithExactFeed,
+      );
+      console.log(
+        `🍇 Verified critical wine_type artifact coverage: entities=${JSON.stringify(artifactCoverage.entityCoverage)} `
+        + `vespa=${JSON.stringify(artifactCoverage.vespaCoverage)}`,
+      );
       console.log('🚦 Ensuring snapshot-bound LTR readiness');
       await ensureSnapshotBoundLtrModels({
         previousRuntimeState,
-        previousManifest,
+        previousManifest: previousPreparedManifest,
         nextManifest: manifestWithExactFeed,
         snapshotRootDir,
-        allowMissingLtr: args.allowMissingLtr,
+        allowMissingLtr,
       });
       console.log('📥 Indexing document plane into Vespa');
       await runIndexer(
@@ -700,7 +831,7 @@ async function run(): Promise<void> {
         manifestPath: built.manifestPath,
         runtimeStatePath: stagedRuntimeStatePath,
         runtimeNlMappingsPath: args.runtimeNlMappingsPath,
-        allowMissingLtr: args.allowMissingLtr,
+        allowMissingLtr,
       });
       publishState.advance('runtime_substrates_published');
       console.log('✅ Verifying search snapshot readiness');

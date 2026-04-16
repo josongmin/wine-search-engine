@@ -57,11 +57,47 @@ describe('Claude tools HTTP route', () => {
     expect(Array.isArray(body.tools)).toBe(true);
     expect(body.tools.length).toBeGreaterThan(0);
     expect(body.request_id).toEqual(expect.any(String));
+    const searchTool = body.tools.find((tool): tool is Record<string, unknown> => {
+      return typeof tool === 'object' && tool !== null && (tool as { name?: unknown }).name === 'search_wines';
+    });
+    expect(searchTool).toBeDefined();
+    expect(searchTool?.input_schema).toEqual(expect.objectContaining({
+      type: 'object',
+      required: ['query'],
+    }));
   });
 
   it('POST /v1/claude-tools delegates to the adaptive executor', async () => {
     executeWithFallback.mockResolvedValueOnce({
-      result: { ok: true },
+      result: {
+        query_type: 'search',
+        engine_decision: {
+          decision_status: 'resolved',
+          next_action: 'return_result',
+          route: 'entity',
+          decision_confidence: 0.9,
+          confidence_semantics: 'calibrated_decision_confidence',
+          decision_trace_ref: 'decision:v1:short_entity:1111111111111111111111111111111111111111111111111111111111111111',
+          decision_snapshot: {
+            snapshot_id: 'snapshot-123',
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            response_contract_version: 'search_response_v1',
+            feature_flags: {},
+          },
+        },
+        results: [],
+        meta: {
+          request_id: 'req-123',
+          query_time_ms: 5,
+          route: 'entity',
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+        },
+      },
     });
 
     const response = await app.inject({
@@ -77,17 +113,21 @@ describe('Claude tools HTTP route', () => {
     expect(response.statusCode).toBe(200);
     expect(executeWithFallback).toHaveBeenCalledWith(
       'search_wines',
-      { query: 'Opus One 2018' },
+      {
+        query: 'Opus One 2018',
+        limit: 10,
+        retrieval_mode: 'auto',
+      },
       'req-123',
     );
 
     const body = JSON.parse(response.body) as {
       tool_name: string;
-      tool_result: { ok: boolean };
+      tool_result: { query_type: string };
       request_id: string;
     };
     expect(body.tool_name).toBe('search_wines');
-    expect(body.tool_result.ok).toBe(true);
+    expect(body.tool_result.query_type).toBe('search');
     expect(body.request_id).toBe('req-123');
   });
 
@@ -122,5 +162,49 @@ describe('Claude tools HTTP route', () => {
     expect(body.error.message).toBe('An unexpected error occurred.');
     expect(body.error.retryable).toBe(false);
     expect(body.error.request_id).toBe('req-failed-123');
+  });
+
+  it('POST /v1/claude-tools rejects placeholder tool input at the route boundary', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/claude-tools',
+      headers: { 'x-request-id': 'req-invalid-123' },
+      payload: {
+        tool_name: 'search_wines',
+        tool_input: { query: '__TO_BE_FILLED__' },
+        request_id: 'req-invalid-123',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(executeWithFallback).not.toHaveBeenCalled();
+    const body = JSON.parse(response.body) as {
+      error: { code: string; message: string; request_id: string };
+    };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toContain('placeholder');
+    expect(body.error.request_id).toBe('req-invalid-123');
+  });
+
+  it('POST /v1/claude-tools rejects unknown tool_input fields at the route boundary', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/claude-tools',
+      payload: {
+        tool_name: 'search_wines',
+        tool_input: {
+          query: 'Opus One 2018',
+          unexpected: true,
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(executeWithFallback).not.toHaveBeenCalled();
+    const body = JSON.parse(response.body) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toContain('unexpected');
   });
 });

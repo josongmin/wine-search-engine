@@ -311,6 +311,9 @@ pnpm run eval:noisy:validate
 ```bash
 pnpm run benchmark:quick       # --profile quick: 20개, judge off
 pnpm run benchmark:standard    # 80개, judge off (--no-judge)
+pnpm run benchmark:messy       # live noisy-entity eval + messy-search agent 레인 (dev server 필요)
+pnpm run benchmark:messy:entity # live noisy-entity eval: typo / abbreviation / mixed-language entity 복원
+pnpm run benchmark:messy:agent  # messy-search agent profile: gift / mood / colloquial / code-switch 질의
 pnpm run bench:run             # 80개, judge on (표준 프로파일 + judge)
 pnpm run benchmark:nightly     # nightly 프로파일, judge on·3 samples (매우 김)
 pnpm run bench:agent           # --profile 없음 → 코퍼스 전체, judge on (비용 큼; 보통은 위 프로파일 사용)

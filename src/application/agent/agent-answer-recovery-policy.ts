@@ -11,6 +11,7 @@ import {
   getLastGroundingObservationText,
   hasGroundingToolObservations,
 } from './agent-grounding-observation-policy.js';
+import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/semantic-style-query-terms.js';
 
 const defaultLog = bootstrapLogger.child({ component: 'AgentAnswerRecoveryPolicy' });
 
@@ -53,18 +54,6 @@ function appendRecoverySearchClauses(
   baseQuery: string,
   input: Record<string, unknown>,
 ): string {
-  const renderSemanticStyleQueryTerm = (style: string): string => {
-    switch (style) {
-      case 'crowd_pleasing':
-        return 'crowd pleasing';
-      case 'screw_cap':
-        return 'screw cap';
-      case 'off_dry':
-        return 'off dry';
-      default:
-        return style;
-    }
-  };
   const clauses: string[] = [];
   for (const grape of asStringArray(input['exclude_grapes']) ?? []) {
     clauses.push(`not ${grape}`);
@@ -76,14 +65,10 @@ function appendRecoverySearchClauses(
   if (maxPriceKrw !== undefined) {
     clauses.push(`${maxPriceKrw}원 이하`);
   }
-  const styles = asStringArray(input['styles']) ?? [];
-  if (styles.length > 0) {
-    clauses.push(...[...new Set(styles)].map(renderSemanticStyleQueryTerm));
-  }
-  const style = asNonEmptyString(input['style']);
-  if (style !== undefined && styles.length === 0) {
-    clauses.push(renderSemanticStyleQueryTerm(style));
-  }
+  clauses.push(...resolveSemanticStyleQueryTerms({
+    style: asNonEmptyString(input['style']),
+    styles: asStringArray(input['styles']),
+  }));
   const certification = asNonEmptyString(input['certification']);
   if (certification !== undefined) {
     clauses.push(certification);

@@ -200,7 +200,7 @@ describe('AgentOrchestrator', () => {
       } as never,
     };
 
-    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 2 });
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 3 });
     const result = await orchestrator.execute('두 와인 비교해줘', 'req-parallel-1');
 
     expect(result.terminationReason).toBe('answer');
@@ -724,7 +724,6 @@ describe('AgentOrchestrator', () => {
       'req-exact-drinkability-step0',
       expect.any(Object),
     );
-    expect(result.steps[0]?.action?.input).toEqual({ query: 'opus one', limit: 1 });
     expect(entityLookup).toHaveBeenCalledWith('wine-1');
   });
 

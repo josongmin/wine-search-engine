@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { z } from 'zod';
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
@@ -164,6 +165,29 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
 
 export function parseManifest(raw: string, _filePath: string): SearchSnapshotManifest {
   const parsed: unknown = JSON.parse(raw);
+  const asRecord = typeof parsed === 'object' && parsed !== null
+    ? parsed as Record<string, unknown>
+    : undefined;
+  const artifacts = typeof asRecord?.['artifacts'] === 'object' && asRecord['artifacts'] !== null
+    ? asRecord['artifacts'] as Record<string, unknown>
+    : undefined;
+  const counts = typeof asRecord?.['counts'] === 'object' && asRecord['counts'] !== null
+    ? asRecord['counts'] as Record<string, unknown>
+    : undefined;
+  const hashes = typeof asRecord?.['hashes'] === 'object' && asRecord['hashes'] !== null
+    ? asRecord['hashes'] as Record<string, unknown>
+    : undefined;
+
+  if (artifacts !== undefined && artifacts['vespaFeedNdjson'] === undefined) {
+    artifacts['vespaFeedNdjson'] = path.join(path.dirname(_filePath), 'vespa-feed.ndjson');
+  }
+  if (counts !== undefined && counts['vespaFeed'] === undefined) {
+    counts['vespaFeed'] = counts['documents'];
+  }
+  if (hashes !== undefined && hashes['vespaFeed'] === undefined) {
+    hashes['vespaFeed'] = hashes['documents'];
+  }
+
   return SearchSnapshotManifestSchema.parse(parsed);
 }
 

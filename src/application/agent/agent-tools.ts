@@ -10,9 +10,31 @@
  */
 
 import { z } from 'zod';
-import { coercePositiveInt, coerceNonNegativeInt, coerceFiniteNumber } from '../../domain/shared/utils/zod-coerce.js';
+import { coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
+import {
+  buildEntityIdToolField,
+  buildFoodPairingFieldShape,
+  buildSearchToolQueryField,
+  buildSearchToolFieldShape,
+  sanitizeOptionalToolNulls,
+  validateSearchToolVintageRange,
+} from '../search/search-tool-contract.js';
+import {
+  buildFoodPairingColorClause,
+  resolveFoodPairingBudgetKrw,
+} from '../search/food-pairing-tool-policy.js';
+import {
+  appendStructuredQueryClauses,
+  buildSearchToolSoftClauses,
+} from '../search/search-tool-query-policy.js';
+import { buildSearchToolRetrievalCoreQuery } from '../search/search-tool-retrieval-core.js';
+import {
+  applySearchToolBudgetResultPolicy,
+  applySearchToolNegationResultPolicy,
+  collectSearchToolNegationTerms,
+} from '../search/search-tool-result-policy.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
@@ -31,18 +53,16 @@ import type {
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
+import type { CorpusCardinalityCache } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
-import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
-import { stripExactEntityMetadataSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
-import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';
-import { parseSpans, resolveOverlaps, type Span } from '../../domain/attribute/service/span-parser.js';
-import { resolveEntity } from '../../domain/attribute/service/entity-resolver.js';
-import { Transliterator } from '../../domain/alias/service/transliterator.js';
-import { WINE_TYPE_DETECTION_PATTERNS } from '../../domain/query/model/wine-type-patterns.js';
 import {
-  buildAgentQueryExecutionContract,
-  isExactMetadataEntityLookupCandidate,
-} from './agent-query-execution-contract.js';
+  SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
+  SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
+  SEARCH_TOOL_WANTS_DIVERSITY_RE,
+  executeSearchWithTypedWineDiversityDiscovery,
+  shouldRunTypedWineDiversityDiscovery,
+  withWineTypeFilter,
+} from '../search/search-tool-diversity.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -54,21 +74,8 @@ const SEARCH_QUERY_MAX_LEN = MAX_QUERY_LENGTH;
 const SEARCH_LIMIT_MAX = 20;
 /** Max KRW price the agent can filter on (~100M KRW, safely above any real wine). */
 const MAX_PRICE_KRW_BOUND = 100_000_000;
-/** Max USD price for legacy `max_price` field: MAX_PRICE_KRW_BOUND / KRW_PER_USD_APPROXIMATE.
- * Prevents unbounded numeric input from LLM (e.g. 1e10) before the KRW conversion. */
-const MAX_PRICE_USD_BOUND = Math.ceil(MAX_PRICE_KRW_BOUND / KRW_PER_USD_APPROXIMATE); // ≈ 74_075
 /** Top-N results shown in the observation string (controls context window usage). */
 const SUMMARY_TOP_N = 3;
-/** Diversity intent면 최소 이 정도 후보를 받아야 타입/스타일 분산을 실제로 볼 수 있다. */
-const DIVERSITY_MIN_SEARCH_LIMIT = 5;
-/**
- * Open-ended diversity queries ("다양하게", "실패 없는 선물용") need typed candidate
- * discovery across the mainstream wine-type axis when the user did not pin a
- * color. This is an explicit route for diversity intent, not a fallback.
- */
-const DIVERSITY_DISCOVERY_WINE_TYPES = ['white', 'sparkling', 'red'] as const;
-/** Per-type candidate ceiling for typed diversity discovery. */
-const DIVERSITY_DISCOVERY_LIMIT_PER_TYPE = 3;
 /**
  * Max lineage `(source_system:source_record_id)` pairs per wine in the pipe-delimited
  * observation text — keeps agent context bounded; full list is in GROUNDING_JSON.
@@ -83,87 +90,25 @@ const MAX_OBSERVATION_CHARS = 2_000;
 // Input schemas (same as tool-schemas.ts — reusing patterns)
 // ---------------------------------------------------------------------------
 
-/** Minimum vintage year for filter (no wines before this exist). */
-const VINTAGE_FILTER_MIN = 1600;
-/** Maximum vintage year for filter (future vintages not yet produced). */
-const VINTAGE_FILTER_MAX = 2100;
-/** Maximum length for style/certification filter strings (e.g. "oaked", "biodynamic"). */
-const STYLE_FILTER_MAX_LEN = 50;
-/** Maximum count of semantic style hints on a single search request. */
-const STYLE_FILTER_MAX_COUNT = 5;
-/** Max length for individual exclude_grapes / exclude_regions / country / appellation strings.
- *  Longest known appellation: "Vino Nobile di Montepulciano" (28 chars); 100 gives ample headroom. */
-const FILTER_STRING_MAX_LEN = 100;
-/** Max count of exclude_grapes / exclude_regions array items.
- *  Practical limit: a search with >10 exclusions is degenerate and likely a data error. */
-const EXCLUDE_FILTER_MAX_COUNT = 10;
-
-/**
- * Placeholder patterns that LLMs sometimes emit instead of real values.
- * Caught at schema validation to prevent multi-step reasoning failures where
- * the agent "invents" an id template instead of copying a real id from prior
- * tool results. Observed patterns in bench logs: __TO_BE_FILLED__,
- * <top_result_entity_id>, {{id}}, TBD, TODO, PLACEHOLDER.
- */
-const PLACEHOLDER_PATTERN = /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
-
 const SearchInputSchema = z.object({
-  query: z.string()
-    .min(1)
-    .max(SEARCH_QUERY_MAX_LEN)
-    .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
-      message: 'query cannot be a placeholder. Use actual search terms.',
-    }),
-  // coercePositiveInt accepts both number and numeric string (LLMs emit "10" instead of 10).
-  // CLAUDE.md: LLM tool call inputs MUST NOT use .strict() — LLMs emit extra fields.
-  limit: coercePositiveInt.pipe(z.number().int().min(1).max(SEARCH_LIMIT_MAX)).optional(),
-  retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
-  /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]).
-   *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
-  exclude_grapes: z.array(z.string().trim().min(1).max(FILTER_STRING_MAX_LEN)).max(EXCLUDE_FILTER_MAX_COUNT).optional(),
-  /** Countries/regions to exclude (e.g. ["France", "프랑스"]).
-   *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
-  exclude_regions: z.array(z.string().trim().min(1).max(FILTER_STRING_MAX_LEN)).max(EXCLUDE_FILTER_MAX_COUNT).optional(),
-  /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
-  // min(1): 0원은 유효한 예산이 아님. LLM이 0을 emit하면 price post-filter가 lenient
-  // fallback을 트리거해 가격 미입력 와인 전체를 반환하는 silent no-op이 된다.
-  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(MAX_PRICE_KRW_BOUND)).optional(),
-  // ── Structured Vespa filters (direct YQL, bypass NL extraction) ──
-  /** Wine type filter: red, white, rosé, sparkling, etc. */
-  wine_type: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
-  /** Country filter (English canonical name). */
-  country: z.string().trim().min(1).max(FILTER_STRING_MAX_LEN).optional(),
-  /** Minimum vintage year (inclusive). */
-  vintage_min: coercePositiveInt.pipe(z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX)).optional(),
-  /** Maximum vintage year (inclusive). */
-  vintage_max: coercePositiveInt.pipe(z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX)).optional(),
-  /** Appellation filter (e.g. "Pauillac", "Chianti Classico"). */
-  appellation: z.string().trim().min(1).max(FILTER_STRING_MAX_LEN).optional(),
-  /** Style filter (e.g. "oaked", "unoaked", "light", "full"). */
-  style: z.string().trim().min(1).max(STYLE_FILTER_MAX_LEN).optional(),
-  /** Multiple semantic style hints for queries carrying more than one preference axis. */
-  styles: z.array(z.string().trim().min(1).max(STYLE_FILTER_MAX_LEN)).max(STYLE_FILTER_MAX_COUNT).optional(),
-  /** Certification filter (e.g. "organic", "biodynamic"). */
-  certification: z.string().trim().min(1).max(STYLE_FILTER_MAX_LEN).optional(),
-  /** When true, activate diversity dedup to spread results across grapes/regions/styles.
-   *  Use when user says "다양하게", "각각", "종류별로", "different styles", etc. */
-  want_diversity: z.boolean().optional(),
+  query: buildSearchToolQueryField({ maxLen: SEARCH_QUERY_MAX_LEN }),
+  ...buildSearchToolFieldShape({
+    limitMax: SEARCH_LIMIT_MAX,
+    maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
+  }),
 }).superRefine((data, ctx) => {
-  // Cross-field invariant: vintage_min must not exceed vintage_max.
-  // Each field is valid individually, but vintage_min=2020 vintage_max=1990 would
-  // produce an impossible Vespa YQL range filter that silently returns 0 results.
-  if (data.vintage_min != null && data.vintage_max != null && data.vintage_min > data.vintage_max) {
-    ctx.addIssue({
-      path: ['vintage_max'],
-      code: 'custom',
-      message: `vintage_max (${data.vintage_max}) must be >= vintage_min (${data.vintage_min})`,
-    });
-  }
+  validateSearchToolVintageRange(data, ctx);
 });
 
 const CompareInputSchema = z.object({
-  query_a: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
-  query_b: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
+  query_a: buildSearchToolQueryField({
+    maxLen: SEARCH_QUERY_MAX_LEN,
+    requiredMessage: 'Query A must not be empty',
+  }),
+  query_b: buildSearchToolQueryField({
+    maxLen: SEARCH_QUERY_MAX_LEN,
+    requiredMessage: 'Query B must not be empty',
+  }),
 });
 
 /** Max length for entity_id to prevent unbounded strings reaching Vespa GET / NL parser.
@@ -175,28 +120,16 @@ const DRINKING_WINDOW_MIN_YEAR = MIN_PRODUCED_VINTAGE_YEAR;
 const DRINKING_WINDOW_MAX_YEAR = MAX_PRODUCED_VINTAGE_YEAR;
 
 const DrinkingWindowInputSchema = z.object({
-  entity_id: z.string()
-    .min(1)
-    .max(ENTITY_ID_MAX_LEN)
-    .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
-      message: 'entity_id cannot be a placeholder. Copy the canonical entity_id from a prior search_wines result (e.g. "opus-one-2018").',
-    }),
+  entity_id: buildEntityIdToolField({ maxLen: ENTITY_ID_MAX_LEN }),
   target_year: coercePositiveInt.pipe(z.number().int().min(DRINKING_WINDOW_MIN_YEAR).max(DRINKING_WINDOW_MAX_YEAR)).optional(),
 });
 
-/** Max food description length — prevents unbounded strings in the food pairing query.
- * Food pairing queries are short (e.g. "steak", "파스타"); 200 chars is generous. */
-const FOOD_MAX_LEN = 200;
-
-const FoodPairingInputSchema = z.object({
-  food: z.string().min(1).max(FOOD_MAX_LEN),
-  /** Budget in Korean Won (KRW). Use this instead of USD amounts. */
-  // min(1): SearchInputSchema와 동일 이유 — 0원은 price filter를 무력화함.
-  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(MAX_PRICE_KRW_BOUND)).optional(),
-  /** Legacy USD price field — accepted for backwards compat but converted internally. */
-  max_price: coerceFiniteNumber.pipe(z.number().finite().min(1).max(MAX_PRICE_USD_BOUND)).optional(),
-  color: z.enum(['red', 'white', 'rosé', 'sparkling', 'both']).optional(),
-});
+const FoodPairingInputSchema = z.object(
+  buildFoodPairingFieldShape({
+    foodRequiredMessage: 'String must contain at least 1 character(s)',
+    maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Tool result type
@@ -226,8 +159,6 @@ interface AgentToolInnerResult {
   readonly rawResult: unknown;
   readonly structuredOutput: ToolCallStructuredOutput;
 }
-
-type SearchWineType = NonNullable<z.infer<typeof SearchInputSchema>['wine_type']>;
 
 export interface AgentToolExecutionOptions {
   readonly abortSignal?: AbortSignal | undefined;
@@ -276,6 +207,9 @@ export interface AgentToolDeps {
   readonly drinkingWindowEntityLookup?: (
     id: CanonicalEntityId,
   ) => Promise<RetrievalDrinkingWindowProjection | undefined>;
+  /** Corpus cardinality cache for distinguishing corpus exhaustion from query specificity.
+   *  When undefined, all 0-result responses are tagged as `unreliable` (legacy behavior). */
+  readonly corpusCardinality?: CorpusCardinalityCache | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,8 +233,6 @@ export function isKnownTool(name: string): boolean {
 
 /** Minimum number of detected constraint types to emit the staged-search hint. */
 const MIN_CONSTRAINTS_FOR_STAGED_HINT = 3;
-/** Bare entity transliteration applies only to short (<=4 token) search cores. */
-const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
 
 /**
  * Minimum result count to classify retrieval as "reliable".
@@ -322,11 +254,6 @@ const MIN_RESULTS_FOR_RELIABLE_QUALITY = 3;
  * with the security gate constant.
  */
 const MAX_ENRICHED_QUERY_LEN = MAX_QUERY_LENGTH; // 500 — must match security gate
-
-/** Regex for diversity-intent detection. Korean included → /u flag required (rule 8).
- *  Word boundaries use (?:^|[^\p{L}\p{N}])…(?=$|[^\p{L}\p{N}]) instead of \b so
- *  Korean and accented Latin chars are matched correctly (rule 8: no \b on non-ASCII). */
-const WANTS_DIVERSITY_RE = /(?:^|[^\p{L}\p{N}])(?:diverse|different|다른|다르게|각각|variety)(?=$|[^\p{L}\p{N}])/iu;
 
 /**
  * Keyword → label pairs for constraint detection.
@@ -376,364 +303,6 @@ function detectConstraintKeywords(query: string): readonly string[] {
     }
   }
   return found;
-}
-
-// ---------------------------------------------------------------------------
-// Negation term extraction (for post-filter in search_wines)
-// ---------------------------------------------------------------------------
-
-/**
- * Korean negation suffixes that follow the term being excluded.
- * Pattern: <term><whitespace?><suffix>
- * Uses Unicode-aware matchAll (no \b) per CLAUDE.md rule 8.
- */
-const KOREAN_NEGATION_SUFFIX_RE = /(\S+)\s*(?:빼고|제외하고|제외|말고|아닌|없는|빼)/gu;
-
-/**
- * Korean negation prefixes that precede the term being excluded.
- * Pattern: <prefix><whitespace><term>
- * Uses Unicode-aware matchAll (no \b) per CLAUDE.md rule 8.
- * 비 (non-), 안 쓴 (not using), 대신 (instead of) are prefix-style negations.
- */
-const KOREAN_NEGATION_PREFIX_RE = /(?:비\s+|안\s+쓴\s+|대신\s+)(\S+)/gu;
-
-/**
- * English/Latin negation prefix pattern.
- * Captures the term following "not", "without", "exclude", "no", "skip", "non-".
- * Uses \p{L}\p{N} character classes instead of \b to handle accented Latin/non-ASCII.
- */
-const ENGLISH_NEGATION_RE = /(?:not|without|exclude|no|skip|non-)\s+([\p{L}\p{N}][^,\n]*?)(?=\s*,|\s+and\s|\s*$)/giu;
-
-function extractNegationTerms(query: string): readonly string[] {
-  const terms: string[] = [];
-
-  // Korean negation suffixes: X 빼고, X 제외, X 제외하고, X 말고, X 아닌, X 없는, X 빼
-  for (const m of query.matchAll(KOREAN_NEGATION_SUFFIX_RE)) {
-    const term = m[1]?.trim() ?? '';
-    if (term.length > 0) terms.push(term);
-  }
-
-  // Korean negation prefixes: 비 X, 안 쓴 X, 대신 X
-  for (const m of query.matchAll(KOREAN_NEGATION_PREFIX_RE)) {
-    const term = m[1]?.trim() ?? '';
-    if (term.length > 0) terms.push(term);
-  }
-
-  // English negation: not X, without X, exclude X, no X, skip X, non-X
-  for (const m of query.matchAll(ENGLISH_NEGATION_RE)) {
-    const term = m[1]?.trim() ?? '';
-    if (term.length > 0) terms.push(term);
-  }
-
-  return [...new Set(terms.map((t) => t.toLowerCase()))];
-}
-
-/**
- * Additional EntitySummary fields checked for negation post-filter in search_wines.
- * Excludes `canonicalLabel` (checked separately) and `grapes` (iterated separately).
- * Only fields actually present on EntitySummary are listed here.
- * Module-scope to avoid per-call allocation (deterministic, never changes).
- */
-const NEGATION_ENTITY_STRING_FIELDS: ReadonlyArray<'region' | 'producer' | 'appellation'> = [
-  'region', 'producer', 'appellation',
-] as const;
-
-function appendStructuredQueryClauses(
-  baseQuery: string,
-  clauses: readonly string[],
-): string {
-  if (clauses.length === 0) {
-    return baseQuery;
-  }
-  // When baseQuery is empty (clauses exceeded MAX_ENRICHED_QUERY_LEN and
-  // base was dropped), omit the leading ", " to avoid malformed queries
-  // like ", not Cabernet, not Merlot".
-  if (baseQuery.length === 0) {
-    return clauses.join(', ');
-  }
-  return `${baseQuery}, ${clauses.join(', ')}`;
-}
-
-function buildStructuredSearchClauses(input: {
-  readonly exclude_grapes?: readonly string[] | undefined;
-  readonly exclude_regions?: readonly string[] | undefined;
-  readonly max_price_krw?: number | undefined;
-  readonly style?: string | undefined;
-  readonly styles?: readonly string[] | undefined;
-  readonly certification?: string | undefined;
-}): readonly string[] {
-  const clauses: string[] = [];
-
-  const renderSemanticStyleQueryTerm = (style: string): string => {
-    switch (style) {
-      case 'crowd_pleasing':
-        return 'crowd pleasing';
-      case 'screw_cap':
-        return 'screw cap';
-      case 'off_dry':
-        return 'off dry';
-      default:
-        return style;
-    }
-  };
-  for (const grape of input.exclude_grapes ?? []) {
-    clauses.push(`not ${grape}`);
-  }
-  for (const region of input.exclude_regions ?? []) {
-    clauses.push(`not ${region}`);
-  }
-  if (input.max_price_krw !== undefined) {
-    clauses.push(`${input.max_price_krw}원 이하`);
-  }
-  // style and certification are soft text hints — they are NOT Vespa hard filters.
-  // style values in the index are compound ("medium red", "bold red") so exact-match
-  // filtering on agent-emitted values like "light" or "oaked" always returns 0 hits.
-  // certification maps to boolean fields (organic, biodynamic) not a string field.
-  const styles = input.styles !== undefined && input.styles.length > 0
-    ? [...new Set(input.styles)]
-    : input.style !== undefined
-      ? [input.style]
-      : [];
-  for (const style of styles) {
-    clauses.push(renderSemanticStyleQueryTerm(style));
-  }
-  if (input.certification !== undefined) {
-    clauses.push(input.certification);
-  }
-  return clauses;
-}
-
-function pairingTagToSemanticTerm(tag: PairingTag): string {
-  return tag.replace(/_/gu, ' ');
-}
-
-function wineTypeToSemanticTerm(
-  wineType: z.infer<typeof SearchInputSchema>['wine_type'],
-): string | undefined {
-  if (wineType === undefined) return undefined;
-  return wineType === 'rosé' ? 'rose' : wineType;
-}
-
-function buildLexicalNucleus(
-  queryViews: ReturnType<typeof buildNormalizedQueryViews>,
-  rawQuery: string,
-): string | undefined {
-  const transliterated = queryViews.transliterated?.trim();
-  if (transliterated !== undefined && transliterated.length > 0) {
-    return transliterated;
-  }
-  const punctuationStripped = queryViews.punctuationStripped.trim();
-  if (punctuationStripped.length > 0) {
-    return punctuationStripped;
-  }
-  const trimmedRawQuery = rawQuery.trim();
-  return trimmedRawQuery.length > 0 ? trimmedRawQuery : undefined;
-}
-
-function resolveCanonicalEntityTerms(
-  queryViews: ReturnType<typeof buildNormalizedQueryViews>,
-): readonly string[] {
-  const lookupQueries = [
-    ...new Set<string>([
-      queryViews.strict,
-      queryViews.punctuationStripped,
-      ...(queryViews.transliterated !== undefined
-        ? [queryViews.transliterated]
-        : []),
-    ]),
-  ];
-  const canonicals: string[] = [];
-  const seen = new Set<string>();
-
-  for (const lookupQuery of lookupQueries) {
-    for (const span of parseSpans(lookupQuery)) {
-      const romanized = Transliterator.romanizeWineTerm(span.text);
-      if (romanized === undefined) {
-        continue;
-      }
-      const canonical = romanized.trim().toLowerCase();
-      if (canonical.length === 0 || seen.has(canonical)) {
-        continue;
-      }
-      seen.add(canonical);
-      canonicals.push(canonical);
-    }
-
-    const resolvedSpans = resolveOverlaps(
-      parseSpans(lookupQuery).map((span) => ({
-        span,
-        resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
-      })),
-    )
-      .filter(
-        (
-          entry,
-        ): entry is {
-          span: Span;
-          resolved: NonNullable<ReturnType<typeof resolveEntity>>;
-        } => entry.resolved !== null,
-      )
-      .filter((entry) => entry.resolved.entityType !== 'wine_type');
-
-    for (const entry of resolvedSpans) {
-      const canonical = entry.resolved.canonicalValue.trim().toLowerCase();
-      if (canonical.length === 0 || seen.has(canonical)) {
-        continue;
-      }
-      seen.add(canonical);
-      canonicals.push(canonical);
-    }
-  }
-
-  return canonicals;
-}
-
-function isResolvedEntityRepresentedByStructuredFilters(
-  entity: ReturnType<typeof resolveEntity>,
-  input: z.infer<typeof SearchInputSchema>,
-): boolean {
-  if (entity === null) return false;
-  const canonical = entity.canonicalValue.toLowerCase();
-  switch (entity.entityType) {
-    case 'wine_type': {
-      const structuredWineType = wineTypeToSemanticTerm(input.wine_type);
-      return structuredWineType !== undefined && canonical === structuredWineType.toLowerCase();
-    }
-    case 'country':
-      return input.country?.trim().toLowerCase() === canonical;
-    case 'appellation':
-      return input.appellation?.trim().toLowerCase() === canonical;
-    default:
-      return false;
-  }
-}
-
-function buildRetrievalCoreQuery(
-  input: z.infer<typeof SearchInputSchema>,
-): string {
-  const queryContract = buildAgentQueryExecutionContract(input.query);
-  const normalizedQuery = queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query)
-    ? stripExactEntityMetadataSuffix(input.query)
-    : input.query;
-  const queryViews = buildNormalizedQueryViews(normalizedQuery);
-  const tokenCount = queryViews.punctuationStripped.length === 0
-    ? 0
-    : queryViews.punctuationStripped.split(/\s+/u).length;
-  const pairingTags = [
-    ...new Set<PairingTag>([
-      ...extractAllPairingConstraints(input.query),
-      ...extractAllPairingConstraints(queryViews.punctuationStripped),
-      ...(queryViews.transliterated !== undefined
-        ? extractAllPairingConstraints(queryViews.transliterated)
-        : []),
-    ]),
-  ];
-  const hasPositiveStructuredFilters =
-    input.wine_type !== undefined
-    || input.country !== undefined
-    || input.appellation !== undefined
-    || input.vintage_min !== undefined
-    || input.vintage_max !== undefined;
-
-  if (pairingTags.length === 0 && !hasPositiveStructuredFilters) {
-    const canonicalEntityTerms = resolveCanonicalEntityTerms(queryViews);
-    if (queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query) && canonicalEntityTerms.length > 0) {
-      return [...canonicalEntityTerms].sort((a, b) => b.length - a.length)[0]!;
-    }
-    if (tokenCount > 0 && tokenCount <= SHORT_BARE_ENTITY_QUERY_MAX_TOKENS && canonicalEntityTerms.length === 1) {
-      return canonicalEntityTerms[0]!;
-    }
-    if (
-      queryViews.transliterated !== undefined &&
-      queryViews.transliterated !== queryViews.punctuationStripped &&
-      tokenCount > 0 &&
-      tokenCount <= SHORT_BARE_ENTITY_QUERY_MAX_TOKENS
-    ) {
-      return queryViews.transliterated;
-    }
-    return normalizedQuery;
-  }
-
-  const semanticTerms: string[] = [];
-  const seen = new Set<string>();
-  let hasEntitySemanticTerm = false;
-  const add = (value: string | undefined): void => {
-    const trimmed = value?.trim();
-    if (trimmed === undefined || trimmed.length === 0) return;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    semanticTerms.push(trimmed);
-  };
-
-  const lookupQueries = [
-    ...new Set<string>([
-      queryViews.punctuationStripped,
-      ...(queryViews.transliterated !== undefined
-        ? [queryViews.transliterated]
-        : []),
-    ]),
-  ];
-
-  for (const lookupQuery of lookupQueries) {
-    const resolvedSpans = resolveOverlaps(
-      parseSpans(lookupQuery).map((span) => ({
-        span,
-        resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
-      })),
-    )
-      .filter(
-        (
-          entry,
-        ): entry is {
-          span: Span;
-          resolved: NonNullable<ReturnType<typeof resolveEntity>>;
-        } => entry.resolved !== null,
-      )
-      .filter(
-        (entry) => !isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input),
-      );
-
-    for (const entry of resolvedSpans) {
-      if (entry.resolved.entityType === 'wine_type' && input.wine_type !== undefined) {
-        continue;
-      }
-      hasEntitySemanticTerm = true;
-      add(entry.resolved.canonicalValue.toLowerCase());
-    }
-  }
-
-  for (const tag of pairingTags) {
-    add(pairingTagToSemanticTerm(tag));
-  }
-
-  // Preserve the unresolved lexical nucleus when structured filters exist but
-  // no semantic anchor survived reconstruction. Without this, rare entity /
-  // product-concept queries collapse into generic facet text such as
-  // `red wine`, erasing the only exact lexical substrate retrieval still has.
-  if (!hasEntitySemanticTerm && pairingTags.length === 0 && hasPositiveStructuredFilters) {
-    add(buildLexicalNucleus(queryViews, input.query));
-  }
-
-  // Preserve structured wine_type as a hard filter, but avoid duplicating it
-  // into the retrieval-core text when the query already has a canonicalized
-  // entity prior (e.g. "까쇼 추천해줘" -> Cabernet Sauvignon). Duplicating
-  // `red` / `white` in that case distorts planner intent toward pure facet
-  // filtering even though the request is still a semantic recommendation.
-  if (!hasEntitySemanticTerm) {
-    add(wineTypeToSemanticTerm(input.wine_type));
-  }
-
-  if (semanticTerms.length === 0) {
-    return normalizedQuery;
-  }
-
-  const hasWineToken = semanticTerms.some((term) => /(?:^|[^\p{L}\p{N}])wine(?=$|[^\p{L}\p{N}])/iu.test(term));
-  if (!hasWineToken) {
-    semanticTerms.push('wine');
-  }
-
-  return semanticTerms.join(' ');
 }
 
 /** Agent mapping version for structured filter provenance. */
@@ -792,25 +361,6 @@ function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): reado
   // field returns 0 hits. Certification is appended as a text hint to the query.
 
   return filters;
-}
-
-function collectExcludedTerms(input: {
-  readonly query: string;
-  readonly exclude_grapes?: readonly string[] | undefined;
-  readonly exclude_regions?: readonly string[] | undefined;
-}): readonly string[] {
-  const structuredTerms = [
-    ...(input.exclude_grapes ?? []),
-    ...(input.exclude_regions ?? []),
-  ];
-  return [
-    ...new Set(
-      [
-        ...extractNegationTerms(input.query),
-        ...structuredTerms.map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0),
-      ],
-    ),
-  ];
 }
 
 /**
@@ -954,21 +504,6 @@ export async function executeAgentToolsBatch(
   );
 }
 
-/**
- * Strip null values from LLM tool inputs before Zod validation.
- * LLMs routinely emit {"max_price_krw": null} for optional fields they don't
- * intend to set. Zod's .optional() accepts undefined but rejects null, causing
- * "Expected number, received null" parse failures. Stripping nulls here lets
- * the schema stay strict (no .nullable()) while tolerating LLM output quirks.
- */
-function stripNulls(input: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(input)) {
-    if (v !== null) result[k] = v;
-  }
-  return result;
-}
-
 function buildDrinkingWindowToolResult(
   entity: RetrievalDrinkingWindowProjection,
   targetYear: number,
@@ -1004,20 +539,6 @@ function buildDrinkingWindowToolResult(
   };
 }
 
-function queryMentionsWineType(query: string): boolean {
-  return WINE_TYPE_DETECTION_PATTERNS.some((pattern) => pattern.test(query));
-}
-
-function shouldRunTypedDiversityDiscovery(
-  parsed: z.infer<typeof SearchInputSchema>,
-  wantsDiversity: boolean,
-): boolean {
-  if (!wantsDiversity) return false;
-  if (parsed.wine_type !== undefined) return false;
-  if (queryMentionsWineType(parsed.query)) return false;
-  return true;
-}
-
 function buildSearchRequestForAgentQuery(
   query: string,
   limit: number | undefined,
@@ -1034,84 +555,6 @@ function buildSearchRequestForAgentQuery(
   };
 }
 
-function withWineTypeFilter(
-  filters: readonly NormalizedConstraint[],
-  wineType: SearchWineType,
-): readonly NormalizedConstraint[] {
-  return [
-    ...filters.filter((filter) => filter.attribute !== 'wine_type'),
-    {
-      attribute: 'wine_type',
-      operator: '=',
-      value: wineType,
-      source_phrase: wineType,
-      confidence: 1.0,
-      mapping_version: 'agent_tool_diversity_v1',
-    } satisfies NormalizedConstraint,
-  ];
-}
-
-function mergeDiverseSearchResults(
-  responses: readonly SearchResponseV1[],
-  limit: number,
-): readonly SearchResponseV1['results'][number][] {
-  const byId = new Map<string, SearchResponseV1['results'][number]>();
-  for (const response of responses) {
-    for (const result of response.results) {
-      const existing = byId.get(result.entity.entityId);
-      if (
-        existing === undefined
-        || (typeof result.relevanceScore === 'number'
-          && typeof existing.relevanceScore === 'number'
-          && result.relevanceScore > existing.relevanceScore)
-      ) {
-        byId.set(result.entity.entityId, result);
-      }
-    }
-  }
-
-  const candidates = [...byId.values()]
-    .sort((left, right) => right.relevanceScore - left.relevanceScore);
-
-  if (candidates.length <= limit) {
-    return candidates;
-  }
-
-  const selected: SearchResponseV1['results'][number][] = [];
-  const selectedIds = new Set<string>();
-  const coveredAxes = new Set<string>();
-
-  while (selected.length < limit) {
-    let bestCandidate: SearchResponseV1['results'][number] | undefined;
-    let bestNoveltyScore = -1;
-    let bestRelevanceScore = Number.NEGATIVE_INFINITY;
-
-    for (const candidate of candidates) {
-      if (selectedIds.has(candidate.entity.entityId)) continue;
-      const noveltyScore = buildDiversityAxes(candidate)
-        .reduce((score, axis) => score + (coveredAxes.has(axis) ? 0 : 1), 0);
-      const relevanceScore = candidate.relevanceScore;
-      if (
-        noveltyScore > bestNoveltyScore
-        || (noveltyScore === bestNoveltyScore && relevanceScore > bestRelevanceScore)
-      ) {
-        bestCandidate = candidate;
-        bestNoveltyScore = noveltyScore;
-        bestRelevanceScore = relevanceScore;
-      }
-    }
-
-    if (bestCandidate === undefined) break;
-    selected.push(bestCandidate);
-    selectedIds.add(bestCandidate.entity.entityId);
-    for (const axis of buildDiversityAxes(bestCandidate)) {
-      coveredAxes.add(axis);
-    }
-  }
-
-  return selected;
-}
-
 async function executeAgentToolInner(
   toolName: string,
   input: Record<string, unknown>,
@@ -1121,7 +564,7 @@ async function executeAgentToolInner(
 ): Promise<AgentToolInnerResult> {
   switch (toolName) {
     case 'search_wines': {
-      const parseResult = SearchInputSchema.safeParse(stripNulls(input));
+      const parseResult = SearchInputSchema.safeParse(sanitizeOptionalToolNulls(input));
       if (!parseResult.success) {
         const msg = parseResult.error.issues.map((i) => i.message).join(', ');
         return {
@@ -1131,7 +574,7 @@ async function executeAgentToolInner(
         };
       }
       const parsed = parseResult.data;
-      const retrievalCoreQuery = buildRetrievalCoreQuery(parsed);
+      const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(parsed);
 
       // Enrich query with structured exclusion/price params so the existing
       // search pipeline (which understands natural language) applies them.
@@ -1139,7 +582,7 @@ async function executeAgentToolInner(
       // clauses (exclusions, price) are never silently truncated mid-token.
       // Slicing the enriched string after appending can cut e.g. "not Cabern"
       // (malformed exclusion) — truncating base-first guarantees clauses intact.
-      const clauses = buildStructuredSearchClauses(parsed);
+      const clauses = buildSearchToolSoftClauses(parsed);
       const clausesStr = clauses.length > 0 ? `, ${clauses.join(', ')}` : '';
       // Truncate BASE query so that the full enriched string never exceeds the limit.
       // `Math.max(0, ...)` prevents negative slice when clauses alone exceed the limit;
@@ -1153,14 +596,15 @@ async function executeAgentToolInner(
       const enrichedQuery = enrichedRaw.length > MAX_ENRICHED_QUERY_LEN
         ? enrichedRaw.slice(0, MAX_ENRICHED_QUERY_LEN)
         : enrichedRaw;
+      const diversityDiscoveryQuery = enrichedQuery;
 
       // Build structured hard constraints from agent params (price, exclusions)
       // so they flow directly to Vespa as YQL filters.
       const structuredFilters = buildStructuredFilters(parsed);
 
-      const wantsDiversity = parsed.want_diversity === true || WANTS_DIVERSITY_RE.test(parsed.query);
+      const wantsDiversity = parsed.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(parsed.query);
       const effectiveLimit = wantsDiversity
-        ? Math.max(parsed.limit ?? DIVERSITY_MIN_SEARCH_LIMIT, DIVERSITY_MIN_SEARCH_LIMIT)
+        ? Math.max(parsed.limit ?? SEARCH_TOOL_DIVERSITY_MIN_LIMIT, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
         : parsed.limit;
 
       const baseRequest = buildSearchRequestForAgentQuery(
@@ -1171,48 +615,26 @@ async function executeAgentToolInner(
       );
 
       let response: SearchResponseV1 | ComparisonSearchResponse;
-      if (shouldRunTypedDiversityDiscovery(parsed, wantsDiversity)) {
-        const typedResponses = await Promise.all(
-          DIVERSITY_DISCOVERY_WINE_TYPES.map(async (wineType) =>
-            deps.searchUseCase.execute(
-              buildSearchRequestForAgentQuery(
-                enrichedQuery,
-                DIVERSITY_DISCOVERY_LIMIT_PER_TYPE,
-                parsed.retrieval_mode,
-                withWineTypeFilter(structuredFilters, wineType),
-              ),
-              `${requestId}:diversity:${wineType}`,
-              { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
-            ),
+      response = await executeSearchWithTypedWineDiversityDiscovery({
+        searchUseCase: deps.searchUseCase,
+        requestId,
+        fallbackRequest: baseRequest,
+        effectiveLimit: effectiveLimit ?? SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
+        shouldRun: shouldRunTypedWineDiversityDiscovery({
+          query: parsed.query,
+          wantsDiversity,
+          wineType: parsed.wine_type,
+        }),
+        buildTypedRequest: (wineType) =>
+          buildSearchRequestForAgentQuery(
+            diversityDiscoveryQuery,
+            SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
+            parsed.retrieval_mode,
+            withWineTypeFilter(structuredFilters, wineType, 'agent_tool_diversity_v1'),
           ),
-        );
-
-        const successfulTypedResponses = typedResponses.filter(
-          (typed): typed is SearchResponseV1 => typed.queryType === 'search',
-        );
-        if (successfulTypedResponses.length > 0) {
-          const primaryTypedResponse = successfulTypedResponses[0]!;
-          response = {
-            ...primaryTypedResponse,
-            results: mergeDiverseSearchResults(
-              successfulTypedResponses,
-              effectiveLimit ?? DIVERSITY_MIN_SEARCH_LIMIT,
-            ),
-          };
-        } else {
-          response = await deps.searchUseCase.execute(
-            baseRequest,
-            requestId,
-            { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
-          );
-        }
-      } else {
-        response = await deps.searchUseCase.execute(
-          baseRequest,
-          requestId,
-          { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
-        );
-      }
+        ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+        ...(deps.corpusCardinality !== undefined ? { corpusCardinality: deps.corpusCardinality } : {}),
+      });
 
       if (response.queryType === 'comparison') {
         return {
@@ -1224,43 +646,11 @@ async function executeAgentToolInner(
 
       // Negation post-filter: exclude results whose identity fields contain negated terms.
       // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
-      const negTerms = collectExcludedTerms(parsed);
+      const negTerms = collectSearchToolNegationTerms(parsed);
       if (negTerms.length > 0) {
-        // Pre-compile all negation regexes once — not inside the filter callback —
-        // to avoid O(results × terms) RegExp compilations per search call.
-        // Previously new RegExp() was called inside the filter, creating up to
-        // SEARCH_LIMIT_MAX × EXCLUDE_FILTER_MAX_COUNT (20 × 10 = 200) objects per call.
-        const negRegs = negTerms.map((term) => {
-          const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
-        });
-        const filtered = response.results.filter((r) => {
-          const entity = r.entity;
-          // Build a single lowercased string from all identity-bearing fields.
-          const parts: string[] = [entity.canonicalLabel.toLowerCase()];
-          // Grape varieties array
-          for (const g of entity.grapes ?? []) {
-            parts.push(g.toLowerCase());
-          }
-          // Additional EntitySummary string fields from NEGATION_ENTITY_STRING_FIELDS
-          for (const field of NEGATION_ENTITY_STRING_FIELDS) {
-            const v = entity[field];
-            if (typeof v === 'string' && v.length > 0) {
-              parts.push(v.toLowerCase());
-            }
-          }
-          const check = parts.join(' ');
-          // Use Unicode-aware word boundary so "cabernet" doesn't match "cabernet franc"
-          // as a full-word exclusion. \b is ASCII-only and silently fails on non-ASCII.
-          return !negRegs.some((re) => re.test(check));
-        });
-        if (filtered.length < response.results.length) {
-          const filteredResponse = { ...response, results: filtered } as typeof response;
-          if (filtered.length === 0) {
-            // All results matched the negation filter — return the unfiltered results with
-            // a strong instruction to pick non-matching wines. This prevents the agent from
-            // giving up with "찾을 수 없었습니다" when the index has relevant wines.
-            // The agent MUST still exclude the negated items from its final recommendation.
+        const negationFiltered = applySearchToolNegationResultPolicy(response, negTerms);
+        if (negationFiltered.filteredCount > 0) {
+          if (negationFiltered.fallbackToUnfiltered) {
             return {
               observation:
                 `[NEGATION_FALLBACK: All ${response.results.length} result(s) matched excluded terms (${negTerms.join(', ')}). `
@@ -1275,15 +665,16 @@ async function executeAgentToolInner(
               },
             };
           }
+          response = negationFiltered.response;
           return {
             observation:
-              summarizeSearchResults(filteredResponse, wantsDiversity)
-              + `\n[Excluded ${response.results.length - filtered.length} result(s) matching negation terms: ${negTerms.join(', ')}]`,
-            rawResult: filteredResponse,
+              summarizeSearchResults(response, wantsDiversity)
+              + `\n[Excluded ${negationFiltered.filteredCount} result(s) matching negation terms: ${negTerms.join(', ')}]`,
+            rawResult: response,
             structuredOutput: {
               kind: 'search_result_set',
-              resultSet: filteredResponse.results,
-              resultCount: filteredResponse.results.length,
+              resultSet: response.results,
+              resultCount: response.results.length,
             },
           };
         }
@@ -1294,57 +685,22 @@ async function executeAgentToolInner(
       // price filter — max_price_krw is a text hint — so out-of-range results can
       // slip through. This post-filter gives the agent accurate budget-aware results.
       if (parsed.max_price_krw !== undefined) {
-        const budgetKrw = parsed.max_price_krw;
-        // Parse a priceRange string into KRW. Returns null when the format is
-        // unrecognised (e.g. EUR, GBP) — those are kept to avoid false drops.
-        // Returns undefined when price data is absent.
-        const parsePriceAsKrw = (pr: string | undefined): number | null | undefined => {
-          if (pr === undefined) return undefined; // no price data
-          // USD: "$120" or "$1,234.56"
-          const usdMatch = /^\$(\d[\d,]*(?:\.\d+)?)$/.exec(pr);
-          if (usdMatch !== null) {
-            const priceUsd = Number(usdMatch[1]!.replace(/,/g, ''));
-            if (!Number.isFinite(priceUsd)) return null; // parse failure → keep
-            return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
-          }
-          // KRW: "120,000원" or "₩120000"
-          const krwMatch = /^(?:₩|)(\d[\d,]*)(?:\s*원)?$/u.exec(pr.trim());
-          if (krwMatch !== null) {
-            const priceKrw = Number(krwMatch[1]!.replace(/,/g, ''));
-            if (!Number.isFinite(priceKrw)) return null; // parse failure → keep
-            return priceKrw;
-          }
-          return null; // unrecognised currency (EUR, GBP, etc.) → keep
-        };
-        const priceFiltered = response.results.filter((r) => {
-          const priceKrw = parsePriceAsKrw(r.entity.priceRange);
-          if (priceKrw === undefined) return false; // no price data → drop (strict budget)
-          if (priceKrw === null) return true; // unrecognisable format → keep (benefit of doubt)
-          return priceKrw <= budgetKrw;
-        });
-        // If strict filtering removed ALL results (sparse price_usd in index),
-        // fall back to keeping wines with no price data so the agent can still
-        // return something and the user gets guidance rather than an empty list.
-        const strictEmpty = priceFiltered.length === 0 && response.results.length > 0;
-        if (strictEmpty) {
-          const lenient = response.results.filter((r) => {
-            const priceKrw = parsePriceAsKrw(r.entity.priceRange);
-            if (priceKrw === undefined || priceKrw === null) return true; // no data / unknown currency
-            return priceKrw <= budgetKrw;
-          });
-          response = {
-            ...response,
-            results: lenient,
-          } as typeof response;
-        } else if (priceFiltered.length < response.results.length) {
-          response = { ...response, results: priceFiltered } as typeof response;
-        }
+        response = applySearchToolBudgetResultPolicy(
+          response,
+          parsed.max_price_krw,
+          { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+        ).response;
       }
 
-      // Zero-result escalation: guide the agent to relax constraints one by one.
+      // Zero-result escalation: guide the agent to relax constraints one by one,
+      // or signal corpus exhaustion when the wine type has very few entries.
       if (response.results.length === 0) {
+        const corpusLimited = deps.corpusCardinality?.isCorpusLimited(parsed.wine_type) ?? false;
+        const tag = corpusLimited
+          ? `[RETRIEVAL_QUALITY: corpus_limited — this wine type has very few entries in the database]\n이 타입의 와인이 데이터베이스에 매우 적습니다. 검색어: "${parsed.query}". 재검색하지 말고, 가능한 범위에서 답변하거나 더 넓은 카테고리를 제안하세요.`
+          : `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`;
         return {
-          observation: `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
+          observation: tag,
           rawResult: response,
           structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
         };
@@ -1391,7 +747,7 @@ async function executeAgentToolInner(
     }
 
     case 'compare_wines': {
-      const parseResult = CompareInputSchema.safeParse(stripNulls(input));
+      const parseResult = CompareInputSchema.safeParse(sanitizeOptionalToolNulls(input));
       if (!parseResult.success) {
         const msg = parseResult.error.issues.map((i) => i.message).join(', ');
         return {
@@ -1423,7 +779,7 @@ async function executeAgentToolInner(
     }
 
     case 'check_drinking_window': {
-      const parseResult = DrinkingWindowInputSchema.safeParse(stripNulls(input));
+      const parseResult = DrinkingWindowInputSchema.safeParse(sanitizeOptionalToolNulls(input));
       if (!parseResult.success) {
         const msg = parseResult.error.issues.map((i) => i.message).join(', ');
         return {
@@ -1504,7 +860,7 @@ async function executeAgentToolInner(
     }
 
     case 'get_food_pairings': {
-      const parseResult = FoodPairingInputSchema.safeParse(stripNulls(input));
+      const parseResult = FoodPairingInputSchema.safeParse(sanitizeOptionalToolNulls(input));
       if (!parseResult.success) {
         const msg = parseResult.error.issues.map((i) => i.message).join(', ');
         return {
@@ -1514,24 +870,11 @@ async function executeAgentToolInner(
         };
       }
       const parsed = parseResult.data;
-      // Prefer explicit KRW budget; fall back to legacy USD field (converted).
-      const budgetKrw = parsed.max_price_krw
-        ?? (
-          parsed.max_price !== undefined
-            ? (() => {
-                const converted = parsed.max_price * KRW_PER_USD_APPROXIMATE;
-                // Guard against overflow (e.g. max_price = Number.MAX_VALUE → Infinity).
-                // Clamp to MAX_PRICE_KRW_BOUND so the query never contains "Infinity원 이하".
-                return Number.isFinite(converted)
-                  ? Math.min(Math.round(converted), MAX_PRICE_KRW_BOUND)
-                  : undefined;
-              })()
-            : undefined
-        );
-      const colorClause = parsed.color !== undefined && parsed.color !== 'both'
-        ? ` ${parsed.color}`
-        : '';
-      const queryBase = `wines for ${parsed.food}${colorClause}`;
+      const budgetKrw = resolveFoodPairingBudgetKrw(parsed, {
+        krwPerUsd: KRW_PER_USD_APPROXIMATE,
+        maxPriceKrwCap: MAX_PRICE_KRW_BOUND,
+      });
+      const queryBase = `wines for ${parsed.food}${buildFoodPairingColorClause(parsed)}`;
       const query = appendStructuredQueryClauses(
         queryBase,
         budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],

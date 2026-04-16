@@ -7,6 +7,7 @@ import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../../src/shared/constants/so
 
 function makeSearchResponse(
   results: SearchResponseV1['results'],
+  overrides?: Partial<SearchResponseV1>,
 ): SearchResponseV1 {
   return {
     queryType: 'search',
@@ -25,6 +26,7 @@ function makeSearchResponse(
         planner_version: '1',
         feature_flags: {},
       },
+      ...(overrides?.engineDecision ?? {}),
     },
     results,
     meta: {
@@ -33,7 +35,13 @@ function makeSearchResponse(
       route: 'hybrid',
       version: '1.0.0',
       engine_schema_version: 'search_response_v1',
+      ...(overrides?.meta ?? {}),
     },
+    ...(overrides?.counterfactuals !== undefined ? { counterfactuals: overrides.counterfactuals } : {}),
+    ...(overrides?.clarification !== undefined ? { clarification: overrides.clarification } : {}),
+    ...(overrides?.retrievalMode !== undefined ? { retrievalMode: overrides.retrievalMode } : {}),
+    ...(overrides?.resultType !== undefined ? { resultType: overrides.resultType } : {}),
+    ...(overrides?.parsedConstraints !== undefined ? { parsedConstraints: overrides.parsedConstraints } : {}),
   };
 }
 
@@ -193,6 +201,96 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('wine_type: red');
   });
 
+  it('merges runtime metadata across typed diversity responses instead of leaking the first shard', async () => {
+    vi.mocked(mockSearchUseCase.execute)
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-white-1', canonicalLabel: 'White A', type: 'wine', wineType: 'white' },
+            relevanceScore: 0.82,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: [], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+            evidenceItems: [{ type: 'identity', source: 'test', contribution: 'positive', strength: 'high', provenance: 'test' }],
+          },
+        ], {
+          engineDecision: {
+            decisionTraceRef: 'trace-white',
+            runtimeCorrelationRef: 'req-123:diversity:white',
+            degradationReasons: ['typed_probe_partial'],
+          },
+          meta: {
+            requestId: 'req-123:diversity:white',
+            runtimeCorrelationRef: 'req-123:diversity:white',
+            queryTimeMs: 15,
+            executionMode: 'degraded',
+            degradationReasons: ['typed_probe_partial'],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-spark-1', canonicalLabel: 'Sparkling A', type: 'wine', wineType: 'sparkling' },
+            relevanceScore: 0.91,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: [], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+            evidenceItems: [{ type: 'identity', source: 'test', contribution: 'positive', strength: 'high', provenance: 'test' }],
+          },
+        ], {
+          engineDecision: {
+            decisionTraceRef: 'trace-sparkling',
+            runtimeCorrelationRef: 'req-123:diversity:sparkling',
+          },
+          meta: {
+            requestId: 'req-123:diversity:sparkling',
+            runtimeCorrelationRef: 'req-123:diversity:sparkling',
+            queryTimeMs: 42,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-red-1', canonicalLabel: 'Red A', type: 'wine', wineType: 'red' },
+            relevanceScore: 0.85,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: [], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+            evidenceItems: [{ type: 'identity', source: 'test', contribution: 'positive', strength: 'high', provenance: 'test' }],
+          },
+        ], {
+          engineDecision: {
+            decisionTraceRef: 'trace-red',
+            runtimeCorrelationRef: 'req-123:diversity:red',
+          },
+          meta: {
+            requestId: 'req-123:diversity:red',
+            runtimeCorrelationRef: 'req-123:diversity:red',
+            queryTimeMs: 28,
+          },
+        }),
+      );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      { query: '선물용 다양하게 추천', want_diversity: true, limit: 5 },
+      deps,
+      'req-123',
+    );
+
+    const raw = result.rawResult as SearchResponseV1;
+    expect(raw.meta.requestId).toBe('req-123');
+    expect(raw.meta.runtimeCorrelationRef).toBe('req-123');
+    expect(raw.meta.queryTimeMs).toBe(42);
+    expect(raw.meta.executionMode).toBe('degraded');
+    expect(raw.meta.degradationReasons).toEqual(['typed_probe_partial']);
+    expect(raw.engineDecision.runtimeCorrelationRef).toBe('req-123');
+    expect(raw.engineDecision.decisionTraceRef).toBe('trace-sparkling');
+    expect(raw.results[0]?.entity.wineType).toBe('sparkling');
+  });
+
   it('skips typed diversity discovery when query already mentions wine types', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -206,6 +304,33 @@ describe('executeAgentTool', () => {
     );
 
     expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves semantic style and price clauses inside typed diversity discovery queries', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '와인 잘 모르는 사람한테 선물할 거',
+        styles: ['approachable', 'crowd_pleasing'],
+        max_price_krw: 50000,
+        want_diversity: true,
+        limit: 5,
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledTimes(3);
+    for (const [request] of vi.mocked(mockSearchUseCase.execute).mock.calls) {
+      expect(request?.query).toContain('와인 잘 모르는 사람한테 선물할 거');
+      expect(request?.query).toContain('approachable');
+      expect(request?.query).toContain('crowd pleasing');
+      expect(request?.query).toContain('50000원 이하');
+    }
   });
 
   it('rewrites structured multi-course queries to pairing-focused retrieval cores', async () => {
@@ -473,6 +598,32 @@ describe('executeAgentTool', () => {
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
     expect(request?.query).toContain('wines for 쌈싸먹을 때');
     expect(request?.query).not.toContain('both');
+  });
+
+  it('rejects placeholder food values for get_food_pairings', async () => {
+    const result = await executeAgentTool(
+      'get_food_pairings',
+      { food: 'TBD' },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('Invalid input for get_food_pairings');
+    expect(result.observation).toMatch(/placeholder/i);
+    expect(result.rawResult).toBeNull();
+  });
+
+  it('rejects placeholder compare queries', async () => {
+    const result = await executeAgentTool(
+      'compare_wines',
+      { query_a: '__TO_BE_FILLED__', query_b: 'Barolo' },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('Invalid input for compare_wines');
+    expect(result.observation).toMatch(/placeholder/i);
+    expect(result.rawResult).toBeNull();
   });
 
   it('post-filters results using structured exclusion inputs', async () => {
@@ -960,5 +1111,53 @@ describe('executeAgentTool', () => {
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
     expect(request?.query.length).toBeLessThanOrEqual(500);
+  });
+
+  describe('search_wines corpus_limited signal', () => {
+    it('emits corpus_limited when wine type has few entities', async () => {
+      const { InMemoryCorpusCardinalityCache } = await import(
+        '../../../../src/domain/retrieval/service/corpus-cardinality-cache.js'
+      );
+      const cache = new InMemoryCorpusCardinalityCache(
+        new Map([['red', 7000], ['sparkling', 50]]),
+      );
+      const mockSearch = vi.fn().mockResolvedValue(makeSearchResponse([]));
+      const depsWithCardinality: AgentToolDeps = {
+        ...deps,
+        searchUseCase: { execute: mockSearch } as unknown as SearchExecutorPort,
+        corpusCardinality: cache,
+      };
+      const result = await executeAgentTool(
+        'search_wines',
+        { query: '프로세코 추천', wine_type: 'sparkling' },
+        depsWithCardinality,
+        'req-123',
+      );
+      expect(result.observation).toContain('RETRIEVAL_QUALITY: corpus_limited');
+      expect(result.observation).not.toContain('unreliable');
+    });
+
+    it('emits unreliable for large corpus with 0 results', async () => {
+      const { InMemoryCorpusCardinalityCache } = await import(
+        '../../../../src/domain/retrieval/service/corpus-cardinality-cache.js'
+      );
+      const cache = new InMemoryCorpusCardinalityCache(
+        new Map([['red', 7000]]),
+      );
+      const mockSearch = vi.fn().mockResolvedValue(makeSearchResponse([]));
+      const depsWithCardinality: AgentToolDeps = {
+        ...deps,
+        searchUseCase: { execute: mockSearch } as unknown as SearchExecutorPort,
+        corpusCardinality: cache,
+      };
+      const result = await executeAgentTool(
+        'search_wines',
+        { query: '2025 Opus One' },
+        depsWithCardinality,
+        'req-123',
+      );
+      expect(result.observation).toContain('RETRIEVAL_QUALITY: unreliable');
+      expect(result.observation).not.toContain('corpus_limited');
+    });
   });
 });

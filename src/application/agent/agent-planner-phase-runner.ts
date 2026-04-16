@@ -19,6 +19,8 @@ import {
   AGENT_LLM_STEP_TIMEOUT_MESSAGE,
   AgentPlannerPhaseResultPolicy,
 } from './agent-planner-phase-result-policy.js';
+import { containsHangul } from '../../domain/shared/utils/hangul.js';
+import { isExactMetadataEntityLookupCandidate } from './agent-query-execution-contract.js';
 
 const log = bootstrapLogger.child({ component: 'AgentPlannerPhaseRunner' });
 const STEP_LOG_PREVIEW_CHARS = 500;
@@ -72,6 +74,57 @@ function buildPlannerLoopMessages(
     });
   }
   return messages;
+}
+
+function enforceSearchQueryLanguageAnchor(
+  originalQuery: string,
+  parsed: LlmAction,
+): LlmAction {
+  if (!containsHangul(originalQuery)) {
+    return parsed;
+  }
+
+  const originalTrimmed = originalQuery.trim();
+  if (originalTrimmed.length === 0) {
+    return parsed;
+  }
+
+  const enforceActionInput = (input: Record<string, unknown>): Record<string, unknown> => {
+    const query = typeof input['query'] === 'string' ? input['query'].trim() : undefined;
+    if (query === undefined || query.length === 0) {
+      return input;
+    }
+    if (containsHangul(query)) {
+      return input;
+    }
+    if (isExactMetadataEntityLookupCandidate(query)) {
+      return input;
+    }
+    return { ...input, query: originalTrimmed };
+  };
+
+  if (parsed.action?.tool === 'search_wines') {
+    return {
+      ...parsed,
+      action: {
+        ...parsed.action,
+        input: enforceActionInput(parsed.action.input),
+      },
+    };
+  }
+
+  if (parsed.actions !== undefined) {
+    return {
+      ...parsed,
+      actions: parsed.actions.map((action) =>
+        action.tool === 'search_wines'
+          ? { ...action, input: enforceActionInput(action.input) }
+          : action
+      ),
+    };
+  }
+
+  return parsed;
 }
 
 interface AgentPlannerPhaseRunnerDeps {
@@ -185,7 +238,7 @@ export class AgentPlannerPhaseRunner {
       return null;
     }
 
-    const parsed = parseLlmOutput(llmResult.text);
+    const parsed = enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text));
     if (state.steps.length === 0) {
       log.info(
         {

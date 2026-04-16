@@ -108,6 +108,38 @@ describe('WineToolExecutor', () => {
     executionTimeMs: 200,
   };
 
+  function makeSearchResponse(
+    entityId: string,
+    wineType: string,
+    relevanceScore: number,
+    overrides?: Partial<SearchResponseV1>,
+  ): SearchResponseV1 {
+    return {
+      ...mockSearchResponse,
+      ...overrides,
+      engineDecision: {
+        ...mockSearchResponse.engineDecision,
+        ...overrides?.engineDecision,
+      },
+      results: [
+        {
+          ...mockSearchResponse.results[0]!,
+          entity: {
+            ...mockSearchResponse.results[0]!.entity,
+            entityId,
+            canonicalLabel: entityId,
+            wineType,
+          },
+          relevanceScore,
+        },
+      ],
+      meta: {
+        ...mockSearchResponse.meta,
+        ...overrides?.meta,
+      },
+    };
+  }
+
   beforeEach(() => {
     mockSearchUseCase = {
       execute: vi.fn(),
@@ -149,7 +181,7 @@ describe('WineToolExecutor', () => {
 
       expect(mockSearchUseCase.execute).toHaveBeenCalledOnce();
       const [request, requestId] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toBe('Bordeaux red wines');
+      expect(request.query).toBe('bordeaux');
       expect(requestId).toBe('req-123');
       expect(result).toEqual(mockSearchResponse);
     });
@@ -184,6 +216,22 @@ describe('WineToolExecutor', () => {
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       expect(request.options?.mode).toBe('mixed');
+    });
+
+    it('normalizes exact metadata Korean queries to a bare entity retrieval core', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        { query: '오푸스원 지금 마시기 좋아?', country: 'United States' },
+        'req-exact-metadata-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toBe('opus one wine');
+      expect(request.filters).toEqual([
+        expect.objectContaining({ attribute: 'country', value: 'United States' }),
+      ]);
     });
 
     it('should forward semantic style hints, budget text, and structured filters into SearchRequest', async () => {
@@ -226,26 +274,276 @@ describe('WineToolExecutor', () => {
       ]));
     });
 
-    it('should reject invalid query (empty)', async () => {
-      await expect(async () => {
-        await executor.execute('search_wines', { query: '', limit: 10 }, 'req-123');
-      }).rejects.toThrow();
+    it('should coerce numeric strings for structured search fields', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: 'structured string inputs',
+          limit: '5',
+          max_price_krw: '50000',
+          vintage_min: '2020',
+          vintage_max: '2022',
+        },
+        'req-string-structured-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.limit).toBe(5);
+      expect(request.query).toContain('50000원 이하');
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2020 }),
+        expect.objectContaining({ attribute: 'vintage_year', operator: '<=', value: 2022 }),
+      ]));
     });
 
-    it('should reject invalid limit (>50)', async () => {
-      await expect(async () => {
-        await executor.execute('search_wines', { query: 'test', limit: 51 }, 'req-123');
-      }).rejects.toThrow();
+    it('strips null optional fields before validation like the agent tool path', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: 'structured null cleanup',
+          limit: null,
+          max_price_krw: null,
+          vintage_min: null,
+        },
+        'req-null-sanitize-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toBe('structured null cleanup');
+      expect(request.limit).toBe(10);
+      expect(request.filters).toBeUndefined();
     });
 
-    it('should reject invalid retrieval_mode', async () => {
-      await expect(async () => {
-        await executor.execute(
-          'search_wines',
-          { query: 'test', retrieval_mode: 'invalid' },
-          'req-123',
+    it('should prefer styles[] over style and keep semantic styles out of hard filters', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: 'gift wine',
+          style: 'ignored-style',
+          styles: ['approachable', 'crowd_pleasing', 'approachable'],
+          certification: 'organic',
+        },
+        'req-style-array-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toContain('gift wine');
+      expect(request.query).toContain('approachable');
+      expect(request.query).toContain('crowd pleasing');
+      expect(request.query).not.toContain('ignored-style');
+      expect(request.filters).toBeUndefined();
+    });
+
+    it('should run typed diversity discovery when want_diversity is true without explicit wine_type', async () => {
+      vi.mocked(mockSearchUseCase.execute)
+        .mockResolvedValueOnce(
+          makeSearchResponse('white-1', 'white', 0.88, {
+            meta: { ...mockSearchResponse.meta, requestId: 'typed-white', queryTimeMs: 21 },
+          }),
+        )
+        .mockResolvedValueOnce(
+          makeSearchResponse('sparkling-1', 'sparkling', 0.93, {
+            meta: {
+              ...mockSearchResponse.meta,
+              requestId: 'typed-sparkling',
+              queryTimeMs: 42,
+              executionMode: 'degraded',
+              degradationReasons: ['typed_probe_partial'],
+            },
+            engineDecision: {
+              ...mockSearchResponse.engineDecision,
+              decisionTraceRef: 'trace-sparkling',
+              executionMode: 'degraded',
+              degradationReasons: ['typed_probe_partial'],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          makeSearchResponse('red-1', 'red', 0.9, {
+            meta: { ...mockSearchResponse.meta, requestId: 'typed-red', queryTimeMs: 37 },
+          }),
         );
-      }).rejects.toThrow();
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: '선물용 다양하게 추천', want_diversity: true, limit: 4 },
+        'req-diverse-123',
+      );
+
+      expect(mockSearchUseCase.execute).toHaveBeenCalledTimes(3);
+      const calls = vi.mocked(mockSearchUseCase.execute).mock.calls;
+      expect(calls[0]?.[1]).toBe('req-diverse-123:diversity:white');
+      expect(calls[1]?.[1]).toBe('req-diverse-123:diversity:sparkling');
+      expect(calls[2]?.[1]).toBe('req-diverse-123:diversity:red');
+      expect(calls[0]?.[0].limit).toBe(3);
+      expect(calls[1]?.[0].limit).toBe(3);
+      expect(calls[2]?.[0].limit).toBe(3);
+      expect(calls[0]?.[0].filters).toEqual([
+        expect.objectContaining({
+          attribute: 'wine_type',
+          value: 'white',
+          mapping_version: 'claude_tool_diversity_v1',
+        }),
+      ]);
+      expect(calls[1]?.[0].filters).toEqual([
+        expect.objectContaining({
+          attribute: 'wine_type',
+          value: 'sparkling',
+          mapping_version: 'claude_tool_diversity_v1',
+        }),
+      ]);
+      expect(calls[2]?.[0].filters).toEqual([
+        expect.objectContaining({
+          attribute: 'wine_type',
+          value: 'red',
+          mapping_version: 'claude_tool_diversity_v1',
+        }),
+      ]);
+
+      expect(result).toMatchObject({
+        queryType: 'search',
+        meta: {
+          requestId: 'req-diverse-123',
+          runtimeCorrelationRef: 'req-diverse-123',
+          queryTimeMs: 42,
+          executionMode: 'degraded',
+          degradationReasons: ['typed_probe_partial'],
+        },
+        engineDecision: {
+          runtimeCorrelationRef: 'req-diverse-123',
+          decisionTraceRef: 'trace-sparkling',
+          executionMode: 'degraded',
+          degradationReasons: ['typed_probe_partial'],
+        },
+      });
+      expect((result as SearchResponseV1).results.map((item) => item.entity.entityId)).toEqual([
+        'sparkling-1',
+        'red-1',
+        'white-1',
+      ]);
+    });
+
+    it('applies the same budget post-filter policy as agent search tools', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
+        ...mockSearchResponse,
+        results: [
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-cheap',
+              canonicalLabel: 'Budget Blanc',
+              priceRange: '$60',
+            },
+          },
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-pricey',
+              canonicalLabel: 'Pricey Rouge',
+              priceRange: '$80',
+            },
+          },
+        ],
+      });
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: '10만원 이하', max_price_krw: 100_000 },
+        'req-budget-123',
+      ) as SearchResponseV1;
+
+      expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-cheap']);
+    });
+
+    it('applies negation post-filter to raw query exclusions before returning results', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
+        ...mockSearchResponse,
+        results: [
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-merlot',
+              canonicalLabel: 'Merlot Estate',
+              grapes: ['Merlot'],
+            },
+          },
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-cab',
+              canonicalLabel: 'Cabernet Reserve',
+              grapes: ['Cabernet Sauvignon'],
+            },
+          },
+        ],
+      });
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: 'red wine not Merlot' },
+        'req-negation-123',
+      ) as SearchResponseV1;
+
+      expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-cab']);
+    });
+
+    it('should skip typed diversity discovery when wine_type is already explicit', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        { query: '선물용 다양하게 추천', want_diversity: true, wine_type: 'red' },
+        'req-red-only-123',
+      );
+
+      expect(mockSearchUseCase.execute).toHaveBeenCalledTimes(1);
+      const [request, requestId] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(requestId).toBe('req-red-only-123');
+      expect(request.filters).toEqual([
+        expect.objectContaining({ attribute: 'wine_type', value: 'red' }),
+      ]);
+    });
+
+    it('returns in-band error for invalid query (empty)', async () => {
+      const result = await executor.execute('search_wines', { query: '', limit: 10 }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for search_wines'),
+      });
+    });
+
+    it('returns in-band error for invalid limit (>50)', async () => {
+      const result = await executor.execute('search_wines', { query: 'test', limit: 51 }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for search_wines'),
+      });
+    });
+
+    it('returns in-band error for invalid retrieval_mode', async () => {
+      const result = await executor.execute(
+        'search_wines',
+        { query: 'test', retrieval_mode: 'invalid' },
+        'req-123',
+      );
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for search_wines'),
+      });
+    });
+
+    it('returns in-band error for placeholder search queries', async () => {
+      const result = await executor.execute('search_wines', { query: '__TO_BE_FILLED__' }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringMatching(/placeholder/i),
+      });
     });
   });
 
@@ -256,7 +554,7 @@ describe('WineToolExecutor', () => {
       await executor.execute('get_food_pairings', { food: 'grilled salmon' }, 'req-123');
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('wine pairing for grilled salmon');
+      expect(request.query).toContain('wines for grilled salmon');
     });
 
     it('should include color in query when provided', async () => {
@@ -282,7 +580,7 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('wine pairing for ssam');
+      expect(request.query).toContain('wines for ssam');
       expect(request.query).not.toContain('both wine');
     });
 
@@ -296,7 +594,7 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('under 67500 KRW');
+      expect(request.query).toContain('67500원 이하');
     });
 
     it('should prefer max_price_krw over max_price for food pairings', async () => {
@@ -309,7 +607,7 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('under 30000 KRW');
+      expect(request.query).toContain('30000원 이하');
       expect(request.query).not.toContain('67500');
     });
 
@@ -322,10 +620,18 @@ describe('WineToolExecutor', () => {
       expect(requestId).toBe('food-req-789');
     });
 
-    it('should reject invalid food (empty)', async () => {
-      await expect(async () => {
-        await executor.execute('get_food_pairings', { food: '' }, 'req-123');
-      }).rejects.toThrow();
+    it('returns in-band error for invalid food (empty)', async () => {
+      const result = await executor.execute('get_food_pairings', { food: '' }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for get_food_pairings'),
+      });
+    });
+
+    it('returns in-band error for placeholder food values', async () => {
+      const result = await executor.execute('get_food_pairings', { food: 'TBD' }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringMatching(/placeholder/i),
+      });
     });
   });
 
@@ -342,10 +648,18 @@ describe('WineToolExecutor', () => {
       });
     });
 
-    it('should reject invalid entity_id (empty)', async () => {
-      await expect(async () => {
-        await executor.execute('check_drinking_window', { entity_id: '' }, 'req-123');
-      }).rejects.toThrow();
+    it('returns in-band error for invalid entity_id (empty)', async () => {
+      const result = await executor.execute('check_drinking_window', { entity_id: '' }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for check_drinking_window'),
+      });
+    });
+
+    it('returns in-band error for placeholder entity_id values', async () => {
+      const result = await executor.execute('check_drinking_window', { entity_id: '<top_result_entity_id>' }, 'req-123');
+      expect(result).toEqual({
+        error: expect.stringMatching(/placeholder/i),
+      });
     });
   });
 
@@ -374,24 +688,37 @@ describe('WineToolExecutor', () => {
       expect(result).toEqual(mockComparisonResponse);
     });
 
-    it('should reject invalid query_a (empty)', async () => {
-      await expect(async () => {
-        await executor.execute(
-          'compare_wines',
-          { query_a: '', query_b: 'test' },
-          'req-123',
-        );
-      }).rejects.toThrow();
+    it('returns in-band error for invalid query_a (empty)', async () => {
+      const result = await executor.execute(
+        'compare_wines',
+        { query_a: '', query_b: 'test' },
+        'req-123',
+      );
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for compare_wines'),
+      });
     });
 
-    it('should reject invalid query_b (empty)', async () => {
-      await expect(async () => {
-        await executor.execute(
-          'compare_wines',
-          { query_a: 'test', query_b: '' },
-          'req-123',
-        );
-      }).rejects.toThrow();
+    it('returns in-band error for invalid query_b (empty)', async () => {
+      const result = await executor.execute(
+        'compare_wines',
+        { query_a: 'test', query_b: '' },
+        'req-123',
+      );
+      expect(result).toEqual({
+        error: expect.stringContaining('Invalid input for compare_wines'),
+      });
+    });
+
+    it('returns in-band error for placeholder compare queries', async () => {
+      const result = await executor.execute(
+        'compare_wines',
+        { query_a: '__TO_BE_FILLED__', query_b: 'Barolo' },
+        'req-123',
+      );
+      expect(result).toEqual({
+        error: expect.stringMatching(/placeholder/i),
+      });
     });
   });
 });

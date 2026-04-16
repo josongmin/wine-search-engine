@@ -16,6 +16,7 @@ import { RETRIEVAL_MODES } from '../../../domain/query/model/retrieval-mode.js';
 import { QUERY_ROUTES } from '../../../domain/query/model/query-route.js';
 import { QUERY_CLASSES } from '../../../domain/shared/types/query-class.js';
 import { NEXT_ACTIONS } from '../../../domain/shared/types/next-action.js';
+import { RETRIEVAL_CHANNELS } from '../../../domain/retrieval/model/retrieval-channel.js';
 import {
   AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH,
   MAX_AUDIT_BLOCKER_SEED_ENTITY_IDS,
@@ -255,6 +256,121 @@ export const ParsedConstraintsExternSchema = z.object({
   unparsed: z.array(z.string()).max(MAX_SEARCH_PARSED_UNPARSED_FRAGMENTS),
 }).strict();
 
+const AnchorCandidateWireSchema = z.object({
+  surface_form: z.string().min(1),
+  normalized_form: z.string().min(1),
+  candidate_entity_ids: z.array(z.string().min(1)).max(MAX_RESOLVE_CANDIDATES),
+  lookup_variants: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS).optional(),
+  lookup_strategies: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS).optional(),
+  confidence: z.number().finite().min(0).max(1),
+  source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']),
+}).strict();
+
+const NormalizedConstraintWireSchema = z.object({
+  attribute: z.string().min(1),
+  operator: z.enum(['=', '<=', '>=', 'range', 'in', 'exclude', 'not_in']),
+  value: z.union([
+    z.string(),
+    z.number().finite(),
+    z.object({
+      min: z.number().finite(),
+      max: z.number().finite(),
+    }).strict(),
+    z.array(z.string().min(1)).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+  ]),
+  source_phrase: z.string(),
+  confidence: z.number().finite().min(0).max(1),
+  mapping_version: z.string().min(1).optional(),
+}).strict();
+
+const InterpretPolicySchema = z.object({
+  require_exact: z.boolean().optional(),
+  allow_approximate: z.boolean().optional(),
+  require_clarification: z.boolean().optional(),
+  clarification_bias: z.number().finite().min(0).optional(),
+  fallback_mode: z.enum(['hybrid', 'clarify', 'fail']).optional(),
+  policy_reason_codes: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
+}).strict();
+
+const InterpretUncertaintySchema = z.object({
+  overall: z.number().finite().min(0).max(1).optional(),
+  ambiguity_detected: z.boolean().optional(),
+  ambiguity_types: z.array(z.string().min(1)).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
+  ambiguity_severity: z.enum(['low', 'medium', 'high']).optional(),
+  decision_effect: z.enum(['trace_only', 'raise_threshold', 'force_clarify', 'block_resolve']).optional(),
+  parser_confidence: z.number().finite().min(0).max(1).optional(),
+  anchor_confidence: z.number().finite().min(0).max(1).optional(),
+  constraint_confidence: z.number().finite().min(0).max(1).optional(),
+}).strict();
+
+const RuleMatchSchema = z.object({
+  rule_id: z.string().min(1),
+  description: z.string().min(1),
+  inputs_matched: z.record(z.unknown()),
+  outcome: z.string().min(1),
+}).strict();
+
+const RuleMissSchema = z.object({
+  rule_id: z.string().min(1),
+  description: z.string().min(1),
+  failed_condition: z.string().min(1),
+}).strict();
+
+const PolicyDecisionRecordWireSchema = z.object({
+  stage: z.enum([
+    'intent_classification',
+    'route_resolution',
+    'retrieval_mode_selection',
+    'query_classification',
+    'query_class_classification',
+    'uncertainty_estimation',
+    'target_entity_inference',
+  ]),
+  input_facts: z.record(z.unknown()),
+  rules_evaluated: z.array(RuleMatchSchema).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS),
+  rejected_branches: z.array(RuleMissSchema).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS),
+  decision: z.string().min(1),
+  confidence: z.number().finite().min(0).max(1),
+  duration_ms: z.number().finite().nonnegative().optional(),
+}).strict();
+
+const CandidateDropChannelSchema = z.object({
+  channel: z.enum(RETRIEVAL_CHANNELS),
+  raw_score: z.number().finite(),
+  rank: z.number().int(),
+}).strict();
+
+const CandidateDropRecordWireSchema = z.object({
+  entity_id: z.string().min(1),
+  drop_stage: z.enum(['hard_filter', 'coarse_prune', 'assembly_dedup']),
+  drop_reason: z.string().min(1),
+  last_known_score: z.number().finite(),
+  channels: z.array(CandidateDropChannelSchema).max(MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS),
+}).strict();
+
+const RrfFusionTraceSchema = z.object({
+  query_class: z.string().min(1),
+  fusion_class: z.string().min(1),
+  rrf_k: z.number().finite(),
+  channel_weights: z.object({
+    sparse: z.number().finite(),
+    dense: z.number().finite(),
+    anchor: z.number().finite(),
+    learned_sparse: z.number().finite(),
+  }).strict(),
+  candidate_count: z.object({
+    before_fusion: z.object({
+      sparse: z.number().int().nonnegative(),
+      dense: z.number().int().nonnegative(),
+      anchor: z.number().int().nonnegative(),
+      learned_sparse: z.number().int().nonnegative().optional(),
+    }).strict(),
+    after_fusion: z.number().int().nonnegative(),
+    after_hard_filter: z.number().int().nonnegative(),
+    after_assembly: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+
 // ─── T-E5-01: AuditExtension typed surface ──────────────────────────────────
 //
 // Typed "enough" for client autocompletion and basic validation.
@@ -292,7 +408,7 @@ export const AuditExtensionSchema = z.object({
    *
    * @stability debug
    */
-  planner_policy_trace: z.array(z.unknown()).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS).optional(),
+  planner_policy_trace: z.array(PolicyDecisionRecordWireSchema).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS).optional(),
 
   /**
    * E2: Constraint resolution trace — atoms, relations, and outcomes.
@@ -315,7 +431,7 @@ export const AuditExtensionSchema = z.object({
    *
    * @stability debug
    */
-  retrieval_fusion_trace: z.unknown().optional(),
+  retrieval_fusion_trace: RrfFusionTraceSchema.optional(),
 
   /**
    * E5: Ranking delta trace — pre/post rerank positions + Kendall tau drift.
@@ -374,7 +490,7 @@ export const AuditExtensionSchema = z.object({
    *
    * @stability stable
    */
-  hard_filter_drop_log: z.array(z.unknown()).max(MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS).optional(),
+  hard_filter_drop_log: z.array(CandidateDropRecordWireSchema).max(MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS).optional(),
 
   /**
    * Request-level execution contract facts (debug/explain traces).
@@ -839,24 +955,18 @@ export const InterpretResponseSchema = z.object({
   route: z.enum(['entity', 'hybrid', 'mixed']),
   retrieval_mode: z.enum(RETRIEVAL_MODES),
   query_class: z.enum(QUERY_CLASSES),
-  anchors: z.array(z.record(z.unknown())).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
+  anchors: z.array(AnchorCandidateWireSchema).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
   constraints: z.object({
-    hard: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
-    soft: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
-    inferred: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    hard: z.array(NormalizedConstraintWireSchema).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    soft: z.array(NormalizedConstraintWireSchema).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    inferred: z.array(NormalizedConstraintWireSchema).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
   }).strict(),
   expansions: z.object({
     lexical: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
     semantic: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
   }).strict(),
-  policy: z.record(z.unknown()).refine(
-    (rec) => Object.keys(rec).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
-    { message: `policy must not exceed ${String(MAX_SEARCH_METADATA_OBJECT_KEYS)} keys` },
-  ),
-  uncertainty: z.record(z.unknown()).refine(
-    (rec) => Object.keys(rec).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
-    { message: `uncertainty must not exceed ${String(MAX_SEARCH_METADATA_OBJECT_KEYS)} keys` },
-  ),
+  policy: InterpretPolicySchema,
+  uncertainty: InterpretUncertaintySchema,
   planner_version: z.string().min(1),
   policy_rule_version: z.string().min(1),
   threshold_profile_id: z.string().min(1),

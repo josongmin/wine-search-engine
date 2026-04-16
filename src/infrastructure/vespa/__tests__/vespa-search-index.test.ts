@@ -264,6 +264,12 @@ describe('VespaSearchIndex', () => {
         searchTextEn: 'V'.repeat(800),
       },
     });
+    expect(client.query).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ 'presentation.summary': 'hit_summary' }),
+      undefined,
+      undefined,
+    );
   });
 
   it('includes aliases_noisy_recall phrase matching in sparseSearch YQL', async () => {
@@ -480,5 +486,36 @@ describe('VespaSearchIndex', () => {
     expect(capturedParams?.['ranking.features.query(structured_region_boost)']).toBe(1);
     expect(capturedParams?.['ranking.features.query(structured_grape_boost)']).toBe(1);
     expect(capturedParams?.['ranking.features.query(filter_strength)']).toBeGreaterThan(0);
+    expect(capturedParams?.['presentation.summary']).toBe('hit_summary');
+  });
+
+  it('uses hit_summary for denseSearch retrieval hits', async () => {
+    let capturedParams: Record<string, unknown> | undefined;
+    const client = {
+      query: vi.fn().mockImplementation((_yql: string, params?: Record<string, unknown>) => {
+        capturedParams = params;
+        return Promise.resolve(makeQueryResponse(['dense-summary-1']));
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await index.denseSearch([0.1, 0.2, 0.3], ['wine_type:white'], 5);
+
+    expect(capturedParams?.['presentation.summary']).toBe('hit_summary');
+  });
+
+  it('uses hit_summary for learned sparse retrieval hits', async () => {
+    let capturedParams: Record<string, unknown> | undefined;
+    const client = {
+      query: vi.fn().mockImplementation((_yql: string, params?: Record<string, unknown>) => {
+        capturedParams = params;
+        return Promise.resolve(makeQueryResponse(['learned-summary-1']));
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await index.searchLearnedSparse([{ token: 'wine', weight: 1 }], ['wine_type:sparkling'], 5);
+
+    expect(capturedParams?.['presentation.summary']).toBe('hit_summary');
   });
 });

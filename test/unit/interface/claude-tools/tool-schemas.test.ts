@@ -10,9 +10,21 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { WINE_SEARCH_TOOLS } from '../../../../src/interface/claude-tools/tool-schemas.js';
+import {
+  ClaudeToolDefinitionSchema,
+  CompareWinesInputSchema,
+  DrinkingWindowInputSchema,
+  FoodPairingInputSchema,
+  SearchToolInputSchema,
+  WINE_SEARCH_TOOLS,
+} from '../../../../src/interface/claude-tools/tool-schemas.js';
 
 describe('WINE_SEARCH_TOOLS', () => {
+  it('should be schema-valid manifest entries', () => {
+    const parsed = ClaudeToolDefinitionSchema.array().safeParse(WINE_SEARCH_TOOLS);
+    expect(parsed.success).toBe(true);
+  });
+
   it('should contain exactly 4 tools', () => {
     expect(WINE_SEARCH_TOOLS).toHaveLength(4);
   });
@@ -51,6 +63,13 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(tool.input_schema.required).toEqual(['query']);
     });
 
+    it('should require query anchors to preserve the user language instead of translating Korean intent', () => {
+      const queryProp = tool.input_schema.properties.query as any;
+      expect(queryProp.description).toContain('Preserve the user\'s original language');
+      expect(queryProp.description).toContain('do not translate Korean queries');
+      expect(queryProp.description).toContain('structured fields');
+    });
+
     it('should have limit property with 1-50 range', () => {
       const limitProp = tool.input_schema.properties.limit as any;
       expect(limitProp).toBeDefined();
@@ -85,6 +104,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.appellation?.type).toBe('string');
       expect(props.style?.type).toBe('string');
       expect(props.styles?.type).toBe('array');
+      expect(props.styles?.maxItems).toBe(5);
       expect(props.certification?.type).toBe('string');
       expect(props.want_diversity?.type).toBe('boolean');
     });
@@ -134,6 +154,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       const colorProp = tool.input_schema.properties.color as any;
       expect(colorProp).toBeDefined();
       expect(colorProp.enum).toEqual(['red', 'white', 'rosé', 'sparkling', 'both']);
+      expect(colorProp.description).toContain('legacy compatibility');
     });
   });
 
@@ -181,5 +202,38 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(tool.input_schema.properties.query_a).toBeDefined();
       expect(tool.input_schema.properties.query_b).toBeDefined();
     });
+  });
+});
+
+describe('Claude tool input schemas', () => {
+  it('search_wines should reject unknown fields at the boundary', () => {
+    const parsed = SearchToolInputSchema.safeParse({
+      query: 'Opus One 2018',
+      unexpected: true,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('get_food_pairings should reject placeholder food', () => {
+    const parsed = FoodPairingInputSchema.safeParse({
+      food: '__TO_BE_FILLED__',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('check_drinking_window should reject placeholder entity_id', () => {
+    const parsed = DrinkingWindowInputSchema.safeParse({
+      entity_id: '__TO_BE_FILLED__',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('compare_wines should reject unknown fields at the boundary', () => {
+    const parsed = CompareWinesInputSchema.safeParse({
+      query_a: 'Opus One 2018',
+      query_b: 'Sassicaia 2018',
+      extra: 'nope',
+    });
+    expect(parsed.success).toBe(false);
   });
 });

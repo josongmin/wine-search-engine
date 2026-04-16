@@ -57,6 +57,8 @@ import {
   collectConjunctivelyRequiredSlotIds,
   projectConstraintGraphForSubquery,
 } from '../../domain/query/service/project-subquery-constraint-graph.js';
+import { expandSemanticStyleRetrievalTerms } from '../../domain/query/service/semantic-style-query-terms.js';
+import type { WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 
 /**
  * ADR-015 Axis 2: per-call critic context surfaced from
@@ -285,26 +287,56 @@ function buildStructuredQueryExpansions(
 } {
   const lexical: string[] = [];
   const semantic: string[] = [];
+  const wineTypeContext = resolveWineTypeContextFromConstraints(plan.constraints.hard);
   for (const constraint of plan.constraints.hard) {
-    const phrase = retrievalValueToPhrase(constraint.value);
-    if (phrase !== undefined) {
-      lexical.push(phrase);
+    const phrases = retrievalValueToPhrases(constraint.attribute, constraint.value, wineTypeContext);
+    if (phrases.length > 0) {
+      lexical.push(...phrases);
       if (isSemanticRetrievalExpansionAttribute(constraint.attribute)) {
-        semantic.push(phrase);
+        semantic.push(...phrases);
       }
     }
   }
   for (const boost of [...retrievalPlan.softBoosts, ...retrievalPlan.inferredBoosts]) {
-    const phrase = retrievalValueToPhrase(boost.value);
-    if (phrase === undefined) {
+    const phrases = retrievalValueToPhrases(boost.attribute, boost.value, wineTypeContext);
+    if (phrases.length === 0) {
       continue;
     }
-    lexical.push(phrase);
+    lexical.push(...phrases);
     if (isSemanticRetrievalExpansionAttribute(boost.attribute)) {
-      semantic.push(phrase);
+      semantic.push(...phrases);
     }
   }
   return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
+}
+
+function isWineTypeValue(value: unknown): value is WineTypeValue {
+  return value === 'red'
+    || value === 'white'
+    || value === 'rosé'
+    || value === 'sparkling'
+    || value === 'natural'
+    || value === 'dessert'
+    || value === 'fortified'
+    || value === 'orange';
+}
+
+function resolveWineTypeContextFromConstraints(
+  constraints: readonly QueryPlanV1['constraints']['hard'][number][],
+): WineTypeValue | undefined {
+  for (const constraint of constraints) {
+    if (constraint.attribute !== 'wine_type') continue;
+    if (typeof constraint.value === 'string' && isWineTypeValue(constraint.value)) {
+      return constraint.value;
+    }
+    if (Array.isArray(constraint.value)) {
+      const matched = constraint.value.find(isWineTypeValue);
+      if (matched !== undefined) {
+        return matched;
+      }
+    }
+  }
+  return undefined;
 }
 
 function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
@@ -318,6 +350,27 @@ function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
     || attribute === 'certification'
     || attribute === 'pairing'
     || attribute === 'occasion';
+}
+
+function retrievalValueToPhrases(
+  attribute: string,
+  value: unknown,
+  wineTypeContext?: WineTypeValue,
+): readonly string[] {
+  if (attribute === 'style') {
+    if (typeof value === 'string') {
+      return expandSemanticStyleRetrievalTerms({ style: value, wineType: wineTypeContext });
+    }
+    if (Array.isArray(value)) {
+      return expandSemanticStyleRetrievalTerms({
+        styles: value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0),
+        wineType: wineTypeContext,
+      });
+    }
+  }
+
+  const phrase = retrievalValueToPhrase(value);
+  return phrase !== undefined ? [phrase] : [];
 }
 
 function retrievalValueToPhrase(value: unknown): string | undefined {
@@ -483,11 +536,12 @@ function buildStructuredQueryExpansionsFromGraph(
 } {
   const lexical: string[] = [];
   const semantic: string[] = [];
+  const wineTypeContext = resolveWineTypeContextFromGraph(graph);
   for (const node of graph.nodes) {
     if (!isSlotNode(node)) continue;
-    const phrase = retrievalValueToPhrase(node.value);
-    if (phrase === undefined) continue;
-    lexical.push(phrase);
+    const phrases = retrievalValueToPhrases(node.attribute, node.value, wineTypeContext);
+    if (phrases.length === 0) continue;
+    lexical.push(...phrases);
     if (
       node.attribute === 'region'
       || node.attribute === 'country'
@@ -500,10 +554,26 @@ function buildStructuredQueryExpansionsFromGraph(
       || node.attribute === 'pairing'
       || node.attribute === 'occasion'
     ) {
-      semantic.push(phrase);
+      semantic.push(...phrases);
     }
   }
   return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
+}
+
+function resolveWineTypeContextFromGraph(graph: ConstraintGraph): WineTypeValue | undefined {
+  for (const node of graph.nodes) {
+    if (!isSlotNode(node) || node.attribute !== 'wine_type') continue;
+    if (typeof node.value === 'string' && isWineTypeValue(node.value)) {
+      return node.value;
+    }
+    if (Array.isArray(node.value)) {
+      const matched = node.value.find(isWineTypeValue);
+      if (matched !== undefined) {
+        return matched;
+      }
+    }
+  }
+  return undefined;
 }
 
 function buildProductionSubqueryRetriever(

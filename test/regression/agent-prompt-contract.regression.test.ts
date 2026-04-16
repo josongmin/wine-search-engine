@@ -34,6 +34,24 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('"chillable", "screw_cap", "approachable", "crowd_pleasing"');
   });
 
+  it('documents the full typed tool surface for retrieval mode, orange wine, and legacy USD food budgets', () => {
+    const prompt = buildSystemMessage().content;
+
+    expect(prompt).toContain('search_wines(query, limit?, retrieval_mode?');
+    expect(prompt).toContain('retrieval_mode: "auto" | "entity" | "hybrid" | "mixed"');
+    expect(prompt).toContain('"fortified" | "dessert" | "orange" | "natural"');
+    expect(prompt).toContain('get_food_pairings(food, max_price?, max_price_krw?, color?)');
+    expect(prompt).toContain('max_price is legacy USD input; prefer max_price_krw for new calls');
+  });
+
+  it('preserves Korean search query anchors instead of translating them into English paraphrases', () => {
+    const prompt = buildSystemMessage().content;
+
+    expect(prompt).toContain('query must preserve the user\'s original language and lexical anchor');
+    expect(prompt).toContain('If the user asked in Korean, keep search_wines.query in Korean');
+    expect(prompt).toContain('Do NOT rewrite "와인 잘 모르는 사람한테 선물할 거" into English paraphrases');
+  });
+
   it('forbids synthesizing an answer from invalid tool observations', () => {
     const prompt = buildSystemMessage().content;
 

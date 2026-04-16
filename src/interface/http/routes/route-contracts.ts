@@ -13,6 +13,7 @@ import {
 } from '../schemas/search-request.schema.js';
 import {
   ComparisonSearchResponseSchema,
+  DrinkingWindowSchema,
   ErrorResponseSchema,
   InterpretResponseSchema,
   ResolveResponseSchema,
@@ -51,6 +52,13 @@ import {
   HTTP_STATUS_UNAUTHORIZED,
   MAX_AUTHENTICATED_SUBJECT_CHARS,
 } from '../constants.js';
+import {
+  ClaudeToolNameSchema,
+  CompareWinesInputSchema,
+  DrinkingWindowInputSchema,
+  FoodPairingInputSchema,
+  SearchToolInputSchema,
+} from '../../claude-tools/tool-schemas.js';
 
 type ResponseSchema = z.ZodTypeAny | null;
 type SearchRouteCapability =
@@ -85,7 +93,6 @@ const CIRCUIT_BREAKER_REGISTRY_MAX = 64;
  *  short snake_case identifiers ("llm_embedding", "vespa_query"); 128 chars
  *  is comfortably above the longest known breaker id. */
 const CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS = 128;
-const MAX_TOOL_INPUT_RECORD_KEYS = 50;
 export interface HttpRouteContract {
   readonly operationId: string;
   readonly body?: z.ZodTypeAny;
@@ -179,27 +186,78 @@ const AgentMetricsResponseSchema = z.object({
   }).strict(),
 }).strict();
 
-const ClaudeToolsExecuteRequestSchema = z.object({
-  tool_name: z.enum([
-    'search_wines',
-    'get_food_pairings',
-    'check_drinking_window',
-    'compare_wines',
-  ]),
-  tool_input: z.record(z.unknown()).refine(
-    (rec) => Object.keys(rec).length <= MAX_TOOL_INPUT_RECORD_KEYS,
-    { message: `tool_input must have at most ${MAX_TOOL_INPUT_RECORD_KEYS} keys` },
-  ).optional().default({}),
-  // request_id must be non-empty when present; regex already enforces alphanumeric+._-
-  request_id: z.string().min(1).max(MAX_AUTHENTICATED_SUBJECT_CHARS).regex(/^[a-zA-Z0-9._-]+$/).optional(),
+const ClaudeToolsRequestIdSchema = z.string()
+  .min(1)
+  .max(MAX_AUTHENTICATED_SUBJECT_CHARS)
+  .regex(/^[a-zA-Z0-9._-]+$/)
+  .optional();
+
+function withDefaultToolInput<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<T, z.output<T>, unknown> {
+  return z.preprocess((input) => input ?? {}, schema);
+}
+
+const ClaudeToolsExecuteRequestSchema = z.discriminatedUnion('tool_name', [
+  z.object({
+    tool_name: z.literal('search_wines'),
+    tool_input: withDefaultToolInput(SearchToolInputSchema),
+    request_id: ClaudeToolsRequestIdSchema,
+  }).strict(),
+  z.object({
+    tool_name: z.literal('get_food_pairings'),
+    tool_input: withDefaultToolInput(FoodPairingInputSchema),
+    request_id: ClaudeToolsRequestIdSchema,
+  }).strict(),
+  z.object({
+    tool_name: z.literal('check_drinking_window'),
+    tool_input: withDefaultToolInput(DrinkingWindowInputSchema),
+    request_id: ClaudeToolsRequestIdSchema,
+  }).strict(),
+  z.object({
+    tool_name: z.literal('compare_wines'),
+    tool_input: withDefaultToolInput(CompareWinesInputSchema),
+    request_id: ClaudeToolsRequestIdSchema,
+  }).strict(),
+]);
+
+const ClaudeToolResultErrorSchema = z.object({
+  error: z.string().min(1),
 }).strict();
 
-const ClaudeToolsExecuteResponseSchema = z.object({
-  tool_name: z.string(),
-  tool_result: z.unknown(),
-  fallback_applied: z.string().optional(),
+const ClaudeToolEnvelopeBaseSchema = {
   request_id: z.string().min(1),
+} as const;
+
+const ClaudeToolsSearchExecuteResponseSchema = z.object({
+  tool_name: z.literal('search_wines'),
+  tool_result: z.union([SearchResponseSchema, ClaudeToolResultErrorSchema]),
+  fallback_applied: z.literal('mixed').optional(),
+  ...ClaudeToolEnvelopeBaseSchema,
 }).strict();
+
+const ClaudeToolsFoodPairingsExecuteResponseSchema = z.object({
+  tool_name: z.literal('get_food_pairings'),
+  tool_result: z.union([SearchResponseSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsDrinkingWindowExecuteResponseSchema = z.object({
+  tool_name: z.literal('check_drinking_window'),
+  tool_result: z.union([DrinkingWindowSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsCompareExecuteResponseSchema = z.object({
+  tool_name: z.literal('compare_wines'),
+  tool_result: z.union([ComparisonSearchResponseSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsExecuteResponseSchema = z.union([
+  ClaudeToolsSearchExecuteResponseSchema,
+  ClaudeToolsFoodPairingsExecuteResponseSchema,
+  ClaudeToolsDrinkingWindowExecuteResponseSchema,
+  ClaudeToolsCompareExecuteResponseSchema,
+]);
 
 // Claude tools error responses now use the shared RFC-014 envelope
 // (ErrorResponseSchema). The previously hand-rolled flat shape
@@ -207,10 +265,32 @@ const ClaudeToolsExecuteResponseSchema = z.object({
 // every 4xx/5xx MUST be `{ error: { request_id, code, message, failure_reason,
 // retryable } }`. Keeping this comment as a grep target for future migrations.
 
+const ClaudeToolManifestResponsePropertySchema = z.object({
+  type: z.enum(['string', 'number', 'boolean', 'array']),
+  description: z.string().min(1),
+  enum: z.array(z.string().min(1)).min(1).optional(),
+  minimum: z.number().finite().optional(),
+  maximum: z.number().finite().optional(),
+  items: z.object({
+    type: z.literal('string'),
+  }).strict().optional(),
+  max_items: z.number().int().positive().optional(),
+}).strict();
+
+const ClaudeToolManifestResponseSchema = z.object({
+  name: ClaudeToolNameSchema,
+  description: z.string().min(1),
+  input_schema: z.object({
+    type: z.literal('object'),
+    properties: z.record(ClaudeToolManifestResponsePropertySchema),
+    required: z.array(z.string().min(1)),
+  }).strict(),
+}).strict();
+
 const ClaudeToolsListResponseSchema = z.object({
   // Bounded to CLAUDE_TOOLS_LIST_MAX — there are currently 4 tools; this cap
   // prevents unbounded growth from misconfigured or malicious server responses.
-  tools: z.array(z.unknown()).max(CLAUDE_TOOLS_LIST_MAX),
+  tools: z.array(ClaudeToolManifestResponseSchema).max(CLAUDE_TOOLS_LIST_MAX),
   request_id: z.string().min(1),
 }).strict();
 

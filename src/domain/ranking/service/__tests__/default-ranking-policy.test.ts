@@ -75,6 +75,57 @@ describe('DefaultRankingPolicy', () => {
     );
   });
 
+  it('applies wine-type diversity for recommendation mode even when queryClass is anchored_similarity', () => {
+    const policy = new DefaultRankingPolicy();
+    const results: RankedResult[] = [
+      makeResult('red-1', 1, 'red'),
+      makeResult('red-2', 2, 'red'),
+      makeResult('red-3', 3, 'red'),
+      makeResult('white-1', 4, 'white'),
+      makeResult('sparkling-1', 5, 'sparkling'),
+    ];
+
+    const output = policy.apply(results, {
+      queryClass: 'anchored_similarity',
+      effectiveRetrievalMode: 'recommendation',
+      effectiveRoute: 'mixed',
+      hasExplicitWineTypeConstraint: false,
+    });
+
+    expect(output.map((result) => String(result.entityId))).toEqual([
+      String(results[0]!.entityId),
+      String(results[1]!.entityId),
+      String(results[3]!.entityId),
+      String(results[4]!.entityId),
+      String(results[2]!.entityId),
+    ]);
+  });
+
+  it('applies wine-type diversity for anchored_similarity queryClass without explicit recommendation mode', () => {
+    const policy = new DefaultRankingPolicy();
+    const results: RankedResult[] = [
+      makeResult('red-1', 1, 'red'),
+      makeResult('red-2', 2, 'red'),
+      makeResult('red-3', 3, 'red'),
+      makeResult('white-1', 4, 'white'),
+      makeResult('sparkling-1', 5, 'sparkling'),
+    ];
+
+    const output = policy.apply(results, {
+      queryClass: 'anchored_similarity',
+      effectiveRoute: 'mixed',
+      hasExplicitWineTypeConstraint: false,
+    });
+
+    expect(output.map((result) => String(result.entityId))).toEqual([
+      String(results[0]!.entityId),
+      String(results[1]!.entityId),
+      String(results[3]!.entityId),
+      String(results[4]!.entityId),
+      String(results[2]!.entityId),
+    ]);
+  });
+
   it('promotes a missing wine type from the tail when the top window is concentrated', () => {
     const policy = new DefaultRankingPolicy();
     const results: RankedResult[] = [

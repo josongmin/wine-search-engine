@@ -34,6 +34,7 @@ import type { CalibrationStore } from '../domain/resolver/port/calibration-store
 import { AgentOrchestrator } from '../application/agent/agent-orchestrator.js';
 import { getAgentExecutionMetricsCollector } from '../infrastructure/observability/agent-execution-metrics.js';
 import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
+import { InMemoryCorpusCardinalityCache } from '../domain/retrieval/service/corpus-cardinality-cache.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
@@ -134,6 +135,7 @@ export async function createContainer(
                       },
                     }
                   : {}),
+                corpusCardinality: InMemoryCorpusCardinalityCache.empty(),
               },
             },
             {

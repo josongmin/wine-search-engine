@@ -450,11 +450,11 @@ describe('Audit regressions — session 4 (2026-04-09)', () => {
   // deduplication flag. Fix: add Unicode-aware (?:^|[^\p{L}\p{N}])…(?=$|…).
   // ─────────────────────────────────────────────────────────────────────────
   describe('S4-DIVERSITY-WORD-BOUNDARY: WANTS_DIVERSITY_RE has Unicode word boundaries', () => {
-    it('agent-tools source uses Unicode boundaries in WANTS_DIVERSITY_RE', async () => {
+    it('shared diversity core uses Unicode boundaries in WANTS_DIVERSITY_RE', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
       const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-tools.ts', import.meta.url)),
+        fileURLToPath(new URL('../../src/application/search/search-tool-diversity.ts', import.meta.url)),
         'utf-8',
       );
       // Must NOT use a bare alternation without word boundaries (old pattern:

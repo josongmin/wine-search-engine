@@ -33,6 +33,12 @@ const DEFAULT_VESPA_HTTP_TIMEOUTS: VespaHttpTimeouts = {
   documentMutationMs: 15_000,
   documentGetDeleteMs: 10_000,
 };
+const DEFAULT_VESPA_DOCUMENT_CONNECTIONS = 12;
+const VESPA_DOCUMENT_CONNECTIONS = (() => {
+  const raw = process.env['VESPA_DOCUMENT_CONNECTIONS'];
+  const parsed = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VESPA_DOCUMENT_CONNECTIONS;
+})();
 
 /** Fraction of hits that can be malformed before escalating from debug to warn.
  *  >20% dropped hits indicates systematic Vespa schema corruption, not stray data. */
@@ -306,10 +312,10 @@ function buildMtlsDispatcher(mtls: VespaMtlsConfig | undefined): UndiciAgent | u
       key: fs.readFileSync(mtls.keyPath),
       rejectUnauthorized: true,
     },
-    // Vespa Cloud dev zone has limited concurrent capacity. Keep connection
-    // count low and disable pipelining to avoid pool exhaustion during bulk
-    // feed operations (7K+ document upserts).
-    connections: 4,
+    // Document-plane publish is throughput-sensitive; keep pipelining off for
+    // correctness, but allow a wider connection pool so prepared-feed replay
+    // does not serialize 7K+ upserts behind four sockets.
+    connections: VESPA_DOCUMENT_CONNECTIONS,
     pipelining: 1,
     keepAliveTimeout: 30_000,
   });

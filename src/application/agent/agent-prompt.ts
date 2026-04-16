@@ -2,10 +2,17 @@
  * System prompt and message builder for the wine agent.
  */
 
+import {
+  buildFoodPairingsPromptContractLines,
+  buildSearchWinesPromptContractLines,
+} from '../search/search-tool-contract.js';
+import { resolveFoodPairingBudgetKrw } from '../search/food-pairing-tool-policy.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import type { ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 
 type AgentPromptMode = 'planner' | 'synthesis';
+const PROMPT_FALLBACK_50_USD_KRW = 50_000;
 
 /** Build the planner system prompt with today's date injected for drinking window reasoning.
  *  The date is needed so the LLM can evaluate "is this wine drinkable NOW?" without
@@ -13,6 +20,10 @@ type AgentPromptMode = 'planner' | 'synthesis';
  *  date is always fresh. */
 function buildPlannerSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD, UTC
+  const usd50ApproxKrw = resolveFoodPairingBudgetKrw(
+    { max_price: 50 },
+    { krwPerUsd: KRW_PER_USD_APPROXIMATE, maxPriceKrwCap: Number.MAX_SAFE_INTEGER },
+  ) ?? PROMPT_FALLBACK_50_USD_KRW;
   return [
     `You are Cuvee StepPlanner, a wine intelligence agent. Today's date: ${today}. Answer in the user's language and register (Korean casual ↔ formal). Think step by step. Output strict JSON only.`,
     '',
@@ -31,23 +42,10 @@ function buildPlannerSystemPrompt(): string {
     '- Do NOT call tools outside the JSON action/actions contract below.',
     '',
     '## Tools',
-    '- search_wines(query, limit?, exclude_grapes?, exclude_regions?, max_price_krw?, wine_type?, country?, vintage_min?, vintage_max?, style?, styles?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.',
-    '  - wine_type: "red"|"white"|"rosé"|"sparkling"|"fortified"|"dessert"|"natural" (use for type constraints, e.g. 레드→"red", 화이트→"white")',
-    '  - country: English name (e.g. "France", "Italy", "Chile", "United States", "Spain", "Australia")',
-    '  - vintage_min/vintage_max: year range (e.g. "2018-2020년산" → vintage_min:2018, vintage_max:2020)',
-    '  - appellation: specific appellation (e.g. "Pauillac", "Barolo", "Chianti Classico")',
-    '  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include "oaked", "unoaked", "light", "full", "sweet", "dry", "chillable", "screw_cap", "approachable", "crowd_pleasing".',
-    '  - styles: OPTIONAL array of semantic style hints when the user asks for multiple simultaneous qualities. Example: non-expert gift query → styles:["approachable","crowd_pleasing"]. Prefer styles over style when there are 2+ style meanings.',
-    '  - certification: "organic" or "biodynamic"',
-    '  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→70000)',
-    '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
-    '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',
-    '  - want_diversity: true when user wants varied options ("다양하게", "각각", "종류별로", "different styles")',
+    ...buildSearchWinesPromptContractLines(usd50ApproxKrw),
     '- compare_wines(query_a, query_b) — side-by-side comparison of EXACTLY 2 wines/queries. Use for "vs/비교". Do NOT search_wines afterward. For 3+ items use parallel search_wines calls.',
     '- check_drinking_window(entity_id, target_year?) — drinkability check. entity_id from prior search.',
-    '- get_food_pairings(food, max_price_krw?, color?) — food-wine pairing for a single wine color only.',
-    '  - color must be one of "red" | "white" | "rosé" | "sparkling". Never use both, mixed, any, or a multi-color shorthand here.',
-    '  - For mixed red+white requests (e.g. couple sets, "both colors"), do NOT call get_food_pairings. Use search_wines with want_diversity=true or parallel search_wines calls instead.',
+    ...buildFoodPairingsPromptContractLines(),
     '',
     '## Constraint Tiers (CRITICAL — governs retry logic)',
     'MUST-HAVE (never drop on retry): wine_type, exclude_grapes, exclude_regions, vintage exact year',
@@ -64,16 +62,18 @@ function buildPlannerSystemPrompt(): string {
     '   Generic recommendation wording such as "우울할 때 마시기 좋은 와인", "힐링되는 와인", "선물하기 좋은 와인" is NOT a drinkability query. Route it to recommendation search, not check_drinking_window.',
     '   For exact wine info questions (price, drinkability, release/availability), search_wines.query must be ONLY the wine/entity name. Never append helper words like "price", "drinkability", "가격 확인", or "출시 여부" to the query string.',
     '5. Comparison ("vs", "비교"): always compare_wines for 2-way comparisons. For 3+ items use parallel search_wines (one per item) then synthesize. After compare_wines + "지금 마시기 좋은?", fire PARALLEL check_drinking_window on both entity_ids.',
-    '6. Price: convert to max_price_krw number. "5만원"→50000, "가성비"/"가성비 갑"→50000, "$50"→70000. "가성비" = ALWAYS call with max_price_krw=50000. Korean retail tiers: "편의점 와인"/"편의점에서 살 수 있는"→max_price_krw=15000, "마트 와인"/"대형마트"→max_price_krw=20000, "백화점 와인"→max_price_krw=80000.',
+    `6. Price: convert to max_price_krw number. "5만원"→50000, "가성비"/"가성비 갑"→50000, "$50"→${usd50ApproxKrw}. "가성비" = ALWAYS call with max_price_krw=50000. Korean retail tiers: "편의점 와인"/"편의점에서 살 수 있는"→max_price_krw=15000, "마트 와인"/"대형마트"→max_price_krw=20000, "백화점 와인"→max_price_krw=80000.`,
     '7. Vague queries ("아무거나", "추천해줘", "가성비", "가성비 갑"): ALWAYS search_wines first. NEVER answer without searching. Return 2-3 diverse picks with hedging.',
     '8. Situation/recommendation queries (gift, occasion, 추천, 가성비, food pairing): ALWAYS call a tool first. Never answer without searching.',
     '   Mixed-type requests (red+white, "both colors") are NOT food pairing inputs; route them to search_wines instead of get_food_pairings.',
     '   Do NOT invent wine_type for general recommendation queries unless the user explicitly asked for a color/type. Gift/non-expert/safe recommendation intent should usually map to styles:["approachable","crowd_pleasing"], not an assumed red/white filter.',
+    '   For Korean recommendation queries, preserve the original Korean lexical anchor in search_wines.query. Do NOT rewrite "와인 잘 모르는 사람한테 선물할 거" into English paraphrases like "gift recommendation for someone who doesn\'t know wine".',
     '9. Multi-constraint (3+): use structured params for ALL constraints in one call. Follow Constraint Tiers above.',
     '10. NO_MATCH / RETRIEVAL_QUALITY — Progressive relaxation (up to 2 retries total; also retry if fewer than 3 results and query has NICE-TO-HAVE constraints):',
-    '    - Tool results include [RETRIEVAL_QUALITY: reliable|partial|unreliable]. Use this to decide:',
+    '    - Tool results include [RETRIEVAL_QUALITY: reliable|partial|corpus_limited|unreliable]. Use this to decide:',
     '      - reliable → answer immediately (≥3 results, constraints satisfied).',
     '      - partial → retry once by dropping one NICE-TO-HAVE constraint before answering.',
+    '      - corpus_limited → do NOT retry. The database has very few wines of this type. Answer with what is available or suggest a broader category.',
     '      - unreliable (0 results) → retry as below.',
     '    - Retry 1: drop one NICE-TO-HAVE constraint (e.g. drop body/tannin descriptor, keep wine_type + exclude_*).',
     '    - Retry 2: drop one SHOULD-HAVE constraint (e.g. widen price by 2×, drop specific country but keep wine_type).',

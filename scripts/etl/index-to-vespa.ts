@@ -39,10 +39,15 @@ export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
-/** Vespa Cloud dev zone has limited concurrent capacity; keep batches small
- *  to avoid connection-pool exhaustion. Sequential feed (size=1) is safest
- *  for mTLS cloud endpoints; bump to 5-10 for self-hosted Vespa. */
-const BATCH_SIZE = 5;
+function parsePositiveIntEnv(raw: string | undefined, fallback: number): number {
+  const parsed = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+const EMBEDDING_BATCH_SIZE = 5;
+const PREPARED_FEED_BATCH_SIZE = parsePositiveIntEnv(
+  process.env['VESPA_PREPARED_FEED_BATCH_SIZE'],
+  50,
+);
 
 /**
  * GRAPE_FAMILY_MAP — lookup table for multi-word grape variety → canonical family.
@@ -198,6 +203,11 @@ export interface PreparedVespaFeedDocument {
   readonly fields: Record<string, unknown>;
 }
 
+interface ReusableEmbeddingEntry {
+  readonly semanticSummary: string;
+  readonly embedding: readonly number[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -237,6 +247,37 @@ export function parsePreparedVespaFeedDocuments(
     });
   }
   return docs;
+}
+
+function parsePreparedEmbeddingValue(value: unknown): readonly number[] | undefined {
+  if (Array.isArray(value) && value.every((item) => typeof item === 'number')) {
+    return value;
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const values = (value as Record<string, unknown>)['values'];
+    if (Array.isArray(values) && values.every((item) => typeof item === 'number')) {
+      return values;
+    }
+  }
+  return undefined;
+}
+
+export function buildReusableEmbeddingIndex(
+  docs: readonly PreparedVespaFeedDocument[],
+): ReadonlyMap<string, ReusableEmbeddingEntry> {
+  const index = new Map<string, ReusableEmbeddingEntry>();
+  for (const doc of docs) {
+    const entityId = typeof doc.fields['entity_id'] === 'string' ? doc.fields['entity_id'] : undefined;
+    const semanticSummary = typeof doc.fields['semantic_summary'] === 'string'
+      ? doc.fields['semantic_summary']
+      : undefined;
+    const embedding = parsePreparedEmbeddingValue(doc.fields['embedding']);
+    if (entityId === undefined || semanticSummary === undefined || embedding === undefined) {
+      continue;
+    }
+    index.set(entityId, { semanticSummary, embedding });
+  }
+  return index;
 }
 
 export function deterministicEmbedding(
@@ -704,50 +745,74 @@ export async function preparePreparedVespaFeedDocuments(args: {
   readonly records: readonly EnrichedSilverRecord[];
   readonly snapshotId?: string;
   readonly goldCanonicalLookup?: ReadonlyMap<string, string>;
+  readonly reusablePreparedDocs?: readonly PreparedVespaFeedDocument[];
 }): Promise<readonly PreparedVespaFeedDocument[]> {
-  if (openAiApiKey() === undefined) {
-    throw new Error('OPENAI_API_KEY is required for embedding generation — deterministic fallback is disabled (fail-closed)');
-  }
   const lookup = args.goldCanonicalLookup ?? new Map();
-  const chunks = chunkArray(args.records, BATCH_SIZE);
-  const docs: PreparedVespaFeedDocument[] = [];
+  const reusableEmbeddingIndex = buildReusableEmbeddingIndex(args.reusablePreparedDocs ?? []);
+  const docs = new Array<PreparedVespaFeedDocument>(args.records.length);
+  const pending: Array<{
+    readonly index: number;
+    readonly record: EnrichedSilverRecord;
+  }> = [];
 
-  for (let ci = 0; ci < chunks.length; ci++) {
-    const chunk = chunks[ci]!;
-    const texts = chunk.map(buildEmbedText);
-    let embeddings: readonly (readonly number[])[];
-    const EMBED_MAX_RETRIES = 3;
-    for (let attempt = 1; ; attempt++) {
-      try {
-        embeddings = await embedBatchHttp(texts);
-        break;
-      } catch (e) {
-        if (attempt >= EMBED_MAX_RETRIES) throw e;
-        const msg = e instanceof Error ? e.message : String(e);
-        const delayMs = attempt * 2000;
-        console.warn(`  Embedding batch ${ci + 1} attempt ${attempt} failed (${msg}) — retrying in ${delayMs}ms`);
-        await new Promise((r) => setTimeout(r, delayMs));
-      }
+  for (let i = 0; i < args.records.length; i += 1) {
+    const rec = args.records[i]!;
+    const indexable = silverToIndexable(rec, lookup);
+    const validation = validateIndexableRecord(indexable);
+    if (!validation.valid) {
+      throw new Error(
+        `Validation failed for ${rec.sourceId}: ${validation.errors.join('; ')}`,
+      );
     }
 
-    for (let i = 0; i < chunk.length; i++) {
-      const rec = chunk[i]!;
-      const indexable = silverToIndexable(rec, lookup);
-      const validation = validateIndexableRecord(indexable);
-      if (!validation.valid) {
-        throw new Error(
-          `Validation failed for ${rec.sourceId}: ${validation.errors.join('; ')}`,
-        );
-      }
-      const embedding = embeddings[i];
-      if (embedding === undefined) {
-        throw new Error(`Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`);
-      }
-      const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, lookup);
-      docs.push({
+    const reusable = reusableEmbeddingIndex.get(indexable.entityId);
+    if (reusable !== undefined && reusable.semanticSummary === indexable.semanticSummary) {
+      const retrievalDoc = silverToRetrievalDoc(rec, reusable.embedding, args.snapshotId, lookup);
+      docs[i] = {
         id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),
-      });
+      };
+      continue;
+    }
+    pending.push({ index: i, record: rec });
+  }
+
+  if (pending.length > 0) {
+    if (openAiApiKey() === undefined) {
+      throw new Error('OPENAI_API_KEY is required for embedding generation — deterministic fallback is disabled (fail-closed)');
+    }
+    const chunks = chunkArray(pending, EMBEDDING_BATCH_SIZE);
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci]!;
+      const texts = chunk.map(({ record }) => buildEmbedText(record));
+      let embeddings: readonly (readonly number[])[];
+      const EMBED_MAX_RETRIES = 3;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          embeddings = await embedBatchHttp(texts);
+          break;
+        } catch (e) {
+          if (attempt >= EMBED_MAX_RETRIES) throw e;
+          const msg = e instanceof Error ? e.message : String(e);
+          const delayMs = attempt * 2000;
+          console.warn(`  Embedding batch ${ci + 1} attempt ${attempt} failed (${msg}) — retrying in ${delayMs}ms`);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+
+      for (let i = 0; i < chunk.length; i++) {
+        const rec = chunk[i]!.record;
+        const targetIndex = chunk[i]!.index;
+        const embedding = embeddings[i];
+        if (embedding === undefined) {
+          throw new Error(`Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`);
+        }
+        const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, lookup);
+        docs[targetIndex] = {
+          id: String(retrievalDoc.entityId),
+          fields: toVespaFields(retrievalDoc),
+        };
+      }
     }
   }
 
@@ -770,7 +835,7 @@ async function feedPreparedVespaDocuments(
     readonly maxFailureRate?: number;
   },
 ): Promise<void> {
-  const chunks = chunkArray(docs, BATCH_SIZE);
+  const chunks = chunkArray(docs, PREPARED_FEED_BATCH_SIZE);
   let indexed = 0;
   let failures = 0;
 
@@ -829,6 +894,7 @@ export async function materializePreparedVespaFeedArtifact(args: {
   readonly outputPath: string;
   readonly snapshotId: string;
   readonly fixtureRepoRoot?: string;
+  readonly reuseEmbeddingFromPreparedFeedPath?: string;
 }): Promise<{
   readonly count: number;
   readonly hash: string;
@@ -836,10 +902,17 @@ export async function materializePreparedVespaFeedArtifact(args: {
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
   const raw = await fs.readFile(args.inputPath, 'utf8');
   const records = parseNdjson<EnrichedSilverRecord>(raw, args.inputPath).records;
+  const reusablePreparedDocs = args.reuseEmbeddingFromPreparedFeedPath !== undefined
+    ? parsePreparedVespaFeedDocuments(
+      await fs.readFile(args.reuseEmbeddingFromPreparedFeedPath, 'utf8'),
+      args.reuseEmbeddingFromPreparedFeedPath,
+    )
+    : undefined;
   const docs = await preparePreparedVespaFeedDocuments({
     records,
     snapshotId: args.snapshotId,
     goldCanonicalLookup: goldLookup,
+    ...(reusablePreparedDocs !== undefined ? { reusablePreparedDocs } : {}),
   });
   const serialized = serializePreparedVespaFeedDocuments(docs);
   await fs.writeFile(args.outputPath, serialized, 'utf8');

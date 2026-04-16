@@ -20,6 +20,7 @@
  *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 80 curated scenarios, concurrency 3, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 233 scenarios, concurrency 3, judge on (3 samples)
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # agent benchmark on scenarios with golden retrieval IDs
+ *   npx tsx test/benchmark/agent/runner.ts --profile messy-search              # in-domain messy search slice, judge on
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
  * Wall-clock profiling: `wallClock` in JSON + "wall clock" section on stderr
@@ -44,7 +45,7 @@ import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestr
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
 import { AnthropicChatLlm } from '../../../src/infrastructure/ai/anthropic-chat-llm.js';
 import { QuerySanitizer } from '../../../src/domain/security/service/query-sanitizer.js';
-import { AGENT_SCENARIOS, STANDARD_SCENARIO_IDS } from './scenarios.js';
+import { AGENT_SCENARIOS, MESSY_SEARCH_SCENARIO_IDS, STANDARD_SCENARIO_IDS } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTrace } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
@@ -55,6 +56,7 @@ import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
+import { InMemoryCorpusCardinalityCache } from '../../../src/domain/retrieval/service/corpus-cardinality-cache.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
 import type { AgentTerminationReason } from '../../../src/domain/agent/model/agent-step.js';
@@ -66,7 +68,7 @@ export { formatBenchmarkDurationMs } from './benchmark-duration-format.js';
 // ─────────────────────────────────────────────────────────────────────
 
 interface CliArgs {
-  readonly profile?: 'quick' | 'quick-realdata' | 'standard' | 'nightly' | 'retrieval';
+  readonly profile?: 'quick' | 'quick-realdata' | 'standard' | 'nightly' | 'retrieval' | 'messy-search';
   readonly tierFilter?: ScenarioTier;
   readonly idFilter?: readonly number[];
   readonly container: 'real';
@@ -81,6 +83,9 @@ interface CliArgs {
   readonly failIfWorseThan?: number;
   readonly outputPath?: string;
 }
+
+type CriticalWineType = 'red' | 'white' | 'sparkling';
+type CriticalWineTypeCoverage = Record<CriticalWineType, number>;
 
 // 20 scenario IDs spread across tiers for the "quick" profile (~2 min PR smoke test).
 const QUICK_SCENARIO_IDS = new Set([
@@ -130,6 +135,20 @@ const QUICK_REALDATA_SCENARIO_IDS = new Set([
   // taste_descriptor
   20, 21,
 ]);
+
+/**
+ * "messy-search" profile — in-domain free-form wine search slice.
+ *
+ * Focus:
+ *   - colloquial Korean, typos, abbreviations, bilingual overlap
+ *   - gift / mood / situation-based recommendation under uncertainty
+ *   - beginner-safe / crowd-pleasing retrieval alignment
+ *
+ * Judge-on by default because the hard part here is semantic intent alignment,
+ * not tool-path correctness. Concurrency defaults to 2 to keep the initial
+ * judge burst below provider RPM/TPM ceilings while still moving steadily.
+ */
+const MESSY_SEARCH_DEFAULT_CONCURRENCY = 2;
 
 function parseOptionalInt(raw: string | undefined, fallback: number): number {
   if (raw === undefined) return fallback;
@@ -249,11 +268,67 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
     }
   }
 
+  if (profile === 'messy-search') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...MESSY_SEARCH_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: MESSY_SEARCH_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
   return args;
 }
 
 function parseArgs(): CliArgs {
   return parseRunnerArgs(process.argv.slice(2));
+}
+
+function parseCoverageCount(raw: unknown, wineType: CriticalWineType): number {
+  const count = typeof raw === 'number' ? raw : Number(raw ?? 0);
+  if (!Number.isFinite(count)) {
+    throw new Error(
+      `Agent benchmark preflight failed: Vespa count for wine_type=${wineType} is not finite (${String(raw)})`,
+    );
+  }
+  return Math.trunc(count);
+}
+
+export function assertCriticalWineTypeCoverage(
+  coverage: CriticalWineTypeCoverage,
+): void {
+  const missing = (Object.entries(coverage) as Array<[CriticalWineType, number]>)
+    .filter(([, count]) => count <= 0)
+    .map(([wineType]) => wineType);
+  if (missing.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Agent benchmark preflight failed: critical Vespa wine_type coverage missing (${missing.join(', ')}). `
+    + `counts=${JSON.stringify(coverage)}`,
+  );
+}
+
+export async function fetchCriticalWineTypeCoverage(
+  vespaClient: {
+    query(
+      yql: string,
+      params?: Record<string, unknown>,
+      signal?: AbortSignal,
+      requestId?: string,
+    ): Promise<{ root?: { fields?: { totalCount?: unknown } } }>;
+  },
+): Promise<CriticalWineTypeCoverage> {
+  const entries = await Promise.all((['red', 'white', 'sparkling'] as const).map(async (wineType) => {
+    const yql = `select * from sources * where wine_type contains "${wineType}" limit 0`;
+    const response = await vespaClient.query(yql, undefined, undefined, `agent-bench-coverage:${wineType}`);
+    return [wineType, parseCoverageCount(response.root?.fields?.totalCount, wineType)] as const;
+  }));
+  return Object.fromEntries(entries) as CriticalWineTypeCoverage;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -319,6 +394,16 @@ async function buildRealToolDeps(): Promise<{
   };
   const managedRuntime = createManagedRuntimeHandles(baseHandles);
   const container = await createContainer(config, managedRuntime);
+  const vespaClient = ((container.candidatePool as unknown as {
+    readonly searchIndex?: { readonly client?: Parameters<typeof fetchCriticalWineTypeCoverage>[0] };
+  }).searchIndex?.client);
+  if (vespaClient === undefined) {
+    throw new Error(
+      'Agent benchmark preflight failed: candidatePool searchIndex client is unavailable for Vespa coverage verification.',
+    );
+  }
+  const coverage = await fetchCriticalWineTypeCoverage(vespaClient);
+  assertCriticalWineTypeCoverage(coverage);
 
   const toolDeps: AgentToolDeps = {
     searchUseCase: container.searchUseCase as never,
@@ -352,6 +437,9 @@ async function buildRealToolDeps(): Promise<{
           },
         }
       : {}),
+    // Phase 1: corpus cardinality — prevents futile retries on small wine-type pools.
+    // Uses empty cache (all types → corpus_limited) until real Vespa cardinality query is wired.
+    corpusCardinality: InMemoryCorpusCardinalityCache.empty(),
   };
 
   return {

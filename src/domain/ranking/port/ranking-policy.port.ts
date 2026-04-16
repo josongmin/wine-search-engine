@@ -8,6 +8,7 @@
  */
 
 import type { RankedResult } from '../model/ranked-result.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 
 /**
  * Context provided to a policy during application.
@@ -16,6 +17,12 @@ import type { RankedResult } from '../model/ranked-result.js';
 export interface PolicyContext {
   /** Query class used for this search (e.g. "semantic_preference"). */
   readonly queryClass: string;
+  /**
+   * Explicit execution-contract retrieval mode.
+   * Recommendation-style ranking rules should prefer this over queryClass
+   * when the mode is authoritative.
+   */
+  readonly effectiveRetrievalMode?: ExecutionRetrievalMode;
   /** The effective retrieval route (e.g. "hybrid"). */
   readonly effectiveRoute: string;
   /** True when the user explicitly constrained wine color/type. */

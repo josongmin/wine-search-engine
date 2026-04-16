@@ -21,4 +21,11 @@ describe('agent runner profile defaults', () => {
     const args = parseRunnerArgs(['--profile', 'quick-realdata', '--concurrency', '8']);
     expect(args.concurrency).toBe(8);
   });
+
+  it('messy-search defaults to judge-on with the low concurrency cap', () => {
+    const args = parseRunnerArgs(['--profile', 'messy-search']);
+    expect(args.profile).toBe('messy-search');
+    expect(args.concurrency).toBe(2);
+    expect(args.enableJudge).toBe(true);
+  });
 });
