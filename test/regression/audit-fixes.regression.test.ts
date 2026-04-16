@@ -329,12 +329,12 @@ describe('Audit regressions — session 4 (2026-04-09)', () => {
   // string, setting terminationReason='answer' and skipping all fallback layers.
   // Fix: check `typeof parsed.answer === 'string' && parsed.answer.length > 0`.
   // ─────────────────────────────────────────────────────────────────────────
-  describe('S4-EMPTY-ANSWER-LOOP: empty string answer rejected by orchestrator', () => {
-    it('orchestrator source uses length>0 guard on parsed.answer', async () => {
+  describe('S4-EMPTY-ANSWER-LOOP: empty string answer rejected by planner phase', () => {
+    it('planner phase source uses length>0 guard on parsed.answer', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
       const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
+        fileURLToPath(new URL('../../src/application/agent/agent-planner-phase-runner.ts', import.meta.url)),
         'utf-8',
       );
       // Must NOT use the old `parsed.answer !== undefined` alone as the final answer check
@@ -350,20 +350,24 @@ describe('Audit regressions — session 4 (2026-04-09)', () => {
   // allowed one extra LLM call. Fix: both use `>=`.
   // ─────────────────────────────────────────────────────────────────────────
   describe('S4-TOKEN-BUDGET-CONSISTENCY: pre-flight and post-hoc budget checks use same comparator', () => {
-    it('orchestrator source uses >= for post-hoc token budget check', async () => {
+    it('agent phase sources use >= for token budget checks after extraction', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
+      const orchestratorSrc = readFileSync(
         fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
         'utf-8',
       );
-      // Both checks must use >= (not > for post-hoc).
-      // Count occurrences of ">= effectiveConfig.maxTotalTokens" — must be at least 2
-      const geMatches = src.match(/>=\s*effectiveConfig\.maxTotalTokens/g);
+      const synthesisSrc = readFileSync(
+        fileURLToPath(new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url)),
+        'utf-8',
+      );
+      const combinedSrc = `${orchestratorSrc}\n${synthesisSrc}`;
+      // Both checks must use >= (not > for post-hoc), even after phase extraction.
+      const geMatches = combinedSrc.match(/>=\s*effectiveConfig\.maxTotalTokens/g);
       expect(geMatches).not.toBeNull();
       expect(geMatches?.length).toBeGreaterThanOrEqual(2);
-      // Must NOT have a lone `> effectiveConfig.maxTotalTokens` (the old post-hoc pattern)
-      const gtMatches = src.match(/[^>]>\s*effectiveConfig\.maxTotalTokens/g);
+      // Must NOT have a lone `> effectiveConfig.maxTotalTokens` (the old post-hoc pattern).
+      const gtMatches = combinedSrc.match(/[^>]>\s*effectiveConfig\.maxTotalTokens/g);
       expect(gtMatches ?? []).toHaveLength(0);
     });
   });
@@ -482,23 +486,23 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
   // causing the tool to be called with no query and returning an error.
   // Fix: coerce string input to {query: string}.
   // ─────────────────────────────────────────────────────────────────────────
-  describe('S5-PARSE-LLM-STRING-INPUT: orchestrator coerces string input to {query}', () => {
-    it('orchestrator source coerces string input in actions to {query: string}', async () => {
+  describe('S5-PARSE-LLM-STRING-INPUT: LLM output parser coerces string input to {query}', () => {
+    it('agent-llm-output source coerces string input in actions to {query: string}', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
       const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
+        fileURLToPath(new URL('../../src/application/agent/agent-llm-output.ts', import.meta.url)),
         'utf-8',
       );
       // Must coerce string input to {query: string} — not silently drop it
       expect(src).toMatch(/\{ query: a\[.input.\] \}/);
     });
 
-    it('orchestrator source coerces string input in single action to {query: string}', async () => {
+    it('agent-llm-output source coerces string input in single action to {query: string}', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
       const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
+        fileURLToPath(new URL('../../src/application/agent/agent-llm-output.ts', import.meta.url)),
         'utf-8',
       );
       // Must coerce string input in single action path as well

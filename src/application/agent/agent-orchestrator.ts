@@ -11,7 +11,7 @@
  * All search execution uses existing use cases unchanged.
  */
 
-import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
+import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { CIRCUIT_BREAKER_OPEN_CODE } from '../../domain/shared/error/circuit-breaker-open-error.js';
@@ -23,10 +23,6 @@ import { DEFAULT_AGENT_CONFIG } from '../../domain/agent/model/agent-config.js';
 import { StepBudget } from '../../domain/agent/service/step-budget.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import {
-  buildPlannerSystemMessage,
-  buildSynthesisSystemMessage,
-  buildUserMessage,
-  buildStepMessages,
   truncateObservation,
 } from './agent-prompt.js';
 import {
@@ -64,16 +60,14 @@ import {
   AgentFallbackFinalizer,
   hasToolObservations,
 } from './agent-fallback-finalizer.js';
+import {
+  AgentPlannerPhaseRunner,
+  type PlannerPhaseResult,
+} from './agent-planner-phase-runner.js';
+import { AgentObservationSynthesisRunner } from './agent-observation-synthesis-runner.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
-/** Wall-clock budget for the observation-based synthesis LLM call (Layer 1 fallback).
- * gpt-4o averages 20-30s per call; 12s caused consistent timeouts. */
-const SYNTHESIS_TIMEOUT_MS = 60_000;
-/** First synthesis attempt: full token budget (allows detailed, well-structured answers). */
-const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
-/** Second synthesis attempt: halved budget — fast path when first attempt times out. */
-const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
 /** Default single-tool timeout (separate from LLM step timeout). */
 const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
 /**
@@ -86,7 +80,6 @@ const DEFAULT_PARALLEL_BATCH_TIMEOUT_MS = 20_000;
 /** Hard cap on parallel tools per batch step. */
 const MAX_TOOLS_PER_BATCH = 4;
 /** Log-preview chars for non-parseable LLM text — enough to diagnose without bloating the log line. */
-const LOG_PREVIEW_CHARS = 200;
 
 /**
  * E7-T2: Classify a tool call's ToolOutcomeKind from its observation string and error state.
@@ -241,74 +234,6 @@ function buildToolOutcome(
   };
 }
 
-interface PlannerPhaseResult {
-  readonly stepStartMs: number;
-  readonly parsed: LlmAction;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly wasTruncated: boolean;
-}
-
-function buildPlannerLoopMessages(
-  query: string,
-  steps: readonly AgentStep[],
-  pendingRefinementHint: string | undefined,
-  isLastStep: boolean,
-  remainingSteps: number,
-  maxContextChars: number,
-): readonly ChatMessage[] {
-  const baseUserContentRaw = pendingRefinementHint !== undefined
-    ? `${pendingRefinementHint}\n\n${query}`
-    : query;
-  const baseUserContent = baseUserContentRaw.length > maxContextChars
-    ? baseUserContentRaw.slice(0, maxContextChars)
-    : baseUserContentRaw;
-  const messages = [
-    buildPlannerSystemMessage(),
-    buildUserMessage(baseUserContent),
-    ...buildStepMessages(steps),
-  ];
-  if (isLastStep) {
-    messages.push({
-      role: 'user',
-      content: remainingSteps === 1
-        ? `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.`
-        : `[BUDGET_WARNING] Only ${remainingSteps} steps remain. Synthesize your current search results into a final {"thought":"…","answer":"…"} NOW — do not call another tool unless you have no results yet.`,
-    });
-  }
-  return messages;
-}
-
-interface ObservationSynthesisMessages {
-  readonly messages: readonly ChatMessage[];
-  readonly sentinel: string;
-}
-
-function buildObservationSynthesisMessages(
-  query: string,
-  steps: readonly AgentStep[],
-  requestId: string,
-): ObservationSynthesisMessages {
-  const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
-  return {
-    messages: [
-      buildSynthesisSystemMessage(),
-      buildUserMessage(query),
-      ...buildStepMessages(steps),
-      {
-        role: 'user',
-        content: synthSentinel,
-      },
-    ],
-    sentinel: synthSentinel,
-  };
-}
-
-
-/** Longer log-preview chars for step-level debug output (more context than error previews). */
-const STEP_LOG_PREVIEW_CHARS = 500;
-/** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
-const CHARS_PER_TOKEN_ESTIMATE = 4;
 const QUERY_NORMALIZER = new QueryNormalizer();
 const EXACT_METADATA_ALLOWED_SEARCH_KEYS = new Set(['query', 'limit', 'retrieval_mode']);
 
@@ -461,24 +386,8 @@ function formatPolicyBlockedObservation(err: DomainError): string {
   return `Policy blocked: ${err.message}`;
 }
 
-/** Parsed LLM output — either a tool call, a parallel batch, or a final answer. */
-interface LlmAction {
-  readonly thought: string;
-  // Sequential single tool call
-  readonly action?: { readonly tool: string; readonly input: Record<string, unknown> };
-  // Parallel batch: LLM emits {"thought":"…","actions":[{tool,input},{tool,input}]}
-  readonly actions?: readonly { readonly tool: string; readonly input: Record<string, unknown> }[];
-  readonly answer?: string;
-}
-
 interface TimeoutErrorLike extends Error {
   readonly code?: string;
-}
-
-function isValidLlmResult(value: unknown): value is { text: string; model: string; finishReason?: string | null } {
-  if (typeof value !== 'object' || value === null) return false;
-  const rec = value as Record<string, unknown>;
-  return typeof rec['text'] === 'string' && typeof rec['model'] === 'string';
 }
 
 function makeTimeoutError(message: string): TimeoutErrorLike {
@@ -501,129 +410,6 @@ async function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: stri
   }
 }
 
-/**
- * Extract the first complete JSON object from a string that may contain multiple
- * concatenated JSON objects. gpt-5.4 series sometimes emits two objects back-to-back:
- * the valid action object followed by a premature "I have no results" continuation.
- * JSON.parse throws SyntaxError on the full string, losing the valid action entirely.
- * This walks character by character tracking brace depth and stops at the closing `}`
- * of the first top-level object. Falls back to the full string if no object is found.
- */
-function extractFirstJsonObject(text: string): string {
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
-    if (escape) { escape = false; continue; }
-    if (ch === '\\' && inString) { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
-    }
-  }
-  return text; // fallback: no complete object found, let JSON.parse fail naturally
-}
-
-function parseLlmOutput(text: string): LlmAction {
-  try {
-    const trimmed = text.trim();
-    const cleaned = trimmed
-      .replace(/^```[\w-]*\s*\n?/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-    // Extract only the first JSON object — gpt-5.4 series occasionally emits two
-    // back-to-back objects which causes JSON.parse to throw and lose the valid action.
-    const firstObject = extractFirstJsonObject(cleaned);
-    const rawParsed: unknown = JSON.parse(firstObject);
-    if (typeof rawParsed !== 'object' || rawParsed === null) {
-      return { thought: text.slice(0, LOG_PREVIEW_CHARS) };
-    }
-    const parsed = rawParsed as Record<string, unknown>;
-
-    const thought = typeof parsed['thought'] === 'string' ? parsed['thought'] : '';
-
-    if (typeof parsed['answer'] === 'string') {
-      return { thought, answer: parsed['answer'] };
-    }
-
-    // Parallel batch: {"thought":"…","actions":[{tool,input},…]}
-    // Validate each entry; silently drop malformed entries.
-    // If the LLM emits input as a string (e.g. {"tool":"search_wines","input":"opus one"})
-    // instead of an object, coerce it to {query: string} so the tool receives the
-    // query intent rather than an empty object that produces empty-query errors.
-    const actionsRaw = parsed['actions'];
-    if (Array.isArray(actionsRaw) && actionsRaw.length > 0) {
-      const validActions = (actionsRaw as unknown[])
-        .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
-        .map((a) => ({
-          tool: typeof a['tool'] === 'string' ? a['tool'] : '',
-          input:
-            typeof a['input'] === 'object' && a['input'] !== null
-              ? (a['input'] as Record<string, unknown>)
-              : typeof a['input'] === 'string' && a['input'].length > 0
-                ? { query: a['input'] }
-                : {},
-        }))
-        .filter((a) => a.tool.length > 0);
-      if (validActions.length > 0) {
-        return { thought, actions: validActions };
-      }
-    }
-
-    // Single tool call (sequential)
-    const rawAction = parsed['action'];
-    const action =
-      typeof rawAction === 'object' && rawAction !== null && !Array.isArray(rawAction)
-        ? (rawAction as Record<string, unknown>)
-        : undefined;
-    if (action !== undefined && typeof action['tool'] === 'string' && action['tool'].length > 0) {
-      const input =
-        typeof action['input'] === 'object' && action['input'] !== null
-          ? (action['input'] as Record<string, unknown>)
-          : typeof action['input'] === 'string' && action['input'].length > 0
-            ? { query: action['input'] }
-            : {};
-      return { thought, action: { tool: action['tool'], input } };
-    }
-
-    // Bare tool call: LLM emitted {"tool":"search_wines","input":{…}} without wrapping in "action".
-    // Recover by treating the top-level object itself as the action.
-    if (typeof parsed['tool'] === 'string' && parsed['tool'].length > 0) {
-      const bareInput =
-        typeof parsed['input'] === 'object' && parsed['input'] !== null
-          ? (parsed['input'] as Record<string, unknown>)
-          : typeof parsed['input'] === 'string' && parsed['input'].length > 0
-            ? { query: parsed['input'] }
-            : {};
-      log.warn(
-        { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
-        'agent LLM emitted bare tool call (missing action wrapper); recovered',
-      );
-      return { thought, action: { tool: parsed['tool'], input: bareInput } };
-    }
-
-    // If neither action/actions nor answer, treat the whole text as an answer.
-    log.warn(
-      { textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
-      'agent LLM produced JSON without action or answer; falling back to raw text',
-    );
-    return { thought: '[unparseable LLM structure]', answer: trimmed };
-  } catch {
-    log.warn(
-      { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },
-      'agent LLM produced non-JSON output; falling back to raw text',
-    );
-    return { thought: '[unparseable LLM output]', answer: text.trim() };
-  }
-}
-
 export interface AgentOrchestratorDeps {
   readonly chatLlm: ChatLlmPort;
   readonly toolDeps: AgentToolDeps;
@@ -641,6 +427,8 @@ export interface AgentOrchestratorDeps {
 export class AgentOrchestrator {
   private readonly config: AgentConfig;
   private readonly fallbackFinalizer: AgentFallbackFinalizer;
+  private readonly plannerPhaseRunner: AgentPlannerPhaseRunner;
+  private readonly observationSynthesisRunner: AgentObservationSynthesisRunner;
 
   constructor(
     private readonly deps: AgentOrchestratorDeps,
@@ -648,144 +436,12 @@ export class AgentOrchestrator {
   ) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...config };
     this.fallbackFinalizer = new AgentFallbackFinalizer({ toolDeps: deps.toolDeps });
+    this.plannerPhaseRunner = new AgentPlannerPhaseRunner({ chatLlm: deps.chatLlm });
+    this.observationSynthesisRunner = new AgentObservationSynthesisRunner({ chatLlm: deps.chatLlm });
   }
 
   private createExecutionState(): AgentExecutionState {
     return createAgentExecutionState();
-  }
-
-  private async runPlannerPhase(
-    query: string,
-    requestId: string,
-    effectiveConfig: AgentConfig,
-    state: AgentExecutionState,
-    remainingSteps: number,
-    isLastStep: boolean,
-    abortSignal?: AbortSignal,
-  ): Promise<PlannerPhaseResult | null> {
-    const stepStartMs = Date.now();
-    const messages = buildPlannerLoopMessages(
-      query,
-      state.steps,
-      state.pendingRefinementHint,
-      isLastStep,
-      remainingSteps,
-      effectiveConfig.maxContextChars,
-    );
-    state.pendingRefinementHint = undefined;
-
-    if (abortSignal?.aborted) {
-      state.terminationReason = 'error';
-      return null;
-    }
-
-    const stepAbortController = new AbortController();
-    const propagateAbort = (): void => { stepAbortController.abort(); };
-    abortSignal?.addEventListener('abort', propagateAbort, { once: true });
-    if (abortSignal?.aborted) {
-      abortSignal.removeEventListener('abort', propagateAbort);
-      state.terminationReason = 'error';
-      return null;
-    }
-
-    let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    let llmResult: { text: string; model: string; finishReason?: string | null };
-    try {
-      const racedResult: unknown = await Promise.race([
-        this.deps.chatLlm.complete({
-          messages,
-          temperature: 0,
-          maxOutputTokens: 2048,
-          ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
-          abortSignal: stepAbortController.signal,
-        }),
-        new Promise<never>((_resolve, reject) => {
-          stepTimeoutHandle = setTimeout(
-            () => {
-              stepAbortController.abort();
-              reject(new Error('Agent LLM step timed out'));
-            },
-            effectiveConfig.perStepTimeoutMs,
-          );
-        }),
-      ]);
-      if (!isValidLlmResult(racedResult)) {
-        log.warn(
-          { requestId, stepIndex: state.steps.length, rawType: typeof racedResult },
-          'Agent LLM returned malformed step result',
-        );
-        state.reasoningFailureDetected = true;
-        state.terminationReason = 'error';
-        return null;
-      }
-      llmResult = racedResult;
-    } catch (err) {
-      log.warn({ err, requestId, stepIndex: state.steps.length }, 'Agent LLM call failed');
-      if (isAbortError(err)) {
-        state.terminationReason = 'aborted';
-      } else if ((err as Error).message === 'Agent LLM step timed out') {
-        state.reasoningFailureDetected = true;
-        state.timeoutStats.llmStep += 1;
-        state.terminationReason = 'timeout';
-      } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
-        state.reasoningFailureDetected = true;
-        state.llmCircuitOpen = true;
-        state.terminationReason = 'error';
-      } else {
-        state.reasoningFailureDetected = true;
-        state.terminationReason = 'error';
-      }
-      return null;
-    } finally {
-      abortSignal?.removeEventListener('abort', propagateAbort);
-      if (stepTimeoutHandle !== undefined) {
-        clearTimeout(stepTimeoutHandle);
-      }
-    }
-
-    const wasTruncated = llmResult.finishReason === 'length';
-    if (wasTruncated) {
-      log.warn({ requestId, stepIndex: state.steps.length }, 'Agent LLM output truncated (finish_reason=length) — attempting recovery');
-    }
-
-    const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-    const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN_ESTIMATE);
-    const outputTokens = Math.ceil(llmResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
-    state.totalInputTokens += inputTokens;
-    state.totalOutputTokens += outputTokens;
-
-    if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
-      log.warn(
-        { requestId, totalTokens: state.totalInputTokens + state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
-        'agent token budget exceeded — terminating',
-      );
-      state.terminationReason = 'budget';
-      return null;
-    }
-
-    const parsed = parseLlmOutput(llmResult.text);
-    if (state.steps.length === 0) {
-      log.info(
-        {
-          requestId,
-          textPreview: llmResult.text.slice(0, STEP_LOG_PREVIEW_CHARS),
-          finishReason: llmResult.finishReason,
-          hasAction: parsed.action !== undefined,
-          hasActions: parsed.actions !== undefined,
-          hasAnswer: parsed.answer !== undefined && parsed.answer.length > 0,
-          wasTruncated,
-        },
-        '[RCA] step0 LLM output',
-      );
-    }
-
-    return {
-      stepStartMs,
-      parsed,
-      inputTokens,
-      outputTokens,
-      wasTruncated,
-    };
   }
 
   private async runContractDrinkabilityChecks(
@@ -1599,113 +1255,6 @@ export class AgentOrchestrator {
     return false;
   }
 
-  private async runObservationSynthesisPhase(
-    query: string,
-    requestId: string,
-    effectiveConfig: AgentConfig,
-    state: AgentExecutionState,
-    abortSignal?: AbortSignal,
-  ): Promise<void> {
-    if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
-      log.warn({ requestId, totalInputTokens: state.totalInputTokens, totalOutputTokens: state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens }, '[agent] token budget exhausted — skipping final answer synthesis to prevent overrun');
-      return;
-    }
-
-    const obsSteps = state.steps.filter(
-      (s) =>
-        (s.observation !== undefined && s.observation.length > 0) ||
-        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
-    );
-    if (obsSteps.length === 0) {
-      return;
-    }
-
-    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, state.steps, requestId);
-    const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
-      if (abortSignal?.aborted) return undefined;
-      const synthAbort = new AbortController();
-      const propagateSynthAbort = (): void => { synthAbort.abort(); };
-      abortSignal?.addEventListener('abort', propagateSynthAbort, { once: true });
-      if (abortSignal?.aborted) {
-        synthAbort.abort();
-        abortSignal.removeEventListener('abort', propagateSynthAbort);
-        return undefined;
-      }
-      const synthTimer = setTimeout(() => {
-        synthAbort.abort();
-      }, SYNTHESIS_TIMEOUT_MS);
-      try {
-        const synthResult = await this.deps.chatLlm.complete({
-          messages: synthMessages,
-          temperature: 0,
-          maxOutputTokens,
-          ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
-          abortSignal: synthAbort.signal,
-        });
-        if (!isValidLlmResult(synthResult)) {
-          log.warn({ requestId }, 'synthesis LLM returned malformed result');
-          return undefined;
-        }
-        state.totalInputTokens += Math.ceil(synthSentinel.length / CHARS_PER_TOKEN_ESTIMATE);
-        state.totalOutputTokens += Math.ceil(synthResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
-        const parsedSynth = parseLlmOutput(synthResult.text);
-        if (parsedSynth.action !== undefined || parsedSynth.actions !== undefined) {
-          log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
-          return undefined;
-        }
-        const candidate = parsedSynth.answer?.trim() ?? '';
-        const isShell = /^[{[\s]*[}\]]*$/.test(candidate);
-        return candidate.length > 10 && !isShell ? candidate : undefined;
-      } finally {
-        abortSignal?.removeEventListener('abort', propagateSynthAbort);
-        clearTimeout(synthTimer);
-      }
-    };
-
-    let synthAnswer: string | undefined;
-    try {
-      synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
-    } catch (synthErr1) {
-      if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
-        state.llmCircuitOpen = true;
-      } else if (isAbortError(synthErr1)) {
-        state.terminationReason = 'aborted';
-      }
-      // synthesis attempt threw -> keep this on the error channel only
-      log.error({ err: synthErr1, requestId }, `synthesis retry attempt 1 failed (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
-    }
-    if (synthAnswer === undefined) {
-      state.failedSynthesisAttempts += 1;
-    }
-    if (
-      synthAnswer === undefined &&
-      !(abortSignal?.aborted) &&
-      !state.llmCircuitOpen &&
-      state.totalInputTokens + state.totalOutputTokens < effectiveConfig.maxTotalTokens
-    ) {
-      try {
-        log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
-        synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
-      } catch (synthErr2) {
-        if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
-          state.llmCircuitOpen = true;
-        } else if (isAbortError(synthErr2)) {
-          state.terminationReason = 'aborted';
-        }
-        // synthesis attempt threw -> keep this on the error channel only
-        log.error({ err: synthErr2, requestId }, 'synthesis retry attempt 2 failed — proceeding to fallback search');
-      }
-      if (synthAnswer === undefined) {
-        state.failedSynthesisAttempts += 1;
-      }
-    }
-    if (synthAnswer !== undefined) {
-      state.answer = synthAnswer;
-      state.terminationReason = 'answer';
-      log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
-    }
-  }
-
   async execute(
     query: string,
     requestId: string,
@@ -1796,7 +1345,7 @@ export class AgentOrchestrator {
           break;
         }
 
-        const plannerPhase = await this.runPlannerPhase(
+        const plannerPhase = await this.plannerPhaseRunner.run(
           query,
           requestId,
           effectiveConfig,
@@ -1838,7 +1387,7 @@ export class AgentOrchestrator {
     }
 
     if (!state.policyBlocked && !state.llmCircuitOpen && state.answer === '' && state.terminationReason !== 'answer' && !(abortSignal?.aborted)) {
-      await this.runObservationSynthesisPhase(query, requestId, effectiveConfig, state, abortSignal);
+      await this.observationSynthesisRunner.run(query, requestId, effectiveConfig, state, abortSignal);
     }
 
     const observedToolOutput = hasToolObservations(state);

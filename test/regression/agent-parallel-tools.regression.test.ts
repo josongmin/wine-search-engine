@@ -19,9 +19,8 @@ import type { AgentStep } from '../../src/domain/agent/model/agent-step.js';
 import type { AgentToolDeps } from '../../src/application/agent/agent-tools.js';
 import { DomainError } from '../../src/domain/shared/error/domain-error.js';
 
-// ─── parseLlmOutput is not exported, test via orchestrator indirectly ───────
-// Instead, test the JSON shapes that the orchestrator's parser handles,
-// by verifying the buildStepMessages round-trip (which uses the same shape).
+// Parser contract now has direct unit coverage in agent-llm-output.test.ts.
+// This file stays focused on step serialization and parallel tool execution.
 
 // ─── 1-3: parseLlmOutput via shape validation ────────────────────────────────
 
@@ -458,10 +457,8 @@ describe('stripNulls: null optional fields are coerced to absent', () => {
 // wrapping "action" key. parseLlmOutput fell through to the "treat as answer"
 // branch, producing an answer that was just raw JSON — judge scored 0.
 // Fix: detect top-level "tool" key and recover as a synthetic action.
-// Note: parseLlmOutput is internal to agent-orchestrator, so this regression
-// is validated indirectly via buildStepMessages (which receives the already-
-// parsed step) and the scorer (which checks tool=0% as a failure signal).
-// The fix is documented here for audit trail purposes.
+// Note: parser recovery itself is covered in agent-llm-output.test.ts.
+// This regression keeps the recovered workflow shape visible for audit trail purposes.
 
 describe('bare tool call shape documentation', () => {
   it('buildStepMessages handles step produced from bare-tool-call recovery', () => {

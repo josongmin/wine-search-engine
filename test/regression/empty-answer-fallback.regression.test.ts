@@ -194,14 +194,19 @@ describe('EMPTY_ANSWER fallback regression — prompt seam separation', () => {
     expect(src).toMatch(/export function buildSystemMessage/);
   });
 
-  it('R-EMPTY-13: orchestrator uses planner prompt in step-0 and synthesis prompt in fallback', async () => {
+  it('R-EMPTY-13: planner phase uses planner prompt and orchestrator uses synthesis prompt', async () => {
     const fs = await import('fs');
-    const src = fs.readFileSync(
+    const plannerSrc = fs.readFileSync(
+      new URL('../../src/application/agent/agent-planner-phase-runner.ts', import.meta.url),
+      'utf-8',
+    );
+    const orchestratorSrc = fs.readFileSync(
       new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
       'utf-8',
     );
-    expect(src).toMatch(/buildPlannerSystemMessage\(\)/);
-    expect(src).toMatch(/buildSynthesisSystemMessage\(\)/);
-    expect(src).not.toMatch(/buildSystemMessage\(\)/);
+    expect(plannerSrc).toMatch(/buildPlannerSystemMessage\(\)/);
+    expect(orchestratorSrc).toMatch(/buildSynthesisSystemMessage\(\)/);
+    expect(plannerSrc).not.toMatch(/buildSystemMessage\(\)/);
+    expect(orchestratorSrc).not.toMatch(/buildSystemMessage\(\)/);
   });
 });
