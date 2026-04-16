@@ -541,6 +541,28 @@ describe('resolveCandidateValue — grape_family', () => {
 // does not apply a weight deficit.
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// gift_suitability / beginner_suitability constraint evidence (L2)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('resolveCandidateValue — gift/beginner suitability (L2)', () => {
+  it('matches gift_suitability >= 0.5 soft constraint when score is high', () => {
+    const candidate = makeCandidate({ giftSuitabilityScore: 0.7 });
+    const bundle = makeBundle([], [makeConstraint('gift_suitability', '>=', 0.5)]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('gift_suitability');
+  });
+
+  it('does not match beginner_suitability >= 0.5 when score is low', () => {
+    const candidate = makeCandidate({ beginnerSuitabilityScore: 0.3 });
+    const bundle = makeBundle([], [makeConstraint('beginner_suitability', '>=', 0.5)]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).not.toContain('beginner_suitability');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 describe('fruit_intensity soft constraint — no-backing-field exemption (Bug 2 regression)', () => {
   it('fruit_intensity soft constraint adds attribute to matchedConstraints (not-evaluable exemption)', () => {
     // No fruitIntensity field on HybridCandidate → resolveCandidateValue returns undefined.

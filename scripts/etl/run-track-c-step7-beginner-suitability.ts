@@ -162,7 +162,9 @@ async function scoreBeginnerSuitability(record: EnrichedSilverRecord): Promise<B
 
   let parsed: BeginnerScoreResponse;
   try {
-    parsed = JSON.parse(rawContent) as BeginnerScoreResponse;
+    const rawParsed: unknown = JSON.parse(rawContent);
+    if (typeof rawParsed !== 'object' || rawParsed === null) return undefined;
+    parsed = rawParsed as BeginnerScoreResponse;
   } catch {
     return undefined;
   }

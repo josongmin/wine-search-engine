@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type {
+  EvalBenchmarkKind,
   EvalBenchmarkRun,
   EvalBenchmarkRunInput,
 } from '../../domain/evaluation/model/eval-benchmark-run.js';
@@ -27,6 +28,21 @@ interface EvalBenchmarkRunRow {
   created_at: Date;
 }
 
+const VALID_BENCHMARK_KINDS: ReadonlySet<string> = new Set([
+  'noisy_entity',
+  'offline_eval',
+  'entity_retrieval_fixture',
+  'search_feature_behavior_fixture',
+  'agentic_tool_use_fixture',
+] satisfies EvalBenchmarkKind[]);
+
+function toEvalBenchmarkKind(raw: unknown): EvalBenchmarkKind {
+  if (typeof raw === 'string' && VALID_BENCHMARK_KINDS.has(raw)) {
+    return raw as EvalBenchmarkKind;
+  }
+  throw new Error(`Invalid benchmark_kind from DB: ${String(raw)}`);
+}
+
 function toActivationStatus(value: string): EvalBenchmarkRun['activationStatus'] {
   if (value === 'activated' || value === 'shadow_only') {
     return value;
@@ -51,7 +67,7 @@ function rowToEvalBenchmarkRun(row: EvalBenchmarkRunRow): EvalBenchmarkRun {
   const metrics = parseMetrics(row.metrics);
   return {
     runId: row.run_id,
-    benchmarkKind: row.benchmark_kind as EvalBenchmarkRun['benchmarkKind'],
+    benchmarkKind: toEvalBenchmarkKind(row.benchmark_kind),
     ...(row.search_snapshot_id != null ? { snapshotId: row.search_snapshot_id } : {}),
     evalDatasetVersion: row.eval_dataset_version,
     featureSchemaHash: row.feature_schema_hash,
@@ -121,7 +137,14 @@ export class PgEvalBenchmarkRunStore implements EvalBenchmarkRunStore {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limitClause = filter?.limit !== undefined ? `LIMIT ${Math.max(1, Math.trunc(filter.limit))}` : '';
+    let limitClause = '';
+    if (filter?.limit !== undefined) {
+      const safeLimit = Math.max(1, Math.trunc(filter.limit));
+      if (Number.isFinite(safeLimit)) {
+        params.push(safeLimit);
+        limitClause = `LIMIT $${params.length}`;
+      }
+    }
     const result = await this.pool.query<EvalBenchmarkRunRow>(
       `SELECT *
        FROM eval_benchmark_runs

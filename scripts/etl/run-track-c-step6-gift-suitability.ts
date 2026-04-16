@@ -164,7 +164,9 @@ async function scoreGiftSuitability(record: EnrichedSilverRecord): Promise<GiftS
 
   let parsed: GiftScoreResponse;
   try {
-    parsed = JSON.parse(rawContent) as GiftScoreResponse;
+    const rawParsed: unknown = JSON.parse(rawContent);
+    if (typeof rawParsed !== 'object' || rawParsed === null) return undefined;
+    parsed = rawParsed as GiftScoreResponse;
   } catch {
     return undefined;
   }

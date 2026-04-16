@@ -465,6 +465,7 @@ const NON_PENALTY_KEYS = [
   'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
   'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
   'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+  'giftSuitability', 'beginnerSuitability',
 ] as const;
 
 function applyModeOverlayWithNorm(

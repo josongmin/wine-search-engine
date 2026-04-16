@@ -80,7 +80,7 @@ describe('PgEvalBenchmarkRunStore', () => {
     expect(query).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('FROM eval_benchmark_runs'),
-      ['noisy_entity'],
+      ['noisy_entity', 5],
     );
     expect(runs).toEqual([
       expect.objectContaining({
@@ -214,6 +214,55 @@ describe('PgEvalBenchmarkRunStore', () => {
       releaseGatePassed: false,
       activationStatus: 'shadow_only',
     }));
+  });
+
+  it('throws on invalid benchmark_kind from DB', async () => {
+    const query = vi.fn().mockResolvedValueOnce({
+      rows: [
+        {
+          run_id: 'run-bad',
+          benchmark_kind: 'unknown_kind',
+          search_snapshot_id: null,
+          eval_dataset_version: 'v1',
+          feature_schema_hash: 'hash',
+          query_count: 1,
+          recall_at_1: null,
+          recall_at_3: null,
+          mrr: null,
+          false_exact_rate: null,
+          release_gate_passed: false,
+          activation_status: 'shadow_only',
+          report_json: {},
+          metrics: null,
+          created_at: new Date(),
+        },
+      ],
+    });
+    const store = new PgEvalBenchmarkRunStore({ query } as never);
+
+    await expect(store.listRuns()).rejects.toThrow('Invalid benchmark_kind from DB: unknown_kind');
+  });
+
+  it('ignores NaN limit (does not interpolate NaN into SQL)', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [] });
+    const store = new PgEvalBenchmarkRunStore({ query } as never);
+
+    await store.listRuns({ limit: NaN });
+
+    const sql = query.mock.calls[0]![0] as string;
+    expect(sql).not.toContain('LIMIT');
+    expect(query).toHaveBeenCalledWith(expect.any(String), []);
+  });
+
+  it('parameterizes LIMIT instead of interpolating it', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [] });
+    const store = new PgEvalBenchmarkRunStore({ query } as never);
+
+    await store.listRuns({ limit: 10 });
+
+    const sql = query.mock.calls[0]![0] as string;
+    expect(sql).toContain('LIMIT $1');
+    expect(query).toHaveBeenCalledWith(expect.any(String), [10]);
   });
 
   it('roundtrips metrics JSONB (save and read back numeric key-value pairs)', async () => {

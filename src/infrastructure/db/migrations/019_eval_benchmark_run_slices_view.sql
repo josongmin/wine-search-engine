@@ -78,6 +78,7 @@ FROM eval_benchmark_runs r,
      LATERAL jsonb_each_text(r.metrics) AS kv(key, value)
 WHERE r.metrics IS NOT NULL
   AND r.metrics != 'null'::jsonb
+  AND kv.key NOT IN ('recall_at_1', 'recall_at_3', 'mrr', 'false_exact_rate', 'query_count')
   AND kv.value ~ '^-?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$';
 
 
