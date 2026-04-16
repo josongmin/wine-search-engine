@@ -82,12 +82,34 @@ function rangesOverlap(a: { min?: number; max?: number }, b: { min?: number; max
  */
 type MatchMode = 'strict' | 'relaxed' | 'type_only';
 
+/**
+ * Attribute equivalence for SCR scoring.
+ *
+ * The extraction pipeline (planner layer) emits canonical ontology attributes
+ * with `operator: 'exclude'` (e.g., `country exclude "France"`), while scenario
+ * expectations use agent-tool-level attribute names (e.g., `exclude_regions`).
+ * Both represent the same semantic — this map bridges the naming gap so the
+ * scorer doesn't penalize correct extractions.
+ *
+ * Direction: expected → actual (scenarios use the key, system emits the values).
+ */
+const ATTRIBUTE_EQUIVALENCE: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['exclude_regions', new Set(['country', 'region', 'appellation'])],
+  ['exclude_grapes', new Set(['grape_primary'])],
+]);
+
+function attributeMatches(actualAttr: string, expectedAttr: string): boolean {
+  if (actualAttr === expectedAttr) return true;
+  const equivalents = ATTRIBUTE_EQUIVALENCE.get(expectedAttr);
+  return equivalents !== undefined && equivalents.has(actualAttr);
+}
+
 export function constraintMatches(
   actual: NormalizedConstraint,
   expected: ExpectedConstraint,
   mode: MatchMode,
 ): boolean {
-  if (actual.attribute !== expected.attribute) return false;
+  if (!attributeMatches(actual.attribute, expected.attribute)) return false;
   if (mode === 'type_only') return true;
 
   // Operator compatibility

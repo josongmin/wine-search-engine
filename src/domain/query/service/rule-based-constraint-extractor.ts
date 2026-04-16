@@ -203,14 +203,17 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  // "바디감 있고/있는" → body >= 0.5 (connective form: 있고, adnominal: 있는)
+  // "바디감 있고/있는" → body >= 0.7 (connective form: 있고, adnominal: 있는)
+  // Korean "바디감 있다" implies notable body presence — equivalent to "묵직한"
+  // (full-bodied, 0.7). A user saying "바디감 있는 와인" expects full-bodied,
+  // not medium (0.5). Domain-grounded: Vivino body scale 4-5 = 0.7-1.0.
   if (/(?:바디감\s*있(?:고|는|으며|으면서)?|바디감\s*좋(?:고|은|으며)?)/u.test(q)) {
     soft.push({
       attribute: 'body',
       operator: '>=',
-      value: 0.5,
+      value: 0.7,
       source_phrase: '바디감 있',
-      confidence: 0.7,
+      confidence: 0.8,
       mapping_version: mv,
     });
   }
@@ -378,26 +381,43 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   // Vintage range constraints → hard (explicit vintage = hard requirement).
-  if (searchConstraints.vintageMin !== undefined) {
+  // When min === max, emit a single `=` constraint (exact year: "2015년산")
+  // instead of separate >= and <= — the scorer expects `=` for exact years.
+  if (
+    searchConstraints.vintageMin !== undefined &&
+    searchConstraints.vintageMax !== undefined &&
+    searchConstraints.vintageMin === searchConstraints.vintageMax
+  ) {
     hard.push({
       attribute: 'vintage_year',
-      operator: '>=',
+      operator: '=',
       value: searchConstraints.vintageMin,
-      source_phrase: `${searchConstraints.vintageMin}년 이후`,
+      source_phrase: `${searchConstraints.vintageMin}년산`,
       confidence: 0.9,
       mapping_version: mv,
     });
-  }
+  } else {
+    if (searchConstraints.vintageMin !== undefined) {
+      hard.push({
+        attribute: 'vintage_year',
+        operator: '>=',
+        value: searchConstraints.vintageMin,
+        source_phrase: `${searchConstraints.vintageMin}년 이후`,
+        confidence: 0.9,
+        mapping_version: mv,
+      });
+    }
 
-  if (searchConstraints.vintageMax !== undefined) {
-    hard.push({
-      attribute: 'vintage_year',
-      operator: '<=',
-      value: searchConstraints.vintageMax,
-      source_phrase: `${searchConstraints.vintageMax}년 이전`,
-      confidence: 0.9,
-      mapping_version: mv,
-    });
+    if (searchConstraints.vintageMax !== undefined) {
+      hard.push({
+        attribute: 'vintage_year',
+        operator: '<=',
+        value: searchConstraints.vintageMax,
+        source_phrase: `${searchConstraints.vintageMax}년 이전`,
+        confidence: 0.9,
+        mapping_version: mv,
+      });
+    }
   }
 
   return { hard, soft, inferred: [] };

@@ -25,6 +25,7 @@ import {
   extractKoreanVintageAfter,
   extractKoreanVintageBefore,
   extractVintageRange,
+  extractVintageYear,
 } from '../../shared/utils/vintage.js';
 
 // ---------------------------------------------------------------------------
@@ -622,6 +623,7 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
  *   "YYYY년 이후"         — vintageMin = YYYY
  *   "YYYY년 이전"         — vintageMax = YYYY
  *   "YYYY-YYYY"           — year range
+ *   "YYYY년산"            — exact vintage year (vintageMin = vintageMax = YYYY)
  */
 function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vintageMax'> {
   // All vintage patterns delegate to the vintage SSoT
@@ -640,6 +642,13 @@ function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vint
   const before = extractKoreanVintageBefore(q);
   if (before !== null) {
     return { vintageMax: before };
+  }
+
+  // Bare vintage year without directional modifier ("2015년산 중에", "2018 와인").
+  // Treat as exact year constraint: vintageMin = vintageMax = year.
+  const bareYear = extractVintageYear(q);
+  if (bareYear !== null) {
+    return { vintageMin: bareYear, vintageMax: bareYear };
   }
 
   return {};
