@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
+import { createStageTimer } from '../../observability/stage-timer.js';
 import {
   buildEntityIdToolField,
   buildFoodPairingFieldShape,
@@ -614,6 +615,11 @@ async function executeAgentToolInner(
         structuredFilters,
       );
 
+      // Create a per-tool-call StageTimer so pipeline stage latencies
+      // propagate to the SearchResponseV1.stageTimings field — surfaced in
+      // bench reports as the latencyBreakdown section.
+      const toolStageTimer = createStageTimer();
+
       let response: SearchResponseV1 | ComparisonSearchResponse;
       response = await executeSearchWithTypedWineDiversityDiscovery({
         searchUseCase: deps.searchUseCase,
@@ -634,6 +640,7 @@ async function executeAgentToolInner(
           ),
         ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
         ...(deps.corpusCardinality !== undefined ? { corpusCardinality: deps.corpusCardinality } : {}),
+        stageTimer: toolStageTimer,
       });
 
       if (response.queryType === 'comparison') {

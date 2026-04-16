@@ -2,6 +2,7 @@ import type { SearchExecutorPort, SearchExecutorResult } from './port/search-exe
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
+import type { StageTimer } from '../../observability/stage-timer.js';
 import { WINE_TYPE_DETECTION_PATTERNS, type WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 import type { CorpusCardinalityCache } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
 import { CORPUS_LIMITED_THRESHOLD } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
@@ -217,12 +218,19 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
   readonly abortSignal?: AbortSignal | undefined;
   /** When provided, wine types with fewer than CORPUS_LIMITED_THRESHOLD entities are skipped. */
   readonly corpusCardinality?: CorpusCardinalityCache | undefined;
+  /** StageTimer for pipeline latency breakdown. Threaded to search execute options. */
+  readonly stageTimer?: StageTimer | undefined;
 }): Promise<SearchExecutorResult> {
+  const execOpts = {
+    ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
+    ...(input.stageTimer !== undefined ? { stageTimer: input.stageTimer } : {}),
+  };
+
   if (!input.shouldRun) {
     return input.searchUseCase.execute(
       input.fallbackRequest,
       input.requestId,
-      { ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}) },
+      execOpts,
     );
   }
 
@@ -238,7 +246,7 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
     return input.searchUseCase.execute(
       input.fallbackRequest,
       input.requestId,
-      { ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}) },
+      execOpts,
     );
   }
 
@@ -247,7 +255,7 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
       input.searchUseCase.execute(
         input.buildTypedRequest(wineType),
         `${input.requestId}:diversity:${wineType}`,
-        { ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}) },
+        execOpts,
       ),
     ),
   );
