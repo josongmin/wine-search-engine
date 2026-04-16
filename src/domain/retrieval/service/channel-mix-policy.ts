@@ -47,6 +47,7 @@ interface ChannelMixDecision {
 const PROFILE_CHANNEL_MIXES = {
   hybrid_default: ['sparse_bm25', 'dense_semantic'] as const,
   mixed_anchor: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'] as const,
+  recommendation_anchor: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'] as const,
   compare_default: ['sparse_bm25', 'dense_semantic', 'compare_anchor'] as const,
   // browse_default activates browse_producer so producer-browse dispatch is visible
   // in ChannelMixDecision.channelMix (mirrors the BROWSE_DEFAULT profile object).
@@ -85,8 +86,8 @@ const FAMILY_POLICY: Record<QueryFamily, { profile: ProfileName; reason: string 
   // Recommendation queries share the anchor-similarity approach: find wines
   // near the implicit anchor (user history / stated reference wine).
   recommendation: {
-    profile: 'mixed_anchor',
-    reason: 'recommendation family → anchor_similarity channel for neighbourhood retrieval',
+    profile: 'recommendation_anchor',
+    reason: 'recommendation family → recommendation_anchor profile for broader, diversity-aware neighbourhood retrieval',
   },
 
   // Pairing queries are anchor-conditioned: the food item is the anchor and

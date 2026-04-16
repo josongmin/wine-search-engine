@@ -212,6 +212,24 @@ function isRetrievalCriticEnabled(
   return env['RETRIEVAL_EXECUTOR_CRITIC'] !== 'false';
 }
 
+function resolveRemainingLatencyBudgetMs(
+  input: HybridRetrievalInput,
+  nowMs: number = Date.now(),
+): number | undefined {
+  const maxLatencyMs = input.queryPlan.queryBudget?.maxLatencyMs;
+  const requestStartTimeMs = input.requestContext?.requestStartTimeMs;
+  if (
+    maxLatencyMs === undefined
+    || !Number.isFinite(maxLatencyMs)
+    || requestStartTimeMs === undefined
+    || !Number.isFinite(requestStartTimeMs)
+  ) {
+    return undefined;
+  }
+
+  return maxLatencyMs - Math.max(0, nowMs - requestStartTimeMs);
+}
+
 function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
   return graph.nodes.filter((n): n is SubqueryNode => n.kind === 'subquery');
 }
@@ -327,6 +345,25 @@ export async function executeGraphAware(
   // the cap is evaluated BEFORE the retrieval call so we never
   // execute a (CRITIC_RETRY_MAX+1)-th retrieval.
   for (let retryCount = 0; retryCount < CRITIC_RETRY_MAX; retryCount += 1) {
+    const remainingLatencyBudgetMs = resolveRemainingLatencyBudgetMs(currentInput);
+    if (remainingLatencyBudgetMs !== undefined && remainingLatencyBudgetMs <= 0) {
+      pipelineDebug(
+        {
+          step: 'retrieval.critic.budget_exhausted',
+          iterations: rewriteTraces.length,
+        },
+        'pipeline critic retry budget exhausted',
+      );
+      return {
+        ...lastResult,
+        criticRewrites: rewriteTraces,
+        criticDegradationReasons: [
+          ...(lastResult.criticDegradationReasons ?? []),
+          'critic_retry_budget_exhausted',
+        ],
+      };
+    }
+
     const decision: CriticDecision = decideRetry({
       graph,
       coverage:

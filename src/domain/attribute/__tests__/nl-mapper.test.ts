@@ -147,8 +147,24 @@ describe('NLMapper', () => {
         expect(mapping?.value).toBe('crowd_pleasing');
       });
 
+      it('"crowd_pleasing" → style in [crowd_pleasing]', async () => {
+        const mapping = await mapper.mapPhrase('crowd_pleasing');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('crowd_pleasing');
+      });
+
       it('"입문자" → style in [approachable]', async () => {
         const mapping = await mapper.mapPhrase('입문자');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('approachable');
+      });
+
+      it('"approachable" → style in [approachable]', async () => {
+        const mapping = await mapper.mapPhrase('approachable');
         expect(mapping).not.toBeNull();
         expect(mapping?.mappedAttribute).toBe('style');
         expect(mapping?.operator).toBe('in');

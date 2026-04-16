@@ -305,6 +305,9 @@ describe('runSearchPreRoutePhase', () => {
   });
 
   it('passes parent context, session, and budget into decomposed search sub-queries', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(223);
+
     const decomposedSearch = {
       execute: vi.fn().mockResolvedValue({
         queryType: 'comparison',

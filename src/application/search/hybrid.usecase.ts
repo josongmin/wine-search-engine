@@ -158,6 +158,7 @@ export class HybridUseCase {
           stageTimer,
           ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
           requestId,
+          requestStartTimeMs: startTime,
         },
       );
       stageTimer.end('hybrid.retrieval_and_ranking');

@@ -46,6 +46,15 @@ describe('RetrievalProfileService (T4.1)', () => {
     expect(profile.channelMix).toContain('compare_anchor');
   });
 
+  it('recommendation mode → recommendation_anchor profile with reduced fanout', () => {
+    const profile = service.getProfile('semantic_preference', 'hybrid', 'recommendation');
+    expect(profile.name).toBe('recommendation_anchor');
+    expect(profile.channelMix).toContain('anchor_similarity');
+    expect(profile.sparseTopN).toBe(48);
+    expect(profile.denseTopN).toBe(48);
+    expect(profile.finalTopK).toBe(120);
+  });
+
   it('getChannelMix returns correct channels for profile', () => {
     const channels = service.getChannelMix('anchored_similarity', 'mixed');
     expect(channels).toContain('anchor_similarity');
@@ -100,9 +109,9 @@ describe('resolveChannelMix (T4.6)', () => {
     expect(decision.channelMix).toContain('compare_anchor');
   });
 
-  it('recommendation family → mixed_anchor profile', () => {
+  it('recommendation family → recommendation_anchor profile', () => {
     const decision = resolveChannelMix('recommendation');
-    expect(decision.profileName).toBe('mixed_anchor');
+    expect(decision.profileName).toBe('recommendation_anchor');
     expect(decision.channelMix).toContain('anchor_similarity');
   });
 

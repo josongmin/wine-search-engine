@@ -178,6 +178,7 @@ export interface ScoredEntry {
 
   // Display metadata for new entity summary fields
   readonly style?: string | undefined;
+  readonly wineType?: string | undefined;
   readonly classification?: string | undefined;
   readonly alcoholPct?: number | undefined;
   readonly certifications?: readonly string[] | undefined;

@@ -107,7 +107,7 @@ describe('AgentAnswerRecoveryPolicy', () => {
           exclude_grapes: ['Merlot'],
           exclude_regions: ['France'],
           max_price_krw: 50000,
-          style: 'crowd_pleasing',
+          styles: ['approachable', 'crowd_pleasing'],
           country: 'Italy',
           wine_type: 'red',
           vintage_min: 2019,
@@ -126,7 +126,7 @@ describe('AgentAnswerRecoveryPolicy', () => {
 
     expect(execute).toHaveBeenCalledWith(
       {
-        query: '선물용 와인, not Merlot, not France, 50000원 이하, crowd_pleasing',
+        query: '선물용 와인, not Merlot, not France, 50000원 이하, approachable, crowd pleasing',
         limit: 3,
         options: { mode: 'hybrid', explain: false, clarification: false },
         filters: [

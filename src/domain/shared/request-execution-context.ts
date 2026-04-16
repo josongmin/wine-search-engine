@@ -6,6 +6,12 @@ import type { StageTimer } from '../../observability/stage-timer.js';
  */
 export interface RequestExecutionContext {
   /**
+   * Wall-clock request start timestamp in milliseconds.
+   * When present, downstream stages may derive remaining latency budget from
+   * `queryBudget.maxLatencyMs` without inventing local timers.
+   */
+  readonly requestStartTimeMs?: number | undefined;
+  /**
    * Explicit trust-domain for the execution path.
    * `benchmark_trusted` is reserved for internally authenticated benchmark lanes
    * and skips public-edge query-entry security so retrieval quality can be

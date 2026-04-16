@@ -84,6 +84,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.vintage_max?.maximum).toBe(2100);
       expect(props.appellation?.type).toBe('string');
       expect(props.style?.type).toBe('string');
+      expect(props.styles?.type).toBe('array');
       expect(props.certification?.type).toBe('string');
       expect(props.want_diversity?.type).toBe('boolean');
     });
@@ -95,6 +96,8 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.style?.description).toContain('screw_cap');
       expect(props.style?.description).toContain('approachable');
       expect(props.style?.description).toContain('crowd_pleasing');
+      expect(props.styles?.description).toContain('approachable');
+      expect(props.styles?.description).toContain('crowd_pleasing');
     });
   });
 

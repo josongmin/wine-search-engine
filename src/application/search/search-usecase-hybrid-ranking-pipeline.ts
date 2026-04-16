@@ -404,6 +404,25 @@ export async function runHybridRankingPipeline(
 // 4 steps handles 95% of real queries; beyond that, the query is too specific for the index.
 const MAX_RELAXATION_STEPS = 4;
 
+function resolveRemainingLatencyBudgetMs(
+  plan: QueryPlanV1,
+  requestContext: RequestExecutionContext | undefined,
+  nowMs: number = Date.now(),
+): number | undefined {
+  const maxLatencyMs = plan.queryBudget?.maxLatencyMs;
+  const requestStartTimeMs = requestContext?.requestStartTimeMs;
+  if (
+    maxLatencyMs === undefined
+    || !Number.isFinite(maxLatencyMs)
+    || requestStartTimeMs === undefined
+    || !Number.isFinite(requestStartTimeMs)
+  ) {
+    return undefined;
+  }
+
+  return maxLatencyMs - Math.max(0, nowMs - requestStartTimeMs);
+}
+
 export async function executeHybridRouteRankingPipeline(
   plan: QueryPlanV1,
   deps: HybridRankingRouteDeps,
@@ -439,6 +458,18 @@ export async function executeHybridRouteRankingPipeline(
     let abortedDuringRelaxation = false;
 
     for (const step of stepsToTry) {
+      const remainingLatencyBudgetMs = resolveRemainingLatencyBudgetMs(plan, requestContext);
+      if (remainingLatencyBudgetMs !== undefined && remainingLatencyBudgetMs <= 0) {
+        pipelineDebug(
+          {
+            step: 'retrieval.constraint_relaxation.skipped_due_to_budget',
+            relaxed_attributes: step.relaxedAttributes,
+          },
+          'pipeline constraint relaxation skipped due to exhausted request budget',
+        );
+        break;
+      }
+
       // Check abort signal before each relaxation attempt to prevent latency runaway.
       // MAX_RELAXATION_STEPS=4 can add 4 full round-trips to zero-result queries.
       if (requestContext?.abortSignal?.aborted === true) {
@@ -547,9 +578,14 @@ export async function executeHybridRouteRankingPipeline(
     // All relaxation steps exhausted — signal that recovery was attempted but failed.
     // This surfaces as a degradation reason so response builders can log/alert.
     if (stepsToTry.length > 0) {
+      const remainingLatencyBudgetMs = resolveRemainingLatencyBudgetMs(plan, requestContext);
+      const budgetExhaustedDuringRelaxation =
+        remainingLatencyBudgetMs !== undefined && remainingLatencyBudgetMs <= 0;
       const exhaustionDegradation: RankingDegradationSignal = {
         executionMode: 'degraded',
-        degradationReasons: [`constraint_relaxation_exhausted:${stepsToTry.length}_steps`],
+        degradationReasons: budgetExhaustedDuringRelaxation
+          ? ['constraint_relaxation_budget_exhausted']
+          : [`constraint_relaxation_exhausted:${stepsToTry.length}_steps`],
       };
       const mergedWithExhaustion = mergeRouteDegradation(ranked.routeDegradation, exhaustionDegradation);
       return {

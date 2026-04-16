@@ -81,6 +81,26 @@ const MIXED_ANCHOR: RetrievalProfile = {
   finalTopK: 200,
 } as const;
 
+/**
+ * Recommendation-only profile.
+ *
+ * Keeps the same mixed anchor channel semantics as MIXED_ANCHOR, but narrows
+ * per-channel fanout and final candidate volume for broad recommendation
+ * queries where the agent usually surfaces only 2-3 wines. This reduces
+ * retrieval wall without changing the route or channel family.
+ */
+const RECOMMENDATION_ANCHOR: RetrievalProfile = {
+  name: 'recommendation_anchor',
+  channelMix: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
+  sparseWeight: 0.3,
+  denseWeight: 0.3,
+  anchorWeight: 0.4,
+  sparseTopN: 48,
+  denseTopN: 48,
+  fusionK: RRF_DEFAULT_K,
+  finalTopK: 120,
+} as const;
+
 /** Conservative fallback for exact / short-entity queries. */
 const EXACT_SAFE_FALLBACK: RetrievalProfile = {
   name: 'exact_safe_fallback',
@@ -293,6 +313,7 @@ export class RetrievalProfileService {
       switch (decision.profileName) {
         case 'compare_default':       return COMPARE_DEFAULT;
         case 'mixed_anchor':          return MIXED_ANCHOR;
+        case 'recommendation_anchor': return RECOMMENDATION_ANCHOR;
         case 'browse_default':        return BROWSE_DEFAULT;
         case 'region_browse':         return REGION_BROWSE;
         case 'exact_safe_fallback':   return EXACT_SAFE_FALLBACK;
@@ -333,7 +354,7 @@ export class RetrievalProfileService {
         return RELATIVE_FILTER;
       // recommendation mode uses anchor_similarity channel (aligns with FAMILY_POLICY mapping)
       } else if (retrievalMode === 'recommendation') {
-        return MIXED_ANCHOR;
+        return RECOMMENDATION_ANCHOR;
       } else if (retrievalMode === 'similar_items') {
         return MIXED_ANCHOR;
       } else if (retrievalMode === 'no_match_detection') {

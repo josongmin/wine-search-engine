@@ -217,6 +217,9 @@ export interface RankedResult {
   /** Style descriptor (e.g. "bold", "elegant"). */
   readonly style?: string | undefined;
 
+  /** Catalog wine type (e.g. "red", "white", "sparkling"). */
+  readonly wineType?: string | undefined;
+
   /** Classification tier or legal designation. */
   readonly classification?: string | undefined;
 

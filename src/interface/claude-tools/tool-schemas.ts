@@ -98,6 +98,12 @@ export const WINE_SEARCH_TOOLS: readonly ClaudeToolDefinition[] = [
           type: 'string',
           description: 'Optional semantic style hint. Preserve user meaning losslessly; examples: dry, sweet, oaked, light, chillable, screw_cap, approachable, crowd_pleasing.',
         },
+        styles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional multiple semantic style hints. Use when the query carries more than one style meaning at once, e.g. ["approachable","crowd_pleasing"].',
+          maxItems: 5,
+        },
         certification: {
           type: 'string',
           description: 'Optional certification hint such as organic or biodynamic.',

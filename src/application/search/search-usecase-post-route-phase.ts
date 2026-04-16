@@ -38,6 +38,7 @@ import type {
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
+import type { ResultItemMappingOptions } from './search-usecase-map-result-items.js';
 import {
   extractSensoryPriorsFromConstraints,
   extractSensoryPriorsFromRetrievalPlan,
@@ -67,6 +68,7 @@ import { classifyShortfallLayer } from '../../domain/shared/types/provenance-sho
 /** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
 const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
 const retrievalProfileService = new RetrievalProfileService();
+const RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT = 3;
 
 /**
  * Derives AuditExtension from planner/ranking runtime state and optional
@@ -206,6 +208,14 @@ function deriveAuditExtension(
       ? { resolver_provenance_trace: resolverProvenanceTrace }
       : {}),
   };
+}
+
+function resolveResultItemMappingOptions(
+  effectiveRetrievalMode: ExecutionRetrievalMode,
+): ResultItemMappingOptions | undefined {
+  return effectiveRetrievalMode === 'recommendation'
+    ? { maxPredictions: RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT }
+    : undefined;
 }
 
 function buildExecutionAuditTrace(
@@ -776,6 +786,7 @@ export async function runRankedRouteDecisionPhase(
     ctx.drinkingWindow,
     resolveTargetYear(ctx),
     sensoryPriors,
+    resolveResultItemMappingOptions(ctx.effectiveRetrievalMode),
   );
   // Provenance slices and counterfactuals MUST use the full retrieval pool,
   // not the limited result set. Otherwise:
@@ -1069,6 +1080,7 @@ export async function runSearchPostRoutePhase(
       ctx.drinkingWindow,
       resolveTargetYear(ctx),
       sensoryPriorsAbstain,
+      resolveResultItemMappingOptions(ctx.effectiveRetrievalMode),
     );
     // Provenance slices and counterfactuals use the FULL ranked results, not
     // the limited display set — eval analytics need every candidate's channel

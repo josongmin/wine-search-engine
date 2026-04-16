@@ -174,6 +174,7 @@ export class RankingStagePipeline {
         queryClass: input.queryPlan.queryClass,
         // compiled-first: use compiled execution contract when available (E3-U1)
         effectiveRoute: input.compiled.execution.effectiveRoute,
+        hasExplicitWineTypeConstraint: input.constraints.hard.some((constraint) => constraint.attribute === 'wine_type'),
       };
       const policyOutput = this.policy.apply(results, policyContext);
       // policyApplied = true only when the policy actually changed something:

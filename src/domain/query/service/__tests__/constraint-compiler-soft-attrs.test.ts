@@ -281,4 +281,17 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
       ]),
     );
   });
+
+  it('real NLMapper extracts gift + approachable + crowd-pleasing constraints for english gift query', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('gift for wine beginner, safe crowd-pleasing options');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', value: ['gift'] }),
+        expect.objectContaining({ attribute: 'style', value: ['approachable'] }),
+        expect.objectContaining({ attribute: 'style', value: ['crowd_pleasing'] }),
+      ]),
+    );
+  });
 });

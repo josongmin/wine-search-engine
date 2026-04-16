@@ -31,6 +31,7 @@ type RankedResultAttributeProjection = Pick<
   | 'regionEnc'
   | 'countryEnc'
   | 'style'
+  | 'wineType'
   | 'classification'
   | 'alcoholPct'
   | 'certifications'
@@ -62,6 +63,7 @@ interface RankedResultAttributeSource {
   readonly regionEnc?: number | undefined;
   readonly countryEnc?: number | undefined;
   readonly style?: string | undefined;
+  readonly wineType?: string | undefined;
   readonly classification?: string | undefined;
   readonly alcoholPct?: number | undefined;
   readonly certifications?: readonly string[] | undefined;
@@ -125,6 +127,7 @@ function buildRankedResultProjection(
     ...(source.regionEnc !== undefined ? { regionEnc: source.regionEnc } : {}),
     ...(source.countryEnc !== undefined ? { countryEnc: source.countryEnc } : {}),
     ...(source.style !== undefined ? { style: source.style } : {}),
+    ...(source.wineType !== undefined ? { wineType: source.wineType } : {}),
     ...(source.classification !== undefined
       ? { classification: source.classification }
       : {}),
@@ -173,6 +176,7 @@ export function projectHybridCandidateToRankedResultAttributes(
       ? { countryEnc: attributeEncoder.encodeCountry(candidate.country) }
       : {}),
     style: candidate.style,
+    wineType: candidate.wineType,
     classification: candidate.classification,
     alcoholPct: candidate.alcoholPct,
     certifications: candidate.certifications,

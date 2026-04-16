@@ -5,7 +5,11 @@
  *   1. Producer diversity: if 3 or more results from the same producer appear
  *      in the top-10 positions, any extras beyond the 3rd are demoted to after
  *      position 10 (appended in their original relative order).
- *   2. Max-results truncation: if context.maxResults is set, the list is
+ *   2. Wine-type diversity for semantic-preference queries without an explicit
+ *      wine_type hard constraint: if 3 or more results from the same wine type
+ *      appear in the top-10 positions and there are other wine types available
+ *      in that window, extras beyond the 2nd are demoted.
+ *   3. Max-results truncation: if context.maxResults is set, the list is
  *      truncated to that count.
  *
  * After any reordering or truncation, `rank` is re-assigned as 1-based
@@ -19,6 +23,8 @@ import type { RankingPolicyPort, PolicyContext } from '../port/ranking-policy.po
 const DIVERSITY_TOP_WINDOW = 10;
 /** Maximum allowed results per producer within the top window. */
 const MAX_RESULTS_PER_PRODUCER = 3;
+/** Maximum allowed results per wine type within the top window. */
+const MAX_RESULTS_PER_WINE_TYPE = 2;
 
 /**
  * Assigns 1-based contiguous `rank` values to a result list.
@@ -42,6 +48,7 @@ export class DefaultRankingPolicy implements RankingPolicyPort {
     context: PolicyContext,
   ): readonly RankedResult[] {
     let current = applyProducerDiversity(results);
+    current = applyWineTypeDiversity(current, context);
     current = applyMaxResults(current, context.maxResults);
     return reassignRanks(current);
   }
@@ -88,6 +95,67 @@ function applyProducerDiversity(results: readonly RankedResult[]): readonly Rank
   // DIVERSITY_TOP_WINDOW+1 onward, preserving their relative order among
   // themselves and ahead of results that were already in the tail.
   return [...retained, ...demoted, ...tail];
+}
+
+function applyWineTypeDiversity(
+  results: readonly RankedResult[],
+  context: PolicyContext,
+): readonly RankedResult[] {
+  if (context.queryClass !== 'semantic_preference' || context.hasExplicitWineTypeConstraint === true) {
+    return results;
+  }
+
+  const topWindow = results.slice(0, DIVERSITY_TOP_WINDOW);
+  const tail = results.slice(DIVERSITY_TOP_WINDOW);
+  const availableTypes = new Set(
+    results
+      .map((result) => result.wineType?.trim().toLowerCase())
+      .filter((wineType): wineType is string => wineType !== undefined && wineType.length > 0),
+  );
+  if (availableTypes.size < 2) {
+    return results;
+  }
+
+  const wineTypeCounts = new Map<string, number>();
+  const retained: RankedResult[] = [];
+  const demoted: RankedResult[] = [];
+
+  for (const result of topWindow) {
+    const wineType = result.wineType?.trim().toLowerCase();
+    if (wineType === undefined || wineType.length === 0) {
+      retained.push(result);
+      continue;
+    }
+
+    const count = wineTypeCounts.get(wineType) ?? 0;
+    if (count < MAX_RESULTS_PER_WINE_TYPE) {
+      wineTypeCounts.set(wineType, count + 1);
+      retained.push(result);
+    } else {
+      demoted.push({ ...result, policyDemoted: true });
+    }
+  }
+
+  const promotedTailIndices = new Set<number>();
+  for (let index = 0; index < tail.length; index += 1) {
+    const candidate = tail[index];
+    const wineType = candidate?.wineType?.trim().toLowerCase();
+    if (candidate === undefined || wineType === undefined || wineType.length === 0) {
+      continue;
+    }
+    if ((wineTypeCounts.get(wineType) ?? 0) > 0) {
+      continue;
+    }
+    retained.push(candidate);
+    promotedTailIndices.add(index);
+    wineTypeCounts.set(wineType, 1);
+    if (retained.length >= topWindow.length) {
+      break;
+    }
+  }
+
+  const remainingTail = tail.filter((_, index) => !promotedTailIndices.has(index));
+  return [...retained, ...demoted, ...remainingTail];
 }
 
 /**

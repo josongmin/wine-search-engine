@@ -28,6 +28,17 @@ interface ObservationSynthesisMessages {
   readonly sentinel: string;
 }
 
+const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
+
+function compactObservationForSynthesis(observation: string): string {
+  const groundingIndex = observation.lastIndexOf(GROUNDING_JSON_MARKER);
+  if (groundingIndex < 0) {
+    return observation;
+  }
+  const groundingOnly = observation.slice(groundingIndex).trim();
+  return groundingOnly.length > 0 ? groundingOnly : observation;
+}
+
 function buildObservationOnlyMessages(steps: readonly AgentStep[]): readonly ChatMessage[] {
   const messages: ChatMessage[] = [];
 
@@ -36,7 +47,7 @@ function buildObservationOnlyMessages(steps: readonly AgentStep[]): readonly Cha
       for (const pair of step.actionPairs) {
         messages.push({
           role: 'user',
-          content: `[Tool Result: ${pair.action.tool}]\n${pair.observation}`,
+          content: `[Tool Result: ${pair.action.tool}]\n${compactObservationForSynthesis(pair.observation)}`,
         });
       }
       continue;
@@ -45,7 +56,7 @@ function buildObservationOnlyMessages(steps: readonly AgentStep[]): readonly Cha
     if (step.action !== undefined && step.observation !== undefined && step.observation.length > 0) {
       messages.push({
         role: 'user',
-        content: `[Tool Result: ${step.action.tool}]\n${step.observation}`,
+        content: `[Tool Result: ${step.action.tool}]\n${compactObservationForSynthesis(step.observation)}`,
       });
     }
   }

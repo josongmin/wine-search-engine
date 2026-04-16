@@ -24,12 +24,35 @@ import type { RequestExecutionContext } from '../../domain/shared/request-execut
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
+const DECOMPOSED_SEARCH_MIN_TIMEOUT_MS = 1;
 
 type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
 type SearchPreRoutePhaseResult =
   | { readonly outcome: 'continue'; readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery }
   | { readonly outcome: 'return'; readonly response: SearchPreRouteEarlyResponse };
+
+function resolveDecomposedSearchTimeoutMs(
+  request: SearchRequest,
+  startTime: number,
+  nowMs: number = Date.now(),
+): number {
+  const configuredBudgetMs = request.queryBudget?.maxLatencyMs;
+  if (!Number.isFinite(configuredBudgetMs) || configuredBudgetMs === undefined) {
+    return DECOMPOSED_SEARCH_TIMEOUT_MS;
+  }
+
+  const elapsedMs = Math.max(0, nowMs - startTime);
+  const remainingBudgetMs = configuredBudgetMs - elapsedMs;
+  if (remainingBudgetMs <= 0) {
+    return 0;
+  }
+
+  return Math.max(
+    DECOMPOSED_SEARCH_MIN_TIMEOUT_MS,
+    Math.min(DECOMPOSED_SEARCH_TIMEOUT_MS, remainingBudgetMs),
+  );
+}
 
 export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
   readonly request: SearchRequest;
@@ -64,86 +87,101 @@ export async function runSearchPreRoutePhase(
   if (ctx.decomposedSearch) {
     const decomposition = analyzeQueryDecomposition(sanitizedQuery);
     if (isValidDecomposition(decomposition.outcome)) {
-      const timeoutSignal = Symbol('timeout');
-      const abortController = new AbortController();
-      const decomposedAbortSignal =
-        ctx.abortSignal !== undefined
-          ? AbortSignal.any([ctx.abortSignal, abortController.signal])
-          : abortController.signal;
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
-        timeoutHandle = setTimeout(() => {
-          abortController.abort();
-          resolve(timeoutSignal);
-        }, DECOMPOSED_SEARCH_TIMEOUT_MS);
-      });
-      const decomposedSearchPromise = ctx.decomposedSearch.execute(
-        decomposition.outcome.subQueries,
-        decomposition.outcome.comparisonIntent,
-        sanitizedQuery,
-        ctx.requestId,
+      const decomposedSearchTimeoutMs = resolveDecomposedSearchTimeoutMs(
+        ctx.request,
         ctx.startTime,
-        {
-          ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
-          ...(ctx.request.sessionContext !== undefined
-            ? { sessionContext: ctx.request.sessionContext }
-            : {}),
-          ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
-          // Forward explain so a comparison-route caller (options.explain=true)
-          // gets counterfactuals on both sub-search legs.
-          ...(ctx.request.options?.explain === true ? { explain: true } : {}),
-        },
-        { abortSignal: decomposedAbortSignal },
-      ).catch((err: unknown) => {
-        // After timeout fires we abort the controller. Any subsequent rejection
-        // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
-        // would otherwise become an unhandledRejection because nothing is
-        // awaiting the inner promise post-race. Swallow ALL errors after abort.
-        if (abortController.signal.aborted) {
-          return timeoutSignal;
-        }
-        throw err;
-      });
-      let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
-      try {
-        decomposedResponse = await Promise.race([
-          decomposedSearchPromise,
-          timeoutPromise,
-        ]) as typeof timeoutSignal | ComparisonSearchResponse;
-      } finally {
-        // Always clear the timeout handle — prevents timer leak when
-        // decomposedSearchPromise rejects before the timeout fires.
-        if (timeoutHandle !== undefined) {
-          clearTimeout(timeoutHandle);
-        }
-        // Abort any in-flight sub-search work (network requests, sub-use-case
-        // execution) so it does not continue running after we have moved on.
-        // Calling abort() on an already-aborted or completed controller is a no-op.
-        abortController.abort();
-      }
-      if (decomposedResponse === timeoutSignal) {
+      );
+      if (decomposedSearchTimeoutMs <= 0) {
         pipelineDebug(
           {
             step: 'pre_route.decomposed_comparison',
             decomposition_strategy: decomposition.hint.strategy,
-            timed_out: true,
+            skipped_due_to_budget: true,
           },
-          'pipeline pre_route decomposed search timed out — continuing without decomposition',
+          'pipeline pre_route decomposed search skipped due to exhausted request budget',
         );
-      } else if (typeof decomposedResponse !== 'symbol') {
-        const response = decomposedResponse;
-        logSearchEvent({
-          runtime_correlation_ref: ctx.requestId,
-          decomposition_strategy: decomposition.hint.strategy,
+      } else {
+        const timeoutSignal = Symbol('timeout');
+        const abortController = new AbortController();
+        const decomposedAbortSignal =
+          ctx.abortSignal !== undefined
+            ? AbortSignal.any([ctx.abortSignal, abortController.signal])
+            : abortController.signal;
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            abortController.abort();
+            resolve(timeoutSignal);
+          }, decomposedSearchTimeoutMs);
         });
-        pipelineDebug(
+        const decomposedSearchPromise = ctx.decomposedSearch.execute(
+          decomposition.outcome.subQueries,
+          decomposition.outcome.comparisonIntent,
+          sanitizedQuery,
+          ctx.requestId,
+          ctx.startTime,
           {
-            step: 'pre_route.decomposed_comparison',
-            decomposition_strategy: decomposition.hint.strategy,
+            ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
+            ...(ctx.request.sessionContext !== undefined
+              ? { sessionContext: ctx.request.sessionContext }
+              : {}),
+            ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+            // Forward explain so a comparison-route caller (options.explain=true)
+            // gets counterfactuals on both sub-search legs.
+            ...(ctx.request.options?.explain === true ? { explain: true } : {}),
           },
-          'pipeline pre_route comparison branch',
-        );
-        return { outcome: 'return', response };
+          { abortSignal: decomposedAbortSignal },
+        ).catch((err: unknown) => {
+          // After timeout fires we abort the controller. Any subsequent rejection
+          // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
+          // would otherwise become an unhandledRejection because nothing is
+          // awaiting the inner promise post-race. Swallow ALL errors after abort.
+          if (abortController.signal.aborted) {
+            return timeoutSignal;
+          }
+          throw err;
+        });
+        let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
+        try {
+          decomposedResponse = await Promise.race([
+            decomposedSearchPromise,
+            timeoutPromise,
+          ]) as typeof timeoutSignal | ComparisonSearchResponse;
+        } finally {
+          // Always clear the timeout handle — prevents timer leak when
+          // decomposedSearchPromise rejects before the timeout fires.
+          if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle);
+          }
+          // Abort any in-flight sub-search work (network requests, sub-use-case
+          // execution) so it does not continue running after we have moved on.
+          // Calling abort() on an already-aborted or completed controller is a no-op.
+          abortController.abort();
+        }
+        if (decomposedResponse === timeoutSignal) {
+          pipelineDebug(
+            {
+              step: 'pre_route.decomposed_comparison',
+              decomposition_strategy: decomposition.hint.strategy,
+              timed_out: true,
+            },
+            'pipeline pre_route decomposed search timed out — continuing without decomposition',
+          );
+        } else if (typeof decomposedResponse !== 'symbol') {
+          const response = decomposedResponse;
+          logSearchEvent({
+            runtime_correlation_ref: ctx.requestId,
+            decomposition_strategy: decomposition.hint.strategy,
+          });
+          pipelineDebug(
+            {
+              step: 'pre_route.decomposed_comparison',
+              decomposition_strategy: decomposition.hint.strategy,
+            },
+            'pipeline pre_route comparison branch',
+          );
+          return { outcome: 'return', response };
+        }
       }
     }
   }

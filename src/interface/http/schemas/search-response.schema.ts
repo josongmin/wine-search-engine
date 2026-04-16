@@ -107,6 +107,7 @@ export const EntitySummarySchema = z.object({
   price_range: z.string().min(1).optional(),
   // Extended sensory / classification fields (added in RFC-019 Phase 7).
   style: z.string().min(1).optional(),
+  wine_type: z.string().min(1).optional(),
   classification: z.string().min(1).optional(),
   critic_score: z.number().finite().min(0).max(1).optional(),
   alcohol_pct: z.number().finite().min(0).optional(),

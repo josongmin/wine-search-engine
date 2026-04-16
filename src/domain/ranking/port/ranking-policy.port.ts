@@ -18,6 +18,8 @@ export interface PolicyContext {
   readonly queryClass: string;
   /** The effective retrieval route (e.g. "hybrid"). */
   readonly effectiveRoute: string;
+  /** True when the user explicitly constrained wine color/type. */
+  readonly hasExplicitWineTypeConstraint?: boolean;
   /** If set, the policy must truncate results to at most this count. */
   readonly maxResults?: number;
 }

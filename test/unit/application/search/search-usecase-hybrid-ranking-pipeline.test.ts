@@ -309,6 +309,51 @@ describe('executeHybridRouteRankingPipeline', () => {
     );
   });
 
+  it('skips constraint relaxation when request latency budget is already exhausted', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-16T00:00:01.000Z'));
+
+    const plan = {
+      ...minimalPlan(),
+      queryBudget: {
+        maxLatencyMs: 100,
+        maxCandidates: 20,
+        rerankLimit: 10,
+      },
+    } as QueryPlanV1;
+    const compiled = buildCompiled(plan);
+    const candidatePool = {
+      execute: vi.fn().mockResolvedValue([]),
+    };
+    const ranker = {
+      rank: vi.fn().mockResolvedValue({
+        results: [],
+        metadata: { runtimeSignal: undefined, funnelMetrics: undefined },
+      }),
+    };
+
+    const result = await executeHybridRouteRankingPipeline(
+      plan,
+      {
+        candidatePool: candidatePool as never,
+        ranker: ranker as never,
+      },
+      async () => minimalResolveResult(),
+      compiled,
+      {
+        requestStartTimeMs: Date.now() - 150,
+      },
+    );
+
+    expect(candidatePool.execute).toHaveBeenCalledTimes(1);
+    expect(ranker.rank).toHaveBeenCalledTimes(1);
+    expect(result.routeDegradation?.degradationReasons).toContain(
+      'constraint_relaxation_budget_exhausted',
+    );
+
+    vi.useRealTimers();
+  });
+
   it('caps hybrid anchor blocker recall using compiled execution budget', async () => {
     const anchorEntityId = createEntityId('anchor-entity');
     const blockerEntityIdA = createEntityId('blocker-a');

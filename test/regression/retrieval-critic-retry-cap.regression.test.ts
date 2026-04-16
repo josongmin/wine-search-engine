@@ -261,4 +261,66 @@ describe('executor critic retry loop termination', () => {
     expect(executeCalls).toBe(1);
     expect(result.criticRetriesExhausted).toBe(true);
   });
+
+  it('stops critic retries when request latency budget is exhausted without counting cap exhaustion', async () => {
+    const nowMs = Date.now();
+    let executeCalls = 0;
+    const countingPool: CandidatePoolPort = {
+      execute: async () => {
+        executeCalls += 1;
+        return POOL_OUT;
+      },
+      generate: async () => POOL_OUT,
+    };
+    const deps: GraphExecutorDeps = {
+      candidatePool: countingPool,
+      bundleSelector: new BundleSelectorImpl(),
+      queryRewriter: alwaysReformulateRewriter(),
+    };
+    const graph = {
+      ...trivialGraph(),
+      nodes: [
+        { kind: 'group_and', nodeId: 'root', children: ['slot_a'] },
+        {
+          kind: 'slot',
+          nodeId: 'slot_a',
+          atomRef: '0',
+          attribute: 'color',
+          operator: '=',
+          value: 'red',
+          sourceTier: 'hard',
+          sourceKind: 'explicit_utterance',
+          confidence: 1,
+        },
+      ],
+    } as unknown as ConstraintGraph;
+
+    const result = await executeGraphAware(
+      {
+        ...STUB_INPUT,
+        queryPlan: {
+          ...STUB_INPUT.queryPlan,
+          queryBudget: {
+            maxLatencyMs: 100,
+            maxCandidates: 20,
+            rerankLimit: 10,
+          },
+        } as never,
+        requestContext: {
+          requestStartTimeMs: nowMs - 150,
+        },
+      },
+      graph,
+      deps,
+      noOpOpts,
+      zeroCoverageProbe,
+    );
+
+    expect(executeCalls).toBe(1);
+    expect(result.criticRetriesExhausted).toBeUndefined();
+    expect(result.criticDegradationReasons).toContain('critic_retry_budget_exhausted');
+    expect(
+      globalRetrievalCriticCounter.snapshot().RETRIEVAL_CRITIC_RETRIES_EXHAUSTED_COUNT,
+    ).toBe(0);
+  });
 });

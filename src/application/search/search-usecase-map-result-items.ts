@@ -199,6 +199,10 @@ export interface QueryLevelSensoryPriors {
   readonly sweetness?: number | undefined;
 }
 
+export interface ResultItemMappingOptions {
+  readonly maxPredictions?: number | undefined;
+}
+
 function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSensoryPriors): boolean {
   if (r.drinkingWindowStart !== undefined) return false;
   // Rule 28: vintageYear=undefined is guarded above, but a NaN vintage from a
@@ -287,15 +291,21 @@ export async function mapRankedResultsToResultItems(
   // plumbing pattern.
   targetYear: number,
   sensoryPriors?: QueryLevelSensoryPriors,
+  options?: ResultItemMappingOptions,
 ): Promise<readonly ResultItem[]> {
   if (!Number.isFinite(targetYear)) {
     throw new Error(
       `mapRankedResultsToResultItems: targetYear must be a finite number, got ${String(targetYear)}`,
     );
   }
-  const resultsPendingPrediction = rankedResults.filter(
+  const maxPredictions = options?.maxPredictions;
+  const predictionCandidates = rankedResults.filter(
     (r) => drinkingWindow !== undefined && needsDrinkingWindowPrediction(r, sensoryPriors),
   );
+  const resultsPendingPrediction =
+    maxPredictions !== undefined
+      ? predictionCandidates.slice(0, Math.max(0, maxPredictions))
+      : predictionCandidates;
   const drinkingWindowMissingInfo = new Map<string, readonly string[]>();
   const drinkingWindowApproximationUsed = new Map<string, boolean>();
 
@@ -376,6 +386,7 @@ export async function mapRankedResultsToResultItems(
           ? { priceRange: r.priceUsd !== undefined ? `$${r.priceUsd}` : r.priceBand }
           : {}),
         ...(r.style !== undefined ? { style: r.style } : {}),
+        ...(r.wineType !== undefined ? { wineType: r.wineType } : {}),
         ...(r.classification !== undefined ? { classification: r.classification } : {}),
         ...(r.criticScoreNormalized !== undefined ? { criticScore: r.criticScoreNormalized } : {}),
         ...(r.alcoholPct !== undefined ? { alcoholPct: r.alcoholPct } : {}),

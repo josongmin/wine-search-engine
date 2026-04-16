@@ -83,6 +83,131 @@ describe('executeAgentTool', () => {
     expect(parsed.excludeCountries).toContain('France');
   });
 
+  it('serializes multiple semantic styles into parser-compatible clauses', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '선물용 와인 추천',
+        styles: ['approachable', 'crowd_pleasing'],
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toContain('approachable');
+    expect(request?.query).toContain('crowd pleasing');
+  });
+
+  it('raises limit to the diversity floor when want_diversity is true', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '레드 와인 다양하게 추천',
+        want_diversity: true,
+        limit: 3,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.limit).toBe(5);
+  });
+
+  it('runs typed diversity discovery when want_diversity has no explicit wine type', async () => {
+    vi.mocked(mockSearchUseCase.execute)
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-red-1', canonicalLabel: 'Red A', type: 'wine', wineType: 'red', style: 'medium red' },
+            relevanceScore: 0.91,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: ['style'], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+            evidenceItems: [],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-white-1', canonicalLabel: 'White A', type: 'wine', wineType: 'white', style: 'crisp white' },
+            relevanceScore: 0.88,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: ['style'], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.88, missingInfo: [], approximationUsed: false },
+            evidenceItems: [],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-spark-1', canonicalLabel: 'Sparkling A', type: 'wine', wineType: 'sparkling', style: 'sparkling' },
+            relevanceScore: 0.86,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.79, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: ['style'], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.86, missingInfo: [], approximationUsed: false },
+            evidenceItems: [],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeSearchResponse([
+          {
+            entity: { entityId: 'wine-red-2', canonicalLabel: 'Red B', type: 'wine', wineType: 'red', style: 'medium red' },
+            relevanceScore: 0.84,
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.78, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+            constraints: { matched: ['occasion'], unmet: ['style'], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.84, missingInfo: [], approximationUsed: false },
+            evidenceItems: [],
+          },
+        ]),
+      );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      { query: '선물용 다양하게 추천', want_diversity: true, limit: 5 },
+      deps,
+      'req-123',
+    );
+
+    expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledTimes(3);
+
+    const calls = vi.mocked(mockSearchUseCase.execute).mock.calls;
+    const typedFilters = calls.map(([request]) =>
+      request?.filters?.find((filter) => filter.attribute === 'wine_type')?.value,
+    );
+    expect(typedFilters).toEqual(['white', 'sparkling', 'red']);
+    expect(result.observation).toContain('wine_type: white');
+    expect(result.observation).toContain('wine_type: sparkling');
+    expect(result.observation).toContain('wine_type: red');
+  });
+
+  it('skips typed diversity discovery when query already mentions wine types', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      { query: '레드랑 화이트 다양하게 추천', want_diversity: true, limit: 5 },
+      deps,
+      'req-123',
+    );
+
+    expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledTimes(1);
+  });
+
   it('rewrites structured multi-course queries to pairing-focused retrieval cores', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -578,7 +703,7 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('"region":"Bordeaux"');
   });
 
-  it('includes source_record_refs in GROUNDING_JSON and lineage in observation when present', async () => {
+  it('keeps lineage in observation but omits source_record_refs from GROUNDING_JSON when present', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([
         {
@@ -610,9 +735,70 @@ describe('executeAgentTool', () => {
 
     const result = await executeAgentTool('search_wines', { query: 'test lineage' }, deps, 'req-123');
     expect(result.observation).toContain(`lineage: ${SOURCE_SYSTEM_VIVINO_SILVER}:ref-abc`);
-    expect(result.observation).toContain('"source_record_refs"');
-    expect(result.observation).toContain(`"source_system":"${SOURCE_SYSTEM_VIVINO_SILVER}"`);
-    expect(result.observation).toContain('"source_record_id":"ref-abc"');
+    expect(result.observation).not.toContain('"source_record_refs"');
+    expect(result.observation).not.toContain(`"source_system":"${SOURCE_SYSTEM_VIVINO_SILVER}"`);
+    expect(result.observation).not.toContain('"source_record_id":"ref-abc"');
+  });
+
+  it('uses deterministic coverage selection for want_diversity observations', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-red-1', canonicalLabel: 'Red A', type: 'wine', producer: 'Producer A', region: 'Napa Valley', wineType: 'red', style: 'bold' },
+          relevanceScore: 0.95,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.9, semantic: 0.9, attribute: 0.9, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.95, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-red-2', canonicalLabel: 'Red B', type: 'wine', producer: 'Producer B', region: 'Bordeaux', wineType: 'red', style: 'structured' },
+          relevanceScore: 0.91,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.85, semantic: 0.85, attribute: 0.85, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.91, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-white-1', canonicalLabel: 'White A', type: 'wine', producer: 'Producer C', region: 'Mosel', wineType: 'white', style: 'crisp' },
+          relevanceScore: 0.89,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.82, semantic: 0.82, attribute: 0.82, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.89, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-spark-1', canonicalLabel: 'Sparkling A', type: 'wine', producer: 'Producer D', region: 'Champagne', wineType: 'sparkling', style: 'sparkling' },
+          relevanceScore: 0.87,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.87, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      { query: '선물용 다양하게 추천', want_diversity: true },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('wine_type: red');
+    expect(result.observation).toContain('wine_type: white');
+    expect(result.observation).toContain('wine_type: sparkling');
+    expect(result.observation).not.toContain('4. ');
+
+    const groundingJsonMarker = 'GROUNDING_JSON: ';
+    const groundingJson = result.observation.slice(
+      result.observation.lastIndexOf(groundingJsonMarker) + groundingJsonMarker.length,
+    );
+    expect(groundingJson).toContain('"entity_id":"wine-red-1"');
+    expect(groundingJson).toContain('"entity_id":"wine-white-1"');
+    expect(groundingJson).toContain('"entity_id":"wine-spark-1"');
+    expect(groundingJson).not.toContain('"entity_id":"wine-red-2"');
+    expect(groundingJson).toContain('"wine_type":"sparkling"');
   });
 
   it('tags observation with RETRIEVAL_QUALITY: unreliable when 0 results', async () => {

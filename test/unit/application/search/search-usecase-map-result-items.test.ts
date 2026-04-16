@@ -216,4 +216,43 @@ describe('mapRankedResultsToResultItems', () => {
     expect(items[0]?.uncertainty.approximationUsed).toBe(true);
     vi.useRealTimers();
   });
+
+  it('limits drinking-window predictions to top-N ranked results when maxPredictions is set', async () => {
+    vi.useFakeTimers();
+    const drinkingWindow = {
+      check: vi.fn().mockResolvedValue({
+        drinkingWindowStart: 2026,
+        drinkingWindowEnd: 2032,
+        currentlyDrinkable: false,
+        confidence: 'high',
+        evidenceLevel: 'model_based',
+        blockingEligible: true,
+      }),
+    };
+
+    const ranked = [
+      makeRankedResult(),
+      { ...makeRankedResult(), entityId: 'wine-2', canonicalLabel: 'Wine 2' },
+      { ...makeRankedResult(), entityId: 'wine-3', canonicalLabel: 'Wine 3' },
+      { ...makeRankedResult(), entityId: 'wine-4', canonicalLabel: 'Wine 4' },
+    ];
+
+    const pending = mapRankedResultsToResultItems(
+      ranked,
+      drinkingWindow as never,
+      2025,
+      undefined,
+      { maxPredictions: 3 },
+    );
+    await vi.runAllTimersAsync();
+    const items = await pending;
+
+    expect(drinkingWindow.check).toHaveBeenCalledTimes(3);
+    expect(items).toHaveLength(4);
+    expect(items[0]?.drinkingWindow).toBeDefined();
+    expect(items[1]?.drinkingWindow).toBeDefined();
+    expect(items[2]?.drinkingWindow).toBeDefined();
+    expect(items[3]?.drinkingWindow).toBeUndefined();
+    vi.useRealTimers();
+  });
 });

@@ -32,6 +32,7 @@ import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
 const TOOL_VINTAGE_MIN = 1600;
 const TOOL_VINTAGE_MAX = 2100;
+const SEARCH_TOOL_MAX_STYLES = 5;
 
 /**
  * Zod schema for search_wines tool input.
@@ -50,6 +51,7 @@ const SearchToolInputSchema = z.object({
   vintage_max: z.number().int().min(TOOL_VINTAGE_MIN).max(TOOL_VINTAGE_MAX).optional(),
   appellation: z.string().trim().min(1).optional(),
   style: z.string().trim().min(1).optional(),
+  styles: z.array(z.string().trim().min(1)).max(SEARCH_TOOL_MAX_STYLES).optional(),
   certification: z.string().trim().min(1).optional(),
   want_diversity: z.boolean().optional(),
 }).superRefine((data, ctx) => {
@@ -103,6 +105,28 @@ function buildSearchToolStructuredFilters(input: z.infer<typeof SearchToolInputS
   return filters;
 }
 
+function resolveStyleClauses(
+  input: z.infer<typeof SearchToolInputSchema>,
+): readonly string[] {
+  const renderSemanticStyleQueryTerm = (style: string): string => {
+    switch (style) {
+      case 'crowd_pleasing':
+        return 'crowd pleasing';
+      case 'screw_cap':
+        return 'screw cap';
+      case 'off_dry':
+        return 'off dry';
+      default:
+        return style;
+    }
+  };
+
+  if (input.styles !== undefined && input.styles.length > 0) {
+    return [...new Set(input.styles)].map(renderSemanticStyleQueryTerm);
+  }
+  return input.style !== undefined ? [renderSemanticStyleQueryTerm(input.style)] : [];
+}
+
 function buildSearchToolQuery(input: z.infer<typeof SearchToolInputSchema>): string {
   const clauses: string[] = [];
   for (const grape of input.exclude_grapes ?? []) {
@@ -114,8 +138,8 @@ function buildSearchToolQuery(input: z.infer<typeof SearchToolInputSchema>): str
   if (input.max_price_krw !== undefined) {
     clauses.push(`${input.max_price_krw}원 이하`);
   }
-  if (input.style !== undefined) {
-    clauses.push(input.style);
+  for (const style of resolveStyleClauses(input)) {
+    clauses.push(style);
   }
   if (input.certification !== undefined) {
     clauses.push(input.certification);

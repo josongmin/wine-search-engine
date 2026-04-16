@@ -58,6 +58,7 @@ import {
 } from './search-usecase-corrective-retry.js';
 import { buildEntityRouteRankedResults } from './search-usecase-entity-ranked-results.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import {
   rankedResultsToEvalProvenanceSlices,
   searchResponseToEvalProvenanceSlices,
@@ -306,6 +307,12 @@ export class SearchUseCase {
       plannerSuggestedMode,
       retrievalModeSource,
     } = buildSearchRouteResolutionContext(plan, request, compiled);
+    const routeRequestContext: RequestExecutionContext = {
+      ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+      ...(stageTimer !== undefined ? { stageTimer } : {}),
+      requestId,
+      requestStartTimeMs: startTime,
+    };
 
     pipelineDebug(
       {
@@ -343,7 +350,11 @@ export class SearchUseCase {
       effectiveRoute,
       {
         executeEntity: () => this.executeEntityRoute(plan, compiled),
-        executeHybrid: () => this.executeHybridRoute(plan, compiled),
+        executeHybrid: () => this.executeHybridRoute(
+          plan,
+          compiled,
+          routeRequestContext,
+        ),
         executeMixed: async () => {
           try {
             const mixedResult = await this.deps.mixedSolver.solve(plan, compiled);
@@ -352,6 +363,7 @@ export class SearchUseCase {
               const hybridFallback = await this.executeHybridRoute(
                 fallbackExecution.plan,
                 fallbackExecution.compiled,
+                routeRequestContext,
               );
               return buildMixedHybridFallbackExecution(plan, mixedResult, hybridFallback);
             }
@@ -732,6 +744,7 @@ export class SearchUseCase {
   private async executeHybridRoute(
     plan: QueryPlanV1,
     compiled: CompiledWineQuery,
+    requestContext?: RequestExecutionContext,
     anchorEntityId?: CanonicalEntityId,
   ): Promise<SearchRouteExecutionResult> {
     const entityResolutionDeps = {
@@ -749,7 +762,7 @@ export class SearchUseCase {
       },
       (p) => resolveEntityRouteForPlan(p, entityResolutionDeps, compiled),
       compiled,
-      undefined,
+      requestContext,
       anchorEntityId,
     );
   }

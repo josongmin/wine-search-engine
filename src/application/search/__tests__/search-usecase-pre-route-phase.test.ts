@@ -131,4 +131,107 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
 
     expect(plannerWithUndefinedCompiled.plan).toHaveBeenCalledOnce();
   });
+
+  it('skips decomposed search when request latency budget is already exhausted', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-16T00:00:00.000Z'));
+
+    const decomposedSearch = {
+      execute: vi.fn(),
+    };
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({ route: 'hybrid', retrievalMode: 'attribute_search' })),
+    };
+
+    const nowMs = Date.now();
+    const ctx = makeBaseContext({
+      request: {
+        query: 'opus one vs dominus',
+        queryBudget: {
+          maxLatencyMs: 50,
+          maxCandidates: 100,
+          rerankLimit: 20,
+        },
+      },
+      startTime: nowMs - 60,
+      decomposedSearch,
+      securityGateDeps: {
+        querySanitizer: {
+          sanitize: vi.fn().mockReturnValue({ safe: true, sanitizedQuery: 'opus one vs dominus' }),
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    expect(decomposedSearch.execute).not.toHaveBeenCalled();
+    expect(plannerWithoutCompiled.plan).toHaveBeenCalledOnce();
+
+    vi.useRealTimers();
+  });
+
+  it('caps decomposed search timeout to the remaining request budget', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-16T00:00:00.000Z'));
+
+    const decomposedSearch = {
+      execute: vi.fn().mockImplementation(
+        async (
+          _subQueries: [string, string],
+          _comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
+          _originalQuery: string,
+          _requestId: string,
+          _startTime: number,
+          _parentContext: unknown,
+          options?: { abortSignal?: AbortSignal },
+        ) => new Promise((_resolve, reject) => {
+          options?.abortSignal?.addEventListener('abort', () => {
+            reject(new Error('decomposed_abort'));
+          });
+        }),
+      ),
+    };
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({ route: 'hybrid', retrievalMode: 'attribute_search' })),
+    };
+
+    const nowMs = Date.now();
+    const ctx = makeBaseContext({
+      request: {
+        query: 'opus one vs dominus',
+        queryBudget: {
+          maxLatencyMs: 50,
+          maxCandidates: 100,
+          rerankLimit: 20,
+        },
+      },
+      startTime: nowMs - 20,
+      decomposedSearch,
+      securityGateDeps: {
+        querySanitizer: {
+          sanitize: vi.fn().mockReturnValue({ safe: true, sanitizedQuery: 'opus one vs dominus' }),
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const resultPromise = runSearchPreRoutePhase(ctx);
+
+    await vi.advanceTimersByTimeAsync(29);
+    expect(decomposedSearch.execute).toHaveBeenCalledOnce();
+    const options = decomposedSearch.execute.mock.calls[0]?.[6] as { abortSignal?: AbortSignal } | undefined;
+    expect(options?.abortSignal?.aborted).toBe(false);
+    expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await resultPromise;
+
+    expect(result.outcome).toBe('continue');
+    expect(options?.abortSignal?.aborted).toBe(true);
+    expect(plannerWithoutCompiled.plan).toHaveBeenCalledOnce();
+
+    vi.useRealTimers();
+  });
 });
