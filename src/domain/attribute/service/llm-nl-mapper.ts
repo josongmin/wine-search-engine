@@ -32,7 +32,7 @@ import {
   type MapConstraintsResult,
 } from './nl-mapper.js';
 import {
-  LlmConstraintResponseSchema,
+  LlmConstraintItemSchema,
   LLM_ALLOWED_ATTRIBUTES,
   type LlmConstraintItem,
 } from '../model/llm-constraint-schema.js';
@@ -131,7 +131,9 @@ Body/sweetness/acidity/tannin/critic_score/producer_prestige: numeric 0-1.
 Occasion values: gift, party, celebration, anniversary, wedding, date_night, housewarming, solo, healing, camping, romantic, comforting.
 Style values: dry, off_dry, sweet, sparkling, fortified, rose, natural, orange, chillable, screw_cap, approachable, crowd_pleasing, presentation_forward.
 
-Return a JSON array. Each item: { "phrase": string, "attribute": string, "operator": "=" | "<=" | ">=" | "range" | "in", "value": string | number | { "min": number, "max": number }, "confidence": 0-1 }.
+Return a JSON array. Each item: { "phrase": string, "attribute": string, "operator": "=" | "<=" | ">=" | "range" | "in" | "exclude", "value": string | number | { "min": number, "max": number }, "confidence": 0-1 }.
+
+Use "exclude" operator for negation ("말고", "아닌", "빼고", "않고", "not", "except"). Do NOT use "!=" — use "exclude" instead.
 
 Examples:
 - "비싼" → [{"phrase":"비싼","attribute":"price_band","operator":"=","value":"luxury","confidence":0.85}]
@@ -141,6 +143,8 @@ Examples:
 - "시원하게 마실" → [{"phrase":"시원하게 마실","attribute":"style","operator":"in","value":"chillable","confidence":0.8}]
 - "실패 없는" → [{"phrase":"실패 없는","attribute":"style","operator":"in","value":"crowd_pleasing","confidence":0.8}]
 - "예쁜 라벨" → [{"phrase":"예쁜 라벨","attribute":"style","operator":"in","value":"presentation_forward","confidence":0.8}]
+- "샴페인 말고" → [{"phrase":"샴페인 말고","attribute":"region","operator":"exclude","value":"Champagne","confidence":0.85}]
+- "레드인데" → [{"phrase":"레드인데","attribute":"wine_type","operator":"=","value":"red","confidence":0.9}]
 
 If a phrase has no wine-related constraint meaning, omit it from the array. Return [] for no matches.`;
 
@@ -443,17 +447,36 @@ export class LlmNLMapper extends NLMapper {
       }
 
       const parsed: unknown = JSON.parse(result.text);
-      const validated = LlmConstraintResponseSchema.safeParse(parsed);
 
-      if (!validated.success) {
+      // Per-item validation: validate each item independently so that 1 bad
+      // item (e.g., LLM returning "!=" instead of "exclude") does not nuke
+      // the entire response. This is the standard LLM output resilience
+      // pattern — LLMs routinely emit 1-2 malformed items in an otherwise
+      // valid batch. (CLAUDE.md Rule 10: LLM tool output MUST NOT use strict.)
+      if (!Array.isArray(parsed)) {
         log.warn(
-          { issues: validated.error.issues, rawText: result.text.slice(0, LLM_SCHEMA_FAIL_RAW_TEXT_PREVIEW_CHARS) },
-          'LLM response failed schema validation',
+          { rawText: result.text.slice(0, LLM_SCHEMA_FAIL_RAW_TEXT_PREVIEW_CHARS) },
+          'LLM response is not an array — dropping entire response',
         );
         return [];
       }
-
-      return validated.data;
+      const validItems: LlmConstraintItem[] = [];
+      let droppedCount = 0;
+      for (const rawItem of parsed) {
+        const itemResult = LlmConstraintItemSchema.safeParse(rawItem);
+        if (itemResult.success) {
+          validItems.push(itemResult.data);
+        } else {
+          droppedCount++;
+        }
+      }
+      if (droppedCount > 0) {
+        log.info(
+          { droppedCount, keptCount: validItems.length, totalCount: parsed.length },
+          'LLM response: dropped invalid items, kept valid ones',
+        );
+      }
+      return validItems;
     } catch (err) {
       if (externalSignal?.aborted) {
         throw abortError(

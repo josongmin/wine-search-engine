@@ -49,7 +49,7 @@ const chatLlm = new OpenAiChatLlm({
   httpTimeoutMs: 10_000,
 });
 
-const LLM_TIMEOUT_MS = 5_000;
+const LLM_TIMEOUT_MS = 15_000;
 const llmMapper = new LlmNLMapper(NO_OP_MAPPING_TABLE, chatLlm, LLM_TIMEOUT_MS);
 const ruleOnlyMapper = new NLMapper(NO_OP_MAPPING_TABLE);
 const normalizer = new QueryNormalizer();
