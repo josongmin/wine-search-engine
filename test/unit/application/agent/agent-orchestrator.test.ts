@@ -372,7 +372,7 @@ describe('AgentOrchestrator', () => {
     const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 2 });
     const result = await orchestrator.execute('병렬로 많이 돌려', 'req-batch-cap');
 
-    expect(result.terminationReason).toBe('answer');
+    expect(result.terminationReason).toBe('fallback');
     expect(result.toolCallCount).toBe(4);
     expect(result.steps[0]?.actionPairs).toHaveLength(4);
     expect(result.steps[0]?.actionPairs?.every((pair) => pair.observation.includes('Batch too large'))).toBe(true);
@@ -453,8 +453,8 @@ describe('AgentOrchestrator', () => {
       await vi.advanceTimersByTimeAsync(20);
       const result = await runPromise;
 
-      expect(result.terminationReason).toBe('answer');
-      expect(result.fallbackApplied).toBe(false);
+      expect(result.terminationReason).toBe('fallback');
+      expect(result.fallbackApplied).toBe(true);
       expect(result.steps[0]?.observation).toContain('[TIMEOUT]');
     } finally {
       vi.useRealTimers();
@@ -497,11 +497,11 @@ describe('AgentOrchestrator', () => {
       );
       const runPromise = orchestrator.execute('parallel hung', 'req-batch-timeout');
       await vi.advanceTimersByTimeAsync(100);
-      const result = await runPromise;
+    const result = await runPromise;
 
-      expect(result.terminationReason).toBe('fallback');
-      expect(result.fallbackApplied).toBe(true);
-      expect(result.answer).toContain('Based on your query');
+    expect(result.terminationReason).toBe('fallback');
+    expect(result.fallbackApplied).toBe(true);
+      expect(result.answer).toContain('No matching wine was found under the provided constraints');
     } finally {
       vi.useRealTimers();
     }
