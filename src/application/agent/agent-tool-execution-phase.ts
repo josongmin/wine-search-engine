@@ -69,7 +69,7 @@ export class AgentToolExecutionPhase {
       const trimmedAnswer = parsed.answer.trim();
       if (trimmedAnswer.length > 0) {
         if (pendingDrinkabilityEntityIds.length > 0) {
-          state.pendingRefinementHint = this.contractPolicy.buildPendingDrinkabilityAnswerHint(pendingDrinkabilityEntityIds);
+          state.pendingPlannerDirective = this.contractPolicy.buildPendingDrinkabilityDirective(pendingDrinkabilityEntityIds);
           return false;
         }
         state.steps.push({

@@ -144,7 +144,7 @@ describe('AgentToolExecutionPhase', () => {
         action: { tool: 'search_wines', input: { query: 'rare wine under impossible budget' } },
       }),
     );
-    const firstHint = state.pendingRefinementHint;
+    const firstDirective = state.pendingPlannerDirective;
 
     const secondShouldBreak = await phase.run(
       'req-refine',
@@ -160,8 +160,8 @@ describe('AgentToolExecutionPhase', () => {
 
     expect(firstShouldBreak).toBe(false);
     expect(secondShouldBreak).toBe(false);
-    expect(firstHint).toContain('HINT:');
-    expect(state.pendingRefinementHint).toBe(firstHint);
+    expect(firstDirective).toEqual({ kind: 'relax_constraints_retry' });
+    expect(state.pendingPlannerDirective).toBe(firstDirective);
     expect(state.hasInjectedRefinementHint).toBe(true);
   });
 
@@ -307,7 +307,10 @@ describe('AgentToolExecutionPhase', () => {
 
     expect(shouldBreak).toBe(false);
     expect(state.answer).toBe('');
-    expect(state.pendingRefinementHint).toContain('check_drinking_window');
+    expect(state.pendingPlannerDirective).toEqual({
+      kind: 'pending_drinkability_check',
+      entityIds: ['wine-1'],
+    });
   });
 
   it('rejects mixed pending-drinkability batches that omit required checks', async () => {

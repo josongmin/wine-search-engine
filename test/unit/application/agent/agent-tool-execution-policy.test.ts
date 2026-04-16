@@ -47,11 +47,11 @@ describe('AgentToolExecutionPolicy', () => {
     const state = createAgentExecutionState();
 
     policy.maybeInjectRefinementHint(state, ['검색 결과가 없습니다'], 3);
-    const firstHint = state.pendingRefinementHint;
+    const firstDirective = state.pendingPlannerDirective;
     policy.maybeInjectRefinementHint(state, ['NO_MATCH: none'], 5);
 
-    expect(firstHint).toContain('HINT:');
-    expect(state.pendingRefinementHint).toBe(firstHint);
+    expect(firstDirective).toEqual({ kind: 'relax_constraints_retry' });
+    expect(state.pendingPlannerDirective).toBe(firstDirective);
     expect(state.hasInjectedRefinementHint).toBe(true);
   });
 
@@ -62,7 +62,7 @@ describe('AgentToolExecutionPolicy', () => {
     policy.maybeInjectRefinementHint(state, ['검색 결과가 없습니다'], 2);
 
     expect(state.hasInjectedRefinementHint).toBe(false);
-    expect(state.pendingRefinementHint).toBeUndefined();
+    expect(state.pendingPlannerDirective).toBeUndefined();
   });
 
 });

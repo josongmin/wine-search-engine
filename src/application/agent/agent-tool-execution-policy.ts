@@ -5,9 +5,6 @@ import {
   normalizeExactMetadataSearchInput,
 } from './agent-query-execution-contract.js';
 
-const REFINEMENT_HINT_MESSAGE =
-  'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
-
 function shouldInjectRefinementHint(observation: string): boolean {
   return observation.includes('0개') || observation.includes('검색 결과가 없습니다') || observation.startsWith('NO_MATCH:');
 }
@@ -75,6 +72,6 @@ export class AgentToolExecutionPolicy {
       return;
     }
     state.hasInjectedRefinementHint = true;
-    state.pendingRefinementHint = REFINEMENT_HINT_MESSAGE;
+    state.pendingPlannerDirective = { kind: 'relax_constraints_retry' };
   }
 }

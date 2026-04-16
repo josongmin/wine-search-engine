@@ -563,6 +563,21 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
         input: { query: 'barolo' },
       });
     });
+
+    it('fails closed when answer and action are mixed in one JSON object', async () => {
+      const mixed = JSON.stringify({
+        thought: 'bad mix',
+        answer: 'final answer',
+        action: { tool: 'search_wines', input: { query: 'opus one' } },
+      });
+
+      const parsed = parseLlmOutput(mixed);
+
+      expect(parsed).toEqual({
+        thought: '[invalid mixed LLM output]',
+        answer: mixed,
+      });
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────

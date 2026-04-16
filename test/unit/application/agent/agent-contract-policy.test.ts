@@ -38,4 +38,13 @@ describe('AgentContractPolicy', () => {
       { tool: 'check_drinking_window', input: { entity_id: 'wine-1' } },
     ])).toBeNull();
   });
+
+  it('builds a typed pending drinkability directive', () => {
+    const policy = new AgentContractPolicy();
+
+    expect(policy.buildPendingDrinkabilityDirective(['wine-1', 'wine-2'])).toEqual({
+      kind: 'pending_drinkability_check',
+      entityIds: ['wine-1', 'wine-2'],
+    });
+  });
 });

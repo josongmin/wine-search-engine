@@ -1,3 +1,4 @@
+import type { AgentPlannerDirective } from './agent-execution-state.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentQueryExecutionContract } from './agent-query-execution-contract.js';
 import { extractPendingDrinkabilityEntityIds } from './agent-query-execution-contract.js';
@@ -14,8 +15,8 @@ export class AgentContractPolicy {
     );
   }
 
-  buildPendingDrinkabilityAnswerHint(entityIds: readonly string[]): string {
-    return `HINT: This query asks about drinkability. Before answering, you MUST call check_drinking_window for ${entityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+  buildPendingDrinkabilityDirective(entityIds: readonly string[]): AgentPlannerDirective {
+    return { kind: 'pending_drinkability_check', entityIds };
   }
 
   buildDrinkabilityContractViolation(entityIds: readonly string[]): string {

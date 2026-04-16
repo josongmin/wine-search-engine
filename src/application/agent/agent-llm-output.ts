@@ -83,9 +83,21 @@ export function parseLlmOutput(text: string): LlmAction {
       return { thought: '[unparseable LLM output]', answer: trimmed };
     }
     const thought = typeof parsed['thought'] === 'string' ? parsed['thought'] : '';
+    const hasAnswer = typeof parsed['answer'] === 'string';
+    const hasActionObject = typeof parsed['action'] === 'object' && parsed['action'] !== null && !Array.isArray(parsed['action']);
+    const hasActionsArray = Array.isArray(parsed['actions']) && parsed['actions'].length > 0;
+    const hasBareTool = typeof parsed['tool'] === 'string' && parsed['tool'].length > 0;
 
-    if (typeof parsed['answer'] === 'string') {
-      return { thought, answer: parsed['answer'] };
+    if (hasAnswer && (hasActionObject || hasActionsArray || hasBareTool)) {
+      log.warn(
+        { textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
+        'agent LLM produced mixed answer+tool JSON; failing closed to prevent ambiguous execution',
+      );
+      return { thought: '[invalid mixed LLM output]', answer: trimmed };
+    }
+
+    if (hasAnswer) {
+      return { thought, answer: parsed['answer'] as string };
     }
 
     const actionsRaw = parsed['actions'];

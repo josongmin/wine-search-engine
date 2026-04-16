@@ -177,4 +177,31 @@ describe('AgentPlannerPhaseRunner', () => {
       maxOutputTokens: 1536,
     }));
   });
+
+  it('renders and clears typed planner directives in the next planner call', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ thought: 'search', action: { tool: 'search_wines', input: { query: 'opus one' } } }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+    });
+    const state = createAgentExecutionState();
+    state.pendingPlannerDirective = { kind: 'pending_drinkability_check', entityIds: ['wine-1'] };
+
+    await runner.run(
+      'opus one 지금 마시기 좋아?',
+      'req-directive',
+      DEFAULT_AGENT_CONFIG,
+      state,
+      3,
+      false,
+    );
+
+    const messages = complete.mock.calls[0]?.[0].messages ?? [];
+    expect(messages[1]?.content).toContain('[DRINKABILITY_PENDING]');
+    expect(messages[1]?.content).toContain('"wine-1"');
+    expect(state.pendingPlannerDirective).toBeUndefined();
+  });
 });

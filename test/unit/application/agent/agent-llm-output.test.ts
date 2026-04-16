@@ -56,6 +56,23 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('fails closed on mixed answer+action JSON objects', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'bad mix',
+      answer: '오퍼스 원입니다.',
+      action: { tool: 'search_wines', input: { query: 'opus one' } },
+    }));
+
+    expect(parsed).toEqual({
+      thought: '[invalid mixed LLM output]',
+      answer: JSON.stringify({
+        thought: 'bad mix',
+        answer: '오퍼스 원입니다.',
+        action: { tool: 'search_wines', input: { query: 'opus one' } },
+      }),
+    });
+  });
+
   it('validates structured llm result envelopes', () => {
     expect(isValidLlmResult({ text: '{}', model: 'gpt-test', finishReason: 'stop' })).toBe(true);
     expect(isValidLlmResult({ text: '{}', finishReason: 'stop' })).toBe(false);

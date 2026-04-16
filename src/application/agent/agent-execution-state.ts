@@ -3,6 +3,10 @@ import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-e
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { SynthesisContext, ToolOutcome } from './tool-outcome.js';
 
+export type AgentPlannerDirective =
+  | { readonly kind: 'relax_constraints_retry' }
+  | { readonly kind: 'pending_drinkability_check'; readonly entityIds: readonly string[] };
+
 export interface AgentExecutionState {
   readonly steps: AgentStep[];
   readonly toolOutcomes: ToolOutcome[];
@@ -17,7 +21,7 @@ export interface AgentExecutionState {
   unknownToolAttempts: number;
   timeoutStats: { llmStep: number; tool: number; parallelBatch: number };
   hasInjectedRefinementHint: boolean;
-  pendingRefinementHint: string | undefined;
+  pendingPlannerDirective: AgentPlannerDirective | undefined;
   fallbackApplied: boolean;
   fallbackLayer: SynthesisContext['fallbackApplied'];
   failedSynthesisAttempts: number;
@@ -40,7 +44,7 @@ export function createAgentExecutionState(): AgentExecutionState {
     unknownToolAttempts: 0,
     timeoutStats: { llmStep: 0, tool: 0, parallelBatch: 0 },
     hasInjectedRefinementHint: false,
-    pendingRefinementHint: undefined,
+    pendingPlannerDirective: undefined,
     fallbackApplied: false,
     fallbackLayer: null,
     failedSynthesisAttempts: 0,

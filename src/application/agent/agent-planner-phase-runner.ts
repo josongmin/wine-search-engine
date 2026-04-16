@@ -6,7 +6,7 @@ import {
   buildStepMessages,
   buildUserMessage,
 } from './agent-prompt.js';
-import type { AgentExecutionState } from './agent-execution-state.js';
+import type { AgentExecutionState, AgentPlannerDirective } from './agent-execution-state.js';
 import {
   CHARS_PER_TOKEN_ESTIMATE,
   estimateTokenCount,
@@ -33,16 +33,27 @@ export interface PlannerPhaseResult {
   readonly wasTruncated: boolean;
 }
 
+function renderPlannerDirective(directive: AgentPlannerDirective | undefined): string | undefined {
+  if (directive === undefined) {
+    return undefined;
+  }
+  if (directive.kind === 'relax_constraints_retry') {
+    return '[RETRY_RELAX_ONE] Previous search returned no match. Retry once by relaxing exactly one non-must-have constraint. Keep must-have constraints.';
+  }
+  return `[DRINKABILITY_PENDING] Before answering, call check_drinking_window for ${directive.entityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+}
+
 function buildPlannerLoopMessages(
   query: string,
   steps: AgentExecutionState['steps'],
-  pendingRefinementHint: string | undefined,
+  pendingPlannerDirective: AgentPlannerDirective | undefined,
   isLastStep: boolean,
   remainingSteps: number,
   maxContextChars: number,
 ): readonly ChatMessage[] {
-  const baseUserContentRaw = pendingRefinementHint !== undefined
-    ? `${pendingRefinementHint}\n\n${query}`
+  const renderedDirective = renderPlannerDirective(pendingPlannerDirective);
+  const baseUserContentRaw = renderedDirective !== undefined
+    ? `${renderedDirective}\n\n${query}`
     : query;
   const baseUserContent = baseUserContentRaw.length > maxContextChars
     ? baseUserContentRaw.slice(0, maxContextChars)
@@ -91,12 +102,12 @@ export class AgentPlannerPhaseRunner {
     const messages = buildPlannerLoopMessages(
       query,
       state.steps,
-      state.pendingRefinementHint,
+      state.pendingPlannerDirective,
       isLastStep,
       remainingSteps,
       effectiveConfig.maxContextChars,
     );
-    state.pendingRefinementHint = undefined;
+    state.pendingPlannerDirective = undefined;
 
     if (abortSignal?.aborted) {
       this.resultPolicy.applyPreflightAbort(state);
