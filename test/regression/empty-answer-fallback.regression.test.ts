@@ -1,210 +1,397 @@
 /**
  * Regression tests — EMPTY_ANSWER fallback guarantee.
  *
- * APPEND-ONLY. Locks in the 4-layer fallback fix in agent-answer-recovery-policy.ts.
- *
- * Tests verify the orchestrator's synthesis constants, answer recovery policy, and that
- * Layer 3 (last-observation) + Layer 4 (absolute template) are structurally
- * reachable. Full integration tests (mocking the LLM) live in the e2e suite.
+ * These tests lock runtime behavior, not source text. The goal is to keep the
+ * 4-layer fallback contract stable while allowing refactors of the underlying
+ * implementation.
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AgentObservationSynthesisRunner } from '../../src/application/agent/agent-observation-synthesis-runner.js';
+import {
+  AgentAnswerRecoveryPolicy,
+  hasToolObservations,
+} from '../../src/application/agent/agent-answer-recovery-policy.js';
+import { createAgentExecutionState } from '../../src/application/agent/agent-execution-state.js';
+import {
+  getLastGroundingObservationText,
+  hasGroundingToolObservations,
+} from '../../src/application/agent/agent-grounding-observation-policy.js';
+import { AgentOrchestrator } from '../../src/application/agent/agent-orchestrator.js';
+import {
+  buildPlannerSystemMessage,
+  buildSynthesisSystemMessage,
+  buildSystemMessage,
+} from '../../src/application/agent/agent-prompt.js';
+import { DEFAULT_AGENT_CONFIG } from '../../src/domain/agent/model/agent-config.js';
+import type { ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
+import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 
-// ---------------------------------------------------------------------------
-// Part 1: SYNTHESIS_TIMEOUT_MS constant is set to >= 12s
-// ---------------------------------------------------------------------------
+function makeSearchResponse(): SearchResponseV1 {
+  return {
+    queryType: 'search',
+    results: [
+      {
+        entity: {
+          entityId: 'wine-1',
+          canonicalLabel: 'Opus One 2018',
+          type: 'wine',
+          producer: 'Opus One',
+          region: 'Napa Valley',
+        },
+        relevanceScore: 0.99,
+        match: {
+          matchType: 'hybrid',
+          scoreComponents: {
+            lexical: 0.9,
+            semantic: 0.9,
+            attribute: 0.8,
+            popularity: 0.4,
+            preferenceAlignment: 0.5,
+          },
+        },
+        constraints: { matched: [], unmet: [], inferred: [] },
+        uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+        evidenceItems: [],
+      },
+    ],
+    engineDecision: {
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      route: 'hybrid',
+      decisionConfidence: 0.92,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      decisionTraceRef: 'trace-1',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1',
+        threshold_profile_id: 'default',
+        planner_version: '1',
+        feature_flags: {},
+      },
+    },
+    meta: {
+      requestId: 'req-1',
+      queryTimeMs: 11,
+      route: 'hybrid',
+      version: '1.0.0',
+      engine_schema_version: 'search_response_v1',
+    },
+  };
+}
 
-describe('EMPTY_ANSWER fallback regression — synthesis timeout constant', () => {
-  it('R-EMPTY-01: SYNTHESIS_TIMEOUT_MS exported from synthesis runner is at least 12000ms', async () => {
-    // We test the value indirectly by importing the module and verifying the
-    // constant is accessible (and not the old 8000ms value). The orchestrator
-    // does not export it publicly, so we verify via side-channel:
-    // Read the source file and check the literal.
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url),
-      'utf-8',
+function makeEmptySearchResponse(): SearchResponseV1 {
+  return {
+    ...makeSearchResponse(),
+    results: [],
+  };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('EMPTY_ANSWER fallback regression — synthesis timeout contract', () => {
+  it('R-EMPTY-01: synthesis runner must not self-abort before 12 seconds', async () => {
+    vi.useFakeTimers();
+    let llmAborted = false;
+    const complete = vi.fn().mockImplementation(async (request: { readonly abortSignal?: AbortSignal }) => {
+      await new Promise<never>((_resolve, reject) => {
+        request.abortSignal?.addEventListener('abort', () => {
+          llmAborted = true;
+          reject(new DOMException('aborted', 'AbortError'));
+        }, { once: true });
+      });
+    });
+    const runner = new AgentObservationSynthesisRunner({
+      chatLlm: { complete: complete as unknown as ChatLlmPort['complete'] },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      action: { tool: 'search_wines', input: { query: 'opus one' } },
+      observation: 'Found Opus One 2018',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+    const callerAbort = new AbortController();
+
+    const runPromise = runner.run(
+      'opus one',
+      'req-timeout-floor',
+      DEFAULT_AGENT_CONFIG,
+      state,
+      callerAbort.signal,
     );
-    // Must contain the named const at module scope with a value >= 12_000.
-    // Accepted values: 12_000 (original fix) or larger (e.g. 60_000 after LLM latency tuning).
-    expect(src).toMatch(/const SYNTHESIS_TIMEOUT_MS\s*=\s*(?:1[2-9]|[2-9]\d|\d{3,})[_0-9]*/);
-    // Must NOT contain the old 8_000 value assigned to this const
-    expect(src).not.toMatch(/const SYNTHESIS_TIMEOUT_MS\s*=\s*8[_0-9]*/);
+
+    await vi.advanceTimersByTimeAsync(11_999);
+    expect(llmAborted).toBe(false);
+
+    callerAbort.abort();
+    await runPromise;
+    expect(state.terminationReason).toBe('aborted');
   });
 });
 
-// ---------------------------------------------------------------------------
-// Part 2: Layer 3 and Layer 4 guards exist in orchestrator source
-// ---------------------------------------------------------------------------
+describe('EMPTY_ANSWER fallback regression — layered answer recovery', () => {
+  it('R-EMPTY-02: Layer 3 uses typed grounding observation selection', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'grounded search',
+      observation: '오퍼스 원 2018은 현재 마시기 좋습니다.',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+    state.toolOutcomes.push({
+      stepId: 'req:0:0',
+      tool: 'search_wines',
+      kind: 'success',
+      result: { queryType: 'search', results: [{ entity: { entityId: 'wine-1', canonicalLabel: 'Opus One 2018' } }] },
+      durationMs: 1,
+    });
+    state.steps.push({
+      index: 1,
+      thought: 'policy violation',
+      observation: 'Tool contract violation: wrong entity id',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+    state.toolOutcomes.push({
+      stepId: 'req:1:0',
+      tool: 'check_drinking_window',
+      kind: 'policy_violation',
+      errorMessage: 'wrong entity id',
+      durationMs: 1,
+    });
 
-describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', () => {
-  it('R-EMPTY-02: Layer 3 (last-observation summary) guard exists in orchestrator', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    // Layer 3 uses findLast to grab the last step with an observation
-    expect(src).toMatch(/findLast/);
-    expect(src).toMatch(/Layer 3/);
+    expect(hasGroundingToolObservations(state)).toBe(true);
+    expect(getLastGroundingObservationText(state)).toBe('오퍼스 원 2018은 현재 마시기 좋습니다.');
+
+    const answer = await policy.recoverAnswer('오퍼스 원 지금 마실까?', 'req-layer3-typed', state, true);
+
+    expect(answer).toContain('오퍼스 원 2018은 현재 마시기 좋습니다.');
+    expect(answer).not.toContain('Tool contract violation');
   });
 
-  it('R-EMPTY-03: Layer 4 (absolute template) guard exists in orchestrator', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    expect(src).toMatch(/Layer 4/);
-    // The template must be in Korean (matching existing answer strings)
-    expect(src).toMatch(/처리하지 못했습니다/);
+  it('R-EMPTY-03: Layer 4 returns a non-empty Korean template', async () => {
+    const logger = { error: vi.fn() };
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn().mockRejectedValue(new Error('search backend down')) } as never },
+      logger,
+    });
+    const state = createAgentExecutionState();
+
+    const answer = await policy.recoverAnswer('query', 'req-layer4-korean', state, false);
+
+    expect(answer.length).toBeGreaterThan(10);
+    expect(answer).toMatch(/[\uAC00-\uD7A3]/);
+    expect(state.fallbackApplied).toBe(true);
+    expect(state.fallbackLayer).toBe('layer4');
+    expect(logger.error).toHaveBeenCalled();
   });
 
-  it('R-EMPTY-04: fallback search no-result branch sets answer to non-empty Korean template', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    // The else branch when topResult is undefined must set answer to a Korean string
-    expect(src).toMatch(/검색 결과를 찾지 못했습니다/);
+  it('R-EMPTY-04: layer-2 no-result fallback returns a non-empty guidance answer', async () => {
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn().mockResolvedValue(makeEmptySearchResponse()) } as never },
+    });
+    const state = createAgentExecutionState();
+
+    const answer = await policy.recoverAnswer('오퍼스 원', 'req-layer2-no-result', state, false);
+
+    expect(answer).toContain('검색 결과를 찾지 못했습니다');
+    expect(state.fallbackLayer).toBe('layer2');
+    expect(state.terminationReason).toBe('fallback');
   });
 
-  it('R-EMPTY-05: synthesis failure logs at error level (not warn)', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url),
-      'utf-8',
+  it('R-EMPTY-06: fallback search failures are logged at error level', async () => {
+    const logger = { error: vi.fn() };
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn().mockRejectedValue(new Error('fallback failed')) } as never },
+      logger,
+    });
+    const state = createAgentExecutionState();
+
+    await policy.recoverAnswer('query', 'req-fallback-log', state, false);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error), requestId: 'req-fallback-log' }),
+      'agent fallback search failed',
     );
-    // After fix: both retry catch blocks must log.error, never log.warn.
-    expect(src).toMatch(/log\.error\(\{ err: synthErr1, requestId \}, `synthesis retry attempt 1 failed/);
-    expect(src).toMatch(/log\.error\(\{ err: synthErr2, requestId \}, 'synthesis retry attempt 2 failed/);
-    expect(src).not.toMatch(/log\.warn\(\{ err: synthErr1, requestId \}/);
-    expect(src).not.toMatch(/log\.warn\(\{ err: synthErr2, requestId \}/);
   });
 
-  it('R-EMPTY-06: fallback search failure logs at error level (not warn)', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    // After fix: fallback search failure must log.error
-    expect(src).toMatch(/agent fallback search failed.*\n.*log\.error|log\.error.*agent fallback search failed/s);
+  it('R-EMPTY-07: Layer 4 guarantees answer is never empty after all fallback layers', async () => {
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn().mockRejectedValue(new Error('still broken')) } as never },
+    });
+    const state = createAgentExecutionState();
+
+    const answer = await policy.recoverAnswer('query', 'req-non-empty-guarantee', state, false);
+
+    expect(answer).not.toBe('');
+    expect(state.answer).toBe(answer);
+    expect(state.fallbackApplied).toBe(true);
+  });
+
+  it('R-EMPTY-08: Layer 3 slices raw observations to 300 chars', async () => {
+    const longObservation = '가'.repeat(450);
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn() } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      observation: longObservation,
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+
+    const answer = await policy.recoverAnswer('한글 질의', 'req-layer3-slice', state, true);
+    const preview = answer.replace('검색 결과 요약: ', '');
+
+    expect(preview).toHaveLength(300);
+    expect(preview).toBe(longObservation.slice(0, 300));
+  });
+
+  it('R-EMPTY-09: Layer 2 fallback search is skipped when typed tool observations already exist', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      observation: '오퍼스 원 2018은 현재 마시기 좋습니다.',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+
+    const answer = await policy.recoverAnswer('오퍼스 원', 'req-layer2-skip', state, true);
+
+    expect(answer).toContain('검색 결과 요약');
+    expect(execute).not.toHaveBeenCalled();
+    expect(hasToolObservations(state)).toBe(true);
+  });
+
+  it('R-EMPTY-10: Layer 3 terminates as answer when tool observations exist', async () => {
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn() } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      observation: '오퍼스 원 2018은 현재 마시기 좋습니다.',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+
+    await policy.recoverAnswer('오퍼스 원', 'req-layer3-answer', state, true);
+
+    expect(state.fallbackLayer).toBe('layer3');
+    expect(state.terminationReason).toBe('answer');
+  });
+
+  it('R-EMPTY-11: Layer 4 terminates as answer when tool observations existed but no grounding text remained', async () => {
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute: vi.fn().mockRejectedValue(new Error('fallback failed')) } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'search timeout',
+      observation: '[TIMEOUT] search timed out',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+    state.toolOutcomes.push({
+      stepId: 'req:0:0',
+      tool: 'search_wines',
+      kind: 'timeout',
+      errorMessage: '[TIMEOUT] search timed out',
+      durationMs: 1,
+    });
+
+    await policy.recoverAnswer('오퍼스 원', 'req-layer4-answer', state, true);
+
+    expect(state.fallbackLayer).toBe('layer4');
+    expect(state.terminationReason).toBe('answer');
   });
 });
 
-// ---------------------------------------------------------------------------
-// Part 3: Structural check — answer can never be '' after all 4 layers
-// ---------------------------------------------------------------------------
+describe('EMPTY_ANSWER fallback regression — logging and prompt seam', () => {
+  it('R-EMPTY-05: synthesis failures log at error level, not warn level', async () => {
+    const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
+    const complete = vi.fn()
+      .mockRejectedValueOnce(new Error('attempt1 failed'))
+      .mockRejectedValueOnce(new Error('attempt2 failed'));
+    const runner = new AgentObservationSynthesisRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+      logger,
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      action: { tool: 'search_wines', input: { query: 'opus one' } },
+      observation: 'Found Opus One 2018',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
 
-describe('EMPTY_ANSWER fallback regression — structural guarantee', () => {
-  it('R-EMPTY-07: Layer 4 template string is non-empty and Korean', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
+    await runner.run('opus one', 'req-synth-log', DEFAULT_AGENT_CONFIG, state);
+
+    expect(logger.error).toHaveBeenCalledTimes(2);
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringMatching(/synthesis retry attempt [12] failed/),
     );
-    // The Layer 4 unconditional answer assignment must be non-empty Korean string
-    // Matches both backtick template literals and single/double quoted strings
-    const layer4Match = src.match(/Layer 4[\s\S]{0,400}answer\s*=\s*['"`]([^'"`]+)['"`]/);
-    expect(layer4Match).not.toBeNull();
-    if (layer4Match?.[1]) {
-      expect(layer4Match[1].trim().length).toBeGreaterThan(10);
-      // Must contain Korean characters
-      expect(layer4Match[1]).toMatch(/[\uAC00-\uD7A3]/);
-    }
   });
 
-  it('R-EMPTY-08: Layer 3 slices observation to max 300 chars (prevents oversized fallback)', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    // Layer 3 must use .slice(0, LAYER3_OBSERVATION_SLICE_CHARS) or literal .slice(0, 300).
-    // After the magic-number lint fix the literal was replaced with the named constant.
-    const hasLiteralSlice = /\.slice\(0,\s*300\)/.test(src);
-    const hasNamedConstant = /const LAYER3_OBSERVATION_SLICE_CHARS\s*=\s*300/.test(src) &&
-      /\.slice\(0,\s*LAYER3_OBSERVATION_SLICE_CHARS\)/.test(src);
-    expect(hasLiteralSlice || hasNamedConstant).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Part 4: Tool-observation-aware terminationReason fix (FALLBACK_TERMINATION fix)
-//
-// When the agent successfully called tools (has observations) but the final
-// synthesis LLM call fails, terminationReason must be 'answer', not 'fallback'.
-// 'fallback' should only apply when NO tool calls were made at all.
-// ---------------------------------------------------------------------------
-
-describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminationReason', () => {
-  it('R-EMPTY-09: Layer 2 fallback search is skipped when hasToolObservations is true', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    // The guard must be named and explicitly include the absence of observed tool output.
-    expect(src).toMatch(/shouldRunLayer2Fallback/);
-    expect(src).toMatch(/!observedToolOutput/);
-    expect(src).toMatch(/const shouldRunLayer2Fallback[\s\S]*!observedToolOutput/);
+  it('R-EMPTY-12: planner/synthesis/system prompt builders stay distinct at runtime', () => {
+    expect(buildPlannerSystemMessage().content).toContain('Cuvee StepPlanner');
+    expect(buildSynthesisSystemMessage().content).toContain('Cuvee StepSynthesis');
+    expect(buildSystemMessage().content).toBe(buildPlannerSystemMessage().content);
+    expect(buildPlannerSystemMessage().content).not.toBe(buildSynthesisSystemMessage().content);
   });
 
-  it('R-EMPTY-10: Layer 3 sets terminationReason=answer when tool observations exist', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
+  it('R-EMPTY-13: orchestrator uses planner prompt first and synthesis prompt on fallback synthesis', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'search first',
+          action: { tool: 'search_wines', input: { query: 'opus one' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string })
+      .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string });
+    const orchestrator = new AgentOrchestrator(
+      {
+        chatLlm: { complete } as unknown as ChatLlmPort,
+        toolDeps: {
+          searchUseCase: {
+            execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+          } as never,
+        },
+      },
+      { maxSteps: 1 },
     );
-    // Layer 3 must use ternary or conditional to set 'answer' vs 'fallback'
-    // based on whether tool observations exist
-    expect(src).toMatch(/observedToolOutput \? 'answer' : 'fallback'/);
-  });
 
-  it('R-EMPTY-11: Layer 4 sets terminationReason=answer when tool observations exist', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
-      'utf-8',
-    );
-    // Confirm Layer 4 also uses the same ternary (both Layer 3 and 4 must have it)
-    const matches = src.match(/observedToolOutput \? 'answer' : 'fallback'/g);
-    expect(matches).not.toBeNull();
-    expect(matches?.length).toBeGreaterThanOrEqual(2);
-  });
-});
+    await orchestrator.execute('opus one', 'req-prompt-seam-regression', { maxSteps: 1 });
 
-// ---------------------------------------------------------------------------
-// Part 5: Prompt seam — planner and synthesis prompts are structurally distinct
-// ---------------------------------------------------------------------------
-
-describe('EMPTY_ANSWER fallback regression — prompt seam separation', () => {
-  it('R-EMPTY-12: agent-prompt exports separate planner and synthesis system messages', async () => {
-    const fs = await import('fs');
-    const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-prompt.ts', import.meta.url),
-      'utf-8',
-    );
-    expect(src).toMatch(/export function buildPlannerSystemMessage/);
-    expect(src).toMatch(/export function buildSynthesisSystemMessage/);
-    expect(src).toMatch(/export function buildSystemMessage/);
-  });
-
-  it('R-EMPTY-13: planner phase uses planner prompt and synthesis runner uses synthesis prompt', async () => {
-    const fs = await import('fs');
-    const plannerSrc = fs.readFileSync(
-      new URL('../../src/application/agent/agent-planner-phase-runner.ts', import.meta.url),
-      'utf-8',
-    );
-    const synthesisSrc = fs.readFileSync(
-      new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url),
-      'utf-8',
-    );
-    expect(plannerSrc).toMatch(/buildPlannerSystemMessage\(\)/);
-    expect(synthesisSrc).toMatch(/buildSynthesisSystemMessage\(\)/);
-    expect(plannerSrc).not.toMatch(/buildSystemMessage\(\)/);
-    expect(synthesisSrc).not.toMatch(/buildSystemMessage\(\)/);
+    const systemMessages = complete.mock.calls.map((call) => call[0].messages[0]?.content);
+    expect(systemMessages[0]).toBe(buildPlannerSystemMessage().content);
+    expect(systemMessages[1]).toBe(buildSynthesisSystemMessage().content);
+    expect(systemMessages[2]).toBe(buildSynthesisSystemMessage().content);
   });
 });

@@ -28,8 +28,9 @@ describe('AgentContractPolicy', () => {
   it('validates pending drinkability for single and batch steps', () => {
     const policy = new AgentContractPolicy();
 
-    expect(policy.validateDrinkabilitySingleStep(['wine-1'], 'search_wines')).toContain('check_drinking_window');
-    expect(policy.validateDrinkabilitySingleStep(['wine-1'], 'check_drinking_window')).toBeNull();
+    expect(policy.validateDrinkabilitySingleStep(['wine-1'], 'search_wines', { query: 'x' })).toContain('check_drinking_window');
+    expect(policy.validateDrinkabilitySingleStep(['wine-1'], 'check_drinking_window', { entity_id: 'wine-2' })).toContain('check_drinking_window');
+    expect(policy.validateDrinkabilitySingleStep(['wine-1'], 'check_drinking_window', { entity_id: 'wine-1' })).toBeNull();
     expect(policy.validateDrinkabilityBatch(['wine-1'], [
       { tool: 'search_wines', input: { query: 'x' } },
     ])).toContain('check_drinking_window');

@@ -30,6 +30,30 @@ describe('AgentPlannerPhaseRunner', () => {
     expect(state.terminationReason).toBe('error');
   });
 
+  it('marks already-aborted planner calls as aborted without invoking the llm', async () => {
+    const complete = vi.fn();
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+    });
+    const state = createAgentExecutionState();
+    const abortController = new AbortController();
+    abortController.abort();
+
+    const result = await runner.run(
+      'opus one',
+      'req-pre-aborted',
+      DEFAULT_AGENT_CONFIG,
+      state,
+      3,
+      false,
+      abortController.signal,
+    );
+
+    expect(result).toBeNull();
+    expect(state.terminationReason).toBe('aborted');
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it('marks timeout and llm timeout stats when a planner step exceeds budget', async () => {
     vi.useFakeTimers();
     const complete = vi.fn().mockImplementation(async () => {

@@ -5,8 +5,12 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SynthesisContext } from './tool-outcome.js';
 import type { AgentToolDeps } from './agent-tools.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
+import {
+  getLastGroundingObservationText,
+  hasGroundingToolObservations,
+} from './agent-grounding-observation-policy.js';
 
-const log = bootstrapLogger.child({ component: 'AgentAnswerRecoveryPolicy' });
+const defaultLog = bootstrapLogger.child({ component: 'AgentAnswerRecoveryPolicy' });
 
 /** Wall-clock budget for the Layer 2 single-shot fallback search. */
 const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
@@ -60,19 +64,20 @@ function applyFallbackAnswer(
 }
 
 export function hasToolObservations(state: AgentExecutionState): boolean {
-  return state.steps.some(
-    (s) =>
-      (s.observation !== undefined && s.observation.length > 0) ||
-      (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
-  );
+  return hasGroundingToolObservations(state);
 }
 
 interface AgentAnswerRecoveryPolicyDeps {
   readonly toolDeps: Pick<AgentToolDeps, 'searchUseCase'>;
+  readonly logger?: Pick<typeof defaultLog, 'error'> | undefined;
 }
 
 export class AgentAnswerRecoveryPolicy {
-  constructor(private readonly deps: AgentAnswerRecoveryPolicyDeps) {}
+  private readonly logger: Pick<typeof defaultLog, 'error'>;
+
+  constructor(private readonly deps: AgentAnswerRecoveryPolicyDeps) {
+    this.logger = deps.logger ?? defaultLog;
+  }
 
   async recoverAnswer(
     query: string,
@@ -128,7 +133,7 @@ export class AgentAnswerRecoveryPolicy {
         if (isAbortError(err)) {
           state.terminationReason = 'aborted';
         } else {
-          log.error({ err, requestId }, 'agent fallback search failed');
+          this.logger.error({ err, requestId }, 'agent fallback search failed');
         }
       } finally {
         abortSignal?.removeEventListener('abort', propagateFallbackAbort);
@@ -136,15 +141,8 @@ export class AgentAnswerRecoveryPolicy {
       }
     }
 
-    if (!state.policyBlocked && state.terminationReason !== 'aborted' && answer === '') {
-      const lastObs = state.steps.findLast(
-        (s) =>
-          (s.observation !== undefined && s.observation.length > 0) ||
-          (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
-      );
-      const lastObsText =
-        lastObs?.observation ??
-        lastObs?.actionPairs?.find((p) => p.observation.length > 0)?.observation;
+    if (!state.policyBlocked && state.terminationReason !== 'aborted' && !(abortSignal?.aborted) && answer === '') {
+      const lastObsText = getLastGroundingObservationText(state);
       if (lastObsText !== undefined) {
         const queryHasHangul = containsHangul(query);
         const preview = lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS);
@@ -152,22 +150,22 @@ export class AgentAnswerRecoveryPolicy {
           ? '검색 결과 요약: ' + preview
           : 'Search result summary: ' + preview;
         answer = applyFallbackAnswer(state, answer, 'layer3', observedToolOutput ? 'answer' : 'fallback');
-        log.error({ requestId, hasToolObservations: observedToolOutput }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
+        this.logger.error({ requestId, hasToolObservations: observedToolOutput }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
       }
     }
 
     if (state.policyBlocked && answer === '') {
       answer = '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.';
       state.answer = answer;
-      log.error({ requestId }, 'policy-blocked agent run ended without explicit answer; returning blocked template');
+      this.logger.error({ requestId }, 'policy-blocked agent run ended without explicit answer; returning blocked template');
     }
 
     // Layer 4: absolute guarantee — return a non-empty Korean answer template.
     // Layer 4 fallback template: keep the literal assignment directly below this comment.
-    if (!state.policyBlocked && state.terminationReason !== 'aborted' && answer === '') {
+    if (!state.policyBlocked && state.terminationReason !== 'aborted' && !(abortSignal?.aborted) && answer === '') {
       answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
       answer = applyFallbackAnswer(state, answer, 'layer4', observedToolOutput ? 'answer' : 'fallback');
-      log.error({ requestId, query, steps: state.steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
+      this.logger.error({ requestId, query, steps: state.steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
     }
 
     return answer;

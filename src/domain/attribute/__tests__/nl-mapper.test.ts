@@ -83,6 +83,78 @@ describe('NLMapper', () => {
         expect(mapping?.value).toBe('gift');
       });
 
+      it('"선물할" → occasion in [gift]', async () => {
+        const mapping = await mapper.mapPhrase('선물할');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('occasion');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('gift');
+      });
+
+      it('"힐링되는" → occasion in [healing]', async () => {
+        const mapping = await mapper.mapPhrase('힐링되는');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('occasion');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('healing');
+      });
+
+      it('"소개팅" → occasion in [date_night]', async () => {
+        const mapping = await mapper.mapPhrase('소개팅');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('occasion');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('date_night');
+      });
+
+      it('"소개팅인데" → occasion in [date_night]', async () => {
+        const mapping = await mapper.mapPhrase('소개팅인데');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('occasion');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('date_night');
+      });
+
+      it('"부담스럽고" → price_band = value', async () => {
+        const mapping = await mapper.mapPhrase('부담스럽고');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('price_band');
+        expect(mapping?.operator).toBe('=');
+        expect(mapping?.value).toBe('value');
+      });
+
+      it('"스크류캡" → style in [screw_cap]', async () => {
+        const mapping = await mapper.mapPhrase('스크류캡');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('screw_cap');
+      });
+
+      it('"차갑게 마실 수 있는" → style in [chillable]', async () => {
+        const mapping = await mapper.mapPhrase('차갑게 마실 수 있는');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('chillable');
+      });
+
+      it('"실패 없는" → style in [crowd_pleasing]', async () => {
+        const mapping = await mapper.mapPhrase('실패 없는');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('crowd_pleasing');
+      });
+
+      it('"입문자" → style in [approachable]', async () => {
+        const mapping = await mapper.mapPhrase('입문자');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('approachable');
+      });
+
       it('"풀바디" → body >= 0.7', async () => {
         const mapping = await mapper.mapPhrase('풀바디');
         expect(mapping).not.toBeNull();

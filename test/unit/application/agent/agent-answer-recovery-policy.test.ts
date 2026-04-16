@@ -92,8 +92,9 @@ describe('AgentAnswerRecoveryPolicy', () => {
   });
 
   it('converts the latest tool observation into a final answer when observed output already exists', async () => {
+    const execute = vi.fn();
     const policy = new AgentAnswerRecoveryPolicy({
-      toolDeps: { searchUseCase: { execute: vi.fn() } as never },
+      toolDeps: { searchUseCase: { execute } as never },
     });
     const state = createAgentExecutionState();
     state.steps.push({
@@ -111,6 +112,7 @@ describe('AgentAnswerRecoveryPolicy', () => {
     expect(state.fallbackApplied).toBe(true);
     expect(state.fallbackLayer).toBe('layer3');
     expect(state.terminationReason).toBe('answer');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('returns the blocked template without running fallback search when policy already blocked the request', async () => {
@@ -142,5 +144,31 @@ describe('AgentAnswerRecoveryPolicy', () => {
     expect(state.fallbackApplied).toBe(true);
     expect(state.fallbackLayer).toBe('layer4');
     expect(state.terminationReason).toBe('fallback');
+  });
+
+  it('does not synthesize layer-3 or layer-4 fallback answers for aborted requests', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.terminationReason = 'error';
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      observation: 'This observation must not become a fallback answer after abort.',
+      durationMs: 1,
+      tokenCount: { input: 1, output: 1 },
+    });
+    const abortController = new AbortController();
+    abortController.abort();
+
+    const answer = await policy.recoverAnswer('query', 'req-aborted-recovery', state, true, abortController.signal);
+
+    expect(answer).toBe('');
+    expect(execute).not.toHaveBeenCalled();
+    expect(state.answer).toBe('');
+    expect(state.fallbackApplied).toBe(false);
+    expect(state.fallbackLayer).toBeNull();
   });
 });

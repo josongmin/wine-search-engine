@@ -173,6 +173,42 @@ describe('executeAgentTool', () => {
     expect(request?.query).toBe('beaujolais nouveau');
   });
 
+  it('canonicalizes short Korean exact-entity price queries before dispatch', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '오퍼스원 얼마야?',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toBe('opus one');
+  });
+
+  it('canonicalizes short Korean drinkability entity queries before dispatch', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '오푸스원 지금 마시기 좋아?',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toBe('opus one');
+  });
+
   it('preserves the lexical nucleus when structured filters exist but no semantic anchor survives reconstruction', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),

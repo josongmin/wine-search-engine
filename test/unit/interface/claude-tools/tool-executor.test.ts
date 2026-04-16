@@ -186,6 +186,46 @@ describe('WineToolExecutor', () => {
       expect(request.options?.mode).toBe('mixed');
     });
 
+    it('should forward semantic style hints, budget text, and structured filters into SearchRequest', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: 'camping wine',
+          style: 'chillable',
+          certification: 'organic',
+          max_price_krw: 50000,
+          wine_type: 'white',
+          country: 'France',
+          vintage_min: 2020,
+          vintage_max: 2022,
+          appellation: 'Chablis',
+          exclude_grapes: ['Chardonnay'],
+          exclude_regions: ['Italy'],
+        },
+        'req-structured-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toContain('camping wine');
+      expect(request.query).toContain('chillable');
+      expect(request.query).toContain('organic');
+      expect(request.query).toContain('50000원 이하');
+      expect(request.query).toContain('not Chardonnay');
+      expect(request.query).toContain('not Italy');
+      expect(request.limit).toBe(10);
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'wine_type', value: 'white' }),
+        expect.objectContaining({ attribute: 'country', value: 'France' }),
+        expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2020 }),
+        expect.objectContaining({ attribute: 'vintage_year', operator: '<=', value: 2022 }),
+        expect.objectContaining({ attribute: 'appellation', value: 'Chablis' }),
+        expect.objectContaining({ attribute: 'grape_primary', operator: 'exclude', value: 'Chardonnay' }),
+        expect.objectContaining({ attribute: 'region', operator: 'exclude', value: 'Italy' }),
+      ]));
+    });
+
     it('should reject invalid query (empty)', async () => {
       await expect(async () => {
         await executor.execute('search_wines', { query: '', limit: 10 }, 'req-123');
@@ -256,7 +296,21 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('under $50');
+      expect(request.query).toContain('under 67500 KRW');
+    });
+
+    it('should prefer max_price_krw over max_price for food pairings', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'get_food_pairings',
+        { food: 'chicken', max_price: 50, max_price_krw: 30000 },
+        'req-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toContain('under 30000 KRW');
+      expect(request.query).not.toContain('67500');
     });
 
     it('should pass requestId correctly', async () => {

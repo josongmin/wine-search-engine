@@ -1,5 +1,6 @@
 import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
+import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { CIRCUIT_BREAKER_OPEN_CODE } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
@@ -10,6 +11,7 @@ import {
   buildUserMessage,
 } from './agent-prompt.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
+import type { ToolOutcome } from './tool-outcome.js';
 import {
   estimateTokenCount,
   isValidLlmResult,
@@ -17,7 +19,7 @@ import {
   type LlmResult,
 } from './agent-llm-output.js';
 
-const log = bootstrapLogger.child({ component: 'AgentObservationSynthesisRunner' });
+const defaultLog = bootstrapLogger.child({ component: 'AgentObservationSynthesisRunner' });
 const SYNTHESIS_TIMEOUT_MS = 60_000;
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
@@ -29,15 +31,29 @@ interface ObservationSynthesisMessages {
 
 function buildObservationSynthesisMessages(
   query: string,
-  steps: AgentExecutionState['steps'],
+  steps: readonly AgentStep[],
+  toolOutcomes: readonly ToolOutcome[],
   requestId: string,
 ): ObservationSynthesisMessages {
   const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
+  const typedOutcomeMessage: ChatMessage | undefined = toolOutcomes.length > 0
+    ? {
+        role: 'user',
+        content: `[Typed Tool Outcomes]\n${JSON.stringify(toolOutcomes.map((outcome) => ({
+          stepId: outcome.stepId,
+          tool: outcome.tool,
+          kind: outcome.kind,
+          errorMessage: outcome.errorMessage,
+          postconditionViolations: outcome.postconditionViolations,
+        })))}`
+      }
+    : undefined;
   return {
     messages: [
       buildSynthesisSystemMessage(),
       buildUserMessage(query),
       ...buildStepMessages(steps),
+      ...(typedOutcomeMessage !== undefined ? [typedOutcomeMessage] : []),
       {
         role: 'user',
         content: synthSentinel,
@@ -49,10 +65,15 @@ function buildObservationSynthesisMessages(
 
 interface AgentObservationSynthesisRunnerDeps {
   readonly chatLlm: ChatLlmPort;
+  readonly logger?: Pick<typeof defaultLog, 'error' | 'info' | 'warn'> | undefined;
 }
 
 export class AgentObservationSynthesisRunner {
-  constructor(private readonly deps: AgentObservationSynthesisRunnerDeps) {}
+  private readonly logger: Pick<typeof defaultLog, 'error' | 'info' | 'warn'>;
+
+  constructor(private readonly deps: AgentObservationSynthesisRunnerDeps) {
+    this.logger = deps.logger ?? defaultLog;
+  }
 
   async run(
     query: string,
@@ -62,7 +83,7 @@ export class AgentObservationSynthesisRunner {
     abortSignal?: AbortSignal,
   ): Promise<void> {
     if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
-      log.warn({ requestId, totalInputTokens: state.totalInputTokens, totalOutputTokens: state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens }, '[agent] token budget exhausted — skipping final answer synthesis to prevent overrun');
+      this.logger.warn({ requestId, totalInputTokens: state.totalInputTokens, totalOutputTokens: state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens }, '[agent] token budget exhausted — skipping final answer synthesis to prevent overrun');
       return;
     }
 
@@ -75,7 +96,7 @@ export class AgentObservationSynthesisRunner {
       return;
     }
 
-    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, state.steps, requestId);
+    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, obsSteps, state.toolOutcomes, requestId);
     const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
       if (abortSignal?.aborted) return undefined;
       const synthAbort = new AbortController();
@@ -98,14 +119,14 @@ export class AgentObservationSynthesisRunner {
           abortSignal: synthAbort.signal,
         });
         if (!isValidLlmResult(synthResult)) {
-          log.warn({ requestId }, 'synthesis LLM returned malformed result');
+          this.logger.warn({ requestId }, 'synthesis LLM returned malformed result');
           return undefined;
         }
         state.totalInputTokens += estimateTokenCount(synthSentinel);
         state.totalOutputTokens += estimateTokenCount(synthResult.text);
         const parsedSynth = parseLlmJsonObject(synthResult.text);
         if (parsedSynth === null) {
-          log.warn({ requestId }, 'synthesis LLM returned non-JSON output — ignoring, falling to next layer');
+          this.logger.warn({ requestId }, 'synthesis LLM returned non-JSON output — ignoring, falling to next layer');
           return undefined;
         }
         if (
@@ -113,12 +134,12 @@ export class AgentObservationSynthesisRunner {
           parsedSynth['actions'] !== undefined ||
           parsedSynth['tool'] !== undefined
         ) {
-          log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
+          this.logger.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
           return undefined;
         }
         const answer = parsedSynth['answer'];
         if (typeof answer !== 'string') {
-          log.warn({ requestId }, 'synthesis LLM returned JSON without answer — ignoring, falling to next layer');
+          this.logger.warn({ requestId }, 'synthesis LLM returned JSON without answer — ignoring, falling to next layer');
           return undefined;
         }
         const candidate = answer.trim();
@@ -138,7 +159,7 @@ export class AgentObservationSynthesisRunner {
       } else if (isAbortError(synthErr1)) {
         state.terminationReason = 'aborted';
       }
-      log.error({ err: synthErr1, requestId }, `synthesis retry attempt 1 failed (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+      this.logger.error({ err: synthErr1, requestId }, `synthesis retry attempt 1 failed (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
     }
     if (synthAnswer === undefined) {
       state.failedSynthesisAttempts += 1;
@@ -150,7 +171,7 @@ export class AgentObservationSynthesisRunner {
       state.totalInputTokens + state.totalOutputTokens < effectiveConfig.maxTotalTokens
     ) {
       try {
-        log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+        this.logger.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
       } catch (synthErr2) {
         if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
@@ -158,7 +179,7 @@ export class AgentObservationSynthesisRunner {
         } else if (isAbortError(synthErr2)) {
           state.terminationReason = 'aborted';
         }
-        log.error({ err: synthErr2, requestId }, 'synthesis retry attempt 2 failed — proceeding to fallback search');
+        this.logger.error({ err: synthErr2, requestId }, 'synthesis retry attempt 2 failed — proceeding to fallback search');
       }
       if (synthAnswer === undefined) {
         state.failedSynthesisAttempts += 1;
@@ -167,7 +188,7 @@ export class AgentObservationSynthesisRunner {
     if (synthAnswer !== undefined) {
       state.answer = synthAnswer;
       state.terminationReason = 'answer';
-      log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
+      this.logger.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
     }
   }
 }

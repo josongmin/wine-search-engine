@@ -9,8 +9,6 @@ const ONTOLOGY_AXES_BY_ATTRIBUTE = {
 
 type OntologyComparableAttribute = keyof typeof ONTOLOGY_AXES_BY_ATTRIBUTE;
 
-const ONTOLOGY_NORMALIZER = new OntologyNormalizer();
-
 function normalizeFallback(value: string): string {
   return value
     .trim()
@@ -25,12 +23,19 @@ function isOntologyComparableAttribute(
   return attribute in ONTOLOGY_AXES_BY_ATTRIBUTE;
 }
 
+function normalizeOntologyComparableValue(value: string) {
+  // Keep this path free of worker-local module state. The normalizer is
+  // stateless, so constructing it on demand is deterministic and avoids
+  // cross-suite bleed through a shared singleton instance.
+  return new OntologyNormalizer().normalize(value);
+}
+
 export function normalizeConstraintComparableString(
   attribute: string,
   value: string,
 ): string {
   if (isOntologyComparableAttribute(attribute)) {
-    const normalized = ONTOLOGY_NORMALIZER.normalize(value);
+    const normalized = normalizeOntologyComparableValue(value);
     if (normalized !== null && normalized.axis === ONTOLOGY_AXES_BY_ATTRIBUTE[attribute]) {
       return normalized.canonicalValue;
     }

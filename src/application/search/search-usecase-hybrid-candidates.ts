@@ -313,6 +313,9 @@ function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
     || attribute === 'appellation'
     || attribute === 'grape_family'
     || attribute === 'grape_primary'
+    || attribute === 'style'
+    || attribute === 'flavor_profile'
+    || attribute === 'certification'
     || attribute === 'pairing'
     || attribute === 'occasion';
 }
@@ -490,6 +493,12 @@ function buildStructuredQueryExpansionsFromGraph(
       || node.attribute === 'country'
       || node.attribute === 'appellation'
       || node.attribute === 'grape_family'
+      || node.attribute === 'grape_primary'
+      || node.attribute === 'style'
+      || node.attribute === 'flavor_profile'
+      || node.attribute === 'certification'
+      || node.attribute === 'pairing'
+      || node.attribute === 'occasion'
     ) {
       semantic.push(phrase);
     }

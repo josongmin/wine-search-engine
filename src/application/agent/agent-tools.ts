@@ -34,9 +34,15 @@ import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { stripExactEntityMetadataSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
 import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../domain/attribute/service/span-parser.js';
 import { resolveEntity } from '../../domain/attribute/service/entity-resolver.js';
+import { Transliterator } from '../../domain/alias/service/transliterator.js';
+import {
+  buildAgentQueryExecutionContract,
+  isExactMetadataEntityLookupCandidate,
+} from './agent-query-execution-contract.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -489,6 +495,64 @@ function buildLexicalNucleus(
   return trimmedRawQuery.length > 0 ? trimmedRawQuery : undefined;
 }
 
+function resolveCanonicalEntityTerms(
+  queryViews: ReturnType<typeof buildNormalizedQueryViews>,
+): readonly string[] {
+  const lookupQueries = [
+    ...new Set<string>([
+      queryViews.strict,
+      queryViews.punctuationStripped,
+      ...(queryViews.transliterated !== undefined
+        ? [queryViews.transliterated]
+        : []),
+    ]),
+  ];
+  const canonicals: string[] = [];
+  const seen = new Set<string>();
+
+  for (const lookupQuery of lookupQueries) {
+    for (const span of parseSpans(lookupQuery)) {
+      const romanized = Transliterator.romanizeWineTerm(span.text);
+      if (romanized === undefined) {
+        continue;
+      }
+      const canonical = romanized.trim().toLowerCase();
+      if (canonical.length === 0 || seen.has(canonical)) {
+        continue;
+      }
+      seen.add(canonical);
+      canonicals.push(canonical);
+    }
+
+    const resolvedSpans = resolveOverlaps(
+      parseSpans(lookupQuery).map((span) => ({
+        span,
+        resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
+      })),
+    )
+      .filter(
+        (
+          entry,
+        ): entry is {
+          span: Span;
+          resolved: NonNullable<ReturnType<typeof resolveEntity>>;
+        } => entry.resolved !== null,
+      )
+      .filter((entry) => entry.resolved.entityType !== 'wine_type');
+
+    for (const entry of resolvedSpans) {
+      const canonical = entry.resolved.canonicalValue.trim().toLowerCase();
+      if (canonical.length === 0 || seen.has(canonical)) {
+        continue;
+      }
+      seen.add(canonical);
+      canonicals.push(canonical);
+    }
+  }
+
+  return canonicals;
+}
+
 function isResolvedEntityRepresentedByStructuredFilters(
   entity: ReturnType<typeof resolveEntity>,
   input: z.infer<typeof SearchInputSchema>,
@@ -512,7 +576,11 @@ function isResolvedEntityRepresentedByStructuredFilters(
 function buildRetrievalCoreQuery(
   input: z.infer<typeof SearchInputSchema>,
 ): string {
-  const queryViews = buildNormalizedQueryViews(input.query);
+  const queryContract = buildAgentQueryExecutionContract(input.query);
+  const normalizedQuery = queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query)
+    ? stripExactEntityMetadataSuffix(input.query)
+    : input.query;
+  const queryViews = buildNormalizedQueryViews(normalizedQuery);
   const tokenCount = queryViews.punctuationStripped.length === 0
     ? 0
     : queryViews.punctuationStripped.split(/\s+/u).length;
@@ -533,6 +601,13 @@ function buildRetrievalCoreQuery(
     || input.vintage_max !== undefined;
 
   if (pairingTags.length === 0 && !hasPositiveStructuredFilters) {
+    const canonicalEntityTerms = resolveCanonicalEntityTerms(queryViews);
+    if (queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query) && canonicalEntityTerms.length > 0) {
+      return [...canonicalEntityTerms].sort((a, b) => b.length - a.length)[0]!;
+    }
+    if (tokenCount > 0 && tokenCount <= SHORT_BARE_ENTITY_QUERY_MAX_TOKENS && canonicalEntityTerms.length === 1) {
+      return canonicalEntityTerms[0]!;
+    }
     if (
       queryViews.transliterated !== undefined &&
       queryViews.transliterated !== queryViews.punctuationStripped &&
@@ -541,7 +616,7 @@ function buildRetrievalCoreQuery(
     ) {
       return queryViews.transliterated;
     }
-    return input.query;
+    return normalizedQuery;
   }
 
   const semanticTerms: string[] = [];
@@ -615,7 +690,7 @@ function buildRetrievalCoreQuery(
   }
 
   if (semanticTerms.length === 0) {
-    return input.query;
+    return normalizedQuery;
   }
 
   const hasWineToken = semanticTerms.some((term) => /(?:^|[^\p{L}\p{N}])wine(?=$|[^\p{L}\p{N}])/iu.test(term));

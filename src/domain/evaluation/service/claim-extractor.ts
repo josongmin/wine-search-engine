@@ -107,6 +107,43 @@ const KNOWN_REGIONS: ReadonlyMap<string, string> = new Map([
   ['stellenbosch', 'Stellenbosch'],
 ]);
 
+/** Korean and compact alias surfaces for region extraction. */
+const REGION_ALIASES: ReadonlyMap<string, string> = new Map([
+  ['보르도', 'Bordeaux'],
+  ['부르고뉴', 'Burgundy'],
+  ['샴페인', 'Champagne'],
+  ['론', 'Rhône'],
+  ['나파', 'Napa Valley'],
+  ['나파 밸리', 'Napa Valley'],
+  ['나파밸리', 'Napa Valley'],
+  ['소노마', 'Sonoma County'],
+  ['피에몬테', 'Piedmont'],
+  ['토스카나', 'Tuscany'],
+  ['리오하', 'Rioja'],
+  ['모젤', 'Mosel'],
+  ['알자스', 'Alsace'],
+  ['프로방스', 'Provence'],
+  ['보졸레', 'Beaujolais'],
+]);
+
+/** Korean + Latin grape alias surfaces for claim extraction. */
+const GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(?:카베르네\s*소비뇽|카베르네소비뇽|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?)/iu, 'Cabernet Sauvignon'],
+  [/(?:카베르네\s*프랑|cab(?:ernet)?\s*franc)/iu, 'Cabernet Franc'],
+  [/(?:메를로|merlot)/iu, 'Merlot'],
+  [/(?:피노\s*누아르?|피노누아|pinot\s*noir)/iu, 'Pinot Noir'],
+  [/(?:피노\s*그리(?:지오)?|pinot\s*gri(?:gio|s))/iu, 'Pinot Grigio'],
+  [/(?:소비뇽\s*블랑|쇼비|sauvignon\s*blanc)/iu, 'Sauvignon Blanc'],
+  [/(?:샤르도네|샤도네이|chardonnay)/iu, 'Chardonnay'],
+  [/(?:시라(?:즈)?|shiraz|syrah)/iu, 'Syrah'],
+  [/(?:리슬링|riesling)/iu, 'Riesling'],
+  [/(?:그르나슈|grenache|garnacha)/iu, 'Grenache'],
+  [/(?:산지오베제|sangiovese)/iu, 'Sangiovese'],
+  [/(?:템프라니요|tempranillo)/iu, 'Tempranillo'],
+  [/(?:네비올로|nebbiolo)/iu, 'Nebbiolo'],
+  [/(?:말벡|malbec)/iu, 'Malbec'],
+];
+
 /** Latin words commonly capitalized in wine context but NOT wine identities. */
 const LATIN_IDENTITY_STOPWORDS: ReadonlySet<string> = new Set([
   'reserve', 'reserva', 'estate', 'estates', 'vineyard', 'vineyards',
@@ -386,15 +423,15 @@ function extractPriceClaims(text: string): ExtractedClaim[] {
 
 function extractRegionClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
-  const lower = text.toLowerCase().normalize('NFKC');
+  const normalized = correctKoreanWineTypos(text).toLowerCase().normalize('NFKC');
 
   // Sort by length descending so multi-word regions match before substrings
-  const sortedRegions = [...KNOWN_REGIONS.entries()].sort((a, b) => b[0].length - a[0].length);
+  const sortedRegions = [...new Map([...KNOWN_REGIONS, ...REGION_ALIASES]).entries()].sort((a, b) => b[0].length - a[0].length);
 
   const matched = new Set<string>();
   for (const [key, display] of sortedRegions) {
     if (matched.has(key)) continue;
-    if (containsAsWord(lower, key)) {
+    if (containsAsWord(normalized, key.toLowerCase().normalize('NFKC'))) {
       // Skip if a longer region containing this key was already matched
       let isSubstringOfMatched = false;
       for (const m of matched) {
@@ -411,10 +448,17 @@ function extractRegionClaims(text: string): ExtractedClaim[] {
 
 function extractGrapeClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
-  const lower = text.toLowerCase().normalize('NFKC');
+  const normalized = correctKoreanWineTypos(text).toLowerCase().normalize('NFKC');
+
+  for (const [pattern, canonicalGrape] of GRAPE_ALIASES) {
+    if (pattern.test(normalized)) {
+      const canonical = resolveGrapeAlias(canonicalGrape.toLowerCase());
+      claims.push(makeClaim('core_structured_claim', 'grape_primary', canonical, canonicalGrape));
+    }
+  }
 
   for (const grape of KNOWN_GRAPES) {
-    if (containsAsWord(lower, grape)) {
+    if (containsAsWord(normalized, grape)) {
       const canonical = resolveGrapeAlias(grape);
       claims.push(makeClaim('core_structured_claim', 'grape_primary', canonical, grape));
     }

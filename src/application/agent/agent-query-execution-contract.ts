@@ -1,10 +1,12 @@
 import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import { QueryNormalizer } from '../../domain/query/service/query-normalizer.js';
+import { detectDecomposition } from '../../domain/query/service/decomposition-detector.js';
 import {
   hasDrinkabilityKeyword,
   hasEntityMetadataKeyword,
-} from '../../domain/query/service/planner-intent-detection.js';
+  stripExactEntityMetadataSuffix,
+} from '../../domain/query/service/exact-entity-metadata-signals.js';
 import type { ToolOutcome } from './tool-outcome.js';
 
 const QUERY_NORMALIZER = new QueryNormalizer();
@@ -15,16 +17,34 @@ export interface AgentQueryExecutionContract {
   readonly hasEntityMetadataSignal: boolean;
 }
 
+function queryNeedsDrinkabilityCheck(query: string, normalized: string): boolean {
+  if (!hasDrinkabilityKeyword(normalized)) {
+    return false;
+  }
+  if (isExactMetadataEntityLookupCandidate(query)) {
+    return true;
+  }
+  return detectDecomposition(query).decomposed;
+}
+
 export function buildAgentQueryExecutionContract(query: string): AgentQueryExecutionContract {
   const normalized = QUERY_NORMALIZER.normalize(query).accentless;
   return {
-    requiresDrinkabilityCheck: hasDrinkabilityKeyword(normalized),
+    requiresDrinkabilityCheck: queryNeedsDrinkabilityCheck(query, normalized),
     hasEntityMetadataSignal: hasEntityMetadataKeyword(normalized),
   };
 }
 
 export function isSpecificSkuLikeQuery(query: string): boolean {
   return classifyQueryBudget(query)?.classification === 'specific_sku';
+}
+
+export function isExactMetadataEntityLookupCandidate(query: string): boolean {
+  if (isSpecificSkuLikeQuery(query)) {
+    return true;
+  }
+  const strippedEntityQuery = stripExactEntityMetadataSuffix(query);
+  return strippedEntityQuery !== query && isSpecificSkuLikeQuery(strippedEntityQuery);
 }
 
 function getStructuredSearchFilterKeys(input: Record<string, unknown>): readonly string[] {

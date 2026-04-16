@@ -3,22 +3,17 @@ import type { AgentToolCallPair } from '../../domain/agent/model/agent-step.js';
 import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-evidence-frame.js';
 import { toolCallIdForStep } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import type { StepBudget } from '../../domain/agent/service/step-budget.js';
-import { DomainError } from '../../domain/shared/error/domain-error.js';
-import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
-import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentToolDeps, AgentToolResult } from './agent-tools.js';
 import { executeAgentToolsBatch } from './agent-tools.js';
 import { truncateObservation } from './agent-prompt.js';
 import type { AgentQueryExecutionContract } from './agent-query-execution-contract.js';
+import { AgentContractExecutionResultPolicy } from './agent-contract-execution-result-policy.js';
 import { AgentContractPolicy } from './agent-contract-policy.js';
 import {
-  buildObservationPairs,
   buildToolOutcome,
-  formatPolicyBlockedObservation,
   getParallelBatchTimeoutMs,
-  type TimeoutErrorLike,
   withTimeout,
 } from './agent-tool-execution-support.js';
 
@@ -30,6 +25,7 @@ interface AgentContractExecutionPhaseDeps {
 
 export class AgentContractExecutionPhase {
   private readonly contractPolicy = new AgentContractPolicy();
+  private readonly executionResultPolicy = new AgentContractExecutionResultPolicy();
 
   constructor(private readonly deps: AgentContractExecutionPhaseDeps) {}
 
@@ -52,7 +48,7 @@ export class AgentContractExecutionPhase {
     }));
     const budgetCheck = budget.recordParallelBatch(checkCalls, { skipNearDuplicate: true });
     if (!budgetCheck.allowed) {
-      state.terminationReason = budgetCheck.reason ?? 'max_steps';
+      this.executionResultPolicy.applyBudgetReservationFailure(state, budgetCheck.reason);
       return false;
     }
 
@@ -80,71 +76,17 @@ export class AgentContractExecutionPhase {
     } catch (err) {
       autoAbortController.abort();
       const durationMs = Math.max(0, Date.now() - stepStartMs);
-      if (isAbortError(err)) {
-        state.terminationReason = 'aborted';
-        const observation = '[ABORTED] Request cancelled during contract drinkability checks.';
-        for (let i = 0; i < checkCalls.length; i++) {
-          state.toolOutcomes.push(
-            buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, true, false, false),
-          );
-        }
-        const { actionPairs, observations } = buildObservationPairs(checkCalls, observation);
-        state.steps.push({
-          index: stepIndex,
-          thought: 'contract: drinkability check after entity retrieval',
-          actionPairs,
-          actions: checkCalls,
-          observations,
-          durationMs,
-          tokenCount: { input: 0, output: 0 },
-        });
-        return false;
+      const handled = this.executionResultPolicy.applyFailure({
+        err,
+        requestId,
+        stepIndex,
+        checkCalls,
+        durationMs,
+        state,
+      });
+      if (!handled) {
+        log.error({ err, requestId, stepIndex }, 'contract drinkability batch failed');
       }
-      if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
-        state.timeoutStats.parallelBatch += 1;
-        state.terminationReason = 'timeout';
-        const observation = '[TIMEOUT] Contract drinkability checks timed out.';
-        for (let i = 0; i < checkCalls.length; i++) {
-          state.toolOutcomes.push(
-            buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, true, false),
-          );
-        }
-        const { actionPairs, observations } = buildObservationPairs(checkCalls, observation);
-        state.steps.push({
-          index: stepIndex,
-          thought: 'contract: drinkability check after entity retrieval',
-          actionPairs,
-          actions: checkCalls,
-          observations,
-          durationMs,
-          tokenCount: { input: 0, output: 0 },
-        });
-        return false;
-      }
-      if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
-        state.policyBlocked = true;
-        state.terminationReason = 'blocked';
-        const observation = formatPolicyBlockedObservation(err);
-        for (let i = 0; i < checkCalls.length; i++) {
-          state.toolOutcomes.push(
-            buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, false, true),
-          );
-        }
-        const { actionPairs, observations } = buildObservationPairs(checkCalls, observation);
-        state.steps.push({
-          index: stepIndex,
-          thought: 'contract: drinkability check after entity retrieval',
-          actionPairs,
-          actions: checkCalls,
-          observations,
-          durationMs,
-          tokenCount: { input: 0, output: 0 },
-        });
-        return false;
-      }
-      log.error({ err, requestId, stepIndex }, 'contract drinkability batch failed');
-      state.reasoningFailureDetected = true;
-      state.terminationReason = 'error';
       return false;
     } finally {
       autoAbortController.abort();

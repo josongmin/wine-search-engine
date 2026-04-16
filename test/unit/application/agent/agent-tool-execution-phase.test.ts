@@ -233,7 +233,46 @@ describe('AgentToolExecutionPhase', () => {
     expect(state.steps[0]?.observation).toContain('Tool contract violation');
     expect(state.toolOutcomes.at(-1)).toMatchObject({
       tool: 'search_wines',
-      kind: 'tool_error',
+      kind: 'policy_violation',
+    });
+  });
+
+  it('rejects pending drinkability checks that target the wrong entity id', async () => {
+    const execute = vi.fn();
+    const { phase } = makePhase({
+      searchUseCase: { execute } as never,
+    });
+    const state = createAgentExecutionState();
+    state.toolOutcomes.push({
+      stepId: 'req:0:0',
+      tool: 'search_wines',
+      kind: 'success',
+      result: {
+        queryType: 'search',
+        results: [{ entity: { entityId: 'wine-1', canonicalLabel: 'Wine 1' } }],
+      },
+      durationMs: 1,
+    });
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 5 });
+
+    const shouldBreak = await phase.run(
+      'req-wrong-contract-id',
+      DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'check wrong wine',
+        action: { tool: 'check_drinking_window', input: { entity_id: 'wine-2' } },
+      }),
+    );
+
+    expect(shouldBreak).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+    expect(state.steps[0]?.observation).toContain('check_drinking_window next for "wine-1"');
+    expect(state.toolOutcomes.at(-1)).toMatchObject({
+      tool: 'check_drinking_window',
+      kind: 'policy_violation',
     });
   });
 
@@ -308,6 +347,10 @@ describe('AgentToolExecutionPhase', () => {
     expect(execute).not.toHaveBeenCalled();
     expect(state.steps[0]?.observations?.[0]).toContain('Tool contract violation');
     expect(state.toolOutcomes).toHaveLength(3);
+    expect(state.toolOutcomes.slice(1)).toEqual([
+      expect.objectContaining({ tool: 'check_drinking_window', kind: 'policy_violation' }),
+      expect.objectContaining({ tool: 'search_wines', kind: 'policy_violation' }),
+    ]);
   });
 
   it('executes an allowed parallel batch and records both tool outcomes', async () => {

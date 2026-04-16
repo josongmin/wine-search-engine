@@ -95,6 +95,18 @@ describe('Intent Detection — SOTA++ Improvements', () => {
       expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
     });
 
+    it('should keep colloquial price questions on entity_exact for a strong anchor', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['오푸스원', makeMatchResult('오푸스원', 0.95)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('오푸스원 얼마야?');
+      expect(plan.intent).toBe('entity_exact');
+      expect(plan.suggestedRoute).toBe('entity');
+      expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    });
+
     it('should keep release-availability questions on entity_exact for a strong anchor', async () => {
       const matcher = new StubAliasMatcher(
         new Map([['보졸레 누보', makeMatchResult('보졸레 누보', 0.93)]]),

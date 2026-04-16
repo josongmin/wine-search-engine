@@ -1,13 +1,13 @@
 /**
- * E7: ToolOutcome — typed observation replacement for the agent contract executor.
+ * E7: ToolOutcome — typed observation companion for the agent contract executor.
  *
- * Replaces the untyped `observation: string` pattern in AgentToolCallPair with
+ * Complements the untyped `observation: string` pattern in AgentToolCallPair with
  * a structured outcome that distinguishes success, empty result, partial result,
  * timeout, tool error, and policy violation.
  *
  * The existing AgentStep and AgentToolCallPair substrate is NOT replaced —
  * ToolOutcome is generated alongside them as a typed companion. Downstream
- * synthesis can branch on ToolOutcome.kind instead of parsing observation text.
+ * synthesis can branch on ToolOutcome.kind without parsing observation text.
  */
 
 // ─── AgentToolName ────────────────────────────────────────────────────────────
@@ -101,62 +101,10 @@ export interface ExpectedOutputSchema {
   readonly requiredFields?: readonly string[] | undefined;
 }
 
-// ─── FallbackPolicy ──────────────────────────────────────────────────────────
-
-/**
- * What the orchestrator should do when a tool step fails or produces partial results.
- */
-export type FallbackPolicy =
-  | { readonly kind: 'retry'; readonly maxAttempts: number }
-  | { readonly kind: 'relax_constraints'; readonly hint: string }
-  | { readonly kind: 'skip'; readonly reason: string }
-  | { readonly kind: 'fail' };
-
-// ─── PlanStep ─────────────────────────────────────────────────────────────────
-
-/**
- * E7: PlanStep IR — optional compatibility projection from AgentStep.
- *
- * Not a parallel truth — generated from existing AgentStep action/actionPairs
- * to express the plan in a structured form that enables:
- *  1. Deterministic step ID generation
- *  2. Typed postcondition validation
- *  3. Explicit fallback policy per step
- *
- * Consumers MUST NOT treat PlanStep as the authoritative execution record.
- * AgentStep remains the single source of truth for execution history.
- */
-export interface PlanStep {
-  /** Deterministic ID: hash(normalizedQuery) + ':' + stepIndex. */
-  readonly stepId: string;
-
-  /** Natural-language goal for this step. */
-  readonly goal: string;
-
-  /**
-   * Step IDs of prior steps whose results are required as inputs.
-   * Empty for first steps.
-   */
-  readonly requiredInputs: readonly string[];
-
-  /** Tool to invoke. */
-  readonly tool: string; // AgentToolName or unknown/future tools
-
-  /** Tool input parameters. */
-  readonly toolInput: Readonly<Record<string, unknown>>;
-
-  /** Postcondition expectations for outcome validation. */
-  readonly expectedOutputSchema: ExpectedOutputSchema;
-
-  /** What to do when this step fails or produces partial results. */
-  readonly fallbackPolicy: FallbackPolicy;
-}
-
 // ─── SynthesisContext ─────────────────────────────────────────────────────────
 
 /**
- * E7: Structured synthesis context — replaces the raw observation string array
- * fed to the synthesis LLM with typed, filterable step outcomes.
+ * E7: Structured synthesis context — records typed, filterable step outcomes.
  *
  * Enables the synthesis prompt to distinguish successful from failed steps
  * without parsing observation text.

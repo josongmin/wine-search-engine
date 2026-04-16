@@ -130,7 +130,11 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   // Standalone price-level keywords (no numeric amount)
-  if (!priceUnder && /(?:비싼|비싸|고급|럭셔리|프리미엄)/u.test(q)) {
+  const priceAversionContext =
+    /(?:너무\s*)?비싸(?:면|서|고)?/u.test(q)
+    || /부담(?:스럽|없는|없고|돼|되)/u.test(q);
+
+  if (!priceUnder && /(?:비싼|비싸|고급|럭셔리|프리미엄)/u.test(q) && !priceAversionContext) {
     soft.push({
       attribute: 'price_band',
       operator: '=',

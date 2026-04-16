@@ -14,7 +14,7 @@ export class AgentRunLoopTerminationPolicy {
   }
 
   applyPreflightAbort(state: AgentExecutionState): void {
-    state.terminationReason = 'error';
+    state.terminationReason = 'aborted';
   }
 
   applyUnexpectedError(state: AgentExecutionState, err: unknown): void {

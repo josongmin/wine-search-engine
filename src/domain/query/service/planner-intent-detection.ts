@@ -3,6 +3,9 @@ import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { WINE_TYPE_DETECTION_PATTERNS } from '../model/wine-type-patterns.js';
 import type { AnchorExtractor } from './anchor-extractor.js';
+import {
+  hasEntityMetadataKeyword,
+} from './exact-entity-metadata-signals.js';
 
 /** Minimum anchor confidence to consider an anchor "present" for intent detection. */
 export const ANCHOR_PRESENT_CONFIDENCE = 0.5;
@@ -47,20 +50,6 @@ const OCCASION_SUBSTRINGS: readonly string[] = [
   '힐링',
 ] as const;
 
-/** Exact-entity metadata questions should stay on the entity route.
- * These phrases ask about a known wine's properties (price, drinkability,
- * release/availability) rather than requesting discovery/filtering. */
-const DRINKABILITY_KEYWORDS: readonly RegExp[] = [
-  /(?<!\p{L})(?<!\p{N})(?:drinkability|drinking\s+window|when\s+to\s+drink)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:마시기\s*좋(?:아|은|을|을까|을지)?|마실\s*시기|음용\s*시기|피크)(?=$|[^\p{L}\p{N}])/u,
-] as const;
-
-const ENTITY_METADATA_KEYWORDS: readonly RegExp[] = [
-  /(?<!\p{L})(?<!\p{N})(?:price|cost|worth|release(?:d)?|availability|available|in\s+stock)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:가격|얼마|시세|출시|나왔어|나왔나|재고|구할\s*수\s*있|살\s*수\s*있)(?=$|[^\p{L}\p{N}])/u,
-  ...DRINKABILITY_KEYWORDS,
-] as const;
-
 /** Constraint keywords indicating structured filtering.
  *  Wine type patterns are sourced from the shared WINE_TYPE_DETECTION_PATTERNS
  *  (wine-type-patterns.ts) to avoid duplication. Non-wine-type constraint
@@ -83,14 +72,6 @@ export type IntentDetectionAnchorExtractor = Pick<
   AnchorExtractor,
   'hasComparisonMarkers' | 'hasKoreanMixedQueryMarkers'
 >;
-
-export function hasDrinkabilityKeyword(normalizedQuery: string): boolean {
-  return DRINKABILITY_KEYWORDS.some((re) => re.test(normalizedQuery));
-}
-
-export function hasEntityMetadataKeyword(normalizedQuery: string): boolean {
-  return ENTITY_METADATA_KEYWORDS.some((re) => re.test(normalizedQuery));
-}
 
 /**
  * Detects the primary intent based on anchors, patterns, and keywords.

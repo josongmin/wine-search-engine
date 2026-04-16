@@ -1,7 +1,7 @@
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentQueryExecutionContract } from './agent-query-execution-contract.js';
 import {
-  isSpecificSkuLikeQuery,
+  isExactMetadataEntityLookupCandidate,
   normalizeExactMetadataSearchInput,
 } from './agent-query-execution-contract.js';
 
@@ -34,7 +34,7 @@ function normalizeSearchInput(
     return input;
   }
   const searchQuery = input['query'];
-  if (typeof searchQuery !== 'string' || !isSpecificSkuLikeQuery(searchQuery)) {
+  if (typeof searchQuery !== 'string' || !isExactMetadataEntityLookupCandidate(searchQuery)) {
     return input;
   }
   const normalized = normalizeExactMetadataSearchInput(input).effectiveInput;

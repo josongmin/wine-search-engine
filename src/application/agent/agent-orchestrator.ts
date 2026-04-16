@@ -19,9 +19,9 @@ import {
   type AgentToolDeps,
 } from './agent-tools.js';
 import {
-  AgentFallbackFinalizer,
-} from './agent-fallback-finalizer.js';
-import { hasToolObservations } from './agent-answer-recovery-policy.js';
+  AgentAnswerRecoveryPolicy,
+  hasToolObservations,
+} from './agent-answer-recovery-policy.js';
 import {
   AgentPlannerPhaseRunner,
 } from './agent-planner-phase-runner.js';
@@ -36,7 +36,7 @@ import { AgentResultFinalizer } from './agent-result-finalizer.js';
 import { AgentRunLoop } from './agent-run-loop.js';
 import { AgentTerminalRoutingPolicy } from './agent-terminal-routing-policy.js';
 
-export interface AgentOrchestratorDeps {
+interface AgentOrchestratorDeps {
   readonly chatLlm: ChatLlmPort;
   readonly toolDeps: AgentToolDeps;
   readonly executionObserver?: AgentExecutionObserver | undefined;
@@ -45,7 +45,7 @@ export interface AgentOrchestratorDeps {
 
 export class AgentOrchestrator {
   private readonly config: AgentConfig;
-  private readonly fallbackFinalizer: AgentFallbackFinalizer;
+  private readonly answerRecoveryPolicy: AgentAnswerRecoveryPolicy;
   private readonly plannerPhaseRunner: AgentPlannerPhaseRunner;
   private readonly observationSynthesisRunner: AgentObservationSynthesisRunner;
   private readonly contractExecutionPhase: AgentContractExecutionPhase;
@@ -59,7 +59,7 @@ export class AgentOrchestrator {
     config?: Partial<AgentConfig>,
   ) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...config };
-    this.fallbackFinalizer = new AgentFallbackFinalizer({ toolDeps: deps.toolDeps });
+    this.answerRecoveryPolicy = new AgentAnswerRecoveryPolicy({ toolDeps: deps.toolDeps });
     this.plannerPhaseRunner = new AgentPlannerPhaseRunner({ chatLlm: deps.chatLlm });
     this.observationSynthesisRunner = new AgentObservationSynthesisRunner({ chatLlm: deps.chatLlm });
     this.contractExecutionPhase = new AgentContractExecutionPhase({ toolDeps: deps.toolDeps });
@@ -118,7 +118,7 @@ export class AgentOrchestrator {
     }
 
     const observedToolOutput = hasToolObservations(state);
-    const answer = await this.fallbackFinalizer.runFallbackCascade(query, requestId, state, observedToolOutput, abortSignal);
+    const answer = await this.answerRecoveryPolicy.recoverAnswer(query, requestId, state, observedToolOutput, abortSignal);
 
     return this.resultFinalizer.finalize({
       query,

@@ -138,12 +138,13 @@ describe('AgentOrchestrator', () => {
     };
 
     const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1 });
-    const result = await orchestrator.execute('opus one', 'req-prompt-seam');
+    const result = await orchestrator.execute('opus one', 'req-prompt-seam', { maxSteps: 1 });
 
     const systemMessages = complete.mock.calls.map((call) => call[0].messages[0]);
     expect(result.terminationReason).toBe('answer');
-    expect(systemMessages.some((msg) => msg.content === buildPlannerSystemMessage().content)).toBe(true);
-    expect(systemMessages.some((msg) => msg.content === buildSynthesisSystemMessage().content)).toBe(true);
+    expect(systemMessages[0]?.content).toBe(buildPlannerSystemMessage().content);
+    expect(systemMessages[1]?.content).toBe(buildSynthesisSystemMessage().content);
+    expect(systemMessages[2]?.content).toBe(buildSynthesisSystemMessage().content);
   });
 
   it('treats a planner answer as terminal without invoking synthesis', async () => {

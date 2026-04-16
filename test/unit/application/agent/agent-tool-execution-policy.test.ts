@@ -30,6 +30,18 @@ describe('AgentToolExecutionPolicy', () => {
     expect(resolved[1]).toEqual({ tool: 'check_drinking_window', input: { entity_id: 'wine-1' } });
   });
 
+  it('normalizes colloquial Korean exact-metadata search into exact lookup input', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: { query: '오푸스원 얼마야?', country: 'United States' },
+      queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: true },
+    });
+
+    expect(resolved).toEqual({ query: '오푸스원 얼마야?', limit: 1 });
+  });
+
   it('injects refinement hint only once when no-match observations appear with enough remaining steps', () => {
     const policy = new AgentToolExecutionPolicy();
     const state = createAgentExecutionState();

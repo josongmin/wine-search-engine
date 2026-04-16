@@ -17,7 +17,7 @@ describe('AgentRunLoopTerminationPolicy', () => {
     expect(state.terminationReason).toBe('budget');
 
     policy.applyPreflightAbort(state);
-    expect(state.terminationReason).toBe('error');
+    expect(state.terminationReason).toBe('aborted');
   });
 
   it('maps blocked, breaker-open, and generic errors', () => {

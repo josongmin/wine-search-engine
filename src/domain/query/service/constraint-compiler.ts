@@ -1,4 +1,5 @@
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { isAbortError } from '../../shared/cooperative-abort.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { NLMapper } from '../../attribute/service/nl-mapper.js';
@@ -103,6 +104,9 @@ export class ConstraintCompiler {
       candidatePhrases,
       abortSignal !== undefined ? { abortSignal } : undefined,
     ).catch((err: unknown) => {
+      if (isAbortError(err)) {
+        throw err;
+      }
       // NLMapper failure: return empty constraints so Tier 6 rule-based
       // extraction and entity resolver can still run. The query proceeds
       // with reduced precision rather than aborting entirely.

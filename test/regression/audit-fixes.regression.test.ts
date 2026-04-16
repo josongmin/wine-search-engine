@@ -11,7 +11,15 @@
  * - test that would FAIL if the fix were reverted
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { AgentObservationSynthesisRunner } from '../../src/application/agent/agent-observation-synthesis-runner.js';
+import { createAgentExecutionState } from '../../src/application/agent/agent-execution-state.js';
+import { parseLlmOutput } from '../../src/application/agent/agent-llm-output.js';
+import { buildSystemMessage } from '../../src/application/agent/agent-prompt.js';
+import { AgentRunLoop } from '../../src/application/agent/agent-run-loop.js';
+import { AgentToolExecutionPhase } from '../../src/application/agent/agent-tool-execution-phase.js';
+import { DEFAULT_AGENT_CONFIG } from '../../src/domain/agent/model/agent-config.js';
+import { StepBudget } from '../../src/domain/agent/service/step-budget.js';
 import { CreateWatchlistRequestSchema } from '../../src/interface/http/schemas/watchlist.schema.js';
 import { extractRuleBasedConstraints } from '../../src/domain/query/service/rule-based-constraint-extractor.js';
 import { DrinkingWindowSchema } from '../../src/interface/http/schemas/search-response.schema.js';
@@ -330,17 +338,35 @@ describe('Audit regressions — session 4 (2026-04-09)', () => {
   // Fix: check `typeof parsed.answer === 'string' && parsed.answer.length > 0`.
   // ─────────────────────────────────────────────────────────────────────────
   describe('S4-EMPTY-ANSWER-LOOP: empty string answer rejected by planner phase', () => {
-    it('planner phase source uses length>0 guard on parsed.answer', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-planner-phase-runner.ts', import.meta.url)),
-        'utf-8',
+    it('empty-string answers do not terminate the agent loop as a final answer', async () => {
+      const searchExecute = vi.fn();
+      const toolPhase = new AgentToolExecutionPhase({
+        toolDeps: { searchUseCase: { execute: searchExecute } as never },
+        contractExecutionPhase: { runDrinkabilityChecks: vi.fn().mockResolvedValue(true) },
+      });
+      const state = createAgentExecutionState();
+      const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 2 });
+
+      const shouldBreak = await toolPhase.run(
+        'req-empty-answer',
+        DEFAULT_AGENT_CONFIG,
+        budget,
+        state,
+        { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+        {
+          stepStartMs: Date.now(),
+          parsed: { thought: 'empty answer', answer: '' },
+          inputTokens: 1,
+          outputTokens: 1,
+          wasTruncated: false,
+        },
       );
-      // Must NOT use the old `parsed.answer !== undefined` alone as the final answer check
-      expect(src).not.toMatch(/if\s*\(\s*parsed\.answer\s*!==\s*undefined\s*\)\s*\{/);
-      // Must use length>0 guard
-      expect(src).toMatch(/parsed\.answer\.length\s*>\s*0/);
+
+      expect(shouldBreak).toBe(false);
+      expect(state.answer).toBe('');
+      expect(state.terminationReason).toBe('max_steps');
+      expect(state.steps).toHaveLength(0);
+      expect(searchExecute).not.toHaveBeenCalled();
     });
   });
 
@@ -350,29 +376,49 @@ describe('Audit regressions — session 4 (2026-04-09)', () => {
   // allowed one extra LLM call. Fix: both use `>=`.
   // ─────────────────────────────────────────────────────────────────────────
   describe('S4-TOKEN-BUDGET-CONSISTENCY: pre-flight and post-hoc budget checks use same comparator', () => {
-    it('agent phase sources use >= for token budget checks after extraction', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const orchestratorSrc = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
-        'utf-8',
-      );
-      const runLoopSrc = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-run-loop.ts', import.meta.url)),
-        'utf-8',
-      );
-      const synthesisSrc = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url)),
-        'utf-8',
-      );
-      const combinedSrc = `${orchestratorSrc}\n${runLoopSrc}\n${synthesisSrc}`;
-      // Both checks must use >= (not > for post-hoc), even after phase extraction.
-      const geMatches = combinedSrc.match(/>=\s*effectiveConfig\.maxTotalTokens/g);
-      expect(geMatches).not.toBeNull();
-      expect(geMatches?.length).toBeGreaterThanOrEqual(2);
-      // Must NOT have a lone `> effectiveConfig.maxTotalTokens` (the old post-hoc pattern).
-      const gtMatches = combinedSrc.match(/[^>]>\s*effectiveConfig\.maxTotalTokens/g);
-      expect(gtMatches ?? []).toHaveLength(0);
+    it('run loop refuses an exact-at-budget planner call', async () => {
+      const plannerPhaseRunner = { run: vi.fn() };
+      const toolExecutionPhase = { run: vi.fn() };
+      const loop = new AgentRunLoop({
+        plannerPhaseRunner: plannerPhaseRunner as never,
+        toolExecutionPhase: toolExecutionPhase as never,
+      });
+      const state = createAgentExecutionState();
+      state.totalInputTokens = DEFAULT_AGENT_CONFIG.maxTotalTokens;
+
+      await loop.run({
+        query: 'opus one',
+        requestId: 'req-budget-prefight',
+        effectiveConfig: DEFAULT_AGENT_CONFIG,
+        queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+        budget: new StepBudget(DEFAULT_AGENT_CONFIG),
+        state,
+      });
+
+      expect(state.terminationReason).toBe('budget');
+      expect(plannerPhaseRunner.run).not.toHaveBeenCalled();
+    });
+
+    it('observation synthesis also refuses an exact-at-budget retry', async () => {
+      const complete = vi.fn();
+      const runner = new AgentObservationSynthesisRunner({
+        chatLlm: { complete: complete as never },
+      });
+      const state = createAgentExecutionState();
+      state.totalInputTokens = DEFAULT_AGENT_CONFIG.maxTotalTokens;
+      state.steps.push({
+        index: 0,
+        thought: 'searched',
+        action: { tool: 'search_wines', input: { query: 'opus one' } },
+        observation: 'Found Opus One 2018',
+        durationMs: 1,
+        tokenCount: { input: 1, output: 1 },
+      });
+
+      await runner.run('opus one', 'req-budget-posthoc', DEFAULT_AGENT_CONFIG, state);
+
+      expect(complete).not.toHaveBeenCalled();
+      expect(state.answer).toBe('');
     });
   });
 
@@ -491,26 +537,31 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
   // Fix: coerce string input to {query: string}.
   // ─────────────────────────────────────────────────────────────────────────
   describe('S5-PARSE-LLM-STRING-INPUT: LLM output parser coerces string input to {query}', () => {
-    it('agent-llm-output source coerces string input in actions to {query: string}', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-llm-output.ts', import.meta.url)),
-        'utf-8',
-      );
-      // Must coerce string input to {query: string} — not silently drop it
-      expect(src).toMatch(/\{ query: a\[.input.\] \}/);
+    it('coerces string input inside actions[] to query objects', async () => {
+      const parsed = parseLlmOutput(JSON.stringify({
+        thought: 'search both',
+        actions: [
+          { tool: 'search_wines', input: 'opus one' },
+          { tool: 'get_food_pairings', input: { food: 'steak' } },
+        ],
+      }));
+
+      expect(parsed.actions).toEqual([
+        { tool: 'search_wines', input: { query: 'opus one' } },
+        { tool: 'get_food_pairings', input: { food: 'steak' } },
+      ]);
     });
 
-    it('agent-llm-output source coerces string input in single action to {query: string}', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-llm-output.ts', import.meta.url)),
-        'utf-8',
-      );
-      // Must coerce string input in single action path as well
-      expect(src).toMatch(/\{ query: action\[.input.\] \}/);
+    it('coerces string input inside single action to a query object', async () => {
+      const parsed = parseLlmOutput(JSON.stringify({
+        thought: 'search one',
+        action: { tool: 'search_wines', input: 'barolo' },
+      }));
+
+      expect(parsed.action).toEqual({
+        tool: 'search_wines',
+        input: { query: 'barolo' },
+      });
     });
   });
 
@@ -521,25 +572,15 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
   // ─────────────────────────────────────────────────────────────────────────
   describe('S5-SYSTEM-PROMPT-FORMAT: output format rules are unambiguous', () => {
     it('system prompt forbids mixing answer with action/actions', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-prompt.ts', import.meta.url)),
-        'utf-8',
-      );
-      // Must say "never mix" or "EXACTLY ONE"
-      expect(src).toMatch(/EXACTLY ONE|never mix|Never include both/i);
+      const prompt = buildSystemMessage().content;
+
+      expect(prompt).toMatch(/EXACTLY ONE|never mix|Never include both/i);
     });
 
     it('system prompt requires input to be a JSON object not a string', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-prompt.ts', import.meta.url)),
-        'utf-8',
-      );
-      // Must say input must be an object
-      expect(src).toMatch(/input must be a JSON object/i);
+      const prompt = buildSystemMessage().content;
+
+      expect(prompt).toMatch(/input must be a JSON object/i);
     });
   });
 
@@ -819,18 +860,20 @@ describe('Audit regressions — session 6 ingestion pipeline (2026-04-09)', () =
   // to the generic `observation = "Tool error: ..."` branch, misclassifying
   // caller disconnect as a tool error. terminationReason remained 'max_steps'
   // or 'error' instead of 'aborted', polluting metrics.
-  // Fix: check isAbortError() before the generic error branch in tool catch.
+  // Fix: route tool execution failures through the result policy and check
+  // isAbortError() before the generic recoverable error disposition.
   // ─────────────────────────────────────────────────────────────────────────
   describe('E4-TOOL-ABORT: tool catch block handles AbortError correctly', () => {
-    it('tool execution phase source checks isAbortError in tool catch block', async () => {
+    it('tool execution result policy checks isAbortError before recoverable tool errors', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
       const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-tool-execution-phase.ts', import.meta.url)),
+        fileURLToPath(new URL('../../src/application/agent/agent-tool-execution-result-policy.ts', import.meta.url)),
         'utf-8',
       );
-      // Must check isAbortError in the tool catch block (identified by surrounding TIMEOUT check context)
-      expect(src).toMatch(/isAbortError\(toolErr\)/);
+      const abortCheckIndex = src.indexOf('isAbortError(err)');
+      expect(abortCheckIndex).toBeGreaterThan(-1);
+      expect(src.lastIndexOf("kind: 'recoverable'")).toBeGreaterThan(abortCheckIndex);
     });
   });
 

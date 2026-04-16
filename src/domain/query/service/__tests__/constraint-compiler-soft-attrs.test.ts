@@ -13,6 +13,8 @@
 import { describe, it, expect } from 'vitest';
 import { ConstraintCompiler } from '../constraint-compiler.js';
 import type { NLMapper } from '../../../attribute/service/nl-mapper.js';
+import { NLMapper as DefaultNLMapper } from '../../../attribute/service/nl-mapper.js';
+import type { MappingTablePort } from '../../../attribute/port/mapping-table.port.js';
 
 /** Minimal NLMapper stub that returns a single constraint for the given attribute. */
 function makeNLMapper(attribute: string, value: string): NLMapper {
@@ -44,6 +46,18 @@ function makeNLMapper(attribute: string, value: string): NLMapper {
       },
     }),
   } as unknown as NLMapper;
+}
+
+class NullMappingTablePort implements MappingTablePort {
+  async findMapping(): Promise<null> {
+    return null;
+  }
+  async findMappingsByAttribute(): Promise<readonly []> {
+    return [];
+  }
+  async getCurrentVersion(): Promise<string> {
+    return 'v1.0';
+  }
 }
 
 const SOFT_ATTRS_UNDER_TEST = [
@@ -188,5 +202,83 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     expect(result.bundle.hard).toHaveLength(0);
     expect(result.bundle.soft).toHaveLength(0);
     expect(result.constraintExtraction?.fallbackTriggered).toBe(true);
+  });
+
+  it('propagates AbortError instead of masking cancellation as nlmapper_exception fallback', async () => {
+    const nlMapper: NLMapper = {
+      mapConstraints: async () => {
+        const error = new Error('Constraint mapping aborted');
+        error.name = 'AbortError';
+        throw error;
+      },
+    } as unknown as NLMapper;
+    const compiler = new ConstraintCompiler(nlMapper);
+
+    await expect(compiler.compile('test query')).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('real NLMapper extracts gift occasion from inflected Korean phrase', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', value: ['gift'] }),
+      ]),
+    );
+  });
+
+  it('real NLMapper extracts healing occasion from adjectival Korean phrase', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('힐링되는 와인 한 잔');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', value: ['healing'] }),
+      ]),
+    );
+  });
+
+  it('real NLMapper extracts date occasion and affordability from situational Korean phrasing', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('이번 주말 소개팅인데, 분위기 좋은 와인 추천. 너무 비싸면 부담스럽고');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', value: ['date_night'] }),
+        expect.objectContaining({ attribute: 'price_band', value: 'value' }),
+      ]),
+    );
+    expect(result.bundle.soft).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'price_band', value: 'luxury' }),
+      ]),
+    );
+  });
+
+  it('real NLMapper extracts camping + screw-cap + chillable constraints', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', value: ['camping'] }),
+        expect.objectContaining({ attribute: 'style', value: ['screw_cap'] }),
+        expect.objectContaining({ attribute: 'style', value: ['chillable'] }),
+      ]),
+    );
+  });
+
+  it('real NLMapper extracts gift + approachable + crowd-pleasing constraints for non-expert gift query', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', value: ['gift'] }),
+        expect.objectContaining({ attribute: 'style', value: ['approachable'] }),
+        expect.objectContaining({ attribute: 'style', value: ['crowd_pleasing'] }),
+      ]),
+    );
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAgentQueryExecutionContract,
   extractPendingDrinkabilityEntityIds,
+  isExactMetadataEntityLookupCandidate,
   isSpecificSkuLikeQuery,
   normalizeExactMetadataSearchInput,
 } from '../../../../src/application/agent/agent-query-execution-contract.js';
@@ -18,11 +19,32 @@ describe('agent query execution contract', () => {
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
     });
+    expect(buildAgentQueryExecutionContract('오퍼스원 얼마야?')).toEqual({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+    });
+  });
+
+  it('does not escalate generic mood recommendation wording into a drinkability contract', () => {
+    expect(buildAgentQueryExecutionContract('우울할 때 마시기 좋은 와인')).toEqual({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+    });
+    expect(buildAgentQueryExecutionContract('힐링되는 와인 한 잔 추천해줘')).toEqual({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+    });
   });
 
   it('detects specific-sku-like queries through the adaptive-budget classifier contract', () => {
     expect(isSpecificSkuLikeQuery('opus one 2018')).toBe(true);
     expect(isSpecificSkuLikeQuery('레드 와인 추천해줘')).toBe(false);
+  });
+
+  it('treats metadata-suffixed exact entity queries as exact lookup candidates', () => {
+    expect(isExactMetadataEntityLookupCandidate('오푸스원 얼마야?')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('오푸스원 지금 마시기 좋아?')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('레드 와인 추천해줘')).toBe(false);
   });
 
   it('strips structured filters from exact metadata search input while preserving allowed execution keys', () => {

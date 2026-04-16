@@ -174,6 +174,34 @@ describe('OntologyNormalizer', () => {
     expect(result!.canonicalValue).toBe('healing');
   });
 
+  it('"캠핑" → occasion/camping', () => {
+    const result = normalizer.normalize('캠핑');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('occasion');
+    expect(result!.canonicalValue).toBe('camping');
+  });
+
+  it('"시원하게" → style/chillable', () => {
+    const result = normalizer.normalize('시원하게');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('style');
+    expect(result!.canonicalValue).toBe('chillable');
+  });
+
+  it('"스크류캡" → style/screw_cap', () => {
+    const result = normalizer.normalize('스크류캡');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('style');
+    expect(result!.canonicalValue).toBe('screw_cap');
+  });
+
+  it('"실패 없는" → style/crowd_pleasing', () => {
+    const result = normalizer.normalize('실패 없는');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('style');
+    expect(result!.canonicalValue).toBe('crowd_pleasing');
+  });
+
   // ── Additional: style variants ────────────────────────────────────────────
   it('"sparkling" → style/sparkling', () => {
     const result = normalizer.normalize('sparkling');

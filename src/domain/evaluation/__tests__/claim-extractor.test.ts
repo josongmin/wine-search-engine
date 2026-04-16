@@ -28,6 +28,40 @@ describe('extractClaims', () => {
     expect(claims.some((c) => c.category === 'identity_claim' && c.value === '보졸레 누보')).toBe(true);
   });
 
+  it('extracts Korean region aliases as region claims', () => {
+    const claims = extractClaims('보르도와 나파 스타일 차이가 궁금해');
+    const regions = claims.filter((c) => c.field === 'region').map((c) => c.value);
+    expect(regions).toEqual(expect.arrayContaining(['Bordeaux', 'Napa Valley']));
+  });
+
+  it('extracts Korean grape slang alias as grape claim', () => {
+    const claims = extractClaims('까쇼 추천해줘');
+    expect(claims.some((c) => c.field === 'grape_primary' && c.normalizedValue === 'cabernet sauvignon')).toBe(true);
+  });
+
+  it('extracts Korean grape names as grape claims', () => {
+    const claims = extractClaims('카베르네 소비뇽 기반 와인');
+    expect(claims.some((c) => c.field === 'grape_primary' && c.normalizedValue === 'cabernet sauvignon')).toBe(true);
+  });
+
+  it('does not promote generic Korean recommendation prose to identity claims', () => {
+    const claims = extractClaims('풀바디 레드 와인 추천: 검색 결과 기준으로 맞는 표기를 정리해드릴게요.');
+    const identities = claims.filter((c) => c.category === 'identity_claim');
+    expect(identities).toHaveLength(0);
+  });
+
+  it('does not promote drinkability question wrappers to identity claims', () => {
+    const claims = extractClaims('현재 받은 검색 결과 기준으로 지금 마시기 좋은지 설명드릴게요.');
+    const identities = claims.filter((c) => c.category === 'identity_claim');
+    expect(identities).toHaveLength(0);
+  });
+
+  it('does not promote colloquial filler words to identity claims', () => {
+    const claims = extractClaims('쌈싸먹을 때는 보통 이런 화이트가 맞아요.');
+    const identities = claims.filter((c) => c.category === 'identity_claim');
+    expect(identities).toHaveLength(0);
+  });
+
   it('does not extract structured Latin geography as identity claims', () => {
     const claims = extractClaims('France / Ribera del Duero / Castilla y León');
     const ids = claims.filter((c) => c.category === 'identity_claim');

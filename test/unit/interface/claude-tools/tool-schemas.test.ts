@@ -87,6 +87,15 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.certification?.type).toBe('string');
       expect(props.want_diversity?.type).toBe('boolean');
     });
+
+    it('should document the extended semantic style vocabulary', () => {
+      const props = tool.input_schema.properties as Record<string, any>;
+      expect(props.style?.description).toContain('losslessly');
+      expect(props.style?.description).toContain('chillable');
+      expect(props.style?.description).toContain('screw_cap');
+      expect(props.style?.description).toContain('approachable');
+      expect(props.style?.description).toContain('crowd_pleasing');
+    });
   });
 
   describe('get_food_pairings tool', () => {

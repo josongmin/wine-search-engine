@@ -96,7 +96,7 @@ export const WINE_SEARCH_TOOLS: readonly ClaudeToolDefinition[] = [
         },
         style: {
           type: 'string',
-          description: 'Optional style hint such as dry, sweet, oaked, or light.',
+          description: 'Optional semantic style hint. Preserve user meaning losslessly; examples: dry, sweet, oaked, light, chillable, screw_cap, approachable, crowd_pleasing.',
         },
         certification: {
           type: 'string',

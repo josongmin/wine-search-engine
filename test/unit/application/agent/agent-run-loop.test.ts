@@ -162,7 +162,7 @@ describe('AgentRunLoop', () => {
     expect(state.terminationReason).toBe('error');
   });
 
-  it('treats preflight abort as a terminal error without planner execution', async () => {
+  it('treats preflight abort as aborted without planner execution', async () => {
     const plannerPhaseRunner = { run: vi.fn() };
     const toolExecutionPhase = { run: vi.fn() };
     const loop = new AgentRunLoop({
@@ -183,7 +183,7 @@ describe('AgentRunLoop', () => {
       abortSignal: abortController.signal,
     });
 
-    expect(state.terminationReason).toBe('error');
+    expect(state.terminationReason).toBe('aborted');
     expect(plannerPhaseRunner.run).not.toHaveBeenCalled();
     expect(toolExecutionPhase.run).not.toHaveBeenCalled();
   });

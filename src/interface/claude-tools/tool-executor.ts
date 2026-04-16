@@ -23,11 +23,15 @@ import { buildMachineResponseV2 } from '../../domain/response/service/machine-re
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,
+  KRW_PER_USD_APPROXIMATE,
 } from '../../domain/shared/constants.js';
 import { MAX_WINE_TOOL_SEARCH_RESULTS } from '../http/constants.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 /** criticScoreNormalized is 0–1; predictor wants 0–100 proxy points. */
 const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
+const TOOL_VINTAGE_MIN = 1600;
+const TOOL_VINTAGE_MAX = 2100;
 
 /**
  * Zod schema for search_wines tool input.
@@ -37,6 +41,25 @@ const SearchToolInputSchema = z.object({
   query: z.string().min(1, 'Query must not be empty'),
   limit: z.number().int().min(1).max(MAX_WINE_TOOL_SEARCH_RESULTS).optional().default(10),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional().default('auto'),
+  exclude_grapes: z.array(z.string().trim().min(1)).max(10).optional(),
+  exclude_regions: z.array(z.string().trim().min(1)).max(10).optional(),
+  max_price_krw: z.number().int().min(1).optional(),
+  wine_type: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
+  country: z.string().trim().min(1).optional(),
+  vintage_min: z.number().int().min(TOOL_VINTAGE_MIN).max(TOOL_VINTAGE_MAX).optional(),
+  vintage_max: z.number().int().min(TOOL_VINTAGE_MIN).max(TOOL_VINTAGE_MAX).optional(),
+  appellation: z.string().trim().min(1).optional(),
+  style: z.string().trim().min(1).optional(),
+  certification: z.string().trim().min(1).optional(),
+  want_diversity: z.boolean().optional(),
+}).superRefine((data, ctx) => {
+  if (data.vintage_min !== undefined && data.vintage_max !== undefined && data.vintage_min > data.vintage_max) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['vintage_max'],
+      message: `vintage_max (${data.vintage_max}) must be >= vintage_min (${data.vintage_min})`,
+    });
+  }
 });
 
 const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
@@ -48,8 +71,60 @@ const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1, 'Food must not be empty'),
   max_price: z.number().finite().positive().optional(),
+  max_price_krw: z.number().int().positive().optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling', 'both']).optional(),
 });
+
+function buildSearchToolStructuredFilters(input: z.infer<typeof SearchToolInputSchema>): readonly NormalizedConstraint[] {
+  const filters: NormalizedConstraint[] = [];
+
+  for (const grape of input.exclude_grapes ?? []) {
+    filters.push({ attribute: 'grape_primary', operator: 'exclude', value: grape, source_phrase: grape, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+  for (const region of input.exclude_regions ?? []) {
+    filters.push({ attribute: 'region', operator: 'exclude', value: region, source_phrase: region, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+  if (input.wine_type !== undefined) {
+    filters.push({ attribute: 'wine_type', operator: '=', value: input.wine_type, source_phrase: input.wine_type, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+  if (input.country !== undefined) {
+    filters.push({ attribute: 'country', operator: '=', value: input.country, source_phrase: input.country, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+  if (input.vintage_min !== undefined) {
+    filters.push({ attribute: 'vintage_year', operator: '>=', value: input.vintage_min, source_phrase: `${input.vintage_min}년 이후`, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+  if (input.vintage_max !== undefined) {
+    filters.push({ attribute: 'vintage_year', operator: '<=', value: input.vintage_max, source_phrase: `${input.vintage_max}년 이전`, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+  if (input.appellation !== undefined) {
+    filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: 'claude_tool_v1' });
+  }
+
+  return filters;
+}
+
+function buildSearchToolQuery(input: z.infer<typeof SearchToolInputSchema>): string {
+  const clauses: string[] = [];
+  for (const grape of input.exclude_grapes ?? []) {
+    clauses.push(`not ${grape}`);
+  }
+  for (const region of input.exclude_regions ?? []) {
+    clauses.push(`not ${region}`);
+  }
+  if (input.max_price_krw !== undefined) {
+    clauses.push(`${input.max_price_krw}원 이하`);
+  }
+  if (input.style !== undefined) {
+    clauses.push(input.style);
+  }
+  if (input.certification !== undefined) {
+    clauses.push(input.certification);
+  }
+  if (clauses.length === 0) {
+    return input.query;
+  }
+  return `${input.query}, ${clauses.join(', ')}`;
+}
 
 /**
  * Zod schema for check_drinking_window tool input.
@@ -204,14 +279,17 @@ export class WineToolExecutor {
    */
   private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse> {
     const validated = SearchToolInputSchema.parse(input);
+    const filters = buildSearchToolStructuredFilters(validated);
 
     const request: SearchRequest = {
-      query: validated.query,
+      query: buildSearchToolQuery(validated),
+      limit: validated.limit,
       options: {
         mode: validated.retrieval_mode,
         explain: false,
         clarification: false,
       },
+      ...(filters.length > 0 ? { filters } : {}),
     };
 
     return this.deps.searchUseCase.execute(request, requestId);
@@ -237,8 +315,10 @@ export class WineToolExecutor {
     if (validated.color !== undefined && validated.color !== 'both') {
       query += ` ${validated.color} wine`;
     }
-    if (validated.max_price !== undefined) {
-      query += ` under $${validated.max_price}`;
+    if (validated.max_price_krw !== undefined) {
+      query += ` under ${validated.max_price_krw} KRW`;
+    } else if (validated.max_price !== undefined) {
+      query += ` under ${Math.round(validated.max_price * KRW_PER_USD_APPROXIMATE)} KRW`;
     }
 
     const request: SearchRequest = {

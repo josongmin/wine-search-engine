@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { retrieveHybridCandidatesForPlan } from '../../../../src/application/search/search-usecase-hybrid-candidates.js';
+import {
+  buildHybridRetrievalInputForPlan,
+  retrieveHybridCandidatesForPlan,
+} from '../../../../src/application/search/search-usecase-hybrid-candidates.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { ConstraintGraph } from '../../../../src/domain/query/model/constraint-graph.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
@@ -294,6 +297,36 @@ function sharedBudgetHybridGraph(): ConstraintGraph {
 }
 
 describe('retrieveHybridCandidatesForPlan', () => {
+  it('propagates style and flavor soft constraints into semantic query expansions', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: ['chillable'],
+            source_phrase: '시원하게',
+            confidence: 0.85,
+          },
+          {
+            attribute: 'flavor_profile',
+            operator: 'in',
+            value: ['fruity'],
+            source_phrase: '과일향 풍부한',
+            confidence: 0.82,
+          },
+        ],
+        inferred: [],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining(['chillable', 'fruity']),
+    );
+  });
+
   it('projects retrieval provenance coverage and shortfall on the generic candidate-pool path', async () => {
     const plan = minimalPlan({
       constraints: {

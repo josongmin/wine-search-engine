@@ -49,9 +49,17 @@ export class AgentContractPolicy {
   validateDrinkabilitySingleStep(
     entityIds: readonly string[],
     tool: string,
+    input: Record<string, unknown>,
   ): string | null {
-    return entityIds.length > 0 && tool !== 'check_drinking_window'
-      ? this.buildDrinkabilityContractViolation(entityIds)
-      : null;
+    if (entityIds.length === 0) {
+      return null;
+    }
+    if (tool !== 'check_drinking_window') {
+      return this.buildDrinkabilityContractViolation(entityIds);
+    }
+    const requestedEntityId = input['entity_id'];
+    return typeof requestedEntityId === 'string' && entityIds.includes(requestedEntityId)
+      ? null
+      : this.buildDrinkabilityContractViolation(entityIds);
   }
 }

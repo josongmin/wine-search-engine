@@ -1,8 +1,5 @@
 import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
-import { DomainError } from '../../domain/shared/error/domain-error.js';
-import { CIRCUIT_BREAKER_OPEN_CODE } from '../../domain/shared/error/circuit-breaker-open-error.js';
-import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
   buildPlannerSystemMessage,
@@ -18,6 +15,10 @@ import {
   type LlmResult,
   type LlmAction,
 } from './agent-llm-output.js';
+import {
+  AGENT_LLM_STEP_TIMEOUT_MESSAGE,
+  AgentPlannerPhaseResultPolicy,
+} from './agent-planner-phase-result-policy.js';
 
 const log = bootstrapLogger.child({ component: 'AgentPlannerPhaseRunner' });
 const STEP_LOG_PREVIEW_CHARS = 500;
@@ -65,6 +66,8 @@ interface AgentPlannerPhaseRunnerDeps {
 }
 
 export class AgentPlannerPhaseRunner {
+  private readonly resultPolicy = new AgentPlannerPhaseResultPolicy();
+
   constructor(private readonly deps: AgentPlannerPhaseRunnerDeps) {}
 
   async run(
@@ -88,7 +91,7 @@ export class AgentPlannerPhaseRunner {
     state.pendingRefinementHint = undefined;
 
     if (abortSignal?.aborted) {
-      state.terminationReason = 'error';
+      this.resultPolicy.applyPreflightAbort(state);
       return null;
     }
 
@@ -97,7 +100,7 @@ export class AgentPlannerPhaseRunner {
     abortSignal?.addEventListener('abort', propagateAbort, { once: true });
     if (abortSignal?.aborted) {
       abortSignal.removeEventListener('abort', propagateAbort);
-      state.terminationReason = 'error';
+      this.resultPolicy.applyPreflightAbort(state);
       return null;
     }
 
@@ -116,7 +119,7 @@ export class AgentPlannerPhaseRunner {
           stepTimeoutHandle = setTimeout(
             () => {
               stepAbortController.abort();
-              reject(new Error('Agent LLM step timed out'));
+              reject(new Error(AGENT_LLM_STEP_TIMEOUT_MESSAGE));
             },
             effectiveConfig.perStepTimeoutMs,
           );
@@ -127,27 +130,13 @@ export class AgentPlannerPhaseRunner {
           { requestId, stepIndex: state.steps.length, rawType: typeof racedResult },
           'Agent LLM returned malformed step result',
         );
-        state.reasoningFailureDetected = true;
-        state.terminationReason = 'error';
+        this.resultPolicy.applyMalformedLlmResult(state);
         return null;
       }
       llmResult = racedResult;
     } catch (err) {
       log.warn({ err, requestId, stepIndex: state.steps.length }, 'Agent LLM call failed');
-      if (isAbortError(err)) {
-        state.terminationReason = 'aborted';
-      } else if ((err as Error).message === 'Agent LLM step timed out') {
-        state.reasoningFailureDetected = true;
-        state.timeoutStats.llmStep += 1;
-        state.terminationReason = 'timeout';
-      } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
-        state.reasoningFailureDetected = true;
-        state.llmCircuitOpen = true;
-        state.terminationReason = 'error';
-      } else {
-        state.reasoningFailureDetected = true;
-        state.terminationReason = 'error';
-      }
+      this.resultPolicy.applyLlmFailure(state, err);
       return null;
     } finally {
       abortSignal?.removeEventListener('abort', propagateAbort);
@@ -172,7 +161,7 @@ export class AgentPlannerPhaseRunner {
         { requestId, totalTokens: state.totalInputTokens + state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
         'agent token budget exceeded — terminating',
       );
-      state.terminationReason = 'budget';
+      this.resultPolicy.applyTokenBudgetExceeded(state);
       return null;
     }
 

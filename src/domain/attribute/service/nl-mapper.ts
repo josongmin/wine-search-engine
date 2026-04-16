@@ -158,6 +158,42 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
     },
   ],
   [
+    '선물',
+    {
+      phrase: '선물',
+      mappedAttribute: 'occasion',
+      operator: 'in',
+      value: 'gift',
+      mappingConfidence: 0.9,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
+  [
+    '선물할',
+    {
+      phrase: '선물할',
+      mappedAttribute: 'occasion',
+      operator: 'in',
+      value: 'gift',
+      mappingConfidence: 0.88,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
+  [
+    '선물할 거',
+    {
+      phrase: '선물할 거',
+      mappedAttribute: 'occasion',
+      operator: 'in',
+      value: 'gift',
+      mappingConfidence: 0.88,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
+  [
     '입문용',
     {
       phrase: '입문용',
@@ -309,9 +345,30 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   // Occasion extended
   ['기념일', { phrase: '기념일', mappedAttribute: 'occasion', operator: 'in', value: 'anniversary', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['데이트', { phrase: '데이트', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['소개팅', { phrase: '소개팅', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['소개팅인데', { phrase: '소개팅인데', mappedAttribute: 'occasion', operator: 'in', value: 'date_night', mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['혼술', { phrase: '혼술', mappedAttribute: 'occasion', operator: 'in', value: 'solo', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['집들이', { phrase: '집들이', mappedAttribute: 'occasion', operator: 'in', value: 'housewarming', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['힐링', { phrase: '힐링', mappedAttribute: 'occasion', operator: 'in', value: 'healing', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['힐링되는', { phrase: '힐링되는', mappedAttribute: 'occasion', operator: 'in', value: 'healing', mappingConfidence: 0.78, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['캠핑', { phrase: '캠핑', mappedAttribute: 'occasion', operator: 'in', value: 'camping', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['우울할 때', { phrase: '우울할 때', mappedAttribute: 'occasion', operator: 'in', value: 'comforting', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['비 오는 날', { phrase: '비 오는 날', mappedAttribute: 'occasion', operator: 'in', value: 'comforting', mappingConfidence: 0.74, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['부담 없는', { phrase: '부담 없는', mappedAttribute: 'price_band', operator: '=', value: 'value', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['부담없는', { phrase: '부담없는', mappedAttribute: 'price_band', operator: '=', value: 'value', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['부담스럽고', { phrase: '부담스럽고', mappedAttribute: 'price_band', operator: '=', value: 'value', mappingConfidence: 0.72, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['입문자', { phrase: '입문자', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.83, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['와인 잘 모르는', { phrase: '와인 잘 모르는', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['무난한', { phrase: '무난한', mappedAttribute: 'style', operator: 'in', value: 'crowd_pleasing', mappingConfidence: 0.78, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['실패 없는', { phrase: '실패 없는', mappedAttribute: 'style', operator: 'in', value: 'crowd_pleasing', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['스크류캡', { phrase: '스크류캡', mappedAttribute: 'style', operator: 'in', value: 'screw_cap', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['스크류캡이고', { phrase: '스크류캡이고', mappedAttribute: 'style', operator: 'in', value: 'screw_cap', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['스크류캡인', { phrase: '스크류캡인', mappedAttribute: 'style', operator: 'in', value: 'screw_cap', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['차갑게 마실 수 있는', { phrase: '차갑게 마실 수 있는', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['차갑게 마실 수 있는 거', { phrase: '차갑게 마실 수 있는 거', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['차갑게 마실 수', { phrase: '차갑게 마실 수', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['시원하게 마실', { phrase: '시원하게 마실', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['시원하게', { phrase: '시원하게', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
   // ── Wine types (Korean + English) ──────────────────────────────────
   // Maps to wine_type attribute via '=' operator for hard Vespa filter.

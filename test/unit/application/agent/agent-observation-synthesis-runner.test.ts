@@ -15,6 +15,16 @@ function makeObservedState() {
     durationMs: 10,
     tokenCount: { input: 10, output: 10 },
   });
+  state.toolOutcomes.push({
+    stepId: 'req:0:0',
+    tool: 'search_wines',
+    kind: 'success',
+    result: {
+      queryType: 'search',
+      results: [{ entity: { entityId: 'wine-1', canonicalLabel: 'Opus One 2018' } }],
+    },
+    durationMs: 10,
+  });
   return state;
 }
 
@@ -40,6 +50,9 @@ describe('AgentObservationSynthesisRunner', () => {
     expect(state.totalInputTokens).toBeGreaterThan(0);
     expect(state.totalOutputTokens).toBeGreaterThan(0);
     expect(complete).toHaveBeenCalledTimes(1);
+    const messages = complete.mock.calls[0]?.[0].messages ?? [];
+    expect(messages.some((message) => message.content.includes('[Typed Tool Outcomes]'))).toBe(true);
+    expect(messages.some((message) => message.content.includes('"kind":"success"'))).toBe(true);
   });
 
   it('retries malformed synthesis twice and leaves fallback layers to finish', async () => {
