@@ -11,26 +11,15 @@
  */
 
 // ─── AgentToolName ────────────────────────────────────────────────────────────
-
-/**
- * Canonical union of all agent tool names.
- * Single source of truth — TOOL_BATCH_POLICY and ToolOutcome both key on this.
- */
-export type AgentToolName =
-  | 'search_wines'
-  | 'compare_wines'
-  | 'check_drinking_window'
-  | 'get_food_pairings';
-
-/** Type guard: narrows a string to AgentToolName. */
-export function isAgentToolName(name: string): name is AgentToolName {
-  return (
-    name === 'search_wines' ||
-    name === 'compare_wines' ||
-    name === 'check_drinking_window' ||
-    name === 'get_food_pairings'
-  );
-}
+//
+// SSOT: agent-tool-attempt-schema.ts owns KNOWN_AGENT_TOOL_NAMES.
+// Re-exported here as AgentToolName / isAgentToolName for backward compat
+// with ToolOutcome, TOOL_BATCH_POLICY, and existing consumers.
+//
+export {
+  type KnownAgentToolName as AgentToolName,
+  isKnownAgentToolName as isAgentToolName,
+} from './agent-tool-attempt-schema.js';
 
 // ─── ToolOutcomeKind ──────────────────────────────────────────────────────────
 

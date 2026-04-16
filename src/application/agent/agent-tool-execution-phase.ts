@@ -11,8 +11,8 @@ import type { AgentToolDeps, AgentToolResult } from './agent-tools.js';
 import {
   executeAgentTool,
   executeAgentToolsBatch,
-  isKnownTool,
 } from './agent-tools.js';
+import { isKnownAgentToolName, KNOWN_AGENT_TOOL_NAMES_DISPLAY } from './agent-tool-attempt-schema.js';
 import { truncateObservation } from './agent-prompt.js';
 import { evaluateBatchPolicy } from './tool-batch-policy.js';
 import { AgentContractPolicy } from './agent-contract-policy.js';
@@ -26,7 +26,6 @@ import {
   withTimeout,
 } from './agent-tool-execution-support.js';
 import { AgentToolExecutionResultPolicy } from './agent-tool-execution-result-policy.js';
-import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from './agent-tool-attempt-schema.js';
 
 const log = bootstrapLogger.child({ component: 'AgentToolExecutionPhase' });
 
@@ -174,7 +173,7 @@ export class AgentToolExecutionPhase {
       return true;
     }
 
-    const unknownTool = batchCalls.find((c) => !isKnownTool(c.tool));
+    const unknownTool = batchCalls.find((c) => !isKnownAgentToolName(c.tool));
     if (unknownTool !== undefined) {
       state.reasoningFailureDetected = true;
       state.unknownToolAttempts++;
@@ -367,7 +366,7 @@ export class AgentToolExecutionPhase {
       return false;
     }
 
-    if (!isKnownTool(tool)) {
+    if (!isKnownAgentToolName(tool)) {
       const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
       return this.resultPolicy.applyUnknownTool({
         requestId,

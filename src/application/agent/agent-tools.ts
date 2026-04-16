@@ -64,6 +64,7 @@ import {
   shouldRunTypedWineDiversityDiscovery,
   withWineTypeFilter,
 } from '../search/search-tool-diversity.js';
+import { isKnownAgentToolName } from './agent-tool-attempt-schema.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -217,16 +218,8 @@ export interface AgentToolDeps {
 // Tool dispatcher
 // ---------------------------------------------------------------------------
 
-const KNOWN_TOOLS = new Set([
-  'search_wines',
-  'compare_wines',
-  'check_drinking_window',
-  'get_food_pairings',
-]);
-
-export function isKnownTool(name: string): boolean {
-  return KNOWN_TOOLS.has(name);
-}
+// SSOT: tool name validation delegated to agent-tool-attempt-schema.ts
+export const isKnownTool = isKnownAgentToolName;
 
 // ---------------------------------------------------------------------------
 // Multi-constraint detection (for staged-search hints in search_wines)
