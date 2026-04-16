@@ -15,6 +15,8 @@ import {
 } from './agent-fixture-runner-common.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
+import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/agentic-tool-use-fixture-eval-results.json');
 const SUITE_ID = 'agentic_tool_use';
@@ -182,8 +184,49 @@ async function run(): Promise<void> {
   console.log(`  latency_p95_ms: ${report.latency_p95_ms.toFixed(0)}`);
   console.log(`  output: ${args.output}`);
 
+  // Check thresholds, capturing pass/fail before persisting
+  let thresholdsPassed = true;
+  let thresholdError: unknown;
   if (args.useThresholds) {
-    await assertThresholds(report);
+    try {
+      await assertThresholds(report);
+    } catch (err: unknown) {
+      thresholdsPassed = false;
+      thresholdError = err;
+    }
+  }
+
+  // Persist benchmark run to DB (best-effort — eval succeeds even if DB is unavailable)
+  try {
+    const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
+    const pool = getPgPool();
+    try {
+      const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
+      await evalBenchmarkRunStore.saveRun({
+        benchmarkKind: 'agentic_tool_use_fixture',
+        evalDatasetVersion: 'v1',
+        featureSchemaHash: getCurrentFeatureSchemaHash(),
+        queryCount: report.query_count,
+        releaseGatePassed: thresholdsPassed,
+        activationStatus: 'shadow_only',
+        report: report as unknown as Readonly<Record<string, unknown>>,
+        metrics: {
+          tool_selection_accuracy: report.tool_selection_accuracy,
+          step_budget_compliance: report.step_budget_compliance,
+          pass_rate: report.min_pass_rate,
+        },
+      });
+      console.log('  Benchmark run persisted to DB.');
+    } finally {
+      await pool.end();
+    }
+  } catch (persistErr: unknown) {
+    const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+    console.warn(`  [WARN] Could not persist benchmark run to DB: ${msg}`);
+  }
+
+  if (thresholdError !== undefined) {
+    throw thresholdError;
   }
 }
 

@@ -72,6 +72,8 @@ import {
   requireFixtureCorpusPath,
 } from './fixture-corpus-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
+import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -2682,6 +2684,38 @@ async function run(): Promise<void> {
 
   // Write results (after gate verdict is added if applicable)
   await fs.writeFile(args.output, JSON.stringify(evalResult, null, 2) + '\n', 'utf8');
+
+  // Persist benchmark run to DB (best-effort — eval succeeds even if DB is unavailable)
+  try {
+    const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
+    const pool = getPgPool();
+    try {
+      const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
+      const releaseGatePassed = evalResult.release_gate_verdict?.passed ?? false;
+      await evalBenchmarkRunStore.saveRun({
+        benchmarkKind: 'offline_eval',
+        evalDatasetVersion: args.tier,
+        featureSchemaHash: getCurrentFeatureSchemaHash(),
+        queryCount: evalResult.query_count,
+        mrr: evalResult.mrr_at_10,
+        recallAt3: evalResult.recall_at_3,
+        releaseGatePassed,
+        activationStatus: 'shadow_only',
+        report: evalResult as unknown as Readonly<Record<string, unknown>>,
+        metrics: {
+          ndcg_at_10: evalResult.ndcg_at_10,
+          decision_utility: evalResult.decision_utility,
+          recall_at_100: evalResult.recall_at_100,
+        },
+      });
+      console.log('  Benchmark run persisted to DB.');
+    } finally {
+      await pool.end();
+    }
+  } catch (persistErr: unknown) {
+    const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+    console.warn(`  [WARN] Could not persist benchmark run to DB: ${msg}`);
+  }
 
   console.log(`\n  Results written to: ${args.output}`);
 

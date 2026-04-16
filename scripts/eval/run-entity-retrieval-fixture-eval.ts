@@ -35,6 +35,8 @@ import {
   type BenchmarkExecutionLane,
 } from './live-benchmark-preflight.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
+import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/entity-retrieval-fixture-eval-results.json');
 const DEFAULT_SUITES = [
@@ -389,8 +391,64 @@ async function run(): Promise<void> {
   }
   console.log(`  output: ${args.output}`);
 
+  // Check thresholds, capturing pass/fail before persisting
+  let thresholdsPassed = true;
+  let thresholdError: unknown;
   if (args.useThresholds) {
-    await assertEntityRetrievalFixtureThresholds(finalReport);
+    try {
+      await assertEntityRetrievalFixtureThresholds(finalReport);
+    } catch (err: unknown) {
+      thresholdsPassed = false;
+      thresholdError = err;
+    }
+  }
+
+  // Persist benchmark run to DB (best-effort — eval succeeds even if DB is unavailable)
+  const totalQueryCount = finalReport.suites.reduce((sum, s) => sum + s.query_count, 0);
+  const suitesWithTop1 = finalReport.suites.filter((s) => s.top1_accuracy !== null);
+  const suitesWithTopK = finalReport.suites.filter((s) => s.topk_accuracy !== null);
+  const aggregatePassRate = totalQueryCount === 0
+    ? 0
+    : finalReport.suites.reduce((sum, s) => sum + s.pass_count, 0) / totalQueryCount;
+  const avgTop1 = suitesWithTop1.length > 0
+    ? suitesWithTop1.reduce((sum, s) => sum + s.top1_accuracy!, 0) / suitesWithTop1.length
+    : 0;
+  const avgTopK = suitesWithTopK.length > 0
+    ? suitesWithTopK.reduce((sum, s) => sum + s.topk_accuracy!, 0) / suitesWithTopK.length
+    : 0;
+
+  try {
+    const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
+    const pool = getPgPool();
+    try {
+      const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
+      await evalBenchmarkRunStore.saveRun({
+        benchmarkKind: 'entity_retrieval_fixture',
+        evalDatasetVersion: 'v1',
+        featureSchemaHash: getCurrentFeatureSchemaHash(),
+        queryCount: totalQueryCount,
+        ...(suitesWithTop1.length > 0 ? { recallAt1: avgTop1 } : {}),
+        ...(suitesWithTopK.length > 0 ? { recallAt3: avgTopK } : {}),
+        releaseGatePassed: thresholdsPassed,
+        activationStatus: 'shadow_only',
+        report: finalReport as unknown as Readonly<Record<string, unknown>>,
+        metrics: {
+          top1_accuracy: avgTop1,
+          topk_accuracy: avgTopK,
+          pass_rate: aggregatePassRate,
+        },
+      });
+      console.log('  Benchmark run persisted to DB.');
+    } finally {
+      await pool.end();
+    }
+  } catch (persistErr: unknown) {
+    const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+    console.warn(`  [WARN] Could not persist benchmark run to DB: ${msg}`);
+  }
+
+  if (thresholdError !== undefined) {
+    throw thresholdError;
   }
 }
 

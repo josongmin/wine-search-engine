@@ -37,6 +37,8 @@ import {
   type BenchmarkExecutionLane,
 } from './live-benchmark-preflight.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
+import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 
 const SUITE_ID = 'search_feature_behavior' as const;
 const DEFAULT_OUTPUT = resolveDataPath('data/search-feature-behavior-fixture-eval-results.json');
@@ -492,8 +494,50 @@ export async function main(): Promise<void> {
     `[sfb-fixture-eval] top3=${report.top3_accuracy.toFixed(4)} constraint_compliance=${report.constraint_compliance_rate.toFixed(4)} pass_rate=${report.min_pass_rate.toFixed(4)}\n`,
   );
 
+  // Check thresholds, capturing pass/fail before persisting
+  let thresholdsPassed = true;
+  let thresholdError: unknown;
   if (args.useThresholds) {
-    await assertThresholds(report);
+    try {
+      await assertThresholds(report);
+    } catch (err: unknown) {
+      thresholdsPassed = false;
+      thresholdError = err;
+    }
+  }
+
+  // Persist benchmark run to DB (best-effort — eval succeeds even if DB is unavailable)
+  try {
+    const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
+    const pool = getPgPool();
+    try {
+      const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
+      await evalBenchmarkRunStore.saveRun({
+        benchmarkKind: 'search_feature_behavior_fixture',
+        evalDatasetVersion: 'v1',
+        featureSchemaHash: getCurrentFeatureSchemaHash(),
+        queryCount: report.query_count,
+        recallAt3: report.top3_accuracy,
+        releaseGatePassed: thresholdsPassed,
+        activationStatus: 'shadow_only',
+        report: report as unknown as Readonly<Record<string, unknown>>,
+        metrics: {
+          retrieval_accuracy: report.top3_accuracy,
+          constraint_compliance: report.constraint_compliance_rate,
+          pass_rate: report.min_pass_rate,
+        },
+      });
+      process.stderr.write('[sfb-fixture-eval] Benchmark run persisted to DB.\n');
+    } finally {
+      await pool.end();
+    }
+  } catch (persistErr: unknown) {
+    const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+    process.stderr.write(`[sfb-fixture-eval] [WARN] Could not persist benchmark run to DB: ${msg}\n`);
+  }
+
+  if (thresholdError !== undefined) {
+    throw thresholdError;
   }
 }
 
