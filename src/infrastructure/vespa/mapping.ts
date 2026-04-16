@@ -46,6 +46,15 @@ const MAX_SPARSE_TENSOR_CELLS = 10_000;
 /** `_not` suffix length when deriving field name for NOT-IN clauses. */
 const SPARSE_NOT_FIELD_SUFFIX_LENGTH = 4;
 
+export class MalformedVespaDocumentError extends Error {
+  readonly missingField: string;
+  constructor(message: string, missingField: string) {
+    super(message);
+    this.name = 'MalformedVespaDocumentError';
+    this.missingField = missingField;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
@@ -75,25 +84,37 @@ function isNumberArray(v: unknown): v is number[] {
 function getRequiredString(fields: Record<string, unknown>, key: string): string {
   const v = fields[key];
   if (isString(v) && v.length > 0) return v;
-  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  throw new MalformedVespaDocumentError(
+    'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
+    key,
+  );
 }
 
 function getRequiredNumber(fields: Record<string, unknown>, key: string): number {
   const v = fields[key];
   if (isNumber(v)) return v;
-  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  throw new MalformedVespaDocumentError(
+    'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
+    key,
+  );
 }
 
 function getRequiredBoolean(fields: Record<string, unknown>, key: string): boolean {
   const v = fields[key];
   if (isBoolean(v)) return v;
-  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  throw new MalformedVespaDocumentError(
+    'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
+    key,
+  );
 }
 
 function getRequiredStringArray(fields: Record<string, unknown>, key: string): readonly string[] {
   const v = fields[key];
   if (isStringArray(v)) return v;
-  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  throw new MalformedVespaDocumentError(
+    'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
+    key,
+  );
 }
 
 /**
@@ -437,7 +458,10 @@ export function fromVespaFields(
   // responses. Operators can find the full key list in structured logs.
   const rawEntityId = fields['entity_id'];
   if (typeof rawEntityId !== 'string' || rawEntityId.length === 0) {
-    throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+    throw new MalformedVespaDocumentError(
+      'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
+      'entity_id',
+    );
   }
 
   const lineageRefsFromFields = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);

@@ -90,6 +90,14 @@ interface FuzzyAliasRow extends AliasRow {
   readonly lookupStrategy: FuzzyLookupStrategy;
 }
 
+interface MatchPlan {
+  readonly tokenList: readonly string[];
+  readonly compactList: readonly string[];
+  readonly transliteratedList: readonly string[];
+  readonly phoneticList: readonly string[];
+  readonly fuzzyVariants: readonly QueryVariantCandidate[];
+}
+
 function bestFuzzySimilarity(
   queryVariants: readonly QueryVariantCandidate[],
   candidateCompact: string,
@@ -219,64 +227,76 @@ export class PgAliasMatcher implements AliasMatcher {
     const trimmed = normalizedQuery.trim();
     if (trimmed.length === 0) return [];
 
-    // T-010/W2: pre-flight the pointer resolve so a missing `active_search_snapshot`
-    // table (fresh dev DB, unit-test mock pool without the pointer row) degrades
-    // to the same "no aliases available" behavior as a missing aliases table.
-    // A present-but-empty pointer table is still a hard error (publish never ran).
-    const canUseSnapshotBackedLookup = await this.canUseSnapshotBackedLookup();
-    if (!canUseSnapshotBackedLookup) {
+    const activeSnapshotId = await this.resolveActiveSnapshotId();
+    if (activeSnapshotId === null) {
       return [];
     }
 
-    const views = buildNormalizedQueryViews(trimmed);
+    const plan = this.buildMatchPlan(trimmed);
+    if (plan === null) {
+      return [];
+    }
 
-    // Build candidate lookup tokens: full phrase + individual words + bigrams
-    const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
-    const tokens = new Set<string>();
-    const compactTokens = new Set<string>();
-    const transliteratedTokens = new Set<string>();
-    const phoneticTokens = new Set<string>();
+    return this.runMatchPlan(plan, activeSnapshotId);
+  }
 
-    for (const value of views.lookupVariants) {
-      if (value.length > 0) {
-        tokens.add(value);
-        if (value !== views.compact) {
-          compactTokens.add(value.replace(/[^\p{L}\p{N}]+/gu, ''));
+  async findMatchesBatch(
+    normalizedQueries: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const dedupedQueries = this.trimDedupedQueries(normalizedQueries);
+    if (dedupedQueries.length === 0) {
+      return new Map();
+    }
+
+    const activeSnapshotId = await this.resolveActiveSnapshotId();
+    if (activeSnapshotId === null) {
+      const emptyMatches = new Map<string, readonly AliasMatchResult[]>();
+      for (const query of dedupedQueries) {
+        emptyMatches.set(query, []);
+      }
+      return emptyMatches;
+    }
+
+    const planByQuery = new Map<string, MatchPlan>();
+    for (const query of dedupedQueries) {
+      const plan = this.buildMatchPlan(query);
+      if (plan === null) {
+        planByQuery.set(query, {
+          tokenList: [],
+          compactList: [],
+          transliteratedList: [],
+          phoneticList: [],
+          fuzzyVariants: [],
+        });
+      } else {
+        planByQuery.set(query, plan);
+      }
+    }
+
+    const batchResults = await Promise.all(
+      dedupedQueries.map(async (query) => {
+        const plan = planByQuery.get(query);
+        if (plan === undefined || plan.tokenList.length === 0) {
+          return [query, []] as const;
         }
-      }
-    }
-    if (views.compact.length > 0) {
-      compactTokens.add(views.compact);
-    }
-    if (views.transliterated !== undefined && views.transliterated.length > 0) {
-      transliteratedTokens.add(views.transliterated);
-      transliteratedTokens.add(compactForLookup(views.transliterated));
-    }
-    if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {
-      phoneticTokens.add(views.phoneticCompact);
-    }
-    for (const w of words) {
-      if (w.length >= 2) {
-        tokens.add(w);
-        compactTokens.add(w.replace(/\s+/g, ''));
-      }
-    }
-    for (let i = 0; i < words.length - 1; i++) {
-      const w0 = words[i];
-      const w1 = words[i + 1];
-      if (w0 !== undefined && w1 !== undefined) {
-        const bigram = `${w0} ${w1}`;
-        tokens.add(bigram);
-        compactTokens.add(bigram.replace(/\s+/g, ''));
-      }
-    }
+        return [query, await this.runMatchPlan(plan, activeSnapshotId)] as const;
+      }),
+    );
 
-    const tokenList = Array.from(tokens);
-    const compactList = Array.from(compactTokens).filter((token) => token.length > 0);
-    const transliteratedList = Array.from(transliteratedTokens).filter((token) => token.length > 0);
-    const phoneticList = Array.from(phoneticTokens).filter((token) => token.length > 0);
+    const matched = new Map<string, readonly AliasMatchResult[]>(batchResults);
+    return matched;
+  }
 
-    const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
+  private async runMatchPlan(
+    plan: MatchPlan,
+    activeSnapshotId: string,
+  ): Promise<readonly AliasMatchResult[]> {
+    const tokenList = [...plan.tokenList];
+    const compactList = [...plan.compactList];
+    const transliteratedList = [...plan.transliteratedList];
+    const phoneticList = [...plan.phoneticList];
+    const fuzzyVariants = [...plan.fuzzyVariants];
+
     const result = await this.queryAliases(
       `SELECT entity_id, surface_form, normalized_value, confidence
        FROM aliases
@@ -342,28 +362,6 @@ export class PgAliasMatcher implements AliasMatcher {
       });
     }
 
-    const fuzzyVariants = Array.from(
-      new Map<string, QueryVariantCandidate>(
-        views.lookupVariants.flatMap((value) => {
-          const compactValue = compactForLookup(value);
-          if (compactValue.length < MIN_FUZZY_QUERY_LENGTH) {
-            return [];
-          }
-
-          const strategy: FuzzyLookupStrategy =
-            views.phoneticCompact !== undefined && compactValue === views.phoneticCompact
-              ? 'phonetic_fuzzy'
-              : views.transliterated !== undefined &&
-                  (value === views.transliterated ||
-                    compactValue === compactForLookup(views.transliterated))
-                ? 'transliterated_fuzzy'
-                : 'fuzzy_char_ngram';
-
-          return [[compactValue, { value: compactValue, strategy }] as const];
-        }),
-      ).values(),
-    );
-
     if (fuzzyVariants.length === 0) {
       return [];
     }
@@ -372,7 +370,6 @@ export class PgAliasMatcher implements AliasMatcher {
       new Set(fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
     ).map((gram) => gram.replace(/[%_\\]/g, '\\$&'));
 
-    // activeSnapshotId already resolved above; reuse within same method scope.
     const fuzzyCandidates = await this.queryAliases(
       `SELECT entity_id, surface_form, normalized_value, confidence
        FROM aliases
@@ -412,6 +409,125 @@ export class PgAliasMatcher implements AliasMatcher {
     return groupRows<FuzzyAliasRow>(fuzzyRows, (row) => row.lookupStrategy);
   }
 
+  private buildMatchPlan(normalizedQuery: string): MatchPlan | null {
+    const views = buildNormalizedQueryViews(normalizedQuery);
+
+    // Build candidate lookup tokens: full phrase + individual words + bigrams.
+    const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
+    const tokens = new Set<string>();
+    const compactTokens = new Set<string>();
+    const transliteratedTokens = new Set<string>();
+    const phoneticTokens = new Set<string>();
+
+    for (const value of views.lookupVariants) {
+      if (value.length > 0) {
+        tokens.add(value);
+        if (value !== views.compact) {
+          compactTokens.add(value.replace(/[^\p{L}\p{N}]+/gu, ''));
+        }
+      }
+    }
+    if (views.compact.length > 0) {
+      compactTokens.add(views.compact);
+    }
+    if (views.transliterated !== undefined && views.transliterated.length > 0) {
+      transliteratedTokens.add(views.transliterated);
+      transliteratedTokens.add(compactForLookup(views.transliterated));
+    }
+    if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {
+      phoneticTokens.add(views.phoneticCompact);
+    }
+    for (const w of words) {
+      if (w.length >= 2) {
+        tokens.add(w);
+        compactTokens.add(w.replace(/\s+/g, ''));
+      }
+    }
+    for (let i = 0; i < words.length - 1; i++) {
+      const w0 = words[i];
+      const w1 = words[i + 1];
+      if (w0 !== undefined && w1 !== undefined) {
+        const bigram = `${w0} ${w1}`;
+        tokens.add(bigram);
+        compactTokens.add(bigram.replace(/\s+/g, ''));
+      }
+    }
+
+    const tokenList = Array.from(tokens);
+    const compactList = Array.from(compactTokens).filter((token) => token.length > 0);
+    const transliteratedList = Array.from(transliteratedTokens).filter((token) => token.length > 0);
+    const phoneticList = Array.from(phoneticTokens).filter((token) => token.length > 0);
+
+    const fuzzyVariants = Array.from(
+      new Map<string, QueryVariantCandidate>(
+        views.lookupVariants.flatMap((value) => {
+          const compactValue = compactForLookup(value);
+          if (compactValue.length < MIN_FUZZY_QUERY_LENGTH) {
+            return [];
+          }
+
+          const strategy: FuzzyLookupStrategy =
+            views.phoneticCompact !== undefined && compactValue === views.phoneticCompact
+              ? 'phonetic_fuzzy'
+              : views.transliterated !== undefined &&
+                  (value === views.transliterated ||
+                    compactValue === compactForLookup(views.transliterated))
+                ? 'transliterated_fuzzy'
+                : 'fuzzy_char_ngram';
+
+          return [[compactValue, { value: compactValue, strategy }] as const];
+        }),
+      ).values(),
+    );
+
+    if (
+      tokenList.length === 0 &&
+      compactList.length === 0 &&
+      transliteratedList.length === 0 &&
+      phoneticList.length === 0
+    ) {
+      return null;
+    }
+
+    return {
+      tokenList,
+      compactList,
+      transliteratedList,
+      phoneticList,
+      fuzzyVariants,
+    };
+  }
+
+  private async resolveActiveSnapshotId(): Promise<string | null> {
+    const now = Date.now();
+    if (this.activeSnapshotMissingTableUntil > now) {
+      return null;
+    }
+
+    try {
+      const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
+      this.activeSnapshotMissingTableUntil = 0;
+      this.activeSnapshotMissingTableLogged = false;
+      return activeSnapshotId;
+    } catch (err: unknown) {
+      const code = readPgSqlState(err);
+      if (code !== '42P01') {
+        throw err;
+      }
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+        throw err;
+      }
+      this.activeSnapshotMissingTableUntil = now + ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS;
+      if (!this.activeSnapshotMissingTableLogged) {
+        bootstrapLogger.info(
+          '[PgAliasMatcher] active_search_snapshot table missing — alias matching disabled until substrate recovers',
+        );
+        this.activeSnapshotMissingTableLogged = true;
+      }
+      return null;
+    }
+  }
+
   private async queryAliases(
     sql: string,
     params: readonly unknown[],
@@ -433,33 +549,17 @@ export class PgAliasMatcher implements AliasMatcher {
     }
   }
 
-  private async canUseSnapshotBackedLookup(): Promise<boolean> {
-    const now = Date.now();
-    if (this.activeSnapshotMissingTableUntil > now) {
-      return false;
+  private trimDedupedQueries(queries: readonly string[]): readonly string[] {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const query of queries) {
+      const trimmed = query.trim();
+      if (trimmed.length === 0 || seen.has(trimmed)) {
+        continue;
+      }
+      seen.add(trimmed);
+      ordered.push(trimmed);
     }
-
-    try {
-      await resolveActiveSnapshot(this.pool);
-      this.activeSnapshotMissingTableUntil = 0;
-      this.activeSnapshotMissingTableLogged = false;
-      return true;
-    } catch (err: unknown) {
-      const code = readPgSqlState(err);
-      if (code !== '42P01') {
-        throw err;
-      }
-      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
-        throw err;
-      }
-      this.activeSnapshotMissingTableUntil = now + ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS;
-      if (!this.activeSnapshotMissingTableLogged) {
-        bootstrapLogger.info(
-          '[PgAliasMatcher] active_search_snapshot table missing — alias matching disabled until substrate recovers',
-        );
-        this.activeSnapshotMissingTableLogged = true;
-      }
-      return false;
-    }
+    return ordered;
   }
 }

@@ -334,14 +334,27 @@ export class CascadingAliasMatcher implements AliasMatcher {
       : undefined;
 
     const unresolved: string[] = [];
-    for (const query of trimmedQueries) {
-      const primaryMatches = primaryBatch?.get(query)
-        ?? (primaryBatch === undefined ? await this.primary.findMatches(query) : []);
-      if (primaryMatches.length > 0) {
-        results.set(query, primaryMatches);
-        continue;
+    if (primaryBatch === undefined) {
+      const primaryMatches = await Promise.all(
+        trimmedQueries.map((query) => this.primary.findMatches(query)),
+      );
+      for (const [index, query] of trimmedQueries.entries()) {
+        const matched = primaryMatches[index] ?? [];
+        if (matched.length > 0) {
+          results.set(query, matched);
+          continue;
+        }
+        unresolved.push(query);
       }
-      unresolved.push(query);
+    } else {
+      for (const query of trimmedQueries) {
+        const primaryMatches = primaryBatch.get(query) ?? [];
+        if (primaryMatches.length > 0) {
+          results.set(query, primaryMatches);
+          continue;
+        }
+        unresolved.push(query);
+      }
     }
 
     if (unresolved.length === 0) {
@@ -351,10 +364,17 @@ export class CascadingAliasMatcher implements AliasMatcher {
     const secondaryBatch = this.secondary.findMatchesBatch !== undefined
       ? await this.secondary.findMatchesBatch(unresolved)
       : undefined;
-    for (const query of unresolved) {
-      const secondaryMatches = secondaryBatch?.get(query)
-        ?? (secondaryBatch === undefined ? await this.secondary.findMatches(query) : []);
-      results.set(query, secondaryMatches);
+    if (secondaryBatch === undefined) {
+      const secondaryMatches = await Promise.all(
+        unresolved.map((query) => this.secondary.findMatches(query)),
+      );
+      for (const [index, query] of unresolved.entries()) {
+        results.set(query, secondaryMatches[index] ?? []);
+      }
+    } else {
+      for (const query of unresolved) {
+        results.set(query, secondaryBatch.get(query) ?? []);
+      }
     }
 
     return results;

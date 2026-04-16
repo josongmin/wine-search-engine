@@ -36,10 +36,11 @@ function nonPenaltySum(w: ScoringWeights): number {
 function makeConstraint(
   attribute: string,
   value: NormalizedConstraint['value'],
+  operator: NormalizedConstraint['operator'] = Array.isArray(value) ? 'in' : '=',
 ): NormalizedConstraint {
   return {
     attribute,
-    operator: Array.isArray(value) ? 'in' : '=',
+    operator,
     value,
     source_phrase: `${attribute}:${typeof value === 'object' ? JSON.stringify(value) : String(value)}`,
     confidence: 1,
@@ -285,6 +286,34 @@ describe('resolveChannelAwareWeights', () => {
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });
 
+    it('raises giftSuitability when gift_suitability numeric suitability is extracted', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [makeConstraint('gift_suitability', 0.72, '>=')],
+        ),
+      );
+      expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
+      expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('does not raise giftSuitability when gift_suitability is below minimum threshold', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [makeConstraint('gift_suitability', 0.2, '>=')],
+        ),
+      );
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+      expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
     it('raises beginnerSuitability only when style=approachable is explicitly present', () => {
       const base = resolveWeights('semantic_preference');
       const result = applySituationIntentWeightOverlay(
@@ -295,6 +324,34 @@ describe('resolveChannelAwareWeights', () => {
         ),
       );
       expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('raises beginnerSuitability when beginner_suitability numeric suitability is extracted', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [makeConstraint('beginner_suitability', 0.68, '>=')],
+        ),
+      );
+      expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('does not raise beginnerSuitability when beginner_suitability is below minimum threshold', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [makeConstraint('beginner_suitability', 0.1, '>=')],
+        ),
+      );
+      expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
       expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });

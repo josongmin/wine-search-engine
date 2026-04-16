@@ -162,4 +162,100 @@ describe('SearchSnapshotAliasMatcher', () => {
       }),
     ]);
   });
+
+  it('loads alias substrate when alias rows contain legacy keys', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'snapshot-alias-matcher-legacy-'));
+    TMP_DIRS.push(dir);
+    const aliasesPath = path.join(dir, 'aliases.ndjson');
+    const manifestPath = path.join(dir, 'manifest.json');
+    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+
+    await fs.writeFile(
+      aliasesPath,
+      `${JSON.stringify({
+        aliasId: 'a1',
+        entityId: 'wine:opus-one',
+        value: '오푸스 원',
+        normalizedValue: '오푸스 원',
+        sourceTrust: 1,
+        confidencePrior: 0.97,
+        type: 'translation',
+        scope: 'global',
+        source: 'legacy',
+      })}\n`,
+      'utf8',
+    );
+    await fs.writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot.v1',
+        snapshotId: 'search-snapshot:v1:test5678',
+        generatedAt: '2026-04-16T00:00:00.000Z',
+        contentHash: 'hash5678',
+        sourceInputPath: '/tmp/input.ndjson',
+        artifacts: {
+          documentsNdjson: '/tmp/documents.ndjson',
+          vespaFeedNdjson: '/tmp/vespa-feed.ndjson',
+          entitiesNdjson: '/tmp/entities.ndjson',
+          aliasesNdjson: aliasesPath,
+          ambiguityRegistryNdjson: '/tmp/ambiguity.ndjson',
+          nlMappingsJson: '/tmp/nl-mappings.json',
+          metadataJson: '/tmp/metadata.json',
+        },
+        counts: {
+          documents: 1,
+          vespaFeed: 1,
+          entities: 1,
+          aliases: 1,
+          ambiguityRegistry: 0,
+          nlMappings: 0,
+        },
+        hashes: {
+          documents: 'h1',
+          vespaFeed: 'h2',
+          entities: 'h3',
+          aliases: 'h4',
+          ambiguityRegistry: 'h5',
+          nlMappings: 'h6',
+        },
+      })}\n`,
+      'utf8',
+    );
+    await fs.writeFile(
+      runtimeStatePath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot_runtime_state.v3',
+        snapshotId: 'search-snapshot:v1:test5678',
+        contentHash: 'hash5678',
+        publishedAt: '2026-04-16T00:00:00.000Z',
+        manifestPath,
+        nlMappingsRuntimePath: '/tmp/nl-mappings.runtime.json',
+        allowMissingLtr: true,
+        counts: {
+          entities: 1,
+          aliases: 1,
+          ambiguityRegistry: 0,
+          nlMappings: 0,
+          activeLtrModels: 0,
+        },
+        hashes: {
+          entities: 'h3',
+          aliases: 'h4',
+          ambiguityRegistry: 'h5',
+          nlMappings: 'h6',
+          activeLtrModels: 'h7',
+        },
+      })}\n`,
+      'utf8',
+    );
+
+    const matcher = await SearchSnapshotAliasMatcher.loadFromRuntimeState(runtimeStatePath);
+
+    expect(matcher).toBeDefined();
+    await expect(matcher!.findMatches('오푸스 원')).resolves.toMatchObject([
+      expect.objectContaining({
+        surfaceForm: '오푸스 원',
+      }),
+    ]);
+  });
 });

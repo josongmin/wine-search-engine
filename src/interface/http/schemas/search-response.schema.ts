@@ -293,7 +293,7 @@ const NormalizedConstraintWireSchema = z.object({
   mapping_version: z.string().min(1).optional(),
 }).strict();
 
-const ConstraintAtomWireSchema = NormalizedConstraintWireSchema.extend({
+const ConstraintAtomWireSchemaV1 = NormalizedConstraintWireSchema.extend({
   source_tier: z.enum(['hard', 'soft', 'inferred']),
   source_kind: z.enum([
     'explicit_utterance',
@@ -308,7 +308,42 @@ const ConstraintAtomWireSchema = NormalizedConstraintWireSchema.extend({
   constraint_role: z.enum(['must_satisfy', 'prefer', 'contextual_hint', 'exclusion']),
 }).strict();
 
-const ConstraintRelationWireSchema = z.object({
+const ConstraintAtomWireSchemaLegacy = z.object({
+  key: z.string().min(1),
+  attribute: z.string().min(1),
+  operator: z.enum(['=', '<=', '>=', 'range', 'in', 'exclude', 'not_in']),
+  value: z.union([
+    z.string(),
+    z.number().finite(),
+    z.object({
+      min: z.number().finite(),
+      max: z.number().finite(),
+    }).strict(),
+    z.array(z.string().min(1)).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+  ]),
+  source_phrase: z.string().optional(),
+  confidence: z.number().finite().min(0).max(1).optional(),
+  mapping_version: z.string().min(1).optional(),
+  source_tier: z.enum(['hard', 'soft', 'inferred']).optional(),
+  source_kind: z.enum([
+    'explicit_utterance',
+    'implicit_slot',
+    'planner_inferred',
+    'session_carry',
+    'system_default',
+  ]).optional(),
+  authority_level: z.number().int().nonnegative().optional(),
+  semantic_scope: z.enum(['intrinsic', 'extrinsic', 'temporal', 'relational']).optional(),
+  conflict_policy: z.enum(['strict', 'prefer', 'relaxable', 'informative']).optional(),
+  constraint_role: z.enum(['must_satisfy', 'prefer', 'contextual_hint', 'exclusion']).optional(),
+}).strict();
+
+const ConstraintAtomWireSchema = z.union([
+  ConstraintAtomWireSchemaV1,
+  ConstraintAtomWireSchemaLegacy,
+]);
+
+const ConstraintRelationWireSchemaV1 = z.object({
   type: z.enum([
     'contradiction',
     'redundancy',
@@ -322,6 +357,26 @@ const ConstraintRelationWireSchema = z.object({
   winner: z.enum(['a', 'b']).optional(),
   explanation: z.string().min(1),
 }).strict();
+
+const ConstraintRelationWireSchemaLegacy = z.object({
+  type: z.enum([
+    'contradiction',
+    'redundancy',
+    'overshadow',
+    'soft_tension',
+    'subsumption',
+    'implication',
+  ]),
+  from: z.string().min(1),
+  to: z.string().min(1),
+  winner: z.enum(['a', 'b']).optional(),
+  explanation: z.string().min(1).optional(),
+}).strict();
+
+const ConstraintRelationWireSchema = z.union([
+  ConstraintRelationWireSchemaV1,
+  ConstraintRelationWireSchemaLegacy,
+]);
 
 const ProvenancePolicyWireSchema = z.object({
   require_identity_seal: z.boolean(),
@@ -407,6 +462,7 @@ const PolicyDecisionRecordWireSchema = z.object({
     'intent_classification',
     'route_resolution',
     'retrieval_mode_selection',
+    'constraint_resolution',
     'query_classification',
     'query_class_classification',
     'uncertainty_estimation',
@@ -872,6 +928,9 @@ export const SearchResponseSchema = z.object({
   counterfactuals: z.array(CounterfactualRejectSchema).max(MAX_SEARCH_COUNTERFACTUALS).optional(),
   clarification: ClarificationPayloadSchema.nullable().optional(),
   meta: SearchResponseMetaSchema,
+  // Stage-timing breakdown is emitted by the pipeline and surfaced for
+  // latency observability / replay diagnostics.
+  stage_timings: z.record(z.number().finite().nonnegative()).optional(),
   retrieval_mode: z.enum([
     'entity_lookup',
     'attribute_search',

@@ -106,6 +106,10 @@ export interface HttpRouteContract {
   readonly responseType?: string;
 }
 
+type RouteContractWithRequiredBody<T extends z.ZodTypeAny> = HttpRouteContract & {
+  readonly body: T;
+};
+
 function defineRouteContract<T extends HttpRouteContract>(contract: T): T {
   return Object.freeze(contract);
 }
@@ -351,7 +355,7 @@ export const RetrievalDegradationMetricsRouteContract = defineRouteContract({
   },
 });
 
-export const ClaudeToolsExecuteRouteContract = defineRouteContract({
+export const ClaudeToolsExecuteRouteContract: RouteContractWithRequiredBody<typeof ClaudeToolsExecuteRequestSchema> = defineRouteContract({
   operationId: 'tools.execute',
   body: ClaudeToolsExecuteRequestSchema,
   responses: {

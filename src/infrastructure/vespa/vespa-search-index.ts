@@ -32,6 +32,7 @@ import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import {
   toVespaFields,
   fromVespaFields,
+  MalformedVespaDocumentError,
   buildSparseFilters,
   buildDenseFilters,
   readRawVespaRetrievalSummary,
@@ -300,6 +301,63 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   return normalizeRetrievalHitSummary(readRawVespaRetrievalSummary(fields));
 }
 
+function parseHitSummaryWithContext(
+  callerName: string,
+  hit: VespaHit,
+  rank: number,
+): RetrievalHitSummary | undefined {
+  try {
+    return extractHitSummary(hit.fields);
+  } catch (err) {
+    const rawEntityId = isString(hit.fields['entity_id']) && hit.fields['entity_id'].length > 0
+      ? hit.fields['entity_id']
+      : '<missing_or_empty>';
+    bootstrapLogger.warn(
+      {
+        callerName,
+        entityId: rawEntityId,
+        rank,
+        fieldCount: Object.keys(hit.fields).length,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      `[VespaSearchIndex] ${callerName}: hit summary parse failed`,
+    );
+    throw err;
+  }
+}
+
+function logDocumentParseFailure(
+  callerName: string,
+  err: unknown,
+  fields: Record<string, unknown>,
+  rank?: number,
+): void {
+  const rawEntityId = isString(fields['entity_id']) && fields['entity_id'].length > 0
+    ? fields['entity_id']
+    : '<missing_or_empty>';
+  bootstrapLogger.warn(
+    {
+      callerName,
+      entityId: rawEntityId,
+      ...(rank !== undefined ? { rank } : {}),
+      fieldCount: Object.keys(fields).length,
+      missingField: err instanceof MalformedVespaDocumentError ? err.missingField : undefined,
+      err: err instanceof Error ? err.message : String(err),
+    },
+    `[VespaSearchIndex] ${callerName}: document parse failed`,
+  );
+}
+
+function getEntityIdForLog(hit: VespaHit): string {
+  const fromField = hit.fields['entity_id'];
+  if (isString(fromField) && fromField.length > 0) {
+    return fromField;
+  }
+  const parts = hit.id.split('::');
+  const docId = parts[parts.length - 1];
+  return isString(docId) && docId.length > 0 ? docId : '<missing_or_empty>';
+}
+
 // ---------------------------------------------------------------------------
 // VespaSearchIndex
 // ---------------------------------------------------------------------------
@@ -430,12 +488,28 @@ export class VespaSearchIndex implements SearchIndexPort {
     const children = response.root.children ?? [];
 
     return children.map((hit, index) => {
-      const entityId = this.extractEntityId(hit);
-      const summary = extractHitSummary(hit.fields);
+      const rank = index + 1;
+      let entityId: CanonicalEntityId;
+      try {
+        entityId = this.extractEntityId(hit);
+      } catch (err) {
+        bootstrapLogger.warn(
+          {
+            callerName: 'sparseSearch',
+            entityId: getEntityIdForLog(hit),
+            rank,
+            fieldCount: Object.keys(hit.fields).length,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          '[VespaSearchIndex] sparseSearch: failed to extract entityId',
+        );
+        throw err;
+      }
+      const summary = parseHitSummaryWithContext('sparseSearch', hit, rank);
       return {
         entityId,
         score: hit.relevance,
-        rank: index + 1,
+        rank,
         matchedFields: extractMatchedFields(hit.fields),
         ...(summary !== undefined ? { summary } : {}),
       } satisfies SparseHit;
@@ -512,12 +586,28 @@ export class VespaSearchIndex implements SearchIndexPort {
     const children = response.root.children ?? [];
 
     return children.map((hit, index) => {
-      const entityId = this.extractEntityId(hit);
-      const summary = extractHitSummary(hit.fields);
+      const rank = index + 1;
+      let entityId: CanonicalEntityId;
+      try {
+        entityId = this.extractEntityId(hit);
+      } catch (err) {
+        bootstrapLogger.warn(
+          {
+            callerName: 'denseSearch',
+            entityId: getEntityIdForLog(hit),
+            rank,
+            fieldCount: Object.keys(hit.fields).length,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          '[VespaSearchIndex] denseSearch: failed to extract entityId',
+        );
+        throw err;
+      }
+      const summary = parseHitSummaryWithContext('denseSearch', hit, rank);
       return {
         entityId,
         score: hit.relevance,
-        rank: index + 1,
+        rank,
         similarity: normaliseSimilarity(hit.relevance),
         ...(summary !== undefined ? { summary } : {}),
       } satisfies DenseHit;
@@ -584,12 +674,28 @@ export class VespaSearchIndex implements SearchIndexPort {
     const children = response.root.children ?? [];
 
     return children.map((hit, index) => {
-      const entityId = this.extractEntityId(hit);
-      const summary = extractHitSummary(hit.fields);
+      const rank = index + 1;
+      let entityId: CanonicalEntityId;
+      try {
+        entityId = this.extractEntityId(hit);
+      } catch (err) {
+        bootstrapLogger.warn(
+          {
+            callerName: 'searchLearnedSparse',
+            entityId: getEntityIdForLog(hit),
+            rank,
+            fieldCount: Object.keys(hit.fields).length,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          '[VespaSearchIndex] searchLearnedSparse: failed to extract entityId',
+        );
+        throw err;
+      }
+      const summary = parseHitSummaryWithContext('searchLearnedSparse', hit, rank);
       return {
         entityId,
         score: hit.relevance,
-        rank: index + 1,
+        rank,
         similarity: normaliseSimilarity(hit.relevance),
         ...(summary !== undefined ? { summary } : {}),
       } satisfies DenseHit;
@@ -609,7 +715,12 @@ export class VespaSearchIndex implements SearchIndexPort {
   async getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null> {
     const fields = await this.client.get(entityId);
     if (fields === null) return null;
-    return fromVespaFields(fields);
+    try {
+      return fromVespaFields(fields);
+    } catch (err) {
+      logDocumentParseFailure('getDocument', err, fields);
+      throw err;
+    }
   }
 
   async getDocuments(
@@ -632,7 +743,18 @@ export class VespaSearchIndex implements SearchIndexPort {
         'presentation.summary': 'full',
       });
       const children = response.root.children ?? [];
-      return children.map((hit) => fromVespaFields(hit.fields));
+      return children.map((hit, index) => {
+        try {
+          return fromVespaFields(hit.fields);
+        } catch (err) {
+          logDocumentParseFailure('getDocuments', err, hit.fields, index + 1);
+          bootstrapLogger.warn(
+            { batchSize: batch.length },
+            '[VespaSearchIndex] getDocuments: batch context',
+          );
+          throw err;
+        }
+      });
     }));
     const docs = new Map<CanonicalEntityId, RetrievalDocument>();
     for (const result of settled) {
@@ -833,7 +955,14 @@ export class VespaSearchIndex implements SearchIndexPort {
         'presentation.summary': summaryName,
       });
       const children = response.root.children ?? [];
-      return children.map((hit) => parseHit(hit.fields));
+      return children.map((hit, index) => {
+        try {
+          return parseHit(hit.fields);
+        } catch (err) {
+          logDocumentParseFailure(callerName, err, hit.fields, index + 1);
+          throw err;
+        }
+      });
     }));
 
     // Build Map<entityId, projection> from successful batches.

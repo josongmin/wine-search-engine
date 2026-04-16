@@ -35,7 +35,7 @@ const SnapshotAliasRecordSchema = z.object({
   normalizedValue: z.string().min(1),
   sourceTrust: z.number(),
   confidencePrior: z.number(),
-}).strict();
+}).passthrough();
 const SnapshotManifestSchema = z.object({
   artifacts: z.object({
     aliasesNdjson: z.string().min(1),

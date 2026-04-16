@@ -63,11 +63,11 @@ function makeMinimalCompiled(overrides?: {
       policyRuleVersion: '1.0.0',
       thresholdProfileId: 'default',
     },
-    execution: {
+      execution: {
       effectiveRoute: 'hybrid',
       effectiveRetrievalMode: 'attribute_search',
       routeSource: 'planner',
-      budget: { maxCandidates: 50, enablePrecisionRerank: false },
+      budget: { maxCandidates: 50, rerankLimit: 0, enablePrecisionRerank: false },
       provenancePolicy: {
         requireIdentitySeal: false,
         requireConstraintEvidence: false,

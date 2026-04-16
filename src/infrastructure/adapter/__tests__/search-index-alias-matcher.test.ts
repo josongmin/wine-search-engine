@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SearchIndexAliasMatcher } from '../search-index-alias-matcher.js';
+import type { AliasMatcher } from '../../../domain/query/service/anchor-extractor.js';
 import { InMemorySearchIndex } from '../../../../test/integration/helpers/in-memory-adapters.js';
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
 import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 import type { SearchIndexPort } from '../../../domain/retrieval/port/search-index.port.js';
+import { CascadingAliasMatcher } from '../search-index-alias-matcher.js';
 
 function makeDoc(overrides: Partial<RetrievalDocument> = {}): RetrievalDocument {
   return {
@@ -121,5 +123,44 @@ describe('SearchIndexAliasMatcher', () => {
     expect(batch.get('오퍼스원')?.[0]?.entityIds).toContain(
       createCanonicalEntityId('wine-opus-one-2018'),
     );
+  });
+
+  it('falls back to secondary batch for unresolved primary misses', async () => {
+    const primary: AliasMatcher = {
+      findMatches: async () => [],
+    };
+    const secondary: AliasMatcher = {
+      findMatches: async () => [],
+      findMatchesBatch: async (_queries) => new Map([
+        [
+          '오푸스원',
+          [
+            {
+              surfaceForm: '오푸스원',
+              normalizedForm: '오푸스원',
+              entityIds: [createCanonicalEntityId('entity-opus')],
+              matchConfidence: 0.84,
+            },
+          ],
+        ],
+        [
+          '오퍼스원',
+          [
+            {
+              surfaceForm: '오퍼스원',
+              normalizedForm: '오퍼스원',
+              entityIds: [createCanonicalEntityId('entity-opus')],
+              matchConfidence: 0.83,
+            },
+          ],
+        ],
+      ]),
+    };
+
+    const matcher = new CascadingAliasMatcher(primary, secondary);
+    const batch = await matcher.findMatchesBatch(['오푸스원', '오퍼스원']);
+
+    expect(batch.get('오푸스원')?.[0]?.entityIds).toContain(createCanonicalEntityId('entity-opus'));
+    expect(batch.get('오퍼스원')?.[0]?.entityIds).toContain(createCanonicalEntityId('entity-opus'));
   });
 });

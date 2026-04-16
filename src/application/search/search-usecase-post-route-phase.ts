@@ -234,6 +234,9 @@ function buildExecutionAuditTrace(
   const executionBudget = compiled.execution.budget;
   const provenancePolicy = compiled.execution.provenancePolicy;
   const provenanceClosure = rankingMetadata?.provenanceClosure;
+  const rerankLimit = Number.isFinite(executionBudget.rerankLimit)
+    ? executionBudget.rerankLimit
+    : 0;
 
   return {
     effective_route: effectiveRoute,
@@ -247,7 +250,7 @@ function buildExecutionAuditTrace(
     used_compiled_execution: routeExecutionFacts.usedCompiledExecution,
     compiled_budget: {
       max_candidates: executionBudget.maxCandidates,
-      rerank_limit: executionBudget.rerankLimit,
+      rerank_limit: rerankLimit,
       enable_precision_rerank: executionBudget.enablePrecisionRerank,
     },
     provenance_policy: {

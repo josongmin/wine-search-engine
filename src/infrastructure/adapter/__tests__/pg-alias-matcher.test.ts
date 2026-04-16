@@ -122,6 +122,34 @@ describe('PgAliasMatcher', () => {
     expect(pool.queries).toHaveLength(2);
   });
 
+  it('resolves batch lookups for multiple queries without serial alias path bottlenecks', async () => {
+    const pool = new MockPool([
+      [
+        {
+          entity_id: 'entity-opus-one',
+          surface_form: 'Opus One',
+          normalized_value: 'opus one',
+          confidence: 0.93,
+        },
+      ],
+      [
+        {
+          entity_id: 'entity-chateau-margaux',
+          surface_form: 'Chateau Margaux',
+          normalized_value: 'chateau margaux',
+          confidence: 0.91,
+        },
+      ],
+    ]);
+    const matcher = new PgAliasMatcher(pool as never);
+
+    const batch = await matcher.findMatchesBatch(['opusone', 'chateau margaux']);
+
+    expect(batch.get('opusone')?.[0]?.entityIds).toEqual(['entity-opus-one']);
+    expect(batch.get('chateau margaux')?.[0]?.entityIds).toEqual(['entity-chateau-margaux']);
+    expect(pool.queries).toHaveLength(2);
+  });
+
   it('scores fuzzy candidates against multiple normalized variants, including transliterated compact forms', async () => {
     const pool = new MockPool([
       [],

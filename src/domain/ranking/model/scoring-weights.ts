@@ -1,5 +1,6 @@
 import type {
   ConstraintBundle,
+  NormalizedConstraint,
   QueryClass,
 } from '../../shared/types/index.js';
 import {
@@ -253,6 +254,7 @@ export { DEFAULT_WEIGHTS };
 
 const SITUATION_INTENT_GIFT_WEIGHT_FLOOR = 0.15;
 const SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR = 0.15;
+const SITUATION_INTENT_FACET_TRIGGER_MIN = 0.5;
 
 function constraintValueMatches(
   constraints: ConstraintBundle,
@@ -275,6 +277,75 @@ function constraintValueMatches(
   return false;
 }
 
+function constraintNumericMeetsMinimum(
+  constraints: ConstraintBundle,
+  attribute: string,
+  minValue: number,
+): boolean {
+  const buckets = [constraints.hard, constraints.soft, constraints.inferred] as const;
+
+  for (const bucket of buckets) {
+    for (const constraint of bucket) {
+      if (constraint.attribute !== attribute) {
+        continue;
+      }
+
+      switch (constraint.operator) {
+        case '>=':
+        case '=': {
+          if (typeof constraint.value === 'number' && Number.isFinite(constraint.value)) {
+            if (constraint.value >= minValue) {
+              return true;
+            }
+          }
+          break;
+        }
+        case 'in':
+          // Array/string constraints are not numeric suitability scores.
+          break;
+
+        case '<=':
+          // Explicit upper-bound requests on suitability cannot establish intent.
+          break;
+
+        case 'range':
+          if (isNumericRangeValue(constraint.value)) {
+            return constraint.value.max >= minValue;
+          }
+          break;
+
+        case 'exclude':
+        case 'not_in':
+          break;
+
+        default: {
+          const _exhaustive: never = constraint.operator;
+          void _exhaustive;
+          break;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function isNumericRangeValue(
+  value: NormalizedConstraint['value'],
+): value is { readonly min: number; readonly max: number } {
+  const candidate = value as unknown;
+  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+    return false;
+  }
+  if (!('min' in candidate) || !('max' in candidate)) {
+    return false;
+  }
+  const rangeValue = candidate as { readonly min: unknown; readonly max: unknown };
+  if (typeof rangeValue.min !== 'number' || typeof rangeValue.max !== 'number') {
+    return false;
+  }
+  return Number.isFinite(rangeValue.min) && Number.isFinite(rangeValue.max);
+}
+
 /**
  * Applies a query-constraint-driven overlay for explicit situation intents.
  *
@@ -287,16 +358,30 @@ export function applySituationIntentWeightOverlay(
   constraints: ConstraintBundle,
 ): ScoringWeights {
   const hasGiftIntent = constraintValueMatches(constraints, 'occasion', 'gift');
-  const hasBeginnerIntent = constraintValueMatches(constraints, 'style', 'approachable');
+  const hasGiftSuitabilityIntent = constraintNumericMeetsMinimum(
+    constraints,
+    'gift_suitability',
+    SITUATION_INTENT_FACET_TRIGGER_MIN,
+  );
+  const hasBeginnerIntent =
+    constraintValueMatches(constraints, 'style', 'approachable');
+  const hasBeginnerSuitabilityIntent = constraintNumericMeetsMinimum(
+    constraints,
+    'beginner_suitability',
+    SITUATION_INTENT_FACET_TRIGGER_MIN,
+  );
 
-  if (!hasGiftIntent && !hasBeginnerIntent) {
+  const resolvedHasGiftIntent = hasGiftIntent || hasGiftSuitabilityIntent;
+  const resolvedHasBeginnerIntent = hasBeginnerIntent || hasBeginnerSuitabilityIntent;
+
+  if (!resolvedHasGiftIntent && !resolvedHasBeginnerIntent) {
     return baseWeights;
   }
 
-  const giftSuitability = hasGiftIntent
+  const giftSuitability = resolvedHasGiftIntent
     ? Math.max(baseWeights.giftSuitability, SITUATION_INTENT_GIFT_WEIGHT_FLOOR)
     : baseWeights.giftSuitability;
-  const beginnerSuitability = hasBeginnerIntent
+  const beginnerSuitability = resolvedHasBeginnerIntent
     ? Math.max(baseWeights.beginnerSuitability, SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR)
     : baseWeights.beginnerSuitability;
 

@@ -683,6 +683,37 @@ describe('Ranker', () => {
       expect(passedWeights.beginnerSuitability).toBeGreaterThan(0);
     });
 
+    it('activates gift learned facet from explicit gift_suitability constraint', async () => {
+      const candidate: HybridCandidate = {
+        ...makeCandidate('wine-situation-suitability'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      } as HybridCandidate;
+      const aggregate = vi.fn().mockReturnValue(0.8);
+      const aggregator = { aggregate } as unknown as ScoreAggregator;
+      const ranker = makeRanker(aggregator);
+      const suitabilityConstraints = makeConstraintsWithSoftEntries([
+        makeConstraint('gift_suitability', 0.72, '>='),
+      ]);
+      const input = makeInputWithOverrides([candidate], {
+        constraints: suitabilityConstraints,
+        queryPlan: {
+          constraints: suitabilityConstraints,
+        },
+      });
+
+      await ranker.rank(input);
+
+      const passedWeights = aggregate.mock.calls[0]?.[1];
+      expect(passedWeights.giftSuitability).toBeGreaterThan(0);
+      expect(passedWeights.beginnerSuitability).toBe(0);
+    });
+
     it('keeps situation learned facets off when the constraint bundle has no explicit trigger', async () => {
       const candidate: HybridCandidate = {
         ...makeCandidate('wine-situation-none'),
