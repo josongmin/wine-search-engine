@@ -47,6 +47,49 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('fails closed when a known tool carries invalid typed input', () => {
+    const raw = JSON.stringify({
+      thought: 'bad typed input',
+      action: { tool: 'get_food_pairings', input: { food: 123 } },
+    });
+    const parsed = parseLlmOutput(raw);
+
+    expect(parsed).toEqual({
+      thought: '[unparseable LLM structure]',
+      answer: raw,
+    });
+  });
+
+  it('preserves unknown tools with object input for recovery feedback', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'try fake tool',
+      action: { tool: 'fake_tool', input: { x: 1 } },
+    }));
+
+    expect(parsed).toEqual({
+      thought: 'try fake tool',
+      action: {
+        tool: 'fake_tool',
+        input: { x: 1 },
+      },
+    });
+  });
+
+  it('keeps known tools with missing optional attempt fields so execution can return validation feedback', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'search without query',
+      action: { tool: 'search_wines', input: {} },
+    }));
+
+    expect(parsed).toEqual({
+      thought: 'search without query',
+      action: {
+        tool: 'search_wines',
+        input: {},
+      },
+    });
+  });
+
   it('falls back to raw answer text for non-JSON output', () => {
     const parsed = parseLlmOutput('not-json at all');
 

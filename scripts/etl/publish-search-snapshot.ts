@@ -1,7 +1,6 @@
 #!/usr/bin/env tsx
 
-import { execFile as execFileCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../../src/config/env.js';
@@ -46,7 +45,6 @@ export {
   type SnapshotPublishStateMachine,
 } from './snapshot-publish-state-machine.js';
 
-const execFile = promisify(execFileCb);
 const VESPA_NAMESPACE = 'wine';
 const VESPA_DOC_TYPE = 'wine_entity';
 const SNAPSHOT_PUBLISH_LOCK_A = 93721;
@@ -142,15 +140,33 @@ async function runIndexer(
   if (fixtureRepoRoot != null && fixtureRepoRoot.length > 0) {
     tail.push('--fixture-repo', fixtureRepoRoot);
   }
-  await execFile(
-    'npx',
-    ['tsx', scriptPath, ...tail],
-    {
-      cwd: process.cwd(),
-      env: process.env,
-      maxBuffer: 32 * 1024 * 1024,
-    },
-  );
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      'npx',
+      ['tsx', scriptPath, ...tail],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: 'inherit',
+      },
+    );
+
+    child.once('error', (error) => {
+      reject(error);
+    });
+
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `index-to-vespa exited with code=${code ?? 'null'} signal=${signal ?? 'null'}`,
+        ),
+      );
+    });
+  });
 }
 
 function buildStagingPath(activePath: string, snapshotId: string): string {

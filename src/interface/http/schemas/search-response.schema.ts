@@ -283,6 +283,64 @@ const NormalizedConstraintWireSchema = z.object({
   mapping_version: z.string().min(1).optional(),
 }).strict();
 
+const ConstraintAtomWireSchema = NormalizedConstraintWireSchema.extend({
+  source_tier: z.enum(['hard', 'soft', 'inferred']),
+  source_kind: z.enum([
+    'explicit_utterance',
+    'implicit_slot',
+    'planner_inferred',
+    'session_carry',
+    'system_default',
+  ]),
+  authority_level: z.number().int().nonnegative(),
+  semantic_scope: z.enum(['intrinsic', 'extrinsic', 'temporal', 'relational']),
+  conflict_policy: z.enum(['strict', 'prefer', 'relaxable', 'informative']),
+  constraint_role: z.enum(['must_satisfy', 'prefer', 'contextual_hint', 'exclusion']),
+}).strict();
+
+const ConstraintRelationWireSchema = z.object({
+  type: z.enum([
+    'contradiction',
+    'redundancy',
+    'overshadow',
+    'soft_tension',
+    'subsumption',
+    'implication',
+  ]),
+  atom_index_a: z.number().int().nonnegative(),
+  atom_index_b: z.number().int().nonnegative(),
+  winner: z.enum(['a', 'b']).optional(),
+  explanation: z.string().min(1),
+}).strict();
+
+const ProvenancePolicyWireSchema = z.object({
+  require_identity_seal: z.boolean(),
+  require_constraint_evidence: z.boolean(),
+  require_anchor_evidence: z.boolean(),
+}).strict();
+
+const ProvenanceCoverageStageWireSchema = z.object({
+  candidate_count: z.number().int().nonnegative(),
+  identity_evidence_satisfied: z.boolean(),
+  constraint_evidence_satisfied: z.boolean(),
+  anchor_evidence_satisfied: z.boolean(),
+  matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+  unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+  anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+}).strict();
+
+const ExecutionProvenanceClosureWireSchema = z.object({
+  policy: ProvenancePolicyWireSchema,
+  pre_rank: ProvenanceCoverageStageWireSchema,
+  post_rank: ProvenanceCoverageStageWireSchema,
+  missing: z.array(z.enum([
+    'identity_evidence',
+    'constraint_evidence',
+    'anchor_evidence',
+  ])).max(3),
+  satisfied: z.boolean(),
+}).strict();
+
 const InterpretPolicySchema = z.object({
   require_exact: z.boolean().optional(),
   allow_approximate: z.boolean().optional(),
@@ -371,6 +429,38 @@ const RrfFusionTraceSchema = z.object({
   }).strict(),
 }).strict();
 
+const ScoreDriftRecordWireSchema = z.object({
+  query_class: z.string().min(1),
+  heuristic_top3_entity_ids: z.array(z.string().min(1)).max(3),
+  ltr_top3_entity_ids: z.array(z.string().min(1)).max(3),
+  rank_order_changes: z.number().int().nonnegative(),
+  average_rerank_delta_normalized: z.number().finite(),
+  safety_envelope_blocks: z.number().int().nonnegative(),
+}).strict();
+
+const StructuredClarifyPayloadWireSchema = z.object({
+  kind: z.enum([
+    'anchor_disambiguation',
+    'constraint_conflict',
+    'preference_gap',
+    'budget_gap',
+  ]),
+  question: z.string().min(1),
+  options: z.array(z.string().min(1)).max(MAX_CLARIFICATION_CANDIDATES).optional(),
+  conflicting_atoms: z.tuple([z.string().min(1), z.string().min(1)]).optional(),
+  gap_description: z.string().min(1).optional(),
+}).strict();
+
+const TypedAbstainDecisionWireSchema = z.object({
+  should_abstain: z.literal(true),
+  reason: z.enum(['no_match', 'low_confidence', 'semantic_conflict', 'insufficient_evidence']),
+  detail: z.string().min(1),
+  recoverable_by: z.enum(['relax_constraints', 'clarify', 'retry_with_dense', 'split_query']).optional(),
+  conflicting_relations: z.array(ConstraintRelationWireSchema).max(MAX_AUDIT_CONSTRAINT_RELATIONS).optional(),
+  entropy: z.number().finite().optional(),
+  clarify_payload: StructuredClarifyPayloadWireSchema.optional(),
+}).strict();
+
 // ─── T-E5-01: AuditExtension typed surface ──────────────────────────────────
 //
 // Typed "enough" for client autocompletion and basic validation.
@@ -414,10 +504,10 @@ export const AuditExtensionSchema = z.object({
    * E2: Constraint resolution trace — atoms, relations, and outcomes.
    *
    * @stability debug
-   */
+  */
   constraint_resolution_trace: z.object({
-    atoms: z.array(z.unknown()).max(MAX_AUDIT_CONSTRAINT_ATOMS),
-    relations: z.array(z.unknown()).max(MAX_AUDIT_CONSTRAINT_RELATIONS),
+    atoms: z.array(ConstraintAtomWireSchema).max(MAX_AUDIT_CONSTRAINT_ATOMS),
+    relations: z.array(ConstraintRelationWireSchema).max(MAX_AUDIT_CONSTRAINT_RELATIONS),
     policy_outcomes: z.array(z.object({
       atom_index: z.number().int(),
       outcome: z.enum(['kept', 'dropped', 'shadowed']),
@@ -443,7 +533,7 @@ export const AuditExtensionSchema = z.object({
     post_rerank_top5: z.array(z.string()).max(MAX_AUDIT_RANKING_TOP_N),
     safety_envelope_blocks: z.number().int(),
     protected_candidate_evictions: z.number().int().optional(),
-    drift: z.unknown(),
+    drift: ScoreDriftRecordWireSchema,
   }).strict().optional(),
 
   /**
@@ -473,9 +563,9 @@ export const AuditExtensionSchema = z.object({
    */
   abstain_policy_trace: z.object({
     evaluated: z.boolean(),
-    decision: z.unknown(),
+    decision: z.union([z.literal(false), TypedAbstainDecisionWireSchema]),
     top_k_entropy: z.number().finite().optional(),
-    constraint_conflicts: z.array(z.unknown()).max(MAX_AUDIT_CONSTRAINT_RELATIONS).optional(),
+    constraint_conflicts: z.array(ConstraintRelationWireSchema).max(MAX_AUDIT_CONSTRAINT_RELATIONS).optional(),
     channel_degradation: z.object({
       dense_degraded: z.boolean(),
       anchor_degraded: z.boolean(),
@@ -514,12 +604,8 @@ export const AuditExtensionSchema = z.object({
       max_candidates: z.number().int(),
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),
-    provenance_policy: z.object({
-      require_identity_seal: z.boolean(),
-      require_constraint_evidence: z.boolean(),
-      require_anchor_evidence: z.boolean(),
-    }).strict().optional(),
-    provenance_closure: z.unknown().optional(),
+    provenance_policy: ProvenancePolicyWireSchema.optional(),
+    provenance_closure: ExecutionProvenanceClosureWireSchema.optional(),
   }).strict().optional(),
 
   /**
@@ -658,42 +744,8 @@ export const SearchResponseMetaSchema = z.object({
       max_candidates: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_CANDIDATES),
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),
-    provenance_policy: z.object({
-      require_identity_seal: z.boolean(),
-      require_constraint_evidence: z.boolean(),
-      require_anchor_evidence: z.boolean(),
-    }).strict().optional(),
-    provenance_closure: z.object({
-      policy: z.object({
-        require_identity_seal: z.boolean(),
-        require_constraint_evidence: z.boolean(),
-        require_anchor_evidence: z.boolean(),
-      }).strict(),
-      pre_rank: z.object({
-        candidate_count: z.number().int().nonnegative(),
-        identity_evidence_satisfied: z.boolean(),
-        constraint_evidence_satisfied: z.boolean(),
-        anchor_evidence_satisfied: z.boolean(),
-        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-      }).strict(),
-      post_rank: z.object({
-        candidate_count: z.number().int().nonnegative(),
-        identity_evidence_satisfied: z.boolean(),
-        constraint_evidence_satisfied: z.boolean(),
-        anchor_evidence_satisfied: z.boolean(),
-        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-      }).strict(),
-      missing: z.array(z.enum([
-        'identity_evidence',
-        'constraint_evidence',
-        'anchor_evidence',
-      ])).max(3),
-      satisfied: z.boolean(),
-    }).strict().optional(),
+    provenance_policy: ProvenancePolicyWireSchema.optional(),
+    provenance_closure: ExecutionProvenanceClosureWireSchema.optional(),
     admission_closure: z.object({
       required: z.object({
         identity_seal: z.boolean(),
@@ -709,31 +761,11 @@ export const SearchResponseMetaSchema = z.object({
     }).strict().optional(),
   }).strict().optional(),
   provenance_trace: z.object({
-    policy: z.object({
-      require_identity_seal: z.boolean(),
-      require_constraint_evidence: z.boolean(),
-      require_anchor_evidence: z.boolean(),
-    }).strict(),
+    policy: ProvenancePolicyWireSchema,
     observed: z.object({
       top_entity_present: z.boolean(),
-      pre_rank: z.object({
-        candidate_count: z.number().int().nonnegative(),
-        identity_evidence_satisfied: z.boolean(),
-        constraint_evidence_satisfied: z.boolean(),
-        anchor_evidence_satisfied: z.boolean(),
-        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-      }).strict(),
-      post_rank: z.object({
-        candidate_count: z.number().int().nonnegative(),
-        identity_evidence_satisfied: z.boolean(),
-        constraint_evidence_satisfied: z.boolean(),
-        anchor_evidence_satisfied: z.boolean(),
-        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
-      }).strict(),
+      pre_rank: ProvenanceCoverageStageWireSchema,
+      post_rank: ProvenanceCoverageStageWireSchema,
     }).strict(),
     missing: z.array(z.enum([
       'identity_evidence',

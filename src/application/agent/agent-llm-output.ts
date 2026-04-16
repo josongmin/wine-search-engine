@@ -1,4 +1,9 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import {
+  isKnownAgentToolName,
+  parseKnownAgentToolAttemptInput,
+  parseUnknownAgentToolAttemptInput,
+} from './agent-tool-attempt-schema.js';
 
 const log = bootstrapLogger.child({ component: 'AgentLlmOutput' });
 const LOG_PREVIEW_CHARS = 200;
@@ -71,6 +76,28 @@ export function parseLlmJsonObject(text: string): Record<string, unknown> | null
   }
 }
 
+function parseToolCallCandidate(candidate: Record<string, unknown>): {
+  readonly tool: string;
+  readonly input: Record<string, unknown>;
+} | null {
+  const tool = typeof candidate['tool'] === 'string' ? candidate['tool'] : '';
+  if (tool.length === 0) {
+    return null;
+  }
+
+  if (isKnownAgentToolName(tool)) {
+    const knownInput = parseKnownAgentToolAttemptInput(tool, candidate['input']);
+    return knownInput !== null ? { tool, input: knownInput } : null;
+  }
+
+  if (typeof candidate['input'] !== 'undefined') {
+    const unknownInput = parseUnknownAgentToolAttemptInput(candidate['input']);
+    return { tool, input: unknownInput };
+  }
+
+  return { tool, input: {} };
+}
+
 export function parseLlmOutput(text: string): LlmAction {
   try {
     const trimmed = text.trim();
@@ -104,16 +131,8 @@ export function parseLlmOutput(text: string): LlmAction {
     if (Array.isArray(actionsRaw) && actionsRaw.length > 0) {
       const validActions = (actionsRaw as unknown[])
         .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
-        .map((a) => ({
-          tool: typeof a['tool'] === 'string' ? a['tool'] : '',
-          input:
-            typeof a['input'] === 'object' && a['input'] !== null
-              ? (a['input'] as Record<string, unknown>)
-              : typeof a['input'] === 'string' && a['input'].length > 0
-                ? { query: a['input'] }
-                : {},
-        }))
-        .filter((a) => a.tool.length > 0);
+        .map(parseToolCallCandidate)
+        .filter((a): a is NonNullable<typeof a> => a !== null);
       if (validActions.length > 0) {
         return { thought, actions: validActions };
       }
@@ -124,28 +143,27 @@ export function parseLlmOutput(text: string): LlmAction {
       typeof rawAction === 'object' && rawAction !== null && !Array.isArray(rawAction)
         ? (rawAction as Record<string, unknown>)
         : undefined;
-    if (action !== undefined && typeof action['tool'] === 'string' && action['tool'].length > 0) {
-      const input =
-        typeof action['input'] === 'object' && action['input'] !== null
-          ? (action['input'] as Record<string, unknown>)
-          : typeof action['input'] === 'string' && action['input'].length > 0
-            ? { query: action['input'] }
-            : {};
-      return { thought, action: { tool: action['tool'], input } };
+    if (action !== undefined) {
+      const parsedAction = parseToolCallCandidate(action);
+      if (parsedAction !== null) {
+        return { thought, action: parsedAction };
+      }
     }
 
     if (typeof parsed['tool'] === 'string' && parsed['tool'].length > 0) {
-      const bareInput =
-        typeof parsed['input'] === 'object' && parsed['input'] !== null
-          ? (parsed['input'] as Record<string, unknown>)
-          : typeof parsed['input'] === 'string' && parsed['input'].length > 0
-            ? { query: parsed['input'] }
-            : {};
+      const bareAction = parseToolCallCandidate(parsed);
+      if (bareAction === null) {
+        log.warn(
+          { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
+          'agent LLM emitted invalid bare tool input; failing closed',
+        );
+        return { thought: '[unparseable LLM structure]', answer: trimmed };
+      }
       log.warn(
         { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
         'agent LLM emitted bare tool call (missing action wrapper); recovered',
       );
-      return { thought, action: { tool: parsed['tool'], input: bareInput } };
+      return { thought, action: bareAction };
     }
 
     log.warn(

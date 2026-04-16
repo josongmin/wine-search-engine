@@ -368,6 +368,100 @@ describe('Post-route AuditExtension derivation via runRankedRouteDecisionPhase',
     });
   });
 
+  it('emits typed execution_trace.provenance_closure when ranking metadata carries compiled provenance closure', async () => {
+    const rankingMetadata: RankingMetadata = {
+      coarsePruneSummary: undefined,
+      rerankExecuted: false,
+      rerankGateReason: undefined,
+      rerankDecision: undefined,
+      runtimeSignal: undefined,
+      preRerankTop5: ['e-1'],
+      provenanceClosure: {
+        policy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: false,
+        },
+        preRank: {
+          candidateCount: 12,
+          identityEvidenceSatisfied: true,
+          constraintEvidenceSatisfied: true,
+          anchorEvidenceSatisfied: true,
+          matchedConstraintAttributes: ['region'],
+          unmetConstraintAttributes: [],
+          anchorSignalTypes: [],
+        },
+        postRank: {
+          candidateCount: 5,
+          identityEvidenceSatisfied: true,
+          constraintEvidenceSatisfied: true,
+          anchorEvidenceSatisfied: true,
+          matchedConstraintAttributes: ['region'],
+          unmetConstraintAttributes: [],
+          anchorSignalTypes: [],
+        },
+        missing: [],
+        satisfied: true,
+      },
+    };
+    const ctx = makeBaseContext({ rankingMetadata });
+
+    await runRankedRouteDecisionPhase(ctx);
+
+    const audit = getAuditExtensionFromBuildCall(ctx);
+    expect(audit?.execution_trace?.provenance_closure).toBeDefined();
+    expect(audit!.execution_trace!.provenance_closure!.satisfied).toBe(true);
+    expect(audit!.execution_trace!.provenance_closure!.preRank.matchedConstraintAttributes).toEqual(['region']);
+  });
+
+  it('emits typed constraint_resolution_trace when planner trace is present and constraints produce relations', async () => {
+    const ctx = makeBaseContext({
+      plan: makeMinimalPlan({
+        constraints: {
+          hard: [
+            {
+              attribute: 'region',
+              operator: '=',
+              value: 'Bordeaux',
+              source_phrase: '보르도',
+              confidence: 0.99,
+            },
+            {
+              attribute: 'region',
+              operator: '=',
+              value: 'Burgundy',
+              source_phrase: '부르고뉴',
+              confidence: 0.97,
+            },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      }),
+      compiled: makeMinimalCompiled({
+        plannerTrace: [
+          {
+            stage: 'query_classification',
+            inputFacts: { rawQuery: '보르도 부르고뉴' },
+            rulesEvaluated: [],
+            rejectedBranches: [],
+            decision: 'pure_constraint',
+            confidence: 0.95,
+          },
+        ],
+      }),
+    });
+
+    await runRankedRouteDecisionPhase(ctx);
+
+    const audit = getAuditExtensionFromBuildCall(ctx);
+    expect(audit?.constraint_resolution_trace).toBeDefined();
+    expect(audit!.constraint_resolution_trace!.atoms).toHaveLength(2);
+    expect(audit!.constraint_resolution_trace!.relations).toHaveLength(1);
+    expect(audit!.constraint_resolution_trace!.relations[0]!.type).toBe('contradiction');
+    expect(audit!.constraint_resolution_trace!.policy_outcomes.some((outcome) => outcome.outcome === 'dropped')).toBe(true);
+  });
+
   it('emits retrieval_fusion_trace when retrievalFusionTrace is provided', async () => {
     const fusionTrace: RrfFusionTrace = {
       queryClass: 'pure_constraint',

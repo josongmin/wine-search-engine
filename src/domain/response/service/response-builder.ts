@@ -151,6 +151,12 @@ export interface ResponseBuildParams {
    * Two responses with the same fingerprint MUST produce identical rankings for the same index state.
    */
   readonly determinismFingerprintParams?: DeterminismFingerprintParams | undefined;
+
+  /**
+   * Per-stage latency snapshot from the request-scoped StageTimer.
+   * When present, attached verbatim to SearchResponseV1.stageTimings.
+   */
+  readonly stageTimings?: Readonly<Record<string, number>> | undefined;
 }
 
 /** Fixed-point precision for confidence in deterministic response hash. */
@@ -287,6 +293,9 @@ export class ResponseBuilder {
       retrievalMode,
       ...(resultType !== undefined ? { resultType } : {}),
       ...(parsedConstraints !== undefined ? { parsedConstraints } : {}),
+      ...(params.stageTimings !== undefined && Object.keys(params.stageTimings).length > 0
+        ? { stageTimings: params.stageTimings }
+        : {}),
     };
   }
 

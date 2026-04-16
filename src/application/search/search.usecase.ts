@@ -419,6 +419,8 @@ export class SearchUseCase {
         ? { criticRewrites }
         : {}),
       ...(criticRetriesExhausted === true ? { criticRetriesExhausted: true } : {}),
+      // Stage timing snapshot for the response (latency breakdown probe).
+      ...(stageTimer !== undefined ? { stageTimings: stageTimer.snapshot() } : {}),
       // Wire HTTP options.explain → includeCounterfactuals symmetrically:
       //   explain=true  → includeCounterfactuals=true (force on)
       //   explain=false → includeCounterfactuals=false (force off)

@@ -657,6 +657,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     const anchorHits = anchorResult.hits;
 
     // Step 4: Fuse via RRF
+    stageTimer?.start('retrieval.rrf_fusion');
     // Per-class fusion config is a foundation module (Epic-16 / T16-2) that
     // was standalone before this wire-up. getFusionConfig falls back to
     // DEFAULT_FUSION_CONFIG (k=60) for unknown classes, so the change is
@@ -673,6 +674,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       effectiveFusionK,
       learnedSparseHits,
     );
+    stageTimer?.end('retrieval.rrf_fusion');
     const countAfterFusion = candidates.length;
 
     // Enrich traces with pipeline context.
@@ -745,13 +747,16 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     );
 
     // Step 5: Apply hard constraint filter (with drop log for E4 audit).
+    stageTimer?.start('retrieval.hard_filter');
     const { filtered: hardFiltered, drops: hardFilterDrops } =
       this.constraintFilter.applyHardFiltersWithDropLog(candidates, input.hardConstraints);
     candidates = [...hardFiltered];
     this._lastDropLog = hardFilterDrops;
     const countAfterHardFilter = candidates.length;
+    stageTimer?.end('retrieval.hard_filter');
 
     // Step 6: Structured assembly + protected recall.
+    stageTimer?.start('retrieval.candidate_assembly');
     const envelopes = candidates.map((candidate) =>
       hybridCandidateToEnvelope(candidate, effectiveFusionK));
     const protectedCandidates = applyProtectedRecallPolicy(envelopes);
@@ -760,6 +765,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       accumulated.map((entry) => entry.mergedEnvelope),
       buildAssemblyPolicy(profile.finalTopK),
     );
+
+    stageTimer?.end('retrieval.candidate_assembly');
 
     // Critic-facing structured degradation codes are derived from
     // production-observable pool states rather than log strings:

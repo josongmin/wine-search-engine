@@ -13,9 +13,13 @@ import { describe, it, expect } from 'vitest';
 import {
   ClaudeToolDefinitionSchema,
   CompareWinesInputSchema,
+  CompareWinesAttemptInputSchema,
   DrinkingWindowInputSchema,
+  DrinkingWindowAttemptInputSchema,
   FoodPairingInputSchema,
+  FoodPairingAttemptInputSchema,
   SearchToolInputSchema,
+  SearchToolAttemptInputSchema,
   WINE_SEARCH_TOOLS,
 } from '../../../../src/interface/claude-tools/tool-schemas.js';
 
@@ -233,6 +237,36 @@ describe('Claude tool input schemas', () => {
       query_a: 'Opus One 2018',
       query_b: 'Sassicaia 2018',
       extra: 'nope',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('search_wines attempt schema should reject non-string-array exclude_grapes', () => {
+    const parsed = SearchToolAttemptInputSchema.safeParse({
+      query: 'Opus One 2018',
+      exclude_grapes: [1, 2],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('get_food_pairings attempt schema should reject non-string food', () => {
+    const parsed = FoodPairingAttemptInputSchema.safeParse({
+      food: 123,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('check_drinking_window attempt schema should reject non-string entity_id', () => {
+    const parsed = DrinkingWindowAttemptInputSchema.safeParse({
+      entity_id: { nested: 'bad' },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('compare_wines attempt schema should reject non-string query fields', () => {
+    const parsed = CompareWinesAttemptInputSchema.safeParse({
+      query_a: ['Opus One'],
+      query_b: 'Sassicaia',
     });
     expect(parsed.success).toBe(false);
   });

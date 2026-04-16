@@ -1157,6 +1157,9 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
         const evidenceFrameCount = result.evidenceFrames?.length ?? 0;
 
+        // Extract pipeline stage timings from the first successful search response.
+        const searchStageTimings = result.searchResults?.stageTimings;
+
         const execution: ScenarioExecution = {
           answer: result.answer,
           stepCount: result.steps.length,
@@ -1167,6 +1170,9 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           totalDurationMs: result.totalDurationMs,
           totalTokens: result.totalTokens,
           ...(result.evidenceFrames !== undefined ? { evidenceFrameCount } : {}),
+          ...(searchStageTimings !== undefined && Object.keys(searchStageTimings).length > 0
+            ? { stageTimings: searchStageTimings }
+            : {}),
         };
 
         // Map AgentStep[] → StepTrace[] for triage profiling in the result JSON.
@@ -1643,6 +1649,34 @@ function buildReport(
           evidenceFrameCounts: { framedToolCalls, totalToolCalls },
         };
       })(),
+      // Pipeline stage latency breakdown: median and p95 per stage across all
+      // scenarios that reported stageTimings. Lets operators pinpoint which
+      // pipeline stage drives latency regressions without guessing.
+      ...(() => {
+        const allTimings = executed
+          .map((r) => r.stageTimings)
+          .filter((t): t is Readonly<Record<string, number>> => t !== undefined);
+        if (allTimings.length === 0) return {};
+        const stageKeys = [...new Set(allTimings.flatMap((t) => Object.keys(t)))].sort();
+        const stageMedians: Record<string, number> = {};
+        const stageP95s: Record<string, number> = {};
+        for (const key of stageKeys) {
+          const vals = allTimings
+            .map((t) => t[key])
+            .filter((v): v is number => v !== undefined)
+            .sort((a, b) => a - b);
+          if (vals.length === 0) continue;
+          stageMedians[key] = vals[Math.floor(vals.length / 2)]!;
+          stageP95s[key] = vals[Math.floor(vals.length * 0.95)]!;
+        }
+        return {
+          latencyBreakdown: {
+            stageMedians,
+            stageP95s,
+            scenarioCount: allTimings.length,
+          },
+        };
+      })(),
     },
   };
 }
@@ -1850,6 +1884,18 @@ async function main(): Promise<void> {
   console.error(`  Tokens in:    ${s.tokens.inputMean.toFixed(0)} mean`);
   console.error(`  Tokens out:   ${s.tokens.outputMean.toFixed(0)} mean`);
   console.error(`  Tokens p95:   ${s.tokens.totalP95.toFixed(0)} total`);
+  // ────── pipeline stage latency breakdown ──────
+  const lb = (s as Record<string, unknown>)['latencyBreakdown'] as
+    | { stageMedians: Record<string, number>; stageP95s: Record<string, number>; scenarioCount: number }
+    | undefined;
+  if (lb !== undefined && lb.scenarioCount > 0) {
+    console.error(`  ────── latency breakdown (median ms, n=${lb.scenarioCount}) ──────`);
+    const sorted = Object.entries(lb.stageMedians).sort((a, b) => b[1] - a[1]);
+    for (const [stage, median] of sorted) {
+      const p95 = lb.stageP95s[stage] ?? 0;
+      console.error(`  ${stage.padEnd(35)} ${String(Math.round(median)).padStart(6)}ms  (p95: ${Math.round(p95)}ms)`);
+    }
+  }
   console.error('  ────── by tier ─────────');
   const sortedTiers = Object.entries(s.byTier).sort((a, b) => b[1].avgScore - a[1].avgScore);
   for (const [tier, data] of sortedTiers) {

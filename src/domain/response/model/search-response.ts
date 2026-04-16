@@ -81,4 +81,12 @@ export interface SearchResponseV1 {
    * Omitted if no constraints were present in the query.
    */
   readonly parsedConstraints?: ParsedConstraintsExtern | undefined;
+
+  /**
+   * Per-stage latency breakdown from the StageTimer, in milliseconds.
+   * Populated when a StageTimer was active during the request.
+   * Keys follow the stage naming convention: `search.total`, `retrieval.sparse_bm25`, etc.
+   * Only present in responses built through the main search pipeline.
+   */
+  readonly stageTimings?: Readonly<Record<string, number>> | undefined;
 }

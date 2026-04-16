@@ -431,6 +431,8 @@ export async function executeHybridRouteRankingPipeline(
   requestContext?: RequestExecutionContext,
   anchorEntityId?: CanonicalEntityId,
 ): Promise<SearchRouteExecutionResult> {
+  const stageTimer = requestContext?.stageTimer;
+  stageTimer?.start('hybrid.retrieval');
   const retrieval = await retrieveHybridCandidatesForPlan(
     plan,
     {
@@ -443,6 +445,9 @@ export async function executeHybridRouteRankingPipeline(
     requestContext,
     anchorEntityId,
   );
+  stageTimer?.end('hybrid.retrieval');
+
+  stageTimer?.start('hybrid.ranking');
   const ranked = await runHybridRankingPipeline(
     plan,
     retrieval.candidates,
@@ -450,9 +455,11 @@ export async function executeHybridRouteRankingPipeline(
     compiled,
     retrieval.retrievalProvenanceCoverage,
   );
+  stageTimer?.end('hybrid.ranking');
 
   // No-result recovery: attempt progressive constraint relaxation.
   if (ranked.rankedResults.length === 0 && plan.constraints.hard.length > 0) {
+    stageTimer?.start('hybrid.constraint_relaxation');
     const ladder = buildRelaxationLadder(plan.constraints);
     const stepsToTry = ladder.slice(0, MAX_RELAXATION_STEPS);
     let abortedDuringRelaxation = false;
@@ -523,6 +530,7 @@ export async function executeHybridRouteRankingPipeline(
       );
 
       if (relaxedRanked.rankedResults.length > 0) {
+        stageTimer?.end('hybrid.constraint_relaxation');
         pipelineDebug(
           {
             step: 'retrieval.constraint_relaxation.success',
@@ -572,9 +580,11 @@ export async function executeHybridRouteRankingPipeline(
     // already cancelled is incorrect — propagate the abort so the error handler
     // can close the connection cleanly.
     if (abortedDuringRelaxation) {
+      stageTimer?.end('hybrid.constraint_relaxation');
       throwIfAborted(requestContext?.abortSignal, 'Hybrid route ranking pipeline aborted during constraint relaxation');
     }
 
+    stageTimer?.end('hybrid.constraint_relaxation');
     // All relaxation steps exhausted — signal that recovery was attempted but failed.
     // This surfaces as a degradation reason so response builders can log/alert.
     if (stepsToTry.length > 0) {
@@ -604,6 +614,12 @@ export async function executeHybridRouteRankingPipeline(
       };
     }
   }
+
+  // Note: stageTimer.end called here covers ALL exit paths from the relaxation block
+  // (success-with-results, abort, and all-steps-exhausted all return above, so
+  // this line only executes for the "entered the block but stepsToTry was empty"
+  // edge case, which is fine — start/end are idempotent on missing names).
+  stageTimer?.end('hybrid.constraint_relaxation');
 
   // Normal (non-relaxation) path — merge retrieval + ranking degradations.
   if (retrieval.routeDegradation === undefined) {

@@ -387,7 +387,11 @@ describe('SearchResponseSchema', () => {
         audit_extension: {
           abstain_policy_trace: {
             evaluated: true,
-            decision: { should_abstain: true, reason: 'low_confidence' },
+            decision: {
+              should_abstain: true,
+              reason: 'low_confidence',
+              detail: 'Top-k entropy is too high to resolve safely',
+            },
             channel_degradation: {
               dense_degraded: false,
               anchor_degraded: false,
@@ -400,6 +404,204 @@ describe('SearchResponseSchema', () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it('accepts typed abstain_policy_trace decision and ranking_delta_trace drift inside audit_extension', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          abstain_policy_trace: {
+            evaluated: true,
+            decision: {
+              should_abstain: true,
+              reason: 'semantic_conflict',
+              detail: 'Soft constraints conflict with each other',
+              recoverable_by: 'clarify',
+              conflicting_relations: [
+                {
+                  type: 'soft_tension',
+                  atom_index_a: 0,
+                  atom_index_b: 1,
+                  explanation: 'sweetness and bone-dry preference conflict',
+                },
+              ],
+              clarify_payload: {
+                kind: 'constraint_conflict',
+                question: '어느 쪽 취향을 더 우선할까요?',
+                conflicting_atoms: ['sweetness', 'dryness'],
+              },
+            },
+            top_k_entropy: 0.92,
+            constraint_conflicts: [
+              {
+                type: 'soft_tension',
+                atom_index_a: 0,
+                atom_index_b: 1,
+                explanation: 'sweetness and bone-dry preference conflict',
+              },
+            ],
+            channel_degradation: {
+              dense_degraded: false,
+              anchor_degraded: false,
+              sparse_degraded: false,
+              sparse_zero_hits: false,
+            },
+          },
+          ranking_delta_trace: {
+            pre_rerank_top5: ['wine:a', 'wine:b'],
+            post_rerank_top5: ['wine:b', 'wine:a'],
+            safety_envelope_blocks: 1,
+            drift: {
+              query_class: 'semantic_preference',
+              heuristic_top3_entity_ids: ['wine:a', 'wine:b'],
+              ltr_top3_entity_ids: ['wine:b', 'wine:a'],
+              rank_order_changes: 1,
+              average_rerank_delta_normalized: 0.12,
+              safety_envelope_blocks: 1,
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts typed constraint_resolution_trace and execution provenance closure inside audit_extension', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          constraint_resolution_trace: {
+            atoms: [
+              {
+                attribute: 'region',
+                operator: '=',
+                value: 'Bordeaux',
+                source_phrase: '보르도',
+                confidence: 0.98,
+                source_tier: 'hard',
+                source_kind: 'explicit_utterance',
+                authority_level: 100,
+                semantic_scope: 'intrinsic',
+                conflict_policy: 'strict',
+                constraint_role: 'must_satisfy',
+              },
+            ],
+            relations: [
+              {
+                type: 'subsumption',
+                atom_index_a: 0,
+                atom_index_b: 1,
+                explanation: 'region Bordeaux subsumes Pauillac',
+              },
+            ],
+            policy_outcomes: [
+              {
+                atom_index: 0,
+                outcome: 'kept',
+                reason: 'highest authority hard constraint',
+              },
+            ],
+          },
+          execution_trace: {
+            effective_route: 'hybrid',
+            provenance_policy: {
+              require_identity_seal: false,
+              require_constraint_evidence: true,
+              require_anchor_evidence: false,
+            },
+            provenance_closure: {
+              policy: {
+                require_identity_seal: false,
+                require_constraint_evidence: true,
+                require_anchor_evidence: false,
+              },
+              pre_rank: {
+                candidate_count: 12,
+                identity_evidence_satisfied: true,
+                constraint_evidence_satisfied: true,
+                anchor_evidence_satisfied: true,
+                matched_constraint_attributes: ['region'],
+                unmet_constraint_attributes: [],
+                anchor_signal_types: [],
+              },
+              post_rank: {
+                candidate_count: 5,
+                identity_evidence_satisfied: true,
+                constraint_evidence_satisfied: true,
+                anchor_evidence_satisfied: true,
+                matched_constraint_attributes: ['region'],
+                unmet_constraint_attributes: [],
+                anchor_signal_types: [],
+              },
+              missing: [],
+              satisfied: true,
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects unknown nested keys inside typed constraint_resolution_trace entries', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          constraint_resolution_trace: {
+            atoms: [
+              {
+                attribute: 'region',
+                operator: '=',
+                value: 'Bordeaux',
+                source_phrase: '보르도',
+                confidence: 0.98,
+                source_tier: 'hard',
+                source_kind: 'explicit_utterance',
+                authority_level: 100,
+                semantic_scope: 'intrinsic',
+                conflict_policy: 'strict',
+                constraint_role: 'must_satisfy',
+                extra_flag: true,
+              },
+            ],
+            relations: [],
+            policy_outcomes: [],
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects unknown nested keys inside typed abstain decision payloads', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          abstain_policy_trace: {
+            evaluated: true,
+            decision: {
+              should_abstain: true,
+              reason: 'low_confidence',
+              detail: 'Entropy too high',
+              rogue_key: 'nope',
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
   });
 
   it('EntitySummarySchema accepts lineage keys after deepKeysToSnake from domain camelCase', () => {

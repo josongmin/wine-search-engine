@@ -50,6 +50,12 @@ import {
   buildSearchToolQueryField,
   validateSearchToolVintageRange,
 } from '../../application/search/search-tool-contract.js';
+export {
+  CompareWinesAttemptInputSchema,
+  DrinkingWindowAttemptInputSchema,
+  FoodPairingAttemptInputSchema,
+  SearchToolAttemptInputSchema,
+} from '../../application/agent/agent-tool-attempt-schema.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -158,41 +164,6 @@ export const CompareWinesInputSchema = z.object({
     maxLen: SEARCH_TOOL_QUERY_MAX_LEN,
     requiredMessage: 'Query B must not be empty',
   }),
-}).strict();
-
-export const SearchToolAttemptInputSchema = z.object({
-  query: z.unknown().optional(),
-  limit: z.unknown().optional(),
-  retrieval_mode: z.unknown().optional(),
-  exclude_grapes: z.unknown().optional(),
-  exclude_regions: z.unknown().optional(),
-  max_price_krw: z.unknown().optional(),
-  wine_type: z.unknown().optional(),
-  country: z.unknown().optional(),
-  vintage_min: z.unknown().optional(),
-  vintage_max: z.unknown().optional(),
-  appellation: z.unknown().optional(),
-  style: z.unknown().optional(),
-  styles: z.unknown().optional(),
-  certification: z.unknown().optional(),
-  want_diversity: z.unknown().optional(),
-}).strict();
-
-export const FoodPairingAttemptInputSchema = z.object({
-  food: z.unknown().optional(),
-  max_price: z.unknown().optional(),
-  max_price_krw: z.unknown().optional(),
-  color: z.unknown().optional(),
-}).strict();
-
-export const DrinkingWindowAttemptInputSchema = z.object({
-  entity_id: z.unknown().optional(),
-  target_year: z.unknown().optional(),
-}).strict();
-
-export const CompareWinesAttemptInputSchema = z.object({
-  query_a: z.unknown().optional(),
-  query_b: z.unknown().optional(),
 }).strict();
 
 /**

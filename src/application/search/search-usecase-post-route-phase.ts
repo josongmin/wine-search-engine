@@ -541,6 +541,11 @@ interface SearchPostRouteExecutionContext {
    */
   readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
   readonly criticRetriesExhausted?: boolean | undefined;
+  /**
+   * Per-stage latency snapshot from the request-scoped StageTimer.
+   * Threaded to ResponseBuilder so it can be included in SearchResponseV1.
+   */
+  readonly stageTimings?: Readonly<Record<string, number>> | undefined;
 }
 
 export interface RankedRouteDecisionPhaseContext {
@@ -604,6 +609,11 @@ export interface RankedRouteDecisionPhaseContext {
    */
   readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
   readonly criticRetriesExhausted?: boolean | undefined;
+  /**
+   * Per-stage latency snapshot from the request-scoped StageTimer.
+   * Threaded to ResponseBuilder so it can be included in SearchResponseV1.
+   */
+  readonly stageTimings?: Readonly<Record<string, number>> | undefined;
 }
 
 function assertSearchRouteExecutionFacts(
@@ -894,6 +904,7 @@ export async function runRankedRouteDecisionPhase(
         ctx.compiled,
         ctx.rankingMetadata,
       ),
+      ...(ctx.stageTimings !== undefined ? { stageTimings: ctx.stageTimings } : {}),
     });
   } catch (buildErr) {
     if (buildErr instanceof EvidenceObligationError) {
@@ -1158,6 +1169,7 @@ export async function runSearchPostRoutePhase(
             ctx.compiled,
             ctx.rankingMetadata,
           ),
+          ...(ctx.stageTimings !== undefined ? { stageTimings: ctx.stageTimings } : {}),
         },
       );
     } catch (buildErr) {
@@ -1239,6 +1251,7 @@ export async function runSearchPostRoutePhase(
         ? { criticRewrites: ctx.criticRewrites }
         : {}),
       ...(ctx.criticRetriesExhausted === true ? { criticRetriesExhausted: true } : {}),
+      ...(ctx.stageTimings !== undefined ? { stageTimings: ctx.stageTimings } : {}),
     });
   }
 

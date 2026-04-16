@@ -692,24 +692,26 @@ export class VespaClient {
     let successCount = 0;
     let failureCount = 0;
     const errors: string[] = [];
-
-    const results = await Promise.allSettled(
-      docs.map((doc) => this.put(doc.id, doc.fields)),
-    );
-
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i];
-      if (result === undefined) continue;
-      if (result.status === 'fulfilled') {
-        successCount++;
-      } else {
-        failureCount++;
-        const docId = docs[i]?.id ?? `index:${i}`;
-        errors.push(
-          `doc[${docId}]: ${extractErrorMessage(result.reason)}`,
-        );
+    const concurrency = Math.max(1, Math.min(VESPA_DOCUMENT_CONNECTIONS, docs.length));
+    let nextIndex = 0;
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (nextIndex < docs.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const doc = docs[currentIndex];
+        if (doc === undefined) {
+          continue;
+        }
+        try {
+          await this.put(doc.id, doc.fields);
+          successCount += 1;
+        } catch (error) {
+          failureCount += 1;
+          errors.push(`doc[${doc.id}]: ${extractErrorMessage(error)}`);
+        }
       }
-    }
+    });
+    await Promise.all(workers);
 
     return { successCount, failureCount, errors };
   }

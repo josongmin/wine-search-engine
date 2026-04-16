@@ -76,6 +76,13 @@ export interface ScenarioExecution {
    * the bench summary aggregates this into `evidenceFrameCoverage`.
    */
   readonly evidenceFrameCount?: number | undefined;
+  /**
+   * Per-pipeline-stage timing snapshot from the first successful search call.
+   * Keys are stage names (e.g. 'search.total', 'retrieval.parallel_fanout',
+   * 'retrieval.dense_semantic'). Values are elapsed ms (performance.now precision).
+   * Absent when no search tool call produced stageTimings.
+   */
+  readonly stageTimings?: Readonly<Record<string, number>> | undefined;
 }
 
 /**

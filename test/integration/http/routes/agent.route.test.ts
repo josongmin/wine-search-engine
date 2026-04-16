@@ -228,4 +228,44 @@ describe('POST /v1/agent', () => {
     expect(body.error.code).toBe('INTERNAL_ERROR');
     expect(body.error.request_id).toEqual(expect.any(String));
   });
+
+  it('fails closed when a known tool trace contains invalid input value types', async () => {
+    deps.agentOrchestrator.execute = vi.fn().mockResolvedValue({
+      answer: 'bad typed trace',
+      steps: [
+        {
+          index: 0,
+          thought: 'search',
+          action: {
+            tool: 'search_wines',
+            input: { query: 'opus one', exclude_grapes: [1, 2] },
+          },
+          observation: 'Found 1 result',
+          durationMs: 2,
+          tokenCount: { input: 1, output: 1 },
+        },
+      ],
+      totalDurationMs: 2,
+      totalTokens: { input: 1, output: 1 },
+      toolCallCount: 1,
+      fallbackApplied: false,
+      terminationReason: 'answer',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/agent',
+      headers: { 'content-type': 'application/json', 'x-request-id': 'req-bad-typed-trace' },
+      payload: {
+        query: 'test bad typed trace',
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    const body = response.json() as {
+      error: { code: string; request_id: string };
+    };
+    expect(body.error.code).toBe('INTERNAL_ERROR');
+    expect(body.error.request_id).toEqual(expect.any(String));
+  });
 });
