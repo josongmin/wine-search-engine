@@ -15,14 +15,14 @@ import { describe, it, expect } from 'vitest';
 // ---------------------------------------------------------------------------
 
 describe('EMPTY_ANSWER fallback regression — synthesis timeout constant', () => {
-  it('R-EMPTY-01: SYNTHESIS_TIMEOUT_MS exported from orchestrator is at least 12000ms', async () => {
+  it('R-EMPTY-01: SYNTHESIS_TIMEOUT_MS exported from synthesis runner is at least 12000ms', async () => {
     // We test the value indirectly by importing the module and verifying the
     // constant is accessible (and not the old 8000ms value). The orchestrator
     // does not export it publicly, so we verify via side-channel:
     // Read the source file and check the literal.
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url),
       'utf-8',
     );
     // Must contain the named const at module scope with a value >= 12_000.
@@ -73,16 +73,14 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
   it('R-EMPTY-05: synthesis failure logs at error level (not warn)', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url),
       'utf-8',
     );
-    // After fix: synthesis failure must log.error (not log.warn).
-    // There are now 2 separate catch blocks (attempt 1 + attempt 2), both must use log.error.
-    // Verify no log.warn for synthesis failures.
-    expect(src).toMatch(/synthesis attempt.*threw.*\n.*log\.error/s);
-    // Negative assertion: "synthesis attempt N threw" must not be followed immediately by log.warn.
-    // Uses a non-greedy match (.*?) to prevent DOTALL from spanning thousands of lines.
-    expect(src).not.toMatch(/synthesis attempt \d+ threw.*?\n.*?log\.warn/s);
+    // After fix: both retry catch blocks must log.error, never log.warn.
+    expect(src).toMatch(/log\.error\(\{ err: synthErr1, requestId \}, `synthesis retry attempt 1 failed/);
+    expect(src).toMatch(/log\.error\(\{ err: synthErr2, requestId \}, 'synthesis retry attempt 2 failed/);
+    expect(src).not.toMatch(/log\.warn\(\{ err: synthErr1, requestId \}/);
+    expect(src).not.toMatch(/log\.warn\(\{ err: synthErr2, requestId \}/);
   });
 
   it('R-EMPTY-06: fallback search failure logs at error level (not warn)', async () => {
@@ -194,19 +192,19 @@ describe('EMPTY_ANSWER fallback regression — prompt seam separation', () => {
     expect(src).toMatch(/export function buildSystemMessage/);
   });
 
-  it('R-EMPTY-13: planner phase uses planner prompt and orchestrator uses synthesis prompt', async () => {
+  it('R-EMPTY-13: planner phase uses planner prompt and synthesis runner uses synthesis prompt', async () => {
     const fs = await import('fs');
     const plannerSrc = fs.readFileSync(
       new URL('../../src/application/agent/agent-planner-phase-runner.ts', import.meta.url),
       'utf-8',
     );
-    const orchestratorSrc = fs.readFileSync(
-      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+    const synthesisSrc = fs.readFileSync(
+      new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url),
       'utf-8',
     );
     expect(plannerSrc).toMatch(/buildPlannerSystemMessage\(\)/);
-    expect(orchestratorSrc).toMatch(/buildSynthesisSystemMessage\(\)/);
+    expect(synthesisSrc).toMatch(/buildSynthesisSystemMessage\(\)/);
     expect(plannerSrc).not.toMatch(/buildSystemMessage\(\)/);
-    expect(orchestratorSrc).not.toMatch(/buildSystemMessage\(\)/);
+    expect(synthesisSrc).not.toMatch(/buildSystemMessage\(\)/);
   });
 });
