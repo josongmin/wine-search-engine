@@ -71,6 +71,12 @@ export interface ModeWeightProfile {
 
   /** Maps to ScoringWeights.multilingualScore. */
   readonly multilingualScoreWeight: number;
+
+  /** Maps to ScoringWeights.giftSuitability (Track C learned facet). */
+  readonly giftSuitabilityWeight: number;
+
+  /** Maps to ScoringWeights.beginnerSuitability (Track C learned facet). */
+  readonly beginnerSuitabilityWeight: number;
 }
 
 /**
@@ -91,6 +97,8 @@ export const DEFAULT_WEIGHTS: ModeWeightProfile = {
   availabilityWeight: 0.0,
   criticScoreWeight: 0.0,
   multilingualScoreWeight: 0.0,
+  giftSuitabilityWeight: 0.0,
+  beginnerSuitabilityWeight: 0.0,
 };
 
 /**
@@ -113,6 +121,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Ambiguous entity: boost confidence thresholds ===
@@ -129,6 +139,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Attribute search: balance text + semantic ===
@@ -145,6 +157,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Constraint filtering: favor constraint adherence ===
@@ -161,6 +175,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Producer browse: prestige-aware. Diversity (avoid same-vintage
@@ -179,6 +195,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.05,            // Critic score secondary for browse
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Region browse: geographic emphasis is encoded in the retrieval
@@ -196,6 +214,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Comparison: entity integrity paramount ===
@@ -212,6 +232,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.10,            // Critic score key for comparison
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Recommendation/pairing: preference & occasion focus ===
@@ -228,6 +250,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.10,           // Quality signals for recommendations
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === Similar items: anchor-based similarity. Anchor-duplicate diversity
@@ -245,6 +269,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 
   // === No match: fallback (should rarely be reached in ranking) ===
@@ -261,6 +287,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.0,
     multilingualScoreWeight: 0.0,
+    giftSuitabilityWeight: 0.0,
+    beginnerSuitabilityWeight: 0.0,
   },
 };
 
@@ -298,6 +326,8 @@ export const MODE_WEIGHT_OVERLAY_MAP: ReadonlyArray<{
   { modeField: 'recencyWeight', scoringField: 'recency' },
   { modeField: 'criticScoreWeight', scoringField: 'criticScore' },
   { modeField: 'multilingualScoreWeight', scoringField: 'multilingualScore' },
+  { modeField: 'giftSuitabilityWeight', scoringField: 'giftSuitability' },
+  { modeField: 'beginnerSuitabilityWeight', scoringField: 'beginnerSuitability' },
 ] as const;
 
 /**

@@ -25,7 +25,9 @@ function nonPenaltySum(w: ScoringWeights): number {
     w.producerPrestige +
     w.recency +
     w.criticScore +
-    w.multilingualScore
+    w.multilingualScore +
+    w.giftSuitability +
+    w.beginnerSuitability
   );
 }
 
@@ -359,6 +361,8 @@ describe('modeNormFactor baseSum=0 guard (Bug 3 regression)', () => {
     recency: 0,
     criticScore: 0,
     multilingualScore: 0,
+    giftSuitability: 0,
+    beginnerSuitability: 0,
   };
 
   it('returns finite weights (not 0 or Infinity) when baseSum is 0', () => {

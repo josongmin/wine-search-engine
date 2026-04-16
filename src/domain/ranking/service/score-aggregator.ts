@@ -95,6 +95,8 @@ export class ScoreAggregator {
     score += add('recency', signals.recency, weights.recency);
     score += add('criticScore', signals.criticScore, weights.criticScore);
     score += add('multilingualScore', signals.multilingualScore, weights.multilingualScore);
+    score += add('giftSuitability', signals.giftSuitability, weights.giftSuitability);
+    score += add('beginnerSuitability', signals.beginnerSuitability, weights.beginnerSuitability);
 
     // Uncertainty penalty is subtracted. Same contract: undefined skips,
     // NaN/Infinity throws.
@@ -132,6 +134,8 @@ function snapshotOf(signals: ComponentScores): Readonly<Record<string, unknown>>
     recency: signals.recency,
     criticScore: signals.criticScore,
     multilingualScore: signals.multilingualScore,
+    giftSuitability: signals.giftSuitability,
+    beginnerSuitability: signals.beginnerSuitability,
     uncertaintyPenalty: signals.uncertaintyPenalty,
     hardConstraintPass: signals.hardConstraintPass,
   };

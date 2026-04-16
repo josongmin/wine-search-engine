@@ -157,6 +157,11 @@ export interface HybridCandidate {
   /** Numeric price band: 1=value, 2=mid, 3=premium, 4=luxury. */
   readonly priceBandNumeric?: number | undefined;
 
+  /** Gift suitability score from the learned facet (Track C Step 6). */
+  readonly giftSuitabilityScore?: number | undefined;
+  /** Beginner suitability score from the learned facet (Track C Step 7). */
+  readonly beginnerSuitabilityScore?: number | undefined;
+
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
   /** Raw BM25 score from sparse retrieval pass. */

@@ -239,6 +239,10 @@ function resolveCandidateValue(
       // Constraint matching uses 'in' semantics: the candidate satisfies the constraint
       // if ANY of its flavor profiles matches the constraint value.
       return candidate.flavorProfiles;
+    case 'gift_suitability':
+      return candidate.giftSuitabilityScore;
+    case 'beginner_suitability':
+      return candidate.beginnerSuitabilityScore;
     case 'fruit_intensity':
       // fruit_intensity has no backing field in HybridCandidate or Vespa schema.
       // Return undefined so the caller (annotateCandidateConstraintEvidence) can detect

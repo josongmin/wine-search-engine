@@ -54,6 +54,8 @@ export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entit
   readonly grapeFamily?: string | undefined;
   readonly regionHierarchy?: readonly string[] | undefined;
   readonly priceBandNumeric?: number | undefined;
+  readonly giftSuitabilityScore?: number | undefined;
+  readonly beginnerSuitabilityScore?: number | undefined;
 }
 
 export const RETRIEVAL_HIT_SUMMARY_KEYS = [
@@ -91,6 +93,8 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'grapeFamily',
   'regionHierarchy',
   'priceBandNumeric',
+  'giftSuitabilityScore',
+  'beginnerSuitabilityScore',
 ] as const satisfies readonly (keyof RetrievalHitSummary)[];
 
 export type RetrievalHitSummaryKey = (typeof RETRIEVAL_HIT_SUMMARY_KEYS)[number];

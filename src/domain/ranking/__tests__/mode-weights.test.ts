@@ -32,6 +32,8 @@ const REQUIRED_WEIGHT_FIELDS: ReadonlyArray<keyof ModeWeightProfile> = [
   'availabilityWeight',
   'criticScoreWeight',
   'multilingualScoreWeight',
+  'giftSuitabilityWeight',
+  'beginnerSuitabilityWeight',
 ] as const;
 
 describe('getModeWeights', () => {

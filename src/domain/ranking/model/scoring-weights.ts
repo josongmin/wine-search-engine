@@ -67,6 +67,12 @@ export interface ScoringWeights {
 
   /** Weight for multilingual (Korean) match signal. */
   readonly multilingualScore: number;
+
+  /** Weight for gift suitability signal (situation_based queries with gift intent). */
+  readonly giftSuitability: number;
+
+  /** Weight for beginner suitability signal (situation_based queries with beginner intent). */
+  readonly beginnerSuitability: number;
 }
 
 /**
@@ -93,6 +99,8 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
   recency: 0.0,
   criticScore: 0.0,
   multilingualScore: 0.0,
+  giftSuitability: 0.0,
+  beginnerSuitability: 0.0,
 } as const;
 
 /**
@@ -118,6 +126,8 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.0,
     criticScore: 0.0,
     multilingualScore: 0.05,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   pure_constraint: {
     softConstraint: 0.30,
@@ -132,20 +142,24 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.0,
     criticScore: 0.05,
     multilingualScore: 0.0,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   semantic_preference: {
-    semantic: 0.25,
+    semantic: 0.22,        // reduced from 0.25 to compensate for gift/beginner facets
     preferenceAlignment: 0.20,
     softConstraint: 0.10,
     attributeAlignment: 0.10,
     entityIntegrity: 0.10,
-    popularity: 0.03,
+    popularity: 0.01,      // reduced from 0.03 to compensate for gift/beginner facets
     availability: 0.05,
     uncertaintyPenalty: 0.05,
     producerPrestige: 0.02,
     recency: 0.0,
-    criticScore: 0.10,   // critic score boosts quality-preference queries
+    criticScore: 0.10,     // critic score boosts quality-preference queries
     multilingualScore: 0.05,
+    giftSuitability: 0.05,
+    beginnerSuitability: 0.05,
   },
   short_entity: {
     entityIntegrity: 0.30,
@@ -160,6 +174,8 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.0,
     criticScore: 0.0,
     multilingualScore: 0.0,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   // exact_entity: fully specified lookup — same weight profile as short_entity;
   // entity integrity and attribute alignment dominate.
@@ -176,6 +192,8 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.0,
     criticScore: 0.0,
     multilingualScore: 0.0,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   ambiguous_short_form: {
     entityIntegrity: 0.25,
@@ -190,6 +208,8 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.0,
     criticScore: 0.0,
     multilingualScore: 0.0,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   comparison_query: {
     entityIntegrity: 0.20,
@@ -204,6 +224,8 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.05,           // vintage recency relevant for comparison
     criticScore: 0.10,       // critic score is key for comparison queries
     multilingualScore: 0.0,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
 } as const;
 
@@ -284,6 +306,9 @@ export function resolveChannelAwareWeights(
   const recency = baseWeights.recency;
   const criticScore = baseWeights.criticScore;
   const multilingualScore = baseWeights.multilingualScore;
+  // Track C learned facet signals — not channel-adjusted (domain signals from ETL)
+  const giftSuitability = baseWeights.giftSuitability;
+  const beginnerSuitability = baseWeights.beginnerSuitability;
 
   if (hasAnchorChannel) {
     anchorSimilarity *= CHANNEL_WEIGHT_ANCHOR_SIMILARITY_BOOST;
@@ -314,7 +339,9 @@ export function resolveChannelAwareWeights(
     baseWeights.producerPrestige +
     baseWeights.recency +
     baseWeights.criticScore +
-    baseWeights.multilingualScore;
+    baseWeights.multilingualScore +
+    baseWeights.giftSuitability +
+    baseWeights.beginnerSuitability;
 
   const adjustedNonPenaltySum =
     entityIntegrity +
@@ -328,7 +355,9 @@ export function resolveChannelAwareWeights(
     producerPrestige +
     recency +
     criticScore +
-    multilingualScore;
+    multilingualScore +
+    giftSuitability +
+    beginnerSuitability;
 
   // Guard: if there is nothing to normalise (all weights are zero) return as-is.
   const rawNormFactor =
@@ -352,5 +381,7 @@ export function resolveChannelAwareWeights(
     recency: recency * normFactor,
     criticScore: criticScore * normFactor,
     multilingualScore: multilingualScore * normFactor,
+    giftSuitability: giftSuitability * normFactor,
+    beginnerSuitability: beginnerSuitability * normFactor,
   };
 }

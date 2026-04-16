@@ -97,30 +97,32 @@ function xorGraph(): ConstraintGraph {
 }
 
 describe('Wave I3 — LTRFeatureVector graph-aware features', () => {
-  it('LTR_FEATURE_NAMES contains the 4 new graph features (appended, not inserted)', () => {
+  it('LTR_FEATURE_NAMES contains the 4 graph features after situation facets', () => {
     expect(LTR_FEATURE_NAMES).toContain('graph_root_satisfied');
     expect(LTR_FEATURE_NAMES).toContain('graph_hard_tier_coverage');
     expect(LTR_FEATURE_NAMES).toContain('graph_xor_branch_match');
     expect(LTR_FEATURE_NAMES).toContain('graph_origin_encoded');
-    // Legacy features retained and in the same relative order (regression
-    // guard: no reorder-induced silent drift for v1-trained models).
+    // v3: 4 situation facet features (gift/beginner suitability) inserted between
+    // legacy degradation features and graph features. Graph features are now at
+    // legacyIdx + 5 (4 facet features + 1).
     const legacyLast = 'degraded_channel_count';
     const legacyIdx = LTR_FEATURE_NAMES.indexOf(legacyLast);
+    /** Number of situation facet features inserted between legacy and graph. */
+    const SITUATION_FACET_COUNT = 4;
     const graphFirstIdx = LTR_FEATURE_NAMES.indexOf('graph_root_satisfied');
-    expect(graphFirstIdx).toBe(legacyIdx + 1);
+    expect(graphFirstIdx).toBe(legacyIdx + 1 + SITUATION_FACET_COUNT);
   });
 
-  it('schema version bumped to v2', () => {
-    expect(LTR_FEATURE_SCHEMA_VERSION).toBe('2');
+  it('schema version bumped to v3', () => {
+    expect(LTR_FEATURE_SCHEMA_VERSION).toBe('3');
   });
 
-  it('schema hash changes between v1 (26 features) and v2 (30 features)', () => {
-    const v2Hash = getCurrentFeatureSchemaHash();
-    // v1 hash (computed offline, seeded for parity check). Not
-    // pre-computed here — we simply verify v2 hash != known-v1 lengths.
-    // The length discipline ensures any future feature add also bumps.
-    expect(v2Hash).toHaveLength(16);
-    expect(LTR_FEATURE_NAMES.length).toBe(30);
+  it('schema hash changes between v2 (30 features) and v3 (34 features)', () => {
+    const v3Hash = getCurrentFeatureSchemaHash();
+    // v3: +4 gift/beginner suitability features (gift_suitability_score,
+    // beginner_suitability_score, gift_suitability_strong, beginner_suitability_strong).
+    expect(v3Hash).toHaveLength(16);
+    expect(LTR_FEATURE_NAMES.length).toBe(34);
   });
 
   it('absent graph → all 4 features = 0 (backward-compat with v1 vectors)', () => {

@@ -580,6 +580,12 @@ export function silverToIndexable(
     ...(rec.syntheticQueries !== undefined && rec.syntheticQueries.length > 0
       ? { syntheticQueries: rec.syntheticQueries }
       : {}),
+    ...(rec.giftSuitabilityClassification?.score != null
+      ? { giftSuitabilityScore: rec.giftSuitabilityClassification.score }
+      : {}),
+    ...(rec.beginnerSuitabilityClassification?.score != null
+      ? { beginnerSuitabilityScore: rec.beginnerSuitabilityClassification.score }
+      : {}),
   };
 }
 
@@ -734,6 +740,12 @@ export function silverToRetrievalDoc(
     ...(indexable.grapeFamily !== undefined ? { grapeFamily: indexable.grapeFamily } : {}),
     ...(indexable.regionHierarchy !== undefined ? { regionHierarchy: [...indexable.regionHierarchy] } : {}),
     ...(indexable.priceBandNumeric !== undefined ? { priceBandNumeric: indexable.priceBandNumeric } : {}),
+    ...(indexable.giftSuitabilityScore !== undefined
+      ? { giftSuitabilityScore: indexable.giftSuitabilityScore }
+      : {}),
+    ...(indexable.beginnerSuitabilityScore !== undefined
+      ? { beginnerSuitabilityScore: indexable.beginnerSuitabilityScore }
+      : {}),
     ...(indexable.sourceRecordRefs !== undefined && indexable.sourceRecordRefs.length > 0
       ? { sourceRecordRefs: [...indexable.sourceRecordRefs] }
       : {}),

@@ -21,6 +21,8 @@ import { projectHardTierSubgraph } from '../../query/service/graph-tier-projecti
 
 /** Default neutral confidence when a signal cannot be measured. */
 const DEFAULT_NEUTRAL_CONFIDENCE = 0.5;
+/** Threshold above which a learned facet score counts as "strong match" for LTR binary features. */
+const LEARNED_FACET_STRONG_THRESHOLD = 0.6;
 /** Score for partial label match: query contains canonical label as substring. */
 const PARTIAL_LABEL_MATCH_SCORE = 0.5;
 /** Hangul Syllables block — used to detect Korean queries. */
@@ -74,6 +76,17 @@ interface LTRFeatureVector {
   readonly is_sparse_degraded: number;
   readonly is_anchor_degraded: number;
   readonly degraded_channel_count: number;
+
+  // Situation facet signals (4) — Track C learned facets (gift / beginner).
+  // Absent score → 0 (no signal); strong threshold derived from LEARNED_FACET_STRONG_THRESHOLD.
+  /** Raw gift suitability score [0, 1] from ETL normalizer. 0 when absent. */
+  readonly gift_suitability_score: number;
+  /** Raw beginner suitability score [0, 1] from ETL normalizer. 0 when absent. */
+  readonly beginner_suitability_score: number;
+  /** 1 if gift suitability ≥ LEARNED_FACET_STRONG_THRESHOLD, 0 otherwise. */
+  readonly gift_suitability_strong: number;
+  /** 1 if beginner suitability ≥ LEARNED_FACET_STRONG_THRESHOLD, 0 otherwise. */
+  readonly beginner_suitability_strong: number;
 
   // Graph-aware signals (4) — Wave I3.
   // Absent graph → all four are 0 (backward-compatible).
@@ -267,6 +280,12 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
     is_anchor_degraded: dAnchor,
     degraded_channel_count: dDense + dSparse + dAnchor,
 
+    // Situation facet signals (gift / beginner learned facets)
+    gift_suitability_score: c.giftSuitabilityScore ?? 0,
+    beginner_suitability_score: c.beginnerSuitabilityScore ?? 0,
+    gift_suitability_strong: (c.giftSuitabilityScore ?? 0) >= LEARNED_FACET_STRONG_THRESHOLD ? 1 : 0,
+    beginner_suitability_strong: (c.beginnerSuitabilityScore ?? 0) >= LEARNED_FACET_STRONG_THRESHOLD ? 1 : 0,
+
     graph_root_satisfied: graphFeatures.rootSatisfied,
     graph_hard_tier_coverage: graphFeatures.hardTierCoverage,
     graph_xor_branch_match: graphFeatures.xorBranchMatch,
@@ -382,6 +401,10 @@ export const LTR_FEATURE_NAMES: readonly (keyof LTRFeatureVector)[] = [
   'is_sparse_degraded',
   'is_anchor_degraded',
   'degraded_channel_count',
+  'gift_suitability_score',
+  'beginner_suitability_score',
+  'gift_suitability_strong',
+  'beginner_suitability_strong',
   'graph_root_satisfied',
   'graph_hard_tier_coverage',
   'graph_xor_branch_match',

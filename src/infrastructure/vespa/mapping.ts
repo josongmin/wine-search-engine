@@ -241,6 +241,8 @@ const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   priceBandNumeric: { vespaField: 'price_band_numeric', kind: 'number' },
   searchTextKo: { vespaField: 'search_text_ko', kind: 'string' },
   flavorProfiles: { vespaField: 'flavor_profiles', kind: 'string_array' },
+  giftSuitabilityScore: { vespaField: 'gift_suitability_score', kind: 'number' },
+  beginnerSuitabilityScore: { vespaField: 'beginner_suitability_score', kind: 'number' },
 } as const satisfies Record<RetrievalHitSummaryKey, VespaRetrievalSummaryFieldSpec>;
 
 /**
@@ -497,6 +499,10 @@ export function fromVespaFields(
     ...(summary.grapeFamily !== undefined && { grapeFamily: summary.grapeFamily }),
     ...(summary.regionHierarchy !== undefined && { regionHierarchy: [...summary.regionHierarchy] }),
     ...(summary.priceBandNumeric !== undefined && { priceBandNumeric: summary.priceBandNumeric }),
+    ...(summary.giftSuitabilityScore !== undefined
+      && { giftSuitabilityScore: summary.giftSuitabilityScore }),
+    ...(summary.beginnerSuitabilityScore !== undefined
+      && { beginnerSuitabilityScore: summary.beginnerSuitabilityScore }),
     ...(learnedSparseWeights !== undefined && { learnedSparseWeights }),
     ...(syntheticQueries !== undefined && { syntheticQueries }),
     ...(lineageRefsFromFields !== undefined && lineageRefsFromFields.length > 0
@@ -570,6 +576,8 @@ export function toRetrievalFeatureProjection(doc: RetrievalDocument): RetrievalF
     ...(doc.drinkingWindowModelVersion !== undefined
       ? { drinkingWindowModelVersion: doc.drinkingWindowModelVersion }
       : {}),
+    ...(doc.giftSuitabilityScore != null ? { giftSuitabilityScore: doc.giftSuitabilityScore } : {}),
+    ...(doc.beginnerSuitabilityScore != null ? { beginnerSuitabilityScore: doc.beginnerSuitabilityScore } : {}),
   };
 }
 
@@ -634,6 +642,8 @@ export function parseFeatureSummary(raw: Record<string, unknown>): RetrievalFeat
   const drinkingWindowStart = getOptionalNumber(raw, 'drinking_window_start');
   const drinkingWindowEnd = getOptionalNumber(raw, 'drinking_window_end');
   const drinkingWindowModelVersion = getOptionalString(raw, 'drinking_window_model_version');
+  const giftSuitabilityScore = getOptionalNumber(raw, 'gift_suitability_score');
+  const beginnerSuitabilityScore = getOptionalNumber(raw, 'beginner_suitability_score');
 
   return {
     entityId: isString(entityIdRaw) && entityIdRaw.length > 0
@@ -647,6 +657,8 @@ export function parseFeatureSummary(raw: Record<string, unknown>): RetrievalFeat
     ...(drinkingWindowStart !== undefined ? { drinkingWindowStart } : {}),
     ...(drinkingWindowEnd !== undefined ? { drinkingWindowEnd } : {}),
     ...(drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion } : {}),
+    ...(giftSuitabilityScore !== undefined ? { giftSuitabilityScore } : {}),
+    ...(beginnerSuitabilityScore !== undefined ? { beginnerSuitabilityScore } : {}),
   };
 }
 

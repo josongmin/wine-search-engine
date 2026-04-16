@@ -105,6 +105,20 @@ export interface ComponentScores {
    * 0.0 when no Korean text is present or query is purely Latin.
    */
   readonly multilingualScore?: number | undefined;
+
+  /**
+   * Gift suitability signal [0, 1] from Track C learned facet classifier.
+   * Higher = better gift candidate. Only weighted for gift-intent queries.
+   * Absent (undefined) when giftSuitabilityScore is not available.
+   */
+  readonly giftSuitability?: number | undefined;
+
+  /**
+   * Beginner suitability signal [0, 1] from Track C learned facet classifier.
+   * Higher = more beginner-friendly wine. Only weighted for beginner-intent queries.
+   * Absent (undefined) when beginnerSuitabilityScore is not available.
+   */
+  readonly beginnerSuitability?: number | undefined;
 }
 
 /**

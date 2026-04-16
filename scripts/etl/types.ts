@@ -350,6 +350,56 @@ export interface OccasionClassification {
   readonly provenance: OccasionClassificationProvenance;
 }
 
+// ---------------------------------------------------------------------------
+// Gift Suitability Classification (Track C Step 6)
+// ---------------------------------------------------------------------------
+
+export interface GiftSuitabilityFingerprint {
+  readonly modelId: string;
+  readonly contentHash: string;
+  readonly version: string;
+  readonly generatedAt: string;
+}
+
+export interface GiftSuitabilityProvenance {
+  readonly source: 'llm_gift_suitability_scorer';
+  readonly promptVersion: string;
+  readonly snippet: string;
+  readonly rationale: string;
+}
+
+export interface GiftSuitabilityClassification {
+  /** Gift suitability score in [0, 1], normalized from LLM 0-100 output. */
+  readonly score: number;
+  readonly fingerprint: GiftSuitabilityFingerprint;
+  readonly provenance: GiftSuitabilityProvenance;
+}
+
+// ---------------------------------------------------------------------------
+// Beginner Suitability Classification (Track C Step 7)
+// ---------------------------------------------------------------------------
+
+export interface BeginnerSuitabilityFingerprint {
+  readonly modelId: string;
+  readonly contentHash: string;
+  readonly version: string;
+  readonly generatedAt: string;
+}
+
+export interface BeginnerSuitabilityProvenance {
+  readonly source: 'llm_beginner_suitability_scorer';
+  readonly promptVersion: string;
+  readonly snippet: string;
+  readonly rationale: string;
+}
+
+export interface BeginnerSuitabilityClassification {
+  /** Beginner suitability score in [0, 1], normalized from LLM 0-100 output. */
+  readonly score: number;
+  readonly fingerprint: BeginnerSuitabilityFingerprint;
+  readonly provenance: BeginnerSuitabilityProvenance;
+}
+
 export interface EnrichedSilverRecord extends SilverWineRecord {
   readonly aliases: AliasBundle;
   /**
@@ -365,6 +415,10 @@ export interface EnrichedSilverRecord extends SilverWineRecord {
   readonly learnedSparseWeights?: LearnedSparseVector | undefined;
   /** Provenance-backed occasion tags from the offline classifier. */
   readonly occasionClassification?: OccasionClassification | undefined;
+  /** Provenance-backed gift suitability score from the offline scorer. */
+  readonly giftSuitabilityClassification?: GiftSuitabilityClassification | undefined;
+  /** Provenance-backed beginner suitability score from the offline scorer. */
+  readonly beginnerSuitabilityClassification?: BeginnerSuitabilityClassification | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +490,10 @@ export interface IndexableWineRecord {
   readonly drinkingWindowEnd?: number | undefined;
   /** Model version that produced the drinking-window estimate. */
   readonly drinkingWindowModelVersion?: string | undefined;
+  /** Gift suitability score in [0, 1]. Populated by Track C Step 6. */
+  readonly giftSuitabilityScore?: number | undefined;
+  /** Beginner suitability score in [0, 1]. Populated by Track C Step 7. */
+  readonly beginnerSuitabilityScore?: number | undefined;
 
   // -------------------------------------------------------------------------
   // Payload fields — stored in the index but not in either projection

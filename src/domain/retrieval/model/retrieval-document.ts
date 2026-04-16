@@ -69,6 +69,8 @@ export interface RetrievalFeatureProjection {
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
   readonly drinkingWindowModelVersion?: string | undefined;
+  readonly giftSuitabilityScore?: number | undefined;
+  readonly beginnerSuitabilityScore?: number | undefined;
 }
 
 /**
@@ -258,6 +260,11 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
 
   /** Numericized price-band bucket for ranking and filtering. */
   readonly priceBandNumeric?: number | undefined;
+
+  /** Gift suitability score in [0, 1]. ETL Track C Step 6 learned facet. */
+  readonly giftSuitabilityScore?: number | undefined;
+  /** Beginner suitability score in [0, 1]. ETL Track C Step 7 learned facet. */
+  readonly beginnerSuitabilityScore?: number | undefined;
 
   /** SPLADE-style learned sparse weights (T4.2). Absent until the offline model runs. */
   readonly learnedSparseWeights?: DocumentSparseVector | undefined;

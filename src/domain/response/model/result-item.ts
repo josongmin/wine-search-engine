@@ -11,7 +11,7 @@ export interface DrinkingWindowBlock {
   readonly peakYear?: number | undefined; // Optional peak maturity year
   readonly currentlyDrinkable: boolean;   // true if current year is within window
   readonly confidence: 'high' | 'medium' | 'low';
-  readonly evidenceLevel?: 'learned' | 'heuristic' | undefined;
+  readonly evidenceLevel?: 'learned' | undefined;
   readonly blockingEligible?: boolean | undefined;
   readonly modelVersion?: string | undefined;
 }
@@ -85,6 +85,11 @@ export interface EntitySummary {
 
   /** Human-readable price band (e.g. "$20-$30"). */
   readonly priceRange?: string | undefined;
+
+  /** Gift suitability score in [0, 1]. */
+  readonly giftSuitabilityScore?: number | undefined;
+  /** Beginner suitability score in [0, 1]. */
+  readonly beginnerSuitabilityScore?: number | undefined;
 
   /**
    * Upstream source record identifiers for lineage (ADR-007). Never use these

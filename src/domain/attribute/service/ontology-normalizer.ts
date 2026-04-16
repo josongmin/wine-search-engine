@@ -38,6 +38,9 @@ interface OntologyNormalization {
 
 export const OCCASION_ONTOLOGY_VERSION = 'occasion-v1-20260414' as const;
 
+export const GIFT_SUITABILITY_VERSION = 'gift-suitability-v1-20260416' as const;
+export const BEGINNER_SUITABILITY_VERSION = 'beginner-suitability-v1-20260416' as const;
+
 export const OCCASION_ONTOLOGY_VALUES = [
   'gift',
   'party',

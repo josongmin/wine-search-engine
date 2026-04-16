@@ -557,6 +557,26 @@ export class SignalComputer {
   }
 
   /**
+   * Computes gift suitability signal from the learned facet score.
+   * Returns the raw score from the Track C gift suitability classifier.
+   * Only meaningful when the query has gift intent — the weight system
+   * ensures this signal is 0-weighted for non-gift queries.
+   */
+  computeGiftSuitability(candidate: HybridCandidate): number {
+    // giftSuitabilityScore is already in [0, 1] from the ETL normalizer.
+    // Absent score → 0 (no signal, not penalized).
+    return candidate.giftSuitabilityScore ?? 0;
+  }
+
+  /**
+   * Computes beginner suitability signal from the learned facet score.
+   * Returns the raw score from the Track C beginner suitability classifier.
+   */
+  computeBeginnerSuitability(candidate: HybridCandidate): number {
+    return candidate.beginnerSuitabilityScore ?? 0;
+  }
+
+  /**
    * Computes all signal components for a single candidate.
    *
    * Convenience method that calls each individual signal computation
@@ -609,6 +629,8 @@ export class SignalComputer {
       ...(recency !== undefined ? { recency } : {}),
       ...(criticScore !== undefined ? { criticScore } : {}),
       multilingualScore: this.computeMultilingualScore(candidate, queryContainsHangul),
+      giftSuitability: this.computeGiftSuitability(candidate),
+      beginnerSuitability: this.computeBeginnerSuitability(candidate),
     };
   }
 

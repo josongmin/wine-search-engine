@@ -253,6 +253,16 @@ schema wine_entity {
       indexing: summary | attribute
     }
 
+    field gift_suitability_score type float {
+      indexing: summary | attribute
+      attribute: fast-search
+    }
+
+    field beginner_suitability_score type float {
+      indexing: summary | attribute
+      attribute: fast-search
+    }
+
     # -------------------------------------------------------------------------
     # Task 5: Schema Structuring Enhancements
     # -------------------------------------------------------------------------
@@ -390,6 +400,8 @@ schema wine_entity {
     summary region_hierarchy {}
     summary price_band_numeric {}
     summary flavor_profiles {}
+    summary gift_suitability_score {}
+    summary beginner_suitability_score {}
     summary source_record_refs_json {}
   }
 
@@ -404,6 +416,8 @@ schema wine_entity {
     summary drinking_window_start {}
     summary drinking_window_end {}
     summary drinking_window_model_version {}
+    summary gift_suitability_score {}
+    summary beginner_suitability_score {}
   }
 
   document-summary full {
@@ -460,6 +474,8 @@ schema wine_entity {
     summary producer_aliases {}
     summary price_band_numeric {}
     summary flavor_profile_structured {}
+    summary gift_suitability_score {}
+    summary beginner_suitability_score {}
     summary source_record_refs_json {}
   }
 

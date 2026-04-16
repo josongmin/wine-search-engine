@@ -16,9 +16,12 @@ import { LTR_FEATURE_NAMES } from './ltr-features.js';
 /** Schema major version — bump on backward-incompatible changes.
  *  v2 (Wave I3): added 4 graph-aware features (`graph_root_satisfied`,
  *  `graph_hard_tier_coverage`, `graph_xor_branch_match`,
- *  `graph_origin_encoded`). Models trained under v1 are incompatible
- *  with v2 inference by design — the parity hash will reject them. */
-export const LTR_FEATURE_SCHEMA_VERSION = '2';
+ *  `graph_origin_encoded`).
+ *  v3 (Track C): added 4 situation facet features (`gift_suitability_score`,
+ *  `beginner_suitability_score`, `gift_suitability_strong`,
+ *  `beginner_suitability_strong`). Models trained under v2 are incompatible
+ *  with v3 inference by design — the parity hash will reject them. */
+export const LTR_FEATURE_SCHEMA_VERSION = '3';
 /** Truncation length for the parity hash (sufficient collision resistance for our use). */
 const PARITY_HASH_LENGTH = 16;
 

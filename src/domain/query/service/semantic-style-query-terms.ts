@@ -1,5 +1,12 @@
 import type { WineTypeValue } from '../model/wine-type-patterns.js';
 
+const NO_OP_SEMANTIC_STYLE_HINTS: ReadonlySet<string> = new Set([
+  // No backing retrieval/evidence profile in the current substrate.
+  // Keep the ontology token for upstream intent capture, but do not let it
+  // pollute tool query text or semantic retrieval expansion.
+  'presentation_forward',
+]);
+
 export function renderSemanticStyleQueryTerm(style: string): string {
   switch (style) {
     case 'crowd_pleasing':
@@ -54,20 +61,12 @@ const SEMANTIC_STYLE_PROFILES: ReadonlyMap<string, SemanticStyleProfile> = new M
     evidenceGrapeTerms: ['merlot', 'pinot noir', 'pinot grigio', 'pinot gris', 'sauvignon blanc', 'chardonnay'],
     evidenceStyleTerms: ['easy drinking', 'medium', 'red blend'],
   }],
-  ['presentation_forward', {
-    renderedTerm: 'giftable presentation',
-    genericRetrievalTerms: ['giftable', 'celebration'],
-    untypedArchetypeTerms: ['prosecco', 'rosé'],
-    wineTypeRetrievalTerms: {
-      red: ['pinot noir', 'beaujolais'],
-      white: ['pinot grigio', 'moscato', 'riesling'],
-      sparkling: ['prosecco', 'cava', 'cremant'],
-    },
-    evidenceWineTypes: ['sparkling', 'white', 'rosé'],
-    evidenceOccasionTerms: ['gift', 'celebration', 'party'],
-    evidenceGrapeTerms: ['pinot noir', 'gamay', 'pinot grigio', 'pinot gris', 'moscato', 'riesling'],
-    evidenceStyleTerms: ['sparkling', 'rosé', 'floral', 'light'],
-  }],
+  // presentation_forward: REMOVED — no backing data in Vivino for label
+  // aesthetics/packaging. Retrieval terms ('giftable', 'celebration',
+  // 'prosecco', 'rosé') polluted BM25 recall without data-backed signal.
+  // NL mapper still recognises "예쁜 라벨" → style:presentation_forward as
+  // unsupported preference (no profile → no expansion → no-op soft constraint).
+  // Replaced by giftSuitabilityScore / beginnerSuitabilityScore learned facets.
 ]);
 
 function unique(values: readonly string[]): readonly string[] {
@@ -78,11 +77,12 @@ function collectStyleHints(input: {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
 }): readonly string[] {
-  return input.styles !== undefined && input.styles.length > 0
+  const rawHints = input.styles !== undefined && input.styles.length > 0
     ? [...new Set(input.styles)]
     : input.style !== undefined
       ? [input.style]
       : [];
+  return rawHints.filter((style) => !NO_OP_SEMANTIC_STYLE_HINTS.has(style));
 }
 
 export function resolveSemanticStyleEvidenceProfile(style: string): {

@@ -241,6 +241,7 @@ const NON_PENALTY_WEIGHT_FIELDS = [
   'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
   'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
   'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+  'giftSuitability', 'beginnerSuitability',
 ] as const;
 
 function buildObservedLtrInferenceScoreComponents(
@@ -801,6 +802,7 @@ export class Ranker {
    */
   async rank(input: RankingInput): Promise<RankingOutput> {
     const { queryPlan, candidates, anchorProfile, constraints } = input;
+    const stageTimer = input.requestContext?.stageTimer;
 
     // Collect metadata in local variables; returned alongside results
     // in RankingOutput (no mutable instance fields).
@@ -871,18 +873,20 @@ export class Ranker {
     // Absent graph → flat AND-all path byte-identical to pre-PR5.
     const constraintGraph = input.compiled.constraintGraph;
 
-    for (const candidate of candidates) {
-      const componentScores = this.signalComputer.computeAll(
-        candidate,
-        queryPlan,
-        constraints,
-        anchorProfile,
-        input.retrievalPlan,
-        referenceYear,
-        queryContainsHangul,
-        constraintGraph,
-      );
-      const constraintState = buildConstraintState(candidate, queryConstraintCtx, constraintGraph);
+    stageTimer?.start('ranking.primary_scoring');
+    try {
+      for (const candidate of candidates) {
+        const componentScores = this.signalComputer.computeAll(
+          candidate,
+          queryPlan,
+          constraints,
+          anchorProfile,
+          input.retrievalPlan,
+          referenceYear,
+          queryContainsHangul,
+          constraintGraph,
+        );
+        const constraintState = buildConstraintState(candidate, queryConstraintCtx, constraintGraph);
 
       // Step 3: Aggregate signals into final score.
       // T5.3: Adjust weights based on which retrieval channels contributed
@@ -914,35 +918,36 @@ export class Ranker {
         }
       }
 
-      scored.push({
-        entityId: candidate.entityId,
-        canonicalLabel: candidate.canonicalLabel ?? '',
-        ...(candidate.searchTextEn !== undefined
-          ? { searchTextEn: candidate.searchTextEn }
-          : {}),
-        ...(projectHybridCandidateToRankedResultAttributes(
-          candidate,
-          this.attributeEncoder,
-        ) as Partial<ScoredEntry>),
-        // E1-T3: propagate deterministic tie-break tiers alongside channel ranks.
-        ...(candidate.denseRank !== undefined ? { denseRank: candidate.denseRank } : {}),
-        ...(candidate.anchorRank !== undefined ? { anchorRank: candidate.anchorRank } : {}),
-        evidenceQualityTier: buildEvidenceQualityTier(candidate),
-        lexicalExactnessTier: buildLexicalExactnessTier(candidate),
-        matchedConstraints: constraintState.matchedConstraints,
-        unmetConstraints: constraintState.unmetConstraints,
-        inferredConstraints: constraintState.inferredConstraints,
-        // ADR-014: conditional spread preserves exactOptionalPropertyTypes
-        // semantics — absent graph → fields absent entirely.
-        ...(constraintState.matchedAtomRefs !== undefined
-          ? { matchedAtomRefs: constraintState.matchedAtomRefs }
-          : {}),
-        ...(constraintState.unmetAtomRefs !== undefined
-          ? { unmetAtomRefs: constraintState.unmetAtomRefs }
-          : {}),
-        componentScores,
-        finalScore,
-      });
+        scored.push({
+          entityId: candidate.entityId,
+          canonicalLabel: candidate.canonicalLabel ?? '',
+          ...(candidate.searchTextEn !== undefined
+            ? { searchTextEn: candidate.searchTextEn }
+            : {}),
+          ...(projectHybridCandidateToRankedResultAttributes(
+            candidate,
+            this.attributeEncoder,
+          ) as Partial<ScoredEntry>),
+          // E1-T3: propagate deterministic tie-break tiers alongside channel ranks.
+          ...(candidate.denseRank !== undefined ? { denseRank: candidate.denseRank } : {}),
+          ...(candidate.anchorRank !== undefined ? { anchorRank: candidate.anchorRank } : {}),
+          evidenceQualityTier: buildEvidenceQualityTier(candidate),
+          lexicalExactnessTier: buildLexicalExactnessTier(candidate),
+          matchedConstraints: constraintState.matchedConstraints,
+          unmetConstraints: constraintState.unmetConstraints,
+          inferredConstraints: constraintState.inferredConstraints,
+          ...(constraintState.matchedAtomRefs !== undefined
+            ? { matchedAtomRefs: constraintState.matchedAtomRefs }
+            : {}),
+          ...(constraintState.unmetAtomRefs !== undefined
+            ? { unmetAtomRefs: constraintState.unmetAtomRefs }
+            : {}),
+          componentScores,
+          finalScore,
+        });
+      }
+    } finally {
+      stageTimer?.end('ranking.primary_scoring');
     }
 
     // Step 4 (T5.2): Coarse prune — explicit stage boundary.
@@ -1012,11 +1017,15 @@ export class Ranker {
     if (this.reranker !== undefined || hasConfiguredLearnedRerank) {
       // E3-U5: compiled-first route for gate — falls back to V1 plan.route
       const gateEffectiveRoute = input.compiled.execution.effectiveRoute;
+      const compiledBudget = input.compiled.execution.budget;
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
         queryClass: queryPlan.queryClass,
         effectiveRoute: gateEffectiveRoute,
         hasAnchor: anchorProfile !== undefined,
+        rerankLimit: compiledBudget.enablePrecisionRerank
+          ? compiledBudget.rerankLimit
+          : 0,
         ...(input.rerankForced !== undefined ? { rerankForced: input.rerankForced } : {}),
       });
 
@@ -1027,12 +1036,15 @@ export class Ranker {
         if (this.reranker !== undefined) {
           try {
             const preRerankCount = viable.length;
+            stageTimer?.start('ranking.cross_encoder');
             const rerankOutcome = await this.applyReranking(
               queryPlan.normalizedQuery,
               viable,
               queryPlan.queryClass,
               effectiveTopK,
+              stageTimer,
             );
+            stageTimer?.end('ranking.cross_encoder');
             finalOrder = rerankOutcome.results;
             localRerankInputCount = preRerankCount;
             localRerankOutputCount = finalOrder.length;
@@ -1056,6 +1068,7 @@ export class Ranker {
               localRuntimeSignal = rerankOutcome.runtimeSignal ?? { rerankerStatus: 'executed' };
             }
           } catch (err) {
+            stageTimer?.end('ranking.cross_encoder');
             const rerankerFailureReason = classifyRerankerFailureReason(err);
             bootstrapLogger.warn(
               {
@@ -1090,38 +1103,45 @@ export class Ranker {
     // Step 7 & 8: Map to RankedResult with evidence items and assign ranks.
     // T5.2: coarsePruneMeta is attached to every retained candidate.
     // Pruned candidates never appear here (they were filtered out in step 4).
-    let results: RankedResult[] = finalOrder.map((entry, index) => {
-      const evidenceItems = this.evidenceMapper.mapToEvidence(
-        entry.componentScores,
-      );
+    stageTimer?.start('ranking.evidence_mapping');
+    let results: RankedResult[];
+    try {
+      results = finalOrder.map((entry, index) => {
+        const evidenceItems = this.evidenceMapper.mapToEvidence(
+          entry.componentScores,
+        );
 
-      return {
-        entityId: entry.entityId,
-        canonicalLabel: entry.canonicalLabel,
-        finalScore: entry.finalScore,
-        rank: index + 1,
-        componentScores: entry.componentScores,
-        evidenceItems,
-        matchedConstraints: entry.matchedConstraints,
-        unmetConstraints: entry.unmetConstraints,
-        inferredConstraints: entry.inferredConstraints,
-        // ADR-014 Phase 1b.3b: propagate graph-derived slot IDs when present.
-        ...(entry.matchedAtomRefs !== undefined
-          ? { matchedAtomRefs: entry.matchedAtomRefs }
-          : {}),
-        ...(entry.unmetAtomRefs !== undefined
-          ? { unmetAtomRefs: entry.unmetAtomRefs }
-          : {}),
-        coarsePruneMeta: {
-          preGateScore: entry.finalScore,
-          hardConstraintPassed: entry.componentScores.hardConstraintPass,
-          entityIntegrityPassed: true,
-        },
-        ...(projectRankedResultSourceAttributes(entry) as Partial<RankedResult>),
-      };
-    });
+        return {
+          entityId: entry.entityId,
+          canonicalLabel: entry.canonicalLabel,
+          finalScore: entry.finalScore,
+          rank: index + 1,
+          componentScores: entry.componentScores,
+          evidenceItems,
+          matchedConstraints: entry.matchedConstraints,
+          unmetConstraints: entry.unmetConstraints,
+          inferredConstraints: entry.inferredConstraints,
+          ...(entry.matchedAtomRefs !== undefined
+            ? { matchedAtomRefs: entry.matchedAtomRefs }
+            : {}),
+          ...(entry.unmetAtomRefs !== undefined
+            ? { unmetAtomRefs: entry.unmetAtomRefs }
+            : {}),
+          coarsePruneMeta: {
+            preGateScore: entry.finalScore,
+            hardConstraintPassed: entry.componentScores.hardConstraintPass,
+            entityIntegrityPassed: true,
+          },
+          ...(projectRankedResultSourceAttributes(entry) as Partial<RankedResult>),
+        };
+      });
+    } finally {
+      stageTimer?.end('ranking.evidence_mapping');
+    }
 
     if (shouldApplyLearnedRerank) {
+      stageTimer?.start('ranking.ltr');
+      try {
       // E5-T3: Build safety envelope descriptors BEFORE LTR runs.
       // Heuristic ranks are the pre-rerank baseline for invariant checks.
       // Lift hard constraints from RankingInput.constraints to ConstraintAtom[]
@@ -1265,6 +1285,9 @@ export class Ranker {
           safetyEnvelopeBlocks,
         };
       }
+      } finally {
+        stageTimer?.end('ranking.ltr');
+      }
     }
 
     // E1-T4: Build typed RerankDecision for structured audit trail.
@@ -1350,6 +1373,7 @@ export class Ranker {
     viable: readonly ScoredEntry[],
     queryClass: QueryClass,
     topKLimit: number = this.rerankTopK,
+    stageTimer?: NonNullable<RankingInput['requestContext']>['stageTimer'],
   ): Promise<{
     readonly results: readonly ScoredEntry[];
     readonly runtimeSignal?: RankerRuntimeSignal | undefined;
@@ -1370,19 +1394,23 @@ export class Ranker {
     if (reranker === undefined) {
       throw new Error('applyReranking requires reranker');
     }
+    stageTimer?.start('ranking.cross_encoder.remote');
     const rerankResults = await reranker.rerank(
       query,
       rerankCandidates,
       topKLimit,
     );
+    stageTimer?.end('ranking.cross_encoder.remote');
 
-    // Build lookups
-    const rerankScoreMap = new Map(
-      rerankResults.map((r) => [String(r.entityId), r.score]),
-    );
-    const entryMap = new Map(
-      topK.map((entry) => [String(entry.entityId), entry]),
-    );
+    stageTimer?.start('ranking.cross_encoder.postprocess');
+    try {
+      // Build lookups
+      const rerankScoreMap = new Map(
+        rerankResults.map((r) => [String(r.entityId), r.score]),
+      );
+      const entryMap = new Map(
+        topK.map((entry) => [String(entry.entityId), entry]),
+      );
 
     // Normalise reranker scores to [0, 1] before blending.
     // Cross-encoder logits (e.g. BGE-reranker) are typically in [-10, +15];
@@ -1465,23 +1493,26 @@ export class Ranker {
     // primary sort.
     // Use .concat() instead of spread — rest can be thousands of entries and
     // spread pushes all elements onto the call stack (crashes at ~65K; Rule 9).
-    const combined = rerankedTopK.concat(rest);
-    combined.sort(compareScoredEntriesByFinalScoreDesc);
-    return {
-      results: combined,
-      ...(batchNormalizationFailed ? { normalizationFailed: true } : {}),
-      ...(degradationReasons.length > 0
-        ? {
-            runtimeSignal: {
-              rerankerStatus: 'executed',
-              degradation: {
-                executionMode: 'degraded',
-                degradationReasons,
-              },
-            } as RankerRuntimeSignal,
-          }
-        : {}),
-    };
+      const combined = rerankedTopK.concat(rest);
+      combined.sort(compareScoredEntriesByFinalScoreDesc);
+      return {
+        results: combined,
+        ...(batchNormalizationFailed ? { normalizationFailed: true } : {}),
+        ...(degradationReasons.length > 0
+          ? {
+              runtimeSignal: {
+                rerankerStatus: 'executed',
+                degradation: {
+                  executionMode: 'degraded',
+                  degradationReasons,
+                },
+              } as RankerRuntimeSignal,
+            }
+          : {}),
+      };
+    } finally {
+      stageTimer?.end('ranking.cross_encoder.postprocess');
+    }
   }
 }
 
