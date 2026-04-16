@@ -91,6 +91,59 @@ describe('AgentAnswerRecoveryPolicy', () => {
     expect(state.lastSearchResult?.results[0]?.entity.entityId).toBe('wine-1');
   });
 
+  it('replays structured search params during layer-2 fallback search', async () => {
+    const execute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'search first',
+      action: {
+        tool: 'search_wines',
+        input: {
+          query: '선물용 와인',
+          exclude_grapes: ['Merlot'],
+          exclude_regions: ['France'],
+          max_price_krw: 50000,
+          style: 'crowd_pleasing',
+          country: 'Italy',
+          wine_type: 'red',
+          vintage_min: 2019,
+          vintage_max: 2022,
+          appellation: 'Barolo',
+          limit: 3,
+          retrieval_mode: 'hybrid',
+        },
+      },
+      observation: 'tool crashed before answer',
+      durationMs: 3,
+      tokenCount: { input: 1, output: 1 },
+    });
+
+    await policy.recoverAnswer('current query', 'req-fallback-structured', state, false);
+
+    expect(execute).toHaveBeenCalledWith(
+      {
+        query: '선물용 와인, not Merlot, not France, 50000원 이하, crowd_pleasing',
+        limit: 3,
+        options: { mode: 'hybrid', explain: false, clarification: false },
+        filters: [
+          expect.objectContaining({ attribute: 'grape_primary', operator: 'exclude', value: 'Merlot' }),
+          expect.objectContaining({ attribute: 'region', operator: 'exclude', value: 'France' }),
+          expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+          expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
+          expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2019 }),
+          expect.objectContaining({ attribute: 'vintage_year', operator: '<=', value: 2022 }),
+          expect.objectContaining({ attribute: 'appellation', operator: '=', value: 'Barolo' }),
+        ],
+      },
+      'req-fallback-structured-fallback',
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('converts the latest tool observation into a final answer when observed output already exists', async () => {
     const execute = vi.fn();
     const policy = new AgentAnswerRecoveryPolicy({
@@ -113,6 +166,29 @@ describe('AgentAnswerRecoveryPolicy', () => {
     expect(state.fallbackLayer).toBe('layer3');
     expect(state.terminationReason).toBe('answer');
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('prefers GROUNDING_JSON-derived preview over raw observation slices in layer 3', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      observation: 'Found 2 results\nGROUNDING_JSON: {"query_type":"search","total_results":2,"wines":[{"canonical_label":"Opus One 2018","region":"Napa Valley","grapes":["Cabernet Sauvignon"],"price":"420000원"},{"canonical_label":"Masseto 2020","region":"Toscana","grapes":["Merlot"],"price":"390000원"}]}',
+      durationMs: 3,
+      tokenCount: { input: 1, output: 1 },
+    });
+
+    const answer = await policy.recoverAnswer('선물용 와인', 'req-layer3-grounding', state, true);
+
+    expect(answer).toContain('검색 결과 요약');
+    expect(answer).toContain('Opus One 2018');
+    expect(answer).toContain('Napa Valley');
+    expect(answer).toContain('420000원');
+    expect(answer).not.toContain('GROUNDING_JSON');
   });
 
   it('returns the blocked template without running fallback search when policy already blocked the request', async () => {

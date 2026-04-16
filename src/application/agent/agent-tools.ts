@@ -58,7 +58,7 @@ const MAX_PRICE_KRW_BOUND = 100_000_000;
  * Prevents unbounded numeric input from LLM (e.g. 1e10) before the KRW conversion. */
 const MAX_PRICE_USD_BOUND = Math.ceil(MAX_PRICE_KRW_BOUND / KRW_PER_USD_APPROXIMATE); // ≈ 74_075
 /** Top-N results shown in the observation string (controls context window usage). */
-const SUMMARY_TOP_N = 5;
+const SUMMARY_TOP_N = 3;
 /**
  * Max lineage `(source_system:source_record_id)` pairs per wine in the pipe-delimited
  * observation text — keeps agent context bounded; full list is in GROUNDING_JSON.

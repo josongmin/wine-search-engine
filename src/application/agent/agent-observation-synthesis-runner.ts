@@ -7,7 +7,6 @@ import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
   buildSynthesisSystemMessage,
-  buildStepMessages,
   buildUserMessage,
 } from './agent-prompt.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
@@ -20,13 +19,38 @@ import {
 } from './agent-llm-output.js';
 
 const defaultLog = bootstrapLogger.child({ component: 'AgentObservationSynthesisRunner' });
-const SYNTHESIS_TIMEOUT_MS = 60_000;
+const SYNTHESIS_TIMEOUT_MS = 12_000;
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
 
 interface ObservationSynthesisMessages {
   readonly messages: readonly ChatMessage[];
   readonly sentinel: string;
+}
+
+function buildObservationOnlyMessages(steps: readonly AgentStep[]): readonly ChatMessage[] {
+  const messages: ChatMessage[] = [];
+
+  for (const step of steps) {
+    if (step.actionPairs !== undefined) {
+      for (const pair of step.actionPairs) {
+        messages.push({
+          role: 'user',
+          content: `[Tool Result: ${pair.action.tool}]\n${pair.observation}`,
+        });
+      }
+      continue;
+    }
+
+    if (step.action !== undefined && step.observation !== undefined && step.observation.length > 0) {
+      messages.push({
+        role: 'user',
+        content: `[Tool Result: ${step.action.tool}]\n${step.observation}`,
+      });
+    }
+  }
+
+  return messages;
 }
 
 function buildObservationSynthesisMessages(
@@ -36,10 +60,15 @@ function buildObservationSynthesisMessages(
   requestId: string,
 ): ObservationSynthesisMessages {
   const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
-  const typedOutcomeMessage: ChatMessage | undefined = toolOutcomes.length > 0
+  const nonSuccessToolOutcomes = toolOutcomes.filter((outcome) =>
+    outcome.kind !== 'success'
+    || outcome.errorMessage !== undefined
+    || (outcome.postconditionViolations?.length ?? 0) > 0,
+  );
+  const typedOutcomeMessage: ChatMessage | undefined = nonSuccessToolOutcomes.length > 0
     ? {
         role: 'user',
-        content: `[Typed Tool Outcomes]\n${JSON.stringify(toolOutcomes.map((outcome) => ({
+        content: `[Typed Tool Outcomes]\n${JSON.stringify(nonSuccessToolOutcomes.map((outcome) => ({
           stepId: outcome.stepId,
           tool: outcome.tool,
           kind: outcome.kind,
@@ -52,7 +81,7 @@ function buildObservationSynthesisMessages(
     messages: [
       buildSynthesisSystemMessage(),
       buildUserMessage(query),
-      ...buildStepMessages(steps),
+      ...buildObservationOnlyMessages(steps),
       ...(typedOutcomeMessage !== undefined ? [typedOutcomeMessage] : []),
       {
         role: 'user',
@@ -151,6 +180,7 @@ export class AgentObservationSynthesisRunner {
     };
 
     let synthAnswer: string | undefined;
+    let shouldRetrySynthesis = true;
     try {
       synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
     } catch (synthErr1) {
@@ -159,13 +189,18 @@ export class AgentObservationSynthesisRunner {
       } else if (isAbortError(synthErr1)) {
         state.terminationReason = 'aborted';
       }
-      this.logger.error({ err: synthErr1, requestId }, `synthesis retry attempt 1 failed (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+      shouldRetrySynthesis = false;
+      this.logger.error(
+        { err: synthErr1, requestId },
+        'synthesis attempt 1 failed — skipping retry and falling through to recovery layers',
+      );
     }
     if (synthAnswer === undefined) {
       state.failedSynthesisAttempts += 1;
     }
     if (
       synthAnswer === undefined &&
+      shouldRetrySynthesis &&
       !(abortSignal?.aborted) &&
       !state.llmCircuitOpen &&
       state.totalInputTokens + state.totalOutputTokens < effectiveConfig.maxTotalTokens

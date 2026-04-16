@@ -330,9 +330,7 @@ describe('EMPTY_ANSWER fallback regression — layered answer recovery', () => {
 describe('EMPTY_ANSWER fallback regression — logging and prompt seam', () => {
   it('R-EMPTY-05: synthesis failures log at error level, not warn level', async () => {
     const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
-    const complete = vi.fn()
-      .mockRejectedValueOnce(new Error('attempt1 failed'))
-      .mockRejectedValueOnce(new Error('attempt2 failed'));
+    const complete = vi.fn().mockRejectedValueOnce(new Error('attempt1 failed'));
     const runner = new AgentObservationSynthesisRunner({
       chatLlm: { complete } as unknown as ChatLlmPort,
       logger,
@@ -349,7 +347,8 @@ describe('EMPTY_ANSWER fallback regression — logging and prompt seam', () => {
 
     await runner.run('opus one', 'req-synth-log', DEFAULT_AGENT_CONFIG, state);
 
-    expect(logger.error).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledTimes(1);
     expect(logger.warn).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.stringMatching(/synthesis retry attempt [12] failed/),

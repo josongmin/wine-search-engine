@@ -51,8 +51,9 @@ describe('AgentObservationSynthesisRunner', () => {
     expect(state.totalOutputTokens).toBeGreaterThan(0);
     expect(complete).toHaveBeenCalledTimes(1);
     const messages = complete.mock.calls[0]?.[0].messages ?? [];
-    expect(messages.some((message) => message.content.includes('[Typed Tool Outcomes]'))).toBe(true);
-    expect(messages.some((message) => message.content.includes('"kind":"success"'))).toBe(true);
+    expect(messages.some((message) => message.content.includes('[Typed Tool Outcomes]'))).toBe(false);
+    expect(messages.some((message) => message.role === 'assistant')).toBe(false);
+    expect(messages.some((message) => message.content.includes('[Tool Result: search_wines]'))).toBe(true);
   });
 
   it('retries malformed synthesis twice and leaves fallback layers to finish', async () => {
@@ -179,6 +180,46 @@ describe('AgentObservationSynthesisRunner', () => {
     expect(state.terminationReason).toBe('aborted');
     expect(state.failedSynthesisAttempts).toBe(1);
     expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry synthesis when attempt 1 throws a non-abort error', async () => {
+    const complete = vi.fn().mockRejectedValue(new Error('provider timeout'));
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = makeObservedState();
+
+    await runner.run('opus one', 'req-synth-provider-error', DEFAULT_AGENT_CONFIG, state);
+
+    expect(state.answer).toBe('');
+    expect(state.failedSynthesisAttempts).toBe(1);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes typed tool outcomes only when a non-success tool result exists', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({
+        thought: 'recover',
+        answer: '검색 결과 기준으로 일부 도구 실패가 있었지만 오퍼스 원 2018은 확인됐습니다.',
+      }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = makeObservedState();
+    state.toolOutcomes.push({
+      stepId: 'req:1:0',
+      tool: 'check_drinking_window',
+      kind: 'tool_error',
+      errorMessage: 'Tool "check_drinking_window" timed out',
+      durationMs: 25,
+    });
+
+    await runner.run('opus one', 'req-synth-tool-error', DEFAULT_AGENT_CONFIG, state);
+
+    const messages = complete.mock.calls[0]?.[0].messages ?? [];
+    expect(messages.some((message) => message.content.includes('[Typed Tool Outcomes]'))).toBe(true);
+    expect(messages.some((message) => message.content.includes('"kind":"tool_error"'))).toBe(true);
   });
 
   it('skips synthesis when token budget is already exhausted or no observation exists', async () => {

@@ -129,4 +129,52 @@ describe('AgentPlannerPhaseRunner', () => {
     expect(state.terminationReason).toBe('budget');
     expect(state.totalInputTokens + state.totalOutputTokens).toBeGreaterThanOrEqual(1);
   });
+
+  it('uses a lower output cap for non-last planner steps', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ thought: 'search', action: { tool: 'search_wines', input: { query: 'opus one' } } }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+    });
+
+    await runner.run(
+      'opus one',
+      'req-output-cap-default',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+      maxOutputTokens: 1024,
+    }));
+  });
+
+  it('keeps a higher output cap on the last step to allow final answers', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ thought: 'done', answer: '오퍼스 원 2018입니다.' }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+    });
+
+    await runner.run(
+      'opus one',
+      'req-output-cap-last-step',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      1,
+      true,
+    );
+
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+      maxOutputTokens: 1536,
+    }));
+  });
 });

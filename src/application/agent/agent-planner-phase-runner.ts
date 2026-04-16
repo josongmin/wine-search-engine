@@ -22,6 +22,8 @@ import {
 
 const log = bootstrapLogger.child({ component: 'AgentPlannerPhaseRunner' });
 const STEP_LOG_PREVIEW_CHARS = 500;
+const PLANNER_MAX_OUTPUT_TOKENS_DEFAULT = 1_024;
+const PLANNER_MAX_OUTPUT_TOKENS_LAST_STEP = 1_536;
 
 export interface PlannerPhaseResult {
   readonly stepStartMs: number;
@@ -65,6 +67,12 @@ interface AgentPlannerPhaseRunnerDeps {
   readonly chatLlm: ChatLlmPort;
 }
 
+function resolvePlannerMaxOutputTokens(isLastStep: boolean): number {
+  return isLastStep
+    ? PLANNER_MAX_OUTPUT_TOKENS_LAST_STEP
+    : PLANNER_MAX_OUTPUT_TOKENS_DEFAULT;
+}
+
 export class AgentPlannerPhaseRunner {
   private readonly resultPolicy = new AgentPlannerPhaseResultPolicy();
 
@@ -106,12 +114,13 @@ export class AgentPlannerPhaseRunner {
 
     let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let llmResult: LlmResult;
+    const plannerMaxOutputTokens = resolvePlannerMaxOutputTokens(isLastStep);
     try {
       const racedResult: unknown = await Promise.race([
         this.deps.chatLlm.complete({
           messages,
           temperature: 0,
-          maxOutputTokens: 2048,
+          maxOutputTokens: plannerMaxOutputTokens,
           ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
           abortSignal: stepAbortController.signal,
         }),
