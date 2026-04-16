@@ -1,13 +1,8 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { nanoid } from 'nanoid';
-
-/** Max length for inbound correlation / request ids (gateways, load balancers). */
-const INCOMING_REQUEST_ID_MAX_LEN = 128;
-
-/**
- * Allowed charset for inbound ids: letters, digits, dot, underscore, hyphen (no whitespace).
- */
-const INCOMING_REQUEST_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
+import {
+  isHeaderSafeRequestId,
+} from '../../domain/shared/utils/request-id.js';
 
 function firstHeaderValue(value: IncomingHttpHeaders[string]): string | undefined {
   if (value === undefined) {
@@ -32,10 +27,7 @@ export function resolveIncomingRequestId(headers: IncomingHttpHeaders): string {
     if (candidate === undefined || candidate.length === 0) {
       continue;
     }
-    if (candidate.length > INCOMING_REQUEST_ID_MAX_LEN) {
-      continue;
-    }
-    if (!INCOMING_REQUEST_ID_PATTERN.test(candidate)) {
+    if (!isHeaderSafeRequestId(candidate)) {
       continue;
     }
     return candidate;
@@ -59,9 +51,7 @@ export function resolveRequestId(
   const trimmed = explicitRequestId?.trim();
   if (
     trimmed !== undefined &&
-    trimmed.length > 0 &&
-    trimmed.length <= INCOMING_REQUEST_ID_MAX_LEN &&
-    INCOMING_REQUEST_ID_PATTERN.test(trimmed)
+    isHeaderSafeRequestId(trimmed)
   ) {
     return trimmed;
   }

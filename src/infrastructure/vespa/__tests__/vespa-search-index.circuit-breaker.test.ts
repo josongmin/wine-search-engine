@@ -128,4 +128,31 @@ describe('VespaClient.query() AbortSignal (E3-T3)', () => {
       client.query('select * from wine_entity where true limit 1', undefined, controller.signal),
     ).rejects.toThrow();
   });
+
+  it('canonicalizes a non-ASCII requestId before sending X-Request-Id downstream', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        root: { id: 'root', relevance: 1, children: [] },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = newClient();
+    await client.query(
+      'select * from wine_entity where true limit 1',
+      undefined,
+      undefined,
+      'probe-피노 그리지오 추천',
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Request-Id']).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(headers['X-Request-Id']).toBeDefined();
+    expect(headers['X-Request-Id']).not.toBe('probe-피노 그리지오 추천');
+    expect(headers['X-Request-Id'].length).toBeLessThanOrEqual(128);
+  });
 });

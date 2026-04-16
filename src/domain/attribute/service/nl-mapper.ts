@@ -330,6 +330,12 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['평점 높은', { phrase: '평점 높은', mappedAttribute: 'critic_score', operator: '>=', value: 0.8, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['점수 높은', { phrase: '점수 높은', mappedAttribute: 'critic_score', operator: '>=', value: 0.8, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
+  // Alcohol
+  ['도수 낮은', { phrase: '도수 낮은', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['도수 낮은 거', { phrase: '도수 낮은 거', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['알코올 도수 낮은', { phrase: '알코올 도수 낮은', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['low alcohol', { phrase: 'low alcohol', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
   // Flavor / aroma
   ['과일향', { phrase: '과일향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'fruity', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['오크향', { phrase: '오크향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
@@ -373,6 +379,14 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['crowd-pleasing', { phrase: 'crowd-pleasing', mappedAttribute: 'style', operator: 'in', value: 'crowd_pleasing', mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['safe crowd-pleasing', { phrase: 'safe crowd-pleasing', mappedAttribute: 'style', operator: 'in', value: 'crowd_pleasing', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['safe crowd-pleasing options', { phrase: 'safe crowd-pleasing options', mappedAttribute: 'style', operator: 'in', value: 'crowd_pleasing', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['예쁜 라벨', { phrase: '예쁜 라벨', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['예쁜 라벨이면', { phrase: '예쁜 라벨이면', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['예쁜 병', { phrase: '예쁜 병', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['예쁜 거', { phrase: '예쁜 거', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.72, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['패키지 예쁜', { phrase: '패키지 예쁜', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.78, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['보기 좋은', { phrase: '보기 좋은', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.74, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['pretty label', { phrase: 'pretty label', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['giftable presentation', { phrase: 'giftable presentation', mappedAttribute: 'style', operator: 'in', value: 'presentation_forward', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['screw_cap', { phrase: 'screw_cap', mappedAttribute: 'style', operator: 'in', value: 'screw_cap', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['스크류캡', { phrase: '스크류캡', mappedAttribute: 'style', operator: 'in', value: 'screw_cap', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['스크류캡이고', { phrase: '스크류캡이고', mappedAttribute: 'style', operator: 'in', value: 'screw_cap', mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],

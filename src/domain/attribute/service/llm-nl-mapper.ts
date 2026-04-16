@@ -129,7 +129,7 @@ Price band values: budget, mid, premium, luxury.
 Wine type values: red, white, rosé, sparkling, natural, dessert, fortified, orange.
 Body/sweetness/acidity/tannin/critic_score/producer_prestige: numeric 0-1.
 Occasion values: gift, party, celebration, anniversary, wedding, date_night, housewarming, solo, healing, camping, romantic, comforting.
-Style values: dry, off_dry, sweet, sparkling, fortified, rose, natural, orange, chillable, screw_cap, approachable, crowd_pleasing.
+Style values: dry, off_dry, sweet, sparkling, fortified, rose, natural, orange, chillable, screw_cap, approachable, crowd_pleasing, presentation_forward.
 
 Return a JSON array. Each item: { "phrase": string, "attribute": string, "operator": "=" | "<=" | ">=" | "range" | "in", "value": string | number | { "min": number, "max": number }, "confidence": 0-1 }.
 
@@ -140,6 +140,7 @@ Examples:
 - "스크류캡" → [{"phrase":"스크류캡","attribute":"style","operator":"in","value":"screw_cap","confidence":0.85}]
 - "시원하게 마실" → [{"phrase":"시원하게 마실","attribute":"style","operator":"in","value":"chillable","confidence":0.8}]
 - "실패 없는" → [{"phrase":"실패 없는","attribute":"style","operator":"in","value":"crowd_pleasing","confidence":0.8}]
+- "예쁜 라벨" → [{"phrase":"예쁜 라벨","attribute":"style","operator":"in","value":"presentation_forward","confidence":0.8}]
 
 If a phrase has no wine-related constraint meaning, omit it from the array. Return [] for no matches.`;
 

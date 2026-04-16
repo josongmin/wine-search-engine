@@ -246,6 +246,10 @@ export class SearchUseCase {
     const preRoute = await runSearchPreRoutePhase({
       request,
       ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+      ...(options?.debugRequest === true ? { debugRequest: true } : {}),
+      ...(options?.executionPrincipal !== undefined
+        ? { executionPrincipal: options.executionPrincipal }
+        : {}),
       ...(stageTimer !== undefined ? { stageTimer } : {}),
       requestId,
       startTime,
@@ -309,6 +313,10 @@ export class SearchUseCase {
     } = buildSearchRouteResolutionContext(plan, request, compiled);
     const routeRequestContext: RequestExecutionContext = {
       ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+      ...(options?.debugRequest === true ? { debugRequest: true } : {}),
+      ...(options?.executionPrincipal !== undefined
+        ? { executionPrincipal: options.executionPrincipal }
+        : {}),
       ...(stageTimer !== undefined ? { stageTimer } : {}),
       requestId,
       requestStartTimeMs: startTime,

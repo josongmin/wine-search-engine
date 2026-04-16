@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { AnchorExtractor, type AliasMatcher, type AliasMatchResult } from '../service/anchor-extractor.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { QueryNormalizer } from '../service/query-normalizer.js';
@@ -279,6 +279,40 @@ describe('AnchorExtractor', () => {
       expect(result.anchors[0]?.lookupVariants).toEqual(
         expect.arrayContaining(['클라우디베이']),
       );
+    });
+  });
+
+  describe('batch alias lookup integration', () => {
+    it('uses AliasMatcher.findMatchesBatch when available to avoid repeated per-variant lookups', async () => {
+      const batchLookup = vi.fn(async (queries: readonly string[]) => {
+        const result = new Map<string, readonly AliasMatchResult[]>();
+        for (const query of queries) {
+          result.set(
+            query,
+            query === '오푸스원'
+              ? [makeMatchResult('오푸스원', ['entity-opus-one'], 0.92)]
+              : [],
+          );
+        }
+        return result;
+      });
+      const singleLookup = vi.fn(async (_query: string): Promise<readonly AliasMatchResult[]> => {
+        throw new Error('single lookup should not be used when batch is available');
+      });
+      const extractor = new AnchorExtractor({
+        findMatches: singleLookup,
+        findMatchesBatch: batchLookup,
+      });
+
+      const anchors = await extractor.extract(
+        '오푸스원 지금 마시기 좋아?',
+        normalizer.normalize('오푸스원 지금 마시기 좋아?'),
+      );
+
+      expect(anchors).toHaveLength(1);
+      expect(anchors[0]?.surfaceForm).toBe('오푸스원');
+      expect(batchLookup).toHaveBeenCalledTimes(1);
+      expect(singleLookup).not.toHaveBeenCalled();
     });
   });
 

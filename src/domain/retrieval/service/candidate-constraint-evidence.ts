@@ -108,8 +108,15 @@ function candidateMatchesSemanticStyleProfile(
     .map((value) => normalizeString(value));
   const candidateStyleFragments = collectCandidateStyleFragments(candidate)
     .map((value) => normalizeString(value));
+  const candidateOccasions = (candidate.occasion ?? [])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => normalizeString(value));
 
   if (profile.wineTypes.some((wineType) => candidateWineTypes.includes(normalizeWineType(wineType)))) {
+    return true;
+  }
+
+  if (profile.occasionTerms.some((term) => candidateOccasions.includes(normalizeString(term)))) {
     return true;
   }
 

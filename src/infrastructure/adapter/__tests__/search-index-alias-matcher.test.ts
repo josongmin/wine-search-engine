@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SearchIndexAliasMatcher } from '../search-index-alias-matcher.js';
 import { InMemorySearchIndex } from '../../../../test/integration/helpers/in-memory-adapters.js';
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
 import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
+import type { SearchIndexPort } from '../../../domain/retrieval/port/search-index.port.js';
 
 function makeDoc(overrides: Partial<RetrievalDocument> = {}): RetrievalDocument {
   return {
@@ -97,5 +98,28 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches.length).toBeGreaterThan(0);
     expect(matches[0]?.entityIds).toContain(doc.entityId);
     expect(matches[0]?.lookupStrategy).toContain('index_exact');
+  });
+
+  it('batches multiple lookup queries into a single sparseSearch call', async () => {
+    const backingIndex = new InMemorySearchIndex();
+    await backingIndex.upsertDocument(makeDoc());
+
+    const searchIndex = {
+      sparseSearch: vi.fn(backingIndex.sparseSearch.bind(backingIndex)),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    const batch = await matcher.findMatchesBatch([
+      '오푸스원 지금 마시기 좋아?',
+      '오퍼스원',
+    ]);
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(batch.get('오푸스원 지금 마시기 좋아?')?.[0]?.entityIds).toContain(
+      createCanonicalEntityId('wine-opus-one-2018'),
+    );
+    expect(batch.get('오퍼스원')?.[0]?.entityIds).toContain(
+      createCanonicalEntityId('wine-opus-one-2018'),
+    );
   });
 });

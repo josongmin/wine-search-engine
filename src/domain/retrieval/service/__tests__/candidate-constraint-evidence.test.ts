@@ -220,6 +220,29 @@ describe('unmetHardConstraints annotation', () => {
     expect(result.matchedConstraints).toContain('style');
   });
 
+  it('matches presentation_forward style for sparkling gift-style candidates', () => {
+    const candidate = makeCandidate({
+      wineType: 'sparkling',
+      style: 'sparkling white',
+      body: 2,
+      tannin: 1,
+    });
+    const bundle = makeBundle([], [makeConstraint('style', 'in', ['presentation_forward'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('style');
+  });
+
+  it('matches presentation_forward style from explicit occasion metadata', () => {
+    const candidate = makeCandidate({
+      wineType: 'red',
+      style: 'medium red',
+      occasion: ['gift'],
+    });
+    const bundle = makeBundle([], [makeConstraint('style', 'in', ['presentation_forward'])]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('style');
+  });
+
   it('accumulates multiple unmet attributes', () => {
     const candidate = makeCandidate({ wineType: 'white', region: 'Tuscany' });
     const bundle = makeBundle([

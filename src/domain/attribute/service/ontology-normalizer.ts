@@ -235,6 +235,14 @@ const EXACT_MAPPINGS: ReadonlyMap<string, MappingEntry> = new Map<string, Mappin
   ['crowd-pleasing', { axis: 'style', canonicalValue: 'crowd_pleasing', displayValue: 'Crowd-Pleasing' }],
   ['실패 없는', { axis: 'style', canonicalValue: 'crowd_pleasing', displayValue: 'Crowd-Pleasing' }],
   ['무난한', { axis: 'style', canonicalValue: 'crowd_pleasing', displayValue: 'Crowd-Pleasing' }],
+  ['예쁜 라벨', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['예쁜 라벨이면', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['예쁜 병', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['예쁜 거', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['패키지 예쁜', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['보기 좋은', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['pretty label', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
+  ['giftable presentation', { axis: 'style', canonicalValue: 'presentation_forward', displayValue: 'Presentation-Forward' }],
 
   // ── Sweetness axis (numeric sense) ──────────────────────────────────────────
   ['bone dry', { axis: 'sweetness', canonicalValue: 'bone_dry', displayValue: 'Bone Dry' }],

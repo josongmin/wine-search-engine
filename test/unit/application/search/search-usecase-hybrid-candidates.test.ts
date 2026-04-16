@@ -404,6 +404,29 @@ describe('retrieveHybridCandidatesForPlan', () => {
     );
   });
 
+  it('expands presentation-forward style semantics into gift-oriented retrieval archetypes', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: ['presentation_forward'],
+            source_phrase: '예쁜 라벨',
+            confidence: 0.8,
+          },
+        ],
+        inferred: [],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining(['giftable presentation', 'giftable', 'celebration', 'prosecco', 'rosé']),
+    );
+  });
+
   it('projects retrieval provenance coverage and shortfall on the generic candidate-pool path', async () => {
     const plan = minimalPlan({
       constraints: {

@@ -32,6 +32,16 @@ export interface AliasMatcher {
    * @returns Zero or more alias match results, ordered by confidence descending.
    */
   findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]>;
+  /**
+   * Optional bulk lookup for request-scoped batches of normalized queries.
+   *
+   * Hot-path alias substrates should implement this to avoid repeated
+   * downstream I/O when the planner expands a single user query into multiple
+   * lookup variants/spans.
+   */
+  findMatchesBatch?(
+    normalizedQueries: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>>;
 }
 
 /**
@@ -189,6 +199,12 @@ export class AnchorExtractor {
   private async lookupAliasMatches(
     lookupQueries: readonly string[],
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
+    const normalizedLookupQueries = lookupQueries
+      .map((query) => query.trim())
+      .filter((query) => query.length > 0);
+    const batchMatches = this.aliasMatcher.findMatchesBatch !== undefined
+      ? await this.aliasMatcher.findMatchesBatch(normalizedLookupQueries)
+      : undefined;
     const merged = new Map<
       string,
       {
@@ -201,11 +217,13 @@ export class AnchorExtractor {
     >();
 
     for (const [priority, lookupQuery] of lookupQueries.entries()) {
-      if (lookupQuery.trim().length === 0) {
+      const trimmedLookupQuery = lookupQuery.trim();
+      if (trimmedLookupQuery.length === 0) {
         continue;
       }
 
-      const aliasMatches = await this.aliasMatcher.findMatches(lookupQuery);
+      const aliasMatches = batchMatches?.get(trimmedLookupQuery)
+        ?? await this.aliasMatcher.findMatches(trimmedLookupQuery);
       for (const match of aliasMatches) {
         const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;
         const existing = merged.get(key);
@@ -224,7 +242,7 @@ export class AnchorExtractor {
           });
         }
 
-        merged.get(key)?.lookupVariants.add(lookupQuery);
+        merged.get(key)?.lookupVariants.add(trimmedLookupQuery);
         if (match.lookupStrategy !== undefined) {
           merged.get(key)?.lookupStrategies.add(match.lookupStrategy);
         }

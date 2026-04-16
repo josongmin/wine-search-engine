@@ -171,6 +171,22 @@ describe('NLMapper', () => {
         expect(mapping?.value).toBe('approachable');
       });
 
+      it('"예쁜 라벨" → style in [presentation_forward]', async () => {
+        const mapping = await mapper.mapPhrase('예쁜 라벨');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('presentation_forward');
+      });
+
+      it('"예쁜 라벨이면" → style in [presentation_forward]', async () => {
+        const mapping = await mapper.mapPhrase('예쁜 라벨이면');
+        expect(mapping).not.toBeNull();
+        expect(mapping?.mappedAttribute).toBe('style');
+        expect(mapping?.operator).toBe('in');
+        expect(mapping?.value).toBe('presentation_forward');
+      });
+
       it('"풀바디" → body >= 0.7', async () => {
         const mapping = await mapper.mapPhrase('풀바디');
         expect(mapping).not.toBeNull();

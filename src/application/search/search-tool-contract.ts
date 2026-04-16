@@ -80,8 +80,9 @@ const SEARCH_TOOL_STYLE_EXAMPLES = [
   'screw_cap',
   'approachable',
   'crowd_pleasing',
+  'presentation_forward',
 ] as const;
-const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing'] as const;
+const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing', 'presentation_forward'] as const;
 
 interface SearchToolTextFieldOptions {
   readonly maxLen: number;

@@ -11,10 +11,12 @@ import {
   CHARS_PER_TOKEN_ESTIMATE,
   estimateTokenCount,
   isValidLlmResult,
+  isLikelyJsonAttempt,
   parseLlmOutput,
   type LlmResult,
   type LlmAction,
 } from './agent-llm-output.js';
+import type { AgentToolAttempt } from './agent-tool-attempt-schema.js';
 import {
   AGENT_LLM_STEP_TIMEOUT_MESSAGE,
   AgentPlannerPhaseResultPolicy,
@@ -125,6 +127,85 @@ function enforceSearchQueryLanguageAnchor(
   }
 
   return parsed;
+}
+
+function hasExplicitPerSlotExactCardinality(query: string): boolean {
+  return /(한\s*병씩|한병씩|각각\s*한\s*병|각\s*한\s*병|one\s+bottle\s+each|one\s+each|exactly\s+one)/iu.test(query);
+}
+
+function hasExplicitRedWhitePairRequest(query: string): boolean {
+  return /(레드|red)/iu.test(query) && /(화이트|white)/iu.test(query);
+}
+
+function getActionWineType(action: AgentToolAttempt): string | undefined {
+  if (action.tool !== 'search_wines') {
+    return undefined;
+  }
+  return typeof action.input.wine_type === 'string' ? action.input.wine_type : undefined;
+}
+
+function enforceExplicitPerSlotCardinality(
+  originalQuery: string,
+  parsed: LlmAction,
+): LlmAction {
+  if (!hasExplicitPerSlotExactCardinality(originalQuery)) {
+    return parsed;
+  }
+
+  if (
+    parsed.action?.tool === 'search_wines'
+    && hasExplicitRedWhitePairRequest(originalQuery)
+    && typeof parsed.action.input['wine_type'] !== 'string'
+  ) {
+    const baseInput = parsed.action.input;
+    return {
+      thought: parsed.thought,
+      actions: [
+        {
+          tool: 'search_wines',
+          input: { ...baseInput, wine_type: 'red', limit: 1, want_diversity: false },
+        },
+        {
+          tool: 'search_wines',
+          input: { ...baseInput, wine_type: 'white', limit: 1, want_diversity: false },
+        },
+      ],
+    };
+  }
+
+  if (parsed.actions === undefined) {
+    return parsed;
+  }
+
+  const searchActions = parsed.actions.filter((action) => action.tool === 'search_wines');
+  if (searchActions.length < 2) {
+    return parsed;
+  }
+
+  const distinctWineTypes = new Set(
+    searchActions
+      .map((action) => getActionWineType(action))
+      .filter((wineType): wineType is string => wineType !== undefined && wineType.length > 0),
+  );
+  if (distinctWineTypes.size < 2) {
+    return parsed;
+  }
+
+  return {
+    ...parsed,
+    actions: parsed.actions.map((action) =>
+      action.tool === 'search_wines'
+        ? {
+            ...action,
+            input: {
+              ...action.input,
+              limit: 1,
+              want_diversity: false,
+            },
+          }
+        : action,
+    ),
+  };
 }
 
 interface AgentPlannerPhaseRunnerDeps {
@@ -238,7 +319,21 @@ export class AgentPlannerPhaseRunner {
       return null;
     }
 
-    const parsed = enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text));
+    const parsed = enforceExplicitPerSlotCardinality(
+      query,
+      enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text)),
+    );
+    if (
+      parsed.thought === '[unparseable LLM output]'
+      && isLikelyJsonAttempt(llmResult.text)
+    ) {
+      log.warn(
+        { requestId, stepIndex: state.steps.length },
+        'Agent LLM produced JSON-like but unparseable planner output; failing closed for recovery',
+      );
+      this.resultPolicy.applyMalformedLlmResult(state);
+      return null;
+    }
     if (state.steps.length === 0) {
       log.info(
         {

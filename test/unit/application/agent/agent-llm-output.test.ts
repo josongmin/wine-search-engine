@@ -47,6 +47,20 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('recovers the first valid JSON object when a later concatenated object is truncated', () => {
+    const parsed = parseLlmOutput(
+      '{"thought":"search","action":{"tool":"search_wines","input":{"query":"anniversary dinner"}}}\n{"thought":"partial"',
+    );
+
+    expect(parsed).toEqual({
+      thought: 'search',
+      action: {
+        tool: 'search_wines',
+        input: { query: 'anniversary dinner' },
+      },
+    });
+  });
+
   it('fails closed when a known tool carries invalid typed input', () => {
     const raw = JSON.stringify({
       thought: 'bad typed input',

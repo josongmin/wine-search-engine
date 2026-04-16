@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { formatErrorDiagnostics } from '../../domain/shared/utils/error-diagnostics.js';
+import { canonicalizeRequestIdForHeader } from '../../domain/shared/utils/request-id.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { VespaQueryResponseSchema } from './vespa-response.schema.js';
@@ -446,7 +447,9 @@ export class VespaClient {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(requestId !== undefined ? { 'X-Request-Id': requestId } : {}),
+            ...(requestId !== undefined
+              ? { 'X-Request-Id': canonicalizeRequestIdForHeader(requestId) }
+              : {}),
           },
           body: JSON.stringify(body),
         },

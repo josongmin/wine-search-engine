@@ -1593,6 +1593,47 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     expect(r.scores.toolAccuracy).toBeGreaterThanOrEqual(0.69);
     expect(r.scores.toolAccuracy).toBeLessThan(0.71);
   });
+
+  it('does not penalize slot-disjoint parallel search_wines calls as duplicates', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 10,
+        tools: [{ tool: 'search_wines' }],
+      }),
+      makeExecution({
+        stepCount: 3,
+        toolCallCount: 2,
+        toolsUsed: [
+          tool('search_wines', '{"query":"커플용 세트","wine_type":"red","limit":1,"want_diversity":false}'),
+          tool('search_wines', '{"query":"커플용 세트","wine_type":"white","limit":1,"want_diversity":false}'),
+        ],
+      }),
+      undefined,
+    );
+    expect(r.scores.toolAccuracy).toBe(1);
+    expect(r.diagnostics?.some((d) => d.code === 'TOOL_DUPLICATE_CALLS')).toBe(false);
+  });
+
+  it('still penalizes repeated equivalent structured search_wines calls', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 10,
+        tools: [{ tool: 'search_wines' }],
+      }),
+      makeExecution({
+        stepCount: 3,
+        toolCallCount: 2,
+        toolsUsed: [
+          tool('search_wines', '{"query":"오퍼스원","wine_type":"red","limit":1}'),
+          tool('search_wines', '{"wine_type":"red","limit":1,"query":"오퍼스원"}'),
+        ],
+      }),
+      undefined,
+    );
+    expect(r.scores.toolAccuracy).toBeGreaterThanOrEqual(0.69);
+    expect(r.scores.toolAccuracy).toBeLessThan(0.71);
+    expect(r.diagnostics?.some((d) => d.code === 'TOOL_DUPLICATE_CALLS')).toBe(true);
+  });
 });
 
 describe('maxConfidence — handles all threshold values', () => {

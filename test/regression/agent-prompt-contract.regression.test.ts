@@ -31,7 +31,7 @@ describe('agent system prompt contract', () => {
 
     expect(prompt).toContain('ONLY treat these as drinkability checks when the query targets a specific wine or an explicit comparison pair');
     expect(prompt).toContain('Generic recommendation wording such as "우울할 때 마시기 좋은 와인", "힐링되는 와인", "선물하기 좋은 와인" is NOT a drinkability query');
-    expect(prompt).toContain('"chillable", "screw_cap", "approachable", "crowd_pleasing"');
+    expect(prompt).toContain('"chillable", "screw_cap", "approachable", "crowd_pleasing", "presentation_forward"');
   });
 
   it('documents the full typed tool surface for retrieval mode, orange wine, and legacy USD food budgets', () => {

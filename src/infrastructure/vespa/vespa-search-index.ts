@@ -120,12 +120,13 @@ function parseDrinkingWindowSummary(raw: Record<string, unknown>): RetrievalDrin
  */
 const MIN_YQL_LIMIT = 1;
 /**
- * Absolute upper bound on any YQL `limit` clause. Vespa's default
- * `maxHits` is 400; values beyond this typically come from caller bugs
- * (NaN, Infinity, or integer overflow from upstream arithmetic) and
- * would either be rejected by Vespa or exhaust memory.
+ * Absolute upper bound on any YQL `limit` / `targetHits` clause.
+ *
+ * Vespa Cloud rejects requests above the cluster `maxHits` ceiling; in this
+ * deployment that ceiling is 400. Anything larger is therefore a caller-side
+ * contract bug, not a valid retrieval request.
  */
-const MAX_YQL_LIMIT = 10_000;
+const MAX_YQL_LIMIT = 400;
 
 /**
  * Coerces a runtime-unknown number into a safe non-negative integer suitable
@@ -142,6 +143,9 @@ const MAX_YQL_LIMIT = 10_000;
  * upstream callers to respect the port contract.
  */
 function sanitizeYqlIntLimit(value: number, fallback: number): number {
+  if (Number.isNaN(value)) return fallback;
+  if (value === Number.POSITIVE_INFINITY) return MAX_YQL_LIMIT;
+  if (value === Number.NEGATIVE_INFINITY) return MIN_YQL_LIMIT;
   if (!Number.isFinite(value)) return fallback;
   const rounded = Math.floor(value);
   if (rounded < MIN_YQL_LIMIT) return MIN_YQL_LIMIT;

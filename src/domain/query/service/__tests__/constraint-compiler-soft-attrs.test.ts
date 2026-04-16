@@ -282,6 +282,16 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     );
   });
 
+  it('real NLMapper extracts presentation-forward style for pretty-label gift query', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('와인 입문자 선물용, 예쁜 라벨이면 좋겠다');
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'style', value: ['presentation_forward'] }),
+      ]),
+    );
+  });
+
   it('real NLMapper extracts gift + approachable + crowd-pleasing constraints for english gift query', async () => {
     const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
     const result = await compiler.compile('gift for wine beginner, safe crowd-pleasing options');
@@ -291,6 +301,17 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
         expect.objectContaining({ attribute: 'occasion', value: ['gift'] }),
         expect.objectContaining({ attribute: 'style', value: ['approachable'] }),
         expect.objectContaining({ attribute: 'style', value: ['crowd_pleasing'] }),
+      ]),
+    );
+  });
+
+  it('real NLMapper extracts low-alcohol hard constraint for beginner gift phrasing', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('와인 입문자 선물용, 달달하면서 도수 낮은 거');
+
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
       ]),
     );
   });

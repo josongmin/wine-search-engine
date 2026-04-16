@@ -19,6 +19,7 @@ interface SemanticStyleProfile {
   readonly untypedArchetypeTerms: readonly string[];
   readonly wineTypeRetrievalTerms?: Partial<Record<WineTypeValue, readonly string[]>>;
   readonly evidenceWineTypes?: readonly WineTypeValue[];
+  readonly evidenceOccasionTerms?: readonly string[];
   readonly evidenceGrapeTerms?: readonly string[];
   readonly evidenceStyleTerms?: readonly string[];
 }
@@ -53,6 +54,20 @@ const SEMANTIC_STYLE_PROFILES: ReadonlyMap<string, SemanticStyleProfile> = new M
     evidenceGrapeTerms: ['merlot', 'pinot noir', 'pinot grigio', 'pinot gris', 'sauvignon blanc', 'chardonnay'],
     evidenceStyleTerms: ['easy drinking', 'medium', 'red blend'],
   }],
+  ['presentation_forward', {
+    renderedTerm: 'giftable presentation',
+    genericRetrievalTerms: ['giftable', 'celebration'],
+    untypedArchetypeTerms: ['prosecco', 'rosé'],
+    wineTypeRetrievalTerms: {
+      red: ['pinot noir', 'beaujolais'],
+      white: ['pinot grigio', 'moscato', 'riesling'],
+      sparkling: ['prosecco', 'cava', 'cremant'],
+    },
+    evidenceWineTypes: ['sparkling', 'white', 'rosé'],
+    evidenceOccasionTerms: ['gift', 'celebration', 'party'],
+    evidenceGrapeTerms: ['pinot noir', 'gamay', 'pinot grigio', 'pinot gris', 'moscato', 'riesling'],
+    evidenceStyleTerms: ['sparkling', 'rosé', 'floral', 'light'],
+  }],
 ]);
 
 function unique(values: readonly string[]): readonly string[] {
@@ -72,6 +87,7 @@ function collectStyleHints(input: {
 
 export function resolveSemanticStyleEvidenceProfile(style: string): {
   readonly wineTypes: readonly WineTypeValue[];
+  readonly occasionTerms: readonly string[];
   readonly grapeTerms: readonly string[];
   readonly styleTerms: readonly string[];
 } | undefined {
@@ -82,6 +98,7 @@ export function resolveSemanticStyleEvidenceProfile(style: string): {
 
   return {
     wineTypes: profile.evidenceWineTypes ?? [],
+    occasionTerms: profile.evidenceOccasionTerms ?? [],
     grapeTerms: unique([
       ...profile.untypedArchetypeTerms,
       ...(profile.evidenceGrapeTerms ?? []),

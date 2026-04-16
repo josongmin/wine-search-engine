@@ -202,6 +202,13 @@ describe('OntologyNormalizer', () => {
     expect(result!.canonicalValue).toBe('crowd_pleasing');
   });
 
+  it('"예쁜 라벨" → style/presentation_forward', () => {
+    const result = normalizer.normalize('예쁜 라벨');
+    expect(result).not.toBeNull();
+    expect(result!.axis).toBe('style');
+    expect(result!.canonicalValue).toBe('presentation_forward');
+  });
+
   // ── Additional: style variants ────────────────────────────────────────────
   it('"sparkling" → style/sparkling', () => {
     const result = normalizer.normalize('sparkling');

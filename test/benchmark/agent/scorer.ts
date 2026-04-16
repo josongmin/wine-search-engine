@@ -40,6 +40,72 @@ export interface ToolCallTrace {
   readonly input?: string;
 }
 
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJsonStringify(item)).join(',')}]`;
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableJsonStringify(nested)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function getToolCallSemanticSignature(call: ToolCallTrace): string | null {
+  if (typeof call.input !== 'string' || call.input.trim().length === 0) {
+    return null;
+  }
+  try {
+    return `${call.tool}:${stableJsonStringify(JSON.parse(call.input) as unknown)}`;
+  } catch {
+    return null;
+  }
+}
+
+function countSemanticallyDistinctCalls(calls: readonly ToolCallTrace[]): number {
+  const signatures = new Set<string>();
+  let opaqueCallCount = 0;
+  for (const call of calls) {
+    const signature = getToolCallSemanticSignature(call);
+    if (signature !== null) {
+      signatures.add(signature);
+      continue;
+    }
+    opaqueCallCount += 1;
+  }
+  return signatures.size + opaqueCallCount;
+}
+
+function parseToolCallInput(call: ToolCallTrace): Record<string, unknown> | null {
+  if (typeof call.input !== 'string' || call.input.trim().length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(call.input) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isSearchWinesPartitionBatch(calls: readonly ToolCallTrace[]): boolean {
+  if (calls.length < 2 || !calls.every((call) => call.tool === 'search_wines')) {
+    return false;
+  }
+  const wineTypes = calls
+    .map((call) => parseToolCallInput(call)?.['wine_type'])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toLowerCase());
+  if (wineTypes.length !== calls.length) {
+    return false;
+  }
+  return new Set(wineTypes).size === calls.length;
+}
+
 /**
  * Per-step trace captured from an AgentStep for triage / profiling.
  * Mirrors AgentStep but with tool inputs typed as Record<string,unknown>
@@ -1012,12 +1078,18 @@ function scoreToolAccuracy(
   for (const e of expected) {
     expectedCounts.set(e.tool, (expectedCounts.get(e.tool) ?? 0) + 1);
   }
-  const actualCounts = new Map<string, number>();
+  const actualCallsByTool = new Map<string, ToolCallTrace[]>();
   for (const t of toolsUsed) {
-    actualCounts.set(t.tool, (actualCounts.get(t.tool) ?? 0) + 1);
+    const calls = actualCallsByTool.get(t.tool) ?? [];
+    calls.push(t);
+    actualCallsByTool.set(t.tool, calls);
   }
   for (const [tool, expReps] of expectedCounts) {
-    const actReps = actualCounts.get(tool) ?? 0;
+    const actualCalls = actualCallsByTool.get(tool) ?? [];
+    const actReps =
+      tool === 'search_wines' && expReps === 1 && isSearchWinesPartitionBatch(actualCalls)
+        ? expReps
+        : countSemanticallyDistinctCalls(actualCalls);
     if (actReps > expReps) {
       const ratio = expReps / actReps; // 0 < ratio < 1
       const penalty = Math.max(ratio, PENALTY_TOOL_DUPLICATE);
@@ -1026,7 +1098,7 @@ function scoreToolAccuracy(
         dim: 'toolAccuracy',
         severity: 'warn',
         code: 'TOOL_DUPLICATE_CALLS',
-        message: `tool ${tool} called ${actReps}x (expected ${expReps}x, penalty ${((1 - penalty) * 100).toFixed(0)}%)`,
+        message: `tool ${tool} called ${actualCalls.length}x (${actReps} semantic invocation(s), expected ${expReps}x, penalty ${((1 - penalty) * 100).toFixed(0)}%)`,
         observed: actReps,
         expected: expReps,
       });

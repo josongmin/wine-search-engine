@@ -66,6 +66,7 @@ function buildPlannerSystemPrompt(): string {
     '7. Vague queries ("아무거나", "추천해줘", "가성비", "가성비 갑"): ALWAYS search_wines first. NEVER answer without searching. Return 2-3 diverse picks with hedging.',
     '8. Situation/recommendation queries (gift, occasion, 추천, 가성비, food pairing): ALWAYS call a tool first. Never answer without searching.',
     '   Mixed-type requests (red+white, "both colors") are NOT food pairing inputs; route them to search_wines instead of get_food_pairings.',
+    '   If the user requests an exact per-slot count such as "한 병씩", "각각 1개", or "one each", search each slot with that exact cardinality and final-answer with exactly that many wines — no extra alternates.',
     '   Do NOT invent wine_type for general recommendation queries unless the user explicitly asked for a color/type. Gift/non-expert/safe recommendation intent should usually map to styles:["approachable","crowd_pleasing"], not an assumed red/white filter.',
     '   For Korean recommendation queries, preserve the original Korean lexical anchor in search_wines.query. Do NOT rewrite "와인 잘 모르는 사람한테 선물할 거" into English paraphrases like "gift recommendation for someone who doesn\'t know wine".',
     '9. Multi-constraint (3+): use structured params for ALL constraints in one call. Follow Constraint Tiers above.',

@@ -167,6 +167,20 @@ function buildSearchQueries(query: string): readonly string[] {
   return ordered;
 }
 
+function trimDedupedQueries(queries: readonly string[]): readonly string[] {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const query of queries) {
+    const trimmed = query.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    ordered.push(trimmed);
+  }
+  return ordered;
+}
+
 function collectCandidateSurfaces(hit: SparseHit): readonly CandidateSurface[] {
   const summary = hit.summary;
   const candidates: CandidateSurface[] = [];
@@ -198,23 +212,10 @@ function resolveBaseConfidence(hit: SparseHit, fallbackField: AliasFieldName): n
 export class SearchIndexAliasMatcher implements AliasMatcher {
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
-  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
-    const trimmed = normalizedQuery.trim();
-    if (trimmed.length === 0) {
-      return [];
-    }
-
-    const queries = buildSearchQueries(trimmed);
-
-    const hits = await this.searchIndex.sparseSearch(
-      queries,
-      [],
-      SEARCH_INDEX_ALIAS_LIMIT,
-      'hybrid',
-    );
-    if (hits.length === 0) {
-      return [];
-    }
+  private resolveMatchesForQuery(
+    normalizedQuery: string,
+    hits: readonly SparseHit[],
+  ): readonly AliasMatchResult[] {
     const grouped = new Map<
       string,
       {
@@ -228,7 +229,7 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
 
     for (const hit of hits) {
       for (const surface of collectCandidateSurfaces(hit)) {
-        const classified = classifyMatch(trimmed, surface.value);
+        const classified = classifyMatch(normalizedQuery, surface.value);
         if (classified === null) {
           continue;
         }
@@ -268,6 +269,41 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
         lookupStrategy: [...match.lookupStrategies].sort().join('+'),
       }));
   }
+
+  async findMatchesBatch(
+    normalizedQueries: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const trimmedQueries = trimDedupedQueries(normalizedQueries);
+    if (trimmedQueries.length === 0) {
+      return new Map();
+    }
+
+    const mergedSearchQueries = trimDedupedQueries(
+      trimmedQueries.flatMap((query) => buildSearchQueries(query)),
+    );
+
+    const hits = await this.searchIndex.sparseSearch(
+      mergedSearchQueries,
+      [],
+      SEARCH_INDEX_ALIAS_LIMIT * trimmedQueries.length,
+      'hybrid',
+    );
+    const matchesByQuery = new Map<string, readonly AliasMatchResult[]>();
+    for (const query of trimmedQueries) {
+      matchesByQuery.set(query, this.resolveMatchesForQuery(query, hits));
+    }
+    return matchesByQuery;
+  }
+
+  async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+    const trimmed = normalizedQuery.trim();
+    if (trimmed.length === 0) {
+      return [];
+    }
+
+    const batch = await this.findMatchesBatch([trimmed]);
+    return batch.get(trimmed) ?? [];
+  }
 }
 
 export class CascadingAliasMatcher implements AliasMatcher {
@@ -282,5 +318,45 @@ export class CascadingAliasMatcher implements AliasMatcher {
       return primaryMatches;
     }
     return this.secondary.findMatches(normalizedQuery);
+  }
+
+  async findMatchesBatch(
+    normalizedQueries: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const trimmedQueries = trimDedupedQueries(normalizedQueries);
+    if (trimmedQueries.length === 0) {
+      return new Map();
+    }
+
+    const results = new Map<string, readonly AliasMatchResult[]>();
+    const primaryBatch = this.primary.findMatchesBatch !== undefined
+      ? await this.primary.findMatchesBatch(trimmedQueries)
+      : undefined;
+
+    const unresolved: string[] = [];
+    for (const query of trimmedQueries) {
+      const primaryMatches = primaryBatch?.get(query)
+        ?? (primaryBatch === undefined ? await this.primary.findMatches(query) : []);
+      if (primaryMatches.length > 0) {
+        results.set(query, primaryMatches);
+        continue;
+      }
+      unresolved.push(query);
+    }
+
+    if (unresolved.length === 0) {
+      return results;
+    }
+
+    const secondaryBatch = this.secondary.findMatchesBatch !== undefined
+      ? await this.secondary.findMatchesBatch(unresolved)
+      : undefined;
+    for (const query of unresolved) {
+      const secondaryMatches = secondaryBatch?.get(query)
+        ?? (secondaryBatch === undefined ? await this.secondary.findMatches(query) : []);
+      results.set(query, secondaryMatches);
+    }
+
+    return results;
   }
 }

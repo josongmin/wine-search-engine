@@ -370,7 +370,7 @@ describe('VespaSearchIndex', () => {
       const index = new VespaSearchIndex(client);
       await index.sparseSearch(['bordeaux'], [], Number.POSITIVE_INFINITY);
       expect(queries[0]).not.toContain('Infinity');
-      expect(queries[0]).toMatch(/ limit \d+$/);
+      expect(queries[0]).toMatch(/ limit 400$/);
     });
 
     it('coerces negative limit to MIN_YQL_LIMIT in sparseSearch', async () => {
@@ -404,7 +404,8 @@ describe('VespaSearchIndex', () => {
       const index = new VespaSearchIndex(client);
       await index.denseSearch([0.1, 0.2, 0.3], [], Number.POSITIVE_INFINITY);
       expect(queries[0]).not.toContain('Infinity');
-      expect(queries[0]).toMatch(/targetHits: \d+/);
+      expect(queries[0]).toMatch(/targetHits: 400/);
+      expect(queries[0]).toMatch(/ limit 400$/);
     });
 
     it('coerces NaN limit in searchLearnedSparse without emitting NaN', async () => {
@@ -419,6 +420,19 @@ describe('VespaSearchIndex', () => {
       expect(queries[0]).not.toContain('NaN');
       expect(queries[0]).toMatch(/targetHits: \d+/);
       expect(queries[0]).toMatch(/ limit \d+$/);
+    });
+
+    it('coerces Infinity limit in searchLearnedSparse to Vespa maxHits cap', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.searchLearnedSparse(
+        [{ token: 'wine', weight: 1 }],
+        [],
+        Number.POSITIVE_INFINITY,
+      );
+      expect(queries[0]).not.toContain('Infinity');
+      expect(queries[0]).toMatch(/targetHits: 400/);
+      expect(queries[0]).toMatch(/ limit 400$/);
     });
   });
 

@@ -214,6 +214,148 @@ describe('AgentPlannerPhaseRunner', () => {
     }));
   });
 
+  it('clamps parallel red/white per-slot searches to exact cardinality for "한 병씩" queries', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '커플 선물용으로 레드/화이트 각각 검색',
+            actions: [
+              {
+                tool: 'search_wines',
+                input: {
+                  query: '커플 세트로 레드 화이트 한 병씩, 예쁜 거',
+                  wine_type: 'red',
+                  limit: 3,
+                  want_diversity: true,
+                },
+              },
+              {
+                tool: 'search_wines',
+                input: {
+                  query: '커플 세트로 레드 화이트 한 병씩, 예쁜 거',
+                  wine_type: 'white',
+                  limit: 3,
+                  want_diversity: true,
+                },
+              },
+            ],
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '커플 세트로 레드 화이트 한 병씩, 예쁜 거',
+      'req-couple-gift-cardinality',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.actions).toEqual([
+      {
+        tool: 'search_wines',
+        input: expect.objectContaining({
+          wine_type: 'red',
+          limit: 1,
+          want_diversity: false,
+        }),
+      },
+      {
+        tool: 'search_wines',
+        input: expect.objectContaining({
+          wine_type: 'white',
+          limit: 1,
+          want_diversity: false,
+        }),
+      },
+    ]);
+  });
+
+  it('splits a single broad search into red/white exact-count parallel searches for pair-set queries', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '커플 선물 세트 검색',
+            action: {
+              tool: 'search_wines',
+              input: {
+                query: '커플 세트로 레드 화이트 한 병씩, 예쁜 거',
+                limit: 4,
+                want_diversity: true,
+                styles: ['approachable', 'crowd_pleasing'],
+              },
+            },
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '커플 세트로 레드 화이트 한 병씩, 예쁜 거',
+      'req-couple-gift-split',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.action).toBeUndefined();
+    expect(result?.parsed.actions).toEqual([
+      {
+        tool: 'search_wines',
+        input: expect.objectContaining({
+          wine_type: 'red',
+          limit: 1,
+          want_diversity: false,
+          styles: ['approachable', 'crowd_pleasing'],
+        }),
+      },
+      {
+        tool: 'search_wines',
+        input: expect.objectContaining({
+          wine_type: 'white',
+          limit: 1,
+          want_diversity: false,
+          styles: ['approachable', 'crowd_pleasing'],
+        }),
+      },
+    ]);
+  });
+
+  it('fails closed on JSON-like but unparseable planner output so recovery can run', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: '{"thought":"검색","action":{"tool":"search_wines","input":{"query":"결혼기념일"}}\n{"thought":"검색 시작"}',
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+    const state = createAgentExecutionState();
+
+    const result = await runner.run(
+      '결혼기념일 디너 와인 추천',
+      'req-json-like-malformed',
+      DEFAULT_AGENT_CONFIG,
+      state,
+      3,
+      false,
+    );
+
+    expect(result).toBeNull();
+    expect(state.reasoningFailureDetected).toBe(true);
+    expect(state.terminationReason).toBe('error');
+  });
+
   it('renders and clears typed planner directives in the next planner call', async () => {
     const complete = vi.fn().mockResolvedValue({
       text: JSON.stringify({ thought: 'search', action: { tool: 'search_wines', input: { query: 'opus one' } } }),

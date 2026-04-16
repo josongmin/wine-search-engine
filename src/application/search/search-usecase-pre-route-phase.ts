@@ -82,10 +82,24 @@ export async function runSearchPreRoutePhase(
 ): Promise<SearchPreRoutePhaseResult> {
   const sanitizedQuery = ctx.executionPrincipal === 'benchmark_trusted'
     ? ctx.request.query
-    : await createSearchQuerySecurityGate(ctx.securityGateDeps).getSafeQueryOrThrow(ctx.request.query);
+    : await (async () => {
+      ctx.stageTimer?.start('pre_route.security_gate');
+      return createSearchQuerySecurityGate(ctx.securityGateDeps)
+        .getSafeQueryOrThrow(ctx.request.query)
+        .finally(() => {
+          ctx.stageTimer?.end('pre_route.security_gate');
+        });
+    })();
 
   if (ctx.decomposedSearch) {
-    const decomposition = analyzeQueryDecomposition(sanitizedQuery);
+    ctx.stageTimer?.start('pre_route.decomposition.detect');
+    const decomposition = (() => {
+      try {
+        return analyzeQueryDecomposition(sanitizedQuery);
+      } finally {
+        ctx.stageTimer?.end('pre_route.decomposition.detect');
+      }
+    })();
     if (isValidDecomposition(decomposition.outcome)) {
       const decomposedSearchTimeoutMs = resolveDecomposedSearchTimeoutMs(
         ctx.request,
@@ -114,6 +128,7 @@ export async function runSearchPreRoutePhase(
             resolve(timeoutSignal);
           }, decomposedSearchTimeoutMs);
         });
+        ctx.stageTimer?.start('pre_route.decomposition.execute');
         const decomposedSearchPromise = ctx.decomposedSearch.execute(
           decomposition.outcome.subQueries,
           decomposition.outcome.comparisonIntent,
@@ -140,6 +155,8 @@ export async function runSearchPreRoutePhase(
             return timeoutSignal;
           }
           throw err;
+        }).finally(() => {
+          ctx.stageTimer?.end('pre_route.decomposition.execute');
         });
         let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
         try {
@@ -190,17 +207,32 @@ export async function runSearchPreRoutePhase(
   // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
   const plannerContext = buildPlannerContextFromSearchRequest(ctx.request, {
     ...(ctx.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
+    ...(ctx.debugRequest === true ? { debugRequest: true } : {}),
+    ...(ctx.stageTimer !== undefined ? { stageTimer: ctx.stageTimer } : {}),
+    requestId: ctx.requestId,
   });
   let plan: QueryPlanV1;
   let compiled: CompiledWineQuery;
+  ctx.stageTimer?.start('pre_route.planner');
   if (ctx.queryPlanner.planWithCompiled !== undefined) {
-    const result = await ctx.queryPlanner.planWithCompiled(sanitizedQuery, plannerContext);
+    const result = await ctx.queryPlanner.planWithCompiled(
+      sanitizedQuery,
+      plannerContext,
+    ).finally(() => {
+      ctx.stageTimer?.end('pre_route.planner');
+    });
     plan = result.v1;
     compiled = result.compiled;
   } else if (ctx.allowCompiledFallback === true) {
-    plan = await ctx.queryPlanner.plan(sanitizedQuery, plannerContext);
+    plan = await ctx.queryPlanner.plan(
+      sanitizedQuery,
+      plannerContext,
+    ).finally(() => {
+      ctx.stageTimer?.end('pre_route.planner');
+    });
     compiled = compileFromLegacyPlan(plan);
   } else {
+    ctx.stageTimer?.end('pre_route.planner');
     throw new Error(
       'Search pre-route requires QueryPlanner.planWithCompiled(); ' +
       'set allowCompiledFallback=true only for tests or explicit special seams.',

@@ -221,16 +221,19 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
   /** StageTimer for pipeline latency breakdown. Threaded to search execute options. */
   readonly stageTimer?: StageTimer | undefined;
 }): Promise<SearchExecutorResult> {
-  const execOpts = {
+  const fallbackExecOpts = {
     ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
     ...(input.stageTimer !== undefined ? { stageTimer: input.stageTimer } : {}),
   };
+  const typedExecOpts = input.abortSignal !== undefined
+    ? { abortSignal: input.abortSignal }
+    : undefined;
 
   if (!input.shouldRun) {
     return input.searchUseCase.execute(
       input.fallbackRequest,
       input.requestId,
-      execOpts,
+      fallbackExecOpts,
     );
   }
 
@@ -246,7 +249,7 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
     return input.searchUseCase.execute(
       input.fallbackRequest,
       input.requestId,
-      execOpts,
+      fallbackExecOpts,
     );
   }
 
@@ -255,7 +258,7 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
       input.searchUseCase.execute(
         input.buildTypedRequest(wineType),
         `${input.requestId}:diversity:${wineType}`,
-        execOpts,
+        typedExecOpts,
       ),
     ),
   );
@@ -274,6 +277,6 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
   return input.searchUseCase.execute(
     input.fallbackRequest,
     input.requestId,
-    { ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}) },
+    fallbackExecOpts,
   );
 }

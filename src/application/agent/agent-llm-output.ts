@@ -71,10 +71,48 @@ function extractFirstJsonObject(text: string): string {
   return text;
 }
 
+function extractFirstParsableJsonObject(text: string): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let start = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+      continue;
+    }
+    if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        const candidate = text.slice(start, i + 1);
+        try {
+          const parsed: unknown = JSON.parse(candidate);
+          if (typeof parsed === 'object' && parsed !== null) {
+            return candidate;
+          }
+        } catch (err) {
+          void err;
+          // Continue scanning so concatenated/truncated later payloads do not
+          // poison an otherwise valid earlier JSON object boundary.
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 export function parseLlmJsonObject(text: string): Record<string, unknown> | null {
   try {
     const cleaned = cleanLlmJsonText(text);
-    const firstObject = extractFirstJsonObject(cleaned);
+    const firstObject = extractFirstParsableJsonObject(cleaned) ?? extractFirstJsonObject(cleaned);
     const rawParsed: unknown = JSON.parse(firstObject);
     return typeof rawParsed === 'object' && rawParsed !== null
       ? rawParsed as Record<string, unknown>
@@ -82,6 +120,11 @@ export function parseLlmJsonObject(text: string): Record<string, unknown> | null
   } catch {
     return null;
   }
+}
+
+export function isLikelyJsonAttempt(text: string): boolean {
+  const cleaned = cleanLlmJsonText(text);
+  return cleaned.startsWith('{') || cleaned.startsWith('[');
 }
 
 function parseToolCallCandidate(candidate: Record<string, unknown>): AgentToolAttempt | null {

@@ -190,6 +190,7 @@ export class Planner {
     originalQuery: string,
     context?: PlannerContext,
   ): Promise<QueryPlanV2> {
+    const stageTimer = context?.stageTimer;
     // 1. Normalize + Korean typo correction.
     const typoFixed = correctKoreanWineTypos(safeQuery);
     const queryViews = this.queryNormalizer.normalize(typoFixed);
@@ -202,7 +203,13 @@ export class Planner {
     const plannerTrace: PolicyDecisionRecord[] = [];
 
     // 2. Extract anchors.
-    const { anchors, relativeQuery } = await this.anchorExtractor.extractWithRelative(normalizedQuery, queryViews);
+    stageTimer?.start('planner.anchor_extraction');
+    const { anchors, relativeQuery } = await this.anchorExtractor.extractWithRelative(
+      normalizedQuery,
+      queryViews,
+    ).finally(() => {
+      stageTimer?.end('planner.anchor_extraction');
+    });
 
     // 2b. Fuzzy-match fallback: when anchor extraction finds nothing, try
     //     approximate matching against the known-term index.
@@ -328,7 +335,14 @@ export class Planner {
       allAnchors,
       relativeQuery,
     );
-    const parsed = await this.parseConstraints(constraintQuery, intent, context?.abortSignal);
+    stageTimer?.start('planner.constraint_parsing');
+    const parsed = await this.parseConstraints(
+      constraintQuery,
+      intent,
+      context?.abortSignal,
+    ).finally(() => {
+      stageTimer?.end('planner.constraint_parsing');
+    });
     const mergedConstraints = this.mergePairingIntoBundle(
       buildBundleFromAtoms(parsed.reasonerOutput.survivingAtoms),
       normalizedQuery,

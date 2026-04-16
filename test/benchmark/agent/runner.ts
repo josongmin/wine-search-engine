@@ -405,8 +405,20 @@ async function buildRealToolDeps(): Promise<{
   const coverage = await fetchCriticalWineTypeCoverage(vespaClient);
   assertCriticalWineTypeCoverage(coverage);
 
+  const benchmarkTrustedSearchUseCase: AgentToolDeps['searchUseCase'] = {
+    execute: (request, requestId, options) =>
+      container.searchUseCase.execute(
+        request,
+        requestId,
+        {
+          ...options,
+          executionPrincipal: 'benchmark_trusted',
+        },
+      ),
+  };
+
   const toolDeps: AgentToolDeps = {
-    searchUseCase: container.searchUseCase as never,
+    searchUseCase: benchmarkTrustedSearchUseCase,
     ...(container.decomposedSearchUseCase !== undefined
       ? {
           decomposedSearchExecute: async (

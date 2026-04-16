@@ -553,7 +553,7 @@ describe('executeAgentTool', () => {
     );
 
     const call = vi.mocked(mockSearchUseCase.execute).mock.calls[0];
-    expect(call?.[2]).toEqual({ abortSignal: controller.signal });
+    expect(call?.[2]).toEqual(expect.objectContaining({ abortSignal: controller.signal }));
   });
 
   it('serializes pairing budgets into parser-compatible KRW text', async () => {
