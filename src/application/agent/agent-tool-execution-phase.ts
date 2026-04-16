@@ -26,6 +26,7 @@ import {
   withTimeout,
 } from './agent-tool-execution-support.js';
 import { AgentToolExecutionResultPolicy } from './agent-tool-execution-result-policy.js';
+import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from './agent-tool-attempt-schema.js';
 
 const log = bootstrapLogger.child({ component: 'AgentToolExecutionPhase' });
 
@@ -181,7 +182,7 @@ export class AgentToolExecutionPhase {
         state.terminationReason = 'error';
         return true;
       }
-      const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+      const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}`;
       this.resultPolicy.recordBatchStep({
         requestId,
         stepIndex: batchStepIndex,

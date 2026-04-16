@@ -8,6 +8,7 @@ import {
   formatPolicyBlockedObservation,
   type TimeoutErrorLike,
 } from './agent-tool-execution-support.js';
+import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from './agent-tool-attempt-schema.js';
 
 interface ToolCall {
   readonly tool: string;
@@ -280,6 +281,6 @@ export class AgentToolExecutionResultPolicy {
   }
 
   private buildUnknownToolObservation(tool: string): string {
-    return `Unknown tool: ${tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+    return `Unknown tool: ${tool}. Available: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}`;
   }
 }

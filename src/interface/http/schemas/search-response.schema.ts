@@ -82,6 +82,16 @@ export const EvidenceItemSchema = z.object({
   contribution: z.string().min(1),
   strength: z.enum(['low', 'medium', 'high']),
   provenance: z.string().min(1),
+  /**
+   * Intentional-open: channel-specific evidence metadata.
+   *
+   * Different retrieval channels (entity, hybrid, sparse) attach varying
+   * metadata shapes (e.g. matchType, aliasScore for entity evidence).
+   * Values are currently scalar (string | number) but future channels
+   * may need nested structures. Clients MUST NOT depend on specific keys.
+   *
+   * Bounded by key count (50) to prevent unbounded serialization.
+   */
   metadata: z.record(z.string(), z.unknown()).refine(
     (obj) => Object.keys(obj).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
     'metadata must have at most 50 keys',
@@ -361,10 +371,28 @@ const InterpretUncertaintySchema = z.object({
   constraint_confidence: z.number().finite().min(0).max(1).optional(),
 }).strict();
 
+/**
+ * Scalar fact value for planner policy trace fields (`input_facts`, `inputs_matched`).
+ *
+ * Bounded to scalar JSON types because all planner stages currently emit only
+ * string, number, or boolean facts (e.g. normalizedQuery, anchorCount, intent).
+ * If a new stage needs nested structures, expand this deliberately rather than
+ * using z.unknown().
+ *
+ * @stability debug — planner trace shapes may evolve across releases.
+ */
+const PlannerFactValueSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
+
+/** Maximum keys in a single planner fact record (input_facts or inputs_matched). */
+const MAX_PLANNER_FACT_KEYS = 10;
+
 const RuleMatchSchema = z.object({
   rule_id: z.string().min(1),
   description: z.string().min(1),
-  inputs_matched: z.record(z.unknown()),
+  inputs_matched: z.record(z.string(), PlannerFactValueSchema).refine(
+    (r) => Object.keys(r).length <= MAX_PLANNER_FACT_KEYS,
+    `inputs_matched must have at most ${MAX_PLANNER_FACT_KEYS} keys`,
+  ),
   outcome: z.string().min(1),
 }).strict();
 
@@ -384,7 +412,10 @@ const PolicyDecisionRecordWireSchema = z.object({
     'uncertainty_estimation',
     'target_entity_inference',
   ]),
-  input_facts: z.record(z.unknown()),
+  input_facts: z.record(z.string(), PlannerFactValueSchema).refine(
+    (r) => Object.keys(r).length <= MAX_PLANNER_FACT_KEYS,
+    `input_facts must have at most ${MAX_PLANNER_FACT_KEYS} keys`,
+  ),
   rules_evaluated: z.array(RuleMatchSchema).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS),
   rejected_branches: z.array(RuleMissSchema).max(MAX_AUDIT_PLANNER_POLICY_TRACE_ITEMS),
   decision: z.string().min(1),

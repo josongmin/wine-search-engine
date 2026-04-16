@@ -121,4 +121,47 @@ describe('agent-llm-output', () => {
     expect(isValidLlmResult({ text: '{}', finishReason: 'stop' })).toBe(false);
     expect(isValidLlmResult(undefined)).toBe(false);
   });
+
+  it('filters out known tools with wrong-type input from parallel batch', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'parallel run',
+      actions: [
+        { tool: 'search_wines', input: { query: 'barolo' } },
+        { tool: 'get_food_pairings', input: { food: 123 } },
+        { tool: 'check_drinking_window', input: { entity_id: 'wine-1' } },
+      ],
+    }));
+
+    expect(parsed.actions).toHaveLength(2);
+    expect(parsed.actions![0]).toEqual({ tool: 'search_wines', input: { query: 'barolo' } });
+    expect(parsed.actions![1]).toEqual({ tool: 'check_drinking_window', input: { entity_id: 'wine-1' } });
+  });
+
+  it('fails closed on bare tool call with invalid known-tool typed input', () => {
+    const raw = JSON.stringify({
+      thought: 'bare invalid',
+      tool: 'compare_wines',
+      input: { query_a: 123, query_b: 456 },
+    });
+    const parsed = parseLlmOutput(raw);
+
+    expect(parsed).toEqual({
+      thought: '[unparseable LLM structure]',
+      answer: raw,
+    });
+  });
+
+  it('preserves unknown tool in parallel batch alongside valid known tools', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'mix known+unknown',
+      actions: [
+        { tool: 'search_wines', input: { query: 'brunello' } },
+        { tool: 'fake_lookup', input: { id: 'abc' } },
+      ],
+    }));
+
+    expect(parsed.actions).toHaveLength(2);
+    expect(parsed.actions![0]).toEqual({ tool: 'search_wines', input: { query: 'brunello' } });
+    expect(parsed.actions![1]).toEqual({ tool: 'fake_lookup', input: { id: 'abc' } });
+  });
 });

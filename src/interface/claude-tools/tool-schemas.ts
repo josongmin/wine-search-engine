@@ -55,6 +55,15 @@ export {
   DrinkingWindowAttemptInputSchema,
   FoodPairingAttemptInputSchema,
   SearchToolAttemptInputSchema,
+  type AgentToolAttempt,
+  type CompareWinesAttemptInput,
+  type DrinkingWindowAttemptInput,
+  type FoodPairingAttemptInput,
+  type KnownAgentToolAttempt,
+  type KnownAgentToolInput,
+  type SearchToolAttemptInput,
+  type UnknownAgentToolAttempt,
+  MAX_UNKNOWN_TOOL_INPUT_KEYS,
 } from '../../application/agent/agent-tool-attempt-schema.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,

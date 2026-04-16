@@ -3,17 +3,25 @@ import {
   isKnownAgentToolName,
   parseKnownAgentToolAttemptInput,
   parseUnknownAgentToolAttemptInput,
+  type AgentToolAttempt,
 } from './agent-tool-attempt-schema.js';
 
 const log = bootstrapLogger.child({ component: 'AgentLlmOutput' });
 const LOG_PREVIEW_CHARS = 200;
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 
-/** Parsed LLM output — either a tool call, a parallel batch, or a final answer. */
+/**
+ * Parsed LLM output — either a tool call, a parallel batch, or a final answer.
+ *
+ * `action` / `actions` carry the discriminated `AgentToolAttempt` type so that
+ * known tools' input shape is typed from parse through execution and
+ * serialization.  Unknown tools use the `UnknownAgentToolAttempt` variant
+ * (open `Record<string, unknown>` input) for recovery semantics.
+ */
 export interface LlmAction {
   readonly thought: string;
-  readonly action?: { readonly tool: string; readonly input: Record<string, unknown> };
-  readonly actions?: readonly { readonly tool: string; readonly input: Record<string, unknown> }[];
+  readonly action?: AgentToolAttempt;
+  readonly actions?: readonly AgentToolAttempt[];
   readonly answer?: string;
 }
 
@@ -76,18 +84,14 @@ export function parseLlmJsonObject(text: string): Record<string, unknown> | null
   }
 }
 
-function parseToolCallCandidate(candidate: Record<string, unknown>): {
-  readonly tool: string;
-  readonly input: Record<string, unknown>;
-} | null {
+function parseToolCallCandidate(candidate: Record<string, unknown>): AgentToolAttempt | null {
   const tool = typeof candidate['tool'] === 'string' ? candidate['tool'] : '';
   if (tool.length === 0) {
     return null;
   }
 
   if (isKnownAgentToolName(tool)) {
-    const knownInput = parseKnownAgentToolAttemptInput(tool, candidate['input']);
-    return knownInput !== null ? { tool, input: knownInput } : null;
+    return parseKnownAgentToolAttemptInput(tool, candidate['input']);
   }
 
   if (typeof candidate['input'] !== 'undefined') {

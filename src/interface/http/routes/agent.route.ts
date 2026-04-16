@@ -30,6 +30,7 @@ import {
   FoodPairingAttemptInputSchema,
   SearchToolAttemptInputSchema,
 } from '../../claude-tools/tool-schemas.js';
+import { MAX_UNKNOWN_TOOL_INPUT_KEYS } from '../../../application/agent/agent-tool-attempt-schema.js';
 
 const AgentRequestSchema = z.object({
   query: z.string().min(1).max(MAX_AGENT_HTTP_QUERY_CHARS),
@@ -66,7 +67,10 @@ const AgentUnknownToolCallSchema = z.object({
     (tool) => !ClaudeToolNameSchema.safeParse(tool).success,
     { message: 'Unknown tool calls must not use a registered tool name.' },
   ),
-  input: z.record(z.unknown()),
+  input: z.record(z.unknown()).refine(
+    (r) => Object.keys(r).length <= MAX_UNKNOWN_TOOL_INPUT_KEYS,
+    { message: `Unknown tool input must have at most ${MAX_UNKNOWN_TOOL_INPUT_KEYS} keys.` },
+  ),
 }).strict();
 
 const AgentToolCallSchema = z.union([

@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { formatErrorDiagnostics } from '../../domain/shared/utils/error-diagnostics.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { VespaQueryResponseSchema } from './vespa-response.schema.js';
@@ -159,6 +160,13 @@ function assertObject(
  */
 function extractErrorMessage(body: unknown): string {
   if (typeof body === 'string') return body;
+  const diagnostics = formatErrorDiagnostics(body);
+  if (diagnostics !== undefined) {
+    if (body instanceof Error) {
+      return `${body.message} [${diagnostics}]`;
+    }
+    return diagnostics;
+  }
   if (typeof body === 'object' && body !== null) {
     const b = body as Record<string, unknown>;
     if (typeof b['message'] === 'string') return b['message'];

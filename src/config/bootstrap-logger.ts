@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { getSafeErrorDiagnostics } from '../domain/shared/utils/error-diagnostics.js';
 
 /**
  * Custom error serializer that strips fields known to leak PII or secrets.
@@ -13,25 +14,35 @@ import pino from 'pino';
  * only the fields that are safe for log aggregation.
  */
 function safeErrSerializer(err: unknown): Record<string, unknown> {
+  const diagnostics = getSafeErrorDiagnostics(err);
+  if (diagnostics !== undefined) {
+    const serialized: Record<string, unknown> = {
+      type: diagnostics.name,
+      message: diagnostics.message,
+      ...(diagnostics.code !== undefined ? { code: diagnostics.code } : {}),
+      ...(diagnostics.errno !== undefined ? { errno: diagnostics.errno } : {}),
+      ...(diagnostics.statusCode !== undefined ? { statusCode: diagnostics.statusCode } : {}),
+      ...(diagnostics.syscall !== undefined ? { syscall: diagnostics.syscall } : {}),
+      ...(diagnostics.hostname !== undefined ? { hostname: diagnostics.hostname } : {}),
+      ...(diagnostics.address !== undefined ? { address: diagnostics.address } : {}),
+      ...(diagnostics.port !== undefined ? { port: diagnostics.port } : {}),
+      ...(diagnostics.isAborted !== undefined ? { isAborted: diagnostics.isAborted } : {}),
+      ...(diagnostics.cause !== undefined ? { cause: diagnostics.cause } : {}),
+    };
+    if (
+      process.env['LOG_INCLUDE_STACK'] === 'true'
+      && err !== null
+      && typeof err === 'object'
+      && typeof (err as Record<string, unknown>)['stack'] === 'string'
+    ) {
+      serialized['stack'] = (err as Record<string, unknown>)['stack'];
+    }
+    return serialized;
+  }
   if (err === null || typeof err !== 'object') {
     return { type: typeof err, message: String(err) };
   }
-  const e = err as Record<string, unknown>;
-  const out: Record<string, unknown> = {
-    type: (e['name'] as string | undefined) ?? 'Error',
-    message: typeof e['message'] === 'string' ? e['message'] : '<no message>',
-  };
-  if (typeof e['code'] === 'string' || typeof e['code'] === 'number') {
-    out['code'] = e['code'];
-  }
-  if (typeof e['statusCode'] === 'number') {
-    out['statusCode'] = e['statusCode'];
-  }
-  // Stack: keep but only when explicitly desired (not in production logs).
-  if (process.env['LOG_INCLUDE_STACK'] === 'true' && typeof e['stack'] === 'string') {
-    out['stack'] = e['stack'];
-  }
-  return out;
+  return { type: 'object', message: '<no message>' };
 }
 
 /**
