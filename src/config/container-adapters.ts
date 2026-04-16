@@ -3,7 +3,7 @@ import { PgBlockingAdapter } from '../infrastructure/adapter/pg-blocking-adapter
 import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-store.js';
 import { PgAmbiguityDictionary } from '../infrastructure/adapter/pg-ambiguity-dictionary.js';
 import { PgThresholdStore } from '../infrastructure/adapter/pg-threshold-store.js';
-import { PgAliasMatcher } from '../infrastructure/adapter/pg-alias-matcher.js';
+import { isAliasTableAvailable } from '../infrastructure/adapter/pg-alias-matcher.js';
 import {
   CascadingAliasMatcher,
   SearchIndexAliasMatcher,
@@ -176,12 +176,21 @@ export async function buildCoreAdapterServices(
         })
       : undefined;
 
-  // In-memory search-snapshot alias substrate is only needed when
-  // PostgreSQL-backed aliasing is unavailable and PG-overlay matcher is enabled.
-  // Avoiding it when PostgreSQL is present keeps startup free of unnecessary I/O.
-  const searchSnapshotAliasMatcher = !config.killSwitch.aliasOverlay && pool === undefined
-    ? await SearchSnapshotAliasMatcher.loadFromRuntimeState()
+  const isPgAliasOverlayAvailable = pool !== undefined && !config.killSwitch.aliasOverlay
+    ? await isAliasTableAvailable(pool)
+    : false;
+
+  const inMemoryPgAliasMatcher = pool !== undefined && isPgAliasOverlayAvailable
+    && !config.killSwitch.aliasOverlay
+    ? await SearchSnapshotAliasMatcher.loadFromPostgres(pool)
     : undefined;
+
+  // Fall back to search-snapshot artifacts when PostgreSQL overlay is
+  // unavailable at startup.
+  const inMemoryAliasMatcher =
+    !config.killSwitch.aliasOverlay && inMemoryPgAliasMatcher === undefined
+      ? await SearchSnapshotAliasMatcher.loadFromRuntimeState()
+      : inMemoryPgAliasMatcher;
 
   // Doc2Query generator (index-time only). Prefer the OpenAI-backed
   // implementation when a chat adapter is available so it inherits the
@@ -232,8 +241,8 @@ export async function buildCoreAdapterServices(
         return new CachedAliasMatcher(indexAliasMatcher);
       }
       if (!pool) {
-        if (searchSnapshotAliasMatcher !== undefined) {
-          return new CachedAliasMatcher(searchSnapshotAliasMatcher);
+        if (inMemoryAliasMatcher !== undefined) {
+          return new CachedAliasMatcher(inMemoryAliasMatcher);
         }
         bootstrapLogger.warn(
           {
@@ -245,10 +254,13 @@ export async function buildCoreAdapterServices(
         );
         return new CachedAliasMatcher(indexAliasMatcher);
       }
-      return new CachedAliasMatcher(new CascadingAliasMatcher(
-        new PgAliasMatcher(pool),
-        indexAliasMatcher,
-      ));
+      if (inMemoryAliasMatcher !== undefined) {
+        return new CachedAliasMatcher(new CascadingAliasMatcher(
+          inMemoryAliasMatcher,
+          indexAliasMatcher,
+        ));
+      }
+      return new CachedAliasMatcher(indexAliasMatcher);
     })(),
     mappingTable: new FileMappingTableAdapter(),
     anchorResolver: new VespaAnchorResolver(searchIndex),

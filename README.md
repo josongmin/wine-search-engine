@@ -248,7 +248,7 @@ flowchart TD
 | 명령 | 확인 내용 |
 |------|-----------|
 | `pnpm run eval:noisy:assert-baseline` | 스모크 1회 실행 후 베이스라인 대비 (`eval:noisy:validate` + assert) |
-| `pnpm run eval:noisy:smoke` | `data/noisy-entity-eval-smoke-results.json` 생성(로컬·아티팩트용) |
+| `pnpm run eval:noisy:smoke` | 활성 shared data dir의 `data/noisy-entity-eval-smoke-results.json` 생성 |
 | `pnpm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
 | `pnpm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) |
 | `pnpm run test:verification:core` | 로컬/나이틀리용: `typecheck` + `e2e:contract` + `e2e:runtime` + `ingest:contract` + `test:verification:noisy` |
@@ -467,7 +467,7 @@ cp .env.example .env
 
 실질적 변경을 머지하기 전: **`pnpm run lint`**, **`pnpm run typecheck`**, 담당 영역 테스트.
 
-로컬에서 빌드 산출물·`node_modules`를 비우려면 **`pnpm run clean:worktree`** 후 **`pnpm install --frozen-lockfile`**. pnpm 패키지 스토어는 **`.npmrc`의 `store-dir`**로 `~/.wine-search-engine/store/pnpm`에 두어 클론 밖에 유지합니다(일부 패키지 postinstall이 내부적으로 `npm`을 호출하면 `store-dir`에 대한 무해한 경고가 나올 수 있음).
+로컬에서 빌드 산출물·대형 로컬 캐시·임시 워크트리·`node_modules`를 비우려면 **`pnpm run clean:worktree`** 후 **`pnpm install --frozen-lockfile`**. 루트 의존성만 다시 외부화하려면 **`pnpm run deps:link`**. pnpm 패키지 스토어는 **`.npmrc`의 `store-dir`**로 `~/.wine-search-engine/store/pnpm`에 두어 클론 밖에 유지합니다(일부 패키지 postinstall이 내부적으로 `npm`을 호출하면 `store-dir`에 대한 무해한 경고가 나올 수 있음).
 
 ---
 

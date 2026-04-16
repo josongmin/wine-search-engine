@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 const OfflineEvalSchema = z.object({
   dataset_tier: z.string().min(1),
@@ -275,11 +276,12 @@ function parseArgs(argv: readonly string[]): CliArgs {
         kind = value;
       }
     } else if (arg === '--current') {
-      current = argv[++i] ?? '';
+      current = resolveCliDataPathArg(argv[++i] ?? '');
     } else if (arg === '--baseline') {
-      baseline = argv[++i] ?? '';
+      const baselinePath = argv[++i];
+      baseline = baselinePath === undefined ? '' : resolveCliDataPathArg(baselinePath);
     } else if (arg === '--manifest') {
-      manifest = argv[++i] ?? DEFAULT_MANIFEST;
+      manifest = resolveCliDataPathArg(argv[++i] ?? DEFAULT_MANIFEST);
     }
   }
 

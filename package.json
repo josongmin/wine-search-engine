@@ -9,6 +9,7 @@
   },
   "scripts": {
     "preinstall": "node ./scripts/enforce-pnpm-install.mjs",
+    "deps:link": "bash scripts/deps/link-external-node-modules.sh",
     "artifacts:link": "bash scripts/build/link-external-artifacts.sh",
     "clean:worktree": "bash scripts/build/clean-worktree-artifacts.sh",
     "deadcode": "knip --no-exit-code",
@@ -109,7 +110,7 @@
     "verify:security-local": "pnpm run verify:anthropic-wiring && pnpm run semgrep",
     "eval": "tsx scripts/eval/run-offline-eval.ts",
     "eval:offline:local": "tsx scripts/eval/run-offline-eval-local.ts",
-    "eval:offline:gate": "tsx scripts/eval/run-offline-eval.ts --fixture-corpus gate --tier gate --verify-splits --output data/eval-results.json",
+    "eval:offline:gate": "tsx scripts/eval/run-offline-eval.ts --fixture-corpus gate --tier gate --verify-splits",
     "eval:offline:silver": "tsx scripts/eval/run-offline-eval.ts --fixture-corpus silver --tier silver --output data/eval-results-silver.json",
     "eval:offline:with-splits": "tsx scripts/eval/run-offline-eval.ts --fixture-corpus gate --tier gate --verify-splits",
     "eval:offline:with-splits:local": "tsx scripts/eval/run-offline-eval-local.ts --verify-splits",

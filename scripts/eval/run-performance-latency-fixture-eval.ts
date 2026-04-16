@@ -30,6 +30,7 @@ import {
   runLiveBenchmarkPreflight,
   type BenchmarkExecutionLane,
 } from './live-benchmark-preflight.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 const SUITE_ID = 'performance_latency' as const;
 const DEFAULT_OUTPUT = resolveDataPath('data/performance-latency-fixture-eval-results.json');
@@ -109,7 +110,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--output' || arg === '-o') {
-      output = argv[++i] ?? output;
+      output = resolveCliDataPathArg(argv[++i] ?? output);
     } else if (arg === '--api-url') {
       apiUrl = argv[++i] ?? apiUrl;
     } else if (arg === '--timeout-ms') {

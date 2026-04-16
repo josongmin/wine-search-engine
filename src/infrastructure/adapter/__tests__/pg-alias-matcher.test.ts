@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { PgAliasMatcher } from '../pg-alias-matcher.js';
+import { describe, expect, it, vi } from 'vitest';
+import { isAliasTableAvailable, PgAliasMatcher } from '../pg-alias-matcher.js';
 
 interface AliasRow {
   entity_id: string;
@@ -32,7 +32,30 @@ class MockPool {
     this.queries.push({ sql, params });
     const next = this.responses[this.aliasQueryIdx] ?? [];
     this.aliasQueryIdx++;
+    if (typeof sql === 'string' && sql.includes('FROM unnest')) {
+      const queryIds = Array.isArray(params?.[0]) ? (params[0] as readonly number[]) : [];
+      return {
+        rows: next.map((row, index) => ({
+          ...row,
+          queryId: queryIds[index] ?? queryIds[queryIds.length - 1],
+        })),
+      };
+    }
     return { rows: [...next] };
+  }
+}
+
+class MissingAliasPool {
+  readonly queries: Array<{ sql: string; params: readonly unknown[] }> = [];
+
+  async query(sql: string, params: readonly unknown[]): Promise<{ rows: unknown[] }> {
+    this.queries.push({ sql, params });
+    if (sql.includes('FROM active_search_snapshot')) {
+      return { rows: [POINTER_ROW] };
+    }
+    const err = new Error('relation "aliases" does not exist') as Error & { code?: string };
+    err.code = '42P01';
+    throw err;
   }
 }
 
@@ -193,5 +216,33 @@ describe('PgAliasMatcher', () => {
     const matcher = new PgAliasMatcher(pool as never);
 
     await expect(matcher.findMatches('opusone')).resolves.toEqual([]);
+  });
+
+  it('caches aliases table existence checks per pool', async () => {
+    const query = vi.fn(async () => ({
+      rows: [{ aliases_exists: true }],
+    }));
+    const pool = { query } as never;
+
+    expect(await isAliasTableAvailable(pool)).toBe(true);
+    expect(await isAliasTableAvailable(pool)).toBe(true);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('short-circuits aliases table misses after first 42P01', async () => {
+    const pool = new MissingAliasPool();
+    const matcher = new PgAliasMatcher(pool as never);
+
+    await matcher.findMatches('opusone');
+    await matcher.findMatches('opusone');
+
+    const pointerQueries = pool.queries.filter((query) =>
+      query.sql.includes('FROM active_search_snapshot'),
+    );
+    const aliasQueries = pool.queries.filter((query) =>
+      query.sql.includes('FROM unnest'),
+    );
+    expect(pointerQueries).toHaveLength(1);
+    expect(aliasQueries).toHaveLength(1);
   });
 });

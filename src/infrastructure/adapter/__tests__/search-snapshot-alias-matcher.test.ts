@@ -11,6 +11,51 @@ afterEach(async () => {
 });
 
 describe('SearchSnapshotAliasMatcher', () => {
+  it('loads exact alias substrate from PostgreSQL snapshot rows', async () => {
+    const queries: string[] = [];
+    const pool = {
+      async query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }> {
+        queries.push(sql);
+        if (sql.includes('FROM active_search_snapshot')) {
+          return {
+            rows: [{
+              active_snapshot_id: 'snapshot-001',
+              previous_snapshot_id: null,
+              content_hash: 'hash-001',
+              promoted_at: new Date('2026-04-16T00:00:00.000Z'),
+            }],
+          };
+        }
+        if (sql.includes('FROM aliases')) {
+          return {
+            rows: [
+              {
+                alias_id: 'alias-001',
+                entity_id: 'entity-opus-one',
+                surface_form: 'Opus One',
+                normalized_value: 'opus one',
+                source_trust: 1,
+                confidence: 0.98,
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+    } as never;
+
+    const matcher = await SearchSnapshotAliasMatcher.loadFromPostgres(pool);
+    expect(matcher).toBeDefined();
+
+    const matches = await matcher?.findMatches('opus one');
+    expect(matches?.[0]).toMatchObject({
+      surfaceForm: 'Opus One',
+      entityIds: ['entity-opus-one'],
+    });
+    expect(queries.some((query) => query.includes('FROM active_search_snapshot'))).toBe(true);
+    expect(queries.some((query) => query.includes('FROM aliases'))).toBe(true);
+  });
+
   it('resolves exact, compact, and transliterated alias matches from memory', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {

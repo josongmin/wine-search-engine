@@ -142,6 +142,8 @@ data/performance-*-fixture-eval-results.json
 data/silver-phase*.ndjson
 data/silver-final.ndjson
 data/eval-results.json
+data/eval-results-bronze.json
+data/eval-results-silver.json
 data/eval-with-reranker-bronze.json
 data/noisy-entity-eval-smoke-results.json
 data/silver-quality-report.json

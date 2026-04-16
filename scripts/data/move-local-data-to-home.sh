@@ -71,6 +71,8 @@ move_if_present "hard-negatives.jsonl"
 # Golden query corpora are no longer benchmark SSOT here; keep any local
 # snapshots in place instead of auto-promoting them into the shared data dir.
 move_if_present "eval-results.json"
+move_if_present "eval-results-bronze.json"
+move_if_present "eval-results-silver.json"
 move_if_present "eval-with-reranker-bronze.json"
 move_if_present "noisy-entity-eval-smoke-results.json"
 move_if_present "silver-quality-report.json"

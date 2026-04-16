@@ -21,6 +21,24 @@ const VespaCountResponseSchema = z.object({
 
 const CRITICAL_WINE_TYPES = ['red', 'white', 'sparkling'] as const;
 type CriticalWineType = typeof CRITICAL_WINE_TYPES[number];
+const VESPA_RAW_FIELD_PROBE_LIMIT = 3;
+
+const VESPA_RAW_PAYLOAD_REQUIREMENTS = {
+  entityId: ['entity_id', 'canonical_label'],
+  wineType: ['wine_type'],
+} as const;
+
+type VespaPayloadViolation = {
+  readonly wineType: CriticalWineType;
+  readonly entityId: string;
+  readonly issues: readonly string[];
+};
+
+type VespaPayloadProbeResult = {
+  readonly wineType: CriticalWineType;
+  readonly sampleCount: number;
+  readonly violations: readonly VespaPayloadViolation[];
+};
 
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 
@@ -34,6 +52,117 @@ function parseSqlCountText(raw: string | undefined, context: string): number {
     throw new Error(`${context}: COUNT aggregate is not a finite number: ${String(raw)}`);
   }
   return Math.trunc(n);
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseVespaResponseChildren(raw: unknown): readonly Record<string, unknown>[] {
+  if (!isRecordValue(raw)) {
+    throw new Error('Vespa payload probe returned unexpected response shape: response body is not an object');
+  }
+
+  const root = raw['root'];
+  if (!isRecordValue(root)) {
+    throw new Error('Vespa payload probe returned unexpected response shape: missing root object');
+  }
+
+  const children = root['children'];
+  if (children === undefined) {
+    return [];
+  }
+  if (!Array.isArray(children)) {
+    throw new Error('Vespa payload probe returned unexpected response shape: root.children is not an array');
+  }
+
+  return children.map((child) => {
+    if (!isRecordValue(child)) {
+      return {};
+    }
+    const fields = child.fields;
+    return isRecordValue(fields) ? fields : {};
+  });
+}
+
+function getEntityIdFromFields(fields: Record<string, unknown>): string {
+  const raw = fields['entity_id'];
+  if (typeof raw === 'string' && raw.length > 0) {
+    return raw;
+  }
+  return '<unknown-entity-id>';
+}
+
+function wineTypeValues(raw: unknown): readonly string[] {
+  if (typeof raw === 'string') {
+    return [raw];
+  }
+  if (Array.isArray(raw)) {
+    return raw.filter((item): item is string => typeof item === 'string');
+  }
+  return [];
+}
+
+function validateVespaPayloadFieldRequirements(
+  wineType: CriticalWineType,
+  fields: Record<string, unknown>,
+): readonly string[] {
+  const issues: string[] = [];
+
+  for (const field of VESPA_RAW_PAYLOAD_REQUIREMENTS.entityId) {
+    const raw = fields[field];
+    if (typeof raw !== 'string' || raw.length === 0) {
+      issues.push(`missing-or-empty ${field}`);
+    }
+  }
+
+  const wineTypeRaw = fields[VESPA_RAW_PAYLOAD_REQUIREMENTS.wineType[0]];
+  if (!wineTypeValues(wineTypeRaw).some((candidate) => candidate === wineType)) {
+    issues.push(`wine_type does not include ${wineType}: ${JSON.stringify(wineTypeRaw)}`);
+  }
+
+  return issues;
+}
+
+async function fetchVespaWineTypePayloadProbe(
+  vespaUrl: string,
+  snapshotId: string,
+  wineType: CriticalWineType,
+): Promise<VespaPayloadProbeResult> {
+  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      yql:
+        `select * from sources * where ` +
+        `search_snapshot_id contains ${JSON.stringify(snapshotId)} and ` +
+        `wine_type contains ${JSON.stringify(wineType)} limit ${VESPA_RAW_FIELD_PROBE_LIMIT};`,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vespa payload probe failed with status ${response.status} for ${wineType}`);
+  }
+
+  const body: unknown = await response.json();
+  const children = parseVespaResponseChildren(body);
+  const violations: VespaPayloadViolation[] = [];
+  for (const fields of children) {
+    const issues = validateVespaPayloadFieldRequirements(wineType, fields);
+    if (issues.length > 0) {
+      violations.push({
+        wineType,
+        entityId: getEntityIdFromFields(fields),
+        issues,
+      });
+    }
+  }
+
+  return {
+    wineType,
+    sampleCount: children.length,
+    violations,
+  };
 }
 
 export interface LoadedSearchSnapshotRuntimeState {
@@ -433,6 +562,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     runtimeSparklingWineTypeCountResult,
     canonicalAliasJoinResult,
     canonicalAmbiguityTotalResult,
+    vespaWineTypePayloadProbe,
   ] = await Promise.all([
     args.pool.query<{ total_count: string; snapshot_count: string }>(
       `SELECT
@@ -583,6 +713,9 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
        WHERE search_snapshot_id = $1`,
       [runtimeState.snapshotId],
     ),
+    Promise.all(
+      CRITICAL_WINE_TYPES.map(async (wineType) => fetchVespaWineTypePayloadProbe(args.vespaUrl, runtimeState.snapshotId, wineType)),
+    ),
   ]);
 
   const entityCount = parseSqlCountText(entityResult.rows[0]?.snapshot_count, 'entities.snapshot_count');
@@ -615,6 +748,31 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     throw new Error(
       `Critical wine_type Vespa coverage missing for snapshot ${runtimeState.snapshotId}: ${missingVespaWineTypes.join(', ')}`,
     );
+  }
+
+  const payloadEmptyButExpected = vespaWineTypePayloadProbe
+    .filter((probe) => {
+      const configuredCount = runtimeWineTypeCounts[probe.wineType];
+      return configuredCount > 0 && probe.sampleCount === 0;
+    })
+    .map((probe) => `${probe.wineType}(sample_count=0)`);
+  if (payloadEmptyButExpected.length > 0) {
+    throw new Error(
+      `Critical wine_type Vespa payload probe returned no samples for snapshot ${runtimeState.snapshotId}: ${payloadEmptyButExpected.join(', ')}`,
+    );
+  }
+
+  const payloadViolations = vespaWineTypePayloadProbe
+    .flatMap((probe) => probe.violations)
+    .filter((violation) => violation.issues.length > 0);
+  if (payloadViolations.length > 0) {
+    const details = payloadViolations
+      .map((violation) => {
+        const issues = violation.issues.join('; ');
+        return `${violation.wineType}:${violation.entityId}: ${issues}`;
+      })
+      .join(' | ');
+    throw new Error(`Critical wine_type Vespa payload requirement violations for snapshot ${runtimeState.snapshotId}: ${details}`);
   }
 
   const canonicalGraphEntityCount = parseSqlCountText(canonicalGraphEntityResult.rows[0]?.c, 'canonical_entities.snapshot');

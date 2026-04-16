@@ -8,7 +8,7 @@ import { Transliterator } from '../../domain/alias/service/transliterator.js';
 
 const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
 
-export interface SearchToolRetrievalCoreInput {
+interface SearchToolRetrievalCoreInput {
   readonly query: string;
   readonly wine_type?: string | undefined;
   readonly country?: string | undefined;

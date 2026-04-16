@@ -71,6 +71,7 @@ import {
   OFFLINE_EVAL_GATE_CORPUS,
   requireFixtureCorpusPath,
 } from './fixture-corpus-paths.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -271,15 +272,18 @@ function parseArgs(argv: string[]): Args {
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--input' || a === '-i') out.input = argv[++i] ?? defaultInput;
+    if (a === '--input' || a === '-i') out.input = resolveCliDataPathArg(argv[++i] ?? defaultInput);
     else if (a === '--fixture-corpus') {
       const corpus = argv[++i];
       if (corpus === 'silver' || corpus === 'val' || corpus === 'gate') {
         out.fixtureCorpus = corpus;
       }
     }
-    else if (a === '--output' || a === '-o') out.output = argv[++i] ?? DEFAULT_OUTPUT;
-    else if (a === '--baseline-report') out.baselineReport = argv[++i];
+    else if (a === '--output' || a === '-o') out.output = resolveCliDataPathArg(argv[++i] ?? DEFAULT_OUTPUT);
+    else if (a === '--baseline-report') {
+      const baselineReport = argv[++i];
+      out.baselineReport = baselineReport === undefined ? undefined : resolveCliDataPathArg(baselineReport);
+    }
     else if (a === '--tier') {
       const t = argv[++i];
       if (t === 'bronze' || t === 'silver' || t === 'gate') out.tier = t;

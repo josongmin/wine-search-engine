@@ -1,6 +1,6 @@
 import { buildSearchToolStyleQueryTerms } from './search-tool-contract.js';
 
-export interface SearchToolSoftClauseInput {
+interface SearchToolSoftClauseInput {
   readonly exclude_grapes?: readonly string[] | undefined;
   readonly exclude_regions?: readonly string[] | undefined;
   readonly max_price_krw?: number | undefined;

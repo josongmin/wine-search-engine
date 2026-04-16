@@ -10,6 +10,9 @@ import {
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
 
+const ALIASES_TABLE_PRESENCE_CACHE_TTL_MS = 10_000;
+const ALIASES_TABLE_MISSING_CACHE_TTL_MS = 10_000;
+
 interface AliasRow {
   entity_id: string;
   surface_form: string;
@@ -36,6 +39,33 @@ const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
   [/eau/g, 'o'],
   [/aux/g, 'o'],
 ] as const;
+
+interface AliasTablePresenceCacheEntry {
+  readonly exists: boolean;
+  readonly expiresAt: number;
+}
+
+const aliasTablePresenceByPool = new WeakMap<Pool, AliasTablePresenceCacheEntry>();
+const aliasesTableDisabledUntilByPool = new WeakMap<Pool, number>();
+const aliasesTableDisabledLogByPool = new WeakSet<Pool>();
+
+export async function isAliasTableAvailable(pool: Pool): Promise<boolean> {
+  const now = Date.now();
+  const cached = aliasTablePresenceByPool.get(pool);
+  if (cached !== undefined && cached.expiresAt > now) {
+    return cached.exists;
+  }
+
+  const result = await pool.query<{ aliases_exists: boolean }>(
+    `SELECT to_regclass('aliases') IS NOT NULL AS aliases_exists`,
+  );
+  const exists = result.rows[0]?.aliases_exists ?? false;
+  aliasTablePresenceByPool.set(pool, {
+    exists,
+    expiresAt: now + ALIASES_TABLE_PRESENCE_CACHE_TTL_MS,
+  });
+  return exists;
+}
 
 function charNgrams(value: string, size: number = 3): readonly string[] {
   if (value.length === 0) {
@@ -86,8 +116,25 @@ interface QueryVariantCandidate {
   readonly strategy: FuzzyLookupStrategy;
 }
 
-interface FuzzyAliasRow extends AliasRow {
+interface QueryBoundAliasRow extends AliasRow {
+  readonly queryId: number;
+}
+
+interface FuzzyAliasRow extends QueryBoundAliasRow {
   readonly lookupStrategy: FuzzyLookupStrategy;
+}
+
+interface BatchExactLookupPayload {
+  readonly queryId: number;
+  readonly exact: readonly string[];
+  readonly compact: readonly string[];
+  readonly transliterated: readonly string[];
+  readonly phonetic: readonly string[];
+}
+
+interface BatchFuzzyLookupPayload {
+  readonly queryId: number;
+  readonly fuzzyGrams: readonly string[];
 }
 
 interface MatchPlan {
@@ -96,6 +143,44 @@ interface MatchPlan {
   readonly transliteratedList: readonly string[];
   readonly phoneticList: readonly string[];
   readonly fuzzyVariants: readonly QueryVariantCandidate[];
+}
+
+type QueryResultQueryId = number | string;
+
+interface QueryBoundAliasRowFromSql extends Omit<QueryBoundAliasRow, 'queryId'> {
+  readonly query_id: QueryResultQueryId;
+}
+
+type PgAliasMatcherRow = AliasRow | QueryBoundAliasRow | QueryBoundAliasRowFromSql;
+
+function escapeLikePattern(input: string): string {
+  return input.replace(/[%_\\]/g, '\\$&');
+}
+
+function resolveExactLookupStrategy(plan: MatchPlan, normalizedValue: string): string {
+  const transliteratedSet = new Set(plan.transliteratedList);
+  const compactSet = new Set(plan.compactList);
+  const phoneticSet = new Set(plan.phoneticList);
+  const exactSet = new Set(plan.tokenList);
+
+  const normalizedLower = normalizedValue.toLowerCase();
+  const compactValue = compactForLookup(normalizedValue);
+  const compactLower = compactForLookup(normalizedLower);
+  const phoneticValue = phoneticCompactForLookup(normalizedValue);
+
+  if (transliteratedSet.has(normalizedLower) || transliteratedSet.has(compactLower)) {
+    return 'transliterated_exact';
+  }
+  if (compactSet.has(compactValue)) {
+    return 'compact_exact';
+  }
+  if (exactSet.has(normalizedValue)) {
+    return 'exact';
+  }
+  if (phoneticSet.has(phoneticValue)) {
+    return 'phonetic_exact';
+  }
+  return 'lexical_exact';
 }
 
 function bestFuzzySimilarity(
@@ -210,6 +295,23 @@ function groupRows<TRow extends AliasRow>(
   return matches;
 }
 
+function resolveQueryId(row: PgAliasMatcherRow): number | undefined {
+  if ('queryId' in row && typeof row.queryId === 'number') {
+    return row.queryId;
+  }
+  if ('query_id' in row && typeof row.query_id === 'number') {
+    return row.query_id;
+  }
+  if ('query_id' in row && typeof row.query_id === 'bigint') {
+    return Number(row.query_id);
+  }
+  if ('query_id' in row && typeof row.query_id === 'string') {
+    const parsed = Number.parseInt(row.query_id, 10);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
 /**
  * PostgreSQL-backed implementation of {@link AliasMatcher}.
  *
@@ -227,17 +329,8 @@ export class PgAliasMatcher implements AliasMatcher {
     const trimmed = normalizedQuery.trim();
     if (trimmed.length === 0) return [];
 
-    const activeSnapshotId = await this.resolveActiveSnapshotId();
-    if (activeSnapshotId === null) {
-      return [];
-    }
-
-    const plan = this.buildMatchPlan(trimmed);
-    if (plan === null) {
-      return [];
-    }
-
-    return this.runMatchPlan(plan, activeSnapshotId);
+    const matched = await this.findMatchesBatch([trimmed]);
+    return matched.get(trimmed) ?? [];
   }
 
   async findMatchesBatch(
@@ -257,156 +350,242 @@ export class PgAliasMatcher implements AliasMatcher {
       return emptyMatches;
     }
 
-    const planByQuery = new Map<string, MatchPlan>();
+    const planByQuery = new Map<string, MatchPlan | null>();
     for (const query of dedupedQueries) {
-      const plan = this.buildMatchPlan(query);
-      if (plan === null) {
-        planByQuery.set(query, {
-          tokenList: [],
-          compactList: [],
-          transliteratedList: [],
-          phoneticList: [],
-          fuzzyVariants: [],
-        });
-      } else {
-        planByQuery.set(query, plan);
-      }
+      planByQuery.set(query, this.buildMatchPlan(query));
     }
 
-    const batchResults = await Promise.all(
-      dedupedQueries.map(async (query) => {
-        const plan = planByQuery.get(query);
-        if (plan === undefined || plan.tokenList.length === 0) {
-          return [query, []] as const;
-        }
-        return [query, await this.runMatchPlan(plan, activeSnapshotId)] as const;
-      }),
-    );
-
-    const matched = new Map<string, readonly AliasMatchResult[]>(batchResults);
-    return matched;
+    return this.runBatchMatch(planByQuery, activeSnapshotId);
   }
 
-  private async runMatchPlan(
-    plan: MatchPlan,
+  private async runBatchMatch(
+    planByQuery: Map<string, MatchPlan | null>,
     activeSnapshotId: string,
-  ): Promise<readonly AliasMatchResult[]> {
-    const tokenList = [...plan.tokenList];
-    const compactList = [...plan.compactList];
-    const transliteratedList = [...plan.transliteratedList];
-    const phoneticList = [...plan.phoneticList];
-    const fuzzyVariants = [...plan.fuzzyVariants];
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const matchesByQuery = new Map<string, readonly AliasMatchResult[]>();
+    const queryIdByQuery = new Map<string, number>();
+    const planByQueryId = new Map<number, MatchPlan>();
 
-    const result = await this.queryAliases(
-      `SELECT entity_id, surface_form, normalized_value, confidence
-       FROM aliases
-       WHERE search_snapshot_id = $5
-         AND (
-           normalized_value = ANY($1)
-           OR regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g') = ANY($2)
-           OR lower(regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g')) = ANY($3)
-           OR regexp_replace(
-                lower(
-                  regexp_replace(
-                    regexp_replace(
+    const exactPayload: BatchExactLookupPayload[] = [];
+    let nextQueryId = 0;
+    for (const [query, plan] of planByQuery.entries()) {
+      if (plan === null) {
+        matchesByQuery.set(query, []);
+        continue;
+      }
+
+      const queryId = nextQueryId;
+      nextQueryId += 1;
+      queryIdByQuery.set(query, queryId);
+      planByQueryId.set(queryId, plan);
+      matchesByQuery.set(query, []);
+
+      exactPayload.push({
+        queryId,
+        exact: plan.tokenList,
+        compact: plan.compactList,
+        transliterated: plan.transliteratedList,
+        phonetic: plan.phoneticList,
+      });
+    }
+
+    const exactRowsByQueryId = new Map<number, readonly AliasMatchResult[]>();
+    if (exactPayload.length > 0) {
+      const exactPayloadQueryIds = exactPayload.map((payload) => payload.queryId);
+      const exactRowsById = new Map<number, QueryBoundAliasRow[]>(
+        exactPayload.map((payload) => [payload.queryId, []]),
+      );
+      const exactRows = await this.queryAliases(
+        `SELECT candidate.entity_id,
+           candidate.surface_form,
+           candidate.normalized_value,
+           candidate.confidence,
+           q.query_id
+         FROM unnest($1::int[], $2::text[][], $3::text[][], $4::text[][], $5::text[][])
+              AS q(query_id, exact_values, compact_values, transliterated_values, phonetic_values)
+         CROSS JOIN LATERAL (
+           SELECT entity_id, surface_form, normalized_value, confidence
+           FROM aliases
+           WHERE search_snapshot_id = $6
+             AND (
+               normalized_value = ANY(q.exact_values)
+               OR regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g') = ANY(q.compact_values)
+               OR lower(regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g')) = ANY(q.transliterated_values)
+               OR regexp_replace(
+                    lower(
                       regexp_replace(
                         regexp_replace(
                           regexp_replace(
                             regexp_replace(
-                              regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g'),
-                              'sch', 'ch', 'g'
+                              regexp_replace(
+                                regexp_replace(
+                                  regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g'),
+                                  'sch', 'ch', 'g'
+                                ),
+                                'sh', 'ch', 'g'
+                              ),
+                              'ph', 'f', 'g'
                             ),
-                            'sh', 'ch', 'g'
+                            'eaux', 'o', 'g'
                           ),
-                          'ph', 'f', 'g'
+                          'eau', 'o', 'g'
                         ),
-                        'eaux', 'o', 'g'
-                      ),
-                      'eau', 'o', 'g'
+                        'aux', 'o', 'g'
+                      )
                     ),
-                    'aux', 'o', 'g'
-                  )
-                ),
-                '[aeiouy]', '', 'g'
-              ) = ANY($4)
-         ) AND is_suppressed = FALSE
-       ORDER BY confidence DESC`,
-      [tokenList, compactList, transliteratedList, phoneticList, activeSnapshotId],
-    );
+                    '[aeiouy]', '', 'g'
+                  ) = ANY(q.phonetic_values)
+             )
+             AND is_suppressed = FALSE
+           ORDER BY confidence DESC
+         ) AS candidate
+         ORDER BY q.query_id, confidence DESC`,
+        [
+          exactPayloadQueryIds,
+          exactPayload.map((payload) => payload.exact),
+          exactPayload.map((payload) => payload.compact),
+          exactPayload.map((payload) => payload.transliterated),
+          exactPayload.map((payload) => payload.phonetic),
+          activeSnapshotId,
+        ],
+        exactPayloadQueryIds,
+      );
 
-    if (result.rows.length > 0) {
-      const transliteratedSet = new Set(transliteratedList);
-      const phoneticSet = new Set(phoneticList);
-      const exactSet = new Set(tokenList);
-      const compactSet = new Set(compactList);
-      return groupRows(result.rows, (row) => {
-        const normalizedValue = row.normalized_value.toLowerCase();
-        const compactValue = compactForLookup(normalizedValue);
-        const phoneticValue = phoneticCompactForLookup(normalizedValue);
-        if (
-          transliteratedSet.has(normalizedValue) ||
-          transliteratedSet.has(compactValue)
-        ) {
-          return 'transliterated_exact';
+      for (const row of exactRows.rows) {
+        const targetRows = exactRowsById.get(row.queryId);
+        if (targetRows === undefined) {
+          continue;
         }
-        if (compactSet.has(compactValue)) {
-          return 'compact_exact';
+        targetRows.push(row);
+      }
+
+      for (const [queryId, rows] of exactRowsById.entries()) {
+        const plan = planByQueryId.get(queryId);
+        if (plan === undefined || rows.length === 0) {
+          continue;
         }
-        if (exactSet.has(normalizedValue)) {
-          return 'exact';
+        const grouped = groupRows(rows, (row) => resolveExactLookupStrategy(plan, row.normalized_value));
+        if (grouped.length > 0) {
+          exactRowsByQueryId.set(queryId, grouped);
         }
-        if (phoneticSet.has(phoneticValue)) {
-          return 'phonetic_exact';
-        }
-        return 'lexical_exact';
+      }
+    }
+
+    for (const [query, queryId] of queryIdByQuery.entries()) {
+      const exactMatch = exactRowsByQueryId.get(queryId);
+      if (exactMatch !== undefined && exactMatch.length > 0) {
+        matchesByQuery.set(query, exactMatch);
+      }
+    }
+
+    const fuzzyPayload: BatchFuzzyLookupPayload[] = [];
+    const fuzzyQueriesById = new Map<number, readonly AliasMatchResult[]>();
+    for (const [, queryId] of queryIdByQuery.entries()) {
+      if (exactRowsByQueryId.get(queryId) !== undefined) {
+        continue;
+      }
+
+      const plan = planByQueryId.get(queryId);
+      if (plan === undefined) {
+        continue;
+      }
+      if (plan.fuzzyVariants.length === 0) {
+        continue;
+      }
+
+      const fuzzyGrams = Array.from(
+        new Set(plan.fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
+      ).map(escapeLikePattern);
+
+      fuzzyPayload.push({
+        queryId,
+        fuzzyGrams,
       });
+      fuzzyQueriesById.set(queryId, []);
     }
 
-    if (fuzzyVariants.length === 0) {
-      return [];
-    }
+    if (fuzzyPayload.length > 0) {
+      const fuzzyRows = await this.queryAliases(
+        `SELECT candidate.entity_id,
+           candidate.surface_form,
+           candidate.normalized_value,
+           candidate.confidence,
+           q.query_id
+         FROM unnest($1::int[], $2::text[][])
+              AS q(query_id, fuzzy_grams)
+         CROSS JOIN LATERAL (
+           SELECT entity_id, surface_form, normalized_value, confidence
+           FROM aliases
+           WHERE search_snapshot_id = $3
+             AND is_suppressed = FALSE
+             AND EXISTS (
+               SELECT 1
+               FROM unnest(q.fuzzy_grams) AS gram
+               WHERE regexp_replace(normalized_value, '[[:space:][:punct:]]+', '', 'g')
+                     LIKE '%' || gram || '%' ESCAPE '\\'
+             )
+           ORDER BY confidence DESC
+           LIMIT $4
+         ) AS candidate
+         ORDER BY q.query_id, confidence DESC`,
+        [
+          fuzzyPayload.map((payload) => payload.queryId),
+          fuzzyPayload.map((payload) => payload.fuzzyGrams),
+          activeSnapshotId,
+          MAX_FUZZY_CANDIDATES,
+        ],
+        fuzzyPayload.map((payload) => payload.queryId),
+      );
 
-    const fuzzyGrams = Array.from(
-      new Set(fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
-    ).map((gram) => gram.replace(/[%_\\]/g, '\\$&'));
-
-    const fuzzyCandidates = await this.queryAliases(
-      `SELECT entity_id, surface_form, normalized_value, confidence
-       FROM aliases
-       WHERE search_snapshot_id = $3
-         AND is_suppressed = FALSE
-         AND EXISTS (
-           SELECT 1
-           FROM unnest($1::text[]) AS gram
-           WHERE regexp_replace(normalized_value, '[[:space:][:punct:]]+', '', 'g')
-                 LIKE '%' || gram || '%'
-         )
-       ORDER BY confidence DESC
-       LIMIT $2`,
-      [fuzzyGrams, MAX_FUZZY_CANDIDATES, activeSnapshotId],
-    );
-
-    const fuzzyRows: FuzzyAliasRow[] = fuzzyCandidates.rows
-      .map((row) => {
+    const scoredFuzzyRowsByQueryId = new Map<number, FuzzyAliasRow[]>();
+      for (const row of fuzzyRows.rows) {
+        const plan = planByQueryId.get(row.queryId);
+        if (plan === undefined) {
+          continue;
+        }
         const candidateCompact = compactForLookup(row.normalized_value);
         if (candidateCompact.length === 0) {
-          return null;
+          continue;
         }
-
-        const fuzzyMatch = bestFuzzySimilarity(fuzzyVariants, candidateCompact);
+        const fuzzyMatch = bestFuzzySimilarity(plan.fuzzyVariants, candidateCompact);
         if (fuzzyMatch === null) {
-          return null;
+          continue;
         }
-
-        return {
+        const scoredRow: FuzzyAliasRow = {
           ...row,
           confidence: row.confidence * fuzzyMatch.similarity,
           lookupStrategy: fuzzyMatch.strategy,
         };
-      })
-      .filter((row): row is FuzzyAliasRow => row !== null);
+        const previous = scoredFuzzyRowsByQueryId.get(row.queryId);
+        if (previous === undefined) {
+          scoredFuzzyRowsByQueryId.set(row.queryId, [scoredRow]);
+          continue;
+        }
+        previous.push(scoredRow);
+      }
 
-    return groupRows<FuzzyAliasRow>(fuzzyRows, (row) => row.lookupStrategy);
+      for (const [queryId, rows] of scoredFuzzyRowsByQueryId.entries()) {
+        if (rows.length === 0) {
+          continue;
+        }
+        const grouped = groupRows<FuzzyAliasRow>(rows, (row) => row.lookupStrategy);
+        if (grouped.length > 0) {
+          fuzzyQueriesById.set(queryId, grouped);
+        }
+      }
+    }
+
+    for (const [query, queryId] of queryIdByQuery.entries()) {
+      if (matchesByQuery.get(query)?.length !== 0) {
+        continue;
+      }
+      const fuzzyMatches = fuzzyQueriesById.get(queryId);
+      if (fuzzyMatches !== undefined) {
+        matchesByQuery.set(query, fuzzyMatches);
+      }
+    }
+
+    return matchesByQuery;
   }
 
   private buildMatchPlan(normalizedQuery: string): MatchPlan | null {
@@ -531,9 +710,33 @@ export class PgAliasMatcher implements AliasMatcher {
   private async queryAliases(
     sql: string,
     params: readonly unknown[],
-  ): Promise<{ rows: AliasRow[] }> {
+    fallbackQueryIds: readonly number[] = [],
+  ): Promise<{ rows: QueryBoundAliasRow[] }> {
+    const now = Date.now();
+    const aliasesDisabledUntil = aliasesTableDisabledUntilByPool.get(this.pool);
+    if (aliasesDisabledUntil !== undefined && aliasesDisabledUntil > now) {
+      return { rows: [] };
+    }
+
     try {
-      return await this.pool.query<AliasRow>(sql, [...params]);
+      const result = await this.pool.query<PgAliasMatcherRow>(sql, [...params]);
+      const fallbackQueryId =
+        fallbackQueryIds.length === 1 ? fallbackQueryIds[0] : undefined;
+      return {
+        rows: result.rows
+          .map((row) => {
+            const queryId = resolveQueryId(row);
+            if (queryId !== undefined) {
+              return { ...row, queryId };
+            }
+            if (fallbackQueryId !== undefined) {
+              return { ...row, queryId: fallbackQueryId };
+            }
+            return null;
+          })
+          .filter((row): row is PgAliasMatcherRow & { queryId: number } => row !== null)
+          .filter((row): row is QueryBoundAliasRow => typeof row.queryId === 'number'),
+      };
     } catch (err: unknown) {
       const code = readPgSqlState(err);
       if (code !== '42P01') {
@@ -542,9 +745,13 @@ export class PgAliasMatcher implements AliasMatcher {
       if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
         throw err;
       }
-      bootstrapLogger.info(
-        '[PgAliasMatcher] aliases table does not exist yet — alias matching disabled for this request',
-      );
+      aliasesTableDisabledUntilByPool.set(this.pool, now + ALIASES_TABLE_MISSING_CACHE_TTL_MS);
+      if (!aliasesTableDisabledLogByPool.has(this.pool)) {
+        bootstrapLogger.info(
+          '[PgAliasMatcher] aliases table does not exist yet — alias matching disabled for this request',
+        );
+        aliasesTableDisabledLogByPool.add(this.pool);
+      }
       return { rows: [] };
     }
   }

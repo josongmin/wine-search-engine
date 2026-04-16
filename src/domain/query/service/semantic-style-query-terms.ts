@@ -7,7 +7,7 @@ const NO_OP_SEMANTIC_STYLE_HINTS: ReadonlySet<string> = new Set([
   'presentation_forward',
 ]);
 
-export function renderSemanticStyleQueryTerm(style: string): string {
+function renderSemanticStyleQueryTerm(style: string): string {
   switch (style) {
     case 'crowd_pleasing':
       return 'crowd pleasing';

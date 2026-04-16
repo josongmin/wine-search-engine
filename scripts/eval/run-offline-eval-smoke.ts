@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { createTestServer, closeTestServer } from '../../test/e2e/helpers/test-server.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface Args {
   input: string;
@@ -23,16 +24,19 @@ function parseArgs(argv: readonly string[]): Args {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--input' || arg === '-i') {
-      out.input = argv[++index] ?? out.input;
+      out.input = resolveCliDataPathArg(argv[++index] ?? out.input);
     } else if (arg === '--output' || arg === '-o') {
-      out.output = argv[++index] ?? out.output;
+      out.output = resolveCliDataPathArg(argv[++index] ?? out.output);
     } else if (arg === '--tier') {
       const tier = argv[++index];
       if (tier === 'bronze' || tier === 'silver' || tier === 'gate') {
         out.tier = tier;
       }
     } else if (arg === '--baseline-report') {
-      out.baselineReport = argv[++index];
+      const baselineReport = argv[++index];
+      out.baselineReport = baselineReport === undefined
+        ? undefined
+        : resolveCliDataPathArg(baselineReport);
     }
   }
 

@@ -280,7 +280,7 @@ pnpm run test:e2e:vespa:smoke  # quick availability smoke
 pnpm run dev
 
 # 2. 오프라인 eval (bronze 500-query set, NDCG/MRR/Recall)
-pnpm run eval:offline:bronze           # → data/eval-results.json
+pnpm run eval:offline:bronze           # → active shared data dir의 data/eval-results-bronze.json
 pnpm run eval:offline:assert-baseline  # 베이스라인 대비 회귀 확인
 
 # 3. LLM judge 기반 NDCG (40 Korean queries × 300 wines)

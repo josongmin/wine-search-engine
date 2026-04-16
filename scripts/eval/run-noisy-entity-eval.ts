@@ -32,6 +32,7 @@ import {
   runLiveBenchmarkPreflight,
   type BenchmarkExecutionLane,
 } from './live-benchmark-preflight.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -200,13 +201,14 @@ function parseArgs(argv: string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--input' || arg === '-i') {
-      args.input = argv[++i] ?? DEFAULT_INPUT;
+      args.input = resolveCliDataPathArg(argv[++i] ?? DEFAULT_INPUT);
     } else if (arg === '--output' || arg === '-o') {
-      args.output = argv[++i] ?? DEFAULT_OUTPUT;
+      args.output = resolveCliDataPathArg(argv[++i] ?? DEFAULT_OUTPUT);
     } else if (arg === '--api-url') {
       args.apiUrl = argv[++i] ?? args.apiUrl;
     } else if (arg === '--predictions') {
-      args.predictions = argv[++i] ?? null;
+      const predictions = argv[++i];
+      args.predictions = predictions === undefined ? null : resolveCliDataPathArg(predictions);
     } else if (arg === '--smoke-predictions') {
       args.smokePredictions = true;
     } else if (arg === '--suite' || arg === '--suites') {

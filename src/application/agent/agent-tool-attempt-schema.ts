@@ -59,13 +59,6 @@ export type FoodPairingAttemptInput = z.infer<typeof FoodPairingAttemptInputSche
 export type DrinkingWindowAttemptInput = z.infer<typeof DrinkingWindowAttemptInputSchema>;
 export type CompareWinesAttemptInput = z.infer<typeof CompareWinesAttemptInputSchema>;
 
-/** Any single known-tool input. Useful when the specific tool isn't narrowed yet. */
-export type KnownAgentToolInput =
-  | SearchToolAttemptInput
-  | FoodPairingAttemptInput
-  | DrinkingWindowAttemptInput
-  | CompareWinesAttemptInput;
-
 // ── Discriminated union: known tool + its typed input ────────────────────────
 export type KnownAgentToolAttempt =
   | { readonly tool: 'search_wines'; readonly input: SearchToolAttemptInput }

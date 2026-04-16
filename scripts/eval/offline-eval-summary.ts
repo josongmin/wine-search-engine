@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import type { EvalResult, EvalDeltaBucket } from './metrics.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface Args {
   input: string;
@@ -13,7 +14,7 @@ function parseArgs(argv: readonly string[]): Args {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--input' || arg === '-i') {
-      input = argv[index + 1] ?? input;
+      input = resolveCliDataPathArg(argv[index + 1] ?? input);
       index += 1;
     }
   }

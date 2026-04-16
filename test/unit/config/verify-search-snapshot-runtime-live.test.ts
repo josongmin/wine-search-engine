@@ -68,6 +68,12 @@ interface NamespaceSealOverride {
   readonly canonicalAmbiguityViolations?: string;
 }
 
+interface VespaPayloadSamples {
+  readonly red?: Array<Record<string, unknown>>;
+  readonly white?: Array<Record<string, unknown>>;
+  readonly sparkling?: Array<Record<string, unknown>>;
+}
+
 function createPoolMock(overrides?: {
   readonly canonicalAliasJoinCount?: string;
   readonly canonicalAmbiguityTotalCount?: string;
@@ -128,13 +134,15 @@ function createPoolMock(overrides?: {
 }
 
 /**
- * Build a fetch mock returning five Vespa responses:
- * snapshot doc count, red count, white count, sparkling count, namespace seal count.
+ * Build a fetch mock returning Vespa responses in the runtime-check order:
+ * snapshot doc count, red count, white count, sparkling count,
+ * red/white/sparkling payload samples, namespace seal probe.
  */
 function mockVespaResponses(args?: {
   readonly snapshotDocCount?: number;
   readonly wineTypeCounts?: Partial<Record<'red' | 'white' | 'sparkling', number>>;
   readonly namespaceSealViolations?: number;
+  readonly payloadSamples?: VespaPayloadSamples;
 }) {
   const docCount = args?.snapshotDocCount ?? 10;
   const wineTypeCounts = {
@@ -143,6 +151,11 @@ function mockVespaResponses(args?: {
     sparkling: args?.wineTypeCounts?.sparkling ?? 3,
   };
   const violations = args?.namespaceSealViolations ?? 0;
+  const payloadSamples = {
+    red: args?.payloadSamples?.red ?? [{ entity_id: 'red-entity-1', canonical_label: 'Red One', wine_type: 'red' }],
+    white: args?.payloadSamples?.white ?? [{ entity_id: 'white-entity-1', canonical_label: 'White One', wine_type: 'white' }],
+    sparkling: args?.payloadSamples?.sparkling ?? [{ entity_id: 'sparkling-entity-1', canonical_label: 'Sparkling One', wine_type: 'sparkling' }],
+  };
   return vi
     .spyOn(globalThis, 'fetch')
     .mockResolvedValueOnce(
@@ -158,8 +171,69 @@ function mockVespaResponses(args?: {
       new Response(JSON.stringify({ root: { fields: { totalCount: wineTypeCounts.sparkling } } }), { status: 200 }),
     )
     .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          root: {
+            children: payloadSamples.red.map((sample) => ({ fields: sample })),
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          root: {
+            children: payloadSamples.white.map((sample) => ({ fields: sample })),
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          root: {
+            children: payloadSamples.sparkling.map((sample) => ({ fields: sample })),
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    .mockResolvedValueOnce(
       new Response(JSON.stringify({ root: { fields: { totalCount: violations } } }), { status: 200 }),
     );
+}
+
+async function buildHappyRuntimeState(): Promise<LoadedSearchSnapshotRuntimeState> {
+  const dir = await makeTempDir();
+  const nlPath = path.join(dir, 'nl.json');
+  const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+  await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+  const activeLtrHash = activeLtrHashFromRows();
+  return {
+    schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+    snapshotId: 'snap-test-1',
+    contentHash: 'hash',
+    publishedAt: '2026-04-12T00:00:00.000Z',
+    manifestPath: '/tmp/m.json',
+    nlMappingsRuntimePath: nlPath,
+    allowMissingLtr: false,
+    counts: {
+      entities: 10,
+      aliases: 10,
+      ambiguityRegistry: 2,
+      nlMappings: 1,
+      activeLtrModels: 1,
+    },
+    hashes: {
+      entities: 'entities',
+      aliases: 'aliases',
+      ambiguityRegistry: 'ambiguity',
+      nlMappings: hashRuntimeNlMappings(nlPayload),
+      activeLtrModels: activeLtrHash,
+    },
+  };
 }
 
 describe('verifySearchSnapshotRuntimeStateLive', () => {
@@ -592,5 +666,69 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+
+  describe('Vespa payload integrity probe', () => {
+    it('passes when red/white/sparkling payload hits include required fields', async () => {
+      const runtimeState = await buildHappyRuntimeState();
+      const fetchSpy = mockVespaResponses();
+
+      try {
+        const pool = createPoolMock() as unknown as Pool;
+        await expect(
+          verifySearchSnapshotRuntimeStateLive({
+            pool,
+            vespaUrl: 'http://vespa.test:8080',
+            runtimeState,
+          }),
+        ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('throws when payload sample misses required canonical field', async () => {
+      const runtimeState = await buildHappyRuntimeState();
+      const fetchSpy = mockVespaResponses({
+        payloadSamples: {
+          white: [{ entity_id: 'white-entity-1', wine_type: 'white' }],
+        },
+      });
+
+      try {
+        const pool = createPoolMock() as unknown as Pool;
+        await expect(
+          verifySearchSnapshotRuntimeStateLive({
+            pool,
+            vespaUrl: 'http://vespa.test:8080',
+            runtimeState,
+          }),
+        ).rejects.toThrow(/critical wine_type Vespa payload requirement violations/i);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('throws when payload sample has anchor mismatch', async () => {
+      const runtimeState = await buildHappyRuntimeState();
+      const fetchSpy = mockVespaResponses({
+        payloadSamples: {
+          sparkling: [{ entity_id: 'sparkling-entity-1', canonical_label: 'Sparkling One', wine_type: 'white' }],
+        },
+      });
+
+      try {
+        const pool = createPoolMock() as unknown as Pool;
+        await expect(
+          verifySearchSnapshotRuntimeStateLive({
+            pool,
+            vespaUrl: 'http://vespa.test:8080',
+            runtimeState,
+          }),
+        ).rejects.toThrow(/critical wine_type Vespa payload requirement violations/i);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
   });
 });

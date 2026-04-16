@@ -16,13 +16,13 @@ export const DRINKING_WINDOW_TOOL_DESCRIPTION =
 export const COMPARE_WINES_TOOL_DESCRIPTION =
   'Compare two wines side-by-side with rankings and attributes.';
 
-export const SEARCH_TOOL_FILTER_TEXT_MAX_LEN = 100;
-export const SEARCH_TOOL_STYLE_HINT_MAX_LEN = 50;
+const SEARCH_TOOL_FILTER_TEXT_MAX_LEN = 100;
+const SEARCH_TOOL_STYLE_HINT_MAX_LEN = 50;
 export const SEARCH_TOOL_MAX_STYLES = 5;
 export const SEARCH_TOOL_MAX_EXCLUDE_FILTERS = 10;
 export const SEARCH_TOOL_VINTAGE_MIN = 1600;
 export const SEARCH_TOOL_VINTAGE_MAX = 2100;
-export const FOOD_PAIRING_FOOD_MAX_LEN = 200;
+const FOOD_PAIRING_FOOD_MAX_LEN = 200;
 
 export const SEARCH_TOOL_QUERY_DESCRIPTION =
   'Wine search query anchor. Preserve the user\'s original language and lexical anchor; do not translate Korean queries into broad English paraphrases. Put extra constraints into structured fields instead (e.g., "보르도 5만원 이하", "Pinot Noir 2020", "dry red wine").';
@@ -60,7 +60,7 @@ export const FOOD_PAIRING_MAX_PRICE_KRW_DESCRIPTION =
   'Optional maximum wine price in KRW (preferred over USD).';
 export const FOOD_PAIRING_MAX_PRICE_USD_DESCRIPTION =
   'Optional maximum wine price in USD (legacy compatibility input, e.g. 50).';
-export const FOOD_PAIRING_COLOR_DESCRIPTION =
+const FOOD_PAIRING_COLOR_DESCRIPTION =
   'Optional wine color filter. Use "both" when red and white are both acceptable.';
 export const FOOD_PAIRING_FOOD_DESCRIPTION =
   'Food item or dish to pair against (e.g. "grilled salmon", "pasta carbonara", "cheese platter").';
@@ -72,7 +72,7 @@ export const COMPARE_WINES_QUERY_A_DESCRIPTION =
   'First wine query (e.g. "Château Margaux 2015").';
 export const COMPARE_WINES_QUERY_B_DESCRIPTION =
   'Second wine query (e.g. "Caymus Cabernet 2018").';
-export const SEARCH_TOOL_PLACEHOLDER_PATTERN =
+const SEARCH_TOOL_PLACEHOLDER_PATTERN =
   /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
 
 const SEARCH_TOOL_STYLE_EXAMPLES = [

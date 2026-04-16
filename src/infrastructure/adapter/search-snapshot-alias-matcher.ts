@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import type { Pool } from 'pg';
 import { z } from 'zod';
 import type {
   AliasMatchResult,
@@ -11,6 +12,10 @@ import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
 } from '../health/search-snapshot-readiness.js';
+import {
+  isActiveSnapshotSubstrateBootstrapAllowed,
+  resolveActiveSnapshot,
+} from '../db/active-snapshot-resolver.js';
 
 interface SnapshotAliasRecord {
   readonly aliasId: string;
@@ -19,6 +24,15 @@ interface SnapshotAliasRecord {
   readonly normalizedValue: string;
   readonly sourceTrust: number;
   readonly confidencePrior: number;
+}
+
+interface PgAliasRecord {
+  readonly alias_id: string;
+  readonly entity_id: string;
+  readonly surface_form: string;
+  readonly normalized_value: string;
+  readonly source_trust: number;
+  readonly confidence: number;
 }
 
 type AliasStrategy =
@@ -172,6 +186,68 @@ interface GroupedAliasMatch {
 }
 
 export class SearchSnapshotAliasMatcher implements AliasMatcher {
+  static async loadFromPostgres(pool: Pool): Promise<SearchSnapshotAliasMatcher | undefined> {
+    try {
+      const { activeSnapshotId } = await resolveActiveSnapshot(pool);
+      const { rows } = await pool.query<PgAliasRecord>(
+        `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence
+         FROM aliases
+         WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
+         ORDER BY confidence DESC`,
+        [activeSnapshotId],
+      );
+      const aliases = rows
+        .filter((row) => (
+          typeof row.alias_id === 'string' &&
+          row.alias_id.length > 0 &&
+          typeof row.entity_id === 'string' &&
+          row.entity_id.length > 0 &&
+          typeof row.surface_form === 'string' &&
+          row.surface_form.length > 0 &&
+          typeof row.normalized_value === 'string' &&
+          row.normalized_value.length > 0
+        ))
+        .map((row) => ({
+          aliasId: row.alias_id,
+          entityId: row.entity_id,
+          value: row.surface_form,
+          normalizedValue: row.normalized_value,
+          sourceTrust: Number.isFinite(row.source_trust) ? row.source_trust : 0,
+          confidencePrior: Number.isFinite(row.confidence) ? row.confidence : 0,
+        }));
+
+      if (aliases.length === 0) {
+        bootstrapLogger.info(
+          {
+            activeSnapshotId,
+          },
+          '[Container] Search snapshot alias overlay loaded from PostgreSQL but empty; falling back to search-index',
+        );
+        return undefined;
+      }
+
+      bootstrapLogger.info(
+        {
+          activeSnapshotId,
+          aliasCount: aliases.length,
+        },
+        '[Container] Search snapshot alias overlay loaded from PostgreSQL into memory',
+      );
+      return new SearchSnapshotAliasMatcher(aliases);
+    } catch (error: unknown) {
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+        throw error;
+      }
+      bootstrapLogger.warn(
+        {
+          err: error,
+        },
+        '[Container] PostgreSQL alias overlay unavailable; falling back to search-index runtime substrate',
+      );
+      return undefined;
+    }
+  }
+
   static async loadFromRuntimeState(
     runtimeStatePath: string = DEFAULT_RUNTIME_STATE_PATH,
   ): Promise<SearchSnapshotAliasMatcher | undefined> {

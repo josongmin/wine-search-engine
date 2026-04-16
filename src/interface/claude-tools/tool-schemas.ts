@@ -61,15 +61,6 @@ export {
   DrinkingWindowAttemptInputSchema,
   FoodPairingAttemptInputSchema,
   SearchToolAttemptInputSchema,
-  type AgentToolAttempt,
-  type CompareWinesAttemptInput,
-  type DrinkingWindowAttemptInput,
-  type FoodPairingAttemptInput,
-  type KnownAgentToolAttempt,
-  type KnownAgentToolInput,
-  type SearchToolAttemptInput,
-  type UnknownAgentToolAttempt,
-  MAX_UNKNOWN_TOOL_INPUT_KEYS,
 } from '../../application/agent/agent-tool-attempt-schema.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
@@ -117,14 +108,14 @@ const ClaudeToolStringArrayPropertySchema = z.object({
   maxItems: z.number().int().positive().optional(),
 }).strict();
 
-export const ClaudeToolInputSchemaPropertySchema = z.union([
+const ClaudeToolInputSchemaPropertySchema = z.union([
   ClaudeToolStringPropertySchema,
   ClaudeToolNumberPropertySchema,
   ClaudeToolBooleanPropertySchema,
   ClaudeToolStringArrayPropertySchema,
 ]);
 
-export const ClaudeToolInputSchemaSchema = z.object({
+const ClaudeToolInputSchemaSchema = z.object({
   type: z.literal('object'),
   properties: z.record(ClaudeToolInputSchemaPropertySchema),
   required: z.array(z.string().min(1)),
@@ -136,7 +127,7 @@ export const ClaudeToolDefinitionSchema = z.object({
   input_schema: ClaudeToolInputSchemaSchema,
 }).strict();
 
-export type ClaudeToolDefinition = z.infer<typeof ClaudeToolDefinitionSchema>;
+type ClaudeToolDefinition = z.infer<typeof ClaudeToolDefinitionSchema>;
 
 export const SearchToolInputSchema = z.object({
   query: buildSearchToolQueryField({

@@ -1,6 +1,6 @@
 const MAX_ERROR_CAUSE_DEPTH = 5;
 
-export interface SafeErrorDiagnostics {
+interface SafeErrorDiagnostics {
   readonly name: string;
   readonly message: string;
   readonly code?: string | number;

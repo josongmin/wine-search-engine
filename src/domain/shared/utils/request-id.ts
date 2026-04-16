@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 
 /** Shared max length for request / correlation IDs across inbound and outbound hops. */
-export const REQUEST_ID_MAX_LEN = 128;
+const REQUEST_ID_MAX_LEN = 128;
 
 /** Header-safe request-id charset accepted by edge/server middleware. */
-export const REQUEST_ID_SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
+const REQUEST_ID_SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 const DOWNSTREAM_REQUEST_ID_PREFIX = 'u';
 const DOWNSTREAM_REQUEST_ID_HASH_HEX_LEN = 24;

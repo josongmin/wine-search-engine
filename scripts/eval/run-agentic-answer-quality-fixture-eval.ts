@@ -14,6 +14,7 @@ import {
   type AgentFixtureCase,
 } from './agent-fixture-runner-common.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/agentic-answer-quality-fixture-eval-results.json');
 const SUITE_ID = 'agentic_answer_quality';
@@ -64,7 +65,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--output' || arg === '-o') {
-      output = argv[++i] ?? output;
+      output = resolveCliDataPathArg(argv[++i] ?? output);
     } else if (arg === '--api-url') {
       apiUrl = argv[++i] ?? apiUrl;
     } else if (arg === '--timeout-ms') {

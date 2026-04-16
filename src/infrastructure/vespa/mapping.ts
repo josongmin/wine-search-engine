@@ -108,8 +108,12 @@ function getRequiredBoolean(fields: Record<string, unknown>, key: string): boole
   );
 }
 
-function getRequiredStringArray(fields: Record<string, unknown>, key: string): readonly string[] {
+function getOptionalStringArray(
+  fields: Record<string, unknown>,
+  key: string,
+): readonly string[] | undefined {
   const v = fields[key];
+  if (v === undefined) return undefined;
   if (isStringArray(v)) return v;
   throw new MalformedVespaDocumentError(
     'fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid',
@@ -473,11 +477,11 @@ export function fromVespaFields(
       ? { searchSnapshotId: getOptionalString(fields, 'search_snapshot_id') }
       : {}),
     canonicalLabel: getRequiredString(fields, 'canonical_label'),
-    aliasesIdentitySafe: getRequiredStringArray(fields, 'aliases_identity_safe'),
-    aliasesNoisyRecall: getRequiredStringArray(fields, 'aliases_noisy_recall'),
+    aliasesIdentitySafe: getOptionalStringArray(fields, 'aliases_identity_safe') ?? [],
+    aliasesNoisyRecall: getOptionalStringArray(fields, 'aliases_noisy_recall') ?? [],
     producer: getRequiredString(fields, 'producer'),
     region: getRequiredString(fields, 'region'),
-    grapes: getRequiredStringArray(fields, 'grapes'),
+    grapes: getOptionalStringArray(fields, 'grapes') ?? [],
     searchTextKo: getRequiredString(fields, 'search_text_ko'),
     searchTextEn: getRequiredString(fields, 'search_text_en'),
     semanticSummary: getRequiredString(fields, 'semantic_summary'),
@@ -488,7 +492,7 @@ export function fromVespaFields(
     ...(summary.sweetness !== undefined ? { sweetness: summary.sweetness } : {}),
     style: getRequiredString(fields, 'style'),
     priceBand: getRequiredString(fields, 'price_band'),
-    pairing: getRequiredStringArray(fields, 'pairing'),
+    pairing: summary.pairing ?? [],
     ...(summary.occasion !== undefined ? { occasion: [...summary.occasion] } : {}),
     availability: getRequiredBoolean(fields, 'availability'),
     popularityScore: getRequiredNumber(fields, 'popularity_score'),

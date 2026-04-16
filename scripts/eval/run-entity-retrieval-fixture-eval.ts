@@ -34,6 +34,7 @@ import {
   runLiveBenchmarkPreflight,
   type BenchmarkExecutionLane,
 } from './live-benchmark-preflight.js';
+import { resolveCliDataPathArg } from './cli-data-path.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/entity-retrieval-fixture-eval-results.json');
 const DEFAULT_SUITES = [
@@ -107,11 +108,12 @@ function parseArgs(argv: readonly string[]): CliArgs {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--output' || arg === '-o') {
-      output = argv[++i] ?? output;
+      output = resolveCliDataPathArg(argv[++i] ?? output);
     } else if (arg === '--api-url') {
       apiUrl = argv[++i] ?? apiUrl;
     } else if (arg === '--predictions') {
-      predictions = argv[++i] ?? null;
+      const predictionPath = argv[++i];
+      predictions = predictionPath === undefined ? null : resolveCliDataPathArg(predictionPath);
     } else if (arg === '--smoke-predictions') {
       smokePredictions = true;
     } else if (arg === '--suite' || arg === '--suites') {

@@ -184,10 +184,31 @@ function buildRuntimeState(args: {
 function mockVespa(args?: { snapshotDocCount?: number; sealViolations?: number }) {
   const docs = args?.snapshotDocCount ?? 2;
   const violations = args?.sealViolations ?? 0;
+  const redPayload = [{ fields: { entity_id: 'red-op', canonical_label: 'Red Op', wine_type: 'red' } }];
+  const whitePayload = [{ fields: { entity_id: 'white-op', canonical_label: 'White Op', wine_type: 'white' } }];
+  const sparklingPayload = [{ fields: { entity_id: 'spark-op', canonical_label: 'Sparkling Op', wine_type: 'sparkling' } }];
   return vi
     .spyOn(globalThis, 'fetch')
     .mockResolvedValueOnce(
       new Response(JSON.stringify({ root: { fields: { totalCount: docs } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { fields: { totalCount: 1 } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { fields: { totalCount: 1 } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { fields: { totalCount: 1 } } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { children: redPayload } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { children: whitePayload } }), { status: 200 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ root: { children: sparklingPayload } }), { status: 200 }),
     )
     .mockResolvedValueOnce(
       new Response(JSON.stringify({ root: { fields: { totalCount: violations } } }), { status: 200 }),

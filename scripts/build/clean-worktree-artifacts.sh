@@ -8,6 +8,8 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${repo_root}"
 
 paths=(
+  .cache
+  .claude/worktrees
   dist
   coverage
   test-results
@@ -24,6 +26,28 @@ paths=(
 )
 
 for p in "${paths[@]}"; do
+  if [ -e "${p}" ] || [ -L "${p}" ]; then
+    rm -rf "${p}"
+    echo "removed ${p}"
+  fi
+done
+
+shopt -s nullglob
+archive_paths=(
+  *.tar
+  *.tar.gz
+  *.tar.bz2
+  *.tar.xz
+  *.tgz
+  *.zip
+  *.7z
+  *.rar
+  .DS_Store
+  docs/.DS_Store
+)
+shopt -u nullglob
+
+for p in "${archive_paths[@]}"; do
   if [ -e "${p}" ] || [ -L "${p}" ]; then
     rm -rf "${p}"
     echo "removed ${p}"

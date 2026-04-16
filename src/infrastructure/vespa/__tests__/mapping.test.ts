@@ -130,6 +130,69 @@ describe('fromVespaFields entity_id validation', () => {
       }),
     ).toThrow(/malformed Vespa document/);
   });
+
+  it('defaults missing identity aliases to an empty array for partial Vespa docs', () => {
+    const doc = fromVespaFields({
+      ...makeMinimalRequiredFields(),
+      aliases_identity_safe: undefined,
+      aliases_noisy_recall: undefined,
+    });
+    expect(doc.aliasesIdentitySafe).toEqual([]);
+    expect(doc.aliasesNoisyRecall).toEqual([]);
+  });
+
+  it('throws when identity alias field exists but has invalid type', () => {
+    expect(() =>
+      fromVespaFields({
+        ...makeMinimalRequiredFields(),
+        aliases_identity_safe: 'not-an-array',
+      } as unknown as Record<string, unknown>),
+    ).toThrow(/malformed Vespa document/);
+  });
+
+  it('throws when noisy alias field exists but has invalid type', () => {
+    expect(() =>
+      fromVespaFields({
+        ...makeMinimalRequiredFields(),
+        aliases_identity_safe: ['good'],
+        aliases_noisy_recall: 123,
+      } as unknown as Record<string, unknown>),
+    ).toThrow(/malformed Vespa document/);
+  });
+
+  it('defaults missing pairing to an empty array for partial Vespa docs', () => {
+    const doc = fromVespaFields({
+      ...makeMinimalRequiredFields(),
+      pairing: undefined,
+    });
+    expect(doc.pairing).toEqual([]);
+  });
+
+  it('defaults missing grapes to an empty array for partial Vespa docs', () => {
+    const doc = fromVespaFields({
+      ...makeMinimalRequiredFields(),
+      grapes: undefined,
+    });
+    expect(doc.grapes).toEqual([]);
+  });
+
+  it('throws when pairing field exists but has invalid type', () => {
+    expect(() =>
+      fromVespaFields({
+        ...makeMinimalRequiredFields(),
+        pairing: 'not-an-array',
+      } as unknown as Record<string, unknown>),
+    ).toThrow(/malformed Vespa document/);
+  });
+
+  it('throws when grapes field exists but has invalid type', () => {
+    expect(() =>
+      fromVespaFields({
+        ...makeMinimalRequiredFields(),
+        grapes: 'not-an-array',
+      } as unknown as Record<string, unknown>),
+    ).toThrow(/malformed Vespa document/);
+  });
 });
 
 describe('vespa mapping retrieval summary SSOT', () => {

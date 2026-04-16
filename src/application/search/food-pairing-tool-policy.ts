@@ -1,9 +1,9 @@
-export interface FoodPairingBudgetInput {
+interface FoodPairingBudgetInput {
   readonly max_price?: number | undefined;
   readonly max_price_krw?: number | undefined;
 }
 
-export interface FoodPairingColorInput {
+interface FoodPairingColorInput {
   readonly color?: 'red' | 'white' | 'rosé' | 'sparkling' | 'both' | undefined;
 }
 

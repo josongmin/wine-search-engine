@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 deps_root="${WINE_DEPS_DIR:-${HOME}/.wine-search-engine/deps}"
+timestamp="$(date +%Y%m%d-%H%M%S)"
 
 mkdir -p "${deps_root}/root" "${deps_root}/web"
 
@@ -21,12 +22,13 @@ link_dependency_dir() {
 
   if [ -e "${repo_path}" ]; then
     if [ -e "${target_path}" ] || [ -L "${target_path}" ]; then
-      rm -rf "${repo_path}"
-      echo "relinked ${repo_rel} -> ${target_path}"
-    else
-      mv "${repo_path}" "${target_path}"
-      echo "moved ${repo_rel} -> ${target_path}"
+      local backup_path="${target_path}.bak-${timestamp}"
+      mv "${target_path}" "${backup_path}"
+      echo "backed up existing ${target_rel} -> ${backup_path}"
     fi
+
+    mv "${repo_path}" "${target_path}"
+    echo "moved ${repo_rel} -> ${target_path}"
   else
     mkdir -p "${target_path}"
   fi

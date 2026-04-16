@@ -121,7 +121,7 @@ class RedisRerankCacheStore implements RerankCacheStore {
   }
 }
 
-export interface CachedRerankerOptions {
+interface CachedRerankerOptions {
   readonly modelId: string;
   readonly inner: RerankerPort;
   readonly redis?: RedisClient | undefined;
