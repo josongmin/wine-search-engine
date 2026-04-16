@@ -246,12 +246,6 @@ export const WINE_SEARCH_TOOLS = [
           description: SEARCH_TOOL_STYLES_DESCRIPTION,
           maxItems: SEARCH_TOOL_MAX_STYLES,
         },
-        styles: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional multiple semantic style hints. Use when the query carries more than one style meaning at once, e.g. ["approachable","crowd_pleasing"].',
-          maxItems: 5,
-        },
         certification: {
           type: 'string',
           description: SEARCH_TOOL_CERTIFICATION_DESCRIPTION,
