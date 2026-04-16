@@ -5,7 +5,7 @@ import { containsHangul as sharedContainsHangul } from '../../shared/utils/hangu
 /**
  * Result of generating a transliterated alias.
  */
-export interface TransliterationResult {
+interface TransliterationResult {
   /** The transliterated surface form. */
   readonly value: string;
   /** Alias type classification. */

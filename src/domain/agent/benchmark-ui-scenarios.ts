@@ -4,7 +4,7 @@
  * Keep in sync with `QUICK_SCENARIO_IDS` in `test/benchmark/agent/runner.ts`
  * and the matching rows in `test/benchmark/agent/scenarios.ts`.
  */
-export interface AgentBenchmarkUiScenario {
+interface AgentBenchmarkUiScenario {
   readonly id: number;
   readonly tier: string;
   readonly query: string;

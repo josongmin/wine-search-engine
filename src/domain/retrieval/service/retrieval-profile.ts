@@ -19,7 +19,7 @@ import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
  * Configuration profile that governs retrieval behaviour for a given
  * query family and route combination.
  */
-export interface RetrievalProfile {
+interface RetrievalProfile {
   /** Human-readable profile name — must be unique across profiles. */
   readonly name: string;
 

@@ -10,7 +10,7 @@ import { BKTree } from './bk-tree.js';
 import { soundexEn, soundexKo } from './phonetic.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
-export interface FuzzyMatchResult {
+interface FuzzyMatchResult {
   readonly term: string;
   readonly editDistance: number;
   readonly combinedScore: number;

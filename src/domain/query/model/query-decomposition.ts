@@ -19,7 +19,7 @@ export interface QueryDecompositionHint {
   readonly reason?: string;
 }
 
-export interface DetectableDecompositionOutcome {
+interface DetectableDecompositionOutcome {
   readonly decomposed: boolean;
   readonly subQueries?: readonly [string, string] | undefined;
   readonly comparisonIntent?: 'compare' | 'recommend_one' | 'list_both' | undefined;

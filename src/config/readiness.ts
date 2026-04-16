@@ -11,6 +11,7 @@ import {
   probeSearchSnapshotRuntimeState,
   verifySearchSnapshotRuntimeStateLive,
 } from '../infrastructure/health/search-snapshot-readiness.js';
+import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { createSnapshotHealthReader } from '../infrastructure/health/snapshot-health-reader.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
@@ -95,6 +96,45 @@ async function probeCalibrationStore(
   }
 }
 
+async function probeAliasSubstrate(
+  pool: NonNullable<RuntimeHandles['pool']>,
+): Promise<ReadinessStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const activeSnapshot = await Promise.race([
+      resolveActiveSnapshot(pool, { bypassCache: true }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('alias substrate pointer probe timeout')); }, PROBE_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+
+    const probeResult = await Promise.race([
+      pool.query(
+        `SELECT 1
+           FROM aliases
+          WHERE search_snapshot_id = $1
+            AND is_suppressed = FALSE
+          LIMIT 1`,
+        [activeSnapshot.activeSnapshotId],
+      ),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('alias substrate row probe timeout')); }, PROBE_TIMEOUT_MS);
+      }),
+    ]);
+
+    return probeResult.rowCount != null && probeResult.rowCount > 0 ? 'up' : 'down';
+  } catch (err) {
+    log.warn({ err, probe: 'alias_substrate' }, 'readiness probe failed');
+    return 'down';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function buildHealthRouteOptions(
   config: Config,
   runtime: RuntimeHandles,
@@ -105,16 +145,18 @@ export function buildHealthRouteOptions(
   const expectsRedis = expectsRedisAtStartup(config);
   const watchlistEnabled = isWatchlistEnabled(config);
   const redisRequired = expectsRedis;
+  const isProduction = config.nodeEnv === 'production';
+  const hasPool = runtime.pool !== undefined;
 
   return {
     // Runtime plane composite-PK migration (016): attach the snapshot_health
     // observability reader when a PG pool is available. Absent in test and
     // dev environments without PG, where /ready simply omits the block.
-    ...(runtime.pool !== undefined
+    ...(hasPool
       ? { snapshotHealthReader: createSnapshotHealthReader(runtime.pool) }
       : {}),
     readiness: {
-      ...(runtime.pool
+      ...((hasPool || isProduction)
         ? {
             postgres: {
               required: true,
@@ -124,6 +166,16 @@ export function buildHealthRouteOptions(
                   return Promise.resolve('down');
                 }
                 return probePostgres(pool);
+              },
+            },
+            alias_substrate: {
+              required: true,
+              check: (): Promise<ReadinessStatus> => {
+                const pool = runtime.pool;
+                if (pool === undefined) {
+                  return Promise.resolve('down');
+                }
+                return probeAliasSubstrate(pool);
               },
             },
           }
@@ -170,7 +222,7 @@ export function buildHealthRouteOptions(
         required: true, // T-E7-02: strict fail-closed regardless of NODE_ENV
         check: async (): Promise<ReadinessStatus> => {
           if (runtime.pool === undefined) {
-            return probeSearchSnapshotRuntimeState();
+            return isProduction ? 'down' : probeSearchSnapshotRuntimeState();
           }
           try {
             await verifySearchSnapshotRuntimeStateLive({

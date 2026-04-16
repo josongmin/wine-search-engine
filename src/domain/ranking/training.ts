@@ -4,9 +4,3 @@
  */
 
 export { buildTrainingExamples, trainAllModels } from './service/ltr-training-service.js';
-
-export type {
-  RankingFeatures,
-  LambdaMARTExample,
-  QueryClassWeights,
-} from './service/lambdamart-ranker.js';

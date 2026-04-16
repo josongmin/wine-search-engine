@@ -148,11 +148,10 @@ describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminatio
       new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
       'utf-8',
     );
-    // The guard must check !hasToolObservations before running Layer 2 search
-    expect(src).toMatch(/hasToolObservations/);
+    // The guard must be named and explicitly include !hasToolObservations.
+    expect(src).toMatch(/shouldRunLayer2Fallback/);
     expect(src).toMatch(/!hasToolObservations/);
-    // Layer 2 condition must include the !hasToolObservations guard
-    expect(src).toMatch(/answer === '' && terminationReason !== 'answer' && !hasToolObservations/);
+    expect(src).toMatch(/const shouldRunLayer2Fallback[\s\S]*!hasToolObservations/);
   });
 
   it('R-EMPTY-10: Layer 3 sets terminationReason=answer when tool observations exist', async () => {
@@ -176,5 +175,33 @@ describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminatio
     const matches = src.match(/hasToolObservations \? 'answer' : 'fallback'/g);
     expect(matches).not.toBeNull();
     expect(matches?.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 5: Prompt seam — planner and synthesis prompts are structurally distinct
+// ---------------------------------------------------------------------------
+
+describe('EMPTY_ANSWER fallback regression — prompt seam separation', () => {
+  it('R-EMPTY-12: agent-prompt exports separate planner and synthesis system messages', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(
+      new URL('../../src/application/agent/agent-prompt.ts', import.meta.url),
+      'utf-8',
+    );
+    expect(src).toMatch(/export function buildPlannerSystemMessage/);
+    expect(src).toMatch(/export function buildSynthesisSystemMessage/);
+    expect(src).toMatch(/export function buildSystemMessage/);
+  });
+
+  it('R-EMPTY-13: orchestrator uses planner prompt in step-0 and synthesis prompt in fallback', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(
+      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+      'utf-8',
+    );
+    expect(src).toMatch(/buildPlannerSystemMessage\(\)/);
+    expect(src).toMatch(/buildSynthesisSystemMessage\(\)/);
+    expect(src).not.toMatch(/buildSystemMessage\(\)/);
   });
 });

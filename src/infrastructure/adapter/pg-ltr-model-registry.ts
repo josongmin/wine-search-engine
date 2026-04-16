@@ -37,7 +37,7 @@ interface LtrModelRow {
  * trainAllModels() returns Map<string, ...> and QueryClassWeights.queryClass
  * is typed as `string`.
  */
-export interface LtrModelRegistryPort {
+interface LtrModelRegistryPort {
   /**
    * Saves a trained model for a query class.
    * Inserts a new version and marks it as active (deactivating prior versions).
@@ -91,14 +91,14 @@ export interface LtrModelRegistryPort {
   clearAllModels(): Promise<void>;
 }
 
-export interface LtrModelSaveMetadata {
+interface LtrModelSaveMetadata {
   readonly searchSnapshotId: string;
   readonly evalDatasetVersion: string;
   readonly featureSchemaHash: string;
   readonly activate?: boolean;
 }
 
-export interface LtrModelCloneMetadata {
+interface LtrModelCloneMetadata {
   readonly featureSchemaHash: string;
 }
 

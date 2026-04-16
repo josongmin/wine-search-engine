@@ -3,7 +3,10 @@ import type { BlockingPort } from '../../domain/resolver/port/blocking.port.js';
 import { createCanonicalEntityId, type EntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
-import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
+import {
+  isActiveSnapshotSubstrateBootstrapAllowed,
+  resolveActiveSnapshot,
+} from '../db/active-snapshot-resolver.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 interface CandidateRow {
@@ -37,6 +40,9 @@ export class PgBlockingAdapter implements BlockingPort {
       ({ activeSnapshotId } = await resolveActiveSnapshot(this.pool));
     } catch (err: unknown) {
       if (readPgSqlState(err) === '42P01') {
+        if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+          throw err;
+        }
         // Snapshot pointer table missing = fresh DB, pre-publish. This is
         // distinct from "aliases table exists but query failed" (counted
         // below) — operators need the distinction to decide between
@@ -113,6 +119,9 @@ export class PgBlockingAdapter implements BlockingPort {
           surface: 'PgBlockingAdapter',
           errorClass: err instanceof Error ? err.constructor.name : 'unknown',
         });
+        throw err;
+      }
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
         throw err;
       }
       globalSilentSkipCounter.increment('blocker_disabled_aliases_table_missing', {

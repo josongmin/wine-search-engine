@@ -3,28 +3,26 @@
  *
  * Background
  * ──────────
- * Waves B1–B4 each locked one flag-on path in isolation:
+ * Waves B1–B3 each locked one flag-on path in isolation:
  *
  *   - B1  `BUNDLE_SELECTOR_ENABLED`     (ADR-013 Phase 1c)
  *   - B2  `RETRIEVAL_EXECUTOR_CRITIC`   (ADR-015 Axis 2)
  *   - B3  `CONSTRAINT_GRAPH_TOPOLOGY_LLM` (ADR-012 Phase 1b.2)
- *   - B4  `GCE_SHADOW_EMIT`             (ADR-016 Axis 3)
- *
  * Additionally `CONSTRAINT_GRAPH_EMIT` (ADR-011 Phase 1b.3a) is the
  * base-level flag that gates graph emission at compile time. Each B-wave
  * test proves its own flag works when the other flags are OFF. None of
  * them exercise the more realistic scenario where multiple flags are ON
  * at once — which is where cross-feature interactions actually live.
  *
- * This file locks a minimal matrix of 7 combinations covering the full
+ * This file locks a minimal matrix of 6 combinations covering the full
  * dependency DAG between the flags, from baseline (all off) to the
  * all-on "full train". The harness re-implements the well-trodden
  * fakes from Wave B1–B4 so no real LLM, real Vespa, real PG, or real
  * OpenAI are touched — only `ChatLlmPort` and `CandidatePoolPort` are
  * faked; `ConstraintCompiler`, `ConstraintTopologyPlanner`,
  * `BundleSelectorImpl`, `InMemoryBudgetLedger`, the retrieval critic +
- * rewriter, the grounded-claim emitter, `buildMachineResponseV2`, and
- * `buildSearchDecisionInput` are all real.
+ * rewriter, `buildMachineResponseV2`, and `buildSearchDecisionInput`
+ * are all real.
  *
  * Combinations (indexed to the task spec matrix)
  * ──────────────────────────────────────────────
@@ -33,13 +31,12 @@
  *   3. graph_emit + topology_llm
  *   4. graph_emit + bundle_selector (topology faked via direct graph injection)
  *   5. graph_emit + critic
- *   6. graph_emit + gce_shadow_emit
- *   7. ALL ON (graph_emit + topology + bundle + critic + gce)
+ *   6. ALL ON (graph_emit + topology + bundle + critic)
  *
- * Critical invariants locked in combo 7 (the all-on case)
+ * Critical invariants locked in combo 6 (the all-on case)
  * ───────────────────────────────────────────────────────
  *   - 5-second per-case timeout — proves no deadlock.
- *   - V2 response has `grounded.claims.length >= 1`.
+ *   - V2 response remains machine-V2 compatible with no shadow sidecar.
  *   - Decision input has `executionContext.constraintGraph` populated.
  *   - `criticRewrites` count is finite (0 or bounded by CRITIC_RETRY_MAX).
  *   - Ledger snapshot: reservations.size === assignments.length (P1-C).
@@ -70,18 +67,8 @@ import { BundleSelectorImpl } from '../../src/domain/retrieval/service/bundle-se
 import { InMemoryBudgetLedger } from '../../src/domain/retrieval/service/budget-ledger.js';
 import { CRITIC_RETRY_MAX } from '../../src/domain/retrieval/service/retrieval-critic.js';
 import {
-  emitGroundedClaims,
-  type EmitGroundedClaimsInput,
-} from '../../src/domain/response/service/grounded-claim-emitter.js';
-import {
   buildMachineResponseV2,
-  type MachineResponseBuildParamsV2,
 } from '../../src/domain/response/service/machine-response-builder-v2.js';
-import {
-  DEFAULT_TYPE_TO_CATEGORY_MAPPING,
-  type AtomicClaimType,
-} from '../../src/domain/response/model/atomic-claim-type.js';
-import { GROUNDED_CLAIM_SCHEMA_VERSION } from '../../src/domain/response/model/grounded-claim.js';
 
 // Counters — resetting guarantees cross-combo independence.
 import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
@@ -103,7 +90,6 @@ import type {
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../src/domain/retrieval/model/retrieval-input.js';
 import type { CandidatePoolPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
-import type { ToolCallEvidenceFrame } from '../../src/domain/agent/model/tool-call-evidence-frame.js';
 import type {
   RankedResult,
   ComponentScores,
@@ -122,7 +108,6 @@ const MANAGED_FLAGS = [
   'CONSTRAINT_GRAPH_TOPOLOGY_LLM',
   'BUNDLE_SELECTOR_ENABLED',
   'RETRIEVAL_EXECUTOR_CRITIC',
-  'GCE_SHADOW_EMIT',
 ] as const;
 
 type ManagedFlag = (typeof MANAGED_FLAGS)[number];
@@ -156,9 +141,6 @@ function restoreFlags(snap: Record<ManagedFlag, string | undefined>): void {
         case 'RETRIEVAL_EXECUTOR_CRITIC':
           delete process.env.RETRIEVAL_EXECUTOR_CRITIC;
           break;
-        case 'GCE_SHADOW_EMIT':
-          delete process.env.GCE_SHADOW_EMIT;
-          break;
       }
     } else {
       process.env[key] = v;
@@ -175,7 +157,6 @@ function clearAllFlagsBeforeSet(): void {
   delete process.env.CONSTRAINT_GRAPH_TOPOLOGY_LLM;
   delete process.env.BUNDLE_SELECTOR_ENABLED;
   delete process.env.RETRIEVAL_EXECUTOR_CRITIC;
-  delete process.env.GCE_SHADOW_EMIT;
 }
 
 function resetAllCounters(): void {
@@ -433,41 +414,6 @@ const alwaysRelaxRewriter = {
   }),
 };
 
-// ─── GCE emitter fixtures ────────────────────────────────────────────────────
-
-function cannedClaim(
-  id: string,
-  type: AtomicClaimType,
-  toolCallId: string,
-  text: string,
-): Record<string, unknown> {
-  return {
-    id,
-    type,
-    category: DEFAULT_TYPE_TO_CATEGORY_MAPPING[type],
-    text,
-    provenance: [{ toolCallId }],
-    claimSchemaVersion: GROUNDED_CLAIM_SCHEMA_VERSION,
-  };
-}
-
-function cannedGroundedPayload(
-  claims: readonly Record<string, unknown>[],
-): string {
-  return JSON.stringify({
-    proseSegments: [
-      {
-        id: 'seg-1',
-        text: 'We recommend these wines based on your query.',
-      },
-    ],
-    claims,
-    claimSchemaVersion: GROUNDED_CLAIM_SCHEMA_VERSION,
-  });
-}
-
-const FAKE_SHA256 = 'a'.repeat(64);
-
 function makeComponentScores(): ComponentScores {
   return {
     entityIntegrity: 0.95,
@@ -507,25 +453,6 @@ function makeRankedResult(
     matchedConstraints: [],
     unmetConstraints: [],
     inferredConstraints: [],
-  };
-}
-
-function makeEvidenceFrame(toolCallId: string): ToolCallEvidenceFrame {
-  return {
-    frameSchemaVersion: 'tool_evidence_v1',
-    toolCallId,
-    toolName: 'search_wines',
-    invokedAt: '2026-04-15T00:00:00.000Z',
-    requestId: 'req-f5-xflag',
-    request: { toolName: 'search_wines', input: { query: XOR_QUERY } },
-    structuredOutput: {
-      kind: 'search_result_set',
-      resultSet: [],
-      resultCount: 0,
-    },
-    observationSnapshot: 'observation text',
-    observationHash: FAKE_SHA256,
-    durationMs: 12,
   };
 }
 
@@ -573,14 +500,10 @@ describe('F5 combo 1 — all OFF (baseline)', () => {
       // Baseline contract: no graph at all.
       expect(compiled.constraintGraph).toBeUndefined();
 
-      // V2 envelope on baseline must omit `grounded` entirely.
       const response = buildMachineResponseV2({
         queryId: 'q-f5-combo-1',
         results: [makeRankedResult('wine-001', 'Opus One 2018', 1)],
-        evidenceFrames: [makeEvidenceFrame('req-combo-1-s0')],
-        generatedProse: 'prose',
       });
-      expect('grounded' in response).toBe(false);
       expect(response.version).toBe('2');
     },
     CASE_TIMEOUT_MS,
@@ -603,11 +526,9 @@ describe('F5 combo 1 — all OFF (baseline)', () => {
         resultsLen: response.results.length,
         version: response.version,
         responseType: response.responseType,
-        hasGrounded: 'grounded' in response,
-        hasClaimSchemaVersion: 'claimSchemaVersion' in response,
       });
       expect(serialized).toBe(
-        '{"queryId":"q-f5-baseline-snapshot","resultsLen":1,"version":"2","responseType":"machine","hasGrounded":false,"hasClaimSchemaVersion":false}',
+        '{"queryId":"q-f5-baseline-snapshot","resultsLen":1,"version":"2","responseType":"machine"}',
       );
     },
     CASE_TIMEOUT_MS,
@@ -878,73 +799,15 @@ describe('F5 combo 5 — graph_emit + critic', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Combo 6 — graph_emit + gce_shadow_emit
+// Combo 6 — ALL ON
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('F5 combo 6 — graph_emit + gce_shadow_emit', () => {
-  beforeEach(() => {
-    process.env.CONSTRAINT_GRAPH_EMIT = 'true';
-    process.env.GCE_SHADOW_EMIT = 'true';
-  });
-
-  it(
-    'emitter runs end-to-end alongside the legacy response envelope',
-    async () => {
-      const claims = [
-        cannedClaim(
-          'c-1',
-          'entity_reference',
-          'req-combo-6-s0',
-          'Opus One 2018',
-        ),
-      ];
-      const llm = new CannedLlm([cannedGroundedPayload(claims)]);
-
-      const rankedResults = [
-        makeRankedResult('wine-001', 'Opus One 2018', 1),
-      ];
-      const frames = [makeEvidenceFrame('req-combo-6-s0')];
-
-      const emitInput: EmitGroundedClaimsInput = {
-        rankedResults,
-        evidenceFrames: frames,
-        prose: 'Opus One 2018 is bold and full-bodied.',
-      };
-      const emitted = await emitGroundedClaims(llm, emitInput);
-
-      expect(llm.calls).toHaveLength(1);
-
-      const params: MachineResponseBuildParamsV2 = {
-        queryId: 'q-f5-combo-6',
-        results: rankedResults,
-        evidenceFrames: frames,
-        generatedProse: emitInput.prose,
-        groundedOverride: emitted,
-      };
-      const response = buildMachineResponseV2(params);
-
-      expect(response.grounded).toBeDefined();
-      expect(response.grounded?.claims.length).toBeGreaterThanOrEqual(1);
-      expect(response.claimSchemaVersion).toBe(GROUNDED_CLAIM_SCHEMA_VERSION);
-      // Legacy envelope still shows through.
-      expect(response.version).toBe('2');
-      expect(response.results).toHaveLength(1);
-    },
-    CASE_TIMEOUT_MS,
-  );
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Combo 7 — ALL ON
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('F5 combo 7 — ALL ON (full train)', () => {
+describe('F5 combo 6 — ALL ON (full train)', () => {
   beforeEach(() => {
     process.env.CONSTRAINT_GRAPH_EMIT = 'true';
     process.env.CONSTRAINT_GRAPH_TOPOLOGY_LLM = 'true';
     process.env.BUNDLE_SELECTOR_ENABLED = 'true';
     process.env.RETRIEVAL_EXECUTOR_CRITIC = 'true';
-    process.env.GCE_SHADOW_EMIT = 'true';
   });
 
   it(
@@ -1034,54 +897,21 @@ describe('F5 combo 7 — ALL ON (full train)', () => {
           .BUNDLE_SELECTOR_BUDGET_UNSELECTED_RESERVED_COUNT,
       ).toBe(0);
 
-      // Step 3: run the grounded claim emitter with a canned payload and
-      // stitch the result into the V2 response envelope.
+      // Step 3: assemble the V2 machine envelope from ranked results.
       const rankedResults = [
         makeRankedResult('wine-001', 'Opus One 2018', 1),
         makeRankedResult('wine-002', 'Château Margaux 2016', 2),
       ];
-      const frames = [
-        makeEvidenceFrame('req-combo-7-s0'),
-        makeEvidenceFrame('req-combo-7-s1'),
-      ];
-      const gceClaims = [
-        cannedClaim(
-          'c-1',
-          'entity_reference',
-          'req-combo-7-s0',
-          'Opus One 2018',
-        ),
-        cannedClaim(
-          'c-2',
-          'vintage_assertion',
-          'req-combo-7-s0',
-          'Vintage: 2018',
-        ),
-      ];
-      const gceLlm = new CannedLlm([cannedGroundedPayload(gceClaims)]);
-      const emitted = await emitGroundedClaims(gceLlm, {
-        rankedResults,
-        evidenceFrames: frames,
-        prose: 'Opus One 2018 is bold.',
-      });
-      expect(gceLlm.calls).toHaveLength(1);
-
       const response = buildMachineResponseV2({
-        queryId: 'q-f5-combo-7',
+        queryId: 'q-f5-combo-6',
         results: rankedResults,
-        evidenceFrames: frames,
-        ...(compiledGraph !== undefined
-          ? { constraintGraph: compiledGraph }
-          : {}),
-        generatedProse: 'Opus One 2018 is bold.',
-        groundedOverride: emitted,
       });
 
       // Hard invariants from the task spec ─────────────────────────────
-      // (i) V2 response carries grounded with ≥1 claim.
-      expect(response.grounded).toBeDefined();
-      expect(response.grounded?.claims.length).toBeGreaterThanOrEqual(1);
-      expect(response.claimSchemaVersion).toBe(GROUNDED_CLAIM_SCHEMA_VERSION);
+      // (i) V2 response remains machine-V2 compatible in the all-on path.
+      expect(response.version).toBe('2');
+      expect(response.responseType).toBe('machine');
+      expect(response.results).toHaveLength(2);
 
       // (ii) Decision-input style executionContext carries constraintGraph.
       // We stage the hand-off manually because the full DecisionInput
@@ -1093,7 +923,7 @@ describe('F5 combo 7 — ALL ON (full train)', () => {
           (executionResult.criticRewrites ?? []).map((trace, i) => ({
             subqueryId: trace.subqueryId,
             type: trace.rewriteType,
-            rewriteTraceRef: `f5-combo-7-trace-${String(i)}`,
+            rewriteTraceRef: `f5-combo-6-trace-${String(i)}`,
           })),
       };
       expect(executionContext.constraintGraph).toBeDefined();

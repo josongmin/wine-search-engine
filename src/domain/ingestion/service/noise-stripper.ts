@@ -42,7 +42,7 @@ const PROMOTIONAL_PATTERNS: readonly RegExp[] = [
 /**
  * Result of stripping noise tokens from a title.
  */
-export interface NoiseStripResult {
+interface NoiseStripResult {
   /** The cleaned title with noise tokens removed. */
   readonly cleaned: string;
   /** List of noise tokens that were found and removed. */

@@ -27,7 +27,7 @@ export interface JudgeSample {
   readonly itemB?: string;
 }
 
-export interface JudgeBiasReport {
+interface JudgeBiasReport {
   readonly meanScore: number;
   readonly stdScore: number;
   readonly perJudgeMean: ReadonlyMap<string, number>;
@@ -137,7 +137,7 @@ export function computeJudgeBias(samples: readonly JudgeSample[]): JudgeBiasRepo
   };
 }
 
-export interface BiasCorrectedScore {
+interface BiasCorrectedScore {
   readonly originalScore: number;
   readonly correctedScore: number;
   readonly judgeId: string;

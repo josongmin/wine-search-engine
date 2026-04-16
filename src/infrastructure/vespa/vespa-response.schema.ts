@@ -81,6 +81,3 @@ export const VespaQueryResponseSchema = z
     timing: VespaTimingSchema.optional(),
   })
   .passthrough();
-
-export type VespaHitParsed = z.infer<typeof VespaHitSchema>;
-export type VespaQueryResponseParsed = z.infer<typeof VespaQueryResponseSchema>;

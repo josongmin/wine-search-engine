@@ -1,8 +1,6 @@
 export {
   type CanonicalEntityId,
-  type DocumentId,
   type EntityId,
-  type SourceRecordId,
   createCanonicalEntityId,
   createEntityId,
   createSourceRecordId,
@@ -19,10 +17,6 @@ export {
 export { type EvidenceStrength, type EvidenceItem } from './evidence-item.js';
 export {
   type ConstraintAtom,
-  type ConstraintTier,
-  type ConstraintSourceKind,
-  type ConstraintSemanticScope,
-  type ConstraintConflictPolicy,
   liftBundleToAtoms,
 } from './constraint-atom.js';
 export {
@@ -30,18 +24,3 @@ export {
   isCorruptedSnapshot,
 } from './decision-snapshot.js';
 export { type SignalSet } from './signal-set.js';
-export {
-  type ProvenanceShortfallCode,
-  type ShortfallLayer,
-  type RetrievalProvenanceShortfall,
-  type DenseChannelShortfall,
-  type EntityResolverShortfall,
-  type ProvenanceClosureShortfall,
-  type RerankerShortfall,
-  type RerankQualityShortfall,
-  type LtrShortfall,
-  type ConstraintRelaxationShortfall,
-  type LearnedMatcherShortfall,
-  type SpecializedRouteShortfall,
-  type MixedRouteShortfall,
-} from './provenance-shortfall-taxonomy.js';

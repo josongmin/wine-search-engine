@@ -18,7 +18,7 @@ import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import { computeGraphCoverage } from '../../query/service/compute-graph-coverage.js';
 import { projectSoftTierSubgraph } from '../../query/service/graph-tier-projection.js';
 
-export interface GraphSoftWeightInput {
+interface GraphSoftWeightInput {
   readonly graph: ConstraintGraph;
   readonly matchedAttributes: ReadonlySet<string>;
 }

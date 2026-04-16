@@ -45,7 +45,7 @@ export interface QueryEntityAggregation {
 /**
  * A detected quality issue in the feedback stream.
  */
-export interface FeedbackQualityIssue {
+interface FeedbackQualityIssue {
   /** Type of issue detected. */
   readonly type: 'click_spam' | 'session_bounce' | 'contradictory_signals';
 

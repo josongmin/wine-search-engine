@@ -1,6 +1,6 @@
-export type AdmissionOutcome = 'allow' | 'clarify' | 'reject';
+type AdmissionOutcome = 'allow' | 'clarify' | 'reject';
 
-export interface AdmissionSignals {
+interface AdmissionSignals {
   confidence: number;
   evidenceSufficient: boolean;
   ambiguityHigh: boolean;

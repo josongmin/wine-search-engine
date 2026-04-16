@@ -1,9 +1,9 @@
-export type CacheEligibility =
+type CacheEligibility =
   | 'cacheable'
   | 'non_cacheable'
   | 'cacheable_but_snapshot_bound';
 
-export interface CachePolicyDecision {
+interface CachePolicyDecision {
   eligibility: CacheEligibility;
   reason?: string;
 }
@@ -24,10 +24,10 @@ export const RESPONSE_CACHE_READ_BYPASS_REASONS = [
   'model_version_drift',
 ] as const;
 
-export type ResponseCacheReadBypassReason =
+type ResponseCacheReadBypassReason =
   typeof RESPONSE_CACHE_READ_BYPASS_REASONS[number];
 
-export interface ResponseCacheReadDecision {
+interface ResponseCacheReadDecision {
   eligibility: 'cache_hit' | 'bypass';
   reason?: ResponseCacheReadBypassReason;
 }

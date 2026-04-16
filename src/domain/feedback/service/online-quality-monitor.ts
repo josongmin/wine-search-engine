@@ -22,12 +22,12 @@ export interface QualitySnapshot {
   readonly degradationFlagRate: number;
 }
 
-export interface QualityDelta {
+interface QualityDelta {
   readonly ctrDelta: number;
   readonly zeroResultDelta: number;
 }
 
-export interface QualityMonitorState {
+interface QualityMonitorState {
   readonly current: QualitySnapshot;
   readonly previous: QualitySnapshot | undefined;
   readonly delta: QualityDelta | undefined;

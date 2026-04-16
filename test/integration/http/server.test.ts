@@ -582,6 +582,12 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
       expect(vi.mocked(deps.searchUseCase.execute).mock.calls[0]?.[2]).toMatchObject({
         debugRequest: true,
         executionPrincipal: 'benchmark_trusted',
+        stageTimer: expect.objectContaining({
+          start: expect.any(Function),
+          end: expect.any(Function),
+          snapshot: expect.any(Function),
+          isRunning: expect.any(Function),
+        }),
       });
     } finally {
       await app.close();

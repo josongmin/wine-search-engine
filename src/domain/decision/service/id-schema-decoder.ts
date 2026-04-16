@@ -16,23 +16,23 @@ const SNAPSHOT_ID_V1_SEGMENT_COUNT = 6;
 /** Colon-separated segments in snapshot id v2 (adds execution + retrieval). */
 const SNAPSHOT_ID_V2_SEGMENT_COUNT = 8;
 
-export interface DecodedAuthorityTraceRefV1 {
+interface DecodedAuthorityTraceRefV1 {
   readonly family: 'decision' | 'admission';
   readonly schemaVersion: typeof AUTHORITY_TRACE_SCHEMA_VERSION;
   readonly queryClass: string;
   readonly digest: string;
 }
 
-export type DecodedAuthorityTraceRef = DecodedAuthorityTraceRefV1;
+type DecodedAuthorityTraceRef = DecodedAuthorityTraceRefV1;
 
-export interface DecodedBatchIdV1 {
+interface DecodedBatchIdV1 {
   readonly schemaVersion: typeof BATCH_ID_SCHEMA_VERSION;
   readonly digest: string;
 }
 
-export type DecodedBatchId = DecodedBatchIdV1;
+type DecodedBatchId = DecodedBatchIdV1;
 
-export interface DecodedSnapshotIdV1 {
+interface DecodedSnapshotIdV1 {
   readonly schemaVersion: typeof SNAPSHOT_ID_SCHEMA_VERSION;
   readonly thresholdProfileId: string;
   readonly plannerVersion: string;
@@ -40,7 +40,7 @@ export interface DecodedSnapshotIdV1 {
   readonly digest: string;
 }
 
-export interface DecodedSnapshotIdV2 {
+interface DecodedSnapshotIdV2 {
   readonly schemaVersion: typeof SNAPSHOT_ID_SCHEMA_VERSION_V2;
   readonly thresholdProfileId: string;
   readonly plannerVersion: string;
@@ -50,15 +50,15 @@ export interface DecodedSnapshotIdV2 {
   readonly digest: string;
 }
 
-export type DecodedSnapshotId = DecodedSnapshotIdV1 | DecodedSnapshotIdV2;
+type DecodedSnapshotId = DecodedSnapshotIdV1 | DecodedSnapshotIdV2;
 
-export interface IdDecodeFailure {
+interface IdDecodeFailure {
   readonly kind: 'authority_trace_ref' | 'batch_id' | 'snapshot_id';
   readonly rawValue: string;
   readonly reason: string;
 }
 
-export type IdDecodeResult<T> =
+type IdDecodeResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: IdDecodeFailure };
 

@@ -17,7 +17,7 @@
 import { trace, SpanStatusCode, type Span } from '@opentelemetry/api';
 
 /** Model pricing per 1M tokens, USD. Updated 2026-Q1. */
-export interface ModelPricing {
+interface ModelPricing {
   readonly inputPerMillion: number;
   readonly outputPerMillion: number;
   /** Cached input tokens (Anthropic ephemeral / OpenAI prompt caching). */
@@ -42,7 +42,7 @@ const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
   'claude-haiku-4-5-20251001': { inputPerMillion: 0.8, outputPerMillion: 4.0, cachedInputPerMillion: 0.08 },
 };
 
-export interface GenAiUsage {
+interface GenAiUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens?: number;
@@ -84,9 +84,9 @@ function stripVersionSuffix(model: string): string {
   return model.replace(/-\d{8}$/, '').replace(/-\d{4}-\d{2}-\d{2}$/, '');
 }
 
-export type GenAiSystem = 'openai' | 'anthropic' | 'custom';
+type GenAiSystem = 'openai' | 'anthropic' | 'custom';
 
-export interface GenAiSpanAttributes {
+interface GenAiSpanAttributes {
   /** LLM provider system (gen_ai.system) */
   readonly system: GenAiSystem;
   /** Requested model (gen_ai.request.model) */

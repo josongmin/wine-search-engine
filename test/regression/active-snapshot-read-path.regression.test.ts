@@ -3,7 +3,7 @@
  *
  * Contract:
  *  - adapters resolve active_snapshot_id via ActiveSnapshotResolver
- *  - missing pointer table (42P01) degrades to empty result (dev bootstrap)
+ *  - missing pointer table (42P01) only degrades under the explicit bootstrap seam
  *  - present-but-empty pointer row is loud (publish never ran)
  *  - each read query carries search_snapshot_id as a bound parameter
  */
@@ -14,6 +14,33 @@ function makePool(rows: unknown[]) {
   return {
     query: vi.fn().mockResolvedValue({ rows }),
   } as unknown as import('pg').Pool;
+}
+
+async function withEnv<T>(
+  env: Record<string, string | undefined>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(env)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, key);
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) {
+        Reflect.deleteProperty(process.env, key);
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }
 
 describe('T-010/W2 resolveActiveSnapshot', () => {
@@ -45,6 +72,28 @@ describe('T-010/W2 resolveActiveSnapshot', () => {
       .rejects.toMatchObject({ code: '42P01' });
   });
 
+  it('negative-caches 42P01 within the TTL window but bypassCache still forces a real SELECT', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-16T00:00:00Z'));
+    try {
+      const err = new Error('relation "active_search_snapshot" does not exist') as Error & { code: string };
+      err.code = '42P01';
+      const pool = {
+        query: vi.fn().mockRejectedValue(err),
+      } as unknown as import('pg').Pool;
+
+      await expect(resolveActiveSnapshot(pool)).rejects.toMatchObject({ code: '42P01' });
+      await expect(resolveActiveSnapshot(pool)).rejects.toMatchObject({ code: '42P01' });
+      expect((pool.query as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+
+      await expect(resolveActiveSnapshot(pool, { bypassCache: true }))
+        .rejects.toMatchObject({ code: '42P01' });
+      expect((pool.query as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('caches pointer reads within the TTL window', async () => {
     const pool = makePool([{
       active_snapshot_id: 'snap-cached',
@@ -69,6 +118,64 @@ describe('T-010/W2 resolveActiveSnapshot', () => {
     await resolveActiveSnapshot(pool, { bypassCache: true });
     await resolveActiveSnapshot(pool, { bypassCache: true });
     expect((pool.query as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('T-010/W2 snapshot substrate bootstrap seam', () => {
+  it('PgBlockingAdapter fails closed on 42P01 in production unless bootstrap is explicit', async () => {
+    await withEnv({ NODE_ENV: 'production', WINE_ENGINE_BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE: undefined }, async () => {
+      const { PgBlockingAdapter } = await import('../../src/infrastructure/adapter/pg-blocking-adapter.js');
+      const err = new Error('relation "active_search_snapshot" does not exist') as Error & { code: string };
+      err.code = '42P01';
+      const pool = {
+        query: vi.fn().mockRejectedValue(err),
+      } as unknown as import('pg').Pool;
+      const adapter = new PgBlockingAdapter(pool);
+
+      await expect(adapter.block('Opus One', 'opus one')).rejects.toMatchObject({ code: '42P01' });
+    });
+  });
+
+  it('PgBlockingAdapter allows bootstrap degradation only under the explicit seam', async () => {
+    await withEnv({ NODE_ENV: 'production', WINE_ENGINE_BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE: '1' }, async () => {
+      const { PgBlockingAdapter } = await import('../../src/infrastructure/adapter/pg-blocking-adapter.js');
+      const err = new Error('relation "active_search_snapshot" does not exist') as Error & { code: string };
+      err.code = '42P01';
+      const pool = {
+        query: vi.fn().mockRejectedValue(err),
+      } as unknown as import('pg').Pool;
+      const adapter = new PgBlockingAdapter(pool);
+
+      await expect(adapter.block('Opus One', 'opus one')).resolves.toEqual([]);
+    });
+  });
+
+  it('PgAliasMatcher fails closed on 42P01 in production unless bootstrap is explicit', async () => {
+    await withEnv({ NODE_ENV: 'production', WINE_ENGINE_BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE: undefined }, async () => {
+      const { PgAliasMatcher } = await import('../../src/infrastructure/adapter/pg-alias-matcher.js');
+      const err = new Error('relation "active_search_snapshot" does not exist') as Error & { code: string };
+      err.code = '42P01';
+      const pool = {
+        query: vi.fn().mockRejectedValue(err),
+      } as unknown as import('pg').Pool;
+      const matcher = new PgAliasMatcher(pool);
+
+      await expect(matcher.findMatches('beaujolais nouveau')).rejects.toMatchObject({ code: '42P01' });
+    });
+  });
+
+  it('PgAmbiguityDictionary fails closed on 42P01 in production unless bootstrap is explicit', async () => {
+    await withEnv({ NODE_ENV: 'production', WINE_ENGINE_BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE: undefined }, async () => {
+      const { PgAmbiguityDictionary } = await import('../../src/infrastructure/adapter/pg-ambiguity-dictionary.js');
+      const err = new Error('relation "active_search_snapshot" does not exist') as Error & { code: string };
+      err.code = '42P01';
+      const pool = {
+        query: vi.fn().mockRejectedValue(err),
+      } as unknown as import('pg').Pool;
+      const dictionary = new PgAmbiguityDictionary(pool);
+
+      await expect(dictionary.isKnownAmbiguous('bordeaux')).rejects.toMatchObject({ code: '42P01' });
+    });
   });
 });
 

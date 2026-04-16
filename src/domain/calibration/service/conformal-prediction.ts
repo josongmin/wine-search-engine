@@ -40,7 +40,7 @@ export interface ConformalCalibration {
   readonly calibrationSize: number;
 }
 
-export interface ConformalScoreInterval {
+interface ConformalScoreInterval {
   /** Predicted score. */
   readonly point: number;
   /** Whether the score exceeds the conformal threshold. */

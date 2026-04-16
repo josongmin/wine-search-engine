@@ -8,7 +8,7 @@ const EVIDENCE_COMPREHENSIVENESS_CONFIDENCE_RATIO = 0.5;
 /**
  * Summary of evidence faithfulness metrics for a set of evaluation results.
  */
-export interface EvidenceAuditSummary {
+interface EvidenceAuditSummary {
   /** Fraction of resolved cases where evidence alone produces the same decision. */
   readonly sufficiency: number;
 

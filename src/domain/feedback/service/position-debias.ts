@@ -9,7 +9,7 @@
 
 import type { FeedbackEvent } from '../model/feedback-event.js';
 
-export interface ExaminationModel {
+interface ExaminationModel {
   /** Probability the user examines the result at the given 0-indexed rank. */
   examineProbability(position: number): number;
 }

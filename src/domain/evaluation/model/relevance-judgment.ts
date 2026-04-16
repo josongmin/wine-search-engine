@@ -31,15 +31,3 @@ export interface RelevanceJudgment {
   /** Epoch milliseconds when human audit was performed. */
   readonly auditedAt?: number;
 }
-
-export interface RelevanceJudgmentSet {
-  readonly version: string;
-  readonly createdAt: number;
-  readonly judgments: readonly RelevanceJudgment[];
-  readonly stats: {
-    readonly total: number;
-    readonly bySource: Readonly<Record<string, number>>;
-    readonly byGrade: Readonly<Record<string, number>>;
-    readonly interAnnotatorAgreement?: number;
-  };
-}

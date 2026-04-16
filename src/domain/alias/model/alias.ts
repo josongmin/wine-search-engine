@@ -70,7 +70,7 @@ export interface Alias {
  * Parameters for creating a new Alias.
  * The factory auto-generates `aliasId` and `normalizedValue`.
  */
-export interface CreateAliasParams {
+interface CreateAliasParams {
   readonly entityId: CanonicalEntityId;
   readonly value: string;
   readonly type: AliasType;

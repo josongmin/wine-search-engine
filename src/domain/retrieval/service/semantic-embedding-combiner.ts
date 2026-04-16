@@ -3,21 +3,6 @@ import { globalSilentSkipCounter } from '../../../observability/silent-skip-coun
 
 const log = bootstrapLogger.child({ component: 'SemanticEmbeddingCombiner' });
 
-/**
- * C1 (fail-loud): reasons the combiner may return undefined.
- *
- * The caller (CandidatePool) treats undefined as "dense retrieval not
- * possible for this query" and degrades to sparse-only. Distinguishing
- * reasons lets the degradation be visible in logs/metrics rather than
- * folded into a generic "dense skipped".
- */
-export type EmbeddingCombineSkipReason =
-  | 'empty_input'
-  | 'empty_vector'
-  | 'dim_mismatch'
-  | 'non_finite_element'
-  | 'zero_norm';
-
 function isFiniteNumberVector(
   vec: readonly number[],
   expectedLength: number,

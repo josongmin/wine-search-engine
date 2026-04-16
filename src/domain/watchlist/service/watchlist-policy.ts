@@ -20,7 +20,7 @@ import type {
   WatchlistTrigger,
 } from '../model/watchlist-entry.js';
 
-export type WatchlistTriggerResponse =
+type WatchlistTriggerResponse =
   | {
       readonly type: 'new_vintage';
       readonly min_vintage: number;
@@ -38,14 +38,6 @@ export type WatchlistTriggerResponse =
       readonly type: 'critic_score_above';
       readonly threshold: number;
     };
-
-export type WatchlistChangeEventType =
-  | 'vintage_released'
-  | 'price_updated'
-  | 'stock_changed'
-  | 'critic_score_updated';
-
-export type TypedWatchlistChangeEvent = WatchlistChangeEvent;
 
 export function toWatchlistTriggerResponse(
   trigger: WatchlistTrigger,

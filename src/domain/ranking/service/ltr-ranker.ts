@@ -11,7 +11,7 @@ import { scoreDocument } from './lambdamart-ranker.js';
 /**
  * A searchable document to be ranked.
  */
-export interface RankableDocument {
+interface RankableDocument {
   readonly entityId: string;
   readonly retrievalScore: number;
   readonly features: RankingFeatures;
@@ -21,12 +21,12 @@ export interface RankableDocument {
 /**
  * Result after LTR ranking.
  */
-export interface RankedDocument extends RankableDocument {
+interface RankedDocument extends RankableDocument {
   readonly ltrScore: number;
   readonly finalRank: number;
 }
 
-export interface LtrRerankResult {
+interface LtrRerankResult {
   readonly documents: readonly RankedDocument[];
   /** True when LTR scores were saturated (all identical) and the ranker
    *  fell back to heuristic retrieval scores. Downstream should treat

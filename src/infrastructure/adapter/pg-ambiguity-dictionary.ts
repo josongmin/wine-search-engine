@@ -2,9 +2,16 @@ import type { Pool, QueryResultRow } from 'pg';
 import type { AmbiguityDictionary } from '../../domain/query/port/ambiguity-dictionary.port.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
-import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
+import {
+  ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,
+  isActiveSnapshotSubstrateBootstrapAllowed,
+  resolveActiveSnapshot,
+} from '../db/active-snapshot-resolver.js';
 
 export class PgAmbiguityDictionary implements AmbiguityDictionary {
+  private activeSnapshotMissingTableUntil = 0;
+  private activeSnapshotMissingTableLogged = false;
+
   constructor(private readonly pool: Pool) {}
 
   async isKnownAmbiguous(surfaceForm: string): Promise<boolean> {
@@ -55,13 +62,28 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
    * loud error upstream.
    */
   private async resolveActiveSnapshotOrNull(): Promise<{ activeSnapshotId: string } | null> {
+    const now = Date.now();
+    if (this.activeSnapshotMissingTableUntil > now) {
+      return null;
+    }
+
     try {
-      return await resolveActiveSnapshot(this.pool);
+      const snapshot = await resolveActiveSnapshot(this.pool);
+      this.activeSnapshotMissingTableUntil = 0;
+      this.activeSnapshotMissingTableLogged = false;
+      return snapshot;
     } catch (err: unknown) {
       if (readPgSqlState(err) === '42P01') {
-        bootstrapLogger.info(
-          '[PgAmbiguityDictionary] active_search_snapshot table missing — ambiguity lookup disabled for this request',
-        );
+        if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+          throw err;
+        }
+        this.activeSnapshotMissingTableUntil = now + ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS;
+        if (!this.activeSnapshotMissingTableLogged) {
+          bootstrapLogger.info(
+            '[PgAmbiguityDictionary] active_search_snapshot table missing — ambiguity lookup disabled until substrate recovers',
+          );
+          this.activeSnapshotMissingTableLogged = true;
+        }
         return null;
       }
       throw err;
@@ -77,6 +99,9 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
     } catch (err: unknown) {
       const code = readPgSqlState(err);
       if (code !== '42P01') {
+        throw err;
+      }
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
         throw err;
       }
       bootstrapLogger.info(

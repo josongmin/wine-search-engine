@@ -28,7 +28,7 @@ import { computeFunnelMetrics } from './funnel-metrics.js';
 /**
  * Options for constructing a {@link RankingStagePipeline}.
  */
-export interface RankingStagePipelineOptions {
+interface RankingStagePipelineOptions {
   /**
    * Optional policy hook (T5.5a).
    * When provided, the policy_apply stage calls policy.apply() and may

@@ -12,7 +12,7 @@
  * Tool definition for Claude API's tools parameter.
  * Each tool includes name, description, and input_schema (JSON Schema).
  */
-export interface ClaudeToolDefinition {
+interface ClaudeToolDefinition {
   readonly name: string;
   readonly description: string;
   readonly input_schema: {
@@ -52,6 +52,60 @@ export const WINE_SEARCH_TOOLS: readonly ClaudeToolDefinition[] = [
           description:
             'Search mode: auto (planner decides), entity (exact entity matching), hybrid (semantic+lexical), mixed (advanced reasoning)',
         },
+        exclude_grapes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional grape varieties to exclude via exact index-level NOT filters.',
+          maxItems: 10,
+        },
+        exclude_regions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional countries or regions to exclude via exact index-level NOT filters.',
+          maxItems: 10,
+        },
+        max_price_krw: {
+          type: 'number',
+          description: 'Optional maximum price in KRW (e.g. 50000 for 5만원).',
+          minimum: 1,
+        },
+        wine_type: {
+          type: 'string',
+          enum: ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'],
+          description: 'Optional exact wine-type constraint.',
+        },
+        country: {
+          type: 'string',
+          description: 'Optional exact country constraint using English canonical country names.',
+        },
+        vintage_min: {
+          type: 'number',
+          description: 'Optional minimum vintage year (inclusive).',
+          minimum: 1600,
+          maximum: 2100,
+        },
+        vintage_max: {
+          type: 'number',
+          description: 'Optional maximum vintage year (inclusive).',
+          minimum: 1600,
+          maximum: 2100,
+        },
+        appellation: {
+          type: 'string',
+          description: 'Optional exact appellation constraint.',
+        },
+        style: {
+          type: 'string',
+          description: 'Optional style hint such as dry, sweet, oaked, or light.',
+        },
+        certification: {
+          type: 'string',
+          description: 'Optional certification hint such as organic or biodynamic.',
+        },
+        want_diversity: {
+          type: 'boolean',
+          description: 'When true, prefer varied grapes, regions, or styles rather than near-duplicates.',
+        },
       },
       required: ['query'],
     },
@@ -71,6 +125,11 @@ export const WINE_SEARCH_TOOLS: readonly ClaudeToolDefinition[] = [
         max_price: {
           type: 'number',
           description: 'Optional maximum wine price in USD (e.g., 50)',
+        },
+        max_price_krw: {
+          type: 'number',
+          description: 'Optional maximum wine price in KRW (preferred over USD).',
+          minimum: 1,
         },
         color: {
           type: 'string',

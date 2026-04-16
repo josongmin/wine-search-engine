@@ -1,6 +1,0 @@
-{
-  "$schema": "adr-016-axis-3-shadow-parity-proof-v1",
-  "description": "Nightly-green proof for the grounded-claim shadow-parity harness. Populated by the nightly CI job. The extractor-deletion guard reads this file; an empty `greens` array fails the guard.",
-  "greens": [],
-  "lastUpdated": null
-}

@@ -19,7 +19,7 @@ import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import { computeGraphCoverage } from '../../query/service/compute-graph-coverage.js';
 import { projectHardTierSubgraph } from '../../query/service/graph-tier-projection.js';
 
-export interface GraphHardGateInput {
+interface GraphHardGateInput {
   readonly graph: ConstraintGraph;
   readonly matchedAttributes: ReadonlySet<string>;
 }

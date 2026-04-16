@@ -1,8 +1,8 @@
 /**
  * ADR-018 Wave F3: feature flag coherence validator.
  *
- * Guards the four cross-flag pre-conditions that the 7-PR SOTA train
- * (ADRs 010..016) introduced. Any incoherent combination MUST throw at
+ * Guards the three cross-flag pre-conditions that the SOTA train
+ * (ADRs 010..015) introduced. Any incoherent combination MUST throw at
  * startup — see docs/adr/018-feature-flag-coherence.md for the rule set.
  *
  * Append-only regression coverage: do not delete this file.
@@ -22,8 +22,6 @@ const defaultSnapshot: FeatureFlagSnapshot = {
   constraintGraphTopologyLlm: false,
   bundleSelectorEnabled: true,
   retrievalExecutorCritic: true,
-  gceShadowEmit: false,
-  gcePrimary: false,
 };
 
 function withOverrides(
@@ -43,8 +41,6 @@ describe('ADR-018 feature flag coherence — happy paths', () => {
       constraintGraphTopologyLlm: false,
       bundleSelectorEnabled: false,
       retrievalExecutorCritic: false,
-      gceShadowEmit: false,
-      gcePrimary: false,
     };
     expect(() => validateFeatureFlagCoherence(allOff)).not.toThrow();
   });
@@ -55,8 +51,6 @@ describe('ADR-018 feature flag coherence — happy paths', () => {
       constraintGraphTopologyLlm: true,
       bundleSelectorEnabled: true,
       retrievalExecutorCritic: true,
-      gceShadowEmit: true,
-      gcePrimary: true,
     };
     expect(() => validateFeatureFlagCoherence(allOn)).not.toThrow();
   });
@@ -115,30 +109,12 @@ describe('ADR-018 feature flag coherence — rule violations', () => {
     }
   });
 
-  it('rule 4: GCE_PRIMARY without GCE_SHADOW_EMIT throws', () => {
-    const snapshot = withOverrides({
-      gcePrimary: true,
-      gceShadowEmit: false,
-    });
-    expect.assertions(2);
-    try {
-      validateFeatureFlagCoherence(snapshot);
-    } catch (err) {
-      expect(err).toBeInstanceOf(FlagCoherenceError);
-      expect((err as FlagCoherenceError).violations).toEqual([
-        'GCE_PRIMARY requires GCE_SHADOW_EMIT',
-      ]);
-    }
-  });
-
   it('collects ALL violations before throwing (3 incoherent combos)', () => {
     const snapshot: FeatureFlagSnapshot = {
       constraintGraphEmit: false,
       constraintGraphTopologyLlm: true,
       bundleSelectorEnabled: true,
       retrievalExecutorCritic: true,
-      gceShadowEmit: false,
-      gcePrimary: false,
     };
     expect.assertions(3);
     try {
@@ -165,8 +141,6 @@ describe('ADR-018 snapshotFeatureFlagsFromEnv — env parsing', () => {
       constraintGraphTopologyLlm: false,
       bundleSelectorEnabled: true,
       retrievalExecutorCritic: true,
-      gceShadowEmit: false,
-      gcePrimary: false,
     });
   });
 
@@ -199,24 +173,17 @@ describe('ADR-018 snapshotFeatureFlagsFromEnv — env parsing', () => {
       CONSTRAINT_GRAPH_TOPOLOGY_LLM: 'true',
       BUNDLE_SELECTOR_ENABLED: 'true',
       RETRIEVAL_EXECUTOR_CRITIC: 'true',
-      GCE_SHADOW_EMIT: 'true',
-      GCE_PRIMARY: 'true',
     };
     const snapshot = snapshotFeatureFlagsFromEnv(onEnv);
     expect(snapshot.constraintGraphTopologyLlm).toBe(true);
     expect(snapshot.bundleSelectorEnabled).toBe(true);
     expect(snapshot.retrievalExecutorCritic).toBe(true);
-    expect(snapshot.gceShadowEmit).toBe(true);
-    expect(snapshot.gcePrimary).toBe(true);
 
     // Default-on flags ignore wrong-case truthy strings unless they are the
-    // literal disabling token `'false'`. Opt-in flags still require the exact
-    // literal `'true'`.
+    // literal disabling token `'false'`.
     const wrongCaseSnapshot = snapshotFeatureFlagsFromEnv({
       BUNDLE_SELECTOR_ENABLED: 'TRUE',
-      GCE_PRIMARY: '1',
     });
     expect(wrongCaseSnapshot.bundleSelectorEnabled).toBe(true);
-    expect(wrongCaseSnapshot.gcePrimary).toBe(false);
   });
 });

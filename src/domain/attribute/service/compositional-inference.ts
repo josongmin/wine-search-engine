@@ -58,7 +58,7 @@ interface CompositionContext {
   readonly grapePrimary: string | undefined;
 }
 
-export interface CompositionalInferenceOptions {
+interface CompositionalInferenceOptions {
   /** Optional parser hint for implicit wine type (e.g. comparison query). */
   readonly impliedWineType?: 'red' | 'white' | 'sparkling' | undefined;
 }

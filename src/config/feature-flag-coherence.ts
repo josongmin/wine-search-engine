@@ -1,7 +1,7 @@
 /**
  * ADR-018: Feature flag coherence validator.
  *
- * The SOTA++ train (ADRs 010..016) introduced five env feature flags that
+ * The SOTA++ train (ADRs 010..015) introduced four env feature flags that
  * gate interlocking stages of the retrieval pipeline. Certain combinations
  * are INCOHERENT — they leave the system in a state where downstream code
  * either silently no-ops or reaches for a dependency that was never
@@ -24,10 +24,6 @@
  *     missing graph would raise a runtime error on every critic-eligible
  *     query.
  *
- *  4. `GCE_PRIMARY=true` requires `GCE_SHADOW_EMIT=true`. Primary mode
- *     serves the 9-class grounded verifier to users; turning it on
- *     without ever having measured shadow parity violates ADR-016 §2.8.
- *
  * All rules are pre-conditions on invariant configuration, not runtime
  * state. The validator is a pure function and must not read process.env
  * directly; callers pass a snapshot.
@@ -36,16 +32,13 @@
  */
 
 /**
- * Immutable snapshot of the five SOTA-train feature flags, plus the
- * Axis-3 shadow/primary flags.
+ * Immutable snapshot of the four SOTA-train feature flags.
  */
 export interface FeatureFlagSnapshot {
   readonly constraintGraphEmit: boolean;
   readonly constraintGraphTopologyLlm: boolean;
   readonly bundleSelectorEnabled: boolean;
   readonly retrievalExecutorCritic: boolean;
-  readonly gceShadowEmit: boolean;
-  readonly gcePrimary: boolean;
 }
 
 /**
@@ -73,9 +66,8 @@ export class FlagCoherenceError extends Error {
  *  - `CONSTRAINT_GRAPH_EMIT`, `BUNDLE_SELECTOR_ENABLED`, and
  *    `RETRIEVAL_EXECUTOR_CRITIC` default to **on**. Only the literal
  *    string `'false'` disables them.
- *  - `CONSTRAINT_GRAPH_TOPOLOGY_LLM`, `GCE_SHADOW_EMIT`, and
- *    `GCE_PRIMARY` default to **off**. Only the literal string `'true'`
- *    enables them.
+ *  - `CONSTRAINT_GRAPH_TOPOLOGY_LLM` defaults to **off**. Only the
+ *    literal string `'true'` enables it.
  */
 export function snapshotFeatureFlagsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -85,8 +77,6 @@ export function snapshotFeatureFlagsFromEnv(
     constraintGraphTopologyLlm: env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true',
     bundleSelectorEnabled: env['BUNDLE_SELECTOR_ENABLED'] !== 'false',
     retrievalExecutorCritic: env['RETRIEVAL_EXECUTOR_CRITIC'] !== 'false',
-    gceShadowEmit: env['GCE_SHADOW_EMIT'] === 'true',
-    gcePrimary: env['GCE_PRIMARY'] === 'true',
   };
 }
 
@@ -117,11 +107,6 @@ export function validateFeatureFlagCoherence(
   if (snapshot.retrievalExecutorCritic && !snapshot.constraintGraphEmit) {
     violations.push('RETRIEVAL_EXECUTOR_CRITIC requires CONSTRAINT_GRAPH_EMIT');
   }
-
-  if (snapshot.gcePrimary && !snapshot.gceShadowEmit) {
-    violations.push('GCE_PRIMARY requires GCE_SHADOW_EMIT');
-  }
-
   if (violations.length > 0) {
     throw new FlagCoherenceError(violations);
   }

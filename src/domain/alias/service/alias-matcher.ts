@@ -7,7 +7,7 @@ import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator
 /**
  * Result of matching a query string against the alias index.
  */
-export interface AliasMatchResult {
+interface AliasMatchResult {
   /** The entity the matched alias points to. */
   readonly entityId: CanonicalEntityId;
   /** The alias that matched. */

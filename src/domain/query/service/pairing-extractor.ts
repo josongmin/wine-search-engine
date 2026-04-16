@@ -47,7 +47,7 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Beef
   beef: [
     /(?<!\p{L})(?<!\p{N})(?:beef|steak|ribeye|filet|sirloin|t[\s-]?bone)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:소고기|스테이크|비프|소|쇠고기)(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:소고기(?:용)?|스테이크(?:용)?|비프(?:용)?|소|쇠고기(?:용)?)(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Lamb
@@ -131,13 +131,13 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Aperitif
   aperitif: [
     /(?<!\p{L})(?<!\p{N})(?:aperitif|appetizer|starter|pre[\s-]?dinner)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:아페리티프|에피타이저|전식|식전주)(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:아페리티프(?:용)?|에피타이저(?:용)?|전식(?:용)?|식전주)(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Dessert
   dessert: [
     /(?<!\p{L})(?<!\p{N})(?:dessert|sweet|chocolate|cake|pudding|fruit)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:디저트|후식|초콜릿|케이크|푸딩|과일)(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:디저트(?:용)?|후식(?:용)?|초콜릿|케이크|푸딩|과일)(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Solo drinking

@@ -8,7 +8,7 @@ import {
   HTTP_SUCCESS_STATUS_MIN,
 } from '../constants.js';
 
-export interface OpenApiBridgeOperation {
+interface OpenApiBridgeOperation {
   readonly operationId: string;
   readonly tags: readonly string[];
   readonly 'x-search-capabilities'?: readonly string[] | undefined;
@@ -37,7 +37,7 @@ export interface OpenApiBridgeOperation {
   readonly 'x-response-type'?: string | undefined;
 }
 
-export interface OpenApiBridgeResponse {
+interface OpenApiBridgeResponse {
   readonly description: string;
   readonly content?: {
     readonly 'application/json': {
@@ -46,7 +46,7 @@ export interface OpenApiBridgeResponse {
   };
 }
 
-export type OpenApiBridgeSchema =
+type OpenApiBridgeSchema =
   | { readonly type: 'string'; readonly enum?: readonly string[]; readonly format?: string; readonly minLength?: number; readonly maxLength?: number }
   | { readonly type: 'number' | 'integer'; readonly minimum?: number; readonly maximum?: number }
   | { readonly type: 'boolean' }
@@ -58,7 +58,7 @@ export type OpenApiBridgeSchema =
   | { readonly allOf: readonly OpenApiBridgeSchema[] }
   | Record<string, unknown>;
 
-export interface OpenApiBridgeDocument {
+interface OpenApiBridgeDocument {
   readonly openapi: '3.1.0';
   readonly info: {
     readonly title: 'Wine Search Engine HTTP Contract Bridge';

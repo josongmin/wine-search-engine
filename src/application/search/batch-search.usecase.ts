@@ -16,14 +16,6 @@ import type { SearchRequest } from './search-request.dto.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
-export type {
-  BatchSearchExecutionContext,
-  BatchSearchOptions,
-  BatchSearchRequestItem,
-  BatchSearchResponse,
-  BatchSearchResultItem,
-} from './batch-search.dto.js';
-
 /**
  * Semaphore-based concurrency limiter.
  *

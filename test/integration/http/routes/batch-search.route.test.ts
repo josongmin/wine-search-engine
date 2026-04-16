@@ -3,7 +3,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerBatchSearchRoute } from '../../../../src/interface/http/routes/batch-search.route.js';
 import type { BatchSearchRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
-import type { BatchSearchResponse } from '../../../../src/application/search/batch-search.usecase.js';
+import type { BatchSearchResponse } from '../../../../src/application/search/batch-search.dto.js';
 import type { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
 import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
 

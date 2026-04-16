@@ -132,7 +132,7 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/response\/model\/bundle-ranked-result\.ts$/,
   /src\/application\/search\/search-usecase-graph-executor\.ts$/,
   /src\/observability\/bundle-selector-counters\.ts$/,
-  // Axis 3 (ADR-016 PR7): grounded claim V2 sidecar seam.
+  // Machine V2 tool sidecar seam.
   /src\/interface\/claude-tools\/tool-executor\.ts$/,
   // Docs / tests / benchmarks remain globally allowed.
   /docs\//,

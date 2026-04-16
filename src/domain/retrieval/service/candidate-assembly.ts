@@ -58,12 +58,12 @@ export interface AssemblyPolicy {
 // Result + Trace
 // ---------------------------------------------------------------------------
 
-export interface AssemblyResult {
+interface AssemblyResult {
   readonly candidates: readonly CandidateEnvelope[];
   readonly trace: AssemblyTrace;
 }
 
-export interface AssemblyTrace {
+interface AssemblyTrace {
   /** Total candidates before assembly. */
   readonly inputCount: number;
   /** Candidates after hard-filter step. */
@@ -292,4 +292,3 @@ export class CandidateAssembler {
     };
   }
 }
-

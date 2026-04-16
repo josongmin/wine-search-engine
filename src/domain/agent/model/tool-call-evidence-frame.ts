@@ -34,15 +34,6 @@ export type ToolEvidenceFrameSchemaVersion =
   | typeof TOOL_EVIDENCE_FRAME_SCHEMA_VERSION
   | typeof TOOL_EVIDENCE_FRAME_SCHEMA_VERSION_V1_1;
 
-/** Closed tuple of tool names that emit frames (all current agent tools). */
-export const FRAME_EMITTING_TOOLS = [
-  'search_wines',
-  'compare_wines',
-  'check_drinking_window',
-  'get_food_pairings',
-] as const;
-export type FrameEmittingToolName = typeof FRAME_EMITTING_TOOLS[number];
-
 /**
  * Typed, discriminated structured output. Closed union — adding a new tool
  * means adding a new variant AND bumping `TOOL_EVIDENCE_FRAME_SCHEMA_VERSION`.
@@ -78,8 +69,6 @@ export type ToolCallStructuredOutput =
       readonly kind: 'no_op';
       readonly reason: string;
     };
-
-export type StructuredOutputKind = ToolCallStructuredOutput['kind'];
 
 export interface ToolCallRequest {
   readonly toolName: string;
@@ -129,9 +118,9 @@ const OBSERVATION_SNAPSHOT_MAX_LEN = 2_200;
 const OBSERVATION_HASH_LEN = 64;
 /** Upper bound on toolCallId — request-id derived, bounded by agent step budget. */
 const TOOL_CALL_ID_MAX_LEN = 256;
-/** Upper bound on tool names. The closed `FRAME_EMITTING_TOOLS` tuple above is
- *  ≤20 chars today; 128 leaves headroom for future tool names without
- *  unbounded growth. Repeated for both the request wrapper and the envelope. */
+/** Upper bound on tool names. Current tool names are ≤20 chars; 128 leaves
+ *  headroom for future additions without unbounded growth. Repeated for both
+ *  the request wrapper and the envelope. */
 const TOOL_NAME_MAX_LEN = 128;
 
 const ToolCallRequestSchema = z.object({
@@ -197,5 +186,3 @@ export const ToolCallEvidenceFrameSchema = z.object({
   durationMs: z.number().finite().nonnegative(),
   retryCount: z.number().int().nonnegative().max(RETRY_COUNT_MAX).optional(),
 }).strict();
-
-export type ToolCallEvidenceFrameValidated = z.infer<typeof ToolCallEvidenceFrameSchema>;

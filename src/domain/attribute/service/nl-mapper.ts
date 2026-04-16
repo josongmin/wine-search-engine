@@ -457,7 +457,7 @@ type ResolverCompatibleAttribute =
   | 'appellation'
   | 'grape_primary';
 
-export interface DefaultEntityAliasMapping {
+interface DefaultEntityAliasMapping {
   readonly phrase: string;
   readonly mappedAttribute: ResolverCompatibleAttribute;
   readonly canonicalValue: string;

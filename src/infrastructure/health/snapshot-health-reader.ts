@@ -4,7 +4,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 const log = bootstrapLogger.child({ component: 'snapshot-health-reader' });
 
 /** Shape surfaced on GET /ready response body as `snapshot_health`. */
-export interface SnapshotHealth {
+interface SnapshotHealth {
   readonly active_snapshot_id: string;
   readonly previous_snapshot_id: string | null;
   readonly stale_row_count: number;

@@ -9,12 +9,12 @@
 
 import type { QueryIntent } from '../model/query-intent.js';
 
-export interface IntentDistribution {
+interface IntentDistribution {
   readonly intent: QueryIntent;
   readonly confidence: number;
 }
 
-export interface HedgeRetrievalDecision {
+interface HedgeRetrievalDecision {
   readonly hedge: boolean;
   readonly intents: readonly QueryIntent[];
   readonly reason: string;

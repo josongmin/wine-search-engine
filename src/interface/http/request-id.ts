@@ -43,7 +43,7 @@ export function resolveIncomingRequestId(headers: IncomingHttpHeaders): string {
   return nanoid();
 }
 
-export interface HttpRequestIdCarrier {
+interface HttpRequestIdCarrier {
   readonly id: string;
   readonly requestId?: string;
 }

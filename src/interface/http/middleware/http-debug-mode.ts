@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 
-export interface HttpDebugModeOptions {
+interface HttpDebugModeOptions {
   /**
    * Shared secret (from `HTTP_DEBUG_SECRET`). When omitted or empty, header-based debug is disabled.
    */

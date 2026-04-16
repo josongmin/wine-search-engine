@@ -28,7 +28,7 @@ import type { RetrievalDocument } from '../model/retrieval-document.js';
  *                             itself uses the anchor's attribute fields on each
  *                             HybridCandidate.
  */
-export interface RelativeFilterInput {
+interface RelativeFilterInput {
   readonly anchorEntityId: CanonicalEntityId;
   readonly constraints: readonly string[];
   readonly anchorDocument?: RetrievalDocument | undefined;

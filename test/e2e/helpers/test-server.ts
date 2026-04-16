@@ -24,7 +24,7 @@ export interface TestServer {
   readonly app: FastifyInstance;
 }
 
-export interface TestServerOptions {
+interface TestServerOptions {
   readonly containerOptions?: TestContainerOptions;
   readonly serverOptions?: Pick<ServerOptions, 'rateLimitMax'>;
 }

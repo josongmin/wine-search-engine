@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 
-export type PgPoolConfig = typeof config.pg;
+type PgPoolConfig = typeof config.pg;
 
 let pool: Pool | null = null;
 

@@ -8,20 +8,7 @@
  */
 
 export type {
-  ResultItemV2Human,
-  SearchResponseV2Human,
-  SearchResponseV2HumanSearch,
-  SearchResponseV2HumanComparison,
-  ComparisonEntityV2Human,
   ResultItemV2Machine,
   SearchResponseV2Machine,
   InterpretResponseV2,
 } from '../../../interface/http/schemas/search-response-v2.schema.js';
-
-/**
- * Alias kept for symmetry with V1 naming conventions.
- * `InterpretResponseV2` is the canonical name; `InterpretResultV2` is an alias
- * so domain code can reference it without importing from the HTTP layer when
- * needed.
- */
-export type { InterpretResponseV2 as InterpretResultV2 } from '../../../interface/http/schemas/search-response-v2.schema.js';

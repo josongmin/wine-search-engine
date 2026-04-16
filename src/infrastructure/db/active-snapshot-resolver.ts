@@ -40,14 +40,45 @@ export class NoActiveSnapshotPointerError extends Error {
  * becomes visible within one "warm" request cycle, and long enough that a
  * burst of requests coalesces to a single pointer query.
  */
-const POINTER_CACHE_TTL_MS = 2_000;
+export const ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS = 2_000;
 
-interface CacheEntry {
+interface CachedActiveSnapshotValue {
+  readonly kind: 'hit';
   readonly value: ActiveSnapshot;
   readonly expiresAt: number;
 }
 
+interface CachedMissingTableValue {
+  readonly kind: 'missing_table';
+  readonly expiresAt: number;
+}
+
+type CacheEntry = CachedActiveSnapshotValue | CachedMissingTableValue;
+
 const cacheByPool = new WeakMap<Pool, CacheEntry>();
+
+const BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE_ENV = 'WINE_ENGINE_BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE';
+
+/**
+ * Explicit bootstrap seam for fresh dev/test environments.
+ *
+ * Production/default read paths must not silently treat missing snapshot
+ * substrate as a steady state. The only allowed opt-in is NODE_ENV !=
+ * production, or an explicit bootstrap env flag when production bootstrap is
+ * intentionally being performed.
+ */
+export function isActiveSnapshotSubstrateBootstrapAllowed(): boolean {
+  return process.env['NODE_ENV'] !== 'production'
+    || process.env[BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE_ENV] === '1';
+}
+
+function buildMissingTableError(): Error & { readonly code: '42P01' } {
+  const err = new Error('relation "active_search_snapshot" does not exist') as Error & {
+    code: '42P01';
+  };
+  err.code = '42P01';
+  return err;
+}
 
 /**
  * Reads the active snapshot pointer, with short-TTL cache.
@@ -67,24 +98,46 @@ export async function resolveActiveSnapshot(
   if (!opts.bypassCache) {
     const cached = cacheByPool.get(pool);
     if (cached !== undefined && cached.expiresAt > now) {
-      return cached.value;
+      if (cached.kind === 'hit') {
+        return cached.value;
+      }
+      throw buildMissingTableError();
     }
   }
 
-  // 42P01 ("relation does not exist") flows back to the caller unchanged so
-  // adapter-level `try { ... } catch (err) { if (sqlState === '42P01') return [] }`
-  // logic continues to degrade gracefully in environments where the migration
-  // has not yet been applied (tests, fresh dev DB bootstrap).
-  const res = await pool.query<{
+  let res: { rows: Array<{
     active_snapshot_id: string;
     previous_snapshot_id: string | null;
     content_hash: string;
     promoted_at: Date;
-  }>(
-    `SELECT active_snapshot_id, previous_snapshot_id, content_hash, promoted_at
-       FROM active_search_snapshot
-      WHERE id = 1`,
-  );
+  }> };
+  try {
+    // 42P01 ("relation does not exist") flows back to the caller unchanged.
+    // Adapter-level fallback is allowed only through the explicit bootstrap
+    // seam exported above; production/default read paths must surface the
+    // missing substrate instead of treating it as normal steady state.
+    res = await pool.query<{
+      active_snapshot_id: string;
+      previous_snapshot_id: string | null;
+      content_hash: string;
+      promoted_at: Date;
+    }>(
+      `SELECT active_snapshot_id, previous_snapshot_id, content_hash, promoted_at
+         FROM active_search_snapshot
+        WHERE id = 1`,
+    );
+  } catch (err: unknown) {
+    const code = typeof err === 'object' && err !== null && 'code' in err
+      ? (err as { code?: string }).code
+      : undefined;
+    if (code === '42P01') {
+      if (!opts.bypassCache) {
+        cacheByPool.set(pool, { kind: 'missing_table', expiresAt: now + ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS });
+      }
+      throw err;
+    }
+    throw err;
+  }
   const row = res.rows[0];
   if (row === undefined) {
     throw new NoActiveSnapshotPointerError();
@@ -98,7 +151,7 @@ export async function resolveActiveSnapshot(
   };
 
   if (!opts.bypassCache) {
-    cacheByPool.set(pool, { value, expiresAt: now + POINTER_CACHE_TTL_MS });
+    cacheByPool.set(pool, { kind: 'hit', value, expiresAt: now + ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS });
   }
 
   return value;

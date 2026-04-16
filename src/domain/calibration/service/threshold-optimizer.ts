@@ -24,7 +24,7 @@ export interface OptimalThreshold {
   readonly sampleSize: number;
 }
 
-export interface ThresholdConstraints {
+interface ThresholdConstraints {
   /** Maximum allowed risk among predictions above the threshold (0..1). */
   readonly maxRisk: number;
   /** Optional minimum coverage requirement. */

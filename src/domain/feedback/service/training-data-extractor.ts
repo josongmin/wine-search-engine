@@ -15,7 +15,7 @@ import { clamp01 } from '../../shared/utils/clamp.js';
 /** Default minimum impressions per (query, entity) before it becomes a label. */
 const DEFAULT_MIN_IMPRESSIONS = 5;
 
-export interface TrainingExample {
+interface TrainingExample {
   readonly query: string;
   readonly entityId: string;
   /** Pointer to a logged feature vector snapshot; undefined until T18-? wires snapshotting. */
@@ -26,13 +26,13 @@ export interface TrainingExample {
   readonly clicks: number;
 }
 
-export interface TrainingDataset {
+interface TrainingDataset {
   readonly examples: readonly TrainingExample[];
   readonly minImpressions: number;
   readonly extractedAt: number;
 }
 
-export interface ExtractTrainingDataOptions {
+interface ExtractTrainingDataOptions {
   readonly minImpressions?: number;
   /** Injectable clock for deterministic tests. */
   readonly now?: () => number;

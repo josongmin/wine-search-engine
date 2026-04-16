@@ -85,6 +85,13 @@ describe('QueryNormalizer', () => {
     expect(views.lookupVariants).toContain('chateaumargaux');
   });
 
+  it('transliterates Korean Cabernet Sauvignon slang to the canonical English form', () => {
+    const views = normalizer.normalize('까쇼');
+
+    expect(views.transliterated).toBe('cabernet sauvignon');
+    expect(views.lookupVariants).toContain('cabernet sauvignon');
+  });
+
   it('keeps price-like tokens intact while stripping vintages', () => {
     const views = normalizer.normalize('10만원 이하 오푸스원 19');
 

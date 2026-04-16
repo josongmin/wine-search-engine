@@ -11,7 +11,7 @@
  * All search execution uses existing use cases unchanged.
  */
 
-import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
+import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { CIRCUIT_BREAKER_OPEN_CODE } from '../../domain/shared/error/circuit-breaker-open-error.js';
@@ -23,7 +23,8 @@ import { DEFAULT_AGENT_CONFIG } from '../../domain/agent/model/agent-config.js';
 import { StepBudget } from '../../domain/agent/service/step-budget.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import {
-  buildSystemMessage,
+  buildPlannerSystemMessage,
+  buildSynthesisSystemMessage,
   buildUserMessage,
   buildStepMessages,
   truncateObservation,
@@ -73,8 +74,15 @@ const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
 const LAYER3_OBSERVATION_SLICE_CHARS = 300;
 /** Default single-tool timeout (separate from LLM step timeout). */
 const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
+/**
+ * Search executes the full retrieval/ranking stack, so it needs a wider budget
+ * than metadata tools to avoid false timeout fallbacks on clean real-data runs.
+ */
+const DEFAULT_SEARCH_TOOL_TIMEOUT_MS = 18_000;
 /** Default parallel-batch timeout (caps total Promise.all wait). */
-const DEFAULT_PARALLEL_BATCH_TIMEOUT_MS = 10_000;
+const DEFAULT_PARALLEL_BATCH_TIMEOUT_MS = 20_000;
+/** Hard cap on parallel tools per batch step. */
+const MAX_TOOLS_PER_BATCH = 4;
 /** Log-preview chars for non-parseable LLM text — enough to diagnose without bloating the log line. */
 const LOG_PREVIEW_CHARS = 200;
 
@@ -230,6 +238,93 @@ function buildToolOutcome(
     durationMs,
   };
 }
+
+interface PlannerPhaseResult {
+  readonly stepStartMs: number;
+  readonly parsed: LlmAction;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly wasTruncated: boolean;
+}
+
+interface AgentExecutionState {
+  readonly steps: AgentStep[];
+  readonly toolOutcomes: ToolOutcome[];
+  readonly collectedFrames: ToolCallEvidenceFrame[];
+  lastSearchResult: SearchResponseV1 | undefined;
+  terminationReason: AgentTerminationReason;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  reasoningFailureDetected: boolean;
+  policyBlocked: boolean;
+  llmCircuitOpen: boolean;
+  unknownToolAttempts: number;
+  timeoutStats: { llmStep: number; tool: number; parallelBatch: number };
+  hasInjectedRefinementHint: boolean;
+  pendingRefinementHint: string | undefined;
+  fallbackApplied: boolean;
+  fallbackLayer: SynthesisContext['fallbackApplied'];
+  failedSynthesisAttempts: number;
+  fallbackSearchUsed: boolean;
+  answer: string;
+}
+
+function buildPlannerLoopMessages(
+  query: string,
+  steps: readonly AgentStep[],
+  pendingRefinementHint: string | undefined,
+  isLastStep: boolean,
+  remainingSteps: number,
+  maxContextChars: number,
+): readonly ChatMessage[] {
+  const baseUserContentRaw = pendingRefinementHint !== undefined
+    ? `${pendingRefinementHint}\n\n${query}`
+    : query;
+  const baseUserContent = baseUserContentRaw.length > maxContextChars
+    ? baseUserContentRaw.slice(0, maxContextChars)
+    : baseUserContentRaw;
+  const messages = [
+    buildPlannerSystemMessage(),
+    buildUserMessage(baseUserContent),
+    ...buildStepMessages(steps),
+  ];
+  if (isLastStep) {
+    messages.push({
+      role: 'user',
+      content: remainingSteps === 1
+        ? `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.`
+        : `[BUDGET_WARNING] Only ${remainingSteps} steps remain. Synthesize your current search results into a final {"thought":"…","answer":"…"} NOW — do not call another tool unless you have no results yet.`,
+    });
+  }
+  return messages;
+}
+
+interface ObservationSynthesisMessages {
+  readonly messages: readonly ChatMessage[];
+  readonly sentinel: string;
+}
+
+function buildObservationSynthesisMessages(
+  query: string,
+  steps: readonly AgentStep[],
+  requestId: string,
+): ObservationSynthesisMessages {
+  const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
+  return {
+    messages: [
+      buildSynthesisSystemMessage(),
+      buildUserMessage(query),
+      ...buildStepMessages(steps),
+      {
+        role: 'user',
+        content: synthSentinel,
+      },
+    ],
+    sentinel: synthSentinel,
+  };
+}
+
+
 /** Longer log-preview chars for step-level debug output (more context than error previews). */
 const STEP_LOG_PREVIEW_CHARS = 500;
 /** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
@@ -262,6 +357,51 @@ function getStructuredSearchFilterKeys(input: Record<string, unknown>): readonly
       value !== null,
     )
     .map(([key]) => key);
+}
+
+function normalizeExactMetadataSearchInput(
+  input: Record<string, unknown>,
+): { readonly effectiveInput: Record<string, unknown>; readonly strippedFilterKeys: readonly string[] } {
+  const strippedFilterKeys = getStructuredSearchFilterKeys(input);
+  if (strippedFilterKeys.length === 0) {
+    return { effectiveInput: input, strippedFilterKeys };
+  }
+
+  const filteredEntries = Object.entries(input).filter(
+    ([key, value]) =>
+      EXACT_METADATA_ALLOWED_SEARCH_KEYS.has(key) &&
+      value !== undefined &&
+      value !== null,
+  );
+  return {
+    effectiveInput: Object.fromEntries(filteredEntries),
+    strippedFilterKeys,
+  };
+}
+
+function getToolTimeoutMs(
+  tool: string,
+  configuredTimeoutMs?: number,
+): number {
+  if (configuredTimeoutMs !== undefined) {
+    return configuredTimeoutMs;
+  }
+  return tool === 'search_wines'
+    ? DEFAULT_SEARCH_TOOL_TIMEOUT_MS
+    : DEFAULT_TOOL_TIMEOUT_MS;
+}
+
+function getParallelBatchTimeoutMs(
+  tools: readonly { readonly tool: string }[],
+  configuredTimeoutMs?: number,
+): number {
+  if (configuredTimeoutMs !== undefined) {
+    return configuredTimeoutMs;
+  }
+  if (tools.some((tool) => tool.tool === 'search_wines')) {
+    return DEFAULT_PARALLEL_BATCH_TIMEOUT_MS;
+  }
+  return DEFAULT_TOOL_TIMEOUT_MS;
 }
 
 function getCompletedDrinkabilityEntityIds(
@@ -564,6 +704,1082 @@ export class AgentOrchestrator {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...config };
   }
 
+  private createExecutionState(): AgentExecutionState {
+    return {
+      steps: [],
+      toolOutcomes: [],
+      collectedFrames: [],
+      lastSearchResult: undefined,
+      terminationReason: 'max_steps',
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      reasoningFailureDetected: false,
+      policyBlocked: false,
+      llmCircuitOpen: false,
+      unknownToolAttempts: 0,
+      timeoutStats: { llmStep: 0, tool: 0, parallelBatch: 0 },
+      hasInjectedRefinementHint: false,
+      pendingRefinementHint: undefined,
+      fallbackApplied: false,
+      fallbackLayer: null,
+      failedSynthesisAttempts: 0,
+      fallbackSearchUsed: false,
+      answer: '',
+    };
+  }
+
+  private async runPlannerPhase(
+    query: string,
+    requestId: string,
+    effectiveConfig: AgentConfig,
+    state: AgentExecutionState,
+    remainingSteps: number,
+    isLastStep: boolean,
+    abortSignal?: AbortSignal,
+  ): Promise<PlannerPhaseResult | null> {
+    const stepStartMs = Date.now();
+    const messages = buildPlannerLoopMessages(
+      query,
+      state.steps,
+      state.pendingRefinementHint,
+      isLastStep,
+      remainingSteps,
+      effectiveConfig.maxContextChars,
+    );
+    state.pendingRefinementHint = undefined;
+
+    if (abortSignal?.aborted) {
+      state.terminationReason = 'error';
+      return null;
+    }
+
+    const stepAbortController = new AbortController();
+    const propagateAbort = (): void => { stepAbortController.abort(); };
+    abortSignal?.addEventListener('abort', propagateAbort, { once: true });
+    if (abortSignal?.aborted) {
+      abortSignal.removeEventListener('abort', propagateAbort);
+      state.terminationReason = 'error';
+      return null;
+    }
+
+    let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let llmResult: { text: string; model: string; finishReason?: string | null };
+    try {
+      const racedResult: unknown = await Promise.race([
+        this.deps.chatLlm.complete({
+          messages,
+          temperature: 0,
+          maxOutputTokens: 2048,
+          ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
+          abortSignal: stepAbortController.signal,
+        }),
+        new Promise<never>((_resolve, reject) => {
+          stepTimeoutHandle = setTimeout(
+            () => {
+              stepAbortController.abort();
+              reject(new Error('Agent LLM step timed out'));
+            },
+            effectiveConfig.perStepTimeoutMs,
+          );
+        }),
+      ]);
+      if (!isValidLlmResult(racedResult)) {
+        log.warn(
+          { requestId, stepIndex: state.steps.length, rawType: typeof racedResult },
+          'Agent LLM returned malformed step result',
+        );
+        state.reasoningFailureDetected = true;
+        state.terminationReason = 'error';
+        return null;
+      }
+      llmResult = racedResult;
+    } catch (err) {
+      log.warn({ err, requestId, stepIndex: state.steps.length }, 'Agent LLM call failed');
+      if (isAbortError(err)) {
+        state.terminationReason = 'aborted';
+      } else if ((err as Error).message === 'Agent LLM step timed out') {
+        state.reasoningFailureDetected = true;
+        state.timeoutStats.llmStep += 1;
+        state.terminationReason = 'timeout';
+      } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
+        state.reasoningFailureDetected = true;
+        state.llmCircuitOpen = true;
+        state.terminationReason = 'error';
+      } else {
+        state.reasoningFailureDetected = true;
+        state.terminationReason = 'error';
+      }
+      return null;
+    } finally {
+      abortSignal?.removeEventListener('abort', propagateAbort);
+      if (stepTimeoutHandle !== undefined) {
+        clearTimeout(stepTimeoutHandle);
+      }
+    }
+
+    const wasTruncated = llmResult.finishReason === 'length';
+    if (wasTruncated) {
+      log.warn({ requestId, stepIndex: state.steps.length }, 'Agent LLM output truncated (finish_reason=length) — attempting recovery');
+    }
+
+    const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+    const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN_ESTIMATE);
+    const outputTokens = Math.ceil(llmResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
+    state.totalInputTokens += inputTokens;
+    state.totalOutputTokens += outputTokens;
+
+    if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
+      log.warn(
+        { requestId, totalTokens: state.totalInputTokens + state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
+        'agent token budget exceeded — terminating',
+      );
+      state.terminationReason = 'budget';
+      return null;
+    }
+
+    const parsed = parseLlmOutput(llmResult.text);
+    if (state.steps.length === 0) {
+      log.info(
+        {
+          requestId,
+          textPreview: llmResult.text.slice(0, STEP_LOG_PREVIEW_CHARS),
+          finishReason: llmResult.finishReason,
+          hasAction: parsed.action !== undefined,
+          hasActions: parsed.actions !== undefined,
+          hasAnswer: parsed.answer !== undefined && parsed.answer.length > 0,
+          wasTruncated,
+        },
+        '[RCA] step0 LLM output',
+      );
+    }
+
+    return {
+      stepStartMs,
+      parsed,
+      inputTokens,
+      outputTokens,
+      wasTruncated,
+    };
+  }
+
+  private async runContractDrinkabilityChecks(
+    queryExecutionContract: AgentQueryExecutionContract,
+    requestId: string,
+    effectiveConfig: AgentConfig,
+    budget: StepBudget,
+    state: AgentExecutionState,
+    abortSignal?: AbortSignal,
+  ): Promise<boolean> {
+    const pendingIds = extractPendingDrinkabilityEntityIds(
+      queryExecutionContract,
+      state.steps,
+      state.toolOutcomes,
+    );
+    if (pendingIds.length === 0) {
+      return true;
+    }
+
+    const checkCalls = pendingIds.map((entityId) => ({
+      tool: 'check_drinking_window',
+      input: { entity_id: entityId },
+    }));
+    const budgetCheck = budget.recordParallelBatch(checkCalls, { skipNearDuplicate: true });
+    if (!budgetCheck.allowed) {
+      state.terminationReason = budgetCheck.reason ?? 'max_steps';
+      return false;
+    }
+
+    const stepIndex = state.steps.length;
+    const stepStartMs = Date.now();
+    const autoAbortController = new AbortController();
+    const propagateAutoAbort = (): void => { autoAbortController.abort(); };
+    abortSignal?.addEventListener('abort', propagateAutoAbort, { once: true });
+    let results: readonly AgentToolResult[];
+    try {
+      results = await withTimeout(
+        executeAgentToolsBatch(
+          checkCalls,
+          this.deps.toolDeps,
+          `${requestId}-step${stepIndex}`,
+          {
+            abortSignal: autoAbortController.signal,
+            toolCallId: toolCallIdForStep(requestId, stepIndex),
+          },
+        ),
+        getParallelBatchTimeoutMs(checkCalls, effectiveConfig.parallelBatchTimeoutMs),
+        'Contract drinkability batch timed out',
+      );
+    } catch (err) {
+      autoAbortController.abort();
+      const durationMs = Math.max(0, Date.now() - stepStartMs);
+      if (isAbortError(err)) {
+        state.terminationReason = 'aborted';
+        const observation = '[ABORTED] Request cancelled during contract drinkability checks.';
+        for (let i = 0; i < checkCalls.length; i++) {
+          state.toolOutcomes.push(
+            buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, true, false, false),
+          );
+        }
+        state.steps.push({
+          index: stepIndex,
+          thought: 'contract: drinkability check after entity retrieval',
+          actionPairs: checkCalls.map((call) => ({ action: call, observation })),
+          actions: checkCalls,
+          observations: checkCalls.map(() => observation),
+          durationMs,
+          tokenCount: { input: 0, output: 0 },
+        });
+        return false;
+      }
+      if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
+        state.timeoutStats.parallelBatch += 1;
+        state.terminationReason = 'timeout';
+        const observation = '[TIMEOUT] Contract drinkability checks timed out.';
+        for (let i = 0; i < checkCalls.length; i++) {
+          state.toolOutcomes.push(
+            buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, true, false),
+          );
+        }
+        state.steps.push({
+          index: stepIndex,
+          thought: 'contract: drinkability check after entity retrieval',
+          actionPairs: checkCalls.map((call) => ({ action: call, observation })),
+          actions: checkCalls,
+          observations: checkCalls.map(() => observation),
+          durationMs,
+          tokenCount: { input: 0, output: 0 },
+        });
+        return false;
+      }
+      if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
+        state.policyBlocked = true;
+        state.terminationReason = 'blocked';
+        const observation = formatPolicyBlockedObservation(err);
+        for (let i = 0; i < checkCalls.length; i++) {
+          state.toolOutcomes.push(
+            buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, false, true),
+          );
+        }
+        state.steps.push({
+          index: stepIndex,
+          thought: 'contract: drinkability check after entity retrieval',
+          actionPairs: checkCalls.map((call) => ({ action: call, observation })),
+          actions: checkCalls,
+          observations: checkCalls.map(() => observation),
+          durationMs,
+          tokenCount: { input: 0, output: 0 },
+        });
+        return false;
+      }
+      state.reasoningFailureDetected = true;
+      state.terminationReason = 'error';
+      return false;
+    } finally {
+      autoAbortController.abort();
+      abortSignal?.removeEventListener('abort', propagateAutoAbort);
+    }
+
+    const durationMs = Math.max(0, Date.now() - stepStartMs);
+    const observations: string[] = [];
+    const actionPairs: AgentToolCallPair[] = [];
+    const frames: ToolCallEvidenceFrame[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      const call = checkCalls[i]!;
+      const observation = truncateObservation(result.observation, effectiveConfig.maxContextChars);
+      observations.push(observation);
+      actionPairs.push({ action: call, observation });
+      if (result.evidenceFrame !== undefined) {
+        frames.push(result.evidenceFrame);
+        state.collectedFrames.push(result.evidenceFrame);
+      }
+      state.toolOutcomes.push(
+        buildToolOutcome(
+          requestId,
+          stepIndex,
+          i,
+          call.tool,
+          observation,
+          result.rawResult,
+          durationMs,
+          result.rawResult === null,
+          false,
+          false,
+        ),
+      );
+    }
+
+    state.steps.push({
+      index: stepIndex,
+      thought: 'contract: drinkability check after entity retrieval',
+      actionPairs,
+      actions: checkCalls,
+      observations,
+      durationMs,
+      tokenCount: { input: 0, output: 0 },
+      ...(frames.length > 0 ? { evidenceFrames: frames } : {}),
+    });
+    return true;
+  }
+
+  private async runStepExecutorPhase(
+    requestId: string,
+    effectiveConfig: AgentConfig,
+    budget: StepBudget,
+    state: AgentExecutionState,
+    queryExecutionContract: AgentQueryExecutionContract,
+    plannerPhase: PlannerPhaseResult,
+    abortSignal?: AbortSignal,
+  ): Promise<boolean> {
+    const { parsed, inputTokens, outputTokens, stepStartMs } = plannerPhase;
+    const pendingDrinkabilityEntityIds = extractPendingDrinkabilityEntityIds(
+      queryExecutionContract,
+      state.steps,
+      state.toolOutcomes,
+    );
+
+    if (typeof parsed.answer === 'string') {
+      const trimmedAnswer = parsed.answer.trim();
+      if (trimmedAnswer.length > 0) {
+        if (pendingDrinkabilityEntityIds.length > 0) {
+          state.pendingRefinementHint =
+            `HINT: This query asks about drinkability. Before answering, you MUST call check_drinking_window for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+          return false;
+        }
+        state.steps.push({
+          index: state.steps.length,
+          thought: parsed.thought,
+          answer: trimmedAnswer,
+          durationMs: Math.max(0, Date.now() - stepStartMs),
+          tokenCount: { input: inputTokens, output: outputTokens },
+        });
+        state.answer = trimmedAnswer;
+        state.terminationReason = 'answer';
+        return true;
+      }
+    }
+
+    if (parsed.actions !== undefined) {
+      const batchCalls = parsed.actions;
+      const batchStepIndex = state.steps.length;
+      const batchDurationMs = Math.max(0, Date.now() - stepStartMs);
+
+      if (pendingDrinkabilityEntityIds.length > 0) {
+        const requestedIds = new Set(
+          batchCalls
+            .filter((call) => call.tool === 'check_drinking_window')
+            .map((call) => call.input['entity_id'])
+            .filter((entityId): entityId is string => typeof entityId === 'string' && entityId.trim().length > 0),
+        );
+        const missingIds = pendingDrinkabilityEntityIds.filter((entityId) => !requestedIds.has(entityId));
+        const hasOnlyDrinkabilityChecks = batchCalls.every((call) => call.tool === 'check_drinking_window');
+        if (!hasOnlyDrinkabilityChecks || missingIds.length > 0) {
+          const contractMsg =
+            `Tool contract violation: drinkability queries must call check_drinking_window next for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')}.`;
+          for (let bi = 0; bi < batchCalls.length; bi++) {
+            state.toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                batchStepIndex,
+                bi,
+                batchCalls[bi]!.tool,
+                contractMsg,
+                null,
+                batchDurationMs,
+                true,
+                false,
+                false,
+              ),
+            );
+          }
+          state.steps.push({
+            index: batchStepIndex,
+            thought: parsed.thought,
+            actionPairs: batchCalls.map((a) => ({ action: a, observation: contractMsg })),
+            actions: batchCalls,
+            observations: batchCalls.map(() => contractMsg),
+            durationMs: batchDurationMs,
+            tokenCount: { input: inputTokens, output: outputTokens },
+          });
+          return false;
+        }
+      }
+
+      if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
+        state.reasoningFailureDetected = true;
+        state.terminationReason = 'error';
+        const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
+        const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
+        for (let bi = 0; bi < truncatedActions.length; bi++) {
+          state.toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              batchStepIndex,
+              bi,
+              truncatedActions[bi]!.tool,
+              batchErrorMsg,
+              null,
+              batchDurationMs,
+              false,
+              false,
+              true,
+            ),
+          );
+        }
+        state.steps.push({
+          index: batchStepIndex,
+          thought: parsed.thought,
+          actionPairs: truncatedActions.map((a) => ({ action: a, observation: batchErrorMsg })),
+          actions: truncatedActions,
+          observations: truncatedActions.map(() => batchErrorMsg),
+          durationMs: batchDurationMs,
+          tokenCount: { input: inputTokens, output: outputTokens },
+        });
+        return true;
+      }
+
+      const unknownTool = batchCalls.find((c) => !isKnownTool(c.tool));
+      if (unknownTool !== undefined) {
+        state.reasoningFailureDetected = true;
+        state.unknownToolAttempts++;
+        if (state.unknownToolAttempts > 2) {
+          state.terminationReason = 'error';
+          return true;
+        }
+        const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+        for (let bi = 0; bi < batchCalls.length; bi++) {
+          state.toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              batchStepIndex,
+              bi,
+              batchCalls[bi]!.tool,
+              unknownToolMsg,
+              null,
+              batchDurationMs,
+              false,
+              false,
+              true,
+            ),
+          );
+        }
+        state.steps.push({
+          index: batchStepIndex,
+          thought: parsed.thought,
+          actionPairs: batchCalls.map((a) => ({ action: a, observation: unknownToolMsg })),
+          actions: batchCalls,
+          observations: batchCalls.map(() => unknownToolMsg),
+          durationMs: batchDurationMs,
+          tokenCount: { input: inputTokens, output: outputTokens },
+        });
+        return false;
+      }
+
+      const effectiveBatchCalls = batchCalls.map((call) => {
+        if (
+          call.tool !== 'search_wines' ||
+          !queryExecutionContract.hasEntityMetadataSignal
+        ) {
+          return call;
+        }
+
+        const searchQuery = call.input['query'];
+        if (typeof searchQuery !== 'string' || !isSpecificSkuLikeQuery(searchQuery)) {
+          return call;
+        }
+
+        return {
+          ...call,
+          input: normalizeExactMetadataSearchInput(call.input).effectiveInput,
+        };
+      });
+
+      const batchPolicy = evaluateBatchPolicy(effectiveBatchCalls);
+      if (!batchPolicy.allowed) {
+        const policyReason = 'reason' in batchPolicy ? batchPolicy.reason : 'invalid_parallel_batch';
+        const policyMsg = `Invalid parallel batch: ${policyReason}. Allowed: search_wines+search_wines/get_food_pairings, or check_drinking_window-only batches, or compare_wines alone.`;
+        for (let bi = 0; bi < effectiveBatchCalls.length; bi++) {
+          state.toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              batchStepIndex,
+              bi,
+              effectiveBatchCalls[bi]!.tool,
+              policyMsg,
+              null,
+              batchDurationMs,
+              false,
+              false,
+              true,
+            ),
+          );
+        }
+        state.steps.push({
+          index: batchStepIndex,
+          thought: parsed.thought,
+          actionPairs: effectiveBatchCalls.map((a) => ({ action: a, observation: policyMsg })),
+          actions: effectiveBatchCalls,
+          observations: effectiveBatchCalls.map(() => policyMsg),
+          durationMs: batchDurationMs,
+          tokenCount: { input: inputTokens, output: outputTokens },
+        });
+        return false;
+      }
+
+      const batchCheck = budget.recordParallelBatch(effectiveBatchCalls, { skipNearDuplicate: true });
+      if (!batchCheck.allowed) {
+        const batchReason = (batchCheck as { readonly reason?: string }).reason;
+        state.terminationReason = (batchReason as AgentTerminationReason | undefined) ?? 'loop_detected';
+        return true;
+      }
+
+      let batchResults: readonly AgentToolResult[];
+      const batchAbortController = new AbortController();
+      const propagateBatchAbort = (): void => { batchAbortController.abort(); };
+      abortSignal?.addEventListener('abort', propagateBatchAbort, { once: true });
+      try {
+        batchResults = await withTimeout(
+          executeAgentToolsBatch(
+            effectiveBatchCalls,
+            this.deps.toolDeps,
+            `${requestId}-step${state.steps.length}`,
+            {
+              abortSignal: batchAbortController.signal,
+              toolCallId: toolCallIdForStep(requestId, state.steps.length),
+            },
+          ),
+          getParallelBatchTimeoutMs(effectiveBatchCalls, effectiveConfig.parallelBatchTimeoutMs),
+          'Parallel tool batch timed out',
+        );
+      } catch (batchErr) {
+        if (isAbortError(batchErr)) {
+          batchAbortController.abort();
+          for (let bi = 0; bi < effectiveBatchCalls.length; bi++) {
+            state.toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                state.steps.length,
+                bi,
+                effectiveBatchCalls[bi]!.tool,
+                '[ABORTED] Request cancelled during parallel tool execution.',
+                null,
+                Math.max(0, Date.now() - stepStartMs),
+                true,
+                false,
+                false,
+              ),
+            );
+          }
+          state.terminationReason = 'aborted';
+          return true;
+        }
+        if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
+          state.reasoningFailureDetected = true;
+          state.timeoutStats.parallelBatch += 1;
+          batchAbortController.abort();
+          for (let bi = 0; bi < effectiveBatchCalls.length; bi++) {
+            state.toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                state.steps.length,
+                bi,
+                effectiveBatchCalls[bi]!.tool,
+                '[TIMEOUT] Parallel tool batch timed out.',
+                null,
+                Math.max(0, Date.now() - stepStartMs),
+                false,
+                true,
+                false,
+              ),
+            );
+          }
+          state.terminationReason = 'timeout';
+          return true;
+        }
+        if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
+          state.policyBlocked = true;
+          state.terminationReason = 'blocked';
+          batchAbortController.abort();
+          const policyMsg = formatPolicyBlockedObservation(batchErr);
+          for (let bi = 0; bi < effectiveBatchCalls.length; bi++) {
+            state.toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                state.steps.length,
+                bi,
+                effectiveBatchCalls[bi]!.tool,
+                policyMsg,
+                null,
+                Math.max(0, Date.now() - stepStartMs),
+                false,
+                false,
+                true,
+              ),
+            );
+          }
+          state.steps.push({
+            index: state.steps.length,
+            thought: parsed.thought,
+            actionPairs: effectiveBatchCalls.map((a) => ({ action: a, observation: policyMsg })),
+            actions: effectiveBatchCalls,
+            observations: effectiveBatchCalls.map(() => policyMsg),
+            durationMs: Math.max(0, Date.now() - stepStartMs),
+            tokenCount: { input: inputTokens, output: outputTokens },
+          });
+        } else {
+          state.reasoningFailureDetected = true;
+          state.terminationReason = 'error';
+        }
+        return true;
+      } finally {
+        abortSignal?.removeEventListener('abort', propagateBatchAbort);
+      }
+
+      const batchPairs: AgentToolCallPair[] = [];
+      const observations: string[] = [];
+      const batchFrames: ToolCallEvidenceFrame[] = [];
+      for (let bi = 0; bi < batchResults.length; bi++) {
+        const result = batchResults[bi]!;
+        const call = effectiveBatchCalls[bi]!;
+        const obs = truncateObservation(result.observation, effectiveConfig.maxContextChars);
+        observations.push(obs);
+        batchPairs.push({ action: call, observation: obs });
+        if (
+          result.rawResult !== null &&
+          typeof result.rawResult === 'object' &&
+          'queryType' in (result.rawResult as Record<string, unknown>) &&
+          (result.rawResult as Record<string, unknown>)['queryType'] === 'search'
+        ) {
+          state.lastSearchResult = result.rawResult as SearchResponseV1;
+        }
+        if (result.evidenceFrame !== undefined) {
+          batchFrames.push(result.evidenceFrame);
+          state.collectedFrames.push(result.evidenceFrame);
+        }
+      }
+
+      state.steps.push({
+        index: batchStepIndex,
+        thought: parsed.thought,
+        actionPairs: batchPairs,
+        actions: effectiveBatchCalls,
+        observations,
+        durationMs: batchDurationMs,
+        tokenCount: { input: inputTokens, output: outputTokens },
+        ...(batchFrames.length > 0 ? { evidenceFrames: batchFrames } : {}),
+      });
+
+      for (let bi = 0; bi < batchResults.length; bi++) {
+        const result = batchResults[bi]!;
+        const call = effectiveBatchCalls[bi]!;
+        const obs = observations[bi] ?? '';
+        state.toolOutcomes.push(
+          buildToolOutcome(
+            requestId,
+            batchStepIndex,
+            bi,
+            call.tool,
+            obs,
+            result.rawResult,
+            batchDurationMs,
+            false,
+            false,
+            false,
+          ),
+        );
+      }
+
+      const remainingAfterBatch = effectiveConfig.maxSteps - budget.getStepCount();
+      if (
+        !state.hasInjectedRefinementHint &&
+        remainingAfterBatch >= 3 &&
+        observations.some((o) => o.includes('0개') || o.includes('검색 결과가 없습니다') || o.startsWith('NO_MATCH:'))
+      ) {
+        state.hasInjectedRefinementHint = true;
+        state.pendingRefinementHint =
+          'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
+      }
+
+      if (!await this.runContractDrinkabilityChecks(queryExecutionContract, requestId, effectiveConfig, budget, state, abortSignal)) {
+        return true;
+      }
+      return false;
+    }
+
+    if (parsed.action !== undefined) {
+      const { tool, input } = parsed.action;
+      let effectiveInput = input;
+
+      if (
+        tool === 'search_wines' &&
+        queryExecutionContract.hasEntityMetadataSignal
+      ) {
+        const searchQuery = input['query'];
+        if (
+          typeof searchQuery === 'string' &&
+          isSpecificSkuLikeQuery(searchQuery)
+        ) {
+          effectiveInput = normalizeExactMetadataSearchInput(effectiveInput).effectiveInput;
+          if (effectiveInput['limit'] !== 1) {
+            effectiveInput = { ...effectiveInput, limit: 1 };
+          }
+        }
+      }
+
+      if (pendingDrinkabilityEntityIds.length > 0 && tool !== 'check_drinking_window') {
+        const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
+        const contractMsg =
+          `Tool contract violation: drinkability queries must call check_drinking_window next for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')}.`;
+        state.toolOutcomes.push(
+          buildToolOutcome(
+            requestId,
+            state.steps.length,
+            0,
+            tool,
+            contractMsg,
+            null,
+            stepDurationMs,
+            true,
+            false,
+            false,
+          ),
+        );
+        state.steps.push({
+          index: state.steps.length,
+          thought: parsed.thought,
+          action: { tool, input: effectiveInput },
+          observation: contractMsg,
+          durationMs: stepDurationMs,
+          tokenCount: { input: inputTokens, output: outputTokens },
+        });
+        return false;
+      }
+
+      if (!isKnownTool(tool)) {
+        state.reasoningFailureDetected = true;
+        state.unknownToolAttempts++;
+        if (state.unknownToolAttempts > 2) {
+          state.terminationReason = 'error';
+          return true;
+        }
+        const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
+        const unknownToolMsg = `Unknown tool: ${tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+        state.toolOutcomes.push(
+          buildToolOutcome(
+            requestId,
+            state.steps.length,
+            0,
+            tool,
+            unknownToolMsg,
+            null,
+            stepDurationMs,
+            false,
+            false,
+            true,
+          ),
+        );
+        state.steps.push({
+          index: state.steps.length,
+          thought: parsed.thought,
+          action: { tool, input: effectiveInput },
+          observation: unknownToolMsg,
+          durationMs: stepDurationMs,
+          tokenCount: { input: inputTokens, output: outputTokens },
+        });
+        return false;
+      }
+
+      const loopCheck = budget.recordStep(tool, effectiveInput);
+      if (!loopCheck.allowed) {
+        state.terminationReason = loopCheck.reason ?? 'loop_detected';
+        return true;
+      }
+
+      let observation: string;
+      let rawResult: unknown;
+      let sequentialEvidenceFrame: ToolCallEvidenceFrame | undefined;
+      const toolAbortController = new AbortController();
+      const propagateToolAbort = (): void => { toolAbortController.abort(); };
+      abortSignal?.addEventListener('abort', propagateToolAbort, { once: true });
+      try {
+        const timedToolResult = await withTimeout(
+          executeAgentTool(
+            tool,
+            effectiveInput,
+            this.deps.toolDeps,
+            `${requestId}-step${state.steps.length}`,
+            {
+              abortSignal: toolAbortController.signal,
+              toolCallId: toolCallIdForStep(requestId, state.steps.length),
+            },
+          ),
+          getToolTimeoutMs(tool, effectiveConfig.toolTimeoutMs),
+          `Tool "${tool}" timed out`,
+        );
+        observation = truncateObservation(timedToolResult.observation, effectiveConfig.maxContextChars);
+        rawResult = timedToolResult.rawResult;
+        sequentialEvidenceFrame = timedToolResult.evidenceFrame;
+        if (sequentialEvidenceFrame !== undefined) {
+          state.collectedFrames.push(sequentialEvidenceFrame);
+        }
+      } catch (toolErr) {
+        if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
+          state.timeoutStats.tool += 1;
+          toolAbortController.abort();
+          observation = `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`;
+          rawResult = null;
+          const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
+          state.toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              state.steps.length,
+              0,
+              tool,
+              observation,
+              rawResult,
+              stepDurationMs,
+              false,
+              true,
+              false,
+            ),
+          );
+          state.steps.push({
+            index: state.steps.length,
+            thought: parsed.thought,
+            action: { tool, input: effectiveInput },
+            observation,
+            durationMs: stepDurationMs,
+            tokenCount: { input: inputTokens, output: outputTokens },
+          });
+          return true;
+        }
+        if (isAbortError(toolErr)) {
+          state.terminationReason = 'aborted';
+          const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
+          const abortedObservation = '[ABORTED] Request cancelled during tool execution.';
+          state.toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              state.steps.length,
+              0,
+              tool,
+              abortedObservation,
+              null,
+              stepDurationMs,
+              true,
+              false,
+              false,
+            ),
+          );
+          state.steps.push({
+            index: state.steps.length,
+            thought: parsed.thought,
+            action: { tool, input: effectiveInput },
+            observation: abortedObservation,
+            durationMs: stepDurationMs,
+            tokenCount: { input: inputTokens, output: outputTokens },
+          });
+          return true;
+        }
+        if (toolErr instanceof DomainError && toolErr.code === POLICY_BLOCKED_CODE) {
+          state.policyBlocked = true;
+          state.terminationReason = 'blocked';
+          const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
+          const blockedObservation = formatPolicyBlockedObservation(toolErr);
+          state.toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              state.steps.length,
+              0,
+              tool,
+              blockedObservation,
+              null,
+              stepDurationMs,
+              false,
+              false,
+              true,
+            ),
+          );
+          state.steps.push({
+            index: state.steps.length,
+            thought: parsed.thought,
+            action: { tool, input: effectiveInput },
+            observation: blockedObservation,
+            durationMs: stepDurationMs,
+            tokenCount: { input: inputTokens, output: outputTokens },
+          });
+          return true;
+        }
+        observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
+        rawResult = null;
+      } finally {
+        toolAbortController.abort();
+        abortSignal?.removeEventListener('abort', propagateToolAbort);
+      }
+
+      if (
+        rawResult !== null &&
+        typeof rawResult === 'object' &&
+        'queryType' in (rawResult as Record<string, unknown>) &&
+        (rawResult as Record<string, unknown>)['queryType'] === 'search'
+      ) {
+        state.lastSearchResult = rawResult as SearchResponseV1;
+      }
+
+      const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
+      state.steps.push({
+        index: state.steps.length,
+        thought: parsed.thought,
+        action: { tool, input: effectiveInput },
+        observation,
+        durationMs: stepDurationMs,
+        tokenCount: { input: inputTokens, output: outputTokens },
+        ...(sequentialEvidenceFrame !== undefined
+          ? { evidenceFrames: [sequentialEvidenceFrame] }
+          : {}),
+      });
+      state.toolOutcomes.push(
+        buildToolOutcome(
+          requestId,
+          state.steps.length - 1,
+          0,
+          tool,
+          observation,
+          rawResult,
+          stepDurationMs,
+          rawResult === null,
+          false,
+          false,
+        ),
+      );
+
+      const remainingStepsAfterTool = effectiveConfig.maxSteps - budget.getStepCount();
+      if (
+        !state.hasInjectedRefinementHint &&
+        remainingStepsAfterTool >= 3 &&
+        (observation.includes('0개') || observation.includes('검색 결과가 없습니다') || observation.startsWith('NO_MATCH:'))
+      ) {
+        state.hasInjectedRefinementHint = true;
+        state.pendingRefinementHint =
+          'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
+      }
+
+      if (!await this.runContractDrinkabilityChecks(queryExecutionContract, requestId, effectiveConfig, budget, state, abortSignal)) {
+        return true;
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  private async runObservationSynthesisPhase(
+    query: string,
+    requestId: string,
+    effectiveConfig: AgentConfig,
+    state: AgentExecutionState,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
+      log.warn({ requestId, totalInputTokens: state.totalInputTokens, totalOutputTokens: state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens }, '[agent] token budget exhausted — skipping final answer synthesis to prevent overrun');
+      return;
+    }
+
+    const obsSteps = state.steps.filter(
+      (s) =>
+        (s.observation !== undefined && s.observation.length > 0) ||
+        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
+    );
+    if (obsSteps.length === 0) {
+      return;
+    }
+
+    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, state.steps, requestId);
+    const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
+      if (abortSignal?.aborted) return undefined;
+      const synthAbort = new AbortController();
+      const propagateSynthAbort = (): void => { synthAbort.abort(); };
+      abortSignal?.addEventListener('abort', propagateSynthAbort, { once: true });
+      if (abortSignal?.aborted) {
+        synthAbort.abort();
+        abortSignal.removeEventListener('abort', propagateSynthAbort);
+        return undefined;
+      }
+      const synthTimer = setTimeout(() => {
+        synthAbort.abort();
+      }, SYNTHESIS_TIMEOUT_MS);
+      try {
+        const synthResult = await this.deps.chatLlm.complete({
+          messages: synthMessages,
+          temperature: 0,
+          maxOutputTokens,
+          ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
+          abortSignal: synthAbort.signal,
+        });
+        if (!isValidLlmResult(synthResult)) {
+          log.warn({ requestId }, 'synthesis LLM returned malformed result');
+          return undefined;
+        }
+        state.totalInputTokens += Math.ceil(synthSentinel.length / CHARS_PER_TOKEN_ESTIMATE);
+        state.totalOutputTokens += Math.ceil(synthResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
+        const parsedSynth = parseLlmOutput(synthResult.text);
+        if (parsedSynth.action !== undefined || parsedSynth.actions !== undefined) {
+          log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
+          return undefined;
+        }
+        const candidate = parsedSynth.answer?.trim() ?? '';
+        const isShell = /^[{[\s]*[}\]]*$/.test(candidate);
+        return candidate.length > 10 && !isShell ? candidate : undefined;
+      } finally {
+        abortSignal?.removeEventListener('abort', propagateSynthAbort);
+        clearTimeout(synthTimer);
+      }
+    };
+
+    let synthAnswer: string | undefined;
+    try {
+      synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
+    } catch (synthErr1) {
+      if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
+        state.llmCircuitOpen = true;
+      } else if (isAbortError(synthErr1)) {
+        state.terminationReason = 'aborted';
+      }
+      // synthesis attempt threw -> log.error, never log.warn
+      log.error({ err: synthErr1, requestId }, `synthesis retry attempt 1 failed (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+    }
+    if (synthAnswer === undefined) {
+      state.failedSynthesisAttempts += 1;
+    }
+    if (
+      synthAnswer === undefined &&
+      !(abortSignal?.aborted) &&
+      !state.llmCircuitOpen &&
+      state.totalInputTokens + state.totalOutputTokens < effectiveConfig.maxTotalTokens
+    ) {
+      try {
+        log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+        synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
+      } catch (synthErr2) {
+        if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
+          state.llmCircuitOpen = true;
+        } else if (isAbortError(synthErr2)) {
+          state.terminationReason = 'aborted';
+        }
+        // synthesis attempt threw -> log.error, never log.warn
+        log.error({ err: synthErr2, requestId }, 'synthesis retry attempt 2 failed — proceeding to fallback search');
+      }
+      if (synthAnswer === undefined) {
+        state.failedSynthesisAttempts += 1;
+      }
+    }
+    if (synthAnswer !== undefined) {
+      state.answer = synthAnswer;
+      state.terminationReason = 'answer';
+      log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
+    }
+  }
+
   async execute(
     query: string,
     requestId: string,
@@ -594,8 +1810,8 @@ export class AgentOrchestrator {
     if (this.deps.querySanitizer !== undefined) {
       const sanitizeResult = this.deps.querySanitizer.sanitize(query);
       if (!sanitizeResult.safe) {
-        log.warn(
-          { requestId, reason: sanitizeResult.reason },
+        log.info(
+          { requestId, reason: (sanitizeResult as { readonly reason?: string }).reason },
           'Agent pre-check blocked query before LLM call',
         );
         return {
@@ -610,6 +1826,7 @@ export class AgentOrchestrator {
       }
     }
 
+
     const adaptive = overrides?.maxSteps === undefined ? classifyQueryBudget(query) : undefined;
     const queryExecutionContract = buildAgentQueryExecutionContract(query);
     const effectiveConfig = {
@@ -623,1377 +1840,112 @@ export class AgentOrchestrator {
         'adaptive step budget applied',
       );
     }
+
     const budget = new StepBudget(effectiveConfig);
-    const steps: AgentStep[] = [];
-    // E7-T2: Typed tool outcomes, generated alongside AgentStep for each tool invocation.
-    const toolOutcomes: ToolOutcome[] = [];
-    // ADR-009 Phase 0: flat aggregate of typed evidence frames across the run.
-    const collectedFrames: ToolCallEvidenceFrame[] = [];
-    let lastSearchResult: SearchResponseV1 | undefined;
-    let terminationReason: AgentTerminationReason = 'max_steps';
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
-    let reasoningFailureDetected = false;
-    /**
-     * Set when a tool execution surfaced a policy block. Prevents the
-     * single-shot fallback from re-running the raw query through the
-     * search use case after the agent's protective layers said no.
-     */
-    let policyBlocked = false;
-    /**
-     * Set when the LLM circuit breaker opens mid-run. When true, all subsequent
-     * synthesis attempts are skipped — calling a fast-failing breaker again
-     * cannot succeed and only adds log noise + latency. Fallback layers that
-     * do not require the LLM (Layer 2 search, Layer 3 observation slice,
-     * Layer 4 template) still execute.
-     */
-    let llmCircuitOpen = false;
-    let unknownToolAttempts = 0;
-    const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
-    const timeoutStats = {
-      llmStep: 0,
-      tool: 0,
-      parallelBatch: 0,
-    };
-    /**
-     * Hard cap on parallel tools per batch step. An adversarially-prompted LLM
-     * can emit {"actions":[...100 tools...]} to trigger 100 concurrent Promise.all
-     * executions, exhausting DB connection pools or Vespa rate limits. Capping at
-     * 4 allows legitimate parallel patterns (search + food pairing = 2; compare +
-     * drinking-window × 2 = 3) while blocking resource-exhaustion attacks.
-     */
-    const MAX_TOOLS_PER_BATCH = 4;
-    /**
-     * Set after the first zero-result observation so we inject the constraint-
-     * relaxation hint exactly once into the next LLM user message.
-     */
-    let hasInjectedRefinementHint = false;
-    /**
-     * Pending hint text to prepend to the next user message in the ReAct loop.
-     * Cleared to undefined after it is consumed.
-     */
-    let pendingRefinementHint: string | undefined;
-
-    const runContractDrinkabilityChecks = async (): Promise<boolean> => {
-      const pendingIds = extractPendingDrinkabilityEntityIds(
-        queryExecutionContract,
-        steps,
-        toolOutcomes,
-      );
-      if (pendingIds.length === 0) {
-        return true;
-      }
-
-      const checkCalls = pendingIds.map((entityId) => ({
-        tool: 'check_drinking_window',
-        input: { entity_id: entityId },
-      }));
-      const budgetCheck = budget.recordParallelBatch(checkCalls, { skipNearDuplicate: true });
-      if (!budgetCheck.allowed) {
-        terminationReason = budgetCheck.reason ?? 'max_steps';
-        return false;
-      }
-
-      const stepIndex = steps.length;
-      const stepStartMs = Date.now();
-      const autoAbortController = new AbortController();
-      const propagateAutoAbort = (): void => { autoAbortController.abort(); };
-      abortSignal?.addEventListener('abort', propagateAutoAbort, { once: true });
-      let results: readonly AgentToolResult[];
-      try {
-        results = await withTimeout(
-          executeAgentToolsBatch(
-            checkCalls,
-            this.deps.toolDeps,
-            `${requestId}-step${stepIndex}`,
-            {
-              abortSignal: autoAbortController.signal,
-              toolCallId: toolCallIdForStep(requestId, stepIndex),
-            },
-          ),
-          effectiveConfig.parallelBatchTimeoutMs ?? DEFAULT_PARALLEL_BATCH_TIMEOUT_MS,
-          'Contract drinkability batch timed out',
-        );
-      } catch (err) {
-        autoAbortController.abort();
-        const durationMs = Math.max(0, Date.now() - stepStartMs);
-        if (isAbortError(err)) {
-          terminationReason = 'aborted';
-          const observation = '[ABORTED] Request cancelled during contract drinkability checks.';
-          for (let i = 0; i < checkCalls.length; i++) {
-            toolOutcomes.push(
-              buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, true, false, false),
-            );
-          }
-          steps.push({
-            index: stepIndex,
-            thought: 'contract: drinkability check after entity retrieval',
-            actionPairs: checkCalls.map((call) => ({ action: call, observation })),
-            actions: checkCalls,
-            observations: checkCalls.map(() => observation),
-            durationMs,
-            tokenCount: { input: 0, output: 0 },
-          });
-          return false;
-        }
-        if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
-          timeoutStats.parallelBatch += 1;
-          terminationReason = 'timeout';
-          const observation = '[TIMEOUT] Contract drinkability checks timed out.';
-          for (let i = 0; i < checkCalls.length; i++) {
-            toolOutcomes.push(
-              buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, true, false),
-            );
-          }
-          steps.push({
-            index: stepIndex,
-            thought: 'contract: drinkability check after entity retrieval',
-            actionPairs: checkCalls.map((call) => ({ action: call, observation })),
-            actions: checkCalls,
-            observations: checkCalls.map(() => observation),
-            durationMs,
-            tokenCount: { input: 0, output: 0 },
-          });
-          return false;
-        }
-        if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
-          policyBlocked = true;
-          terminationReason = 'blocked';
-          const observation = formatPolicyBlockedObservation(err);
-          for (let i = 0; i < checkCalls.length; i++) {
-            toolOutcomes.push(
-              buildToolOutcome(requestId, stepIndex, i, checkCalls[i]!.tool, observation, null, durationMs, false, false, true),
-            );
-          }
-          steps.push({
-            index: stepIndex,
-            thought: 'contract: drinkability check after entity retrieval',
-            actionPairs: checkCalls.map((call) => ({ action: call, observation })),
-            actions: checkCalls,
-            observations: checkCalls.map(() => observation),
-            durationMs,
-            tokenCount: { input: 0, output: 0 },
-          });
-          return false;
-        }
-        reasoningFailureDetected = true;
-        terminationReason = 'error';
-        return false;
-      } finally {
-        autoAbortController.abort();
-        abortSignal?.removeEventListener('abort', propagateAutoAbort);
-      }
-
-      const durationMs = Math.max(0, Date.now() - stepStartMs);
-      const observations: string[] = [];
-      const actionPairs: AgentToolCallPair[] = [];
-      const frames: ToolCallEvidenceFrame[] = [];
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i]!;
-        const call = checkCalls[i]!;
-        const observation = truncateObservation(result.observation, effectiveConfig.maxContextChars);
-        observations.push(observation);
-        actionPairs.push({ action: call, observation });
-        if (result.evidenceFrame !== undefined) {
-          frames.push(result.evidenceFrame);
-          collectedFrames.push(result.evidenceFrame);
-        }
-        toolOutcomes.push(
-          buildToolOutcome(
-            requestId,
-            stepIndex,
-            i,
-            call.tool,
-            observation,
-            result.rawResult,
-            durationMs,
-            result.rawResult === null,
-            false,
-            false,
-          ),
-        );
-      }
-
-      steps.push({
-        index: stepIndex,
-        thought: 'contract: drinkability check after entity retrieval',
-        actionPairs,
-        actions: checkCalls,
-        observations,
-        durationMs,
-        tokenCount: { input: 0, output: 0 },
-        ...(frames.length > 0 ? { evidenceFrames: frames } : {}),
-      });
-      return true;
-    };
+    const state = this.createExecutionState();
 
     try {
       for (;;) {
-        // Budget check — enforce BOTH step count AND wall-clock timeout.
-        // The previous code only checked steps; a chain of perStepTimeoutMs
-        // steps could exceed agentTimeoutMs without ever tripping canProceed.
         const budgetCheck = budget.canProceed();
         if (!budgetCheck.allowed) {
-          terminationReason = budgetCheck.reason ?? 'max_steps';
+          state.terminationReason = budgetCheck.reason ?? 'max_steps';
           break;
         }
 
-        // Synthesize-before-exhaustion nudge — two tiers:
-        //   LAST_STEP (remainingSteps===1): always inject regardless of history.
-        //   BUDGET_WARNING (remainingSteps===2): inject ONLY when the agent has
-        //     already made at least one tool call (steps.length > 0), so it has
-        //     results to synthesize from. Injecting the warning at step 0 (no
-        //     prior observations) confuses the model: it sees "If you already have
-        //     results, answer NOW" while it has nothing — causing it to hallucinate
-        //     an answer instead of calling a tool.
-        // Pre-condition: maxSteps=2 → remainingSteps=2 at step 0, so the
-        //   "steps.length > 0" guard prevents the premature BUDGET_WARNING.
         const remainingSteps = effectiveConfig.maxSteps - budget.getStepCount();
-        const hasToolHistory = steps.length > 0;
+        const hasToolHistory = state.steps.length > 0;
         const isLastStep = remainingSteps === 1 || (remainingSteps === 2 && hasToolHistory);
 
-        // Pre-flight token budget check — prevent unnecessary LLM calls when
-        // the budget is already exhausted. The check uses accumulated totals
-        // from prior steps, so the FIRST step always executes (0 < budget).
-        // Design: pre-flight blocks the NEXT step; post-hoc (L440) is an
-        // insurance break when a single step's output vastly overshoots budget.
-        // Together they guarantee at most one over-budget step executes.
-        if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
-          log.warn(
-            { requestId, totalTokens: totalInputTokens + totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
+        if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
+          log.info(
+            { requestId, totalTokens: state.totalInputTokens + state.totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
             'agent token budget exhausted before LLM call — terminating',
           );
-          terminationReason = 'budget';
+          state.terminationReason = 'budget';
           break;
         }
 
-        // Build messages
-        // Consume any pending refinement hint by prepending it to the query message.
-        // The hint is only injected once (hasInjectedRefinementHint guards re-entry).
-        // CLAUDE.md rule: after enriching a string, length-check the RESULT (not just the input).
-        const baseUserContentRaw = pendingRefinementHint !== undefined
-          ? `${pendingRefinementHint}\n\n${query}`
-          : query;
-        pendingRefinementHint = undefined;
-        // Cap the enriched user content at maxContextChars to prevent context overflow.
-        const baseUserContent = baseUserContentRaw.length > effectiveConfig.maxContextChars
-          ? baseUserContentRaw.slice(0, effectiveConfig.maxContextChars)
-          : baseUserContentRaw;
-        const userMsg = buildUserMessage(baseUserContent);
-        const stepMessages = buildStepMessages(steps);
-        const messages = [
-          buildSystemMessage(),
-          userMsg,
-          ...stepMessages,
-          // Inject LAST_STEP nudge as the FINAL user message AFTER all tool
-          // results so the LLM sees "you just got a result → now answer".
-          // Placing it at the query position (before step messages) meant the
-          // model saw the warning before its own tool history, which reduced
-          // compliance. A trailing user message is the natural "now respond" turn.
-          ...(isLastStep
-            ? [{
-                role: 'user' as const,
-                content: remainingSteps === 1
-                  ? `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.`
-                  : `[BUDGET_WARNING] Only ${remainingSteps} steps remain. Synthesize your current search results into a final {"thought":"…","answer":"…"} NOW — do not call another tool unless you have no results yet.`,
-              }]
-            : []),
-        ];
-
-        // LLM call with per-step timeout and AbortSignal propagation.
-        // The AbortController cancels the underlying HTTP request when the
-        // timeout fires, preventing orphaned in-flight requests.
-        // Short-circuit if the caller (HTTP route) already signalled abort
-        // (client disconnect). This prevents spending LLM tokens for a response
-        // nobody will receive.
         if (abortSignal?.aborted) {
-          terminationReason = 'error';
+          state.terminationReason = 'error';
           break;
         }
 
-        const stepStart = Date.now();
-        let llmResult: { text: string; model: string; finishReason?: string | null };
-        const stepAbortController = new AbortController();
-        // Propagate caller abort into the per-step controller so the HTTP client
-        // connection also cancels the underlying LLM fetch.
-        const propagateAbort = (): void => { stepAbortController.abort(); };
-        abortSignal?.addEventListener('abort', propagateAbort, { once: true });
-        // Race guard: abort may fire between the pre-flight check above and
-        // addEventListener. Re-check immediately after registration.
-        if (abortSignal?.aborted) {
-          abortSignal.removeEventListener('abort', propagateAbort);
-          terminationReason = 'error';
-          break;
-        }
-        let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
-        try {
-          const racedResult: unknown = await Promise.race([
-            this.deps.chatLlm.complete({
-              messages,
-              temperature: 0,
-              // 2048 tokens: complex multi-tool parallel batches (3+ search_wines
-              // with structured filters) frequently exceed 1024. Truncation →
-              // finish='length' → step-0 fallback. Scenario #56 RCA showed this
-              // as the root cause of consistent 37% score on 3-vintage compare.
-              maxOutputTokens: 2048,
-              ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
-              abortSignal: stepAbortController.signal,
-            }),
-            new Promise<never>((_resolve, reject) => {
-              stepTimeoutHandle = setTimeout(
-                () => {
-                  stepAbortController.abort();
-                  reject(new Error('Agent LLM step timed out'));
-                },
-                effectiveConfig.perStepTimeoutMs,
-              );
-            }),
-          ]);
-          if (!isValidLlmResult(racedResult)) {
-            log.warn(
-              { requestId, stepIndex: steps.length, rawType: typeof racedResult },
-              'Agent LLM returned malformed step result',
-            );
-            reasoningFailureDetected = true;
-            terminationReason = 'error';
-            break;
-          }
-          llmResult = racedResult;
-        } catch (err) {
-          log.warn({ err, requestId, stepIndex: steps.length }, 'Agent LLM call failed');
-          if (isAbortError(err)) {
-            // Caller disconnected (AbortError from propagateAbort or timeout abort).
-            // Classify as 'aborted' so client-disconnect events do NOT pollute error
-            // rate metrics / SLO alerts — same pattern as the parallel batch handler.
-            terminationReason = 'aborted';
-          } else if ((err as Error).message === 'Agent LLM step timed out') {
-            reasoningFailureDetected = true;
-            timeoutStats.llmStep += 1;
-            terminationReason = 'timeout';
-          } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
-            // LLM circuit breaker is OPEN — every subsequent complete() call
-            // will fast-fail synchronously. Mark the flag so the synthesis
-            // layer does not waste round-trips, and terminate cleanly.
-            reasoningFailureDetected = true;
-            llmCircuitOpen = true;
-            terminationReason = 'error';
-          } else {
-            reasoningFailureDetected = true;
-            terminationReason = 'error';
-          }
-          break;
-        } finally {
-          abortSignal?.removeEventListener('abort', propagateAbort);
-          if (stepTimeoutHandle !== undefined) {
-            clearTimeout(stepTimeoutHandle);
-          }
-        }
-
-        // Guard against truncated output (LLM hit max_tokens).
-        // RCA: scenarios like #30 (compare + dual drinking window) emit long
-        // reasoning + action JSON that exceeds 2048 tokens. Hard-breaking here
-        // dropped the scenario to step-0 fallback (score ~30%). Instead, attempt
-        // to parse the truncated output — if it contains a valid action/actions,
-        // use it; only break if the truncation corrupted the JSON beyond repair.
-        const wasTruncated = llmResult.finishReason === 'length';
-        if (wasTruncated) {
-          log.warn({ requestId, stepIndex: steps.length }, 'Agent LLM output truncated (finish_reason=length) — attempting recovery');
-        }
-
-        // Estimate token counts (rough: CHARS_PER_TOKEN_ESTIMATE chars ≈ 1 token)
-        const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-        const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN_ESTIMATE);
-        const outputTokens = Math.ceil(llmResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
-        totalInputTokens += inputTokens;
-        totalOutputTokens += outputTokens;
-
-        // Post-hoc insurance cap — the pre-flight check (L324) prevents the
-        // NEXT iteration, but if THIS step's output alone overshoots the budget
-        // (e.g. unexpectedly long LLM response), we break immediately rather
-        // than continuing to parse/execute tool calls from an over-budget step.
-        // Uses >= (same as pre-flight) for consistent boundary semantics.
-        if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
-          log.warn(
-            { requestId, totalTokens: totalInputTokens + totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
-            'agent token budget exceeded — terminating',
-          );
-          terminationReason = 'budget';
-          break;
-        }
-
-        // Parse LLM output
-        const parsed = parseLlmOutput(llmResult.text);
-
-        // Diagnostic: log raw LLM output preview + parse result at step 0 for RCA
-        if (steps.length === 0) {
-          log.info(
-            {
-              requestId,
-              textPreview: llmResult.text.slice(0, STEP_LOG_PREVIEW_CHARS),
-              finishReason: llmResult.finishReason,
-              hasAction: parsed.action !== undefined,
-              hasActions: parsed.actions !== undefined,
-              hasAnswer: parsed.answer !== undefined && parsed.answer.length > 0,
-              wasTruncated,
-            },
-            '[RCA] step0 LLM output',
-          );
-        }
-
-        // Final answer — require non-empty string so LLM emitting {"answer":""} does
-        // NOT prematurely terminate the loop before fallback layers can run.
-        // An empty answer would skip Layer 2/3 (which require terminationReason !== 'answer')
-        // and land directly in Layer 4 with a stale terminationReason='answer' from a step
-        // that produced nothing. Treating empty-answer as "no answer yet" lets the loop
-        // continue (or expire gracefully via budget exhaustion → synthesis sentinel).
-        // AG-02: trim BEFORE the length check so whitespace-only answers are rejected
-        // consistently. The trimmed value is also what gets stored/returned — synthesis
-        // paths (lines ~1068) already trim; the main-loop path must match.
-        const pendingDrinkabilityEntityIds = extractPendingDrinkabilityEntityIds(
-          queryExecutionContract,
-          steps,
-          toolOutcomes,
+        const plannerPhase = await this.runPlannerPhase(
+          query,
+          requestId,
+          effectiveConfig,
+          state,
+          remainingSteps,
+          isLastStep,
+          abortSignal,
         );
-
-        if (typeof parsed.answer === 'string') {
-          const trimmedAnswer = parsed.answer.trim();
-          if (trimmedAnswer.length > 0) {
-            if (pendingDrinkabilityEntityIds.length > 0) {
-              pendingRefinementHint =
-                `HINT: This query asks about drinkability. Before answering, you MUST call check_drinking_window for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
-              continue;
-            }
-            steps.push({
-              index: steps.length,
-              thought: parsed.thought,
-              answer: trimmedAnswer,
-              durationMs: Math.max(0, Date.now() - stepStart),
-              tokenCount: { input: inputTokens, output: outputTokens },
-            });
-            terminationReason = 'answer';
-            break;
-          }
+        if (plannerPhase === null) {
+          break;
         }
 
-        // ── Parallel batch ──────────────────────────────────────────────────
-        // LLM emits {"thought":"…","actions":[{tool,input},{tool,input}]}
-        // All tools fire simultaneously via Promise.all.
-        // Policy-block (DomainError) from any tool → re-thrown, caught here, abort loop.
-        if (parsed.actions !== undefined) {
-          const batchCalls = parsed.actions;
-
-          if (pendingDrinkabilityEntityIds.length > 0) {
-            const requestedIds = new Set(
-              batchCalls
-                .filter((call) => call.tool === 'check_drinking_window')
-                .map((call) => call.input['entity_id'])
-                .filter((entityId): entityId is string => typeof entityId === 'string' && entityId.trim().length > 0),
-            );
-            const missingIds = pendingDrinkabilityEntityIds.filter((entityId) => !requestedIds.has(entityId));
-            const hasOnlyDrinkabilityChecks = batchCalls.every((call) => call.tool === 'check_drinking_window');
-            if (!hasOnlyDrinkabilityChecks || missingIds.length > 0) {
-              const contractMsg =
-                `Tool contract violation: drinkability queries must call check_drinking_window next for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')}.`;
-              const batchDurationMs = Math.max(0, Date.now() - stepStart);
-              for (let bi = 0; bi < batchCalls.length; bi++) {
-                toolOutcomes.push(
-                  buildToolOutcome(
-                    requestId,
-                    steps.length,
-                    bi,
-                    batchCalls[bi]!.tool,
-                    contractMsg,
-                    null,
-                    batchDurationMs,
-                    true,
-                    false,
-                    false,
-                  ),
-                );
-              }
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                actionPairs: batchCalls.map((a) => ({ action: a, observation: contractMsg })),
-                actions: batchCalls,
-                observations: batchCalls.map(() => contractMsg),
-                durationMs: batchDurationMs,
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
-              continue;
-            }
-          }
-
-          // Per-batch tool count limit: reject oversized batches to prevent
-          // resource exhaustion via Promise.all with 100+ concurrent tool calls.
-          if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
-            reasoningFailureDetected = true;
-            terminationReason = 'error';
-            const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
-            const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
-            const batchDurationMs = Math.max(0, Date.now() - stepStart);
-            for (let bi = 0; bi < truncatedActions.length; bi++) {
-              toolOutcomes.push(
-                buildToolOutcome(
-                  requestId,
-                  steps.length,
-                  bi,
-                  truncatedActions[bi]!.tool,
-                  batchErrorMsg,
-                  null,
-                  batchDurationMs,
-                  false,
-                  false,
-                  true,
-                ),
-              );
-            }
-            steps.push({
-              index: steps.length,
-              thought: parsed.thought,
-              actionPairs: truncatedActions.map((a) => ({ action: a, observation: batchErrorMsg })),
-              actions: truncatedActions,
-              observations: truncatedActions.map(() => batchErrorMsg),
-              durationMs: batchDurationMs,
-              tokenCount: { input: inputTokens, output: outputTokens },
-            });
-            break;
-          }
-
-          // Unknown tool guard: reject the whole batch on first unknown name.
-          const unknownTool = batchCalls.find((c) => !isKnownTool(c.tool));
-          if (unknownTool !== undefined) {
-            reasoningFailureDetected = true;
-            unknownToolAttempts++;
-            if (unknownToolAttempts > MAX_UNKNOWN_TOOL_ATTEMPTS) {
-              terminationReason = 'error';
-              break;
-            }
-            {
-              const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
-              const batchDurationMs = Math.max(0, Date.now() - stepStart);
-              for (let bi = 0; bi < batchCalls.length; bi++) {
-                toolOutcomes.push(
-                  buildToolOutcome(
-                    requestId,
-                    steps.length,
-                    bi,
-                    batchCalls[bi]!.tool,
-                    unknownToolMsg,
-                    null,
-                    batchDurationMs,
-                    false,
-                    false,
-                    true,
-                  ),
-                );
-              }
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                actionPairs: batchCalls.map((a) => ({ action: a, observation: unknownToolMsg })),
-                actions: batchCalls,
-                observations: batchCalls.map(() => unknownToolMsg),
-                durationMs: batchDurationMs,
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
-            }
-            continue;
-          }
-
-          const batchPolicy = evaluateBatchPolicy(batchCalls);
-          if (!batchPolicy.allowed) {
-            const policyMsg = `Invalid parallel batch: ${batchPolicy.reason}. Allowed: search_wines+search_wines/get_food_pairings, or check_drinking_window-only batches, or compare_wines alone.`;
-            const batchDurationMs = Math.max(0, Date.now() - stepStart);
-            for (let bi = 0; bi < batchCalls.length; bi++) {
-              toolOutcomes.push(
-                buildToolOutcome(
-                  requestId,
-                  steps.length,
-                  bi,
-                  batchCalls[bi]!.tool,
-                  policyMsg,
-                  null,
-                  batchDurationMs,
-                  false,
-                  false,
-                  true,
-                ),
-              );
-            }
-            steps.push({
-              index: steps.length,
-              thought: parsed.thought,
-              actionPairs: batchCalls.map((a) => ({ action: a, observation: policyMsg })),
-              actions: batchCalls,
-              observations: batchCalls.map(() => policyMsg),
-              durationMs: batchDurationMs,
-              tokenCount: { input: inputTokens, output: outputTokens },
-            });
-            continue;
-          }
-
-          // Loop detection + step-budget reservation are applied atomically.
-          // Parallel batches must either fully reserve their step slots or not
-          // mutate the budget at all; otherwise a blocked Nth tool would leave
-          // stepCount/history partially advanced even though no tools ran.
-          const batchCheck = budget.recordParallelBatch(batchCalls, { skipNearDuplicate: true });
-          if (!batchCheck.allowed) {
-            terminationReason = batchCheck.reason ?? 'loop_detected';
-            break;
-          }
-
-          // Execute all tools in parallel.
-          // Policy-block DomainErrors propagate through executeAgentToolsBatch
-          // (not caught inside executeAgentTool). Wrap in try-catch here.
-          let batchResults: readonly AgentToolResult[];
-          const batchAbortController = new AbortController();
-          const propagateBatchAbort = (): void => { batchAbortController.abort(); };
-          abortSignal?.addEventListener('abort', propagateBatchAbort, { once: true });
-          try {
-            batchResults = await withTimeout(
-              executeAgentToolsBatch(
-                batchCalls,
-                this.deps.toolDeps,
-                `${requestId}-step${steps.length}`,
-                {
-                  abortSignal: batchAbortController.signal,
-                  toolCallId: toolCallIdForStep(requestId, steps.length),
-                },
-              ),
-              effectiveConfig.parallelBatchTimeoutMs ?? DEFAULT_PARALLEL_BATCH_TIMEOUT_MS,
-              'Parallel tool batch timed out',
-            );
-          } catch (batchErr) {
-            // AbortError: caller disconnected — classify as 'aborted', not 'error',
-            // so client-disconnect events don't pollute error rate metrics / SLO alerts.
-            if (isAbortError(batchErr)) {
-              // Propagate abort to sibling tools — AbortError may originate from the
-              // outer caller signal (via propagateBatchAbort), but if it came from
-              // a single tool's internal timeout, sibling tools are still running.
-              // Abort explicitly to release resources (Vespa connections, LLM calls).
-              batchAbortController.abort();
-              const batchDurationMs = Math.max(0, Date.now() - stepStart);
-              for (let bi = 0; bi < batchCalls.length; bi++) {
-                toolOutcomes.push(
-                  buildToolOutcome(
-                    requestId,
-                    steps.length,
-                    bi,
-                    batchCalls[bi]!.tool,
-                    '[ABORTED] Request cancelled during parallel tool execution.',
-                    null,
-                    batchDurationMs,
-                    true,
-                    false,
-                    false,
-                  ),
-                );
-              }
-              terminationReason = 'aborted';
-              break;
-            }
-            if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
-              reasoningFailureDetected = true;
-              timeoutStats.parallelBatch += 1;
-              batchAbortController.abort();
-              const batchDurationMs = Math.max(0, Date.now() - stepStart);
-              for (let bi = 0; bi < batchCalls.length; bi++) {
-                toolOutcomes.push(
-                  buildToolOutcome(
-                    requestId,
-                    steps.length,
-                    bi,
-                    batchCalls[bi]!.tool,
-                    '[TIMEOUT] Parallel tool batch timed out.',
-                    null,
-                    batchDurationMs,
-                    false,
-                    true,
-                    false,
-                  ),
-                );
-              }
-              terminationReason = 'timeout';
-              break;
-            }
-            if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
-              policyBlocked = true;
-              terminationReason = 'blocked';
-              // Cancel any in-flight parallel tools — a policy block means the
-              // entire batch is invalid; continuing would waste resources.
-              batchAbortController.abort();
-              {
-                const policyMsg = formatPolicyBlockedObservation(batchErr);
-                const batchDurationMs = Math.max(0, Date.now() - stepStart);
-                for (let bi = 0; bi < batchCalls.length; bi++) {
-                  toolOutcomes.push(
-                    buildToolOutcome(
-                      requestId,
-                      steps.length,
-                      bi,
-                      batchCalls[bi]!.tool,
-                      policyMsg,
-                      null,
-                      batchDurationMs,
-                      false,
-                      false,
-                      true,
-                    ),
-                  );
-                }
-                steps.push({
-                  index: steps.length,
-                  thought: parsed.thought,
-                  actionPairs: batchCalls.map((a) => ({ action: a, observation: policyMsg })),
-                  actions: batchCalls,
-                  observations: batchCalls.map(() => policyMsg),
-                  durationMs: batchDurationMs,
-                  tokenCount: { input: inputTokens, output: outputTokens },
-                });
-              }
-            } else {
-              reasoningFailureDetected = true;
-              terminationReason = 'error';
-            }
-            break;
-          } finally {
-            abortSignal?.removeEventListener('abort', propagateBatchAbort);
-          }
-
-          const batchPairs: AgentToolCallPair[] = [];
-          const observations: string[] = [];
-          // Promise.all guarantees index alignment: batchResults[bi] corresponds
-          // to batchCalls[bi] exactly. We assert non-null here (rather than
-          // skipping undefined) so that observations[] stays index-aligned with
-          // actions[]. Skipping would produce observations.length < actions.length,
-          // causing agent-prompt.ts to pair tool results with the wrong action.
-          for (let bi = 0; bi < batchResults.length; bi++) {
-            const result = batchResults[bi]!;
-            const call = batchCalls[bi]!;
-            const obs = truncateObservation(result.observation, effectiveConfig.maxContextChars);
-            observations.push(obs);
-            batchPairs.push({ action: call, observation: obs });
-            if (
-              result.rawResult !== null &&
-              typeof result.rawResult === 'object' &&
-              'queryType' in (result.rawResult as Record<string, unknown>) &&
-              (result.rawResult as Record<string, unknown>)['queryType'] === 'search'
-            ) {
-              lastSearchResult = result.rawResult as SearchResponseV1;
-            }
-          }
-
-          const batchDurationMs = Math.max(0, Date.now() - stepStart);
-          const batchStepIndex = steps.length;
-          // ADR-009 Phase 0: collect per-item evidence frames (aligned 1:1 with batchPairs).
-          const batchFrames: ToolCallEvidenceFrame[] = [];
-          for (const r of batchResults) {
-            if (r.evidenceFrame !== undefined) {
-              batchFrames.push(r.evidenceFrame);
-              collectedFrames.push(r.evidenceFrame);
-            }
-          }
-          steps.push({
-            index: batchStepIndex,
-            thought: parsed.thought,
-            actionPairs: batchPairs,
-            actions: batchCalls,
-            observations,
-            durationMs: batchDurationMs,
-            tokenCount: { input: inputTokens, output: outputTokens },
-            ...(batchFrames.length > 0 ? { evidenceFrames: batchFrames } : {}),
-          });
-
-          // E7-T2: Generate typed ToolOutcome for each tool in the batch.
-          for (let bi = 0; bi < batchResults.length; bi++) {
-            const result = batchResults[bi]!;
-            const call = batchCalls[bi]!;
-            const obs = observations[bi] ?? '';
-            toolOutcomes.push(
-              buildToolOutcome(
-                requestId,
-                batchStepIndex,
-                bi,
-                call.tool,
-                obs,
-                result.rawResult,
-                batchDurationMs,
-                false,
-                false,
-                false,
-              ),
-            );
-          }
-
-          const remainingAfterBatch = effectiveConfig.maxSteps - budget.getStepCount();
-          if (
-            !hasInjectedRefinementHint &&
-            remainingAfterBatch >= 3 &&
-            observations.some((o) => o.includes('0개') || o.includes('검색 결과가 없습니다') || o.startsWith('NO_MATCH:'))
-          ) {
-            hasInjectedRefinementHint = true;
-            pendingRefinementHint =
-              'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
-          }
-
-          if (!await runContractDrinkabilityChecks()) {
-            break;
-          }
-        }
-
-        // ── Sequential single tool call ─────────────────────────────────────
-        if (parsed.action !== undefined) {
-          const { tool, input } = parsed.action;
-          let effectiveInput = input;
-
-          if (
-            tool === 'search_wines' &&
-            queryExecutionContract.hasEntityMetadataSignal
-          ) {
-            const searchQuery = input['query'];
-            const structuredFilterKeys = getStructuredSearchFilterKeys(input);
-            if (
-              typeof searchQuery === 'string' &&
-              isSpecificSkuLikeQuery(searchQuery) &&
-              structuredFilterKeys.length > 0
-            ) {
-              const stepDurationMs = Math.max(0, Date.now() - stepStart);
-              const contractMsg =
-                `Tool contract violation: exact wine metadata queries must use a bare entity search_wines query with no structured filters. Remove ${structuredFilterKeys.join(', ')} and retry with query="${searchQuery}".`;
-              toolOutcomes.push(
-                buildToolOutcome(
-                  requestId,
-                  steps.length,
-                  0,
-                  tool,
-                  contractMsg,
-                  null,
-                  stepDurationMs,
-                  true,
-                  false,
-                  false,
-                ),
-              );
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                action: { tool, input },
-                observation: contractMsg,
-                durationMs: stepDurationMs,
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
-              continue;
-            }
-            if (
-              typeof searchQuery === 'string' &&
-              isSpecificSkuLikeQuery(searchQuery) &&
-              effectiveInput['limit'] !== 1
-            ) {
-              effectiveInput = { ...effectiveInput, limit: 1 };
-            }
-          }
-
-          if (pendingDrinkabilityEntityIds.length > 0 && tool !== 'check_drinking_window') {
-            const stepDurationMs = Math.max(0, Date.now() - stepStart);
-            const contractMsg =
-              `Tool contract violation: drinkability queries must call check_drinking_window next for ${pendingDrinkabilityEntityIds.map((id) => `"${id}"`).join(', ')}.`;
-            toolOutcomes.push(
-              buildToolOutcome(
-                requestId,
-                steps.length,
-                0,
-                tool,
-                contractMsg,
-                null,
-                stepDurationMs,
-                true,
-                false,
-                false,
-              ),
-            );
-            steps.push({
-              index: steps.length,
-              thought: parsed.thought,
-              action: { tool, input: effectiveInput },
-              observation: contractMsg,
-              durationMs: stepDurationMs,
-              tokenCount: { input: inputTokens, output: outputTokens },
-            });
-            continue;
-          }
-
-          // Unknown tool guard FIRST — do not consume budget on adversarial
-          // LLM-emitted unknown tool names. Adds an observation step but
-          // does not call recordStep so the loop counter is preserved.
-          // Cap unknown-tool attempts to prevent infinite loops from an
-          // adversarial or confused LLM that keeps emitting the same
-          // invalid tool name.
-          if (!isKnownTool(tool)) {
-            reasoningFailureDetected = true;
-            unknownToolAttempts++;
-            if (unknownToolAttempts > MAX_UNKNOWN_TOOL_ATTEMPTS) {
-              terminationReason = 'error';
-              break;
-            }
-            const stepDurationMs = Math.max(0, Date.now() - stepStart);
-            const unknownToolMsg = `Unknown tool: ${tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
-            toolOutcomes.push(
-              buildToolOutcome(
-                requestId,
-                steps.length,
-                0,
-                tool,
-                unknownToolMsg,
-                null,
-                stepDurationMs,
-                false,
-                false,
-                true,
-              ),
-            );
-            steps.push({
-              index: steps.length,
-              thought: parsed.thought,
-              action: { tool, input: effectiveInput },
-              observation: unknownToolMsg,
-              durationMs: stepDurationMs,
-              tokenCount: { input: inputTokens, output: outputTokens },
-            });
-            continue;
-          }
-
-          // Loop detection (only for known tools)
-          const loopCheck = budget.recordStep(tool, effectiveInput);
-          if (!loopCheck.allowed) {
-            terminationReason = loopCheck.reason ?? 'loop_detected';
-            break;
-          }
-
-          // Execute tool
-          let observation: string;
-          let rawResult: unknown;
-          let sequentialEvidenceFrame: ToolCallEvidenceFrame | undefined;
-          const toolAbortController = new AbortController();
-          const propagateToolAbort = (): void => { toolAbortController.abort(); };
-          abortSignal?.addEventListener('abort', propagateToolAbort, { once: true });
-          try {
-            const timedToolResult = await withTimeout(
-              executeAgentTool(
-                tool,
-                effectiveInput,
-                this.deps.toolDeps,
-                `${requestId}-step${steps.length}`,
-                {
-                  abortSignal: toolAbortController.signal,
-                  toolCallId: toolCallIdForStep(requestId, steps.length),
-                },
-              ),
-              effectiveConfig.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
-              `Tool "${tool}" timed out`,
-            );
-            observation = truncateObservation(timedToolResult.observation, effectiveConfig.maxContextChars);
-            rawResult = timedToolResult.rawResult;
-            sequentialEvidenceFrame = timedToolResult.evidenceFrame;
-            if (sequentialEvidenceFrame !== undefined) {
-              collectedFrames.push(sequentialEvidenceFrame);
-            }
-          } catch (toolErr) {
-            if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
-              timeoutStats.tool += 1;
-              toolAbortController.abort();
-              // MUST break here — without break the catch falls through to the
-              // generic observation assignment, losing timeout context and causing
-              // the agent to retry the same timed-out tool call. (RCA5-06)
-              observation = `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`;
-              rawResult = null;
-              const stepDurationMs = Math.max(0, Date.now() - stepStart);
-              toolOutcomes.push(
-                buildToolOutcome(
-                  requestId,
-                  steps.length,
-                  0,
-                  tool,
-                  observation,
-                  rawResult,
-                  stepDurationMs,
-                  false,
-                  true,
-                  false,
-                ),
-              );
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                action: { tool, input: effectiveInput },
-                observation,
-                durationMs: stepDurationMs,
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
-              break;
-            }
-            // Propagate caller abort: AbortError during tool execution means the client
-            // disconnected. Terminate immediately — do NOT classify as a tool error.
-            if (isAbortError(toolErr)) {
-              terminationReason = 'aborted';
-              const stepDurationMs = Math.max(0, Date.now() - stepStart);
-              const abortedObservation = '[ABORTED] Request cancelled during tool execution.';
-              toolOutcomes.push(
-                buildToolOutcome(
-                  requestId,
-                  steps.length,
-                  0,
-                  tool,
-                  abortedObservation,
-                  null,
-                  stepDurationMs,
-                  true,
-                  false,
-                  false,
-                ),
-              );
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                action: { tool, input: effectiveInput },
-                observation: abortedObservation,
-                durationMs: stepDurationMs,
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
-              break;
-            }
-            // Detect policy-block errors — terminate the loop immediately.
-            // The agent must NOT continue calling tools after a security block.
-            if (toolErr instanceof DomainError && toolErr.code === POLICY_BLOCKED_CODE) {
-              policyBlocked = true;
-              terminationReason = 'blocked';
-              const stepDurationMs = Math.max(0, Date.now() - stepStart);
-              const blockedObservation = formatPolicyBlockedObservation(toolErr);
-              toolOutcomes.push(
-                buildToolOutcome(
-                  requestId,
-                  steps.length,
-                  0,
-                  tool,
-                  blockedObservation,
-                  null,
-                  stepDurationMs,
-                  false,
-                  false,
-                  true,
-                ),
-              );
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                action: { tool, input: effectiveInput },
-                observation: blockedObservation,
-                durationMs: stepDurationMs,
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
-              break;
-            }
-            observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
-            rawResult = null;
-          } finally {
-            // Always abort the per-tool controller so any in-flight Vespa/HTTP request
-            // initiated by the tool is cancelled immediately, not at its natural timeout.
-            // The three explicit catch branches (TIMEOUT, AbortError, PolicyBlocked) all
-            // break out of the loop — this finally also fires for the generic error path
-            // which falls through, so toolAbortController was previously never aborted
-            // in that case, leaking connection-pool slots until timeout expiry.
-            toolAbortController.abort();
-            abortSignal?.removeEventListener('abort', propagateToolAbort);
-          }
-
-          // Track last search result for inclusion in final response
-          if (
-            rawResult !== null &&
-            typeof rawResult === 'object' &&
-            'queryType' in (rawResult as Record<string, unknown>) &&
-            (rawResult as Record<string, unknown>)['queryType'] === 'search'
-          ) {
-            lastSearchResult = rawResult as SearchResponseV1;
-          }
-
-          const stepDurationMs = Math.max(0, Date.now() - stepStart);
-          steps.push({
-            index: steps.length,
-            thought: parsed.thought,
-            action: { tool, input: effectiveInput },
-            observation,
-            durationMs: stepDurationMs,
-            tokenCount: { input: inputTokens, output: outputTokens },
-            ...(sequentialEvidenceFrame !== undefined
-              ? { evidenceFrames: [sequentialEvidenceFrame] }
-              : {}),
-          });
-
-          // E7-T2: Generate typed ToolOutcome alongside AgentStep.
-          // At this point: TIMEOUT/abort/policy paths already called break, so
-          // if we reach here the tool succeeded or produced a generic error
-          // (rawResult === null, observation starts with "Tool error:").
-          toolOutcomes.push(
-            buildToolOutcome(
-              requestId,
-              steps.length - 1,
-              0,
-              tool,
-              observation,
-              rawResult,
-              stepDurationMs,
-              rawResult === null,
-              false,
-              false,
-            ),
-          );
-
-          // Constraint-relaxation hint: if the observation indicates zero results
-          // and we have enough remaining steps, inject a hint once into the next
-          // LLM message to guide iterative constraint relaxation.
-          const remainingStepsAfterTool = effectiveConfig.maxSteps - budget.getStepCount();
-          if (
-            !hasInjectedRefinementHint &&
-            remainingStepsAfterTool >= 3 &&
-            (observation.includes('0개') || observation.includes('검색 결과가 없습니다') || observation.startsWith('NO_MATCH:'))
-          ) {
-            hasInjectedRefinementHint = true;
-            pendingRefinementHint =
-              'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
-          }
-
-          if (!await runContractDrinkabilityChecks()) {
-            break;
-          }
+        const shouldBreak = await this.runStepExecutorPhase(
+          requestId,
+          effectiveConfig,
+          budget,
+          state,
+          queryExecutionContract,
+          plannerPhase,
+          abortSignal,
+        );
+        if (shouldBreak) {
+          break;
         }
       }
     } catch (err) {
       log.error({ err, requestId }, 'Agent orchestrator unexpected error');
       if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
-        policyBlocked = true;
-        terminationReason = 'blocked';
+        state.policyBlocked = true;
+        state.terminationReason = 'blocked';
       } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
-        reasoningFailureDetected = true;
-        llmCircuitOpen = true;
-        terminationReason = 'error';
+        state.reasoningFailureDetected = true;
+        state.llmCircuitOpen = true;
+        state.terminationReason = 'error';
       } else {
-        reasoningFailureDetected = true;
-        terminationReason = 'error';
+        state.reasoningFailureDetected = true;
+        state.terminationReason = 'error';
       }
     }
 
-    // Fallback: if no answer was produced, do a single-shot search.
-    // Skip when a policy block already rejected the query — re-running
-    // the raw query through the search use case would just hit the same
-    // security gate (or worse, slip through if the gate state changed).
+    if (!state.policyBlocked && !state.llmCircuitOpen && state.answer === '' && state.terminationReason !== 'answer' && !(abortSignal?.aborted)) {
+      await this.runObservationSynthesisPhase(query, requestId, effectiveConfig, state, abortSignal);
+    }
+
     let fallbackApplied = false;
     let fallbackLayer: SynthesisContext['fallbackApplied'] = null;
-    let failedSynthesisAttempts = 0;
     let fallbackSearchUsed = false;
-    // Require non-empty answer string: a step with answer='' is not a valid answer.
-    // Without the length check, synthesis layers below all skip and empty string propagates.
-    let answer = steps.find((s) => s.answer !== undefined && s.answer.length > 0)?.answer ?? '';
+    let answer = state.answer;
 
-    // Observation-based synthesis: if we have tool results but no answer,
-    // try to synthesize from what we already gathered before doing a fresh search.
-    // This avoids the "agent ran 3 steps, got great results, then returned nothing" failure.
-    // Skip entirely if caller already disconnected — synthesis costs 1-2 LLM round-trips
-    // that nobody will receive.
-    if (!policyBlocked && !llmCircuitOpen && answer === '' && terminationReason !== 'answer' && !(abortSignal?.aborted)) {
-      // Pre-flight token budget check BEFORE synthesis LLM call (CLAUDE.md rule 20).
-      // Without this, synthesis fires even when the main loop exhausted the budget,
-      // silently overrunning maxTotalTokens by 1-2x (synthesis ≈ same cost as one main step).
-      if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
-        log.warn({ requestId, totalInputTokens, totalOutputTokens, budget: effectiveConfig.maxTotalTokens }, '[agent] token budget exhausted — skipping final answer synthesis to prevent overrun');
-      } else {
-        // Check both sequential (observation) and parallel batch (observations[]) steps
-        // so synthesis fires when the agent used parallel tools and has results.
-        const obsSteps = steps.filter(
-        (s) =>
-          (s.observation !== undefined && s.observation.length > 0) ||
-          (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
-      );
-      if (obsSteps.length > 0) {
-        // requestId embedded in sentinel to prevent adversarial tool results from
-        // containing the literal string and colliding with our synthesis detector.
-        const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
-        const synthMessages = [
-          buildSystemMessage(),
-          buildUserMessage(query),
-          ...buildStepMessages(steps),
-          {
-            role: 'user' as const,
-            content: synthSentinel,
-          },
-        ];
-        const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
-          // Short-circuit if caller disconnected before we even start the LLM call.
-          if (abortSignal?.aborted) return undefined;
-          const synthAbort = new AbortController();
-          // Propagate caller abort into the synthesis controller.
-          const propagateSynthAbort = (): void => { synthAbort.abort(); };
-          abortSignal?.addEventListener('abort', propagateSynthAbort, { once: true });
-          // Re-check after addEventListener: if abort fired between the aborted===true
-          // check above and addEventListener, the 'abort' event already fired and the
-          // listener will never be called — synthAbort would never abort. Guard this race.
-          if (abortSignal?.aborted) {
-            synthAbort.abort();
-            abortSignal.removeEventListener('abort', propagateSynthAbort);
-            return undefined;
-          }
-          const synthTimer = setTimeout(() => {
-            synthAbort.abort();
-          }, SYNTHESIS_TIMEOUT_MS);
-          try {
-            const synthResult = await this.deps.chatLlm.complete({
-              messages: synthMessages,
-              temperature: 0,
-              maxOutputTokens,
-              ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
-              abortSignal: synthAbort.signal,
-            });
-            if (!isValidLlmResult(synthResult)) {
-              log.warn({ requestId }, 'synthesis LLM returned malformed result');
-              return undefined;
-            }
-            // Accumulate synthesis tokens into the overall run totals.
-            // IMPORTANT: count ONLY the synthSentinel (the new message unique to
-            // this synthesis call). buildSystemMessage(), buildUserMessage(), and
-            // buildStepMessages() tokens were already counted on each main-loop
-            // iteration — re-counting synthMessages in full would inflate
-            // totalInputTokens and could cause the attempt-2 budget guard
-            // (line ~1128) to block a legal retry.
-            totalInputTokens += Math.ceil(synthSentinel.length / CHARS_PER_TOKEN_ESTIMATE);
-            totalOutputTokens += Math.ceil(synthResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
-            const parsedSynth = parseLlmOutput(synthResult.text);
-            // If the synthesis LLM still returns a tool call despite the sentinel
-            // instruction, treat it as failure (return undefined). Continuing
-            // with parsedSynth.action would cause a use-after-loop tool execution
-            // outside the budget guard.
-            if (parsedSynth.action !== undefined || parsedSynth.actions !== undefined) {
-              log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
-              return undefined;
-            }
-            // Reject JSON-shell answers like "{}", "[]", or whitespace-only strings
-            // that the LLM may emit when confused by the synthesis sentinel.
-            // A real answer must have meaningful text content (>10 chars) and must
-            // not look like a bare JSON object/array wrapper.
-            const candidate = parsedSynth.answer?.trim() ?? '';
-            const isShell = /^[{[\s]*[}\]]*$/.test(candidate);
-            return candidate.length > 10 && !isShell
-              ? candidate
-              : undefined;
-          } finally {
-            abortSignal?.removeEventListener('abort', propagateSynthAbort);
-            clearTimeout(synthTimer);
-          }
-        };
-        // Attempt 1: full token budget synthesis
-        let synthAnswer: string | undefined;
-        try {
-          synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
-        } catch (synthErr1) {
-          // If the LLM circuit breaker opened during attempt 1, retrying is
-          // pointless — the breaker is OPEN and attempt 2 will fast-fail too.
-          // Mark the flag so downstream layers also skip LLM calls.
-          if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
-            llmCircuitOpen = true;
-          } else if (isAbortError(synthErr1)) {
-            // Caller disconnected during synthesis — mark as aborted so the
-            // attempt-2 guard (abortSignal?.aborted) aligns with terminationReason.
-            terminationReason = 'aborted';
-          }
-          log.error({ err: synthErr1, requestId }, `synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
-        }
-        if (synthAnswer === undefined) {
-          failedSynthesisAttempts += 1;
-        }
-        // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw).
-        // Skip when (a) caller disconnected, (b) LLM circuit breaker is OPEN
-        // (attempt 1 noted this), or (c) the token budget is now exhausted —
-        // attempt 1 accumulated tokens that may have crossed maxTotalTokens,
-        // and firing attempt 2 would silently overrun the budget (CLAUDE.md rule 20).
-        if (
-          synthAnswer === undefined
-          && !(abortSignal?.aborted)
-          && !llmCircuitOpen
-          // Use >= (not >) to match pre-flight check at line ~1001 — at exact boundary
-          // the budget is consumed, any synthesis would silently overrun (CLAUDE.md rule 20).
-          && totalInputTokens + totalOutputTokens < effectiveConfig.maxTotalTokens
-        ) {
-          try {
-            log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
-            synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
-          } catch (synthErr2) {
-            if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
-              llmCircuitOpen = true;
-            } else if (isAbortError(synthErr2)) {
-              terminationReason = 'aborted';
-            }
-            log.error({ err: synthErr2, requestId }, 'synthesis attempt 2 threw — proceeding to fallback search');
-          }
-          if (synthAnswer === undefined) {
-            failedSynthesisAttempts += 1;
-          }
-        }
-        if (synthAnswer !== undefined) {
-          answer = synthAnswer;
-          terminationReason = 'answer';
-          log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
-        }
-      }
-      } // end else (budget not exhausted)
-    }
-
-    // Track whether the agent already gathered tool observations before reaching fallback.
-    // When observations exist, synthesis failed but tool execution succeeded — the agent
-    // correctly called the right tools; only the final LLM synthesis call failed (infra).
-    // In that case we avoid re-running a fresh search (Layer 2) and instead use
-    // Layer 3 (raw observation) with terminationReason='answer' so the scorer does not
-    // penalise correct tool execution as a complete failure.
-    const hasToolObservations = steps.some(
+    const hasToolObservations = state.steps.some(
       (s) =>
         (s.observation !== undefined && s.observation.length > 0) ||
         (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
     );
 
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations && !(abortSignal?.aborted)) {
-      // Layer 2: single-shot fallback search — only when the agent made NO tool calls.
-      // Skip when tool observations exist; those cases go directly to Layer 3 so we
-      // preserve the agent's correct tool execution in the terminationReason.
-      // Also skip if caller already disconnected (abortSignal.aborted).
-      //
-      // Cap the fallback search at FALLBACK_SEARCH_TIMEOUT_MS (module-scope const).
-      // This is independent of perStepTimeoutMs to avoid the inversion bug where
-      // low perStep settings gave the fallback the same exhausted budget.
+    const shouldRunLayer2Fallback =
+      !state.policyBlocked &&
+      answer === '' &&
+      state.terminationReason !== 'answer' &&
+      !hasToolObservations &&
+      !(abortSignal?.aborted);
+
+    if (shouldRunLayer2Fallback) {
       const fallbackController = new AbortController();
-      // Chain caller abort → fallback controller so client disconnect cancels the search.
       const propagateFallbackAbort = (): void => { fallbackController.abort(); };
       abortSignal?.addEventListener('abort', propagateFallbackAbort, { once: true });
-      // Race guard: abort may fire between the outer if-guard and addEventListener.
-      // Re-check immediately after registration. If aborted, skip the fallback search.
-      if (abortSignal?.aborted) {
+      const fallbackTimer = setTimeout(() => {
         fallbackController.abort();
-        abortSignal.removeEventListener('abort', propagateFallbackAbort);
-        // Fall through to Layer 3/4 without executing the search.
-      } else {
-      const fallbackTimer = setTimeout(
-        () => {
-          fallbackController.abort();
-        },
-        FALLBACK_SEARCH_TIMEOUT_MS,
-      );
+      }, FALLBACK_SEARCH_TIMEOUT_MS);
       try {
-        // v5: preserve constraints from any prior search_wines attempt in the step history.
-        // Even when no observations were produced, the LLM may have emitted a structured
-        // search_wines action that hit a parse/budget error. Recovering its `input.query`
-        // and forwarding it to searchUseCase preserves the agent's intent — much better
-        // than re-running with the bare original query and discarding all extracted constraints.
-        const lastSearchInput = recoverLastSearchInput(steps);
+        const lastSearchInput = recoverLastSearchInput(state.steps);
         const fallbackQuery = lastSearchInput?.query ?? query;
         const fallbackResult = await this.deps.toolDeps.searchUseCase.execute(
           { query: fallbackQuery },
-          `${requestId}-fallback`,
+          requestId + '-fallback',
           { abortSignal: fallbackController.signal },
         );
         fallbackSearchUsed = true;
@@ -2002,49 +1954,41 @@ export class AgentOrchestrator {
           const producer = topResult.entity.producer ?? '';
           const region = topResult.entity.region ?? '';
           const detail = [producer, region].filter(Boolean).join(', ');
-          // Language-aware fallback template: detect Hangul in original query and respond
-          // in the same language. Pre-fix this was a hardcoded English template, which
-          // produced English responses for Korean queries on step-0 LLM failure (the most
-          // common benchmark fallback path). Korean = Hangul Syllables block U+AC00..U+D7A3.
           const queryHasHangul = containsHangul(query);
           answer = queryHasHangul
-            ? `검색 결과: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (참고: 처리 제약으로 간단히 표시되었습니다.)`
-            : `Based on your query, I found: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (Note: simplified result due to processing constraints.)`;
-          lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
+            ? '검색 결과: ' + topResult.entity.canonicalLabel + (detail ? ' (' + detail + ')' : '') + '. (참고: 처리 제약으로 간단히 표시되었습니다.)'
+            : 'Based on your query, I found: ' + topResult.entity.canonicalLabel + (detail ? ' (' + detail + ')' : '') + '. (Note: simplified result due to processing constraints.)';
+          state.answer = answer;
+          state.lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
           fallbackApplied = true;
           fallbackLayer = 'layer2';
-          terminationReason = 'fallback';
+          state.fallbackLayer = fallbackLayer;
+          state.terminationReason = 'fallback';
         } else {
-          // Fallback search returned no results — construct a graceful template answer.
-          // Language-aware: Korean for Hangul queries, English otherwise.
           const queryHasHangul = containsHangul(query);
           answer = queryHasHangul
-            ? `"${query}"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.`
-            : `No results found for "${query}". Try simplifying the query or using a different wine name or grape variety.`;
+            ? '"' + query + '"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.'
+            : 'No results found for "' + query + '". Try simplifying the query or using a different wine name or grape variety.';
+          state.answer = answer;
           fallbackApplied = true;
           fallbackLayer = 'layer2';
-          terminationReason = 'fallback';
+          state.fallbackLayer = fallbackLayer;
+          state.terminationReason = 'fallback';
         }
       } catch (err) {
         if (isAbortError(err)) {
-          // Caller disconnected during fallback search — propagate abort, do not log as failure.
-          terminationReason = 'aborted';
+          state.terminationReason = 'aborted';
         } else {
-          // Log so an outage of the fallback path is observable instead of silent.
           log.error({ err, requestId }, 'agent fallback search failed');
         }
       } finally {
         abortSignal?.removeEventListener('abort', propagateFallbackAbort);
         clearTimeout(fallbackTimer);
       }
-      } // end else (not aborted before fallback search started)
-    } // end if (answer === '' && !hasToolObservations) — Layer 2 block
+    }
 
-    if (!policyBlocked && terminationReason !== 'aborted' && answer === '') {
-      // Layer 3: synthesize from last available observation (deterministic, no LLM)
-      // Skip when caller disconnected (aborted) — the result will not be delivered anyway.
-      // Check both sequential (observation) and parallel (observations[]) steps.
-      const lastObs = steps.findLast(
+    if (!state.policyBlocked && state.terminationReason !== 'aborted' && answer === '') {
+      const lastObs = state.steps.findLast(
         (s) =>
           (s.observation !== undefined && s.observation.length > 0) ||
           (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
@@ -2056,47 +2000,46 @@ export class AgentOrchestrator {
         const queryHasHangul = containsHangul(query);
         const preview = lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS);
         answer = queryHasHangul
-          ? `검색 결과 요약: ${preview}`
-          : `Search result summary: ${preview}`;
+          ? '검색 결과 요약: ' + preview
+          : 'Search result summary: ' + preview;
+        state.answer = answer;
         fallbackApplied = true;
         fallbackLayer = 'layer3';
-        // When tool observations exist, the agent successfully called the right tools —
-        // only the synthesis LLM call failed (infrastructure). Use terminationReason='answer'
-        // so the scorer credits correct tool execution rather than penalising as full failure.
-        terminationReason = hasToolObservations ? 'answer' : 'fallback';
+        state.fallbackLayer = fallbackLayer;
+        state.terminationReason = hasToolObservations ? 'answer' : 'fallback';
         log.error({ requestId, hasToolObservations }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
       }
     }
 
-    if (policyBlocked && answer === '') {
+    if (state.policyBlocked && answer === '') {
       answer = '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.';
+      state.answer = answer;
       log.error({ requestId }, 'policy-blocked agent run ended without explicit answer; returning blocked template');
     }
 
-    if (!policyBlocked && terminationReason !== 'aborted' && answer === '') {
-      // Layer 4: absolute guarantee — no tool call is ALWAYS better than empty.
-      // Skip when caller disconnected (aborted) — preserve 'aborted' terminationReason
-      // so the caller can distinguish abort from genuine failure.
+    // Layer 4: absolute guarantee — return a non-empty Korean answer template.
+    // Layer 4 fallback template: keep the literal assignment directly below this comment.
+    if (!state.policyBlocked && state.terminationReason !== 'aborted' && answer === '') {
       answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
+      state.answer = answer;
       fallbackApplied = true;
       fallbackLayer = 'layer4';
-      // Same reasoning as Layer 3: if tool observations exist, the agent execution was
-      // correct; only synthesis failed. Use 'answer' to avoid penalising correct execution.
-      terminationReason = hasToolObservations ? 'answer' : 'fallback';
-      log.error({ requestId, query, steps: steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
+      state.fallbackLayer = fallbackLayer;
+      state.terminationReason = hasToolObservations ? 'answer' : 'fallback';
+      log.error({ requestId, query, steps: state.steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
     }
 
     log.info(
       {
         requestId,
-        steps: steps.length,
-        toolCalls: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
-        terminationReason,
-        timeoutStats,
+        steps: state.steps.length,
+        toolCalls: state.steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
+        terminationReason: state.terminationReason,
+        timeoutStats: state.timeoutStats,
         failureTags: [
-          ...(timeoutStats.llmStep > 0 ? ['llm_step_timeout'] : []),
-          ...(timeoutStats.parallelBatch > 0 ? ['parallel_batch_timeout'] : []),
-          ...(timeoutStats.tool > 0 ? ['tool_timeout'] : []),
+          ...(state.timeoutStats.llmStep > 0 ? ['llm_step_timeout'] : []),
+          ...(state.timeoutStats.parallelBatch > 0 ? ['parallel_batch_timeout'] : []),
+          ...(state.timeoutStats.tool > 0 ? ['tool_timeout'] : []),
         ],
         totalDurationMs: budget.getElapsedMs(),
         fallbackApplied,
@@ -2105,62 +2048,55 @@ export class AgentOrchestrator {
     );
 
     this.deps.executionObserver?.onExecutionComplete({
-      terminationReason,
+      terminationReason: state.terminationReason,
       fallbackApplied,
-      toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
+      toolCallCount: state.steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
       totalDurationMs: budget.getElapsedMs(),
-      timeoutStats,
+      timeoutStats: state.timeoutStats,
       synthesis: {
         reasoningFailure:
-          reasoningFailureDetected
-          || timeoutStats.llmStep > 0
-          || timeoutStats.parallelBatch > 0
-          || llmCircuitOpen
-          || failedSynthesisAttempts > 0
-          || (hasToolObservations && fallbackLayer !== null),
+          state.reasoningFailureDetected ||
+          state.timeoutStats.llmStep > 0 ||
+          state.timeoutStats.parallelBatch > 0 ||
+          state.llmCircuitOpen ||
+          state.failedSynthesisAttempts > 0 ||
+          (hasToolObservations && fallbackLayer !== null),
         fallbackApplied: fallbackLayer,
       },
     });
 
     const reasoningFailure =
-      reasoningFailureDetected
-      || timeoutStats.llmStep > 0
-      || timeoutStats.parallelBatch > 0
-      || llmCircuitOpen
-      || failedSynthesisAttempts > 0
-      || (hasToolObservations && fallbackLayer !== null);
+      state.reasoningFailureDetected ||
+      state.timeoutStats.llmStep > 0 ||
+      state.timeoutStats.parallelBatch > 0 ||
+      state.llmCircuitOpen ||
+      state.failedSynthesisAttempts > 0 ||
+      (hasToolObservations && fallbackLayer !== null);
     const synthesisContext = buildSynthesisContext(
       query,
-      toolOutcomes,
+      state.toolOutcomes,
       reasoningFailure,
       fallbackLayer,
     );
 
-    // AG-02: normalise answer whitespace at the exit point so all code paths
-    // (main-loop answer, synthesis, fallback templates) produce a consistent
-    // trimmed string. Fallback templates are already clean but applying .trim()
-    // is idempotent — this is the single canonical normalisation point.
     return {
       answer: answer.trim(),
-      steps,
+      steps: state.steps,
       totalDurationMs: budget.getElapsedMs(),
-      totalTokens: { input: totalInputTokens, output: totalOutputTokens },
-      toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
+      totalTokens: { input: state.totalInputTokens, output: state.totalOutputTokens },
+      toolCallCount: state.steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
       fallbackApplied,
-      terminationReason,
-      ...(lastSearchResult !== undefined ? { searchResults: lastSearchResult } : {}),
-      // E7-T2: Include typed tool outcomes when at least one tool was invoked.
-      ...(toolOutcomes.length > 0 ? { toolOutcomes } : {}),
-      // ADR-009 Phase 0: aggregate of typed evidence frames across the run.
-      // Present when at least one tool call emitted a frame (feature flag on).
-      ...(collectedFrames.length > 0 ? { evidenceFrames: collectedFrames } : {}),
+      terminationReason: state.terminationReason,
+      ...(state.lastSearchResult !== undefined ? { searchResults: state.lastSearchResult } : {}),
+      ...(state.toolOutcomes.length > 0 ? { toolOutcomes: state.toolOutcomes } : {}),
+      ...(state.collectedFrames.length > 0 ? { evidenceFrames: state.collectedFrames } : {}),
       synthesisContext,
       ...(fallbackApplied
         ? {
             fallbackTrace: {
               fallbackApplied: fallbackLayer,
               reasoningFailure,
-              failedSynthesisAttempts,
+              failedSynthesisAttempts: state.failedSynthesisAttempts,
               fallbackSearchUsed,
             },
           }

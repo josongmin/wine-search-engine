@@ -41,13 +41,13 @@ export const GRAPH_METRIC_TIER_WEIGHT_SOFT = 0.2;
 export const GRAPH_METRIC_TIER_WEIGHT_INFERRED = 0.2;
 
 /** Return type for `computeScrInferredGraph`. */
-export interface GraphScrResult {
+interface GraphScrResult {
   /** `null` when no graph was provided OR when the expected inferred bucket is empty. */
   readonly value: number | null;
 }
 
 /** Return type for `computeCsrInferredGraph`. */
-export interface GraphCsrResult {
+interface GraphCsrResult {
   /** `null` when no graph was provided OR when no extracted inferred constraints exist. */
   readonly value: number | null;
 }

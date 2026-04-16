@@ -17,13 +17,13 @@ import type { CandidateEnvelope, ProtectedInclusionReason } from '../model/candi
 // Classification result
 // ---------------------------------------------------------------------------
 
-export type ProtectionReason =
+type ProtectionReason =
   | 'known_item_lookup'
   | 'anchor_conditioned'
   | 'exact_alias_match'
   | 'hard_constraint_compatible';
 
-export interface ProtectionClassification {
+interface ProtectionClassification {
   /** Whether this candidate should be protected. */
   readonly protect: boolean;
   /** Primary reason (highest-priority match), if protect === true. */
@@ -34,7 +34,7 @@ export interface ProtectionClassification {
 // Policy interface
 // ---------------------------------------------------------------------------
 
-export interface ProtectedRecallPolicy {
+interface ProtectedRecallPolicy {
   classify(candidate: CandidateEnvelope): ProtectionClassification;
 }
 

@@ -408,7 +408,7 @@ export function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEn
  * - `feature_dimension_mismatch`: model weight vector length ≠ LTR_MODEL_FEATURE_DIMENSION
  * - `model_stale`: model age exceeded MODEL_STALENESS_THRESHOLD_DAYS (warning only, does not skip)
  */
-export type LtrRerankSkipReason =
+type LtrRerankSkipReason =
   | 'not_skipped'
   | 'no_model_for_query_class'
   | 'empty_candidates'
@@ -716,7 +716,7 @@ function buildConstraintState(
   };
 }
 
-export type RankerOptions = {
+type RankerOptions = {
   readonly rerankTopK?: number;
   readonly rerankBlendScale?: number;
   readonly rerankThreshold?: number;

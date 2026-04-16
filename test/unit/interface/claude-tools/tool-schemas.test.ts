@@ -63,6 +63,30 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(modeProp).toBeDefined();
       expect(modeProp.enum).toEqual(['auto', 'entity', 'hybrid', 'mixed']);
     });
+
+    it('should expose structured search constraints that match the agent search contract', () => {
+      const props = tool.input_schema.properties as Record<string, any>;
+      expect(props.exclude_grapes?.type).toBe('array');
+      expect(props.exclude_regions?.type).toBe('array');
+      expect(props.max_price_krw?.type).toBe('number');
+      expect(props.wine_type?.enum).toEqual([
+        'red',
+        'white',
+        'rosé',
+        'sparkling',
+        'fortified',
+        'dessert',
+        'orange',
+        'natural',
+      ]);
+      expect(props.country?.type).toBe('string');
+      expect(props.vintage_min?.minimum).toBe(1600);
+      expect(props.vintage_max?.maximum).toBe(2100);
+      expect(props.appellation?.type).toBe('string');
+      expect(props.style?.type).toBe('string');
+      expect(props.certification?.type).toBe('string');
+      expect(props.want_diversity?.type).toBe('boolean');
+    });
   });
 
   describe('get_food_pairings tool', () => {
@@ -85,6 +109,13 @@ describe('WINE_SEARCH_TOOLS', () => {
       const priceProp = tool.input_schema.properties.max_price as any;
       expect(priceProp).toBeDefined();
       expect(priceProp.type).toBe('number');
+    });
+
+    it('should expose max_price_krw as the preferred structured budget field', () => {
+      const priceProp = tool.input_schema.properties.max_price_krw as any;
+      expect(priceProp).toBeDefined();
+      expect(priceProp.type).toBe('number');
+      expect(priceProp.minimum).toBe(1);
     });
 
     it('should have optional color property with wine colors', () => {

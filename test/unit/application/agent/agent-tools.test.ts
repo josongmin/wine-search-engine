@@ -83,6 +83,117 @@ describe('executeAgentTool', () => {
     expect(parsed.excludeCountries).toContain('France');
   });
 
+  it('rewrites structured multi-course queries to pairing-focused retrieval cores', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '결혼기념일 코스요리 에피타이저용 화이트 추천',
+        wine_type: 'white',
+        max_price_krw: 150_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toContain('aperitif');
+    expect(request?.query).toContain('white');
+    expect(request?.query).toContain('wine');
+    expect(request?.query).not.toContain('결혼기념일');
+    expect(request?.query).not.toContain('코스요리');
+  });
+
+  it('rewrites colloquial grape queries to canonical retrieval cores', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '까쇼 추천해줘',
+        wine_type: 'red',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toContain('cabernet sauvignon');
+    expect(request?.query).toContain('wine');
+    expect(request?.query).not.toContain('추천해줘');
+    expect(request?.filters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'wine_type', value: 'red' }),
+      ]),
+    );
+  });
+
+  it('rewrites Korean food-suffix pairing queries to canonical pairing cores', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '메인 소고기용 레드 추천',
+        wine_type: 'red',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toContain('beef');
+    expect(request?.query).toContain('red');
+    expect(request?.query).toContain('wine');
+    expect(request?.query).not.toContain('소고기용');
+  });
+
+  it('transliterates short bare Korean entity queries to canonical Latin retrieval cores', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '보졸레 누보',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toBe('beaujolais nouveau');
+  });
+
+  it('preserves the lexical nucleus when structured filters exist but no semantic anchor survives reconstruction', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '보졸레 누보 올해꺼 나왔어?',
+        wine_type: 'red',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toMatch(/보졸레|beaujolais/i);
+    expect(request?.query).toContain('red');
+    expect(request?.query).toContain('wine');
+  });
+
   it('forwards search_wines limit to the search use case', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),

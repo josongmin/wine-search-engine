@@ -6,7 +6,7 @@
 
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
-export interface CharNgramMatch {
+interface CharNgramMatch {
   readonly term: string;
   readonly similarity: number;
   readonly sharedTrigrams: number;

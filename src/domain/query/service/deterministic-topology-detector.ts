@@ -61,7 +61,7 @@ const TOPOLOGY_COURSE_SUBQUERY_ID_PREFIX = `${TOPOLOGY_NODE_ID_PREFIX}det-course
  *  guidance that each course slot should target ~3 wines to choose from. */
 const DEFAULT_SUBQUERY_TARGET_CARDINALITY = 3;
 
-export interface DeterministicTopologyInput {
+interface DeterministicTopologyInput {
   readonly atoms: readonly ConstraintAtom[];
   readonly normalizedQuery: string;
   readonly decompositionHint?: QueryDecompositionHint | undefined;

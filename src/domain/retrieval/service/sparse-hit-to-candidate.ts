@@ -13,7 +13,7 @@ import { summaryToHybridCandidateFields } from './hybrid-candidate-summary.js';
  * applied filter list, and the candidate source tags — all of which are
  * parameters here.
  */
-export interface SparseHitToCandidateOptions {
+interface SparseHitToCandidateOptions {
   readonly retrievalProfile: string;
   readonly lexicalQueries: readonly string[];
   readonly filtersApplied: readonly string[];

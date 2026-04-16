@@ -5,7 +5,7 @@ import type { EntityType } from './entity-type.js';
  * Parameters required to compute an identity signature.
  * Which fields are used depends on the entity type.
  */
-export interface SignatureParams {
+interface SignatureParams {
   /** Canonical label of the entity (normalized). */
   readonly canonicalLabel: string;
   /** Producer entity id — required for wine. */

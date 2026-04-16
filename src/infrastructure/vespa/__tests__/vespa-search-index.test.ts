@@ -266,6 +266,21 @@ describe('VespaSearchIndex', () => {
     });
   });
 
+  it('includes aliases_noisy_recall phrase matching in sparseSearch YQL', async () => {
+    let capturedYql = '';
+    const client = {
+      query: vi.fn().mockImplementation((yql: string) => {
+        capturedYql = yql;
+        return Promise.resolve(makeQueryResponse([]));
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await index.sparseSearch(['오푸스원'], [], 5);
+
+    expect(capturedYql).toContain('aliases_noisy_recall contains phrase(@query0)');
+  });
+
   it('rejects Vespa hits whose indexed entity_id uses the forbidden source-record public namespace (ADR-007)', async () => {
     const client = {
       query: vi.fn().mockResolvedValue({

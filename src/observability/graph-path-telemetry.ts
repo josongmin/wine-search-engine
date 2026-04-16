@@ -154,7 +154,7 @@ export function recordGraphPathDecision(decision: GraphPathDecision): void {
   bucket[decision.outcome] += 1;
 }
 
-export interface GraphPathCountersSnapshot {
+interface GraphPathCountersSnapshot {
   readonly byReader: Readonly<Record<string, Readonly<Record<GraphPathOutcome, number>>>>;
   readonly totalByOutcome: Readonly<Record<GraphPathOutcome, number>>;
 }

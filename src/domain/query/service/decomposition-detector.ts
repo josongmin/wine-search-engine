@@ -25,19 +25,19 @@ import {
   type QueryDecompositionHint,
 } from '../model/query-decomposition.js';
 
-export interface DecompositionResult {
+interface DecompositionResult {
   readonly decomposed: false;
 }
 
-export interface SuccessfulDecomposition {
+interface SuccessfulDecomposition {
   readonly decomposed: true;
   readonly subQueries: [string, string];
   readonly comparisonIntent: 'compare' | 'recommend_one' | 'list_both';
 }
 
-export type DecompositionOutcome = DecompositionResult | SuccessfulDecomposition;
+type DecompositionOutcome = DecompositionResult | SuccessfulDecomposition;
 
-export interface QueryDecompositionAnalysis {
+interface QueryDecompositionAnalysis {
   readonly outcome: DecompositionOutcome;
   readonly hint: QueryDecompositionHint;
 }

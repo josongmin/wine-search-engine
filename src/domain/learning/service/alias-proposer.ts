@@ -31,7 +31,7 @@ const ALIAS_CONFIDENCE_WEIGHT_PURCHASE = 0.2;
 /**
  * Configuration for alias proposal thresholds.
  */
-export interface AliasProposerConfig {
+interface AliasProposerConfig {
   /** Minimum distinct query count to propose an alias (default: 10). */
   readonly minQueryCount: number;
 

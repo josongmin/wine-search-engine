@@ -11,12 +11,6 @@ export type CacheGetResult<T> =
   | { readonly kind: 'infra_error'; readonly errorClass: string; readonly message: string }
   | { readonly kind: 'corrupt_entry'; readonly reason: string };
 
-/**
- * Backwards-compatible alias retained for legacy imports while callers
- * migrate to the typed `CacheGetResult` name.
- */
-export type CacheResult<T> = CacheGetResult<T>;
-
 export function cacheHit<T>(value: T): CacheGetResult<T> {
   return { kind: 'hit', value };
 }

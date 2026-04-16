@@ -22,7 +22,7 @@ export interface RerankGateInput {
   readonly rerankForced?: boolean;
 }
 
-export interface RerankGateDecision {
+interface RerankGateDecision {
   readonly shouldRerank: boolean;
   /** Human-readable trace reason for observability/debugging. */
   readonly reason: string;

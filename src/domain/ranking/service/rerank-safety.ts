@@ -74,7 +74,7 @@ export interface SafetyCandidateDescriptor {
  * List-level context — pre-computed aggregate over all candidates in the batch.
  * Passed to evaluateRerankSafety() so candidate-level checks can use list info.
  */
-export interface RerankSafetyListContext {
+interface RerankSafetyListContext {
   /**
    * True if there exists at least one candidate with hardConstraintPass=true
    * in the pre-rerank list. Used for Rule 1 — if no candidate passes hard

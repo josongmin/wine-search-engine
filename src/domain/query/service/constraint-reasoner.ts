@@ -422,7 +422,7 @@ function areOpposingOperators(op1: string, op2: string): boolean {
 }
 
 /** Rebuild a ConstraintBundle from a flat list of resolved atoms. */
-function buildBundleFromAtoms(atoms: readonly ConstraintAtom[]): ConstraintBundle {
+export function buildBundleFromAtoms(atoms: readonly ConstraintAtom[]): ConstraintBundle {
   const hard: NormalizedConstraint[] = [];
   const soft: NormalizedConstraint[] = [];
   const inferred: NormalizedConstraint[] = [];
@@ -437,9 +437,17 @@ function buildBundleFromAtoms(atoms: readonly ConstraintAtom[]): ConstraintBundl
       confidence: atom.confidence,
       ...(atom.mapping_version !== undefined ? { mapping_version: atom.mapping_version } : {}),
     };
-    if (atom.source_tier === 'hard') hard.push(base);
-    else if (atom.source_tier === 'soft') soft.push(base);
-    else inferred.push(base);
+    if (atom.constraint_role === 'exclusion' || atom.constraint_role === 'must_satisfy') {
+      hard.push(base);
+    } else if (atom.constraint_role === 'prefer') {
+      soft.push(base);
+    } else if (atom.source_tier === 'hard') {
+      hard.push(base);
+    } else if (atom.source_tier === 'soft') {
+      soft.push(base);
+    } else {
+      inferred.push(base);
+    }
   }
 
   return { hard, soft, inferred };

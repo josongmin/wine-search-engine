@@ -36,7 +36,7 @@ function ltrCurrentYear(): number {
   return new Date().getFullYear();
 }
 
-export interface LTRFeatureVector {
+interface LTRFeatureVector {
   // Retrieval signals (5)
   readonly bm25_score: number;
   readonly dense_score: number;

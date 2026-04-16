@@ -14,6 +14,7 @@ import { projectToHumanResponse } from './search-human-projection.js';
 import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
 import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
+import { createStageTimer } from '../../../observability/stage-timer.js';
 
 /**
  * POST /v1/search — main search endpoint.
@@ -38,10 +39,12 @@ export function registerSearchRoute(
       const parsed = parseContractBody(request, SearchRouteContract);
       const searchRequest = toSearchRequest(parsed);
       const requestId = getRequestId(request);
+      const stageTimer = createStageTimer();
 
       const response = await deps.searchUseCase.execute(searchRequest, requestId, {
         abortSignal: abortSignalFromFastifyRequest(request),
         debugRequest: request.debugRequest,
+        stageTimer,
       });
 
       // RFC 7234 §4.1: Vary must list headers that influence representation selection.

@@ -75,7 +75,7 @@ export interface ResolvedEntity {
 
 type ResolverEntry = Omit<ResolvedEntity, 'matchedSurface'>;
 
-export interface ResolveEntityOptions {
+interface ResolveEntityOptions {
   /**
    * When true, prefer ontology-bearing entities (country/region/appellation/grape)
    * over style-like categories such as `wine_type`.

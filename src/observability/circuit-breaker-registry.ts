@@ -9,7 +9,7 @@
 
 import type { CircuitBreaker } from '../domain/shared/circuit-breaker/circuit-breaker.js';
 
-export interface CircuitBreakerSnapshot {
+interface CircuitBreakerSnapshot {
   readonly name: string;
   readonly state: string;
   readonly metrics: ReturnType<CircuitBreaker['getMetrics']>;

@@ -290,7 +290,7 @@ export function matchesCourseKeywords(query: string): boolean {
  * `subquery` node per detected course. Order is deterministic
  * (insertion-sorted by canonical course label).
  */
-export interface ClassifiedCourseHit {
+interface ClassifiedCourseHit {
   readonly purpose: string;
 }
 

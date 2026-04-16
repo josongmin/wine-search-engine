@@ -3,7 +3,7 @@ import type { EvalResult } from '../model/eval-result.js';
 /**
  * A single point on the risk-coverage curve.
  */
-export interface RiskCoveragePoint {
+interface RiskCoveragePoint {
   /** Fraction of cases covered at this threshold (0–1). */
   readonly coverage: number;
 

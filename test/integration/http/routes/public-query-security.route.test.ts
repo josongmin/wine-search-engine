@@ -131,6 +131,36 @@ describe('public query route security semantics', () => {
     });
   });
 
+  it('/v1/search forwards a per-request stageTimer into SearchUseCase execution context', async () => {
+    const execute = vi.fn().mockResolvedValue(buildNonPolicyFailureResponse());
+    const deps: SearchRouteDeps = {
+      searchUseCase: {
+        execute,
+      },
+      decomposedSearchUseCase: {
+        execute: vi.fn(),
+      },
+    };
+
+    registerSearchRoute(app, deps);
+
+    const response = await post(app, '/v1/search', { query: 'Opus One' });
+
+    expect(response.statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      expect.objectContaining({
+        stageTimer: expect.objectContaining({
+          start: expect.any(Function),
+          end: expect.any(Function),
+          snapshot: expect.any(Function),
+          isRunning: expect.any(Function),
+        }),
+      }),
+    );
+  });
+
   it('/v1/search fails closed when a V2 human payload leaks into the V1 route', async () => {
     const deps: SearchRouteDeps = {
       searchUseCase: {

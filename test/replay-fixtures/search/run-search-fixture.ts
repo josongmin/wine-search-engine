@@ -170,8 +170,8 @@ const SearchReplayFixtureSchema = z
   .superRefine(addExecutionLaneInvariant);
 
 export type SearchReplayFixtureFile = z.infer<typeof SearchReplayFixtureSchema>;
-export type SearchHttpFixtureFile = z.infer<typeof SearchFixtureSchema>;
-export type ReplayHttpFixtureFile = z.infer<typeof ReplayFixtureSchema>;
+type SearchHttpFixtureFile = z.infer<typeof SearchFixtureSchema>;
+type ReplayHttpFixtureFile = z.infer<typeof ReplayFixtureSchema>;
 
 export function loadSearchReplayFixtures(
   dir: string = path.join(process.cwd(), 'test/replay-fixtures/search'),
@@ -375,7 +375,7 @@ async function buildExecutableReplayFixturePayload(
  * rather than a hard failure, keeping the fixture suite stable across snapshot
  * version bumps while still catching behavioral regressions.
  */
-export interface FixtureDriftClassification {
+interface FixtureDriftClassification {
   /** Fields that assert user-visible search result correctness. */
   readonly resultFields: readonly string[];
   /** Fields that assert execution provenance / trace identity. */

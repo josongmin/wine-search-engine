@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
+import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import { atomicWriteFile } from './etl-utils.js';
 import { parseNdjson } from './ndjson.js';
 import {
@@ -72,6 +73,43 @@ async function promoteStagedFile(stagingPath: string, activePath: string): Promi
   const raw = await fs.readFile(stagingPath, 'utf8');
   await atomicWriteFile(activePath, raw);
   await fs.rm(stagingPath, { force: true });
+}
+
+export async function promoteRuntimeSubstrateArtifacts(args: {
+  readonly stagedRuntimeStatePath: string;
+  readonly activeRuntimeStatePath: string;
+  readonly stagedRuntimeNlMappingsPath: string;
+  readonly activeRuntimeNlMappingsPath: string;
+}): Promise<SearchSnapshotRuntimeState> {
+  const stagedState = await loadSearchSnapshotRuntimeState(args.stagedRuntimeStatePath);
+  const activeState: SearchSnapshotRuntimeState = {
+    ...stagedState,
+    nlMappingsRuntimePath: args.activeRuntimeNlMappingsPath,
+  };
+
+  await atomicWriteFile(args.stagedRuntimeStatePath, `${JSON.stringify(activeState, null, 2)}\n`);
+  await promoteStagedFile(args.stagedRuntimeNlMappingsPath, args.activeRuntimeNlMappingsPath);
+  await promoteStagedFile(args.stagedRuntimeStatePath, args.activeRuntimeStatePath);
+  return activeState;
+}
+
+export async function restoreRuntimeSubstrateArtifacts(args: {
+  readonly activeRuntimeStatePath: string;
+  readonly previousRuntimeStateContents: string | undefined;
+  readonly activeRuntimeNlMappingsPath: string;
+  readonly previousRuntimeNlMappingsContents: string | undefined;
+}): Promise<void> {
+  if (args.previousRuntimeNlMappingsContents === undefined) {
+    await fs.rm(args.activeRuntimeNlMappingsPath, { force: true });
+  } else {
+    await atomicWriteFile(args.activeRuntimeNlMappingsPath, args.previousRuntimeNlMappingsContents);
+  }
+
+  if (args.previousRuntimeStateContents === undefined) {
+    await fs.rm(args.activeRuntimeStatePath, { force: true });
+  } else {
+    await atomicWriteFile(args.activeRuntimeStatePath, args.previousRuntimeStateContents);
+  }
 }
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
@@ -546,25 +584,47 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const previousRuntimeStateContents = await readOptionalFile(args.runtimeStatePath);
+  const previousRuntimeNlMappingsContents = await readOptionalFile(args.runtimeNlMappingsPath);
   const manifest = await loadManifest(args.manifestPath);
   const stagedRuntimeStatePath = buildStagingPath(args.runtimeStatePath, manifest.snapshotId);
   const stagedRuntimeNlMappingsPath = buildStagingPath(args.runtimeNlMappingsPath, manifest.snapshotId);
-  const state = await publishRuntimeSubstrates({
+  await publishRuntimeSubstrates({
     ...args,
     runtimeStatePath: stagedRuntimeStatePath,
-    runtimeNlMappingsPath: stagedRuntimeNlMappingsPath,
+    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
   });
-  await promoteStagedFile(state.nlMappingsRuntimePath, args.runtimeNlMappingsPath);
-  await promoteStagedFile(stagedRuntimeStatePath, args.runtimeStatePath);
-  console.log(`Published runtime substrates for ${state.snapshotId}`);
-  console.log(`runtime_state=${args.runtimeStatePath}`);
-  console.log(`runtime_nl_mappings=${args.runtimeNlMappingsPath}`);
-  console.log(`entities=${state.counts.entities}`);
-  console.log(`aliases=${state.counts.aliases}`);
-  console.log(`ambiguity_registry=${state.counts.ambiguityRegistry}`);
-  console.log(`nl_mappings=${state.counts.nlMappings}`);
-  console.log(`active_ltr_models=${state.counts.activeLtrModels}`);
-  console.log(`allow_missing_ltr=${state.allowMissingLtr}`);
+  try {
+    const promotedState = await promoteRuntimeSubstrateArtifacts({
+      stagedRuntimeStatePath,
+      activeRuntimeStatePath: args.runtimeStatePath,
+      stagedRuntimeNlMappingsPath,
+      activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
+    });
+    console.log(`Published runtime substrates for ${promotedState.snapshotId}`);
+    console.log(`runtime_state=${args.runtimeStatePath}`);
+    console.log(`runtime_nl_mappings=${args.runtimeNlMappingsPath}`);
+    console.log(`entities=${promotedState.counts.entities}`);
+    console.log(`aliases=${promotedState.counts.aliases}`);
+    console.log(`ambiguity_registry=${promotedState.counts.ambiguityRegistry}`);
+    console.log(`nl_mappings=${promotedState.counts.nlMappings}`);
+    console.log(`active_ltr_models=${promotedState.counts.activeLtrModels}`);
+    console.log(`allow_missing_ltr=${promotedState.allowMissingLtr}`);
+  } catch (error) {
+    try {
+      await restoreRuntimeSubstrateArtifacts({
+        activeRuntimeStatePath: args.runtimeStatePath,
+        previousRuntimeStateContents,
+        activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
+        previousRuntimeNlMappingsContents,
+      });
+    } catch (restoreError) {
+      const publishMessage = error instanceof Error ? error.message : String(error);
+      const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError);
+      throw new Error(`runtime substrate publish failed: ${publishMessage}; restore failed: ${restoreMessage}`);
+    }
+    throw error;
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

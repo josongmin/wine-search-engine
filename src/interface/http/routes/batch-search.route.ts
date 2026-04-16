@@ -9,7 +9,7 @@ import { BatchSearchRouteContract } from './route-contracts.js';
 import { getRequestId } from '../request-id.js';
 import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
-import type { BatchSearchResponse } from '../../../application/search/batch-search.usecase.js';
+import type { BatchSearchResponse } from '../../../application/search/batch-search.dto.js';
 
 function normalizeBatchResponse(
   response: Omit<BatchSearchResponse, 'batch_status' | 'has_failures'>

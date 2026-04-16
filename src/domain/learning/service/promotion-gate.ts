@@ -54,7 +54,7 @@ const SHADOW_WRONG_RESOLVE_RATE_INCREASE_THRESHOLD = 0.005;
 /**
  * Result of evaluating a proposal through the promotion gate.
  */
-export interface PromotionDecision {
+interface PromotionDecision {
   /** Whether the proposal passed the gate. */
   readonly approved: boolean;
 
@@ -68,7 +68,7 @@ export interface PromotionDecision {
 /**
  * Configuration for the promotion gate.
  */
-export interface PromotionGateConfig {
+interface PromotionGateConfig {
   /** Confidence threshold above which alias proposals are auto-approved (default: 0.9). */
   readonly aliasAutoApproveConfidence: number;
 

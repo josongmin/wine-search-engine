@@ -174,8 +174,8 @@ When all `CRITIC_RETRY_MAX` retries fail to achieve acceptable coverage,
 the last retrieval result (whatever it is) is handed to the ranker with
 `degradationReasons` containing `'critic_retries_exhausted'`. The
 decision trace records the attempted rewrites. The response builder can
-surface the degradation; until PR7 (GCE) emits a grounded claim for it,
-the signal is trace-only.
+surface the degradation through its existing machine-response envelope;
+the signal is otherwise trace-only.
 
 ### 7. Prompt freezing: `critic_reformulate_v1`
 

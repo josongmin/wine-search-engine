@@ -6,7 +6,7 @@ import {
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
 import { wineTitleCase } from '../../shared/utils/title-case.js';
 
-export interface OntologySnapshotNode {
+interface OntologySnapshotNode {
   readonly id: string;
   readonly entityType: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
   readonly canonicalLabel: string;
@@ -15,7 +15,7 @@ export interface OntologySnapshotNode {
 }
 
 /** RFC-019 P3 entity entry in the keyed `entities` map. */
-export interface OntologyEntity {
+interface OntologyEntity {
   readonly id: string;
   readonly type: OntologySnapshotNode['entityType'];
   readonly canonical: string;
@@ -24,7 +24,7 @@ export interface OntologyEntity {
   readonly aliases: readonly string[];
 }
 
-export interface OntologySnapshot {
+interface OntologySnapshot {
   readonly version: string;
   readonly generatedAt: string;
   readonly nodes: readonly OntologySnapshotNode[];

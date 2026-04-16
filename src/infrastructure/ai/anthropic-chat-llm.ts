@@ -54,7 +54,7 @@ const ANTHROPIC_RETRY_CONFIG: RetryConfig = {
   label: 'Anthropic chat',
 };
 
-export interface AnthropicChatLlmOptions {
+interface AnthropicChatLlmOptions {
   readonly apiKey: string;
   readonly defaultModel: string;
   readonly httpTimeoutMs: number;

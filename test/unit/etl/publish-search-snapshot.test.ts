@@ -9,6 +9,10 @@ import {
   FIXTURE_REPO_REQUIRED_ERROR,
 } from '../../../scripts/etl/publish-search-snapshot.js';
 import {
+  promoteRuntimeSubstrateArtifacts,
+  restoreRuntimeSubstrateArtifacts,
+} from '../../../scripts/etl/publish-runtime-substrates.js';
+import {
   serializePreparedVespaFeedDocuments,
 } from '../../../scripts/etl/index-to-vespa.js';
 import type { SearchSnapshotManifest } from '../../../scripts/etl/search-snapshot-schema.js';
@@ -97,6 +101,78 @@ describe('loadPublishedRuntimeState', () => {
     await expect(loadPublishedRuntimeState(runtimeStatePath)).rejects.toThrow(
       /Unexpected end of JSON input|Expected property name or '}' in JSON|Malformed runtime search snapshot state/,
     );
+  });
+});
+
+describe('runtime substrate promotion state machine', () => {
+  it('rewrites the staged runtime state to the active nl mappings path before promotion', async () => {
+    const dir = await makeTempDir();
+    const stagedStatePath = path.join(dir, 'runtime-search-snapshot.snapshot.staging.json');
+    const activeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const stagedNlMappingsPath = path.join(dir, 'nl-mappings.snapshot.staging.json');
+    const activeNlMappingsPath = path.join(dir, 'nl-mappings.json');
+
+    await fs.writeFile(
+      stagedStatePath,
+      `${JSON.stringify({
+        schemaVersion: 'search_snapshot_runtime_state.v3',
+        snapshotId: 'search-snapshot:v1:test',
+        contentHash: 'content-hash',
+        publishedAt: '2026-04-14T00:00:00.000Z',
+        manifestPath: '/tmp/manifest.json',
+        nlMappingsRuntimePath: stagedNlMappingsPath,
+        allowMissingLtr: false,
+        counts: {
+          entities: 1,
+          aliases: 1,
+          ambiguityRegistry: 0,
+          nlMappings: 1,
+          activeLtrModels: 1,
+        },
+        hashes: {
+          entities: 'entities-hash',
+          aliases: 'aliases-hash',
+          ambiguityRegistry: 'ambiguity-hash',
+          nlMappings: 'nl-hash',
+          activeLtrModels: 'ltr-hash',
+        },
+      }, null, 2)}\n`,
+    );
+    await fs.writeFile(stagedNlMappingsPath, `${JSON.stringify({ mappings: [{ key: 'full-bodied' }] })}\n`);
+    await fs.writeFile(activeNlMappingsPath, `${JSON.stringify({ mappings: [{ key: 'legacy' }] })}\n`);
+
+    const promotedState = await promoteRuntimeSubstrateArtifacts({
+      stagedRuntimeStatePath: stagedStatePath,
+      activeRuntimeStatePath: activeStatePath,
+      stagedRuntimeNlMappingsPath: stagedNlMappingsPath,
+      activeRuntimeNlMappingsPath: activeNlMappingsPath,
+    });
+
+    expect(promotedState.nlMappingsRuntimePath).toBe(activeNlMappingsPath);
+    await expect(fs.readFile(activeStatePath, 'utf8')).resolves.toContain(activeNlMappingsPath);
+    await expect(fs.readFile(activeNlMappingsPath, 'utf8')).resolves.toContain('full-bodied');
+    await expect(fs.stat(stagedStatePath)).rejects.toThrow();
+    await expect(fs.stat(stagedNlMappingsPath)).rejects.toThrow();
+  });
+
+  it('restores active runtime substrate files exactly on rollback', async () => {
+    const dir = await makeTempDir();
+    const activeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const activeNlMappingsPath = path.join(dir, 'nl-mappings.json');
+    const previousState = `${JSON.stringify({ snapshotId: 'previous-state' }, null, 2)}\n`;
+    const previousNlMappings = `${JSON.stringify({ mappings: [{ key: 'previous' }] })}\n`;
+    await fs.writeFile(activeStatePath, previousState);
+    await fs.writeFile(activeNlMappingsPath, previousNlMappings);
+
+    await restoreRuntimeSubstrateArtifacts({
+      activeRuntimeStatePath: activeStatePath,
+      previousRuntimeStateContents: previousState,
+      activeRuntimeNlMappingsPath: activeNlMappingsPath,
+      previousRuntimeNlMappingsContents: previousNlMappings,
+    });
+
+    await expect(fs.readFile(activeStatePath, 'utf8')).resolves.toBe(previousState);
+    await expect(fs.readFile(activeNlMappingsPath, 'utf8')).resolves.toBe(previousNlMappings);
   });
 });
 

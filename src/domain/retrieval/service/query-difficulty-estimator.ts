@@ -13,9 +13,9 @@
 
 import { clamp01 } from '../../shared/utils/clamp.js';
 
-export type QueryDifficulty = 'easy' | 'medium' | 'hard';
+type QueryDifficulty = 'easy' | 'medium' | 'hard';
 
-export interface DifficultyEstimate {
+interface DifficultyEstimate {
   readonly difficulty: QueryDifficulty;
   readonly score: number; // [0,1], 0=easy, 1=hard
   readonly signals: {

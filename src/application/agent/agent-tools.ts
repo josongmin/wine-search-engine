@@ -33,6 +33,10 @@ import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';
+import { parseSpans, resolveOverlaps, type Span } from '../../domain/attribute/service/span-parser.js';
+import { resolveEntity } from '../../domain/attribute/service/entity-resolver.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -273,6 +277,8 @@ export function isKnownTool(name: string): boolean {
 
 /** Minimum number of detected constraint types to emit the staged-search hint. */
 const MIN_CONSTRAINTS_FOR_STAGED_HINT = 3;
+/** Bare entity transliteration applies only to short (<=4 token) search cores. */
+const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
 
 /**
  * Minimum result count to classify retrieval as "reliable".
@@ -454,6 +460,170 @@ function buildStructuredSearchClauses(input: {
     clauses.push(input.certification);
   }
   return clauses;
+}
+
+function pairingTagToSemanticTerm(tag: PairingTag): string {
+  return tag.replace(/_/gu, ' ');
+}
+
+function wineTypeToSemanticTerm(
+  wineType: z.infer<typeof SearchInputSchema>['wine_type'],
+): string | undefined {
+  if (wineType === undefined) return undefined;
+  return wineType === 'rosé' ? 'rose' : wineType;
+}
+
+function buildLexicalNucleus(
+  queryViews: ReturnType<typeof buildNormalizedQueryViews>,
+  rawQuery: string,
+): string | undefined {
+  const transliterated = queryViews.transliterated?.trim();
+  if (transliterated !== undefined && transliterated.length > 0) {
+    return transliterated;
+  }
+  const punctuationStripped = queryViews.punctuationStripped.trim();
+  if (punctuationStripped.length > 0) {
+    return punctuationStripped;
+  }
+  const trimmedRawQuery = rawQuery.trim();
+  return trimmedRawQuery.length > 0 ? trimmedRawQuery : undefined;
+}
+
+function isResolvedEntityRepresentedByStructuredFilters(
+  entity: ReturnType<typeof resolveEntity>,
+  input: z.infer<typeof SearchInputSchema>,
+): boolean {
+  if (entity === null) return false;
+  const canonical = entity.canonicalValue.toLowerCase();
+  switch (entity.entityType) {
+    case 'wine_type': {
+      const structuredWineType = wineTypeToSemanticTerm(input.wine_type);
+      return structuredWineType !== undefined && canonical === structuredWineType.toLowerCase();
+    }
+    case 'country':
+      return input.country?.trim().toLowerCase() === canonical;
+    case 'appellation':
+      return input.appellation?.trim().toLowerCase() === canonical;
+    default:
+      return false;
+  }
+}
+
+function buildRetrievalCoreQuery(
+  input: z.infer<typeof SearchInputSchema>,
+): string {
+  const queryViews = buildNormalizedQueryViews(input.query);
+  const tokenCount = queryViews.punctuationStripped.length === 0
+    ? 0
+    : queryViews.punctuationStripped.split(/\s+/u).length;
+  const pairingTags = [
+    ...new Set<PairingTag>([
+      ...extractAllPairingConstraints(input.query),
+      ...extractAllPairingConstraints(queryViews.punctuationStripped),
+      ...(queryViews.transliterated !== undefined
+        ? extractAllPairingConstraints(queryViews.transliterated)
+        : []),
+    ]),
+  ];
+  const hasPositiveStructuredFilters =
+    input.wine_type !== undefined
+    || input.country !== undefined
+    || input.appellation !== undefined
+    || input.vintage_min !== undefined
+    || input.vintage_max !== undefined;
+
+  if (pairingTags.length === 0 && !hasPositiveStructuredFilters) {
+    if (
+      queryViews.transliterated !== undefined &&
+      queryViews.transliterated !== queryViews.punctuationStripped &&
+      tokenCount > 0 &&
+      tokenCount <= SHORT_BARE_ENTITY_QUERY_MAX_TOKENS
+    ) {
+      return queryViews.transliterated;
+    }
+    return input.query;
+  }
+
+  const semanticTerms: string[] = [];
+  const seen = new Set<string>();
+  let hasEntitySemanticTerm = false;
+  const add = (value: string | undefined): void => {
+    const trimmed = value?.trim();
+    if (trimmed === undefined || trimmed.length === 0) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    semanticTerms.push(trimmed);
+  };
+
+  const lookupQueries = [
+    ...new Set<string>([
+      queryViews.punctuationStripped,
+      ...(queryViews.transliterated !== undefined
+        ? [queryViews.transliterated]
+        : []),
+    ]),
+  ];
+
+  for (const lookupQuery of lookupQueries) {
+    const resolvedSpans = resolveOverlaps(
+      parseSpans(lookupQuery).map((span) => ({
+        span,
+        resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
+      })),
+    )
+      .filter(
+        (
+          entry,
+        ): entry is {
+          span: Span;
+          resolved: NonNullable<ReturnType<typeof resolveEntity>>;
+        } => entry.resolved !== null,
+      )
+      .filter(
+        (entry) => !isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input),
+      );
+
+    for (const entry of resolvedSpans) {
+      if (entry.resolved.entityType === 'wine_type' && input.wine_type !== undefined) {
+        continue;
+      }
+      hasEntitySemanticTerm = true;
+      add(entry.resolved.canonicalValue.toLowerCase());
+    }
+  }
+
+  for (const tag of pairingTags) {
+    add(pairingTagToSemanticTerm(tag));
+  }
+
+  // Preserve the unresolved lexical nucleus when structured filters exist but
+  // no semantic anchor survived reconstruction. Without this, rare entity /
+  // product-concept queries collapse into generic facet text such as
+  // `red wine`, erasing the only exact lexical substrate retrieval still has.
+  if (!hasEntitySemanticTerm && pairingTags.length === 0 && hasPositiveStructuredFilters) {
+    add(buildLexicalNucleus(queryViews, input.query));
+  }
+
+  // Preserve structured wine_type as a hard filter, but avoid duplicating it
+  // into the retrieval-core text when the query already has a canonicalized
+  // entity prior (e.g. "까쇼 추천해줘" -> Cabernet Sauvignon). Duplicating
+  // `red` / `white` in that case distorts planner intent toward pure facet
+  // filtering even though the request is still a semantic recommendation.
+  if (!hasEntitySemanticTerm) {
+    add(wineTypeToSemanticTerm(input.wine_type));
+  }
+
+  if (semanticTerms.length === 0) {
+    return input.query;
+  }
+
+  const hasWineToken = semanticTerms.some((term) => /(?:^|[^\p{L}\p{N}])wine(?=$|[^\p{L}\p{N}])/iu.test(term));
+  if (!hasWineToken) {
+    semanticTerms.push('wine');
+  }
+
+  return semanticTerms.join(' ');
 }
 
 /** Agent mapping version for structured filter provenance. */
@@ -743,6 +913,7 @@ async function executeAgentToolInner(
         };
       }
       const parsed = parseResult.data;
+      const retrievalCoreQuery = buildRetrievalCoreQuery(parsed);
 
       // Enrich query with structured exclusion/price params so the existing
       // search pipeline (which understands natural language) applies them.
@@ -757,7 +928,7 @@ async function executeAgentToolInner(
       // in that extreme case the base query is dropped and only clauses are kept (still
       // bounded because appendStructuredQueryClauses just concatenates).
       const maxBaseLen = Math.max(0, MAX_ENRICHED_QUERY_LEN - clausesStr.length);
-      const baseQueryCapped = parsed.query.slice(0, maxBaseLen);
+      const baseQueryCapped = retrievalCoreQuery.slice(0, maxBaseLen);
       // Hard clamp on the final string — handles the edge case where clauses
       // themselves exceed MAX_ENRICHED_QUERY_LEN (very many exclusions).
       const enrichedRaw = appendStructuredQueryClauses(baseQueryCapped, clauses);

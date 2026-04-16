@@ -4,7 +4,11 @@ import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
-import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
+import {
+  ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,
+  isActiveSnapshotSubstrateBootstrapAllowed,
+  resolveActiveSnapshot,
+} from '../db/active-snapshot-resolver.js';
 
 interface AliasRow {
   entity_id: string;
@@ -206,6 +210,9 @@ function groupRows<TRow extends AliasRow>(
  * Results are grouped by normalised_value and sorted by confidence.
  */
 export class PgAliasMatcher implements AliasMatcher {
+  private activeSnapshotMissingTableUntil = 0;
+  private activeSnapshotMissingTableLogged = false;
+
   constructor(private readonly pool: Pool) {}
 
   async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
@@ -216,19 +223,9 @@ export class PgAliasMatcher implements AliasMatcher {
     // table (fresh dev DB, unit-test mock pool without the pointer row) degrades
     // to the same "no aliases available" behavior as a missing aliases table.
     // A present-but-empty pointer table is still a hard error (publish never ran).
-    try {
-      // warm cache + surface migration/empty-pointer errors once here
-      const resolverModule = await import('../db/active-snapshot-resolver.js');
-      await resolverModule.resolveActiveSnapshot(this.pool);
-    } catch (err: unknown) {
-      const code = readPgSqlState(err);
-      if (code === '42P01') {
-        bootstrapLogger.info(
-          '[PgAliasMatcher] active_search_snapshot table missing — alias matching disabled for this request',
-        );
-        return [];
-      }
-      throw err;
+    const canUseSnapshotBackedLookup = await this.canUseSnapshotBackedLookup();
+    if (!canUseSnapshotBackedLookup) {
+      return [];
     }
 
     const views = buildNormalizedQueryViews(trimmed);
@@ -426,10 +423,43 @@ export class PgAliasMatcher implements AliasMatcher {
       if (code !== '42P01') {
         throw err;
       }
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+        throw err;
+      }
       bootstrapLogger.info(
         '[PgAliasMatcher] aliases table does not exist yet — alias matching disabled for this request',
       );
       return { rows: [] };
+    }
+  }
+
+  private async canUseSnapshotBackedLookup(): Promise<boolean> {
+    const now = Date.now();
+    if (this.activeSnapshotMissingTableUntil > now) {
+      return false;
+    }
+
+    try {
+      await resolveActiveSnapshot(this.pool);
+      this.activeSnapshotMissingTableUntil = 0;
+      this.activeSnapshotMissingTableLogged = false;
+      return true;
+    } catch (err: unknown) {
+      const code = readPgSqlState(err);
+      if (code !== '42P01') {
+        throw err;
+      }
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+        throw err;
+      }
+      this.activeSnapshotMissingTableUntil = now + ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS;
+      if (!this.activeSnapshotMissingTableLogged) {
+        bootstrapLogger.info(
+          '[PgAliasMatcher] active_search_snapshot table missing — alias matching disabled until substrate recovers',
+        );
+        this.activeSnapshotMissingTableLogged = true;
+      }
+      return false;
     }
   }
 }

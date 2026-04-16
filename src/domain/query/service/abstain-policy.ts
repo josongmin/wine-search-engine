@@ -22,12 +22,12 @@ const PRICE_ATTRIBUTES = new Set(['price', 'priceMin', 'priceMax', 'price_min', 
 /** Attribute names that represent quality/critic-score constraints. */
 const QUALITY_ATTRIBUTES = new Set(['criticScore', 'critic_score', 'rating', 'score', 'points']);
 
-export type AbstainDecision =
+type AbstainDecision =
   | { readonly abstain: false; readonly entropy?: number; readonly reason?: string }
   | { readonly abstain: true; readonly entropy: number };
 
 /** Context passed to shouldAbstain to influence gate behaviour. */
-export interface AbstainContext {
+interface AbstainContext {
   /**
    * Whether an LTR model is currently active for scoring.
    *

@@ -62,7 +62,7 @@ const WEIGHT_BOOST_STRONG = 2.0;
  */
 const LEARNED_SPARSE_DISABLED = 0.0;
 
-export interface FusionConfig {
+interface FusionConfig {
   readonly rrfK: number;
   readonly sparseWeight: number;
   readonly denseWeight: number;

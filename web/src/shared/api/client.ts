@@ -120,7 +120,7 @@ async function request<T>(
   }
 }
 
-export interface ApiCallOptions {
+interface ApiCallOptions {
   readonly signal?: AbortSignal;
 }
 

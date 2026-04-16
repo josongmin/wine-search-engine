@@ -6,12 +6,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildSystemMessage } from '../../src/application/agent/agent-prompt.js';
+import { buildSystemMessage, buildSynthesisSystemMessage } from '../../src/application/agent/agent-prompt.js';
 
 describe('agent system prompt contract', () => {
   it('routes mixed red+white requests away from get_food_pairings', () => {
     const prompt = buildSystemMessage().content;
 
+    expect(prompt).toContain('You are Cuvee StepPlanner');
     expect(prompt).toContain('Mixed-type requests (red+white, "both colors") are NOT food pairing inputs');
     expect(prompt).toContain('Never use both, mixed, any, or a multi-color shorthand');
     expect(prompt).toContain('Use search_wines with want_diversity=true or parallel search_wines calls instead');
@@ -31,5 +32,14 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('If a tool result says "Invalid input for …"');
     expect(prompt).toContain('Do NOT answer from that failed observation');
     expect(prompt).toContain('Immediately issue a corrected tool call or switch to a different valid tool');
+  });
+
+  it('keeps the synthesis prompt tool-free and observation-only', () => {
+    const prompt = buildSynthesisSystemMessage().content;
+
+    expect(prompt).toContain('You are Cuvee StepSynthesis');
+    expect(prompt).toContain('Do NOT call tools');
+    expect(prompt).toContain('Do NOT output "action" or "actions"');
+    expect(prompt).toContain('Do NOT decide new tool work; that belongs to the planner phase');
   });
 });

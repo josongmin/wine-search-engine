@@ -35,7 +35,7 @@ Hard rules:
 - Output strict JSON only: { "reformulatedQuery": "<string>", "confidence": <0..1> }.
 - If you cannot responsibly reformulate (e.g. the query is already minimal), emit { "reformulatedQuery": "", "confidence": 0 } — the caller will abandon the retry gracefully.`;
 
-export interface BuildCriticReformulateUserMessageInput {
+interface BuildCriticReformulateUserMessageInput {
   readonly normalizedQuery: string;
   readonly degradationReasons: readonly string[];
   readonly coverageRatio?: number | undefined;

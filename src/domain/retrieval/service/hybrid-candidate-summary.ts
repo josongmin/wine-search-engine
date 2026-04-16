@@ -12,7 +12,7 @@ import {
 } from '../port/search-index.port.js';
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 
-export type HybridCandidateSummaryFields = Pick<
+type HybridCandidateSummaryFields = Pick<
   HybridCandidate,
   RetrievalHitSummaryKey | 'sourceRecordRefs'
 >;

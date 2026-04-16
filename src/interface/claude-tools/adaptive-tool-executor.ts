@@ -27,7 +27,7 @@ type AnyToolResult =
 /**
  * Result from executeWithFallback, includes fallback tracking.
  */
-export interface AdaptiveToolResult<T> {
+interface AdaptiveToolResult<T> {
   /** The result from tool execution */
   readonly result: T;
   /** Optional: which fallback mode was applied (e.g., 'mixed') */

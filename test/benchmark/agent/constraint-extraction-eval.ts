@@ -61,7 +61,7 @@ function getSharedNormalizer(): QueryNormalizer {
 }
 
 /** Result of offline constraint extraction for a single query. */
-export interface ExtractionResult {
+interface ExtractionResult {
   readonly bundle: ConstraintBundle;
   readonly spans: readonly Span[];
   readonly resolvedEntities: readonly ResolvedEntity[];

@@ -3,10 +3,6 @@
  * methods (save/update/delete/createSnapshot/rollbackToSnapshot) were removed
  * when migration 016 collapsed the runtime write path to the ETL publisher.
  *
- * Carve-out: `src/domain/ingestion/service/entity-matcher.ts` declares a
- * SEPARATE `EntityRepository` interface (ingestion-side, not runtime lookup).
- * That interface is out of scope and must not be conflated.
- *
  * Append-only test: never delete this file.
  */
 import { describe, expect, it } from 'vitest';

@@ -395,7 +395,7 @@ function cosine(a: readonly number[], b: readonly number[]): number {
 // Adapter
 // ---------------------------------------------------------------------------
 
-export interface OpenAiDoc2QueryGeneratorOptions {
+interface OpenAiDoc2QueryGeneratorOptions {
   readonly chatLlm: ChatLlmPort;
   /**
    * Embedding service used for the round-trip consistency filter.

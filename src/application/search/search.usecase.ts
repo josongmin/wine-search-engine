@@ -227,6 +227,8 @@ export class SearchUseCase {
     startTime: number,
     options?: SearchExecutionOptions,
   ): Promise<SearchExecutorEvaluationResult> {
+    const stageTimer = options?.stageTimer;
+    stageTimer?.start('search.total');
     throwIfAborted(options?.abortSignal, 'Search execution aborted');
 
     pipelineDebug(
@@ -239,9 +241,11 @@ export class SearchUseCase {
       'pipeline search.execute',
     );
 
+    stageTimer?.start('search.pre_route');
     const preRoute = await runSearchPreRoutePhase({
       request,
       ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+      ...(stageTimer !== undefined ? { stageTimer } : {}),
       requestId,
       startTime,
       snapshotVersions: this.deps.snapshotVersions,
@@ -260,11 +264,14 @@ export class SearchUseCase {
         ?? this.deps.cacheLookupRuntimeState,
       decomposedSearch: this.deps.decomposedSearch,
       allowCompiledFallback: this.deps.allowCompiledFallback,
+    }).finally(() => {
+      stageTimer?.end('search.pre_route');
     });
 
     throwIfAborted(options?.abortSignal, 'Search execution aborted');
 
     if (preRoute.outcome === 'return') {
+      stageTimer?.end('search.total');
       pipelineDebug(
         {
           step: 'search.pre_route.early_exit',
@@ -272,6 +279,7 @@ export class SearchUseCase {
         },
         'pipeline pre_route return',
       );
+      emitSearchStageTimingSnapshot(stageTimer);
       // Note on options.explain: pre-route early exits (security blocks,
       // clarification asks) have no ranked candidates, so there is nothing to
       // produce counterfactuals from. explain=true is intentionally a no-op
@@ -312,6 +320,7 @@ export class SearchUseCase {
     );
 
     // Step 3: Execute based on route
+    stageTimer?.start('search.route_execution');
     const {
       resolveResult,
       rankedResults,
@@ -355,11 +364,14 @@ export class SearchUseCase {
           }
         },
       },
-    );
+    ).finally(() => {
+      stageTimer?.end('search.route_execution');
+    });
 
     throwIfAborted(options?.abortSignal, 'Search execution aborted');
 
     // Steps 3b–7: Entropy abstain (RFC-013) → DecisionEngine → response → cache write
+    stageTimer?.start('search.post_route');
     const response = await runSearchPostRoutePhase({
       plan,
       compiled,
@@ -402,7 +414,11 @@ export class SearchUseCase {
       ...(request.options?.explain !== undefined
         ? { includeCounterfactuals: request.options.explain }
         : {}),
+    }).finally(() => {
+      stageTimer?.end('search.post_route');
     });
+
+    stageTimer?.end('search.total');
 
     pipelineDebug(
       {
@@ -413,6 +429,7 @@ export class SearchUseCase {
       },
       'pipeline search.execute complete',
     );
+    emitSearchStageTimingSnapshot(stageTimer);
 
     const retrievalProvenanceSlices = includeEvalProvenance
       ? rankedResultsToEvalProvenanceSlices(requestId, rankedResults)
@@ -736,6 +753,25 @@ export class SearchUseCase {
       anchorEntityId,
     );
   }
+}
+
+function emitSearchStageTimingSnapshot(
+  stageTimer: SearchExecutionOptions['stageTimer'],
+): void {
+  if (stageTimer === undefined) {
+    return;
+  }
+  const snapshot = stageTimer.snapshot();
+  if (Object.keys(snapshot).length === 0) {
+    return;
+  }
+  pipelineDebug(
+    {
+      step: 'search.execute.stage_timings',
+      stages: snapshot,
+    },
+    'pipeline search stage timings',
+  );
 }
 
 function buildMixedHybridFallbackExecution(

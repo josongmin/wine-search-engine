@@ -1,4 +1,4 @@
-export type CanonicalValue =
+type CanonicalValue =
   | null
   | boolean
   | number

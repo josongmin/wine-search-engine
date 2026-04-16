@@ -8,7 +8,7 @@ import type { AgentConfig } from '../model/agent-config.js';
 import type { AgentTerminationReason } from '../model/agent-step.js';
 import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 
-export interface BudgetCheck {
+interface BudgetCheck {
   readonly allowed: boolean;
   readonly reason?: AgentTerminationReason | undefined;
 }

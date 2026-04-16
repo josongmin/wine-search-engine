@@ -334,50 +334,9 @@ interface MachineResponseV2 /* extended */ {
   readonly engineDecision: EngineDecision;         // unchanged
   readonly results: readonly ResultItem[];         // unchanged
 
-  // NEW — Grounded Claim Emission
-  readonly grounded?: GroundedPayload;
-  readonly claimSchemaVersion?: 'claim_schema_v1'; // explicit from v1 (P2 gate)
-}
-
-interface GroundedPayload {
-  readonly proseSegments: readonly ProseSegment[];   // prose chunks with span markers
-  readonly atomicClaims: readonly AtomicClaim[];
-  readonly claimSchemaVersion: 'claim_schema_v1';
-}
-
-interface ProseSegment {
-  readonly text: string;
-  readonly localeTag: 'ko' | 'en' | 'fr' | 'ja' | 'other';
-  readonly inlineMarkers: readonly InlineMarker[]; // maps offsets → claimId
-}
-
-interface AtomicClaim {
-  readonly claimId: string;
-  readonly type: AtomicClaimType;
-  readonly field: ClaimField;
-  readonly value: unknown;
-  readonly provenanceRef: ProvenanceRef;
-  readonly polarity: 'asserts' | 'denies' | 'hypothesizes';
-  readonly hedge: 'certain' | 'likely' | 'uncertain';
-  readonly claimSchemaVersion: 'claim_schema_v1';  // per-claim version, not just envelope
-}
-
-type AtomicClaimType =
-  | 'entity_reference'
-  | 'attribute_assertion'
-  | 'price_assertion'
-  | 'vintage_assertion'
-  | 'pairing_assertion'
-  | 'comparative_assertion'
-  | 'drinking_window_assertion'
-  | 'style_assertion'
-  | 'recommendation';
-
-interface ProvenanceRef {
-  readonly kind: 'tool_call_frame' | 'domain_knowledge' | 'hedged';
-  readonly toolCallId?: string;                     // Axis 0 frame id
-  readonly resultEntityId?: string;                 // a row inside frame.structuredOutput.resultSet
-  readonly passageSpan?: { start: number; end: number };  // within frame.observationSnapshot
+  // Axis 3 note:
+  // the grounded-claim sidecar proposed in this draft was later removed
+  // from the live runtime on 2026-04-16.
 }
 ```
 
@@ -486,7 +445,7 @@ Each phase has a feature flag and a forward-compatible schema strategy.
 | 0 | `EVIDENCE_FRAME_EMIT` | Flag off → tool dispatcher emits only observation string; bench harness falls back to `parseObservations`. Fully reversible. |
 | 1 | `CONSTRAINT_GRAPH_V2_EMIT` | Flag off → planner emits only `ConstraintBundle`, `legacyBundle` bridge disappears, all readers take the existing bundle path. Reversible **only** if no writer has committed to graph-only fields. |
 | 2 | `RETRIEVAL_EXECUTOR_CRITIC` | Flag off → executor does single retrieval pass, no critic, no rewrite. Reversible. |
-| 3 | `GCE_SHADOW_EMIT` (emit grounded but don't use for scoring) + `GCE_PRIMARY` (use grounded for scoring) | Two-stage: shadow mode runs parallel for a window, primary promotes after gates. Rollback by demoting primary. Hard to reverse once `claim-extractor.ts` is deleted — therefore deletion is **last**, not first. |
+| 3 | Axis-3 grounded-claim sidecar | Removed from the live runtime on 2026-04-16; no active rollback path because the feature is no longer shipped. |
 
 ---
 

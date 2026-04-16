@@ -10,7 +10,7 @@ import {
   InMemoryThresholdStore,
 } from '../../../integration/helpers/in-memory-adapters.js';
 
-export interface VespaTestRealStores {
+interface VespaTestRealStores {
   readonly calibrationStore: CalibrationStore;
   readonly thresholdStore: ThresholdStore;
   readonly backing: 'memory' | 'pg';

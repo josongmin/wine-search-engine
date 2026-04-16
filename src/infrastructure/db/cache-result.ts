@@ -30,8 +30,6 @@ export type CacheWriteResult =
   | { readonly kind: 'breaker_open' }
   | { readonly kind: 'infra_error'; readonly errorClass: string; readonly message: string };
 
-export type CacheDeleteResult = CacheWriteResult;
-
 export function cacheHit<T>(value: T): CacheGetResult<T> {
   return { kind: 'hit', value };
 }

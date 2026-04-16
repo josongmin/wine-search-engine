@@ -17,13 +17,6 @@ declare const SourceRecordIdBrand: unique symbol;
  */
 export type SourceRecordId = string & { readonly [SourceRecordIdBrand]: typeof SourceRecordIdBrand };
 
-declare const DocumentIdBrand: unique symbol;
-
-/**
- * ADR-007: Storage / index document identifier when distinct from public entity identity.
- */
-export type DocumentId = string & { readonly [DocumentIdBrand]: typeof DocumentIdBrand };
-
 /** Same as {@link CanonicalEntityId}; kept for existing imports and call sites (ADR-007 convergence). */
 export type EntityId = CanonicalEntityId;
 

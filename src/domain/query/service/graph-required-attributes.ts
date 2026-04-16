@@ -18,7 +18,7 @@ import type { QueryPlanV1 } from '../model/query-plan.js';
 import type { ConstraintGraph } from '../model/constraint-graph.js';
 import { computeGraphCoverage } from './compute-graph-coverage.js';
 
-export interface RequiredAttributeResolution {
+interface RequiredAttributeResolution {
   /** Unique required-and-matched attribute names, in deterministic order. */
   readonly matched: readonly string[];
   /** Unique required-but-unmet attribute names, in deterministic order. */
@@ -37,7 +37,7 @@ export interface RequiredAttributeResolution {
   readonly satisfied: boolean;
 }
 
-export interface ResolveRequiredAttributesInput {
+interface ResolveRequiredAttributesInput {
   readonly plan: QueryPlanV1;
   readonly graph?: ConstraintGraph | undefined;
   /**

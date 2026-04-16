@@ -22,12 +22,13 @@ interface Args {
   readonly runtimeStatePath: string;
   readonly manifestPath?: string;
   /** T-010/W2: when true, assert active_search_snapshot pointer = runtime state snapshotId. */
-  readonly requirePointerParity?: boolean;
+  readonly requirePointerParity: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let manifestPath: string | undefined;
+  let requirePointerParity: boolean | undefined;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--runtime-state') {
@@ -36,11 +37,20 @@ function parseArgs(argv: readonly string[]): Args {
     } else if (arg === '--manifest' || arg === '-m') {
       manifestPath = argv[i + 1];
       i += 1;
+    } else if (arg === '--require-pointer-parity') {
+      requirePointerParity = true;
+    } else if (arg === '--bootstrap-mode') {
+      requirePointerParity = false;
     }
   }
-  return manifestPath !== undefined
-    ? { runtimeStatePath, manifestPath }
-    : { runtimeStatePath };
+  if (requirePointerParity === undefined) {
+    throw new Error('Either --require-pointer-parity or --bootstrap-mode is required');
+  }
+  return {
+    runtimeStatePath,
+    requirePointerParity,
+    ...(manifestPath !== undefined ? { manifestPath } : {}),
+  };
 }
 
 export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
@@ -75,7 +85,7 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
       vespaUrl: config.vespa.url,
       runtimeState,
       strictHashes: true,
-      ...(args.requirePointerParity === true ? { requirePointerParity: true } : {}),
+      ...(args.requirePointerParity ? { requirePointerParity: true } : {}),
     });
 
     if (runtimeState.counts.aliases !== manifest.counts.aliases) {

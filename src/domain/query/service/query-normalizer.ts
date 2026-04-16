@@ -51,6 +51,8 @@ const KOREAN_TRANSLITERATION_RULES: readonly [RegExp, string][] = [
   [/샤토\s*마고/gu, 'chateau margaux'],
   [/샤또\s*마고/gu, 'chateau margaux'],
   [/샤또\s*마르고/gu, 'chateau margaux'],
+  [/카베르네\s*소비뇽/gu, 'cabernet sauvignon'],
+  [/카베르네소비뇽/gu, 'cabernet sauvignon'],
   [/보졸레\s*누보/gu, 'beaujolais nouveau'],
   [/모에\s*샹동/gu, 'moet chandon'],
   [/모엣\s*샹동/gu, 'moet chandon'],

@@ -66,6 +66,16 @@ export interface ConstraintAtom extends NormalizedConstraint {
    * - `informative` — purely diagnostic; never blocks results
    */
   readonly conflict_policy: ConstraintConflictPolicy;
+
+  /**
+   * Downstream execution role for this atom after provenance-aware typing.
+   *
+   * - `must_satisfy`   — hard execution obligation / evidence required
+   * - `prefer`         — ranking prior / soft preference
+   * - `contextual_hint`— recall or interpretation hint, not a blocking filter
+   * - `exclusion`      — negative hard obligation (`exclude` / `not_in`)
+   */
+  readonly constraint_role: ConstraintRole;
 }
 
 /** Bundle tier that produced this atom. */
@@ -92,6 +102,12 @@ export type ConstraintConflictPolicy =
   | 'prefer'
   | 'relaxable'
   | 'informative';
+
+export type ConstraintRole =
+  | 'must_satisfy'
+  | 'prefer'
+  | 'contextual_hint'
+  | 'exclusion';
 
 // ─── Authority level constants (SSoT) ────────────────────────────────────────
 
@@ -125,11 +141,7 @@ export function liftToAtom(
 ): ConstraintAtom {
   const resolvedKind: ConstraintSourceKind =
     sourceKind ??
-    (tier === 'hard'
-      ? 'explicit_utterance'
-      : tier === 'inferred'
-        ? 'planner_inferred'
-        : 'implicit_slot');
+    inferSourceKind(constraint, tier);
 
   const authority = CONSTRAINT_AUTHORITY_BY_SOURCE_KIND[resolvedKind];
 
@@ -138,6 +150,15 @@ export function liftToAtom(
   const conflictPolicy: ConstraintConflictPolicy =
     tier === 'hard' ? 'strict' : tier === 'soft' ? 'prefer' : 'relaxable';
 
+  const constraintRole: ConstraintRole =
+    constraint.operator === 'exclude' || constraint.operator === 'not_in'
+      ? 'exclusion'
+      : tier === 'hard'
+        ? 'must_satisfy'
+        : tier === 'soft'
+          ? 'prefer'
+          : 'contextual_hint';
+
   return {
     ...constraint,
     source_tier: tier,
@@ -145,6 +166,7 @@ export function liftToAtom(
     authority_level: authority,
     semantic_scope: semanticScope,
     conflict_policy: conflictPolicy,
+    constraint_role: constraintRole,
   };
 }
 
@@ -220,4 +242,35 @@ function inferSemanticScope(attribute: string): ConstraintSemanticScope {
   if (TEMPORAL_ATTRIBUTES.has(attribute)) return 'temporal';
   if (RELATIONAL_ATTRIBUTES.has(attribute)) return 'relational';
   return 'extrinsic';
+}
+
+function inferSourceKind(
+  constraint: NormalizedConstraint,
+  tier: ConstraintTier,
+): ConstraintSourceKind {
+  const rawSourcePhrase = (constraint as { readonly source_phrase?: unknown }).source_phrase;
+  const sourcePhrase = typeof rawSourcePhrase === 'string' ? rawSourcePhrase : '';
+  if (
+    sourcePhrase.startsWith('entity_resolver(') ||
+    sourcePhrase.startsWith('entity_shadow(') ||
+    sourcePhrase.startsWith('llm_linker(') ||
+    constraint.mapping_version?.startsWith('entity-resolver-') === true ||
+    constraint.mapping_version?.startsWith('llm-') === true
+  ) {
+    return 'implicit_slot';
+  }
+  if (
+    sourcePhrase.startsWith('ontology(') ||
+    constraint.mapping_version?.startsWith('ontology-') === true ||
+    constraint.mapping_version?.startsWith('compositional-') === true
+  ) {
+    return 'planner_inferred';
+  }
+  if (tier === 'inferred') {
+    return 'planner_inferred';
+  }
+  if (tier === 'soft') {
+    return 'implicit_slot';
+  }
+  return 'explicit_utterance';
 }

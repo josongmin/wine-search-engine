@@ -26,7 +26,7 @@ const PREFERENCE_BOUNDARY = 0.5;
  */
 const POSITION_BIAS_NOISE_FLOOR = 0.05;
 
-export interface PositionSwapPair {
+interface PositionSwapPair {
   readonly itemA: string;
   readonly itemB: string;
   readonly scoreAtA: number;

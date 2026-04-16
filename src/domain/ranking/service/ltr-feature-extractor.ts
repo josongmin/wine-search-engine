@@ -103,7 +103,7 @@ export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures 
  * When the next LambdaMART model version adds these features, promote
  * them to extractLTRFeatures() and update RankingFeatures accordingly.
  */
-export interface ExtendedLTRFeatures extends RankingFeatures {
+interface ExtendedLTRFeatures extends RankingFeatures {
   readonly criticScoreFeature: number;
   readonly producerPrestigeFeature: number;
   /**

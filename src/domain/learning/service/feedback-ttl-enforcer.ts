@@ -46,7 +46,7 @@ const LONG_SIGNAL_TYPES: readonly FeedbackType[] = ['purchase', 'session_success
 /**
  * Result of a TTL enforcement run.
  */
-export interface TTLEnforcementResult {
+interface TTLEnforcementResult {
   /** ISO-8601 timestamp at which the run started. */
   readonly runAt: string;
 

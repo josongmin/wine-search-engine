@@ -2,6 +2,7 @@ import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
+import { parseSpans } from '../../attribute/service/span-parser.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
@@ -63,7 +64,7 @@ const COMPARISON_MARKERS: readonly RegExp[] = [
  * Korean mixed-query markers ("같은", "비슷한", "말고", "대신", "vs", "보다").
  */
 /** Combined result of {@link AnchorExtractor.extractWithRelative}. */
-export interface AnchorExtractionWithRelative {
+interface AnchorExtractionWithRelative {
   /** Anchor candidates from alias matching, ordered by confidence descending. */
   readonly anchors: readonly AnchorCandidate[];
   /** Structured relative/similarity query, or null if none detected. */
@@ -85,7 +86,7 @@ export class AnchorExtractor {
     normalizedQuery: string,
     queryViews?: NormalizedQueryViews,
   ): Promise<readonly AnchorCandidate[]> {
-    const lookupQueries = queryViews?.lookupVariants ?? [normalizedQuery];
+    const lookupQueries = this.buildLookupQueries(normalizedQuery, queryViews);
     return this.extractFromLookupQueries(lookupQueries);
   }
 
@@ -106,7 +107,7 @@ export class AnchorExtractor {
     queryViews?: NormalizedQueryViews,
   ): Promise<AnchorExtractionWithRelative> {
     const relativeQuery = this.relativeQueryExtractor.extract(normalizedQuery);
-    const lookupQueries = new Set<string>(queryViews?.lookupVariants ?? [normalizedQuery]);
+    const lookupQueries = new Set<string>(this.buildLookupQueries(normalizedQuery, queryViews));
 
     for (const anchorSurface of relativeQuery?.relativeExpressions.map((expr) => expr.anchorSurfaceForm) ?? []) {
       const trimmed = anchorSurface.trim();
@@ -118,6 +119,41 @@ export class AnchorExtractor {
     const anchors = await this.extractFromLookupQueries([...lookupQueries]);
 
     return { anchors, relativeQuery };
+  }
+
+  /**
+   * Build lookup queries in priority order.
+   *
+   * We keep the original normalized views first, then add their token spans so
+   * entity anchors survive trailing request words like "추천" or "해줘".
+   */
+  private buildLookupQueries(
+    normalizedQuery: string,
+    queryViews?: NormalizedQueryViews,
+  ): readonly string[] {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    const add = (value: string): void => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0 || seen.has(trimmed)) {
+        return;
+      }
+      seen.add(trimmed);
+      ordered.push(trimmed);
+    };
+
+    const baseQueries = queryViews?.lookupVariants ?? [normalizedQuery];
+    for (const query of baseQueries) {
+      add(query);
+    }
+
+    for (const query of baseQueries) {
+      for (const span of parseSpans(query)) {
+        add(span.text);
+      }
+    }
+
+    return ordered;
   }
 
   private async extractFromLookupQueries(

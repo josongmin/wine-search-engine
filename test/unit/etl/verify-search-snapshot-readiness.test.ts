@@ -132,11 +132,12 @@ describe('verifySearchSnapshotReadiness', () => {
     const { runtimeStatePath, manifestPath } = await writeFixtureFiles();
 
     await expect(
-      verifySearchSnapshotReadiness({ runtimeStatePath, manifestPath }),
+      verifySearchSnapshotReadiness({ runtimeStatePath, manifestPath, requirePointerParity: false }),
     ).resolves.toBeUndefined();
 
     expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledTimes(1);
     expect(mockCreatePgPool).toHaveBeenCalledTimes(1);
+    expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requirePointerParity).toBeUndefined();
   });
 
   it('fails closed when manifest entity count diverges from runtime state', async () => {
@@ -146,7 +147,8 @@ describe('verifySearchSnapshotReadiness', () => {
     });
 
     await expect(
-      verifySearchSnapshotReadiness({ runtimeStatePath, manifestPath }),
+      verifySearchSnapshotReadiness({ runtimeStatePath, manifestPath, requirePointerParity: true }),
     ).rejects.toThrow(/Entity state\/manifest mismatch/);
+    expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requirePointerParity).toBe(true);
   });
 });

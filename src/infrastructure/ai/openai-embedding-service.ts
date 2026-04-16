@@ -31,7 +31,7 @@ const OPENAI_EMBEDDING_FAILURE_THRESHOLD = 3;
 const OPENAI_EMBEDDING_RECOVERY_TIMEOUT_MS = 30_000;
 const OPENAI_EMBEDDING_HALF_OPEN_MAX = 2;
 
-export interface OpenAiEmbeddingServiceOptions {
+interface OpenAiEmbeddingServiceOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
   readonly baseUrl: string;
   readonly apiKey: string;

@@ -6,7 +6,7 @@
  *   2. Graph undefined → pass-through.
  *   3. Graph origin='deterministic_from_atoms' → pass-through.
  *   4. Hybrid graph with 0 or 1 subquery nodes → pass-through.
- *   5. Hybrid graph with >1 subquery nodes + flag on → bundle engaged.
+ *   5. Non-trivial graph with >1 subquery nodes + flag on → bundle engaged.
  *
  * Never delete this file.
  */
@@ -99,6 +99,15 @@ function hybridGraph(subqueryCount: number, withSharedBudget = false): Constrain
   };
 }
 
+function plannerEmittedGraph(subqueryCount: number): ConstraintGraph {
+  const graph = hybridGraph(subqueryCount);
+  return {
+    ...graph,
+    origin: 'planner_emitted',
+    graphSchemaVersion: 'constraint_graph_v1.1',
+  };
+}
+
 const deps: GraphExecutorDeps = {
   candidatePool: stubCandidatePool,
   bundleSelector: new BundleSelectorImpl(),
@@ -147,6 +156,15 @@ describe('executeGraphAware passthrough (ADR-013)', () => {
     const r = await executeGraphAware(stubInput, hybridGraph(2), deps, baseOpts);
     expect(r.mode).toBe('bundle');
     expect(r.candidates.length).toBe(2);
+    expect(r.assignmentSolution?.assignments.length).toBe(2);
+  });
+
+  it('flag on, planner_emitted graph with 2 subqueries → bundle engaged', async () => {
+    process.env['BUNDLE_SELECTOR_ENABLED'] = 'true';
+    const graph = plannerEmittedGraph(2);
+    expect(shouldEngageBundlePath(graph)).toBe(true);
+    const r = await executeGraphAware(stubInput, graph, deps, baseOpts);
+    expect(r.mode).toBe('bundle');
     expect(r.assignmentSolution?.assignments.length).toBe(2);
   });
 

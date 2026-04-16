@@ -40,7 +40,7 @@ interface BKNode {
   readonly children: Map<number, BKNode>;
 }
 
-export interface BKSearchResult {
+interface BKSearchResult {
   readonly term: string;
   readonly editDistance: number;
 }

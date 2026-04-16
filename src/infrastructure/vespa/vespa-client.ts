@@ -22,7 +22,7 @@ const HTTP_STATUS_NOT_FOUND = 404;
 const HTTP_STATUS_SERVER_ERROR_MIN = 500;
 
 /** Default Vespa HTTP timeouts (override via env / {@link VespaClient} constructor). */
-export interface VespaHttpTimeouts {
+interface VespaHttpTimeouts {
   readonly searchRequestMs: number;
   readonly documentMutationMs: number;
   readonly documentGetDeleteMs: number;
@@ -63,7 +63,7 @@ export interface VespaQueryResponse {
 }
 
 /** Summary of a bulk-feed operation. */
-export interface BulkFeedResult {
+interface BulkFeedResult {
   readonly successCount: number;
   readonly failureCount: number;
   readonly errors: readonly string[];
@@ -289,7 +289,7 @@ async function withRetry<T>(
  * include the HTTP status code on failure.
  */
 /** Vespa Cloud mTLS client certificate configuration. */
-export interface VespaMtlsConfig {
+interface VespaMtlsConfig {
   readonly certPath: string;
   readonly keyPath: string;
 }
@@ -418,6 +418,7 @@ export class VespaClient {
     requestId?: string,
   ): Promise<VespaQueryResponse> {
     return withRetry(async () => {
+      const startedAt = performance.now();
       const url = `${this.baseUrl}/search/`;
       // CRITICAL: spread `params` first so a caller-supplied `yql` cannot
       // override the audited query string. The previous order
@@ -516,9 +517,11 @@ export class VespaClient {
       const parsed = validation.data as unknown as VespaQueryResponse;
       const hitCount = parsed.root.children?.length ?? 0;
       const totalCount = parsed.root.fields?.totalCount;
+      const durationMs = performance.now() - startedAt;
       pipelineDebug(
         {
           step: PipelineDebugStep.VESPA_QUERY,
+          duration_ms: durationMs,
           yql_length: yql.length,
           hit_count: hitCount,
           ...(totalCount !== undefined ? { total_count: totalCount } : {}),

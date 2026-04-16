@@ -8,7 +8,7 @@ import { clamp01 } from '../../shared/utils/clamp.js';
 const CRITIC_PROXY_SCORE_DISPLAY_BASE = 80;
 const CRITIC_PROXY_SCORE_DISPLAY_SPAN = 20;
 
-export type RankedResultAttributeProjection = Pick<
+type RankedResultAttributeProjection = Pick<
   RankedResult,
   | 'producer'
   | 'region'
@@ -41,7 +41,7 @@ export type RankedResultAttributeProjection = Pick<
   | 'sourceRecordRefs'
 >;
 
-export interface RankedResultAttributeSource {
+interface RankedResultAttributeSource {
   readonly producer?: string | undefined;
   readonly region?: string | undefined;
   readonly grapePrimary?: string | undefined;

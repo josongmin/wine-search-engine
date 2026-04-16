@@ -23,13 +23,6 @@ import type {
   ResultItemV2Machine,
   SearchResponseV2Machine,
 } from '../model/result-item-v2.js';
-import type { ToolCallEvidenceFrame } from '../../agent/model/tool-call-evidence-frame.js';
-import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
-import {
-  emptyGroundedPayload,
-  GROUNDED_CLAIM_SCHEMA_VERSION,
-  type GroundedPayload,
-} from '../model/grounded-claim.js';
 
 /** Decimal places for fusion score in compact provenance string. */
 const RETRIEVAL_PROVENANCE_FUSION_SCORE_DECIMALS = 4;
@@ -41,42 +34,6 @@ const EVIDENCE_WEIGHT_LOW = 0.1;
 export interface MachineResponseBuildParamsV2 {
   readonly queryId: string;
   readonly results: readonly RankedResult[];
-  /**
-   * ADR-016 Axis 3 — optional tool-call evidence frames. When present,
-   * `grounded.claims[*].provenance[*].toolCallId` is validated against
-   * this set at emit time (unknown IDs are dropped).
-   */
-  readonly evidenceFrames?: readonly ToolCallEvidenceFrame[] | undefined;
-  /**
-   * ADR-016 — optional constraint graph from the compiled query.
-   * Carried through to the grounded payload so claim verifiers can
-   * reference the same slot identity as retriever and ranker.
-   */
-  readonly constraintGraph?: ConstraintGraph | undefined;
-  /**
-   * ADR-016 — natural-language response prose. Passed to the emitter so
-   * claims can be grounded in specific sentences. Absent → emitter does
-   * not run and `grounded` is omitted.
-   */
-  readonly generatedProse?: string | undefined;
-  /**
-   * ADR-016 §2.5 — upstream degradation reasons to surface in
-   * `grounded.degradationReasons` verbatim. Sources: BundleSelector,
-   * critic `criticRewrites` / `criticRetriesExhausted`.
-   */
-  readonly upstreamDegradationReasons?: readonly string[] | undefined;
-  /**
-   * ADR-016 — pre-emitted grounded payload (e.g. when the caller runs
-   * the emitter itself and wants the builder to stitch it into the
-   * envelope). Mutually exclusive with emitter-triggered emission.
-   */
-  readonly groundedOverride?: GroundedPayload | undefined;
-}
-
-/** Env-flag gate — the builder NEVER emits `grounded` unless this flag
- *  is on. See ADR-016 §2.7. */
-function isGroundedClaimEmitEnabled(): boolean {
-  return process.env['GCE_SHADOW_EMIT'] === 'true';
 }
 
 /**
@@ -166,53 +123,10 @@ export function buildMachineResponseV2(
     return item;
   });
 
-  // ADR-016 Axis 3 — attach `grounded` sidecar when the feature flag is on,
-  // the caller supplied evidence frames + graph + prose (the three upstream
-  // signals), or supplied a pre-computed override. Otherwise the envelope
-  // is byte-compatible with pre-PR7.
-  const grounded = resolveGroundedPayload(params);
-
   return {
     queryId: params.queryId,
     results: items,
-    ...(grounded !== undefined ? { grounded } : {}),
-    ...(grounded !== undefined ? { claimSchemaVersion: GROUNDED_CLAIM_SCHEMA_VERSION } : {}),
     version: '2',
     responseType: 'machine',
   };
-}
-
-/**
- * Resolve the grounded payload for the current build request.
- *
- * Precedence:
- *   1. `groundedOverride` when supplied (caller ran the emitter itself).
- *   2. Fail-closed empty payload with `upstreamDegradationReasons` when
- *      flag is on but evidence frames / prose are missing.
- *   3. `undefined` (envelope omits `grounded`) when flag is off.
- *
- * This helper does NOT call the LLM emitter directly — the async emitter
- * lives in `grounded-claim-emitter.ts`. Callers that want emission drive
- * it themselves and pass the result as `groundedOverride`, keeping
- * `buildMachineResponseV2` synchronous.
- */
-function resolveGroundedPayload(
-  params: MachineResponseBuildParamsV2,
-): GroundedPayload | undefined {
-  if (params.groundedOverride !== undefined) {
-    return params.groundedOverride;
-  }
-  if (!isGroundedClaimEmitEnabled()) {
-    return undefined;
-  }
-  // Flag is on but the caller did not run the emitter and did not supply
-  // enough inputs for synchronous stitching — surface an empty payload
-  // with explicit degradation reasons instead of silently omitting.
-  const reasons = [...(params.upstreamDegradationReasons ?? [])];
-  const hasFrames = (params.evidenceFrames?.length ?? 0) > 0;
-  const hasProse = typeof params.generatedProse === 'string' && params.generatedProse.length > 0;
-  if (!hasFrames || !hasProse) {
-    reasons.push('grounded_claim_inputs_missing');
-  }
-  return emptyGroundedPayload(reasons);
 }

@@ -28,7 +28,7 @@ const COHERE_RERANK_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
 const COHERE_RERANK_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
 const COHERE_RERANK_BREAKER_NAME = 'cohere-rerank';
 
-export interface CohereRerankerOptions {
+interface CohereRerankerOptions {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;

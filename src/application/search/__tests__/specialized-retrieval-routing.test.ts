@@ -6,6 +6,7 @@ import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-can
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import { MixedRouteDegradationError } from '../../../domain/mixed/model/mixed-degradation.js';
+import { createStageTimer } from '../../../observability/stage-timer.js';
 
 function makePlan(overrides: Partial<QueryPlanV1>): QueryPlanV1 {
   return {
@@ -220,6 +221,31 @@ describe('SearchUseCase specialized retrieval routing', () => {
       undefined,
     );
     expect(deps.candidatePool.generate).not.toHaveBeenCalled();
+  });
+
+  it('records end-to-end stage timings on the main search path when a stageTimer is provided', async () => {
+    const plan = makePlan({});
+    vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
+    vi.mocked(deps.browseRetriever!.browseProducer).mockResolvedValue([
+      makeCandidate('wine-1', 'Opus One 2018'),
+    ]);
+
+    const useCase = new SearchUseCase(deps);
+    const stageTimer = createStageTimer();
+    await useCase.execute(
+      { query: 'opus one wines' },
+      'req-stage-timer',
+      { stageTimer },
+    );
+
+    expect(stageTimer.snapshot()).toEqual(
+      expect.objectContaining({
+        'search.total': expect.any(Number),
+        'search.pre_route': expect.any(Number),
+        'search.route_execution': expect.any(Number),
+        'search.post_route': expect.any(Number),
+      }),
+    );
   });
 
   it('uses CompareRetriever for compare_candidates queries', async () => {

@@ -1,7 +1,7 @@
 import type { NormalizedConstraint, ConstraintBundle } from '../../shared/types/index.js';
 import { WINE_TYPE_EXCLUSIVITY_GROUPS } from '../model/wine-type-patterns.js';
 
-export type ContradictionResult =
+type ContradictionResult =
   | { contradicted: false }
   | { contradicted: true; conflictPairs: Array<[NormalizedConstraint, NormalizedConstraint]> };
 

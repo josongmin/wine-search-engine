@@ -71,6 +71,22 @@ describe('AnchorExtractor', () => {
       expect(hasMarker).toBe(true);
     });
 
+    it('"까쇼 추천해줘" → trailing request words do not block grape anchor extraction', async () => {
+      const aliasMatcher = new ExactAliasMatcher(
+        new Map([
+          ['cabernet sauvignon', [makeMatchResult('Cabernet Sauvignon', ['entity-cabernet-sauvignon'], 0.95)]],
+        ]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const result = await extractor.extract('까쇼 추천해줘', normalizer.normalize('까쇼 추천해줘'));
+      expect(result).toHaveLength(1);
+      expect(result[0]?.surfaceForm).toBe('Cabernet Sauvignon');
+      expect(result[0]?.lookupVariants).toEqual(
+        expect.arrayContaining(['cabernet sauvignon']),
+      );
+    });
+
     it('"마고 비슷한 레드와인" → anchor: "마고", marker: "비슷한"', async () => {
       const aliasMatcher = new StubAliasMatcher(
         new Map([['마고', [makeMatchResult('마고', ['entity-margaux'], 0.88)]]]),

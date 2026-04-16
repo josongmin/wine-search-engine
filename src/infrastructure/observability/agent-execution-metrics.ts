@@ -3,7 +3,7 @@ import type {
   AgentExecutionRecord,
 } from '../../domain/agent/port/agent-execution-observer.port.js';
 
-export interface AgentExecutionMetrics {
+interface AgentExecutionMetrics {
   readonly runs: number;
   readonly byTerminationReason: Readonly<Record<string, number>>;
   readonly fallbackRuns: number;

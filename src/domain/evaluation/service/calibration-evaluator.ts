@@ -23,7 +23,7 @@ const RELIABILITY_BIN_CENTER_OFFSET = 0.5;
 /**
  * A single bin in a reliability diagram.
  */
-export interface ReliabilityBin {
+interface ReliabilityBin {
   /** Center of this confidence bin (e.g. 0.05, 0.15, ..., 0.95). */
   readonly binCenter: number;
 
@@ -40,7 +40,7 @@ export interface ReliabilityBin {
 /**
  * Per-query-class ECE breakdown.
  */
-export interface QueryClassECE {
+interface QueryClassECE {
   /** The query class. */
   readonly queryClass: QueryClass;
 

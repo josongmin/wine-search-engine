@@ -1,8 +1,10 @@
 import type {
   QueryClass,
   ConstraintBundle,
+  ConstraintAtom,
   NormalizedConstraint,
 } from '../../shared/types/index.js';
+import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { QueryPlanV2 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
@@ -36,6 +38,8 @@ import { analyzeQueryDecomposition } from './decomposition-detector.js';
 import { extractAllPairingConstraints } from './pairing-extractor.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
+import { buildBundleFromAtoms } from './constraint-reasoner.js';
+import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -325,10 +329,17 @@ export class Planner {
       relativeQuery,
     );
     const parsed = await this.parseConstraints(constraintQuery, intent, context?.abortSignal);
-    const constraints = this.mergePairingIntoBundle(
-      parsed.bundle,
+    const mergedConstraints = this.mergePairingIntoBundle(
+      buildBundleFromAtoms(parsed.reasonerOutput.survivingAtoms),
       normalizedQuery,
     );
+    const mergedConstraintAtoms = liftBundleToAtoms(mergedConstraints);
+    const roleTypedAtoms = this.contextualizeConstraintAtoms(
+      mergedConstraintAtoms,
+      intent,
+    );
+    const constraints = buildBundleFromAtoms(roleTypedAtoms);
+    const retrievalPlan = buildRetrievalPlan(constraints);
 
     // 7. Build expansions.
     const baseExpansions = this.expansionBuilder.build(
@@ -440,9 +451,9 @@ export class Planner {
       ...(parsed.constraintExtraction !== undefined
         ? { constraintExtraction: parsed.constraintExtraction }
         : {}),
-      retrievalPlan: parsed.retrievalPlan,
-      // E2-T3: Expose conflict-resolved ConstraintAtoms from reasoner for ranker + safety consumers.
-      constraintAtoms: parsed.reasonerOutput.atoms,
+      retrievalPlan,
+      // E2-T3: Expose conflict-resolved, provenance-typed atoms for ranker + safety consumers.
+      constraintAtoms: roleTypedAtoms,
       // ADR-010 Phase 1a: surface the trivial ConstraintGraph when the
       // compiler emitted one. Field is optional and additive — existing
       // readers remain on `constraintAtoms` / `constraints` until Phase 1b.
@@ -683,6 +694,30 @@ export class Planner {
     abortSignal?: AbortSignal,
   ): Promise<ConstraintCompilerResult> {
     return this.constraintCompiler.compile(normalizedQuery, abortSignal);
+  }
+
+  private contextualizeConstraintAtoms(
+    atoms: readonly ConstraintAtom[],
+    intent: QueryIntent,
+  ): readonly ConstraintAtom[] {
+    if (intent !== 'semantic_discovery' && intent !== 'pairing_search') {
+      return atoms;
+    }
+
+    return atoms.map((atom) => {
+      const isPositiveVarietalPrior =
+        atom.attribute === 'grape_primary'
+        && (atom.operator === '=' || atom.operator === 'in');
+      if (!isPositiveVarietalPrior) {
+        return atom;
+      }
+      return {
+        ...atom,
+        source_tier: 'soft',
+        conflict_policy: 'prefer',
+        constraint_role: 'prefer',
+      };
+    });
   }
 
   private buildConstraintParsingQuery(

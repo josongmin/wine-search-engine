@@ -26,7 +26,7 @@ export type QueryFamily = (typeof QUERY_FAMILY_LABELS)[number];
  * The result of a channel mix policy decision.
  * Consumers should use `channelMix` for dispatch and `reason` for tracing.
  */
-export interface ChannelMixDecision {
+interface ChannelMixDecision {
   /** The human-readable profile name that was selected. */
   readonly profileName: string;
 

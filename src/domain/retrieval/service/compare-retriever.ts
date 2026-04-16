@@ -11,9 +11,6 @@ import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 import { extractHardConstraintsFromGraph } from '../../query/service/graph-slot-constraints.js';
 
-/** Compatibility alias for older callers. */
-export type ComparisonCandidate = HybridCandidate;
-
 export class CompareRetriever {
   private readonly constraintFilter = new ConstraintFilter();
 

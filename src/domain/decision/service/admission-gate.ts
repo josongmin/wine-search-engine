@@ -16,7 +16,7 @@ import { decideAdmission } from './admission-policy.js';
  * - `{ admitted: false, reason, traceRef }` — the decision is rejected with
  *   a machine-readable reason and a trace reference for audit trails.
  */
-export type AdmissionResult =
+type AdmissionResult =
   | { readonly admitted: true }
   | {
       readonly admitted: false;

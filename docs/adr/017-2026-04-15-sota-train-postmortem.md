@@ -142,7 +142,7 @@ because they require Vespa Cloud credentials; see §7.
 | `CONSTRAINT_GRAPH_TOPOLOGY_LLM` | off | DORMANT | real `ChatLlmPort` wiring (API key + provider) |
 | `BUNDLE_SELECTOR_ENABLED` | off | DORMANT | hybrid multi-subquery graphs from topology planner |
 | `RETRIEVAL_EXECUTOR_CRITIC` | off | DORMANT | deterministic path is ready today; LLM reformulate needs API key |
-| `GCE_SHADOW_EMIT` / `GCE_PRIMARY` | off | DORMANT | real LLM + gold annotation set ≥ 200 rows |
+| `GCE_SHADOW_EMIT` / `GCE_PRIMARY` | off | REMOVED | Axis-3 grounded-claim stack was decommissioned on 2026-04-16 |
 
 Only `CONSTRAINT_GRAPH_EMIT` is live on the default production path at
 session close. The four dormant flags are **ready to flip** once the
@@ -311,7 +311,8 @@ hybrid graphs for the first time.
   - `CONSTRAINT_GRAPH_TOPOLOGY_LLM` — needs `ChatLlmPort`
   - `BUNDLE_SELECTOR_ENABLED` — has real input from F1+H now, activation is a runtime flip
   - `RETRIEVAL_EXECUTOR_CRITIC` — deterministic path ready
-  - `GCE_SHADOW_EMIT` / `GCE_PRIMARY` — needs LLM
+- **Removed after the session**:
+  - `GCE_SHADOW_EMIT` / `GCE_PRIMARY`
 
 ### SOTA++ score after Waves F-H
 

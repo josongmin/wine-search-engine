@@ -19,7 +19,7 @@ export interface RollbackThresholds {
   readonly minSamples: number;
 }
 
-export interface RollbackDecision {
+interface RollbackDecision {
   readonly shouldRollback: boolean;
   readonly reasons: readonly string[];
 }

@@ -40,7 +40,7 @@ const LLM_MAX_OUTPUT_TOKENS = 256;
 /** Deterministic seed for reformulate (cooperates with OpenAI seed param). */
 const LLM_DETERMINISTIC_SEED = 1515;
 
-export interface QueryRewriterDeps {
+interface QueryRewriterDeps {
   /** Optional LLM port for the `reformulate` branch. When unwired the
    *  rewriter declines reformulate requests by returning `null`. */
   readonly chatLlm?: ChatLlmPort | undefined;

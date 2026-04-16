@@ -5,7 +5,7 @@ import type { Alias, AliasType } from '../model/alias.js';
 /**
  * Result of an adversarial check.
  */
-export interface AdversarialCheckResult {
+interface AdversarialCheckResult {
   /** Whether the check passed (alias is allowed). */
   readonly passed: boolean;
   /** Human-readable reason for rejection, if `passed` is false. */

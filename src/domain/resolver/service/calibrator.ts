@@ -20,7 +20,7 @@ const DEFAULT_PLATT_PARAMS: CalibrationParams = {
   ece: 1.0,
 };
 
-export interface CalibratorOptions {
+interface CalibratorOptions {
   /**
    * When true, missing trained params are treated as a startup/runtime error rather than
    * silently falling back to identity calibration.

@@ -132,7 +132,7 @@ describe('T-010 publish-runtime-substrates append-only contract', () => {
 });
 
 describe('T-010 publish-search-snapshot pointer promote wiring', () => {
-  it('publish run() calls promoteActiveSearchSnapshotPointer before promoteStagedFile', async () => {
+  it('publish run() calls pointer promote before runtime substrate promotion and live verify', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const src = readFileSync(
@@ -140,10 +140,15 @@ describe('T-010 publish-search-snapshot pointer promote wiring', () => {
       'utf-8',
     );
     const pointerIdx = src.indexOf('promoteActiveSearchSnapshotPointer(');
-    const stagedIdx = src.indexOf('promoteStagedFile(stagedRuntimeStatePath');
+    const runtimePromoteIdx = src.indexOf('promoteRuntimeSubstrateArtifacts({');
+    const liveVerifyIdx = src.indexOf('runtimeStatePath: args.runtimeStatePath');
     expect(pointerIdx).toBeGreaterThan(0);
-    expect(stagedIdx).toBeGreaterThan(0);
-    expect(pointerIdx).toBeLessThan(stagedIdx);
+    expect(runtimePromoteIdx).toBeGreaterThan(0);
+    expect(liveVerifyIdx).toBeGreaterThan(0);
+    expect(pointerIdx).toBeLessThan(runtimePromoteIdx);
+    expect(runtimePromoteIdx).toBeLessThan(liveVerifyIdx);
+    expect(src).toContain('requirePointerParity: false');
+    expect(src).toContain('requirePointerParity: true');
   });
 
   it('rollback path calls rollbackActiveSearchSnapshotPointer first', async () => {
@@ -159,5 +164,21 @@ describe('T-010 publish-search-snapshot pointer promote wiring', () => {
     const rollbackFnEnd = src.indexOf('async function ', rollbackFnStart + 1);
     const rollbackBody = src.slice(rollbackFnStart, rollbackFnEnd);
     expect(rollbackBody).toContain('rollbackActiveSearchSnapshotPointer');
+  });
+
+  it('runtime substrate promotion rewrites nl mappings path before active promotion', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const src = readFileSync(
+      fileURLToPath(new URL('../../scripts/etl/publish-runtime-substrates.ts', import.meta.url)),
+      'utf-8',
+    );
+    expect(src).toContain('nlMappingsRuntimePath: args.activeRuntimeNlMappingsPath');
+    expect(src).toContain('restoreRuntimeSubstrateArtifacts');
+    const rewriteIdx = src.indexOf('nlMappingsRuntimePath: args.activeRuntimeNlMappingsPath');
+    const promoteIdx = src.indexOf('promoteStagedFile(args.stagedRuntimeNlMappingsPath, args.activeRuntimeNlMappingsPath)');
+    expect(rewriteIdx).toBeGreaterThan(0);
+    expect(promoteIdx).toBeGreaterThan(0);
+    expect(rewriteIdx).toBeLessThan(promoteIdx);
   });
 });

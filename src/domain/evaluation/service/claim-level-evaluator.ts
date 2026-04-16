@@ -51,7 +51,7 @@ Object.freeze(EMPTY_CATEGORY);
 /**
  * Options for {@link evaluateClaims}.
  */
-export interface EvaluateClaimsOptions {
+interface EvaluateClaimsOptions {
   /**
    * Deterministic "current year" used as the upper bound for accepted vintage
    * year claims. When omitted, falls back to `new Date().getFullYear()`.

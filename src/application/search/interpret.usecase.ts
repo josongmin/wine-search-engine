@@ -18,8 +18,6 @@ import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 
 const retrievalProfileService = new RetrievalProfileService();
 
-export type { InterpretRequest } from './interpret-request.dto.js';
-
 /**
  * Dependencies injected into the InterpretUseCase.
  */

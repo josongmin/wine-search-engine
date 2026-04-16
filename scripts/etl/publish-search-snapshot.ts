@@ -14,7 +14,11 @@ import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/
 // cache does not affect readiness probes running on separate pools.
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { buildSearchSnapshot } from './build-search-snapshot.js';
-import { publishRuntimeSubstrates } from './publish-runtime-substrates.js';
+import {
+  promoteRuntimeSubstrateArtifacts,
+  publishRuntimeSubstrates,
+  restoreRuntimeSubstrateArtifacts,
+} from './publish-runtime-substrates.js';
 import { verifySearchSnapshotReadiness } from './verify-search-snapshot-readiness.js';
 import { verifyRuntimeGoldCatalogCoverage } from './verify-runtime-gold-catalog-coverage.js';
 import { resolveDefaultFixtureRepoRoot } from './snapshot-entity-identity.js';
@@ -130,12 +134,6 @@ function buildStagingPath(activePath: string, snapshotId: string): string {
   const ext = path.extname(activePath);
   const base = ext.length > 0 ? activePath.slice(0, -ext.length) : activePath;
   return `${base}.${snapshotId}.staging${ext}`;
-}
-
-async function promoteStagedFile(stagingPath: string, activePath: string): Promise<void> {
-  const raw = await fs.readFile(stagingPath, 'utf8');
-  await atomicWriteFile(activePath, raw);
-  await fs.rm(stagingPath, { force: true });
 }
 
 /**
@@ -288,6 +286,17 @@ export async function rollbackActiveSearchSnapshotPointer(): Promise<{
 export async function loadPublishedRuntimeState(runtimeStatePath: string) {
   try {
     return await loadSearchSnapshotRuntimeState(runtimeStatePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function readOptionalTextFile(filePath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return undefined;
@@ -618,10 +627,15 @@ async function run(): Promise<void> {
 
   const fixtureRoot = resolvePublishFixtureRepoRoot(args.fixtureRepoRoot);
   const stagedRuntimeStatePath = buildStagingPath(args.runtimeStatePath, built.manifest.snapshotId);
+  const stagedRuntimeNlMappingsPath = buildStagingPath(args.runtimeNlMappingsPath, built.manifest.snapshotId);
   const snapshotRootDir = path.dirname(path.dirname(built.manifest.artifacts.vespaFeedNdjson));
   const [previousRuntimeState, newSnapshotEntityIds] = await Promise.all([
     loadPublishedRuntimeState(args.runtimeStatePath),
     loadSnapshotEntityIds(built.manifest.artifacts.entitiesNdjson),
+  ]);
+  const [previousRuntimeStateContents, previousRuntimeNlMappingsContents] = await Promise.all([
+    readOptionalTextFile(args.runtimeStatePath),
+    readOptionalTextFile(args.runtimeNlMappingsPath),
   ]);
   const previousManifest = previousRuntimeState !== undefined
     ? await loadManifest(previousRuntimeState.manifestPath)
@@ -632,107 +646,140 @@ async function run(): Promise<void> {
   }
 
   const publishLock = await acquireSnapshotPublishLock();
-
-  let runtimeState;
+  let runtimeState: Awaited<ReturnType<typeof publishRuntimeSubstrates>> | undefined;
   try {
-    console.log('🧾 Materializing exact Vespa replay artifact');
-    const manifestWithExactFeed = await materializeExactVespaFeedForSnapshot({
-      manifest: built.manifest,
-      manifestPath: built.manifestPath,
-      fixtureRepoRoot: fixtureRoot,
-    });
-    console.log('🚦 Ensuring snapshot-bound LTR readiness');
-    await ensureSnapshotBoundLtrModels({
-      previousRuntimeState,
-      previousManifest,
-      nextManifest: manifestWithExactFeed,
-      snapshotRootDir,
-      allowMissingLtr: args.allowMissingLtr,
-    });
-    console.log('📥 Indexing document plane into Vespa');
-    await runIndexer(
-      manifestWithExactFeed.artifacts.vespaFeedNdjson,
-      manifestWithExactFeed.snapshotId,
-      'prepared-feed',
-      fixtureRoot,
-    );
-    if (
-      previousRuntimeState !== undefined
-      && previousRuntimeState.snapshotId !== manifestWithExactFeed.snapshotId
-    ) {
-      console.log(`🧹 Deleting stale Vespa docs from previous snapshot ${previousRuntimeState.snapshotId}`);
-      const currentRuntimeEntityIds = await loadCurrentRuntimeEntityIds(previousRuntimeState.snapshotId);
-      const nextEntityIdSet = new Set(newSnapshotEntityIds);
-      const staleDocIds = currentRuntimeEntityIds.filter((entityId) => !nextEntityIdSet.has(entityId));
-      await deleteStaleVespaDocuments(staleDocIds);
-    }
-    console.log('🗄️ Publishing runtime substrates');
-    runtimeState = await publishRuntimeSubstrates({
-      manifestPath: built.manifestPath,
-      runtimeStatePath: stagedRuntimeStatePath,
-      runtimeNlMappingsPath: args.runtimeNlMappingsPath,
-      allowMissingLtr: args.allowMissingLtr,
-    });
-    console.log('✅ Verifying search snapshot readiness');
-    await verifySearchSnapshotReadiness({
-      runtimeStatePath: stagedRuntimeStatePath,
-      manifestPath: built.manifestPath,
-    });
-    console.log('🎯 Verifying runtime gold catalog coverage');
-    const config = loadConfig();
-    if (!shouldUsePgPool(config.pg)) {
-      throw new Error('Postgres configuration is required for runtime gold coverage verification');
-    }
-    const coveragePool = createPgPool(config.pg);
     try {
-      const coverage = await verifyRuntimeGoldCatalogCoverage({
-        pool: coveragePool,
-        snapshotId: manifestWithExactFeed.snapshotId,
+      console.log('🧾 Materializing exact Vespa replay artifact');
+      const manifestWithExactFeed = await materializeExactVespaFeedForSnapshot({
+        manifest: built.manifest,
+        manifestPath: built.manifestPath,
         fixtureRepoRoot: fixtureRoot,
       });
-      console.log(
-        `🎯 Runtime gold coverage passed: ${coverage.requiredCanonicalIds} canonical id(s) confirmed`,
-      );
-    } finally {
-      await coveragePool.end();
-    }
-    console.log('🔁 Atomic DB pointer promote — active_search_snapshot');
-    await promoteActiveSearchSnapshotPointer({
-      snapshotId: manifestWithExactFeed.snapshotId,
-      previousSnapshotId: previousRuntimeState?.snapshotId,
-      contentHash: runtimeState.contentHash ?? manifestWithExactFeed.snapshotId,
-    });
-    console.log('🔁 Re-verifying readiness with pointer parity (post-promote)');
-    await verifySearchSnapshotReadiness({
-      runtimeStatePath: stagedRuntimeStatePath,
-      manifestPath: built.manifestPath,
-      requirePointerParity: true,
-    });
-    console.log('📌 Promoting staged runtime state');
-    await promoteStagedFile(stagedRuntimeStatePath, args.runtimeStatePath);
-  } catch (error) {
-    console.error('↩️ Publish failed; attempting rollback');
-    await Promise.all([
-      fs.rm(stagedRuntimeStatePath, { force: true }),
-    ]);
-    try {
-      await rollbackToPreviousSnapshot({
+      console.log('🚦 Ensuring snapshot-bound LTR readiness');
+      await ensureSnapshotBoundLtrModels({
         previousRuntimeState,
         previousManifest,
-        runtimeStatePath: args.runtimeStatePath,
-        newSnapshotEntityIds,
-        fixtureRepoRoot: fixtureRoot,
+        nextManifest: manifestWithExactFeed,
+        snapshotRootDir,
+        allowMissingLtr: args.allowMissingLtr,
       });
-    } catch (rollbackError) {
+      console.log('📥 Indexing document plane into Vespa');
+      await runIndexer(
+        manifestWithExactFeed.artifacts.vespaFeedNdjson,
+        manifestWithExactFeed.snapshotId,
+        'prepared-feed',
+        fixtureRoot,
+      );
+      if (
+        previousRuntimeState !== undefined
+        && previousRuntimeState.snapshotId !== manifestWithExactFeed.snapshotId
+      ) {
+        console.log(`🧹 Deleting stale Vespa docs from previous snapshot ${previousRuntimeState.snapshotId}`);
+        const currentRuntimeEntityIds = await loadCurrentRuntimeEntityIds(previousRuntimeState.snapshotId);
+        const nextEntityIdSet = new Set(newSnapshotEntityIds);
+        const staleDocIds = currentRuntimeEntityIds.filter((entityId) => !nextEntityIdSet.has(entityId));
+        await deleteStaleVespaDocuments(staleDocIds);
+      }
+      console.log('🗄️ Publishing runtime substrates');
+      runtimeState = await publishRuntimeSubstrates({
+        manifestPath: built.manifestPath,
+        runtimeStatePath: stagedRuntimeStatePath,
+        runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+        allowMissingLtr: args.allowMissingLtr,
+      });
+      console.log('✅ Verifying search snapshot readiness');
+      await verifySearchSnapshotReadiness({
+        runtimeStatePath: stagedRuntimeStatePath,
+        manifestPath: built.manifestPath,
+        requirePointerParity: false,
+      });
+      console.log('🎯 Verifying runtime gold catalog coverage');
+      const config = loadConfig();
+      if (!shouldUsePgPool(config.pg)) {
+        throw new Error('Postgres configuration is required for runtime gold coverage verification');
+      }
+      const coveragePool = createPgPool(config.pg);
+      try {
+        const coverage = await verifyRuntimeGoldCatalogCoverage({
+          pool: coveragePool,
+          snapshotId: manifestWithExactFeed.snapshotId,
+          fixtureRepoRoot: fixtureRoot,
+        });
+        console.log(
+          `🎯 Runtime gold coverage passed: ${coverage.requiredCanonicalIds} canonical id(s) confirmed`,
+        );
+      } finally {
+        await coveragePool.end();
+      }
+      console.log('🔁 Atomic DB pointer promote — active_search_snapshot');
+      await promoteActiveSearchSnapshotPointer({
+        snapshotId: manifestWithExactFeed.snapshotId,
+        previousSnapshotId: previousRuntimeState?.snapshotId,
+        contentHash: runtimeState.contentHash ?? manifestWithExactFeed.snapshotId,
+      });
+      console.log('🔁 Re-verifying readiness with pointer parity (post-promote)');
+      await verifySearchSnapshotReadiness({
+        runtimeStatePath: stagedRuntimeStatePath,
+        manifestPath: built.manifestPath,
+        requirePointerParity: true,
+      });
+      console.log('📌 Promoting runtime substrate files');
+      runtimeState = await promoteRuntimeSubstrateArtifacts({
+        stagedRuntimeStatePath,
+        activeRuntimeStatePath: args.runtimeStatePath,
+        stagedRuntimeNlMappingsPath,
+        activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
+      });
+      console.log('✅ Verifying readiness after runtime substrate promotion');
+      await verifySearchSnapshotReadiness({
+        runtimeStatePath: args.runtimeStatePath,
+        manifestPath: built.manifestPath,
+        requirePointerParity: true,
+      });
+    } catch (error) {
+      console.error('↩️ Publish failed; attempting rollback');
       const publishMessage = error instanceof Error ? error.message : String(error);
-      const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-      throw new Error(`search snapshot publish failed: ${publishMessage}; rollback failed: ${rollbackMessage}`);
-    } finally {
-      await publishLock.release();
+      const rollbackFailures: string[] = [];
+      await Promise.all([
+        fs.rm(stagedRuntimeStatePath, { force: true }),
+        fs.rm(stagedRuntimeNlMappingsPath, { force: true }),
+      ]);
+      try {
+        await rollbackToPreviousSnapshot({
+          previousRuntimeState,
+          previousManifest,
+          runtimeStatePath: args.runtimeStatePath,
+          newSnapshotEntityIds,
+          fixtureRepoRoot: fixtureRoot,
+        });
+      } catch (rollbackError) {
+        rollbackFailures.push(
+          `pointer/Vespa rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
+      }
+      try {
+        await restoreRuntimeSubstrateArtifacts({
+          activeRuntimeStatePath: args.runtimeStatePath,
+          previousRuntimeStateContents,
+          activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
+          previousRuntimeNlMappingsContents,
+        });
+      } catch (restoreError) {
+        rollbackFailures.push(
+          `runtime substrate restore failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+        );
+      }
+      if (rollbackFailures.length > 0) {
+        throw new Error(`search snapshot publish failed: ${publishMessage}; ${rollbackFailures.join('; ')}`);
+      }
+      throw error;
     }
-    throw error;
+    if (runtimeState === undefined) {
+      throw new Error('Publish state machine completed without producing a runtime state');
+    }
+  } finally {
+    await publishLock.release();
   }
-  await publishLock.release();
 
   console.log(`Published search snapshot ${runtimeState.snapshotId}`);
   console.log(`manifest=${built.manifestPath}`);

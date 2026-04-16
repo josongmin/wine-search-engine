@@ -9,8 +9,8 @@
  *  - If `BUNDLE_SELECTOR_ENABLED === 'false'` → pass-through (flag-off
  *    rollback is byte-identical).
  *  - If `graph === undefined` → pass-through.
- *  - If `graph.origin !== 'hybrid'` → pass-through (trivial + planner-only
- *    graphs do not carry cross-subquery structure today).
+ *  - If `graph.origin === 'deterministic_from_atoms'` → pass-through
+ *    (trivial graph; no cross-subquery structure).
  *  - If `subqueryNodes.length <= 1` → pass-through (no assignment to do).
  *  - Otherwise → per-subquery retrieval → `chooseAssignment` →
  *    `BundleRankedResult[]`-ready assignment payload.
@@ -241,7 +241,11 @@ export function shouldEngageBundlePath(
 ): boolean {
   if (!isBundleSelectorEnabled(env)) return false;
   if (graph === undefined) return false;
-  if (graph.origin !== 'hybrid') return false;
+  // The trivial atom graph never carries multi-subquery topology, so it must
+  // remain on the passthrough path. In contrast, merged deterministic / LLM
+  // topology graphs are emitted as `planner_emitted` or `hybrid` and SHOULD
+  // engage the bundle path when they carry >1 subquery nodes.
+  if (graph.origin === 'deterministic_from_atoms') return false;
   const subqueryCount = extractSubqueryNodes(graph).length;
   return subqueryCount > 1;
 }

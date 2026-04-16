@@ -3,7 +3,7 @@ import { DomainError } from './domain-error.js';
 export const POLICY_BLOCKED_CODE = 'POLICY_BLOCKED';
 export const POLICY_BLOCKED_MESSAGE = 'Query blocked by security policy.';
 
-export interface PolicyBlockedRejectionMeta {
+interface PolicyBlockedRejectionMeta {
   readonly layer?: string | undefined;
   readonly reason?: string | undefined;
 }

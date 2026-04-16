@@ -23,9 +23,6 @@ import type { DecisionStatus, NextAction } from '../../domain/shared/types/index
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 
-export type { ResolveRequest } from './resolve-request.dto.js';
-export type { ResolveResponse } from './resolve-response.dto.js';
-
 /**
  * Dependencies injected into the ResolveUseCase.
  */

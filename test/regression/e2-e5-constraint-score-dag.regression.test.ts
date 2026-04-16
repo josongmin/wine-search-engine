@@ -88,6 +88,7 @@ describe('ConstraintAtom + liftToAtom (E2-T1)', () => {
     expect(atom.conflict_policy).toBe('strict');
     expect(atom.source_kind).toBe('explicit_utterance');
     expect(atom.authority_level).toBe(CONSTRAINT_AUTHORITY_BY_SOURCE_KIND.explicit_utterance);
+    expect(atom.constraint_role).toBe('must_satisfy');
   });
 
   it('soft tier → prefer conflict_policy, implicit_slot source_kind', () => {
@@ -95,6 +96,7 @@ describe('ConstraintAtom + liftToAtom (E2-T1)', () => {
     expect(atom.source_tier).toBe('soft');
     expect(atom.conflict_policy).toBe('prefer');
     expect(atom.source_kind).toBe('implicit_slot');
+    expect(atom.constraint_role).toBe('prefer');
   });
 
   it('inferred tier → relaxable conflict_policy, planner_inferred source_kind', () => {
@@ -102,6 +104,28 @@ describe('ConstraintAtom + liftToAtom (E2-T1)', () => {
     expect(atom.source_tier).toBe('inferred');
     expect(atom.conflict_policy).toBe('relaxable');
     expect(atom.source_kind).toBe('planner_inferred');
+    expect(atom.constraint_role).toBe('contextual_hint');
+  });
+
+  it('entity resolver and llm-linked constraints infer implicit_slot provenance', () => {
+    const resolverAtom = liftToAtom(
+      {
+        ...makeConstraint('grape_primary', 'Cabernet Sauvignon'),
+        source_phrase: 'entity_resolver(까쇼)',
+        mapping_version: 'entity-resolver-v1.0',
+      },
+      'hard',
+    );
+    const llmAtom = liftToAtom(
+      {
+        ...makeConstraint('region', 'Bordeaux'),
+        source_phrase: 'llm_linker(보르도)',
+        mapping_version: 'llm-linker-v1.0',
+      },
+      'hard',
+    );
+    expect(resolverAtom.source_kind).toBe('implicit_slot');
+    expect(llmAtom.source_kind).toBe('implicit_slot');
   });
 
   it('sourceKind override overrides default', () => {

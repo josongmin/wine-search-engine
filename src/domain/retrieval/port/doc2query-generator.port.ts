@@ -61,11 +61,6 @@ export interface Doc2QueryInput {
   readonly numQueries: number;
 }
 
-export interface Doc2QueryGeneration {
-  readonly entityId: string;
-  readonly syntheticQueries: readonly string[];
-}
-
 export interface Doc2QueryGeneratorPort {
   /**
    * Generate N synthetic queries that this wine document COULD answer.

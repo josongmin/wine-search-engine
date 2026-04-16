@@ -29,6 +29,14 @@ class StubAliasMatcher implements AliasMatcher {
   }
 }
 
+class ExactAliasMatcher implements AliasMatcher {
+  constructor(private readonly entries: Map<string, readonly AliasMatchResult[]> = new Map()) {}
+
+  findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+    return Promise.resolve(this.entries.get(normalizedQuery) ?? []);
+  }
+}
+
 function makeMatchResult(
   surfaceForm: string,
   confidence = 0.9,
@@ -170,6 +178,26 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     const planner = makePlanner(entries);
     const plan = await planner.plan('오푸스원 지금 마시기 좋아?');
 
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+  });
+
+  it('slang grape query with trailing request words still routes as exact entity', async () => {
+    const anchorMatcher = new ExactAliasMatcher(
+      new Map([
+        ['카베르네 소비뇽', [makeMatchResult('카베르네 소비뇽', 0.95, ['entity-cabernet-sauvignon'])]],
+      ]),
+    );
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(anchorMatcher),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+    const plan = await planner.plan('까쇼 추천해줘');
+
+    expect(plan.anchors).toHaveLength(1);
     expect(plan.intent).toBe('entity_exact');
     expect(plan.suggestedRoute).toBe('entity');
     expect(plan.suggestedRetrievalMode).toBe('entity_lookup');

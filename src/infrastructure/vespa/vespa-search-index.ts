@@ -382,6 +382,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     //   userInput(@queryN)                             — general multi-term match via WAND
     //   canonical_label contains phrase(@queryN)        — exact phrase for full wine names
     //   aliases_identity_safe contains phrase(@queryN)  — exact phrase for identity aliases
+    //   aliases_noisy_recall contains phrase(@queryN)   — exact phrase for broad recall aliases
     //   search_text_ko contains phrase(@queryN)         — Korean tasting notes / descriptions
     //   search_text_en contains phrase(@queryN)         — English tasting notes / doc2query
     //   producer contains phrase(@queryN)               — producer name exact match
@@ -394,6 +395,7 @@ export class VespaSearchIndex implements SearchIndexPort {
         `(userInput(@query${i})` +
         ` OR canonical_label contains phrase(@query${i})` +
         ` OR aliases_identity_safe contains phrase(@query${i})` +
+        ` OR aliases_noisy_recall contains phrase(@query${i})` +
         ` OR search_text_ko contains phrase(@query${i})` +
         ` OR search_text_en contains phrase(@query${i})` +
         ` OR producer contains phrase(@query${i}))`,

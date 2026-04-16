@@ -13,7 +13,9 @@
  *    root may become an interior group or be dropped if superseded.
  *  - **Idempotent**. `merge(trivial, merge(trivial, t)) ===
  *    merge(trivial, t)` byte-for-byte.
- *  - **Origin**: result is always `origin: 'hybrid'`.
+ *  - **Origin**: result preserves the topology origin
+ *    (`planner_emitted` for deterministic detector output, `hybrid`
+ *    for LLM topology).
  *  - **Schema version**: result bumps to v1.1 (topology carries replay
  *    metadata).
  */

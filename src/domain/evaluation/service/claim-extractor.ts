@@ -187,7 +187,7 @@ function containsAsWord(haystack: string, needle: string): boolean {
 /**
  * Options for {@link extractClaims}.
  */
-export interface ExtractClaimsOptions {
+interface ExtractClaimsOptions {
   /**
    * Deterministic "current year" used as the upper bound for accepted vintage
    * years (vintages > currentYear + 1 are rejected as implausible). When

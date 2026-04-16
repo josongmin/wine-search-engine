@@ -18,7 +18,7 @@ import { CACHE_MODE_CONFIG } from '../model/cache-key.js';
 /**
  * Result of eligibility analysis.
  */
-export interface CacheEligibilityResult {
+interface CacheEligibilityResult {
   readonly isCacheable: boolean;
   readonly ttlSeconds: number;
   readonly reason: string;

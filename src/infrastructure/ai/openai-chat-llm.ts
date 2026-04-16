@@ -43,7 +43,7 @@ const OPENAI_RETRY_CONFIG: RetryConfig = {
   label: 'OpenAI chat',
 };
 
-export interface OpenAiChatLlmOptions {
+interface OpenAiChatLlmOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
   readonly baseUrl: string;
   readonly apiKey: string;

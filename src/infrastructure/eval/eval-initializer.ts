@@ -14,7 +14,7 @@ const log = bootstrapLogger.child({ component: 'EvalInitializer' });
 /**
  * Options for running evaluation.
  */
-export interface EvalRunnerOptions {
+interface EvalRunnerOptions {
   /** Only evaluate cases with specific query class. */
   readonly queryClass?: QueryClass;
 

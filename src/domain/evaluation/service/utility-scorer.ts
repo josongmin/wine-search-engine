@@ -20,7 +20,7 @@ const UTILITY_WEIGHTS = {
  * Classification of a single evaluation outcome into one of the
  * Decision Utility categories.
  */
-export interface UtilityClassification {
+interface UtilityClassification {
   readonly utilityScore: number;
   readonly isCorrectResolve: boolean;
   readonly isWrongResolve: boolean;

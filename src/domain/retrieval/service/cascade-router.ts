@@ -42,7 +42,7 @@ export const PHASE_TO_CHANNEL: Readonly<Record<RetrievalPhase, RetrievalChannel 
  * T4.1: Phase dispatch decision.
  * Records which phases are executed, skipped, and their channel mappings.
  */
-export interface PhaseDispatchDecision {
+interface PhaseDispatchDecision {
   readonly difficulty: 'easy' | 'medium' | 'hard';
   readonly phasesToExecute: readonly RetrievalPhase[];
   readonly channelsToActivate: readonly RetrievalChannel[];

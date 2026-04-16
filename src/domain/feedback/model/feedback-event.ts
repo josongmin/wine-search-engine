@@ -26,8 +26,3 @@ export interface FeedbackEvent {
   readonly userId?: string;
   readonly dwellMs?: number;
 }
-
-export interface FeedbackEventBatch {
-  readonly events: readonly FeedbackEvent[];
-  readonly batchedAt: number;
-}

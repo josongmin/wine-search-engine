@@ -37,8 +37,6 @@ import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/reques
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { createStageTimer } from '../../observability/stage-timer.js';
-export type { HybridSearchRequest } from './hybrid-request.dto.js';
-
 /**
  * Dependencies injected into the HybridUseCase.
  */

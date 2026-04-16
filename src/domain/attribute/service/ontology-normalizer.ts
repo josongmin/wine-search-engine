@@ -11,7 +11,7 @@
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
-export type OntologyAxis =
+type OntologyAxis =
   | 'grape'
   | 'region'
   | 'style'
@@ -25,7 +25,7 @@ export type OntologyAxis =
   | 'producer_prestige'
   | 'certification';
 
-export interface OntologyNormalization {
+interface OntologyNormalization {
   readonly axis: OntologyAxis;
   /** Underscore-separated canonical value, e.g. 'cabernet_sauvignon', 'full_body'. */
   readonly canonicalValue: string;

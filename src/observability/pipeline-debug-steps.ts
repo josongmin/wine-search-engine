@@ -109,7 +109,7 @@ export const PIPELINE_STAGE_ORDER = [
   'infra_http',
 ] as const;
 
-export type PipelineStage = (typeof PIPELINE_STAGE_ORDER)[number];
+type PipelineStage = (typeof PIPELINE_STAGE_ORDER)[number];
 
 /**
  * Maps each pipeline stage to the step IDs that belong to it.

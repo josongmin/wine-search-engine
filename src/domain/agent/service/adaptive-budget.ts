@@ -109,7 +109,7 @@ const SITUATION_INDICATORS: readonly string[] = [
   '분위기', 'mood', 'atmosphere', '로맨틱', 'romantic',
 ];
 
-export interface AdaptiveBudget {
+interface AdaptiveBudget {
   readonly maxSteps: number;
   readonly classification: 'specific_sku' | 'adversarial' | 'off_domain' | 'nested_condition' | 'situation_based' | 'compound' | 'default';
   readonly reason: string;

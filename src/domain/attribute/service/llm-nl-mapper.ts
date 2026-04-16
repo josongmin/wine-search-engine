@@ -165,8 +165,6 @@ export const CACHE_KEY_NAMESPACE = `${LLM_MAPPING_VERSION}:${PROMPT_FINGERPRINT}
  * were actually checked against the cache (i.e. missedPhrases capped at
  * MAX_LLM_PHRASES). When phraseCache is undefined, all three are 0.
  */
-export type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
-
 export class LlmNLMapper extends NLMapper {
   constructor(
     mappingTable: MappingTablePort,

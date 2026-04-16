@@ -8,7 +8,7 @@ import type { FastifyBaseLogger } from 'fastify';
  *
  * **Step names:** prefer `PipelineDebugStep` in `pipeline-debug-steps.ts` for new logs.
  */
-export interface RequestPipelineDebugContext {
+interface RequestPipelineDebugContext {
   readonly requestId: string;
   readonly debugRequest: boolean;
   /** Fastify request logger (may be a child at level `debug` when debug mode is on). */

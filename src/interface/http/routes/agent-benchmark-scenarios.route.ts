@@ -49,7 +49,7 @@ export const AgentBenchmarkScenariosRouteContract = {
   },
 } as const;
 
-export interface AgentBenchmarkScenariosRouteOptions {
+interface AgentBenchmarkScenariosRouteOptions {
   readonly enabled: boolean;
 }
 

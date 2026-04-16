@@ -28,7 +28,7 @@ const PROTECTION_PRIORITY: Readonly<Record<string, number>> = {
 // Output type
 // ---------------------------------------------------------------------------
 
-export interface AccumulatedEvidence {
+interface AccumulatedEvidence {
   /** Entity ID this evidence belongs to. */
   readonly entityId: string;
 

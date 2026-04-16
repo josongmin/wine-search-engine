@@ -37,10 +37,6 @@ import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
 } from '../../../domain/shared/constants.js';
-import {
-  GroundedPayloadSchema,
-  GROUNDED_CLAIM_SCHEMA_VERSION,
-} from '../../../domain/response/model/grounded-claim.js';
 
 // ---------------------------------------------------------------------------
 // V2 shared sub-schemas
@@ -217,15 +213,6 @@ export const ResultItemV2MachineSchema = z.object({
 export const SearchResponseV2MachineSchema = z.object({
   queryId: z.string().min(1),
   results: z.array(ResultItemV2MachineSchema).max(MAX_SEARCH_RESULTS_PER_RESPONSE),
-  /**
-   * ADR-016 Axis 3 — optional grounded claim envelope (V2 sidecar only).
-   * Absent when `GCE_SHADOW_EMIT` feature flag is off, when the builder
-   * was not supplied with evidence frames + constraint graph + prose, or
-   * when emission failed fail-closed.
-   */
-  grounded: GroundedPayloadSchema.optional(),
-  /** ADR-016 envelope-level schema version mirror. Optional. */
-  claimSchemaVersion: z.literal(GROUNDED_CLAIM_SCHEMA_VERSION).optional(),
   version: z.literal('2'),
   responseType: z.literal('machine'),
 }).strict();

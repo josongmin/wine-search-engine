@@ -87,4 +87,26 @@ describe('Planner RFC-019 semantic compiler path', () => {
     );
     expect(plan.constraintExtraction?.phrasesByTier?.tier6_regex_fallback).toBeGreaterThan(0);
   });
+
+  it('downgrades resolver-sourced varietal constraints to soft priors for semantic discovery queries', async () => {
+    const planner = makePlanner();
+    const plan = await planner.plan('까쇼 추천해줘');
+
+    expect(plan.intent).toBe('semantic_discovery');
+    expect(plan.queryClass).toBe('semantic_preference');
+    expect(plan.constraints.hard.some((constraint) => constraint.attribute === 'grape_primary')).toBe(false);
+    expect(plan.constraints.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary', value: 'Cabernet Sauvignon' }),
+      ]),
+    );
+    expect(
+      plan.constraintAtoms?.find((constraint) => constraint.attribute === 'grape_primary'),
+    ).toEqual(
+      expect.objectContaining({
+        constraint_role: 'prefer',
+        source_tier: 'soft',
+      }),
+    );
+  });
 });

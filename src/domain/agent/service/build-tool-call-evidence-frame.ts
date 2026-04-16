@@ -15,7 +15,7 @@ import {
   type ToolCallStructuredOutput,
 } from '../model/tool-call-evidence-frame.js';
 
-export interface BuildToolCallEvidenceFrameInput {
+interface BuildToolCallEvidenceFrameInput {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly requestId: string;

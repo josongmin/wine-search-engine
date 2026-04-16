@@ -4,6 +4,10 @@ import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-sto
 import { PgAmbiguityDictionary } from '../infrastructure/adapter/pg-ambiguity-dictionary.js';
 import { PgThresholdStore } from '../infrastructure/adapter/pg-threshold-store.js';
 import { PgAliasMatcher } from '../infrastructure/adapter/pg-alias-matcher.js';
+import {
+  CascadingAliasMatcher,
+  SearchIndexAliasMatcher,
+} from '../infrastructure/adapter/search-index-alias-matcher.js';
 import { FileMappingTableAdapter } from '../infrastructure/adapter/file-mapping-table.js';
 import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learned-matcher.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
@@ -40,7 +44,6 @@ import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher
 import type { RerankerPort } from '../domain/ranking/port/reranker.port.js';
 import type { Doc2QueryGeneratorPort } from '../domain/retrieval/port/doc2query-generator.port.js';
 import {
-  StubAliasMatcher,
   StubAmbiguityDictionary,
   StubBlockingPort,
   StubCalibrationStore,
@@ -200,25 +203,35 @@ export function buildCoreAdapterServices(
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
     ambiguityDict: pool ? new PgAmbiguityDictionary(pool) : new StubAmbiguityDictionary(),
     thresholdStore: pool ? new PgThresholdStore(pool) : new StubThresholdStore(),
-    aliasMatcher: ((): typeof StubAliasMatcher.prototype | InstanceType<typeof PgAliasMatcher> => {
+    aliasMatcher: ((): AliasMatcher => {
+      const indexAliasMatcher = new SearchIndexAliasMatcher(searchIndex);
       if (config.killSwitch.aliasOverlay) {
         bootstrapLogger.warn(
           {
             killSwitch: 'aliasOverlay',
             nodeEnv: config.nodeEnv,
             consequence:
-              'alias_matcher_disabled — fuzzy/exact alias retrieval is OFF; entity lookup quality will degrade',
+              'pg_alias_overlay_disabled — using search-index exact alias substrate only',
           },
-          '[container] kill-switch active: using StubAliasMatcher (returns no matches)',
+          '[container] kill-switch active: using SearchIndexAliasMatcher (exact alias substrate from Vespa docs)',
         );
-        return new StubAliasMatcher();
+        return indexAliasMatcher;
       }
       if (!pool) {
-        // Already covered by the production-no-pool throw above; this is
-        // the dev/test path.
-        return new StubAliasMatcher();
+        bootstrapLogger.warn(
+          {
+            nodeEnv: config.nodeEnv,
+            consequence:
+              'pg_alias_substrate_unavailable — using search-index exact alias substrate only',
+          },
+          '[container] PostgreSQL alias substrate unavailable: using SearchIndexAliasMatcher',
+        );
+        return indexAliasMatcher;
       }
-      return new PgAliasMatcher(pool);
+      return new CascadingAliasMatcher(
+        new PgAliasMatcher(pool),
+        indexAliasMatcher,
+      );
     })(),
     mappingTable: new FileMappingTableAdapter(),
     anchorResolver: new VespaAnchorResolver(searchIndex),

@@ -108,8 +108,6 @@ export type ConstraintGraphNode =
   | GroupOrNode
   | GroupXorNode;
 
-export type ConstraintGraphNodeKind = ConstraintGraphNode['kind'];
-
 // ─── Edges ───────────────────────────────────────────────────────────────────
 
 export type BudgetResource = 'price_total' | 'time' | 'count';
@@ -283,8 +281,6 @@ export const ConstraintGraphSchema = z.object({
   generatedAt: z.string().min(1).max(REPLAY_METADATA_MAX_LEN).optional(),
   llmModel: z.string().min(1).max(REPLAY_METADATA_MAX_LEN).optional(),
 }).strict();
-
-export type ConstraintGraphValidated = z.infer<typeof ConstraintGraphSchema>;
 
 // ─── Convenience accessors ───────────────────────────────────────────────────
 

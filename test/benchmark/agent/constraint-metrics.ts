@@ -80,7 +80,7 @@ function rangesOverlap(a: { min?: number; max?: number }, b: { min?: number; max
  * - Value: string equality via NFKC fold, number equality with 0.1%
  *   tolerance, range overlap for numeric ranges, subset inclusion for arrays.
  */
-export type MatchMode = 'strict' | 'relaxed' | 'type_only';
+type MatchMode = 'strict' | 'relaxed' | 'type_only';
 
 export function constraintMatches(
   actual: NormalizedConstraint,
@@ -167,7 +167,7 @@ export function constraintMatches(
 // P1: Semantic Constraint Recall (SCR)
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface ConstraintRecallScore {
+interface ConstraintRecallScore {
   /** hard bucket recall [0,1] or null if no expected hard constraints. */
   readonly scrHard: number | null;
   /** soft bucket recall [0,1] or null. */
@@ -264,7 +264,7 @@ export function scoreSemanticConstraintRecall(
 // P2: Entity Linking Accuracy (ELA@1)
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface EntityLinkingScore {
+interface EntityLinkingScore {
   /** Precision = correctly linked / total linked. */
   readonly precision: number | null;
   /** Recall = correctly linked / total expected. */
@@ -344,7 +344,7 @@ export function scoreEntityLinkingAccuracy(
 // P3: Slot F1 (entity-level, SemEval-2013)
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface SlotF1Score {
+interface SlotF1Score {
   /** Strict F1 — attribute + operator + value exact match. */
   readonly strict: number | null;
   /** Relaxed F1 — operator can flex (>= matches range, etc.). */
@@ -412,7 +412,7 @@ export function scoreSlotF1(
 // P4: Constraint Satisfaction Rate (CSR)
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface ConstraintSatisfactionScore {
+interface ConstraintSatisfactionScore {
   readonly csrHard: number | null;
   readonly csrSoft: number | null;
   readonly csrInferred: number | null;
@@ -545,7 +545,7 @@ export function scoreConstraintSatisfactionRate(
 // P6: Utility-weighted Discounted Cumulative Gain (UDCG)
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface UDCGScore {
+interface UDCGScore {
   readonly udcg5: number | null;
   readonly udcg10: number | null;
 }
@@ -623,7 +623,7 @@ export function scoreUDCGPair(
 // P7: Judge-SCR Correlation
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface JudgeSCRCorrelation {
+interface JudgeSCRCorrelation {
   /** Pearson correlation coefficient, or null if sample size < 3. */
   readonly pearsonR: number | null;
   /** Number of (scrScore, judgeScore) pairs evaluated. */
@@ -705,7 +705,7 @@ export function computeJudgeSCRCorrelation(
 // P8: Confidence Calibration (Brier Score)
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface BrierCalibrationScore {
+interface BrierCalibrationScore {
   readonly brierScore: number | null;
   readonly sampleCount: number;
 }

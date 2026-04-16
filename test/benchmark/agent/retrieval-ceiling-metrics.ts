@@ -30,7 +30,7 @@ const RECALL_K_TIGHT = 20;
 const RECALL_K_MID = 50;
 const RECALL_K_LOOSE = 100;
 
-export interface RetrievalCeilingMetrics {
+interface RetrievalCeilingMetrics {
   readonly recall_at_20: number;
   readonly recall_at_50: number;
   readonly recall_at_100: number;
@@ -41,7 +41,7 @@ export interface RetrievalCeilingMetrics {
   readonly ranked_count: number;
 }
 
-export interface RankingGapAnalysis {
+interface RankingGapAnalysis {
   readonly oracle: number;
   readonly achieved: number;
   readonly retrievalCoverage: number;

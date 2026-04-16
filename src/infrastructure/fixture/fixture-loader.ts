@@ -168,7 +168,7 @@ export const BenchmarkSuiteSchema = z.object({
   tags: z.array(z.string()).optional(),
 }).strict();
 
-export type BenchmarkSuite = z.infer<typeof BenchmarkSuiteSchema>;
+type BenchmarkSuite = z.infer<typeof BenchmarkSuiteSchema>;
 
 const AliasSurfaceEntrySchema = z.object({
   surface_form: z.string(),
@@ -180,7 +180,7 @@ const AliasSurfaceEntrySchema = z.object({
   notes: z.string().optional(),
 }).strict();
 
-export type AliasSurfaceEntry = z.infer<typeof AliasSurfaceEntrySchema>;
+type AliasSurfaceEntry = z.infer<typeof AliasSurfaceEntrySchema>;
 
 // ---------------------------------------------------------------------------
 // FixtureLoader

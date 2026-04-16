@@ -5,6 +5,7 @@ import type { AgentToolDeps } from '../../../../src/application/agent/agent-tool
 import { PolicyBlockedError } from '../../../../src/domain/shared/error/policy-blocked.js';
 import { CircuitBreakerOpenError } from '../../../../src/domain/shared/error/circuit-breaker-open-error.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
+import { buildPlannerSystemMessage, buildSynthesisSystemMessage } from '../../../../src/application/agent/agent-prompt.js';
 
 function makeSearchResponse(): SearchResponseV1 {
   return {
@@ -93,9 +94,10 @@ describe('AgentOrchestrator', () => {
       .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string })
       .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string });
     const chatLlm: ChatLlmPort = { complete };
+    const searchExecute = vi.fn().mockResolvedValue(makeSearchResponse());
     const toolDeps: AgentToolDeps = {
       searchUseCase: {
-        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+        execute: searchExecute,
       } as never,
     };
 
@@ -109,6 +111,64 @@ describe('AgentOrchestrator', () => {
     expect(result.terminationReason).toBe('answer');
     expect(result.answer).toContain('Search result summary:');
     expect(result.toolCallCount).toBe(1);
+    expect(searchExecute).toHaveBeenCalledTimes(1);
+    expect(result.fallbackTrace).toMatchObject({
+      fallbackApplied: 'layer3',
+      fallbackSearchUsed: false,
+    });
+  });
+
+  it('uses planner prompt for step-0 and synthesis prompt for fallback', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'search first',
+          action: { tool: 'search_wines', input: { query: 'opus one' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string })
+      .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string });
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1 });
+    const result = await orchestrator.execute('opus one', 'req-prompt-seam');
+
+    const systemMessages = complete.mock.calls.map((call) => call[0].messages[0]);
+    expect(result.terminationReason).toBe('answer');
+    expect(systemMessages.some((msg) => msg.content === buildPlannerSystemMessage().content)).toBe(true);
+    expect(systemMessages.some((msg) => msg.content === buildSynthesisSystemMessage().content)).toBe(true);
+  });
+
+  it('treats a planner answer as terminal without invoking synthesis', async () => {
+    const complete = vi.fn().mockResolvedValueOnce({
+      text: JSON.stringify({
+        thought: 'direct answer',
+        answer: '오퍼스 원 2018을 추천드립니다.',
+      }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn(),
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1 });
+    const result = await orchestrator.execute('opus one', 'req-planner-answer');
+
+    expect(result.terminationReason).toBe('answer');
+    expect(result.answer).toContain('오퍼스 원 2018');
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(complete.mock.calls[0]?.[0].messages[0].content).toBe(buildPlannerSystemMessage().content);
   });
 
   it('handles parallel actions and returns a final answer', async () => {
@@ -236,6 +296,44 @@ describe('AgentOrchestrator', () => {
       reasoningFailure: true,
       failedSynthesisAttempts: 0,
       fallbackSearchUsed: true,
+    });
+  });
+
+  it('ignores synthesis tool-call outputs and falls back to raw observations', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'search first',
+          action: { tool: 'search_wines', input: { query: 'opus one' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'synthesis should not trigger tools',
+          action: { tool: 'search_wines', input: { query: 'should not run' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const searchExecute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: searchExecute,
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1 });
+    const result = await orchestrator.execute('opus one', 'req-synth-tool-call');
+
+    expect(result.fallbackApplied).toBe(true);
+    expect(result.terminationReason).toBe('answer');
+    expect(result.answer).toContain('Search result summary:');
+    expect(result.fallbackTrace).toMatchObject({
+      fallbackApplied: 'layer3',
+      fallbackSearchUsed: false,
     });
   });
 
@@ -578,7 +676,7 @@ describe('AgentOrchestrator', () => {
     expect(result.answer.length).toBeGreaterThan(0);
   });
 
-  it('rejects structured filters on exact metadata lookup and forces a bare entity query', async () => {
+  it('auto-normalizes exact metadata lookup to a bare entity query before tool execution', async () => {
     const complete = vi.fn()
       .mockResolvedValueOnce({
         text: JSON.stringify({
@@ -587,14 +685,6 @@ describe('AgentOrchestrator', () => {
             tool: 'search_wines',
             input: { query: 'opus one', country: 'United States' },
           },
-        }),
-        model: 'test-model',
-        finishReason: 'stop',
-      })
-      .mockResolvedValueOnce({
-        text: JSON.stringify({
-          thought: 'retry with bare entity',
-          action: { tool: 'search_wines', input: { query: 'opus one', limit: 2 } },
         }),
         model: 'test-model',
         finishReason: 'stop',
@@ -627,13 +717,13 @@ describe('AgentOrchestrator', () => {
 
     expect(result.terminationReason).toBe('answer');
     expect(result.answer).toContain('오퍼스 원 2018');
-    expect(result.steps[0]?.observation).toContain('bare entity search_wines query');
     expect(searchExecute).toHaveBeenCalledTimes(1);
     expect(searchExecute).toHaveBeenCalledWith(
       { query: 'opus one', limit: 1 },
-      'req-exact-drinkability-step1',
+      'req-exact-drinkability-step0',
       expect.any(Object),
     );
+    expect(result.steps[0]?.action?.input).toEqual({ query: 'opus one', limit: 1 });
     expect(entityLookup).toHaveBeenCalledWith('wine-1');
   });
 

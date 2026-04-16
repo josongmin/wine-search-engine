@@ -649,7 +649,7 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
 
 describe('Audit regressions — session 6 ingestion pipeline (2026-04-09)', () => {
   // S6-UNICODE-BOUNDARY: \p{L}\p{N} (AND) was used instead of [\p{L}\p{N}] (OR)
-  // in field-normalizer and structured-extractor. This caused vintage years
+  // in field-normalizer. This caused vintage years
   // adjacent to letters (e.g. "2015 Limited") to match as volumes (2015L = 2M ml).
   describe('S6-UNICODE-BOUNDARY: regex uses character class not sequence', () => {
     it('field-normalizer uses [\\p{L}\\p{N}] not \\p{L}\\p{N}', async () => {
@@ -663,18 +663,6 @@ describe('Audit regressions — session 6 ingestion pipeline (2026-04-09)', () =
       expect(src).not.toMatch(/\(?<!\\p\{L\}\\p\{N\}\)/);
       expect(src).not.toMatch(/\(?!\\p\{L\}\\p\{N\}\)/);
       // Must contain the bracketed character class form
-      expect(src).toMatch(/\[\\p\{L\}\\p\{N\}\]/);
-    });
-
-    it('structured-extractor uses [\\p{L}\\p{N}] not \\p{L}\\p{N}', async () => {
-      const { readFileSync } = await import('node:fs');
-      const { fileURLToPath } = await import('node:url');
-      const src = readFileSync(
-        fileURLToPath(new URL('../../src/domain/ingestion/service/structured-extractor.ts', import.meta.url)),
-        'utf-8',
-      );
-      expect(src).not.toMatch(/\(?<!\\p\{L\}\\p\{N\}\)/);
-      expect(src).not.toMatch(/\(?!\\p\{L\}\\p\{N\}\)/);
       expect(src).toMatch(/\[\\p\{L\}\\p\{N\}\]/);
     });
   });

@@ -189,11 +189,9 @@ const LlmTopologyResponseSchema = z
   })
   .strict();
 
-export type LlmTopologyResponse = z.infer<typeof LlmTopologyResponseSchema>;
-
 // ─── Planner ──────────────────────────────────────────────────────────────────
 
-export interface TopologyPlannerInput {
+interface TopologyPlannerInput {
   readonly atoms: readonly ConstraintAtom[];
   readonly normalizedQuery: string;
   readonly decompositionHint?: QueryDecompositionHint | undefined;
