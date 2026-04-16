@@ -217,7 +217,7 @@ function makeFakeNLMapper(): NLMapper {
 /**
  * Canned ChatLlmPort — records each call and replays a stack of canned
  * responses in order. The last response is re-used once the stack is
- * drained so multi-call sites (e.g. topology planner + GCE emitter) can
+ * drained so multi-call sites (for example topology planner retries) can
  * share one fake and still get deterministic payloads.
  *
  * Wave D's CannedLlmPort served the same role; re-implemented here to

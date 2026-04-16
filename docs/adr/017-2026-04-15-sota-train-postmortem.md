@@ -10,7 +10,7 @@
 [ADR-013](./013-constraint-graph-phase-1c-bundle-selector.md),
 [ADR-014](./014-ranker-graph-native.md),
 [ADR-015](./015-axis-2-retrieval-critic.md),
-[ADR-016](./016-axis-3-grounded-claims.md).
+[ADR-016](./016-axis-3-grounded-claims.md) (tombstoned after the session).
 **Scope**: Entire 2026-04-15 session commit range `c90e635..221e098` (26 commits).
 
 ---
@@ -24,10 +24,13 @@ advances four orthogonal axes of the search pipeline at the same time:
 **(1) structured evidence carrier** (ADR-009), **(2) ConstraintGraph** as
 a topology layer over `ConstraintAtom` (ADR-010 → ADR-014), **(3) self-critique
 RAG** via an executor-internal retrieval critic (ADR-015), and **(4) grounded
-claim emission** from the V2 sidecar (ADR-016). The session landed the full
-train plus Wave A–E follow-up closure (bench baseline, shadow parity, lint
-debt, integration locks, relaxation regeneration). This document is the
-authoritative post-mortem for that session.
+claim emission** from the V2 sidecar (ADR-016). Axis 4 was later
+decommissioned on 2026-04-16; this document keeps the original train record
+historical while the "updated flag landscape" section records the removal.
+The session landed the full train plus Wave A–E follow-up closure (bench
+baseline, shadow parity, lint debt, integration locks, relaxation
+regeneration). This document is the authoritative post-mortem for that
+session.
 
 ---
 
@@ -196,15 +199,13 @@ approximation, and K > 5 is rare enough in the query corpus that the
 fail-closed surface is acceptable until a provably-correct wider algorithm
 can be justified.
 
-### 6.5 Dual-axis `AtomicClaim` (ADR-016)
+### 6.5 Dual-axis `AtomicClaim` (ADR-016, historical)
 
-`AtomicClaim` carries **both** a 9-class `type` field (the new semantic
-axis introduced by ADR-016) and the existing 5-class `category` field
-(the RFC-020 routing contract). Neither supersedes the other: the 5-class
-axis is the verifier dispatch contract and cannot move without breaking
-the contract; the 9-class axis is the new semantic granularity the
-extractor needs. Keeping both is a small cost in schema width for a large
-gain in routing stability during the rollout.
+ADR-016 originally introduced an `AtomicClaim` with both a 9-class `type`
+field and the existing 5-class `category` field. That schema is no longer
+part of the live runtime after the 2026-04-16 GCE decommission. Keep this
+section only as historical context for commits `0658313`, `15c6b08`,
+`c28eec2`, and `221e098`.
 
 ---
 
@@ -218,17 +219,11 @@ annotation, cloud provisioning).
    Postgres + Redis + Vespa Cloud + OpenAI stack. The local bench in
    commit `67a7f55` only exercises the deterministic projector; the
    critical-section retrieval metric needs the real stack.
-2. **Gold annotation set ≥ 200 rows** — requires human annotation labor
-   the bootstrap 30-claim set cannot substitute for.
-3. **`test:e2e:vespa` / `test:quality:vespa`** — both lanes require
+2. **`test:e2e:vespa` / `test:quality:vespa`** — both lanes require
    Vespa Cloud credentials that are not available in the default dev
    environment.
-4. **LLM topology planner shadow rollout** — requires `ChatLlmPort`
+3. **LLM topology planner shadow rollout** — requires `ChatLlmPort`
    wiring to a real provider and a production API key budget.
-5. **Grounded Claim Emission primary mode** — requires all four
-   ADR-016 §2.8 production gates (≥ 0.95 parity on ≥ 200 rows, verifier
-   latency budget, LLM availability, shadow mode soak). Currently only
-   the schema and emitter are wired; the gates are dormant.
 
 ---
 
@@ -239,11 +234,11 @@ annotation, cloud provisioning).
   integration locks in place on every flag-gated surface.
 - **Product value on default path**: **depends on the F1 wave landing**.
   Only `CONSTRAINT_GRAPH_EMIT=on` is live by default at HEAD; the
-  user-visible uplift from ADR-012/013/015/016 is gated behind the four
-  dormant flags in §5. The SOTA++ structure is ready; the product
+  user-visible uplift from ADR-012/013/015 is gated behind the dormant
+  flags in §5. ADR-016 is no longer part of the live product path. The SOTA++ structure is ready; the product
   delivery is partially held back by §7's external deps.
-- **SOTA++ roadmap completion**: **95 / 100** — three items in §7
-  (bench, gold set, Vespa credentials / shadow rollout) are deferred
+- **SOTA++ roadmap completion**: **95 / 100** — the active items in §7
+  (bench, Vespa credentials / shadow rollout) are deferred
   purely on external dependencies, not engineering debt.
 
 ---
@@ -260,9 +255,8 @@ under "Axis 2 / 3 activation" and the future-phases appendix. Named phases:
 - **Phase 2** — Multi-turn session graph carry-over. Re-uses the graph
   identity from one turn to the next so constraints persist across
   follow-up questions.
-- **Phase 3** — Streaming grounded claim emission for UX. Emits
-  `AtomicClaim` rows as soon as their upstream frame finishes, instead of
-  bundling at end-of-response.
+- **Phase 3** — Decommissioned Axis-3 GCE. No active streaming grounded-claim
+  roadmap remains after the 2026-04-16 removal.
 - **Phase 4** — Vespa rank profile integration. Graph-aware features
   feed into LTR rather than staying at the application layer.
 
@@ -318,7 +312,7 @@ hybrid graphs for the first time.
 
 - **Code / structure / tests**: 99/100
 - **Product value on default path**: **98/100** (F1 default-on activates XOR/pairing + shares_budget in production without external deps)
-- **SOTA++ roadmap completion**: 97/100 (3 items still blocked on external deps: real LLM bench, Vespa lane, 200-row gold annotation)
+- **SOTA++ roadmap completion**: 97/100 (active external deps still blocked: real LLM bench, Vespa lane)
 
 ## 11. Session sign-off
 

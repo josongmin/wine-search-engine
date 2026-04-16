@@ -46,12 +46,13 @@ The reviewer raised five P1/P2 findings that each invalidate a piece of the abov
 | P1-B | `QueryPlanV1.constraints: ConstraintBundle` is **field-frozen** (E1-U9 comment at [query-plan.ts:29-37](../../src/domain/query/model/query-plan.ts#L29-L37)). Downstream readers (`provenance-closure`, `decision-input`, ranker) all consume flat `hard/soft/inferred` attribute arrays. | ConstraintGraph cannot replace the compiler output — it must live in a new V2 planner plane alongside the frozen V1 bundle. |
 | P1-C | `BudgetLedger.reserve(subqueryId, candidates)` cuts raw-candidate budget before ranking chooses a result. Current pipeline ranks first, judges constraint-coverage on `topResult` only ([search-usecase-provenance-closure.ts:61-66](../../src/application/search/search-usecase-provenance-closure.ts#L61-L66)). Deducting budget from unselected candidates can evict valid bundles. | Multi-query execution needs a **bundle-selection / assignment** stage between retrieval and ranking. `ConstraintGraph` alone is not enough. |
 | P2-A | Agent layer already has `adaptive-budget.ts` + `step-budget.ts` that per-tool cap and trigram-Jaccard block near-duplicate reformulations ([step-budget.ts:16-49](../../src/domain/agent/service/step-budget.ts#L16-L49)). Self-critique retry at the agent step layer would either be blocked or bypass the guard. | Self-critique must live **inside the retrieval executor**, not in the agent loop. |
-| P2-B | Evidence is reconstructed from raw observation strings by [`evidence-parser.ts`](../../src/domain/evaluation/service/evidence-parser.ts) (regex over pipe-delimited lines). `provenanceRef.resultId/toolCallId/passageSpan` cannot be reliably restored from that carrier. | GCE needs a **structured evidence carrier** upstream before the evaluator can consume provenance at all. |
+| P2-B | Evidence is reconstructed from raw observation strings by [`evidence-parser.ts`](../../src/domain/evaluation/service/evidence-parser.ts) (regex over pipe-delimited lines). `provenanceRef.resultId/toolCallId/passageSpan` cannot be reliably restored from that carrier. | Any future provenance-aware evaluator needs a **structured evidence carrier** upstream before it can consume provenance at all. |
 
-Plus two things the draft left as "open questions" that should be cutover gates:
+The original 2026-04-14 GCE draft also identified two evaluator-cutover gates. They
+are now historical because the grounded-claim sidecar was removed on 2026-04-16:
 
-- **Gold atomic_claim annotation**: `aggregate()` at [claim-level-evaluator.ts:108-110](../../src/domain/evaluation/service/claim-level-evaluator.ts#L108-L110) already excludes `status !== 'ok'` from faithfulness denominators. Grading a new evaluator with a new evaluator therefore self-biases. A human-annotated claim gold set is **not** a later concern — it is the gate that authorises cutover.
-- **Claim ontology versioning**: `pairing_assertion` / `style_assertion` / `recommendation` carry the highest schema-drift risk. The ontology must carry an explicit `claim_schema_version` field from v1 so that replay and bench comparisons across revisions stay sound.
+- **Gold atomic_claim annotation**: `aggregate()` at [claim-level-evaluator.ts:108-110](../../src/domain/evaluation/service/claim-level-evaluator.ts#L108-L110) already excludes `status !== 'ok'` from faithfulness denominators. If GCE is revived, a human-annotated claim gold set must gate cutover.
+- **Claim ontology versioning**: `pairing_assertion` / `style_assertion` / `recommendation` carry the highest schema-drift risk. If GCE is revived, the ontology must carry an explicit schema-version field from v1 so replay and bench comparisons across revisions stay sound.
 
 The reviewer's one-liner: "방향은 맞는데, ADR 제목이 '평가/생성 재설계'인 것보다 실제론 'planner/execution/provenance contract migration'에 더 가깝습니다."
 
@@ -68,13 +69,13 @@ Four axes, ordered by dependency:
 | **0** | Structured Evidence Carrier | prerequisite | tool-call return type, agent-step record shape |
 | **1** | ConstraintGraph (V2 planner plane) | largest | `QueryPlanV2`, `CompiledWineQuery`, constraint-compiler additive output, provenance-closure read path, ranker input, `BundleSelector` new stage |
 | **2** | Self-critique RAG loop (executor-internal) | medium | retrieval executor internal retry, **not** the agent loop |
-| **3** | Grounded Claim Emission (V2 builder + V1 optional sidecar) | wire-contract + evaluator | `MachineResponseBuilderV2` extension, new atomic-claim schema, type-dispatched verifiers, **NOT** a V1 schema change |
+| **3** | Grounded Claim Emission | decommissioned | Removed from live runtime on 2026-04-16; ADR-016 remains a tombstone, not an active build plan |
 
 The reviewer's concluded order (축 2 → 축 3 → 축 1) maps onto Axes 1 → 2 → 3 in this plan. Axis 0 is the new prerequisite that the draft missed.
 
 ---
 
-## Axis 0 — Structured Evidence Carrier (prerequisite for Axis 3)
+## Axis 0 — Structured Evidence Carrier
 
 ### What's broken
 
@@ -317,69 +318,20 @@ The deterministic parts of `RetrievalCritic` (coverage, provenance shortfall) re
 
 ---
 
-## Axis 3 — Grounded Claim Emission (V2 builder + sidecar, NOT V1 schema change)
+## Axis 3 — Grounded Claim Emission (decommissioned)
 
-### What's broken
+Axis 3 was implemented as a V2 sidecar experiment and then removed from the
+live runtime on 2026-04-16. The repository no longer contains the
+grounded-claim emitter, `AtomicClaim` model layer, per-type verifier stack,
+gold-claim bootstrap corpus, GCE feature flags, or machine-response V2
+`grounded` / `claimSchemaVersion` payload surface.
 
-Per P1-A: `SearchResponseV1` is locked. GCE prose+claims does not fit. The [response-builder.ts:1-19](../../src/domain/response/service/response-builder.ts#L1-L19) comment literally warns: "Do NOT promote V2 builders to main runtime contract without an explicit migration epic that gates on eval regression results."
+Current runtime status:
 
-### What to build
-
-GCE lives in the **V2 builder sidecar** that already exists (`MachineResponseBuilderV2`, `HumanResponseBuilderV2`):
-
-```typescript
-interface MachineResponseV2 /* extended */ {
-  readonly schemaVersion: 'machine_response_v2';
-  readonly queryType: 'search';
-  readonly engineDecision: EngineDecision;         // unchanged
-  readonly results: readonly ResultItem[];         // unchanged
-
-  // Axis 3 note:
-  // the grounded-claim sidecar proposed in this draft was later removed
-  // from the live runtime on 2026-04-16.
-}
-```
-
-Note `provenanceRef.toolCallId` points at the **Axis-0 `ToolCallEvidenceFrame.toolCallId`**. Axis 3 literally cannot exist without Axis 0.
-
-### Type-dispatched verifier
-
-One verifier per claim type — regex-free.
-
-```typescript
-const VERIFIERS: Record<AtomicClaimType, ClaimVerifier> = {
-  entity_reference:           new ExactEntityMatchVerifier(),    // against frame.structuredOutput.resultSet
-  attribute_assertion:        new NumericRangeVerifier(),
-  price_assertion:            new PriceToleranceVerifier(),      // ±10%
-  vintage_assertion:          new ExactYearVerifier(),
-  pairing_assertion:          new NliVerifier(),                 // LLM or small NLI model
-  comparative_assertion:      new PairwiseVerifier(),
-  drinking_window_assertion:  new WindowIntersectionVerifier(),
-  style_assertion:            new EmbeddingSimilarityVerifier(), // threshold 0.7
-  recommendation:             new NoopVerifier(),
-};
-```
-
-`claim-extractor.ts` is **deleted** at the completion of Axis 3, not at the start — retention during shadow emit allows side-by-side comparison against the gold annotation set.
-
-### Where it plugs in
-
-| Touch point | File | Change |
-|---|---|---|
-| V2 builder | `src/domain/response/service/machine-response-builder-v2.ts` | Emit `grounded` payload. |
-| LLM generation adapter | `src/application/agent/agent-prompt.ts`, `src/application/agent/agent-response-parser.ts` (new) | JSON-schema-constrained output for Anthropic; `tool_use` bridge for OpenAI. |
-| V1 response | `src/domain/response/model/search-response.ts:41` | *unchanged* — no V1 breaking change. |
-| New: verifier dispatcher | `src/domain/evaluation/service/claim-verifier-router.ts` | Replace regex extract + flat verify with type dispatch. |
-| Legacy extractor | `src/domain/evaluation/service/claim-extractor.ts` | Retained for shadow comparison, deleted at cutover. |
-
-### Cutover gates for Axis 3
-
-The following four gates are ALL required. Any single failure keeps the legacy extractor live.
-
-1. **Gold atomic_claim annotation set exists** — human-annotated, ≥200 scenarios, independent of engine output. Upgraded from open question to gate per reviewer.
-2. **`claim_schema_version` header on every emitted claim** — per-claim, not just per-envelope. Replay / bench diffing must stay sound across ontology revisions. Upgraded from open question to gate per reviewer.
-3. **Shadow-mode parity ≥0.95** — on the gold set, new verifier's per-type precision/recall matches or exceeds regex extractor, and the false-positive hardFail rate from the RCA collapses from 51% to <5%.
-4. **Evaluator-on-evaluator bias audit** — aggregate score calculated both with and without `status !== 'ok'` exclusion at [claim-level-evaluator.ts:108-110](../../src/domain/evaluation/service/claim-level-evaluator.ts#L108-L110). Both numbers reported; drift between them flagged in the bench output. Self-bias visible instead of hidden.
+- `SearchResponseV1` and machine-response V2 do not emit grounded-claim payloads.
+- `claim-extractor.ts` and `claim-level-evaluator.ts` remain the active deterministic evaluation path.
+- ADR-016 is retained only as a tombstone for historical links.
+- There is no active Axis-3 rollback path because the feature is no longer shipped.
 
 ---
 
@@ -410,12 +362,12 @@ Each phase is a standalone shippable PR train. Axis ordering is forced by the de
 
 ### Phase 3 — Grounded Claim Emission
 
-Only entered when Phases 0-2 are green.
+Decommissioned on 2026-04-16. Do not start implementation from this plan.
 
-- V2 builder extension.
-- Type-dispatched verifiers.
-- Legacy extractor retained in shadow mode.
-- **Cutover gates (all four)**: gold annotation set, per-claim schema version, shadow parity ≥0.95, evaluator-bias dual reporting.
+- ADR-016 is retained as a tombstone for historical links.
+- Machine-response V2 has no active grounded-claim payload.
+- `claim-extractor.ts` and `claim-level-evaluator.ts` remain the active deterministic evaluation path.
+- A future revival requires a fresh ADR and new gates; the removed sidecar is not a rollback target.
 
 ---
 
@@ -429,10 +381,7 @@ These are **blocking**, not "nice to have". A PR that claims axis completion wit
 | 1 | Legacy readers unchanged + bundle selector green + inferred-constraint targets | Regression suite + bench tier thresholds |
 | 2 | Internal retry bounded ≤3 + trace replay | Type-level constant + regression test |
 | 2 | Context recall ≥70%, duplicate rate ≤5% | Bench nightly threshold |
-| 3 | Gold atomic_claim annotation set ≥200 scenarios | Human-annotated file committed to repo |
-| 3 | `claim_schema_version` on every claim | Zod schema + runtime assertion |
-| 3 | Shadow parity ≥0.95 on gold set | Bench harness diff report |
-| 3 | Evaluator-bias dual reporting in every bench summary | Bench summary format change |
+| 3 | No active gate | Axis decommissioned on 2026-04-16; revive only via fresh ADR |
 
 ---
 
@@ -451,17 +400,17 @@ Each phase has a feature flag and a forward-compatible schema strategy.
 
 ## 5. Open questions (actually open)
 
-These are questions this plan does NOT yet answer, as opposed to the two previously-listed "open" items that have been promoted to cutover gates.
+These are questions this plan does NOT yet answer.
 
 1. **Graph coverage metric definition**: the existing `scrInferred / csrInferred` calculation assumes flat buckets. Under the ConstraintGraph model, coverage = `|matched_slots| / |expected_slots|` where "expected" is the union of graph slot nodes. But slots may be nested under `group_xor` (pick one), so strict equality is the wrong operator. Needs a formal definition of graph-coverage with group semantics before Axis 1 cutover gates can be written precisely.
 
-2. **Multi-vendor constrained decoding**: Anthropic `tool_use` and OpenAI `json_schema` have different enforcement strengths for nested discriminated unions. The GCE claim envelope has a discriminated `AtomicClaimType` union with per-type `field` constraints — not all vendors guarantee this. Open question: do we emit a laxer schema and validate-then-reject post-hoc, or do we pick one vendor as primary and treat others as fallback?
+2. **Multi-vendor constrained decoding**: Anthropic `tool_use` and OpenAI `json_schema` have different enforcement strengths for nested discriminated unions. This remains relevant for graph-topology planner output and future structured LLM calls. Open question: do we emit a laxer schema and validate-then-reject post-hoc, or do we pick one vendor as primary and treat others as fallback?
 
 3. **BundleSelector complexity ceiling**: bipartite assignment with budget constraints is NP-hard in general. For K ≤ 5 subqueries it's trivial. For K > 5 we need a heuristic. Open question: what's the worst-case realistic K? A "gift set of 12 wines under a single budget" is rare but legitimate.
 
 4. **`entity_snapshots` deprecation**: ADR-008 left this table alive (FK to entities dropped, archive retained). Under a fully grounded eval world, per-entity rollback is handled by pointer flip + composite-PK append-only history. `entity_snapshots` may be dead weight. Separate ADR.
 
-5. **Latency budget under 4-axis pipeline**: worst case per-query = 1 planner-LLM + N subquery-retrievals + up-to-3 critic-retries + 1 GCE-LLM. Rough headline: current p95 = 29s; projection puts 4-axis p95 at ~45-60s without streaming. Streaming prose generation while claims are still being verified is a UX mitigation, but it changes the response contract. Open.
+5. **Latency budget under 3-axis runtime pipeline**: worst case per-query = 1 planner-LLM + N subquery-retrievals + up-to-3 critic-retries. Rough headline: current p95 = 29s; projection puts the active planner/executor pipeline above the current budget unless graph planning and critic retries are tightly gated. Open.
 
 ---
 
@@ -469,7 +418,7 @@ These are questions this plan does NOT yet answer, as opposed to the two previou
 
 Listed explicitly to prevent scope drift:
 
-- Does not change `SearchResponseV1`. V2 is where GCE lives.
+- Does not change `SearchResponseV1`. The removed GCE/V2 sidecar is not part of this active plan.
 - Does not remove the flat `ConstraintBundle`. It survives as `legacyBundle` until the last reader migrates.
 - Does not touch agent `step-budget.ts` or `adaptive-budget.ts`. Those guards are correct at the agent layer.
 - Does not revisit ADR-008 runtime plane composite PK work. That plane is stable; this plan builds on it.

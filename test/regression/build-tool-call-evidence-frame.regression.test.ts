@@ -1,7 +1,7 @@
 /**
  * ADR-009 Phase 0: invariants on the frame builder utility + toolCallId
  * conventions. Locks the correlation contract that downstream phases
- * (CRAG executor retry, GCE provenanceRef.toolCallId) depend on.
+ * (CRAG executor retry and provenance audits) depend on.
  *
  * Append-only test: never delete this file.
  */

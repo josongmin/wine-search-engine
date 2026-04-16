@@ -43,13 +43,11 @@ import {
   buildSynthesisContext,
   type ExpectedOutputSchema,
   isAgentToolName,
-  type SynthesisContext,
   type ToolOutcome,
   type ToolOutcomeKind,
 } from './tool-outcome.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import { containsHangul } from '../../domain/shared/utils/hangul.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execution-observer.port.js';
 import { QueryNormalizer } from '../../domain/query/service/query-normalizer.js';
@@ -58,20 +56,24 @@ import {
   hasEntityMetadataKeyword,
 } from '../../domain/query/service/planner-intent-detection.js';
 import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
+import {
+  createAgentExecutionState,
+  type AgentExecutionState,
+} from './agent-execution-state.js';
+import {
+  AgentFallbackFinalizer,
+  hasToolObservations,
+} from './agent-fallback-finalizer.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
 /** Wall-clock budget for the observation-based synthesis LLM call (Layer 1 fallback).
  * gpt-4o averages 20-30s per call; 12s caused consistent timeouts. */
 const SYNTHESIS_TIMEOUT_MS = 60_000;
-/** Wall-clock budget for the Layer 2 single-shot fallback search. */
-const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
 /** First synthesis attempt: full token budget (allows detailed, well-structured answers). */
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 /** Second synthesis attempt: halved budget — fast path when first attempt times out. */
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
-/** Layer 3 fallback: max chars of observation to include in answer (prevents oversized responses). */
-const LAYER3_OBSERVATION_SLICE_CHARS = 300;
 /** Default single-tool timeout (separate from LLM step timeout). */
 const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
 /**
@@ -245,28 +247,6 @@ interface PlannerPhaseResult {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly wasTruncated: boolean;
-}
-
-interface AgentExecutionState {
-  readonly steps: AgentStep[];
-  readonly toolOutcomes: ToolOutcome[];
-  readonly collectedFrames: ToolCallEvidenceFrame[];
-  lastSearchResult: SearchResponseV1 | undefined;
-  terminationReason: AgentTerminationReason;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  reasoningFailureDetected: boolean;
-  policyBlocked: boolean;
-  llmCircuitOpen: boolean;
-  unknownToolAttempts: number;
-  timeoutStats: { llmStep: number; tool: number; parallelBatch: number };
-  hasInjectedRefinementHint: boolean;
-  pendingRefinementHint: string | undefined;
-  fallbackApplied: boolean;
-  fallbackLayer: SynthesisContext['fallbackApplied'];
-  failedSynthesisAttempts: number;
-  fallbackSearchUsed: boolean;
-  answer: string;
 }
 
 function buildPlannerLoopMessages(
@@ -551,42 +531,6 @@ function extractFirstJsonObject(text: string): string {
   return text; // fallback: no complete object found, let JSON.parse fail naturally
 }
 
-/**
- * Recover the most recent search_wines input from the agent's step history.
- * Used by Layer 2 fallback to preserve constraints from failed/aborted attempts.
- *
- * Walks the steps in reverse order, returning the input of the last `search_wines`
- * action found (in either the legacy `action` field or the parallel `actionPairs`
- * field). Returns undefined if no search_wines was ever attempted.
- *
- * Returns the validated subset that searchUseCase needs (currently `query` only —
- * extending this to forward `wine_type`, `country`, `vintage_min/max`, `max_price_krw`
- * etc. requires changing searchUseCase to accept structured constraints in addition
- * to the NL query, which is a separate refactor).
- */
-function recoverLastSearchInput(steps: readonly AgentStep[]): { query: string } | undefined {
-  for (let i = steps.length - 1; i >= 0; i--) {
-    const step = steps[i]!;
-    // Check parallel actionPairs first (newer format)
-    if (step.actionPairs !== undefined) {
-      for (let j = step.actionPairs.length - 1; j >= 0; j--) {
-        const pair = step.actionPairs[j]!;
-        if (pair.action.tool === 'search_wines') {
-          const q = pair.action.input['query'];
-          if (typeof q === 'string' && q.trim().length > 0) return { query: q };
-        }
-      }
-    }
-    // Check legacy single action (migration fallback: actionPairs is preferred; action is the deprecated path)
-    // TODO(cleanup): remove after actionPairs migration complete
-    if (step.action?.tool === 'search_wines') {
-      const q = step.action.input['query'];
-      if (typeof q === 'string' && q.trim().length > 0) return { query: q };
-    }
-  }
-  return undefined;
-}
-
 function parseLlmOutput(text: string): LlmAction {
   try {
     const trimmed = text.trim();
@@ -696,36 +640,18 @@ export interface AgentOrchestratorDeps {
 
 export class AgentOrchestrator {
   private readonly config: AgentConfig;
+  private readonly fallbackFinalizer: AgentFallbackFinalizer;
 
   constructor(
     private readonly deps: AgentOrchestratorDeps,
     config?: Partial<AgentConfig>,
   ) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...config };
+    this.fallbackFinalizer = new AgentFallbackFinalizer({ toolDeps: deps.toolDeps });
   }
 
   private createExecutionState(): AgentExecutionState {
-    return {
-      steps: [],
-      toolOutcomes: [],
-      collectedFrames: [],
-      lastSearchResult: undefined,
-      terminationReason: 'max_steps',
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      reasoningFailureDetected: false,
-      policyBlocked: false,
-      llmCircuitOpen: false,
-      unknownToolAttempts: 0,
-      timeoutStats: { llmStep: 0, tool: 0, parallelBatch: 0 },
-      hasInjectedRefinementHint: false,
-      pendingRefinementHint: undefined,
-      fallbackApplied: false,
-      fallbackLayer: null,
-      failedSynthesisAttempts: 0,
-      fallbackSearchUsed: false,
-      answer: '',
-    };
+    return createAgentExecutionState();
   }
 
   private async runPlannerPhase(
@@ -1915,119 +1841,8 @@ export class AgentOrchestrator {
       await this.runObservationSynthesisPhase(query, requestId, effectiveConfig, state, abortSignal);
     }
 
-    let fallbackApplied = false;
-    let fallbackLayer: SynthesisContext['fallbackApplied'] = null;
-    let fallbackSearchUsed = false;
-    let answer = state.answer;
-
-    const hasToolObservations = state.steps.some(
-      (s) =>
-        (s.observation !== undefined && s.observation.length > 0) ||
-        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
-    );
-
-    const shouldRunLayer2Fallback =
-      !state.policyBlocked &&
-      answer === '' &&
-      state.terminationReason !== 'answer' &&
-      !hasToolObservations &&
-      !(abortSignal?.aborted);
-
-    if (shouldRunLayer2Fallback) {
-      const fallbackController = new AbortController();
-      const propagateFallbackAbort = (): void => { fallbackController.abort(); };
-      abortSignal?.addEventListener('abort', propagateFallbackAbort, { once: true });
-      const fallbackTimer = setTimeout(() => {
-        fallbackController.abort();
-      }, FALLBACK_SEARCH_TIMEOUT_MS);
-      try {
-        const lastSearchInput = recoverLastSearchInput(state.steps);
-        const fallbackQuery = lastSearchInput?.query ?? query;
-        const fallbackResult = await this.deps.toolDeps.searchUseCase.execute(
-          { query: fallbackQuery },
-          requestId + '-fallback',
-          { abortSignal: fallbackController.signal },
-        );
-        fallbackSearchUsed = true;
-        const topResult = fallbackResult.queryType === 'search' ? fallbackResult.results.at(0) : undefined;
-        if (topResult !== undefined) {
-          const producer = topResult.entity.producer ?? '';
-          const region = topResult.entity.region ?? '';
-          const detail = [producer, region].filter(Boolean).join(', ');
-          const queryHasHangul = containsHangul(query);
-          answer = queryHasHangul
-            ? '검색 결과: ' + topResult.entity.canonicalLabel + (detail ? ' (' + detail + ')' : '') + '. (참고: 처리 제약으로 간단히 표시되었습니다.)'
-            : 'Based on your query, I found: ' + topResult.entity.canonicalLabel + (detail ? ' (' + detail + ')' : '') + '. (Note: simplified result due to processing constraints.)';
-          state.answer = answer;
-          state.lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
-          fallbackApplied = true;
-          fallbackLayer = 'layer2';
-          state.fallbackLayer = fallbackLayer;
-          state.terminationReason = 'fallback';
-        } else {
-          const queryHasHangul = containsHangul(query);
-          answer = queryHasHangul
-            ? '"' + query + '"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.'
-            : 'No results found for "' + query + '". Try simplifying the query or using a different wine name or grape variety.';
-          state.answer = answer;
-          fallbackApplied = true;
-          fallbackLayer = 'layer2';
-          state.fallbackLayer = fallbackLayer;
-          state.terminationReason = 'fallback';
-        }
-      } catch (err) {
-        if (isAbortError(err)) {
-          state.terminationReason = 'aborted';
-        } else {
-          log.error({ err, requestId }, 'agent fallback search failed');
-        }
-      } finally {
-        abortSignal?.removeEventListener('abort', propagateFallbackAbort);
-        clearTimeout(fallbackTimer);
-      }
-    }
-
-    if (!state.policyBlocked && state.terminationReason !== 'aborted' && answer === '') {
-      const lastObs = state.steps.findLast(
-        (s) =>
-          (s.observation !== undefined && s.observation.length > 0) ||
-          (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
-      );
-      const lastObsText =
-        lastObs?.observation ??
-        lastObs?.actionPairs?.find((p) => p.observation.length > 0)?.observation;
-      if (lastObsText !== undefined) {
-        const queryHasHangul = containsHangul(query);
-        const preview = lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS);
-        answer = queryHasHangul
-          ? '검색 결과 요약: ' + preview
-          : 'Search result summary: ' + preview;
-        state.answer = answer;
-        fallbackApplied = true;
-        fallbackLayer = 'layer3';
-        state.fallbackLayer = fallbackLayer;
-        state.terminationReason = hasToolObservations ? 'answer' : 'fallback';
-        log.error({ requestId, hasToolObservations }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
-      }
-    }
-
-    if (state.policyBlocked && answer === '') {
-      answer = '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.';
-      state.answer = answer;
-      log.error({ requestId }, 'policy-blocked agent run ended without explicit answer; returning blocked template');
-    }
-
-    // Layer 4: absolute guarantee — return a non-empty Korean answer template.
-    // Layer 4 fallback template: keep the literal assignment directly below this comment.
-    if (!state.policyBlocked && state.terminationReason !== 'aborted' && answer === '') {
-      answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
-      state.answer = answer;
-      fallbackApplied = true;
-      fallbackLayer = 'layer4';
-      state.fallbackLayer = fallbackLayer;
-      state.terminationReason = hasToolObservations ? 'answer' : 'fallback';
-      log.error({ requestId, query, steps: state.steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
-    }
+    const observedToolOutput = hasToolObservations(state);
+    const answer = await this.fallbackFinalizer.runFallbackCascade(query, requestId, state, observedToolOutput, abortSignal);
 
     log.info(
       {
@@ -2042,14 +1857,14 @@ export class AgentOrchestrator {
           ...(state.timeoutStats.tool > 0 ? ['tool_timeout'] : []),
         ],
         totalDurationMs: budget.getElapsedMs(),
-        fallbackApplied,
+        fallbackApplied: state.fallbackApplied,
       },
       'Agent execution complete',
     );
 
     this.deps.executionObserver?.onExecutionComplete({
       terminationReason: state.terminationReason,
-      fallbackApplied,
+      fallbackApplied: state.fallbackApplied,
       toolCallCount: state.steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
       totalDurationMs: budget.getElapsedMs(),
       timeoutStats: state.timeoutStats,
@@ -2060,8 +1875,8 @@ export class AgentOrchestrator {
           state.timeoutStats.parallelBatch > 0 ||
           state.llmCircuitOpen ||
           state.failedSynthesisAttempts > 0 ||
-          (hasToolObservations && fallbackLayer !== null),
-        fallbackApplied: fallbackLayer,
+          (observedToolOutput && state.fallbackLayer !== null),
+        fallbackApplied: state.fallbackLayer,
       },
     });
 
@@ -2071,12 +1886,12 @@ export class AgentOrchestrator {
       state.timeoutStats.parallelBatch > 0 ||
       state.llmCircuitOpen ||
       state.failedSynthesisAttempts > 0 ||
-      (hasToolObservations && fallbackLayer !== null);
+      (observedToolOutput && state.fallbackLayer !== null);
     const synthesisContext = buildSynthesisContext(
       query,
       state.toolOutcomes,
       reasoningFailure,
-      fallbackLayer,
+      state.fallbackLayer,
     );
 
     return {
@@ -2085,19 +1900,19 @@ export class AgentOrchestrator {
       totalDurationMs: budget.getElapsedMs(),
       totalTokens: { input: state.totalInputTokens, output: state.totalOutputTokens },
       toolCallCount: state.steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
-      fallbackApplied,
+      fallbackApplied: state.fallbackApplied,
       terminationReason: state.terminationReason,
       ...(state.lastSearchResult !== undefined ? { searchResults: state.lastSearchResult } : {}),
       ...(state.toolOutcomes.length > 0 ? { toolOutcomes: state.toolOutcomes } : {}),
       ...(state.collectedFrames.length > 0 ? { evidenceFrames: state.collectedFrames } : {}),
       synthesisContext,
-      ...(fallbackApplied
+      ...(state.fallbackApplied
         ? {
             fallbackTrace: {
-              fallbackApplied: fallbackLayer,
+              fallbackApplied: state.fallbackLayer,
               reasoningFailure,
               failedSynthesisAttempts: state.failedSynthesisAttempts,
-              fallbackSearchUsed,
+              fallbackSearchUsed: state.fallbackSearchUsed,
             },
           }
         : {}),

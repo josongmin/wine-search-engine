@@ -6,8 +6,8 @@
  * as typed structured data plus replay metadata (hash, schema version,
  * timing, request correlation).
  *
- * Downstream consumers (bench evaluator, claim verifier in Phase 3 GCE,
- * retrieval critic in Phase 2) read `structuredOutput` directly. They must
+ * Downstream consumers (bench evaluator, retrieval critic in Phase 2)
+ * read `structuredOutput` directly. They must
  * NOT parse `observationSnapshot` — that field is retained only for prompt
  * audit / replay transparency.
  */

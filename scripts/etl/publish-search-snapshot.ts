@@ -32,6 +32,18 @@ import {
   materializePreparedVespaFeedArtifact,
   parsePreparedVespaFeedDocuments,
 } from './index-to-vespa.js';
+import {
+  createSnapshotPublishStateMachine,
+  hasSnapshotPublishReachedPhase,
+  type SnapshotPublishPhase,
+} from './snapshot-publish-state-machine.js';
+export {
+  createSnapshotPublishStateMachine,
+  hasSnapshotPublishReachedPhase,
+  SNAPSHOT_PUBLISH_PHASES,
+  type SnapshotPublishPhase,
+  type SnapshotPublishStateMachine,
+} from './snapshot-publish-state-machine.js';
 
 const execFile = promisify(execFileCb);
 const VESPA_NAMESPACE = 'wine';
@@ -40,13 +52,6 @@ const SNAPSHOT_PUBLISH_LOCK_A = 93721;
 const SNAPSHOT_PUBLISH_LOCK_B = 6006;
 export const FIXTURE_REPO_REQUIRED_ERROR =
   'Fixture repo not found: set FIXTURE_REPO_PATH or --fixture-repo, or clone wine-engine-fixture as a sibling.';
-
-type SnapshotPublishPhase =
-  | 'built'
-  | 'vespa_indexed'
-  | 'runtime_substrates_published'
-  | 'pointer_promoted'
-  | 'runtime_artifacts_promoted';
 
 interface Args {
   readonly input: string;
@@ -452,12 +457,12 @@ async function rollbackToPreviousSnapshot(args: {
   readonly previousManifest?: SearchSnapshotManifest | undefined;
   readonly runtimeStatePath: string;
   readonly newSnapshotEntityIds: readonly string[];
-  readonly pointerPromoted: boolean;
+  readonly publishPhase: SnapshotPublishPhase;
   readonly fixtureRepoRoot?: string | undefined;
 }): Promise<void> {
-  // T-010/W2: phase-aware rollback. Only attempt pointer rollback when the
-  // publish flow actually crossed the pointer-promote boundary.
-  if (args.pointerPromoted) {
+  // T-010/W2: phase-aware rollback. Pointer rollback is derived from the
+  // publish state machine, not a separate boolean that can drift from phase.
+  if (hasSnapshotPublishReachedPhase(args.publishPhase, 'pointer_promoted')) {
     try {
       const { rolledBackTo, from } = await rollbackActiveSearchSnapshotPointer();
       console.log(`↩️ Active snapshot pointer rolled back: ${from} → ${rolledBackTo}`);
@@ -655,8 +660,7 @@ async function run(): Promise<void> {
 
   const publishLock = await acquireSnapshotPublishLock();
   let runtimeState: Awaited<ReturnType<typeof publishRuntimeSubstrates>> | undefined;
-  let publishPhase: SnapshotPublishPhase = 'built';
-  let pointerPromoted = false;
+  const publishState = createSnapshotPublishStateMachine();
   try {
     try {
       console.log('🧾 Materializing exact Vespa replay artifact');
@@ -680,7 +684,7 @@ async function run(): Promise<void> {
         'prepared-feed',
         fixtureRoot,
       );
-      publishPhase = 'vespa_indexed';
+      publishState.advance('vespa_indexed');
       if (
         previousRuntimeState !== undefined
         && previousRuntimeState.snapshotId !== manifestWithExactFeed.snapshotId
@@ -698,7 +702,7 @@ async function run(): Promise<void> {
         runtimeNlMappingsPath: args.runtimeNlMappingsPath,
         allowMissingLtr: args.allowMissingLtr,
       });
-      publishPhase = 'runtime_substrates_published';
+      publishState.advance('runtime_substrates_published');
       console.log('✅ Verifying search snapshot readiness');
       await verifySearchSnapshotReadiness({
         runtimeStatePath: stagedRuntimeStatePath,
@@ -729,8 +733,7 @@ async function run(): Promise<void> {
         previousSnapshotId: previousRuntimeState?.snapshotId,
         contentHash: runtimeState.contentHash ?? manifestWithExactFeed.snapshotId,
       });
-      pointerPromoted = true;
-      publishPhase = 'pointer_promoted';
+      publishState.advance('pointer_promoted');
       console.log('🔁 Re-verifying readiness with pointer parity (post-promote)');
       await verifySearchSnapshotReadiness({
         runtimeStatePath: stagedRuntimeStatePath,
@@ -744,7 +747,7 @@ async function run(): Promise<void> {
         stagedRuntimeNlMappingsPath,
         activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
       });
-      publishPhase = 'runtime_artifacts_promoted';
+      publishState.advance('runtime_artifacts_promoted');
       console.log('✅ Verifying readiness after runtime substrate promotion');
       await verifySearchSnapshotReadiness({
         runtimeStatePath: args.runtimeStatePath,
@@ -752,7 +755,7 @@ async function run(): Promise<void> {
         requirePointerParity: true,
       });
     } catch (error) {
-      console.error(`↩️ Publish failed during phase=${publishPhase}; attempting rollback`);
+      console.error(`↩️ Publish failed during phase=${publishState.current}; attempting rollback`);
       const publishMessage = error instanceof Error ? error.message : String(error);
       const rollbackFailures: string[] = [];
       await Promise.all([
@@ -765,7 +768,7 @@ async function run(): Promise<void> {
           previousManifest,
           runtimeStatePath: args.runtimeStatePath,
           newSnapshotEntityIds,
-          pointerPromoted,
+          publishPhase: publishState.current,
           fixtureRepoRoot: fixtureRoot,
         });
       } catch (rollbackError) {

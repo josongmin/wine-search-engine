@@ -345,10 +345,12 @@ export {
 export { stripNoiseTokens, isPromotionalText } from './service/noise-stripper.js';
 export type { NoiseStripResult } from './service/noise-stripper.js';
 
-export { extract } from './service/structured-extractor.js';
-
-export { EntityMatcher } from './service/entity-matcher.js';
+export { detectContamination } from './service/contamination-detector.js';
 ```
+
+`structured-extractor`, `entity-matcher`, and `abuse-detector` were removed
+from the runtime ingestion package on 2026-04-16. The remaining ingestion
+surface is normalization, noise stripping, and contamination detection.
 
 ---
 

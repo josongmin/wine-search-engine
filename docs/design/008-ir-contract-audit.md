@@ -331,7 +331,7 @@ NO-OP.
 
 **Risk**:
 - Consumers: grep confirms **only** `TraversalService.traverse` (read `findById`) and `PgEntityRepository` (implementation). No mutating callers in `src/` tree.
-- `src/domain/ingestion/service/entity-matcher.ts` declares its own separate `EntityRepository` interface — **unrelated to this port**. Keep untouched.
+- Historical note: `src/domain/ingestion/service/entity-matcher.ts` used to declare its own separate ingestion `EntityRepository` interface, unrelated to this port. That service was removed on 2026-04-16.
 
 **Lock**:
 ```ts
@@ -382,17 +382,17 @@ The interface accepts `(query, normalizedQuery, limit?)` and returns `CanonicalE
 
 **Impact**: NO-OP. Same pattern as BlockingPort.
 
-### L6.5 `EntityRepository` (ingestion) — [src/domain/ingestion/service/entity-matcher.ts:44-53](../../src/domain/ingestion/service/entity-matcher.ts#L44-L53)
+### L6.5 `EntityRepository` (ingestion) — removed historical surface
 
-**Separate interface** from L6.1 — ingestion/canonicalization, not runtime lookup. Has methods `findByExternalRef`, `findByProducerAndLabel`, `findByLabelAndRegion`, `findByAlias` — all reads.
+This was a separate interface from L6.1 — ingestion/canonicalization, not
+runtime lookup. It was removed with `entity-matcher.ts` on 2026-04-16 and is
+no longer part of the live runtime surface.
 
-**Impact**: NO-OP. Unrelated to runtime plane snapshot PK. Do not conflate with L6.1.
+**Impact**: historical only. Unrelated to runtime plane snapshot PK. Do not
+reintroduce or conflate with L6.1.
 
-**Test lock**: carve-out in the readonly-surface regression test so it doesn't scan this file:
-```ts
-// exclude src/domain/ingestion/**
-if (rel.startsWith('src/domain/ingestion/')) continue;
-```
+**Test lock**: the readonly-surface regression now has no ingestion matcher
+carve-out because the file no longer exists.
 
 ### L6.6 `TraversalService` consumer — [entity/service/traversal.service.ts:91](../../src/domain/entity/service/traversal.service.ts#L91)
 
@@ -478,9 +478,10 @@ it('no production TS file calls PgAliasRepository mutating methods', () => {
 
 **Impact**: NO-OP. Only uses `entityRepo.findById()` (read). Under R1, the method is retained.
 
-### L8.2 `EntityMatcher` (ingestion) — [src/domain/ingestion/service/entity-matcher.ts](../../src/domain/ingestion/service/entity-matcher.ts)
+### L8.2 `EntityMatcher` (ingestion) — removed historical surface
 
-**Impact**: NO-OP. Uses its own ingestion-layer `EntityRepository` interface (§L6.5), not the runtime port.
+**Impact**: historical only. The old ingestion matcher and its private
+repository interface were removed on 2026-04-16.
 
 ### L8.3 `AliasProposer` / `PromotionGate` (learning subsystem) — [src/config/container-learning.ts](../../src/config/container-learning.ts)
 
@@ -726,7 +727,7 @@ Mocks of `EntityRepository` / `AliasRepository` use partial implementations. Und
 **Impact**: SHAPE-CHANGE. Test files that reference deleted methods fail to compile.
 
 **Action**: update mock definitions in parallel with the R1 PR. Specifically:
-- `src/domain/ingestion/__tests__/entity-matcher.test.ts` — uses the **ingestion** `EntityRepository`, not the runtime port. NO-OP (verified §L6.5).
+- Historical: `src/domain/ingestion/__tests__/entity-matcher.test.ts` used the removed ingestion matcher, not the runtime port.
 - Any other mock that references `save`/`update`/`delete`/`createSnapshot`/`rollbackToSnapshot` — grep and update.
 
 **Lock**: `tsc --noEmit` in pre-push catches any dangling mock.
@@ -772,14 +773,14 @@ Mocks of `EntityRepository` / `AliasRepository` use partial implementations. Und
 | L6 | `AliasRepository` port | alias-repository.port.ts | SHAPE-CHANGE (R1) | delete `save`/`suppress`/`bulkSave` | `alias-repository-port-readonly-surface.regression.test.ts` |
 | L6 | `BlockingPort` | blocking.port.ts | NO-OP | — | existing |
 | L6 | `AmbiguityDictionary` port | ambiguity-dictionary.port.ts | NO-OP | — | existing |
-| L6 | `EntityRepository` port (ingestion) | entity-matcher.ts:44 | NO-OP | — | carve-out in regression test |
+| L6 | `EntityRepository` port (ingestion) | removed historical surface | NO-OP | — | no live file |
 | L7 | `PgEntityRepository` | pg-entity-repository.ts | DELETE methods (R1) | impl plan §4 | readonly-surface test |
 | L7 | `PgAliasRepository` | pg-alias-repository.ts | DELETE methods (R1) | impl plan §4 extension | `pg-alias-repository-readonly-surface.regression.test.ts` |
 | L7 | `PgBlockingAdapter` | pg-blocking-adapter.ts | NO-OP | — | existing |
 | L7 | `PgAmbiguityDictionary` | pg-ambiguity-dictionary.ts | NO-OP | — | existing |
 | L7 | `PgAliasMatcher` | pg-alias-matcher.ts | NO-OP | — | existing |
 | L8 | `TraversalService` | traversal.service.ts | NO-OP | — | tsc |
-| L8 | `EntityMatcher` (ingestion) | entity-matcher.ts | NO-OP | — | existing |
+| L8 | `EntityMatcher` (ingestion) | removed historical surface | NO-OP | — | no live file |
 | L8 | `AliasProposer` / `PromotionGate` | container-learning.ts | NO-OP | — | existing |
 | L9 | `ReadyResponseSchema` | route-contracts.ts:112-127 | SHAPE-CHANGE | add `snapshot_health.optional()` | `ready-route-snapshot-health.test.ts` |
 | L9 | `ReadyResponse` TS interface | health.route.ts:101-111 | SHAPE-CHANGE | mirror schema | tsc |

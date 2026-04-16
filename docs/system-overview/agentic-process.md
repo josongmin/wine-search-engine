@@ -777,7 +777,12 @@ ScoreDriftRecord {
 
 **합계: 1.00** | 현재 훈련 시 `bm25Score`·`diversityScore`는 `0.0` 센티널 (Vespa가 per-candidate 미노출, T18-? 예정)
 
-### LambdaMART 훈련 (retrain-orchestrator → lambdamart-ranker.ts)
+### LambdaMART 훈련 (offline training artifact → lambdamart-ranker.ts)
+
+`retrain-orchestrator.ts` was removed on 2026-04-16 with the unused
+learning sidecar cleanup. The ranker still consumes trained
+`QueryClassWeights`, but runtime orchestration does not depend on that
+deleted service.
 
 ```
 입력: LambdaMARTExample[] (pairwise 쌍)

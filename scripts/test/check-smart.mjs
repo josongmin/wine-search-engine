@@ -128,7 +128,6 @@ function matches(file, patterns) {
 const metaPatterns = [
   /^test\/unit\/replay-fixtures\/.+\.test\.ts$/,
   /^test\/unit\/interface\/http\/http-route-catalog-openapi-parity\.test\.ts$/,
-  /^src\/domain\/response\/__tests__\/human-response-builder-v2\.test\.ts$/,
   /^src\/interface\/http\/schemas\/__tests__\/search-response-v2\.schema\.test\.ts$/,
   /^src\/interface\/http\/routes\/__tests__\/http-contract-manifest-script\.test\.ts$/,
   /^src\/interface\/http\/routes\/__tests__\/http-contract-openapi-bridge\.test\.ts$/,

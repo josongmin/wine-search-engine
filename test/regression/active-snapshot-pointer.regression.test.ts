@@ -12,6 +12,11 @@
  * lane separately.
  */
 import { describe, expect, it, vi } from 'vitest';
+import {
+  createSnapshotPublishStateMachine,
+  hasSnapshotPublishReachedPhase,
+  SNAPSHOT_PUBLISH_PHASES,
+} from '../../scripts/etl/publish-search-snapshot.js';
 import { assertSnapshotNotAlreadyPublished } from '../../scripts/etl/publish-runtime-substrates.js';
 
 describe('T-010 assertSnapshotNotAlreadyPublished', () => {
@@ -166,18 +171,44 @@ describe('T-010 publish-search-snapshot pointer promote wiring', () => {
     expect(rollbackBody).toContain('rollbackActiveSearchSnapshotPointer');
   });
 
-  it('rollback path is gated by pointerPromoted state', async () => {
+  it('rollback path derives pointer rollback from publish phase state', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
-    const src = readFileSync(
+    const publishSrc = readFileSync(
       fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
       'utf-8',
     );
-    expect(src).toContain('type SnapshotPublishPhase');
-    expect(src).toContain('let pointerPromoted = false');
-    expect(src).toContain('pointerPromoted = true');
-    expect(src).toContain('if (args.pointerPromoted)');
-    expect(src).toContain("publishPhase = 'pointer_promoted'");
+    const stateMachineSrc = readFileSync(
+      fileURLToPath(new URL('../../scripts/etl/snapshot-publish-state-machine.ts', import.meta.url)),
+      'utf-8',
+    );
+    expect(stateMachineSrc).toContain('SNAPSHOT_PUBLISH_PHASES');
+    expect(stateMachineSrc).toContain('createSnapshotPublishStateMachine');
+    expect(publishSrc).toContain("publishState.advance('pointer_promoted')");
+    expect(publishSrc).toContain("hasSnapshotPublishReachedPhase(args.publishPhase, 'pointer_promoted')");
+    expect(publishSrc).not.toContain('let pointerPromoted');
+    expect(publishSrc).not.toContain('pointerPromoted = true');
+  });
+
+  it('publish phase helper gates pointer rollback at the pointer-promoted boundary', () => {
+    expect(SNAPSHOT_PUBLISH_PHASES).toEqual([
+      'built',
+      'vespa_indexed',
+      'runtime_substrates_published',
+      'pointer_promoted',
+      'runtime_artifacts_promoted',
+    ]);
+    expect(hasSnapshotPublishReachedPhase('runtime_substrates_published', 'pointer_promoted')).toBe(false);
+    expect(hasSnapshotPublishReachedPhase('pointer_promoted', 'pointer_promoted')).toBe(true);
+    expect(hasSnapshotPublishReachedPhase('runtime_artifacts_promoted', 'pointer_promoted')).toBe(true);
+  });
+
+  it('publish state machine rejects skipped phase transitions', () => {
+    const publishState = createSnapshotPublishStateMachine();
+    expect(() => publishState.advance('runtime_substrates_published')).toThrow(/Illegal search snapshot publish phase transition/);
+    expect(publishState.current).toBe('built');
+    expect(publishState.advance('vespa_indexed')).toBe('vespa_indexed');
+    expect(publishState.hasReached('pointer_promoted')).toBe(false);
   });
 
   it('runtime substrate promotion rewrites nl mappings path before active promotion', async () => {
