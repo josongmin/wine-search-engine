@@ -218,6 +218,12 @@ export class ConstraintCompiler {
     }
 
     const tier12Empty = hard.length === 0 && soft.length === 0;
+    // Tier 6 receives the ORIGINAL query — predicate normalization is handled
+    // by the NL mapper's phrase-level variant lookup (korean-predicate-variants.ts),
+    // NOT by query-level transformation. Applying normalizeQueryPredicates to the
+    // full query breaks negation markers: "말고" (postpositional negation) gets
+    // transformed to "말은" (meaningless) by the "고→은" suffix rule, preventing
+    // NEGATION_SUBJECT_AFTER from matching.
     const tier6Bundle = extractRuleBasedConstraints(normalizedQuery);
     const tier6ConstraintCount = mergeConstraintBundleIntoLists(
       tier6Bundle,

@@ -27,6 +27,7 @@ import {
   extractVintageRange,
   extractVintageYear,
 } from '../../shared/utils/vintage.js';
+import { normalizeKoreanNegation } from './korean-negation-normalizer.js';
 
 // ---------------------------------------------------------------------------
 // KRW ↔ USD conversion
@@ -251,7 +252,7 @@ const NEGATION_SUBJECT_BEFORE: RegExp =
   /(?:^|[^\p{L}\p{N}])(?:not|without|exclude|no|except)\s+(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)/giu;
 
 const NEGATION_SUBJECT_AFTER: RegExp =
-  /(?:^|[^\p{L}\p{N}])(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)\s+(?:빼고|빼주세요|빼줘|제외|말고|없이|아닌|아니고|않고|않은|빼(?=[^\p{L}\p{N}]|$))/giu;
+  /(?:^|[^\p{L}\p{N}])(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)\s+(?:빼고|빼주세요|빼줘|제외|말고|없이|빼(?=[^\p{L}\p{N}]|$))/giu;
 
 /**
  * Korean adverbial negation preceding the subject: "안 X"
@@ -697,7 +698,12 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   // pattern — the regex expects precomposed 가 (U+AC00) but gets ㄱ+ㅏ.
   // Also maps fullwidth space (U+3000) to ASCII so downstream \s+ handling
   // and boundary lookarounds work uniformly.
-  const q = query.normalize('NFC').replace(/\u3000/g, ' ');
+  const qRaw = query.normalize('NFC').replace(/\u3000/g, ' ');
+  // Korean negation normalization: convert predicative negation forms
+  // (아닌/아니고/않고/않은) to canonical "말고" BEFORE pattern extraction.
+  // This is a structural preprocessing step — the existing NEGATION_SUBJECT_AFTER
+  // regex handles "말고", so all Korean negation forms route through one path.
+  const q = normalizeKoreanNegation(qRaw);
   const excludeGrapeSet = new Set<string>();
   const excludeCountrySet = new Set<string>();
   const excludeRegionSet = new Set<string>();

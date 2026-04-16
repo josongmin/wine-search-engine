@@ -71,6 +71,35 @@ const SUFFIX_RULES: readonly (readonly [string, string])[] = [
  * generateKoreanPredicateVariants("좋은")    // → ["좋은"] (already adnominal)
  * generateKoreanPredicateVariants("high")    // → ["high"] (no Korean suffix)
  */
+/**
+ * Normalizes an entire query string by replacing Korean connective predicate
+ * endings with their adnominal form. Unlike {@link generateKoreanPredicateVariants}
+ * (which generates variant lookup keys for phrase-level matching), this function
+ * transforms the query IN PLACE so downstream pattern matchers (e.g., the
+ * rule-based constraint extractor) see normalized forms without enumerating
+ * every connective variant in their regexes.
+ *
+ * Operates token-by-token: each whitespace-delimited token is checked against
+ * SUFFIX_RULES and replaced if a match is found.
+ *
+ * @example
+ * normalizeQueryPredicates("평점 좋고 바디감 있고") // → "평점 좋은 바디감 있는"
+ * normalizeQueryPredicates("hello world")          // → "hello world" (unchanged)
+ */
+export function normalizeQueryPredicates(query: string): string {
+  return query.replace(/\S+/gu, (token) => {
+    for (const [suffix, replacement] of SUFFIX_RULES) {
+      if (token.endsWith(suffix)) {
+        const stem = token.slice(0, -suffix.length);
+        if (stem.length > 0) {
+          return stem + replacement;
+        }
+      }
+    }
+    return token;
+  });
+}
+
 export function generateKoreanPredicateVariants(phrase: string): readonly string[] {
   if (phrase.length === 0) {
     return [phrase];

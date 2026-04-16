@@ -170,14 +170,15 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  // Critic score / rating keywords
-  // Connective forms: 좋고, 높고 (연결형 -고) alongside adnominal 좋은, 높은
-  if (/(?:평점|점수|별점|리뷰)\s*(?:좋은|좋고|높은|높고|훌륭|최고)/u.test(q)) {
+  // Critic score / rating keywords: "평점 좋은/높은" and their connective variants
+  // (좋고, 높고) are handled by DEFAULT_MAPPINGS in nl-mapper.ts (SSoT) +
+  // predicate variant lookup. Only non-NL structural patterns remain here.
+  if (/(?:^|[^\p{L}\p{N}])(?:별점|리뷰)\s*(?:좋은|높은|훌륭|최고)(?=$|[^\p{L}\p{N}])/u.test(q)) {
     soft.push({
       attribute: 'critic_score',
       operator: '>=',
       value: 0.7,
-      source_phrase: '평점 좋은',
+      source_phrase: '별점 좋은',
       confidence: 0.75,
       mapping_version: mv,
     });
@@ -203,24 +204,12 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  // "바디감 있고/있는" → body >= 0.7 (connective form: 있고, adnominal: 있는)
-  // Korean "바디감 있다" implies notable body presence — equivalent to "묵직한"
-  // (full-bodied, 0.7). A user saying "바디감 있는 와인" expects full-bodied,
-  // not medium (0.5). Domain-grounded: Vivino body scale 4-5 = 0.7-1.0.
-  if (/(?:바디감\s*있(?:고|는|으며|으면서)?|바디감\s*좋(?:고|은|으며)?)/u.test(q)) {
-    soft.push({
-      attribute: 'body',
-      operator: '>=',
-      value: 0.7,
-      source_phrase: '바디감 있',
-      confidence: 0.8,
-      mapping_version: mv,
-    });
-  }
+  // "바디감 있는/좋은" and "타닌 없는" are handled by DEFAULT_MAPPINGS in
+  // nl-mapper.ts (SSoT for phrase→attribute mappings). The predicate normalizer
+  // generates connective variants (있고→있는), so NL mapper catches them.
 
   // "low tannin" intent
-  // Connective forms: 없고 (연결형 -고) alongside adnominal 없는
-  if (/(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|타닌감?\s*없(?:고|는|다)|부드러(?:운|움|운편)?)/u.test(q)) {
+  if (/(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|부드러(?:운|움|운편)?)/u.test(q)) {
     soft.push({
       attribute: 'tannin',
       operator: '<=',
