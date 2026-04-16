@@ -22,6 +22,18 @@ import {
   SearchToolAttemptInputSchema,
   WINE_SEARCH_TOOLS,
 } from '../../../../src/interface/claude-tools/tool-schemas.js';
+import { KNOWN_AGENT_TOOL_NAMES } from '../../../../src/application/agent/agent-tool-attempt-schema.js';
+import {
+  buildFoodPairingFieldShape,
+  buildSearchToolFieldShape,
+  FOOD_PAIRING_COLORS,
+  SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+  SEARCH_TOOL_MAX_STYLES,
+  SEARCH_TOOL_RETRIEVAL_MODES,
+  SEARCH_TOOL_VINTAGE_MAX,
+  SEARCH_TOOL_VINTAGE_MIN,
+  SEARCH_TOOL_WINE_TYPES,
+} from '../../../../src/application/search/search-tool-contract.js';
 
 describe('WINE_SEARCH_TOOLS', () => {
   it('should be schema-valid manifest entries', () => {
@@ -269,5 +281,81 @@ describe('Claude tool input schemas', () => {
       query_b: 'Sassicaia',
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('manifest ↔ validator ↔ contract parity', () => {
+  it('manifest tool names match KNOWN_AGENT_TOOL_NAMES SSOT', () => {
+    const manifestNames = WINE_SEARCH_TOOLS.map((t) => t.name).sort();
+    expect(manifestNames).toEqual([...KNOWN_AGENT_TOOL_NAMES].sort());
+  });
+
+  it('search_wines manifest properties match contract builder keys', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'search_wines')!;
+    const manifestKeys = Object.keys(tool.input_schema.properties).sort();
+    // Contract builder produces all keys except 'query' (which is added separately)
+    const contractKeys = ['query', ...Object.keys(buildSearchToolFieldShape({
+      limitMax: 50, defaultLimit: 10, defaultRetrievalMode: 'auto', maxPriceKrwMax: Number.MAX_SAFE_INTEGER,
+    }))].sort();
+    expect(manifestKeys).toEqual(contractKeys);
+  });
+
+  it('get_food_pairings manifest properties match contract builder keys', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'get_food_pairings')!;
+    const manifestKeys = Object.keys(tool.input_schema.properties).sort();
+    const contractKeys = Object.keys(buildFoodPairingFieldShape({
+      foodRequiredMessage: '', maxPriceKrwMax: Number.MAX_SAFE_INTEGER,
+    })).sort();
+    expect(manifestKeys).toEqual(contractKeys);
+  });
+
+  it('check_drinking_window manifest properties match validator schema keys', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'check_drinking_window')!;
+    const manifestKeys = Object.keys(tool.input_schema.properties).sort();
+    expect(manifestKeys).toEqual(['entity_id', 'target_year']);
+  });
+
+  it('compare_wines manifest properties match validator schema keys', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'compare_wines')!;
+    const manifestKeys = Object.keys(tool.input_schema.properties).sort();
+    expect(manifestKeys).toEqual(['query_a', 'query_b']);
+  });
+
+  it('retrieval_mode enum in manifest matches contract SSOT', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'search_wines')!;
+    const prop = tool.input_schema.properties.retrieval_mode as { enum: readonly string[] };
+    expect(prop.enum).toEqual([...SEARCH_TOOL_RETRIEVAL_MODES]);
+  });
+
+  it('wine_type enum in manifest matches contract SSOT', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'search_wines')!;
+    const prop = tool.input_schema.properties.wine_type as { enum: readonly string[] };
+    expect(prop.enum).toEqual([...SEARCH_TOOL_WINE_TYPES]);
+  });
+
+  it('food pairing color enum in manifest matches contract SSOT', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'get_food_pairings')!;
+    const prop = tool.input_schema.properties.color as { enum: readonly string[] };
+    expect(prop.enum).toEqual([...FOOD_PAIRING_COLORS]);
+  });
+
+  it('vintage bounds in manifest match contract SSOT', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'search_wines')!;
+    const vintageMin = tool.input_schema.properties.vintage_min as { minimum: number; maximum: number };
+    const vintageMax = tool.input_schema.properties.vintage_max as { minimum: number; maximum: number };
+    expect(vintageMin.minimum).toBe(SEARCH_TOOL_VINTAGE_MIN);
+    expect(vintageMin.maximum).toBe(SEARCH_TOOL_VINTAGE_MAX);
+    expect(vintageMax.minimum).toBe(SEARCH_TOOL_VINTAGE_MIN);
+    expect(vintageMax.maximum).toBe(SEARCH_TOOL_VINTAGE_MAX);
+  });
+
+  it('array maxItems in manifest match contract SSOT', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'search_wines')!;
+    const excludeGrapes = tool.input_schema.properties.exclude_grapes as { maxItems: number };
+    const excludeRegions = tool.input_schema.properties.exclude_regions as { maxItems: number };
+    const styles = tool.input_schema.properties.styles as { maxItems: number };
+    expect(excludeGrapes.maxItems).toBe(SEARCH_TOOL_MAX_EXCLUDE_FILTERS);
+    expect(excludeRegions.maxItems).toBe(SEARCH_TOOL_MAX_EXCLUDE_FILTERS);
+    expect(styles.maxItems).toBe(SEARCH_TOOL_MAX_STYLES);
   });
 });

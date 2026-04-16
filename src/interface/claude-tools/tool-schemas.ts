@@ -1,11 +1,16 @@
 /**
- * Epic 17.2: Claude Tool Schemas for Wine Search Engine
+ * Claude Tool Schemas — HTTP/route surface for wine search tools.
  *
  * Defines 4 wine-specific tools in Claude API format:
  * 1. search_wines - Query wine inventory with mode selection
  * 2. get_food_pairings - Find wines that pair with foods
  * 3. check_drinking_window - Predict wine drinkability
  * 4. compare_wines - Compare two wines side-by-side
+ *
+ * SSOT chain:
+ *   search-tool-contract.ts  → descriptions, enums, bounds, field builders
+ *   agent-tool-attempt-schema.ts → attempt-level Zod schemas + discriminated types
+ *   this file → re-exports attempt schemas + defines HTTP validator schemas + Claude API manifest
  */
 
 import { z } from 'zod';

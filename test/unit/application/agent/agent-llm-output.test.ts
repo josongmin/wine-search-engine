@@ -164,4 +164,22 @@ describe('agent-llm-output', () => {
     expect(parsed.actions![0]).toEqual({ tool: 'search_wines', input: { query: 'brunello' } });
     expect(parsed.actions![1]).toEqual({ tool: 'fake_lookup', input: { id: 'abc' } });
   });
+
+  it('coexists: unknown tool recovery + known tool validation feedback in same batch', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'mixed errors',
+      actions: [
+        { tool: 'search_wines', input: {} },
+        { tool: 'nonexistent_tool', input: { x: 1 } },
+        { tool: 'get_food_pairings', input: { food: 42 } },
+      ],
+    }));
+
+    // search_wines with empty input → passes (all fields optional in attempt schema)
+    // nonexistent_tool → preserved for unknown tool recovery feedback
+    // get_food_pairings with food:42 → filtered out (wrong type, fail-closed)
+    expect(parsed.actions).toHaveLength(2);
+    expect(parsed.actions![0]).toEqual({ tool: 'search_wines', input: {} });
+    expect(parsed.actions![1]).toEqual({ tool: 'nonexistent_tool', input: { x: 1 } });
+  });
 });

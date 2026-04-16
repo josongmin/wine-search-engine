@@ -604,6 +604,90 @@ describe('SearchResponseSchema', () => {
     expect(parsed.success).toBe(false);
   });
 
+  it('accepts typed planner_policy_trace with bounded scalar input_facts and inputs_matched', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          planner_policy_trace: [
+            {
+              stage: 'intent_classification',
+              input_facts: { normalizedQuery: '오퍼스 원', anchorCount: 1 },
+              rules_evaluated: [
+                {
+                  rule_id: 'intent.detected',
+                  description: 'detected intent from query',
+                  inputs_matched: { normalizedQuery: '오퍼스 원' },
+                  outcome: 'entity_exact',
+                },
+              ],
+              rejected_branches: [],
+              decision: 'entity_exact',
+              confidence: 0.95,
+              duration_ms: 2,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects planner input_facts with nested object values (bounded to scalars)', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          planner_policy_trace: [
+            {
+              stage: 'intent_classification',
+              input_facts: { nested: { deep: true } },
+              rules_evaluated: [],
+              rejected_branches: [],
+              decision: 'entity_exact',
+              confidence: 0.9,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects planner inputs_matched with array values (bounded to scalars)', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        audit_extension: {
+          planner_policy_trace: [
+            {
+              stage: 'route_resolution',
+              input_facts: { intent: 'entity_exact', anchorCount: 1 },
+              rules_evaluated: [
+                {
+                  rule_id: 'route.resolved',
+                  description: 'resolved route',
+                  inputs_matched: { values: [1, 2, 3] },
+                  outcome: 'entity',
+                },
+              ],
+              rejected_branches: [],
+              decision: 'entity',
+              confidence: 0.8,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it('EntitySummarySchema accepts lineage keys after deepKeysToSnake from domain camelCase', () => {
     const entity = deepKeysToSnake({
       entityId: 'wine:test',

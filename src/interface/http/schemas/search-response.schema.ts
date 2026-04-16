@@ -497,7 +497,8 @@ const TypedAbstainDecisionWireSchema = z.object({
 // Typed "enough" for client autocompletion and basic validation.
 // All fields optional — audit fields are gated by explain/debug.
 // .passthrough() on sub-objects tolerates future field additions.
-// Complex/deeply-nested trace payloads stay z.unknown() to avoid fragile coupling.
+// Planner fact values (input_facts, inputs_matched) are bounded to scalar types.
+// Evidence/result metadata remain z.record(z.string(), z.unknown()) — see field comments.
 //
 // T-E5-03: Stable vs Debug boundary
 //
@@ -849,8 +850,9 @@ export const SearchResponseMetaSchema = z.object({
    *
    * T-E5-01: Upgraded from z.unknown() to AuditExtensionSchema.
    * The schema uses .passthrough() extensively so future field additions
-   * do not break existing clients. Complex nested traces (fusion, drift,
-   * abstain decision) remain z.unknown() to avoid fragile coupling.
+   * do not break existing clients. Nested traces (fusion, drift, abstain)
+   * are typed with strict schemas. Planner fact values (input_facts,
+   * inputs_matched) are bounded to scalar types (string | number | boolean).
    *
    * Gating: fields within the envelope are populated per the field gating policy
    * in AuditExtension (explain=true / debug header / always-on for abstain+fallback).
@@ -1066,6 +1068,14 @@ export const ResolveCandidateSchema = z.object({
   blocker_seed: z.literal(true).optional(),
   evidence_refs: z.array(z.string().min(1)).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
   match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
+  /**
+   * Intentional-open reserved: result-level metadata.
+   *
+   * No producer currently populates this field — it is reserved for future
+   * use by the resolver or post-route enrichment phases. Bounded by key
+   * count (50) to prevent unbounded serialization if activated later.
+   * Clients MUST NOT depend on this field being present or any specific keys.
+   */
   metadata: z.record(z.string(), z.unknown()).refine(
     (obj) => Object.keys(obj).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
     'metadata must have at most 50 keys',
