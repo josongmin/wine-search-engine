@@ -8,10 +8,13 @@ import type { SynthesisContext } from './tool-outcome.js';
 import type { AgentToolDeps } from './agent-tools.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
+  buildSearchToolStyleDerivedFilters,
+  buildSearchToolStyleQueryTerms,
+} from '../search/search-tool-contract.js';
+import {
   getLastGroundingObservationText,
   hasGroundingToolObservations,
 } from './agent-grounding-observation-policy.js';
-import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/semantic-style-query-terms.js';
 
 const defaultLog = bootstrapLogger.child({ component: 'AgentAnswerRecoveryPolicy' });
 
@@ -65,7 +68,7 @@ function appendRecoverySearchClauses(
   if (maxPriceKrw !== undefined) {
     clauses.push(`${maxPriceKrw}원 이하`);
   }
-  clauses.push(...resolveSemanticStyleQueryTerms({
+  clauses.push(...buildSearchToolStyleQueryTerms({
     style: asNonEmptyString(input['style']),
     styles: asStringArray(input['styles']),
   }));
@@ -94,6 +97,13 @@ function buildRecoveryFilters(input: Record<string, unknown>): readonly Normaliz
     filters.push({ attribute: 'wine_type', operator: '=', value: wineType, source_phrase: wineType, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
   }
 
+  const maxAlcoholPct = typeof input['max_alcohol_pct'] === 'number' && Number.isFinite(input['max_alcohol_pct']) && input['max_alcohol_pct'] > 0
+    ? input['max_alcohol_pct']
+    : undefined;
+  if (maxAlcoholPct !== undefined) {
+    filters.push({ attribute: 'alcohol_pct', operator: '<=', value: maxAlcoholPct, source_phrase: `${maxAlcoholPct}% 이하`, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
+  }
+
   const country = asNonEmptyString(input['country']);
   if (country !== undefined) {
     filters.push({ attribute: 'country', operator: '=', value: country, source_phrase: country, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
@@ -113,6 +123,11 @@ function buildRecoveryFilters(input: Record<string, unknown>): readonly Normaliz
   if (appellation !== undefined) {
     filters.push({ attribute: 'appellation', operator: '=', value: appellation, source_phrase: appellation, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
   }
+
+  filters.push(...buildSearchToolStyleDerivedFilters({
+    style: asNonEmptyString(input['style']),
+    styles: asStringArray(input['styles']),
+  }));
 
   return filters;
 }

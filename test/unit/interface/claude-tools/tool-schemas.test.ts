@@ -104,6 +104,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.exclude_grapes?.type).toBe('array');
       expect(props.exclude_regions?.type).toBe('array');
       expect(props.max_price_krw?.type).toBe('number');
+      expect(props.max_alcohol_pct?.type).toBe('number');
       expect(props.wine_type?.enum).toEqual([
         'red',
         'white',
@@ -128,12 +129,21 @@ describe('WINE_SEARCH_TOOLS', () => {
     it('should document the extended semantic style vocabulary', () => {
       const props = tool.input_schema.properties as Record<string, any>;
       expect(props.style?.description).toContain('losslessly');
+      expect(props.style?.description).toContain('sweet');
       expect(props.style?.description).toContain('chillable');
       expect(props.style?.description).toContain('screw_cap');
       expect(props.style?.description).toContain('approachable');
       expect(props.style?.description).toContain('crowd_pleasing');
       expect(props.styles?.description).toContain('approachable');
       expect(props.styles?.description).toContain('crowd_pleasing');
+      expect(props.style?.description).not.toContain('presentation_forward');
+    });
+
+    it('should expose max_alcohol_pct as a structured low-alcohol filter', () => {
+      const props = tool.input_schema.properties as Record<string, any>;
+      expect(props.max_alcohol_pct?.description).toContain('low-alcohol');
+      expect(props.max_alcohol_pct?.minimum).toBe(0.1);
+      expect(props.max_alcohol_pct?.maximum).toBe(100);
     });
   });
 

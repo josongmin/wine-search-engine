@@ -111,6 +111,72 @@ describe('executeAgentTool', () => {
     expect(request?.query).toContain('crowd pleasing');
   });
 
+  it('does not serialize unsupported presentation_forward style hints into search query text', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '예쁜 라벨 선물용 와인',
+        styles: ['presentation_forward', 'approachable'],
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toContain('approachable');
+    expect(request?.query).not.toContain('presentation_forward');
+  });
+
+  it('pushes max_alcohol_pct into structured filters for low-alcohol queries', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '도수 낮은 달달한 와인',
+        style: 'sweet',
+        max_alcohol_pct: 12,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).not.toContain('sweet');
+    expect(request?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+    ]));
+  });
+
+  it('compiles sweet style into a structured sweetness filter instead of raw query text', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '달달한 선물용 와인',
+        styles: ['sweet', 'approachable'],
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toContain('approachable');
+    expect(request?.query).not.toContain('sweet');
+    expect(request?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
+    ]));
+  });
+
   it('raises limit to the diversity floor when want_diversity is true', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -1153,6 +1219,26 @@ describe('executeAgentTool', () => {
       const result = await executeAgentTool(
         'search_wines',
         { query: '2025 Opus One' },
+        depsWithCardinality,
+        'req-123',
+      );
+      expect(result.observation).toContain('RETRIEVAL_QUALITY: unreliable');
+      expect(result.observation).not.toContain('corpus_limited');
+    });
+
+    it('does not emit corpus_limited for generic 0-result queries without an explicit wine type', async () => {
+      const { InMemoryCorpusCardinalityCache } = await import(
+        '../../../../src/domain/retrieval/service/corpus-cardinality-cache.js'
+      );
+      const mockSearch = vi.fn().mockResolvedValue(makeSearchResponse([]));
+      const depsWithCardinality: AgentToolDeps = {
+        ...deps,
+        searchUseCase: { execute: mockSearch } as unknown as SearchExecutorPort,
+        corpusCardinality: InMemoryCorpusCardinalityCache.empty(),
+      };
+      const result = await executeAgentTool(
+        'search_wines',
+        { query: '와인 입문자 선물용 달달하면서 도수 낮은 거, 예쁜 라벨' },
         depsWithCardinality,
         'req-123',
       );

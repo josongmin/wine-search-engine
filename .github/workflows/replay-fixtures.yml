@@ -90,7 +90,7 @@ jobs:
             echo "- Docker stack: \`docker-compose.test.yml\` via \`bash scripts/run-vespa-test-lane.sh\`"
             echo "- Fixture count: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -l '\"runtime_mode\"\\s*:\\s*\"full_runtime\"' | wc -l | tr -d ' ')"
             echo "- Capability tags: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -o '\"[a-z_]+_runtime\"' | tr -d '\"' | sort -u | tr '\n' ',' | sed 's/,$//')"
-            echo "- Surfaced degradation reasons (fixture SSOT): $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -o '\"[a-z_]+\"' | tr -d '\"' | rg '(_timeout|heuristic_drinking_window|learned_matcher_timeout|reranker_timeout)$' | sort -u | tr '\n' ',' | sed 's/,$//')"
+            echo "- Surfaced degradation reasons (fixture SSOT): $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -o '\"[a-z_]+\"' | tr -d '\"' | rg '(_timeout|learned_matcher_timeout|reranker_timeout)$' | sort -u | tr '\n' ',' | sed 's/,$//')"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Append full-runtime fixture report to summary
         if: always()

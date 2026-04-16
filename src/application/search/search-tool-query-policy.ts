@@ -1,4 +1,4 @@
-import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/semantic-style-query-terms.js';
+import { buildSearchToolStyleQueryTerms } from './search-tool-contract.js';
 
 export interface SearchToolSoftClauseInput {
   readonly exclude_grapes?: readonly string[] | undefined;
@@ -35,7 +35,7 @@ export function buildSearchToolSoftClauses(
   if (input.max_price_krw !== undefined) {
     clauses.push(`${input.max_price_krw}원 이하`);
   }
-  for (const style of resolveSemanticStyleQueryTerms(input)) {
+  for (const style of buildSearchToolStyleQueryTerms(input)) {
     clauses.push(style);
   }
   if (input.certification !== undefined) {

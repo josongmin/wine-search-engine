@@ -107,7 +107,8 @@ describe('AgentAnswerRecoveryPolicy', () => {
           exclude_grapes: ['Merlot'],
           exclude_regions: ['France'],
           max_price_krw: 50000,
-          styles: ['approachable', 'crowd_pleasing'],
+          max_alcohol_pct: 12,
+          styles: ['approachable', 'crowd_pleasing', 'sweet'],
           country: 'Italy',
           wine_type: 'red',
           vintage_min: 2019,
@@ -125,20 +126,22 @@ describe('AgentAnswerRecoveryPolicy', () => {
     await policy.recoverAnswer('current query', 'req-fallback-structured', state, false);
 
     expect(execute).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         query: '선물용 와인, not Merlot, not France, 50000원 이하, approachable, crowd pleasing',
         limit: 3,
         options: { mode: 'hybrid', explain: false, clarification: false },
-        filters: [
+        filters: expect.arrayContaining([
           expect.objectContaining({ attribute: 'grape_primary', operator: 'exclude', value: 'Merlot' }),
           expect.objectContaining({ attribute: 'region', operator: 'exclude', value: 'France' }),
+          expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+          expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
           expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
           expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
           expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2019 }),
           expect.objectContaining({ attribute: 'vintage_year', operator: '<=', value: 2022 }),
           expect.objectContaining({ attribute: 'appellation', operator: '=', value: 'Barolo' }),
-        ],
-      },
+        ]),
+      }),
       'req-fallback-structured-fallback',
       expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
     );

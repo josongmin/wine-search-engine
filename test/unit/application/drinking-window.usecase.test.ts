@@ -4,13 +4,13 @@ import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/
 describe('DrinkingWindowUseCase', () => {
   it('passes predictor features through and evaluates drinkability against the explicit target year', async () => {
     const predictor = {
-      modelVersion: 'predictor-v1',
+      modelVersion: 'onnx:predictor-v1',
       predict: vi.fn().mockReturnValue({
         drinkingWindowStart: 2024,
         drinkingWindowEnd: 2030,
         peakYear: 2027,
         confidence: 'high' as const,
-        modelVersion: 'predictor-v1',
+        modelVersion: 'onnx:predictor-v1',
       }),
     };
 
@@ -47,19 +47,19 @@ describe('DrinkingWindowUseCase', () => {
       confidence: 'high',
       evidenceLevel: 'learned',
       blockingEligible: true,
-      modelVersion: 'predictor-v1',
+      modelVersion: 'onnx:predictor-v1',
     });
   });
 
-  it('marks heuristic predictor outputs as non-blocking evidence', async () => {
+  it('returns undefined evidence for non-ONNX model versions', async () => {
     const predictor = {
-      modelVersion: 'heuristic-v1.0-enc20260405',
+      modelVersion: 'unloaded',
       predict: vi.fn().mockReturnValue({
         drinkingWindowStart: 2024,
         drinkingWindowEnd: 2030,
         peakYear: 2027,
         confidence: 'low' as const,
-        modelVersion: 'heuristic-v1.0-enc20260405',
+        modelVersion: 'unloaded',
       }),
     };
 
@@ -77,7 +77,7 @@ describe('DrinkingWindowUseCase', () => {
       targetYear: 2027,
     });
 
-    expect(result.evidenceLevel).toBe('heuristic');
+    expect(result.evidenceLevel).toBeUndefined();
     expect(result.blockingEligible).toBe(false);
   });
 });

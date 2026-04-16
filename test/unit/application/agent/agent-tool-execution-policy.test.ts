@@ -59,10 +59,20 @@ describe('AgentToolExecutionPolicy', () => {
     const policy = new AgentToolExecutionPolicy();
     const state = createAgentExecutionState();
 
-    policy.maybeInjectRefinementHint(state, ['검색 결과가 없습니다'], 2);
+    policy.maybeInjectRefinementHint(state, ['검색 결과가 없습니다'], 1);
 
     expect(state.hasInjectedRefinementHint).toBe(false);
     expect(state.pendingPlannerDirective).toBeUndefined();
+  });
+
+  it('injects refinement hint when remaining step budget is enough', () => {
+    const policy = new AgentToolExecutionPolicy();
+    const state = createAgentExecutionState();
+
+    policy.maybeInjectRefinementHint(state, ['검색 결과가 없습니다'], 2);
+
+    expect(state.hasInjectedRefinementHint).toBe(true);
+    expect(state.pendingPlannerDirective).toEqual({ kind: 'relax_constraints_retry' });
   });
 
 });

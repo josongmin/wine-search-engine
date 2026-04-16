@@ -344,7 +344,9 @@ export async function mapRankedResultsToResultItems(
     let drinkingWindowBlock: DrinkingWindowBlock | undefined;
 
     if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
-        && r.drinkingWindowStart <= r.drinkingWindowEnd) {
+        && r.drinkingWindowStart <= r.drinkingWindowEnd
+        && r.drinkingWindowModelVersion !== undefined
+        && !r.drinkingWindowModelVersion.startsWith('heuristic')) {
       // Guard: inverted windows (start > end) from ETL bugs or Track-C backfill errors
       // would fail the Zod response schema refine → HTTP 500. Omit the block instead.
       drinkingWindowBlock = {
@@ -355,9 +357,7 @@ export async function mapRankedResultsToResultItems(
         confidence: inferDrinkingWindowConfidence(r.drinkingWindowModelVersion),
         evidenceLevel: inferDrinkingWindowEvidenceLevel(r.drinkingWindowModelVersion),
         blockingEligible: inferDrinkingWindowBlockingEligibility(r.drinkingWindowModelVersion),
-        ...(r.drinkingWindowModelVersion !== undefined
-          ? { modelVersion: r.drinkingWindowModelVersion }
-          : {}),
+        modelVersion: r.drinkingWindowModelVersion,
       };
     } else {
       const predicted = predictionMap.get(r.entityId);

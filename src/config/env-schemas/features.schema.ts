@@ -20,11 +20,6 @@ export const FeaturesEnvSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
 
-  /** Explicit production opt-in for heuristic-only drinking-window prediction. */
-  ALLOW_HEURISTIC_DRINKING_WINDOW: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
   /** Optional directory containing `window_start.onnx` and `window_end.onnx`. */
   DRINKING_WINDOW_MODEL_DIR: z.string().min(1).optional(),
 
@@ -40,4 +35,9 @@ export const FeaturesEnvSchema = z.object({
    * Default: unset (confidence check disabled, backward compatible).
    * Recommended: 0.45 (AURC-calibrated operating point). */
   CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().finite().min(0).max(1).optional(),
+
+  /** Optional path to a runtime LTR model file for PG-less / bootstrap startup.
+   * When unset, learned LTR is skipped unless registry data is available from PG.
+   */
+  RUNTIME_LTR_MODELS_PATH: z.string().min(1).optional(),
 });

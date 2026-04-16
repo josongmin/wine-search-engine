@@ -190,6 +190,84 @@ describe('AgentPlannerPhaseRunner', () => {
     }));
   });
 
+  it('drops mixed retrieval overrides for anchorless recommendation queries', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '선물 추천 검색',
+            action: {
+              tool: 'search_wines',
+              input: {
+                query: '와인 입문자 선물용 달달하면서 도수 낮은 거, 예쁜 라벨',
+                retrieval_mode: 'mixed',
+                styles: ['approachable', 'crowd_pleasing', 'sweet'],
+                max_alcohol_pct: 12,
+              },
+            },
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '와인 입문자 선물용 달달하면서 도수 낮은 거, 예쁜 라벨',
+      'req-drop-mixed-anchorless',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.action?.tool).toBe('search_wines');
+    expect(result?.parsed.action?.input).toEqual(expect.objectContaining({
+      query: '와인 입문자 선물용 달달하면서 도수 낮은 거, 예쁜 라벨',
+      styles: ['approachable', 'crowd_pleasing', 'sweet'],
+      max_alcohol_pct: 12,
+    }));
+    expect(result?.parsed.action?.input).not.toHaveProperty('retrieval_mode');
+  });
+
+  it('preserves mixed retrieval overrides for anchored mixed-query searches', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '오퍼스원 anchor 기반 mixed 검색',
+            action: {
+              tool: 'search_wines',
+              input: {
+                query: '오퍼스원 같은 와인 추천',
+                retrieval_mode: 'mixed',
+                styles: ['approachable'],
+              },
+            },
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '오퍼스원 같은 와인 추천',
+      'req-keep-mixed-anchored',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.action?.tool).toBe('search_wines');
+    expect(result?.parsed.action?.input).toEqual(expect.objectContaining({
+      query: '오퍼스원 같은 와인 추천',
+      retrieval_mode: 'mixed',
+      styles: ['approachable'],
+    }));
+  });
+
   it('keeps a higher output cap on the last step to allow final answers', async () => {
     const complete = vi.fn().mockResolvedValue({
       text: JSON.stringify({ thought: 'done', answer: '오퍼스 원 2018입니다.' }),

@@ -14,6 +14,7 @@ describe('benchmark / verification package scripts parity (ADR-005)', () => {
   const scripts = readPackageScripts();
 
   const governance = 'tsx scripts/eval/verify-external-fixture-governance.ts';
+  const claimBootstrap = 'tsx scripts/eval/analyze-legacy-claim-bootstrap.ts --out /tmp/legacy-claim-bootstrap-analysis.json';
 
   it('keeps fixture governance entrypoints on the same command (no silent drift)', () => {
     expect(scripts['eval:fixtures:verify']).toBe(governance);
@@ -23,8 +24,13 @@ describe('benchmark / verification package scripts parity (ADR-005)', () => {
 
   it('keeps eval:full wired to offline gate then fixture governance', () => {
     expect(scripts['eval:full']).toBe(
-      'pnpm run eval:offline:gate && pnpm run eval:fixtures:verify',
+      'pnpm run eval:offline:gate && pnpm run eval:fixtures:verify && pnpm run eval:claim:bootstrap',
     );
+  });
+
+  it('keeps claim bootstrap verification on the dedicated analysis script', () => {
+    expect(scripts['eval:claim:bootstrap']).toBe(claimBootstrap);
+    expect(scripts['test:verification:claim']).toBe('pnpm run eval:claim:bootstrap');
   });
 
   it('keeps exploratory agent runner scripts as direct npx tsx', () => {
@@ -53,5 +59,11 @@ describe('benchmark / verification package scripts parity (ADR-005)', () => {
     expect(scripts['test:verification:agent']).not.toMatch(/pnpm run bench:agent:fixtures:/);
     expect(scripts['test:verification:perf']).toContain('&&');
     expect(scripts['test:verification:perf']).not.toMatch(/pnpm run eval:perf:/);
+    expect(scripts['test:verification:fixtures:full']).toBe(
+      'pnpm run test:verification:search && pnpm run test:verification:agent && pnpm run test:verification:perf && pnpm run test:verification:claim',
+    );
+    expect(scripts['test:verification:core']).toBe(
+      'pnpm run typecheck && pnpm run typecheck:etl && pnpm run test:e2e:contract && pnpm run test:e2e:runtime && pnpm run test:ingest:contract && pnpm run test:verification:noisy && pnpm run test:verification:claim',
+    );
   });
 });

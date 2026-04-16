@@ -67,6 +67,14 @@ const COMPARISON_MARKERS: readonly RegExp[] = [
   /(?:와|과|랑|하고|이랑)\s+.+?\s+(?:중|비교|비교해|비교해줘|비교하면|뭐가|어떤|차이|어느)(?:$|[^\p{L}\p{N}])/u,
 ] as const;
 
+export function hasKoreanMixedQueryMarkers(normalizedQuery: string): boolean {
+  return KOREAN_MIXED_QUERY_MARKERS.some((re) => re.test(normalizedQuery));
+}
+
+export function hasComparisonMarkers(normalizedQuery: string): boolean {
+  return COMPARISON_MARKERS.some((re) => re.test(normalizedQuery));
+}
+
 /**
  * Extracts anchor candidates from a normalized query string.
  *
@@ -279,7 +287,63 @@ export class AnchorExtractor {
    * @returns Zero or more alias match results, ordered by confidence descending.
    */
   async lookupForFuzzyTerm(term: string): Promise<readonly AliasMatchResult[]> {
-    return this.aliasMatcher.findMatches(term);
+    const matchesByTerm = await this.lookupForFuzzyTerms([term]);
+    return matchesByTerm.get(term.trim()) ?? [];
+  }
+
+  /**
+   * Resolve multiple fuzzy terms in one batch when the underlying matcher
+   * supports batch lookup. Falls back to concurrent single lookups otherwise.
+   *
+   * This is a performance-critical path for fallback entity recovery when exact
+   * anchors miss.
+   */
+  async lookupForFuzzyTerms(
+    terms: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
+    const normalizedTerms = Array.from(
+      new Set(
+        terms
+          .map((term) => term.trim())
+          .filter((term) => term.length > 0),
+      ),
+    );
+    if (normalizedTerms.length === 0) {
+      return new Map();
+    }
+
+    try {
+      const batch =
+        this.aliasMatcher.findMatchesBatch !== undefined
+          ? await this.aliasMatcher.findMatchesBatch(normalizedTerms)
+          : undefined;
+      if (batch !== undefined) {
+        const merged = new Map<string, readonly AliasMatchResult[]>();
+        for (const term of normalizedTerms) {
+          merged.set(term, batch.get(term) ?? []);
+        }
+        return merged;
+      }
+
+      const settled = await Promise.allSettled(
+        normalizedTerms.map(async (term) => this.aliasMatcher.findMatches(term)),
+      );
+      const merged = new Map<string, readonly AliasMatchResult[]>();
+      normalizedTerms.forEach((term, index) => {
+        const maybeMatches = settled[index];
+        merged.set(
+          term,
+          maybeMatches?.status === 'fulfilled' ? maybeMatches.value : [],
+        );
+      });
+      return merged;
+    } catch {
+      const merged = new Map<string, readonly AliasMatchResult[]>();
+      for (const term of normalizedTerms) {
+        merged.set(term, []);
+      }
+      return merged;
+    }
   }
 
   /**
@@ -292,7 +356,7 @@ export class AnchorExtractor {
    * @returns `true` if any Korean mixed-query marker is present.
    */
   hasKoreanMixedQueryMarkers(normalizedQuery: string): boolean {
-    return KOREAN_MIXED_QUERY_MARKERS.some((re) => re.test(normalizedQuery));
+    return hasKoreanMixedQueryMarkers(normalizedQuery);
   }
 
   /**
@@ -302,6 +366,6 @@ export class AnchorExtractor {
    * @returns `true` if any comparison marker is present.
    */
   hasComparisonMarkers(normalizedQuery: string): boolean {
-    return COMPARISON_MARKERS.some((re) => re.test(normalizedQuery));
+    return hasComparisonMarkers(normalizedQuery);
   }
 }

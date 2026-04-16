@@ -29,7 +29,7 @@ import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const OPENAI_BASE_URL = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
 const MODEL = process.env['OPENAI_BEGINNER_MODEL'] ?? 'gpt-4.1-mini';
-const PROMPT_VERSION = 'beginner-suitability-scorer-v1';
+const PROMPT_VERSION = 'beginner-suitability-scorer-v2';
 const BATCH_SIZE = 20;
 /** LLM score normalization divisor: LLM outputs 0-100, we store [0, 1]. */
 const LLM_SCORE_SCALE = 100;
@@ -40,6 +40,7 @@ const LLM_SCORE_SCALE = 100;
 
 interface BeginnerScoreResponse {
   readonly score?: number | string;
+  readonly evidence_axes?: readonly string[];
   readonly snippet?: string;
   readonly rationale?: string;
 }
@@ -73,28 +74,25 @@ function contentHash(record: EnrichedSilverRecord): string {
 // Prompt
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = [
+export const BEGINNER_SUITABILITY_SYSTEM_PROMPT = [
   'You are a wine beginner-friendliness scoring expert. Score wines based on explicit catalog evidence only.',
-  'Consider: flavor simplicity (fruit-forward = friendlier, complex tannin/mineral = less friendly),',
-  'sweetness level (sweeter wines are generally more beginner-accessible),',
-  'alcohol level (moderate preferred, very high alcohol is less approachable),',
-  'grape familiarity (well-known grapes like Merlot, Chardonnay, Pinot Grigio = more accessible),',
-  'price accessibility (value/mid-range = more approachable entry point),',
-  'wine type (sparkling and rosé often favored by beginners),',
-  'and tasting note language (descriptors suggesting easy-drinking, smooth, approachable wines).',
+  'Use only evidence present in the supplied fields; do not invent accessibility from grape fame or price tier.',
+  'Ground the score in explicit evidence axes such as body, sweetness, acidity, tannin, alcohol percentage, grape_primary,',
+  'flavor-profile language, wine type, and search text.',
+  'Do NOT treat sweetness, grape familiarity, or wine type as stand-alone proxies; only use them when the catalog explicitly supports them.',
+  'If the catalog evidence is thin, stay conservative and say so.',
   'Do NOT hallucinate facts not present in the catalog data.',
 ].join(' ');
 
-function buildPrompt(record: EnrichedSilverRecord): string {
+export function buildBeginnerSuitabilityUserPrompt(record: EnrichedSilverRecord): string {
   return [
     'Score this wine\'s beginner-friendliness on 0-100.',
-    'Return JSON: {"score": N, "snippet": "evidence from catalog data", "rationale": "why this score"}',
-    'If evidence is insufficient for a confident score, return {"score": 40, "snippet": "insufficient explicit beginner signals", "rationale": "default baseline"}',
+    'Return JSON: {"score": N, "evidence_axes": ["body", "sweetness"], "snippet": "evidence from catalog data", "rationale": "why this score"}',
+    'If evidence is insufficient, return a conservative score grounded in the available evidence and keep evidence_axes empty if no explicit axis is supported.',
     '',
     `canonical_label: ${record.canonicalLabel}`,
     `producer: ${record.producer}`,
     `wine_type: ${record.wineType}`,
-    `price_band: ${record.priceBand}`,
     `body: ${String(record.body ?? '')}`,
     `sweetness: ${String(record.sweetness ?? '')}`,
     `acidity: ${String(record.acidity ?? '')}`,
@@ -127,8 +125,8 @@ async function scoreBeginnerSuitability(record: EnrichedSilverRecord): Promise<B
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildPrompt(record) },
+        { role: 'system', content: BEGINNER_SUITABILITY_SYSTEM_PROMPT },
+        { role: 'user', content: buildBeginnerSuitabilityUserPrompt(record) },
       ],
     }),
   });
@@ -146,11 +144,21 @@ async function scoreBeginnerSuitability(record: EnrichedSilverRecord): Promise<B
     return undefined;
   }
 
-  const parsed = JSON.parse(rawContent) as BeginnerScoreResponse;
+  let parsed: BeginnerScoreResponse;
+  try {
+    parsed = JSON.parse(rawContent) as BeginnerScoreResponse;
+  } catch {
+    return undefined;
+  }
+  const evidenceAxes = Array.isArray(parsed.evidence_axes)
+    ? parsed.evidence_axes
+      .filter((axis): axis is string => typeof axis === 'string' && axis.trim().length > 0)
+      .map((axis) => axis.trim())
+    : undefined;
 
   // Accept both number and string for score (LLMs routinely emit "75" instead of 75)
   const rawScore = typeof parsed.score === 'string' ? parseFloat(parsed.score) : parsed.score;
-  if (!Number.isFinite(rawScore) || rawScore < 0 || rawScore > LLM_SCORE_SCALE) {
+  if (typeof rawScore !== 'number' || !Number.isFinite(rawScore) || rawScore < 0 || rawScore > LLM_SCORE_SCALE) {
     return undefined;
   }
 
@@ -174,6 +182,7 @@ async function scoreBeginnerSuitability(record: EnrichedSilverRecord): Promise<B
     provenance: {
       source: 'llm_beginner_suitability_scorer',
       promptVersion: PROMPT_VERSION,
+      ...(evidenceAxes !== undefined ? { evidenceAxes } : {}),
       snippet: snippet.trim(),
       rationale: rationale.trim(),
     },

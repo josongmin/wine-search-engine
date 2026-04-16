@@ -3,6 +3,9 @@ import {
   assertTrackCFieldCoverageIsComplete,
   assertTrackCSourceStateMatches,
   buildTrackCSourceState,
+  parseFromStep,
+  TRACK_C_STEP_DEFINITIONS,
+  TRACK_C_TOTAL_STEPS,
 } from '../../../scripts/etl/run-track-c.js';
 
 describe('assertTrackCFieldCoverageIsComplete', () => {
@@ -15,6 +18,15 @@ describe('assertTrackCFieldCoverageIsComplete', () => {
     ).not.toThrow();
   });
 
+  it('passes when coverage ratio satisfies a partial threshold', () => {
+    expect(() =>
+      assertTrackCFieldCoverageIsComplete('criticProxy', {
+        present: 7,
+        total: 10,
+      }, 0.7),
+    ).not.toThrow();
+  });
+
   it('fails closed on partial coverage', () => {
     expect(() =>
       assertTrackCFieldCoverageIsComplete('criticProxy', {
@@ -22,6 +34,15 @@ describe('assertTrackCFieldCoverageIsComplete', () => {
         total: 10,
       }),
     ).toThrow(/not fully populated/);
+  });
+
+  it('fails closed when below minimum threshold', () => {
+    expect(() =>
+      assertTrackCFieldCoverageIsComplete('criticProxy', {
+        present: 6,
+        total: 10,
+      }, 0.7),
+    ).toThrow(/below minimum coverage/);
   });
 
   it('fails closed on empty output', () => {
@@ -52,5 +73,35 @@ describe('Track C source state', () => {
     expect(() => assertTrackCSourceStateMatches(current, recorded)).toThrow(
       /source hash mismatch/,
     );
+  });
+});
+
+describe('Track C step plan', () => {
+  it('exposes seven ordered steps with gift/beginner coverage wired in', () => {
+    expect(TRACK_C_TOTAL_STEPS).toBe(7);
+    expect(TRACK_C_STEP_DEFINITIONS.map((step) => step.num)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(TRACK_C_STEP_DEFINITIONS[5]).toMatchObject({
+      num: 6,
+      script: 'run-track-c-step6-gift-suitability.ts',
+      field: 'giftSuitabilityClassification',
+      requiredCoverage: 0.7,
+    });
+    expect(TRACK_C_STEP_DEFINITIONS[6]).toMatchObject({
+      num: 7,
+      script: 'run-track-c-step7-beginner-suitability.ts',
+      field: 'beginnerSuitabilityClassification',
+      requiredCoverage: 0.7,
+    });
+    expect(TRACK_C_STEP_DEFINITIONS[3]).toMatchObject({
+      num: 4,
+      field: 'occasionClassification',
+      requiredCoverage: 0,
+    });
+  });
+
+  it('clamps --from-step to the seven-step plan', () => {
+    expect(parseFromStep(['--from-step', '999'])).toBe(7);
+    expect(parseFromStep(['--from-step', '0'])).toBe(1);
+    expect(parseFromStep(['--from-step', 'not-a-number'])).toBe(1);
   });
 });

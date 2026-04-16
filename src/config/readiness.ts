@@ -277,7 +277,7 @@ export function buildHealthRouteOptions(
               required: false,
               check: (): Promise<ReadinessStatus> =>
                 Promise.resolve(
-                  drinkingWindowPredictor.modelVersion.startsWith('heuristic') ? 'down' : 'up',
+                  drinkingWindowPredictor.modelVersion.startsWith('onnx:') ? 'up' : 'down',
                 ),
             },
           }

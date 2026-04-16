@@ -5,7 +5,7 @@
  * use cases with validated input and proper requestId propagation.
  */
 
-import { z } from 'zod';
+import type { z } from 'zod';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
 import { DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
@@ -13,6 +13,7 @@ import type { DecomposedSearchUseCasePort } from '../../application/search/port/
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
 import {
+  buildSearchToolStyleDerivedFilters,
   sanitizeOptionalToolNulls,
 } from '../../application/search/search-tool-contract.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -85,7 +86,7 @@ function parseToolInput<T extends z.ZodTypeAny>(
   }
   return {
     success: true,
-    data: validation.data,
+    data: validation.data as z.output<T>,
   };
 }
 
@@ -118,6 +119,9 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   if (input.wine_type !== undefined) {
     pushSearchToolStructuredFilter(filters, 'wine_type', '=', input.wine_type, input.wine_type);
   }
+  if (input.max_alcohol_pct !== undefined) {
+    pushSearchToolStructuredFilter(filters, 'alcohol_pct', '<=', input.max_alcohol_pct, `${input.max_alcohol_pct}% 이하`);
+  }
   if (input.country !== undefined) {
     pushSearchToolStructuredFilter(filters, 'country', '=', input.country, input.country);
   }
@@ -130,6 +134,8 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   if (input.appellation !== undefined) {
     pushSearchToolStructuredFilter(filters, 'appellation', '=', input.appellation, input.appellation);
   }
+
+  filters.push(...buildSearchToolStyleDerivedFilters(input));
 
   return filters;
 }

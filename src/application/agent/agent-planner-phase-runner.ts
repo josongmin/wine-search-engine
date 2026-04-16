@@ -22,7 +22,16 @@ import {
   AgentPlannerPhaseResultPolicy,
 } from './agent-planner-phase-result-policy.js';
 import { containsHangul } from '../../domain/shared/utils/hangul.js';
-import { isExactMetadataEntityLookupCandidate } from './agent-query-execution-contract.js';
+import {
+  isExactMetadataEntityLookupCandidate,
+  isSpecificSkuLikeQuery,
+} from './agent-query-execution-contract.js';
+import { parseSpans } from '../../domain/attribute/service/span-parser.js';
+import { Transliterator } from '../../domain/alias/service/transliterator.js';
+import {
+  hasComparisonMarkers,
+  hasKoreanMixedQueryMarkers,
+} from '../../domain/query/service/anchor-extractor.js';
 
 const log = bootstrapLogger.child({ component: 'AgentPlannerPhaseRunner' });
 const STEP_LOG_PREVIEW_CHARS = 500;
@@ -208,6 +217,63 @@ function enforceExplicitPerSlotCardinality(
   };
 }
 
+function queryHasAnchorSurface(query: string): boolean {
+  if (isSpecificSkuLikeQuery(query) || isExactMetadataEntityLookupCandidate(query)) {
+    return true;
+  }
+
+  return parseSpans(query).some((span) => {
+    if (isSpecificSkuLikeQuery(span.text)) {
+      return true;
+    }
+    return Transliterator.romanizeWineTerm(span.text) !== undefined;
+  });
+}
+
+function shouldAllowMixedRetrievalMode(query: string): boolean {
+  if (!queryHasAnchorSurface(query)) {
+    return false;
+  }
+  return hasKoreanMixedQueryMarkers(query) || hasComparisonMarkers(query);
+}
+
+function sanitizeSearchRetrievalModeOverrides(parsed: LlmAction): LlmAction {
+  const sanitizeInput = (input: Record<string, unknown>): Record<string, unknown> => {
+    if (input['retrieval_mode'] !== 'mixed') {
+      return input;
+    }
+    const query = typeof input['query'] === 'string' ? input['query'].trim() : '';
+    if (query.length === 0 || shouldAllowMixedRetrievalMode(query)) {
+      return input;
+    }
+    const { retrieval_mode: _removed, ...rest } = input;
+    return rest;
+  };
+
+  if (parsed.action?.tool === 'search_wines') {
+    return {
+      ...parsed,
+      action: {
+        ...parsed.action,
+        input: sanitizeInput(parsed.action.input),
+      },
+    };
+  }
+
+  if (parsed.actions !== undefined) {
+    return {
+      ...parsed,
+      actions: parsed.actions.map((action) =>
+        action.tool === 'search_wines'
+          ? { ...action, input: sanitizeInput(action.input) }
+          : action,
+      ),
+    };
+  }
+
+  return parsed;
+}
+
 interface AgentPlannerPhaseRunnerDeps {
   readonly chatLlm: ChatLlmPort;
 }
@@ -319,9 +385,11 @@ export class AgentPlannerPhaseRunner {
       return null;
     }
 
-    const parsed = enforceExplicitPerSlotCardinality(
-      query,
-      enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text)),
+    const parsed = sanitizeSearchRetrievalModeOverrides(
+      enforceExplicitPerSlotCardinality(
+        query,
+        enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text)),
+      ),
     );
     if (
       parsed.thought === '[unparseable LLM output]'

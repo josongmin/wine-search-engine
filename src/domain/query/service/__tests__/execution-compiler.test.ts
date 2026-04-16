@@ -18,6 +18,7 @@ function makeMinimalPlan(
     suggestedRoute?: QueryRoute;
     suggestedRetrievalMode?: RetrievalMode;
     admission_context?: QueryPlanV2['admission_context'];
+    queryBudget?: QueryPlanV2['queryBudget'];
   } = {},
 ): QueryPlanV2 {
   return {
@@ -50,6 +51,9 @@ function makeMinimalPlan(
     plannerVersion: '1.0.0',
     policyRuleVersion: '1.0.0',
     thresholdProfileId: 'default',
+    ...(overrides.queryBudget !== undefined && {
+      queryBudget: overrides.queryBudget,
+    }),
     ...(overrides.admission_context !== undefined && {
       admission_context: overrides.admission_context,
     }),
@@ -135,6 +139,7 @@ describe('ExecutionCompiler', () => {
     const result = compiler.compile({ plan });
     expect(result.execution.budget.enablePrecisionRerank).toBe(true);
     expect(result.execution.budget.maxCandidates).toBe(20);
+    expect(result.execution.budget.rerankLimit).toBe(20);
   });
 
   // 5. entity_lookup disables precision rerank
@@ -146,6 +151,7 @@ describe('ExecutionCompiler', () => {
     const result = compiler.compile({ plan });
     expect(result.execution.budget.enablePrecisionRerank).toBe(false);
     expect(result.execution.budget.maxCandidates).toBe(10);
+    expect(result.execution.budget.rerankLimit).toBe(0);
   });
 
   // 6. maxCandidatesOverride overrides default budget
@@ -158,6 +164,38 @@ describe('ExecutionCompiler', () => {
     expect(result.execution.budget.maxCandidates).toBe(42);
     // precision rerank stays at mode default
     expect(result.execution.budget.enablePrecisionRerank).toBe(false);
+    expect(result.execution.budget.rerankLimit).toBe(0);
+  });
+
+  it('threads queryBudget.rerankLimit into the execution contract for rerank-enabled modes', () => {
+    const plan = makeMinimalPlan({
+      suggestedRoute: 'hybrid',
+      suggestedRetrievalMode: 'attribute_search',
+      queryBudget: {
+        maxLatencyMs: 500,
+        maxCandidates: 50,
+        rerankLimit: 7,
+      },
+    });
+    const result = compiler.compile({ plan });
+    expect(result.execution.budget.maxCandidates).toBe(50);
+    expect(result.execution.budget.rerankLimit).toBe(7);
+    expect(result.execution.budget.enablePrecisionRerank).toBe(true);
+  });
+
+  it('caps rerankLimit by maxCandidates in the execution contract', () => {
+    const plan = makeMinimalPlan({
+      suggestedRoute: 'hybrid',
+      suggestedRetrievalMode: 'attribute_search',
+      queryBudget: {
+        maxLatencyMs: 500,
+        maxCandidates: 50,
+        rerankLimit: 100,
+      },
+    });
+    const result = compiler.compile({ plan, maxCandidatesOverride: 12 });
+    expect(result.execution.budget.maxCandidates).toBe(12);
+    expect(result.execution.budget.rerankLimit).toBe(12);
   });
 
   // 7. ProvenancePolicy correctly maps requires_identity_seal: true

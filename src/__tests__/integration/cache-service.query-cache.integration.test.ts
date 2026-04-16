@@ -135,9 +135,9 @@ describe('CacheService query cache integration', () => {
     const mockPlan = createMockPlan();
     const mockRequest = {};
     const mockResponse = createMockResponse('test-v1', {
-      executionMode: 'heuristic',
+      executionMode: 'degraded',
       blockingEligible: false,
-      degradationReasons: ['heuristic_drinking_window'],
+      degradationReasons: ['reranker_timeout'],
     });
     const mockCompiled = createMockCompiledQuery();
 

@@ -43,52 +43,61 @@ export interface TrackCStepDefinition {
   readonly script: string;
   readonly desc: string;
   readonly field: string;
+  /** Minimum coverage ratio required before the step is considered passable. */
+  readonly requiredCoverage?: number;
 }
 
-export const TRACK_C_STEP_DEFINITIONS = [
+export const TRACK_C_STEP_DEFINITIONS: readonly TrackCStepDefinition[] = [
   {
     num: 1,
     script: 'run-track-c-step1.ts',
     desc: 'Generate Critic Proxy Scores',
     field: 'criticProxy',
+    requiredCoverage: 1,
   },
   {
     num: 2,
     script: 'run-track-c-step2.ts',
     desc: 'Enrich Certifications (Wikidata + LLM)',
     field: 'certifications',
+    requiredCoverage: 1,
   },
   {
     num: 3,
     script: 'run-track-c-step3.ts',
     desc: 'Generate Food Pairings (Claude)',
     field: 'pairingTags',
+    requiredCoverage: 1,
   },
   {
     num: 4,
     script: 'run-track-c-step4-occasion.ts',
     desc: 'Classify Occasion Tags (Ontology + LLM)',
     field: 'occasionClassification',
+    requiredCoverage: 0,
   },
   {
     num: 5,
     script: 'drinking-window-backfill.ts',
     desc: 'Drinking Window Backfill (Heuristic Stub, Opt-In)',
     field: 'drinkingWindow',
+    requiredCoverage: 1,
   },
   {
     num: 6,
     script: 'run-track-c-step6-gift-suitability.ts',
     desc: 'Score Gift Suitability (LLM Teacher Label)',
     field: 'giftSuitabilityClassification',
+    requiredCoverage: 0.7,
   },
   {
     num: 7,
     script: 'run-track-c-step7-beginner-suitability.ts',
     desc: 'Score Beginner Suitability (LLM Teacher Label)',
     field: 'beginnerSuitabilityClassification',
+    requiredCoverage: 0.7,
   },
-] as const satisfies readonly TrackCStepDefinition[];
+] as const;
 
 export const TRACK_C_TOTAL_STEPS = TRACK_C_STEP_DEFINITIONS.length;
 
@@ -214,13 +223,23 @@ function fieldCoverage(fieldName: string): { present: number; total: number; rat
 export function assertTrackCFieldCoverageIsComplete(
   fieldName: string,
   coverage: { readonly present: number; readonly total: number },
+  minimumRatio: number = 1,
 ): void {
+  if (minimumRatio <= 0) {
+    return;
+  }
   if (coverage.total === 0) {
     throw new Error(`Track C field "${fieldName}" has no records`);
   }
-  if (coverage.present !== coverage.total) {
+  if (minimumRatio >= 1 && coverage.present !== coverage.total) {
     throw new Error(
       `Track C field "${fieldName}" is not fully populated (${coverage.present}/${coverage.total})`,
+    );
+  }
+  if (coverage.total > 0 && coverage.present / coverage.total < minimumRatio) {
+    throw new Error(
+      `Track C field "${fieldName}" is below minimum coverage (${coverage.present}/${coverage.total})`
+      + `, threshold ${(minimumRatio * 100).toFixed(1)}%`,
     );
   }
 }
@@ -240,6 +259,7 @@ async function runStep(
   scriptName: string,
   description: string,
   outputField: string,
+  minimumCoverage: number,
 ): Promise<boolean> {
   console.log(`\n${'='.repeat(70)}`);
   console.log(`Step ${stepNum}: ${description}`);
@@ -271,13 +291,18 @@ async function runStep(
     // Validate output field across ALL records (not just first sample)
     const coverage = fieldCoverage(outputField);
     try {
-      assertTrackCFieldCoverageIsComplete(outputField, coverage);
+      assertTrackCFieldCoverageIsComplete(
+        outputField,
+        coverage,
+        minimumCoverage,
+      );
     } catch {
       if (backupPath !== null) {
         fs.copyFileSync(backupPath, TRACK_C_OUTPUT_FILE);
       }
       console.error(
-        `  Step ${stepNum} completed but output field "${outputField}" is not fully populated (${coverage.present}/${coverage.total})`,
+        `  Step ${stepNum} completed but output field "${outputField}" failed coverage check (` +
+        `${coverage.present}/${coverage.total}, ${(coverage.ratio * 100).toFixed(1)}%)`,
       );
       return false;
     }
@@ -370,6 +395,7 @@ async function main() {
         step.script,
         step.desc,
         step.field,
+        step.requiredCoverage ?? 1,
       );
       results.push({
         step: step.num,

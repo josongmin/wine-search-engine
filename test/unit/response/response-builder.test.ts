@@ -130,7 +130,7 @@ function makeCompiled(overrides?: Partial<CompiledWineQuery>): CompiledWineQuery
     },
     execution: {
       effectiveRoute: 'hybrid', effectiveRetrievalMode: 'attribute_search', routeSource: 'planner',
-      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      budget: { maxCandidates: 20, rerankLimit: 20, enablePrecisionRerank: true },
       provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
     },
     ...overrides,
@@ -342,7 +342,7 @@ describe('ResponseBuilder', () => {
       expect(response.meta.decisionSnapshot).toEqual(snapshot);
     });
 
-    it('surfaces heuristic drinking-window responses as heuristic and non-blocking', () => {
+    it('does not add heuristic degradation for results with undefined evidenceLevel', () => {
       const params = makeBaseParams({
         results: [
           {
@@ -352,9 +352,8 @@ describe('ResponseBuilder', () => {
               drinkingWindowEnd: 2030,
               currentlyDrinkable: true,
               confidence: 'low',
-              evidenceLevel: 'heuristic',
+              evidenceLevel: undefined,
               blockingEligible: false,
-              modelVersion: 'heuristic-v1.0-enc20260405',
             },
           },
         ],
@@ -362,12 +361,9 @@ describe('ResponseBuilder', () => {
 
       const response = builder.build(params);
 
-      expect(response.meta.executionMode).toBe('heuristic');
-      expect(response.meta.blockingEligible).toBe(false);
-      expect(response.meta.degradationReasons).toContain('heuristic_drinking_window');
-      expect(response.engineDecision.executionMode).toBe('heuristic');
-      expect(response.engineDecision.blockingEligible).toBe(false);
-      expect(response.engineDecision.degradationReasons).toContain('heuristic_drinking_window');
+      expect(response.meta.executionMode).toBe('authoritative');
+      expect(response.meta.degradationReasons ?? []).not.toContain('heuristic_drinking_window');
+      expect(response.engineDecision.degradationReasons ?? []).not.toContain('heuristic_drinking_window');
     });
 
     it('preserves explicit degraded contract overrides from upstream', () => {

@@ -171,7 +171,8 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   // Critic score / rating keywords
-  if (/(?:평점|점수|별점|리뷰)\s*(?:좋은|높은|훌륭|최고)/u.test(q)) {
+  // Connective forms: 좋고, 높고 (연결형 -고) alongside adnominal 좋은, 높은
+  if (/(?:평점|점수|별점|리뷰)\s*(?:좋은|좋고|높은|높고|훌륭|최고)/u.test(q)) {
     soft.push({
       attribute: 'critic_score',
       operator: '>=',
@@ -202,8 +203,21 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
+  // "바디감 있고/있는" → body >= 0.5 (connective form: 있고, adnominal: 있는)
+  if (/(?:바디감\s*있(?:고|는|으며|으면서)?|바디감\s*좋(?:고|은|으며)?)/u.test(q)) {
+    soft.push({
+      attribute: 'body',
+      operator: '>=',
+      value: 0.5,
+      source_phrase: '바디감 있',
+      confidence: 0.7,
+      mapping_version: mv,
+    });
+  }
+
   // "low tannin" intent
-  if (/(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|부드러(?:운|움|운편)?)/u.test(q)) {
+  // Connective forms: 없고 (연결형 -고) alongside adnominal 없는
+  if (/(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|타닌감?\s*없(?:고|는|다)|부드러(?:운|움|운편)?)/u.test(q)) {
     soft.push({
       attribute: 'tannin',
       operator: '<=',
@@ -305,6 +319,17 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       value: style,
       source_phrase: style,
       confidence: 0.85,
+      mapping_version: mv,
+    });
+  }
+
+  for (const wineType of searchConstraints.excludeWineTypes ?? []) {
+    hard.push({
+      attribute: 'wine_type',
+      operator: 'exclude',
+      value: wineType,
+      source_phrase: wineType,
+      confidence: 0.9,
       mapping_version: mv,
     });
   }

@@ -221,9 +221,9 @@ describe('unmetHardConstraints annotation', () => {
   });
 
   // presentation_forward semantic profile removed — no backing data in source.
-  // These tests verify that without a profile, presentation_forward is a no-op
-  // soft constraint (does not match, does not pollute retrieval).
-  it('presentation_forward without profile does NOT match sparkling candidates', () => {
+  // These tests verify that the no-profile style constraint is treated as
+  // non-evaluable during soft scoring (neutral, not a hard mismatch).
+  it('presentation_forward without profile is treated as non-evaluable soft constraint for sparkling candidates', () => {
     const candidate = makeCandidate({
       wineType: 'sparkling',
       style: 'sparkling white',
@@ -232,10 +232,10 @@ describe('unmetHardConstraints annotation', () => {
     });
     const bundle = makeBundle([], [makeConstraint('style', 'in', ['presentation_forward'])]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
-    expect(result.matchedConstraints).not.toContain('style');
+    expect(result.matchedConstraints).toContain('style');
   });
 
-  it('presentation_forward without profile does NOT match via occasion metadata', () => {
+  it('presentation_forward without profile does not require occasion evidence', () => {
     const candidate = makeCandidate({
       wineType: 'red',
       style: 'medium red',
@@ -243,7 +243,7 @@ describe('unmetHardConstraints annotation', () => {
     });
     const bundle = makeBundle([], [makeConstraint('style', 'in', ['presentation_forward'])]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
-    expect(result.matchedConstraints).not.toContain('style');
+    expect(result.matchedConstraints).toContain('style');
   });
 
   it('accumulates multiple unmet attributes', () => {

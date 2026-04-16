@@ -364,6 +364,7 @@ export interface GiftSuitabilityFingerprint {
 export interface GiftSuitabilityProvenance {
   readonly source: 'llm_gift_suitability_scorer';
   readonly promptVersion: string;
+  readonly evidenceAxes?: readonly string[];
   readonly snippet: string;
   readonly rationale: string;
 }
@@ -389,6 +390,7 @@ export interface BeginnerSuitabilityFingerprint {
 export interface BeginnerSuitabilityProvenance {
   readonly source: 'llm_beginner_suitability_scorer';
   readonly promptVersion: string;
+  readonly evidenceAxes?: readonly string[];
   readonly snippet: string;
   readonly rationale: string;
 }

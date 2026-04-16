@@ -209,9 +209,11 @@ function buildConfig(parsed: EnvVars) {
 
     /** Drinking-window runtime policy. */
     drinkingWindow: {
-      allowHeuristicInProduction: parsed.ALLOW_HEURISTIC_DRINKING_WINDOW,
       modelDir: parsed.DRINKING_WINDOW_MODEL_DIR,
     },
+
+    /** Runtime LTR artifact path for bootstrap-mode learned reranker fallback. */
+    runtimeLtrModelsPath: parsed.RUNTIME_LTR_MODELS_PATH,
 
     /** Agent configuration. */
     agent: {

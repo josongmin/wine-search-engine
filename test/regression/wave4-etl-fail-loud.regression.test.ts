@@ -65,8 +65,8 @@ describe('Wave 4 / H15: publish-search-snapshot allow-missing-ltr ack source che
       'utf-8',
     );
     expect(src).toMatch(/ETL_PUBLISH_LTR_BYPASS_ACK/);
-    expect(src).toMatch(/--allow-missing-ltr was set in NODE_ENV=production/);
-    expect(src).toMatch(/Refusing fail-open/);
+    expect(src).toMatch(/--allow-missing-ltr was enabled for publish without operator ack/);
+    expect(src).toMatch(/fall back to lexical-only ranking/);
   });
 });
 
@@ -89,8 +89,7 @@ describe('Wave 4 / cross-cutting: fail-loud principles', () => {
       fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
       'utf-8',
     );
-    expect(src).toMatch(/lexical-only ranking/);
-    expect(src).toMatch(/silently degrading production search quality/);
+    expect(src).toMatch(/fall back to lexical-only ranking/);
+    expect(src).toMatch(/Refusing fail-open/);
   });
 });
-

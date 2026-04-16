@@ -151,7 +151,7 @@ describe('Nested condition regression — agent-prompt multi-constraint strategy
   it('R-NESTED-10: strategy instructs agent to search with hard constraints first', () => {
     const src = readSrc('src/application/agent/agent-prompt.ts');
     // After the refactor, the strategy says "search with ALL hard constraints in ONE call"
-    expect(src).toMatch(/hard constraint|HARD constraint|hard.*constraint/i);
+    expect(src).toMatch(/ONE-CALL rule|one-call|MUST-HAVE|ALL constraints|structured params/i);
   });
 
   it('R-NESTED-11: strategy mentions relaxing constraints when results < 3', () => {

@@ -12,6 +12,7 @@ import {
   normalizeConstraintComparableString,
 } from '../../attribute/service/constraint-ontology-normalization.js';
 import { resolveSemanticStyleEvidenceProfile } from '../../query/service/semantic-style-query-terms.js';
+import { isNoOpSemanticStyleHint } from '../../query/service/semantic-style-query-terms.js';
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
@@ -487,6 +488,33 @@ function satisfiesConstraint(
   );
 }
 
+function isConstraintStyleWithoutBackedSemanticProfile(constraint: NormalizedConstraint): boolean {
+  if (constraint.attribute !== 'style') {
+    return false;
+  }
+  if (constraint.operator !== '=' && constraint.operator !== 'in') {
+    return false;
+  }
+
+  const requestedStyles = typeof constraint.value === 'string'
+    ? [constraint.value]
+    : Array.isArray(constraint.value)
+      ? constraint.value.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : [];
+  if (requestedStyles.length === 0) {
+    return false;
+  }
+
+  const hasBackedProfile = requestedStyles.some((value) => {
+    const normalized = normalizeConstraintComparableString('style', value);
+    return isNoOpSemanticStyleHint(normalized)
+      ? false
+      : resolveSemanticStyleEvidenceProfile(normalized) !== undefined;
+  });
+
+  return !hasBackedProfile;
+}
+
 export function annotateCandidateConstraintEvidence(
   candidate: HybridCandidate,
   constraints: ConstraintBundle,
@@ -505,6 +533,11 @@ export function annotateCandidateConstraintEvidence(
 
   for (const constraint of constraints.soft) {
     if (satisfiesConstraint(candidate, constraint)) {
+      matched.add(constraint.attribute);
+    } else if (isConstraintStyleWithoutBackedSemanticProfile(constraint)) {
+      // Unsupported style preferences (예: presentation_forward) are not backed by
+      // measurable catalog evidence. Treat as "not evaluable" instead of strict
+      // mismatch to avoid soft-constraint denominator pollution.
       matched.add(constraint.attribute);
     } else if (resolveCandidateValue(candidate, constraint.attribute) === undefined) {
       // Soft constraint has no backing field on this candidate (e.g. fruit_intensity

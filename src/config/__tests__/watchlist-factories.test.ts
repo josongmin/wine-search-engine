@@ -26,7 +26,7 @@ describe('watchlist runtime factories', () => {
     expect(services.watchlistRuntime).toBeNull();
   });
 
-  it('uses the injected watchlist publisher factory when watchlist-aware search is enabled', () => {
+  it('uses the injected watchlist publisher factory when watchlist-aware search is enabled', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
@@ -35,9 +35,9 @@ describe('watchlist runtime factories', () => {
       publishUpdate: vi.fn(async () => {}),
     }));
 
-    buildCoreAdapterServices(config, {
+    await Promise.resolve(buildCoreAdapterServices(config, {
       createWatchlistPublisher: publisherFactory,
-    });
+    }));
 
     expect(publisherFactory).toHaveBeenCalledTimes(1);
   });

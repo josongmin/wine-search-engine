@@ -29,7 +29,7 @@ import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const OPENAI_BASE_URL = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
 const MODEL = process.env['OPENAI_GIFT_MODEL'] ?? 'gpt-4.1-mini';
-const PROMPT_VERSION = 'gift-suitability-scorer-v1';
+const PROMPT_VERSION = 'gift-suitability-scorer-v2';
 const BATCH_SIZE = 20;
 /** LLM score normalization divisor: LLM outputs 0-100, we store [0, 1]. */
 const LLM_SCORE_SCALE = 100;
@@ -40,6 +40,7 @@ const LLM_SCORE_SCALE = 100;
 
 interface GiftScoreResponse {
   readonly score?: number | string;
+  readonly evidence_axes?: readonly string[];
   readonly snippet?: string;
   readonly rationale?: string;
 }
@@ -74,28 +75,27 @@ function contentHash(record: EnrichedSilverRecord): string {
 // Prompt
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = [
+export const GIFT_SUITABILITY_SYSTEM_PROMPT = [
   'You are a wine gift-suitability scoring expert. Score wines based on explicit catalog evidence only.',
-  'Consider: brand recognition and prestige for gifting, price point signaling (luxury/premium = stronger gift signal),',
-  'occasion fit (celebration, anniversary, wedding contexts), wine type appeal for non-expert recipients',
-  '(sparkling and rosé have natural visual appeal), region/classification prestige (Grand Cru, Barolo DOCG etc.),',
-  'and producer reputation.',
-  'Do NOT consider label aesthetics or packaging — that data is not available.',
+  'Use only evidence present in the supplied fields; do not invent label aesthetics, packaging, or social prestige.',
+  'Ground the score in explicit evidence axes such as producer recognition and prestige, official classification, occasion tags,',
+  'flavor-profile language, pairing language, wine type, alcohol percentage, and search text.',
+  'Do NOT treat price band or bottle style as a stand-alone proxy for gifting.',
+  'If the catalog evidence is thin, stay conservative and say so.',
   'Do NOT hallucinate facts not present in the catalog data.',
 ].join(' ');
 
-function buildPrompt(record: EnrichedSilverRecord): string {
+export function buildGiftSuitabilityUserPrompt(record: EnrichedSilverRecord): string {
   return [
     'Score this wine\'s gift suitability on 0-100.',
-    'Return JSON: {"score": N, "snippet": "evidence from catalog data", "rationale": "why this score"}',
-    'If evidence is insufficient for a confident score, return {"score": 30, "snippet": "insufficient explicit gift signals", "rationale": "default baseline"}',
+    'Return JSON: {"score": N, "evidence_axes": ["occasion", "classification"], "snippet": "evidence from catalog data", "rationale": "why this score"}',
+    'If evidence is insufficient, return a conservative score grounded in the available evidence and keep evidence_axes empty if no explicit axis is supported.',
     '',
     `canonical_label: ${record.canonicalLabel}`,
     `producer: ${record.producer}`,
     `country: ${record.country}`,
     `region: ${record.region}`,
     `wine_type: ${record.wineType}`,
-    `price_band: ${record.priceBand}`,
     `classification: ${record.classification ?? ''}`,
     `producer_prestige: ${String(record.producerPrestige ?? '')}`,
     `alcohol_pct: ${String(record.alcoholPct ?? '')}`,
@@ -123,15 +123,15 @@ async function scoreGiftSuitability(record: EnrichedSilverRecord): Promise<GiftS
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: MODEL,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildPrompt(record) },
-      ],
-    }),
-  });
+        model: MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: GIFT_SUITABILITY_SYSTEM_PROMPT },
+          { role: 'user', content: buildGiftSuitabilityUserPrompt(record) },
+        ],
+      }),
+    });
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -146,11 +146,21 @@ async function scoreGiftSuitability(record: EnrichedSilverRecord): Promise<GiftS
     return undefined;
   }
 
-  const parsed = JSON.parse(rawContent) as GiftScoreResponse;
+  let parsed: GiftScoreResponse;
+  try {
+    parsed = JSON.parse(rawContent) as GiftScoreResponse;
+  } catch {
+    return undefined;
+  }
+  const evidenceAxes = Array.isArray(parsed.evidence_axes)
+    ? parsed.evidence_axes
+      .filter((axis): axis is string => typeof axis === 'string' && axis.trim().length > 0)
+      .map((axis) => axis.trim())
+    : undefined;
 
   // Accept both number and string for score (LLMs routinely emit "75" instead of 75)
   const rawScore = typeof parsed.score === 'string' ? parseFloat(parsed.score) : parsed.score;
-  if (!Number.isFinite(rawScore) || rawScore < 0 || rawScore > LLM_SCORE_SCALE) {
+  if (typeof rawScore !== 'number' || !Number.isFinite(rawScore) || rawScore < 0 || rawScore > LLM_SCORE_SCALE) {
     return undefined;
   }
 
@@ -174,6 +184,7 @@ async function scoreGiftSuitability(record: EnrichedSilverRecord): Promise<GiftS
     provenance: {
       source: 'llm_gift_suitability_scorer',
       promptVersion: PROMPT_VERSION,
+      ...(evidenceAxes !== undefined ? { evidenceAxes } : {}),
       snippet: snippet.trim(),
       rationale: rationale.trim(),
     },

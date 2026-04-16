@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import { coerceFiniteNumber, coerceNonNegativeInt, coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
+import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/semantic-style-query-terms.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 export const SEARCH_TOOL_WINE_TYPES = ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'] as const;
@@ -34,6 +36,8 @@ export const SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION =
   'Optional countries or regions to exclude via exact index-level NOT filters.';
 export const SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION =
   'Optional maximum price in KRW (e.g. 50000 for 5만원).';
+export const SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION =
+  'Optional maximum alcohol percentage ABV (e.g. 12 for low-alcohol / 도수 낮은 와인).';
 export const SEARCH_TOOL_WINE_TYPE_DESCRIPTION =
   'Optional exact wine-type constraint.';
 export const SEARCH_TOOL_COUNTRY_DESCRIPTION =
@@ -80,9 +84,14 @@ const SEARCH_TOOL_STYLE_EXAMPLES = [
   'screw_cap',
   'approachable',
   'crowd_pleasing',
-  'presentation_forward',
 ] as const;
-const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing', 'presentation_forward'] as const;
+const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing', 'sweet'] as const;
+const SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION = 'search_tool_style_v1';
+const SEARCH_TOOL_STYLE_HINTS_WITH_STRUCTURED_FILTERS: ReadonlySet<string> = new Set([
+  'dry',
+  'off_dry',
+  'sweet',
+]);
 
 interface SearchToolTextFieldOptions {
   readonly maxLen: number;
@@ -161,6 +170,7 @@ export function buildSearchToolFieldShape(
     exclude_grapes: z.array(z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
     exclude_regions: z.array(z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
     max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
+    max_alcohol_pct: coerceFiniteNumber.pipe(z.number().positive().max(100)).optional(),
     wine_type: z.enum(SEARCH_TOOL_WINE_TYPES).optional(),
     country: z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN).optional(),
     vintage_min: coercePositiveInt.pipe(z.number().int().min(SEARCH_TOOL_VINTAGE_MIN).max(SEARCH_TOOL_VINTAGE_MAX)).optional(),
@@ -222,17 +232,18 @@ export function buildSearchWinesPromptContractLines(
   usd50ApproxKrw: number,
 ): readonly string[] {
   return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, max_price_krw?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.',
+    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.',
     `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
     '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
     `  - wine_type: ${quoteEnum(SEARCH_TOOL_WINE_TYPES)} (use for type constraints, e.g. 레드→"red", 화이트→"white")`,
     '  - country: English name (e.g. "France", "Italy", "Chile", "United States", "Spain", "Australia")',
     '  - vintage_min/vintage_max: year range (e.g. "2018-2020년산" → vintage_min:2018, vintage_max:2020)',
     '  - appellation: specific appellation (e.g. "Pauillac", "Barolo", "Chianti Classico")',
-    `  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include ${SEARCH_TOOL_STYLE_EXAMPLES.map((value) => `"${value}"`).join(', ')}.`,
+    `  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include ${SEARCH_TOOL_STYLE_EXAMPLES.map((value) => `"${value}"`).join(', ')}. Use "sweet" / "off_dry" for sweetness intent instead of vague prose.`,
     `  - styles: OPTIONAL array of semantic style hints when the user asks for multiple simultaneous qualities. Example: non-expert gift query → styles:[${SEARCH_TOOL_STYLES_EXAMPLE_VALUES.map((value) => `"${value}"`).join(',')}]. Prefer styles over style when there are 2+ style meanings.`,
     '  - certification: "organic" or "biodynamic"',
     `  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→${usd50ApproxKrw})`,
+    '  - max_alcohol_pct: ABV upper bound for low-alcohol requests ("도수 낮은" → 12)',
     '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
     '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',
     '  - want_diversity: true when user wants varied options ("다양하게", "각각", "종류별로", "different styles")',
@@ -246,4 +257,78 @@ export function buildFoodPairingsPromptContractLines(): readonly string[] {
     `  - color must be one of ${quoteEnum(FOOD_PAIRING_COLORS.filter((color) => color !== 'both'))}. Never use both, mixed, any, or a multi-color shorthand here.`,
     '  - For mixed red+white requests (e.g. couple sets, "both colors"), do NOT call get_food_pairings. Use search_wines with want_diversity=true or parallel search_wines calls instead.',
   ];
+}
+
+function collectSearchToolStyleHints(input: {
+  readonly style?: string | undefined;
+  readonly styles?: readonly string[] | undefined;
+}): readonly string[] {
+  return input.styles !== undefined && input.styles.length > 0
+    ? [...new Set(input.styles)]
+    : input.style !== undefined
+      ? [input.style]
+      : [];
+}
+
+export function buildSearchToolStyleDerivedFilters(input: {
+  readonly style?: string | undefined;
+  readonly styles?: readonly string[] | undefined;
+}): readonly NormalizedConstraint[] {
+  const filters: NormalizedConstraint[] = [];
+  for (const styleHint of collectSearchToolStyleHints(input)) {
+    if (styleHint === 'sweet') {
+      filters.push({
+        attribute: 'sweetness',
+        operator: '>=',
+        value: 0.5,
+        source_phrase: 'sweet',
+        confidence: 1.0,
+        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+      });
+      continue;
+    }
+    if (styleHint === 'dry') {
+      filters.push({
+        attribute: 'sweetness',
+        operator: '<=',
+        value: 0.2,
+        source_phrase: 'dry',
+        confidence: 1.0,
+        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+      });
+      continue;
+    }
+    if (styleHint === 'off_dry') {
+      filters.push({
+        attribute: 'sweetness',
+        operator: '>=',
+        value: 0.2,
+        source_phrase: 'off_dry',
+        confidence: 1.0,
+        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+      });
+      filters.push({
+        attribute: 'sweetness',
+        operator: '<=',
+        value: 0.6,
+        source_phrase: 'off_dry',
+        confidence: 1.0,
+        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+      });
+    }
+  }
+  return filters;
+}
+
+export function buildSearchToolStyleQueryTerms(input: {
+  readonly style?: string | undefined;
+  readonly styles?: readonly string[] | undefined;
+}): readonly string[] {
+  const originalHints = new Set(collectSearchToolStyleHints(input));
+  return resolveSemanticStyleQueryTerms(input).filter((term) => {
+    if (term === 'off dry') {
+      return !originalHints.has('off_dry');
+    }
+    return !SEARCH_TOOL_STYLE_HINTS_WITH_STRUCTURED_FILTERS.has(term);
+  });
 }

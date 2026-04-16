@@ -331,18 +331,22 @@ describe('HybridUseCase', () => {
       'req-context',
     );
 
-    expect(queryPlanner.plan).toHaveBeenCalledWith('ridge cabernet', {
-      locale: 'ko-KR',
-      session: {
-        sessionId: 'session-1',
-        previousEntities: [previousEntity],
-      },
-      budget: {
-        maxLatencyMs: 1200,
-        maxCandidates: 48,
-        rerankLimit: 16,
-      },
-    });
+    expect(queryPlanner.plan).toHaveBeenCalledWith(
+      'ridge cabernet',
+      expect.objectContaining({
+        locale: 'ko-KR',
+        session: {
+          sessionId: 'session-1',
+          previousEntities: [previousEntity],
+        },
+        budget: {
+          maxLatencyMs: 1200,
+          maxCandidates: 48,
+          rerankLimit: 16,
+        },
+        requestId: 'req-context',
+      }),
+    );
   });
 
   it('preserves specialized producer browse retrieval in the shared hybrid route pipeline', async () => {

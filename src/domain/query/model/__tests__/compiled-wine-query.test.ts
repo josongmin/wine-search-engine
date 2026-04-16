@@ -16,6 +16,7 @@ import type { QueryUnderstandingSnapshot } from '../query-understanding-snapshot
 function makeExecutionBudget(overrides?: Partial<ExecutionBudget>): ExecutionBudget {
   return {
     maxCandidates: 200,
+    rerankLimit: 20,
     enablePrecisionRerank: false,
     ...overrides,
   };
@@ -154,12 +155,14 @@ describe('EngineExecutionContract', () => {
 describe('ExecutionBudget', () => {
   it('has all required fields', () => {
     expectTypeOf<ExecutionBudget>().toHaveProperty('maxCandidates');
+    expectTypeOf<ExecutionBudget>().toHaveProperty('rerankLimit');
     expectTypeOf<ExecutionBudget>().toHaveProperty('enablePrecisionRerank');
   });
 
-  it('accepts maxCandidates and enablePrecisionRerank as required', () => {
-    const budget = makeExecutionBudget({ maxCandidates: 100, enablePrecisionRerank: true });
+  it('accepts maxCandidates, rerankLimit, and enablePrecisionRerank as required', () => {
+    const budget = makeExecutionBudget({ maxCandidates: 100, rerankLimit: 12, enablePrecisionRerank: true });
     expect(budget.maxCandidates).toBe(100);
+    expect(budget.rerankLimit).toBe(12);
     expect(budget.enablePrecisionRerank).toBe(true);
   });
 

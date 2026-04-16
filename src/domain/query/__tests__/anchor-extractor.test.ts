@@ -314,6 +314,35 @@ describe('AnchorExtractor', () => {
       expect(batchLookup).toHaveBeenCalledTimes(1);
       expect(singleLookup).not.toHaveBeenCalled();
     });
+
+    it('resolves multiple fuzzy terms with batch lookup when available', async () => {
+      const batchLookup = vi.fn(async (queries: readonly string[]) => {
+        const result = new Map<string, readonly AliasMatchResult[]>();
+        for (const query of queries) {
+          result.set(
+            query,
+            query.length > 0 ? [makeMatchResult(query, ['entity-fuzzy'], 0.88)] : [],
+          );
+        }
+        return result;
+      });
+      const extractor = new AnchorExtractor({
+        findMatches: vi.fn(async (_query: string): Promise<readonly AliasMatchResult[]> => {
+          return [];
+        }),
+        findMatchesBatch: batchLookup,
+      });
+
+      const results = await extractor.lookupForFuzzyTerms([
+        'opus one',
+        'pinot noir',
+        'opus one',
+      ]);
+
+      expect(results.get('opus one')?.map((entry) => entry.normalizedForm)).toEqual(['opus one']);
+      expect(results.get('pinot noir')?.map((entry) => entry.normalizedForm)).toEqual(['pinot noir']);
+      expect(batchLookup).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('multi-view noisy lookup', () => {

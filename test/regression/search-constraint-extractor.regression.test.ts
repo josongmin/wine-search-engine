@@ -760,22 +760,229 @@ describe('search-constraint-extractor — negation routing fixes (BUG regression
 
   // BUG: multi-word Korean wine type "내추럴 와인 빼고" — NEGATION_SUBJECT_AFTER captures
   // "내추럴 와인" as subject. WINE_TYPE_ALL_TOKENS has '내추럴' (first word).
-  // Fix: firstWord fallback → routes to excludeStyleSet with canonical '내추럴'
-  it('R-NEG-BUG-05: "내추럴 와인 빼고" routes to excludeStyleSet via first-word matching', () => {
+  // Fix (v1): firstWord fallback → routes to excludeStyleSet with canonical '내추럴'
+  // Fix (v2): wine type tokens now resolve to canonical English via WINE_TYPE_RULES
+  // and route to excludeWineTypes (not excludeStyles). "내추럴" → "natural".
+  it('R-NEG-BUG-05: "내추럴 와인 빼고" routes to excludeWineTypes via canonical resolution', () => {
     const c = extractSearchConstraints('내추럴 와인 빼고 레드 추천');
-    expect(c.excludeStyles).toContain('내추럴');
+    expect(c.excludeWineTypes).toContain('natural');
     expect(c.excludeRegions ?? []).not.toContain('내추럴 와인');
   });
 
   // BUG: "빼주세요" and "빼줘" were absent from NEGATION_SUBJECT_AFTER pattern
   // Users using polite forms got no negation extraction at all
-  it('R-NEG-BUG-06: "스파클링 빼주세요" extracts sparkling exclusion', () => {
+  // Fix (v2): wine type tokens now resolve to canonical English via WINE_TYPE_RULES
+  // and route to excludeWineTypes. "스파클링" → "sparkling".
+  it('R-NEG-BUG-06: "스파클링 빼주세요" extracts sparkling exclusion via excludeWineTypes', () => {
     const c = extractSearchConstraints('스파클링 빼주세요');
-    expect(c.excludeStyles).toContain('스파클링');
+    expect(c.excludeWineTypes).toContain('sparkling');
   });
 
-  it('R-NEG-BUG-07: "스파클링 빼줘" extracts sparkling exclusion', () => {
+  it('R-NEG-BUG-07: "스파클링 빼줘" extracts sparkling exclusion via excludeWineTypes', () => {
     const c = extractSearchConstraints('스파클링 빼줘');
-    expect(c.excludeStyles).toContain('스파클링');
+    expect(c.excludeWineTypes).toContain('sparkling');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Korean verbal negation patterns and wine_type canonical resolution (BUG-A/B fix)
+// ---------------------------------------------------------------------------
+
+describe('Korean verbal negation patterns (아닌/아니고/않고/않은)', () => {
+  it('R-NEG-VERBAL-01: "화이트 말고" → excludeWineTypes contains "white"', () => {
+    const c = extractSearchConstraints('화이트 말고 레드 와인');
+    expect(c.excludeWineTypes).toContain('white');
+    // Must NOT appear in excludeStyles (Bug B fix: route to wine_type, not style)
+    expect(c.excludeStyles ?? []).not.toContain('화이트');
+    expect(c.excludeStyles ?? []).not.toContain('white');
+  });
+
+  it('R-NEG-VERBAL-02: "레드 말고 화이트로" → exclude wine_type "red", no exclude on "white"', () => {
+    const c = extractSearchConstraints('레드 말고 화이트로');
+    expect(c.excludeWineTypes).toContain('red');
+    // "화이트로" is not in a negation context — it should NOT be excluded
+    expect(c.excludeWineTypes ?? []).not.toContain('white');
+  });
+
+  it('R-NEG-VERBAL-03: "프랑스 아닌 레드" → country exclude "France"', () => {
+    const c = extractSearchConstraints('프랑스 아닌 레드');
+    expect(c.excludeCountries).toContain('France');
+    // "레드" is not negated
+    expect(c.excludeWineTypes ?? []).not.toContain('red');
+  });
+
+  it('R-NEG-VERBAL-04: "프랑스 아닌" → country exclude "France"', () => {
+    const c = extractSearchConstraints('프랑스 아닌');
+    expect(c.excludeCountries).toContain('France');
+  });
+
+  it('R-NEG-VERBAL-05: "이탈리아 아닌 레드" → country exclude "Italy" + no wine_type exclude', () => {
+    const c = extractSearchConstraints('이탈리아 아닌 레드');
+    expect(c.excludeCountries).toContain('Italy');
+    expect(c.excludeWineTypes ?? []).not.toContain('red');
+  });
+
+  it('R-NEG-VERBAL-06: "카베르네 소비뇽 빼고" → grape exclude "Cabernet Sauvignon"', () => {
+    const c = extractSearchConstraints('카베르네 소비뇽 빼고');
+    expect(c.excludeGrapes).toContain('Cabernet Sauvignon');
+  });
+
+  it('R-NEG-VERBAL-07: "이탈리아 아니고 레드" → country exclude "Italy"', () => {
+    const c = extractSearchConstraints('이탈리아 아니고 레드');
+    expect(c.excludeCountries).toContain('Italy');
+  });
+
+  it('R-NEG-VERBAL-08: "프랑스 않은 와인" → country exclude "France"', () => {
+    // "않은" is a verbal negation suffix (past adjective form of 않다)
+    const c = extractSearchConstraints('프랑스 않은 와인');
+    expect(c.excludeCountries).toContain('France');
+  });
+
+  it('R-NEG-VERBAL-09: "샴페인 아닌 스파클링" → exclude wine_type "sparkling" for 샴페인', () => {
+    // "샴페인" is both a wine_type (sparkling alias) and a region (Champagne).
+    // WINE_TYPE_RULES resolves 샴페인 → "sparkling" because it is listed in the
+    // sparkling pattern. The downstream pipeline handles this as wine_type exclusion.
+    const c = extractSearchConstraints('샴페인 아닌 스파클링');
+    expect(c.excludeWineTypes).toContain('sparkling');
+  });
+});
+
+describe('Korean "안" adverb negation (NEGATION_KOREAN_ADVERB_BEFORE)', () => {
+  it('R-NEG-AN-01: "안 비싼 와인" → subject "비싼 와인" extracted (free-form region fallthrough)', () => {
+    // "안 비싼 와인" = "not expensive wine" — "비싼 와인" is not a grape, country, or wine type
+    // so it falls through to region as free-form. The important thing is that it
+    // IS captured as a negated subject.
+    const c = extractSearchConstraints('안 비싼 와인');
+    // "비싼 와인" is not a recognized entity — falls to excludeRegions
+    expect(c.excludeRegions ?? []).toContain('비싼 와인');
+  });
+
+  it('R-NEG-AN-02: "안 쓴 와인" → extracts negated subject', () => {
+    // "안 쓴" = "not bitter"; "쓴" is not a recognized entity so free-form region fallthrough
+    const c = extractSearchConstraints('안 쓴 와인');
+    expect(c.excludeRegions ?? []).toContain('쓴 와인');
+  });
+
+  it('R-NEG-AN-03: "안 비싼 레드" → greedy 2-word capture includes "레드" (known limitation)', () => {
+    // The "안" adverb pattern captures up to 2 words after "안", so "비싼 레드" is the subject.
+    // "레드" within the subject triggers wine_type canonical resolution → "red".
+    // This is a known limitation of greedy capture — semantic disambiguation requires NLU.
+    const c = extractSearchConstraints('안 비싼 레드');
+    // Subject "비싼 레드" resolves "레드" via WINE_TYPE_RULES → "red"
+    expect(c.excludeWineTypes).toContain('red');
+  });
+});
+
+describe('excludeWineTypes canonical resolution via WINE_TYPE_RULES', () => {
+  it('R-NEG-CANON-01: "화이트 빼고" → canonical "white" (not Korean surface "화이트")', () => {
+    const c = extractSearchConstraints('화이트 빼고');
+    expect(c.excludeWineTypes).toContain('white');
+    expect(c.excludeWineTypes).not.toContain('화이트');
+  });
+
+  it('R-NEG-CANON-02: "레드 빼고" → canonical "red"', () => {
+    const c = extractSearchConstraints('레드 빼고');
+    expect(c.excludeWineTypes).toContain('red');
+  });
+
+  it('R-NEG-CANON-03: "로제 빼고" → canonical "rosé"', () => {
+    const c = extractSearchConstraints('로제 빼고');
+    expect(c.excludeWineTypes).toContain('rosé');
+  });
+
+  it('R-NEG-CANON-04: "not sparkling" (English) → canonical "sparkling"', () => {
+    const c = extractSearchConstraints('not sparkling');
+    expect(c.excludeWineTypes).toContain('sparkling');
+  });
+
+  it('R-NEG-CANON-05: "not red" (English) → canonical "red"', () => {
+    const c = extractSearchConstraints('not red');
+    expect(c.excludeWineTypes).toContain('red');
+  });
+
+  it('R-NEG-CANON-06: "디저트 말고" → canonical "dessert"', () => {
+    const c = extractSearchConstraints('디저트 말고');
+    expect(c.excludeWineTypes).toContain('dessert');
+  });
+
+  it('R-NEG-CANON-07: "주정강화 빼고" → canonical "fortified"', () => {
+    const c = extractSearchConstraints('주정강화 빼고');
+    expect(c.excludeWineTypes).toContain('fortified');
+  });
+});
+
+describe('excludeWineTypes end-to-end through rule-based-constraint-extractor', () => {
+  it('R-NEG-E2E-WT-01: "화이트 말고 레드 와인" → hard wine_type exclude "white"', () => {
+    const bundle = extractRuleBasedConstraints('화이트 말고 레드 와인');
+    const wineTypeExclude = bundle.hard.find(
+      (c) => c.attribute === 'wine_type' && c.operator === 'exclude',
+    );
+    expect(wineTypeExclude).toBeDefined();
+    expect(wineTypeExclude?.value).toBe('white');
+  });
+
+  it('R-NEG-E2E-WT-02: "스파클링 빼고 레드 와인" → hard wine_type exclude "sparkling"', () => {
+    const bundle = extractRuleBasedConstraints('스파클링 빼고 레드 와인');
+    const wineTypeExclude = bundle.hard.find(
+      (c) => c.attribute === 'wine_type' && c.operator === 'exclude',
+    );
+    expect(wineTypeExclude).toBeDefined();
+    expect(wineTypeExclude?.value).toBe('sparkling');
+  });
+
+  it('R-NEG-E2E-WT-03: wine_type exclude produces wine_type_not filter token', () => {
+    const bundle = extractRuleBasedConstraints('화이트 아닌 레드 와인');
+    const tokens = hardConstraintsToSparseFilterTokens(bundle.hard);
+    expect(tokens).toContain('wine_type_not:white');
+  });
+
+  it('R-NEG-E2E-WT-04: wine_type_not token produces !(wine_type contains "X") YQL', () => {
+    const bundle = extractRuleBasedConstraints('레드 빼고 화이트 와인');
+    const tokens = hardConstraintsToSparseFilterTokens(bundle.hard);
+    const yql = buildSparseFilters([...tokens]);
+    expect(yql).toContain('!(wine_type contains "red")');
+  });
+});
+
+describe('searchConstraintsToFilterTokens — excludeWineTypes', () => {
+  it('produces wine_type_not token for wine type exclusion', () => {
+    const tokens = searchConstraintsToFilterTokens({ excludeWineTypes: ['white'] });
+    expect(tokens).toContain('wine_type_not:white');
+  });
+
+  it('produces multiple wine_type_not tokens for multiple exclusions', () => {
+    const tokens = searchConstraintsToFilterTokens({ excludeWineTypes: ['white', 'sparkling'] });
+    expect(tokens).toContain('wine_type_not:white');
+    expect(tokens).toContain('wine_type_not:sparkling');
+  });
+
+  it('returns empty array when excludeWineTypes is absent', () => {
+    const tokens = searchConstraintsToFilterTokens({});
+    expect(tokens.filter((t) => t.startsWith('wine_type_not:'))).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: ASCII, accented, emoji inputs still work after verbal negation
+// ---------------------------------------------------------------------------
+
+describe('regression: verbal negation patterns do not break non-Korean input', () => {
+  it('plain ASCII "not Merlot" still works', () => {
+    const c = extractSearchConstraints('not Merlot');
+    expect(c.excludeGrapes).toContain('Merlot');
+  });
+
+  it('accented Latin "not rosé" extracts wine_type exclusion', () => {
+    const c = extractSearchConstraints('not rosé');
+    expect(c.excludeWineTypes).toContain('rosé');
+  });
+
+  it('emoji in query does not crash verbal negation patterns', () => {
+    expect(() => extractSearchConstraints('🍷 안 비싼 레드 와인')).not.toThrow();
+  });
+
+  it('empty string returns empty constraints (verbal patterns do not add phantom results)', () => {
+    const c = extractSearchConstraints('');
+    expect(c).toEqual({});
   });
 });

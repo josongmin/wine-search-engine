@@ -24,6 +24,7 @@ export const SearchToolAttemptInputSchema = z.object({
   exclude_grapes: AttemptStringArraySchema.optional(),
   exclude_regions: AttemptStringArraySchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
+  max_alcohol_pct: AttemptNumberSchema.optional(),
   wine_type: AttemptStringSchema.optional(),
   country: AttemptStringSchema.optional(),
   vintage_min: AttemptNumberSchema.optional(),

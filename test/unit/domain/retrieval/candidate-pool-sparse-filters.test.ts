@@ -140,6 +140,110 @@ describe('CandidatePoolService sparse filter tokens', () => {
     expect(out[0]?.matchedConstraints).toContain('wine_type');
   });
 
+  it('caps assembled candidates by the compiled execution budget when it is tighter than the profile ceiling', async () => {
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => [
+        {
+          entityId: 'wine-1',
+          score: 9,
+          rank: 1,
+          matchedFields: ['canonical_label'],
+          summary: { canonicalLabel: 'Wine One', style: 'bold red', wineType: 'red' },
+        },
+        {
+          entityId: 'wine-2',
+          score: 8,
+          rank: 2,
+          matchedFields: ['canonical_label'],
+          summary: { canonicalLabel: 'Wine Two', style: 'silky red', wineType: 'red' },
+        },
+        {
+          entityId: 'wine-3',
+          score: 7,
+          rank: 3,
+          matchedFields: ['canonical_label'],
+          summary: { canonicalLabel: 'Wine Three', style: 'fresh red', wineType: 'red' },
+        },
+      ]),
+      denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async () => []),
+      getDocument: vi.fn(async () => null),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch: vi.fn(async () => [[0.1]]),
+    };
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
+    const out = await pool.generate(createInput({
+      queryPlan: minimalPlan({
+        queryClass: 'semantic_preference',
+        retrievalMode: 'attribute_search',
+      }),
+      compiledRetrievalMode: 'attribute_search',
+      semanticQueries: [],
+      executionBudgetMaxCandidates: 1,
+    }));
+
+    expect(out).toHaveLength(1);
+    expect(out[0]?.entityId).toBe('wine-1');
+    expect(pool.getLastFusionTrace()?.candidateCount.afterFusion).toBe(3);
+    expect(pool.getLastFusionTrace()?.candidateCount.afterHardFilter).toBe(3);
+    expect(pool.getLastFusionTrace()?.candidateCount.afterAssembly).toBe(1);
+  });
+
+  it('caps sparse and dense retrieval topN by the compiled execution budget', async () => {
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => [
+        {
+          entityId: 'wine-1',
+          score: 9,
+          rank: 1,
+          matchedFields: ['canonical_label'],
+          summary: { canonicalLabel: 'Wine One', style: 'bold red', wineType: 'red' },
+        },
+      ]),
+      denseSearch: vi.fn(async () => [
+        {
+          entityId: 'wine-1',
+          score: 0.9,
+          rank: 1,
+          similarity: 0.9,
+          summary: { canonicalLabel: 'Wine One', style: 'bold red', wineType: 'red' },
+        },
+      ]),
+      searchLearnedSparse: vi.fn(async () => []),
+      getDocument: vi.fn(async () => null),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch: vi.fn(async () => [[0.1]]),
+    };
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
+    await pool.generate(createInput({
+      queryPlan: minimalPlan({
+        queryClass: 'semantic_preference',
+        retrievalMode: 'attribute_search',
+      }),
+      compiledRetrievalMode: 'attribute_search',
+      lexicalQueries: ['structured cabernet'],
+      semanticQueries: ['structured cabernet'],
+      executionBudgetMaxCandidates: 1,
+    }));
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledOnce();
+    expect(searchIndex.denseSearch).toHaveBeenCalledOnce();
+    expect((searchIndex.sparseSearch as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).toBe(1);
+    expect((searchIndex.denseSearch as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).toBe(1);
+  });
+
   it('degrades to sparse-only when dense retrieval receives no primary embedding', async () => {
     const searchIndex: SearchIndexPort = {
       sparseSearch: vi.fn(async () => []),

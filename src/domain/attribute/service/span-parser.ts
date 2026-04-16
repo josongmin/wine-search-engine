@@ -26,6 +26,27 @@ const MAX_SPAN_TOKENS = 3;
 const TRAILING_PUNCT_RE = /[,.;:?!)\]}\s]+$/u;
 const LEADING_PUNCT_RE = /^[([{\s]+/u;
 
+/**
+ * Strips Korean listing/comparison particles (조사) from token ends.
+ *
+ * Korean agglutinative particles attach to the preceding noun:
+ * "바롤로랑" = "바롤로" + "랑" (listing particle).
+ * The entity resolver needs the bare noun form to match.
+ *
+ * Only strips particles that are LISTING markers (이랑/하고/랑/과/와).
+ * Does NOT strip case markers (이/가/을/를/에/에서) — those are more
+ * ambiguous and could be part of entity names.
+ *
+ * Order matters: longer suffixes first to avoid partial matches
+ * (이랑 before 랑).
+ */
+const KOREAN_LISTING_PARTICLE_SUFFIX: RegExp =
+  /(?:이랑|하고|랑|과|와)$/u;
+
+function stripKoreanListingParticle(token: string): string {
+  return token.replace(KOREAN_LISTING_PARTICLE_SUFFIX, '');
+}
+
 export interface Span {
   /** Lowercased + NFKC-normalized + punctuation-stripped span text. */
   readonly text: string;
@@ -78,6 +99,18 @@ export function parseSpans(normalizedQuery: string): readonly Span[] {
         endChar: last.end,
         tokenCount: slice.length,
       });
+
+      // Generate a particle-stripped variant for Korean listing particles.
+      // "바롤로랑" → "바롤로" so the entity resolver can match "Barolo".
+      const particleStripped = stripKoreanListingParticle(stripped);
+      if (particleStripped !== stripped && particleStripped.length > 0) {
+        spans.push({
+          text: particleStripped,
+          startChar: first.start,
+          endChar: last.end,
+          tokenCount: slice.length,
+        });
+      }
     }
   }
   return spans;

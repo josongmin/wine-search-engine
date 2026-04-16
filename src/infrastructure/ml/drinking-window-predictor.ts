@@ -11,35 +11,19 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
  *  - Critic proxy score (from Epic 12)
  *
  * Serves ONNX-exported LightGBM models via onnxruntime-node.
+ * ONNX models must be loaded via load() before predict() is callable.
  */
 
 /**
- * Drinking window model version.
- * Format: v{major}.{minor}-enc{YYYYMMDD}
- * enc version pins the label encoders (grape, region, country).
+ * Initial model version sentinel before ONNX models are loaded.
+ * load() replaces this with `onnx:<modelDir>` on success.
  */
-export const DRINKING_WINDOW_MODEL_VERSION = 'heuristic-v1.0-enc20260405';
+export const DRINKING_WINDOW_MODEL_VERSION = 'unloaded';
 
-/** Heuristic window predictor: baseline years before structure/critic bonuses. */
-const HEURISTIC_BASE_WINDOW_YEARS = 3;
-/** Sensory axes are centered at this 1–5 scale midpoint. */
-const HEURISTIC_STRUCTURE_CENTER = 2;
-const HEURISTIC_BODY_TANNIN_EXTENSION_WEIGHT = 1.5;
-const HEURISTIC_ACIDITY_EXTENSION_WEIGHT = 1.0;
-const HEURISTIC_CRITIC_SCORE_ELITE = 95;
-const HEURISTIC_CRITIC_BONUS_ELITE = 5;
-const HEURISTIC_CRITIC_SCORE_HIGH = 90;
-const HEURISTIC_CRITIC_BONUS_HIGH = 3;
-const HEURISTIC_CRITIC_SCORE_GOOD = 85;
-const HEURISTIC_CRITIC_BONUS_GOOD = 1;
-const HEURISTIC_SWEETNESS_STRUCTURAL_MID = 3;
-const HEURISTIC_SWEETNESS_EXTENSION_WEIGHT = 1.5;
-const HEURISTIC_TOTAL_WINDOW_MIN_YEARS = 3;
-const HEURISTIC_TOTAL_WINDOW_MAX_YEARS = 25;
-const HEURISTIC_VINTAGE_DRINKING_START_OFFSET = 2;
-const HEURISTIC_MEDIUM_CONFIDENCE_CRITIC_FLOOR = 90;
-const HEURISTIC_MEDIUM_CONFIDENCE_TANNIN_FLOOR = 3;
-const HEURISTIC_MEDIUM_CONFIDENCE_ACIDITY_FLOOR = 4;
+/** Sensory body midpoint default when optional body is absent (ONNX feature encoding). */
+const SENSORY_BODY_MIDPOINT_DEFAULT = 2;
+/** Sensory sweetness midpoint default when optional sweetness is absent (ONNX feature encoding). */
+const SENSORY_SWEETNESS_MIDPOINT_DEFAULT = 3;
 
 type OrtTensor = {
   readonly data: Float32Array;
@@ -95,14 +79,6 @@ export interface DrinkingWindowPrediction {
 }
 
 /**
- * When `allowHeuristicFallback` is false, {@link DrinkingWindowPredictor.predict}
- * requires successful {@link DrinkingWindowPredictor.load} (ONNX only — no silent rule-based path).
- */
-export interface DrinkingWindowPredictorOptions {
-  readonly allowHeuristicFallback?: boolean;
-}
-
-/**
  * LightGBM-backed Drinking Window Predictor via ONNX Runtime.
  *
  * Expected ONNX model files:
@@ -117,16 +93,11 @@ export class DrinkingWindowPredictor {
   private sessionStart?: OrtSession;
   private sessionEnd?: OrtSession;
   private tensorCtor?: OrtModule['Tensor'];
-  private readonly allowHeuristicFallback: boolean;
   /**
    * In-flight load promise. Concurrent load() calls share this so we never
    * end up with two pairs of sessions and a leaked first pair.
    */
   private loadPromise: Promise<void> | undefined;
-
-  constructor(options?: DrinkingWindowPredictorOptions) {
-    this.allowHeuristicFallback = options?.allowHeuristicFallback ?? true;
-  }
 
   get modelVersion(): string {
     return this.currentModelVersion;
@@ -187,8 +158,8 @@ export class DrinkingWindowPredictor {
   }
 
   /**
-   * Predicts drinking window: ONNX when loaded; otherwise rule-based heuristic
-   * if {@link DrinkingWindowPredictorOptions.allowHeuristicFallback} is true (default).
+   * Predicts drinking window via loaded ONNX models.
+   * Throws if ONNX models have not been loaded via load().
    */
   async predict(input: DrinkingWindowInput): Promise<DrinkingWindowPrediction> {
     if (this.isOnnxReady()) {
@@ -200,13 +171,9 @@ export class DrinkingWindowPredictor {
       );
     }
 
-    if (!this.allowHeuristicFallback) {
-      throw new Error(
-        'DrinkingWindowPredictor: ONNX required (allowHeuristicFallback=false). Load window_start.onnx and window_end.onnx via load().',
-      );
-    }
-
-    return this.predictHeuristic(input);
+    throw new Error(
+      'DrinkingWindowPredictor: ONNX models not loaded. Call load() with a directory containing window_start.onnx and window_end.onnx.',
+    );
   }
 
   private isOnnxReady(): boolean {
@@ -215,92 +182,6 @@ export class DrinkingWindowPredictor {
       this.sessionEnd !== undefined &&
       this.tensorCtor !== undefined
     );
-  }
-
-  private predictHeuristic(input: DrinkingWindowInput): DrinkingWindowPrediction {
-    const vintage = input.vintage;
-    // Rule 28: NaN vintage propagates silently through all arithmetic, producing
-    // NaN drinkingWindowStart/End that survive the start>end swap guard and reach
-    // callers. Catch it early with a loud throw so the data pipeline bug is visible.
-    if (!Number.isFinite(vintage)) {
-      throw new Error(`DrinkingWindowPredictor: vintage is not finite (got ${String(vintage)})`);
-    }
-    // Port allows body/sweetness to be absent (not all wines have sensory data).
-    // Fall back to the structural midpoint so arithmetic stays finite — port comment
-    // documents this: "Absent when not indexed — predictor falls back to midpoint."
-    const body = input.body ?? HEURISTIC_STRUCTURE_CENTER;
-    const tannin = input.tannin;
-    const acidity = input.acidity;
-    const score = Math.max(0, input.avgCriticProxyScore);
-
-    const baseWindow = HEURISTIC_BASE_WINDOW_YEARS;
-    const bodyBonus = Math.max(
-      0,
-      (body - HEURISTIC_STRUCTURE_CENTER) * HEURISTIC_BODY_TANNIN_EXTENSION_WEIGHT,
-    );
-    const tanninBonus = Math.max(
-      0,
-      (tannin - HEURISTIC_STRUCTURE_CENTER) * HEURISTIC_BODY_TANNIN_EXTENSION_WEIGHT,
-    );
-    const acidityBonus = Math.max(
-      0,
-      (acidity - HEURISTIC_STRUCTURE_CENTER) * HEURISTIC_ACIDITY_EXTENSION_WEIGHT,
-    );
-    const criticBonus =
-      score >= HEURISTIC_CRITIC_SCORE_ELITE
-        ? HEURISTIC_CRITIC_BONUS_ELITE
-        : score >= HEURISTIC_CRITIC_SCORE_HIGH
-          ? HEURISTIC_CRITIC_BONUS_HIGH
-          : score >= HEURISTIC_CRITIC_SCORE_GOOD
-            ? HEURISTIC_CRITIC_BONUS_GOOD
-            : 0;
-    // Sweetness above the structural midpoint extends aging potential (preservative effect).
-    // Fall back to midpoint when sweetness is absent (no NaN propagation — see port comment).
-    const sweetness = input.sweetness ?? HEURISTIC_SWEETNESS_STRUCTURAL_MID;
-    const sweetnessBonus = Math.max(
-      0,
-      (sweetness - HEURISTIC_SWEETNESS_STRUCTURAL_MID) * HEURISTIC_SWEETNESS_EXTENSION_WEIGHT,
-    );
-
-    // Floor totalWindow so end > start always holds, even when all
-    // bonuses are 0 (light wine, low score). Without this floor, vintage=2024
-    // with totalWindow=1 produced start=2026 > end=2025 (invariant violation).
-    const totalWindow = Math.max(
-      HEURISTIC_TOTAL_WINDOW_MIN_YEARS,
-      Math.min(
-        HEURISTIC_TOTAL_WINDOW_MAX_YEARS,
-        baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus + sweetnessBonus,
-      ),
-    );
-
-    const drinkingWindowStart = vintage + HEURISTIC_VINTAGE_DRINKING_START_OFFSET;
-    const drinkingWindowEnd = Math.max(
-      drinkingWindowStart + 1,
-      Math.round(vintage + totalWindow),
-    );
-    const peakYear = Math.round(
-      drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
-    );
-
-    let confidence: 'high' | 'medium' | 'low' = 'low';
-
-    if (
-      score >= HEURISTIC_MEDIUM_CONFIDENCE_CRITIC_FLOOR
-      && (
-        tannin >= HEURISTIC_MEDIUM_CONFIDENCE_TANNIN_FLOOR
-        || acidity >= HEURISTIC_MEDIUM_CONFIDENCE_ACIDITY_FLOOR
-      )
-    ) {
-      confidence = 'medium';
-    }
-
-    return {
-      drinkingWindowStart,
-      drinkingWindowEnd,
-      peakYear,
-      confidence,
-      modelVersion: this.modelVersion,
-    };
   }
 
   private async predictWithOnnx(
@@ -353,7 +234,7 @@ export class DrinkingWindowPredictor {
     // Guarantee end > start regardless of model output sign/magnitude.
     // Math.max(startOffset + 1, endOffset) is insufficient when both offsets are
     // negative: e.g. startOffset=-10, endOffset=-5 → start=vintage, end=vintage-5
-    // (INVARIANT VIOLATION). Mirror the heuristic path: clamp end to start+1.
+    // (INVARIANT VIOLATION). Clamp end to start+1.
     const drinkingWindowEnd = Math.max(
       drinkingWindowStart + 1,
       Math.round(input.vintage + endOffset),
@@ -374,8 +255,8 @@ export class DrinkingWindowPredictor {
   private toFeatureArray(input: DrinkingWindowInput): Float32Array {
     // body/sweetness are optional in the port — fall back to structural midpoint
     // so undefined values do not produce NaN features sent to the ONNX model.
-    const body = input.body ?? HEURISTIC_STRUCTURE_CENTER;
-    const sweetness = input.sweetness ?? HEURISTIC_SWEETNESS_STRUCTURAL_MID;
+    const body = input.body ?? SENSORY_BODY_MIDPOINT_DEFAULT;
+    const sweetness = input.sweetness ?? SENSORY_SWEETNESS_MIDPOINT_DEFAULT;
     return new Float32Array([
       input.grapePrimaryEnc,
       input.regionEnc,

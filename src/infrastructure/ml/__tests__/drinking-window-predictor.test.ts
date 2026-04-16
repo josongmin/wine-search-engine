@@ -13,70 +13,23 @@ describe('DrinkingWindowPredictor', () => {
     avgCriticProxyScore: 95,
   } as const;
 
-  it('predicts safely without a prior load()', async () => {
+  it('throws when ONNX models are not loaded', async () => {
     const predictor = new DrinkingWindowPredictor();
 
-    const prediction = await predictor.predict(input);
-
-    expect(prediction.drinkingWindowStart).toBeGreaterThanOrEqual(2015);
-    expect(prediction.drinkingWindowEnd).toBeGreaterThan(
-      prediction.drinkingWindowStart,
-    );
-    // High critic score + structured tannin/acidity → heuristic upgrades to medium (see predictor).
-    expect(prediction.confidence).toBe('medium');
-    expect(prediction.modelVersion).toContain('heuristic');
+    await expect(predictor.predict(input)).rejects.toThrow(/ONNX models not loaded/);
   });
 
-  it('keeps the heuristic fallback contract even after load()', async () => {
+  it('reports unloaded model version before load', () => {
     const predictor = new DrinkingWindowPredictor();
 
-    await expect(predictor.load('/tmp/onnx-models')).rejects.toBeDefined();
-    expect(predictor.modelVersion).toContain('heuristic');
+    expect(predictor.modelVersion).toBe('unloaded');
   });
 
-  it('throws when heuristic is disabled and ONNX is not loaded', async () => {
-    const predictor = new DrinkingWindowPredictor({ allowHeuristicFallback: false });
-
-    await expect(predictor.predict(input)).rejects.toThrow(/ONNX required/);
-  });
-
-  // E4-T7: RCA5-05 — drinkingWindowStart must never exceed drinkingWindowEnd
-  it('always returns drinkingWindowStart <= drinkingWindowEnd (invariant)', async () => {
+  it('rejects load with non-existent model directory', async () => {
     const predictor = new DrinkingWindowPredictor();
 
-    // Minimal structure wine: all bonuses near zero → shortest window (still >= MIN)
-    const minimalInput = {
-      vintage: 2022,
-      grapePrimaryEnc: 0,
-      regionEnc: 0,
-      countryEnc: 0,
-      body: 1,        // minimum body
-      tannin: 1,      // minimum tannin
-      acidity: 1,     // minimum acidity
-      sweetness: 1,
-      avgCriticProxyScore: 0, // no critic score
-    };
-    const prediction = await predictor.predict(minimalInput);
-    expect(prediction.drinkingWindowStart).toBeLessThanOrEqual(prediction.drinkingWindowEnd);
-    expect(prediction.drinkingWindowEnd).toBeGreaterThan(prediction.drinkingWindowStart);
-  });
-
-  it('returns safeStart <= safeEnd even for a recent vintage with no structure', async () => {
-    const predictor = new DrinkingWindowPredictor();
-    // RCA5-05 scenario: very recent vintage, minimal bonuses
-    const recentInput = {
-      vintage: 2024,
-      grapePrimaryEnc: 0,
-      regionEnc: 0,
-      countryEnc: 0,
-      body: 1,
-      tannin: 1,
-      acidity: 1,
-      sweetness: 1,
-      avgCriticProxyScore: 0,
-    };
-    const result = await predictor.predict(recentInput);
-    // Invariant: end > start — no inversion, no exception
-    expect(result.drinkingWindowEnd).toBeGreaterThan(result.drinkingWindowStart);
+    await expect(predictor.load('/tmp/nonexistent-onnx-models')).rejects.toBeDefined();
+    // Model version must remain unloaded after failed load
+    expect(predictor.modelVersion).toBe('unloaded');
   });
 });

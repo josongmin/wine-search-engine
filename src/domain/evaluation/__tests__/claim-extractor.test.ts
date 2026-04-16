@@ -141,6 +141,24 @@ describe('extractClaims', () => {
     expect(pairing).toBeDefined();
   });
 
+  it('extracts English pairing rationale with "pairs well with"', () => {
+    const claims = extractClaims('Sassicaia 2018 pairs well with grilled ribeye and hearty red meat dishes.');
+    const pairing = claims.find((c) => c.field === 'pairing_rationale');
+    expect(pairing).toBeDefined();
+  });
+
+  it('extracts recommendation-style semantic claims', () => {
+    const claims = extractClaims('Masi Amarone is recommended for a cold winter evening near the fireplace.');
+    const opinion = claims.find((c) => c.category === 'semantic_claim' && c.field === 'general_opinion');
+    expect(opinion).toBeDefined();
+  });
+
+  it('extracts comparative claims from explicit more-than statements', () => {
+    const claims = extractClaims('Penfolds Grange is more powerful and concentrated than a traditional Barolo.');
+    const comparative = claims.find((c) => c.category === 'comparative_claim');
+    expect(comparative).toBeDefined();
+  });
+
   it('deduplicates identical claims', () => {
     const claims = extractClaims('Cabernet Sauvignon, Cabernet Sauvignon, more Cabernet Sauvignon.');
     const grapes = claims.filter((c) => c.field === 'grape_primary' && c.normalizedValue === 'cabernet sauvignon');

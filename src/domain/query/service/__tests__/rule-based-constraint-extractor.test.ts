@@ -240,3 +240,86 @@ describe('extractRuleBasedConstraints — BUG-P2 currency detection from matched
     expect(band?.value).toBe('mid');
   });
 });
+
+describe('extractRuleBasedConstraints — Korean connective form patterns (연결형 어미)', () => {
+  // Critic score: connective forms "좋고", "높고"
+  it('"평점 좋고" → critic_score >= 0.7 (connective form -고)', () => {
+    const result = extractRuleBasedConstraints('평점 좋고 바디감 있는 와인');
+    const score = result.soft.find((c) => c.attribute === 'critic_score');
+    expect(score).toBeDefined();
+    expect(score?.operator).toBe('>=');
+    expect(score?.value).toBe(0.7);
+  });
+
+  it('"점수 높고" → critic_score >= 0.7 (connective form -고)', () => {
+    const result = extractRuleBasedConstraints('점수 높고 부드러운 와인');
+    const score = result.soft.find((c) => c.attribute === 'critic_score');
+    expect(score).toBeDefined();
+  });
+
+  // "바디감 있고" → body >= 0.5
+  it('"바디감 있고" → body >= 0.5 (connective form -고)', () => {
+    const result = extractRuleBasedConstraints('바디감 있고 평점 좋은 와인');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.operator).toBe('>=');
+    expect(body?.value).toBe(0.5);
+  });
+
+  it('"바디감 있는" → body >= 0.5 (adnominal form)', () => {
+    const result = extractRuleBasedConstraints('바디감 있는 와인');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.value).toBe(0.5);
+  });
+
+  it('"바디감 좋은" → body >= 0.5', () => {
+    const result = extractRuleBasedConstraints('바디감 좋은 레드 와인');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.value).toBe(0.5);
+  });
+
+  it('"바디감 좋고" → body >= 0.5 (connective form)', () => {
+    const result = extractRuleBasedConstraints('바디감 좋고 산도 높은');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    expect(body).toBeDefined();
+    expect(body?.value).toBe(0.5);
+  });
+
+  // "타닌 없고" → tannin <= 0.4
+  it('"타닌 없고" → tannin <= 0.4 (connective form -고)', () => {
+    const result = extractRuleBasedConstraints('타닌 없고 과일향 풍부한 와인');
+    const tannin = result.soft.find((c) => c.attribute === 'tannin');
+    expect(tannin).toBeDefined();
+    expect(tannin?.operator).toBe('<=');
+    expect(tannin?.value).toBe(0.4);
+  });
+
+  it('"타닌감 없는" → tannin <= 0.4 (adnominal form)', () => {
+    const result = extractRuleBasedConstraints('타닌감 없는 와인');
+    const tannin = result.soft.find((c) => c.attribute === 'tannin');
+    expect(tannin).toBeDefined();
+    expect(tannin?.value).toBe(0.4);
+  });
+
+  // False-positive guard: "좋고" without critic score context should NOT match
+  it('"좋고" alone without score context does NOT trigger critic_score', () => {
+    const result = extractRuleBasedConstraints('맛 좋고 향 좋은 와인');
+    const score = result.soft.find((c) => c.attribute === 'critic_score');
+    expect(score).toBeUndefined();
+  });
+
+  // Combined connective forms in one query
+  it('multiple connective forms in one query extract all constraints', () => {
+    const result = extractRuleBasedConstraints('평점 좋고 바디감 있고 타닌 없고 과일향 풍부한 와인');
+    const score = result.soft.find((c) => c.attribute === 'critic_score');
+    const body = result.soft.find((c) => c.attribute === 'body');
+    const tannin = result.soft.find((c) => c.attribute === 'tannin');
+    const fruit = result.soft.find((c) => c.attribute === 'fruit_intensity');
+    expect(score).toBeDefined();
+    expect(body).toBeDefined();
+    expect(tannin).toBeDefined();
+    expect(fruit).toBeDefined();
+  });
+});

@@ -83,15 +83,15 @@ describe('DefaultProtectedRecallPolicy', () => {
     expect(result.reason).toBe('exact_alias_match');
   });
 
-  // 5. hard_constraint_compatible: passes hard constraints with matched constraints
-  it('classifies hard-constraint-compatible candidates', () => {
+  // 5. hard-constraint compatibility alone is eligibility, not protected recall
+  it('does not protect candidates solely for hard-constraint compatibility', () => {
     const c = makeCandidate('e5', {
       matchedFilterConstraints: ['vintage:2020'],
       failedHardConstraints: [],
     });
     const result = policy.classify(c);
-    expect(result.protect).toBe(true);
-    expect(result.reason).toBe('hard_constraint_compatible');
+    expect(result.protect).toBe(false);
+    expect(result.reason).toBeUndefined();
   });
 
   // 6. no protection for low-quality candidate
@@ -105,7 +105,7 @@ describe('DefaultProtectedRecallPolicy', () => {
     expect(result.reason).toBeUndefined();
   });
 
-  // 7. failedHardConstraints with entries → no hard_constraint_compatible
+  // 7. failedHardConstraints with entries still remain unprotected
   it('does not protect candidate with failed hard constraints', () => {
     const c = makeCandidate('e7', {
       matchedFilterConstraints: ['vintage:2020'],

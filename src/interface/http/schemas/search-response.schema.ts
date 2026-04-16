@@ -634,6 +634,7 @@ export const AuditExtensionSchema = z.object({
     used_compiled_execution: z.boolean().optional(),
     compiled_budget: z.object({
       max_candidates: z.number().int(),
+      rerank_limit: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),
     provenance_policy: ProvenancePolicyWireSchema.optional(),
@@ -774,6 +775,7 @@ export const SearchResponseMetaSchema = z.object({
     used_compiled_execution: z.boolean(),
     budget: z.object({
       max_candidates: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_CANDIDATES),
+      rerank_limit: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),
     provenance_policy: ProvenancePolicyWireSchema.optional(),

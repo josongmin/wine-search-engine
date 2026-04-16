@@ -88,6 +88,17 @@ describe('buildEntityResolverInputFromPlan', () => {
 });
 
 describe('buildHybridRetrievalInputForPlan', () => {
+  it('propagates the compiled execution candidate budget into retrieval input', () => {
+    const input = buildHybridRetrievalInputForPlan(
+      minimalPlan(),
+      'hybrid',
+      undefined,
+      minimalCompiled(),
+    );
+
+    expect(input.executionBudgetMaxCandidates).toBe(20);
+  });
+
   it('attaches a structured retrieval plan derived from constraints', () => {
     const plan = {
       ...minimalPlan(),
@@ -142,7 +153,10 @@ describe('buildHybridRetrievalInputForPlan', () => {
       expect.arrayContaining(['q', '오푸스원', 'opus one', 'opusone', 'Bordeaux', 'Cabernet Merlot', 'gift']),
     );
     expect(input.semanticQueries).toEqual(
-      expect.arrayContaining(['q', '오푸스원', 'opus one', 'opusone', 'Bordeaux', 'Cabernet Merlot', 'gift']),
+      expect.arrayContaining(['q', 'Bordeaux', 'Cabernet Merlot', 'gift']),
+    );
+    expect(input.semanticQueries).not.toEqual(
+      expect.arrayContaining(['오푸스원', 'opusone']),
     );
   });
 });

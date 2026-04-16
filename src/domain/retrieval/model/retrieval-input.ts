@@ -44,6 +44,14 @@ export interface HybridRetrievalInput {
    */
   readonly compiledRetrievalMode?: ExecutionRetrievalMode | undefined;
 
+  /**
+   * Absolute compiled execution ceiling for retrieval candidates.
+   *
+   * Retrieval exploration and assembly must not exceed this bound even when
+   * profile-level fanout settings are larger.
+   */
+  readonly executionBudgetMaxCandidates?: number | undefined;
+
   /** Lexical query strings for sparse (BM25) retrieval. */
   readonly lexicalQueries: readonly string[];
 

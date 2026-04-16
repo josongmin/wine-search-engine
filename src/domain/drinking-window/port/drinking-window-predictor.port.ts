@@ -2,7 +2,7 @@
  * Port for predicting a wine's drinking window.
  *
  * Application use cases depend on this contract, while infrastructure adapters
- * provide the concrete ONNX / heuristic implementation.
+ * provide the concrete ONNX implementation.
  */
 
 /**

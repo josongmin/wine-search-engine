@@ -27,6 +27,9 @@ export interface ExecutionBudget {
   /** Maximum number of candidates to retrieve from the index. */
   readonly maxCandidates: number;
 
+  /** Maximum number of candidates to submit to precision reranking. */
+  readonly rerankLimit: number;
+
   /** Whether to enable precision reranking for this query. */
   readonly enablePrecisionRerank: boolean;
 }

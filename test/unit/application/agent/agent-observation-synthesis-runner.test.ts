@@ -222,6 +222,38 @@ describe('AgentObservationSynthesisRunner', () => {
     expect(messages.some((message) => message.content.includes('"kind":"tool_error"'))).toBe(true);
   });
 
+  it('short-circuits synthesis when all search outcomes are empty and emits fallback answer', async () => {
+    const complete = vi.fn();
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'searched',
+      action: { tool: 'search_wines', input: { query: 'white wine' } },
+      observation: '검색 결과가 없습니다.',
+      durationMs: 10,
+      tokenCount: { input: 10, output: 10 },
+    });
+    state.toolOutcomes.push({
+      stepId: 'req:0:0',
+      tool: 'search_wines',
+      kind: 'success',
+      result: { queryType: 'search', results: [] },
+      durationMs: 10,
+    });
+
+    await runner.run('화이트 와인 알려줘', 'req-synth-no-match', DEFAULT_AGENT_CONFIG, state);
+
+    expect(complete).not.toHaveBeenCalled();
+    expect(state.answer).toContain('검색 결과를 찾지 못했습니다');
+    expect(state.failedSynthesisAttempts).toBe(1);
+    expect(state.terminationReason).toBe('fallback');
+    expect(state.fallbackApplied).toBe(true);
+    expect(state.fallbackLayer).toBe('layer3');
+    expect(state.reasoningFailureDetected).toBe(true);
+  });
+
   it('skips synthesis when token budget is already exhausted or no observation exists', async () => {
     const complete = vi.fn();
     const chatLlm: ChatLlmPort = { complete: complete as unknown as ChatLlmPort['complete'] };

@@ -1031,6 +1031,7 @@ describe('runSearchPostRoutePhase', () => {
           routeSource: 'planner',
           budget: {
             maxCandidates: 24,
+            rerankLimit: 12,
             enablePrecisionRerank: true,
           },
           provenancePolicy: {
@@ -1138,6 +1139,7 @@ describe('runSearchPostRoutePhase', () => {
       used_compiled_execution: true,
       compiled_budget: {
         max_candidates: 24,
+        rerank_limit: 12,
         enable_precision_rerank: true,
       },
       provenance_policy: {

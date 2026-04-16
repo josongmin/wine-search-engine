@@ -36,6 +36,7 @@ function makeRankedResult(overrides: Partial<RankedResult> = {}): RankedResult {
     avgCriticProxyScore: 96,
     drinkingWindowStart: 2026,
     drinkingWindowEnd: 2032,
+    drinkingWindowModelVersion: 'onnx:test-v1',
     matchedConstraints: [],
     unmetConstraints: [],
     inferredConstraints: [],

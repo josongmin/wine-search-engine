@@ -11,6 +11,8 @@ type TestEnrichedSilverRecord = EnrichedSilverRecord & {
   readonly producerPrestige?: number | null;
   readonly criticProxy?: { readonly proxyScore?: number } | null;
   readonly drinkingWindow?: unknown;
+  readonly giftSuitabilityClassification?: { readonly score?: number | null } | null;
+  readonly beginnerSuitabilityClassification?: { readonly score?: number | null } | null;
 };
 
 function makeEnrichedRecord(
@@ -50,6 +52,12 @@ function makeEnrichedRecord(
       peakYear: 2029,
       confidence: 'medium',
       modelVersion: 'dw-v1',
+    },
+    giftSuitabilityClassification: {
+      score: 0.82,
+    },
+    beginnerSuitabilityClassification: {
+      score: 0.76,
     },
     aliases: {
       proposed: [
@@ -114,6 +122,8 @@ describe('validateSilverRecords', () => {
         producerPrestige: null,
         criticProxy: null,
         drinkingWindow: null,
+        giftSuitabilityClassification: null,
+        beginnerSuitabilityClassification: null,
       }),
       makeEnrichedRecord({
         sourceId: 'vivino:sparse-2',
@@ -122,6 +132,8 @@ describe('validateSilverRecords', () => {
         producerPrestige: null,
         criticProxy: null,
         drinkingWindow: null,
+        giftSuitabilityClassification: null,
+        beginnerSuitabilityClassification: null,
       }),
     ];
 
@@ -134,6 +146,8 @@ describe('validateSilverRecords', () => {
         expect.stringContaining('producer_prestige coverage 0.0%'),
         expect.stringContaining('criticProxy coverage 0.0%'),
         expect.stringContaining('drinkingWindow coverage 0.0%'),
+        expect.stringContaining('giftSuitability coverage 0.0%'),
+        expect.stringContaining('beginnerSuitability coverage 0.0%'),
       ]),
     );
   });
@@ -147,6 +161,8 @@ describe('validateSilverRecords', () => {
         producerPrestige: null,
         criticProxy: null,
         drinkingWindow: null,
+        giftSuitabilityClassification: null,
+        beginnerSuitabilityClassification: null,
       }),
       makeEnrichedRecord({
         sourceId: 'vivino:sparse-2',
@@ -155,6 +171,8 @@ describe('validateSilverRecords', () => {
         producerPrestige: null,
         criticProxy: null,
         drinkingWindow: null,
+        giftSuitabilityClassification: null,
+        beginnerSuitabilityClassification: null,
       }),
     ];
 
@@ -170,6 +188,40 @@ describe('validateSilverRecords', () => {
         expect.stringContaining('producer_prestige coverage 0.0%'),
         expect.stringContaining('criticProxy coverage 0.0%'),
         expect.stringContaining('drinkingWindow coverage 0.0%'),
+        expect.stringContaining('giftSuitability coverage 0.0%'),
+        expect.stringContaining('beginnerSuitability coverage 0.0%'),
+      ]),
+    );
+  });
+
+  it('fails closed when normalized suitability scores leave [0,1]', () => {
+    const report = validateSilverRecords(
+      [
+        makeEnrichedRecord({
+          sourceId: 'vivino:bad-score-1',
+          externalId: 'bad-score-1',
+          giftSuitabilityClassification: { score: 1.2 },
+          beginnerSuitabilityClassification: { score: 0.76 },
+        }),
+        makeEnrichedRecord({
+          sourceId: 'vivino:bad-score-2',
+          externalId: 'bad-score-2',
+          giftSuitabilityClassification: { score: 0.82 },
+          beginnerSuitabilityClassification: { score: -0.1 },
+        }),
+      ],
+      SMALL_GATES,
+    );
+
+    expect(report.passed).toBe(false);
+    expect(report.blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          'giftSuitabilityClassification.score for vivino:bad-score-1 = 1.2 outside [0, 1]',
+        ),
+        expect.stringContaining(
+          'beginnerSuitabilityClassification.score for vivino:bad-score-2 = -0.1 outside [0, 1]',
+        ),
       ]),
     );
   });
@@ -232,6 +284,8 @@ describe('validateSilverRecords', () => {
       producerPrestige: 0,
       criticProxy: 0,
       drinkingWindow: 0,
+      giftSuitability: 0,
+      beginnerSuitability: 0,
     });
   });
 });

@@ -364,6 +364,7 @@ describe('Post-route AuditExtension derivation via runRankedRouteDecisionPhase',
     expect(audit!.execution_trace!.sparse_executed).toBe(true);
     expect(audit!.execution_trace!.compiled_budget).toEqual({
       max_candidates: 50,
+      rerank_limit: 0,
       enable_precision_rerank: false,
     });
   });

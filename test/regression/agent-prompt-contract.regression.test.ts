@@ -26,22 +26,34 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('Never append helper words like "price", "drinkability", "가격 확인", or "출시 여부"');
   });
 
-  it('keeps generic mood wording out of the drinkability contract and preserves semantic style hints', () => {
+  it('keeps generic mood wording out of the drinkability contract and routes gift intent through learned facets', () => {
     const prompt = buildSystemMessage().content;
 
     expect(prompt).toContain('ONLY treat these as drinkability checks when the query targets a specific wine or an explicit comparison pair');
     expect(prompt).toContain('Generic recommendation wording such as "우울할 때 마시기 좋은 와인", "힐링되는 와인", "선물하기 좋은 와인" is NOT a drinkability query');
-    expect(prompt).toContain('"chillable", "screw_cap", "approachable", "crowd_pleasing", "presentation_forward"');
+    expect(prompt).toContain('Gift/non-expert/safe recommendation intent should preserve the original lexical anchor');
+    expect(prompt).toContain('let learned facets handle gift/beginner suitability');
+    expect(prompt).toContain('Do NOT invent label aesthetics, packaging, or luxury prestige proxies');
+    expect(prompt).not.toContain('"presentation_forward"');
   });
 
   it('documents the full typed tool surface for retrieval mode, orange wine, and legacy USD food budgets', () => {
     const prompt = buildSystemMessage().content;
 
     expect(prompt).toContain('search_wines(query, limit?, retrieval_mode?');
+    expect(prompt).toContain('max_alcohol_pct?');
     expect(prompt).toContain('retrieval_mode: "auto" | "entity" | "hybrid" | "mixed"');
     expect(prompt).toContain('"fortified" | "dessert" | "orange" | "natural"');
     expect(prompt).toContain('get_food_pairings(food, max_price?, max_price_krw?, color?)');
     expect(prompt).toContain('max_price is legacy USD input; prefer max_price_krw for new calls');
+  });
+
+  it('maps explicit sweetness and low-alcohol wording to structured search fields', () => {
+    const prompt = buildSystemMessage().content;
+
+    expect(prompt).toContain('If the user explicitly states sweetness, off-dry, or low-alcohol preferences');
+    expect(prompt).toContain('map them to structured search fields (style:"sweet"/"off_dry", max_alcohol_pct)');
+    expect(prompt).toContain('"도수 낮은" → 12');
   });
 
   it('preserves Korean search query anchors instead of translating them into English paraphrases', () => {

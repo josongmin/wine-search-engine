@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Planner } from '../planner.js';
 import { AnchorExtractor } from '../anchor-extractor.js';
 import { ExpansionBuilder } from '../expansion-builder.js';
@@ -137,6 +137,43 @@ describe('Planner – constraint extraction metadata', () => {
     expect(seenAnchors).toHaveLength(1);
     expect(seenAnchors[0]?.source).toBe('planner_heuristic');
     expect(plan.expansions.lexical).toContain('opus one');
+  });
+
+  it('performs batched fuzzy fallback lookups instead of per-hit lookups', async () => {
+    const batchLookup = vi.fn(async (queries: readonly string[]) => {
+      const result = new Map<string, readonly AliasMatchResult[]>();
+      for (const query of queries) {
+        result.set(
+          query,
+          query === 'opus one'
+            ? [makeMatchResult(query, 0.88, [`entity-${query.replace(/\s+/g, '-')}`])]
+            : [],
+        );
+      }
+      return result;
+    });
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor({
+        findMatches: vi.fn(async (_query: string): Promise<readonly AliasMatchResult[]> => []),
+        findMatchesBatch: batchLookup,
+      }),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+      {
+        match: () => [{ term: 'opus one', editDistance: 1, combinedScore: 0.92 }],
+      },
+    );
+
+    const plan = await planner.plan('opux one');
+
+    expect(plan.anchors.length).toBeGreaterThan(0);
+    expect(plan.anchors.some((anchor) => anchor.source === 'planner_heuristic')).toBe(true);
+    expect(batchLookup).toHaveBeenCalledTimes(2);
+    expect(batchLookup).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining(['opus one']),
+    );
   });
 });
 

@@ -29,9 +29,13 @@ export const WINE_TYPE_RULES: readonly (readonly [RegExp, WineTypeValue])[] = [
   // which would break the trailing word boundary on "rosé".
   [/(?:^|[^\p{L}\p{N}])(?:ros[eé]|로제)(?=$|[^\p{L}\p{N}])/iu, 'rosé'],
   [/(?:^|[^\p{L}\p{N}])(?:natural wine|내추럴 와인|내추럴)(?=$|[^\p{L}\p{N}])/iu, 'natural'],
-  [/(?:^|[^\p{L}\p{N}])(?:dessert wines?|디저트 와인|sauternes|icewine)(?=$|[^\p{L}\p{N}])/iu, 'dessert'],
+  // "디저트" added as bare Korean token for negation resolution ("디저트 말고" → dessert).
+  // Previously only "디저트 와인" matched, but WINE_TYPE_KOREAN_TOKENS has bare "디저트".
+  [/(?:^|[^\p{L}\p{N}])(?:dessert wines?|디저트 와인|디저트|sauternes|icewine)(?=$|[^\p{L}\p{N}])/iu, 'dessert'],
   [/(?:^|[^\p{L}\p{N}])(?:fortified|주정강화|port|sherry|madeira|marsala)(?=$|[^\p{L}\p{N}])/iu, 'fortified'],
-  [/(?:^|[^\p{L}\p{N}])(?:orange wine|오렌지 와인|amber wine)(?=$|[^\p{L}\p{N}])/iu, 'orange'],
+  // "오렌지" added as bare Korean token for negation resolution ("오렌지 말고" → orange).
+  // Previously only "오렌지 와인" matched, but WINE_TYPE_KOREAN_TOKENS has bare "오렌지".
+  [/(?:^|[^\p{L}\p{N}])(?:orange wine|오렌지 와인|오렌지|amber wine)(?=$|[^\p{L}\p{N}])/iu, 'orange'],
 ] as const;
 
 /**

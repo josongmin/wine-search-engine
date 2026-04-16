@@ -273,4 +273,26 @@ describe('SignalComputer specialized signals', () => {
 
     expect(score).toBeCloseTo(1, 5);
   });
+
+  it('treats non-evaluable soft style constraints as neutral during soft scoring', () => {
+    const score = computer.computeSoftConstraint(
+      makeCandidate({ matchedConstraints: ['style'] }),
+      {
+        hard: [],
+        soft: [
+          {
+            attribute: 'style',
+            operator: 'in',
+            value: 'presentation_forward',
+            source_phrase: '예쁜 라벨',
+            confidence: 0.8,
+            mapping_version: 'test',
+          },
+        ],
+        inferred: [],
+      },
+    );
+
+    expect(score).toBeCloseTo(1.0, 5);
+  });
 });

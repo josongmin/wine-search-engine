@@ -6,7 +6,7 @@ import {
 } from '../drinking-window-confidence.js';
 
 describe('inferDrinkingWindowConfidence', () => {
-  it('treats heuristic model versions as low confidence', () => {
+  it('treats non-learned model versions as low confidence', () => {
     expect(inferDrinkingWindowConfidence('heuristic-v1.0-enc20260405')).toBe('low');
   });
 
@@ -15,19 +15,32 @@ describe('inferDrinkingWindowConfidence', () => {
     expect(inferDrinkingWindowConfidence('')).toBe('low');
   });
 
-  it('allows explicit non-heuristic model versions to surface as high confidence', () => {
-    expect(inferDrinkingWindowConfidence('onnx-v2.1-enc20260405')).toBe('high');
+  it('treats unloaded sentinel as low confidence', () => {
+    expect(inferDrinkingWindowConfidence('unloaded')).toBe('low');
+  });
+
+  it('treats explicit ONNX model versions as high confidence', () => {
+    expect(inferDrinkingWindowConfidence('onnx:v2.1-enc20260405')).toBe('high');
   });
 });
 
-describe('drinking-window honesty helpers', () => {
-  it('marks heuristic model versions as heuristic and non-blocking', () => {
-    expect(inferDrinkingWindowEvidenceLevel('heuristic-v1.0-enc20260405')).toBe('heuristic');
+describe('drinking-window evidence helpers', () => {
+  it('returns undefined evidence for heuristic model versions', () => {
+    expect(inferDrinkingWindowEvidenceLevel('heuristic-v1.0-enc20260405')).toBeUndefined();
     expect(inferDrinkingWindowBlockingEligibility('heuristic-v1.0-enc20260405')).toBe(false);
   });
 
-  it('marks explicit learned model versions as learned and blocking-eligible', () => {
-    expect(inferDrinkingWindowEvidenceLevel('onnx-v2.1-enc20260405')).toBe('learned');
-    expect(inferDrinkingWindowBlockingEligibility('onnx-v2.1-enc20260405')).toBe(true);
+  it('returns undefined evidence for missing/empty/unloaded model versions', () => {
+    expect(inferDrinkingWindowEvidenceLevel(undefined)).toBeUndefined();
+    expect(inferDrinkingWindowEvidenceLevel('')).toBeUndefined();
+    expect(inferDrinkingWindowEvidenceLevel('unloaded')).toBeUndefined();
+    expect(inferDrinkingWindowBlockingEligibility(undefined)).toBe(false);
+    expect(inferDrinkingWindowBlockingEligibility('')).toBe(false);
+    expect(inferDrinkingWindowBlockingEligibility('unloaded')).toBe(false);
+  });
+
+  it('marks ONNX model versions as learned and blocking-eligible', () => {
+    expect(inferDrinkingWindowEvidenceLevel('onnx:v2.1-enc20260405')).toBe('learned');
+    expect(inferDrinkingWindowBlockingEligibility('onnx:v2.1-enc20260405')).toBe(true);
   });
 });

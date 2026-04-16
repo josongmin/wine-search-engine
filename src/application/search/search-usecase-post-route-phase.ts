@@ -247,6 +247,7 @@ function buildExecutionAuditTrace(
     used_compiled_execution: routeExecutionFacts.usedCompiledExecution,
     compiled_budget: {
       max_candidates: executionBudget.maxCandidates,
+      rerank_limit: executionBudget.rerankLimit,
       enable_precision_rerank: executionBudget.enablePrecisionRerank,
     },
     provenance_policy: {
@@ -399,6 +400,7 @@ function buildDeterminismFingerprintParams(
     String(retrievalProfile.denseTopN),
     String(retrievalProfile.fusionK),
     String(retrievalProfile.finalTopK),
+    String(compiled.execution.budget.maxCandidates),
   );
   // Iterate the SSoT overlay map so a new mode-weights field automatically
   // participates in the hash and a removed field cannot drift the cache key.
@@ -406,6 +408,8 @@ function buildDeterminismFingerprintParams(
     indexVersionsHash,
     RANKING_POLICY_VERSION,
     effectiveRetrievalMode,
+    String(compiled.execution.budget.enablePrecisionRerank),
+    String(compiled.execution.budget.rerankLimit),
     ...MODE_WEIGHT_OVERLAY_MAP.map(({ modeField }) => String(modeWeights[modeField])),
   );
 

@@ -43,6 +43,7 @@ const SearchReplayFixtureExecutionTraceExpectationSchema = z.object({
   used_compiled_execution: z.boolean().optional(),
   compiled_budget: z.object({
     max_candidates: z.number().int().positive(),
+    rerank_limit: z.number().int().nonnegative().optional(),
     enable_precision_rerank: z.boolean(),
   }).strict().optional(),
   provenance_policy: z.object({
@@ -71,11 +72,68 @@ const SearchReplayFixtureTraceExpectationSchema = z.object({
 }).strict();
 
 
-const SearchReplayFixtureSuccessExpectationSchema = z.object({
-  execution_mode: z.string().min(1),
-  degradation_reasons: z.array(z.string()),
+const SearchReplayFixtureSuccessExpectationRawSchema = z.object({
+  execution_mode: z.string().min(1).optional(),
+  executionMode: z.string().min(1).optional(),
+  degradation_reasons: z.array(z.string().min(1)).optional(),
+  degradationReasons: z.array(z.string().min(1)).optional(),
   golden_trace: SearchReplayFixtureTraceExpectationSchema.optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const hasExecutionMode = value.execution_mode ?? value.executionMode;
+  const hasDegradationReasons = value.degradation_reasons ?? value.degradationReasons;
+
+  if (hasExecutionMode === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'expected.execution needs execution_mode (or executionMode) field',
+      path: ['execution_mode'],
+    });
+  }
+  if (hasDegradationReasons === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'expected.execution needs degradation_reasons (or degradationReasons) field',
+      path: ['degradation_reasons'],
+    });
+  }
+
+  if (
+    value.execution_mode !== undefined
+    && value.executionMode !== undefined
+    && value.execution_mode !== value.executionMode
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'execution_mode and executionMode must be identical when both provided',
+      path: ['executionMode'],
+    });
+  }
+  if (
+    value.degradation_reasons !== undefined
+    && value.degradationReasons !== undefined
+    && JSON.stringify(value.degradation_reasons) !== JSON.stringify(value.degradationReasons)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'degradation_reasons and degradationReasons must match when both provided',
+      path: ['degradationReasons'],
+    });
+  }
+}).transform((value) => ({
+  ...value,
+  execution_mode: value.execution_mode ?? value.executionMode ?? 'authoritative',
+  degradation_reasons: value.degradation_reasons ?? value.degradationReasons ?? [],
+}))
+  .transform((value) => {
+    const { executionMode: _executionMode, degradationReasons: _degradationReasons, ...rest } = value;
+    return rest as Required<Pick<typeof rest, never>> & {
+      execution_mode: string;
+      degradation_reasons: string[];
+      golden_trace?: z.infer<typeof SearchReplayFixtureTraceExpectationSchema>;
+    };
+  });
+
+const SearchReplayFixtureSuccessExpectationSchema = SearchReplayFixtureSuccessExpectationRawSchema;
 
 const SearchReplayFixtureComparisonExpectationSchema = z.object({
   comparison_intent: z.enum(['compare', 'recommend_one', 'list_both']),

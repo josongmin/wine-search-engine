@@ -337,4 +337,80 @@ describe('NLMapper', () => {
       expect(result?.mappingVersion).toBe('v2.0');
     });
   });
+
+  describe('Korean predicate variant lookup (연결형→관형형)', () => {
+    const mapper = new NLMapper(new NullMappingTablePort());
+
+    it('"산도 높고" → acidity >= 0.7 (via variant "산도 높은")', async () => {
+      const { constraints } = await mapper.mapConstraints(['산도 높고']);
+      expect(constraints).toHaveLength(1);
+      const c = constraints[0];
+      expect(c?.attribute).toBe('acidity');
+      expect(c?.operator).toBe('>=');
+      expect(c?.value).toBe(0.7);
+    });
+
+    it('"평점 좋고" → critic_score >= 0.7 (via variant "평점 좋은")', async () => {
+      const { constraints } = await mapper.mapConstraints(['평점 좋고']);
+      expect(constraints).toHaveLength(1);
+      const c = constraints[0];
+      expect(c?.attribute).toBe('critic_score');
+      expect(c?.operator).toBe('>=');
+      expect(c?.value).toBe(0.7);
+    });
+
+    it('"평점 높고" → critic_score >= 0.8 (via variant "평점 높은")', async () => {
+      const { constraints } = await mapper.mapConstraints(['평점 높고']);
+      expect(constraints).toHaveLength(1);
+      const c = constraints[0];
+      expect(c?.attribute).toBe('critic_score');
+      expect(c?.operator).toBe('>=');
+      expect(c?.value).toBe(0.8);
+    });
+
+    it('"묵직하고" → body >= 0.7 (via variant "묵직한" from 하고→한)', async () => {
+      const mapping = await mapper.mapPhrase('묵직하고');
+      expect(mapping).not.toBeNull();
+      expect(mapping?.mappedAttribute).toBe('body');
+      expect(mapping?.operator).toBe('>=');
+      expect(mapping?.value).toBe(0.7);
+    });
+
+    it('"풍부하며" → body >= 0.7 via "강렬한" is NOT matched; only "풍부한" doesn\'t exist as body — tests variant reach', async () => {
+      // "풍부하며" → variant "풍부한" — but 풍부한 is not a DEFAULT_MAPPINGS key
+      // (it could be added in the future). This tests that no false match occurs.
+      const mapping = await mapper.mapPhrase('풍부하며');
+      // 풍부한 is not in DEFAULT_MAPPINGS, so null is correct.
+      expect(mapping).toBeNull();
+    });
+
+    it('"강렬하고" → body >= 0.8 (via variant "강렬한")', async () => {
+      const mapping = await mapper.mapPhrase('강렬하고');
+      expect(mapping).not.toBeNull();
+      expect(mapping?.mappedAttribute).toBe('body');
+      expect(mapping?.operator).toBe('>=');
+      expect(mapping?.value).toBe(0.8);
+    });
+
+    it('"도수 낮고" → alcohol_pct <= 12 (via variant "도수 낮은")', async () => {
+      const { constraints } = await mapper.mapConstraints(['도수 낮고']);
+      expect(constraints).toHaveLength(1);
+      const c = constraints[0];
+      expect(c?.attribute).toBe('alcohol_pct');
+      expect(c?.operator).toBe('<=');
+      expect(c?.value).toBe(12);
+    });
+
+    it('already-adnominal form "산도 높은" still works (exact match, no variant needed)', async () => {
+      const { constraints } = await mapper.mapConstraints(['산도 높은']);
+      expect(constraints).toHaveLength(1);
+      expect(constraints[0]?.attribute).toBe('acidity');
+    });
+
+    it('English phrases are unaffected by Korean variant generation', async () => {
+      const mapping = await mapper.mapPhrase('low alcohol');
+      expect(mapping).not.toBeNull();
+      expect(mapping?.mappedAttribute).toBe('alcohol_pct');
+    });
+  });
 });

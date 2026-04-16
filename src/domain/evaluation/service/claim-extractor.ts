@@ -485,7 +485,11 @@ function extractWineTypeClaims(text: string): ExtractedClaim[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Indicator regex — sentences without these keywords are not treated as semantic claims. */
-const SEMANTIC_INDICATORS_RE = /(?:맛|향|노트|풍미|아로마|테이스팅|바디|탄닌|산미|페어링|음식|어울|곁들|tasting|aroma|nose|palate|finish|pairs?\s+with|food|body|tannin|acidity|flavor|flavour|notes?\s+of)/iu;
+const SEMANTIC_INDICATORS_RE = /(?:맛|향|노트|풍미|아로마|테이스팅|바디|탄닌|산미|페어링|음식|어울|곁들|추천|권하|잘\s+맞|좋은\s+선택|recommended?\s+for|great\s+for|ideal\s+for|perfect\s+for|tasting|aroma|nose|palate|finish|pairs?\s+(?:well\s+)?with|food|body|tannin|acidity|flavor|flavour|notes?\s+of)/iu;
+/** Comparative indicator regex — explicit A vs B style assertions. */
+const COMPARATIVE_INDICATORS_RE = /(?:보다|more\s+.+?\s+than|less\s+.+?\s+than|richer\s+than|lighter\s+than|bolder\s+than|more\s+powerful\s+than|more\s+concentrated\s+than|higher\s+(?:acid|acidity|tannin)\s+than)/iu;
+/** Recommendation / occasion-suggestion surface indicators. */
+const RECOMMENDATION_INDICATORS_RE = /(?:추천|권하|추천드립|추천합|recommended?\s+for|great\s+for|ideal\s+for|perfect\s+for)/iu;
 
 function extractSemanticClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
@@ -495,6 +499,11 @@ function extractSemanticClaims(text: string): ExtractedClaim[] {
 
   for (const sentence of sentences) {
     const trimmed = sentence.trim();
+    if (COMPARATIVE_INDICATORS_RE.test(trimmed)) {
+      claims.push(makeClaim('comparative_claim', 'general_opinion', trimmed, trimmed));
+      continue;
+    }
+
     // Skip sentences with no semantic indicator at all (avoid promoting
     // bare facts like "Opus One 2015" to semantic claims).
     if (!SEMANTIC_INDICATORS_RE.test(trimmed)) continue;
@@ -512,9 +521,10 @@ function extractSemanticClaims(text: string): ExtractedClaim[] {
 function classifySemanticFields(sentence: string): WineField[] {
   const fields: WineField[] = [];
   const lower = sentence.toLowerCase();
-  if (/페어링|음식|어울|곁들|pairs?\s+with|food/iu.test(lower)) fields.push('pairing_rationale');
+  if (/페어링|음식|어울|곁들|잘\s+맞|pairs?\s+(?:well\s+)?with|food/iu.test(lower)) fields.push('pairing_rationale');
   if (/맛|향|노트|아로마|tasting|aroma|nose|palate|flavor|flavour|notes?\s+of/iu.test(lower)) fields.push('tasting_notes');
   if (/바디|탄닌|산미|body|tannin|acidity|finish/iu.test(lower)) fields.push('style_description');
+  if (RECOMMENDATION_INDICATORS_RE.test(lower)) fields.push('general_opinion');
   // If indicator matched but no specific dimension, fall back to general_opinion
   if (fields.length === 0) fields.push('general_opinion');
   return fields;

@@ -244,6 +244,7 @@ describe('WineToolExecutor', () => {
           style: 'chillable',
           certification: 'organic',
           max_price_krw: 50000,
+          max_alcohol_pct: 12,
           wine_type: 'white',
           country: 'France',
           vintage_min: 2020,
@@ -264,6 +265,7 @@ describe('WineToolExecutor', () => {
       expect(request.query).toContain('not Italy');
       expect(request.limit).toBe(10);
       expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
         expect.objectContaining({ attribute: 'wine_type', value: 'white' }),
         expect.objectContaining({ attribute: 'country', value: 'France' }),
         expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2020 }),
@@ -338,6 +340,43 @@ describe('WineToolExecutor', () => {
       expect(request.query).toContain('crowd pleasing');
       expect(request.query).not.toContain('ignored-style');
       expect(request.filters).toBeUndefined();
+    });
+
+    it('should treat presentation_forward as a no-op style hint instead of polluting the retrieval query', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: '예쁜 라벨 선물용 와인',
+          styles: ['presentation_forward', 'approachable'],
+        },
+        'req-presentation-noop-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      expect(request.query).toContain('approachable');
+      expect(request.query).not.toContain('presentation_forward');
+    });
+
+    it('should compile sweet style into structured sweetness filters instead of query text', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: '달달한 선물용 와인',
+          styles: ['sweet', 'approachable'],
+        },
+        'req-sweet-structured-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      expect(request.query).toContain('approachable');
+      expect(request.query).not.toContain('sweet');
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
+      ]));
     });
 
     it('should run typed diversity discovery when want_diversity is true without explicit wine_type', async () => {

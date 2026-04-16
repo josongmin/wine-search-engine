@@ -66,7 +66,7 @@ export class AgentToolExecutionPolicy {
   ): void {
     if (
       state.hasInjectedRefinementHint ||
-      remainingSteps < 3 ||
+      remainingSteps < 2 ||
       !observations.some((observation) => shouldInjectRefinementHint(observation))
     ) {
       return;

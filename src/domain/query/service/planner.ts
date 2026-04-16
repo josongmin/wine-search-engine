@@ -21,7 +21,7 @@ import { STYLE_SENSORY_ATTRIBUTES } from '../../shared/constants/constraint-attr
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
 import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
-import { type AnchorExtractor } from './anchor-extractor.js';
+import { type AliasMatchResult, type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import { ConstraintCompiler, type ConstraintCompilerResult } from './constraint-compiler.js';
@@ -223,20 +223,33 @@ export class Planner {
     if (anchors.length === 0 && this.fuzzyMatcher !== undefined) {
       const fuzzyHits = this.fuzzyMatcher.match(normalizedQuery);
       fuzzyExpansions = fuzzyHits.map((h) => h.term);
+      const fuzzyLookupTerms = Array.from(
+        new Set(
+          fuzzyHits
+            .map((hit) => hit.term.trim())
+            .filter((term) => term.length > 0),
+        ),
+      );
+      const fuzzyMatchMap = fuzzyLookupTerms.length > 0
+        ? await (async () => {
+          stageTimer?.start('planner.fuzzy_anchor_lookup');
+          try {
+            return await this.anchorExtractor.lookupForFuzzyTerms(fuzzyLookupTerms);
+          } finally {
+            stageTimer?.end('planner.fuzzy_anchor_lookup');
+          }
+        })()
+        : new Map<string, readonly AliasMatchResult[]>();
 
       // Resolve entity IDs for each fuzzy term via the anchor extractor.
-      // Use allSettled to avoid a single lookup failure blocking all others.
-      const anchorResults = await Promise.allSettled(
-        fuzzyHits.map(async (hit) => {
-          const matches = await this.anchorExtractor.lookupForFuzzyTerm(hit.term);
-          return { hit, matches };
-        }),
-      );
+      const anchorResults = fuzzyHits.map((hit) => {
+        const matches = fuzzyMatchMap.get(hit.term.trim()) ?? [];
+        return { hit, matches };
+      });
 
       const heuristicCandidates: AnchorCandidate[] = [];
       for (const result of anchorResults) {
-        if (result.status !== 'fulfilled') continue;
-        const { hit, matches } = result.value;
+        const { hit, matches } = result;
         for (const match of matches) {
           if (match.entityIds.length === 0) continue;
           heuristicCandidates.push({
@@ -312,12 +325,38 @@ export class Planner {
       ));
     }
 
-    // 6. Determine query class.
-    const queryClass = await this.determineQueryClass(
+    const queryClassPromise = (async () => {
+      stageTimer?.start('planner.query_class');
+      try {
+        return await this.determineQueryClass(normalizedQuery, intent, allAnchors);
+      } finally {
+        stageTimer?.end('planner.query_class');
+      }
+    })();
+
+    // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
+    const constraintQuery = this.buildConstraintParsingQuery(
       normalizedQuery,
-      intent,
       allAnchors,
+      relativeQuery,
     );
+    const parsedPromise = (async () => {
+      stageTimer?.start('planner.constraint_parsing');
+      try {
+        return await this.parseConstraints(
+          constraintQuery,
+          intent,
+          context?.abortSignal,
+        );
+      } finally {
+        stageTimer?.end('planner.constraint_parsing');
+      }
+    })();
+
+    const [queryClass, parsed] = await Promise.all([
+      queryClassPromise,
+      parsedPromise,
+    ]);
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'query_class_classification',
@@ -329,20 +368,6 @@ export class Planner {
       ));
     }
 
-    // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
-    const constraintQuery = this.buildConstraintParsingQuery(
-      normalizedQuery,
-      allAnchors,
-      relativeQuery,
-    );
-    stageTimer?.start('planner.constraint_parsing');
-    const parsed = await this.parseConstraints(
-      constraintQuery,
-      intent,
-      context?.abortSignal,
-    ).finally(() => {
-      stageTimer?.end('planner.constraint_parsing');
-    });
     const mergedConstraints = this.mergePairingIntoBundle(
       buildBundleFromAtoms(parsed.reasonerOutput.survivingAtoms),
       normalizedQuery,

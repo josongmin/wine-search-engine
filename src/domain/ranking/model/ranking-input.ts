@@ -5,6 +5,7 @@ import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import type { CanonicalEntityId, ConstraintBundle } from '../../shared/types/index.js';
+import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 
 /**
  * Optional context about the current user session, used to inform
@@ -67,4 +68,7 @@ export interface RankingInput {
    * getModeWeights() instead of queryPlan.retrievalMode (V1 fallback).
    */
   readonly compiled: CompiledWineQuery;
+
+  /** Optional request-scoped execution context for fine-grained ranking telemetry. */
+  readonly requestContext?: RequestExecutionContext | undefined;
 }

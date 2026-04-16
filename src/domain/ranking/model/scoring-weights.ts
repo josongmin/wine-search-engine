@@ -133,7 +133,7 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     beginnerSuitability: 0.0,
   },
   pure_constraint: {
-    softConstraint: 0.32,    // non-penalty sum: 0.32+0.27+0.04+0.10+0.02+0.01+0.07+0.05+0.08+0.08 = 1.04
+    softConstraint: 0.32,    // non-penalty sum: 0.32+0.27+0.04+0.10+0.02+0.01+0.07+0.05 = 0.88
     attributeAlignment: 0.27,
     semantic: 0.04,          // reduced from 0.10 — pure constraint queries rely on explicit constraints, not embedding similarity
     entityIntegrity: 0.10,
@@ -145,8 +145,8 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     recency: 0.0,
     criticScore: 0.05,
     multilingualScore: 0.0,
-    giftSuitability: 0.08,  // activated for situation queries with gift intent
-    beginnerSuitability: 0.08, // activated for situation queries with beginner intent
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   semantic_preference: {
     semantic: 0.22,

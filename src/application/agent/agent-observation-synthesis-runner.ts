@@ -23,6 +23,63 @@ const SYNTHESIS_TIMEOUT_MS = 12_000;
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
 
+function hasKoreanText(text: string): boolean {
+  return /[\p{Script=Hangul}]/u.test(text);
+}
+
+function extractSearchResultCount(rawResult: unknown): number | undefined {
+  if (rawResult === null || rawResult === undefined || typeof rawResult !== 'object') {
+    return undefined;
+  }
+
+  const result = rawResult as Record<string, unknown>;
+
+  if (
+    typeof result['queryType'] === 'string'
+    && result['queryType'] === 'search'
+    && Array.isArray(result['results'])
+  ) {
+    return result['results'].length;
+  }
+
+  if (result['kind'] === 'search_result_set' && typeof result['resultCount'] === 'number') {
+    return result['resultCount'];
+  }
+
+  if (Array.isArray(result['resultSet'])) {
+    return result['resultSet'].length;
+  }
+
+  return undefined;
+}
+
+function isSearchSuccessWithData(outcome: ToolOutcome): boolean {
+  if (outcome.tool !== 'search_wines') {
+    return false;
+  }
+
+  if (outcome.kind !== 'success' && outcome.kind !== 'partial_result') {
+    return false;
+  }
+
+  const searchResultCount = extractSearchResultCount(outcome.result);
+  return searchResultCount === undefined ? true : searchResultCount > 0;
+}
+
+function hasNoGroundedSearchResults(outcomes: readonly ToolOutcome[]): boolean {
+  const searchOutcomes = outcomes.filter((outcome) => outcome.tool === 'search_wines');
+  if (searchOutcomes.length === 0) {
+    return false;
+  }
+  return !searchOutcomes.some(isSearchSuccessWithData);
+}
+
+function buildNoMatchSynthesisAnswer(query: string): string {
+  return hasKoreanText(query)
+    ? '현재 조건으로는 검색 결과를 찾지 못했습니다. 핵심 조건을 하나씩 완화해 다시 검색해보세요.'
+    : 'No matching wine was found under the provided constraints. Relax one constraint and retry.';
+}
+
 interface ObservationSynthesisMessages {
   readonly messages: readonly ChatMessage[];
   readonly sentinel: string;
@@ -76,16 +133,21 @@ function buildObservationSynthesisMessages(
     || outcome.errorMessage !== undefined
     || (outcome.postconditionViolations?.length ?? 0) > 0,
   );
-  const typedOutcomeMessage: ChatMessage | undefined = nonSuccessToolOutcomes.length > 0
+  const typedOutcomeRows = nonSuccessToolOutcomes.map((outcome) => {
+    const searchResultCount = extractSearchResultCount(outcome.result);
+    return {
+      stepId: outcome.stepId,
+      tool: outcome.tool,
+      kind: outcome.kind,
+      errorMessage: outcome.errorMessage,
+      postconditionViolations: outcome.postconditionViolations,
+      ...(searchResultCount !== undefined ? { searchResultCount } : {}),
+    };
+  });
+  const typedOutcomeMessage: ChatMessage | undefined = typedOutcomeRows.length > 0
     ? {
         role: 'user',
-        content: `[Typed Tool Outcomes]\n${JSON.stringify(nonSuccessToolOutcomes.map((outcome) => ({
-          stepId: outcome.stepId,
-          tool: outcome.tool,
-          kind: outcome.kind,
-          errorMessage: outcome.errorMessage,
-          postconditionViolations: outcome.postconditionViolations,
-        })))}`
+        content: `[Typed Tool Outcomes]\n${JSON.stringify(typedOutcomeRows)}`
       }
     : undefined;
   return {
@@ -133,6 +195,16 @@ export class AgentObservationSynthesisRunner {
         (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
     );
     if (obsSteps.length === 0) {
+      return;
+    }
+    if (hasNoGroundedSearchResults(state.toolOutcomes)) {
+      state.answer = buildNoMatchSynthesisAnswer(query);
+      state.failedSynthesisAttempts += 1;
+      state.reasoningFailureDetected = true;
+      state.terminationReason = 'fallback';
+      state.fallbackApplied = true;
+      state.fallbackLayer = 'layer3';
+      this.logger.warn({ requestId, obsSteps: obsSteps.length }, 'all search outcomes were empty or failed — short-circuiting synthesis to no-match response');
       return;
     }
 

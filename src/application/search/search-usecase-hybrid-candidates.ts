@@ -260,6 +260,9 @@ export function buildHybridRetrievalInputForPlan(
     queryPlan: plan,
     route,
     ...(compiled !== undefined ? { compiledRetrievalMode: compiled.execution.effectiveRetrievalMode } : {}),
+    ...(compiled !== undefined
+      ? { executionBudgetMaxCandidates: compiled.execution.budget.maxCandidates }
+      : {}),
     lexicalQueries: buildPlanLexicalQueryVariants(plan, structuredQueries.lexical),
     semanticQueries: buildPlanSemanticQueryVariants(plan, structuredQueries.semantic),
     hardConstraints: plan.constraints.hard,
@@ -419,7 +422,6 @@ function buildPlanSemanticQueryVariants(
 ): readonly string[] {
   return uniqueStrings([
     plan.rawQuery,
-    ...(plan.normalizedQueryViews?.lookupVariants ?? []),
     ...(plan.normalizedQueryViews?.transliterated !== undefined
       ? [plan.normalizedQueryViews.transliterated]
       : []),

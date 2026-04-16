@@ -350,16 +350,8 @@ export class ResponseBuilder {
   } {
     const explicitReasons = params.contract?.degradationReasons ?? [];
     const inferredReasons = new Set<string>(explicitReasons);
-    const hasHeuristicDrinkingWindow = results.some(
-      (result) => result.drinkingWindow?.evidenceLevel === 'heuristic',
-    );
 
-    if (hasHeuristicDrinkingWindow) {
-      inferredReasons.add('heuristic_drinking_window');
-    }
-
-    const declaredExecutionMode = params.contract?.executionMode
-      ?? (hasHeuristicDrinkingWindow ? 'heuristic' : 'authoritative');
+    const declaredExecutionMode = params.contract?.executionMode ?? 'authoritative';
 
     // Wire-contract invariant (bugbash 2026-04-14): if ANY degradation reason
     // is present, the response MUST NOT advertise `authoritative` — that would

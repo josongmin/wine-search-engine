@@ -65,7 +65,10 @@ interface Args {
 
 export function resolveAllowMissingLtrForPublish(
   cliAllowMissingLtr: boolean,
-  previousRuntimeState?: Pick<Awaited<ReturnType<typeof loadPublishedRuntimeState>>, 'allowMissingLtr'> | undefined,
+  previousRuntimeState?: Pick<
+    NonNullable<Awaited<ReturnType<typeof loadPublishedRuntimeState>>>,
+    'allowMissingLtr'
+  > | undefined,
 ): boolean {
   return cliAllowMissingLtr || previousRuntimeState?.allowMissingLtr === true;
 }

@@ -20,7 +20,7 @@ import {
   KRW_PER_EUR_APPROXIMATE,
   KRW_PER_GBP_APPROXIMATE,
 } from '../../shared/constants.js';
-import { WINE_TYPE_ALL_TOKENS } from '../model/wine-type-patterns.js';
+import { WINE_TYPE_ALL_TOKENS, WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
   extractKoreanVintageAfter,
   extractKoreanVintageBefore,
@@ -100,6 +100,16 @@ export interface SearchConstraints {
    * Maps to `!(style contains "X")` in YQL.
    */
   readonly excludeStyles?: readonly string[];
+
+  /**
+   * Wine types to exclude (canonical English values: 'red', 'white', 'sparkling', etc.).
+   * Maps to `!(wine_type contains "X")` in YQL.
+   *
+   * Separated from excludeStyles because (a) the Vespa field is `wine_type`, not `style`,
+   * and (b) Vespa stores canonical English values — Korean surface tokens like "화이트"
+   * would never match the `wine_type` field if routed through excludeStyles.
+   */
+  readonly excludeWineTypes?: readonly string[];
 
   /**
    * Maximum price in KRW. Converted to USD before injecting into Vespa.
@@ -240,7 +250,24 @@ const NEGATION_SUBJECT_BEFORE: RegExp =
   /(?:^|[^\p{L}\p{N}])(?:not|without|exclude|no|except)\s+(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)/giu;
 
 const NEGATION_SUBJECT_AFTER: RegExp =
-  /(?:^|[^\p{L}\p{N}])(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)\s+(?:빼고|빼주세요|빼줘|제외|말고|없이|빼(?=[^\p{L}\p{N}]|$))/giu;
+  /(?:^|[^\p{L}\p{N}])(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)\s+(?:빼고|빼주세요|빼줘|제외|말고|없이|아닌|아니고|않고|않은|빼(?=[^\p{L}\p{N}]|$))/giu;
+
+/**
+ * Korean adverbial negation preceding the subject: "안 X"
+ *
+ * Korean pattern:
+ *   "안 X"  — "not X" (short-form negation adverb placed BEFORE the predicate/subject)
+ *
+ * Examples:
+ *   "오크 안 쓴 샤도네이" → subject = "쓴" (negated: oaky/oak-used)
+ *   "탄닌 안 센 와인"     → subject = "센" (negated: strong tannin)
+ *
+ * Note: captures up to 2 words after "안" as the negated subject. The leading "안"
+ * must be preceded by a non-word boundary or start-of-string to avoid matching
+ * Korean words ending in "안" (e.g. "불안" = anxiety).
+ */
+const NEGATION_KOREAN_ADVERB_BEFORE: RegExp =
+  /(?:^|[^\p{L}\p{N}])안\s+(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)/giu;
 
 // ---------------------------------------------------------------------------
 // Price extraction
@@ -623,6 +650,21 @@ function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vint
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolves a token (Korean or English, lowercase) to its canonical wine_type value.
+ * Returns undefined if the token is not a recognized wine type.
+ *
+ * Uses WINE_TYPE_RULES (SSoT) for resolution — not a separate mapping table.
+ * This ensures Korean surface tokens ("화이트", "레드", "스파클링") are mapped to
+ * canonical English values ("white", "red", "sparkling") that Vespa stores.
+ */
+function resolveWineTypeCanonical(token: string): string | undefined {
+  for (const [pattern, canonical] of WINE_TYPE_RULES) {
+    if (pattern.test(token)) return canonical;
+  }
+  return undefined;
+}
+
+/**
  * Extracts structured search constraints from a natural-language query string.
  *
  * This is a pure function — no I/O, no randomness, no external state.
@@ -651,6 +693,7 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   const excludeCountrySet = new Set<string>();
   const excludeRegionSet = new Set<string>();
   const excludeStyleSet = new Set<string>();
+  const excludeWineTypeSet = new Set<string>();
 
   // Collect all negated subject tokens from both negation patterns.
   const subjectTokens: string[] = [];
@@ -658,6 +701,7 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   // Reset lastIndex before exec loops to guarantee correct iteration.
   NEGATION_SUBJECT_BEFORE.lastIndex = 0;
   NEGATION_SUBJECT_AFTER.lastIndex = 0;
+  NEGATION_KOREAN_ADVERB_BEFORE.lastIndex = 0;
 
   let m: RegExpExecArray | null;
 
@@ -669,6 +713,13 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   }
 
   while ((m = NEGATION_SUBJECT_AFTER.exec(q)) !== null) {
+    const subject = m.groups?.['subject'];
+    if (subject !== undefined && subject.length > 0) {
+      subjectTokens.push(subject.trim());
+    }
+  }
+
+  while ((m = NEGATION_KOREAN_ADVERB_BEFORE.exec(q)) !== null) {
     const subject = m.groups?.['subject'];
     if (subject !== undefined && subject.length > 0) {
       subjectTokens.push(subject.trim());
@@ -698,8 +749,23 @@ export function extractSearchConstraints(query: string): SearchConstraints {
       continue;
     }
 
-    // Style exclusion: wine type terms (from canonical WINE_TYPE_ALL_TOKENS SSOT)
-    // plus style/flavor descriptors that are not wine types themselves.
+    // Wine type exclusions: resolve Korean surface tokens to canonical English values
+    // and route to wine_type (not style). The previous code routed wine types to
+    // excludeStyleSet which emits `style exclude "화이트"` — wrong because:
+    // (a) attribute should be wine_type, not style, and
+    // (b) Vespa stores English canonical values ("white"), not Korean surfaces ("화이트").
+    //
+    // WINE_TYPE_RULES (SSoT) handles both Korean and English tokens via regex matching,
+    // so "화이트" → "white", "레드" → "red", "sparkling" → "sparkling" etc.
+    const tokenLower = token.toLowerCase();
+    const firstWord = tokenLower.split(/\s+/u)[0] ?? tokenLower;
+    const wineTypeCanonical = resolveWineTypeCanonical(token) ?? resolveWineTypeCanonical(firstWord);
+    if (wineTypeCanonical !== undefined) {
+      excludeWineTypeSet.add(wineTypeCanonical);
+      continue;
+    }
+
+    // Style exclusion: style/flavor descriptors that are not wine types themselves.
     //
     // Notes on the inline pattern:
     // - `oak(?:ed)?` matches 'oak' and 'oaked'; previously `oaked?` matched 'oake' (optional d
@@ -709,8 +775,6 @@ export function extractSearchConstraints(query: string): SearchConstraints {
     //   fell through to excludeRegionSet, emitting a no-op `region_not:full-bodied` YQL clause.
     // - Multi-word token handling: "내추럴 와인" is 2 words; WINE_TYPE_ALL_TOKENS has '내추럴' (1 word).
     //   Check both the full token and its first word so "내추럴 와인 빼고" routes to excludeStyleSet.
-    const tokenLower = token.toLowerCase();
-    const firstWord = tokenLower.split(/\s+/u)[0] ?? tokenLower;
     if (
       WINE_TYPE_ALL_TOKENS.has(tokenLower) ||
       WINE_TYPE_ALL_TOKENS.has(firstWord) ||
@@ -756,12 +820,14 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   const excludeCountries = [...excludeCountrySet];
   const excludeRegions = [...excludeRegionSet];
   const excludeStyles = [...excludeStyleSet];
+  const excludeWineTypes = [...excludeWineTypeSet];
 
   return {
     ...(excludeGrapes.length > 0 ? { excludeGrapes } : {}),
     ...(excludeCountries.length > 0 ? { excludeCountries } : {}),
     ...(excludeRegions.length > 0 ? { excludeRegions } : {}),
     ...(excludeStyles.length > 0 ? { excludeStyles } : {}),
+    ...(excludeWineTypes.length > 0 ? { excludeWineTypes } : {}),
     ...price,
     ...vintage,
   };
@@ -809,6 +875,10 @@ export function searchConstraintsToFilterTokens(
 
   for (const style of constraints.excludeStyles ?? []) {
     tokens.push(`style_not:${style}`);
+  }
+
+  for (const wineType of constraints.excludeWineTypes ?? []) {
+    tokens.push(`wine_type_not:${wineType}`);
   }
 
   if (constraints.minPriceKrw !== undefined) {

@@ -45,11 +45,6 @@ const KILL_SWITCH_POLICY: readonly KillSwitchPolicyRow[] = [
     effect: 'degraded_only',
     reason: 'query/embedding cache disabled; every request hits retrieval layer',
   },
-  {
-    key: 'ALLOW_HEURISTIC_DRINKING_WINDOW',
-    effect: 'degraded_only',
-    reason: 'drinking window may fall back to heuristic only',
-  },
 ];
 
 function resolveRowActive(row: KillSwitchPolicyRow, config: Config): boolean | undefined {
@@ -64,8 +59,6 @@ function resolveRowActive(row: KillSwitchPolicyRow, config: Config): boolean | u
       return config.killSwitch.injectionJudge;
     case 'KILL_SWITCH_QUERY_CACHE':
       return config.killSwitch.queryCache;
-    case 'ALLOW_HEURISTIC_DRINKING_WINDOW':
-      return config.drinkingWindow.allowHeuristicInProduction;
     default:
       return undefined;
   }

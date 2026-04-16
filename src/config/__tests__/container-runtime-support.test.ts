@@ -1,4 +1,7 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import path from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { tmpdir } from 'node:os';
 import { buildRuntimeSupportServices } from '../container-runtime-support.js';
 import { parseEnv } from '../env.js';
 import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
@@ -47,37 +50,14 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.injectionJudge).toBeDefined();
   });
 
-  it('allows heuristic drinking-window predictor outside production', async () => {
+  it('creates drinking-window predictor in unloaded state without ONNX model dir', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
     });
 
     const services = await buildRuntimeSupportServices(config, {});
 
-    expect(services.drinkingWindowPredictor.modelVersion).toContain('heuristic');
-  });
-
-  it('rejects heuristic drinking-window predictor in production without explicit opt-in', async () => {
-    const config = parseEnv({
-      NODE_ENV: 'production',
-      PG_PASSWORD: 'secret',
-      ANTHROPIC_API_KEY: 'sk-ant-test',
-    });
-
-    await expect(buildRuntimeSupportServices(config, {})).rejects.toThrow(/heuristic-only drinking-window/);
-  });
-
-  it('allows heuristic drinking-window predictor in production only with explicit config opt-in', async () => {
-    const config = parseEnv({
-      NODE_ENV: 'production',
-      PG_PASSWORD: 'secret',
-      ALLOW_HEURISTIC_DRINKING_WINDOW: 'true',
-      ANTHROPIC_API_KEY: 'sk-ant-test',
-    });
-
-    const services = await buildRuntimeSupportServices(config, {});
-
-    expect(services.drinkingWindowPredictor.modelVersion).toContain('heuristic');
+    expect(services.drinkingWindowPredictor.modelVersion).toBe('unloaded');
   });
 
   it('does NOT instantiate phraseCache when Redis is unavailable', async () => {
@@ -109,5 +89,68 @@ describe('buildRuntimeSupportServices', () => {
     });
 
     await expect(buildRuntimeSupportServices(config, {})).rejects.toBeDefined();
+  });
+
+  it('loads LTR models from local runtime artifact when PG is unavailable', async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'runtime-ltr-support-'));
+    const modelPath = path.join(tempDir, 'runtime-ltr-models.json');
+    const artifact = {
+      queryClassModels: {
+        red_wine: {
+          weights: [0.2, 0.1, -0.05, 0.2, 0.15, 0.03, 0.08, 0.27],
+          bias: 0.12,
+          trainingExampleCount: 33,
+          ndcg5ValidationScore: 0.72,
+          trainedAt: '2026-04-01T00:00:00.000Z',
+        },
+      },
+    };
+    await writeFile(modelPath, JSON.stringify(artifact, null, 2));
+
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      RUNTIME_LTR_MODELS_PATH: modelPath,
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.ltrModels).toBeDefined();
+    expect(services.ltrModels?.size).toBe(1);
+    expect(services.ltrModels?.get('red_wine')).toBeDefined();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('falls back to local runtime artifact when PG returns zero models', async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'runtime-ltr-support-'));
+    const modelPath = path.join(tempDir, 'runtime-ltr-models.json');
+    const artifact = {
+      queryClassModels: {
+        red_wine: {
+          queryClass: 'ignored',
+          weights: [0.11, 0.22, 0.33, 0.44, 0.55, 0.66, 0.77, 0.88],
+          bias: 0.2,
+          trainingExampleCount: 12,
+          ndcg5ValidationScore: 0.7,
+          trainedAt: '2026-04-01T00:00:00Z',
+        },
+      },
+    };
+    await writeFile(modelPath, JSON.stringify(artifact, null, 2));
+
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+    } as never;
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      RUNTIME_LTR_MODELS_PATH: modelPath,
+    });
+
+    const services = await buildRuntimeSupportServices(config, { pool });
+
+    expect(services.ltrModels).toBeDefined();
+    expect(services.ltrModels?.size).toBe(1);
+    expect(services.ltrModels?.get('red_wine')).toBeDefined();
+    expect(pool.query).toHaveBeenCalled();
+    await rm(tempDir, { recursive: true, force: true });
   });
 });

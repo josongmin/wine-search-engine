@@ -39,16 +39,16 @@ export interface ExecutionCompilerInput {
  * - Constraint-only and no_match modes are lean.
  */
 const DEFAULT_BUDGETS: Record<ExecutionRetrievalMode, ExecutionBudget> = {
-  entity_lookup:      { maxCandidates: 10,  enablePrecisionRerank: false },
-  entity_resolution:  { maxCandidates: 20,  enablePrecisionRerank: true  },
-  attribute_search:   { maxCandidates: 50,  enablePrecisionRerank: true  },
-  constraint_filter:  { maxCandidates: 50,  enablePrecisionRerank: false },
-  producer_browse:    { maxCandidates: 30,  enablePrecisionRerank: false },
-  region_browse:      { maxCandidates: 30,  enablePrecisionRerank: false },
-  compare_candidates: { maxCandidates: 20,  enablePrecisionRerank: true  },
-  recommendation:     { maxCandidates: 20,  enablePrecisionRerank: true  },
-  similar_items:      { maxCandidates: 20,  enablePrecisionRerank: false },
-  no_match_detection: { maxCandidates: 5,   enablePrecisionRerank: false },
+  entity_lookup:      { maxCandidates: 10,  rerankLimit: 0,  enablePrecisionRerank: false },
+  entity_resolution:  { maxCandidates: 20,  rerankLimit: 20, enablePrecisionRerank: true  },
+  attribute_search:   { maxCandidates: 50,  rerankLimit: 20, enablePrecisionRerank: true  },
+  constraint_filter:  { maxCandidates: 50,  rerankLimit: 0,  enablePrecisionRerank: false },
+  producer_browse:    { maxCandidates: 30,  rerankLimit: 0,  enablePrecisionRerank: false },
+  region_browse:      { maxCandidates: 30,  rerankLimit: 0,  enablePrecisionRerank: false },
+  compare_candidates: { maxCandidates: 20,  rerankLimit: 20, enablePrecisionRerank: true  },
+  recommendation:     { maxCandidates: 20,  rerankLimit: 20, enablePrecisionRerank: true  },
+  similar_items:      { maxCandidates: 20,  rerankLimit: 0,  enablePrecisionRerank: false },
+  no_match_detection: { maxCandidates: 5,   rerankLimit: 0,  enablePrecisionRerank: false },
 } as const;
 
 /**
@@ -148,9 +148,15 @@ export class ExecutionCompiler {
 
     // 4. Build ExecutionBudget from mode defaults + optional override.
     const modeDefaultBudget = DEFAULT_BUDGETS[effectiveRetrievalMode];
+    const maxCandidates =
+      maxCandidatesOverride ?? modeDefaultBudget.maxCandidates;
+    const requestedRerankLimit =
+      plan.queryBudget?.rerankLimit ?? modeDefaultBudget.rerankLimit;
     const budget: ExecutionBudget = {
-      maxCandidates:
-        maxCandidatesOverride ?? modeDefaultBudget.maxCandidates,
+      maxCandidates,
+      rerankLimit: modeDefaultBudget.enablePrecisionRerank
+        ? Math.min(maxCandidates, requestedRerankLimit)
+        : 0,
       enablePrecisionRerank: modeDefaultBudget.enablePrecisionRerank,
     };
 

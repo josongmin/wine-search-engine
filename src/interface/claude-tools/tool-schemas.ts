@@ -33,6 +33,7 @@ import {
   SEARCH_TOOL_EXCLUDE_GRAPES_DESCRIPTION,
   SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
   SEARCH_TOOL_LIMIT_DESCRIPTION,
+  SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
   SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
   SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION,
   SEARCH_TOOL_MAX_STYLES,
@@ -224,6 +225,12 @@ export const WINE_SEARCH_TOOLS = [
           type: 'number',
           description: SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION,
           minimum: 1,
+        },
+        max_alcohol_pct: {
+          type: 'number',
+          description: SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
+          minimum: 0.1,
+          maximum: 100,
         },
         wine_type: {
           type: 'string',

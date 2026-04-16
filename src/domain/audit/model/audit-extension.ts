@@ -101,6 +101,7 @@ export interface AuditExtension {
     readonly used_compiled_execution?: boolean | undefined;
     readonly compiled_budget?: {
       readonly max_candidates: number;
+      readonly rerank_limit: number;
       readonly enable_precision_rerank: boolean;
     } | undefined;
     readonly provenance_policy?: {

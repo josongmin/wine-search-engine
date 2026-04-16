@@ -15,6 +15,7 @@ import { RedisPhraseCache } from '../infrastructure/cache/redis-phrase-cache.js'
 import { RedisCircuitBreakerWrapper } from '../infrastructure/db/redis-circuit-breaker-wrapper.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
+import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
 import { getCurrentFeatureSchemaHash } from '../domain/ranking/service/feature-parity-hash.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
@@ -222,40 +223,34 @@ export async function buildRuntimeSupportServices(
     }
   }
 
-  const allowHeuristicFallback =
-    config.nodeEnv !== 'production' || config.drinkingWindow.allowHeuristicInProduction;
+  if ((ltrModels === undefined || ltrModels.size === 0) && config.runtimeLtrModelsPath !== undefined) {
+    const fallbackModels = await loadRuntimeLtrModels(config.runtimeLtrModelsPath);
+    if (fallbackModels !== undefined) {
+      if (ltrModels === undefined) {
+        bootstrapLogger.info(
+          { source: 'runtime-file', ltrModelCount: fallbackModels.size },
+          '[Container] Loaded LTR models from runtime artifact',
+        );
+      } else {
+        bootstrapLogger.warn(
+          { source: 'runtime-file', path: config.runtimeLtrModelsPath, sourceCount: ltrModels.size },
+          '[Container] PG returned no active LTR models; switched to runtime artifact fallback',
+        );
+      }
+      ltrModels = fallbackModels;
+    }
+  }
 
-  const drinkingWindowPredictor = new DrinkingWindowPredictor({ allowHeuristicFallback });
+  const drinkingWindowPredictor = new DrinkingWindowPredictor();
   if (config.drinkingWindow.modelDir !== undefined) {
     await drinkingWindowPredictor.load(config.drinkingWindow.modelDir);
     bootstrapLogger.info(
       { modelVersion: drinkingWindowPredictor.modelVersion },
-      '[Container] Drinking-window predictor loaded',
+      '[Container] Drinking-window predictor loaded (ONNX)',
     );
-  }
-  if (
-    config.nodeEnv === 'production'
-    && drinkingWindowPredictor.modelVersion.startsWith('heuristic')
-    && !config.drinkingWindow.allowHeuristicInProduction
-  ) {
-    throw new Error(
-      'Production startup refuses heuristic-only drinking-window prediction. ' +
-        'The heuristic emits responses with executionMode="heuristic" and is rule-based — not ML. ' +
-        'To enable ONNX prediction: set DRINKING_WINDOW_MODEL_DIR to a directory containing window_start.onnx and window_end.onnx. ' +
-        'To explicitly opt in to heuristic-only operation (advisory mode), set ALLOW_HEURISTIC_DRINKING_WINDOW=true.',
-    );
-  }
-  if (
-    config.nodeEnv === 'production'
-    && drinkingWindowPredictor.modelVersion.startsWith('heuristic')
-    && config.drinkingWindow.allowHeuristicInProduction
-  ) {
-    bootstrapLogger.warn(
-      {
-        modelVersion: drinkingWindowPredictor.modelVersion,
-        evidenceLevel: 'heuristic',
-      },
-      '[Container] Drinking-window predictor running in heuristic-only mode in production (ALLOW_HEURISTIC_DRINKING_WINDOW=true). All predictions will carry executionMode="heuristic".',
+  } else {
+    bootstrapLogger.info(
+      '[Container] Drinking-window predictor: no ONNX model dir configured — predictions will be unavailable',
     );
   }
 

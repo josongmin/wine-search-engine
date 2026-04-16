@@ -300,6 +300,14 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       readonly hits: readonly DenseHit[] | undefined;
       readonly degradation?: DegradationReport;
     };
+    const sparseTopN = resolveExplorationTopN(
+      profile.sparseTopN,
+      input.executionBudgetMaxCandidates,
+    );
+    const denseTopN = resolveExplorationTopN(
+      profile.denseTopN,
+      input.executionBudgetMaxCandidates,
+    );
 
     const sparseTask = async (): Promise<SparseResult> => {
       if (!activeChannels.has('sparse_bm25')) {
@@ -326,7 +334,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         const hits = await this.searchIndex.sparseSearch(
           effectiveLexicalQueries,
           filtersOrUndefined,
-          profile.sparseTopN,
+          sparseTopN,
           vespaRankProfile,
           requestId,
         );
@@ -363,7 +371,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         const hits = await this.searchIndex.searchLearnedSparse(
           buildLearnedSparseQueryWeights(input),
           filtersOrUndefined,
-          profile.sparseTopN,
+          sparseTopN,
           requestId,
         );
         return { hits, degraded: false };
@@ -450,7 +458,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         const hits = await this.searchIndex.denseSearch(
           primaryEmbedding,
           filtersOrUndefined,
-          profile.denseTopN,
+          denseTopN,
           vespaRankProfile,
           requestId,
         );
@@ -513,7 +521,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         const hits = await this.searchIndex.denseSearch(
           anchorEmbedding,
           filtersOrUndefined,
-          profile.denseTopN,
+          denseTopN,
           vespaRankProfile,
           requestId,
         );
@@ -763,7 +771,12 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     const accumulated = accumulateEvidence(protectedCandidates);
     const assembled = this.candidateAssembler.assemble(
       accumulated.map((entry) => entry.mergedEnvelope),
-      buildAssemblyPolicy(profile.finalTopK),
+      buildAssemblyPolicy(
+        resolveExplorationTopN(
+          profile.finalTopK,
+          input.executionBudgetMaxCandidates,
+        ),
+      ),
     );
 
     stageTimer?.end('retrieval.candidate_assembly');
@@ -1112,6 +1125,20 @@ function buildAssemblyPolicy(maxTotal: number): AssemblyPolicy {
     protectExactMatches: true,
     protectAnchorConditioned: true,
   };
+}
+
+function resolveExplorationTopN(
+  profileTopN: number,
+  executionBudgetMaxCandidates?: number,
+): number {
+  if (
+    executionBudgetMaxCandidates === undefined
+    || !Number.isFinite(executionBudgetMaxCandidates)
+    || executionBudgetMaxCandidates <= 0
+  ) {
+    return profileTopN;
+  }
+  return Math.min(profileTopN, Math.trunc(executionBudgetMaxCandidates));
 }
 
 function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {

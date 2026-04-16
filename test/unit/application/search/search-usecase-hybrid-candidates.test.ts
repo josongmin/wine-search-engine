@@ -404,7 +404,7 @@ describe('retrieveHybridCandidatesForPlan', () => {
     );
   });
 
-  it('expands presentation-forward style semantics into gift-oriented retrieval archetypes', () => {
+  it('treats presentation-forward style as a retrieval no-op because there is no backing data profile', () => {
     const plan = minimalPlan({
       constraints: {
         hard: [],
@@ -422,8 +422,8 @@ describe('retrieveHybridCandidatesForPlan', () => {
     });
 
     const input = buildHybridRetrievalInputForPlan(plan);
-    expect(input.semanticQueries).toEqual(
-      expect.arrayContaining(['giftable presentation', 'giftable', 'celebration', 'prosecco', 'rosé']),
+    expect(input.semanticQueries).not.toEqual(
+      expect.arrayContaining(['presentation_forward']),
     );
   });
 

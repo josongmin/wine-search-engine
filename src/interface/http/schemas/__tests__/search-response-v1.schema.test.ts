@@ -60,6 +60,7 @@ describe('SearchResponseSchema', () => {
           used_compiled_execution: true,
           budget: {
             max_candidates: 120,
+            rerank_limit: 12,
             enable_precision_rerank: true,
           },
           provenance_policy: {

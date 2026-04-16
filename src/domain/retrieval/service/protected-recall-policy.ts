@@ -8,7 +8,6 @@
  * 1. known_item_lookup — candidate came from a direct entity lookup (sparseRank === 1)
  * 2. anchor_conditioned — query had an anchor and this candidate was conditioned on it
  * 3. exact_alias_match — candidate matched via an exact alias (not fuzzy)
- * 4. hard_constraint_compatible — candidate passes all hard constraints
  */
 
 import type { CandidateEnvelope, ProtectedInclusionReason } from '../model/candidate-envelope.js';
@@ -20,8 +19,7 @@ import type { CandidateEnvelope, ProtectedInclusionReason } from '../model/candi
 type ProtectionReason =
   | 'known_item_lookup'
   | 'anchor_conditioned'
-  | 'exact_alias_match'
-  | 'hard_constraint_compatible';
+  | 'exact_alias_match';
 
 interface ProtectionClassification {
   /** Whether this candidate should be protected. */
@@ -67,15 +65,6 @@ export class DefaultProtectedRecallPolicy implements ProtectedRecallPolicy {
       prov.protectedInclusionReason === 'known_item_lookup'
     ) {
       return { protect: true, reason: 'exact_alias_match' };
-    }
-
-    // 4. hard_constraint_compatible: candidate passes all hard constraints
-    //    and there are matched constraints (implies the query had hard constraints)
-    if (
-      (prov.failedHardConstraints === undefined || prov.failedHardConstraints.length === 0) &&
-      prov.matchedFilterConstraints.length > 0
-    ) {
-      return { protect: true, reason: 'hard_constraint_compatible' };
     }
 
     return { protect: false };

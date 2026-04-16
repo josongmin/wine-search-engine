@@ -73,6 +73,10 @@ function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
+export function isNoOpSemanticStyleHint(style: string): boolean {
+  return NO_OP_SEMANTIC_STYLE_HINTS.has(style);
+}
+
 function collectStyleHints(input: {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
@@ -82,7 +86,7 @@ function collectStyleHints(input: {
     : input.style !== undefined
       ? [input.style]
       : [];
-  return rawHints.filter((style) => !NO_OP_SEMANTIC_STYLE_HINTS.has(style));
+  return rawHints.filter((style) => !isNoOpSemanticStyleHint(style));
 }
 
 export function resolveSemanticStyleEvidenceProfile(style: string): {

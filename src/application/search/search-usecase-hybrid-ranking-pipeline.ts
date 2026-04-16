@@ -310,6 +310,7 @@ export async function runHybridRankingPipeline(
   compiled: CompiledWineQuery,
   retrievalProvenanceCoverage?: ProvenanceCoverageStage,
   retrievalPlanOverride?: ReturnType<typeof buildRetrievalPlan>,
+  requestContext?: RequestExecutionContext,
 ): Promise<SearchRouteExecutionResult> {
   const retrievalPlan = retrievalPlanOverride ?? compiled.query.retrievalPlan;
   const rankingInput: RankingInput = {
@@ -318,6 +319,7 @@ export async function runHybridRankingPipeline(
     constraints: plan.constraints,
     retrievalPlan,
     compiled,
+    ...(requestContext !== undefined ? { requestContext } : {}),
   };
 
   const { results: rankedResults, metadata: rankingMetadata } = await ranker.rank(rankingInput);
@@ -454,6 +456,8 @@ export async function executeHybridRouteRankingPipeline(
     deps.ranker,
     compiled,
     retrieval.retrievalProvenanceCoverage,
+    undefined,
+    requestContext,
   );
   stageTimer?.end('hybrid.ranking');
 
@@ -527,6 +531,8 @@ export async function executeHybridRouteRankingPipeline(
         deps.ranker,
         relaxedCompiled,
         relaxedRetrieval.retrievalProvenanceCoverage,
+        undefined,
+        requestContext,
       );
 
       if (relaxedRanked.rankedResults.length > 0) {

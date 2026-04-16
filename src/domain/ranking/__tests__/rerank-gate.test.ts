@@ -10,6 +10,7 @@ function makeInput(overrides: Partial<RerankGateInput> = {}): RerankGateInput {
     queryClass: 'semantic_preference',
     effectiveRoute: 'hybrid',
     hasAnchor: false,
+    rerankLimit: 20,
     ...overrides,
   };
 }
@@ -238,15 +239,21 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('topKOverride', () => {
-    it('does not set topKOverride in default cases', () => {
+    it('caps topKOverride to the contract rerankLimit when reranking is enabled', () => {
       // Use unknown class to exercise the large_candidate_set path without class-specific rules.
       const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'unknown' }));
-      expect(decision.topKOverride).toBeUndefined();
+      expect(decision.topKOverride).toBe(20);
     });
 
-    it('does not set topKOverride for forced rerank', () => {
-      const decision = evaluateRerankGate(makeInput({ rerankForced: true }));
-      expect(decision.topKOverride).toBeUndefined();
+    it('caps topKOverride for forced rerank as well', () => {
+      const decision = evaluateRerankGate(makeInput({ rerankForced: true, rerankLimit: 3 }));
+      expect(decision.topKOverride).toBe(3);
+    });
+
+    it('blocks reranking when the compiled budget disables rerank fanout', () => {
+      const decision = evaluateRerankGate(makeInput({ rerankLimit: 0 }));
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('budget_disabled');
     });
   });
 

@@ -15,6 +15,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
 import { createStageTimer } from '../../observability/stage-timer.js';
 import {
+  buildSearchToolStyleDerivedFilters,
   buildEntityIdToolField,
   buildFoodPairingFieldShape,
   buildSearchToolQueryField,
@@ -327,6 +328,11 @@ function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): reado
     filters.push({ attribute: 'wine_type', operator: '=', value: input.wine_type, source_phrase: input.wine_type, confidence: 1.0, mapping_version: v });
   }
 
+  // Alcohol upper bound
+  if (input.max_alcohol_pct !== undefined) {
+    filters.push({ attribute: 'alcohol_pct', operator: '<=', value: input.max_alcohol_pct, source_phrase: `${input.max_alcohol_pct}% 이하`, confidence: 1.0, mapping_version: v });
+  }
+
   // Country
   if (input.country !== undefined) {
     filters.push({ attribute: 'country', operator: '=', value: input.country, source_phrase: input.country, confidence: 1.0, mapping_version: v });
@@ -344,6 +350,8 @@ function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): reado
   if (input.appellation !== undefined) {
     filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: v });
   }
+
+  filters.push(...buildSearchToolStyleDerivedFilters(input));
 
   // Style: NOT a hard Vespa filter — Vespa style values are compound strings like
   // "medium red", "bold red", "light red", "medium white", "full white". An exact-match
@@ -695,7 +703,10 @@ async function executeAgentToolInner(
       // Zero-result escalation: guide the agent to relax constraints one by one,
       // or signal corpus exhaustion when the wine type has very few entries.
       if (response.results.length === 0) {
-        const corpusLimited = deps.corpusCardinality?.isCorpusLimited(parsed.wine_type) ?? false;
+        const corpusLimited =
+          typeof parsed.wine_type === 'string'
+          && parsed.wine_type.length > 0
+          && (deps.corpusCardinality?.isCorpusLimited(parsed.wine_type) ?? false);
         const tag = corpusLimited
           ? `[RETRIEVAL_QUALITY: corpus_limited — this wine type has very few entries in the database]\n이 타입의 와인이 데이터베이스에 매우 적습니다. 검색어: "${parsed.query}". 재검색하지 말고, 가능한 범위에서 답변하거나 더 넓은 카테고리를 제안하세요.`
           : `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`;

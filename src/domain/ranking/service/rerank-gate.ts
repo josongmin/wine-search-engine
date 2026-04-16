@@ -18,6 +18,8 @@ export interface RerankGateInput {
   readonly queryClass: string;
   readonly effectiveRoute: string;
   readonly hasAnchor: boolean;
+  /** Execution-contract rerank ceiling. <= 0 disables precision reranking. */
+  readonly rerankLimit?: number;
   /** For testing/overrides — forces rerank regardless of other conditions. */
   readonly rerankForced?: boolean;
 }
@@ -51,14 +53,26 @@ const RERANK_GATE_MIN_CANDIDATE_COUNT = 5;
 const RERANK_GATE_LARGE_CANDIDATE_COUNT = 20;
 
 export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
-  const { candidateCount, queryClass, effectiveRoute, hasAnchor, rerankForced } = input;
+  const { candidateCount, queryClass, effectiveRoute, hasAnchor, rerankForced, rerankLimit } = input;
+  const boundedTopK =
+    rerankLimit !== undefined
+      ? Math.max(0, Math.min(candidateCount, rerankLimit))
+      : undefined;
 
   if (rerankForced === true) {
-    return { shouldRerank: true, reason: 'forced' };
+    return {
+      shouldRerank: true,
+      reason: 'forced',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
   }
 
   if (candidateCount < RERANK_GATE_MIN_CANDIDATE_COUNT) {
     return { shouldRerank: false, reason: 'too_few_candidates' };
+  }
+
+  if ((boundedTopK ?? 1) <= 0) {
+    return { shouldRerank: false, reason: 'budget_disabled' };
   }
 
   if (queryClass === 'exact_entity' || queryClass === 'short_entity' || effectiveRoute === 'entity') {
@@ -66,14 +80,22 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
   }
 
   if (queryClass === 'comparison_query' || hasAnchor) {
-    return { shouldRerank: true, reason: hasAnchor ? 'has_anchor' : 'comparison_query' };
+    return {
+      shouldRerank: true,
+      reason: hasAnchor ? 'has_anchor' : 'comparison_query',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
   }
 
   // semantic_preference queries have ambiguous intent — cross-encoder reranking
   // adds the most value here because dense retrieval alone cannot reliably rank
   // nuanced preference-driven matches. Always rerank regardless of candidate count.
   if (queryClass === 'semantic_preference') {
-    return { shouldRerank: true, reason: 'semantic_preference' };
+    return {
+      shouldRerank: true,
+      reason: 'semantic_preference',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
   }
 
   // pure_constraint queries (price/style/food-pairing) benefit heavily from
@@ -81,17 +103,29 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
   // intent ("스테이크와 어울리는") → English document cross-attention,
   // which BM25 alone cannot provide. Always rerank when candidates exist.
   if (queryClass === 'pure_constraint') {
-    return { shouldRerank: true, reason: 'pure_constraint' };
+    return {
+      shouldRerank: true,
+      reason: 'pure_constraint',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
   }
 
   // ambiguous_short_form queries (e.g. "바롤로", "아마로네") have multiple
   // plausible candidates — cross-encoder reranking improves precision.
   if (queryClass === 'ambiguous_short_form') {
-    return { shouldRerank: true, reason: 'ambiguous_short_form' };
+    return {
+      shouldRerank: true,
+      reason: 'ambiguous_short_form',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
   }
 
   if (candidateCount >= RERANK_GATE_LARGE_CANDIDATE_COUNT) {
-    return { shouldRerank: true, reason: 'large_candidate_set' };
+    return {
+      shouldRerank: true,
+      reason: 'large_candidate_set',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
   }
 
   return { shouldRerank: false, reason: 'default_skip' };

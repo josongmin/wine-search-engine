@@ -91,7 +91,7 @@ export async function buildCoreContainerServices(
   warnStartupMisconfigurations(config);
 
   const support = await buildRuntimeSupportServices(config, runtime);
-  const adapters = buildCoreAdapterServices(config, runtime.pool);
+  const adapters = await Promise.resolve(buildCoreAdapterServices(config, runtime.pool));
 
   // T1.2: Wrap the concrete Planner (returns QueryPlanV2) in the V1 adapter so
   // existing consumers continue to receive QueryPlanV1-shaped objects.

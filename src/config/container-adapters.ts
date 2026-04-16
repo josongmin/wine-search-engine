@@ -10,6 +10,8 @@ import {
 } from '../infrastructure/adapter/search-index-alias-matcher.js';
 import { FileMappingTableAdapter } from '../infrastructure/adapter/file-mapping-table.js';
 import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learned-matcher.js';
+import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-snapshot-alias-matcher.js';
+import { CachedAliasMatcher } from '../infrastructure/adapter/cached-alias-matcher.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
 import { OpenAiChatLlm } from '../infrastructure/ai/openai-chat-llm.js';
@@ -17,6 +19,7 @@ import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-se
 import { OpenAiDoc2QueryGenerator } from '../infrastructure/ai/openai-doc2query-generator.js';
 import { StubDoc2QueryGenerator } from '../infrastructure/adapter/stub-doc2query-generator.js';
 import { CohereReranker } from '../infrastructure/ai/cohere-reranker.js';
+import { CachedReranker } from '../infrastructure/ai/cached-reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
 import { VespaSimilarRetrieval } from '../infrastructure/vespa/vespa-similar-retrieval.js';
 import { VespaCandidateAttributes } from '../infrastructure/vespa/vespa-candidate-attributes.js';
@@ -101,10 +104,10 @@ function resolveRuntimeHandles(runtime?: Pool | RuntimeHandles): RuntimeHandles 
   return runtime;
 }
 
-export function buildCoreAdapterServices(
+export async function buildCoreAdapterServices(
   config: Config,
   runtime?: Pool | RuntimeHandles,
-): CoreAdapterServices {
+): Promise<CoreAdapterServices> {
   const runtimeHandles = resolveRuntimeHandles(runtime);
   const pool = resolvePool(runtimeHandles);
 
@@ -173,6 +176,13 @@ export function buildCoreAdapterServices(
         })
       : undefined;
 
+  // In-memory search-snapshot alias substrate is only needed when
+  // PostgreSQL-backed aliasing is unavailable and PG-overlay matcher is enabled.
+  // Avoiding it when PostgreSQL is present keeps startup free of unnecessary I/O.
+  const searchSnapshotAliasMatcher = !config.killSwitch.aliasOverlay && pool === undefined
+    ? await SearchSnapshotAliasMatcher.loadFromRuntimeState()
+    : undefined;
+
   // Doc2Query generator (index-time only). Prefer the OpenAI-backed
   // implementation when a chat adapter is available so it inherits the
   // chat circuit breaker / retries; otherwise fall back to the
@@ -191,11 +201,15 @@ export function buildCoreAdapterServices(
     ...(chatLlm !== undefined ? { chatLlm } : {}),
     ...(config.cohere.apiKey !== undefined
       ? {
-          reranker: new CohereReranker({
-            apiKey: config.cohere.apiKey,
-            baseUrl: config.cohere.baseUrl,
-            model: config.cohere.rerankModel,
-            httpTimeoutMs: config.reranker.httpTimeoutMs,
+          reranker: new CachedReranker({
+            modelId: config.cohere.rerankModel,
+            inner: new CohereReranker({
+              apiKey: config.cohere.apiKey,
+              baseUrl: config.cohere.baseUrl,
+              model: config.cohere.rerankModel,
+              httpTimeoutMs: config.reranker.httpTimeoutMs,
+            }),
+            ...(runtimeHandles.redisClient !== undefined ? { redis: runtimeHandles.redisClient } : {}),
           }),
         }
       : {}),
@@ -215,9 +229,12 @@ export function buildCoreAdapterServices(
           },
           '[container] kill-switch active: using SearchIndexAliasMatcher (exact alias substrate from Vespa docs)',
         );
-        return indexAliasMatcher;
+        return new CachedAliasMatcher(indexAliasMatcher);
       }
       if (!pool) {
+        if (searchSnapshotAliasMatcher !== undefined) {
+          return new CachedAliasMatcher(searchSnapshotAliasMatcher);
+        }
         bootstrapLogger.warn(
           {
             nodeEnv: config.nodeEnv,
@@ -226,12 +243,12 @@ export function buildCoreAdapterServices(
           },
           '[container] PostgreSQL alias substrate unavailable: using SearchIndexAliasMatcher',
         );
-        return indexAliasMatcher;
+        return new CachedAliasMatcher(indexAliasMatcher);
       }
-      return new CascadingAliasMatcher(
+      return new CachedAliasMatcher(new CascadingAliasMatcher(
         new PgAliasMatcher(pool),
         indexAliasMatcher,
-      );
+      ));
     })(),
     mappingTable: new FileMappingTableAdapter(),
     anchorResolver: new VespaAnchorResolver(searchIndex),
