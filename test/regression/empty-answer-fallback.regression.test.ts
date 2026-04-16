@@ -1,9 +1,9 @@
 /**
  * Regression tests — EMPTY_ANSWER fallback guarantee.
  *
- * APPEND-ONLY. Locks in the 4-layer fallback fix in agent-fallback-finalizer.ts.
+ * APPEND-ONLY. Locks in the 4-layer fallback fix in agent-answer-recovery-policy.ts.
  *
- * Tests verify the orchestrator's synthesis constants, fallback finalizer, and that
+ * Tests verify the orchestrator's synthesis constants, answer recovery policy, and that
  * Layer 3 (last-observation) + Layer 4 (absolute template) are structurally
  * reachable. Full integration tests (mocking the LLM) live in the e2e suite.
  */
@@ -41,7 +41,7 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
   it('R-EMPTY-02: Layer 3 (last-observation summary) guard exists in orchestrator', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // Layer 3 uses findLast to grab the last step with an observation
@@ -52,7 +52,7 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
   it('R-EMPTY-03: Layer 4 (absolute template) guard exists in orchestrator', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     expect(src).toMatch(/Layer 4/);
@@ -63,7 +63,7 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
   it('R-EMPTY-04: fallback search no-result branch sets answer to non-empty Korean template', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // The else branch when topResult is undefined must set answer to a Korean string
@@ -86,7 +86,7 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
   it('R-EMPTY-06: fallback search failure logs at error level (not warn)', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // After fix: fallback search failure must log.error
@@ -102,7 +102,7 @@ describe('EMPTY_ANSWER fallback regression — structural guarantee', () => {
   it('R-EMPTY-07: Layer 4 template string is non-empty and Korean', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // The Layer 4 unconditional answer assignment must be non-empty Korean string
@@ -119,7 +119,7 @@ describe('EMPTY_ANSWER fallback regression — structural guarantee', () => {
   it('R-EMPTY-08: Layer 3 slices observation to max 300 chars (prevents oversized fallback)', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // Layer 3 must use .slice(0, LAYER3_OBSERVATION_SLICE_CHARS) or literal .slice(0, 300).
@@ -143,7 +143,7 @@ describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminatio
   it('R-EMPTY-09: Layer 2 fallback search is skipped when hasToolObservations is true', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // The guard must be named and explicitly include the absence of observed tool output.
@@ -155,7 +155,7 @@ describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminatio
   it('R-EMPTY-10: Layer 3 sets terminationReason=answer when tool observations exist', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // Layer 3 must use ternary or conditional to set 'answer' vs 'fallback'
@@ -166,7 +166,7 @@ describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminatio
   it('R-EMPTY-11: Layer 4 sets terminationReason=answer when tool observations exist', async () => {
     const fs = await import('fs');
     const src = fs.readFileSync(
-      new URL('../../src/application/agent/agent-fallback-finalizer.ts', import.meta.url),
+      new URL('../../src/application/agent/agent-answer-recovery-policy.ts', import.meta.url),
       'utf-8',
     );
     // Confirm Layer 4 also uses the same ternary (both Layer 3 and 4 must have it)

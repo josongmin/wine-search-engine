@@ -11,14 +11,16 @@ import {
 } from './agent-prompt.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
+  CHARS_PER_TOKEN_ESTIMATE,
+  estimateTokenCount,
   isValidLlmResult,
   parseLlmOutput,
+  type LlmResult,
   type LlmAction,
 } from './agent-llm-output.js';
 
 const log = bootstrapLogger.child({ component: 'AgentPlannerPhaseRunner' });
 const STEP_LOG_PREVIEW_CHARS = 500;
-const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 export interface PlannerPhaseResult {
   readonly stepStartMs: number;
@@ -58,7 +60,7 @@ function buildPlannerLoopMessages(
   return messages;
 }
 
-export interface AgentPlannerPhaseRunnerDeps {
+interface AgentPlannerPhaseRunnerDeps {
   readonly chatLlm: ChatLlmPort;
 }
 
@@ -100,7 +102,7 @@ export class AgentPlannerPhaseRunner {
     }
 
     let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    let llmResult: { text: string; model: string; finishReason?: string | null };
+    let llmResult: LlmResult;
     try {
       const racedResult: unknown = await Promise.race([
         this.deps.chatLlm.complete({
@@ -161,7 +163,7 @@ export class AgentPlannerPhaseRunner {
 
     const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
     const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN_ESTIMATE);
-    const outputTokens = Math.ceil(llmResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
+    const outputTokens = estimateTokenCount(llmResult.text);
     state.totalInputTokens += inputTokens;
     state.totalOutputTokens += outputTokens;
 

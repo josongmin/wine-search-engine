@@ -11,15 +11,16 @@ import {
 } from './agent-prompt.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
+  estimateTokenCount,
   isValidLlmResult,
-  parseLlmOutput,
+  parseLlmJsonObject,
+  type LlmResult,
 } from './agent-llm-output.js';
 
 const log = bootstrapLogger.child({ component: 'AgentObservationSynthesisRunner' });
 const SYNTHESIS_TIMEOUT_MS = 60_000;
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
-const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 interface ObservationSynthesisMessages {
   readonly messages: readonly ChatMessage[];
@@ -89,7 +90,7 @@ export class AgentObservationSynthesisRunner {
         synthAbort.abort();
       }, SYNTHESIS_TIMEOUT_MS);
       try {
-        const synthResult = await this.deps.chatLlm.complete({
+        const synthResult: LlmResult = await this.deps.chatLlm.complete({
           messages: synthMessages,
           temperature: 0,
           maxOutputTokens,
@@ -100,16 +101,28 @@ export class AgentObservationSynthesisRunner {
           log.warn({ requestId }, 'synthesis LLM returned malformed result');
           return undefined;
         }
-        state.totalInputTokens += Math.ceil(synthSentinel.length / CHARS_PER_TOKEN_ESTIMATE);
-        state.totalOutputTokens += Math.ceil(synthResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
-        const parsedSynth = parseLlmOutput(synthResult.text);
-        if (parsedSynth.action !== undefined || parsedSynth.actions !== undefined) {
+        state.totalInputTokens += estimateTokenCount(synthSentinel);
+        state.totalOutputTokens += estimateTokenCount(synthResult.text);
+        const parsedSynth = parseLlmJsonObject(synthResult.text);
+        if (parsedSynth === null) {
+          log.warn({ requestId }, 'synthesis LLM returned non-JSON output — ignoring, falling to next layer');
+          return undefined;
+        }
+        if (
+          parsedSynth['action'] !== undefined ||
+          parsedSynth['actions'] !== undefined ||
+          parsedSynth['tool'] !== undefined
+        ) {
           log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
           return undefined;
         }
-        const candidate = parsedSynth.answer?.trim() ?? '';
-        const isShell = /^[{[\s]*[}\]]*$/.test(candidate);
-        return candidate.length > 10 && !isShell ? candidate : undefined;
+        const answer = parsedSynth['answer'];
+        if (typeof answer !== 'string') {
+          log.warn({ requestId }, 'synthesis LLM returned JSON without answer — ignoring, falling to next layer');
+          return undefined;
+        }
+        const candidate = answer.trim();
+        return candidate.length > 0 ? candidate : undefined;
       } finally {
         abortSignal?.removeEventListener('abort', propagateSynthAbort);
         clearTimeout(synthTimer);

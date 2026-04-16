@@ -2,6 +2,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'AgentLlmOutput' });
 const LOG_PREVIEW_CHARS = 200;
+export const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 /** Parsed LLM output — either a tool call, a parallel batch, or a final answer. */
 export interface LlmAction {
@@ -11,10 +12,28 @@ export interface LlmAction {
   readonly answer?: string;
 }
 
-export function isValidLlmResult(value: unknown): value is { text: string; model: string; finishReason?: string | null } {
+export interface LlmResult {
+  readonly text: string;
+  readonly model: string;
+  readonly finishReason?: string | null;
+}
+
+export function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN_ESTIMATE);
+}
+
+export function isValidLlmResult(value: unknown): value is LlmResult {
   if (typeof value !== 'object' || value === null) return false;
   const rec = value as Record<string, unknown>;
   return typeof rec['text'] === 'string' && typeof rec['model'] === 'string';
+}
+
+function cleanLlmJsonText(text: string): string {
+  return text
+    .trim()
+    .replace(/^```[\w-]*\s*\n?/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 }
 
 function extractFirstJsonObject(text: string): string {
@@ -39,19 +58,30 @@ function extractFirstJsonObject(text: string): string {
   return text;
 }
 
+export function parseLlmJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const cleaned = cleanLlmJsonText(text);
+    const firstObject = extractFirstJsonObject(cleaned);
+    const rawParsed: unknown = JSON.parse(firstObject);
+    return typeof rawParsed === 'object' && rawParsed !== null
+      ? rawParsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseLlmOutput(text: string): LlmAction {
   try {
     const trimmed = text.trim();
-    const cleaned = trimmed
-      .replace(/^```[\w-]*\s*\n?/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-    const firstObject = extractFirstJsonObject(cleaned);
-    const rawParsed: unknown = JSON.parse(firstObject);
-    if (typeof rawParsed !== 'object' || rawParsed === null) {
-      return { thought: text.slice(0, LOG_PREVIEW_CHARS) };
+    const parsed = parseLlmJsonObject(text);
+    if (parsed === null) {
+      log.warn(
+        { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },
+        'agent LLM produced non-JSON output; falling back to raw text',
+      );
+      return { thought: '[unparseable LLM output]', answer: trimmed };
     }
-    const parsed = rawParsed as Record<string, unknown>;
     const thought = typeof parsed['thought'] === 'string' ? parsed['thought'] : '';
 
     if (typeof parsed['answer'] === 'string') {

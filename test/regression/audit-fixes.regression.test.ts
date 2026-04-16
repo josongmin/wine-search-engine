@@ -357,11 +357,15 @@ describe('Audit regressions — session 4 (2026-04-09)', () => {
         fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
         'utf-8',
       );
+      const runLoopSrc = readFileSync(
+        fileURLToPath(new URL('../../src/application/agent/agent-run-loop.ts', import.meta.url)),
+        'utf-8',
+      );
       const synthesisSrc = readFileSync(
         fileURLToPath(new URL('../../src/application/agent/agent-observation-synthesis-runner.ts', import.meta.url)),
         'utf-8',
       );
-      const combinedSrc = `${orchestratorSrc}\n${synthesisSrc}`;
+      const combinedSrc = `${orchestratorSrc}\n${runLoopSrc}\n${synthesisSrc}`;
       // Both checks must use >= (not > for post-hoc), even after phase extraction.
       const geMatches = combinedSrc.match(/>=\s*effectiveConfig\.maxTotalTokens/g);
       expect(geMatches).not.toBeNull();
@@ -818,11 +822,11 @@ describe('Audit regressions — session 6 ingestion pipeline (2026-04-09)', () =
   // Fix: check isAbortError() before the generic error branch in tool catch.
   // ─────────────────────────────────────────────────────────────────────────
   describe('E4-TOOL-ABORT: tool catch block handles AbortError correctly', () => {
-    it('agent-orchestrator source checks isAbortError in tool catch block', async () => {
+    it('tool execution phase source checks isAbortError in tool catch block', async () => {
       const { readFileSync } = await import('node:fs');
       const { fileURLToPath } = await import('node:url');
       const src = readFileSync(
-        fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
+        fileURLToPath(new URL('../../src/application/agent/agent-tool-execution-phase.ts', import.meta.url)),
         'utf-8',
       );
       // Must check isAbortError in the tool catch block (identified by surrounding TIMEOUT check context)
