@@ -122,13 +122,16 @@ describe('fromVespaFields entity_id validation', () => {
     expect(message).toMatch(/malformed Vespa document/);
   });
 
-  it('throws when a required field such as search_text_ko is missing', () => {
-    expect(() =>
-      fromVespaFields({
-        ...makeMinimalRequiredFields(),
-        search_text_ko: undefined,
-      }),
-    ).toThrow(/malformed Vespa document/);
+  it('defaults missing search_text_ko/en/semantic_summary to canonical label', () => {
+    const doc = fromVespaFields({
+      ...makeMinimalRequiredFields(),
+      search_text_ko: undefined,
+      search_text_en: undefined,
+      semantic_summary: undefined,
+    });
+    expect(doc.searchTextKo).toBe('Some Wine');
+    expect(doc.searchTextEn).toBe('Some Wine');
+    expect(doc.semanticSummary).toBe('Some Wine');
   });
 
   it('defaults missing identity aliases to an empty array for partial Vespa docs', () => {

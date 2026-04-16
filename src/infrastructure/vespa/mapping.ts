@@ -470,21 +470,34 @@ export function fromVespaFields(
 
   const lineageRefsFromFields = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);
 
+  const canonicalLabel = getRequiredString(fields, 'canonical_label');
+  const searchTextKo = summary.searchTextKo ?? getOptionalString(fields, 'search_text_ko');
+  const searchTextEn = summary.searchTextEn ?? getOptionalString(fields, 'search_text_en');
+  const semanticSummary = getOptionalString(fields, 'semantic_summary');
+  const hasAnySearchSurface =
+    searchTextKo !== undefined ||
+    searchTextEn !== undefined ||
+    semanticSummary !== undefined;
+
+  const resolvedSearchTextKo = searchTextKo ?? (hasAnySearchSurface ? getRequiredString(fields, 'search_text_ko') : canonicalLabel);
+  const resolvedSearchTextEn = searchTextEn ?? (hasAnySearchSurface ? getRequiredString(fields, 'search_text_en') : canonicalLabel);
+  const resolvedSemanticSummary = semanticSummary ?? (hasAnySearchSurface ? getRequiredString(fields, 'semantic_summary') : canonicalLabel);
+
   return {
     entityId: createCanonicalEntityId(rawEntityId),
     entityType: getRequiredString(fields, 'entity_type'),
     ...(getOptionalString(fields, 'search_snapshot_id') !== undefined
       ? { searchSnapshotId: getOptionalString(fields, 'search_snapshot_id') }
       : {}),
-    canonicalLabel: getRequiredString(fields, 'canonical_label'),
+    canonicalLabel,
     aliasesIdentitySafe: getOptionalStringArray(fields, 'aliases_identity_safe') ?? [],
     aliasesNoisyRecall: getOptionalStringArray(fields, 'aliases_noisy_recall') ?? [],
     producer: getRequiredString(fields, 'producer'),
     region: getRequiredString(fields, 'region'),
     grapes: getOptionalStringArray(fields, 'grapes') ?? [],
-    searchTextKo: getRequiredString(fields, 'search_text_ko'),
-    searchTextEn: getRequiredString(fields, 'search_text_en'),
-    semanticSummary: getRequiredString(fields, 'semantic_summary'),
+    searchTextKo: resolvedSearchTextKo,
+    searchTextEn: resolvedSearchTextEn,
+    semanticSummary: resolvedSemanticSummary,
     // E1-P3-7: body/sweetness use conditional spread to distinguish "no data" (field absent)
     // from "value is 0" (field present with value 0). exactOptionalPropertyTypes:
     // omit key when undefined.

@@ -15,6 +15,8 @@ web/.next/
 *.tsbuildinfo
 .tsbuildinfo.build
 next-env.d.ts
+web/tsconfig.tsbuildinfo
+web/next-env.d.ts
 
 # Logs & caches
 *.log

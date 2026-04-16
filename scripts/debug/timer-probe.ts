@@ -7,6 +7,9 @@ async function main() {
     const config = loadConfig();
     const { createContainer } = await import('../../src/config/container.js');
     const container = await createContainer(config);
+    const executionPrincipal = process.env.TIMER_PROBE_EXECUTION_PRINCIPAL === 'public'
+      ? 'public'
+      : 'benchmark_trusted';
 
     // Run 3 queries: cold, warm, warm — measure pre_route specifically
     const queries = ['prosecco', '피노 그리지오 추천', 'Opus One 2018'];
@@ -15,10 +18,16 @@ async function main() {
     for (const query of queries) {
       const timer = createStageTimer();
       const result = await container.searchUseCase.execute(
-        { query }, `probe-${query}`, { stageTimer: timer },
+        { query },
+        `probe-${query}`,
+        {
+          stageTimer: timer,
+          executionPrincipal,
+        },
       );
       const snap = timer.snapshot();
       results.push({
+        executionPrincipal,
         query,
         resultType: result.queryType,
         resultCount: result.queryType === 'search' ? result.results.length : 0,

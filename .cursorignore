@@ -13,6 +13,8 @@ web/.next/
 .cache/
 *.tsbuildinfo
 next-env.d.ts
+web/tsconfig.tsbuildinfo
+web/next-env.d.ts
 test-results
 playwright-report
 

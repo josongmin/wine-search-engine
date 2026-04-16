@@ -22,6 +22,8 @@ tmp/
 temp/
 *.tsbuildinfo
 next-env.d.ts
+web/tsconfig.tsbuildinfo
+web/next-env.d.ts
 test-results
 test-results/
 playwright-report
