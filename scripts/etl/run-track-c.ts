@@ -88,14 +88,14 @@ export const TRACK_C_STEP_DEFINITIONS: readonly TrackCStepDefinition[] = [
     script: 'run-track-c-step6-gift-suitability.ts',
     desc: 'Score Gift Suitability (LLM Teacher Label)',
     field: 'giftSuitabilityClassification',
-    requiredCoverage: 0.7,
+    requiredCoverage: 1,
   },
   {
     num: 7,
     script: 'run-track-c-step7-beginner-suitability.ts',
     desc: 'Score Beginner Suitability (LLM Teacher Label)',
     field: 'beginnerSuitabilityClassification',
-    requiredCoverage: 0.7,
+    requiredCoverage: 1,
   },
 ] as const;
 

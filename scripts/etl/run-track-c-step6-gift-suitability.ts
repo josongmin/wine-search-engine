@@ -28,7 +28,7 @@ import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const OPENAI_BASE_URL = (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-const MODEL = process.env['OPENAI_GIFT_MODEL'] ?? 'gpt-4.1-mini';
+const MODEL = process.env['OPENAI_GIFT_MODEL'] ?? 'gpt-5.4-mini';
 const PROMPT_VERSION = 'gift-suitability-scorer-v2';
 const BATCH_SIZE = 20;
 /** LLM score normalization divisor: LLM outputs 0-100, we store [0, 1]. */
@@ -110,13 +110,34 @@ export function buildGiftSuitabilityUserPrompt(record: EnrichedSilverRecord): st
 // LLM call + validation
 // ---------------------------------------------------------------------------
 
+/** Max retries for transient API errors (502, 429, 503). */
+const MAX_RETRIES = 3;
+/** Base delay in ms for exponential backoff. */
+const RETRY_BASE_DELAY_MS = 2000;
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(url, init);
+    if (response.ok) return response;
+    const retryable = response.status === 429 || response.status === 502 || response.status === 503;
+    if (!retryable || attempt === MAX_RETRIES) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Gift suitability scorer HTTP ${response.status}: ${text.slice(0, 200)}`);
+    }
+    const delay = RETRY_BASE_DELAY_MS * (2 ** attempt);
+    console.log(`    Retry ${attempt + 1}/${MAX_RETRIES} after ${delay}ms (HTTP ${response.status})`);
+    await new Promise((resolve) => { setTimeout(resolve, delay); });
+  }
+  throw new Error('fetchWithRetry: unreachable');
+}
+
 async function scoreGiftSuitability(record: EnrichedSilverRecord): Promise<GiftSuitabilityClassification | undefined> {
   const apiKey = process.env['OPENAI_API_KEY']?.trim();
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is required for gift suitability scoring');
   }
 
-  const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+  const response = await fetchWithRetry(`${OPENAI_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -132,11 +153,6 @@ async function scoreGiftSuitability(record: EnrichedSilverRecord): Promise<GiftS
         ],
       }),
     });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Gift suitability scorer HTTP ${response.status}: ${text.slice(0, 200)}`);
-  }
 
   const json = await response.json() as {
     choices?: readonly { message?: { content?: string | null } }[];
@@ -220,21 +236,29 @@ async function run(): Promise<void> {
     const scored = await Promise.all(
       batch.map(async (record) => {
         if (isFresh(record)) {
-          return record;
+          return { record } as const;
         }
         const classification = await scoreGiftSuitability(record);
         if (classification === undefined) {
-          // 유효한 점수 없으면 필드 제거
-          const { giftSuitabilityClassification: _removed, ...rest } = record;
-          return rest as EnrichedSilverRecord;
+          return { failedSourceId: record.sourceId } as const;
         }
         return {
-          ...record,
-          giftSuitabilityClassification: classification,
-        } satisfies EnrichedSilverRecord;
+          record: {
+            ...record,
+            giftSuitabilityClassification: classification,
+          } satisfies EnrichedSilverRecord,
+        } as const;
       }),
     );
-    output.push(...scored);
+    const failedSourceIds = scored
+      .flatMap((result) => ('failedSourceId' in result ? [result.failedSourceId] : []));
+    if (failedSourceIds.length > 0) {
+      const preview = failedSourceIds.slice(0, 10).join(', ');
+      throw new Error(
+        `Gift suitability scoring produced no classification for ${failedSourceIds.length} record(s): ${preview}`,
+      );
+    }
+    output.push(...scored.flatMap((result) => ('record' in result ? [result.record] : [])));
     console.log(`  Gift suitability scoring: ${Math.min(index + batch.length, records.length)}/${records.length}`);
   }
 
