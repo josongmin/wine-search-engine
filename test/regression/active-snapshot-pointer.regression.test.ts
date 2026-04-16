@@ -166,6 +166,20 @@ describe('T-010 publish-search-snapshot pointer promote wiring', () => {
     expect(rollbackBody).toContain('rollbackActiveSearchSnapshotPointer');
   });
 
+  it('rollback path is gated by pointerPromoted state', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const src = readFileSync(
+      fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
+      'utf-8',
+    );
+    expect(src).toContain('type SnapshotPublishPhase');
+    expect(src).toContain('let pointerPromoted = false');
+    expect(src).toContain('pointerPromoted = true');
+    expect(src).toContain('if (args.pointerPromoted)');
+    expect(src).toContain("publishPhase = 'pointer_promoted'");
+  });
+
   it('runtime substrate promotion rewrites nl mappings path before active promotion', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');

@@ -1745,7 +1745,7 @@ export class AgentOrchestrator {
       } else if (isAbortError(synthErr1)) {
         state.terminationReason = 'aborted';
       }
-      // synthesis attempt threw -> log.error, never log.warn
+      // synthesis attempt threw -> keep this on the error channel only
       log.error({ err: synthErr1, requestId }, `synthesis retry attempt 1 failed (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
     }
     if (synthAnswer === undefined) {
@@ -1766,7 +1766,7 @@ export class AgentOrchestrator {
         } else if (isAbortError(synthErr2)) {
           state.terminationReason = 'aborted';
         }
-        // synthesis attempt threw -> log.error, never log.warn
+        // synthesis attempt threw -> keep this on the error channel only
         log.error({ err: synthErr2, requestId }, 'synthesis retry attempt 2 failed — proceeding to fallback search');
       }
       if (synthAnswer === undefined) {
