@@ -1,4 +1,7 @@
-import type { QueryClass } from '../../shared/types/index.js';
+import type {
+  ConstraintBundle,
+  QueryClass,
+} from '../../shared/types/index.js';
 import {
   type RetrievalChannel,
   preferCanonicalRetrievalChannelLabels,
@@ -132,10 +135,10 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
   pure_constraint: {
     softConstraint: 0.30,
     attributeAlignment: 0.25,
-    semantic: 0.10,
+    semantic: 0.04,        // reduced from 0.10 — pure constraint queries rely on explicit constraints, not embedding similarity
     entityIntegrity: 0.10,
-    preferenceAlignment: 0.05,
-    popularity: 0.03,
+    preferenceAlignment: 0.02, // reduced from 0.05 — situation queries have explicit constraints rather than soft preferences
+    popularity: 0.01,      // reduced from 0.03 — popularity is a weak signal for situation queries
     availability: 0.07,
     uncertaintyPenalty: 0.05,
     producerPrestige: 0.0,
@@ -146,20 +149,20 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     beginnerSuitability: 0.0,
   },
   semantic_preference: {
-    semantic: 0.22,        // reduced from 0.25 to compensate for gift/beginner facets
+    semantic: 0.22,
     preferenceAlignment: 0.20,
     softConstraint: 0.10,
     attributeAlignment: 0.10,
     entityIntegrity: 0.10,
-    popularity: 0.01,      // reduced from 0.03 to compensate for gift/beginner facets
+    popularity: 0.01,
     availability: 0.05,
     uncertaintyPenalty: 0.05,
     producerPrestige: 0.02,
     recency: 0.0,
-    criticScore: 0.10,     // critic score boosts quality-preference queries
+    criticScore: 0.10,
     multilingualScore: 0.05,
-    giftSuitability: 0.05,
-    beginnerSuitability: 0.05,
+    giftSuitability: 0.0,
+    beginnerSuitability: 0.0,
   },
   short_entity: {
     entityIntegrity: 0.30,
@@ -247,6 +250,110 @@ export function resolveWeights(queryClass: QueryClass): ScoringWeights {
 }
 
 export { DEFAULT_WEIGHTS };
+
+const SITUATION_INTENT_GIFT_WEIGHT_FLOOR = 0.15;
+const SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR = 0.15;
+
+function constraintValueMatches(
+  constraints: ConstraintBundle,
+  attribute: string,
+  expectedValue: string,
+): boolean {
+  const buckets = [constraints.hard, constraints.soft, constraints.inferred] as const;
+  for (const bucket of buckets) {
+    for (const constraint of bucket) {
+      if (constraint.attribute !== attribute) continue;
+      const value = constraint.value;
+      if (typeof value === 'string' && value === expectedValue) {
+        return true;
+      }
+      if (Array.isArray(value) && value.includes(expectedValue)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Applies a query-constraint-driven overlay for explicit situation intents.
+ *
+ * This is deliberately narrower than the mode overlay: it only activates when
+ * the parsed query already surfaced a supported situation facet in the
+ * constraint bundle. No raw-text heuristics are used here.
+ */
+export function applySituationIntentWeightOverlay(
+  baseWeights: ScoringWeights,
+  constraints: ConstraintBundle,
+): ScoringWeights {
+  const hasGiftIntent = constraintValueMatches(constraints, 'occasion', 'gift');
+  const hasBeginnerIntent = constraintValueMatches(constraints, 'style', 'approachable');
+
+  if (!hasGiftIntent && !hasBeginnerIntent) {
+    return baseWeights;
+  }
+
+  const giftSuitability = hasGiftIntent
+    ? Math.max(baseWeights.giftSuitability, SITUATION_INTENT_GIFT_WEIGHT_FLOOR)
+    : baseWeights.giftSuitability;
+  const beginnerSuitability = hasBeginnerIntent
+    ? Math.max(baseWeights.beginnerSuitability, SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR)
+    : baseWeights.beginnerSuitability;
+
+  const baseNonPenaltySum =
+    baseWeights.entityIntegrity +
+    baseWeights.anchorSimilarity +
+    baseWeights.semantic +
+    baseWeights.softConstraint +
+    baseWeights.attributeAlignment +
+    baseWeights.preferenceAlignment +
+    baseWeights.popularity +
+    baseWeights.availability +
+    baseWeights.producerPrestige +
+    baseWeights.recency +
+    baseWeights.criticScore +
+    baseWeights.multilingualScore +
+    baseWeights.giftSuitability +
+    baseWeights.beginnerSuitability;
+
+  const adjustedNonPenaltySum =
+    baseWeights.entityIntegrity +
+    baseWeights.anchorSimilarity +
+    baseWeights.semantic +
+    baseWeights.softConstraint +
+    baseWeights.attributeAlignment +
+    baseWeights.preferenceAlignment +
+    baseWeights.popularity +
+    baseWeights.availability +
+    baseWeights.producerPrestige +
+    baseWeights.recency +
+    baseWeights.criticScore +
+    baseWeights.multilingualScore +
+    giftSuitability +
+    beginnerSuitability;
+
+  const rawNormFactor = adjustedNonPenaltySum > 0 ? baseNonPenaltySum / adjustedNonPenaltySum : 1;
+  const normFactor = Number.isFinite(rawNormFactor) ? rawNormFactor : 1;
+
+  return {
+    entityIntegrity: baseWeights.entityIntegrity * normFactor,
+    anchorSimilarity: baseWeights.anchorSimilarity * normFactor,
+    semantic: baseWeights.semantic * normFactor,
+    softConstraint: baseWeights.softConstraint * normFactor,
+    attributeAlignment: baseWeights.attributeAlignment * normFactor,
+    preferenceAlignment: baseWeights.preferenceAlignment * normFactor,
+    popularity: baseWeights.popularity * normFactor,
+    availability: baseWeights.availability * normFactor,
+    uncertaintyPenalty: baseWeights.uncertaintyPenalty,
+    entityIntegrityThreshold: baseWeights.entityIntegrityThreshold,
+    producerPrestige: baseWeights.producerPrestige * normFactor,
+    recency: baseWeights.recency * normFactor,
+    criticScore: baseWeights.criticScore * normFactor,
+    multilingualScore: baseWeights.multilingualScore * normFactor,
+    giftSuitability: giftSuitability * normFactor,
+    beginnerSuitability: beginnerSuitability * normFactor,
+  };
+}
 
 /**
  * Adjusts scoring weights based on which retrieval channels contributed to a

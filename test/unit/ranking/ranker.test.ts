@@ -9,12 +9,17 @@ import type { ComponentScores } from '../../../src/domain/ranking/model/ranked-r
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled-wine-query.js';
-import type { ConstraintBundle, EvidenceItem } from '../../../src/domain/shared/types/index.js';
+import type { ConstraintBundle, EvidenceItem, NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 import type { QueryClassWeights } from '../../../src/domain/ranking/service/lambdamart-ranker.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
-import { resolveChannelAwareWeights, resolveWeights } from '../../../src/domain/ranking/model/scoring-weights.js';
+import {
+  resolveChannelAwareWeights,
+  resolveWeights,
+  applySituationIntentWeightOverlay,
+} from '../../../src/domain/ranking/model/scoring-weights.js';
 import { getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
 import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
+import { createStageTimer } from '../../../src/observability/stage-timer.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -96,6 +101,23 @@ function makeConstraints(): ConstraintBundle {
   return { hard: [], soft: [], inferred: [] };
 }
 
+function makeConstraint(
+  attribute: string,
+  value: NormalizedConstraint['value'],
+): NormalizedConstraint {
+  return {
+    attribute,
+    operator: Array.isArray(value) ? 'in' : '=',
+    value,
+    source_phrase: `${attribute}:${typeof value === 'object' ? JSON.stringify(value) : String(value)}`,
+    confidence: 1,
+  };
+}
+
+function makeConstraintsWithSoftEntries(entries: readonly NormalizedConstraint[]): ConstraintBundle {
+  return { hard: [], soft: [...entries], inferred: [] };
+}
+
 /** Minimal CompiledWineQuery for test helpers. */
 function makeCompiled(plan?: QueryPlanV1): CompiledWineQuery {
   const p = plan ?? makeQueryPlan();
@@ -118,7 +140,7 @@ function makeCompiled(plan?: QueryPlanV1): CompiledWineQuery {
       effectiveRoute: p.route,
       effectiveRetrievalMode: p.retrievalMode,
       routeSource: 'planner',
-      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      budget: { maxCandidates: 20, rerankLimit: 20, enablePrecisionRerank: true },
       provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
     },
   };
@@ -147,10 +169,11 @@ function makeInputWithOverrides(
   return {
     queryPlan: plan,
     candidates,
-    constraints: makeConstraints(),
+    constraints: overrides.constraints ?? makeConstraints(),
     compiled: overrides.compiled ?? makeCompiled(plan),
     ...(overrides.anchorProfile !== undefined ? { anchorProfile: overrides.anchorProfile } : {}),
     ...(overrides.rerankForced !== undefined ? { rerankForced: overrides.rerankForced } : {}),
+    ...(overrides.requestContext !== undefined ? { requestContext: overrides.requestContext } : {}),
   };
 }
 
@@ -189,7 +212,8 @@ function resolveExpectedRankerWeights(input: RankingInput, channels: readonly st
     criticScore: overlaid.criticScore * normFactor,
     multilingualScore: overlaid.multilingualScore * normFactor,
   };
-  return resolveChannelAwareWeights(channels, modeAdjusted);
+  const situationAdjusted = applySituationIntentWeightOverlay(modeAdjusted, input.constraints);
+  return resolveChannelAwareWeights(channels, situationAdjusted);
 }
 
 /** A simple evidence item stub. */
@@ -623,6 +647,76 @@ describe('Ranker', () => {
         resolveExpectedRankerWeights(input, ['relative_filter']),
       );
     });
+
+    it('activates situation learned facets only when explicit gift/beginner constraints are present', async () => {
+      const candidate: HybridCandidate = {
+        ...makeCandidate('wine-situation'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      } as HybridCandidate;
+      const aggregate = vi.fn().mockReturnValue(0.8);
+      const aggregator = { aggregate } as unknown as ScoreAggregator;
+      const ranker = makeRanker(aggregator);
+      const situationConstraints = makeConstraintsWithSoftEntries([
+        makeConstraint('occasion', ['gift']),
+        makeConstraint('style', ['approachable']),
+      ]);
+      const input = makeInputWithOverrides([candidate], {
+        constraints: situationConstraints,
+        queryPlan: {
+          constraints: situationConstraints,
+        },
+      });
+
+      await ranker.rank(input);
+
+      const passedWeights = aggregate.mock.calls[0]?.[1];
+      expect(passedWeights).toEqual(
+        resolveExpectedRankerWeights(input, []),
+      );
+      expect(passedWeights.giftSuitability).toBeGreaterThan(0);
+      expect(passedWeights.beginnerSuitability).toBeGreaterThan(0);
+    });
+
+    it('keeps situation learned facets off when the constraint bundle has no explicit trigger', async () => {
+      const candidate: HybridCandidate = {
+        ...makeCandidate('wine-situation-none'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      } as HybridCandidate;
+      const aggregate = vi.fn().mockReturnValue(0.8);
+      const aggregator = { aggregate } as unknown as ScoreAggregator;
+      const ranker = makeRanker(aggregator);
+      const input = makeInputWithOverrides([candidate], {
+        constraints: makeConstraintsWithSoftEntries([
+          makeConstraint('price_band', ['premium']),
+        ]),
+        queryPlan: {
+          constraints: makeConstraintsWithSoftEntries([
+            makeConstraint('price_band', ['premium']),
+          ]),
+        },
+      });
+
+      await ranker.rank(input);
+
+      const passedWeights = aggregate.mock.calls[0]?.[1];
+      expect(passedWeights).toEqual(
+        resolveExpectedRankerWeights(input, []),
+      );
+      expect(passedWeights.giftSuitability).toBe(0);
+      expect(passedWeights.beginnerSuitability).toBe(0);
+    });
   });
 
   describe('-Infinity filtering', () => {
@@ -907,6 +1001,36 @@ describe('Ranker', () => {
   });
 
   describe('rerankTopK', () => {
+    it('uses the compiled execution budget rerankLimit as the rerank ceiling', async () => {
+      const candidates = makeCandidates(8, 'wine-0');
+      const rerankSpy = vi.fn().mockResolvedValue(
+        candidates.slice(0, 3).map((candidate, index) => ({
+          entityId: candidate.entityId,
+          score: 1 - index * 0.1,
+          rank: index + 1,
+        })),
+      );
+      const reranker: RerankerPort = { rerank: rerankSpy };
+      const ranker = makeRanker(makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]), {
+        reranker,
+        rerankTopK: 8,
+      });
+
+      await ranker.rank(makeInputWithOverrides(candidates, {
+        compiled: {
+          ...makeCompiled(),
+          execution: {
+            ...makeCompiled().execution,
+            budget: { maxCandidates: 20, rerankLimit: 3, enablePrecisionRerank: true },
+          },
+        },
+      }));
+
+      expect(rerankSpy).toHaveBeenCalledOnce();
+      const callArgs = rerankSpy.mock.calls[0] as [string, readonly RerankCandidate[], number];
+      expect(callArgs[1]).toHaveLength(3);
+    });
+
     it('rerankTopK=3 with 8 candidates: top-3 sent to reranker, remaining 5 appended', async () => {
       const candidates = makeCandidates(8, 'wine-0');
 
@@ -931,7 +1055,16 @@ describe('Ranker', () => {
         rerankTopK: 3,
       });
 
-      const { results } = await ranker.rank(makeInput(candidates, true));
+      const { results } = await ranker.rank(makeInputWithOverrides(candidates, {
+        rerankForced: true,
+        compiled: {
+          ...makeCompiled(),
+          execution: {
+            ...makeCompiled().execution,
+            budget: { maxCandidates: 20, rerankLimit: 3, enablePrecisionRerank: true },
+          },
+        },
+      }));
 
       // Reranker should have been called with exactly 3 candidates
       expect(rerankSpy).toHaveBeenCalledOnce();
@@ -994,6 +1127,66 @@ describe('Ranker', () => {
           degradationReasons: ['reranker_timeout'],
         },
       });
+    });
+
+    it('records fine-grained ranking stage timings when a request stageTimer is provided', async () => {
+      const candidates = makeCandidates(6, 'wine-0');
+      const reranker: RerankerPort = {
+        rerank: (_query, rerankCandidates) =>
+          Promise.resolve(
+            rerankCandidates.map((c, i) => ({
+              entityId: c.entityId,
+              score: 1.0 - i * 0.1,
+              rank: i + 1,
+            })),
+          ),
+      };
+      const ranker = makeRanker(makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]), { reranker });
+      const stageTimer = createStageTimer();
+
+      await ranker.rank(makeInputWithOverrides(candidates, {
+        rerankForced: true,
+        requestContext: { stageTimer },
+      }));
+
+      expect(stageTimer.snapshot()).toEqual(expect.objectContaining({
+        'ranking.primary_scoring': expect.any(Number),
+        'ranking.cross_encoder': expect.any(Number),
+        'ranking.cross_encoder.remote': expect.any(Number),
+        'ranking.cross_encoder.postprocess': expect.any(Number),
+        'ranking.evidence_mapping': expect.any(Number),
+      }));
+    });
+
+    it('prefers local LTR over remote cross-encoder when the query class has an LTR model', async () => {
+      const candidates = makeCandidates(6, 'wine-ltr-primary');
+      const rerankSpy = vi.fn().mockResolvedValue(makeDescendingRerankResults(candidates));
+      const ranker = makeRanker(makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]), {
+        reranker: { rerank: rerankSpy },
+        ltrModels: new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]),
+      });
+      const stageTimer = createStageTimer();
+
+      const { metadata } = await ranker.rank(makeInputWithOverrides(candidates, {
+        rerankForced: true,
+        requestContext: { stageTimer },
+      }));
+
+      expect(rerankSpy).not.toHaveBeenCalled();
+      expect(metadata.rerankExecuted).toBe(true);
+      expect(metadata.rerankDecision).toMatchObject({
+        applied: true,
+        decision: 'applied',
+        modelId: 'semantic_preference',
+      });
+      expect(stageTimer.snapshot()).not.toEqual(expect.objectContaining({
+        'ranking.cross_encoder': expect.any(Number),
+        'ranking.cross_encoder.remote': expect.any(Number),
+        'ranking.cross_encoder.postprocess': expect.any(Number),
+      }));
+      expect(stageTimer.snapshot()).toEqual(expect.objectContaining({
+        'ranking.ltr': expect.any(Number),
+      }));
     });
   });
 

@@ -814,6 +814,8 @@ const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
   ['alcohol_max',           { type: 'num_lte', field: 'alcohol_pct',             clamp: [WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP], decimals: 2 }],
   ['vintage_year_min',      { type: 'int_gte', field: 'vintage_year',            clamp: [MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR] }],
   ['vintage_year_max',      { type: 'int_lte', field: 'vintage_year',            clamp: [MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR] }],
+  ['gift_suitability_min',     { type: 'num_gte', field: 'gift_suitability_score',     clamp: [0, 1], decimals: 3 }],
+  ['beginner_suitability_min', { type: 'num_gte', field: 'beginner_suitability_score', clamp: [0, 1], decimals: 3 }],
 
   // NOT-exclusion tokens (field_not: prefix)
   ['grape_primary_not', { type: 'not_contains', field: 'grape_primary' }],

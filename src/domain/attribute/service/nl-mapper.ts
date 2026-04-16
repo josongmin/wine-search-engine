@@ -3,6 +3,7 @@ import { throwIfAborted } from '../../shared/cooperative-abort.js';
 import type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
 import type { NLMapping } from '../model/nl-mapping.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
+import { generateKoreanPredicateVariants } from '../../query/service/korean-predicate-variants.js';
 
 /**
  * Current version of the default mapping table.
@@ -397,6 +398,20 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['시원하게 마실', { phrase: '시원하게 마실', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['시원하게', { phrase: '시원하게', mappedAttribute: 'style', operator: 'in', value: 'chillable', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
+  // ── Gift suitability (ETL Track C step 6 — gift_suitability_score) ─
+  ['선물하기 좋은', { phrase: '선물하기 좋은', mappedAttribute: 'gift_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['선물로 좋은', { phrase: '선물로 좋은', mappedAttribute: 'gift_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['gift worthy', { phrase: 'gift worthy', mappedAttribute: 'gift_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['giftable', { phrase: 'giftable', mappedAttribute: 'gift_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
+  // ── Beginner suitability (ETL Track C step 7 — beginner_suitability_score) ─
+  ['입문자용', { phrase: '입문자용', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.88, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['입문자에게 좋은', { phrase: '입문자에게 좋은', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['초보자용', { phrase: '초보자용', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['초보자', { phrase: '초보자', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['easy to drink', { phrase: 'easy to drink', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['마시기 쉬운', { phrase: '마시기 쉬운', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
   // ── Wine types (Korean + English) ──────────────────────────────────
   // Maps to wine_type attribute via '=' operator for hard Vespa filter.
   ['레드', { phrase: '레드', mappedAttribute: 'wine_type', operator: '=', value: 'red', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
@@ -636,17 +651,40 @@ export class NLMapper {
    */
   async mapPhrase(phrase: string): Promise<NLMapping | null> {
     const trimmed = phrase.trim();
+    const lower = trimmed.toLowerCase();
 
     // 1. Check the repository (with lowercase normalisation so "Bordeaux" and
     // "bordeaux" always hit the same mapping row).
-    const repoMapping = await this.mappingTable.findMapping(trimmed.toLowerCase());
+    const repoMapping = await this.mappingTable.findMapping(lower);
     if (repoMapping !== null) {
       return repoMapping;
     }
 
     // 2. Fall back to built-in defaults (all DEFAULT_MAPPINGS keys are lowercase).
-    const builtIn = DEFAULT_MAPPINGS.get(trimmed.toLowerCase());
-    return builtIn ?? null;
+    const builtIn = DEFAULT_MAPPINGS.get(lower);
+    if (builtIn != null) {
+      return builtIn;
+    }
+
+    // 3. Generate Korean predicate variants (연결형→관형형) and retry lookup.
+    // e.g. "산도 높고" → try "산도 높은" which exists in DEFAULT_MAPPINGS.
+    const variants = generateKoreanPredicateVariants(lower);
+    for (const variant of variants) {
+      // Skip the original (already tried above)
+      if (variant === lower) {
+        continue;
+      }
+      const variantRepoMapping = await this.mappingTable.findMapping(variant);
+      if (variantRepoMapping !== null) {
+        return variantRepoMapping;
+      }
+      const variantBuiltIn = DEFAULT_MAPPINGS.get(variant);
+      if (variantBuiltIn != null) {
+        return variantBuiltIn;
+      }
+    }
+
+    return null;
   }
 
   /**

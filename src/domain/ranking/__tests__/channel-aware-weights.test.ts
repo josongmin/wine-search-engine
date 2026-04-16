@@ -3,9 +3,11 @@ import {
   resolveChannelAwareWeights,
   DEFAULT_WEIGHTS,
   resolveWeights,
+  applySituationIntentWeightOverlay,
 } from '../model/scoring-weights.js';
 import type { QueryClass } from '../../shared/types/index.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
+import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
 import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 
@@ -29,6 +31,27 @@ function nonPenaltySum(w: ScoringWeights): number {
     w.giftSuitability +
     w.beginnerSuitability
   );
+}
+
+function makeConstraint(
+  attribute: string,
+  value: NormalizedConstraint['value'],
+): NormalizedConstraint {
+  return {
+    attribute,
+    operator: Array.isArray(value) ? 'in' : '=',
+    value,
+    source_phrase: `${attribute}:${typeof value === 'object' ? JSON.stringify(value) : String(value)}`,
+    confidence: 1,
+  };
+}
+
+function makeConstraintBundle(
+  hard: readonly NormalizedConstraint[] = [],
+  soft: readonly NormalizedConstraint[] = [],
+  inferred: readonly NormalizedConstraint[] = [],
+): ConstraintBundle {
+  return { hard, soft, inferred };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -235,6 +258,105 @@ describe('resolveChannelAwareWeights', () => {
         DEFAULT_WEIGHTS,
       );
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(DEFAULT_WEIGHTS), 10);
+    });
+  });
+
+  describe('situation-intent overlay — boost learned facets only on explicit triggers', () => {
+    it('returns the base profile unchanged when no supported situation facet is present', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(base, makeConstraintBundle());
+      expect(result).toBe(base);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+      expect(result.giftSuitability).toBe(0);
+      expect(result.beginnerSuitability).toBe(0);
+    });
+
+    it('raises giftSuitability only when occasion=gift is explicitly present', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [makeConstraint('occasion', ['gift'])],
+        ),
+      );
+      expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
+      expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('raises beginnerSuitability only when style=approachable is explicitly present', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [makeConstraint('style', ['approachable'])],
+        ),
+      );
+      expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('can activate both learned facets when both explicit triggers are present', () => {
+      const base = resolveWeights('semantic_preference');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [
+            makeConstraint('occasion', ['gift']),
+            makeConstraint('style', ['approachable']),
+          ],
+        ),
+      );
+      expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
+      expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('pure_constraint base weights provide warm gift/beginner activation without explicit triggers', () => {
+      const base = resolveWeights('pure_constraint');
+      // pure_constraint has giftSuitability=0.08, beginnerSuitability=0.08 as a static base
+      // for situation queries with strong attribute constraints
+      expect(base.giftSuitability).toBe(0.08);
+      expect(base.beginnerSuitability).toBe(0.08);
+      // Without explicit triggers, the overlay returns the base unchanged
+      const result = applySituationIntentWeightOverlay(base, makeConstraintBundle());
+      expect(result).toBe(base);
+      expect(result.giftSuitability).toBe(0.08);
+      expect(result.beginnerSuitability).toBe(0.08);
+    });
+
+    it('pure_constraint gift/beginner weights are boosted further by explicit situation triggers', () => {
+      const base = resolveWeights('pure_constraint');
+      const result = applySituationIntentWeightOverlay(
+        base,
+        makeConstraintBundle(
+          [],
+          [
+            makeConstraint('occasion', ['gift']),
+            makeConstraint('style', ['approachable']),
+          ],
+        ),
+      );
+      // Dynamic overlay bumps to 0.15 floor, which is higher than the 0.08 base
+      expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
+      expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('pure_constraint compensated weight reductions maintain budget for constraint signals', () => {
+      const weights = resolveWeights('pure_constraint');
+      // softConstraint + attributeAlignment must remain the dominant signals
+      expect(weights.softConstraint + weights.attributeAlignment).toBeGreaterThan(
+        weights.giftSuitability + weights.beginnerSuitability,
+      );
+      // semantic was reduced to compensate — must be lower than gift+beginner combined
+      expect(weights.semantic).toBeLessThan(
+        weights.giftSuitability + weights.beginnerSuitability,
+      );
     });
   });
 });

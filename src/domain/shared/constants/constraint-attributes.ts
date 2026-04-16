@@ -36,6 +36,10 @@ export const SOFT_CONSTRAINT_ATTRIBUTES: ReadonlySet<string> = new Set([
   'drinking_window',
   'flavor_profile',
   'certification',
+  // ETL Track C suitability scores — soft ranking 신호, hard 필터 아님.
+  // 0-result 방지: "선물하기 좋은", "입문자용" 등의 쿼리가 hard 필터로 오분류되지 않도록 함.
+  'gift_suitability',
+  'beginner_suitability',
 ]);
 
 /**

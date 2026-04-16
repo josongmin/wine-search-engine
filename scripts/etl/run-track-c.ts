@@ -10,6 +10,8 @@
  * 3. generate-pairings.ts - Claude-based food pairing taxonomy normalization
  * 4. run-track-c-step4-occasion.ts - ontology-constrained occasion classification
  * 5. drinking-window-backfill.ts - heuristic stub (opt-in only)
+ * 6. run-track-c-step6-gift-suitability.ts - LLM-based gift suitability scoring
+ * 7. run-track-c-step7-beginner-suitability.ts - LLM-based beginner suitability scoring
  *
  * SOTA++ improvements over v1:
  * - Advisory file lock prevents concurrent runs
@@ -35,6 +37,60 @@ export const TRACK_C_OUTPUT_FILE = ETL_ARTIFACT_FILES.trackc;
 export const TRACK_C_SOURCE_STATE_FILE = resolveDataPath('.silver-trackc.source-state.json');
 const LOCK_FILE = resolveDataPath('.etl-track-c.lock');
 const MIN_RECORDS_FOR_TRACK_C = 100; // fail fast: don't spend LLM credits on tiny datasets
+
+export interface TrackCStepDefinition {
+  readonly num: number;
+  readonly script: string;
+  readonly desc: string;
+  readonly field: string;
+}
+
+export const TRACK_C_STEP_DEFINITIONS = [
+  {
+    num: 1,
+    script: 'run-track-c-step1.ts',
+    desc: 'Generate Critic Proxy Scores',
+    field: 'criticProxy',
+  },
+  {
+    num: 2,
+    script: 'run-track-c-step2.ts',
+    desc: 'Enrich Certifications (Wikidata + LLM)',
+    field: 'certifications',
+  },
+  {
+    num: 3,
+    script: 'run-track-c-step3.ts',
+    desc: 'Generate Food Pairings (Claude)',
+    field: 'pairingTags',
+  },
+  {
+    num: 4,
+    script: 'run-track-c-step4-occasion.ts',
+    desc: 'Classify Occasion Tags (Ontology + LLM)',
+    field: 'occasionClassification',
+  },
+  {
+    num: 5,
+    script: 'drinking-window-backfill.ts',
+    desc: 'Drinking Window Backfill (Heuristic Stub, Opt-In)',
+    field: 'drinkingWindow',
+  },
+  {
+    num: 6,
+    script: 'run-track-c-step6-gift-suitability.ts',
+    desc: 'Score Gift Suitability (LLM Teacher Label)',
+    field: 'giftSuitabilityClassification',
+  },
+  {
+    num: 7,
+    script: 'run-track-c-step7-beginner-suitability.ts',
+    desc: 'Score Beginner Suitability (LLM Teacher Label)',
+    field: 'beginnerSuitabilityClassification',
+  },
+] as const satisfies readonly TrackCStepDefinition[];
+
+export const TRACK_C_TOTAL_STEPS = TRACK_C_STEP_DEFINITIONS.length;
 
 export interface TrackCSourceState {
   readonly sourcePath: string;
@@ -169,11 +225,11 @@ export function assertTrackCFieldCoverageIsComplete(
   }
 }
 
-function parseFromStep(argv: string[]): number {
+export function parseFromStep(argv: string[]): number {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--from-step') {
       const n = parseInt(argv[i + 1] ?? '', 10);
-      return Number.isNaN(n) ? 1 : Math.max(1, Math.min(5, n));
+      return Number.isNaN(n) ? 1 : Math.max(1, Math.min(TRACK_C_TOTAL_STEPS, n));
     }
   }
   return 1;
@@ -302,40 +358,7 @@ async function main() {
   }> = [];
 
   try {
-    const steps = [
-      {
-        num: 1,
-        script: 'run-track-c-step1.ts',
-        desc: 'Generate Critic Proxy Scores',
-        field: 'criticProxy',
-      },
-      {
-        num: 2,
-        script: 'run-track-c-step2.ts',
-        desc: 'Enrich Certifications (Wikidata + LLM)',
-        field: 'certifications',
-      },
-      {
-        num: 3,
-        script: 'run-track-c-step3.ts',
-        desc: 'Generate Food Pairings (Claude)',
-        field: 'pairingTags',
-      },
-      {
-        num: 4,
-        script: 'run-track-c-step4-occasion.ts',
-        desc: 'Classify Occasion Tags (Ontology + LLM)',
-        field: 'occasionClassification',
-      },
-      {
-        num: 5,
-        script: 'drinking-window-backfill.ts',
-        desc: 'Drinking Window Backfill (Heuristic Stub, Opt-In)',
-        field: 'drinkingWindow',
-      },
-    ];
-
-    for (const step of steps) {
+    for (const step of TRACK_C_STEP_DEFINITIONS) {
       if (step.num < fromStep) {
         console.log(`\n  Skipping step ${step.num} (--from-step ${fromStep})`);
         results.push({ step: step.num, name: step.desc, success: true });
@@ -391,7 +414,7 @@ async function main() {
   console.log(`  Records: ${finalRecordCount}`);
   console.log(`  Size: ${finalSize}`);
 
-  console.log(`\nSteps Completed:`);
+  console.log(`\nSteps Completed (${TRACK_C_TOTAL_STEPS} planned):`);
   for (const result of results) {
     const icon = result.success ? 'OK' : 'FAIL';
     console.log(`  [${icon}] Step ${result.step}: ${result.name}`);

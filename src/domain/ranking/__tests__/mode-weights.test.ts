@@ -90,6 +90,18 @@ describe('ModeWeightProfile invariants (RFC-017 §8.3)', () => {
       expect(profile, `getModeWeights('${mode}') must not fall through to DEFAULT_WEIGHTS`).not.toBe(DEFAULT_WEIGHTS);
     }
   });
+
+  it('semantic_preference leaves situation learned facets to the query-aware overlay', () => {
+    const profile = getModeWeights('semantic_preference');
+    expect(profile.giftSuitabilityWeight).toBe(0);
+    expect(profile.beginnerSuitabilityWeight).toBe(0);
+  });
+
+  it('pure_constraint also leaves situation learned facets to the query-aware overlay', () => {
+    const weights = resolveWeights('pure_constraint');
+    expect(weights.giftSuitability).toBe(0);
+    expect(weights.beginnerSuitability).toBe(0);
+  });
 });
 
 describe('MODE_WEIGHT_OVERLAY_MAP — SSoT parity (RCA5-04 prevention)', () => {

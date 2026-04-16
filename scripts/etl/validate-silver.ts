@@ -39,6 +39,8 @@ export const SILVER_QUALITY_GATES = {
   minProducerPrestigeCoverage: 0.70, // ≥70% from winery_rating
   minDrinkingWindowCoverage: 0.60,   // ≥60% from Track C step 4
   minCriticProxyCoverage: 0.80,      // ≥80% from Track C step 1
+  minGiftSuitabilityCoverage: 0.70,  // ≥70% from Track C step 6
+  minBeginnerSuitabilityCoverage: 0.70, // ≥70% from Track C step 7
 } as const;
 
 export interface SilverQualityGateThresholds {
@@ -51,6 +53,8 @@ export interface SilverQualityGateThresholds {
   readonly minProducerPrestigeCoverage?: number;
   readonly minDrinkingWindowCoverage?: number;
   readonly minCriticProxyCoverage?: number;
+  readonly minGiftSuitabilityCoverage?: number;
+  readonly minBeginnerSuitabilityCoverage?: number;
 }
 
 export interface SilverQualityGateOptions {
@@ -112,6 +116,8 @@ export function validateSilverRecords(
     readonly producerPrestige?: number | null;
     readonly criticProxy?: { readonly proxyScore?: number } | null;
     readonly drinkingWindow?: unknown;
+    readonly giftSuitabilityClassification?: { readonly score?: number | null } | null;
+    readonly beginnerSuitabilityClassification?: { readonly score?: number | null } | null;
   };
   const gold = records as readonly GoldRecord[];
 
@@ -131,6 +137,8 @@ export function validateSilverRecords(
     producerPrestige: ratio(gold.filter((r) => r.producerPrestige != null).length),
     criticProxy: ratio(gold.filter((r) => r.criticProxy?.proxyScore != null).length),
     drinkingWindow: ratio(gold.filter((r) => r.drinkingWindow != null).length),
+    giftSuitability: ratio(gold.filter((r) => r.giftSuitabilityClassification != null).length),
+    beginnerSuitability: ratio(gold.filter((r) => r.beginnerSuitabilityClassification != null).length),
   };
 
   const gateCoverage = (
@@ -221,6 +229,46 @@ export function validateSilverRecords(
     'drinkingWindow coverage',
     'run Track C step 4 (drinking-window-backfill)',
   );
+  gateCoverage(
+    'giftSuitability',
+    gates.minGiftSuitabilityCoverage,
+    'giftSuitability coverage',
+    'run Track C step 6 to generate provenance-backed gift suitability scores',
+  );
+  gateCoverage(
+    'beginnerSuitability',
+    gates.minBeginnerSuitabilityCoverage,
+    'beginnerSuitability coverage',
+    'run Track C step 7 to generate provenance-backed beginner suitability scores',
+  );
+
+  const validateNormalizedScore = (
+    label: string,
+    recordId: string,
+    value: number | null | undefined,
+  ): void => {
+    if (value == null) {
+      return;
+    }
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      blockers.push(
+        `${label} for ${recordId} = ${value} outside [0, 1] — expected normalized score`,
+      );
+    }
+  };
+
+  for (const record of gold) {
+    validateNormalizedScore(
+      'giftSuitabilityClassification.score',
+      record.sourceId,
+      record.giftSuitabilityClassification?.score,
+    );
+    validateNormalizedScore(
+      'beginnerSuitabilityClassification.score',
+      record.sourceId,
+      record.beginnerSuitabilityClassification?.score,
+    );
+  }
 
   const report: SilverQualityReport = {
     totalBronzeRows: n, // already deduped at this point

@@ -17,7 +17,11 @@ import type {
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import type { QueryClassWeights } from '../index.js';
-import { resolveWeights, resolveChannelAwareWeights } from '../model/scoring-weights.js';
+import {
+  resolveWeights,
+  resolveChannelAwareWeights,
+  applySituationIntentWeightOverlay,
+} from '../model/scoring-weights.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
 import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
@@ -823,7 +827,7 @@ export class Ranker {
     const scored: ScoredEntry[] = [];
 
     // Step 2: Select weights based on query class, then overlay retrieval-mode
-    // specific boosts from mode-weights.ts (producer prestige, recency, geo).
+    // specific boosts and explicit situation-intent boosts from query constraints.
     // E3-U5: compiled-first — use ExecutionCompiler's resolved mode when available.
     const effectiveRetrievalMode = input.compiled.execution.effectiveRetrievalMode;
     const baseWeights = resolveWeights(queryPlan.queryClass);
@@ -846,7 +850,11 @@ export class Ranker {
       overlaidSum > 0 && baseSum > 0 && overlaidSum !== baseSum
         ? baseSum / overlaidSum
         : 1;
-    const weights: ScoringWeights = scaleOverlaidWeights(overlaid, modeNormFactor);
+    const modeAdjustedWeights: ScoringWeights = scaleOverlaidWeights(overlaid, modeNormFactor);
+    const weights: ScoringWeights = applySituationIntentWeightOverlay(
+      modeAdjustedWeights,
+      constraints,
+    );
 
     // Pre-compute query-level signals shared across all candidates.
     const referenceYear = new Date().getFullYear();
@@ -1018,6 +1026,7 @@ export class Ranker {
       // E3-U5: compiled-first route for gate — falls back to V1 plan.route
       const gateEffectiveRoute = input.compiled.execution.effectiveRoute;
       const compiledBudget = input.compiled.execution.budget;
+      const hasPrimaryLtrModel = this.ltrModels?.has(queryPlan.queryClass) === true;
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
         queryClass: queryPlan.queryClass,
@@ -1033,7 +1042,7 @@ export class Ranker {
 
       if (gateDecision.shouldRerank) {
         const effectiveTopK = gateDecision.topKOverride ?? this.rerankTopK;
-        if (this.reranker !== undefined) {
+        if (this.reranker !== undefined && !hasPrimaryLtrModel) {
           try {
             const preRerankCount = viable.length;
             stageTimer?.start('ranking.cross_encoder');
