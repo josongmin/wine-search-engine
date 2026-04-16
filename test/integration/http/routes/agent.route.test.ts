@@ -222,9 +222,7 @@ describe('POST /v1/agent', () => {
     });
 
     expect(response.statusCode).toBe(500);
-    const body = response.json() as {
-      error: { code: string; request_id: string };
-    };
+    const body = response.json();
     expect(body.error.code).toBe('INTERNAL_ERROR');
     expect(body.error.request_id).toEqual(expect.any(String));
   });
@@ -262,9 +260,7 @@ describe('POST /v1/agent', () => {
     });
 
     expect(response.statusCode).toBe(500);
-    const body = response.json() as {
-      error: { code: string; request_id: string };
-    };
+    const body = response.json();
     expect(body.error.code).toBe('INTERNAL_ERROR');
     expect(body.error.request_id).toEqual(expect.any(String));
   });
