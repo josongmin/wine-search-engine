@@ -316,10 +316,8 @@ describe('resolveChannelAwareWeights', () => {
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });
 
-    it('pure_constraint base weights provide warm gift/beginner activation without explicit triggers', () => {
+    it('pure_constraint has warm gift/beginner baseline without explicit triggers', () => {
       const base = resolveWeights('pure_constraint');
-      // pure_constraint has giftSuitability=0.08, beginnerSuitability=0.08 as a static base
-      // for situation queries with strong attribute constraints
       expect(base.giftSuitability).toBe(0.08);
       expect(base.beginnerSuitability).toBe(0.08);
       // Without explicit triggers, the overlay returns the base unchanged
@@ -341,22 +339,21 @@ describe('resolveChannelAwareWeights', () => {
           ],
         ),
       );
-      // Dynamic overlay bumps to 0.15 floor, which is higher than the 0.08 base
+      // Dynamic overlay bumps both learned facets to the explicit-intent floor.
       expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
       expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });
 
-    it('pure_constraint compensated weight reductions maintain budget for constraint signals', () => {
+    it('pure_constraint compensated weight reductions preserve constraint signal dominance', () => {
       const weights = resolveWeights('pure_constraint');
       // softConstraint + attributeAlignment must remain the dominant signals
       expect(weights.softConstraint + weights.attributeAlignment).toBeGreaterThan(
         weights.giftSuitability + weights.beginnerSuitability,
       );
-      // semantic was reduced to compensate — must be lower than gift+beginner combined
-      expect(weights.semantic).toBeLessThan(
-        weights.giftSuitability + weights.beginnerSuitability,
-      );
+      expect(weights.semantic).toBe(0.04);
+      expect(weights.softConstraint).toBeGreaterThan(weights.semantic);
+      expect(weights.attributeAlignment).toBeGreaterThan(weights.preferenceAlignment);
     });
   });
 });

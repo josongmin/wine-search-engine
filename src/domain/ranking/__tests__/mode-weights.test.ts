@@ -97,10 +97,10 @@ describe('ModeWeightProfile invariants (RFC-017 §8.3)', () => {
     expect(profile.beginnerSuitabilityWeight).toBe(0);
   });
 
-  it('pure_constraint also leaves situation learned facets to the query-aware overlay', () => {
+  it('pure_constraint provides warm gift/beginner baseline before query-aware overlay', () => {
     const weights = resolveWeights('pure_constraint');
-    expect(weights.giftSuitability).toBe(0);
-    expect(weights.beginnerSuitability).toBe(0);
+    expect(weights.giftSuitability).toBe(0.08);
+    expect(weights.beginnerSuitability).toBe(0.08);
   });
 });
 
