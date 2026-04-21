@@ -41,6 +41,7 @@ import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import { buildRetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 import {
   AmbiguityIntentCompiler,
   type AmbiguityIntentCompilerInput,
@@ -410,6 +411,7 @@ export class Planner {
     );
     const constraints = buildBundleFromAtoms(roleTypedAtoms);
     const retrievalPlan = buildRetrievalPlan(constraints);
+    const retrievalObjective = buildRetrievalObjective(constraints);
 
     // 7. Build expansions.
     const baseExpansions = this.expansionBuilder.build(
@@ -529,6 +531,7 @@ export class Planner {
         ? { constraintExtraction: parsed.constraintExtraction }
         : {}),
       retrievalPlan,
+      retrievalObjective,
       // E2-T3: Expose conflict-resolved, provenance-typed atoms for ranker + safety consumers.
       constraintAtoms: roleTypedAtoms,
       // ADR-010 Phase 1a: surface the trivial ConstraintGraph when the

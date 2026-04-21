@@ -8,6 +8,7 @@ import type { QueryPlannerPort } from '../../../../src/application/search/port/s
 import type { ResponseBuilder } from '../../../../src/domain/response/service/response-builder.js';
 import type { NormalizedConstraint } from '../../../../src/domain/shared/types/index.js';
 import { buildRetrievalPlan } from '../../../../src/domain/retrieval/service/retrieval-plan-builder.js';
+import { buildRetrievalObjective } from '../../../../src/domain/retrieval/model/retrieval-objective.js';
 import { logSearchEvent } from '../../../../src/observability/log-search-event.js';
 
 vi.mock('../../../../src/observability/log-search-event.js', () => ({
@@ -183,6 +184,14 @@ describe('runSearchPreRoutePhase', () => {
       expect(result.compiled.query.retrievalPlan).toEqual(
         buildRetrievalPlan(result.plan.constraints),
       );
+      expect(result.compiled.query.retrievalObjective).toEqual(
+        buildRetrievalObjective(result.plan.constraints),
+      );
+      expect(result.compiled.query.retrievalObjective.constraintTargets).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+        ]),
+      );
       expect(result.compiled.execution.provenancePolicy.requireConstraintEvidence).toBe(true);
     }
   });
@@ -343,6 +352,22 @@ describe('runSearchPreRoutePhase', () => {
     expect(result.outcome).toBe('return');
     expect(decomposedSearch.execute).toHaveBeenCalledWith(
       ['Opus One', 'Screaming Eagle'],
+      [
+        expect.objectContaining({
+          rawQuery: 'Opus One',
+          retrievalQuery: 'Opus One',
+          mode: 'entity',
+          retrievalMode: 'auto',
+          evidenceSource: 'entity_default',
+        }),
+        expect.objectContaining({
+          rawQuery: 'Screaming Eagle',
+          retrievalQuery: 'Screaming Eagle',
+          mode: 'entity',
+          retrievalMode: 'auto',
+          evidenceSource: 'entity_default',
+        }),
+      ],
       'compare',
       'Opus One vs Screaming Eagle',
       'r-compare',
@@ -380,6 +405,7 @@ describe('runSearchPreRoutePhase', () => {
     const decomposedSearch = {
       execute: vi.fn().mockImplementation(async (
         _subQueries: [string, string],
+        _comparisonLegs: unknown,
         _comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
         _originalQuery: string,
         _requestId: string,

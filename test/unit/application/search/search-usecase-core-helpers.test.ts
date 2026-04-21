@@ -160,6 +160,52 @@ describe('buildHybridRetrievalInputForPlan', () => {
       expect.arrayContaining(['오푸스원', 'opusone']),
     );
   });
+
+  it('does not flatten learned suitability or drinking-window signals into numeric lexical expansions', () => {
+    const plan = {
+      ...minimalPlan(),
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'gift_suitability',
+            operator: '>=',
+            value: 0.7,
+            source_phrase: 'gift-worthy',
+            confidence: 0.9,
+            mapping_version: 'test',
+          },
+          {
+            attribute: 'beginner_suitability',
+            operator: '>=',
+            value: 0.6,
+            source_phrase: '초보자',
+            confidence: 0.88,
+            mapping_version: 'test',
+          },
+          {
+            attribute: 'drinking_window',
+            operator: '=',
+            value: 'peak',
+            source_phrase: '지금 피크',
+            confidence: 0.85,
+            mapping_version: 'test',
+          },
+        ],
+        inferred: [],
+      },
+    } as QueryPlanV1;
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+
+    expect(input.lexicalQueries).not.toEqual(expect.arrayContaining(['0.7', '0.6', 'peak']));
+    expect(input.semanticQueries).not.toEqual(expect.arrayContaining(['0.7', '0.6', 'peak']));
+    expect(input.retrievalObjective?.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ axis: 'gift_suitability', value: 0.7 }),
+      expect.objectContaining({ axis: 'beginner_suitability', value: 0.6 }),
+      expect.objectContaining({ axis: 'drinking_window', value: 'peak' }),
+    ]));
+  });
 });
 
 describe('tryGetCachedSearchResponse', () => {

@@ -1,4 +1,5 @@
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { BlockingPort } from '../port/blocking.port.js';
 
@@ -56,6 +57,7 @@ export class Blocker {
    */
   private recordBlockingMetrics(candidateCount: number, elapsedMs: number): void {
     if (candidateCount === 0) {
+      globalSilentSkipCounter.increment('blocker_zero_candidates', { elapsedMs });
       // Zero-candidate blocking is almost always a recall problem: either
       // the blocking adapter is a stub, the index is empty, or the query
       // failed to match anything. Downstream resolution will produce no

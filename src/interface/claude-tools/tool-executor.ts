@@ -56,6 +56,7 @@ import {
   SearchToolInputSchema,
 } from './tool-schemas.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
+import { buildComparisonDecompositionLegsForRetrieval } from '../../domain/query/service/decomposition-detector.js';
 
 /** criticScoreNormalized is 0–1; predictor wants 0–100 proxy points. */
 const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
@@ -135,6 +136,27 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   if (input.appellation !== undefined) {
     pushSearchToolStructuredFilter(filters, 'appellation', '=', input.appellation, input.appellation);
   }
+  if (input.occasion !== undefined && input.occasion.length > 0) {
+    pushSearchToolStructuredFilter(filters, 'occasion', 'in', [...input.occasion], input.occasion.join(', '));
+  }
+  if (input.gift_suitability_min !== undefined) {
+    pushSearchToolStructuredFilter(
+      filters,
+      'gift_suitability',
+      '>=',
+      input.gift_suitability_min,
+      `gift_suitability>=${input.gift_suitability_min}`,
+    );
+  }
+  if (input.beginner_suitability_min !== undefined) {
+    pushSearchToolStructuredFilter(
+      filters,
+      'beginner_suitability',
+      '>=',
+      input.beginner_suitability_min,
+      `beginner_suitability>=${input.beginner_suitability_min}`,
+    );
+  }
 
   filters.push(...buildSearchToolStyleDerivedFilters(input));
 
@@ -186,6 +208,13 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
     ...(input.style !== undefined ? { style: input.style } : {}),
     ...(input.styles !== undefined ? { styles: input.styles } : {}),
     ...(input.certification !== undefined ? { certification: input.certification } : {}),
+    ...(input.occasion !== undefined ? { occasion: input.occasion } : {}),
+    ...(input.gift_suitability_min !== undefined
+      ? { gift_suitability_min: input.gift_suitability_min }
+      : {}),
+    ...(input.beginner_suitability_min !== undefined
+      ? { beginner_suitability_min: input.beginner_suitability_min }
+      : {}),
   };
   const filters = buildSearchToolStructuredFilters(sharedSearchInput);
   const buildSubQuery = (query: string): string => {
@@ -196,6 +225,7 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
       appellation: input.appellation,
       vintage_min: input.vintage_min,
       vintage_max: input.vintage_max,
+      occasion: input.occasion,
     });
     const clauses = buildSearchToolSoftClauses(input);
     return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
@@ -571,9 +601,11 @@ export class WineToolExecutor {
     const validated = validation.data;
     const startTime = Date.now();
     const compareRequest = buildCompareToolRequestContext(validated);
+    const rawSubQueries = [validated.query_a, validated.query_b] as const;
 
     return this.deps.decomposedSearchUseCase.execute(
-      [...compareRequest.subQueries] as [string, string],
+      [...rawSubQueries],
+      buildComparisonDecompositionLegsForRetrieval(rawSubQueries, compareRequest.subQueries),
       'compare',
       compareRequest.originalQuery,
       requestId,

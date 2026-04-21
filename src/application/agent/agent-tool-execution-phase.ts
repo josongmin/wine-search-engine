@@ -65,6 +65,33 @@ export class AgentToolExecutionPhase {
       state,
     );
 
+    if (parsed.plannerDefect !== undefined) {
+      const defectBudgetCheck = budget.recordStep(
+        '__planner_defect__',
+        { query: parsed.plannerDefect.code },
+      );
+      if (!defectBudgetCheck.allowed) {
+        state.terminationReason = defectBudgetCheck.reason ?? 'loop_detected';
+        return true;
+      }
+
+      state.reasoningFailureDetected = true;
+      state.plannerDefectAttempts += 1;
+      state.steps.push({
+        index: state.steps.length,
+        thought: parsed.thought,
+        observation: parsed.plannerDefect.observation,
+        durationMs: Math.max(0, Date.now() - stepStartMs),
+        tokenCount: { input: inputTokens, output: outputTokens },
+      });
+
+      if (state.plannerDefectAttempts > 2) {
+        state.terminationReason = 'error';
+        return true;
+      }
+      return false;
+    }
+
     if (typeof parsed.answer === 'string') {
       const trimmedAnswer = parsed.answer.trim();
       if (trimmedAnswer.length > 0) {

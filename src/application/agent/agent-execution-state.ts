@@ -19,6 +19,7 @@ export interface AgentExecutionState {
   policyBlocked: boolean;
   llmCircuitOpen: boolean;
   unknownToolAttempts: number;
+  plannerDefectAttempts: number;
   timeoutStats: { llmStep: number; tool: number; parallelBatch: number };
   hasInjectedRefinementHint: boolean;
   pendingPlannerDirective: AgentPlannerDirective | undefined;
@@ -42,6 +43,7 @@ export function createAgentExecutionState(): AgentExecutionState {
     policyBlocked: false,
     llmCircuitOpen: false,
     unknownToolAttempts: 0,
+    plannerDefectAttempts: 0,
     timeoutStats: { llmStep: 0, tool: 0, parallelBatch: 0 },
     hasInjectedRefinementHint: false,
     pendingPlannerDirective: undefined,

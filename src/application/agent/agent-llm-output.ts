@@ -1,7 +1,7 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
   isKnownAgentToolName,
-  parseKnownAgentToolAttemptInput,
+  parseKnownAgentToolAttemptInputWithRepair,
   parseUnknownAgentToolAttemptInput,
   type AgentToolAttempt,
 } from './agent-tool-attempt-schema.js';
@@ -23,6 +23,16 @@ export interface LlmAction {
   readonly action?: AgentToolAttempt;
   readonly actions?: readonly AgentToolAttempt[];
   readonly answer?: string;
+  readonly plannerDefect?: PlannerDefect;
+}
+
+export interface PlannerDefect {
+  readonly code:
+    | 'mixed_answer_and_tool'
+    | 'invalid_tool_input'
+    | 'json_without_action_or_answer';
+  readonly observation: string;
+  readonly rawText: string;
 }
 
 export interface LlmResult {
@@ -127,22 +137,60 @@ export function isLikelyJsonAttempt(text: string): boolean {
   return cleaned.startsWith('{') || cleaned.startsWith('[');
 }
 
-function parseToolCallCandidate(candidate: Record<string, unknown>): AgentToolAttempt | null {
+interface ToolCallCandidateParseResult {
+  readonly attempt: AgentToolAttempt | null;
+  readonly plannerDefect?: PlannerDefect | undefined;
+}
+
+function buildInvalidToolInputObservation(
+  tool: string,
+  issues: readonly string[],
+  removedUnknownKeys: readonly string[],
+): string {
+  const issueText = issues.length > 0 ? issues.join('; ') : 'unknown validation error';
+  const repairedUnknownKeys = removedUnknownKeys.length > 0
+    ? ` Removed unsupported keys: ${removedUnknownKeys.join(', ')}.`
+    : '';
+  return `Planner output invalid for ${tool}: ${issueText}.${repairedUnknownKeys} Re-emit a valid JSON tool call using only the allowed schema fields.`;
+}
+
+function parseToolCallCandidate(candidate: Record<string, unknown>): ToolCallCandidateParseResult {
   const tool = typeof candidate['tool'] === 'string' ? candidate['tool'] : '';
   if (tool.length === 0) {
-    return null;
+    return { attempt: null };
   }
 
   if (isKnownAgentToolName(tool)) {
-    return parseKnownAgentToolAttemptInput(tool, candidate['input']);
+    const parsed = parseKnownAgentToolAttemptInputWithRepair(tool, candidate['input']);
+    if (parsed.attempt !== null) {
+      if (parsed.repair !== undefined) {
+        log.info(
+          { tool, removedUnknownKeys: parsed.repair.removedUnknownKeys },
+          'agent LLM tool input repaired by dropping unknown schema fields',
+        );
+      }
+      return { attempt: parsed.attempt };
+    }
+    return {
+      attempt: null,
+      plannerDefect: {
+        code: 'invalid_tool_input',
+        observation: buildInvalidToolInputObservation(
+          tool,
+          parsed.issues.map((issue) => issue.message),
+          parsed.repair?.removedUnknownKeys ?? [],
+        ),
+        rawText: JSON.stringify(candidate),
+      },
+    };
   }
 
   if (typeof candidate['input'] !== 'undefined') {
     const unknownInput = parseUnknownAgentToolAttemptInput(candidate['input']);
-    return { tool, input: unknownInput };
+    return { attempt: { tool, input: unknownInput } };
   }
 
-  return { tool, input: {} };
+  return { attempt: { tool, input: {} } };
 }
 
 export function parseLlmOutput(text: string): LlmAction {
@@ -165,9 +213,16 @@ export function parseLlmOutput(text: string): LlmAction {
     if (hasAnswer && (hasActionObject || hasActionsArray || hasBareTool)) {
       log.warn(
         { textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
-        'agent LLM produced mixed answer+tool JSON; failing closed to prevent ambiguous execution',
+        'agent LLM produced mixed answer+tool JSON; routing to planner defect recovery',
       );
-      return { thought: '[invalid mixed LLM output]', answer: trimmed };
+      return {
+        thought,
+        plannerDefect: {
+          code: 'mixed_answer_and_tool',
+          observation: 'Planner output mixed a final answer with tool instructions. Re-emit exactly one JSON shape: either {"thought":"...","answer":"..."} or {"thought":"...","action":{...}}.',
+          rawText: trimmed,
+        },
+      };
     }
 
     if (hasAnswer) {
@@ -176,12 +231,18 @@ export function parseLlmOutput(text: string): LlmAction {
 
     const actionsRaw = parsed['actions'];
     if (Array.isArray(actionsRaw) && actionsRaw.length > 0) {
-      const validActions = (actionsRaw as unknown[])
+      const parsedActions = (actionsRaw as unknown[])
         .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
         .map(parseToolCallCandidate)
+      const validActions = parsedActions
+        .map((entry) => entry.attempt)
         .filter((a): a is NonNullable<typeof a> => a !== null);
       if (validActions.length > 0) {
         return { thought, actions: validActions };
+      }
+      const plannerDefect = parsedActions.find((entry) => entry.plannerDefect !== undefined)?.plannerDefect;
+      if (plannerDefect !== undefined) {
+        return { thought, plannerDefect };
       }
     }
 
@@ -192,32 +253,49 @@ export function parseLlmOutput(text: string): LlmAction {
         : undefined;
     if (action !== undefined) {
       const parsedAction = parseToolCallCandidate(action);
-      if (parsedAction !== null) {
-        return { thought, action: parsedAction };
+      if (parsedAction.attempt !== null) {
+        return { thought, action: parsedAction.attempt };
+      }
+      if (parsedAction.plannerDefect !== undefined) {
+        return { thought, plannerDefect: parsedAction.plannerDefect };
       }
     }
 
     if (typeof parsed['tool'] === 'string' && parsed['tool'].length > 0) {
       const bareAction = parseToolCallCandidate(parsed);
-      if (bareAction === null) {
+      if (bareAction.attempt === null) {
         log.warn(
           { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
-          'agent LLM emitted invalid bare tool input; failing closed',
+          'agent LLM emitted invalid bare tool input; routing to planner defect recovery',
         );
-        return { thought: '[unparseable LLM structure]', answer: trimmed };
+        return {
+          thought,
+          plannerDefect: bareAction.plannerDefect ?? {
+            code: 'invalid_tool_input',
+            observation: 'Planner emitted a bare tool call with invalid input. Re-emit a valid wrapped JSON action object.',
+            rawText: trimmed,
+          },
+        };
       }
       log.warn(
         { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
         'agent LLM emitted bare tool call (missing action wrapper); recovered',
       );
-      return { thought, action: bareAction };
+      return { thought, action: bareAction.attempt };
     }
 
     log.warn(
       { textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
-      'agent LLM produced JSON without action or answer; falling back to raw text',
+      'agent LLM produced JSON without action or answer; routing to planner defect recovery',
     );
-    return { thought: '[unparseable LLM structure]', answer: trimmed };
+    return {
+      thought,
+      plannerDefect: {
+        code: 'json_without_action_or_answer',
+        observation: 'Planner output JSON without a usable answer or tool call. Re-emit a valid final answer JSON or a valid tool action JSON.',
+        rawText: trimmed,
+      },
+    };
   } catch {
     log.warn(
       { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },

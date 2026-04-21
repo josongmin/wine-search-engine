@@ -61,6 +61,10 @@ import type {
   DecomposedSearchParentContext,
 } from '../../../src/application/search/port/search-route-usecases.port.js';
 import { InMemoryCorpusCardinalityCache } from '../../../src/domain/retrieval/service/corpus-cardinality-cache.js';
+import {
+  buildComparisonDecompositionLegs,
+  buildComparisonDecompositionLegsForRetrieval,
+} from '../../../src/domain/query/service/decomposition-detector.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
 import type { AgentTerminationReason } from '../../../src/domain/agent/model/agent-step.js';
@@ -433,9 +437,16 @@ async function buildRealToolDeps(): Promise<{
             startTime: number,
             parentContext?: DecomposedSearchParentContext,
             options?: DecomposedSearchExecutionOptions,
+            retrievalSubQueries?: readonly string[],
           ) =>
             container.decomposedSearchUseCase.execute(
               subQueries as [string, string],
+              retrievalSubQueries !== undefined
+                ? buildComparisonDecompositionLegsForRetrieval(
+                    subQueries as [string, string],
+                    retrievalSubQueries as [string, string],
+                  )
+                : buildComparisonDecompositionLegs(subQueries as [string, string]),
               comparisonIntent as 'compare' | 'recommend_one' | 'list_both',
               originalQuery,
               requestId,

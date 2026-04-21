@@ -27,6 +27,23 @@ describe('detectDecomposition', () => {
     if (result.decomposed) {
       expect(result.subQueries[0]).toBe('Margaux');
       expect(result.subQueries[1]).toBe('Pauillac');
+      expect(result.comparisonSubtype).toBe('concept');
+      expect(result.comparisonLegs[0]).toEqual(expect.objectContaining({
+        rawQuery: 'Margaux',
+        retrievalQuery: 'Margaux wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        canonicalConcept: 'Margaux',
+      }));
+      expect(result.comparisonLegs[1]).toEqual(expect.objectContaining({
+        rawQuery: 'Pauillac',
+        retrievalQuery: 'Pauillac wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        canonicalConcept: 'Pauillac',
+      }));
     }
   });
 
@@ -40,5 +57,47 @@ describe('detectDecomposition', () => {
     expect(analysis.outcome.decomposed).toBe(true);
     expect(analysis.hint.strategy).toBe('comparison');
     expect(analysis.hint.subQueryCount).toBe(2);
+    expect(analysis.hint.comparisonSubtype).toBe('entity');
+    expect(analysis.hint.comparisonLegs).toEqual([
+      expect.objectContaining({
+        rawQuery: 'Opus One',
+        retrievalQuery: 'Opus One',
+        mode: 'entity',
+        retrievalMode: 'auto',
+        evidenceSource: 'entity_default',
+      }),
+      expect.objectContaining({
+        rawQuery: 'Screaming Eagle',
+        retrievalQuery: 'Screaming Eagle',
+        mode: 'entity',
+        retrievalMode: 'auto',
+        evidenceSource: 'entity_default',
+      }),
+    ]);
+  });
+
+  it('uses span-level deterministic concept evidence for concept phrases', () => {
+    const analysis = analyzeQueryDecomposition('Napa Cabernet vs Burgundy Pinot Noir');
+
+    expect(analysis.outcome.decomposed).toBe(true);
+    if (analysis.outcome.decomposed) {
+      expect(analysis.outcome.comparisonSubtype).toBe('concept');
+      expect(analysis.outcome.comparisonLegs[0]).toEqual(expect.objectContaining({
+        rawQuery: 'Napa Cabernet',
+        retrievalQuery: 'Napa Valley wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'span_entity_resolution',
+        canonicalConcept: 'Napa Valley',
+      }));
+      expect(analysis.outcome.comparisonLegs[1]).toEqual(expect.objectContaining({
+        rawQuery: 'Burgundy Pinot Noir',
+        retrievalQuery: 'Burgundy wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'span_entity_resolution',
+        canonicalConcept: 'Burgundy',
+      }));
+    }
   });
 });

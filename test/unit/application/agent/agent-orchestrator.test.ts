@@ -418,6 +418,68 @@ describe('AgentOrchestrator', () => {
     expect(vi.mocked(toolDeps.decomposedSearchExecute)).not.toHaveBeenCalled();
   });
 
+  it('recovers from mixed answer+tool planner output instead of terminating as a final answer', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'bad mixed payload',
+          answer: '바롤로와 브루넬로를 비교해 보겠습니다.',
+          action: {
+            tool: 'compare_wines',
+            input: { query_a: 'Barolo', query_b: 'Brunello', food: 'steak' },
+          },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'retry with repaired compare call',
+          action: {
+            tool: 'compare_wines',
+            input: { query_a: 'Barolo', query_b: 'Brunello' },
+          },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'done',
+          answer: '비교를 완료했습니다.',
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn(),
+      } as never,
+      decomposedSearchExecute: vi.fn().mockResolvedValue({
+        queryType: 'comparison',
+        originalQuery: 'Barolo vs Brunello',
+        comparisonIntent: 'compare',
+        entities: [
+          { subQuery: 'Barolo', topResult: null, resultCount: 0, resolutionStatus: 'ambiguous', allResults: [] },
+          { subQuery: 'Brunello', topResult: null, resultCount: 0, resolutionStatus: 'ambiguous', allResults: [] },
+        ],
+        overallStatus: 'ambiguous',
+        requestId: 'req-mixed-answer-tool',
+        executionTimeMs: 5,
+      }),
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 3 });
+    const result = await orchestrator.execute('바롤로와 브루넬로 비교', 'req-mixed-answer-tool');
+
+    expect(result.terminationReason).toBe('answer');
+    expect(result.steps[0]?.observation).toContain('mixed a final answer with tool instructions');
+    expect(result.steps[0]?.action).toBeUndefined();
+    expect(result.steps[1]?.action?.tool).toBe('compare_wines');
+    expect(vi.mocked(toolDeps.decomposedSearchExecute)).toHaveBeenCalledOnce();
+  });
+
   it('times out single tool call and records a tool error observation', async () => {
     vi.useFakeTimers();
     try {

@@ -271,6 +271,93 @@ describe('InterpretUseCase', () => {
     expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
   });
 
+  it('derives V2 activeChannels from the compiled execution profile instead of queryFamily policy', async () => {
+    const plan = {
+      rawQuery: 'Barolo vs Amarone',
+      normalizedQuery: 'barolo vs amarone',
+      intent: 'comparison_search' as const,
+      route: 'mixed' as const,
+      retrievalMode: 'compare_candidates' as const,
+      queryClass: 'comparison_query',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      decompositionHint: {
+        strategy: 'comparison' as const,
+        subQueryCount: 2,
+        confidence: 0.92,
+      },
+      policy: {},
+      uncertainty: {
+        overall: 0.15,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0,
+        constraintConfidence: 0.9,
+      },
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue(plan),
+      planWithCompiled: vi.fn().mockResolvedValue({
+        v1: plan,
+        compiled: {
+          query: {
+            rawQuery: plan.rawQuery,
+            normalizedQuery: plan.normalizedQuery,
+            intent: plan.intent,
+            queryClass: plan.queryClass,
+            anchors: plan.anchors,
+            constraints: plan.constraints,
+            expansions: plan.expansions,
+            uncertainty: plan.uncertainty,
+            plannerVersion: plan.plannerVersion,
+            policyRuleVersion: plan.policyRuleVersion,
+            thresholdProfileId: plan.thresholdProfileId,
+          },
+          execution: {
+            effectiveRoute: 'hybrid' as const,
+            effectiveRetrievalMode: 'attribute_search' as const,
+            routeSource: 'planner' as const,
+            budget: { maxCandidates: 20, enablePrecisionRerank: true },
+            provenancePolicy: {
+              requireIdentitySeal: false,
+              requireConstraintEvidence: false,
+              requireAnchorEvidence: false,
+            },
+          },
+        },
+      }),
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner,
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'Barolo vs Amarone',
+        }),
+      },
+    });
+
+    const result = await useCase.execute({
+      query: 'Barolo vs Amarone',
+      buildV2: true,
+    });
+
+    expect(result.v2Explain.detectedIntent).toBe('comparison');
+    expect(result.v2Explain.activeChannels).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+    ]);
+    expect(result.v2Explain.activeChannels).not.toContain('compare_anchor');
+  });
+
   it('surfaces attribute-based appliedConstraints in V2 explain from actual plan constraints', async () => {
     const queryPlanner: QueryPlannerPort = {
       plan: vi.fn().mockResolvedValue({

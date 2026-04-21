@@ -256,8 +256,11 @@ export function loadConfig(options?: {
   readonly loadDotenv?: boolean;
 }): Config {
   if (options?.loadDotenv ?? true) {
-    dotenv.config({ path: '.env.local', override: false });
-    dotenv.config({ override: false });
+    // Base secrets from `.env`, then `.env.local` overrides (standard local-dev pattern).
+    // Previously `.env.local` was loaded first with `override: false`, so a stray empty
+    // `DATABASE_URL=` in `.env.local` blocked `DATABASE_URL` from `.env`.
+    dotenv.config({ path: '.env', override: false });
+    dotenv.config({ path: '.env.local', override: true });
   }
 
   return parseEnv(options?.env ?? process.env);

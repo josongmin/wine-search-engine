@@ -636,6 +636,50 @@ describe('planV2ToUnderstandingSnapshot', () => {
     expect(snapshot.retrievalPlan).toEqual(retrievalPlan);
   });
 
+  it('forwards retrievalObjective from QueryPlanV2 onto the snapshot', () => {
+    const retrievalObjective = {
+      objectiveVersion: 'retrieval-objective-v1.0' as const,
+      signals: [
+        {
+          axis: 'occasion' as const,
+          attribute: 'occasion',
+          operator: 'in' as const,
+          value: ['gift'],
+          sourcePhrase: '선물',
+          confidence: 0.9,
+          sourceTier: 'soft' as const,
+        },
+      ],
+    };
+    const plan: QueryPlanV2 = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      intent: 'semantic_discovery',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0,
+        constraintConfidence: 0.5,
+      },
+      queryClass: 'semantic_preference',
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+      suggestedRoute: 'hybrid',
+      suggestedRetrievalMode: 'attribute_search',
+      retrievalObjective,
+    };
+    const snapshot = planV2ToUnderstandingSnapshot(plan);
+    expect(snapshot.retrievalObjective).toEqual(retrievalObjective);
+  });
+
   it('snapshot does NOT include suggestedRoute, suggestedRetrievalMode, or admission_context', () => {
     const plan: QueryPlanV2 = {
       rawQuery: 'test',

@@ -13,7 +13,7 @@
  * Epic 14, Step 14.1: Query Decomposition Detector
  *
  * Detects "A vs B" style comparison queries and decomposes them into
- * two separate entity resolution queries.
+ * typed comparison legs.
  *
  * Patterns:
  *  - English: "X vs Y", "X versus Y", "compare X and Y"
@@ -21,9 +21,21 @@
  */
 
 import {
+  buildEntityComparisonLeg,
+  getComparisonDecompositionSubtype,
   toQueryDecompositionHint,
+  type ComparisonDecompositionSubtype,
+  type ComparisonDecompositionLeg,
+  type ComparisonDecompositionLegs,
+  type ComparisonIntent,
   type QueryDecompositionHint,
 } from '../model/query-decomposition.js';
+import { buildNormalizedQueryViews } from './query-normalizer.js';
+import {
+  isDirectEntityResolution,
+  resolveEntity,
+} from '../../attribute/service/entity-resolver.js';
+import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
 
 interface DecompositionResult {
   readonly decomposed: false;
@@ -32,7 +44,9 @@ interface DecompositionResult {
 interface SuccessfulDecomposition {
   readonly decomposed: true;
   readonly subQueries: [string, string];
-  readonly comparisonIntent: 'compare' | 'recommend_one' | 'list_both';
+  readonly comparisonIntent: ComparisonIntent;
+  readonly comparisonSubtype: ComparisonDecompositionSubtype;
+  readonly comparisonLegs: ComparisonDecompositionLegs;
 }
 
 type DecompositionOutcome = DecompositionResult | SuccessfulDecomposition;
@@ -63,6 +77,14 @@ const COMPARISON_PATTERNS: ReadonlyArray<RegExp> = [
   /(.+?)\s+(?:또는|아니면)\s+(.+?)\s+(?:어느|뭐|어떤)(?:\?|$)/u,
 ];
 
+const CONCEPT_COMPARE_ENTITY_TYPES = new Set([
+  'wine_type',
+  'country',
+  'region',
+  'appellation',
+  'grape_primary',
+] as const);
+
 /**
  * Detects whether a query is a decomposable comparison query.
  * Returns sub-queries and inferred comparison intent.
@@ -76,10 +98,13 @@ export function detectDecomposition(query: string): DecompositionOutcome {
 
       // Sanity check: both sub-queries must be non-empty
       if (subQuery1.length > 0 && subQuery2.length > 0) {
+        const comparisonLegs = buildComparisonDecompositionLegs([subQuery1, subQuery2]);
         return {
           decomposed: true,
           subQueries: [subQuery1, subQuery2],
           comparisonIntent: inferComparisonIntent(query),
+          comparisonSubtype: getComparisonDecompositionSubtype(comparisonLegs),
+          comparisonLegs,
         };
       }
     }
@@ -104,7 +129,7 @@ export function analyzeQueryDecomposition(query: string): QueryDecompositionAnal
  */
 function inferComparisonIntent(
   query: string,
-): 'compare' | 'recommend_one' | 'list_both' {
+): ComparisonIntent {
   const q = query.toLowerCase();
 
   // "which is better", "추천", "추천해", "어느 게 좋아"
@@ -120,6 +145,92 @@ function inferComparisonIntent(
 
   // Default: neutral comparison
   return 'compare';
+}
+
+export function buildComparisonDecompositionLegs(
+  subQueries: readonly [string, string],
+): ComparisonDecompositionLegs {
+  return [
+    buildComparisonDecompositionLeg(subQueries[0]),
+    buildComparisonDecompositionLeg(subQueries[1]),
+  ];
+}
+
+export function buildComparisonDecompositionLegsForRetrieval(
+  rawSubQueries: readonly [string, string],
+  retrievalSubQueries: readonly [string, string],
+): ComparisonDecompositionLegs {
+  const [left, right] = buildComparisonDecompositionLegs(rawSubQueries);
+  return [
+    { ...left, retrievalQuery: retrievalSubQueries[0] },
+    { ...right, retrievalQuery: retrievalSubQueries[1] },
+  ];
+}
+
+function buildComparisonDecompositionLeg(query: string): ComparisonDecompositionLeg {
+  const conceptResolution = resolveConceptComparisonCanonical(query);
+  if (conceptResolution !== undefined) {
+    return {
+      rawQuery: query,
+      retrievalQuery: `${conceptResolution.canonicalConcept} wine`,
+      mode: 'concept',
+      retrievalMode: 'hybrid',
+      evidenceSource: conceptResolution.evidenceSource,
+      canonicalConcept: conceptResolution.canonicalConcept,
+    };
+  }
+
+  return buildEntityComparisonLeg(query);
+}
+
+function resolveConceptComparisonCanonical(
+  query: string,
+): {
+  readonly canonicalConcept: string;
+  readonly evidenceSource: 'direct_entity_resolution' | 'span_entity_resolution';
+} | undefined {
+  const normalized = buildNormalizedQueryViews(query).punctuationStripped.trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  const direct = resolveEntity(normalized, { preferEntityOverStyle: true });
+  if (
+    isDirectEntityResolution(direct)
+    && CONCEPT_COMPARE_ENTITY_TYPES.has(direct.entityType)
+  ) {
+    return {
+      canonicalConcept: direct.canonicalValue,
+      evidenceSource: 'direct_entity_resolution',
+    };
+  }
+
+  const resolvedSpans = resolveOverlaps(
+    parseSpans(normalized).map((span) => ({
+      span,
+      resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
+    })),
+  )
+    .filter(
+      (
+        entry,
+      ): entry is {
+        span: Span;
+        resolved: NonNullable<ReturnType<typeof resolveEntity>>;
+      } => isDirectEntityResolution(entry.resolved),
+    );
+
+  const conceptResolution = resolvedSpans.find((entry) =>
+    CONCEPT_COMPARE_ENTITY_TYPES.has(entry.resolved.entityType),
+  );
+  if (conceptResolution === undefined) {
+    return undefined;
+  }
+
+  return {
+    canonicalConcept: conceptResolution.resolved.canonicalValue,
+    evidenceSource: 'span_entity_resolution',
+  };
 }
 
 /**

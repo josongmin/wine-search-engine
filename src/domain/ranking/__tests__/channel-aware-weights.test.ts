@@ -9,6 +9,7 @@ import type { QueryClass } from '../../shared/types/index.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
+import type { RetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -53,6 +54,15 @@ function makeConstraintBundle(
   inferred: readonly NormalizedConstraint[] = [],
 ): ConstraintBundle {
   return { hard, soft, inferred };
+}
+
+function makeRetrievalObjective(
+  signals: RetrievalObjective['signals'],
+): RetrievalObjective {
+  return {
+    objectiveVersion: 'retrieval-objective-v1.0',
+    signals,
+  };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -297,6 +307,50 @@ describe('resolveChannelAwareWeights', () => {
       );
       expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
       expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('prefers retrievalObjective over raw constraints when deciding situation facets', () => {
+      const base = resolveWeights('semantic_preference');
+      const rawConstraints = makeConstraintBundle(
+        [],
+        [makeConstraint('occasion', ['gift'])],
+      );
+      const objective = makeRetrievalObjective([]);
+
+      const result = applySituationIntentWeightOverlay(base, rawConstraints, objective);
+
+      expect(result).toBe(base);
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+    });
+
+    it('raises learned facets from retrievalObjective signals without reading raw constraints', () => {
+      const base = resolveWeights('semantic_preference');
+      const objective = makeRetrievalObjective([
+        {
+          axis: 'occasion',
+          attribute: 'occasion',
+          operator: 'in',
+          value: ['gift'],
+          sourcePhrase: '선물',
+          confidence: 0.92,
+          sourceTier: 'inferred',
+        },
+        {
+          axis: 'beginner_suitability',
+          attribute: 'beginner_suitability',
+          operator: '>=',
+          value: 0.72,
+          sourcePhrase: '입문자',
+          confidence: 0.89,
+          sourceTier: 'soft',
+        },
+      ]);
+
+      const result = applySituationIntentWeightOverlay(base, makeConstraintBundle(), objective);
+
+      expect(result.giftSuitability).toBeGreaterThan(base.giftSuitability);
+      expect(result.beginnerSuitability).toBeGreaterThan(base.beginnerSuitability);
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });
 

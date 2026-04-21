@@ -21,6 +21,10 @@ import type {
   DecomposedSearchExecutionOptions,
   DecomposedSearchParentContext,
 } from './port/search-route-usecases.port.js';
+import type {
+  ComparisonDecompositionLegs,
+  ComparisonIntent,
+} from '../../domain/query/model/query-decomposition.js';
 
 export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
   constructor(
@@ -29,7 +33,8 @@ export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
 
   async execute(
     subQueries: [string, string],
-    comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
+    comparisonLegs: ComparisonDecompositionLegs,
+    comparisonIntent: ComparisonIntent,
     originalQuery: string,
     requestId: string,
     startTime: number,
@@ -38,6 +43,7 @@ export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
   ): Promise<ComparisonSearchResponse> {
     return this.resolveDelegate().execute(
       subQueries,
+      comparisonLegs,
       comparisonIntent,
       originalQuery,
       requestId,

@@ -144,11 +144,10 @@ export class InterpretUseCase {
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: empty string after trim should fall through to generated ID
     const queryId = request.requestId?.trim() || `interpret-${Date.now()}`;
     const observabilitySlice = planToObservabilitySlice(queryId, plan, compiled);
-    const activeChannels = retrievalProfileService.getChannelMix(
+    const activeChannels = retrievalProfileService.getExecutionChannelMix(
       plan.queryClass,
       compiled.execution.effectiveRoute,
       compiled.execution.effectiveRetrievalMode,
-      observabilitySlice.queryFamily,
     );
 
     const v2Explain = buildInterpretResponseV2({

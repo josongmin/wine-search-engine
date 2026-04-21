@@ -180,6 +180,7 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
       execute: vi.fn().mockImplementation(
         async (
           _subQueries: [string, string],
+          _comparisonLegs: unknown,
           _comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
           _originalQuery: string,
           _requestId: string,
@@ -221,7 +222,7 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
 
     await vi.advanceTimersByTimeAsync(29);
     expect(decomposedSearch.execute).toHaveBeenCalledOnce();
-    const options = decomposedSearch.execute.mock.calls[0]?.[6] as { abortSignal?: AbortSignal } | undefined;
+    const options = decomposedSearch.execute.mock.calls[0]?.[7] as { abortSignal?: AbortSignal } | undefined;
     expect(options?.abortSignal?.aborted).toBe(false);
     expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
 

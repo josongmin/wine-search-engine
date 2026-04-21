@@ -21,6 +21,7 @@ import type {
   ReadinessStatus,
 } from '../interface/http/routes/health.route.js';
 import { bootstrapLogger } from './bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'readiness' });
 const PROBE_TIMEOUT_MS = 3_000;
@@ -147,6 +148,8 @@ export function buildHealthRouteOptions(
   const redisRequired = expectsRedis;
   const isProduction = config.nodeEnv === 'production';
   const hasPool = runtime.pool !== undefined;
+  const blockerZeroCandidatesBaseline =
+    globalSilentSkipCounter.snapshot().blocker_zero_candidates;
 
   return {
     // Runtime plane composite-PK migration (016): attach the snapshot_health
@@ -239,6 +242,13 @@ export function buildHealthRouteOptions(
             return 'down';
           }
         },
+      },
+      blocking_zero_candidates: {
+        required: false,
+        check: (): ReadinessStatus =>
+          globalSilentSkipCounter.snapshot().blocker_zero_candidates === blockerZeroCandidatesBaseline
+            ? 'up'
+            : 'down',
       },
       ...(!config.killSwitch.denseRetrieval
         ? {

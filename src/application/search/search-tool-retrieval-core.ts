@@ -18,9 +18,14 @@ interface SearchToolRetrievalCoreInput {
   readonly appellation?: string | undefined;
   readonly vintage_min?: number | undefined;
   readonly vintage_max?: number | undefined;
+  readonly occasion?: readonly string[] | undefined;
 }
 
 function pairingTagToSemanticTerm(tag: PairingTag): string {
+  return tag.replace(/_/gu, ' ');
+}
+
+function occasionTagToSemanticTerm(tag: string): string {
   return tag.replace(/_/gu, ' ');
 }
 
@@ -139,8 +144,9 @@ export function buildSearchToolRetrievalCoreQuery(
       ...(queryViews.transliterated !== undefined
         ? extractAllPairingConstraints(queryViews.transliterated)
         : []),
-    ]),
+      ]),
   ];
+  const occasionTerms = [...new Set((input.occasion ?? []).map(occasionTagToSemanticTerm))];
   const hasPositiveStructuredFilters =
     input.wine_type !== undefined
     || input.country !== undefined
@@ -148,7 +154,7 @@ export function buildSearchToolRetrievalCoreQuery(
     || input.vintage_min !== undefined
     || input.vintage_max !== undefined;
 
-  if (pairingTags.length === 0 && !hasPositiveStructuredFilters) {
+  if (pairingTags.length === 0 && occasionTerms.length === 0 && !hasPositiveStructuredFilters) {
     const canonicalEntityTerms = resolveCanonicalEntityTerms(queryViews);
     if (queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query) && canonicalEntityTerms.length > 0) {
       return [...canonicalEntityTerms].sort((a, b) => b.length - a.length)[0]!;
@@ -216,7 +222,11 @@ export function buildSearchToolRetrievalCoreQuery(
     add(pairingTagToSemanticTerm(tag));
   }
 
-  if (!hasEntitySemanticTerm && pairingTags.length === 0 && hasPositiveStructuredFilters) {
+  for (const occasion of occasionTerms) {
+    add(occasion);
+  }
+
+  if (!hasEntitySemanticTerm && pairingTags.length === 0 && occasionTerms.length === 0 && hasPositiveStructuredFilters) {
     add(buildLexicalNucleus(queryViews, input.query));
   }
 

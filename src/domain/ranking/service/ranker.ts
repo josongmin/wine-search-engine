@@ -854,6 +854,7 @@ export class Ranker {
     const weights: ScoringWeights = applySituationIntentWeightOverlay(
       modeAdjustedWeights,
       constraints,
+      input.compiled.query.retrievalObjective,
     );
 
     // Pre-compute query-level signals shared across all candidates.

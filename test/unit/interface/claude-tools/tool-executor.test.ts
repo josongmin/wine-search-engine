@@ -276,6 +276,33 @@ describe('WineToolExecutor', () => {
       ]));
     });
 
+    it('should forward occasion and learned suitability constraints into SearchRequest', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: '와인 잘 모르는 사람한테 선물할 거',
+          occasion: ['gift', 'anniversary'],
+          gift_suitability_min: 0.7,
+          beginner_suitability_min: 0.65,
+          styles: ['approachable', 'crowd_pleasing'],
+        },
+        'req-latent-intent-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      expect(request.query).toContain('gift');
+      expect(request.query).toContain('anniversary');
+      expect(request.query).toContain('approachable');
+      expect(request.query).toContain('crowd pleasing');
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift', 'anniversary'] }),
+        expect.objectContaining({ attribute: 'gift_suitability', operator: '>=', value: 0.7 }),
+        expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.65 }),
+      ]));
+    });
+
     it('should coerce numeric strings for structured search fields', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
 
@@ -839,11 +866,27 @@ describe('WineToolExecutor', () => {
       );
 
       expect(mockDecomposedSearchUseCase.execute).toHaveBeenCalledOnce();
-      const [subQueries, intent, originalQuery, requestId] = vi.mocked(
+      const [subQueries, comparisonLegs, intent, originalQuery, requestId] = vi.mocked(
         mockDecomposedSearchUseCase.execute,
       ).mock.calls[0]!;
 
       expect(subQueries).toEqual(['margaux', 'cabernet sauvignon']);
+      expect(comparisonLegs).toEqual([
+        expect.objectContaining({
+          rawQuery: 'margaux',
+          retrievalQuery: 'margaux',
+          mode: 'entity',
+          retrievalMode: 'auto',
+          evidenceSource: 'entity_default',
+        }),
+        expect.objectContaining({
+          rawQuery: 'cabernet sauvignon',
+          retrievalQuery: 'cabernet sauvignon',
+          mode: 'entity',
+          retrievalMode: 'auto',
+          evidenceSource: 'entity_default',
+        }),
+      ]);
       expect(intent).toBe('compare');
       expect(originalQuery).toContain('Château Margaux 2015');
       expect(originalQuery).toContain('Caymus Cabernet 2018');
@@ -868,7 +911,7 @@ describe('WineToolExecutor', () => {
         'compare-req-456',
       );
 
-      const [subQueries, , originalQuery, , , parentContext] = vi.mocked(
+      const [subQueries, , , originalQuery, , , parentContext] = vi.mocked(
         mockDecomposedSearchUseCase.execute,
       ).mock.calls[0]!;
 
@@ -879,6 +922,39 @@ describe('WineToolExecutor', () => {
         expect.arrayContaining([
           expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
           expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
+        ]),
+      );
+    });
+
+    it('should forward shared occasion and suitability constraints to comparison legs', async () => {
+      vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
+        mockComparisonResponse,
+      );
+
+      await executor.execute(
+        'compare_wines',
+        {
+          query_a: 'Barolo',
+          query_b: 'Brunello di Montalcino',
+          occasion: ['gift'],
+          gift_suitability_min: 0.75,
+          beginner_suitability_min: 0.6,
+        },
+        'compare-req-latent-123',
+      );
+
+      const [subQueries, , , originalQuery, , , parentContext] = vi.mocked(
+        mockDecomposedSearchUseCase.execute,
+      ).mock.calls.at(-1)!;
+
+      expect(subQueries[0]).toContain('gift');
+      expect(subQueries[1]).toContain('gift');
+      expect(originalQuery).toContain('gift');
+      expect(parentContext?.filters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+          expect.objectContaining({ attribute: 'gift_suitability', operator: '>=', value: 0.75 }),
+          expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.6 }),
         ]),
       );
     });

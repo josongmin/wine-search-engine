@@ -16,6 +16,10 @@ import type { RequestExecutionContext } from '../../../domain/shared/request-exe
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
 import type { SearchQueryBudget, SearchRequestContext, SearchSessionContext } from '../search-request.dto.js';
 import type { NormalizedConstraint } from '../../../domain/shared/types/constraint-bundle.js';
+import type {
+  ComparisonDecompositionLegs,
+  ComparisonIntent,
+} from '../../../domain/query/model/query-decomposition.js';
 
 export interface DecomposedSearchParentContext {
   readonly context?: SearchRequestContext | undefined;
@@ -35,7 +39,8 @@ export type DecomposedSearchExecutionOptions = RequestExecutionContext;
 export interface DecomposedSearchUseCasePort {
   execute(
     subQueries: [string, string],
-    comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
+    comparisonLegs: ComparisonDecompositionLegs,
+    comparisonIntent: ComparisonIntent,
     originalQuery: string,
     requestId: string,
     startTime: number,

@@ -8,12 +8,20 @@
 import type { ResultItem } from './result-item.js';
 import type { DecisionStatus } from '../../shared/types/index.js';
 
+export type ComparisonEntityMode = 'entity' | 'concept';
+
 /**
  * Single entity in a comparison result.
  */
 export interface ComparisonEntity {
   /** The sub-query used to resolve this entity. */
   readonly subQuery: string;
+
+  /** Whether this leg resolved a concrete entity or a concept/category representative set. */
+  readonly comparisonMode?: ComparisonEntityMode | undefined;
+
+  /** Canonical concept label used for concept/category comparisons. */
+  readonly canonicalConcept?: string | undefined;
 
   /** Top-ranked result item (null if no match). */
   readonly topResult: ResultItem | null;

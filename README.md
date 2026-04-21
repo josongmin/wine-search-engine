@@ -26,14 +26,13 @@
 ```bash
 git clone <internal-remote> wine-search-engine && cd wine-search-engine
 corepack enable   # once per machine — activates pnpm from package.json "packageManager"
-pnpm install && cp .env.example .env   # REDIS_URL, VESPA_URL, 시크릿 등 편집
-pnpm run docker:db:up             # Postgres (docker-compose.yml)
-pnpm run migrate                  # Compose Postgres에 마이그레이션 (기본)
+pnpm install && cp .env.example .env   # DATABASE_URL(RDS), REDIS_URL, VESPA_URL 등 편집
+pnpm run migrate                  # `.env`의 Postgres에 마이그레이션 (기본: RDS URL + PG_SSL)
 pnpm run dev                      # http://localhost:3000 — GET /health 참고
 pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 ```
 
-`pnpm run bootstrap:smoke`는 `.env.example`을 기준으로 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 한 번에 점검합니다. 마이그레이션 단계는 **`docker-compose.yml` Postgres가 떠 있어야** 합니다(`pnpm run docker:db:up`). CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
+`pnpm run bootstrap:smoke`는 임시로 `.env.example`을 `.env`로 복사해 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 점검합니다. 마이그레이션은 **`.env.example`에 유효한 DB가 없으면 실패**하므로, 로컬에서는 `SKIP_MIGRATE=1`을 쓰거나 예시에 맞는 `DATABASE_URL`을 넣습니다. CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
 
 현재 레포에는 `ingest` / `kill-switch` 전용 CLI 진입점이 없습니다. 문서와 `package.json`에서도 제거해 “있는 척” 하지 않도록 맞췄고, ETL/운영 작업은 개별 `scripts/etl/*.ts` 또는 기존 HTTP/설정 경로를 사용합니다.
 
@@ -545,11 +544,13 @@ docker compose -f docker-compose.test.yml up -d
 
 SQL: `src/infrastructure/db/migrations/*.sql` (실행 순서는 파일명 정렬).
 
-- **`pnpm run migrate`** — **`docker-compose.yml`의 Postgres**(`127.0.0.1:5432`, `wine` / `wine_dev`, DB `wine_engine`)에 적용. `.env`에 원격 `DATABASE_URL`이 있어도 이 경로는 로컬 Compose로 고정된다.
-- **`pnpm run migrate:from-env`** — `.env`의 `DATABASE_URL` / `PG_*` 그대로 사용 (RDS 등).
+- **`pnpm run migrate`** / **`pnpm run migrate:from-env`** — **`.env`의 `DATABASE_URL` / `PG_*`** 그대로 사용 (기본 워크플로: RDS 등 관리형 Postgres + `PG_SSL`).
+- **`pnpm run migrate:local-docker`** — `docker-compose.yml`의 Postgres만 대상으로 고정(`pnpm run docker:db:up` 후).
 
 ```bash
-pnpm run docker:db:up && pnpm run migrate
+pnpm run migrate
+# 선택: 로컬 Docker PG만 쓸 때
+# pnpm run docker:db:up && pnpm run migrate:local-docker
 ```
 
 체크아웃에서 한 줄 실행이 필요하면 **tsx** 예시는 `scripts/migrate-from-env.ts` / `scripts/migrate-local-docker-pg.ts`를 참고.
@@ -564,7 +565,7 @@ pnpm run docker:db:up && pnpm run migrate
 | HTTP 계약 | `pnpm run contracts:http`, `contracts:http:openapi-bridge` |
 | Eval | `pnpm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
 | ETL | `pnpm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
-| 운영 | `pnpm run bootstrap:smoke`, `pnpm run migrate` (Docker PG), `pnpm run migrate:from-env`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
+| 운영 | `pnpm run bootstrap:smoke`, `pnpm run migrate` (`.env` DB), `pnpm run migrate:local-docker` (Docker PG), `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
 
 많은 ETL/eval 호출은 **`npx tsx --env-file=.env …`**를 씁니다.
 

@@ -125,6 +125,9 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.styles?.type).toBe('array');
       expect(props.styles?.maxItems).toBe(5);
       expect(props.certification?.type).toBe('string');
+      expect(props.occasion?.type).toBe('array');
+      expect(props.gift_suitability_min?.type).toBe('number');
+      expect(props.beginner_suitability_min?.type).toBe('number');
       expect(props.want_diversity?.type).toBe('boolean');
     });
 
@@ -138,6 +141,10 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.style?.description).toContain('crowd_pleasing');
       expect(props.styles?.description).toContain('approachable');
       expect(props.styles?.description).toContain('crowd_pleasing');
+      expect(props.occasion?.description).toContain('gift');
+      expect(props.occasion?.description).toContain('date_night');
+      expect(props.gift_suitability_min?.description).toContain('gift-suitability');
+      expect(props.beginner_suitability_min?.description).toContain('beginner-suitability');
       expect(props.style?.description).not.toContain('presentation_forward');
     });
 
@@ -248,6 +255,9 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.vintage_min?.minimum).toBe(1600);
       expect(props.styles?.type).toBe('array');
       expect(props.certification?.type).toBe('string');
+      expect(props.occasion?.type).toBe('array');
+      expect(props.gift_suitability_min?.type).toBe('number');
+      expect(props.beginner_suitability_min?.type).toBe('number');
     });
   });
 });
@@ -259,6 +269,25 @@ describe('Claude tool input schemas', () => {
       unexpected: true,
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('search_wines should normalize a single occasion tag to the canonical array shape', () => {
+    const parsed = SearchToolInputSchema.parse({
+      query: '분위기 좋은 와인',
+      occasion: 'date_night',
+    });
+
+    expect(parsed.occasion).toEqual(['date_night']);
+  });
+
+  it('compare_wines should normalize a single shared occasion tag to the canonical array shape', () => {
+    const parsed = CompareWinesInputSchema.parse({
+      query_a: 'Barolo',
+      query_b: 'Brunello',
+      occasion: 'anniversary',
+    });
+
+    expect(parsed.occasion).toEqual(['anniversary']);
   });
 
   it('get_food_pairings should reject placeholder food', () => {

@@ -6,6 +6,22 @@ import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 export const SEARCH_TOOL_WINE_TYPES = ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'] as const;
+export const SEARCH_TOOL_OCCASION_VALUES = [
+  'gift',
+  'celebration',
+  'anniversary',
+  'birthday',
+  'date_night',
+  'housewarming',
+  'party',
+  'wedding',
+  'special_occasion',
+  'solo',
+  'healing',
+  'comforting',
+  'camping',
+  'romantic',
+] as const;
 export const FOOD_PAIRING_COLORS = ['red', 'white', 'rosé', 'sparkling', 'both'] as const;
 export const SEARCH_TOOL_DESCRIPTION =
   'Search for wines by query. Returns matching wines with scores, attributes, and drinking windows.';
@@ -56,6 +72,12 @@ export const SEARCH_TOOL_STYLES_DESCRIPTION =
   'Optional multiple semantic style hints. Use when the query carries more than one style meaning at once, e.g. ["approachable","crowd_pleasing"].';
 export const SEARCH_TOOL_CERTIFICATION_DESCRIPTION =
   'Optional certification hint such as organic or biodynamic.';
+export const SEARCH_TOOL_OCCASION_DESCRIPTION =
+  'Optional occasion semantics using canonical tags (e.g. gift, anniversary, birthday, date_night, housewarming, healing). Use when the user intent is situational rather than entity-specific.';
+export const SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION =
+  'Optional minimum learned gift-suitability score in [0,1]. Use for safe/formal/gift-worthy recommendation intent when the request explicitly implies gifting.';
+export const SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION =
+  'Optional minimum learned beginner-suitability score in [0,1]. Use for non-expert / approachable / easy-drinking recommendation intent when the request explicitly implies it.';
 export const SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION =
   'When true, prefer varied grapes, regions, or styles rather than near-duplicates.';
 export const FOOD_PAIRING_MAX_PRICE_KRW_DESCRIPTION =
@@ -94,6 +116,11 @@ const SEARCH_TOOL_STYLE_HINTS_WITH_STRUCTURED_FILTERS: ReadonlySet<string> = new
   'off_dry',
   'sweet',
 ]);
+
+const SearchToolOccasionArraySchema = z.preprocess(
+  (value) => (typeof value === 'string' ? [value] : value),
+  z.array(z.enum(SEARCH_TOOL_OCCASION_VALUES)).max(SEARCH_TOOL_MAX_STYLES),
+);
 
 interface SearchToolTextFieldOptions {
   readonly maxLen: number;
@@ -186,6 +213,9 @@ export function buildSearchToolFieldShape(
     style: z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN).optional(),
     styles: z.array(z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN)).max(SEARCH_TOOL_MAX_STYLES).optional(),
     certification: z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN).optional(),
+    occasion: SearchToolOccasionArraySchema.optional(),
+    gift_suitability_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
+    beginner_suitability_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
     want_diversity: z.boolean().optional(),
   } as const;
 }
@@ -267,7 +297,7 @@ export function buildSearchWinesPromptContractLines(
   usd50ApproxKrw: number,
 ): readonly string[] {
   return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.',
+    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
     `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
     '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
     `  - wine_type: ${quoteEnum(SEARCH_TOOL_WINE_TYPES)} (use for type constraints, e.g. 레드→"red", 화이트→"white")`,
@@ -276,6 +306,9 @@ export function buildSearchWinesPromptContractLines(
     '  - appellation: specific appellation (e.g. "Pauillac", "Barolo", "Chianti Classico")',
     `  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include ${SEARCH_TOOL_STYLE_EXAMPLES.map((value) => `"${value}"`).join(', ')}. Use "sweet" / "off_dry" for sweetness intent instead of vague prose.`,
     `  - styles: OPTIONAL array of semantic style hints when the user asks for multiple simultaneous qualities. Example: non-expert gift query → styles:[${SEARCH_TOOL_STYLES_EXAMPLE_VALUES.map((value) => `"${value}"`).join(',')}]. Prefer styles over style when there are 2+ style meanings.`,
+    `  - occasion: OPTIONAL canonical situation tags such as ${quoteEnum(SEARCH_TOOL_OCCASION_VALUES)}. Use for gift/anniversary/date/housewarming/healing intent.`,
+    '  - gift_suitability_min: OPTIONAL [0,1] learned suitability floor for gifting queries (safe/formal/gift-worthy).',
+    '  - beginner_suitability_min: OPTIONAL [0,1] learned suitability floor for non-expert / approachable requests.',
     '  - certification: "organic" or "biodynamic"',
     '  - min_price_krw: KRW price floor ("1만원 이상"→10000)',
     `  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→${usd50ApproxKrw})`,

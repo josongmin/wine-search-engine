@@ -61,6 +61,11 @@ describe('silent-skip-counters', () => {
     expect(globalSilentSkipCounter.snapshot().embedding_empty_vector).toBe(1);
   });
 
+  it('tracks blocker zero-candidate events for release gates', () => {
+    globalSilentSkipCounter.increment('blocker_zero_candidates');
+    expect(globalSilentSkipCounter.snapshot().blocker_zero_candidates).toBe(1);
+  });
+
   it('tracks LTR inference component-score absences with explicit taxonomy', () => {
     incrementLtrInferenceComponentScoreAbsent('semantic');
     incrementLtrInferenceComponentScoreAbsent('multilingualScore');

@@ -133,4 +133,31 @@ describe('buildStepMessages — actionPairs path', () => {
     expect(messages).toHaveLength(2);
     expect(messages[1]?.content).toContain('found merlot');
   });
+
+  it('compacts older tool observations while keeping the latest step verbatim', () => {
+    const longObservation = 'x'.repeat(800);
+    const messages = buildStepMessages([
+      {
+        index: 0,
+        thought: 'older tool',
+        action: { tool: 'search_wines', input: { query: 'barolo' } },
+        observation: longObservation,
+        durationMs: 50,
+        tokenCount: { input: 4, output: 2 },
+      },
+      {
+        index: 1,
+        thought: 'latest tool',
+        action: { tool: 'search_wines', input: { query: 'brunello' } },
+        observation: longObservation,
+        durationMs: 50,
+        tokenCount: { input: 4, output: 2 },
+      },
+    ]);
+
+    expect(messages[1]?.content.length).toBeLessThan(longObservation.length + '[Tool Result]\n'.length);
+    expect(messages[1]?.content).toContain('[truncated]');
+    expect(messages[3]?.content).toContain(longObservation);
+    expect(messages[3]?.content).not.toContain('[truncated]');
+  });
 });

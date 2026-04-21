@@ -61,6 +61,12 @@ describe('RetrievalProfileService (T4.1)', () => {
     expect(channels).toContain('dense_semantic');
   });
 
+  it('getExecutionProfile ignores queryFamily-only overlays and mirrors compiled execution facts', () => {
+    const profile = service.getExecutionProfile('comparison_query', 'hybrid', 'attribute_search');
+    expect(profile.name).toBe('hybrid_default');
+    expect(profile.channelMix).toEqual(['sparse_bm25', 'dense_semantic']);
+  });
+
   it('relative mode → relative_filter profile with sparse_bm25 channel', () => {
     const profile = service.getProfile('pure_constraint', 'hybrid', 'relative');
     expect(profile.name).toBe('relative_filter');

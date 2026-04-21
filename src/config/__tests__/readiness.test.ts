@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildHealthRouteOptions } from '../readiness.js';
 import { parseEnv } from '../env.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 
 describe('buildHealthRouteOptions', () => {
   it('marks redis as required when startup features need it, even without watchlist delivery', () => {
@@ -82,6 +83,38 @@ describe('buildHealthRouteOptions', () => {
     expect(health.readiness?.drinking_window_model).toBeDefined();
     expect(health.readiness?.drinking_window_model?.required).toBe(false);
     await expect(health.readiness?.drinking_window_model?.check?.()).resolves.toBe('down');
+  });
+
+  it('surfaces blocker zero-candidate events as a non-required degraded check', async () => {
+    globalSilentSkipCounter.reset();
+    const config = parseEnv({
+      NODE_ENV: 'test',
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    expect(health.readiness?.blocking_zero_candidates).toBeDefined();
+    expect(health.readiness?.blocking_zero_candidates?.required).toBe(false);
+    expect(health.readiness?.blocking_zero_candidates?.check()).toBe('up');
+
+    globalSilentSkipCounter.increment('blocker_zero_candidates');
+    expect(health.readiness?.blocking_zero_candidates?.check()).toBe('down');
+    globalSilentSkipCounter.reset();
+  });
+
+  it('scopes blocker zero-candidate readiness to events after route construction', () => {
+    globalSilentSkipCounter.reset();
+    globalSilentSkipCounter.increment('blocker_zero_candidates');
+    const config = parseEnv({
+      NODE_ENV: 'test',
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    expect(health.readiness?.blocking_zero_candidates?.check()).toBe('up');
+    globalSilentSkipCounter.increment('blocker_zero_candidates');
+    expect(health.readiness?.blocking_zero_candidates?.check()).toBe('down');
+    globalSilentSkipCounter.reset();
   });
 
   it('marks watchlist runtime down when delivery is enabled but the runtime is not running', async () => {

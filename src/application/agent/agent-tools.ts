@@ -199,6 +199,7 @@ export interface AgentToolDeps {
     startTime: number,
     parentContext?: DecomposedSearchParentContext,
     options?: DecomposedSearchExecutionOptions,
+    retrievalSubQueries?: readonly string[],
   ) => Promise<ComparisonSearchResponse>;
   readonly drinkingWindowCheck?: (input: {
     vintage: number;
@@ -329,6 +330,9 @@ interface StructuredSearchConstraintInput {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
   readonly certification?: string | undefined;
+  readonly occasion?: readonly string[] | undefined;
+  readonly gift_suitability_min?: number | undefined;
+  readonly beginner_suitability_min?: number | undefined;
 }
 
 /**
@@ -377,6 +381,16 @@ function buildStructuredFilters(input: StructuredSearchConstraintInput): readonl
   // Appellation
   if (input.appellation !== undefined) {
     filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: v });
+  }
+
+  if (input.occasion !== undefined && input.occasion.length > 0) {
+    filters.push({ attribute: 'occasion', operator: 'in', value: [...input.occasion], source_phrase: input.occasion.join(', '), confidence: 1.0, mapping_version: v });
+  }
+  if (input.gift_suitability_min !== undefined) {
+    filters.push({ attribute: 'gift_suitability', operator: '>=', value: input.gift_suitability_min, source_phrase: `gift_suitability>=${input.gift_suitability_min}`, confidence: 1.0, mapping_version: v });
+  }
+  if (input.beginner_suitability_min !== undefined) {
+    filters.push({ attribute: 'beginner_suitability', operator: '>=', value: input.beginner_suitability_min, source_phrase: `beginner_suitability>=${input.beginner_suitability_min}`, confidence: 1.0, mapping_version: v });
   }
 
   filters.push(...buildSearchToolStyleDerivedFilters(input));
@@ -841,18 +855,20 @@ async function executeAgentToolInner(
         };
       }
       const sharedFilters = buildStructuredFilters(parsed);
-      const subQueries = [
+      const retrievalSubQueries = [
         buildStructuredQuery({ ...parsed, query: parsed.query_a }),
         buildStructuredQuery({ ...parsed, query: parsed.query_b }),
       ] as const;
+      const rawSubQueries = [parsed.query_a, parsed.query_b] as const;
       const response = await deps.decomposedSearchExecute(
-        subQueries,
+        rawSubQueries,
         'compare',
         buildComparisonOriginalQuery(parsed),
         requestId,
         Date.now(),
         sharedFilters.length > 0 ? { filters: sharedFilters } : undefined,
         options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
+        retrievalSubQueries,
       );
       return {
         observation: summarizeComparison(response),

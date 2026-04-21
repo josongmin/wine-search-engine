@@ -44,6 +44,7 @@ export type SilentSkipKind =
   | 'blocker_disabled_aliases_table_missing'
   | 'blocker_snapshot_resolve_failure'
   | 'blocker_alias_query_failure'
+  | 'blocker_zero_candidates'
   // Runtime plane composite-PK migration (016): learning/warmup read paths
   // must be scoped to the active snapshot; when the snapshot pointer table
   // is absent (fresh DB, pre-publish) these features degrade cleanly.
@@ -99,6 +100,7 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'blocker_disabled_aliases_table_missing',
   'blocker_snapshot_resolve_failure',
   'blocker_alias_query_failure',
+  'blocker_zero_candidates',
   'learning_warmup_disabled_snapshot_pointer_missing',
   'alias_checker_disabled_snapshot_pointer_missing',
 ] as const;

@@ -16,6 +16,10 @@ const AttemptStringSchema = z.string();
 const AttemptNumberSchema = z.number().finite();
 const AttemptBooleanSchema = z.boolean();
 const AttemptStringArraySchema = z.array(z.string());
+const AttemptSingleOrStringArraySchema = z.preprocess(
+  (value) => (typeof value === 'string' ? [value] : value),
+  AttemptStringArraySchema,
+);
 
 export const SearchToolAttemptInputSchema = z.object({
   query: AttemptStringSchema.optional(),
@@ -34,6 +38,9 @@ export const SearchToolAttemptInputSchema = z.object({
   style: AttemptStringSchema.optional(),
   styles: AttemptStringArraySchema.optional(),
   certification: AttemptStringSchema.optional(),
+  occasion: AttemptSingleOrStringArraySchema.optional(),
+  gift_suitability_min: AttemptNumberSchema.optional(),
+  beginner_suitability_min: AttemptNumberSchema.optional(),
   want_diversity: AttemptBooleanSchema.optional(),
 }).strict();
 
@@ -65,6 +72,9 @@ export const CompareWinesAttemptInputSchema = z.object({
   style: AttemptStringSchema.optional(),
   styles: AttemptStringArraySchema.optional(),
   certification: AttemptStringSchema.optional(),
+  occasion: AttemptSingleOrStringArraySchema.optional(),
+  gift_suitability_min: AttemptNumberSchema.optional(),
+  beginner_suitability_min: AttemptNumberSchema.optional(),
 }).strict();
 
 // ── Inferred types for each tool's validated input ───────────────────────────
@@ -96,6 +106,22 @@ const KnownAgentToolInputAttemptSchemas = {
   compare_wines: CompareWinesAttemptInputSchema,
 } as const satisfies Record<KnownAgentToolName, z.ZodType<Record<string, unknown>>>;
 
+export interface KnownAgentToolAttemptParseIssue {
+  readonly path: readonly (string | number)[];
+  readonly message: string;
+}
+
+export interface KnownAgentToolAttemptParseRepair {
+  readonly removedUnknownKeys: readonly string[];
+}
+
+export interface KnownAgentToolAttemptParseResult {
+  readonly attempt: KnownAgentToolAttempt | null;
+  readonly normalizedInput: Record<string, unknown>;
+  readonly issues: readonly KnownAgentToolAttemptParseIssue[];
+  readonly repair?: KnownAgentToolAttemptParseRepair | undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -117,6 +143,37 @@ function normalizeRawAttemptInput(
   return {};
 }
 
+function collectParseIssues(error: z.ZodError): readonly KnownAgentToolAttemptParseIssue[] {
+  return error.issues.map((issue) => ({
+    path: issue.path,
+    message: issue.message,
+  }));
+}
+
+function collectUnknownKeys(error: z.ZodError): readonly string[] {
+  const keys: string[] = [];
+  for (const issue of error.issues) {
+    if (issue.code !== 'unrecognized_keys') {
+      continue;
+    }
+    keys.push(...issue.keys);
+  }
+  return [...new Set(keys)];
+}
+
+function omitKeys(
+  input: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  if (keys.length === 0) {
+    return input;
+  }
+  const omitted = new Set(keys);
+  return Object.fromEntries(
+    Object.entries(input).filter(([key]) => !omitted.has(key)),
+  );
+}
+
 /**
  * Parse and validate a known tool's input against its strict schema.
  *
@@ -132,14 +189,56 @@ export function parseKnownAgentToolAttemptInput(
   tool: string,
   rawInput: unknown,
 ): KnownAgentToolAttempt | null {
+  return parseKnownAgentToolAttemptInputWithRepair(tool, rawInput).attempt;
+}
+
+export function parseKnownAgentToolAttemptInputWithRepair(
+  tool: string,
+  rawInput: unknown,
+): KnownAgentToolAttemptParseResult {
   if (!isKnownAgentToolName(tool)) {
-    return null;
+    return {
+      attempt: null,
+      normalizedInput: {},
+      issues: [{ path: [], message: `Unknown tool: ${tool}` }],
+    };
   }
   const normalized = normalizeRawAttemptInput(tool, rawInput);
-  const parsed = KnownAgentToolInputAttemptSchemas[tool].safeParse(normalized);
-  if (!parsed.success) return null;
-  // Safe cast: tool is KnownAgentToolName and parsed.data is the matching schema output
-  return { tool, input: parsed.data } as KnownAgentToolAttempt;
+  const schema = KnownAgentToolInputAttemptSchemas[tool];
+  const parsed = schema.safeParse(normalized);
+  if (parsed.success) {
+    return {
+      attempt: { tool, input: parsed.data } as KnownAgentToolAttempt,
+      normalizedInput: normalized,
+      issues: [],
+    };
+  }
+
+  const removedUnknownKeys = collectUnknownKeys(parsed.error);
+  if (removedUnknownKeys.length > 0) {
+    const repairedInput = omitKeys(normalized, removedUnknownKeys);
+    const repaired = schema.safeParse(repairedInput);
+    if (repaired.success) {
+      return {
+        attempt: { tool, input: repaired.data } as KnownAgentToolAttempt,
+        normalizedInput: repairedInput,
+        issues: [],
+        repair: { removedUnknownKeys },
+      };
+    }
+    return {
+      attempt: null,
+      normalizedInput: repairedInput,
+      issues: collectParseIssues(repaired.error),
+      repair: { removedUnknownKeys },
+    };
+  }
+
+  return {
+    attempt: null,
+    normalizedInput: normalized,
+    issues: collectParseIssues(parsed.error),
+  };
 }
 
 /**

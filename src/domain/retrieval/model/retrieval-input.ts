@@ -4,6 +4,7 @@ import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import type { RetrievalPlan } from '../service/retrieval-plan-builder.js';
+import type { RetrievalObjective } from './retrieval-objective.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 
 /**
@@ -75,6 +76,9 @@ export interface HybridRetrievalInput {
 
   /** Structured retrieval plan (filter + boost + inferred priors) derived from the query. */
   readonly retrievalPlan?: RetrievalPlan | undefined;
+
+  /** Structured latent objective for intent-bearing retrieval/ranking signals. */
+  readonly retrievalObjective?: RetrievalObjective | undefined;
 
   /** Optional anchor profile for similarity-based ("wines like X") queries. */
   readonly anchorProfile?: AnchorProfile | undefined;

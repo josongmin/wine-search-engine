@@ -8,6 +8,7 @@ interface SearchToolSoftClauseInput {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
   readonly certification?: string | undefined;
+  readonly occasion?: readonly string[] | undefined;
 }
 
 function formatKrwAsManWon(krw: number): string {
@@ -59,6 +60,9 @@ export function buildSearchToolSoftClauses(
   clauses.push(...buildSearchToolPriceClauses(input));
   for (const style of buildSearchToolStyleQueryTerms(input)) {
     clauses.push(style);
+  }
+  for (const occasion of input.occasion ?? []) {
+    clauses.push(occasion.replace(/_/gu, ' '));
   }
   if (input.certification !== undefined) {
     clauses.push(input.certification);

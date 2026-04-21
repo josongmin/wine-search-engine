@@ -133,11 +133,15 @@ function projectComparisonToHuman(
     entity: ComparisonSearchResponse['entities'][number],
   ): {
     subQuery: string;
+    comparisonMode?: 'entity' | 'concept';
+    canonicalConcept?: string;
     resolutionStatus: 'resolved' | 'ambiguous' | 'failed';
     resultCount: number;
     topResult: ResultItemV2Human | null;
   } => ({
     subQuery: entity.subQuery,
+    ...(entity.comparisonMode !== undefined ? { comparisonMode: entity.comparisonMode } : {}),
+    ...(entity.canonicalConcept !== undefined ? { canonicalConcept: entity.canonicalConcept } : {}),
     resolutionStatus: entity.resolutionStatus,
     resultCount: entity.resultCount,
     topResult:

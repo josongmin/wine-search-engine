@@ -13,6 +13,8 @@ import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 
 type AgentPromptMode = 'planner' | 'synthesis';
 const PROMPT_FALLBACK_50_USD_KRW = 50_000;
+const FULL_OBSERVATION_HISTORY_STEPS = 1;
+const COMPACT_HISTORY_OBSERVATION_MAX_CHARS = 320;
 
 /** Build the planner system prompt with today's date injected for drinking window reasoning.
  *  The date is needed so the LLM can evaluate "is this wine drinkable NOW?" without
@@ -43,7 +45,7 @@ function buildPlannerSystemPrompt(): string {
     '',
     '## Tools',
     ...buildSearchWinesPromptContractLines(usd50ApproxKrw),
-    '- compare_wines(query_a, query_b, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?) — side-by-side comparison of EXACTLY 2 wines/queries with shared structured constraints applied to BOTH sides. Use for "vs/비교". Do NOT search_wines afterward. For 3+ items use parallel search_wines calls.',
+    '- compare_wines(query_a, query_b, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?) — side-by-side comparison of EXACTLY 2 wines/queries with shared structured constraints applied to BOTH sides. Use for "vs/비교". Do NOT search_wines afterward. For 3+ items use parallel search_wines calls.',
     '- check_drinking_window(entity_id, target_year?) — drinkability check. entity_id from prior search.',
     ...buildFoodPairingsPromptContractLines(),
     '',
@@ -69,7 +71,7 @@ function buildPlannerSystemPrompt(): string {
     '   If the user requests an exact per-slot count such as "한 병씩", "각각 1개", or "one each", search each slot with that exact cardinality and final-answer with exactly that many wines — no extra alternates.',
     '   If those slots imply different wine types or colors (e.g. "레드 화이트 한 병씩"), emit PARALLEL search_wines actions — one typed call per slot — instead of collapsing to a single mixed query.',
     '   If the user asks for aesthetic/pretty presentation but the data lacks packaging or label evidence, say that packaging/label information is unavailable and use only grounded visual composition cues (for example red+white contrast in a set) — never invent bottle design details.',
-    '   Do NOT invent wine_type for general recommendation queries unless the user explicitly asked for a color/type. Gift/non-expert/safe recommendation intent should preserve the original lexical anchor, keep explicit sweetness and low-alcohol constraints when stated, and let learned facets handle gift/beginner suitability. Do NOT invent label aesthetics, packaging, or luxury prestige proxies.',
+    '   Do NOT invent wine_type for general recommendation queries unless the user explicitly asked for a color/type. Gift/non-expert/safe recommendation intent should preserve the original lexical anchor, keep explicit sweetness and low-alcohol constraints when stated, and use structured occasion / gift_suitability_min / beginner_suitability_min fields so learned facets can handle gift/beginner suitability. Do NOT invent label aesthetics, packaging, or luxury prestige proxies.',
     '   If the user explicitly states sweetness, off-dry, or low-alcohol preferences, map them to structured search fields (style:"sweet"/"off_dry", max_alcohol_pct) instead of burying them in query text.',
     '   If the user explicitly asks for beginner-friendly or crowd-pleasing wording, preserve that wording as a query constraint; otherwise do not force style proxies.',
     '   For Korean recommendation queries, preserve the original Korean lexical anchor in search_wines.query. Do NOT rewrite "와인 잘 모르는 사람한테 선물할 거" into English paraphrases like "gift recommendation for someone who doesn\'t know wine".',
@@ -176,8 +178,14 @@ export function buildUserMessage(query: string): ChatMessage {
 
 export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMessage[] {
   const messages: ChatMessage[] = [];
+  const fullObservationStartIndex = Math.max(0, steps.length - FULL_OBSERVATION_HISTORY_STEPS);
+  const renderObservation = (observation: string, stepIndex: number): string =>
+    stepIndex >= fullObservationStartIndex
+      ? observation
+      : truncateObservation(observation, COMPACT_HISTORY_OBSERVATION_MAX_CHARS);
 
-  for (const step of steps) {
+  for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+    const step = steps[stepIndex]!;
     if (step.actionPairs !== undefined) {
       // Parallel batch step (preferred path) — uses paired type to guarantee
       // 1:1 action↔observation alignment; no index drift possible.
@@ -191,7 +199,7 @@ export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMes
       for (const pair of step.actionPairs) {
         messages.push({
           role: 'user',
-          content: `[Tool Result: ${pair.action.tool}]\n${pair.observation}`,
+          content: `[Tool Result: ${pair.action.tool}]\n${renderObservation(pair.observation, stepIndex)}`,
         });
       }
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- legacy path: actions/observations kept for backward-compat when actionPairs is absent
@@ -214,7 +222,7 @@ export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMes
         const obs = observations[i] ?? '(no result)';
         messages.push({
           role: 'user',
-          content: `[Tool Result: ${toolName}]\n${obs}`,
+          content: `[Tool Result: ${toolName}]\n${renderObservation(obs, stepIndex)}`,
         });
       }
     } else if (step.action !== undefined) {
@@ -229,7 +237,7 @@ export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMes
       if (step.observation !== undefined) {
         messages.push({
           role: 'user',
-          content: `[Tool Result]\n${step.observation}`,
+          content: `[Tool Result]\n${renderObservation(step.observation, stepIndex)}`,
         });
       }
     } else if (step.answer !== undefined) {

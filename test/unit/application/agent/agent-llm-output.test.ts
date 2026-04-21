@@ -68,10 +68,10 @@ describe('agent-llm-output', () => {
     });
     const parsed = parseLlmOutput(raw);
 
-    expect(parsed).toEqual({
-      thought: '[unparseable LLM structure]',
-      answer: raw,
-    });
+    expect(parsed.thought).toBe('bad typed input');
+    expect(parsed.plannerDefect).toEqual(expect.objectContaining({
+      code: 'invalid_tool_input',
+    }));
   });
 
   it('preserves unknown tools with object input for recovery feedback', () => {
@@ -104,6 +104,30 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('normalizes single occasion tags to an array on known tool attempts', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'date recommendation',
+      action: {
+        tool: 'search_wines',
+        input: {
+          query: '분위기 좋은 와인',
+          occasion: 'date_night',
+        },
+      },
+    }));
+
+    expect(parsed).toEqual({
+      thought: 'date recommendation',
+      action: {
+        tool: 'search_wines',
+        input: {
+          query: '분위기 좋은 와인',
+          occasion: ['date_night'],
+        },
+      },
+    });
+  });
+
   it('falls back to raw answer text for non-JSON output', () => {
     const parsed = parseLlmOutput('not-json at all');
 
@@ -120,14 +144,10 @@ describe('agent-llm-output', () => {
       action: { tool: 'search_wines', input: { query: 'opus one' } },
     }));
 
-    expect(parsed).toEqual({
-      thought: '[invalid mixed LLM output]',
-      answer: JSON.stringify({
-        thought: 'bad mix',
-        answer: '오퍼스 원입니다.',
-        action: { tool: 'search_wines', input: { query: 'opus one' } },
-      }),
-    });
+    expect(parsed.thought).toBe('bad mix');
+    expect(parsed.plannerDefect).toEqual(expect.objectContaining({
+      code: 'mixed_answer_and_tool',
+    }));
   });
 
   it('validates structured llm result envelopes', () => {
@@ -159,9 +179,34 @@ describe('agent-llm-output', () => {
     });
     const parsed = parseLlmOutput(raw);
 
+    expect(parsed.thought).toBe('bare invalid');
+    expect(parsed.plannerDefect).toEqual(expect.objectContaining({
+      code: 'invalid_tool_input',
+    }));
+  });
+
+  it('repairs compare_wines inputs by dropping unknown schema fields', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'compare concept wines',
+      action: {
+        tool: 'compare_wines',
+        input: {
+          query_a: 'Barolo',
+          query_b: 'Brunello',
+          food: 'steak',
+        },
+      },
+    }));
+
     expect(parsed).toEqual({
-      thought: '[unparseable LLM structure]',
-      answer: raw,
+      thought: 'compare concept wines',
+      action: {
+        tool: 'compare_wines',
+        input: {
+          query_a: 'Barolo',
+          query_b: 'Brunello',
+        },
+      },
     });
   });
 

@@ -20,6 +20,7 @@ import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
 
@@ -125,6 +126,7 @@ export async function runSearchPreRoutePhase(
           ctx.stageTimer?.start('pre_route.decomposition.execute');
           const decomposedSearchPromise = ctx.decomposedSearch.execute(
             decomposition.outcome.subQueries,
+            decomposition.outcome.comparisonLegs,
             decomposition.outcome.comparisonIntent,
             sanitizedQuery,
             ctx.requestId,
@@ -295,6 +297,7 @@ export async function runSearchPreRoutePhase(
           ...compiled.query,
           constraints: plan.constraints,
           retrievalPlan: buildRetrievalPlan(plan.constraints),
+          retrievalObjective: buildRetrievalObjective(plan.constraints),
         },
         execution: {
           ...compiled.execution,

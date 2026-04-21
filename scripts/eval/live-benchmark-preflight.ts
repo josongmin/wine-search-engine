@@ -12,6 +12,11 @@ interface ReadyResponse {
   readonly checks?: Readonly<Record<string, { readonly status: 'up' | 'down' | 'skipped'; readonly required: boolean }>>;
 }
 
+const RELEASE_BLOCKING_READINESS_CHECKS = [
+  'drinking_window_model',
+  'blocking_zero_candidates',
+] as const;
+
 export function resolveBenchmarkSearchEndpoint(
   apiUrl: string,
   executionLane: BenchmarkExecutionLane,
@@ -47,6 +52,20 @@ function formatReadyChecks(checks: ReadyResponse['checks']): string {
     .join(', ');
 }
 
+function formatReleaseBlockingReadinessFailures(
+  checks: ReadyResponse['checks'],
+): string {
+  return RELEASE_BLOCKING_READINESS_CHECKS
+    .flatMap((name) => {
+      const check = checks?.[name];
+      if (check?.status === 'up') {
+        return [];
+      }
+      return `${name}=${check?.status ?? 'missing'}`;
+    })
+    .join(', ');
+}
+
 export async function assertLiveBenchmarkReadiness(apiUrl: string): Promise<void> {
   const response = await fetch(`${apiUrl}/ready`);
   if (!response.ok) {
@@ -57,6 +76,13 @@ export async function assertLiveBenchmarkReadiness(apiUrl: string): Promise<void
   if (body.ready !== true) {
     throw new Error(
       `Live benchmark preflight failed: runtime is not ready (${formatReadyChecks(body.checks)})`,
+    );
+  }
+
+  const releaseBlockingFailures = formatReleaseBlockingReadinessFailures(body.checks);
+  if (releaseBlockingFailures.length > 0) {
+    throw new Error(
+      `Live benchmark preflight failed: release-blocking readiness checks are not up (${releaseBlockingFailures}).`,
     );
   }
 }

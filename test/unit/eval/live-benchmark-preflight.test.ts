@@ -77,6 +77,57 @@ describe('assertLiveBenchmarkReadiness', () => {
     }
   });
 
+  it('throws when drinking-window model readiness is down even if /ready is otherwise green', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ready: true,
+          checks: {
+            postgres: { status: 'up', required: true },
+            drinking_window_model: { status: 'down', required: false },
+            blocking_zero_candidates: { status: 'up', required: false },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const { assertLiveBenchmarkReadiness } = await import(
+        '../../../scripts/eval/live-benchmark-preflight.js'
+      );
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
+        /drinking_window_model=down/,
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when drinking-window model readiness is absent from /ready', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ready: true,
+          checks: {
+            postgres: { status: 'up', required: true },
+            blocking_zero_candidates: { status: 'up', required: false },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const { assertLiveBenchmarkReadiness } = await import(
+        '../../../scripts/eval/live-benchmark-preflight.js'
+      );
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
+        /drinking_window_model=missing/,
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('throws on non-2xx /ready', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response('boom', { status: 503 }),
@@ -93,9 +144,70 @@ describe('assertLiveBenchmarkReadiness', () => {
     }
   });
 
+  it('throws when blocker zero-candidate readiness is down even if /ready is otherwise green', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ready: true,
+          checks: {
+            postgres: { status: 'up', required: true },
+            drinking_window_model: { status: 'up', required: false },
+            blocking_zero_candidates: { status: 'down', required: false },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const { assertLiveBenchmarkReadiness } = await import(
+        '../../../scripts/eval/live-benchmark-preflight.js'
+      );
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
+        /blocking_zero_candidates=down/,
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when blocker zero-candidate readiness is absent from /ready', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ready: true,
+          checks: {
+            postgres: { status: 'up', required: true },
+            drinking_window_model: { status: 'up', required: false },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const { assertLiveBenchmarkReadiness } = await import(
+        '../../../scripts/eval/live-benchmark-preflight.js'
+      );
+      await expect(assertLiveBenchmarkReadiness('http://localhost:3000')).rejects.toThrow(
+        /blocking_zero_candidates=missing/,
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('passes silently when /ready returns ready=true', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ ready: true }), { status: 200 }),
+      new Response(
+        JSON.stringify({
+          ready: true,
+          checks: {
+            postgres: { status: 'up', required: true },
+            drinking_window_model: { status: 'up', required: false },
+            blocking_zero_candidates: { status: 'up', required: false },
+          },
+        }),
+        { status: 200 },
+      ),
     );
     try {
       const { assertLiveBenchmarkReadiness } = await import(

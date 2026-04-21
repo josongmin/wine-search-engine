@@ -10,6 +10,7 @@ import type { NormalizedQueryViews } from './query-views.js';
 import type { QueryDecompositionHint } from './query-decomposition.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import type { RetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 
 /**
  * The understanding portion of a query plan — everything the planner
@@ -83,4 +84,7 @@ export interface QueryUnderstandingSnapshot {
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   /** Structured retrieval plan derived from compiled constraints. */
   readonly retrievalPlan?: RetrievalPlan | undefined;
+
+  /** Structured latent retrieval objective derived from intent-bearing constraints. */
+  readonly retrievalObjective?: RetrievalObjective | undefined;
 }

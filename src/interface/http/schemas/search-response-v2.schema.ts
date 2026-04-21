@@ -106,6 +106,8 @@ const DECISION_STATUS_V2 = ['resolved', 'ambiguous', 'failed'] as const;
  */
 export const ComparisonEntityV2HumanSchema = z.object({
   subQuery: z.string().min(1),
+  comparisonMode: z.enum(['entity', 'concept']).optional(),
+  canonicalConcept: z.string().min(1).optional(),
   resolutionStatus: z.enum(DECISION_STATUS_V2),
   resultCount: z.number().int().nonnegative(),
   topResult: ResultItemV2HumanSchema.nullable(),

@@ -193,6 +193,7 @@ function resolveExpectedRankerWeights(input: RankingInput, channels: readonly st
     'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
     'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
     'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+    'giftSuitability', 'beginnerSuitability',
   ] as const;
   const baseSum = nonPenaltyKeys.reduce((s, k) => s + (baseWeights[k] ?? 0), 0);
   const overlaidSum = nonPenaltyKeys.reduce((s, k) => s + (overlaid[k] ?? 0), 0);
@@ -212,7 +213,11 @@ function resolveExpectedRankerWeights(input: RankingInput, channels: readonly st
     criticScore: overlaid.criticScore * normFactor,
     multilingualScore: overlaid.multilingualScore * normFactor,
   };
-  const situationAdjusted = applySituationIntentWeightOverlay(modeAdjusted, input.constraints);
+  const situationAdjusted = applySituationIntentWeightOverlay(
+    modeAdjusted,
+    input.constraints,
+    input.compiled.query.retrievalObjective,
+  );
   return resolveChannelAwareWeights(channels, situationAdjusted);
 }
 

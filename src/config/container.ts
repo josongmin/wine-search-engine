@@ -35,6 +35,10 @@ import { AgentOrchestrator } from '../application/agent/agent-orchestrator.js';
 import { getAgentExecutionMetricsCollector } from '../infrastructure/observability/agent-execution-metrics.js';
 import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
 import { InMemoryCorpusCardinalityCache } from '../domain/retrieval/service/corpus-cardinality-cache.js';
+import {
+  buildComparisonDecompositionLegs,
+  buildComparisonDecompositionLegsForRetrieval,
+} from '../domain/query/service/decomposition-detector.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
@@ -112,13 +116,30 @@ export async function createContainer(
               executionObserver: getAgentExecutionMetricsCollector(),
               toolDeps: {
                 searchUseCase: features.searchUseCase,
-                decomposedSearchExecute: async (subQueries, comparisonIntent, originalQuery, requestId, startTime) =>
+                decomposedSearchExecute: async (
+                  subQueries,
+                  comparisonIntent,
+                  originalQuery,
+                  requestId,
+                  startTime,
+                  parentContext,
+                  options,
+                  retrievalSubQueries,
+                ) =>
                   features.decomposedSearchUseCase.execute(
                     subQueries as [string, string],
+                    retrievalSubQueries !== undefined
+                      ? buildComparisonDecompositionLegsForRetrieval(
+                          subQueries as [string, string],
+                          retrievalSubQueries as [string, string],
+                        )
+                      : buildComparisonDecompositionLegs(subQueries as [string, string]),
                     comparisonIntent as 'compare' | 'recommend_one' | 'list_both',
                     originalQuery,
                     requestId,
                     startTime,
+                    parentContext,
+                    options,
                   ),
                 // Direct entity lookup by ID — bypasses the full search pipeline
                 // for check_drinking_window. Uses batch getDocuments() with a

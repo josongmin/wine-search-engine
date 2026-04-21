@@ -29,6 +29,7 @@ import type { RankingDegradationSignal } from '../../domain/ranking/model/rankin
 import type { SpecializedFallbackReason } from './specialized-fallback-reason.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import {
@@ -261,6 +262,7 @@ export function buildHybridRetrievalInputForPlan(
   requestContext?: RequestExecutionContext,
 ): HybridRetrievalInput {
   const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
+  const retrievalObjective = compiled?.query.retrievalObjective ?? buildRetrievalObjective(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
   const ambiguitySoftConstraints = buildAmbiguousEntityHintSoftConstraints(plan.expansions.ambiguousEntityHints);
   // TA4: Propagate fuzzy entity hypothesis terms from the planner into the retrieval
@@ -283,6 +285,7 @@ export function buildHybridRetrievalInputForPlan(
       ...ambiguitySoftConstraints,
     ],
     retrievalPlan,
+    retrievalObjective,
     // ADR-014 Phase 1b.3b: propagate the compiled constraint graph so
     // candidate-pool's annotator can emit per-atom slot records.
     ...(compiled?.constraintGraph !== undefined
@@ -396,6 +399,14 @@ function retrievalValueToPhrases(
   value: unknown,
   wineTypeContext?: WineTypeValue,
 ): readonly string[] {
+  if (
+    attribute === 'gift_suitability'
+    || attribute === 'beginner_suitability'
+    || attribute === 'drinking_window'
+  ) {
+    return [];
+  }
+
   if (attribute === 'style') {
     if (typeof value === 'string') {
       return expandSemanticStyleRetrievalTerms({ style: value, wineType: wineTypeContext });

@@ -14,6 +14,7 @@ import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.
 import type { QueryDecompositionHint } from './query-decomposition.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import type { RetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 import type { PolicyDecisionRecord } from './policy-decision-record.js';
 import type { ConstraintGraph } from './constraint-graph.js';
 import type { AmbiguityIntentTrace } from './ambiguity-intent-interpretation.js';
@@ -148,6 +149,8 @@ export interface QueryPlanV2 {
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   /** Structured retrieval plan built from compiled constraints. */
   readonly retrievalPlan?: RetrievalPlan | undefined;
+  /** Structured latent retrieval objective built from intent-bearing constraints. */
+  readonly retrievalObjective?: RetrievalObjective | undefined;
   /**
    * E2-T3: ConstraintAtom IR — flat list of atoms produced by ConstraintReasoner.
    *
@@ -233,5 +236,6 @@ export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstan
     ...(plan.decompositionHint !== undefined && { decompositionHint: plan.decompositionHint }),
     ...(plan.constraintExtraction !== undefined && { constraintExtraction: plan.constraintExtraction }),
     ...(plan.retrievalPlan !== undefined && { retrievalPlan: plan.retrievalPlan }),
+    ...(plan.retrievalObjective !== undefined && { retrievalObjective: plan.retrievalObjective }),
   };
 }

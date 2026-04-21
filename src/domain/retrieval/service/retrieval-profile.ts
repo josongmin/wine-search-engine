@@ -282,48 +282,11 @@ function throwUnknownRetrievalMode(retrievalMode: string): never {
  * execution route, and T4.1 retrieval mode awareness.
  */
 export class RetrievalProfileService {
-  /**
-   * Resolve a retrieval profile for the given query class and route.
-   *
-   * T4.1: Added retrievalMode parameter for mode-aware profile selection.
-   * T4.6: Added queryFamily parameter for family-level channel mix policy.
-   *
-   * Priority order (highest → lowest):
-   *  1. retrievalMode override (explicit execution-contract signal)
-   *  2. queryFamily policy (semantic classification from observability vocab)
-   *  3. route / queryClass heuristics (only when retrievalMode is absent or legacy)
-   *
-   * Existing callers passing only queryClass+route get the same profile as before.
-   *
-   * @param queryClass - The classification of the user query.
-   * @param route - The execution route ('hybrid', 'mixed').
-   * @param retrievalMode - Optional mode for fine-grained profile selection.
-   * @param queryFamily - Optional family label for T4.6 policy-driven selection.
-   */
-  getProfile(
+  private resolveExecutionProfile(
     queryClass: QueryClass,
     route: string,
     retrievalMode?: string,
-    queryFamily?: QueryFamily,
   ): RetrievalProfile {
-    // T4.6: Query family policy — defers to family mapping when no explicit
-    // retrievalMode is set, so that mode overrides always take precedence.
-    if (queryFamily !== undefined && retrievalMode === undefined) {
-      const decision = resolveChannelMix(queryFamily);
-      switch (decision.profileName) {
-        case 'compare_default':       return COMPARE_DEFAULT;
-        case 'mixed_anchor':          return MIXED_ANCHOR;
-        case 'recommendation_anchor': return RECOMMENDATION_ANCHOR;
-        case 'browse_default':        return BROWSE_DEFAULT;
-        case 'region_browse':         return REGION_BROWSE;
-        case 'exact_safe_fallback':   return EXACT_SAFE_FALLBACK;
-        case 'entity_anchor_first':   return ENTITY_ANCHOR_FIRST;
-        case 'relative_filter':       return RELATIVE_FILTER;
-        case 'hybrid_default':        return HYBRID_DEFAULT;
-        // No default: fall through to legacy heuristics for unrecognised profiles
-      }
-    }
-
     // Mode-aware selection (T4.1 / T4.3 / T4.5)
     // retrievalMode can be an ExecutionRetrievalMode string OR the internal runtime
     // value 'relative', which CandidatePoolService.resolveRuntimeRetrievalMode() emits
@@ -384,6 +347,51 @@ export class RetrievalProfileService {
   }
 
   /**
+   * Resolve a retrieval profile for the given query class and route.
+   *
+   * T4.1: Added retrievalMode parameter for mode-aware profile selection.
+   * T4.6: Added queryFamily parameter for family-level channel mix policy.
+   *
+   * Priority order (highest → lowest):
+   *  1. retrievalMode override (explicit execution-contract signal)
+   *  2. queryFamily policy (semantic classification from observability vocab)
+   *  3. route / queryClass heuristics (only when retrievalMode is absent or legacy)
+   *
+   * Existing callers passing only queryClass+route get the same profile as before.
+   *
+   * @param queryClass - The classification of the user query.
+   * @param route - The execution route ('hybrid', 'mixed').
+   * @param retrievalMode - Optional mode for fine-grained profile selection.
+   * @param queryFamily - Optional family label for T4.6 policy-driven selection.
+   */
+  getProfile(
+    queryClass: QueryClass,
+    route: string,
+    retrievalMode?: string,
+    queryFamily?: QueryFamily,
+  ): RetrievalProfile {
+    // T4.6: Query family policy — defers to family mapping when no explicit
+    // retrievalMode is set, so that mode overrides always take precedence.
+    if (queryFamily !== undefined && retrievalMode === undefined) {
+      const decision = resolveChannelMix(queryFamily);
+      switch (decision.profileName) {
+        case 'compare_default':       return COMPARE_DEFAULT;
+        case 'mixed_anchor':          return MIXED_ANCHOR;
+        case 'recommendation_anchor': return RECOMMENDATION_ANCHOR;
+        case 'browse_default':        return BROWSE_DEFAULT;
+        case 'region_browse':         return REGION_BROWSE;
+        case 'exact_safe_fallback':   return EXACT_SAFE_FALLBACK;
+        case 'entity_anchor_first':   return ENTITY_ANCHOR_FIRST;
+        case 'relative_filter':       return RELATIVE_FILTER;
+        case 'hybrid_default':        return HYBRID_DEFAULT;
+        // No default: fall through to legacy heuristics for unrecognised profiles
+      }
+    }
+
+    return this.resolveExecutionProfile(queryClass, route, retrievalMode);
+  }
+
+  /**
    * T4.1: Get the channel mix for a given profile directly.
    * T4.6: Accepts optional queryFamily for policy-driven channel selection.
    * Convenience method for dispatch logic that only needs channel names.
@@ -395,6 +403,32 @@ export class RetrievalProfileService {
     queryFamily?: QueryFamily,
   ): readonly RetrievalChannel[] {
     return this.getProfile(queryClass, route, retrievalMode, queryFamily).channelMix;
+  }
+
+  /**
+   * Resolve the runtime execution profile from compiled route/mode facts only.
+   *
+   * Unlike {@link getProfile}, this path intentionally ignores query-family
+   * policy overlays so consumers can mirror the concrete execution profile
+   * chosen by the compiled/runtime contract.
+   */
+  getExecutionProfile(
+    queryClass: QueryClass,
+    route: string,
+    retrievalMode?: string,
+  ): RetrievalProfile {
+    return this.resolveExecutionProfile(queryClass, route, retrievalMode);
+  }
+
+  /**
+   * Convenience accessor for runtime execution channel mix.
+   */
+  getExecutionChannelMix(
+    queryClass: QueryClass,
+    route: string,
+    retrievalMode?: string,
+  ): readonly RetrievalChannel[] {
+    return this.getExecutionProfile(queryClass, route, retrievalMode).channelMix;
   }
 
 }

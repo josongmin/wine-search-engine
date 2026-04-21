@@ -15,6 +15,10 @@ import type {
 } from './port/search-route-usecases.port.js';
 import { buildComparisonAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
+import type {
+  ComparisonDecompositionLegs,
+  ComparisonIntent,
+} from '../../domain/query/model/query-decomposition.js';
 
 export class UnexpectedDecomposedResponseError extends DomainError {
   constructor() {
@@ -33,6 +37,7 @@ export class DecomposedSearchUseCase {
    * Executes two reused searches for a decomposed comparison.
    *
    * @param subQueries - [queryA, queryB]
+   * @param comparisonLegs - Upstream typed leg metadata for retrieval mode and concept/entity handling.
    * @param comparisonIntent - 'compare' | 'recommend_one' | 'list_both'
    * @param originalQuery - The original "A vs B" query
    * @param requestId - Parent request ID
@@ -40,7 +45,8 @@ export class DecomposedSearchUseCase {
    */
   async execute(
     subQueries: [string, string],
-    comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
+    comparisonLegs: ComparisonDecompositionLegs,
+    comparisonIntent: ComparisonIntent,
     originalQuery: string,
     requestId: string,
     startTime: number,
@@ -66,12 +72,28 @@ export class DecomposedSearchUseCase {
     // while the other is still in flight (the classic Promise.all double-rejection issue).
     const [settledA, settledB] = await Promise.allSettled([
       this.searchUseCase.execute(
-        { ...baseRequest, query: subQueries[0] },
+        {
+          ...baseRequest,
+          query: comparisonLegs[0].retrievalQuery,
+          options: {
+            explain: parentContext?.explain ?? false,
+            clarification: false,
+            mode: comparisonLegs[0].retrievalMode,
+          },
+        },
         `${requestId}-a`,
         options,
       ),
       this.searchUseCase.execute(
-        { ...baseRequest, query: subQueries[1] },
+        {
+          ...baseRequest,
+          query: comparisonLegs[1].retrievalQuery,
+          options: {
+            explain: parentContext?.explain ?? false,
+            clarification: false,
+            mode: comparisonLegs[1].retrievalMode,
+          },
+        },
         `${requestId}-b`,
         options,
       ),
@@ -97,24 +119,36 @@ export class DecomposedSearchUseCase {
     // Build comparison entities from SearchResponseV1 results
     const entityA: ComparisonEntity = {
       subQuery: subQueries[0],
+      comparisonMode: comparisonLegs[0].mode,
+      ...(comparisonLegs[0].canonicalConcept !== undefined
+        ? { canonicalConcept: comparisonLegs[0].canonicalConcept }
+        : {}),
       topResult: resultA.results[0] ?? null,
       resultCount: resultA.results.length,
-      resolutionStatus: resultA.engineDecision.decisionStatus,
+      resolutionStatus: comparisonLegs[0].mode === 'concept' && resultA.results.length > 0
+        ? 'resolved'
+        : resultA.engineDecision.decisionStatus,
       allResults: resultA.results,
     };
 
     const entityB: ComparisonEntity = {
       subQuery: subQueries[1],
+      comparisonMode: comparisonLegs[1].mode,
+      ...(comparisonLegs[1].canonicalConcept !== undefined
+        ? { canonicalConcept: comparisonLegs[1].canonicalConcept }
+        : {}),
       topResult: resultB.results[0] ?? null,
       resultCount: resultB.results.length,
-      resolutionStatus: resultB.engineDecision.decisionStatus,
+      resolutionStatus: comparisonLegs[1].mode === 'concept' && resultB.results.length > 0
+        ? 'resolved'
+        : resultB.engineDecision.decisionStatus,
       allResults: resultB.results,
     };
 
     // Compute overall status
     const overallStatus = this.computeOverallStatus(
-      resultA.engineDecision.decisionStatus,
-      resultB.engineDecision.decisionStatus,
+      entityA.resolutionStatus,
+      entityB.resolutionStatus,
     );
     const leftAuthorityTraceRef =
       resultA.engineDecision.authorityTraceRef ?? resultA.engineDecision.decisionTraceRef;

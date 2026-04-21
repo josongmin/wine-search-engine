@@ -7,6 +7,7 @@ import {
   type RetrievalChannel,
   preferCanonicalRetrievalChannelLabels,
 } from '../../retrieval/model/retrieval-channel.js';
+import type { RetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 
 /** Redistribute mass toward anchor similarity when anchor channel active. */
 const CHANNEL_WEIGHT_ANCHOR_SIMILARITY_BOOST = 1.3;
@@ -277,6 +278,24 @@ function constraintValueMatches(
   return false;
 }
 
+function objectiveValueMatches(
+  objective: RetrievalObjective,
+  attribute: string,
+  expectedValue: string,
+): boolean {
+  for (const signal of objective.signals) {
+    if (signal.attribute !== attribute) continue;
+    const value = signal.value;
+    if (typeof value === 'string' && value === expectedValue) {
+      return true;
+    }
+    if (Array.isArray(value) && value.includes(expectedValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function constraintNumericMeetsMinimum(
   constraints: ConstraintBundle,
   attribute: string,
@@ -329,6 +348,46 @@ function constraintNumericMeetsMinimum(
   return false;
 }
 
+function objectiveNumericMeetsMinimum(
+  objective: RetrievalObjective,
+  attribute: string,
+  minValue: number,
+): boolean {
+  for (const signal of objective.signals) {
+    if (signal.attribute !== attribute) {
+      continue;
+    }
+
+    switch (signal.operator) {
+      case '>=':
+      case '=': {
+        if (typeof signal.value === 'number' && Number.isFinite(signal.value)) {
+          if (signal.value >= minValue) {
+            return true;
+          }
+        }
+        break;
+      }
+      case 'range':
+        if (isNumericRangeValue(signal.value)) {
+          return signal.value.max >= minValue;
+        }
+        break;
+      case '<=':
+      case 'exclude':
+      case 'in':
+      case 'not_in':
+        break;
+      default: {
+        const _exhaustive: never = signal.operator;
+        void _exhaustive;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
 function isNumericRangeValue(
   value: NormalizedConstraint['value'],
 ): value is { readonly min: number; readonly max: number } {
@@ -356,20 +415,37 @@ function isNumericRangeValue(
 export function applySituationIntentWeightOverlay(
   baseWeights: ScoringWeights,
   constraints: ConstraintBundle,
+  retrievalObjective?: RetrievalObjective,
 ): ScoringWeights {
-  const hasGiftIntent = constraintValueMatches(constraints, 'occasion', 'gift');
-  const hasGiftSuitabilityIntent = constraintNumericMeetsMinimum(
-    constraints,
-    'gift_suitability',
-    SITUATION_INTENT_FACET_TRIGGER_MIN,
-  );
+  const hasGiftIntent = retrievalObjective !== undefined
+    ? objectiveValueMatches(retrievalObjective, 'occasion', 'gift')
+    : constraintValueMatches(constraints, 'occasion', 'gift');
+  const hasGiftSuitabilityIntent = retrievalObjective !== undefined
+    ? objectiveNumericMeetsMinimum(
+      retrievalObjective,
+      'gift_suitability',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    )
+    : constraintNumericMeetsMinimum(
+      constraints,
+      'gift_suitability',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    );
   const hasBeginnerIntent =
-    constraintValueMatches(constraints, 'style', 'approachable');
-  const hasBeginnerSuitabilityIntent = constraintNumericMeetsMinimum(
-    constraints,
-    'beginner_suitability',
-    SITUATION_INTENT_FACET_TRIGGER_MIN,
-  );
+    retrievalObjective !== undefined
+      ? objectiveValueMatches(retrievalObjective, 'style', 'approachable')
+      : constraintValueMatches(constraints, 'style', 'approachable');
+  const hasBeginnerSuitabilityIntent = retrievalObjective !== undefined
+    ? objectiveNumericMeetsMinimum(
+      retrievalObjective,
+      'beginner_suitability',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    )
+    : constraintNumericMeetsMinimum(
+      constraints,
+      'beginner_suitability',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    );
 
   const resolvedHasGiftIntent = hasGiftIntent || hasGiftSuitabilityIntent;
   const resolvedHasBeginnerIntent = hasBeginnerIntent || hasBeginnerSuitabilityIntent;

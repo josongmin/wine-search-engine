@@ -285,10 +285,16 @@ describe('HybridUseCase', () => {
 
     await useCase.execute({ query: 'ridge cabernet' }, 'req-abort-fwd', { abortSignal: ac.signal });
 
+    const plannerContext = queryPlanner.plan.mock.calls[0]?.[1] as { abortSignal?: AbortSignal } | undefined;
     expect(queryPlanner.plan).toHaveBeenCalledWith(
       'ridge cabernet',
-      expect.objectContaining({ abortSignal: ac.signal }),
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
     );
+    expect(plannerContext?.abortSignal?.aborted).toBe(false);
+
+    ac.abort();
+
+    expect(plannerContext?.abortSignal?.aborted).toBe(true);
   });
 
   it('throws DomainError when the hybrid ranking pipeline crashes (propagated as 500)', async () => {
@@ -488,6 +494,22 @@ describe('HybridUseCase', () => {
     });
     expect(decomposedSearch.execute).toHaveBeenCalledWith(
       ['Opus One', 'Screaming Eagle'],
+      [
+        expect.objectContaining({
+          rawQuery: 'Opus One',
+          retrievalQuery: 'Opus One',
+          mode: 'entity',
+          retrievalMode: 'auto',
+          evidenceSource: 'entity_default',
+        }),
+        expect.objectContaining({
+          rawQuery: 'Screaming Eagle',
+          retrievalQuery: 'Screaming Eagle',
+          mode: 'entity',
+          retrievalMode: 'auto',
+          evidenceSource: 'entity_default',
+        }),
+      ],
       'compare',
       'Opus One vs Screaming Eagle',
       'req-hybrid-compare',

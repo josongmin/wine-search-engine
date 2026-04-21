@@ -319,6 +319,26 @@ describe('ExecutionCompiler', () => {
     expect(result.query.retrievalPlan).toEqual(retrievalPlan);
   });
 
+  it('forwards plan.retrievalObjective onto compiled.query', () => {
+    const retrievalObjective = {
+      objectiveVersion: 'retrieval-objective-v1.0' as const,
+      signals: [
+        {
+          axis: 'beginner_suitability' as const,
+          attribute: 'beginner_suitability',
+          operator: '>=' as const,
+          value: 0.65,
+          sourcePhrase: '초보자',
+          confidence: 0.88,
+          sourceTier: 'soft' as const,
+        },
+      ],
+    };
+    const plan = { ...makeMinimalPlan(), retrievalObjective };
+    const result = compiler.compile({ plan });
+    expect(result.query.retrievalObjective).toEqual(retrievalObjective);
+  });
+
   // Extra: attribute_search has correct budget defaults
   it('sets correct defaults for attribute_search mode', () => {
     const plan = makeMinimalPlan({

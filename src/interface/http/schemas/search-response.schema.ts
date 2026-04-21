@@ -1011,6 +1011,8 @@ export type SearchResponseBody = z.infer<typeof SearchResponseSchema>;
 
 export const ComparisonEntitySchema = z.object({
   sub_query: z.string().min(1),
+  comparison_mode: z.enum(['entity', 'concept']).optional(),
+  canonical_concept: z.string().min(1).optional(),
   top_result: ResultItemSchema.nullable(),
   result_count: z.number().int().nonnegative(),
   resolution_status: z.enum(['resolved', 'ambiguous', 'failed']),
