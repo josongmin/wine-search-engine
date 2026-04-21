@@ -8,6 +8,7 @@ import type { QueryUnderstandingSnapshot } from '../../model/query-understanding
 import type { AmbiguityDictionary } from '../../port/ambiguity-dictionary.port.js';
 import type { AliasMatcher, AliasMatchResult } from '../anchor-extractor.js';
 import type { NLMapper } from '../../../attribute/service/nl-mapper.js';
+import type { ConstraintExtractionTrace } from '../../../attribute/model/constraint-extraction-trace.js';
 import type { FuzzyMatcherPort } from '../../port/fuzzy-matcher.port.js';
 import type { ExpansionBundle } from '../../model/constraint-bundle.js';
 import type { QueryIntent } from '../../model/query-intent.js';
@@ -47,6 +48,44 @@ function makeMatchResult(
     normalizedForm: surfaceForm.toLowerCase(),
     entityIds: entityIds as unknown as AliasMatchResult['entityIds'],
     matchConfidence: confidence,
+  };
+}
+
+function makeLlmConstraintExtractionTrace(
+  overrides: Partial<ConstraintExtractionTrace> = {},
+): ConstraintExtractionTrace {
+  return {
+    candidatePhraseCount: 1,
+    candidateSpanCount: 1,
+    ruleTableHitCount: 0,
+    llmHitCount: 1,
+    llmSkippedCount: 0,
+    fallbackTriggered: false,
+    source: 'llm_only',
+    llmLatencyMs: 23,
+    phraseCacheHits: 0,
+    phraseCacheNegativeSkipped: 0,
+    phraseCacheMisses: 0,
+    llmLinkedEntityCount: 1,
+    resolvedEntityCount: 1,
+    directHardConstraintCount: 0,
+    ontologyExpandedConstraintCount: 0,
+    compositionalInferenceCount: 0,
+    phrasesByTier: {
+      tier1_default_mapping: 0,
+      tier2_entity_resolver: 0,
+      tier3_ontology_expansion: 0,
+      tier4_compositional_inference: 0,
+      tier5_llm_linker: 1,
+      tier6_regex_fallback: 0,
+      unmapped: 0,
+    },
+    categoriesCovered: ['grape_primary'],
+    unresolvedSpanSamples: ['피노'],
+    semanticConstraintRecall: 1,
+    entityLinkingAccuracy: 1,
+    missedPhrases: [],
+    ...overrides,
   };
 }
 
@@ -175,6 +214,140 @@ describe('Planner – constraint extraction metadata', () => {
       expect.arrayContaining(['opus one']),
     );
   });
+
+  it('promotes queryClass to ambiguous_short_form when constraint parsing emits ambiguity hints', async () => {
+    const ambiguousHintMapper: NLMapper = {
+      mapPhrase: () => Promise.resolve(null),
+      mapConstraints: async () => ({
+        constraints: [],
+        ambiguousEntityHints: [{
+          surface: '피노',
+          entityType: 'grape_primary',
+          retrievalConstraint: {
+            attribute: 'grape_family',
+            operator: '=',
+            value: 'Pinot',
+          },
+          lexicalExpansions: ['pinot'],
+          semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+          clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+          explorationBranches: [
+            {
+              label: 'Pinot Noir',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Noir',
+              },
+              matchValues: ['Pinot Noir'],
+              lexicalExpansions: ['pinot noir'],
+              semanticExpansions: ['pinot noir'],
+            },
+            {
+              label: 'Pinot Gris',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Gris',
+              },
+              matchValues: ['Pinot Gris', 'Pinot Grigio'],
+              lexicalExpansions: ['pinot gris', 'pinot grigio'],
+              semanticExpansions: ['pinot gris', 'pinot grigio'],
+            },
+          ],
+        }],
+      }),
+    } as unknown as NLMapper;
+
+    const planner = makePlanner(new Map(), noAmbiguityDict, ambiguousHintMapper);
+    const plan = await planner.plan('피노 추천');
+
+    expect(plan.queryClass).toBe('ambiguous_short_form');
+    expect(plan.expansions.ambiguousEntityHints).toHaveLength(1);
+  });
+
+  it('reflects compiler-authored ambiguity hints and LLM extraction metrics in the plan', async () => {
+    const compilerBackedMapper: NLMapper = {
+      mapPhrase: () => Promise.resolve(null),
+      mapConstraints: async () => ({
+        constraints: [],
+        ambiguousEntityHints: [{
+          surface: '피노',
+          entityType: 'grape_primary',
+          retrievalConstraint: {
+            attribute: 'grape_family',
+            operator: '=',
+            value: 'Pinot',
+          },
+          lexicalExpansions: ['pinot'],
+          semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+          clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+          explorationBranches: [
+            {
+              label: 'Pinot Noir',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Noir',
+              },
+              matchValues: ['Pinot Noir'],
+              lexicalExpansions: ['pinot noir'],
+              semanticExpansions: ['pinot noir'],
+            },
+            {
+              label: 'Pinot Gris',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Gris',
+              },
+              matchValues: ['Pinot Gris', 'Pinot Grigio'],
+              lexicalExpansions: ['pinot gris', 'pinot grigio'],
+              semanticExpansions: ['pinot gris', 'pinot grigio'],
+            },
+            {
+              label: 'Pinot Blanc',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Blanc',
+              },
+              matchValues: ['Pinot Blanc'],
+              lexicalExpansions: ['pinot blanc'],
+              semanticExpansions: ['pinot blanc'],
+            },
+          ],
+        }],
+        constraintExtraction: makeLlmConstraintExtractionTrace(),
+      }),
+    } as unknown as NLMapper;
+
+    const planner = makePlanner(new Map(), noAmbiguityDict, compilerBackedMapper);
+    const plan = await planner.plan('피노 추천', { enablePlannerTrace: true });
+
+    expect(plan.constraintExtraction).toMatchObject({
+      source: 'llm_only',
+      llmHitCount: 1,
+      llmSkippedCount: 0,
+      llmLatencyMs: 23,
+    });
+    expect(plan.expansions.ambiguousEntityHints).toHaveLength(1);
+    expect(plan.expansions.ambiguousEntityHints?.[0]?.clarifyOptions).toEqual([
+      'Pinot Noir',
+      'Pinot Gris',
+      'Pinot Blanc',
+    ]);
+    expect(plan.plannerTrace?.map((record) => record.stage)).toEqual(
+      expect.arrayContaining([
+        'intent_classification',
+        'route_resolution',
+        'retrieval_mode_selection',
+        'query_class_classification',
+        'uncertainty_estimation',
+        'target_entity_inference',
+      ]),
+    );
+  });
 });
 
 // ── QueryPlanV2 shape ──────────────────────────────────────────────────────────
@@ -279,6 +452,56 @@ describe('Planner – suggestedRoute matches expected routing', () => {
           && constraint.value === 'white',
       ),
     ).toBe(true);
+  });
+
+  it('strong exact entity anchors are stripped from constraint parsing so noisy reversed Korean forms stay entity_exact', async () => {
+    const anchorMatcher = new ExactAliasMatcher(
+      new Map([
+        ['샤또 마고', [{
+          surfaceForm: '샤토 마고',
+          normalizedForm: '샤토 마고',
+          entityIds: ['chateau-margaux-2015'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.95,
+          lookupStrategy: 'exact',
+        }]],
+        ['chateau', [{
+          surfaceForm: "Château d'Yquem",
+          normalizedForm: "château d'yquem",
+          entityIds: ['sauternes-2015'] as unknown as AliasMatchResult['entityIds'],
+          matchConfidence: 0.85,
+          lookupStrategy: 'substring',
+        }]],
+      ]),
+    );
+    const strippingAwareMapper: NLMapper = {
+      mapPhrase: () => Promise.resolve(null),
+      mapConstraints: async (phrases: readonly string[]) => ({
+        constraints: phrases.some((phrase) => phrase.includes('마고'))
+          ? [{
+            attribute: 'appellation',
+            operator: '=',
+            value: 'Margaux',
+            confidence: 0.9,
+            source_phrase: '마고',
+            mapping_version: 'test-v1',
+          }]
+          : [],
+      }),
+    } as unknown as NLMapper;
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(anchorMatcher),
+      new ExpansionBuilder(),
+      strippingAwareMapper,
+    );
+
+    const plan = await planner.plan('마고 샤또');
+
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.queryClass).toBe('short_entity');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    expect(plan.constraints.hard).toHaveLength(0);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   buildSearchToolStyleDerivedFilters,
   buildSearchToolStyleQueryTerms,
 } from '../search/search-tool-contract.js';
+import { buildSearchToolPriceClauses } from '../search/search-tool-query-policy.js';
 import {
   getLastGroundingObservationText,
   hasGroundingToolObservations,
@@ -64,10 +65,14 @@ function appendRecoverySearchClauses(
   for (const region of asStringArray(input['exclude_regions']) ?? []) {
     clauses.push(`not ${region}`);
   }
+  const minPriceKrw = asPositiveInt(input['min_price_krw']);
   const maxPriceKrw = asPositiveInt(input['max_price_krw']);
-  if (maxPriceKrw !== undefined) {
-    clauses.push(`${maxPriceKrw}원 이하`);
-  }
+  clauses.push(
+    ...buildSearchToolPriceClauses({
+      min_price_krw: minPriceKrw,
+      max_price_krw: maxPriceKrw,
+    }),
+  );
   clauses.push(...buildSearchToolStyleQueryTerms({
     style: asNonEmptyString(input['style']),
     styles: asStringArray(input['styles']),

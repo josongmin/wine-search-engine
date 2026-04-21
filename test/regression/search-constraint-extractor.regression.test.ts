@@ -549,6 +549,11 @@ describe('search-constraint-extractor price parsing edge cases', () => {
     expect(c.minPriceKrw).toBeUndefined();
   });
 
+  it('R-PRICE-WON-OVER-01: "10000원 이상" parses as minPriceKrw=10000', () => {
+    const c = extractSearchConstraints('10000원 이상 집들이 와인');
+    expect(c.minPriceKrw).toBe(10_000);
+  });
+
   it('R-PRICE-COMBINED-01: "5만5천원" parses as maxPriceKrw=55000', () => {
     const c = extractSearchConstraints('5만5천원 와인 추천');
     expect(c.maxPriceKrw).toBe(55_000);

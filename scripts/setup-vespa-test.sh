@@ -62,9 +62,17 @@ echo "[setup] Vespa query endpoint is up (${elapsed}s)."
 
 # ── Step 5: Apply Postgres migrations ────────────────────────────────────────
 echo "[setup] Applying Postgres migrations..."
-if ls "$REPO_ROOT/db/migrations/"*.sql >/dev/null 2>&1; then
-  psql postgresql://wine:wine_test@localhost:5433/wine_engine_test \
-    -f "$REPO_ROOT/db/migrations/"*.sql 2>/dev/null || true
+MIGRATIONS_DIR="$REPO_ROOT/src/infrastructure/db/migrations"
+docker exec -i wine-search-test-postgres-1 \
+  psql postgresql://wine:wine_test@localhost:5432/wine_engine_test \
+  -v ON_ERROR_STOP=1 \
+  -c "ALTER USER wine WITH PASSWORD 'wine_test';"
+if ls "$MIGRATIONS_DIR/"*.sql >/dev/null 2>&1; then
+  for migration in "$MIGRATIONS_DIR/"*.sql; do
+    docker exec -i wine-search-test-postgres-1 \
+      psql postgresql://wine:wine_test@localhost:5432/wine_engine_test \
+      -v ON_ERROR_STOP=1 < "$migration"
+  done
   echo "[setup] Migrations applied."
 else
   echo "[setup] No migrations found, skipping."

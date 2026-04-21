@@ -1029,12 +1029,18 @@ export async function runSearchPostRoutePhase(
 
   // ltrAvailable is false when:
   // - kill switch forces heuristic-only mode
+  // - LTR model is absent / unusable, so final scores remain heuristic-only
   // - LTR model loaded but saturated (all scores clamped to same value)
   // Heuristic scores cluster in [0.2, 0.6] → entropy ≈ 0.999 always.
-  // Bypassing the entropy gate prevents 83%+ false-ambiguous rate.
+  // Bypassing the entropy gate prevents false-ambiguous recommendation paths.
+  const rerankDecision = ctx.rankingMetadata?.rerankDecision;
+  const ltrUnavailableDecision = rerankDecision?.decision === 'no_model_for_query_class'
+    || rerankDecision?.decision === 'feature_dimension_mismatch'
+    || rerankDecision?.decision === 'normalization_failed';
   const ltrAvailable =
     snapshot.feature_flags['killSwitchLearning'] !== true
-    && ctx.rankingMetadata?.ltrSaturated !== true;
+    && ctx.rankingMetadata?.ltrSaturated !== true
+    && !ltrUnavailableDecision;
 
   const abstainDecision = ctx.abstainPolicy.evaluate(
     topScores,

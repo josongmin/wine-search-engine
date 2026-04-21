@@ -6,6 +6,7 @@ describe('RFC-019 regression: entity resolver', () => {
   it.each([
     ['보르도', 'region', 'Bordeaux'],
     ['샤르도네', 'grape_primary', 'Chardonnay'],
+    ['피노 그리지오', 'grape_primary', 'Pinot Gris'],
     ['프랑스', 'country', 'France'],
     ['부르고뉴', 'region', 'Burgundy'],
     ['카베르네 소비뇽', 'grape_primary', 'Cabernet Sauvignon'],
@@ -42,6 +43,61 @@ describe('RFC-019 regression: entity resolver', () => {
     expect(result).not.toBeNull();
     expect(result!.entityType).toBe('region');
     expect(result!.canonicalValue).toBe('Napa Valley');
+  });
+
+  it('keeps 피노 as a context-required alias instead of a direct planner-safe grounding', () => {
+    const result = resolveEntity('피노');
+    expect(result).not.toBeNull();
+    expect(result!.entityType).toBe('grape_primary');
+    expect(result!.canonicalValue).toBe('Pinot Noir');
+    expect(result!.resolutionMode).toBe('context_required');
+    expect(result!.ambiguityHint).toEqual({
+      surface: '피노',
+      entityType: 'grape_primary',
+      retrievalConstraint: {
+        attribute: 'grape_family',
+        operator: '=',
+        value: 'Pinot',
+      },
+      lexicalExpansions: ['pinot'],
+      semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+      clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+      explorationBranches: [
+        {
+          label: 'Pinot Noir',
+          softConstraint: {
+            attribute: 'grape_primary',
+            operator: '=',
+            value: 'Pinot Noir',
+          },
+          matchValues: ['Pinot Noir'],
+          lexicalExpansions: ['pinot noir'],
+          semanticExpansions: ['pinot noir'],
+        },
+        {
+          label: 'Pinot Gris',
+          softConstraint: {
+            attribute: 'grape_primary',
+            operator: '=',
+            value: 'Pinot Gris',
+          },
+          matchValues: ['Pinot Gris', 'Pinot Grigio'],
+          lexicalExpansions: ['pinot gris', 'pinot grigio'],
+          semanticExpansions: ['pinot gris', 'pinot grigio'],
+        },
+        {
+          label: 'Pinot Blanc',
+          softConstraint: {
+            attribute: 'grape_primary',
+            operator: '=',
+            value: 'Pinot Blanc',
+          },
+          matchValues: ['Pinot Blanc'],
+          lexicalExpansions: ['pinot blanc'],
+          semanticExpansions: ['pinot blanc'],
+        },
+      ],
+    });
   });
 
   describe('fuzzy fallback', () => {

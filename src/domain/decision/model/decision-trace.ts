@@ -72,6 +72,8 @@ export interface DecisionTrace {
     readonly resolveThreshold: number;
     /** T_gap(Q): minimum gap for resolution. */
     readonly gapThreshold: number;
+    /** Numeric gate policy used when evaluating the thresholds. */
+    readonly numericGateMode?: 'strict' | 'preference' | undefined;
   };
 
   /** Version identifiers for reproducibility. */

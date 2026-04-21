@@ -15,6 +15,7 @@
 
 import { z } from 'zod';
 import {
+  buildCompareToolFieldShape,
   COMPARE_WINES_QUERY_A_DESCRIPTION,
   COMPARE_WINES_QUERY_B_DESCRIPTION,
   COMPARE_WINES_TOOL_DESCRIPTION,
@@ -35,6 +36,7 @@ import {
   SEARCH_TOOL_LIMIT_DESCRIPTION,
   SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
   SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+  SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION,
   SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION,
   SEARCH_TOOL_MAX_STYLES,
   SEARCH_TOOL_QUERY_DESCRIPTION,
@@ -170,7 +172,12 @@ export const CompareWinesInputSchema = z.object({
     maxLen: SEARCH_TOOL_QUERY_MAX_LEN,
     requiredMessage: 'Query B must not be empty',
   }),
-}).strict();
+  ...buildCompareToolFieldShape({
+    maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
+  }),
+}).strict().superRefine((data, ctx) => {
+  validateSearchToolVintageRange(data, ctx);
+});
 
 /**
  * WINE_SEARCH_TOOLS: 4 wine-specific tools for Claude integration.
@@ -211,6 +218,11 @@ export const WINE_SEARCH_TOOLS = [
           items: { type: 'string' },
           description: SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
           maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+        },
+        min_price_krw: {
+          type: 'number',
+          description: SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION,
+          minimum: 1,
         },
         max_price_krw: {
           type: 'number',
@@ -329,6 +341,73 @@ export const WINE_SEARCH_TOOLS = [
         query_b: {
           type: 'string',
           description: COMPARE_WINES_QUERY_B_DESCRIPTION,
+        },
+        exclude_grapes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: SEARCH_TOOL_EXCLUDE_GRAPES_DESCRIPTION,
+          maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+        },
+        exclude_regions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
+          maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+        },
+        min_price_krw: {
+          type: 'number',
+          description: SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION,
+          minimum: 1,
+        },
+        max_price_krw: {
+          type: 'number',
+          description: SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION,
+          minimum: 1,
+        },
+        max_alcohol_pct: {
+          type: 'number',
+          description: SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
+          minimum: 0.1,
+          maximum: 100,
+        },
+        wine_type: {
+          type: 'string',
+          enum: [...SEARCH_TOOL_WINE_TYPES],
+          description: SEARCH_TOOL_WINE_TYPE_DESCRIPTION,
+        },
+        country: {
+          type: 'string',
+          description: SEARCH_TOOL_COUNTRY_DESCRIPTION,
+        },
+        vintage_min: {
+          type: 'number',
+          description: SEARCH_TOOL_VINTAGE_MIN_DESCRIPTION,
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
+        },
+        vintage_max: {
+          type: 'number',
+          description: SEARCH_TOOL_VINTAGE_MAX_DESCRIPTION,
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
+        },
+        appellation: {
+          type: 'string',
+          description: SEARCH_TOOL_APPELLATION_DESCRIPTION,
+        },
+        style: {
+          type: 'string',
+          description: SEARCH_TOOL_STYLE_DESCRIPTION,
+        },
+        styles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: SEARCH_TOOL_STYLES_DESCRIPTION,
+          maxItems: SEARCH_TOOL_MAX_STYLES,
+        },
+        certification: {
+          type: 'string',
+          description: SEARCH_TOOL_CERTIFICATION_DESCRIPTION,
         },
       },
       required: ['query_a', 'query_b'],

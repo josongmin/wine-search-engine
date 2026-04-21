@@ -21,6 +21,7 @@ import { planToObservabilitySlice } from '../../domain/query/model/query-observa
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
+import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
@@ -56,7 +57,7 @@ function resolveDecomposedSearchTimeoutMs(
 
 export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
   readonly request: SearchRequest;
-  /** When set, forwarded into {@link PlannerContext.abortSignal} (NL / LLM constraint path). */
+  /** When set, forwarded into {@link PlannerContext} (NL / LLM constraint path). */
   readonly requestId: string;
   readonly startTime: number;
   readonly snapshotVersions: SnapshotVersionInjection;
@@ -80,304 +81,352 @@ export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
 export async function runSearchPreRoutePhase(
   ctx: SearchPreRoutePhaseContext,
 ): Promise<SearchPreRoutePhaseResult> {
-  const sanitizedQuery = ctx.executionPrincipal === 'benchmark_trusted'
-    ? ctx.request.query
-    : await (async () => {
-      ctx.stageTimer?.start('pre_route.security_gate');
-      return createSearchQuerySecurityGate(ctx.securityGateDeps)
-        .getSafeQueryOrThrow(ctx.request.query)
-        .finally(() => {
-          ctx.stageTimer?.end('pre_route.security_gate');
-        });
-    })();
-
-  if (ctx.decomposedSearch) {
-    ctx.stageTimer?.start('pre_route.decomposition.detect');
-    const decomposition = (() => {
-      try {
-        return analyzeQueryDecomposition(sanitizedQuery);
-      } finally {
-        ctx.stageTimer?.end('pre_route.decomposition.detect');
-      }
-    })();
-    if (isValidDecomposition(decomposition.outcome)) {
-      const decomposedSearchTimeoutMs = resolveDecomposedSearchTimeoutMs(
-        ctx.request,
-        ctx.startTime,
-      );
-      if (decomposedSearchTimeoutMs <= 0) {
-        pipelineDebug(
-          {
-            step: 'pre_route.decomposed_comparison',
-            decomposition_strategy: decomposition.hint.strategy,
-            skipped_due_to_budget: true,
-          },
-          'pipeline pre_route decomposed search skipped due to exhausted request budget',
-        );
-      } else {
-        const timeoutSignal = Symbol('timeout');
-        const abortController = new AbortController();
-        const decomposedAbortSignal =
-          ctx.abortSignal !== undefined
-            ? AbortSignal.any([ctx.abortSignal, abortController.signal])
-            : abortController.signal;
-        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
-          timeoutHandle = setTimeout(() => {
-            abortController.abort();
-            resolve(timeoutSignal);
-          }, decomposedSearchTimeoutMs);
-        });
-        ctx.stageTimer?.start('pre_route.decomposition.execute');
-        const decomposedSearchPromise = ctx.decomposedSearch.execute(
-          decomposition.outcome.subQueries,
-          decomposition.outcome.comparisonIntent,
-          sanitizedQuery,
-          ctx.requestId,
-          ctx.startTime,
-          {
-            ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
-            ...(ctx.request.sessionContext !== undefined
-              ? { sessionContext: ctx.request.sessionContext }
-              : {}),
-            ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
-            // Forward explain so a comparison-route caller (options.explain=true)
-            // gets counterfactuals on both sub-search legs.
-            ...(ctx.request.options?.explain === true ? { explain: true } : {}),
-          },
-          { abortSignal: decomposedAbortSignal },
-        ).catch((err: unknown) => {
-          // After timeout fires we abort the controller. Any subsequent rejection
-          // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
-          // would otherwise become an unhandledRejection because nothing is
-          // awaiting the inner promise post-race. Swallow ALL errors after abort.
-          if (abortController.signal.aborted) {
-            return timeoutSignal;
-          }
-          throw err;
-        }).finally(() => {
-          ctx.stageTimer?.end('pre_route.decomposition.execute');
-        });
-        let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
+  const runPreRouteCore = async (
+    sanitizedQuery: string,
+    plannerAbortSignal: AbortSignal | undefined,
+  ): Promise<SearchPreRoutePhaseResult> => {
+    if (ctx.decomposedSearch) {
+      ctx.stageTimer?.start('pre_route.decomposition.detect');
+      const decomposition = (() => {
         try {
-          decomposedResponse = await Promise.race([
-            decomposedSearchPromise,
-            timeoutPromise,
-          ]) as typeof timeoutSignal | ComparisonSearchResponse;
+          return analyzeQueryDecomposition(sanitizedQuery);
         } finally {
-          // Always clear the timeout handle — prevents timer leak when
-          // decomposedSearchPromise rejects before the timeout fires.
-          if (timeoutHandle !== undefined) {
-            clearTimeout(timeoutHandle);
-          }
-          // Abort any in-flight sub-search work (network requests, sub-use-case
-          // execution) so it does not continue running after we have moved on.
-          // Calling abort() on an already-aborted or completed controller is a no-op.
-          abortController.abort();
+          ctx.stageTimer?.end('pre_route.decomposition.detect');
         }
-        if (decomposedResponse === timeoutSignal) {
+      })();
+      if (isValidDecomposition(decomposition.outcome)) {
+        const decomposedSearchTimeoutMs = resolveDecomposedSearchTimeoutMs(
+          ctx.request,
+          ctx.startTime,
+        );
+        if (decomposedSearchTimeoutMs <= 0) {
           pipelineDebug(
             {
               step: 'pre_route.decomposed_comparison',
               decomposition_strategy: decomposition.hint.strategy,
-              timed_out: true,
+              skipped_due_to_budget: true,
             },
-            'pipeline pre_route decomposed search timed out — continuing without decomposition',
+            'pipeline pre_route decomposed search skipped due to exhausted request budget',
           );
-        } else if (typeof decomposedResponse !== 'symbol') {
-          const response = decomposedResponse;
-          logSearchEvent({
-            runtime_correlation_ref: ctx.requestId,
-            decomposition_strategy: decomposition.hint.strategy,
+        } else {
+          const timeoutSignal = Symbol('timeout');
+          const abortController = new AbortController();
+          const decomposedAbortSignal =
+            plannerAbortSignal !== undefined
+              ? AbortSignal.any([plannerAbortSignal, abortController.signal])
+              : abortController.signal;
+          let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+          const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
+            timeoutHandle = setTimeout(() => {
+              abortController.abort();
+              resolve(timeoutSignal);
+            }, decomposedSearchTimeoutMs);
           });
-          pipelineDebug(
+          ctx.stageTimer?.start('pre_route.decomposition.execute');
+          const decomposedSearchPromise = ctx.decomposedSearch.execute(
+            decomposition.outcome.subQueries,
+            decomposition.outcome.comparisonIntent,
+            sanitizedQuery,
+            ctx.requestId,
+            ctx.startTime,
             {
-              step: 'pre_route.decomposed_comparison',
-              decomposition_strategy: decomposition.hint.strategy,
+              ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
+              ...(ctx.request.sessionContext !== undefined
+                ? { sessionContext: ctx.request.sessionContext }
+                : {}),
+              ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+              ...(ctx.request.filters !== undefined && ctx.request.filters.length > 0
+                ? { filters: ctx.request.filters }
+                : {}),
+              // Forward explain so a comparison-route caller (options.explain=true)
+              // gets counterfactuals on both sub-search legs.
+              ...(ctx.request.options?.explain === true ? { explain: true } : {}),
             },
-            'pipeline pre_route comparison branch',
-          );
-          return { outcome: 'return', response };
+            {
+              abortSignal: decomposedAbortSignal,
+              ...(ctx.executionPrincipal !== undefined
+                ? { executionPrincipal: ctx.executionPrincipal }
+                : {}),
+            },
+          ).catch((err: unknown) => {
+            // After timeout fires we abort the controller. Any subsequent rejection
+            // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
+            // would otherwise become an unhandledRejection because nothing is
+            // awaiting the inner promise post-race. Swallow ALL errors after abort.
+            if (abortController.signal.aborted) {
+              return timeoutSignal;
+            }
+            throw err;
+          }).finally(() => {
+            ctx.stageTimer?.end('pre_route.decomposition.execute');
+          });
+          let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
+          try {
+            decomposedResponse = await Promise.race([
+              decomposedSearchPromise,
+              timeoutPromise,
+            ]) as typeof timeoutSignal | ComparisonSearchResponse;
+          } finally {
+            // Always clear the timeout handle — prevents timer leak when
+            // decomposedSearchPromise rejects before the timeout fires.
+            if (timeoutHandle !== undefined) {
+              clearTimeout(timeoutHandle);
+            }
+            // Abort any in-flight sub-search work (network requests, sub-use-case
+            // execution) so it does not continue running after we have moved on.
+            // Calling abort() on an already-aborted or completed controller is a no-op.
+            abortController.abort();
+          }
+          if (decomposedResponse === timeoutSignal) {
+            pipelineDebug(
+              {
+                step: 'pre_route.decomposed_comparison',
+                decomposition_strategy: decomposition.hint.strategy,
+                timed_out: true,
+              },
+              'pipeline pre_route decomposed search timed out — continuing without decomposition',
+            );
+          } else if (typeof decomposedResponse !== 'symbol') {
+            const response = decomposedResponse;
+            logSearchEvent({
+              runtime_correlation_ref: ctx.requestId,
+              decomposition_strategy: decomposition.hint.strategy,
+            });
+            pipelineDebug(
+              {
+                step: 'pre_route.decomposed_comparison',
+                decomposition_strategy: decomposition.hint.strategy,
+              },
+              'pipeline pre_route comparison branch',
+            );
+            return { outcome: 'return', response };
+          }
         }
       }
     }
-  }
 
-  // Use planWithCompiled when available (PlannerV1Adapter implements this).
-  // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
-  const plannerContext = buildPlannerContextFromSearchRequest(ctx.request, {
-    ...(ctx.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
-    ...(ctx.debugRequest === true ? { debugRequest: true } : {}),
-    ...(ctx.stageTimer !== undefined ? { stageTimer: ctx.stageTimer } : {}),
-    requestId: ctx.requestId,
-  });
-  let plan: QueryPlanV1;
-  let compiled: CompiledWineQuery;
-  ctx.stageTimer?.start('pre_route.planner');
-  if (ctx.queryPlanner.planWithCompiled !== undefined) {
-    const result = await ctx.queryPlanner.planWithCompiled(
-      sanitizedQuery,
-      plannerContext,
-    ).finally(() => {
-      ctx.stageTimer?.end('pre_route.planner');
+    // Use planWithCompiled when available (PlannerV1Adapter implements this).
+    // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
+    const plannerContext = buildPlannerContextFromSearchRequest(ctx.request, {
+      ...(plannerAbortSignal !== undefined ? { abortSignal: plannerAbortSignal } : {}),
+      ...(ctx.debugRequest === true ? { debugRequest: true } : {}),
+      ...(ctx.stageTimer !== undefined ? { stageTimer: ctx.stageTimer } : {}),
+      requestId: ctx.requestId,
     });
-    plan = result.v1;
-    compiled = result.compiled;
-  } else if (ctx.allowCompiledFallback === true) {
-    plan = await ctx.queryPlanner.plan(
-      sanitizedQuery,
-      plannerContext,
-    ).finally(() => {
+    let plan: QueryPlanV1;
+    let compiled: CompiledWineQuery;
+    ctx.stageTimer?.start('pre_route.planner');
+    if (ctx.queryPlanner.planWithCompiled !== undefined) {
+      const result = await ctx.queryPlanner.planWithCompiled(
+        sanitizedQuery,
+        plannerContext,
+      ).finally(() => {
+        ctx.stageTimer?.end('pre_route.planner');
+      });
+      plan = result.v1;
+      compiled = result.compiled;
+    } else if (ctx.allowCompiledFallback === true) {
+      plan = await ctx.queryPlanner.plan(
+        sanitizedQuery,
+        plannerContext,
+      ).finally(() => {
+        ctx.stageTimer?.end('pre_route.planner');
+      });
+      compiled = compileFromLegacyPlan(plan);
+    } else {
       ctx.stageTimer?.end('pre_route.planner');
-    });
-    compiled = compileFromLegacyPlan(plan);
-  } else {
-    ctx.stageTimer?.end('pre_route.planner');
-    throw new Error(
-      'Search pre-route requires QueryPlanner.planWithCompiled(); ' +
-      'set allowCompiledFallback=true only for tests or explicit special seams.',
-    );
-  }
+      throw new Error(
+        'Search pre-route requires QueryPlanner.planWithCompiled(); ' +
+        'set allowCompiledFallback=true only for tests or explicit special seams.',
+      );
+    }
 
-  // Merge caller-supplied structured filters (from agent tools / batch API)
-  // into the planner's hard constraints so they flow to Vespa as YQL filters.
-  //
-  // Override semantics (SOTA best practice — Multi-Meta-RAG pattern):
-  //   Structured params from the agent are AUTHORITATIVE and override NL-extracted
-  //   constraints on the same attribute. This prevents noisy NL extraction from
-  //   conflicting with the agent's explicit intent. For example, if the agent passes
-  //   wine_type="red" AND the NL planner also extracted wine_type="red" from the
-  //   enriched query, we keep the agent version (same result). But if the planner
-  //   extracts wine_type="white" from a confusing enriched query, the agent's
-  //   explicit wine_type="red" replaces it.
-  //
-  //   Override applies per (attribute, operator) pair — so agent's exclude_grapes
-  //   replaces any NL-extracted exclude for the same attribute, but does NOT
-  //   override a different attribute like wine_type.
-  let structuredFiltersMerged = false;
-  if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
-    // Attributes covered by structured agent filters (operator-aware override).
-    // For 'exclude'/'not_in' operators, override only same-operator NL constraints.
-    const agentCoveredKeys = new Set(
-      ctx.request.filters.map((f) => `${f.attribute}:${f.operator}`),
-    );
-    // Drop NL-extracted constraints that are overridden by agent structured params.
-    // Exact-match on (attribute, operator) — same attribute with different operator
-    // (e.g. NL extracted region='=' and agent passed region='exclude') coexist.
-    const nonOverridden = plan.constraints.hard.filter(
-      (c) => !agentCoveredKeys.has(`${c.attribute}:${c.operator}`),
-    );
-    plan = {
-      ...plan,
-      constraints: {
-        ...plan.constraints,
-        hard: [...nonOverridden, ...ctx.request.filters],
-      },
-    };
-    structuredFiltersMerged = true;
-  }
-
-  if (structuredFiltersMerged) {
-    const admissionContext = {
-      requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
-      requires_constraint_evidence: plan.constraints.hard.length > 0,
-      requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
-    } as const;
-    plan = {
-      ...plan,
-      admission_context: admissionContext,
-    };
-    compiled = {
-      ...compiled,
-      query: {
-        ...compiled.query,
-        constraints: plan.constraints,
-        retrievalPlan: buildRetrievalPlan(plan.constraints),
-      },
-      execution: {
-        ...compiled.execution,
-        provenancePolicy: {
-          ...compiled.execution.provenancePolicy,
-          requireConstraintEvidence: admissionContext.requires_constraint_evidence,
+    // Merge caller-supplied structured filters (from agent tools / batch API)
+    // into the planner's hard constraints so they flow to Vespa as YQL filters.
+    //
+    // Override semantics (SOTA best practice — Multi-Meta-RAG pattern):
+    //   Structured params from the agent are AUTHORITATIVE and override NL-extracted
+    //   constraints on the same attribute. This prevents noisy NL extraction from
+    //   conflicting with the agent's explicit intent. For example, if the agent passes
+    //   wine_type="red" AND the NL planner also extracted wine_type="red" from the
+    //   enriched query, we keep the agent version (same result). But if the planner
+    //   extracts wine_type="white" from a confusing enriched query, the agent's
+    //   explicit wine_type="red" replaces it.
+    //
+    //   Override applies per (attribute, operator) pair — so agent's exclude_grapes
+    //   replaces any NL-extracted exclude for the same attribute, but does NOT
+    //   override a different attribute like wine_type.
+    let structuredFiltersMerged = false;
+    if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
+      // Attributes covered by structured agent filters (operator-aware override).
+      // For 'exclude'/'not_in' operators, override only same-operator NL constraints.
+      const agentCoveredKeys = new Set(
+        ctx.request.filters.map((f) => `${f.attribute}:${f.operator}`),
+      );
+      // Drop NL-extracted constraints that are overridden by agent structured params.
+      // Exact-match on (attribute, operator) — same attribute with different operator
+      // (e.g. NL extracted region='=' and agent passed region='exclude') coexist.
+      const nonOverridden = plan.constraints.hard.filter(
+        (c) => !agentCoveredKeys.has(`${c.attribute}:${c.operator}`),
+      );
+      plan = {
+        ...plan,
+        constraints: {
+          ...plan.constraints,
+          hard: [...nonOverridden, ...ctx.request.filters],
         },
-      },
-    };
-  }
+      };
+      structuredFiltersMerged = true;
+    }
 
-  logSearchEvent({
-    runtime_correlation_ref: ctx.requestId,
-    query_observability: planToObservabilitySlice(ctx.requestId, plan, compiled),
-    ...(plan.decompositionHint !== undefined
-      ? { decomposition_strategy: plan.decompositionHint.strategy }
-      : {}),
-  });
+    if (structuredFiltersMerged) {
+      const admissionContext = {
+        requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
+        requires_constraint_evidence: plan.constraints.hard.length > 0,
+        requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
+      } as const;
+      plan = {
+        ...plan,
+        admission_context: admissionContext,
+      };
+      compiled = {
+        ...compiled,
+        query: {
+          ...compiled.query,
+          constraints: plan.constraints,
+          retrievalPlan: buildRetrievalPlan(plan.constraints),
+        },
+        execution: {
+          ...compiled.execution,
+          provenancePolicy: {
+            ...compiled.execution.provenancePolicy,
+            requireConstraintEvidence: admissionContext.requires_constraint_evidence,
+          },
+        },
+      };
+    }
 
-  const satResult = ctx.constraintSAT.check(plan.constraints);
-  if (satResult.contradicted) {
-    pipelineDebug(
-      {
-        step: 'pre_route.constraint_contradiction',
-        query_class: plan.queryClass,
-        conflict_pairs: satResult.conflictPairs.length,
-      },
-      'pipeline pre_route constraint exit',
-    );
-    // CLAUDE.md: catch blocks in use-case code MUST NOT fabricate
-    // success-shaped responses from unexpected errors. If responseBuilder
-    // throws here it is a programmer/infrastructure bug, not an enumerated
-    // degradation — propagate to the HTTP error handler so the failure is
-    // visible and the RFC-014 envelope is emitted by the central handler.
-    const response = ctx.responseBuilder.build(
-      buildConstraintContradictionExitParams(
-        plan,
-        ctx.request,
-        ctx.requestId,
-        ctx.startTime,
-        ctx.snapshotVersions,
-        satResult.conflictPairs,
-        compiled,
-      ),
-    );
-    return { outcome: 'return', response };
-  }
+    logSearchEvent({
+      runtime_correlation_ref: ctx.requestId,
+      query_observability: planToObservabilitySlice(ctx.requestId, plan, compiled),
+      ...(plan.decompositionHint !== undefined
+        ? { decomposition_strategy: plan.decompositionHint.strategy }
+        : {}),
+    });
 
-  if (ctx.cacheService) {
-    const cached = await tryGetCachedSearchResponse(
-      ctx.cacheService,
-      plan,
-      compiled,
-      ctx.request,
-      ctx.snapshotVersions,
-      ctx.cacheLookupRuntimeState,
-      ctx.requestId,
-    );
-    if (cached !== undefined) {
+    const satResult = ctx.constraintSAT.check(plan.constraints);
+    if (satResult.contradicted) {
       pipelineDebug(
         {
-          step: 'pre_route.cache_hit',
+          step: 'pre_route.constraint_contradiction',
           query_class: plan.queryClass,
+          conflict_pairs: satResult.conflictPairs.length,
         },
-        'pipeline pre_route cache hit',
+        'pipeline pre_route constraint exit',
       );
-      const response = mergeCachedSearchResponseMeta(
-        cached,
-        ctx.requestId,
-        ctx.startTime,
+      // CLAUDE.md: catch blocks in use-case code MUST NOT fabricate
+      // success-shaped responses from unexpected errors. If responseBuilder
+      // throws here it is a programmer/infrastructure bug, not an enumerated
+      // degradation — propagate to the HTTP error handler so the failure is
+      // visible and the RFC-014 envelope is emitted by the central handler.
+      const response = ctx.responseBuilder.build(
+        buildConstraintContradictionExitParams(
+          plan,
+          ctx.request,
+          ctx.requestId,
+          ctx.startTime,
+          ctx.snapshotVersions,
+          satResult.conflictPairs,
+          compiled,
+        ),
       );
       return { outcome: 'return', response };
     }
+
+    if (ctx.cacheService) {
+      const cached = await tryGetCachedSearchResponse(
+        ctx.cacheService,
+        plan,
+        compiled,
+        ctx.request,
+        ctx.snapshotVersions,
+        ctx.cacheLookupRuntimeState,
+        ctx.requestId,
+      );
+      if (cached !== undefined) {
+        pipelineDebug(
+          {
+            step: 'pre_route.cache_hit',
+            query_class: plan.queryClass,
+          },
+          'pipeline pre_route cache hit',
+        );
+        const response = mergeCachedSearchResponseMeta(
+          cached,
+          ctx.requestId,
+          ctx.startTime,
+        );
+        return { outcome: 'return', response };
+      }
+    }
+
+    pipelineDebug(
+      {
+        step: 'pre_route.continue',
+        query_class: plan.queryClass,
+        plan_route: plan.route,
+        compiled_route: compiled.execution.effectiveRoute,
+        compiled_mode: compiled.execution.effectiveRetrievalMode,
+      },
+      'pipeline pre_route plan ready',
+    );
+
+    return { outcome: 'continue', plan, compiled };
+  };
+
+  if (ctx.executionPrincipal === 'benchmark_trusted') {
+    return runPreRouteCore(ctx.request.query, ctx.abortSignal);
   }
 
-  pipelineDebug(
-    {
-      step: 'pre_route.continue',
-      query_class: plan.queryClass,
-      plan_route: plan.route,
-      compiled_route: compiled.execution.effectiveRoute,
-      compiled_mode: compiled.execution.effectiveRetrievalMode,
-    },
-    'pipeline pre_route plan ready',
-  );
+  const routeAbortController = new AbortController();
+  const plannerAbortSignal =
+    ctx.abortSignal !== undefined
+      ? AbortSignal.any([ctx.abortSignal, routeAbortController.signal])
+      : routeAbortController.signal;
+  const securityGate = createSearchQuerySecurityGate(ctx.securityGateDeps);
 
-  return { outcome: 'continue', plan, compiled };
+  ctx.stageTimer?.start('pre_route.security_gate');
+  try {
+    const securityCheck = securityGate.startQuerySecurityCheck(ctx.request.query, {
+      abortSignal: plannerAbortSignal,
+    });
+    if (securityCheck.layer1Rejection !== undefined) {
+      throw new PolicyBlockedError(undefined, securityCheck.layer1Rejection);
+    }
+
+    const securityLayer = securityCheck.layer2Result.then((result) => {
+      if (result.rejection !== undefined) {
+        routeAbortController.abort();
+      }
+      return result;
+    });
+
+    const [preRouteOutcome, securityOutcome] = await Promise.allSettled([
+      runPreRouteCore(securityCheck.sanitizedQuery, plannerAbortSignal),
+      securityLayer,
+    ]);
+
+    if (securityOutcome.status === 'fulfilled' && securityOutcome.value.rejection !== undefined) {
+      throw new PolicyBlockedError(undefined, securityOutcome.value.rejection);
+    }
+    if (securityOutcome.status === 'rejected') {
+      throw securityOutcome.reason;
+    }
+    if (preRouteOutcome.status === 'fulfilled') {
+      return preRouteOutcome.value;
+    }
+    throw preRouteOutcome.reason;
+  } finally {
+    ctx.stageTimer?.end('pre_route.security_gate');
+  }
 }

@@ -21,6 +21,7 @@ function deriveDecisionEvidenceItems(
 }
 
 function buildStructuredClarifyPayload(
+  plan: QueryPlanV1,
   abstainDecision: TypedAbstainDecision,
   rankedResults: readonly RankedResult[],
 ): StructuredClarifyPayload {
@@ -35,6 +36,10 @@ function buildStructuredClarifyPayload(
     .slice(0, 3)
     .map((result) => result.canonicalLabel)
     .filter((label) => label.trim().length > 0);
+  const topAmbiguousEntityHint = plan.expansions.ambiguousEntityHints?.[0];
+  const compilerClarifyQuestion = plan.expansions.ambiguityIntentInterpretation?.branchSelections
+    .map((selection) => selection.clarifyQuestion)
+    .find((question): question is string => question !== undefined && question.trim().length > 0);
 
   switch (abstainDecision.reason) {
     case 'semantic_conflict':
@@ -55,6 +60,13 @@ function buildStructuredClarifyPayload(
       };
     case 'low_confidence':
     default:
+      if (topAmbiguousEntityHint !== undefined) {
+        return {
+          kind: 'anchor_disambiguation',
+          question: compilerClarifyQuestion ?? `${topAmbiguousEntityHint.surface}는 어떤 계열을 찾으시나요?`,
+          options: topAmbiguousEntityHint.clarifyOptions,
+        };
+      }
       return {
         kind: topLabels.length > 0 ? 'anchor_disambiguation' : 'preference_gap',
         question: topLabels.length > 0
@@ -258,7 +270,7 @@ export function buildEntropyAbstainResponseParams(options: {
           ? entropy.toFixed(ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS)
           : 'unknown'
       }). Please refine your search.`,
-      structuredPayload: buildStructuredClarifyPayload(abstainDecision, rankedResults),
+      structuredPayload: buildStructuredClarifyPayload(plan, abstainDecision, rankedResults),
       candidates: rankedResults.slice(0, 3).map((r) => ({
         entityId: r.entityId,
         label: r.canonicalLabel,

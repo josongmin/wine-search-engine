@@ -15,11 +15,13 @@ import type { ResolveResponse } from '../resolve-response.dto.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
 import type { SearchQueryBudget, SearchRequestContext, SearchSessionContext } from '../search-request.dto.js';
+import type { NormalizedConstraint } from '../../../domain/shared/types/constraint-bundle.js';
 
 export interface DecomposedSearchParentContext {
   readonly context?: SearchRequestContext | undefined;
   readonly sessionContext?: SearchSessionContext | undefined;
   readonly queryBudget?: SearchQueryBudget | undefined;
+  readonly filters?: readonly NormalizedConstraint[] | undefined;
   /**
    * Forwards the parent search request's `options.explain` to each sub-search
    * so that explain=true on a comparison query produces counterfactuals on

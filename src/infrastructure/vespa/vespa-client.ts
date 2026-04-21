@@ -570,20 +570,25 @@ export class VespaClient {
     url: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const response = await this.fetchWithTimeout(
-      url,
-      {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: payload }),
-      },
-      this.timeouts.documentMutationMs,
-    );
+    // Document-plane writes are idempotent full upserts / assign updates.
+    // Retry transient transport and 5xx/429 failures so prepared-feed replay
+    // does not die on a single HTTP/2 GOAWAY or short-lived Vespa node flap.
+    await withRetry(async () => {
+      const response = await this.fetchWithTimeout(
+        url,
+        {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: payload }),
+        },
+        this.timeouts.documentMutationMs,
+      );
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      handleHttpError(response, `document ${method}`, text);
-    }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        handleHttpError(response, `document ${method}`, text);
+      }
+    }, VESPA_RETRY_CONFIG);
   }
 
   // -------------------------------------------------------------------------
@@ -623,20 +628,22 @@ export class VespaClient {
     for (const [key, value] of Object.entries(fields)) {
       assignFields[key] = { assign: value };
     }
-    const response = await this.fetchWithTimeout(
-      url,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: assignFields }),
-      },
-      this.timeouts.documentMutationMs,
-    );
+    await withRetry(async () => {
+      const response = await this.fetchWithTimeout(
+        url,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: assignFields }),
+        },
+        this.timeouts.documentMutationMs,
+      );
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      handleHttpError(response, 'document UPDATE', text);
-    }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        handleHttpError(response, 'document UPDATE', text);
+      }
+    }, VESPA_RETRY_CONFIG);
   }
 
   /**
@@ -648,17 +655,19 @@ export class VespaClient {
    */
   async delete(docId: string): Promise<void> {
     const url = this.docUrl(this.appName, docId);
-    const response = await this.fetchWithTimeout(
-      url,
-      { method: 'DELETE' },
-      this.timeouts.documentGetDeleteMs,
-    );
+    await withRetry(async () => {
+      const response = await this.fetchWithTimeout(
+        url,
+        { method: 'DELETE' },
+        this.timeouts.documentGetDeleteMs,
+      );
 
-    // 404 is acceptable — the document simply did not exist.
-    if (!response.ok && response.status !== HTTP_STATUS_NOT_FOUND) {
-      const text = await response.text().catch(() => '');
-      handleHttpError(response, 'document DELETE', text);
-    }
+      // 404 is acceptable — the document simply did not exist.
+      if (!response.ok && response.status !== HTTP_STATUS_NOT_FOUND) {
+        const text = await response.text().catch(() => '');
+        handleHttpError(response, 'document DELETE', text);
+      }
+    }, VESPA_RETRY_CONFIG);
   }
 
   /**
@@ -671,22 +680,24 @@ export class VespaClient {
    */
   async get(docId: string): Promise<Record<string, unknown> | null> {
     const url = this.docUrl(this.appName, docId);
-    const response = await this.fetchWithTimeout(url, {}, this.timeouts.documentGetDeleteMs);
+    return withRetry(async () => {
+      const response = await this.fetchWithTimeout(url, {}, this.timeouts.documentGetDeleteMs);
 
-    if (response.status === HTTP_STATUS_NOT_FOUND) return null;
+      if (response.status === HTTP_STATUS_NOT_FOUND) return null;
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      handleHttpError(response, 'document GET', text);
-    }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        handleHttpError(response, 'document GET', text);
+      }
 
-    const data: unknown = await response.json();
-    assertObject(data, 'document GET response');
+      const data: unknown = await response.json();
+      assertObject(data, 'document GET response');
 
-    const fields = data['fields'];
-    if (fields === undefined || fields === null) return {};
-    assertObject(fields, 'document fields');
-    return fields;
+      const fields = data['fields'];
+      if (fields === undefined || fields === null) return {};
+      assertObject(fields, 'document fields');
+      return fields;
+    }, VESPA_RETRY_CONFIG);
   }
 
   /**

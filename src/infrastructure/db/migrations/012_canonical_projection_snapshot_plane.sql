@@ -77,6 +77,22 @@ SET search_snapshot_id = CASE
 END
 WHERE search_snapshot_id IS NULL;
 
+WITH canonical_root_snapshot AS (
+  SELECT
+    CASE
+      WHEN COUNT(DISTINCT NULLIF(source_provenance->>'search_snapshot_id', '')) = 1
+        THEN MIN(NULLIF(source_provenance->>'search_snapshot_id', ''))
+      ELSE NULL
+    END AS search_snapshot_id
+  FROM canonical_entities
+)
+UPDATE canonical_ambiguity_registry AS car
+SET search_snapshot_id = crs.search_snapshot_id
+FROM canonical_root_snapshot AS crs
+WHERE car.search_snapshot_id IS NULL
+  AND car.approval_state = 'snapshot_projected'
+  AND crs.search_snapshot_id IS NOT NULL;
+
 DO $$
 BEGIN
   IF EXISTS (

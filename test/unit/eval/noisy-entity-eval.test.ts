@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertNoisyEntityQualityThresholds,
+  evaluateNoisyEntityBenchmarkWithSearchExecutor,
   extractRankedEntityIds,
   loadNoisyEntityBenchmark,
   loadNoisyEntityPredictions,
@@ -199,6 +200,54 @@ describe('noisy entity benchmark eval', () => {
     expect(ids).toEqual(['entity-a', 'entity-b', 'entity-c', 'entity-d']);
   });
 
+  it('runs the noisy benchmark against an in-process search executor using camelCase runtime fields', async () => {
+    const report = await evaluateNoisyEntityBenchmarkWithSearchExecutor(
+      {
+        execute: async (request) => ({
+          queryType: 'search',
+          engineDecision: {
+            decisionStatus: request.query === 'opus'
+              ? 'ambiguous'
+              : 'resolved',
+          },
+          results: request.query === 'opus'
+            ? [
+                {
+                  entity: {
+                    entityId: 'opus-one-2018',
+                    provenance: { stage: 'semantic', source: 'dense' },
+                  },
+                },
+              ]
+            : [
+                {
+                  entity: {
+                    entityId: request.query === '오푸스 원'
+                      ? 'opus-one-2018'
+                      : 'masseto-2020',
+                    provenance: {
+                      stage: request.query === '오푸스 원' ? 'transliteration' : 'semantic',
+                      source: request.query === '오푸스 원' ? 'ko_alias' : 'dense',
+                    },
+                  },
+                },
+              ],
+          meta: {},
+        }) as never,
+      },
+      {
+        input: resolveDataPath('data/noisy-entity-benchmark.jsonl'),
+        concurrency: 2,
+      },
+    );
+
+    expect(report.source).toBe('search-executor');
+    expect(report.query_count).toBe(100);
+    expect(report.recall_at_3).toBeGreaterThan(0);
+    expect(report.resolution_checked_count).toBeGreaterThan(0);
+    expect(report.by_category.transliteration).toBeDefined();
+  });
+
   it('fails when noisy quality thresholds are violated', () => {
     expect(() =>
       assertNoisyEntityQualityThresholds(
@@ -261,5 +310,40 @@ describe('noisy entity benchmark eval', () => {
         },
       ),
     ).not.toThrow();
+  });
+
+  it('fails when a category or language slice falls below the release floor', () => {
+    expect(() =>
+      assertNoisyEntityQualityThresholds(
+        {
+          benchmark: 'noisy-entity-benchmark',
+          query_count: 10,
+          recall_at_1: 0.95,
+          recall_at_3: 1,
+          mrr: 0.97,
+          by_category: {
+            transliteration: { query_count: 2, recall_at_1: 1, recall_at_3: 0.5, mrr: 0.75 },
+          },
+          by_language: {
+            ko: { query_count: 2, recall_at_1: 1, recall_at_3: 0.5, mrr: 0.75 },
+          },
+          misses: [],
+          provenance_checked_count: 2,
+          provenance_match_rate: 1,
+          provenance_misses: [],
+          resolution_checked_count: 2,
+          resolution_match_rate: 1,
+          false_exact_rate: 0,
+          resolution_misses: [],
+          source: 'predictions',
+          evaluated_at: new Date().toISOString(),
+        },
+        {
+          minRecallAt3: 1,
+          enforceMinRecallAt3ByCategory: true,
+          enforceMinRecallAt3ByLanguage: true,
+        },
+      ),
+    ).toThrow(/category\.transliteration\.recall_at_3=0.5000/);
   });
 });

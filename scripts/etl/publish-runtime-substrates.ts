@@ -20,9 +20,11 @@ import {
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/shared/constants/search-snapshot.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
+import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
 
 const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 const DEFAULT_RUNTIME_NL_MAPPINGS_PATH = resolveDataPath('data/nl-mappings.json');
+const RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS = 5 * 60_000;
 
 interface Args {
   readonly manifestPath: string;
@@ -67,6 +69,27 @@ function buildStagingPath(activePath: string, snapshotId: string): string {
   const ext = path.extname(activePath);
   const base = ext.length > 0 ? activePath.slice(0, -ext.length) : activePath;
   return `${base}.${snapshotId}.staging${ext}`;
+}
+
+export interface RuntimeSubstrateCutoverPaths {
+  readonly stagedRuntimeStatePath: string;
+  readonly activeRuntimeStatePath: string;
+  readonly stagedRuntimeNlMappingsPath: string;
+  readonly activeRuntimeNlMappingsPath: string;
+}
+
+export function resolveRuntimeSubstrateCutoverPaths(args: {
+  readonly snapshotId: string;
+  readonly runtimeStatePath: string;
+  readonly runtimeNlMappingsPath: string;
+}): RuntimeSubstrateCutoverPaths {
+  return {
+    stagedRuntimeStatePath: buildStagingPath(args.runtimeStatePath, args.snapshotId),
+    activeRuntimeStatePath: args.runtimeStatePath,
+    // NL mappings are already written as snapshot-bound artifacts during publish.
+    stagedRuntimeNlMappingsPath: buildSnapshotArtifactPath(args.runtimeNlMappingsPath, args.snapshotId),
+    activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
+  };
 }
 
 async function promoteStagedFile(stagingPath: string, activePath: string): Promise<void> {
@@ -182,6 +205,69 @@ function buildEntityRowsJson(
 interface EntityIdentityRow {
   readonly entity_id: string;
   readonly identity_signature: string;
+}
+
+type LearnedFacetCoverage = {
+  readonly giftSuitabilityScore: number;
+  readonly beginnerSuitabilityScore: number;
+};
+
+function emptyLearnedFacetCoverage(): LearnedFacetCoverage {
+  return {
+    giftSuitabilityScore: 0,
+    beginnerSuitabilityScore: 0,
+  };
+}
+
+export function collectLearnedFacetCoverageFromEntities(
+  entities: readonly EntitySnapshotRecord[],
+): LearnedFacetCoverage {
+  const coverage = emptyLearnedFacetCoverage();
+  for (const entity of entities) {
+    if (entity.attributes['giftSuitabilityScore'] != null) {
+      coverage.giftSuitabilityScore += 1;
+    }
+    if (entity.attributes['beginnerSuitabilityScore'] != null) {
+      coverage.beginnerSuitabilityScore += 1;
+    }
+  }
+  return coverage;
+}
+
+export function assertLearnedFacetCoverageForPublish(
+  coverage: LearnedFacetCoverage,
+  source: string,
+  snapshotId: string,
+  total: number,
+): void {
+  const missing: string[] = [];
+  if (coverage.giftSuitabilityScore !== total) {
+    missing.push(`giftSuitabilityScore=${coverage.giftSuitabilityScore}/${total}`);
+  }
+  if (coverage.beginnerSuitabilityScore !== total) {
+    missing.push(`beginnerSuitabilityScore=${coverage.beginnerSuitabilityScore}/${total}`);
+  }
+  if (missing.length === 0) {
+    return;
+  }
+  throw new Error(
+    `Snapshot ${snapshotId} is missing learned facet coverage in ${source}: ${missing.join(', ')}`,
+  );
+}
+
+export async function assertSnapshotArtifactLearnedFacetCoverage(
+  manifest: Pick<SearchSnapshotManifest, 'snapshotId' | 'artifacts'>,
+): Promise<LearnedFacetCoverage> {
+  const raw = await fs.readFile(manifest.artifacts.entitiesNdjson, 'utf8');
+  const entities = parseNdjson<EntitySnapshotRecord>(raw, manifest.artifacts.entitiesNdjson).records;
+  const coverage = collectLearnedFacetCoverageFromEntities(entities);
+  assertLearnedFacetCoverageForPublish(
+    coverage,
+    'entities artifact',
+    manifest.snapshotId,
+    entities.length,
+  );
+  return coverage;
 }
 
 export async function assertEntityIdentitySignatureConsistency(
@@ -330,7 +416,7 @@ function buildActiveLtrModelHash(rows: readonly {
   readonly query_class: string;
   readonly model_version: number;
   readonly eval_dataset_version: string;
-  readonly feature_schema_hash: string;
+  readonly feature_schema_hash: string | null;
   readonly weights: readonly number[];
   readonly bias: number;
 }[]): string {
@@ -344,6 +430,7 @@ function buildActiveLtrModelHash(rows: readonly {
 
 export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapshotRuntimeState> {
   const manifest = await loadManifest(args.manifestPath);
+  await assertSnapshotArtifactLearnedFacetCoverage(manifest);
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
     throw new Error('Postgres configuration is required to publish runtime substrates');
@@ -365,7 +452,11 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
     throw new Error('Refusing to publish runtime substrates with zero aliases');
   }
 
-  const pool = createPgPool(config.pg);
+  const pool = createPgPool(config.pg, {
+    statementTimeoutMs: RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS,
+    idleInTransactionSessionTimeoutMs: RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS,
+    queryTimeoutMs: RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS + 5_000,
+  });
   try {
     const client = await pool.connect();
     let committed = false;
@@ -502,26 +593,43 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         searchSnapshotId: manifest.snapshotId,
       });
 
+      const ltrFeatureSchemaHashSupported = await pgTableHasColumn(
+        pool,
+        'ltr_model_registry',
+        'feature_schema_hash',
+      );
       const ltrActiveResult = await client.query<{
         count: string;
         query_class: string;
         model_version: number;
         eval_dataset_version: string;
-        feature_schema_hash: string;
+        feature_schema_hash: string | null;
         weights: number[];
         bias: number;
       }>(
-        `SELECT
-           COUNT(*) OVER()::text AS count,
-           query_class,
-           model_version,
-           eval_dataset_version,
-           feature_schema_hash,
-           weights,
-           bias
-         FROM ltr_model_registry
-         WHERE is_active = TRUE AND search_snapshot_id = $1
-         ORDER BY query_class ASC, model_version ASC`,
+        ltrFeatureSchemaHashSupported
+          ? `SELECT
+               COUNT(*) OVER()::text AS count,
+               query_class,
+               model_version,
+               eval_dataset_version,
+               feature_schema_hash,
+               weights,
+               bias
+             FROM ltr_model_registry
+             WHERE is_active = TRUE AND search_snapshot_id = $1
+             ORDER BY query_class ASC, model_version ASC`
+          : `SELECT
+               COUNT(*) OVER()::text AS count,
+               query_class,
+               model_version,
+               eval_dataset_version,
+               NULL::text AS feature_schema_hash,
+               weights,
+               bias
+             FROM ltr_model_registry
+             WHERE is_active = TRUE AND search_snapshot_id = $1
+             ORDER BY query_class ASC, model_version ASC`,
         [manifest.snapshotId],
       );
       const activeLtrModels = Number(ltrActiveResult.rows[0]?.count ?? '0');
@@ -587,20 +695,18 @@ async function run(): Promise<void> {
   const previousRuntimeStateContents = await readOptionalFile(args.runtimeStatePath);
   const previousRuntimeNlMappingsContents = await readOptionalFile(args.runtimeNlMappingsPath);
   const manifest = await loadManifest(args.manifestPath);
-  const stagedRuntimeStatePath = buildStagingPath(args.runtimeStatePath, manifest.snapshotId);
-  const stagedRuntimeNlMappingsPath = buildStagingPath(args.runtimeNlMappingsPath, manifest.snapshotId);
+  const cutoverPaths = resolveRuntimeSubstrateCutoverPaths({
+    snapshotId: manifest.snapshotId,
+    runtimeStatePath: args.runtimeStatePath,
+    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+  });
   await publishRuntimeSubstrates({
     ...args,
-    runtimeStatePath: stagedRuntimeStatePath,
+    runtimeStatePath: cutoverPaths.stagedRuntimeStatePath,
     runtimeNlMappingsPath: args.runtimeNlMappingsPath,
   });
   try {
-    const promotedState = await promoteRuntimeSubstrateArtifacts({
-      stagedRuntimeStatePath,
-      activeRuntimeStatePath: args.runtimeStatePath,
-      stagedRuntimeNlMappingsPath,
-      activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
-    });
+    const promotedState = await promoteRuntimeSubstrateArtifacts(cutoverPaths);
     console.log(`Published runtime substrates for ${promotedState.snapshotId}`);
     console.log(`runtime_state=${args.runtimeStatePath}`);
     console.log(`runtime_nl_mappings=${args.runtimeNlMappingsPath}`);

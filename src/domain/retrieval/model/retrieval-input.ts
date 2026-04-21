@@ -58,6 +58,15 @@ export interface HybridRetrievalInput {
   /** Semantic query strings to be embedded for dense retrieval. */
   readonly semanticQueries: readonly string[];
 
+  /**
+   * Dense-only semantic query views for embedding APIs.
+   *
+   * When absent, dense retrieval falls back to `semanticQueries`. This lets
+   * callers gradually adopt embedding-safe noisy-query views without changing
+   * learned-sparse or critic semantics tied to `semanticQueries`.
+   */
+  readonly semanticEmbeddingQueries?: readonly string[] | undefined;
+
   /** Hard constraints that MUST be satisfied (used as filters). */
   readonly hardConstraints: readonly NormalizedConstraint[];
 

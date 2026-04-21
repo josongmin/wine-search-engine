@@ -150,6 +150,39 @@ describe('AnchorExtractor', () => {
     });
   });
 
+  describe('exact-first span gating', () => {
+    it('does not let span fallbacks inject other entities once base lookup yields a unique exact-like entity', async () => {
+      const aliasMatcher = new ExactAliasMatcher(
+        new Map([
+          ['샤또 마고', [{
+            surfaceForm: '샤토 마고',
+            normalizedForm: '샤토 마고',
+            entityIds: [createEntityId('entity-margaux')],
+            matchConfidence: 0.95,
+            lookupStrategy: 'exact',
+          }]],
+          ['chateau', [{
+            surfaceForm: "Château d'Yquem",
+            normalizedForm: "château d'yquem",
+            entityIds: [createEntityId('entity-yquem')],
+            matchConfidence: 0.85,
+            lookupStrategy: 'substring',
+          }]],
+        ]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const anchors = await extractor.extract('마고 샤또', normalizer.normalize('마고 샤또'));
+
+      expect(anchors.map((anchor) => anchor.surfaceForm)).toContain('샤토 마고');
+      expect(anchors.map((anchor) => anchor.candidateEntityIds.map(String))).toEqual(
+        expect.not.arrayContaining([
+          expect.arrayContaining(['entity-yquem']),
+        ]),
+      );
+    });
+  });
+
   describe('Korean mixed-query markers', () => {
     const extractor = new AnchorExtractor(new EmptyAliasMatcher());
 

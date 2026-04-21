@@ -107,6 +107,26 @@ const collapseWhitespace = (value: string): string => value.replace(SPACE_RE, ' 
 const stripPunctuation = (value: string): string =>
   collapseWhitespace(value.replace(PUNCTUATION_STRIP_RE, ' '));
 
+const ATTACHED_VINTAGE_BOUNDARY_RE =
+  /([\p{L}])((?:19|20)\d{2}|\d{2})(?=$|[^\p{N}])/gu;
+
+/**
+ * Separates vintage-like numeric suffixes from adjacent letters.
+ *
+ * Examples:
+ * - "샤토마고1996" -> "샤토마고 1996"
+ * - "opusone18" -> "opusone 18"
+ *
+ * This keeps vintage canonicalization and stripping on the shared vintage SSoT
+ * path instead of relying on later span fallbacks to recover the clean entity.
+ *
+ * We intentionally do NOT split leading numeric tokens from following text
+ * ("10만원"), because those are often prices or quantity expressions rather
+ * than vintages.
+ */
+const separateAttachedVintageTokens = (value: string): string =>
+  collapseWhitespace(value.replace(ATTACHED_VINTAGE_BOUNDARY_RE, '$1 $2'));
+
 const compact = (value: string): string =>
   value.replace(COMPACT_RE, '').replace(SPACE_RE, '').trim();
 
@@ -222,6 +242,25 @@ const buildReorderedVariants = (value: string): readonly string[] => {
   return dedupeVariants(permutations.slice(1));
 };
 
+const buildSemanticEmbeddingVariants = (
+  raw: string,
+  accentless: string,
+  punctuationStripped: string,
+  vintageCanonicalized: string,
+  vintageStripped: string,
+  transliteratedVariants: readonly string[],
+  reorderedVariants: readonly string[],
+): readonly string[] =>
+  dedupeVariants([
+    raw,
+    accentless,
+    punctuationStripped,
+    vintageCanonicalized,
+    vintageStripped,
+    ...transliteratedVariants,
+    ...reorderedVariants,
+  ]);
+
 /**
  * Produces a multi-view representation of a query for entity lookup.
  *
@@ -236,7 +275,7 @@ export class QueryNormalizer {
     const strict = collapseWhitespace(normalizeUnicodeWithHomoglyphs(typoCorrected)).toLowerCase();
     const accentless = stripAccents(strict);
     const collapsedWhitespace = collapseWhitespace(accentless);
-    const punctuationStripped = stripPunctuation(accentless);
+    const punctuationStripped = separateAttachedVintageTokens(stripPunctuation(accentless));
     const compactView = compact(punctuationStripped);
     const vintageCanonicalized = canonicalizeVintage(punctuationStripped);
     const vintageStripped = stripVintage(vintageCanonicalized);
@@ -276,6 +315,15 @@ export class QueryNormalizer {
       vintageStripped,
       ...(transliterated !== undefined ? { transliterated } : {}),
       ...(reorderedVariants.length > 0 ? { reordered: reorderedVariants } : {}),
+      semanticVariants: buildSemanticEmbeddingVariants(
+        raw,
+        accentless,
+        punctuationStripped,
+        vintageCanonicalized,
+        vintageStripped,
+        transliteratedVariants,
+        reorderedVariants,
+      ),
       lookupVariants: dedupeVariants([
         strict,
         accentless,

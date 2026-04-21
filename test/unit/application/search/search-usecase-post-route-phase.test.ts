@@ -1233,6 +1233,50 @@ describe('runSearchPostRoutePhase', () => {
     });
   });
 
+  it('treats no_model_for_query_class as ltr unavailable for the entropy gate', async () => {
+    const responseBuilder = makeResponseBuilder({ queryType: 'search' as const, meta: {} });
+    const abstainPolicy = makeAbstainPolicy(false);
+
+    await runSearchPostRoutePhase({
+      plan: minimalPlan(),
+      compiled: makeTestCompiled(),
+      request: { query: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로' },
+      requestId: 'req-no-ltr-entropy',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [makeRankedResult()] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: makeDecisionEngine() as never,
+      responseBuilder: responseBuilder as never,
+      cacheService: undefined,
+      rankingMetadata: {
+        coarsePruneSummary: undefined,
+        rerankExecuted: false,
+        rerankGateReason: undefined,
+        runtimeSignal: undefined,
+        preRerankTop5: [],
+        rerankDecision: {
+          applied: false,
+          decision: 'no_model_for_query_class',
+        },
+      },
+    });
+
+    expect(abstainPolicy.evaluate).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Array),
+      expect.any(Object),
+      { ltrAvailable: false },
+      expect.any(Array),
+    );
+  });
+
   it('wires constraint_resolution_trace when explain/planner trace is enabled', async () => {
     const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
 

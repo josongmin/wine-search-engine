@@ -83,6 +83,14 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
     await verifySearchSnapshotRuntimeStateLive({
       pool,
       vespaUrl: config.vespa.url,
+      ...(config.vespa.certPath !== undefined && config.vespa.keyPath !== undefined
+        ? {
+            vespaMtls: {
+              certPath: config.vespa.certPath,
+              keyPath: config.vespa.keyPath,
+            },
+          }
+        : {}),
       runtimeState,
       strictHashes: true,
       ...(args.requirePointerParity ? { requirePointerParity: true } : {}),

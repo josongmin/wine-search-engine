@@ -190,7 +190,7 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     expect(inHard).toBe(true);
   });
 
-  it('NLMapper failure degrades gracefully to an empty bundle with fallbackTriggered (T-planner resilience)', async () => {
+  it('NLMapper failure aborts compile instead of silently degrading to rule-only parsing', async () => {
     const nlMapper: NLMapper = {
       mapConstraints: async () => {
         throw new Error('mapper exploded');
@@ -198,10 +198,7 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     } as unknown as NLMapper;
     const compiler = new ConstraintCompiler(nlMapper);
 
-    const result = await compiler.compile('test query');
-    expect(result.bundle.hard).toHaveLength(0);
-    expect(result.bundle.soft).toHaveLength(0);
-    expect(result.constraintExtraction?.fallbackTriggered).toBe(true);
+    await expect(compiler.compile('test query')).rejects.toThrow('mapper exploded');
   });
 
   it('propagates AbortError instead of masking cancellation as nlmapper_exception fallback', async () => {
@@ -235,6 +232,38 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     expect(result.bundle.soft).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ attribute: 'occasion', value: ['healing'] }),
+      ]),
+    );
+  });
+
+  it('real NLMapper grounds 피노 그리지오 as Pinot Gris instead of leaking 피노 -> Pinot Noir', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('피노 그리지오 추천');
+
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary', value: 'Pinot Gris' }),
+      ]),
+    );
+    expect(result.bundle.hard).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary', value: 'Pinot Noir' }),
+      ]),
+    );
+  });
+
+  it('ambiguous short alias 피노 does not promote to a grape constraint without disambiguating context', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('피노 추천');
+
+    expect(result.bundle.soft).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary' }),
+      ]),
+    );
+    expect(result.bundle.hard).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'grape_primary' }),
       ]),
     );
   });
@@ -312,6 +341,79 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     expect(result.bundle.hard).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+      ]),
+    );
+  });
+
+  it('keeps ambiguous short-form grape aliases as retrieval hints instead of direct constraints', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('피노 추천');
+
+    expect(result.bundle.hard.some((constraint) => constraint.attribute === 'grape_primary')).toBe(false);
+    expect(result.bundle.soft.some((constraint) => constraint.attribute === 'grape_primary')).toBe(false);
+    expect(result.ambiguousEntityHints).toEqual([
+      {
+        surface: '피노',
+        entityType: 'grape_primary',
+        retrievalConstraint: {
+          attribute: 'grape_family',
+          operator: '=',
+          value: 'Pinot',
+        },
+        lexicalExpansions: ['pinot'],
+        semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+        clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+        explorationBranches: [
+          {
+            label: 'Pinot Noir',
+            softConstraint: {
+              attribute: 'grape_primary',
+              operator: '=',
+              value: 'Pinot Noir',
+            },
+            matchValues: ['Pinot Noir'],
+            lexicalExpansions: ['pinot noir'],
+            semanticExpansions: ['pinot noir'],
+          },
+          {
+            label: 'Pinot Gris',
+            softConstraint: {
+              attribute: 'grape_primary',
+              operator: '=',
+              value: 'Pinot Gris',
+            },
+            matchValues: ['Pinot Gris', 'Pinot Grigio'],
+            lexicalExpansions: ['pinot gris', 'pinot grigio'],
+            semanticExpansions: ['pinot gris', 'pinot grigio'],
+          },
+          {
+            label: 'Pinot Blanc',
+            softConstraint: {
+              attribute: 'grape_primary',
+              operator: '=',
+              value: 'Pinot Blanc',
+            },
+            matchValues: ['Pinot Blanc'],
+            lexicalExpansions: ['pinot blanc'],
+            semanticExpansions: ['pinot blanc'],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('suppresses short-form Pinot ambiguity hints when a longer Pinot Grigio direct match already covers the span', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('피노 그리지오 추천');
+
+    expect(result.ambiguousEntityHints).toEqual([]);
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'grape_primary',
+          operator: '=',
+          value: 'Pinot Gris',
+        }),
       ]),
     );
   });

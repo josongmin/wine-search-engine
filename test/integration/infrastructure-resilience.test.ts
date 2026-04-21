@@ -226,6 +226,27 @@ describe('VespaClient — error-handling paths', () => {
         TypeError,
       );
     });
+
+    it('retries document POST on transient transport failure and succeeds', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(new TypeError('HTTP/2 GOAWAY'))
+        .mockResolvedValueOnce(makeMockResponse(200, ''));
+
+      await expect(
+        client.put('wine-1', { canonical_label: 'Retryable Wine' }),
+      ).resolves.toBeUndefined();
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT retry document POST on 400 client errors', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(makeMockResponse(400, 'bad request'));
+
+      await expect(
+        client.put('wine-1', { canonical_label: 'Broken Wine' }),
+      ).rejects.toBeInstanceOf(VespaHttpError);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── Test 2: HTTP 429 → VespaHttpError with isRateLimited=true ───────────

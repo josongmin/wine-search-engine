@@ -22,40 +22,43 @@ const NLMappingSchema = z.object({
 /** Max mappings to accept from a single file (domain bound: ~500 entities × 3 aliases). */
 const MAX_MAPPINGS_FROM_FILE = 2000;
 
+const NLMappingFileSchema = z.object({
+  version: z.string(),
+  generatedAt: z.string().optional(),
+  mappingCount: z.number().int().nonnegative().optional(),
+  mappings: z.array(NLMappingSchema).max(MAX_MAPPINGS_FROM_FILE),
+}).strict();
+
 interface LoadedMappingState {
   readonly mappings: readonly NLMapping[];
   readonly version: string;
 }
 
-const EMPTY_STATE: LoadedMappingState = { mappings: [], version: 'v1.0' };
-
 async function loadMappingStateFromFile(path: string): Promise<LoadedMappingState> {
-  try {
-    const raw = await readFile(path, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    // Runtime shape check (Rule 12: never JSON.parse as T directly)
-    const obj = typeof parsed === 'object' && parsed !== null
-      ? parsed as Record<string, unknown>
-      : undefined;
-    const version = typeof obj?.['version'] === 'string' ? obj['version'] : 'v1.0';
-    const rawMappings = Array.isArray(obj?.['mappings']) ? obj['mappings'] as unknown[] : [];
-    const validated: NLMapping[] = [];
-    for (const item of rawMappings.slice(0, MAX_MAPPINGS_FROM_FILE)) {
-      const result = NLMappingSchema.safeParse(item);
-      if (result.success) {
-        validated.push(result.data as NLMapping);
-      }
-    }
-    return { mappings: validated, version };
-  } catch (err) {
-    // File missing or unreadable — start with empty mapping set.
-    // Log at warn level so operators can detect corrupted/missing data files.
-    bootstrapLogger.warn(
-      { err, path },
-      'NL mapping file unavailable; starting with empty mapping set',
+  const raw = await readFile(path, 'utf8');
+  const parsed = JSON.parse(raw) as unknown;
+  const result = NLMappingFileSchema.safeParse(parsed);
+  if (!result.success) {
+    const detail = result.error.issues
+      .slice(0, 3)
+      .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
+    bootstrapLogger.error(
+      { path, detail },
+      'NL mapping file schema mismatch; refusing to boot with drifted runtime artifact',
     );
-    return EMPTY_STATE;
+    throw new Error(`Invalid NL mapping file at ${path}: ${detail}`);
   }
+  const mappingCount = result.data.mappingCount ?? result.data.mappings.length;
+  if (mappingCount !== result.data.mappings.length) {
+    throw new Error(
+      `Invalid NL mapping file at ${path}: mappingCount=${mappingCount} but parsed=${result.data.mappings.length}`,
+    );
+  }
+  return {
+    mappings: result.data.mappings as readonly NLMapping[],
+    version: result.data.version,
+  };
 }
 
 /**

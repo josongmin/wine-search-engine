@@ -5,6 +5,7 @@ import {
   validateIndexableRecord,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { silverGoldMatchKey } from '../../../scripts/etl/snapshot-entity-identity.js';
+import { SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG } from '../../../src/shared/constants/source-systems.js';
 
 function makeEnrichedRecord(
   overrides: Partial<EnrichedSilverRecord> = {},
@@ -75,6 +76,30 @@ describe('silverToIndexable — hit projection fields', () => {
     // the gold slug is stored in benchmarkEntityId on the resolution object,
     // not propagated into silverToIndexable's entityId.
     expect(indexable.entityId.startsWith('wine-ce-')).toBe(true);
+  });
+
+  it('uses benchmark anchor canonical entity id and source authority in the document plane', () => {
+    const rec = {
+      ...makeEnrichedRecord({
+        sourceId: 'benchmark-anchor-opus-one-2018',
+        externalId: 'opus-one-2018',
+      }),
+      benchmarkAnchorEntityId: 'opus-one-2018',
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+    } as EnrichedSilverRecord & {
+      readonly benchmarkAnchorEntityId: string;
+      readonly sourceSystemOverride: string;
+    };
+
+    const indexable = silverToIndexable(rec);
+
+    expect(indexable.entityId).toBe('opus-one-2018');
+    expect(indexable.sourceRecordRefs).toEqual([
+      {
+        sourceSystem: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+        sourceRecordId: 'benchmark-anchor-opus-one-2018',
+      },
+    ]);
   });
 
   it('maps canonicalLabel', () => {

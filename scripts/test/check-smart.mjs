@@ -177,6 +177,30 @@ const heavySourcePatterns = [
   /^src\/infrastructure\/vespa\//,
 ];
 
+const noisyGatePatterns = [
+  /^src\/application\/search\//,
+  /^src\/domain\/attribute\//,
+  /^src\/domain\/decision\//,
+  /^src\/domain\/query\//,
+  /^src\/domain\/resolver\//,
+  /^src\/domain\/retrieval\//,
+  /^src\/domain\/response\//,
+  /^src\/infrastructure\/adapter\/search-pipeline-evaluator\.ts$/,
+  /^scripts\/eval\/run-noisy-entity-eval\.ts$/,
+  /^scripts\/eval\/assert-baseline-regression\.ts$/,
+  /^scripts\/eval\/run-eval-and-train-ltr\.ts$/,
+  /^scripts\/eval\/run-sota-parallel\.sh$/,
+  /^scripts\/test\/check-smart\.mjs$/,
+  /^scripts\/test\/prepush-smart\.mjs$/,
+  /^data\/noisy-entity-/,
+  /^data\/eval-baselines\/noisy-entity-/,
+  /^test\/unit\/eval\/noisy-entity-eval\.test\.ts$/,
+  /^test\/unit\/eval\/run-eval-and-train-ltr\.test\.ts$/,
+  /^test\/unit\/eval\/assert-baseline-regression\.test\.ts$/,
+  /^test\/unit\/meta\/benchmark-verification-scripts-parity\.test\.ts$/,
+  /^test\/unit\/meta\/sota-parallel-script\.test\.ts$/,
+];
+
 const devTestPatterns = [
   /^test\/unit\/.+\.test\.ts$/,
   /^test\/helpers\/.+\.test\.ts$/,
@@ -193,6 +217,7 @@ const shouldRunTypecheck = changedFiles.some(needsTypecheck);
 const lintableFiles = changedFiles.filter((file) => isLintable(file) && !isDocLike(file));
 const shouldRunMetaLane = changedFiles.some((file) => matches(file, metaSourcePatterns));
 const shouldRunHeavyLane = changedFiles.some((file) => matches(file, heavySourcePatterns));
+const shouldRunNoisyVerification = changedFiles.some((file) => matches(file, noisyGatePatterns));
 const label = stagedOnly ? 'check:smart:staged' : 'check:smart';
 
 if (changedFiles.length === 0) {
@@ -222,6 +247,10 @@ if (explicitFiles.length === 0 && changedFiles.length > 15) {
   if (shouldRunMetaLane) {
     console.log(`[${label}] Meta-contract-sensitive changes detected; running test:meta.`);
     npmRun('test:meta');
+  }
+  if (shouldRunNoisyVerification) {
+    console.log(`[${label}] Noisy-entity-sensitive changes detected; running test:verification:noisy.`);
+    npmRun('test:verification:noisy');
   }
   if (shouldRunHeavyLane) {
     console.log(`[${label}] Search-pipeline-sensitive changes detected; running test:heavy.`);
@@ -270,6 +299,10 @@ if (broadFallback) {
   }
   npmRun('check:dev');
   npmRun('test:meta');
+  if (shouldRunNoisyVerification) {
+    console.log(`[${label}] Noisy-entity-sensitive changes detected; running test:verification:noisy.`);
+    npmRun('test:verification:noisy');
+  }
   if (shouldRunHeavyLane) {
     console.log(`[${label}] Search-pipeline-sensitive changes detected; running test:heavy.`);
     npmRun('test:heavy');
@@ -300,6 +333,11 @@ if (metaFiles.length > 0) {
 if (shouldRunMetaLane) {
   console.log(`[${label}] Meta-contract-sensitive source changes detected; running test:meta.`);
   npmRun('test:meta');
+}
+
+if (shouldRunNoisyVerification) {
+  console.log(`[${label}] Noisy-entity-sensitive changes detected; running test:verification:noisy.`);
+  npmRun('test:verification:noisy');
 }
 
 if (devTestFiles.length > 0) {
@@ -359,6 +397,10 @@ if (
   heavyFiles.length === 0 &&
   relatedInputs.length === 0
 ) {
+  if (shouldRunNoisyVerification) {
+    console.log(`[${label}] No narrow test targets found beyond noisy verification; skipping check:quick fallback.`);
+    process.exit(0);
+  }
   console.log(`[${label}] No runnable test targets found; falling back to check:quick.`);
   npmRun('check:quick');
 }

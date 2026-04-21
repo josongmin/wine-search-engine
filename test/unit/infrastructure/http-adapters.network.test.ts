@@ -143,6 +143,7 @@ describe.skipIf(!CAN_BIND_LOOPBACK_HTTP)('HTTP adapters — real local network r
           vintageCanonicalized: '오푸스원 2018',
           vintageStripped: '오푸스원',
           transliterated: 'opus one',
+          semanticVariants: ['오푸스원 18', '오푸스원', 'opus one'],
           lookupVariants: ['오푸스원 18', 'opus one', 'opusone18'],
         },
         anchorLookupVariants: ['opus one', 'opusone18'],

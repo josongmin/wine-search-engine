@@ -16,11 +16,14 @@ import {
   normalizeCanonicalLabelForIdentity,
 } from '../../src/domain/entity/model/identity-signature.js';
 import type { EnrichedSilverRecord } from './types.js';
+import { parseNdjson } from './ndjson.js';
 import {
   createCanonicalEntityId,
   type CanonicalEntityId,
   type SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import type { EntitySnapshotRecord } from './search-snapshot-schema.js';
 
 /** Fields sufficient for ADR-007 wine canonical id (gold overlay + identity signature). */
 export type WineSnapshotIdentityRow = Pick<
@@ -93,6 +96,12 @@ export interface WineSnapshotEntityResolution {
   readonly benchmarkLinkageAuthority?: BenchmarkLinkageAuthority;
 }
 
+export interface SourceEntityContinuityRecord {
+  readonly entityId: CanonicalEntityId;
+  readonly identitySignature: string;
+  readonly benchmarkEntityId?: CanonicalEntityId;
+}
+
 /**
  * Wave 4 (fail-loud): explicit "fixture required" mode for build/eval/publish
  * paths where missing gold linkage would silently degrade benchmark coverage
@@ -151,6 +160,55 @@ export function resolveDefaultFixtureRepoRoot(): string | undefined {
   return existsSync(sibling) ? normalize(sibling) : undefined;
 }
 
+export async function loadActiveSourceEntityContinuity(
+  runtimeStatePath: string = resolveDataPath('data/runtime-search-snapshot.json'),
+): Promise<ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord>> {
+  if (!existsSync(runtimeStatePath)) {
+    return new Map();
+  }
+
+  const runtimeRaw = await readFile(runtimeStatePath, 'utf8');
+  const runtimeParsed = JSON.parse(runtimeRaw) as {
+    manifestPath?: unknown;
+  };
+  if (typeof runtimeParsed.manifestPath !== 'string' || runtimeParsed.manifestPath.length === 0) {
+    return new Map();
+  }
+
+  const manifestRaw = await readFile(runtimeParsed.manifestPath, 'utf8');
+  const manifestParsed = JSON.parse(manifestRaw) as {
+    artifacts?: { entitiesNdjson?: unknown };
+  };
+  const entitiesNdjson = manifestParsed.artifacts?.entitiesNdjson;
+  if (typeof entitiesNdjson !== 'string' || entitiesNdjson.length === 0 || !existsSync(entitiesNdjson)) {
+    return new Map();
+  }
+
+  const entitiesRaw = await readFile(entitiesNdjson, 'utf8');
+  const entities = parseNdjson<EntitySnapshotRecord>(entitiesRaw, entitiesNdjson).records;
+  const continuity = new Map<SourceRecordId, SourceEntityContinuityRecord>();
+  for (const entity of entities) {
+    const metadata = entity.metadata as {
+      benchmarkEntityId?: unknown;
+      sourceRecordRefs?: readonly { sourceSystem?: string; sourceRecordId?: string }[];
+    };
+    const refs = Array.isArray(metadata.sourceRecordRefs) ? metadata.sourceRecordRefs : [];
+    for (const ref of refs) {
+      if (ref?.sourceSystem !== 'vivino-silver' || typeof ref.sourceRecordId !== 'string') {
+        continue;
+      }
+      continuity.set(ref.sourceRecordId as SourceRecordId, {
+        entityId: createCanonicalEntityId(entity.entityId),
+        identitySignature: entity.identitySignature,
+        ...(typeof metadata.benchmarkEntityId === 'string'
+          ? { benchmarkEntityId: createCanonicalEntityId(metadata.benchmarkEntityId) }
+          : {}),
+      });
+    }
+  }
+  return continuity;
+}
+
 /**
  * Loads gold canonical entities and returns a lookup:
  * `${normalizeCanonicalLabelForIdentity(canonical_label)}|${vintage or 'nv'}` → entity_id.
@@ -202,18 +260,23 @@ export function buildSyntheticRegionId(country: string, region: string): string 
 export function resolveWineSnapshotEntity(
   record: WineSnapshotIdentityRow,
   goldLookup: ReadonlyMap<string, string>,
+  sourceContinuityLookup: ReadonlyMap<SourceRecordId, SourceEntityContinuityRecord> = new Map(),
 ): WineSnapshotEntityResolution {
   const producerId = buildSyntheticProducerId(record.producer);
   const regionId = buildSyntheticRegionId(record.country, record.region);
-  const identitySignature = computeIdentitySignature('wine', {
+  const computedIdentitySignature = computeIdentitySignature('wine', {
     canonicalLabel: record.canonicalLabel,
     producerId,
     regionId,
   });
-  const publicEntityId = createCanonicalEntityId(`${SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX}${identitySignature}`);
+  const continuity = sourceContinuityLookup.get(record.sourceId);
+  const identitySignature = continuity?.identitySignature ?? computedIdentitySignature;
+  const publicEntityId = continuity?.entityId
+    ?? createCanonicalEntityId(`${SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX}${identitySignature}`);
 
   const key = silverGoldMatchKey(record);
   const goldHit = goldLookup.get(key);
+  const continuityBenchmarkEntityId = continuity?.benchmarkEntityId;
   if (goldHit != null) {
     if (isSourceRecordStylePublicEntityId(goldHit)) {
       throw new Error(`Gold lookup returned forbidden source-style id for ${key}: ${goldHit}`);
@@ -241,6 +304,12 @@ export function resolveWineSnapshotEntity(
     producerId,
     regionId,
     resolution: 'identity_signature',
+    ...(continuityBenchmarkEntityId !== undefined
+      ? {
+          benchmarkEntityId: continuityBenchmarkEntityId,
+          benchmarkLinkageAuthority: BENCHMARK_LINKAGE_AUTHORITY,
+        }
+      : {}),
   };
 }
 

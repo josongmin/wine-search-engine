@@ -42,6 +42,23 @@ function makePool(rows: unknown[]): Pool {
   } as unknown as Pool;
 }
 
+function makeSchemaAwarePool(
+  responses: unknown[],
+  hasFeatureSchemaHashColumn: boolean,
+): Pool {
+  const query = vi.fn(async (text: string) => {
+    if (text.includes('information_schema.columns')) {
+      return { rows: [{ present: hasFeatureSchemaHashColumn }], rowCount: 1 };
+    }
+    const next = responses.shift();
+    if (next === undefined) {
+      throw new Error('Unexpected query without stubbed response');
+    }
+    return next;
+  });
+  return { query } as unknown as Pool;
+}
+
 function makeClientSequence(responses: readonly unknown[]) {
   const query = vi.fn();
   for (const response of responses) {
@@ -184,6 +201,12 @@ describe('PgLtrModelRegistry.activateSnapshot', () => {
       undefined,
     ]);
     const pool = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes('information_schema.columns')) {
+          return { rows: [{ present: true }], rowCount: 1 };
+        }
+        throw new Error(`Unexpected pool.query call: ${text}`);
+      }),
       connect: vi.fn().mockResolvedValue(client),
     } as unknown as Pool;
     const registry = new PgLtrModelRegistry(pool);
@@ -239,6 +262,12 @@ describe('PgLtrModelRegistry.cloneActiveModelsToSnapshot', () => {
       undefined,
     ]);
     const pool = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes('information_schema.columns')) {
+          return { rows: [{ present: true }], rowCount: 1 };
+        }
+        throw new Error(`Unexpected pool.query call: ${text}`);
+      }),
       connect: vi.fn().mockResolvedValue(client),
     } as unknown as Pool;
     const registry = new PgLtrModelRegistry(pool);
@@ -271,6 +300,12 @@ describe('PgLtrModelRegistry.cloneActiveModelsToSnapshot', () => {
       undefined,
     ]);
     const pool = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes('information_schema.columns')) {
+          return { rows: [{ present: true }], rowCount: 1 };
+        }
+        throw new Error(`Unexpected pool.query call: ${text}`);
+      }),
       connect: vi.fn().mockResolvedValue(client),
     } as unknown as Pool;
     const registry = new PgLtrModelRegistry(pool);
@@ -283,5 +318,29 @@ describe('PgLtrModelRegistry.cloneActiveModelsToSnapshot', () => {
 
     expect(cloned).toBe(0);
     expect(client.query).toHaveBeenNthCalledWith(3, 'ROLLBACK');
+  });
+
+  it('returns zero when feature_schema_hash column is absent and compatibility cannot be proven', async () => {
+    const pool = makeSchemaAwarePool([], false);
+    const registry = new PgLtrModelRegistry(pool);
+
+    await expect(
+      registry.cloneActiveModelsToSnapshot(
+        'search-snapshot:v1:source',
+        'search-snapshot:v1:target',
+        { featureSchemaHash: '9f8a1573d430a37d' },
+      ),
+    ).resolves.toBe(0);
+  });
+});
+
+describe('PgLtrModelRegistry.listActiveSnapshotIds', () => {
+  it('returns empty when feature schema filtering is requested against a legacy schema', async () => {
+    const pool = makeSchemaAwarePool([], false);
+    const registry = new PgLtrModelRegistry(pool);
+
+    await expect(
+      registry.listActiveSnapshotIds('9f8a1573d430a37d'),
+    ).resolves.toEqual([]);
   });
 });

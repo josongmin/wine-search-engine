@@ -104,6 +104,19 @@ export interface SearchSnapshotRuntimeState {
     readonly nlMappings: string;
     readonly activeLtrModels: string;
   };
+  readonly ltrReleaseProvenance?: {
+    readonly updatedAt: string;
+    readonly evalDatasetVersion: string;
+    readonly featureSchemaHash: string;
+    readonly summaryJsonPath: string;
+    readonly summaryJsonHash: string;
+    readonly summaryMarkdownPath: string;
+    readonly summaryMarkdownHash: string;
+    readonly noisyEntityOutputPath: string;
+    readonly noisyEntityOutputHash: string;
+    readonly combinedReleaseGatePassed: boolean;
+    readonly activationStatus: 'activated' | 'shadow_only';
+  };
 }
 
 export const SearchSnapshotManifestSchema = z.object({
@@ -161,6 +174,19 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     nlMappings: z.string().min(1),
     activeLtrModels: z.string().min(1),
   }).strict(),
+  ltrReleaseProvenance: z.object({
+    updatedAt: z.string().min(1),
+    evalDatasetVersion: z.string().min(1),
+    featureSchemaHash: z.string().min(1),
+    summaryJsonPath: z.string().min(1),
+    summaryJsonHash: z.string().min(1),
+    summaryMarkdownPath: z.string().min(1),
+    summaryMarkdownHash: z.string().min(1),
+    noisyEntityOutputPath: z.string().min(1),
+    noisyEntityOutputHash: z.string().min(1),
+    combinedReleaseGatePassed: z.boolean(),
+    activationStatus: z.enum(['activated', 'shadow_only']),
+  }).strict().optional(),
 }).strict();
 
 export function parseManifest(raw: string, _filePath: string): SearchSnapshotManifest {

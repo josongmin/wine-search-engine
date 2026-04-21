@@ -34,7 +34,7 @@ echo
 run_job "typecheck" pnpm run typecheck
 run_job "verify-splits" npx tsx scripts/eval/verify-splits.ts
 run_job "eval-offline-smoke" pnpm run eval:offline:smoke
-run_job "eval-noisy-validate" pnpm run eval:noisy:validate
+run_job "eval-noisy-gate" pnpm run test:verification:noisy
 
 for pid in "${pids[@]}"; do
   if ! wait "$pid"; then

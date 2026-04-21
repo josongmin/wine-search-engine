@@ -79,6 +79,22 @@ COMMENT ON TABLE entity_snapshots IS
   'Runtime plane composite-PK migration: FK to entities(entity_id) dropped because entities PK is now composite (search_snapshot_id, entity_id). Archive invariant is enforced at the publisher level instead of the DB level.';
 
 -- --------------------------------------------------------------------------
+-- aliases FK drop (must happen BEFORE entities PK change because the old FK
+-- depends on entities(entity_id)).
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'fk_aliases_entity'
+  ) THEN
+    ALTER TABLE aliases
+      DROP CONSTRAINT fk_aliases_entity;
+  END IF;
+END
+$$;
+
+-- --------------------------------------------------------------------------
 -- entities
 -- --------------------------------------------------------------------------
 -- Drop global PK
@@ -150,6 +166,20 @@ BEGIN
     ALTER TABLE aliases
       ADD CONSTRAINT aliases_snapshot_pkey
       PRIMARY KEY (search_snapshot_id, alias_id);
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_aliases_snapshot_entity'
+  ) THEN
+    ALTER TABLE aliases
+      ADD CONSTRAINT fk_aliases_snapshot_entity
+      FOREIGN KEY (search_snapshot_id, entity_id)
+      REFERENCES entities(search_snapshot_id, entity_id)
+      ON DELETE CASCADE;
   END IF;
 END
 $$;

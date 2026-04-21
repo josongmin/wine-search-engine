@@ -505,6 +505,7 @@ describe('TA4: fuzzyEntityHypotheses in ExpansionBundle and HybridRetrievalInput
         vintageCanonicalized: '오푸스원 뭐야',
         vintageStripped: '오푸스원 뭐야',
         transliterated: 'opus one',
+        semanticVariants: ['오푸스원 뭐야', 'opus one'],
       },
       expansions: {
         lexical: ['opus one', 'napa valley'],

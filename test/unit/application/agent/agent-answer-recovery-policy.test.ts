@@ -106,6 +106,7 @@ describe('AgentAnswerRecoveryPolicy', () => {
           query: '선물용 와인',
           exclude_grapes: ['Merlot'],
           exclude_regions: ['France'],
+          min_price_krw: 10000,
           max_price_krw: 50000,
           max_alcohol_pct: 12,
           styles: ['approachable', 'crowd_pleasing', 'sweet'],
@@ -127,7 +128,7 @@ describe('AgentAnswerRecoveryPolicy', () => {
 
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: '선물용 와인, not Merlot, not France, 50000원 이하, approachable, crowd pleasing',
+        query: '선물용 와인, not Merlot, not France, 1~5만원, approachable, crowd pleasing',
         limit: 3,
         options: { mode: 'hybrid', explain: false, clarification: false },
         filters: expect.arrayContaining([

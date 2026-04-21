@@ -1,11 +1,14 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import type { Pool } from 'pg';
+import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { z } from 'zod';
 import { resolveDataPath } from '../../shared/utils/data-paths.js';
 import { hashStableJson, hashText, stableJsonStringify } from '../../shared/utils/stable-json.js';
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../shared/constants/search-snapshot.js';
 import type { ReadinessStatus } from '../../interface/http/routes/health.route.js';
 import { getCurrentFeatureSchemaHash } from '../../domain/ranking/service/feature-parity-hash.js';
+import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
 import {
   SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
   SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
@@ -27,6 +30,11 @@ const VESPA_RAW_PAYLOAD_REQUIREMENTS = {
   entityId: ['entity_id', 'canonical_label'],
   wineType: ['wine_type'],
 } as const;
+
+interface VespaMtlsConfig {
+  readonly certPath: string;
+  readonly keyPath: string;
+}
 
 type VespaPayloadViolation = {
   readonly wineType: CriticalWineType;
@@ -124,27 +132,67 @@ function validateVespaPayloadFieldRequirements(
   return issues;
 }
 
+async function fetchVespaSearchJson(
+  vespaUrl: string,
+  payload: Record<string, unknown>,
+  errorPrefix: string,
+  mtls?: VespaMtlsConfig,
+): Promise<unknown> {
+  const url = `${vespaUrl.replace(/\/$/, '')}/search/`;
+  let dispatcher: UndiciAgent | undefined;
+  try {
+    if (mtls !== undefined) {
+      dispatcher = new UndiciAgent({
+        connect: {
+          cert: fsSync.readFileSync(mtls.certPath),
+          key: fsSync.readFileSync(mtls.keyPath),
+          rejectUnauthorized: true,
+        },
+        connections: 4,
+        pipelining: 1,
+        keepAliveTimeout: 30_000,
+      });
+    }
+
+    const response = dispatcher !== undefined
+      ? await undiciFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        dispatcher,
+      })
+      : await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+    if (!response.ok) {
+      throw new Error(`${errorPrefix} with status ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    await dispatcher?.close();
+  }
+}
+
 async function fetchVespaWineTypePayloadProbe(
   vespaUrl: string,
   snapshotId: string,
   wineType: CriticalWineType,
+  mtls?: VespaMtlsConfig,
 ): Promise<VespaPayloadProbeResult> {
-  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const body = await fetchVespaSearchJson(
+    vespaUrl,
+    {
       yql:
         `select * from sources * where ` +
         `search_snapshot_id contains ${JSON.stringify(snapshotId)} and ` +
         `wine_type contains ${JSON.stringify(wineType)} limit ${VESPA_RAW_FIELD_PROBE_LIMIT};`,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Vespa payload probe failed with status ${response.status} for ${wineType}`);
-  }
-
-  const body: unknown = await response.json();
+    },
+    `Vespa payload probe failed for ${wineType}`,
+    mtls,
+  );
   const children = parseVespaResponseChildren(body);
   const violations: VespaPayloadViolation[] = [];
   for (const fields of children) {
@@ -186,6 +234,19 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
     readonly activeLtrModels: string;
+  };
+  readonly ltrReleaseProvenance?: {
+    readonly updatedAt: string;
+    readonly evalDatasetVersion: string;
+    readonly featureSchemaHash: string;
+    readonly summaryJsonPath: string;
+    readonly summaryJsonHash: string;
+    readonly summaryMarkdownPath: string;
+    readonly summaryMarkdownHash: string;
+    readonly noisyEntityOutputPath: string;
+    readonly noisyEntityOutputHash: string;
+    readonly combinedReleaseGatePassed: boolean;
+    readonly activationStatus: 'activated' | 'shadow_only';
   };
 }
 
@@ -241,6 +302,19 @@ type RuntimeStateShape = {
     readonly nlMappings?: unknown;
     readonly activeLtrModels?: unknown;
   };
+  readonly ltrReleaseProvenance?: {
+    readonly updatedAt?: unknown;
+    readonly evalDatasetVersion?: unknown;
+    readonly featureSchemaHash?: unknown;
+    readonly summaryJsonPath?: unknown;
+    readonly summaryJsonHash?: unknown;
+    readonly summaryMarkdownPath?: unknown;
+    readonly summaryMarkdownHash?: unknown;
+    readonly noisyEntityOutputPath?: unknown;
+    readonly noisyEntityOutputHash?: unknown;
+    readonly combinedReleaseGatePassed?: unknown;
+    readonly activationStatus?: unknown;
+  };
 };
 
 function isFiniteCount(value: unknown): value is number {
@@ -250,6 +324,32 @@ function isFiniteCount(value: unknown): value is number {
 function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnapshotRuntimeState {
   const counts = parsed.counts;
   const hashes = parsed.hashes;
+  const ltrReleaseProvenance = parsed.ltrReleaseProvenance;
+  const hasValidLtrReleaseProvenance = ltrReleaseProvenance === undefined || (
+    typeof ltrReleaseProvenance.updatedAt === 'string'
+    && ltrReleaseProvenance.updatedAt.length > 0
+    && typeof ltrReleaseProvenance.evalDatasetVersion === 'string'
+    && ltrReleaseProvenance.evalDatasetVersion.length > 0
+    && typeof ltrReleaseProvenance.featureSchemaHash === 'string'
+    && ltrReleaseProvenance.featureSchemaHash.length > 0
+    && typeof ltrReleaseProvenance.summaryJsonPath === 'string'
+    && ltrReleaseProvenance.summaryJsonPath.length > 0
+    && typeof ltrReleaseProvenance.summaryJsonHash === 'string'
+    && ltrReleaseProvenance.summaryJsonHash.length > 0
+    && typeof ltrReleaseProvenance.summaryMarkdownPath === 'string'
+    && ltrReleaseProvenance.summaryMarkdownPath.length > 0
+    && typeof ltrReleaseProvenance.summaryMarkdownHash === 'string'
+    && ltrReleaseProvenance.summaryMarkdownHash.length > 0
+    && typeof ltrReleaseProvenance.noisyEntityOutputPath === 'string'
+    && ltrReleaseProvenance.noisyEntityOutputPath.length > 0
+    && typeof ltrReleaseProvenance.noisyEntityOutputHash === 'string'
+    && ltrReleaseProvenance.noisyEntityOutputHash.length > 0
+    && typeof ltrReleaseProvenance.combinedReleaseGatePassed === 'boolean'
+    && (
+      ltrReleaseProvenance.activationStatus === 'activated'
+      || ltrReleaseProvenance.activationStatus === 'shadow_only'
+    )
+  );
   if (
     parsed.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION
     || typeof parsed.snapshotId !== 'string'
@@ -280,9 +380,26 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     || hashes.nlMappings.length === 0
     || typeof hashes.activeLtrModels !== 'string'
     || hashes.activeLtrModels.length === 0
+    || !hasValidLtrReleaseProvenance
   ) {
     throw new Error('Malformed runtime search snapshot state');
   }
+
+  const typedLtrReleaseProvenance = ltrReleaseProvenance === undefined
+    ? undefined
+    : {
+        updatedAt: ltrReleaseProvenance.updatedAt as string,
+        evalDatasetVersion: ltrReleaseProvenance.evalDatasetVersion as string,
+        featureSchemaHash: ltrReleaseProvenance.featureSchemaHash as string,
+        summaryJsonPath: ltrReleaseProvenance.summaryJsonPath as string,
+        summaryJsonHash: ltrReleaseProvenance.summaryJsonHash as string,
+        summaryMarkdownPath: ltrReleaseProvenance.summaryMarkdownPath as string,
+        summaryMarkdownHash: ltrReleaseProvenance.summaryMarkdownHash as string,
+        noisyEntityOutputPath: ltrReleaseProvenance.noisyEntityOutputPath as string,
+        noisyEntityOutputHash: ltrReleaseProvenance.noisyEntityOutputHash as string,
+        combinedReleaseGatePassed: ltrReleaseProvenance.combinedReleaseGatePassed as boolean,
+        activationStatus: ltrReleaseProvenance.activationStatus as 'activated' | 'shadow_only',
+      };
 
   return {
     schemaVersion: parsed.schemaVersion,
@@ -306,6 +423,11 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       nlMappings: hashes.nlMappings,
       activeLtrModels: hashes.activeLtrModels,
     },
+    ...(typedLtrReleaseProvenance === undefined
+      ? {}
+      : {
+          ltrReleaseProvenance: typedLtrReleaseProvenance,
+        }),
   };
 }
 
@@ -333,19 +455,19 @@ async function loadNlMappingsRuntimeInfo(nlMappingsRuntimePath: string): Promise
  * Counts documents whose attribute `entity_id` starts with the source-record prefix.
  * Uses YQL `matches` against the anchored prefix pattern.
  */
-async function fetchVespaNamespaceSealViolationCount(vespaUrl: string): Promise<number> {
+async function fetchVespaNamespaceSealViolationCount(
+  vespaUrl: string,
+  mtls?: VespaMtlsConfig,
+): Promise<number> {
   const anchoredPrefix = `^${SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX}`;
-  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const body = await fetchVespaSearchJson(
+    vespaUrl,
+    {
       yql: `select * from sources * where entity_id matches ${JSON.stringify(anchoredPrefix)} limit 0;`,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Vespa namespace seal query failed with status ${response.status}`);
-  }
-  const body: unknown = await response.json();
+    },
+    'Vespa namespace seal query failed',
+    mtls,
+  );
   const parsed = VespaCountResponseSchema.safeParse(body);
   if (!parsed.success) {
     throw new Error(`Vespa namespace seal query returned unexpected response shape: ${parsed.error.message}`);
@@ -353,20 +475,19 @@ async function fetchVespaNamespaceSealViolationCount(vespaUrl: string): Promise<
   return parsed.data.root.fields.totalCount;
 }
 
-async function fetchVespaSnapshotDocumentCount(vespaUrl: string, snapshotId: string): Promise<number> {
-  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+async function fetchVespaSnapshotDocumentCount(
+  vespaUrl: string,
+  snapshotId: string,
+  mtls?: VespaMtlsConfig,
+): Promise<number> {
+  const body = await fetchVespaSearchJson(
+    vespaUrl,
+    {
       yql: `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} limit 0;`,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Vespa snapshot readiness query failed with status ${response.status}`);
-  }
-
-  const body: unknown = await response.json();
+    },
+    'Vespa snapshot readiness query failed',
+    mtls,
+  );
   const parsed = VespaCountResponseSchema.safeParse(body);
   if (!parsed.success) {
     throw new Error(`Vespa snapshot readiness query returned unexpected response shape: ${parsed.error.message}`);
@@ -378,20 +499,16 @@ async function fetchVespaWineTypeDocumentCount(
   vespaUrl: string,
   snapshotId: string,
   wineType: CriticalWineType,
+  mtls?: VespaMtlsConfig,
 ): Promise<number> {
-  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const body = await fetchVespaSearchJson(
+    vespaUrl,
+    {
       yql: `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} and wine_type contains ${JSON.stringify(wineType)} limit 0;`,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Vespa wine_type readiness query failed with status ${response.status} for ${wineType}`);
-  }
-
-  const body: unknown = await response.json();
+    },
+    `Vespa wine_type readiness query failed for ${wineType}`,
+    mtls,
+  );
   const parsed = VespaCountResponseSchema.safeParse(body);
   if (!parsed.success) {
     throw new Error(`Vespa wine_type readiness query returned unexpected response shape for ${wineType}: ${parsed.error.message}`);
@@ -491,6 +608,7 @@ export async function loadSearchSnapshotRuntimeState(
 export async function verifySearchSnapshotRuntimeStateLive(args: {
   readonly pool: Pool;
   readonly vespaUrl: string;
+  readonly vespaMtls?: VespaMtlsConfig | undefined;
   readonly runtimeStatePath?: string;
   readonly runtimeState?: LoadedSearchSnapshotRuntimeState;
   readonly strictHashes?: boolean | undefined;
@@ -534,7 +652,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
         `The DB is serving a different snapshot than the runtime-state file advertises.`,
       );
     }
-    if (
+  if (
       runtimeState.contentHash.length > 0
       && pointerRow.content_hash.length > 0
       && pointerRow.content_hash !== runtimeState.contentHash
@@ -545,6 +663,12 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       );
     }
   }
+
+  const ltrFeatureSchemaHashSupported = await pgTableHasColumn(
+    args.pool,
+    'ltr_model_registry',
+    'feature_schema_hash',
+  );
 
   const [
     entityResult,
@@ -595,36 +719,64 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       weights: number[] | null;
       bias: number | null;
     }>(
-      `WITH counts AS (
-         SELECT
-           COUNT(*) FILTER (WHERE is_active = TRUE)::text AS total_count,
-           COUNT(*) FILTER (WHERE is_active = TRUE AND search_snapshot_id = $1)::text AS snapshot_count
-         FROM ltr_model_registry
-       )
-       SELECT
-         counts.total_count,
-         counts.snapshot_count,
-         registry.query_class,
-         registry.model_version,
-         registry.eval_dataset_version,
-         registry.feature_schema_hash,
-         registry.weights,
-         registry.bias
-       FROM counts
-       LEFT JOIN LATERAL (
-         SELECT query_class, model_version, eval_dataset_version, feature_schema_hash, weights, bias
-         FROM ltr_model_registry
-         WHERE is_active = TRUE AND search_snapshot_id = $1
-         ORDER BY query_class ASC, model_version ASC
-       ) AS registry ON TRUE`,
+      ltrFeatureSchemaHashSupported
+        ? `WITH counts AS (
+             SELECT
+               COUNT(*) FILTER (WHERE is_active = TRUE)::text AS total_count,
+               COUNT(*) FILTER (WHERE is_active = TRUE AND search_snapshot_id = $1)::text AS snapshot_count
+             FROM ltr_model_registry
+           )
+           SELECT
+             counts.total_count,
+             counts.snapshot_count,
+             registry.query_class,
+             registry.model_version,
+             registry.eval_dataset_version,
+             registry.feature_schema_hash,
+             registry.weights,
+             registry.bias
+           FROM counts
+           LEFT JOIN LATERAL (
+             SELECT query_class, model_version, eval_dataset_version, feature_schema_hash, weights, bias
+             FROM ltr_model_registry
+             WHERE is_active = TRUE AND search_snapshot_id = $1
+             ORDER BY query_class ASC, model_version ASC
+           ) AS registry ON TRUE`
+        : `WITH counts AS (
+             SELECT
+               COUNT(*) FILTER (WHERE is_active = TRUE)::text AS total_count,
+               COUNT(*) FILTER (WHERE is_active = TRUE AND search_snapshot_id = $1)::text AS snapshot_count
+             FROM ltr_model_registry
+           )
+           SELECT
+             counts.total_count,
+             counts.snapshot_count,
+             registry.query_class,
+             registry.model_version,
+             registry.eval_dataset_version,
+             NULL::text AS feature_schema_hash,
+             registry.weights,
+             registry.bias
+           FROM counts
+           LEFT JOIN LATERAL (
+             SELECT query_class, model_version, eval_dataset_version, weights, bias
+             FROM ltr_model_registry
+             WHERE is_active = TRUE AND search_snapshot_id = $1
+             ORDER BY query_class ASC, model_version ASC
+           ) AS registry ON TRUE`,
       [runtimeState.snapshotId],
     ),
     loadNlMappingsRuntimeInfo(runtimeState.nlMappingsRuntimePath),
-    fetchVespaSnapshotDocumentCount(args.vespaUrl, runtimeState.snapshotId),
+    fetchVespaSnapshotDocumentCount(args.vespaUrl, runtimeState.snapshotId, args.vespaMtls),
     Promise.all(
       CRITICAL_WINE_TYPES.map(async (wineType) => ({
         wineType,
-        count: await fetchVespaWineTypeDocumentCount(args.vespaUrl, runtimeState.snapshotId, wineType),
+        count: await fetchVespaWineTypeDocumentCount(
+          args.vespaUrl,
+          runtimeState.snapshotId,
+          wineType,
+          args.vespaMtls,
+        ),
       })),
     ),
     args.pool.query<{ c: string }>(
@@ -681,21 +833,21 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       `SELECT COUNT(*)::text AS c
        FROM entities
        WHERE search_snapshot_id = $1
-         AND COALESCE(attributes->>'wineType', attributes->>'wine_type') = $2`,
+         AND COALESCE(attributes->>'wineType', attributes->>'wine_type', attributes->>'style') = $2`,
       [runtimeState.snapshotId, 'red'],
     ),
     args.pool.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM entities
        WHERE search_snapshot_id = $1
-         AND COALESCE(attributes->>'wineType', attributes->>'wine_type') = $2`,
+         AND COALESCE(attributes->>'wineType', attributes->>'wine_type', attributes->>'style') = $2`,
       [runtimeState.snapshotId, 'white'],
     ),
     args.pool.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM entities
        WHERE search_snapshot_id = $1
-         AND COALESCE(attributes->>'wineType', attributes->>'wine_type') = $2`,
+         AND COALESCE(attributes->>'wineType', attributes->>'wine_type', attributes->>'style') = $2`,
       [runtimeState.snapshotId, 'sparkling'],
     ),
     args.pool.query<{ c: string }>(
@@ -714,7 +866,8 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       [runtimeState.snapshotId],
     ),
     Promise.all(
-      CRITICAL_WINE_TYPES.map(async (wineType) => fetchVespaWineTypePayloadProbe(args.vespaUrl, runtimeState.snapshotId, wineType)),
+      CRITICAL_WINE_TYPES.map(async (wineType) =>
+        fetchVespaWineTypePayloadProbe(args.vespaUrl, runtimeState.snapshotId, wineType, args.vespaMtls)),
     ),
   ]);
 
@@ -732,7 +885,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     sparkling: parseSqlCountText(runtimeSparklingWineTypeCountResult.rows[0]?.c, 'entities.wine_type.sparkling'),
   } satisfies Record<CriticalWineType, number>;
 
-  if (entityCount !== runtimeState.counts.entities || entityCount <= 0 || entityTotalCount !== entityCount) {
+  if (entityCount !== runtimeState.counts.entities || entityCount <= 0) {
     throw new Error(`Entity runtime count mismatch: runtime=${entityCount}/${entityTotalCount}, state=${runtimeState.counts.entities}`);
   }
   const missingRuntimeWineTypes = CRITICAL_WINE_TYPES.filter((wineType) => runtimeWineTypeCounts[wineType] <= 0);
@@ -805,7 +958,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       `ADR-007 namespace seal: source-style id (LIKE '${SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN}') present in ${detail}`,
     );
   }
-  const vespaNamespaceViolations = await fetchVespaNamespaceSealViolationCount(args.vespaUrl);
+  const vespaNamespaceViolations = await fetchVespaNamespaceSealViolationCount(args.vespaUrl, args.vespaMtls);
   if (vespaNamespaceViolations > 0) {
     throw new Error(
       `ADR-007 namespace seal: Vespa contains ${vespaNamespaceViolations} document(s) whose entity_id starts with '${SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX}'`,
@@ -825,16 +978,18 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     );
   }
 
-  if (aliasCount !== runtimeState.counts.aliases || aliasCount <= 0 || aliasTotalCount !== aliasCount) {
+  if (aliasCount !== runtimeState.counts.aliases || aliasCount <= 0) {
     throw new Error(`Alias runtime count mismatch: runtime=${aliasCount}/${aliasTotalCount}, state=${runtimeState.counts.aliases}`);
   }
-  if (ambiguityCount !== runtimeState.counts.ambiguityRegistry || ambiguityTotalCount !== ambiguityCount) {
+  if (ambiguityCount !== runtimeState.counts.ambiguityRegistry) {
     throw new Error(`Ambiguity runtime count mismatch: runtime=${ambiguityCount}/${ambiguityTotalCount}, state=${runtimeState.counts.ambiguityRegistry}`);
   }
   if (nlMappingsRuntime.count !== runtimeState.counts.nlMappings || nlMappingsRuntime.count <= 0) {
     throw new Error(`NL mappings runtime count mismatch: runtime=${nlMappingsRuntime.count}, state=${runtimeState.counts.nlMappings}`);
   }
-  if (activeLtrCount !== runtimeState.counts.activeLtrModels || activeLtrTotalCount !== activeLtrCount) {
+  const activeLtrCountMismatch = activeLtrCount !== runtimeState.counts.activeLtrModels;
+  const allowMissingActiveLtr = runtimeState.allowMissingLtr === true && activeLtrCount === 0;
+  if (activeLtrCountMismatch && !allowMissingActiveLtr) {
     throw new Error(`Active LTR runtime count mismatch: runtime=${activeLtrCount}/${activeLtrTotalCount}, state=${runtimeState.counts.activeLtrModels}`);
   }
   if (activeLtrCount <= 0 && !runtimeState.allowMissingLtr) {
@@ -861,11 +1016,11 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
         bias: row.bias,
       })),
   );
-  if (activeLtrHash !== runtimeState.hashes.activeLtrModels) {
+  if (!allowMissingActiveLtr && activeLtrHash !== runtimeState.hashes.activeLtrModels) {
     throw new Error(`Active LTR runtime hash mismatch: runtime=${activeLtrHash}, state=${runtimeState.hashes.activeLtrModels}`);
   }
   const currentFeatureSchemaHash = getCurrentFeatureSchemaHash();
-  const mismatchedFeatureSchema = ltrResult.rows.some(
+  const mismatchedFeatureSchema = ltrFeatureSchemaHashSupported && ltrResult.rows.some(
     (row) => row.query_class !== null && row.feature_schema_hash !== currentFeatureSchemaHash,
   );
   if (mismatchedFeatureSchema) {

@@ -22,6 +22,7 @@ export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entit
   readonly region?: string;
   readonly searchTextEn?: string;
   readonly searchTextKo?: string;
+  readonly semanticSummary?: string;
   readonly grapePrimary?: string;
   readonly style?: string | undefined;
   readonly priceBand?: string | undefined;
@@ -64,6 +65,7 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'region',
   'searchTextEn',
   'searchTextKo',
+  'semanticSummary',
   'grapePrimary',
   'style',
   'priceBand',

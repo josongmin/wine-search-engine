@@ -14,6 +14,14 @@ import type { CanonicalEntityId, SourceRecordId } from '../../src/domain/shared/
 // ---------------------------------------------------------------------------
 
 /** Subset of the Vivino PDP payload that we actually extract. */
+export interface VivinoRatingDistribution {
+  readonly '1'?: number | undefined;
+  readonly '2'?: number | undefined;
+  readonly '3'?: number | undefined;
+  readonly '4'?: number | undefined;
+  readonly '5'?: number | undefined;
+}
+
 export interface VivinoPayload {
   readonly winery?: { readonly name?: string; readonly id?: number };
   readonly vintage?: { readonly year?: number; readonly seo_name?: string };
@@ -114,8 +122,17 @@ export interface VivinoPayload {
   /** Number of text reviews. */
   readonly review_count?: number;
 
+  /** Star-bucket vote distribution keyed by 1..5. */
+  readonly rating_distribution?: VivinoRatingDistribution;
+
   /** Bottle volume in ml, e.g. 750, 1500. */
   readonly bottle_ml?: number;
+
+  /** Human-facing bottle size label, e.g. "750ml", "Magnum". */
+  readonly bottle_size?: string;
+
+  /** Free-form closure label from the source payload. */
+  readonly closure?: string;
 
   /**
    * Official wine classification label from Vivino, e.g. "Barolo DOCG",
@@ -218,6 +235,12 @@ export interface SilverWineRecord {
   readonly ratingAvg: number | null;
   /** Vivino ratings count (raw). */
   readonly ratingsCount: number;
+  /** Vivino text review count (raw) when present in the source payload. */
+  readonly reviewCount?: number | undefined;
+  /** Star-bucket vote distribution from the source payload when present. */
+  readonly ratingDistribution?: VivinoRatingDistribution | undefined;
+  /** Winery portfolio-level ratings count when present in the source payload. */
+  readonly wineryRatingCount?: number | undefined;
   /** Price in USD (converted from source currency using approximate FX rates). */
   readonly priceUsd: number | null;
   /** Price band derived from priceUsd. */
@@ -233,6 +256,12 @@ export interface SilverWineRecord {
 
   /** Alcohol by volume in %, e.g. 14.0. Null when absent in payload. */
   readonly alcoholPct: number | null;
+  /** Bottle volume in ml when present in the source payload. */
+  readonly bottleSizeMl?: number | undefined;
+  /** Human-facing bottle size label when present in the source payload. */
+  readonly bottleSize?: string | undefined;
+  /** Free-form closure label when present in the source payload. */
+  readonly closure?: string | undefined;
 
   /**
    * Winery-level prestige proxy in [0, 1], derived from payload.winery_rating
@@ -465,6 +494,16 @@ export interface IndexableWineRecord {
   readonly producerPrestige?: number | undefined;
   /** Critic score normalised to [0, 1]. */
   readonly avgCriticProxyScore?: number | undefined;
+  /** Source average rating on Vivino's native 1–5 scale. */
+  readonly ratingAvg?: number | undefined;
+  /** Raw Vivino ratings count. */
+  readonly ratingsCount?: number | undefined;
+  /** Raw Vivino review count. */
+  readonly reviewCount?: number | undefined;
+  /** Source star-bucket rating histogram. */
+  readonly ratingDistribution?: VivinoRatingDistribution | undefined;
+  /** Winery-level raw ratings count. */
+  readonly wineryRatingCount?: number | undefined;
 
   // -------------------------------------------------------------------------
   // RetrievalFeatureProjection fields — ranker / ML feature fields
@@ -531,6 +570,12 @@ export interface IndexableWineRecord {
   readonly country?: string | undefined;
   /** Actual price in USD. */
   readonly priceUsd?: number | undefined;
+  /** Bottle volume in ml. */
+  readonly bottleSizeMl?: number | undefined;
+  /** Human-facing bottle size label. */
+  readonly bottleSize?: string | undefined;
+  /** Free-form closure label from upstream source. */
+  readonly closure?: string | undefined;
   /** Flavor descriptor vocabulary. */
   readonly flavorProfiles?: readonly string[] | undefined;
   /** Alcohol by volume percentage. */

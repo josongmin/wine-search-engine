@@ -38,7 +38,7 @@ const SEMANTIC_STYLE_PROFILES: ReadonlyMap<string, SemanticStyleProfile> = new M
   ['approachable', {
     renderedTerm: 'approachable',
     genericRetrievalTerms: ['easy drinking'],
-    untypedArchetypeTerms: ['merlot'],
+    untypedArchetypeTerms: [],
     wineTypeRetrievalTerms: {
       red: ['merlot', 'pinot noir', 'grenache'],
       white: ['pinot grigio', 'riesling', 'moscato'],
@@ -51,7 +51,7 @@ const SEMANTIC_STYLE_PROFILES: ReadonlyMap<string, SemanticStyleProfile> = new M
   ['crowd_pleasing', {
     renderedTerm: 'crowd pleasing',
     genericRetrievalTerms: ['easy drinking'],
-    untypedArchetypeTerms: ['merlot', 'red blend'],
+    untypedArchetypeTerms: [],
     wineTypeRetrievalTerms: {
       red: ['merlot', 'red blend', 'pinot noir'],
       white: ['pinot grigio', 'sauvignon blanc', 'chardonnay'],

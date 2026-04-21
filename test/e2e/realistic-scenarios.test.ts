@@ -130,6 +130,22 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
   });
 });
 
+describe('Benchmark #88 regression', () => {
+  const query = '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로';
+
+  it('returns a concrete recommendation path without clarification', async () => {
+    const body = await search({
+      query,
+      options: { mode: 'auto', explain: false, clarification: false },
+    });
+
+    expect(getSearchDecisionStatus(body)).toBe('resolved');
+    expect(body.engine_decision.next_action).toBe('return_result');
+    expect(getSearchMeta(body).route).toBe('hybrid');
+    expect(body.results.length).toBeGreaterThan(0);
+  });
+});
+
 describe('Realistic Scenarios — graceful degradation', () => {
   it("'Petrus 2000' stays ambiguous or failed instead of crashing", async () => {
     const body = await search({

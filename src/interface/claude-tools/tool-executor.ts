@@ -63,6 +63,7 @@ const CLAUDE_TOOL_FILTER_MAPPING_VERSION = 'claude_tool_v1' as const;
 const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as const;
 
 type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
+type CompareToolInput = z.infer<typeof CompareWinesInputSchema>;
 
 const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
 
@@ -162,6 +163,51 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
       clarification: false,
     },
     ...(filters.length > 0 ? { filters } : {}),
+  };
+}
+
+function buildCompareToolRequestContext(input: CompareToolInput): {
+  readonly parentContext?: { readonly filters: readonly NormalizedConstraint[] } | undefined;
+  readonly subQueries: readonly [string, string];
+  readonly originalQuery: string;
+} {
+  const sharedSearchInput: SearchToolInput = {
+    query: input.query_a,
+    ...(input.exclude_grapes !== undefined ? { exclude_grapes: input.exclude_grapes } : {}),
+    ...(input.exclude_regions !== undefined ? { exclude_regions: input.exclude_regions } : {}),
+    ...(input.min_price_krw !== undefined ? { min_price_krw: input.min_price_krw } : {}),
+    ...(input.max_price_krw !== undefined ? { max_price_krw: input.max_price_krw } : {}),
+    ...(input.max_alcohol_pct !== undefined ? { max_alcohol_pct: input.max_alcohol_pct } : {}),
+    ...(input.wine_type !== undefined ? { wine_type: input.wine_type } : {}),
+    ...(input.country !== undefined ? { country: input.country } : {}),
+    ...(input.vintage_min !== undefined ? { vintage_min: input.vintage_min } : {}),
+    ...(input.vintage_max !== undefined ? { vintage_max: input.vintage_max } : {}),
+    ...(input.appellation !== undefined ? { appellation: input.appellation } : {}),
+    ...(input.style !== undefined ? { style: input.style } : {}),
+    ...(input.styles !== undefined ? { styles: input.styles } : {}),
+    ...(input.certification !== undefined ? { certification: input.certification } : {}),
+  };
+  const filters = buildSearchToolStructuredFilters(sharedSearchInput);
+  const buildSubQuery = (query: string): string => {
+    const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery({
+      query,
+      wine_type: input.wine_type,
+      country: input.country,
+      appellation: input.appellation,
+      vintage_min: input.vintage_min,
+      vintage_max: input.vintage_max,
+    });
+    const clauses = buildSearchToolSoftClauses(input);
+    return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
+  };
+  const originalQuery = appendStructuredQueryClauses(
+    `${input.query_a} vs ${input.query_b}`,
+    buildSearchToolSoftClauses(input),
+  );
+  return {
+    ...(filters.length > 0 ? { parentContext: { filters } } : {}),
+    subQueries: [buildSubQuery(input.query_a), buildSubQuery(input.query_b)],
+    originalQuery,
   };
 }
 
@@ -345,7 +391,10 @@ export class WineToolExecutor {
     );
     return applySearchToolBudgetResultPolicy(
       negationFiltered.response,
-      validated.max_price_krw,
+      {
+        minKrw: validated.min_price_krw,
+        maxKrw: validated.max_price_krw,
+      },
       { krwPerUsd: KRW_PER_USD_APPROXIMATE },
     ).response;
   }
@@ -442,7 +491,7 @@ export class WineToolExecutor {
       return {
         error:
           `Entity ${validated.entity_id} is missing ML features required for drinking-window prediction: ${missing.join(', ')}. ` +
-          `Reindex the entity or use search_wines for a heuristic estimate.`,
+          'Reindex the entity or use search_wines for the indexed drinking-window field.',
       };
     }
 
@@ -470,6 +519,36 @@ export class WineToolExecutor {
       // criticScoreNormalized is [0,1]; convert to the [0,100] proxy score
       // expected by the predictor.
       avgCriticProxyScore: doc.criticScoreNormalized! * DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE,
+      priorDrinkingWindowStart: doc.drinkingWindowStart,
+      priorDrinkingWindowEnd: doc.drinkingWindowEnd,
+      priorDrinkingWindowModelVersion: doc.drinkingWindowModelVersion,
+      grapePrimary: doc.grapePrimary,
+      grapes: doc.grapes,
+      grapeFamily: doc.grapeFamily,
+      producer: doc.producer,
+      country: doc.country,
+      region: doc.region,
+      appellation: doc.appellation,
+      regionHierarchy: doc.regionHierarchy,
+      wineType: doc.wineType,
+      style: doc.style,
+      classification: doc.classification,
+      oakTreatment: doc.oakTreatment,
+      producerPrestige: doc.producerPrestige,
+      ratingAvg: doc.ratingAvg,
+      ratingsCount: doc.ratingsCount,
+      reviewCount: doc.reviewCount,
+      ratingDistribution: doc.ratingDistribution,
+      wineryRatingCount: doc.wineryRatingCount,
+      priceUsd: doc.priceUsd,
+      bottleSizeMl: doc.bottleSizeMl,
+      bottleSize: doc.bottleSize,
+      closure: doc.closure,
+      certifications: doc.certifications,
+      producerType: doc.producerType,
+      soilType: doc.soilType,
+      finishLength: doc.finishLength,
+      alcoholPct: doc.alcoholPct,
       targetYear,
     });
   }
@@ -491,13 +570,15 @@ export class WineToolExecutor {
     }
     const validated = validation.data;
     const startTime = Date.now();
+    const compareRequest = buildCompareToolRequestContext(validated);
 
     return this.deps.decomposedSearchUseCase.execute(
-      [validated.query_a, validated.query_b],
+      [...compareRequest.subQueries] as [string, string],
       'compare',
-      `${validated.query_a} vs ${validated.query_b}`,
+      compareRequest.originalQuery,
       requestId,
       startTime,
+      compareRequest.parentContext,
     );
   }
 }

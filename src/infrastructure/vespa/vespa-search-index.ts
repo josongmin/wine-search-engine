@@ -749,12 +749,12 @@ export class VespaSearchIndex implements SearchIndexPort {
         } catch (err) {
           logDocumentParseFailure('getDocuments', err, hit.fields, index + 1);
           bootstrapLogger.warn(
-            { batchSize: batch.length },
-            '[VespaSearchIndex] getDocuments: batch context',
+            { batchSize: batch.length, entityIndex: index + 1 },
+            '[VespaSearchIndex] getDocuments: skipping malformed hit and continuing',
           );
-          throw err;
+          return null;
         }
-      });
+      }).filter((doc): doc is RetrievalDocument => doc !== null);
     }));
     const docs = new Map<CanonicalEntityId, RetrievalDocument>();
     for (const result of settled) {
@@ -763,9 +763,7 @@ export class VespaSearchIndex implements SearchIndexPort {
           { err: result.reason instanceof Error ? result.reason.message : String(result.reason) },
           '[VespaSearchIndex] getDocuments: batch query failed',
         );
-        throw new Error(
-          `getDocuments: Vespa batch failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
-        );
+        continue;
       }
       for (const doc of result.value) {
         docs.set(doc.entityId, doc);
@@ -960,9 +958,9 @@ export class VespaSearchIndex implements SearchIndexPort {
           return parseHit(hit.fields);
         } catch (err) {
           logDocumentParseFailure(callerName, err, hit.fields, index + 1);
-          throw err;
+          return null;
         }
-      });
+      }).filter((hit): hit is T => hit !== null);
     }));
 
     // Build Map<entityId, projection> from successful batches.
@@ -975,9 +973,7 @@ export class VespaSearchIndex implements SearchIndexPort {
           { err: result.reason instanceof Error ? result.reason.message : String(result.reason), callerName },
           `[VespaSearchIndex] ${callerName}: batch query failed — refusing partial results`,
         );
-        throw new Error(
-          `${callerName}: Vespa summary batch failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
-        );
+        continue;
       }
       for (const proj of result.value) {
         const eid = entityIdOf(proj);

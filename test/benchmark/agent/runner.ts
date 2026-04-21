@@ -56,6 +56,10 @@ import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
+import type {
+  DecomposedSearchExecutionOptions,
+  DecomposedSearchParentContext,
+} from '../../../src/application/search/port/search-route-usecases.port.js';
 import { InMemoryCorpusCardinalityCache } from '../../../src/domain/retrieval/service/corpus-cardinality-cache.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
@@ -427,6 +431,8 @@ async function buildRealToolDeps(): Promise<{
             originalQuery: string,
             requestId: string,
             startTime: number,
+            parentContext?: DecomposedSearchParentContext,
+            options?: DecomposedSearchExecutionOptions,
           ) =>
             container.decomposedSearchUseCase.execute(
               subQueries as [string, string],
@@ -434,6 +440,11 @@ async function buildRealToolDeps(): Promise<{
               originalQuery,
               requestId,
               startTime,
+              parentContext,
+              {
+                ...options,
+                executionPrincipal: 'benchmark_trusted',
+              },
             ),
         }
       : {}),

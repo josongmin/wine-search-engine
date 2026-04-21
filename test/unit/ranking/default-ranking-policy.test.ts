@@ -31,7 +31,7 @@ const STUB_COMPONENT_SCORES: ComponentScores = {
 function makeResult(
   id: string,
   rank: number,
-  options?: { producer?: string; finalScore?: number },
+  options?: { producer?: string; finalScore?: number; grapePrimary?: string },
 ): RankedResult {
   return {
     entityId: createEntityId(id),
@@ -44,6 +44,7 @@ function makeResult(
     unmetConstraints: [],
     inferredConstraints: [],
     ...(options?.producer !== undefined ? { producer: options.producer } : {}),
+    ...(options?.grapePrimary !== undefined ? { grapePrimary: options.grapePrimary } : {}),
   };
 }
 
@@ -97,6 +98,26 @@ describe('DefaultRankingPolicy (T5.5a)', () => {
 
     it('returns empty array when given empty input', () => {
       expect(policy.apply([], makeContext())).toHaveLength(0);
+    });
+
+    it('does not apply wine-type diversity when a direct grape_primary constraint already grounds the query', () => {
+      const results = [
+        { ...makeResult('gris-1', 1, { grapePrimary: 'Pinot Gris' }), wineType: 'white' },
+        { ...makeResult('gris-2', 2, { grapePrimary: 'Pinot Gris' }), wineType: 'white' },
+        { ...makeResult('gris-3', 3, { grapePrimary: 'Pinot Gris' }), wineType: 'white' },
+        { ...makeResult('noir-1', 4, { grapePrimary: 'Pinot Noir' }), wineType: 'red' },
+      ];
+
+      const out = policy.apply(results, makeContext({
+        hasDirectGrapePrimaryConstraint: true,
+      }));
+
+      expect(out.map((result) => String(result.entityId))).toEqual([
+        'gris-1',
+        'gris-2',
+        'gris-3',
+        'noir-1',
+      ]);
     });
   });
 
@@ -261,6 +282,52 @@ describe('DefaultRankingPolicy (T5.5a)', () => {
   });
 
   // ── maxResults truncation ─────────────────────────────────────────────────
+
+  describe('ambiguous branch diversity', () => {
+    it('promotes distinct ambiguity branches ahead of repeated same-branch results', () => {
+      const results: RankedResult[] = [
+        makeResult('pn-1', 1, { grapePrimary: 'Pinot Noir' }),
+        makeResult('pn-2', 2, { grapePrimary: 'Pinot Noir' }),
+        makeResult('pg-1', 3, { grapePrimary: 'Pinot Grigio' }),
+        makeResult('pg-2', 4, { grapePrimary: 'Pinot Gris' }),
+      ];
+
+      const out = policy.apply(results, makeContext({
+        queryClass: 'semantic_preference',
+        ambiguousBranchGroups: [
+          { label: 'Pinot Noir', matchValues: ['Pinot Noir'] },
+          { label: 'Pinot Gris', matchValues: ['Pinot Gris', 'Pinot Grigio'] },
+          { label: 'Pinot Blanc', matchValues: ['Pinot Blanc'] },
+        ],
+      }));
+
+      expect(out.map((result) => String(result.entityId))).toEqual([
+        'pn-1',
+        'pg-1',
+        'pn-2',
+        'pg-2',
+      ]);
+      expect(out[1]?.grapePrimary).toBe('Pinot Grigio');
+    });
+
+    it('is a no-op when ambiguous branch metadata is absent', () => {
+      const results: RankedResult[] = [
+        makeResult('pn-1', 1, { grapePrimary: 'Pinot Noir' }),
+        makeResult('pn-2', 2, { grapePrimary: 'Pinot Noir' }),
+        makeResult('pg-1', 3, { grapePrimary: 'Pinot Grigio' }),
+      ];
+
+      const out = policy.apply(results, makeContext({
+        queryClass: 'ambiguous_short_form',
+      }));
+
+      expect(out.map((result) => String(result.entityId))).toEqual([
+        'pn-1',
+        'pn-2',
+        'pg-1',
+      ]);
+    });
+  });
 
   describe('maxResults truncation', () => {
     it('truncates results to maxResults when set', () => {

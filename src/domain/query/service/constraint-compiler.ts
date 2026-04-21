@@ -1,10 +1,13 @@
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
-import { isAbortError } from '../../shared/cooperative-abort.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
+import type { AmbiguousEntityHint } from '../../attribute/model/ambiguous-entity-hint.js';
 import type { NLMapper } from '../../attribute/service/nl-mapper.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
-import { resolveEntity, type ResolvedEntity } from '../../attribute/service/entity-resolver.js';
+import {
+  isDirectEntityResolution,
+  resolveEntity,
+  type ResolvedEntity,
+} from '../../attribute/service/entity-resolver.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
 import {
@@ -30,6 +33,7 @@ export interface ConstraintCompilerResult {
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   readonly retrievalPlan: RetrievalPlan;
   readonly resolvedEntities: readonly ResolvedEntity[];
+  readonly ambiguousEntityHints: readonly AmbiguousEntityHint[];
   /**
    * E2-T2: ConstraintReasoner output — conflict-resolved atoms + pairwise relations.
    *
@@ -103,35 +107,7 @@ export class ConstraintCompiler {
     const mapped = await this.nlMapper.mapConstraints(
       candidatePhrases,
       abortSignal !== undefined ? { abortSignal } : undefined,
-    ).catch((err: unknown) => {
-      if (isAbortError(err)) {
-        throw err;
-      }
-      // NLMapper failure: return empty constraints so Tier 6 rule-based
-      // extraction and entity resolver can still run. The query proceeds
-      // with reduced precision rather than aborting entirely.
-      bootstrapLogger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
-        '[constraint-compiler] NLMapper.mapConstraints failed — falling back to Tier 6 rules only',
-      );
-      return {
-        constraints: [],
-        constraintExtraction: {
-          candidatePhraseCount: candidatePhrases.length,
-          ruleTableHitCount: 0,
-          llmHitCount: 0,
-          llmSkippedCount: 0,
-          fallbackTriggered: true,
-          source: 'fallback' as const,
-          llmLatencyMs: null,
-          phraseCacheHits: 0,
-          phraseCacheNegativeSkipped: 0,
-          phraseCacheMisses: 0,
-          missedPhrases: [...candidatePhrases],
-          fallbackReason: 'nlmapper_exception' as const,
-        },
-      };
-    });
+    );
     const matched = mapped.constraints;
     const mapperTrace = mapped.constraintExtraction;
 
@@ -153,6 +129,7 @@ export class ConstraintCompiler {
     }
 
     const coveredPhrases = new Set(matched.map((c) => c.source_phrase.toLowerCase()));
+    const coveredSpans = spans.filter((span) => coveredPhrases.has(span.text));
     const matchedAttributesByPhrase = new Map<string, Set<string>>();
     for (const constraint of matched) {
       const key = constraint.source_phrase.toLowerCase();
@@ -161,24 +138,37 @@ export class ConstraintCompiler {
       matchedAttributesByPhrase.set(key, existing);
     }
 
+    type ResolverResolution =
+      | { entity: ResolvedEntity; kind: 'primary' | 'shadow' }
+      | { hint: AmbiguousEntityHint; kind: 'ambiguous_hint' };
     const resolverCandidates: {
       span: Span;
-      resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } | null;
+      resolved: ResolverResolution | null;
     }[] = [];
     for (const span of spans) {
       const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true }, this.fuzzyMatcher);
+      const ambiguousEntity =
+        preferredEntity !== null
+        && preferredEntity !== undefined
+        && preferredEntity.ambiguityHint !== undefined
+          ? preferredEntity
+          : null;
       if (!coveredPhrases.has(span.text)) {
+        let resolved: ResolverResolution | null = null;
+        if (isDirectEntityResolution(preferredEntity)) {
+          resolved = { entity: preferredEntity, kind: 'primary' };
+        } else if (ambiguousEntity !== null) {
+          resolved = { hint: ambiguousEntity.ambiguityHint!, kind: 'ambiguous_hint' };
+        }
         resolverCandidates.push({
           span,
-          resolved: preferredEntity !== null
-            ? { entity: preferredEntity, kind: 'primary' }
-            : null,
+          resolved,
         });
         continue;
       }
       const coveredAttributes = matchedAttributesByPhrase.get(span.text) ?? new Set<string>();
       if (
-        preferredEntity !== null
+        isDirectEntityResolution(preferredEntity)
         && preferredEntity.entityType !== 'wine_type'
         && !coveredAttributes.has(preferredEntity.entityType)
       ) {
@@ -194,11 +184,19 @@ export class ConstraintCompiler {
     const resolvedNonOverlap = resolveOverlaps(resolverCandidates)
       .filter((e): e is {
         span: Span;
-        resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+        resolved: ResolverResolution;
       } => e.resolved !== null);
 
     const resolvedEntities: ResolvedEntity[] = [];
-    for (const { resolved } of resolvedNonOverlap) {
+    const ambiguousEntityHints: AmbiguousEntityHint[] = [];
+    for (const { span, resolved } of resolvedNonOverlap) {
+      if (resolved.kind === 'ambiguous_hint') {
+        if (isShieldedByCoveredSpan(span, coveredSpans)) {
+          continue;
+        }
+        ambiguousEntityHints.push(resolved.hint);
+        continue;
+      }
       resolvedEntities.push(resolved.entity);
       const constraint = {
         attribute: resolved.entity.entityType,
@@ -350,10 +348,29 @@ export class ConstraintCompiler {
       ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
       retrievalPlan,
       resolvedEntities,
+      ambiguousEntityHints,
       reasonerOutput,
       ...(constraintGraph !== undefined ? { constraintGraph } : {}),
     };
   }
+}
+
+function isShieldedByCoveredSpan(
+  candidate: Span,
+  coveredSpans: readonly Span[],
+): boolean {
+  return coveredSpans.some((coveredSpan) =>
+    spansOverlap(candidate, coveredSpan)
+    && spanLength(coveredSpan) > spanLength(candidate),
+  );
+}
+
+function spansOverlap(left: Span, right: Span): boolean {
+  return left.startChar < right.endChar && right.startChar < left.endChar;
+}
+
+function spanLength(span: Span): number {
+  return span.endChar - span.startChar;
 }
 
 function countBundleConstraints(bundle: ConstraintBundle): number {
@@ -419,7 +436,7 @@ function collectUnresolvedSpanSamples(
   coveredPhrases: ReadonlySet<string>,
   resolved: readonly {
     span: Span;
-    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+    resolved: unknown;
   }[],
 ): readonly string[] {
   const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
@@ -443,7 +460,7 @@ function countUnresolvedSpans(
   coveredPhrases: ReadonlySet<string>,
   resolved: readonly {
     span: Span;
-    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+    resolved: unknown;
   }[],
 ): number {
   const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));

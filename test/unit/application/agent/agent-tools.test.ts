@@ -692,6 +692,48 @@ describe('executeAgentTool', () => {
     expect(result.rawResult).toBeNull();
   });
 
+  it('forwards shared structured comparison constraints through decomposed search', async () => {
+    const mockDecomposedSearchExecute = vi.fn().mockResolvedValue({
+      queryType: 'comparison',
+      originalQuery: 'Barolo vs Brunello di Montalcino',
+      comparisonIntent: 'compare',
+      entities: [],
+      overallStatus: 'resolved',
+      requestId: 'req-123',
+      executionTimeMs: 12,
+      authorityTraceRef: 'cmp-trace',
+      runtimeCorrelationRef: 'req-123',
+    });
+    deps = {
+      ...deps,
+      decomposedSearchExecute: mockDecomposedSearchExecute,
+    };
+
+    await executeAgentTool(
+      'compare_wines',
+      {
+        query_a: 'Barolo',
+        query_b: 'Brunello di Montalcino',
+        max_price_krw: 50_000,
+        country: 'Italy',
+        vintage_min: 2018,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [subQueries, , originalQuery, , , parentContext] = mockDecomposedSearchExecute.mock.calls[0] ?? [];
+    expect(subQueries[0]).toContain('50000원 이하');
+    expect(subQueries[1]).toContain('50000원 이하');
+    expect(originalQuery).toContain('50000원 이하');
+    expect(parentContext?.filters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
+        expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
+      ]),
+    );
+  });
+
   it('post-filters results using structured exclusion inputs', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([
@@ -1043,6 +1085,21 @@ describe('executeAgentTool', () => {
     expect(parsed.maxPriceKrw).toBe(50_000);
   });
 
+  it('coerces string min_price_krw to number and preserves range in query text', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse([]));
+    await executeAgentTool(
+      'search_wines',
+      { query: '집들이 선물용 와인', min_price_krw: '10000', max_price_krw: '20000' },
+      deps,
+      'req-123',
+    );
+    const [req] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(req?.query).toContain('1~2만원');
+    const parsed = (await import('../../../../src/domain/query/service/search-constraint-extractor.js')).extractSearchConstraints(req!.query);
+    expect(parsed.minPriceKrw).toBe(10_000);
+    expect(parsed.maxPriceKrw).toBe(20_000);
+  });
+
   it('price post-filter: drops wines with USD price above max_price_krw budget', async () => {
     // 100000 KRW ≈ $74.07 USD. Wine at $80 should be dropped; wine at $60 should be kept.
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
@@ -1132,6 +1189,49 @@ describe('executeAgentTool', () => {
     // Strict filter drops both (no price data), lenient fallback keeps both
     expect(filtered.results).toHaveLength(2);
     expect(result.observation).not.toContain('검색 결과가 없습니다');
+  });
+
+  it('price post-filter: enforces min/max KRW range when both bounds are present', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-low', canonicalLabel: 'Cheap Wine', type: 'wine', priceRange: '$5' },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-mid', canonicalLabel: 'Housewarming Pick', type: 'wine', priceRange: '$12' },
+          relevanceScore: 0.88,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.78, semantic: 0.78, attribute: 0.78, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.88, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-high', canonicalLabel: 'Over Budget', type: 'wine', priceRange: '$25' },
+          relevanceScore: 0.85,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.75, semantic: 0.75, attribute: 0.75, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.85, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      { query: '집들이 선물용 와인', min_price_krw: 10_000, max_price_krw: 20_000 },
+      deps,
+      'req-123',
+    );
+    const filtered = result.rawResult as SearchResponseV1;
+    expect(filtered.results).toHaveLength(1);
+    expect(filtered.results[0]?.entity.entityId).toBe('wine-mid');
+    expect(result.observation).toContain('10000원 이상 20000원 이하');
+    expect(result.observation).toContain('(~16,200원)');
   });
 
   // ──────────────────────────────────────────────────────────────────────────

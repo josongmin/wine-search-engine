@@ -84,13 +84,13 @@ describe('Track C step plan', () => {
       num: 6,
       script: 'run-track-c-step6-gift-suitability.ts',
       field: 'giftSuitabilityClassification',
-      requiredCoverage: 0.7,
+      requiredCoverage: 1,
     });
     expect(TRACK_C_STEP_DEFINITIONS[6]).toMatchObject({
       num: 7,
       script: 'run-track-c-step7-beginner-suitability.ts',
       field: 'beginnerSuitabilityClassification',
-      requiredCoverage: 0.7,
+      requiredCoverage: 1,
     });
     expect(TRACK_C_STEP_DEFINITIONS[3]).toMatchObject({
       num: 4,

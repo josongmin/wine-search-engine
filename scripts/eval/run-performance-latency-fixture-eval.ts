@@ -103,7 +103,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let timeoutMs = 30_000;
   let concurrency = DEFAULT_CONCURRENCY;
   let warmup = DEFAULT_WARMUP;
-  let executionLane: BenchmarkExecutionLane = 'public';
+  let executionLane: BenchmarkExecutionLane = 'trusted_benchmark';
   let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
 

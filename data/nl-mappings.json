@@ -1,1237 +1,1888 @@
 {
   "version": "ontology-snapshot-v1.0",
-  "generatedAt": "2026-04-09T11:08:19.028Z",
-  "mappingCount": 205,
+  "generatedAt": "2026-04-16T16:50:02.350Z",
+  "mappingCount": 209,
   "mappings": [
     {
-      "surface": "abruzzo",
-      "entityId": "region:abruzzo",
-      "canonical": "Abruzzo",
-      "entityType": "region"
-    },
-    {
-      "surface": "albarino",
-      "entityId": "grape_primary:albariño",
-      "canonical": "Albariño",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "albariño",
-      "entityId": "grape_primary:albariño",
-      "canonical": "Albariño",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "alentejo",
-      "entityId": "region:alentejo",
-      "canonical": "Alentejo",
-      "entityType": "region"
-    },
-    {
-      "surface": "alsace",
-      "entityId": "region:alsace",
-      "canonical": "Alsace",
-      "entityType": "region"
-    },
-    {
-      "surface": "amarone",
-      "entityId": "region:amarone",
-      "canonical": "Amarone",
-      "entityType": "region"
-    },
-    {
-      "surface": "argentina",
-      "entityId": "country:argentina",
-      "canonical": "Argentina",
-      "entityType": "country"
-    },
-    {
-      "surface": "australia",
-      "entityId": "country:australia",
-      "canonical": "Australia",
-      "entityType": "country"
-    },
-    {
-      "surface": "barbaresco",
-      "entityId": "appellation:barbaresco",
-      "canonical": "Barbaresco",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "barolo",
-      "entityId": "appellation:barolo",
-      "canonical": "Barolo",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "barossa valley",
-      "entityId": "region:barossa valley",
-      "canonical": "Barossa Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "bianco",
-      "entityId": "wine_type:white",
-      "canonical": "white",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "blanc",
-      "entityId": "wine_type:white",
-      "canonical": "white",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "blanco",
-      "entityId": "wine_type:white",
-      "canonical": "white",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "blaufrankisch",
-      "entityId": "grape_primary:blaufränkisch",
-      "canonical": "Blaufränkisch",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "blaufränkisch",
-      "entityId": "grape_primary:blaufränkisch",
-      "canonical": "Blaufränkisch",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "bolgheri",
-      "entityId": "region:bolgheri",
-      "canonical": "Bolgheri",
-      "entityType": "region"
-    },
-    {
-      "surface": "bordeaux",
-      "entityId": "region:bordeaux",
-      "canonical": "Bordeaux",
-      "entityType": "region"
-    },
-    {
-      "surface": "bourgogne",
-      "entityId": "region:bourgogne",
-      "canonical": "Bourgogne",
-      "entityType": "region"
-    },
-    {
-      "surface": "brunello di montalcino",
-      "entityId": "appellation:brunello di montalcino",
-      "canonical": "Brunello di Montalcino",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "burgundy",
-      "entityId": "region:burgundy",
-      "canonical": "Burgundy",
-      "entityType": "region"
-    },
-    {
-      "surface": "cab franc",
-      "entityId": "grape_primary:cabernet franc",
-      "canonical": "Cabernet Franc",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "cab sauv",
-      "entityId": "grape_primary:cabernet sauvignon",
-      "canonical": "Cabernet Sauvignon",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "cabernet franc",
-      "entityId": "grape_primary:cabernet franc",
-      "canonical": "Cabernet Franc",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "cabernet sauvignon",
-      "entityId": "grape_primary:cabernet sauvignon",
-      "canonical": "Cabernet Sauvignon",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "california",
-      "entityId": "region:california",
-      "canonical": "California",
-      "entityType": "region"
-    },
-    {
-      "surface": "carmenere",
-      "entityId": "grape_primary:carmenère",
-      "canonical": "Carmenère",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "carmenère",
-      "entityId": "grape_primary:carmenère",
-      "canonical": "Carmenère",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "casablanca valley",
-      "entityId": "region:casablanca valley",
-      "canonical": "Casablanca Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "catalonia",
-      "entityId": "region:catalonia",
-      "canonical": "Catalonia",
-      "entityType": "region"
-    },
-    {
-      "surface": "central otago",
-      "entityId": "region:central otago",
-      "canonical": "Central Otago",
-      "entityType": "region"
-    },
-    {
-      "surface": "chablis",
-      "entityId": "region:chablis",
-      "canonical": "Chablis",
-      "entityType": "region"
-    },
-    {
-      "surface": "chambolle-musigny",
-      "entityId": "region:chambolle-musigny",
-      "canonical": "Chambolle-musigny",
-      "entityType": "region"
-    },
-    {
-      "surface": "champagne",
-      "entityId": "region:champagne",
-      "canonical": "Champagne",
-      "entityType": "region"
-    },
-    {
-      "surface": "champagne",
-      "entityId": "wine_type:sparkling",
-      "canonical": "sparkling",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "chassagne-montrachet",
-      "entityId": "region:chassagne-montrachet",
-      "canonical": "Chassagne-montrachet",
-      "entityType": "region"
-    },
-    {
-      "surface": "châteauneuf-du-pape",
-      "entityId": "region:châteauneuf-du-pape",
-      "canonical": "Châteauneuf-du-pape",
-      "entityType": "region"
-    },
-    {
-      "surface": "chianti",
-      "entityId": "appellation:chianti",
-      "canonical": "Chianti",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "chianti classico",
-      "entityId": "appellation:chianti classico",
-      "canonical": "Chianti Classico",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "chile",
-      "entityId": "country:chile",
-      "canonical": "Chile",
-      "entityType": "country"
-    },
-    {
-      "surface": "clare valley",
-      "entityId": "region:clare valley",
-      "canonical": "Clare Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "colchagua valley",
-      "entityId": "region:colchagua valley",
-      "canonical": "Colchagua Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "columbia valley",
-      "entityId": "region:columbia valley",
-      "canonical": "Columbia Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "constantia",
-      "entityId": "region:constantia",
-      "canonical": "Constantia",
-      "entityType": "region"
-    },
-    {
-      "surface": "cornas",
-      "entityId": "region:cornas",
-      "canonical": "Cornas",
-      "entityType": "region"
-    },
-    {
-      "surface": "côte de beaune",
-      "entityId": "region:côte de beaune",
-      "canonical": "Côte de Beaune",
-      "entityType": "region"
-    },
-    {
-      "surface": "côte de nuits",
-      "entityId": "region:côte de nuits",
-      "canonical": "Côte de Nuits",
-      "entityType": "region"
-    },
-    {
-      "surface": "côte-rôtie",
-      "entityId": "region:côte-rôtie",
-      "canonical": "Côte-rôtie",
-      "entityType": "region"
-    },
-    {
-      "surface": "côtes du rhône",
-      "entityId": "region:côtes du rhône",
-      "canonical": "Côtes du Rhône",
-      "entityType": "region"
-    },
-    {
-      "surface": "crozes-hermitage",
-      "entityId": "region:crozes-hermitage",
-      "canonical": "Crozes-hermitage",
-      "entityType": "region"
-    },
-    {
-      "surface": "dão",
-      "entityId": "region:dão",
-      "canonical": "Dão",
-      "entityType": "region"
-    },
-    {
-      "surface": "dessert",
-      "entityId": "wine_type:dessert",
-      "canonical": "dessert",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "douro",
-      "entityId": "region:douro",
-      "canonical": "Douro",
-      "entityType": "region"
-    },
-    {
-      "surface": "etna",
-      "entityId": "region:etna",
-      "canonical": "Etna",
-      "entityType": "region"
-    },
-    {
-      "surface": "fortified",
-      "entityId": "wine_type:fortified",
-      "canonical": "fortified",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "france",
-      "entityId": "country:france",
-      "canonical": "France",
-      "entityType": "country"
-    },
-    {
-      "surface": "garnacha",
-      "entityId": "grape_primary:grenache",
-      "canonical": "Grenache",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "germany",
-      "entityId": "country:germany",
-      "canonical": "Germany",
-      "entityType": "country"
-    },
-    {
-      "surface": "gevrey-chambertin",
-      "entityId": "region:gevrey-chambertin",
-      "canonical": "Gevrey-chambertin",
-      "entityType": "region"
-    },
-    {
-      "surface": "gewurztraminer",
-      "entityId": "grape_primary:gewurztraminer",
-      "canonical": "Gewurztraminer",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "gewürztraminer",
-      "entityId": "grape_primary:gewurztraminer",
-      "canonical": "Gewurztraminer",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "gigondas",
-      "entityId": "region:gigondas",
-      "canonical": "Gigondas",
-      "entityType": "region"
-    },
-    {
-      "surface": "graves",
-      "entityId": "region:graves",
-      "canonical": "Graves",
-      "entityType": "region"
-    },
-    {
-      "surface": "grenache",
-      "entityId": "grape_primary:grenache",
-      "canonical": "Grenache",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "grenache noir",
-      "entityId": "grape_primary:grenache",
-      "canonical": "Grenache",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "gruner veltliner",
-      "entityId": "grape_primary:grüner veltliner",
-      "canonical": "Grüner Veltliner",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "grüner veltliner",
-      "entityId": "grape_primary:grüner veltliner",
-      "canonical": "Grüner Veltliner",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "haut-médoc",
-      "entityId": "region:haut-médoc",
-      "canonical": "Haut-médoc",
-      "entityType": "region"
-    },
-    {
-      "surface": "hawke's bay",
-      "entityId": "region:hawke's bay",
-      "canonical": "Hawke's Bay",
-      "entityType": "region"
-    },
-    {
-      "surface": "hermitage",
-      "entityId": "region:hermitage",
-      "canonical": "Hermitage",
-      "entityType": "region"
-    },
-    {
-      "surface": "hunter valley",
-      "entityId": "region:hunter valley",
-      "canonical": "Hunter Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "italy",
-      "entityId": "country:italy",
-      "canonical": "Italy",
-      "entityType": "country"
-    },
-    {
-      "surface": "langhe",
-      "entityId": "region:langhe",
-      "canonical": "Langhe",
-      "entityType": "region"
-    },
-    {
-      "surface": "languedoc",
-      "entityId": "region:languedoc",
-      "canonical": "Languedoc",
-      "entityType": "region"
-    },
-    {
-      "surface": "loire",
-      "entityId": "region:loire",
-      "canonical": "Loire",
-      "entityType": "region"
-    },
-    {
-      "surface": "madeira",
-      "entityId": "wine_type:fortified",
-      "canonical": "fortified",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "maipo valley",
-      "entityId": "region:maipo valley",
-      "canonical": "Maipo Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "margaret river",
-      "entityId": "region:margaret river",
-      "canonical": "Margaret River",
-      "entityType": "region"
-    },
-    {
-      "surface": "margaux",
-      "entityId": "appellation:margaux",
-      "canonical": "Margaux",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "marlborough",
-      "entityId": "region:marlborough",
-      "canonical": "Marlborough",
-      "entityType": "region"
-    },
-    {
-      "surface": "mclaren vale",
-      "entityId": "region:mclaren vale",
-      "canonical": "Mclaren Vale",
-      "entityType": "region"
-    },
-    {
-      "surface": "médoc",
-      "entityId": "region:médoc",
-      "canonical": "Médoc",
-      "entityType": "region"
-    },
-    {
-      "surface": "mencia",
-      "entityId": "grape_primary:mencía",
-      "canonical": "Mencía",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "mencía",
-      "entityId": "grape_primary:mencía",
-      "canonical": "Mencía",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "mendoza",
-      "entityId": "region:mendoza",
-      "canonical": "Mendoza",
-      "entityType": "region"
-    },
-    {
-      "surface": "meursault",
-      "entityId": "region:meursault",
-      "canonical": "Meursault",
-      "entityType": "region"
-    },
-    {
-      "surface": "monastrell",
-      "entityId": "grape_primary:mourvèdre",
-      "canonical": "Mourvèdre",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "morey-saint-denis",
-      "entityId": "region:morey-saint-denis",
-      "canonical": "Morey-saint-denis",
-      "entityType": "region"
-    },
-    {
-      "surface": "moscatel",
-      "entityId": "grape_primary:muscat",
-      "canonical": "Muscat",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "moscato",
-      "entityId": "grape_primary:muscat",
-      "canonical": "Muscat",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "mosel",
-      "entityId": "region:mosel",
-      "canonical": "Mosel",
-      "entityType": "region"
-    },
-    {
-      "surface": "mourvedre",
-      "entityId": "grape_primary:mourvèdre",
-      "canonical": "Mourvèdre",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "mourvèdre",
-      "entityId": "grape_primary:mourvèdre",
-      "canonical": "Mourvèdre",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "muscadet",
-      "entityId": "region:muscadet",
-      "canonical": "Muscadet",
-      "entityType": "region"
-    },
-    {
-      "surface": "muscat",
-      "entityId": "grape_primary:muscat",
-      "canonical": "Muscat",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "muscat blanc",
-      "entityId": "grape_primary:muscat",
-      "canonical": "Muscat",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "napa valley",
-      "entityId": "region:napa valley",
-      "canonical": "Napa Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "new zealand",
-      "entityId": "country:new zealand",
-      "canonical": "New Zealand",
-      "entityType": "country"
-    },
-    {
-      "surface": "northern rhône",
-      "entityId": "region:northern rhône",
-      "canonical": "Northern Rhône",
-      "entityType": "region"
-    },
-    {
-      "surface": "nuits-saint-georges",
-      "entityId": "region:nuits-saint-georges",
-      "canonical": "Nuits-saint-georges",
-      "entityType": "region"
-    },
-    {
-      "surface": "oregon",
-      "entityId": "region:oregon",
-      "canonical": "Oregon",
-      "entityType": "region"
-    },
-    {
-      "surface": "paso robles",
-      "entityId": "region:paso robles",
-      "canonical": "Paso Robles",
-      "entityType": "region"
-    },
-    {
-      "surface": "pauillac",
-      "entityId": "appellation:pauillac",
-      "canonical": "Pauillac",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "penedès",
-      "entityId": "region:penedès",
-      "canonical": "Penedès",
-      "entityType": "region"
-    },
-    {
-      "surface": "pessac-léognan",
-      "entityId": "region:pessac-léognan",
-      "canonical": "Pessac-léognan",
-      "entityType": "region"
-    },
-    {
-      "surface": "petit sirah",
-      "entityId": "grape_primary:petite sirah",
-      "canonical": "Petite Sirah",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "petite sirah",
-      "entityId": "grape_primary:petite sirah",
-      "canonical": "Petite Sirah",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "pfalz",
-      "entityId": "region:pfalz",
-      "canonical": "Pfalz",
-      "entityType": "region"
-    },
-    {
-      "surface": "piedmont",
-      "entityId": "region:piedmont",
-      "canonical": "Piedmont",
-      "entityType": "region"
-    },
-    {
-      "surface": "piemonte",
-      "entityId": "region:piemonte",
-      "canonical": "Piemonte",
-      "entityType": "region"
-    },
-    {
-      "surface": "pinot bianco",
-      "entityId": "grape_primary:pinot blanc",
-      "canonical": "Pinot Blanc",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "pinot blanc",
-      "entityId": "grape_primary:pinot blanc",
-      "canonical": "Pinot Blanc",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "pinot grigio",
-      "entityId": "grape_primary:pinot gris",
-      "canonical": "Pinot Gris",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "pinot gris",
-      "entityId": "grape_primary:pinot gris",
-      "canonical": "Pinot Gris",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "pomerol",
-      "entityId": "region:pomerol",
-      "canonical": "Pomerol",
-      "entityType": "region"
-    },
-    {
-      "surface": "pommard",
-      "entityId": "region:pommard",
-      "canonical": "Pommard",
-      "entityType": "region"
-    },
-    {
-      "surface": "port",
-      "entityId": "wine_type:fortified",
-      "canonical": "fortified",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "portugal",
-      "entityId": "country:portugal",
-      "canonical": "Portugal",
-      "entityType": "country"
-    },
-    {
-      "surface": "pouilly-fumé",
-      "entityId": "region:pouilly-fumé",
-      "canonical": "Pouilly-fumé",
-      "entityType": "region"
-    },
-    {
-      "surface": "primitivo",
-      "entityId": "grape_primary:zinfandel",
-      "canonical": "Zinfandel",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "priorat",
-      "entityId": "region:priorat",
-      "canonical": "Priorat",
-      "entityType": "region"
-    },
-    {
-      "surface": "provence",
-      "entityId": "region:provence",
-      "canonical": "Provence",
-      "entityType": "region"
-    },
-    {
-      "surface": "puligny-montrachet",
-      "entityId": "region:puligny-montrachet",
-      "canonical": "Puligny-montrachet",
-      "entityType": "region"
-    },
-    {
-      "surface": "red",
-      "entityId": "wine_type:red",
-      "canonical": "red",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "rheingau",
-      "entityId": "region:rheingau",
-      "canonical": "Rheingau",
-      "entityType": "region"
-    },
-    {
-      "surface": "rheinhessen",
-      "entityId": "region:rheinhessen",
-      "canonical": "Rheinhessen",
-      "entityType": "region"
-    },
-    {
-      "surface": "rhône valley",
-      "entityId": "region:rhône valley",
-      "canonical": "Rhône Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "rías baixas",
-      "entityId": "region:rías baixas",
-      "canonical": "Rías Baixas",
-      "entityType": "region"
-    },
-    {
-      "surface": "ribera del duero",
-      "entityId": "region:ribera del duero",
-      "canonical": "Ribera del Duero",
-      "entityType": "region"
-    },
-    {
-      "surface": "rioja",
-      "entityId": "region:rioja",
-      "canonical": "Rioja",
-      "entityType": "region"
-    },
-    {
-      "surface": "rose",
-      "entityId": "wine_type:rosé",
-      "canonical": "rosé",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "rosé",
-      "entityId": "wine_type:rosé",
-      "canonical": "rosé",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "rosso",
-      "entityId": "wine_type:red",
-      "canonical": "red",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "rouge",
-      "entityId": "wine_type:red",
-      "canonical": "red",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "rueda",
-      "entityId": "region:rueda",
-      "canonical": "Rueda",
-      "entityType": "region"
-    },
-    {
-      "surface": "russian river valley",
-      "entityId": "region:russian river valley",
-      "canonical": "Russian River Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "saint-émilion",
-      "entityId": "appellation:saint-émilion",
-      "canonical": "Saint-émilion",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "saint-estèphe",
-      "entityId": "region:saint-estèphe",
-      "canonical": "Saint-estèphe",
-      "entityType": "region"
-    },
-    {
-      "surface": "saint-julien",
-      "entityId": "region:saint-julien",
-      "canonical": "Saint-julien",
-      "entityType": "region"
-    },
-    {
-      "surface": "sancerre",
-      "entityId": "region:sancerre",
-      "canonical": "Sancerre",
-      "entityType": "region"
-    },
-    {
-      "surface": "santa barbara",
-      "entityId": "region:santa barbara",
-      "canonical": "Santa Barbara",
-      "entityType": "region"
-    },
-    {
-      "surface": "sauternes",
-      "entityId": "region:sauternes",
-      "canonical": "Sauternes",
-      "entityType": "region"
-    },
-    {
-      "surface": "semillon",
-      "entityId": "grape_primary:sémillon",
-      "canonical": "Sémillon",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "sémillon",
-      "entityId": "grape_primary:sémillon",
-      "canonical": "Sémillon",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "sherry",
-      "entityId": "wine_type:fortified",
-      "canonical": "fortified",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "shiraz",
-      "entityId": "grape_primary:syrah",
-      "canonical": "Syrah",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "sicily",
-      "entityId": "region:sicily",
-      "canonical": "Sicily",
-      "entityType": "region"
-    },
-    {
-      "surface": "soave",
-      "entityId": "region:soave",
-      "canonical": "Soave",
-      "entityType": "region"
-    },
-    {
-      "surface": "sonoma county",
-      "entityId": "region:sonoma county",
-      "canonical": "Sonoma County",
-      "entityType": "region"
-    },
-    {
-      "surface": "south africa",
-      "entityId": "country:south africa",
-      "canonical": "South Africa",
-      "entityType": "country"
-    },
-    {
-      "surface": "south australia",
-      "entityId": "region:south australia",
-      "canonical": "South Australia",
-      "entityType": "region"
-    },
-    {
-      "surface": "southern rhône",
-      "entityId": "region:southern rhône",
-      "canonical": "Southern Rhône",
-      "entityType": "region"
-    },
-    {
-      "surface": "spain",
-      "entityId": "country:spain",
-      "canonical": "Spain",
-      "entityType": "country"
-    },
-    {
-      "surface": "sparkling",
-      "entityId": "wine_type:sparkling",
-      "canonical": "sparkling",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "stellenbosch",
-      "entityId": "region:stellenbosch",
-      "canonical": "Stellenbosch",
-      "entityType": "region"
-    },
-    {
-      "surface": "swartland",
-      "entityId": "region:swartland",
-      "canonical": "Swartland",
-      "entityType": "region"
-    },
-    {
-      "surface": "sweet",
-      "entityId": "wine_type:dessert",
-      "canonical": "dessert",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "syrah",
-      "entityId": "grape_primary:syrah",
-      "canonical": "Syrah",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "tinto",
-      "entityId": "wine_type:red",
-      "canonical": "red",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "torrontes",
-      "entityId": "grape_primary:torrontés",
-      "canonical": "Torrontés",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "torrontés",
-      "entityId": "grape_primary:torrontés",
-      "canonical": "Torrontés",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "toscana",
-      "entityId": "region:toscana",
-      "canonical": "Toscana",
-      "entityType": "region"
-    },
-    {
-      "surface": "tuscany",
-      "entityId": "region:tuscany",
-      "canonical": "Tuscany",
-      "entityType": "region"
-    },
-    {
-      "surface": "uco valley",
-      "entityId": "region:uco valley",
-      "canonical": "Uco Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "united states",
-      "entityId": "country:united states",
-      "canonical": "United States",
-      "entityType": "country"
-    },
-    {
-      "surface": "valpolicella",
-      "entityId": "region:valpolicella",
-      "canonical": "Valpolicella",
-      "entityType": "region"
-    },
-    {
-      "surface": "veneto",
-      "entityId": "region:veneto",
-      "canonical": "Veneto",
-      "entityType": "region"
-    },
-    {
-      "surface": "volnay",
-      "entityId": "region:volnay",
-      "canonical": "Volnay",
-      "entityType": "region"
-    },
-    {
-      "surface": "vosne-romanée",
-      "entityId": "region:vosne-romanée",
-      "canonical": "Vosne-romanée",
-      "entityType": "region"
-    },
-    {
-      "surface": "washington",
-      "entityId": "region:washington",
-      "canonical": "Washington",
-      "entityType": "region"
-    },
-    {
-      "surface": "white",
-      "entityId": "wine_type:white",
-      "canonical": "white",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "willamette valley",
-      "entityId": "region:willamette valley",
-      "canonical": "Willamette Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "yarra valley",
-      "entityId": "region:yarra valley",
-      "canonical": "Yarra Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "zinfandel",
-      "entityId": "grape_primary:zinfandel",
-      "canonical": "Zinfandel",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "나파",
-      "entityId": "region:napa valley",
-      "canonical": "Napa Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "나파 밸리",
-      "entityId": "region:napa valley",
-      "canonical": "Napa Valley",
-      "entityType": "region"
-    },
-    {
-      "surface": "남아공",
-      "entityId": "country:south africa",
-      "canonical": "South Africa",
-      "entityType": "country"
-    },
-    {
-      "surface": "남아프리카",
-      "entityId": "country:south africa",
-      "canonical": "South Africa",
-      "entityType": "country"
-    },
-    {
-      "surface": "뉴질랜드",
-      "entityId": "country:new zealand",
-      "canonical": "New Zealand",
-      "entityType": "country"
-    },
-    {
-      "surface": "독일",
-      "entityId": "country:germany",
-      "canonical": "Germany",
-      "entityType": "country"
-    },
-    {
-      "surface": "디저트",
-      "entityId": "wine_type:dessert",
-      "canonical": "dessert",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "레드",
-      "entityId": "wine_type:red",
-      "canonical": "red",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "로제",
-      "entityId": "wine_type:rosé",
-      "canonical": "rosé",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "리오하",
-      "entityId": "region:rioja",
-      "canonical": "Rioja",
-      "entityType": "region"
-    },
-    {
-      "surface": "말버러",
-      "entityId": "region:marlborough",
-      "canonical": "Marlborough",
-      "entityType": "region"
-    },
-    {
-      "surface": "멘도사",
-      "entityId": "region:mendoza",
-      "canonical": "Mendoza",
-      "entityType": "region"
-    },
-    {
-      "surface": "모젤",
-      "entityId": "region:mosel",
-      "canonical": "Mosel",
-      "entityType": "region"
-    },
-    {
-      "surface": "미국",
-      "entityId": "country:united states",
-      "canonical": "United States",
-      "entityType": "country"
-    },
-    {
-      "surface": "바롤로",
-      "entityId": "appellation:barolo",
-      "canonical": "Barolo",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "보르도",
-      "entityId": "region:bordeaux",
-      "canonical": "Bordeaux",
-      "entityType": "region"
-    },
-    {
-      "surface": "부르고뉴",
-      "entityId": "region:burgundy",
-      "canonical": "Burgundy",
-      "entityType": "region"
-    },
-    {
-      "surface": "브루넬로",
-      "entityId": "appellation:brunello di montalcino",
-      "canonical": "Brunello di Montalcino",
-      "entityType": "appellation"
-    },
-    {
-      "surface": "샴페인",
-      "entityId": "region:champagne",
-      "canonical": "Champagne",
-      "entityType": "region"
-    },
-    {
-      "surface": "스파클링",
-      "entityId": "wine_type:sparkling",
-      "canonical": "sparkling",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "스페인",
-      "entityId": "country:spain",
-      "canonical": "Spain",
-      "entityType": "country"
-    },
-    {
-      "surface": "아르헨티나",
-      "entityId": "country:argentina",
-      "canonical": "Argentina",
-      "entityType": "country"
-    },
-    {
-      "surface": "이탈리아",
-      "entityId": "country:italy",
-      "canonical": "Italy",
-      "entityType": "country"
-    },
-    {
-      "surface": "칠레",
-      "entityId": "country:chile",
-      "canonical": "Chile",
-      "entityType": "country"
-    },
-    {
-      "surface": "카베르네",
-      "entityId": "grape_primary:cabernet sauvignon",
-      "canonical": "Cabernet Sauvignon",
-      "entityType": "grape_primary"
-    },
-    {
-      "surface": "토스카나",
-      "entityId": "region:tuscany",
-      "canonical": "Tuscany",
-      "entityType": "region"
-    },
-    {
-      "surface": "포르투갈",
-      "entityId": "country:portugal",
-      "canonical": "Portugal",
-      "entityType": "country"
-    },
-    {
-      "surface": "포트",
-      "entityId": "wine_type:fortified",
-      "canonical": "fortified",
-      "entityType": "wine_type"
-    },
-    {
-      "surface": "프랑스",
-      "entityId": "country:france",
-      "canonical": "France",
-      "entityType": "country"
-    },
-    {
-      "surface": "호주",
-      "entityId": "country:australia",
-      "canonical": "Australia",
-      "entityType": "country"
-    },
-    {
-      "surface": "화이트",
-      "entityId": "wine_type:white",
-      "canonical": "white",
-      "entityType": "wine_type"
+      "phrase": "abruzzo",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Abruzzo",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:abruzzo"
+    },
+    {
+      "phrase": "albarino",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Albariño",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:albariño"
+    },
+    {
+      "phrase": "albariño",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Albariño",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:albariño"
+    },
+    {
+      "phrase": "alentejo",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Alentejo",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:alentejo"
+    },
+    {
+      "phrase": "alsace",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Alsace",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:alsace"
+    },
+    {
+      "phrase": "amarone",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Amarone",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:amarone"
+    },
+    {
+      "phrase": "argentina",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Argentina",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:argentina"
+    },
+    {
+      "phrase": "australia",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Australia",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:australia"
+    },
+    {
+      "phrase": "barbaresco",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Barbaresco",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:barbaresco"
+    },
+    {
+      "phrase": "barolo",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Barolo",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:barolo"
+    },
+    {
+      "phrase": "barossa valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Barossa Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:barossa valley"
+    },
+    {
+      "phrase": "bianco",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "white",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:white"
+    },
+    {
+      "phrase": "blanc",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "white",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:white"
+    },
+    {
+      "phrase": "blanco",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "white",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:white"
+    },
+    {
+      "phrase": "blaufrankisch",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Blaufränkisch",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:blaufränkisch"
+    },
+    {
+      "phrase": "blaufränkisch",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Blaufränkisch",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:blaufränkisch"
+    },
+    {
+      "phrase": "bolgheri",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Bolgheri",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:bolgheri"
+    },
+    {
+      "phrase": "bordeaux",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Bordeaux",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:bordeaux"
+    },
+    {
+      "phrase": "bourgogne",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Bourgogne",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:bourgogne"
+    },
+    {
+      "phrase": "brunello di montalcino",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Brunello di Montalcino",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:brunello di montalcino"
+    },
+    {
+      "phrase": "burgundy",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Burgundy",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:burgundy"
+    },
+    {
+      "phrase": "cab franc",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Cabernet Franc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:cabernet franc"
+    },
+    {
+      "phrase": "cab sauv",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Cabernet Sauvignon",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:cabernet sauvignon"
+    },
+    {
+      "phrase": "cabernet franc",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Cabernet Franc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:cabernet franc"
+    },
+    {
+      "phrase": "cabernet sauvignon",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Cabernet Sauvignon",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:cabernet sauvignon"
+    },
+    {
+      "phrase": "california",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "California",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:california"
+    },
+    {
+      "phrase": "carmenere",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Carmenère",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:carmenère"
+    },
+    {
+      "phrase": "carmenère",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Carmenère",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:carmenère"
+    },
+    {
+      "phrase": "casablanca valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Casablanca Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:casablanca valley"
+    },
+    {
+      "phrase": "catalonia",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Catalonia",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:catalonia"
+    },
+    {
+      "phrase": "central otago",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Central Otago",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:central otago"
+    },
+    {
+      "phrase": "chablis",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Chablis",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:chablis"
+    },
+    {
+      "phrase": "chambolle-musigny",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Chambolle-musigny",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:chambolle-musigny"
+    },
+    {
+      "phrase": "champagne",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Champagne",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:champagne"
+    },
+    {
+      "phrase": "champagne",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "sparkling",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:sparkling"
+    },
+    {
+      "phrase": "chassagne-montrachet",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Chassagne-montrachet",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:chassagne-montrachet"
+    },
+    {
+      "phrase": "châteauneuf-du-pape",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Châteauneuf-du-pape",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:châteauneuf-du-pape"
+    },
+    {
+      "phrase": "chianti",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Chianti",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:chianti"
+    },
+    {
+      "phrase": "chianti classico",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Chianti Classico",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:chianti classico"
+    },
+    {
+      "phrase": "chile",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Chile",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:chile"
+    },
+    {
+      "phrase": "clare valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Clare Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:clare valley"
+    },
+    {
+      "phrase": "colchagua valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Colchagua Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:colchagua valley"
+    },
+    {
+      "phrase": "columbia valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Columbia Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:columbia valley"
+    },
+    {
+      "phrase": "constantia",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Constantia",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:constantia"
+    },
+    {
+      "phrase": "cornas",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Cornas",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:cornas"
+    },
+    {
+      "phrase": "côte de beaune",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Côte de Beaune",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:côte de beaune"
+    },
+    {
+      "phrase": "côte de nuits",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Côte de Nuits",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:côte de nuits"
+    },
+    {
+      "phrase": "côte-rôtie",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Côte-rôtie",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:côte-rôtie"
+    },
+    {
+      "phrase": "côtes du rhône",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Côtes du Rhône",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:côtes du rhône"
+    },
+    {
+      "phrase": "crozes-hermitage",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Crozes-hermitage",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:crozes-hermitage"
+    },
+    {
+      "phrase": "dão",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Dão",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:dão"
+    },
+    {
+      "phrase": "dessert",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "dessert",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:dessert"
+    },
+    {
+      "phrase": "douro",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Douro",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:douro"
+    },
+    {
+      "phrase": "etna",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Etna",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:etna"
+    },
+    {
+      "phrase": "fortified",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "fortified",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:fortified"
+    },
+    {
+      "phrase": "france",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "France",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:france"
+    },
+    {
+      "phrase": "garnacha",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Grenache",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:grenache"
+    },
+    {
+      "phrase": "germany",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Germany",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:germany"
+    },
+    {
+      "phrase": "gevrey-chambertin",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Gevrey-chambertin",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:gevrey-chambertin"
+    },
+    {
+      "phrase": "gewurztraminer",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Gewurztraminer",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:gewurztraminer"
+    },
+    {
+      "phrase": "gewürztraminer",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Gewurztraminer",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:gewurztraminer"
+    },
+    {
+      "phrase": "gigondas",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Gigondas",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:gigondas"
+    },
+    {
+      "phrase": "graves",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Graves",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:graves"
+    },
+    {
+      "phrase": "grenache",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Grenache",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:grenache"
+    },
+    {
+      "phrase": "grenache noir",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Grenache",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:grenache"
+    },
+    {
+      "phrase": "gruner veltliner",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Grüner Veltliner",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:grüner veltliner"
+    },
+    {
+      "phrase": "grüner veltliner",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Grüner Veltliner",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:grüner veltliner"
+    },
+    {
+      "phrase": "haut-médoc",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Haut-médoc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:haut-médoc"
+    },
+    {
+      "phrase": "hawke's bay",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Hawke's Bay",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:hawke's bay"
+    },
+    {
+      "phrase": "hermitage",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Hermitage",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:hermitage"
+    },
+    {
+      "phrase": "hunter valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Hunter Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:hunter valley"
+    },
+    {
+      "phrase": "italy",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Italy",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:italy"
+    },
+    {
+      "phrase": "langhe",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Langhe",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:langhe"
+    },
+    {
+      "phrase": "languedoc",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Languedoc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:languedoc"
+    },
+    {
+      "phrase": "loire",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Loire",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:loire"
+    },
+    {
+      "phrase": "madeira",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "fortified",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:fortified"
+    },
+    {
+      "phrase": "maipo valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Maipo Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:maipo valley"
+    },
+    {
+      "phrase": "margaret river",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Margaret River",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:margaret river"
+    },
+    {
+      "phrase": "margaux",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Margaux",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:margaux"
+    },
+    {
+      "phrase": "marlborough",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Marlborough",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:marlborough"
+    },
+    {
+      "phrase": "mclaren vale",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Mclaren Vale",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:mclaren vale"
+    },
+    {
+      "phrase": "médoc",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Médoc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:médoc"
+    },
+    {
+      "phrase": "mencia",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Mencía",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:mencía"
+    },
+    {
+      "phrase": "mencía",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Mencía",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:mencía"
+    },
+    {
+      "phrase": "mendoza",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Mendoza",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:mendoza"
+    },
+    {
+      "phrase": "meursault",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Meursault",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:meursault"
+    },
+    {
+      "phrase": "monastrell",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Mourvèdre",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:mourvèdre"
+    },
+    {
+      "phrase": "morey-saint-denis",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Morey-saint-denis",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:morey-saint-denis"
+    },
+    {
+      "phrase": "moscatel",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Muscat",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:muscat"
+    },
+    {
+      "phrase": "moscato",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Muscat",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:muscat"
+    },
+    {
+      "phrase": "mosel",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Mosel",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:mosel"
+    },
+    {
+      "phrase": "mourvedre",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Mourvèdre",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:mourvèdre"
+    },
+    {
+      "phrase": "mourvèdre",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Mourvèdre",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:mourvèdre"
+    },
+    {
+      "phrase": "muscadet",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Muscadet",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:muscadet"
+    },
+    {
+      "phrase": "muscat",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Muscat",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:muscat"
+    },
+    {
+      "phrase": "muscat blanc",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Muscat",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:muscat"
+    },
+    {
+      "phrase": "napa valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Napa Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:napa valley"
+    },
+    {
+      "phrase": "new zealand",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "New Zealand",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:new zealand"
+    },
+    {
+      "phrase": "northern rhône",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Northern Rhône",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:northern rhône"
+    },
+    {
+      "phrase": "nuits-saint-georges",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Nuits-saint-georges",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:nuits-saint-georges"
+    },
+    {
+      "phrase": "oregon",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Oregon",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:oregon"
+    },
+    {
+      "phrase": "paso robles",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Paso Robles",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:paso robles"
+    },
+    {
+      "phrase": "pauillac",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Pauillac",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:pauillac"
+    },
+    {
+      "phrase": "penedès",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Penedès",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:penedès"
+    },
+    {
+      "phrase": "pessac-léognan",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Pessac-léognan",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:pessac-léognan"
+    },
+    {
+      "phrase": "petit sirah",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Petite Sirah",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:petite sirah"
+    },
+    {
+      "phrase": "petite sirah",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Petite Sirah",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:petite sirah"
+    },
+    {
+      "phrase": "pfalz",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Pfalz",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:pfalz"
+    },
+    {
+      "phrase": "piedmont",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Piedmont",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:piedmont"
+    },
+    {
+      "phrase": "piemonte",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Piemonte",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:piemonte"
+    },
+    {
+      "phrase": "pinot bianco",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Blanc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot blanc"
+    },
+    {
+      "phrase": "pinot blanc",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Blanc",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot blanc"
+    },
+    {
+      "phrase": "pinot grigio",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Gris",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot gris"
+    },
+    {
+      "phrase": "pinot gris",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Gris",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot gris"
+    },
+    {
+      "phrase": "pomerol",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Pomerol",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:pomerol"
+    },
+    {
+      "phrase": "pommard",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Pommard",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:pommard"
+    },
+    {
+      "phrase": "port",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "fortified",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:fortified"
+    },
+    {
+      "phrase": "portugal",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Portugal",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:portugal"
+    },
+    {
+      "phrase": "pouilly-fumé",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Pouilly-fumé",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:pouilly-fumé"
+    },
+    {
+      "phrase": "primitivo",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Zinfandel",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:zinfandel"
+    },
+    {
+      "phrase": "priorat",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Priorat",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:priorat"
+    },
+    {
+      "phrase": "provence",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Provence",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:provence"
+    },
+    {
+      "phrase": "puligny-montrachet",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Puligny-montrachet",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:puligny-montrachet"
+    },
+    {
+      "phrase": "red",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "red",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:red"
+    },
+    {
+      "phrase": "rheingau",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rheingau",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rheingau"
+    },
+    {
+      "phrase": "rheinhessen",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rheinhessen",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rheinhessen"
+    },
+    {
+      "phrase": "rhône valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rhône Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rhône valley"
+    },
+    {
+      "phrase": "rías baixas",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rías Baixas",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rías baixas"
+    },
+    {
+      "phrase": "ribera del duero",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Ribera del Duero",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:ribera del duero"
+    },
+    {
+      "phrase": "rioja",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rioja",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rioja"
+    },
+    {
+      "phrase": "rose",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "rosé",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:rosé"
+    },
+    {
+      "phrase": "rosé",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "rosé",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:rosé"
+    },
+    {
+      "phrase": "rosso",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "red",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:red"
+    },
+    {
+      "phrase": "rouge",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "red",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:red"
+    },
+    {
+      "phrase": "rueda",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rueda",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rueda"
+    },
+    {
+      "phrase": "russian river valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Russian River Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:russian river valley"
+    },
+    {
+      "phrase": "saint-émilion",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Saint-émilion",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:saint-émilion"
+    },
+    {
+      "phrase": "saint-estèphe",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Saint-estèphe",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:saint-estèphe"
+    },
+    {
+      "phrase": "saint-julien",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Saint-julien",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:saint-julien"
+    },
+    {
+      "phrase": "sancerre",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Sancerre",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:sancerre"
+    },
+    {
+      "phrase": "santa barbara",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Santa Barbara",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:santa barbara"
+    },
+    {
+      "phrase": "sauternes",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Sauternes",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:sauternes"
+    },
+    {
+      "phrase": "semillon",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Sémillon",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:sémillon"
+    },
+    {
+      "phrase": "sémillon",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Sémillon",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:sémillon"
+    },
+    {
+      "phrase": "sherry",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "fortified",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:fortified"
+    },
+    {
+      "phrase": "shiraz",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Syrah",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:syrah"
+    },
+    {
+      "phrase": "sicily",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Sicily",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:sicily"
+    },
+    {
+      "phrase": "soave",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Soave",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:soave"
+    },
+    {
+      "phrase": "sonoma county",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Sonoma County",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:sonoma county"
+    },
+    {
+      "phrase": "south africa",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "South Africa",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:south africa"
+    },
+    {
+      "phrase": "south australia",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "South Australia",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:south australia"
+    },
+    {
+      "phrase": "southern rhône",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Southern Rhône",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:southern rhône"
+    },
+    {
+      "phrase": "spain",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Spain",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:spain"
+    },
+    {
+      "phrase": "sparkling",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "sparkling",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:sparkling"
+    },
+    {
+      "phrase": "stellenbosch",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Stellenbosch",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:stellenbosch"
+    },
+    {
+      "phrase": "swartland",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Swartland",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:swartland"
+    },
+    {
+      "phrase": "sweet",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "dessert",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:dessert"
+    },
+    {
+      "phrase": "syrah",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Syrah",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:syrah"
+    },
+    {
+      "phrase": "tinto",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "red",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:red"
+    },
+    {
+      "phrase": "torrontes",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Torrontés",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:torrontés"
+    },
+    {
+      "phrase": "torrontés",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Torrontés",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:torrontés"
+    },
+    {
+      "phrase": "toscana",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Toscana",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:toscana"
+    },
+    {
+      "phrase": "tuscany",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Tuscany",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:tuscany"
+    },
+    {
+      "phrase": "uco valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Uco Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:uco valley"
+    },
+    {
+      "phrase": "united states",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "United States",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:united states"
+    },
+    {
+      "phrase": "valpolicella",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Valpolicella",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:valpolicella"
+    },
+    {
+      "phrase": "veneto",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Veneto",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:veneto"
+    },
+    {
+      "phrase": "volnay",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Volnay",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:volnay"
+    },
+    {
+      "phrase": "vosne-romanée",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Vosne-romanée",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:vosne-romanée"
+    },
+    {
+      "phrase": "washington",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Washington",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:washington"
+    },
+    {
+      "phrase": "white",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "white",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:white"
+    },
+    {
+      "phrase": "willamette valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Willamette Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:willamette valley"
+    },
+    {
+      "phrase": "yarra valley",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Yarra Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:yarra valley"
+    },
+    {
+      "phrase": "zinfandel",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Zinfandel",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:zinfandel"
+    },
+    {
+      "phrase": "나파",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Napa Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:napa valley"
+    },
+    {
+      "phrase": "나파 밸리",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Napa Valley",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:napa valley"
+    },
+    {
+      "phrase": "남아공",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "South Africa",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:south africa"
+    },
+    {
+      "phrase": "남아프리카",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "South Africa",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:south africa"
+    },
+    {
+      "phrase": "뉴질랜드",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "New Zealand",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:new zealand"
+    },
+    {
+      "phrase": "독일",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Germany",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:germany"
+    },
+    {
+      "phrase": "디저트",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "dessert",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:dessert"
+    },
+    {
+      "phrase": "레드",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "red",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:red"
+    },
+    {
+      "phrase": "로제",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "rosé",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:rosé"
+    },
+    {
+      "phrase": "리오하",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Rioja",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:rioja"
+    },
+    {
+      "phrase": "말버러",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Marlborough",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:marlborough"
+    },
+    {
+      "phrase": "멘도사",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Mendoza",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:mendoza"
+    },
+    {
+      "phrase": "모젤",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Mosel",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:mosel"
+    },
+    {
+      "phrase": "미국",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "United States",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:united states"
+    },
+    {
+      "phrase": "바롤로",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Barolo",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:barolo"
+    },
+    {
+      "phrase": "보르도",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Bordeaux",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:bordeaux"
+    },
+    {
+      "phrase": "부르고뉴",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Burgundy",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:burgundy"
+    },
+    {
+      "phrase": "브루넬로",
+      "mappedAttribute": "appellation",
+      "operator": "=",
+      "value": "Brunello di Montalcino",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:appellation:brunello di montalcino"
+    },
+    {
+      "phrase": "샴페인",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Champagne",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:champagne"
+    },
+    {
+      "phrase": "스파클링",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "sparkling",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:sparkling"
+    },
+    {
+      "phrase": "스페인",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Spain",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:spain"
+    },
+    {
+      "phrase": "아르헨티나",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Argentina",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:argentina"
+    },
+    {
+      "phrase": "이탈리아",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Italy",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:italy"
+    },
+    {
+      "phrase": "칠레",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Chile",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:chile"
+    },
+    {
+      "phrase": "카베르네",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Cabernet Sauvignon",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:cabernet sauvignon"
+    },
+    {
+      "phrase": "토스카나",
+      "mappedAttribute": "region",
+      "operator": "=",
+      "value": "Tuscany",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:region:tuscany"
+    },
+    {
+      "phrase": "포르투갈",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Portugal",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:portugal"
+    },
+    {
+      "phrase": "포트",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "fortified",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:fortified"
+    },
+    {
+      "phrase": "프랑스",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "France",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:france"
+    },
+    {
+      "phrase": "피노 그리",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Gris",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot gris"
+    },
+    {
+      "phrase": "피노 그리지오",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Gris",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot gris"
+    },
+    {
+      "phrase": "피노그리",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Gris",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot gris"
+    },
+    {
+      "phrase": "피노그리지오",
+      "mappedAttribute": "grape_primary",
+      "operator": "=",
+      "value": "Pinot Gris",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:grape_primary:pinot gris"
+    },
+    {
+      "phrase": "호주",
+      "mappedAttribute": "country",
+      "operator": "=",
+      "value": "Australia",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:country:australia"
+    },
+    {
+      "phrase": "화이트",
+      "mappedAttribute": "wine_type",
+      "operator": "=",
+      "value": "white",
+      "mappingConfidence": 0.95,
+      "mappingVersion": "ontology-snapshot-v1.0",
+      "source": "ontology_snapshot:wine_type:white"
     }
   ]
 }

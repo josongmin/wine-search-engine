@@ -125,27 +125,40 @@ function parseSearchToolPriceRangeAsKrw(
 
 export function applySearchToolBudgetResultPolicy(
   response: SearchResponseV1,
-  budgetKrw: number | undefined,
+  budget: {
+    readonly minKrw?: number | undefined;
+    readonly maxKrw?: number | undefined;
+  },
   options: {
     readonly krwPerUsd: number;
   },
 ): SearchToolBudgetFilterResult {
-  if (budgetKrw === undefined) {
+  if (budget.minKrw === undefined && budget.maxKrw === undefined) {
     return { response, mode: 'unchanged' };
   }
+
+  const matchesBudget = (priceKrw: number): boolean => {
+    if (budget.minKrw !== undefined && priceKrw < budget.minKrw) {
+      return false;
+    }
+    if (budget.maxKrw !== undefined && priceKrw > budget.maxKrw) {
+      return false;
+    }
+    return true;
+  };
 
   const strict = response.results.filter((result) => {
     const priceKrw = parseSearchToolPriceRangeAsKrw(result.entity.priceRange, options.krwPerUsd);
     if (priceKrw === undefined) return false;
     if (priceKrw === null) return true;
-    return priceKrw <= budgetKrw;
+    return matchesBudget(priceKrw);
   });
 
   if (strict.length === 0 && response.results.length > 0) {
     const lenient = response.results.filter((result) => {
       const priceKrw = parseSearchToolPriceRangeAsKrw(result.entity.priceRange, options.krwPerUsd);
       if (priceKrw === undefined || priceKrw === null) return true;
-      return priceKrw <= budgetKrw;
+      return matchesBudget(priceKrw);
     });
     return {
       response: { ...response, results: lenient },

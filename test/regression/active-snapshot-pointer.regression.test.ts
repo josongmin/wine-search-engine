@@ -105,6 +105,17 @@ describe('T-010 pointer migration SQL contract', () => {
 });
 
 describe('T-010 publish-runtime-substrates append-only contract', () => {
+  it('fails closed on missing learned facet coverage before runtime substrate publish', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const src = readFileSync(
+      fileURLToPath(new URL('../../scripts/etl/publish-runtime-substrates.ts', import.meta.url)),
+      'utf-8',
+    );
+    expect(src).toContain('assertSnapshotArtifactLearnedFacetCoverage(manifest)');
+    expect(src).toContain('assertLearnedFacetCoverageForPublish(');
+  });
+
   it('has no TRUNCATE TABLE calls in publish path', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
@@ -145,8 +156,8 @@ describe('T-010 publish-search-snapshot pointer promote wiring', () => {
       'utf-8',
     );
     const pointerIdx = src.indexOf('promoteActiveSearchSnapshotPointer(');
-    const runtimePromoteIdx = src.indexOf('promoteRuntimeSubstrateArtifacts({');
-    const liveVerifyIdx = src.indexOf('runtimeStatePath: args.runtimeStatePath');
+    const runtimePromoteIdx = src.indexOf('promoteRuntimeSubstrateArtifacts(cutoverPaths)');
+    const liveVerifyIdx = src.indexOf("console.log('✅ Verifying readiness after runtime substrate promotion')");
     expect(pointerIdx).toBeGreaterThan(0);
     expect(runtimePromoteIdx).toBeGreaterThan(0);
     expect(liveVerifyIdx).toBeGreaterThan(0);

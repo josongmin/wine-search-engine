@@ -700,6 +700,130 @@ describe('WineToolExecutor', () => {
         error: expect.stringMatching(/placeholder/i),
       });
     });
+
+    it('hydrates source-backed drinking-window priors from the entity document', async () => {
+      const entityLookup = {
+        getDocument: vi.fn().mockResolvedValue({
+          entityId: 'wine-123',
+          entityType: 'wine',
+          canonicalLabel: 'Barolo Example 2018',
+          aliasesIdentitySafe: ['Barolo Example 2018'],
+          aliasesNoisyRecall: ['Barolo Example'],
+          producer: 'Giacomo Conterno',
+          region: 'Piemonte',
+          grapes: ['Nebbiolo'],
+          searchTextKo: '바롤로 예시',
+          searchTextEn: 'Barolo Example 2018',
+          semanticSummary: 'Structured Barolo',
+          style: 'structured red',
+          priceBand: 'luxury',
+          pairing: ['braised beef'],
+          availability: true,
+          popularityScore: 0.92,
+          vintageYear: 2018,
+          body: 0.8,
+          tannin: 0.9,
+          acidity: 0.7,
+          sweetness: 0.1,
+          criticScoreNormalized: 0.94,
+          grapePrimaryEnc: 11,
+          regionEnc: 22,
+          countryEnc: 33,
+          grapePrimary: 'Nebbiolo',
+          grapeFamily: 'Nebbiolo',
+          country: 'Italy',
+          appellation: 'Barolo DOCG',
+          regionHierarchy: ['Italy', 'Piemonte', 'Barolo'],
+          wineType: 'red',
+          classification: 'DOCG',
+          oakTreatment: 'large oak cask',
+          producerPrestige: 0.91,
+          ratingAvg: 4.6,
+          ratingsCount: 1287,
+          reviewCount: 211,
+          ratingDistribution: { '1': 2, '2': 10, '3': 115, '4': 540, '5': 620 },
+          wineryRatingCount: 8240,
+          priceUsd: 180,
+          bottleSizeMl: 750,
+          bottleSize: '750ml',
+          closure: 'Cork',
+          drinkingWindowStart: 2026,
+          drinkingWindowEnd: 2038,
+          drinkingWindowModelVersion: 'snapshot:on-index',
+          certifications: ['organic'],
+          producerType: 'domaine',
+          soilType: 'limestone',
+          finishLength: 0.92,
+          alcoholPct: 14.5,
+        }),
+      };
+      const richExecutor = new WineToolExecutor({
+        searchUseCase: mockSearchUseCase,
+        decomposedSearchUseCase: mockDecomposedSearchUseCase,
+        drinkingWindowUseCase: mockDrinkingWindowUseCase,
+        entityLookup,
+      });
+      vi.mocked(mockDrinkingWindowUseCase.check).mockResolvedValue({
+        drinkingWindowStart: 2026,
+        drinkingWindowEnd: 2038,
+        peakYear: 2031,
+        currentlyDrinkable: true,
+        confidence: 'high',
+        evidenceLevel: 'learned',
+        blockingEligible: true,
+        modelVersion: 'onnx:v2',
+      });
+
+      await richExecutor.execute(
+        'check_drinking_window',
+        { entity_id: 'wine-123', target_year: 2031 },
+        'req-123',
+      );
+
+      expect(entityLookup.getDocument).toHaveBeenCalledWith('wine-123');
+      expect(mockDrinkingWindowUseCase.check).toHaveBeenCalledWith({
+        vintage: 2018,
+        grapePrimaryEnc: 11,
+        regionEnc: 22,
+        countryEnc: 33,
+        body: 4,
+        tannin: 4.5,
+        acidity: 3.5,
+        sweetness: 0.5,
+        avgCriticProxyScore: 94,
+        priorDrinkingWindowStart: 2026,
+        priorDrinkingWindowEnd: 2038,
+        priorDrinkingWindowModelVersion: 'snapshot:on-index',
+        grapePrimary: 'Nebbiolo',
+        grapes: ['Nebbiolo'],
+        grapeFamily: 'Nebbiolo',
+        producer: 'Giacomo Conterno',
+        country: 'Italy',
+        region: 'Piemonte',
+        appellation: 'Barolo DOCG',
+        regionHierarchy: ['Italy', 'Piemonte', 'Barolo'],
+        wineType: 'red',
+        style: 'structured red',
+        classification: 'DOCG',
+        oakTreatment: 'large oak cask',
+        producerPrestige: 0.91,
+        ratingAvg: 4.6,
+        ratingsCount: 1287,
+        reviewCount: 211,
+        ratingDistribution: { '1': 2, '2': 10, '3': 115, '4': 540, '5': 620 },
+        wineryRatingCount: 8240,
+        priceUsd: 180,
+        bottleSizeMl: 750,
+        bottleSize: '750ml',
+        closure: 'Cork',
+        certifications: ['organic'],
+        producerType: 'domaine',
+        soilType: 'limestone',
+        finishLength: 0.92,
+        alcoholPct: 14.5,
+        targetYear: 2031,
+      });
+    });
   });
 
   describe('compare_wines', () => {
@@ -719,12 +843,44 @@ describe('WineToolExecutor', () => {
         mockDecomposedSearchUseCase.execute,
       ).mock.calls[0]!;
 
-      expect(subQueries).toEqual(['Château Margaux 2015', 'Caymus Cabernet 2018']);
+      expect(subQueries).toEqual(['margaux', 'cabernet sauvignon']);
       expect(intent).toBe('compare');
       expect(originalQuery).toContain('Château Margaux 2015');
       expect(originalQuery).toContain('Caymus Cabernet 2018');
       expect(requestId).toBe('compare-req-123');
       expect(result).toEqual(mockComparisonResponse);
+    });
+
+    it('should forward shared structured comparison filters to both legs', async () => {
+      vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
+        mockComparisonResponse,
+      );
+
+      await executor.execute(
+        'compare_wines',
+        {
+          query_a: 'Barolo',
+          query_b: 'Brunello di Montalcino',
+          max_price_krw: 50000,
+          country: 'Italy',
+          vintage_min: 2018,
+        },
+        'compare-req-456',
+      );
+
+      const [subQueries, , originalQuery, , , parentContext] = vi.mocked(
+        mockDecomposedSearchUseCase.execute,
+      ).mock.calls[0]!;
+
+      expect(subQueries[0]).toContain('50000원 이하');
+      expect(subQueries[1]).toContain('50000원 이하');
+      expect(originalQuery).toContain('50000원 이하');
+      expect(parentContext?.filters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
+          expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
+        ]),
+      );
     });
 
     it('returns in-band error for invalid query_a (empty)', async () => {

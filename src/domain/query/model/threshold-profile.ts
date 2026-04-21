@@ -1,5 +1,8 @@
 import type { QueryClass } from '../../shared/types/index.js';
 
+/** Decision gate mode used by a threshold entry. */
+export type NumericGateMode = 'strict' | 'preference';
+
 /** Semantic-preference gap when confidence is high (tighter disambiguation). */
 const DYNAMIC_GAP_SEMANTIC_PREF_HIGH_CONFIDENCE = 0.01;
 /** Semantic-preference standard gap (fuzzy NL). */
@@ -29,6 +32,14 @@ export interface ThresholdEntry {
 
   /** Gap threshold T_gap(Q) in [0, 1]. */
   readonly gapTau: number;
+
+  /**
+   * Numeric gate style for the query class.
+   * - `strict`: identity-style gate uses confidence, gap, and conformal set size.
+   * - `preference`: recommendation-style gate uses confidence only; gap/conformal
+   *   remain observable in traces but do not block resolution.
+   */
+  readonly numericGateMode?: NumericGateMode;
 }
 
 /**
@@ -129,6 +140,8 @@ export interface ThresholdProfileV1 {
  * - v2.0.0: 0.05 (5%) — too conservative, blocked valid fuzzy matches
  * - v2.1.0: dynamic 0.015 (1.5%) — matches intent, allows preference queries
  *   when confidence is reasonable (e.g., 0.59 confidence with 1.72% gap)
+ * - v2.2.0: `numericGateMode: preference` — recommendation-style queries use
+ *   confidence-only admission, with gap/conformal retained for observability.
  *
  * Principle (RFC-009): wrong resolve is -1.5 utility, avoidable abstain is -0.3.
  * A threshold is too high if it causes 5+ avoidable abstains per wrong resolve
@@ -156,7 +169,7 @@ export const DEFAULT_THRESHOLD_PROFILE: ThresholdProfileV1 = {
     ambiguous_short_form: { resolveTau: 0.50, gapTau: 0.03 },
     anchored_similarity: { resolveTau: 0.40, gapTau: 0.02 },
     pure_constraint: { resolveTau: 0.35, gapTau: 0.02 },
-    semantic_preference: { resolveTau: 0.35, gapTau: 0.01 },
+    semantic_preference: { resolveTau: 0.35, gapTau: 0.01, numericGateMode: 'preference' },
     comparison_query: { resolveTau: 0.50, gapTau: 0.05 },
     unknown: { resolveTau: 0.50, gapTau: 0.05 },
   },

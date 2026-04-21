@@ -11,10 +11,11 @@
 
 import { VespaClient } from '../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../src/infrastructure/vespa/vespa-search-index.js';
-import { HttpEmbeddingService } from '../src/infrastructure/vespa/embedding-service.js';
 import { createCanonicalEntityId } from '../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../src/domain/retrieval/model/retrieval-document.js';
 import { pathToFileURL } from 'node:url';
+import { loadConfig } from '../src/config/env.js';
+import { OpenAiEmbeddingService } from '../src/infrastructure/ai/openai-embedding-service.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -3117,7 +3118,17 @@ async function main(): Promise<void> {
   // Enrich with real embeddings when an embedding service is available.
   if (USE_REAL_EMBEDDINGS) {
     console.log('Generating real embeddings via HTTP embedding service...');
-    const embeddingService = new HttpEmbeddingService();
+    const config = loadConfig();
+    if (config.openai.apiKey === undefined || config.openai.apiKey.length === 0) {
+      throw new Error('USE_REAL_EMBEDDINGS=true requires OPENAI_API_KEY');
+    }
+    const embeddingService = new OpenAiEmbeddingService({
+      baseUrl: config.openai.baseUrl,
+      apiKey: config.openai.apiKey,
+      model: config.openai.embeddingModel,
+      httpTimeoutMs: config.openai.httpTimeoutMs,
+      dimensions: config.embedding.dimension,
+    });
 
     const semanticSummaries = WINES.map((w) => w.semanticSummary);
     const batchSize = 32;

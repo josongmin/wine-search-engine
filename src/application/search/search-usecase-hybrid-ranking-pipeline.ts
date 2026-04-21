@@ -372,7 +372,11 @@ export async function runHybridRankingPipeline(
     'pipeline hybrid ranking',
   );
 
-  const resolveResult: EntityResolveResult = buildHybridRouteResolveResult(plan, rankedResults);
+  const resolveResult: EntityResolveResult = buildHybridRouteResolveResult(
+    plan,
+    rankedResults,
+    compiled.execution.effectiveRetrievalMode,
+  );
 
   return {
     resolveResult,

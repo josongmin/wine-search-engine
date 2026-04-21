@@ -15,9 +15,11 @@ export function buildMixedRouteResolveResult(
   plan: QueryPlanV1,
   rankedResults: readonly RankedResult[],
   _mixedResult: MixedQueryResult,
+  effectiveRetrievalMode?: CompiledWineQuery['execution']['effectiveRetrievalMode'],
 ): EntityResolveResult {
   return buildRankedRouteResolveResult(plan, rankedResults, {
     outcomeReasonCode: 'MIXED_ROUTE',
+    ...(effectiveRetrievalMode !== undefined ? { effectiveRetrievalMode } : {}),
     topEntity: rankedResults[0] === undefined
       ? undefined
       : {
@@ -38,7 +40,12 @@ export function mixedQueryResultToSearchRouteExecution(
 ): SearchRouteExecutionResult {
   const rankedResults = mixedResult.rankedResults;
   return {
-    resolveResult: buildMixedRouteResolveResult(plan, rankedResults, mixedResult),
+    resolveResult: buildMixedRouteResolveResult(
+      plan,
+      rankedResults,
+      mixedResult,
+      compiled.execution.effectiveRetrievalMode,
+    ),
     rankedResults,
     effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
     retrievalKind: 'mixed_similarity',

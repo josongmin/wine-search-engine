@@ -33,6 +33,7 @@ import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
 import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
+import { AmbiguityIntentCompiler } from '../domain/query/service/ambiguity-intent-compiler.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import { ConstraintTopologyPlanner } from '../domain/query/service/constraint-topology-planner.js';
@@ -161,6 +162,10 @@ export async function buildQueryPlanner(
     chatLlm !== undefined
       ? new ConstraintTopologyPlanner(chatLlm)
       : undefined;
+  const ambiguityIntentCompiler =
+    chatLlm !== undefined
+      ? new AmbiguityIntentCompiler(chatLlm)
+      : undefined;
 
   return new Planner(
     adapters.ambiguityDict,
@@ -169,6 +174,7 @@ export async function buildQueryPlanner(
     nlMapper,
     fuzzyMatcher,
     topologyPlanner,
+    ambiguityIntentCompiler,
   );
 }
 

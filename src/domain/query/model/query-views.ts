@@ -34,6 +34,14 @@ export interface NormalizedQueryViews {
   /** All token orderings tried (for multi-word queries). */
   readonly reordered?: readonly string[] | undefined;
   /**
+   * Deduplicated semantic-safe variants for external embedding APIs.
+   *
+   * This intentionally excludes aggressive exact-only keys such as `compact`
+   * and `phoneticCompact`. Dense encoders should receive human-readable query
+   * views only, while compact / phonetic forms remain in the exact substrate.
+   */
+  readonly semanticVariants: readonly string[];
+  /**
    * Deduplicated flat list of all non-empty view values.
    * Used for staged entity lookup: try each in order from conservative to aggressive.
    */

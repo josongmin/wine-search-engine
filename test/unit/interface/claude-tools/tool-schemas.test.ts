@@ -24,6 +24,7 @@ import {
 } from '../../../../src/interface/claude-tools/tool-schemas.js';
 import { KNOWN_AGENT_TOOL_NAMES } from '../../../../src/application/agent/agent-tool-attempt-schema.js';
 import {
+  buildCompareToolFieldShape,
   buildFoodPairingFieldShape,
   buildSearchToolFieldShape,
   FOOD_PAIRING_COLORS,
@@ -103,6 +104,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       const props = tool.input_schema.properties as Record<string, any>;
       expect(props.exclude_grapes?.type).toBe('array');
       expect(props.exclude_regions?.type).toBe('array');
+      expect(props.min_price_krw?.type).toBe('number');
       expect(props.max_price_krw?.type).toBe('number');
       expect(props.max_alcohol_pct?.type).toBe('number');
       expect(props.wine_type?.enum).toEqual([
@@ -228,6 +230,25 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(tool.input_schema.properties.query_a).toBeDefined();
       expect(tool.input_schema.properties.query_b).toBeDefined();
     });
+
+    it('should expose shared structured comparison constraints', () => {
+      const props = tool.input_schema.properties as Record<string, any>;
+      expect(props.max_price_krw?.type).toBe('number');
+      expect(props.wine_type?.enum).toEqual([
+        'red',
+        'white',
+        'rosé',
+        'sparkling',
+        'fortified',
+        'dessert',
+        'orange',
+        'natural',
+      ]);
+      expect(props.country?.type).toBe('string');
+      expect(props.vintage_min?.minimum).toBe(1600);
+      expect(props.styles?.type).toBe('array');
+      expect(props.certification?.type).toBe('string');
+    });
   });
 });
 
@@ -328,7 +349,10 @@ describe('manifest ↔ validator ↔ contract parity', () => {
   it('compare_wines manifest properties match validator schema keys', () => {
     const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'compare_wines')!;
     const manifestKeys = Object.keys(tool.input_schema.properties).sort();
-    expect(manifestKeys).toEqual(['query_a', 'query_b']);
+    const contractKeys = ['query_a', 'query_b', ...Object.keys(buildCompareToolFieldShape({
+      maxPriceKrwMax: Number.MAX_SAFE_INTEGER,
+    }))].sort();
+    expect(manifestKeys).toEqual(contractKeys);
   });
 
   it('retrieval_mode enum in manifest matches contract SSOT', () => {

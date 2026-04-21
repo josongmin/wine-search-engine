@@ -1,6 +1,6 @@
 {
   "version": "ontology-snapshot-v1.0",
-  "generatedAt": "2026-04-09T11:08:18.671Z",
+  "generatedAt": "2026-04-16T16:49:56.126Z",
   "nodes": [
     {
       "id": "appellation:barbaresco",
@@ -1995,7 +1995,11 @@
       "hierarchy": [],
       "aliases": [
         "Pinot Grigio",
-        "Pinot Gris"
+        "Pinot Gris",
+        "피노 그리",
+        "피노 그리지오",
+        "피노그리",
+        "피노그리지오"
       ]
     },
     "grape_primary:sémillon": {

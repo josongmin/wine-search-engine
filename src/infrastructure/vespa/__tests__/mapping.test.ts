@@ -44,7 +44,15 @@ function makeDocument(overrides: Partial<RetrievalDocument> = {}): RetrievalDocu
     appellation: 'Barolo DOCG',
     producerPrestige: 0.95,
     criticScoreNormalized: 0.97,
+    ratingAvg: 4.6,
+    ratingsCount: 1287,
+    reviewCount: 211,
+    ratingDistribution: { '1': 2, '2': 10, '3': 115, '4': 540, '5': 620 },
+    wineryRatingCount: 8240,
     priceUsd: 240,
+    bottleSizeMl: 750,
+    bottleSize: '750ml',
+    closure: 'Cork',
     flavorProfiles: ['rose', 'tar'],
     classification: 'DOCG',
     alcoholPct: 14.5,
@@ -128,6 +136,18 @@ describe('fromVespaFields entity_id validation', () => {
       search_text_ko: undefined,
       search_text_en: undefined,
       semantic_summary: undefined,
+    });
+    expect(doc.searchTextKo).toBe('Some Wine');
+    expect(doc.searchTextEn).toBe('Some Wine');
+    expect(doc.semanticSummary).toBe('Some Wine');
+  });
+
+  it('falls back canonical label when search_text_ko/en/semantic_summary are empty strings', () => {
+    const doc = fromVespaFields({
+      ...makeMinimalRequiredFields({ 'canonical_label': 'Some Wine' }),
+      search_text_ko: '',
+      search_text_en: '',
+      semantic_summary: '',
     });
     expect(doc.searchTextKo).toBe('Some Wine');
     expect(doc.searchTextEn).toBe('Some Wine');
@@ -218,6 +238,14 @@ describe('vespa mapping retrieval summary SSOT', () => {
       certifications: [' organic ', 'biodynamic'],
       soil_type: 'limestone',
       producer_type: 'domaine',
+      rating_avg: 4.6,
+      ratings_count: 1287,
+      review_count: 211,
+      rating_distribution_json: stableJsonStringify({ '1': 2, '2': 10, '3': 115, '4': 540, '5': 620 }),
+      winery_rating_count: 8240,
+      bottle_size_ml: 750,
+      bottle_size: '750ml',
+      closure: 'Cork',
     });
 
     expect(readRawVespaRetrievalSummary(fields)).toMatchObject({
@@ -251,7 +279,15 @@ describe('vespa mapping retrieval summary SSOT', () => {
       certifications: doc.certifications,
       soilType: doc.soilType,
       producerType: doc.producerType,
+      ratingAvg: doc.ratingAvg,
+      ratingsCount: doc.ratingsCount,
+      reviewCount: doc.reviewCount,
+      wineryRatingCount: doc.wineryRatingCount,
+      bottleSizeMl: doc.bottleSizeMl,
+      bottleSize: doc.bottleSize,
+      closure: doc.closure,
     });
+    expect(roundTripped.ratingDistribution).toEqual(doc.ratingDistribution);
   });
 
   it('omits absent optional summary fields while preserving required retrieval document fields', () => {

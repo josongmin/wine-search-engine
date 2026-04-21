@@ -319,7 +319,7 @@ describe('Projection family separation', () => {
 
     // Hit-only display keys must NOT appear in feature
     const hitOnlyKeys = ['canonicalLabel', 'producer', 'region', 'appellation',
-      'grapePrimary', 'vintageYear', 'searchTextEn', 'producerPrestige', 'sourceRecordRefs'];
+      'grapePrimary', 'vintageYear', 'searchTextEn', 'semanticSummary', 'producerPrestige', 'sourceRecordRefs'];
     for (const key of hitOnlyKeys) {
       expect(feature[key]).toBeUndefined();
     }

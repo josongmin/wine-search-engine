@@ -50,6 +50,7 @@ export class DefaultRankingPolicy implements RankingPolicyPort {
   ): readonly RankedResult[] {
     let current = applyProducerDiversity(results);
     current = applyWineTypeDiversity(current, context);
+    current = applyAmbiguousBranchDiversity(current, context);
     current = applyMaxResults(current, context.maxResults);
     return reassignRanks(current);
   }
@@ -159,6 +160,64 @@ function applyWineTypeDiversity(
   return [...retained, ...demoted, ...remainingTail];
 }
 
+function applyAmbiguousBranchDiversity(
+  results: readonly RankedResult[],
+  context: PolicyContext,
+): readonly RankedResult[] {
+  if (!shouldApplyAmbiguousBranchDiversity(context)) {
+    return results;
+  }
+
+  const topWindow = results.slice(0, DIVERSITY_TOP_WINDOW);
+  const tail = results.slice(DIVERSITY_TOP_WINDOW);
+  const availableBranches = new Set(
+    results
+      .map((result) => resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups))
+      .filter((label): label is string => label !== undefined),
+  );
+  if (availableBranches.size < 2) {
+    return results;
+  }
+
+  const seenBranches = new Set<string>();
+  const retained: RankedResult[] = [];
+  const demoted: RankedResult[] = [];
+
+  for (const result of topWindow) {
+    const branchLabel = resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups);
+    if (branchLabel === undefined) {
+      retained.push(result);
+      continue;
+    }
+    if (!seenBranches.has(branchLabel)) {
+      seenBranches.add(branchLabel);
+      retained.push(result);
+      continue;
+    }
+    demoted.push({ ...result, policyDemoted: true });
+  }
+
+  const promotedTailIndices = new Set<number>();
+  for (let index = 0; index < tail.length; index += 1) {
+    const candidate = tail[index];
+    const branchLabel = candidate !== undefined
+      ? resolveAmbiguousBranchLabel(candidate, context.ambiguousBranchGroups)
+      : undefined;
+    if (candidate === undefined || branchLabel === undefined || seenBranches.has(branchLabel)) {
+      continue;
+    }
+    retained.push(candidate);
+    seenBranches.add(branchLabel);
+    promotedTailIndices.add(index);
+    if (seenBranches.size >= availableBranches.size) {
+      break;
+    }
+  }
+
+  const remainingTail = tail.filter((_, index) => !promotedTailIndices.has(index));
+  return [...retained, ...demoted, ...remainingTail];
+}
+
 /**
  * Wine-type diversity applies to recommendation-style execution contracts:
  * explicit recommendation retrieval mode, plus the anchor-conditioned
@@ -169,11 +228,41 @@ function shouldApplyWineTypeDiversity(context: PolicyContext): boolean {
     return false;
   }
 
+  if (context.hasDirectGrapePrimaryConstraint === true) {
+    return false;
+  }
+
   if (context.effectiveRetrievalMode === 'recommendation') {
     return true;
   }
 
   return context.queryClass === 'semantic_preference' || context.queryClass === 'anchored_similarity';
+}
+
+function shouldApplyAmbiguousBranchDiversity(context: PolicyContext): boolean {
+  return (context.ambiguousBranchGroups?.length ?? 0) > 1;
+}
+
+function resolveAmbiguousBranchLabel(
+  result: RankedResult,
+  groups: PolicyContext['ambiguousBranchGroups'],
+): string | undefined {
+  if (groups === undefined || groups.length === 0) {
+    return undefined;
+  }
+  const candidateValues = [
+    result.grapePrimary,
+  ]
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .map((value) => value.trim().toLowerCase());
+
+  for (const group of groups) {
+    const normalizedMatches = group.matchValues.map((value) => value.trim().toLowerCase());
+    if (candidateValues.some((value) => normalizedMatches.includes(value))) {
+      return group.label;
+    }
+  }
+  return undefined;
 }
 
 /**

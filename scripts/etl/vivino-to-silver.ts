@@ -740,6 +740,21 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     payload?.rating_count ??
     payload?.statistics?.ratings_count ??
     0;
+  const reviewCount =
+    payload?.review_count !== undefined && Number.isFinite(payload.review_count)
+      ? payload.review_count
+      : undefined;
+  const wineryRatingCount =
+    payload?.winery_rating_count !== undefined && Number.isFinite(payload.winery_rating_count)
+      ? payload.winery_rating_count
+      : undefined;
+  const ratingDistribution = payload?.rating_distribution;
+  const bottleSizeMl =
+    payload?.bottle_ml !== undefined && Number.isFinite(payload.bottle_ml)
+      ? payload.bottle_ml
+      : undefined;
+  const bottleSize = payload?.bottle_size?.trim();
+  const closure = payload?.closure?.trim();
 
   return {
     sourceId: createSourceRecordId(makeEntityId(externalId)),
@@ -769,11 +784,17 @@ export function transformRow(row: BronzeRow): PreSilver | null {
       return Number.isFinite(n) ? n : null;
     })(),
     ratingsCount,
+    ...(reviewCount !== undefined ? { reviewCount } : {}),
+    ...(ratingDistribution !== undefined ? { ratingDistribution } : {}),
+    ...(wineryRatingCount !== undefined ? { wineryRatingCount } : {}),
     priceUsd,
     priceBand: priceBandValue,
     scrapedAt: row.scraped_at,
     // SOTA++ new fields
     alcoholPct: parseAlcohol(payload?.alcohol),
+    ...(bottleSizeMl !== undefined ? { bottleSizeMl } : {}),
+    ...(bottleSize !== undefined && bottleSize.length > 0 ? { bottleSize } : {}),
+    ...(closure !== undefined && closure.length > 0 ? { closure } : {}),
     producerPrestige,
     isTopRated,
     classification: extractClassification(payload, row),

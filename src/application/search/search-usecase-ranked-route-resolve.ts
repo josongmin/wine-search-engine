@@ -3,10 +3,53 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
+import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
+
+const NON_ENTITY_SYNTHETIC_CONFORMAL_SET_SIZE = 1;
+const NON_ENTITY_SYNTHETIC_CONFIDENCE_TOP_K = 3;
+
+function shouldBypassSyntheticResolveConformal(
+  effectiveRetrievalMode: ExecutionRetrievalMode | undefined,
+): boolean {
+  switch (effectiveRetrievalMode) {
+    case 'recommendation':
+    case 'compare_candidates':
+    case 'similar_items':
+    case 'producer_browse':
+    case 'region_browse':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function computeNonEntityCandidateSetConfidence(
+  rankedResults: readonly RankedResult[],
+): number {
+  const shortlistScores = rankedResults
+    .slice(0, NON_ENTITY_SYNTHETIC_CONFIDENCE_TOP_K)
+    .map((result) => clamp01(result.finalScore));
+
+  if (shortlistScores.length === 0) {
+    return 0;
+  }
+
+  // Multi-recommendation / browse answers succeed when the returned shortlist
+  // contains at least one good option. Model that contract as the union
+  // probability over the shortlist instead of reusing single-entity top-1
+  // confidence semantics.
+  const allMissProbability = shortlistScores.reduce(
+    (product, score) => product * (1 - score),
+    1,
+  );
+
+  return clamp01(1 - allMissProbability);
+}
 
 interface RankedRouteResolveOptions {
   readonly outcomeReasonCode: 'HYBRID_ROUTE' | 'MIXED_ROUTE';
   readonly topEntity?: EntityResolveResult['topEntity'];
+  readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
 }
 
 /**
@@ -20,6 +63,9 @@ export function buildRankedRouteResolveResult(
 ): EntityResolveResult {
   const topResult = rankedResults[0];
   const top1Score = clamp01(rankedResults[0]?.finalScore ?? 0);
+  const decisionConfidenceC = shouldBypassSyntheticResolveConformal(options.effectiveRetrievalMode)
+    ? computeNonEntityCandidateSetConfidence(rankedResults)
+    : top1Score;
   const top2Result = rankedResults[1];
   const top2Score = top2Result !== undefined
     ? clamp01(top2Result.finalScore)
@@ -69,18 +115,20 @@ export function buildRankedRouteResolveResult(
     status: rankedResults.length > 0 ? 'resolved' : 'failed',
     ...(topEntity !== undefined ? { topEntity } : {}),
     candidates,
-    decisionConfidenceC: top1Score,
+    decisionConfidenceC,
     decisionTrace: {
       queryClass: plan.queryClass,
       top1CalibratedScore: top1Score,
       top2CalibratedScore: top2Score,
       calibratedGap,
-      decisionConfidenceC: top1Score,
+      decisionConfidenceC,
       ambiguityDetected: false,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
       outcomeReasonCodes: [options.outcomeReasonCode],
     },
-    conformalSetSize: computeConformalSetSize(top1Score, DEFAULT_ALPHA, rankedResults.length),
+    conformalSetSize: shouldBypassSyntheticResolveConformal(options.effectiveRetrievalMode)
+      ? NON_ENTITY_SYNTHETIC_CONFORMAL_SET_SIZE
+      : computeConformalSetSize(top1Score, DEFAULT_ALPHA, rankedResults.length),
   };
 }

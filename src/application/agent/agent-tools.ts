@@ -13,8 +13,13 @@ import { z } from 'zod';
 import { coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
+import type {
+  DecomposedSearchExecutionOptions,
+  DecomposedSearchParentContext,
+} from '../search/port/search-route-usecases.port.js';
 import { createStageTimer } from '../../observability/stage-timer.js';
 import {
+  buildCompareToolFieldShape,
   buildSearchToolStyleDerivedFilters,
   buildEntityIdToolField,
   buildFoodPairingFieldShape,
@@ -112,6 +117,11 @@ const CompareInputSchema = z.object({
     maxLen: SEARCH_QUERY_MAX_LEN,
     requiredMessage: 'Query B must not be empty',
   }),
+  ...buildCompareToolFieldShape({
+    maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
+  }),
+}).superRefine((data, ctx) => {
+  validateSearchToolVintageRange(data, ctx);
 });
 
 /** Max length for entity_id to prevent unbounded strings reaching Vespa GET / NL parser.
@@ -187,6 +197,8 @@ export interface AgentToolDeps {
     originalQuery: string,
     requestId: string,
     startTime: number,
+    parentContext?: DecomposedSearchParentContext,
+    options?: DecomposedSearchExecutionOptions,
   ) => Promise<ComparisonSearchResponse>;
   readonly drinkingWindowCheck?: (input: {
     vintage: number;
@@ -303,6 +315,22 @@ function detectConstraintKeywords(query: string): readonly string[] {
 /** Agent mapping version for structured filter provenance. */
 const AGENT_FILTER_VERSION = 'agent_v1';
 
+interface StructuredSearchConstraintInput {
+  readonly exclude_grapes?: readonly string[] | undefined;
+  readonly exclude_regions?: readonly string[] | undefined;
+  readonly min_price_krw?: number | undefined;
+  readonly max_price_krw?: number | undefined;
+  readonly max_alcohol_pct?: number | undefined;
+  readonly wine_type?: string | undefined;
+  readonly country?: string | undefined;
+  readonly vintage_min?: number | undefined;
+  readonly vintage_max?: number | undefined;
+  readonly appellation?: string | undefined;
+  readonly style?: string | undefined;
+  readonly styles?: readonly string[] | undefined;
+  readonly certification?: string | undefined;
+}
+
 /**
  * Converts agent tool structured params to NormalizedConstraints that flow
  * directly to Vespa as hard YQL filters.
@@ -311,7 +339,7 @@ const AGENT_FILTER_VERSION = 'agent_v1';
  * data, so a hard filter would silently drop valid results. Price filtering
  * is handled by the agent-level post-filter instead.
  */
-function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): readonly NormalizedConstraint[] {
+function buildStructuredFilters(input: StructuredSearchConstraintInput): readonly NormalizedConstraint[] {
   const filters: NormalizedConstraint[] = [];
   const v = AGENT_FILTER_VERSION;
 
@@ -363,6 +391,39 @@ function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): reado
   // field returns 0 hits. Certification is appended as a text hint to the query.
 
   return filters;
+}
+
+function buildStructuredQuery(input: StructuredSearchConstraintInput & { readonly query: string }): string {
+  const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
+  const clauses = buildSearchToolSoftClauses(input);
+  return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
+}
+
+function buildComparisonOriginalQuery(
+  input: StructuredSearchConstraintInput & {
+    readonly query_a: string;
+    readonly query_b: string;
+  },
+): string {
+  const sharedClauses = buildSearchToolSoftClauses(input);
+  const base = `${input.query_a} vs ${input.query_b}`;
+  return appendStructuredQueryClauses(base, sharedClauses);
+}
+
+function buildPriceFilterObservation(input: {
+  readonly min_price_krw?: number | undefined;
+  readonly max_price_krw?: number | undefined;
+}): string | undefined {
+  if (input.min_price_krw !== undefined && input.max_price_krw !== undefined) {
+    return `[PRICE_FILTER: 검색 결과는 ${input.min_price_krw}원 이상 ${input.max_price_krw}원 이하로 필터링되었습니다.]`;
+  }
+  if (input.min_price_krw !== undefined) {
+    return `[PRICE_FILTER: 검색 결과는 ${input.min_price_krw}원 이상으로 필터링되었습니다.]`;
+  }
+  if (input.max_price_krw !== undefined) {
+    return `[PRICE_FILTER: 검색 결과는 ${input.max_price_krw}원 이하로 필터링되었습니다.]`;
+  }
+  return undefined;
 }
 
 /**
@@ -688,14 +749,18 @@ async function executeAgentToolInner(
         }
       }
 
-      // Price post-filter: when agent specified max_price_krw, drop results whose
-      // priceRange exceeds the budget. The search pipeline does not have a native
-      // price filter — max_price_krw is a text hint — so out-of-range results can
-      // slip through. This post-filter gives the agent accurate budget-aware results.
-      if (parsed.max_price_krw !== undefined) {
+      // Price post-filter: when agent specified a budget bound/range, drop results
+      // whose priceRange falls outside it. The search pipeline does not have a
+      // native price filter — price bounds are text hints — so out-of-range
+      // results can slip through. This post-filter gives the agent accurate
+      // budget-aware results.
+      if (parsed.min_price_krw !== undefined || parsed.max_price_krw !== undefined) {
         response = applySearchToolBudgetResultPolicy(
           response,
-          parsed.max_price_krw,
+          {
+            minKrw: parsed.min_price_krw,
+            maxKrw: parsed.max_price_krw,
+          },
           { krwPerUsd: KRW_PER_USD_APPROXIMATE },
         ).response;
       }
@@ -738,12 +803,12 @@ async function executeAgentToolInner(
         : '[RETRIEVAL_QUALITY: reliable]';
       obs = `${qualityTag}\n${obs}`;
 
-      // Price filter context: when max_price_krw was applied, annotate observation
-      // so the agent can state "예산 범위 내 검색 결과" even when per-wine prices
-      // are missing from the index. This prevents judge=0 for price-constrained
-      // scenarios where priceRange is sparse.
-      if (parsed.max_price_krw !== undefined) {
-        obs += `\n[PRICE_FILTER: 검색 결과는 ${parsed.max_price_krw}원 이하로 필터링되었습니다.]`;
+      // Price filter context: when a budget bound/range was applied, annotate
+      // the observation so the agent can explicitly cite the enforced range even
+      // when some per-wine prices are sparse in the index.
+      const priceFilterObservation = buildPriceFilterObservation(parsed);
+      if (priceFilterObservation !== undefined) {
+        obs += `\n${priceFilterObservation}`;
       }
 
       return {
@@ -775,12 +840,19 @@ async function executeAgentToolInner(
           structuredOutput: { kind: 'no_op', reason: 'decomposedSearchExecute port not wired' },
         };
       }
+      const sharedFilters = buildStructuredFilters(parsed);
+      const subQueries = [
+        buildStructuredQuery({ ...parsed, query: parsed.query_a }),
+        buildStructuredQuery({ ...parsed, query: parsed.query_b }),
+      ] as const;
       const response = await deps.decomposedSearchExecute(
-        [parsed.query_a, parsed.query_b],
+        subQueries,
         'compare',
-        `${parsed.query_a} vs ${parsed.query_b}`,
+        buildComparisonOriginalQuery(parsed),
         requestId,
         Date.now(),
+        sharedFilters.length > 0 ? { filters: sharedFilters } : undefined,
+        options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
       );
       return {
         observation: summarizeComparison(response),
@@ -1059,7 +1131,7 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     if (r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore)) parts.push(`critic: ${(r.entity.criticScore * 100).toFixed(0)}/100`);
     if (r.entity.alcoholPct !== undefined) parts.push(`alc: ${r.entity.alcoholPct}%`);
     if (r.entity.priceRange !== undefined) {
-      parts.push(`price: ${sanitizeObservationField(r.entity.priceRange)}`);
+      parts.push(`price: ${buildObservationPriceText(r.entity.priceRange)}`);
     }
     if (r.drinkingWindow) {
       parts.push(`drink: ${r.drinkingWindow.drinkingWindowStart}-${r.drinkingWindow.drinkingWindowEnd}`);
@@ -1177,7 +1249,7 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     if (top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore)) parts.push(`critic: ${(top.entity.criticScore * 100).toFixed(0)}/100`);
     if (top.entity.alcoholPct !== undefined) parts.push(`alc: ${top.entity.alcoholPct}%`);
     if (top.entity.priceRange !== undefined) {
-      parts.push(`price: ${sanitizeObservationField(top.entity.priceRange)}`);
+      parts.push(`price: ${buildObservationPriceText(top.entity.priceRange)}`);
     }
     if (top.drinkingWindow) {
       parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);
@@ -1222,6 +1294,33 @@ interface GroundingWineFact {
   readonly style?: string;
   readonly critic_score_100?: number;
   readonly price?: string;
+  readonly price_krw_approx?: number;
+}
+
+function parseObservationPriceKrw(priceRange: string | undefined): number | undefined {
+  if (priceRange === undefined) {
+    return undefined;
+  }
+  const trimmed = priceRange.trim();
+  const usdMatch = /^\$(\d[\d,]*(?:\.\d+)?)$/.exec(trimmed);
+  if (usdMatch !== null) {
+    const usd = Number(usdMatch[1]!.replace(/,/g, ''));
+    return Number.isFinite(usd) ? Math.round(usd * KRW_PER_USD_APPROXIMATE) : undefined;
+  }
+  const krwMatch = /^(?:₩|)(\d[\d,]*)(?:\s*원)?$/u.exec(trimmed);
+  if (krwMatch !== null) {
+    const krw = Number(krwMatch[1]!.replace(/,/g, ''));
+    return Number.isFinite(krw) ? krw : undefined;
+  }
+  return undefined;
+}
+
+function buildObservationPriceText(priceRange: string): string {
+  const priceKrwApprox = parseObservationPriceKrw(priceRange);
+  if (priceKrwApprox === undefined) {
+    return sanitizeObservationField(priceRange);
+  }
+  return `${sanitizeObservationField(priceRange)} (~${priceKrwApprox.toLocaleString('ko-KR')}원)`;
 }
 
 function buildGroundingJsonFromSearch(
@@ -1229,6 +1328,7 @@ function buildGroundingJsonFromSearch(
   displayResults: readonly SearchResponseV1['results'][number][],
 ): string {
   const facts: GroundingWineFact[] = displayResults.slice(0, SUMMARY_TOP_N).map((r) => {
+    const priceKrwApprox = parseObservationPriceKrw(r.entity.priceRange);
     const base: GroundingWineFact = {
       entity_id: r.entity.entityId,
       canonical_label: sanitizeObservationField(r.entity.canonicalLabel),
@@ -1242,6 +1342,7 @@ function buildGroundingJsonFromSearch(
       ...(r.entity.style !== undefined ? { style: sanitizeObservationField(r.entity.style) } : {}),
       ...(r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore) ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
       ...(r.entity.priceRange !== undefined ? { price: sanitizeObservationField(r.entity.priceRange) } : {}),
+      ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
     };
     return base;
   });
@@ -1259,6 +1360,7 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
     .flatMap((entry) => {
       const top = entry.topResult;
       if (top === null) return [];
+      const priceKrwApprox = parseObservationPriceKrw(top.entity.priceRange);
       const fact: GroundingWineFact = {
         entity_id: top.entity.entityId,
         canonical_label: sanitizeObservationField(top.entity.canonicalLabel),
@@ -1272,6 +1374,7 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
         ...(top.entity.style !== undefined ? { style: sanitizeObservationField(top.entity.style) } : {}),
         ...(top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore) ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
         ...(top.entity.priceRange !== undefined ? { price: sanitizeObservationField(top.entity.priceRange) } : {}),
+        ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
       };
       return [fact];
     });

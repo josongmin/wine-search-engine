@@ -91,6 +91,60 @@ describe('CandidatePoolService sparse filter tokens', () => {
     expect(denseFilters[0]).toEqual(['wine_type:red']);
   });
 
+  it('uses semanticEmbeddingQueries only for dense embeddings while learned sparse stays on semanticQueries', async () => {
+    const learnedSparseWeights: Array<readonly { token: string; weight: number }[]> = [];
+
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => []),
+      denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async (queryWeights) => {
+        learnedSparseWeights.push(queryWeights);
+        return [];
+      }),
+      getDocument: vi.fn(async () => null),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embedBatch = vi.fn(async (_texts: readonly string[]) => [[0.1]]);
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch,
+    };
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
+
+    await pool.generate(createInput({
+      queryPlan: minimalPlan({
+        queryClass: 'semantic_preference',
+      }),
+      lexicalQueries: ['wine'],
+      semanticQueries: ['chateau margaux'],
+      semanticEmbeddingQueries: ['샤또마고1996', '샤토 마고', 'chateau margaux', '마고 샤토'],
+    }));
+
+    expect(embedBatch).toHaveBeenCalledWith([
+      '샤또마고1996',
+      '샤토 마고',
+      'chateau margaux',
+      '마고 샤토',
+    ]);
+    expect(learnedSparseWeights).toHaveLength(1);
+    expect(learnedSparseWeights[0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ token: 'wine' }),
+        expect.objectContaining({ token: 'chateau' }),
+        expect.objectContaining({ token: 'margaux' }),
+      ]),
+    );
+    expect(learnedSparseWeights[0]).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ token: '샤토' }),
+        expect.objectContaining({ token: '마고' }),
+      ]),
+    );
+  });
+
   it('filters candidates using annotated hard-constraint evidence after fusion', async () => {
     const searchIndex: SearchIndexPort = {
       sparseSearch: vi.fn(async () => [

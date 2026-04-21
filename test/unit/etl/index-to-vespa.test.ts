@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
 import {
+  assertPreparedFeedCompatibleWithLiveDocumentSchema,
+  buildPreparedFeedSchemaProbe,
   buildReusableEmbeddingIndex,
   buildSearchTextKo,
   deterministicEmbedding,
@@ -10,7 +12,10 @@ import {
   silverToRetrievalDoc,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { toVespaFields } from '../../../src/infrastructure/vespa/mapping.js';
-import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../src/shared/constants/source-systems.js';
+import {
+  SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+  SOURCE_SYSTEM_VIVINO_SILVER,
+} from '../../../src/shared/constants/source-systems.js';
 import { stableJsonStringify } from '../../../src/shared/utils/stable-json.js';
 import {
   LEARNED_SPARSE_EVAL_KEY,
@@ -48,10 +53,16 @@ function makeEnrichedRecord(
     searchTextEn: 'Full-bodied Napa Cabernet with dark fruit and cedar.',
     ratingAvg: 4.7,
     ratingsCount: 812,
+    reviewCount: 133,
+    ratingDistribution: { '1': 2, '2': 10, '3': 115, '4': 300, '5': 385 },
+    wineryRatingCount: 54321,
     priceUsd: 420,
     priceBand: 'luxury',
     popularityScore: 0.93,
     scrapedAt: '2026-04-06T00:00:00.000Z',
+    bottleSizeMl: 750,
+    bottleSize: '750ml',
+    closure: 'Cork',
     aliases: {
       proposed: [
         {
@@ -105,6 +116,57 @@ describe('index-to-vespa bridge', () => {
     expect(doc.sourceRecordRefs).toEqual([
       { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: record.sourceId },
     ]);
+    expect(doc.ratingAvg).toBe(4.7);
+    expect(doc.ratingsCount).toBe(812);
+    expect(doc.reviewCount).toBe(133);
+    expect(doc.ratingDistribution).toEqual({ '1': 2, '2': 10, '3': 115, '4': 300, '5': 385 });
+    expect(doc.wineryRatingCount).toBe(54321);
+    expect(doc.bottleSizeMl).toBe(750);
+    expect(doc.bottleSize).toBe('750ml');
+    expect(doc.closure).toBe('Cork');
+    expect(fields['rating_avg']).toBe(4.7);
+    expect(fields['ratings_count']).toBe(812);
+    expect(fields['review_count']).toBe(133);
+    expect(fields['rating_distribution_json']).toBe(
+      stableJsonStringify({ '1': 2, '2': 10, '3': 115, '4': 300, '5': 385 }),
+    );
+    expect(fields['winery_rating_count']).toBe(54321);
+    expect(fields['bottle_size_ml']).toBe(750);
+    expect(fields['bottle_size']).toBe('750ml');
+    expect(fields['closure']).toBe('Cork');
+  });
+
+  it('preserves benchmark-anchor canonical ids and lineage authority through retrieval projection', () => {
+    const record = {
+      ...makeEnrichedRecord({
+        sourceId: 'benchmark-anchor-opus-one-2018',
+        externalId: 'opus-one-2018',
+      }),
+      benchmarkAnchorEntityId: 'opus-one-2018',
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+    } as EnrichedSilverRecord & {
+      readonly benchmarkAnchorEntityId: string;
+      readonly sourceSystemOverride: string;
+    };
+    const embedding = deterministicEmbedding(
+      record.body,
+      record.sweetness,
+      record.acidity,
+      record.tannin,
+    );
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    expect(String(doc.entityId)).toBe('opus-one-2018');
+    expect(fields['entity_id']).toBe('opus-one-2018');
+    expect(fields['source_record_refs_json']).toBe(
+      stableJsonStringify([
+        {
+          sourceSystem: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+          sourceRecordId: 'benchmark-anchor-opus-one-2018',
+        },
+      ]),
+    );
   });
 
   it('maps enriched records into retrieval documents and omits absent optionals', () => {
@@ -186,6 +248,86 @@ describe('index-to-vespa bridge', () => {
     expect(parsePreparedVespaFeedDocuments(raw, 'prepared-feed.ndjson')).toEqual(prepared);
   });
 
+  it('builds a schema probe that unions prepared-feed fields and rewrites entity identity', () => {
+    const first = makeEnrichedRecord();
+    const second = makeEnrichedRecord({
+      sourceId: 'vivino:opus-one-2019',
+      externalId: '124',
+      canonicalLabel: 'Opus One 2019',
+      vintageYear: 2019,
+      closure: 'Screw cap',
+      reviewCount: 144,
+    });
+    const docs = [
+      {
+        id: 'doc-1',
+        fields: toVespaFields(
+          silverToRetrievalDoc(first, deterministicEmbedding(first.body, first.sweetness, first.acidity, first.tannin)),
+        ),
+      },
+      {
+        id: 'doc-2',
+        fields: toVespaFields(
+          silverToRetrievalDoc(second, deterministicEmbedding(second.body, second.sweetness, second.acidity, second.tannin)),
+        ),
+      },
+    ] as const;
+
+    const probe = buildPreparedFeedSchemaProbe(docs);
+
+    expect(probe).not.toBeNull();
+    expect(probe?.docId).toContain('schema-probe-');
+    expect(probe?.fields['entity_id']).toBe(probe?.docId);
+    expect(probe?.fields['canonical_label']).toBe('Prepared Feed Schema Probe');
+    expect(probe?.fields['price_usd']).toBe(420);
+    expect(probe?.fields['review_count']).toBe(133);
+    expect(probe?.fields['closure']).toBe('Cork');
+  });
+
+  it('smoke-checks the live document schema before bulk replay', async () => {
+    const record = makeEnrichedRecord();
+    const docs = [
+      {
+        id: 'doc-1',
+        fields: toVespaFields(
+          silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin)),
+        ),
+      },
+    ] as const;
+    const writer = {
+      put: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+
+    await expect(assertPreparedFeedCompatibleWithLiveDocumentSchema(writer, docs)).resolves.toBeUndefined();
+    expect(writer.put).toHaveBeenCalledTimes(1);
+    expect(writer.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails loudly when the live document schema rejects a prepared-feed field', async () => {
+    const record = makeEnrichedRecord();
+    const docs = [
+      {
+        id: 'doc-1',
+        fields: toVespaFields(
+          silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin)),
+        ),
+      },
+    ] as const;
+    const writer = {
+      put: vi.fn(async () => {
+        throw new Error(`Vespa document POST failed [HTTP 400]: {"message":"Field 'rating_avg' is not defined"}`);
+      }),
+      delete: vi.fn(async () => undefined),
+    };
+
+    await expect(assertPreparedFeedCompatibleWithLiveDocumentSchema(writer, docs)).rejects.toThrow(
+      /Prepared Vespa feed is incompatible with the live document schema: .*rating_avg/,
+    );
+    expect(writer.put).toHaveBeenCalledTimes(1);
+    expect(writer.delete).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects legacy silver rows as prepared Vespa feed artifacts', () => {
     const legacyRaw = `${JSON.stringify(makeEnrichedRecord())}\n`;
 
@@ -214,6 +356,44 @@ describe('index-to-vespa bridge', () => {
     const embedding = (((docs[0]?.fields['embedding'] as { values: number[] }).values));
     expect(embedding).toEqual(reusedEmbedding);
     expect(docs[0]?.fields['search_snapshot_id']).toBe('search-snapshot:v1:next');
+  });
+
+  it('reuses embeddings across entity-id remaps when source lineage and semantic summary still match', async () => {
+    const benchmarkRecord = {
+      ...makeEnrichedRecord({
+        sourceId: 'benchmark-anchor-opus-one-2018',
+        externalId: 'opus-one-2018',
+      }),
+      benchmarkAnchorEntityId: 'opus-one-2018',
+      sourceSystemOverride: SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+    } as EnrichedSilverRecord & {
+      readonly benchmarkAnchorEntityId: string;
+      readonly sourceSystemOverride: string;
+    };
+    const reusedEmbedding = deterministicEmbedding(0.15, 0.25, 0.35, 0.45);
+    const previousDoc = silverToRetrievalDoc(
+      benchmarkRecord,
+      reusedEmbedding,
+      'search-snapshot:v1:prev',
+    );
+    const reusablePreparedDocs = [
+      {
+        id: 'wine-ce-legacy-opus-one-2018',
+        fields: {
+          ...toVespaFields(previousDoc),
+          entity_id: 'wine-ce-legacy-opus-one-2018',
+        },
+      },
+    ] as const;
+
+    const docs = await preparePreparedVespaFeedDocuments({
+      records: [benchmarkRecord],
+      snapshotId: 'search-snapshot:v1:next',
+      reusablePreparedDocs,
+    });
+
+    expect(docs[0]?.id).toBe('opus-one-2018');
+    expect((((docs[0]?.fields['embedding'] as { values: number[] }).values))).toEqual(reusedEmbedding);
   });
 
   it('re-embeds only changed records when reusable prepared docs do not match semantic_summary', async () => {

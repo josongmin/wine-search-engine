@@ -111,6 +111,7 @@ describe('buildHybridRetrievalInputForPlan', () => {
         compact: '오푸스원',
         vintageCanonicalized: '오푸스원',
         vintageStripped: '오푸스원',
+        semanticVariants: ['오푸스원', 'opus one'],
         lookupVariants: ['오푸스원', 'opus one', 'opusone'],
       },
       constraints: {

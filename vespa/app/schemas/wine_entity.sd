@@ -162,6 +162,38 @@ schema wine_entity {
       indexing: summary | attribute
     }
 
+    field rating_avg type float {
+      indexing: summary | attribute
+    }
+
+    field ratings_count type int {
+      indexing: summary | attribute
+    }
+
+    field review_count type int {
+      indexing: summary | attribute
+    }
+
+    field rating_distribution_json type string {
+      indexing: summary | attribute
+    }
+
+    field winery_rating_count type int {
+      indexing: summary | attribute
+    }
+
+    field bottle_size_ml type int {
+      indexing: summary | attribute
+    }
+
+    field bottle_size type string {
+      indexing: summary | attribute
+    }
+
+    field closure type string {
+      indexing: summary | attribute
+    }
+
     # -------------------------------------------------------------------------
     # SOTA++ enrichment fields (Epic 12: Data Enrichment)
     # -------------------------------------------------------------------------
@@ -451,6 +483,14 @@ schema wine_entity {
     summary producer_prestige {}
     summary critic_score_normalized {}
     summary price_usd {}
+    summary rating_avg {}
+    summary ratings_count {}
+    summary review_count {}
+    summary rating_distribution_json {}
+    summary winery_rating_count {}
+    summary bottle_size_ml {}
+    summary bottle_size {}
+    summary closure {}
     summary critic_proxy_score {}
     summary critic_proxy_tier {}
     summary critic_proxy_confidence {}

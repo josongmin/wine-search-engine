@@ -10,16 +10,10 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import type { NLMapping } from '../../src/domain/attribute/model/nl-mapping.js';
 
 const DEFAULT_INPUT_PATH = resolve(process.cwd(), 'data/entity-ontology.json');
 const DEFAULT_OUTPUT_PATH = resolveDataPath('data/nl-mappings.json');
-
-interface NLMapping {
-  readonly surface: string;
-  readonly entityId: string;
-  readonly canonical: string;
-  readonly entityType: string;
-}
 
 interface OntologyEntity {
   readonly id: string;
@@ -89,17 +83,22 @@ async function main(): Promise<void> {
 
     for (const alias of entity.aliases) {
       mappings.push({
-        surface: alias.toLowerCase().normalize('NFKC'),
-        entityId: entity.id,
-        canonical: entity.canonical,
-        entityType: entity.type,
+        phrase: alias.toLowerCase().normalize('NFKC'),
+        mappedAttribute: entity.type,
+        operator: '=',
+        value: entity.canonical,
+        mappingConfidence: 0.95,
+        mappingVersion: typed.version,
+        source: `ontology_snapshot:${entity.id}`,
       });
     }
   }
 
   // Sort for deterministic output
   mappings.sort((left, right) =>
-    left.surface.localeCompare(right.surface) || left.entityId.localeCompare(right.entityId),
+    left.phrase.localeCompare(right.phrase)
+      || left.mappedAttribute.localeCompare(right.mappedAttribute)
+      || String(left.value).localeCompare(String(right.value)),
   );
 
   const output = {

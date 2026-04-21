@@ -60,6 +60,10 @@ function activeLtrHashFromRows(): string {
   );
 }
 
+function activeLtrHashFromEmptyRows(): string {
+  return hashStableJson([]);
+}
+
 interface NamespaceSealOverride {
   readonly entitiesViolations?: string;
   readonly canonicalEntitiesViolations?: string;
@@ -79,6 +83,23 @@ function createPoolMock(overrides?: {
   readonly canonicalAmbiguityTotalCount?: string;
   readonly canonicalIdentityAuthorityCount?: string;
   readonly runtimeWineTypeCounts?: Partial<Record<'red' | 'white' | 'sparkling', string>>;
+  readonly totalCounts?: {
+    readonly entities?: string;
+    readonly aliases?: string;
+    readonly ambiguityRegistry?: string;
+    readonly activeLtrModels?: string;
+  };
+  readonly ltrRows?: Array<{
+    readonly total_count: string;
+    readonly snapshot_count: string;
+    readonly query_class: string | null;
+    readonly model_version: number | null;
+    readonly eval_dataset_version: string | null;
+    readonly feature_schema_hash: string | null;
+    readonly weights: number[] | null;
+    readonly bias: number | null;
+  }>;
+  readonly ltrFeatureSchemaHashColumn?: boolean;
   readonly namespaceSeal?: NamespaceSealOverride;
 }): Pick<Pool, 'query'> {
   const aliasJoin = overrides?.canonicalAliasJoinCount ?? '10';
@@ -99,17 +120,40 @@ function createPoolMock(overrides?: {
   let callIdx = 0;
   return {
     query: vi.fn(async (_text: string, _params?: readonly unknown[]) => {
+      if (_text.includes('information_schema.columns')) {
+        return { rows: [{ present: overrides?.ltrFeatureSchemaHashColumn ?? true }] };
+      }
       const i = callIdx;
       callIdx++;
       switch (i) {
         case 0:
-          return { rows: [{ total_count: '10', snapshot_count: '10' }] };
+          return {
+            rows: [{
+              total_count: overrides?.totalCounts?.entities ?? '10',
+              snapshot_count: '10',
+            }],
+          };
         case 1:
-          return { rows: [{ total_count: '10', snapshot_count: '10' }] };
+          return {
+            rows: [{
+              total_count: overrides?.totalCounts?.aliases ?? '10',
+              snapshot_count: '10',
+            }],
+          };
         case 2:
-          return { rows: [{ total_count: '2', snapshot_count: '2' }] };
+          return {
+            rows: [{
+              total_count: overrides?.totalCounts?.ambiguityRegistry ?? '2',
+              snapshot_count: '2',
+            }],
+          };
         case 3:
-          return { rows: makeLtrRows() };
+          return {
+            rows: overrides?.ltrRows ?? makeLtrRows().map((row) => ({
+              ...row,
+              total_count: overrides?.totalCounts?.activeLtrModels ?? row.total_count,
+            })),
+          };
         case 4:
           return { rows: [{ c: '10' }] };
         case 5:
@@ -205,7 +249,12 @@ function mockVespaResponses(args?: {
     );
 }
 
-async function buildHappyRuntimeState(): Promise<LoadedSearchSnapshotRuntimeState> {
+async function buildHappyRuntimeState(overrides?: {
+  readonly snapshotId?: string;
+  readonly allowMissingLtr?: boolean;
+  readonly activeLtrModels?: number;
+  readonly activeLtrHash?: string;
+}): Promise<LoadedSearchSnapshotRuntimeState> {
   const dir = await makeTempDir();
   const nlPath = path.join(dir, 'nl.json');
   const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
@@ -213,25 +262,25 @@ async function buildHappyRuntimeState(): Promise<LoadedSearchSnapshotRuntimeStat
   const activeLtrHash = activeLtrHashFromRows();
   return {
     schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
-    snapshotId: 'snap-test-1',
+    snapshotId: overrides?.snapshotId ?? 'snap-test-1',
     contentHash: 'hash',
     publishedAt: '2026-04-12T00:00:00.000Z',
     manifestPath: '/tmp/m.json',
     nlMappingsRuntimePath: nlPath,
-    allowMissingLtr: false,
+    allowMissingLtr: overrides?.allowMissingLtr ?? false,
     counts: {
       entities: 10,
       aliases: 10,
       ambiguityRegistry: 2,
       nlMappings: 1,
-      activeLtrModels: 1,
+      activeLtrModels: overrides?.activeLtrModels ?? 1,
     },
     hashes: {
       entities: 'entities',
       aliases: 'aliases',
       ambiguityRegistry: 'ambiguity',
       nlMappings: hashRuntimeNlMappings(nlPayload),
-      activeLtrModels: activeLtrHash,
+      activeLtrModels: overrides?.activeLtrHash ?? activeLtrHash,
     },
   };
 }
@@ -279,7 +328,108 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           runtimeState,
         }),
       ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
-      expect(pool.query).toHaveBeenCalledTimes(12);
+      expect(pool.query).toHaveBeenCalledTimes(13);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('passes when active LTR rows are absent and runtime explicitly allows missing LTR', async () => {
+    const dir = await makeTempDir();
+    const nlPath = path.join(dir, 'nl.json');
+    const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+    await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+
+    const runtimeState: LoadedSearchSnapshotRuntimeState = {
+      schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+      snapshotId: 'snap-test-1',
+      contentHash: 'hash',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/m.json',
+      nlMappingsRuntimePath: nlPath,
+      allowMissingLtr: true,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 2,
+        nlMappings: 1,
+        activeLtrModels: 0,
+      },
+      hashes: {
+        entities: 'entities',
+        aliases: 'aliases',
+        ambiguityRegistry: 'ambiguity',
+        nlMappings: hashRuntimeNlMappings(nlPayload),
+        activeLtrModels: activeLtrHashFromEmptyRows(),
+      },
+    };
+
+    const fetchSpy = mockVespaResponses();
+
+    try {
+      const pool = createPoolMock({ ltrRows: [] }) as unknown as Pool;
+      await expect(
+        verifySearchSnapshotRuntimeStateLive({
+          pool,
+          vespaUrl: 'http://vespa.test:8080',
+          runtimeState,
+        }),
+      ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
+      expect(pool.query).toHaveBeenCalledTimes(13);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('passes when append-only tables retain older snapshot rows outside the active snapshot', async () => {
+    const dir = await makeTempDir();
+    const nlPath = path.join(dir, 'nl.json');
+    const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+    await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+
+    const activeLtrHash = activeLtrHashFromRows();
+    const runtimeState: LoadedSearchSnapshotRuntimeState = {
+      schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+      snapshotId: 'snap-test-1',
+      contentHash: 'hash',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/m.json',
+      nlMappingsRuntimePath: nlPath,
+      allowMissingLtr: false,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 2,
+        nlMappings: 1,
+        activeLtrModels: 1,
+      },
+      hashes: {
+        entities: 'entities',
+        aliases: 'aliases',
+        ambiguityRegistry: 'ambiguity',
+        nlMappings: hashRuntimeNlMappings(nlPayload),
+        activeLtrModels: activeLtrHash,
+      },
+    };
+
+    const fetchSpy = mockVespaResponses();
+
+    try {
+      const pool = createPoolMock({
+        totalCounts: {
+          entities: '14315',
+          aliases: '96548',
+          ambiguityRegistry: '7919',
+          activeLtrModels: '5',
+        },
+      }) as unknown as Pool;
+      await expect(
+        verifySearchSnapshotRuntimeStateLive({
+          pool,
+          vespaUrl: 'http://vespa.test:8080',
+          runtimeState,
+        }),
+      ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
     } finally {
       fetchSpy.mockRestore();
     }
@@ -726,6 +876,42 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
             runtimeState,
           }),
         ).rejects.toThrow(/critical wine_type Vespa payload requirement violations/i);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it('accepts legacy ltr_model_registry schemas without feature_schema_hash in no-LTR mode', async () => {
+      const runtimeState = await buildHappyRuntimeState({
+        snapshotId: 'snap-legacy',
+        allowMissingLtr: true,
+        activeLtrModels: 0,
+        activeLtrHash: activeLtrHashFromEmptyRows(),
+      });
+      const fetchSpy = mockVespaResponses();
+
+      try {
+        const pool = createPoolMock({
+          totalCounts: { activeLtrModels: '0' },
+          ltrRows: [{
+            total_count: '0',
+            snapshot_count: '0',
+            query_class: null,
+            model_version: null,
+            eval_dataset_version: null,
+            feature_schema_hash: null,
+            weights: null,
+            bias: null,
+          }],
+          ltrFeatureSchemaHashColumn: false,
+        }) as unknown as Pool;
+        await expect(
+          verifySearchSnapshotRuntimeStateLive({
+            pool,
+            vespaUrl: 'http://vespa.test:8080',
+            runtimeState,
+          }),
+        ).resolves.toMatchObject({ snapshotId: 'snap-legacy', allowMissingLtr: true });
       } finally {
         fetchSpy.mockRestore();
       }

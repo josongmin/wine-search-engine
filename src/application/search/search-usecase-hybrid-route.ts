@@ -10,6 +10,7 @@ import { clamp01 } from '../../domain/shared/utils/clamp.js';
 export function buildHybridRouteResolveResult(
   plan: QueryPlanV1,
   rankedResults: readonly RankedResult[],
+  effectiveRetrievalMode?: import('../../domain/query/model/engine-execution-contract.js').ExecutionRetrievalMode,
 ): EntityResolveResult {
   const topResult = rankedResults[0];
   const topEntity = topResult
@@ -22,6 +23,7 @@ export function buildHybridRouteResolveResult(
 
   return buildRankedRouteResolveResult(plan, rankedResults, {
     outcomeReasonCode: 'HYBRID_ROUTE',
+    ...(effectiveRetrievalMode !== undefined ? { effectiveRetrievalMode } : {}),
     ...(topEntity !== undefined ? { topEntity } : {}),
   });
 }

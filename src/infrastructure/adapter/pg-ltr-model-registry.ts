@@ -8,6 +8,7 @@
 import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
+import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
 
 /**
  * Row shape in ltr_model_registry table.
@@ -142,6 +143,18 @@ function parseLtrBias(raw: number, registryId: string): number {
 export class PgLtrModelRegistry implements LtrModelRegistryPort {
   constructor(private readonly pool: Pool) {}
 
+  private async hasFeatureSchemaHashColumn(): Promise<boolean> {
+    return pgTableHasColumn(this.pool, 'ltr_model_registry', 'feature_schema_hash');
+  }
+
+  private async hasCloneLineageColumns(): Promise<boolean> {
+    const [hasCopiedFromRegistryId, hasCopiedFromSnapshotId] = await Promise.all([
+      pgTableHasColumn(this.pool, 'ltr_model_registry', 'copied_from_registry_id'),
+      pgTableHasColumn(this.pool, 'ltr_model_registry', 'copied_from_snapshot_id'),
+    ]);
+    return hasCopiedFromRegistryId && hasCopiedFromSnapshotId;
+  }
+
   async saveModel(
     queryClass: string,
     weights: QueryClassWeights,
@@ -169,28 +182,51 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
 
       // Insert new active version
       const registryId = nanoid();
-      await client.query(
-        `INSERT INTO ltr_model_registry (
-          registry_id, query_class, model_version, is_active,
-          search_snapshot_id, eval_dataset_version,
-          feature_schema_hash,
-          weights, bias, training_example_count, ndcg5_validation_score, trained_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [
-          registryId,
-          queryClass,
-          nextVersion,
-          metadata.activate === true,
-          metadata.searchSnapshotId,
-          metadata.evalDatasetVersion,
-          metadata.featureSchemaHash,
-          Array.from(weights.weights),
-          weights.bias,
-          weights.trainingExampleCount,
-          weights.ndcg5ValidationScore,
-          weights.trainedAt,
-        ],
-      );
+      if (await this.hasFeatureSchemaHashColumn()) {
+        await client.query(
+          `INSERT INTO ltr_model_registry (
+            registry_id, query_class, model_version, is_active,
+            search_snapshot_id, eval_dataset_version,
+            feature_schema_hash,
+            weights, bias, training_example_count, ndcg5_validation_score, trained_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [
+            registryId,
+            queryClass,
+            nextVersion,
+            metadata.activate === true,
+            metadata.searchSnapshotId,
+            metadata.evalDatasetVersion,
+            metadata.featureSchemaHash,
+            Array.from(weights.weights),
+            weights.bias,
+            weights.trainingExampleCount,
+            weights.ndcg5ValidationScore,
+            weights.trainedAt,
+          ],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO ltr_model_registry (
+            registry_id, query_class, model_version, is_active,
+            search_snapshot_id, eval_dataset_version,
+            weights, bias, training_example_count, ndcg5_validation_score, trained_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            registryId,
+            queryClass,
+            nextVersion,
+            metadata.activate === true,
+            metadata.searchSnapshotId,
+            metadata.evalDatasetVersion,
+            Array.from(weights.weights),
+            weights.bias,
+            weights.trainingExampleCount,
+            weights.ndcg5ValidationScore,
+            weights.trainedAt,
+          ],
+        );
+      }
 
       await client.query('COMMIT');
     } catch (err) {
@@ -372,6 +408,9 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     targetSnapshotId: string,
     metadata: LtrModelCloneMetadata,
   ): Promise<number> {
+    if (!(await this.hasFeatureSchemaHashColumn())) {
+      return 0;
+    }
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -409,6 +448,7 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
         return 0;
       }
 
+      const hasCloneLineageColumns = await this.hasCloneLineageColumns();
       for (const row of sourceResult.rows) {
         const versionResult = await client.query<{ next_version: number }>(
           `SELECT COALESCE(MAX(model_version), 0) + 1 AS next_version
@@ -417,34 +457,61 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
           [row.query_class],
         );
         const nextVersion = versionResult.rows[0]?.next_version ?? 1;
-        await client.query(
-          `INSERT INTO ltr_model_registry (
-             registry_id, query_class, model_version, is_active,
-             search_snapshot_id, eval_dataset_version, feature_schema_hash,
-             copied_from_registry_id, copied_from_snapshot_id,
-             weights, bias, training_example_count, ndcg5_validation_score, trained_at
-           ) VALUES (
-             $1, $2, $3, FALSE,
-             $4, $5, $6,
-             $7, $8,
-             $9, $10, $11, $12, $13
-           )`,
-          [
-            nanoid(),
-            row.query_class,
-            nextVersion,
-            targetSnapshotId,
-            row.eval_dataset_version,
-            row.feature_schema_hash,
-            row.registry_id,
-            sourceSnapshotId,
-            row.weights,
-            row.bias,
-            row.training_example_count,
-            row.ndcg5_validation_score,
-            row.trained_at,
-          ],
-        );
+        if (hasCloneLineageColumns) {
+          await client.query(
+            `INSERT INTO ltr_model_registry (
+               registry_id, query_class, model_version, is_active,
+               search_snapshot_id, eval_dataset_version, feature_schema_hash,
+               copied_from_registry_id, copied_from_snapshot_id,
+               weights, bias, training_example_count, ndcg5_validation_score, trained_at
+             ) VALUES (
+               $1, $2, $3, FALSE,
+               $4, $5, $6,
+               $7, $8,
+               $9, $10, $11, $12, $13
+             )`,
+            [
+              nanoid(),
+              row.query_class,
+              nextVersion,
+              targetSnapshotId,
+              row.eval_dataset_version,
+              row.feature_schema_hash,
+              row.registry_id,
+              sourceSnapshotId,
+              row.weights,
+              row.bias,
+              row.training_example_count,
+              row.ndcg5_validation_score,
+              row.trained_at,
+            ],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO ltr_model_registry (
+               registry_id, query_class, model_version, is_active,
+               search_snapshot_id, eval_dataset_version, feature_schema_hash,
+               weights, bias, training_example_count, ndcg5_validation_score, trained_at
+             ) VALUES (
+               $1, $2, $3, FALSE,
+               $4, $5, $6,
+               $7, $8, $9, $10, $11
+             )`,
+            [
+              nanoid(),
+              row.query_class,
+              nextVersion,
+              targetSnapshotId,
+              row.eval_dataset_version,
+              row.feature_schema_hash,
+              row.weights,
+              row.bias,
+              row.training_example_count,
+              row.ndcg5_validation_score,
+              row.trained_at,
+            ],
+          );
+        }
       }
 
       await client.query('COMMIT');
@@ -458,13 +525,22 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
   }
 
   async listActiveSnapshotIds(featureSchemaHash?: string): Promise<readonly string[]> {
+    const hasFeatureSchemaHashColumn = await this.hasFeatureSchemaHashColumn();
+    if (!hasFeatureSchemaHashColumn && featureSchemaHash !== undefined) {
+      return [];
+    }
     const result = await this.pool.query<{ search_snapshot_id: string }>(
-      `SELECT DISTINCT search_snapshot_id
-       FROM ltr_model_registry
-       WHERE is_active = TRUE
-         AND ($1::text IS NULL OR feature_schema_hash = $1)
-       ORDER BY search_snapshot_id ASC`,
-      [featureSchemaHash ?? null],
+      hasFeatureSchemaHashColumn
+        ? `SELECT DISTINCT search_snapshot_id
+           FROM ltr_model_registry
+           WHERE is_active = TRUE
+             AND ($1::text IS NULL OR feature_schema_hash = $1)
+           ORDER BY search_snapshot_id ASC`
+        : `SELECT DISTINCT search_snapshot_id
+           FROM ltr_model_registry
+           WHERE is_active = TRUE
+           ORDER BY search_snapshot_id ASC`,
+      hasFeatureSchemaHashColumn ? [featureSchemaHash ?? null] : [],
     );
     return result.rows.map((row) => row.search_snapshot_id);
   }

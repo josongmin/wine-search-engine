@@ -56,6 +56,9 @@ export interface HybridCandidate {
   /** Korean search text from index — non-empty when wine has Korean aliases. */
   readonly searchTextKo?: string | undefined;
 
+  /** Semantic summary passage from index — dense/rerank evidence substrate. */
+  readonly semanticSummary?: string | undefined;
+
   /** Primary grape from index summary (cross-encoder passage). */
   readonly grapePrimary?: string | undefined;
 

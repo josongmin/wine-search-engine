@@ -117,6 +117,7 @@ function normalizeRetrievalHitSummaryValue(
       ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
     case 'searchTextEn':
     case 'searchTextKo':
+    case 'semanticSummary':
       return normalizeSummarySearchText(
         typeof value === 'string' ? value : undefined,
       ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;

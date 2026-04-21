@@ -225,6 +225,59 @@ function getOptionalStringArrayStrict(
   throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseRatingDistribution(
+  raw: unknown,
+): RetrievalDocument['ratingDistribution'] | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const parsed: Record<'1' | '2' | '3' | '4' | '5', number | undefined> = {
+    '1': undefined,
+    '2': undefined,
+    '3': undefined,
+    '4': undefined,
+    '5': undefined,
+  };
+  for (const key of ['1', '2', '3', '4', '5'] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (!isNumber(value)) {
+      return undefined;
+    }
+    parsed[key] = value;
+  }
+  const hasAnyValue = Object.values(parsed).some((value) => value !== undefined);
+  return hasAnyValue ? parsed : undefined;
+}
+
+function getOptionalRatingDistribution(
+  fields: Record<string, unknown>,
+  key: string,
+): RetrievalDocument['ratingDistribution'] | undefined {
+  const raw = fields[key];
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!isString(raw)) {
+    throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  }
+  const distribution = parseRatingDistribution(parsed);
+  if (distribution === undefined) {
+    throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+  }
+  return distribution;
+}
+
 type RetrievalSummaryFieldKind = 'string' | 'number' | 'string_array';
 type VespaRetrievalSummaryFieldSpec = {
   readonly vespaField: string;
@@ -236,6 +289,7 @@ const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   producer: { vespaField: 'producer', kind: 'string' },
   region: { vespaField: 'region', kind: 'string' },
   searchTextEn: { vespaField: 'search_text_en', kind: 'string' },
+  semanticSummary: { vespaField: 'semantic_summary', kind: 'string' },
   grapePrimary: { vespaField: 'grape_primary', kind: 'string' },
   style: { vespaField: 'style', kind: 'string' },
   priceBand: { vespaField: 'price_band', kind: 'string' },
@@ -404,6 +458,17 @@ export function toVespaFields(
     };
   }
 
+  if (doc.ratingAvg !== undefined) fields['rating_avg'] = doc.ratingAvg;
+  if (doc.ratingsCount !== undefined) fields['ratings_count'] = doc.ratingsCount;
+  if (doc.reviewCount !== undefined) fields['review_count'] = doc.reviewCount;
+  if (doc.ratingDistribution !== undefined) {
+    fields['rating_distribution_json'] = stableJsonStringify(doc.ratingDistribution);
+  }
+  if (doc.wineryRatingCount !== undefined) fields['winery_rating_count'] = doc.wineryRatingCount;
+  if (doc.bottleSizeMl !== undefined) fields['bottle_size_ml'] = doc.bottleSizeMl;
+  if (doc.bottleSize !== undefined) fields['bottle_size'] = doc.bottleSize;
+  if (doc.closure !== undefined) fields['closure'] = doc.closure;
+
   return fields;
 }
 
@@ -453,6 +518,7 @@ export function fromVespaFields(
 
   // Learned sparse weights
   const learnedSparseWeights = parseSparseWeightsTensor(fields['learned_sparse_weights']);
+  const ratingDistribution = getOptionalRatingDistribution(fields, 'rating_distribution_json');
 
   // Validate entity_id before calling createCanonicalEntityId: a missing or
   // non-string entity_id would produce createCanonicalEntityId('') which throws
@@ -473,15 +539,15 @@ export function fromVespaFields(
   const canonicalLabel = getRequiredString(fields, 'canonical_label');
   const searchTextKo = summary.searchTextKo ?? getOptionalString(fields, 'search_text_ko');
   const searchTextEn = summary.searchTextEn ?? getOptionalString(fields, 'search_text_en');
-  const semanticSummary = getOptionalString(fields, 'semantic_summary');
-  const hasAnySearchSurface =
-    searchTextKo !== undefined ||
-    searchTextEn !== undefined ||
-    semanticSummary !== undefined;
+  const semanticSummary = summary.semanticSummary ?? getOptionalString(fields, 'semantic_summary');
 
-  const resolvedSearchTextKo = searchTextKo ?? (hasAnySearchSurface ? getRequiredString(fields, 'search_text_ko') : canonicalLabel);
-  const resolvedSearchTextEn = searchTextEn ?? (hasAnySearchSurface ? getRequiredString(fields, 'search_text_en') : canonicalLabel);
-  const resolvedSemanticSummary = semanticSummary ?? (hasAnySearchSurface ? getRequiredString(fields, 'semantic_summary') : canonicalLabel);
+  const normalizeSurfaceText = (value: string | undefined): string => value !== undefined && value.length > 0
+    ? value
+    : canonicalLabel;
+
+  const resolvedSearchTextKo = normalizeSurfaceText(searchTextKo);
+  const resolvedSearchTextEn = normalizeSurfaceText(searchTextEn);
+  const resolvedSemanticSummary = normalizeSurfaceText(semanticSummary);
 
   return {
     entityId: createCanonicalEntityId(rawEntityId),
@@ -524,6 +590,28 @@ export function fromVespaFields(
     ...(summary.criticScoreNormalized !== undefined
       && { criticScoreNormalized: summary.criticScoreNormalized }),
     ...(summary.priceUsd !== undefined && { priceUsd: summary.priceUsd }),
+    ...(getOptionalNumber(fields, 'rating_avg') !== undefined
+      ? { ratingAvg: getOptionalNumber(fields, 'rating_avg') }
+      : {}),
+    ...(getOptionalNumber(fields, 'ratings_count') !== undefined
+      ? { ratingsCount: getOptionalNumber(fields, 'ratings_count') }
+      : {}),
+    ...(getOptionalNumber(fields, 'review_count') !== undefined
+      ? { reviewCount: getOptionalNumber(fields, 'review_count') }
+      : {}),
+    ...(ratingDistribution !== undefined ? { ratingDistribution } : {}),
+    ...(getOptionalNumber(fields, 'winery_rating_count') !== undefined
+      ? { wineryRatingCount: getOptionalNumber(fields, 'winery_rating_count') }
+      : {}),
+    ...(getOptionalNumber(fields, 'bottle_size_ml') !== undefined
+      ? { bottleSizeMl: getOptionalNumber(fields, 'bottle_size_ml') }
+      : {}),
+    ...(getOptionalString(fields, 'bottle_size') !== undefined
+      ? { bottleSize: getOptionalString(fields, 'bottle_size') }
+      : {}),
+    ...(getOptionalString(fields, 'closure') !== undefined
+      ? { closure: getOptionalString(fields, 'closure') }
+      : {}),
     // SOTA++ taxonomy fields — read from summary (via VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS SSoT)
     ...(summary.flavorProfiles !== undefined && { flavorProfiles: summary.flavorProfiles }),
     ...(summary.classification !== undefined && { classification: summary.classification }),

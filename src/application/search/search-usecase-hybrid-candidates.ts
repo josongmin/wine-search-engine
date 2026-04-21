@@ -1,6 +1,10 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type {
+  AmbiguousEntityHint,
+  AmbiguousEntityHintBranch,
+} from '../../domain/attribute/model/ambiguous-entity-hint.js';
+import type {
   ExecutionRetrievalMode,
   ProvenanceCoverageStage,
 } from '../../domain/query/model/engine-execution-contract.js';
@@ -48,6 +52,7 @@ import { createQueryRewriter } from '../../domain/retrieval/service/query-rewrit
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
 import type { RewriteTrace } from '../../domain/retrieval/service/query-rewriter.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
@@ -57,8 +62,12 @@ import {
   collectConjunctivelyRequiredSlotIds,
   projectConstraintGraphForSubquery,
 } from '../../domain/query/service/project-subquery-constraint-graph.js';
-import { expandSemanticStyleRetrievalTerms } from '../../domain/query/service/semantic-style-query-terms.js';
+import {
+  expandSemanticStyleRetrievalTerms,
+  resolveSemanticStyleEvidenceProfile,
+} from '../../domain/query/service/semantic-style-query-terms.js';
 import type { WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
+import { SEARCH_TOOL_DIVERSITY_WINE_TYPES } from './search-tool-diversity.js';
 
 /**
  * ADR-015 Axis 2: per-call critic context surfaced from
@@ -87,6 +96,7 @@ export function projectRewritesForDecisionInput(
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
+const TYPED_RECOMMENDATION_DISCOVERY_VERSION = 'typed_recommendation_discovery_v1';
 
 export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined {
   // Tiebreak by surfaceForm for deterministic anchor selection when confidence is equal.
@@ -252,6 +262,7 @@ export function buildHybridRetrievalInputForPlan(
 ): HybridRetrievalInput {
   const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
+  const ambiguitySoftConstraints = buildAmbiguousEntityHintSoftConstraints(plan.expansions.ambiguousEntityHints);
   // TA4: Propagate fuzzy entity hypothesis terms from the planner into the retrieval
   // input. When the planner's fuzzy matcher fires on an anchor-miss query, these terms
   // are entity hypothesis seeds that enable the entity-first dual retrieval path.
@@ -265,8 +276,12 @@ export function buildHybridRetrievalInputForPlan(
       : {}),
     lexicalQueries: buildPlanLexicalQueryVariants(plan, structuredQueries.lexical),
     semanticQueries: buildPlanSemanticQueryVariants(plan, structuredQueries.semantic),
+    semanticEmbeddingQueries: buildPlanSemanticEmbeddingQueryVariants(plan, structuredQueries.semantic),
     hardConstraints: plan.constraints.hard,
-    softConstraints: plan.constraints.soft,
+    softConstraints: [
+      ...plan.constraints.soft,
+      ...ambiguitySoftConstraints,
+    ],
     retrievalPlan,
     // ADR-014 Phase 1b.3b: propagate the compiled constraint graph so
     // candidate-pool's annotator can emit per-atom slot records.
@@ -310,7 +325,28 @@ function buildStructuredQueryExpansions(
       semantic.push(...phrases);
     }
   }
+  for (const hint of plan.expansions.ambiguousEntityHints ?? []) {
+    lexical.push(...hint.lexicalExpansions);
+    semantic.push(...hint.semanticExpansions);
+  }
   return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
+}
+
+function buildAmbiguousEntityHintSoftConstraints(
+  hints: readonly AmbiguousEntityHint[] | undefined,
+): readonly NormalizedConstraint[] {
+  if (hints === undefined || hints.length === 0) {
+    return [];
+  }
+
+  return hints.map((hint) => ({
+    attribute: hint.retrievalConstraint.attribute,
+    operator: hint.retrievalConstraint.operator,
+    value: hint.retrievalConstraint.value,
+    source_phrase: `ambiguous_entity_hint(${hint.surface})`,
+    confidence: 0.7,
+    mapping_version: 'ambiguous-entity-hint-v1',
+  }));
 }
 
 function isWineTypeValue(value: unknown): value is WineTypeValue {
@@ -400,8 +436,394 @@ function retrievalValueToPhrase(value: unknown): string | undefined {
   return undefined;
 }
 
+function constraintValueToStrings(value: unknown): readonly string[] {
+  if (typeof value === 'string') {
+    return value.trim().length > 0 ? [value.trim()] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+  }
+  return [];
+}
+
+function hasExplicitWineTypeConstraint(
+  constraints: readonly QueryPlanV1['constraints']['hard'][number][],
+): boolean {
+  return resolveWineTypeContextFromConstraints(constraints) !== undefined;
+}
+
+function hasGiftOccasionPreference(plan: QueryPlanV1): boolean {
+  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+    constraint.attribute === 'occasion'
+    && constraintValueToStrings(constraint.value)
+      .some((value) => value.trim().toLowerCase() === 'gift'),
+  );
+}
+
+function hasRecommendationSemanticStylePreference(plan: QueryPlanV1): boolean {
+  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+    constraint.attribute === 'style'
+    && constraintValueToStrings(constraint.value)
+      .some((value) => resolveSemanticStyleEvidenceProfile(value.trim().toLowerCase()) !== undefined),
+  );
+}
+
+function shouldRunTypedRecommendationDiscovery(plan: QueryPlanV1): boolean {
+  if (hasExplicitWineTypeConstraint(plan.constraints.hard)) {
+    return false;
+  }
+  return hasGiftOccasionPreference(plan) || hasRecommendationSemanticStylePreference(plan);
+}
+
+function shouldRunAmbiguousEntityBranchExploration(plan: QueryPlanV1): boolean {
+  return plan.expansions.ambiguousEntityHints?.some((hint) => hint.explorationBranches.length > 0) ?? false;
+}
+
+function hasHybridSubqueryTopology(graph: ConstraintGraph | undefined): boolean {
+  return graph !== undefined
+    && graph.origin === 'hybrid'
+    && graph.nodes.some((node) => node.kind === 'subquery');
+}
+
+function buildTypedRecommendationPlan(
+  plan: QueryPlanV1,
+  wineType: WineTypeValue,
+): QueryPlanV1 {
+  return {
+    ...plan,
+    constraints: {
+      ...plan.constraints,
+      hard: [
+        ...plan.constraints.hard.filter((constraint) => constraint.attribute !== 'wine_type'),
+        {
+          attribute: 'wine_type',
+          operator: '=',
+          value: wineType,
+          source_phrase: wineType,
+          confidence: 1,
+          mapping_version: TYPED_RECOMMENDATION_DISCOVERY_VERSION,
+        },
+      ],
+    },
+  };
+}
+
+function buildTypedRecommendationRetrievalInput(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  requestContext: RequestExecutionContext | undefined,
+  anchorEntityId: CanonicalEntityId | undefined,
+): HybridRetrievalInput {
+  const typedInput = buildHybridRetrievalInputForPlan(
+    plan,
+    'hybrid',
+    anchorEntityId,
+    undefined,
+    requestContext,
+  );
+  return {
+    ...typedInput,
+    compiledRetrievalMode: compiled.execution.effectiveRetrievalMode,
+    executionBudgetMaxCandidates: compiled.execution.budget.maxCandidates,
+  };
+}
+
+function candidateDiscoveryScore(candidate: HybridCandidate): number {
+  return candidate.fusionRrfTotal ?? candidate.retrievalFusionScore ?? 0;
+}
+
+interface BranchCandidateSet {
+  readonly branchLabel: string;
+  readonly candidates: readonly HybridCandidate[];
+}
+
+function buildAmbiguousEntityBranchPlan(
+  plan: QueryPlanV1,
+  hint: AmbiguousEntityHint,
+  branch: AmbiguousEntityHintBranch,
+): QueryPlanV1 {
+  const { ambiguousEntityHints: _omittedAmbiguousHints, ...baseExpansions } = plan.expansions;
+  return {
+    ...plan,
+    constraints: {
+      ...plan.constraints,
+      soft: uniqueConstraints([
+        ...plan.constraints.soft,
+        ...buildAmbiguousEntityHintSoftConstraints([hint]),
+        {
+          attribute: branch.softConstraint.attribute,
+          operator: branch.softConstraint.operator,
+          value: branch.softConstraint.value,
+          source_phrase: `ambiguous_entity_branch(${hint.surface}:${branch.label})`,
+          confidence: 0.78,
+          mapping_version: 'ambiguous-entity-branch-v1',
+        },
+      ]),
+    },
+    expansions: {
+      ...baseExpansions,
+      lexical: uniqueStrings([
+        ...plan.expansions.lexical,
+        ...hint.lexicalExpansions,
+        ...branch.lexicalExpansions,
+      ]),
+      semantic: uniqueStrings([
+        ...plan.expansions.semantic,
+        ...branch.semanticExpansions,
+      ]),
+    },
+  };
+}
+
+function buildAmbiguousEntityBranchRetrievalInput(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  requestContext: RequestExecutionContext | undefined,
+  anchorEntityId: CanonicalEntityId | undefined,
+): HybridRetrievalInput {
+  const branchInput = buildHybridRetrievalInputForPlan(
+    plan,
+    'hybrid',
+    anchorEntityId,
+    undefined,
+    requestContext,
+  );
+  return {
+    ...branchInput,
+    compiledRetrievalMode: compiled.execution.effectiveRetrievalMode,
+    executionBudgetMaxCandidates: compiled.execution.budget.maxCandidates,
+  };
+}
+
+function mergeBalancedBranchCandidates(
+  branchSets: readonly BranchCandidateSet[],
+  maxCandidates: number,
+): readonly HybridCandidate[] {
+  const sortedBranchSets = branchSets.map((branchSet) => ({
+    ...branchSet,
+    candidates: [...branchSet.candidates].sort((left, right) => {
+      const diff = candidateDiscoveryScore(right) - candidateDiscoveryScore(left);
+      return diff !== 0 ? diff : String(left.entityId).localeCompare(String(right.entityId));
+    }),
+  }));
+  const cursors = sortedBranchSets.map(() => 0);
+  const seenEntityIds = new Set<string>();
+  const merged: HybridCandidate[] = [];
+
+  let progressed = true;
+  while (progressed && merged.length < maxCandidates) {
+    progressed = false;
+    for (const [branchIndex, branchSet] of sortedBranchSets.entries()) {
+      let cursor = cursors[branchIndex] ?? 0;
+      while (
+        cursor < branchSet.candidates.length
+        && seenEntityIds.has(String(branchSet.candidates[cursor]?.entityId))
+      ) {
+        cursor += 1;
+      }
+      cursors[branchIndex] = cursor;
+      const candidate = branchSet.candidates[cursor];
+      if (candidate === undefined) {
+        continue;
+      }
+      merged.push(candidate);
+      seenEntityIds.add(String(candidate.entityId));
+      cursors[branchIndex] = cursor + 1;
+      progressed = true;
+      if (merged.length >= maxCandidates) {
+        break;
+      }
+    }
+  }
+
+  return merged;
+}
+
+function uniqueConstraints(
+  constraints: readonly NormalizedConstraint[],
+): readonly NormalizedConstraint[] {
+  const seen = new Set<string>();
+  const unique: NormalizedConstraint[] = [];
+  for (const constraint of constraints) {
+    const key = [
+      constraint.attribute,
+      constraint.operator,
+      JSON.stringify(constraint.value),
+      constraint.source_phrase,
+    ].join('|');
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(constraint);
+  }
+  return unique;
+}
+
+async function retrieveAmbiguousEntityBranchCandidates(
+  plan: QueryPlanV1,
+  ports: HybridCandidateRetrievalPorts,
+  compiled: CompiledWineQuery,
+  requestContext: RequestExecutionContext | undefined,
+  anchorEntityId: CanonicalEntityId | undefined,
+): Promise<{
+  readonly candidates: readonly HybridCandidate[];
+  readonly degradationSignals: RankingDegradationSignal['degradationReasons'];
+  readonly criticRewrites: readonly RewriteTrace[];
+  readonly criticRetriesExhausted: boolean;
+}> {
+  const queryRewriter = createQueryRewriter(
+    ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
+  );
+  const branchSpecs = (plan.expansions.ambiguousEntityHints ?? []).flatMap((hint) =>
+    hint.explorationBranches.map((branch) => ({ hint, branch })),
+  );
+
+  const branchResults = await Promise.all(
+    branchSpecs.map(async ({ hint, branch }) => {
+      const branchPlan = buildAmbiguousEntityBranchPlan(plan, hint, branch);
+      const branchInput = buildAmbiguousEntityBranchRetrievalInput(
+        branchPlan,
+        compiled,
+        requestContext,
+        anchorEntityId,
+      );
+      const graphResult = await executeGraphAware(
+        branchInput,
+        compiled.constraintGraph,
+        {
+          candidatePool: ports.candidatePool,
+          bundleSelector: new BundleSelectorImpl(),
+          subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
+          queryRewriter,
+          budgetLedger: new InMemoryBudgetLedger(
+            deriveBudgetLedgerOptionsFromCompiled(compiled),
+          ),
+        },
+        DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
+        buildCriticSignalProbeForCompiledQuery(branchPlan, compiled),
+      );
+
+      return {
+        branchLabel: branch.label,
+        candidates: graphResult.candidates,
+        retrievalTelemetry: graphResult.retrievalTelemetry,
+        criticRewrites: graphResult.criticRewrites,
+        criticRetriesExhausted: graphResult.criticRetriesExhausted,
+      };
+    }),
+  );
+
+  return {
+    candidates: mergeBalancedBranchCandidates(
+      branchResults.map((result) => ({
+        branchLabel: result.branchLabel,
+        candidates: result.candidates,
+      })),
+      compiled.execution.budget.maxCandidates,
+    ),
+    degradationSignals: branchResults.flatMap((result) =>
+      result.retrievalTelemetry?.degradationSignals.map((signal) =>
+        `retrieval_degraded:${signal.component}:${signal.reason}`,
+      ) ?? []),
+    criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
+    criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
+  };
+}
+
+async function retrieveTypedRecommendationCandidates(
+  plan: QueryPlanV1,
+  ports: HybridCandidateRetrievalPorts,
+  compiled: CompiledWineQuery,
+  requestContext: RequestExecutionContext | undefined,
+  anchorEntityId: CanonicalEntityId | undefined,
+): Promise<{
+  readonly candidates: readonly HybridCandidate[];
+  readonly degradationSignals: RankingDegradationSignal['degradationReasons'];
+  readonly criticRewrites: readonly RewriteTrace[];
+  readonly criticRetriesExhausted: boolean;
+}> {
+  const queryRewriter = createQueryRewriter(
+    ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
+  );
+
+  const branchResults = await Promise.all(
+    SEARCH_TOOL_DIVERSITY_WINE_TYPES.map(async (wineType) => {
+      const typedPlan = buildTypedRecommendationPlan(plan, wineType);
+      const typedInput = buildTypedRecommendationRetrievalInput(
+        typedPlan,
+        compiled,
+        requestContext,
+        anchorEntityId,
+      );
+      const graphResult = await executeGraphAware(
+        typedInput,
+        compiled.constraintGraph,
+        {
+          candidatePool: ports.candidatePool,
+          bundleSelector: new BundleSelectorImpl(),
+          subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
+          queryRewriter,
+          budgetLedger: new InMemoryBudgetLedger(
+            deriveBudgetLedgerOptionsFromCompiled(compiled),
+          ),
+        },
+        DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
+        buildCriticSignalProbeForCompiledQuery(typedPlan, compiled),
+      );
+
+      return graphResult;
+    }),
+  );
+
+  const branchSets: BranchCandidateSet[] = branchResults.map((result, index) => ({
+    branchLabel: SEARCH_TOOL_DIVERSITY_WINE_TYPES[index] ?? `typed-${index}`,
+    candidates: result.candidates,
+  }));
+
+  return {
+    // Keep the discovery pool branch-balanced. Score still sorts within each
+    // wine-type branch, but the merged top-k must not collapse back into a
+    // single score-dominant pool or the gift/non-expert path regresses to the
+    // same red-heavy failure mode we are trying to prevent.
+    candidates: mergeBalancedBranchCandidates(
+      branchSets,
+      compiled.execution.budget.maxCandidates,
+    ),
+    degradationSignals: branchResults.flatMap((result) =>
+      result.retrievalTelemetry?.degradationSignals.map((signal) =>
+        `retrieval_degraded:${signal.component}:${signal.reason}`,
+      ) ?? []),
+    criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
+    criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
+  };
+}
+
 function uniqueStrings(values: readonly string[]): readonly string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function buildDenseSafeSemanticViews(
+  plan: QueryPlanV1,
+): readonly string[] {
+  const views = plan.normalizedQueryViews;
+  if (views === undefined) {
+    return [];
+  }
+
+  if ((views.semanticVariants?.length ?? 0) > 0) {
+    return views.semanticVariants;
+  }
+
+  return uniqueStrings([
+    views.raw,
+    views.accentless,
+    views.punctuationStripped,
+    views.vintageCanonicalized,
+    views.vintageStripped,
+    ...(views.transliterated !== undefined ? [views.transliterated] : []),
+    ...(views.reordered ?? []),
+  ]);
 }
 
 function buildPlanLexicalQueryVariants(
@@ -425,6 +847,18 @@ function buildPlanSemanticQueryVariants(
     ...(plan.normalizedQueryViews?.transliterated !== undefined
       ? [plan.normalizedQueryViews.transliterated]
       : []),
+    ...plan.expansions.semantic,
+    ...extraTerms,
+  ]);
+}
+
+function buildPlanSemanticEmbeddingQueryVariants(
+  plan: QueryPlanV1,
+  extraTerms: readonly string[] = [],
+): readonly string[] {
+  return uniqueStrings([
+    plan.rawQuery,
+    ...buildDenseSafeSemanticViews(plan),
     ...plan.expansions.semantic,
     ...extraTerms,
   ]);
@@ -523,6 +957,10 @@ function scopeHybridRetrievalInputToSubquery(
       ...graphExpansions.lexical,
     ]),
     semanticQueries: buildPlanSemanticQueryVariants(scopedPlan, [
+      ...expansions.semantic,
+      ...graphExpansions.semantic,
+    ]),
+    semanticEmbeddingQueries: buildPlanSemanticEmbeddingQueryVariants(scopedPlan, [
       ...expansions.semantic,
       ...graphExpansions.semantic,
     ]),
@@ -858,6 +1296,116 @@ export async function retrieveHybridCandidatesForPlan(
     compiled,
     requestContext,
   );
+
+  if (
+    shouldRunAmbiguousEntityBranchExploration(plan)
+    && !hasHybridSubqueryTopology(compiled.constraintGraph)
+  ) {
+    const ambiguousBranchResult = await retrieveAmbiguousEntityBranchCandidates(
+      plan,
+      ports,
+      compiled,
+      requestContext,
+      fallbackAnchorEntityId,
+    );
+    const candidates = ambiguousBranchResult.candidates;
+    const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
+    const provenanceShortfall = buildMissingProvenanceObligations(
+      compiled.execution.provenancePolicy,
+      retrievalProvenanceCoverage,
+    );
+    const mergedDegradation = mergeRetrievalDegradation(
+      degradationReasons,
+      provenanceShortfall,
+      ambiguousBranchResult.degradationSignals,
+    );
+    const criticObservability: CriticRetrievalObservability | undefined =
+      ambiguousBranchResult.criticRewrites.length > 0 || ambiguousBranchResult.criticRetriesExhausted
+        ? {
+            rewrites: ambiguousBranchResult.criticRewrites,
+            retriesExhausted: ambiguousBranchResult.criticRetriesExhausted,
+            degradationReasons: ambiguousBranchResult.criticRetriesExhausted
+              ? ['critic_retries_exhausted']
+              : [],
+          }
+        : undefined;
+
+    return {
+      candidates,
+      effectiveRetrievalMode: effectiveMode,
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      usedCompiledExecution,
+      retrievalProvenanceCoverage,
+      ...(mergedDegradation !== undefined ? { routeDegradation: mergedDegradation } : {}),
+      ...(requestedRoute !== null
+        ? {
+            specializedRouteObservability: {
+              specializedRouteRequested: requestedRoute,
+              specializedRouteExecuted: null,
+              fallbackApplied: degradationReasons.size > 0,
+              ...(degradationReasons.size > 0 ? { fallbackReason: [...degradationReasons][0] } : {}),
+            },
+          }
+        : {}),
+      ...(criticObservability !== undefined ? { criticObservability } : {}),
+    };
+  }
+
+  if (
+    shouldRunTypedRecommendationDiscovery(plan)
+    && !hasHybridSubqueryTopology(compiled.constraintGraph)
+  ) {
+    const typedDiscoveryResult = await retrieveTypedRecommendationCandidates(
+      plan,
+      ports,
+      compiled,
+      requestContext,
+      fallbackAnchorEntityId,
+    );
+    const candidates = typedDiscoveryResult.candidates;
+    const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
+    const provenanceShortfall = buildMissingProvenanceObligations(
+      compiled.execution.provenancePolicy,
+      retrievalProvenanceCoverage,
+    );
+    const mergedDegradation = mergeRetrievalDegradation(
+      degradationReasons,
+      provenanceShortfall,
+      typedDiscoveryResult.degradationSignals,
+    );
+    const criticObservability: CriticRetrievalObservability | undefined =
+      typedDiscoveryResult.criticRewrites.length > 0 || typedDiscoveryResult.criticRetriesExhausted
+        ? {
+            rewrites: typedDiscoveryResult.criticRewrites,
+            retriesExhausted: typedDiscoveryResult.criticRetriesExhausted,
+            degradationReasons: typedDiscoveryResult.criticRetriesExhausted
+              ? ['critic_retries_exhausted']
+              : [],
+          }
+        : undefined;
+
+    return {
+      candidates,
+      effectiveRetrievalMode: effectiveMode,
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      usedCompiledExecution,
+      retrievalProvenanceCoverage,
+      ...(mergedDegradation !== undefined ? { routeDegradation: mergedDegradation } : {}),
+      ...(requestedRoute !== null
+        ? {
+            specializedRouteObservability: {
+              specializedRouteRequested: requestedRoute,
+              specializedRouteExecuted: null,
+              fallbackApplied: degradationReasons.size > 0,
+              ...(degradationReasons.size > 0 ? { fallbackReason: [...degradationReasons][0] } : {}),
+            },
+          }
+        : {}),
+      ...(criticObservability !== undefined ? { criticObservability } : {}),
+    };
+  }
 
   pipelineDebug({ step: 'retrieval.candidate_pool.fallback' }, 'pipeline candidate pool generate');
 

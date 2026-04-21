@@ -17,7 +17,13 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, IndexableWineRecord } from './types.js';
-import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../src/shared/constants/source-systems.js';
+import type { SourceRecordRef } from '../../src/domain/entity/model/source-record-ref.js';
+import { parseSourceRecordRefsFromVespa } from '../../src/domain/entity/model/source-record-ref.js';
+import type { CanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
+import {
+  SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
+  SOURCE_SYSTEM_VIVINO_SILVER,
+} from '../../src/shared/constants/source-systems.js';
 import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/shared/constants/embedding.js';
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
@@ -43,7 +49,16 @@ function parsePositiveIntEnv(raw: string | undefined, fallback: number): number 
   const parsed = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
-const EMBEDDING_BATCH_SIZE = 5;
+const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
+const DEFAULT_EMBEDDING_CONCURRENCY = 8;
+const EMBEDDING_BATCH_SIZE = parsePositiveIntEnv(
+  process.env['OPENAI_EMBEDDING_BATCH_SIZE'],
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+);
+const EMBEDDING_BATCH_CONCURRENCY = parsePositiveIntEnv(
+  process.env['OPENAI_EMBEDDING_BATCH_CONCURRENCY'],
+  DEFAULT_EMBEDDING_CONCURRENCY,
+);
 const PREPARED_FEED_BATCH_SIZE = parsePositiveIntEnv(
   process.env['VESPA_PREPARED_FEED_BATCH_SIZE'],
   50,
@@ -208,6 +223,15 @@ interface ReusableEmbeddingEntry {
   readonly embedding: readonly number[];
 }
 
+function buildReusableSourceRecordKey(ref: SourceRecordRef): string {
+  return `${ref.sourceSystem}\n${ref.sourceRecordId}`;
+}
+
+export interface DocumentPlaneWriter {
+  put(docId: string, fields: Record<string, unknown>): Promise<void>;
+  delete(docId: string): Promise<void>;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -278,6 +302,70 @@ export function buildReusableEmbeddingIndex(
     index.set(entityId, { semanticSummary, embedding });
   }
   return index;
+}
+
+function buildReusableEmbeddingSourceRecordIndex(
+  docs: readonly PreparedVespaFeedDocument[],
+): ReadonlyMap<string, ReusableEmbeddingEntry> {
+  const index = new Map<string, ReusableEmbeddingEntry>();
+  for (const doc of docs) {
+    const semanticSummary = typeof doc.fields['semantic_summary'] === 'string'
+      ? doc.fields['semantic_summary']
+      : undefined;
+    const embedding = parsePreparedEmbeddingValue(doc.fields['embedding']);
+    const sourceRecordRefs = parseSourceRecordRefsFromVespa(doc.fields['source_record_refs_json']);
+    if (semanticSummary === undefined || embedding === undefined || sourceRecordRefs === undefined) {
+      continue;
+    }
+    for (const ref of sourceRecordRefs) {
+      index.set(buildReusableSourceRecordKey(ref), { semanticSummary, embedding });
+    }
+  }
+  return index;
+}
+
+function buildReusableEmbeddingSemanticSummaryIndex(
+  docs: readonly PreparedVespaFeedDocument[],
+): ReadonlyMap<string, ReusableEmbeddingEntry> {
+  const counts = new Map<string, number>();
+  const values = new Map<string, ReusableEmbeddingEntry>();
+  for (const doc of docs) {
+    const semanticSummary = typeof doc.fields['semantic_summary'] === 'string'
+      ? doc.fields['semantic_summary']
+      : undefined;
+    const embedding = parsePreparedEmbeddingValue(doc.fields['embedding']);
+    if (semanticSummary === undefined || embedding === undefined) {
+      continue;
+    }
+    counts.set(semanticSummary, (counts.get(semanticSummary) ?? 0) + 1);
+    if (!values.has(semanticSummary)) {
+      values.set(semanticSummary, { semanticSummary, embedding });
+    }
+  }
+
+  const uniqueIndex = new Map<string, ReusableEmbeddingEntry>();
+  for (const [semanticSummary, entry] of values.entries()) {
+    if (counts.get(semanticSummary) === 1) {
+      uniqueIndex.set(semanticSummary, entry);
+    }
+  }
+  return uniqueIndex;
+}
+
+function findReusableEmbeddingBySourceRecord(
+  sourceRecordRefs: readonly SourceRecordRef[] | undefined,
+  sourceRecordIndex: ReadonlyMap<string, ReusableEmbeddingEntry>,
+): ReusableEmbeddingEntry | undefined {
+  if (sourceRecordRefs === undefined) {
+    return undefined;
+  }
+  for (const ref of sourceRecordRefs) {
+    const match = sourceRecordIndex.get(buildReusableSourceRecordKey(ref));
+    if (match !== undefined) {
+      return match;
+    }
+  }
+  return undefined;
 }
 
 export function deterministicEmbedding(
@@ -366,6 +454,33 @@ interface DrinkingWindowResult {
   readonly peakYear: number;
   readonly confidence: 'high' | 'medium' | 'low';
   readonly modelVersion: string;
+}
+
+type BenchmarkAnchorProjectionRecord = EnrichedSilverRecord & {
+  readonly benchmarkAnchorEntityId?: CanonicalEntityId | undefined;
+  readonly sourceSystemOverride?: string | undefined;
+};
+
+function resolveBenchmarkAnchorEntityId(rec: EnrichedSilverRecord): CanonicalEntityId | undefined {
+  const benchmarkRecord = rec as BenchmarkAnchorProjectionRecord;
+  if (benchmarkRecord.benchmarkAnchorEntityId !== undefined) {
+    return createCanonicalEntityId(benchmarkRecord.benchmarkAnchorEntityId);
+  }
+  if (!rec.sourceId.startsWith('benchmark-anchor-')) {
+    return undefined;
+  }
+  const suffix = rec.sourceId.slice('benchmark-anchor-'.length).trim();
+  return suffix.length > 0 ? createCanonicalEntityId(suffix) : undefined;
+}
+
+function resolveDocumentPlaneSourceRecordRefs(rec: EnrichedSilverRecord): readonly SourceRecordRef[] {
+  const benchmarkRecord = rec as BenchmarkAnchorProjectionRecord;
+  const benchmarkEntityId = resolveBenchmarkAnchorEntityId(rec);
+  const sourceSystem = benchmarkRecord.sourceSystemOverride
+    ?? (benchmarkEntityId !== undefined
+      ? SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG
+      : SOURCE_SYSTEM_VIVINO_SILVER);
+  return [{ sourceSystem, sourceRecordId: rec.sourceId }];
 }
 
 // Gold = EnrichedSilverRecord + all Track C fields + SOTA++ Silver fields
@@ -486,6 +601,7 @@ export function silverToIndexable(
 ): IndexableWineRecord {
   const gold = rec as GoldRecord;
   const resolvedEntity = resolveWineSnapshotEntity(rec, goldCanonicalLookup);
+  const benchmarkAnchorEntityId = resolveBenchmarkAnchorEntityId(rec);
 
   // criticScoreNormalized: Track C proxy (÷100) takes priority over raw Vivino rating (÷5)
   const criticScoreNormalized: number | undefined = (() => {
@@ -512,10 +628,8 @@ export function silverToIndexable(
 
   return {
     // RetrievalHitProjection fields
-    entityId: resolvedEntity.entityId,
-    sourceRecordRefs: [
-      { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: rec.sourceId },
-    ],
+    entityId: benchmarkAnchorEntityId ?? resolvedEntity.entityId,
+    sourceRecordRefs: resolveDocumentPlaneSourceRecordRefs(rec),
     canonicalLabel: rec.canonicalLabel,
     ...(rec.producer.length > 0 ? { producer: rec.producer } : {}),
     ...(rec.region.length > 0 ? { region: rec.region } : {}),
@@ -526,6 +640,11 @@ export function silverToIndexable(
     ...(gold.producerPrestige != null ? { producerPrestige: gold.producerPrestige } : {}),
     // avgCriticProxyScore mirrors criticScoreNormalized for the hit-projection summary.
     ...(criticScoreNormalized !== undefined ? { avgCriticProxyScore: criticScoreNormalized } : {}),
+    ...(rec.ratingAvg != null ? { ratingAvg: rec.ratingAvg } : {}),
+    ...(rec.ratingsCount >= 0 ? { ratingsCount: rec.ratingsCount } : {}),
+    ...(rec.reviewCount !== undefined ? { reviewCount: rec.reviewCount } : {}),
+    ...(rec.ratingDistribution !== undefined ? { ratingDistribution: rec.ratingDistribution } : {}),
+    ...(rec.wineryRatingCount !== undefined ? { wineryRatingCount: rec.wineryRatingCount } : {}),
 
     // RetrievalFeatureProjection fields
     ...(rec.body != null ? { body: rec.body } : {}),
@@ -557,6 +676,9 @@ export function silverToIndexable(
     ...(rec.wineType ? { wineType: rec.wineType } : {}),
     ...(rec.country ? { country: rec.country } : {}),
     ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
+    ...(rec.bottleSizeMl !== undefined ? { bottleSizeMl: rec.bottleSizeMl } : {}),
+    ...(rec.bottleSize !== undefined ? { bottleSize: rec.bottleSize } : {}),
+    ...(rec.closure !== undefined ? { closure: rec.closure } : {}),
     ...(grapeFamily !== undefined ? { grapeFamily } : {}),
     ...(regionHierarchy !== undefined ? { regionHierarchy: [...regionHierarchy] } : {}),
     priceBandNumeric: priceBandToNumeric(rec.priceBand),
@@ -707,6 +829,18 @@ export function silverToRetrievalDoc(
     ...(indexable.grapePrimary !== undefined ? { grapePrimary: indexable.grapePrimary } : {}),
     ...(indexable.country !== undefined ? { country: indexable.country } : {}),
     ...(indexable.priceUsd !== undefined ? { priceUsd: indexable.priceUsd } : {}),
+    ...(indexable.ratingAvg !== undefined ? { ratingAvg: indexable.ratingAvg } : {}),
+    ...(indexable.ratingsCount !== undefined ? { ratingsCount: indexable.ratingsCount } : {}),
+    ...(indexable.reviewCount !== undefined ? { reviewCount: indexable.reviewCount } : {}),
+    ...(indexable.ratingDistribution !== undefined
+      ? { ratingDistribution: indexable.ratingDistribution }
+      : {}),
+    ...(indexable.wineryRatingCount !== undefined
+      ? { wineryRatingCount: indexable.wineryRatingCount }
+      : {}),
+    ...(indexable.bottleSizeMl !== undefined ? { bottleSizeMl: indexable.bottleSizeMl } : {}),
+    ...(indexable.bottleSize !== undefined ? { bottleSize: indexable.bottleSize } : {}),
+    ...(indexable.closure !== undefined ? { closure: indexable.closure } : {}),
     ...(indexable.flavorProfiles !== undefined ? { flavorProfiles: indexable.flavorProfiles } : {}),
     ...(indexable.criticScoreNormalized !== undefined
       ? { criticScoreNormalized: indexable.criticScoreNormalized }
@@ -761,6 +895,12 @@ export async function preparePreparedVespaFeedDocuments(args: {
 }): Promise<readonly PreparedVespaFeedDocument[]> {
   const lookup = args.goldCanonicalLookup ?? new Map();
   const reusableEmbeddingIndex = buildReusableEmbeddingIndex(args.reusablePreparedDocs ?? []);
+  const reusableEmbeddingSourceRecordIndex = buildReusableEmbeddingSourceRecordIndex(
+    args.reusablePreparedDocs ?? [],
+  );
+  const reusableEmbeddingSemanticSummaryIndex = buildReusableEmbeddingSemanticSummaryIndex(
+    args.reusablePreparedDocs ?? [],
+  );
   const docs = new Array<PreparedVespaFeedDocument>(args.records.length);
   const pending: Array<{
     readonly index: number;
@@ -777,7 +917,12 @@ export async function preparePreparedVespaFeedDocuments(args: {
       );
     }
 
-    const reusable = reusableEmbeddingIndex.get(indexable.entityId);
+    const reusable = reusableEmbeddingIndex.get(indexable.entityId)
+      ?? findReusableEmbeddingBySourceRecord(
+        indexable.sourceRecordRefs,
+        reusableEmbeddingSourceRecordIndex,
+      )
+      ?? reusableEmbeddingSemanticSummaryIndex.get(indexable.semanticSummary);
     if (reusable !== undefined && reusable.semanticSummary === indexable.semanticSummary) {
       const retrievalDoc = silverToRetrievalDoc(rec, reusable.embedding, args.snapshotId, lookup);
       docs[i] = {
@@ -794,38 +939,65 @@ export async function preparePreparedVespaFeedDocuments(args: {
       throw new Error('OPENAI_API_KEY is required for embedding generation — deterministic fallback is disabled (fail-closed)');
     }
     const chunks = chunkArray(pending, EMBEDDING_BATCH_SIZE);
-    for (let ci = 0; ci < chunks.length; ci++) {
-      const chunk = chunks[ci]!;
-      const texts = chunk.map(({ record }) => buildEmbedText(record));
-      let embeddings: readonly (readonly number[])[];
-      const EMBED_MAX_RETRIES = 3;
-      for (let attempt = 1; ; attempt++) {
-        try {
-          embeddings = await embedBatchHttp(texts);
-          break;
-        } catch (e) {
-          if (attempt >= EMBED_MAX_RETRIES) throw e;
-          const msg = e instanceof Error ? e.message : String(e);
-          const delayMs = attempt * 2000;
-          console.warn(`  Embedding batch ${ci + 1} attempt ${attempt} failed (${msg}) — retrying in ${delayMs}ms`);
-          await new Promise((r) => setTimeout(r, delayMs));
-        }
-      }
+    console.log(
+      `  Embedding ${pending.length} document(s) in ${chunks.length} batch(es) `
+      + `(batchSize=${EMBEDDING_BATCH_SIZE}, concurrency=${Math.min(EMBEDDING_BATCH_CONCURRENCY, chunks.length)})`,
+    );
 
-      for (let i = 0; i < chunk.length; i++) {
-        const rec = chunk[i]!.record;
-        const targetIndex = chunk[i]!.index;
-        const embedding = embeddings[i];
-        if (embedding === undefined) {
-          throw new Error(`Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`);
+    let nextChunkIndex = 0;
+    let completedChunks = 0;
+    const workers = Array.from(
+      { length: Math.max(1, Math.min(EMBEDDING_BATCH_CONCURRENCY, chunks.length)) },
+      async () => {
+        while (nextChunkIndex < chunks.length) {
+          const currentChunkIndex = nextChunkIndex;
+          nextChunkIndex += 1;
+          const chunk = chunks[currentChunkIndex];
+          if (chunk === undefined) {
+            continue;
+          }
+          const texts = chunk.map(({ record }) => buildEmbedText(record));
+          let embeddings: readonly (readonly number[])[];
+          const EMBED_MAX_RETRIES = 3;
+          for (let attempt = 1; ; attempt++) {
+            try {
+              embeddings = await embedBatchHttp(texts);
+              break;
+            } catch (e) {
+              if (attempt >= EMBED_MAX_RETRIES) throw e;
+              const msg = e instanceof Error ? e.message : String(e);
+              const delayMs = attempt * 2000;
+              console.warn(
+                `  Embedding batch ${currentChunkIndex + 1} attempt ${attempt} failed (${msg}) — retrying in ${delayMs}ms`,
+              );
+              await new Promise((r) => setTimeout(r, delayMs));
+            }
+          }
+
+          for (let i = 0; i < chunk.length; i++) {
+            const rec = chunk[i]!.record;
+            const targetIndex = chunk[i]!.index;
+            const embedding = embeddings[i];
+            if (embedding === undefined) {
+              throw new Error(
+                `Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`,
+              );
+            }
+            const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, lookup);
+            docs[targetIndex] = {
+              id: String(retrievalDoc.entityId),
+              fields: toVespaFields(retrievalDoc),
+            };
+          }
+
+          completedChunks += 1;
+          if (completedChunks % 10 === 0 || completedChunks === chunks.length) {
+            console.log(`  Embedding progress: ${completedChunks}/${chunks.length} batches`);
+          }
         }
-        const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, lookup);
-        docs[targetIndex] = {
-          id: String(retrievalDoc.entityId),
-          fields: toVespaFields(retrievalDoc),
-        };
-      }
-    }
+      },
+    );
+    await Promise.all(workers);
   }
 
   return docs;
@@ -840,6 +1012,58 @@ async function createVespaClient(): Promise<VespaClient> {
   return new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE, undefined, vespaMtls);
 }
 
+export function buildPreparedFeedSchemaProbe(
+  docs: readonly PreparedVespaFeedDocument[],
+): { readonly docId: string; readonly fields: Record<string, unknown> } | null {
+  if (docs.length === 0) {
+    return null;
+  }
+
+  const probeDocId = `schema-probe-${Date.now()}`;
+  const probeFields: Record<string, unknown> = {};
+  for (const doc of docs) {
+    for (const [key, value] of Object.entries(doc.fields)) {
+      if (!(key in probeFields)) {
+        probeFields[key] = value;
+      }
+    }
+  }
+
+  probeFields['entity_id'] = probeDocId;
+  probeFields['canonical_label'] = 'Prepared Feed Schema Probe';
+  if (!('entity_type' in probeFields)) {
+    probeFields['entity_type'] = 'wine';
+  }
+  if (!('search_snapshot_id' in probeFields)) {
+    probeFields['search_snapshot_id'] = 'search-snapshot:v1:schema-probe';
+  }
+
+  return {
+    docId: probeDocId,
+    fields: probeFields,
+  };
+}
+
+export async function assertPreparedFeedCompatibleWithLiveDocumentSchema(
+  writer: DocumentPlaneWriter,
+  docs: readonly PreparedVespaFeedDocument[],
+): Promise<void> {
+  const probe = buildPreparedFeedSchemaProbe(docs);
+  if (probe === null) {
+    return;
+  }
+  try {
+    await writer.put(probe.docId, probe.fields);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Prepared Vespa feed is incompatible with the live document schema: ${message}`,
+    );
+  } finally {
+    await writer.delete(probe.docId).catch(() => undefined);
+  }
+}
+
 async function feedPreparedVespaDocuments(
   vespa: VespaClient,
   docs: readonly PreparedVespaFeedDocument[],
@@ -850,6 +1074,8 @@ async function feedPreparedVespaDocuments(
   const chunks = chunkArray(docs, PREPARED_FEED_BATCH_SIZE);
   let indexed = 0;
   let failures = 0;
+
+  await assertPreparedFeedCompatibleWithLiveDocumentSchema(vespa, docs);
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const chunk = chunks[ci]!;

@@ -35,6 +35,7 @@ describe('DecomposedSearchUseCase', () => {
         context: { locale: 'en-US', currency: 'USD' },
         sessionContext: { sessionId: 'session-1', previousEntities: ['entity-1'] },
         queryBudget: { maxLatencyMs: 900, maxCandidates: 50, rerankLimit: 20 },
+        filters: [{ attribute: 'country', operator: '=', value: 'United States' }],
       },
     );
 
@@ -45,10 +46,11 @@ describe('DecomposedSearchUseCase', () => {
         context: { locale: 'en-US', currency: 'USD' },
         sessionContext: { sessionId: 'session-1', previousEntities: ['entity-1'] },
         queryBudget: { maxLatencyMs: 900, maxCandidates: 50, rerankLimit: 20 },
+        filters: [{ attribute: 'country', operator: '=', value: 'United States' }],
         options: { mode: 'auto', explain: false, clarification: false },
       },
       'req-compare-a',
-      { abortSignal: undefined },
+      undefined,
     );
     expect(searchUseCase.execute).toHaveBeenNthCalledWith(
       2,
@@ -57,10 +59,11 @@ describe('DecomposedSearchUseCase', () => {
         context: { locale: 'en-US', currency: 'USD' },
         sessionContext: { sessionId: 'session-1', previousEntities: ['entity-1'] },
         queryBudget: { maxLatencyMs: 900, maxCandidates: 50, rerankLimit: 20 },
+        filters: [{ attribute: 'country', operator: '=', value: 'United States' }],
         options: { mode: 'auto', explain: false, clarification: false },
       },
       'req-compare-b',
-      { abortSignal: undefined },
+      undefined,
     );
   });
 

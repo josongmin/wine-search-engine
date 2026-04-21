@@ -41,6 +41,7 @@ describe('agent system prompt contract', () => {
     const prompt = buildSystemMessage().content;
 
     expect(prompt).toContain('search_wines(query, limit?, retrieval_mode?');
+    expect(prompt).toContain('min_price_krw?');
     expect(prompt).toContain('max_alcohol_pct?');
     expect(prompt).toContain('retrieval_mode: "auto" | "entity" | "hybrid" | "mixed"');
     expect(prompt).toContain('"fortified" | "dessert" | "orange" | "natural"');
@@ -54,6 +55,14 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('If the user explicitly states sweetness, off-dry, or low-alcohol preferences');
     expect(prompt).toContain('map them to structured search fields (style:"sweet"/"off_dry", max_alcohol_pct)');
     expect(prompt).toContain('"도수 낮은" → 12');
+  });
+
+  it('documents structured price ranges and exact mixed-slot parallel search', () => {
+    const prompt = buildSystemMessage().content;
+
+    expect(prompt).toContain('"1-2만원 사이"→min_price_krw=10000 + max_price_krw=20000');
+    expect(prompt).toContain('If those slots imply different wine types or colors');
+    expect(prompt).toContain('emit PARALLEL search_wines actions — one typed call per slot');
   });
 
   it('preserves Korean search query anchors instead of translating them into English paraphrases', () => {

@@ -180,6 +180,7 @@ describe('ResponseBuilder', () => {
                   compact: 'opusone18',
                   vintageCanonicalized: 'opus one 2018',
                   vintageStripped: 'opus one',
+                  semanticVariants: ['Opus-One 18', 'opus-one 18', 'opus one 18', 'opus one 2018', 'opus one'],
                   lookupVariants: ['opusone18', 'opus one 2018'],
                 },
                 anchorLookupVariants: ['opusone18', 'opus one 2018'],

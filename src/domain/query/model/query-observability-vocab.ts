@@ -1,6 +1,7 @@
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { QueryPlanV1, QueryPlanV2 } from './query-plan.js';
 import type { CompiledWineQuery } from './compiled-wine-query.js';
+import type { AmbiguityIntentTrace } from './ambiguity-intent-interpretation.js';
 
 /** Truncate raw query in observability vocab payloads (telemetry size bound). */
 const OBSERVABILITY_RAW_QUERY_PREVIEW_CHARS = 200;
@@ -60,6 +61,11 @@ export interface QueryObservabilitySlice {
   readonly decompositionConfidence?: number | undefined;
   /** Constraint extraction provenance (populated when LlmNLMapper is active). */
   readonly constraintExtraction?: ConstraintExtractionObservability | undefined;
+  readonly ambiguityIntentSource?: AmbiguityIntentTrace['source'] | undefined;
+  readonly ambiguityIntentLatencyMs?: number | null | undefined;
+  readonly ambiguityIntentBranchSelectionCount?: number | undefined;
+  readonly ambiguityIntentSelectedBranchCount?: number | undefined;
+  readonly ambiguityIntentQueryClassOverride?: string | undefined;
 }
 
 function getSuggestedRoute(plan: PlanLike): string {
@@ -132,6 +138,7 @@ export function planToObservabilitySlice(
     constraintExtraction
     ?? (isQueryPlanV2(plan) ? plan.constraintExtraction : undefined)
     ?? compiled?.query.constraintExtraction;
+  const ambiguityIntentTrace = isQueryPlanV2(plan) ? plan.ambiguityIntentTrace : undefined;
 
   // Guard against NaN propagating to downstream confidence computation.
   // plan.uncertainty.overall must be a valid finite number in [0, 1]; if it
@@ -165,6 +172,17 @@ export function planToObservabilitySlice(
       : {}),
     ...(resolvedConstraintExtraction !== undefined
       ? { constraintExtraction: resolvedConstraintExtraction }
+      : {}),
+    ...(ambiguityIntentTrace !== undefined
+      ? {
+          ambiguityIntentSource: ambiguityIntentTrace.source,
+          ambiguityIntentLatencyMs: ambiguityIntentTrace.latencyMs,
+          ambiguityIntentBranchSelectionCount: ambiguityIntentTrace.branchSelectionCount,
+          ambiguityIntentSelectedBranchCount: ambiguityIntentTrace.selectedBranchCount,
+          ...(ambiguityIntentTrace.queryClassOverride !== undefined
+            ? { ambiguityIntentQueryClassOverride: ambiguityIntentTrace.queryClassOverride }
+            : {}),
+        }
       : {}),
   };
 }

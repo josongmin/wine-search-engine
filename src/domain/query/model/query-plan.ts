@@ -16,6 +16,7 @@ import type { ConstraintExtractionTrace } from '../../attribute/model/constraint
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import type { PolicyDecisionRecord } from './policy-decision-record.js';
 import type { ConstraintGraph } from './constraint-graph.js';
+import type { AmbiguityIntentTrace } from './ambiguity-intent-interpretation.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -185,6 +186,8 @@ export interface QueryPlanV2 {
    * plannerTrace is additive observability only.
    */
   readonly plannerTrace?: readonly PolicyDecisionRecord[] | undefined;
+  /** Ambiguity-intent compiler trace for deterministic→LLM understanding handoff. */
+  readonly ambiguityIntentTrace?: AmbiguityIntentTrace | undefined;
 
   // --- Admission context (planner still populates this) ---
   readonly admission_context?: {

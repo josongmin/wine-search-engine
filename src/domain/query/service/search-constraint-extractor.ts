@@ -609,6 +609,13 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
     if (Number.isFinite(v)) return { maxPriceKrw: v };
   }
 
+  // Priority 8 — won_over: raw 원 value e.g. "10000원 이상"
+  const overWon = /(\d+)\s*원\s*이상/u.exec(qn);
+  if (overWon !== null && overWon[1] !== undefined) {
+    const v = parseInt(overWon[1], 10);
+    if (Number.isFinite(v)) return { minPriceKrw: v };
+  }
+
   return {};
 }
 

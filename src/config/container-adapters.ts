@@ -262,7 +262,7 @@ export async function buildCoreAdapterServices(
       }
       return new CachedAliasMatcher(indexAliasMatcher);
     })(),
-    mappingTable: new FileMappingTableAdapter(),
+    mappingTable: await FileMappingTableAdapter.create(),
     anchorResolver: new VespaAnchorResolver(searchIndex),
     similarRetrieval: new VespaSimilarRetrieval(searchIndex),
     candidateAttributes: new VespaCandidateAttributes(searchIndex),

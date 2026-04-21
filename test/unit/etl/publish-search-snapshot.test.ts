@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../../scripts/etl/index-to-vespa.js', async () => {
   const actual = await vi.importActual<typeof import('../../../scripts/etl/index-to-vespa.js')>(
@@ -34,12 +35,16 @@ vi.mock('../../../scripts/etl/index-to-vespa.js', async () => {
 import {
   assertSnapshotArtifactCriticalWineTypeCoverage,
   assertPreparedRollbackFeedAvailable,
+  collectCriticalWineTypeAliasCoverage,
   ensurePreparedRollbackFeedAvailable,
   collectCriticalWineTypeCoverageFromEntities,
   collectCriticalWineTypeCoverageFromPreparedFeed,
+  deployVespaApplicationPackage,
+  diffSnapshotVespaDocIds,
   loadPublishedRuntimeState,
   resolveAllowMissingLtrForPublish,
   resolvePublishFixtureRepoRoot,
+  resolveVespaApplicationPackagePath,
   FIXTURE_REPO_REQUIRED_ERROR,
 } from '../../../scripts/etl/publish-search-snapshot.js';
 import {
@@ -198,6 +203,96 @@ describe('assertPreparedRollbackFeedAvailable', () => {
   });
 });
 
+describe('deployVespaApplicationPackage', () => {
+  it('deploys and waits for the Vespa application package before indexing', async () => {
+    const dir = await makeTempDir();
+    const applicationPackagePath = path.join(dir, 'vespa', 'app');
+    await fs.mkdir(applicationPackagePath, { recursive: true });
+
+    const calls: Array<{ command: string; args: readonly string[]; cwd?: string | undefined }> = [];
+    await deployVespaApplicationPackage({
+      cwd: dir,
+      waitSeconds: 42,
+      runCommand: async (command, args, _errorLabel, options) => {
+        calls.push({ command, args: [...args], cwd: options?.cwd });
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        command: 'vespa',
+        args: ['deploy', applicationPackagePath, '--wait', '42'],
+        cwd: dir,
+      },
+      {
+        command: 'vespa',
+        args: ['status', '--wait', '42'],
+        cwd: dir,
+      },
+    ]);
+  });
+
+  it('fails when the Vespa application package path is missing', async () => {
+    const dir = await makeTempDir();
+    await expect(
+      deployVespaApplicationPackage({
+        applicationPackagePath: path.join(dir, 'missing', 'vespa', 'app'),
+        runCommand: vi.fn(),
+      }),
+    ).rejects.toThrow(/ENOENT|no such file or directory/i);
+  });
+
+  it('resolves the application package path from the workspace root', () => {
+    expect(resolveVespaApplicationPackagePath('/tmp/worktree')).toBe('/tmp/worktree/vespa/app');
+  });
+
+  it('keeps publish ordered as deploy first, index second', async () => {
+    const scriptPath = fileURLToPath(
+      new URL('../../../scripts/etl/publish-search-snapshot.ts', import.meta.url),
+    );
+    const source = await fs.readFile(scriptPath, 'utf8');
+    const deployIndex = source.indexOf('await deployVespaApplicationPackage();');
+    const indexerIndex = source.indexOf("console.log('📥 Indexing document plane into Vespa');");
+
+    expect(deployIndex).toBeGreaterThanOrEqual(0);
+    expect(indexerIndex).toBeGreaterThan(deployIndex);
+  });
+
+  it('reconciles target-snapshot stale Vespa docs before readiness', async () => {
+    const scriptPath = fileURLToPath(
+      new URL('../../../scripts/etl/publish-search-snapshot.ts', import.meta.url),
+    );
+    const source = await fs.readFile(scriptPath, 'utf8');
+    const reconcileIndex = source.indexOf('await reconcileTargetSnapshotVespaDocuments(');
+    const readinessIndex = source.indexOf("console.log('✅ Verifying search snapshot readiness');");
+
+    expect(reconcileIndex).toBeGreaterThanOrEqual(0);
+    expect(readinessIndex).toBeGreaterThan(reconcileIndex);
+  });
+
+  it('uses the lease table instead of a session-bound advisory lock', async () => {
+    const scriptPath = fileURLToPath(
+      new URL('../../../scripts/etl/publish-search-snapshot.ts', import.meta.url),
+    );
+    const source = await fs.readFile(scriptPath, 'utf8');
+
+    expect(source).toContain('search_snapshot_publish_lock');
+    expect(source).not.toContain('pg_advisory_lock');
+  });
+});
+
+describe('diffSnapshotVespaDocIds', () => {
+  it('separates missing vs stale doc ids exactly', () => {
+    expect(diffSnapshotVespaDocIds({
+      expectedDocIds: ['wine-1', 'wine-2', 'wine-3'],
+      liveDocIds: ['wine-2', 'wine-3', 'wine-legacy'],
+    })).toEqual({
+      missingDocIds: ['wine-1'],
+      staleDocIds: ['wine-legacy'],
+    });
+  });
+});
+
 describe('snapshot artifact critical wine_type coverage', () => {
   it('counts critical wine types from entity and prepared-feed artifacts', async () => {
     const dir = await makeTempDir();
@@ -235,6 +330,44 @@ describe('snapshot artifact critical wine_type coverage', () => {
       ]),
     );
     await fs.writeFile(
+      manifest.artifacts.aliasesNdjson,
+      serializeNdjson([
+        {
+          aliasId: 'alias-red',
+          entityId: 'wine-red',
+          value: 'Red Wine Alias',
+          normalizedValue: 'red wine alias',
+          type: 'canonical_label',
+          scope: 'global',
+          source: 'test',
+          sourceTrust: 1,
+          confidencePrior: 1,
+        },
+        {
+          aliasId: 'alias-white',
+          entityId: 'wine-white',
+          value: 'White Wine Alias',
+          normalizedValue: 'white wine alias',
+          type: 'canonical_label',
+          scope: 'global',
+          source: 'test',
+          sourceTrust: 1,
+          confidencePrior: 1,
+        },
+        {
+          aliasId: 'alias-sparkling',
+          entityId: 'wine-sparkling',
+          value: 'Sparkling Wine Alias',
+          normalizedValue: 'sparkling wine alias',
+          type: 'canonical_label',
+          scope: 'global',
+          source: 'test',
+          sourceTrust: 1,
+          confidencePrior: 1,
+        },
+      ]),
+    );
+    await fs.writeFile(
       manifest.artifacts.vespaFeedNdjson,
       serializePreparedVespaFeedDocuments([
         { id: 'wine-red', fields: { entity_id: 'wine-red', wine_type: 'red' } },
@@ -246,6 +379,11 @@ describe('snapshot artifact critical wine_type coverage', () => {
     await expect(assertSnapshotArtifactCriticalWineTypeCoverage(manifest)).resolves.toEqual({
       entityCoverage: { red: 1, white: 1, sparkling: 1 },
       vespaCoverage: { red: 1, white: 1, sparkling: 1 },
+      aliasCoverage: {
+        red: { entityCount: 1, entitiesWithAliases: 1, aliasCount: 1 },
+        white: { entityCount: 1, entitiesWithAliases: 1, aliasCount: 1 },
+        sparkling: { entityCount: 1, entitiesWithAliases: 1, aliasCount: 1 },
+      },
     });
   });
 
@@ -266,6 +404,7 @@ describe('snapshot artifact critical wine_type coverage', () => {
         },
       ]),
     );
+    await fs.writeFile(manifest.artifacts.aliasesNdjson, serializeNdjson([]));
     await fs.writeFile(
       manifest.artifacts.vespaFeedNdjson,
       serializePreparedVespaFeedDocuments([
@@ -298,6 +437,88 @@ describe('snapshot artifact critical wine_type coverage', () => {
         { id: 'wine-1', fields: { wine_type: 'dessert' } },
       ]),
     ).toEqual({ red: 0, white: 0, sparkling: 0 });
+  });
+
+  it('counts critical wine types from style-only entities', () => {
+    expect(
+      collectCriticalWineTypeCoverageFromEntities([
+        {
+          entityId: 'wine-1',
+          entityType: 'wine',
+          canonicalLabel: 'Wine 1',
+          identitySignature: 'sig-1',
+          relations: {},
+          attributes: { style: 'white' },
+          metadata: {},
+        },
+      ]),
+    ).toEqual({ red: 0, white: 1, sparkling: 0 });
+  });
+
+  it('counts alias coverage per critical wine type without inventing missing aliases', () => {
+    expect(
+      collectCriticalWineTypeAliasCoverage(
+        [
+          {
+            entityId: 'wine-red',
+            entityType: 'wine',
+            canonicalLabel: 'Red Wine',
+            identitySignature: 'sig-red',
+            relations: {},
+            attributes: { wineType: 'red' },
+            metadata: {},
+          },
+          {
+            entityId: 'wine-white',
+            entityType: 'wine',
+            canonicalLabel: 'White Wine',
+            identitySignature: 'sig-white',
+            relations: {},
+            attributes: { wineType: 'white' },
+            metadata: {},
+          },
+        ],
+        [
+          {
+            aliasId: 'alias-red-1',
+            entityId: 'wine-red',
+            value: 'Red Wine',
+            normalizedValue: 'red wine',
+            type: 'canonical_label',
+            scope: 'global',
+            source: 'test',
+            sourceTrust: 1,
+            confidencePrior: 1,
+          },
+          {
+            aliasId: 'alias-red-2',
+            entityId: 'wine-red',
+            value: '레드 와인',
+            normalizedValue: '레드 와인',
+            type: 'ko_alias',
+            scope: 'global',
+            source: 'test',
+            sourceTrust: 1,
+            confidencePrior: 1,
+          },
+          {
+            aliasId: 'alias-non-critical',
+            entityId: 'wine-dessert',
+            value: 'Dessert Wine',
+            normalizedValue: 'dessert wine',
+            type: 'canonical_label',
+            scope: 'global',
+            source: 'test',
+            sourceTrust: 1,
+            confidencePrior: 1,
+          },
+        ],
+      ),
+    ).toEqual({
+      red: { entityCount: 1, entitiesWithAliases: 1, aliasCount: 2 },
+      white: { entityCount: 1, entitiesWithAliases: 0, aliasCount: 0 },
+      sparkling: { entityCount: 0, entitiesWithAliases: 0, aliasCount: 0 },
+    });
   });
 });
 

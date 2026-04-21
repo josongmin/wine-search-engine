@@ -42,11 +42,18 @@ describe('RFC-019 regression: NL mapper coverage', () => {
 
   it.each([
     ['카베르네', 'grape_primary', 'Cabernet Sauvignon'],
+    ['피노 그리지오', 'grape_primary', 'Pinot Gris'],
+    ['피노 그리', 'grape_primary', 'Pinot Gris'],
   ])('grape: %s → %s=%s', async (phrase, attr, value) => {
     const m = await mapper.mapPhrase(phrase);
     expect(m).not.toBeNull();
     expect(m!.mappedAttribute).toBe(attr);
     expect(m!.value).toBe(value);
+  });
+
+  it('ambiguous short alias 피노 does not resolve directly in NLMapper', async () => {
+    const m = await mapper.mapPhrase('피노');
+    expect(m).toBeNull();
   });
 
   it('unknown phrase returns null', async () => {

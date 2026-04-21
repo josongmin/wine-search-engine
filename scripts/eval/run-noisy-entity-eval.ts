@@ -18,6 +18,7 @@ dotenv.config({ path: '.env.local', override: true });
 dotenv.config();
 import fs from 'node:fs/promises';
 import { z } from 'zod';
+import type { SearchExecutorPort } from '../../src/application/search/port/search-executor.port.js';
 import { parseNdjson } from '../etl/ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import {
@@ -153,8 +154,24 @@ export interface NoisyEntityBenchmarkReport {
     readonly expected_resolution: string;
     readonly actual_resolution: string | null;
   }[];
-  readonly source: 'live-api' | 'predictions';
+  readonly source: 'live-api' | 'predictions' | 'search-executor';
   readonly evaluated_at: string;
+}
+
+export interface NoisyEntityBenchmarkThresholds {
+  readonly minRecallAt3?: number;
+  readonly minResolutionMatchRate?: number;
+  readonly minProvenanceMatchRate?: number;
+  readonly maxFalseExactRate?: number;
+  readonly enforceMinRecallAt3ByCategory?: boolean;
+  readonly enforceMinRecallAt3ByLanguage?: boolean;
+}
+
+export interface SearchExecutorNoisyBenchmarkOptions {
+  readonly input?: string;
+  readonly suites?: readonly EntityRetrievalSuiteId[];
+  readonly mode?: 'auto' | 'hybrid' | 'entity';
+  readonly concurrency?: number;
 }
 
 const DEFAULT_INPUT = 'fixture://noisy_attribute_recovery';
@@ -177,6 +194,8 @@ interface CliArgs {
   minResolutionMatchRate?: number;
   minProvenanceMatchRate?: number;
   maxFalseExactRate?: number;
+  enforceMinRecallAt3ByCategory: boolean;
+  enforceMinRecallAt3ByLanguage: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -190,12 +209,14 @@ function parseArgs(argv: string[]): CliArgs {
     mode: 'hybrid',
     timeoutMs: 60_000,
     concurrency: 4,
-    executionLane: 'public',
+    executionLane: 'trusted_benchmark',
     debugKey: process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'],
     minRecallAt3: undefined,
     minResolutionMatchRate: undefined,
     minProvenanceMatchRate: undefined,
     maxFalseExactRate: undefined,
+    enforceMinRecallAt3ByCategory: false,
+    enforceMinRecallAt3ByLanguage: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -255,22 +276,40 @@ function parseArgs(argv: string[]): CliArgs {
       if (Number.isFinite(value)) {
         args.maxFalseExactRate = value;
       }
+    } else if (arg === '--enforce-min-recall-at-3-by-category') {
+      args.enforceMinRecallAt3ByCategory = true;
+    } else if (arg === '--enforce-min-recall-at-3-by-language') {
+      args.enforceMinRecallAt3ByLanguage = true;
     }
   }
 
   return args;
 }
 
-export function assertNoisyEntityQualityThresholds(
+export function getNoisyEntityQualityViolations(
   report: NoisyEntityBenchmarkReport,
-  thresholds: {
-    readonly minRecallAt3?: number;
-    readonly minResolutionMatchRate?: number;
-    readonly minProvenanceMatchRate?: number;
-    readonly maxFalseExactRate?: number;
-  },
-): void {
+  thresholds: NoisyEntityBenchmarkThresholds,
+): readonly string[] {
   const violations: string[] = [];
+
+  const maybeCheckSliceRecallAt3 = (
+    slices: Record<string, NoisyEntitySliceMetrics>,
+    threshold: number | undefined,
+    enabled: boolean | undefined,
+    label: 'category' | 'language',
+  ): void => {
+    if (!enabled || threshold === undefined) {
+      return;
+    }
+
+    for (const [sliceName, metrics] of Object.entries(slices)) {
+      if (metrics.recall_at_3 < threshold) {
+        violations.push(
+          `${label}.${sliceName}.recall_at_3=${metrics.recall_at_3.toFixed(4)} is below required ${threshold.toFixed(4)}`,
+        );
+      }
+    }
+  };
 
   if (
     thresholds.minRecallAt3 !== undefined &&
@@ -280,6 +319,19 @@ export function assertNoisyEntityQualityThresholds(
       `recall_at_3=${report.recall_at_3.toFixed(4)} is below required ${thresholds.minRecallAt3.toFixed(4)}`,
     );
   }
+
+  maybeCheckSliceRecallAt3(
+    report.by_category,
+    thresholds.minRecallAt3,
+    thresholds.enforceMinRecallAt3ByCategory,
+    'category',
+  );
+  maybeCheckSliceRecallAt3(
+    report.by_language,
+    thresholds.minRecallAt3,
+    thresholds.enforceMinRecallAt3ByLanguage,
+    'language',
+  );
 
   if (
     thresholds.minResolutionMatchRate !== undefined &&
@@ -311,6 +363,14 @@ export function assertNoisyEntityQualityThresholds(
     );
   }
 
+  return violations;
+}
+
+export function assertNoisyEntityQualityThresholds(
+  report: NoisyEntityBenchmarkReport,
+  thresholds: NoisyEntityBenchmarkThresholds,
+): void {
+  const violations = getNoisyEntityQualityViolations(report, thresholds);
   if (violations.length > 0) {
     throw new Error(`Noisy entity quality gate failed:\n- ${violations.join('\n- ')}`);
   }
@@ -420,9 +480,10 @@ function extractDecisionStatus(
 ): NoisyEntityDecisionStatus | undefined {
   if (typeof responseBody !== 'object' || responseBody === null) return undefined;
   const body = responseBody as Record<string, unknown>;
-  const engineDecision = body['engine_decision'];
+  const engineDecision = body['engine_decision'] ?? body['engineDecision'];
   if (typeof engineDecision !== 'object' || engineDecision === null) return undefined;
-  const decisionStatus = (engineDecision as Record<string, unknown>)['decision_status'];
+  const decisionStatus = (engineDecision as Record<string, unknown>)['decision_status']
+    ?? (engineDecision as Record<string, unknown>)['decisionStatus'];
   return decisionStatus === 'resolved' || decisionStatus === 'ambiguous' || decisionStatus === 'failed'
     ? decisionStatus
     : undefined;
@@ -791,6 +852,72 @@ export function buildPerfectNoisyEntityPredictions(
   ]));
 }
 
+function benchmarkSearchContextForLanguage(
+  language: NoisyEntityBenchmarkCase['language'],
+): { readonly locale: string; readonly currency: string } {
+  switch (language) {
+    case 'ko':
+      return { locale: 'ko-KR', currency: 'KRW' };
+    case 'mixed':
+      return { locale: 'ko-KR', currency: 'KRW' };
+    case 'en':
+    default:
+      return { locale: 'en-US', currency: 'USD' };
+  }
+}
+
+export async function evaluateNoisyEntityBenchmarkWithSearchExecutor(
+  searchExecutor: SearchExecutorPort,
+  options: SearchExecutorNoisyBenchmarkOptions = {},
+): Promise<NoisyEntityBenchmarkReport> {
+  const cases = await loadNoisyEntityBenchmark(options.input ?? DEFAULT_INPUT, options.suites);
+  const mode = options.mode ?? 'hybrid';
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 16));
+
+  const rankedByBenchmarkId = new Map(await mapPool(
+    cases,
+    concurrency,
+    async (benchmarkCase) => {
+      const request = {
+        query: benchmarkCase.query,
+        context: benchmarkSearchContextForLanguage(benchmarkCase.language),
+        ...(mode !== 'auto'
+          ? { options: { mode, explain: false, clarification: false } as const }
+          : {}),
+      };
+      const requestId = `noisy-bench-${benchmarkCase.benchmark_id}`;
+      const execution = searchExecutor.executeForEvaluation !== undefined
+        ? await searchExecutor.executeForEvaluation(
+            request,
+            requestId,
+            { executionPrincipal: 'benchmark_trusted', requestId },
+          )
+        : {
+            response: await searchExecutor.execute(
+              request,
+              requestId,
+              { executionPrincipal: 'benchmark_trusted', requestId },
+            ),
+          };
+      const responseBody = execution.response;
+      if (responseBody.queryType !== 'search') {
+        return [benchmarkCase.benchmark_id, { rankedEntities: [] }] as const;
+      }
+      return [benchmarkCase.benchmark_id, {
+        rankedEntities: extractRankedEntities(responseBody),
+        decisionStatus: extractDecisionStatus(responseBody),
+      }] as const;
+    },
+  ));
+
+  const report = scoreNoisyEntityBenchmark(cases, rankedByBenchmarkId);
+  return {
+    ...report,
+    source: 'search-executor',
+    evaluated_at: new Date().toISOString(),
+  };
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cases = await loadNoisyEntityBenchmark(args.input, args.suites);
@@ -851,6 +978,8 @@ async function run(): Promise<void> {
     minResolutionMatchRate: args.minResolutionMatchRate,
     minProvenanceMatchRate: args.minProvenanceMatchRate,
     maxFalseExactRate: args.maxFalseExactRate,
+    enforceMinRecallAt3ByCategory: args.enforceMinRecallAt3ByCategory,
+    enforceMinRecallAt3ByLanguage: args.enforceMinRecallAt3ByLanguage,
   });
 }
 

@@ -3,10 +3,22 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 
 type PgPoolConfig = typeof config.pg;
+interface PgPoolTimeoutOverrides {
+  readonly statementTimeoutMs?: number;
+  readonly idleInTransactionSessionTimeoutMs?: number;
+  readonly queryTimeoutMs?: number;
+}
 
 let pool: Pool | null = null;
 
-export function createPgPool(pgConfig: PgPoolConfig): Pool {
+export function createPgPool(
+  pgConfig: PgPoolConfig,
+  timeoutOverrides: PgPoolTimeoutOverrides = {},
+): Pool {
+  const statementTimeoutMs = timeoutOverrides.statementTimeoutMs ?? 30_000;
+  const idleInTransactionSessionTimeoutMs =
+    timeoutOverrides.idleInTransactionSessionTimeoutMs ?? statementTimeoutMs;
+  const queryTimeoutMs = timeoutOverrides.queryTimeoutMs ?? (statementTimeoutMs + 5_000);
   const nextPool = new Pool({
     ...(pgConfig.connectionString !== undefined
       ? { connectionString: pgConfig.connectionString }
@@ -35,9 +47,9 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
     //   query_timeout      = 35s  (client-side, 5s buffer above server timeout)
     // The 5s client buffer ensures the server abort fires first (clean error
     // code) before the client forcibly kills the socket (opaque error).
-    statement_timeout: 30_000,
-    idle_in_transaction_session_timeout: 30_000,
-    query_timeout: 35_000,
+    statement_timeout: statementTimeoutMs,
+    idle_in_transaction_session_timeout: idleInTransactionSessionTimeoutMs,
+    query_timeout: queryTimeoutMs,
   });
   nextPool.on('error', (err) => {
     // Sanitize: pg client error objects sometimes carry full connection

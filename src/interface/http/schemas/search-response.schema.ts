@@ -1090,6 +1090,18 @@ export const InterpretResponseSchema = z.object({
   expansions: z.object({
     lexical: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
     semantic: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    ambiguous_entity_hints: z.array(z.object({
+      surface: z.string().min(1),
+      entity_type: z.string().min(1),
+      retrieval_constraint: z.object({
+        attribute: z.literal('grape_family'),
+        operator: z.literal('='),
+        value: z.string().min(1),
+      }).strict(),
+      lexical_expansions: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),
+      semantic_expansions: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),
+      clarify_options: z.array(z.string().min(1)).max(MAX_CLARIFICATION_CANDIDATES),
+    }).strict()).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
   }).strict(),
   policy: InterpretPolicySchema,
   uncertainty: InterpretUncertaintySchema,

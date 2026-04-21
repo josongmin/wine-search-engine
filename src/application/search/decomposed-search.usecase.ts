@@ -56,6 +56,9 @@ export class DecomposedSearchUseCase {
         ? { sessionContext: parentContext.sessionContext }
         : {}),
       ...(parentContext?.queryBudget !== undefined ? { queryBudget: parentContext.queryBudget } : {}),
+      ...(parentContext?.filters !== undefined && parentContext.filters.length > 0
+        ? { filters: parentContext.filters }
+        : {}),
     };
 
     // Reuse the main search seam for both sub-queries while honoring caller cancellation.
@@ -65,12 +68,12 @@ export class DecomposedSearchUseCase {
       this.searchUseCase.execute(
         { ...baseRequest, query: subQueries[0] },
         `${requestId}-a`,
-        { abortSignal: options?.abortSignal },
+        options,
       ),
       this.searchUseCase.execute(
         { ...baseRequest, query: subQueries[1] },
         `${requestId}-b`,
-        { abortSignal: options?.abortSignal },
+        options,
       ),
     ]);
     if (settledA.status === 'rejected') {

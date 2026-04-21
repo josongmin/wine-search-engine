@@ -150,6 +150,26 @@ describe('QueryNormalizer', () => {
     expect(views.lookupVariants).toContain(views.transliterated);
   });
 
+  it('builds semanticVariants from human-readable noisy-query views only', () => {
+    const views = normalizer.normalize('샤또마고1996');
+
+    expect(views.semanticVariants).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        '샤토 마고 1996',
+        '샤토 마고',
+        'chateau margaux',
+        '마고 샤토',
+      ]),
+    );
+    expect(views.semanticVariants).not.toEqual(
+      expect.arrayContaining([
+        '샤토마고1996',
+        'chtmrg1996',
+      ]),
+    );
+  });
+
   it('counts Hangul transliteration coverage gaps instead of hiding empty fallback variants', () => {
     const views = normalizer.normalize('한글미등록');
 
@@ -173,5 +193,14 @@ describe('QueryNormalizer', () => {
     expect(views.reordered).toContain('chateau margaux');
     // Original ordering should not be in reordered (it's already in lookupVariants via vintageStripped)
     expect(views.reordered).not.toContain('margaux chateau');
+  });
+
+  it('separates attached vintage suffixes before stripping and transliteration', () => {
+    const views = normalizer.normalize('샤또마고1996');
+
+    expect(views.punctuationStripped).toBe('샤토 마고 1996');
+    expect(views.vintageStripped).toBe('샤토 마고');
+    expect(views.transliterated).toBe('chateau margaux');
+    expect(views.lookupVariants).toContain('chateau margaux');
   });
 });

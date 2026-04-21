@@ -108,6 +108,40 @@ describe('search snapshot runtime readiness', () => {
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
 
+  it('returns up when zero active LTR models are present and missing LTR is explicitly allowed', async () => {
+    const dir = await makeTempDir();
+    const nlMappingsPath = path.join(dir, 'nl-mappings.json');
+    const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
+    const nlMappingsPayload = { mappings: [{ key: 'full-bodied', canonical: 'full' }] };
+
+    await fs.writeFile(nlMappingsPath, JSON.stringify(nlMappingsPayload));
+    await fs.writeFile(runtimeStatePath, JSON.stringify({
+      schemaVersion: 'search_snapshot_runtime_state.v3',
+      snapshotId: 'search-snapshot:v1:test',
+      contentHash: 'abc123',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/manifest.json',
+      nlMappingsRuntimePath: nlMappingsPath,
+      allowMissingLtr: true,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 0,
+        nlMappings: 1,
+        activeLtrModels: 0,
+      },
+      hashes: {
+        entities: 'entities-hash',
+        aliases: 'aliases-hash',
+        ambiguityRegistry: 'ambiguity-hash',
+        nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
+        activeLtrModels: 'ltr-hash',
+      },
+    }));
+
+    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
+  });
+
   it('returns down when NL mappings hash does not match runtime state', async () => {
     const dir = await makeTempDir();
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');

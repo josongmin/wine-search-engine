@@ -22,10 +22,32 @@ describe('benchmark / verification package scripts parity (ADR-005)', () => {
     expect(scripts['test:verification:fixtures']).toBe(governance);
   });
 
-  it('keeps eval:full wired to offline gate then fixture governance', () => {
+  it('keeps eval:full wired to offline gate, noisy release gate, then fixture governance', () => {
     expect(scripts['eval:full']).toBe(
-      'pnpm run eval:offline:gate && pnpm run eval:fixtures:verify && pnpm run eval:claim:bootstrap',
+      'pnpm run eval:offline:gate && pnpm run test:verification:noisy && pnpm run eval:fixtures:verify && pnpm run eval:claim:bootstrap',
     );
+  });
+
+  it('keeps quality and CI lanes wired to the noisy release gate', () => {
+    expect(scripts['test:quality']).toBe(
+      'vitest run --config config/vitest/quality.config.ts && pnpm run test:verification:noisy',
+    );
+    expect(scripts['test:quality:nightly']).toBe('pnpm run test:quality');
+    expect(scripts['check:ci']).toContain('pnpm run test:verification:noisy');
+    expect(scripts['git:prepush']).toContain('pnpm run test:verification:noisy');
+    expect(scripts['git:prepush:heavy']).toContain('pnpm run test:verification:noisy');
+  });
+
+  it('keeps noisy release verification on slice-aware gate flags', () => {
+    expect(scripts['test:verification:noisy']).toContain('--enforce-min-recall-at-3-by-category');
+    expect(scripts['test:verification:noisy']).toContain('--enforce-min-recall-at-3-by-language');
+    expect(scripts['eval:noisy:gate']).toContain('--enforce-min-recall-at-3-by-category');
+    expect(scripts['eval:noisy:gate']).toContain('--enforce-min-recall-at-3-by-language');
+  });
+
+  it('keeps smart verification entrypoints on the dedicated wrapper scripts', () => {
+    expect(scripts['check:smart']).toBe('node scripts/test/check-smart.mjs');
+    expect(scripts['git:prepush:smart']).toBe('node scripts/test/prepush-smart.mjs');
   });
 
   it('keeps claim bootstrap verification on the dedicated analysis script', () => {

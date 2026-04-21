@@ -397,6 +397,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     };
 
     const denseTask = async (): Promise<DenseLikeResult> => {
+      const embeddingQueries = input.semanticEmbeddingQueries ?? input.semanticQueries;
       // T02-2: Dense kill switch pre-flight guard. Skip embedding fetch +
       // denseSearch entirely so we don't pay embedding API cost when dense
       // is administratively disabled. Distinct from per-request degradation.
@@ -412,17 +413,17 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           },
         };
       }
-      if (!(activeChannels.has('dense_semantic') && input.semanticQueries.length > 0)) {
+      if (!(activeChannels.has('dense_semantic') && embeddingQueries.length > 0)) {
         return { hits: [], degraded: false };
       }
       try {
         const embeddings = this.cacheService
           ? await this.cacheService.getOrEmbedBatch(
-              input.semanticQueries,
+              embeddingQueries,
               this.embeddingModelId,
               this.embeddingService,
             )
-          : await this.embeddingService.embedBatch(input.semanticQueries);
+          : await this.embeddingService.embedBatch(embeddingQueries);
 
         const validEmbeddings = embeddings.filter(
           (embedding): embedding is readonly number[] => embedding !== null,
@@ -433,12 +434,12 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         if (!primaryEmbedding || primaryEmbedding.length === 0) {
           globalSilentSkipCounter.increment('embedding_empty_vector', {
             queryClass: input.queryPlan.queryClass,
-            semanticQueryCount: input.semanticQueries.length,
+            semanticQueryCount: embeddingQueries.length,
           });
           bootstrapLogger.error(
             {
               queryClass: input.queryPlan.queryClass,
-              semanticQueryCount: input.semanticQueries.length,
+              semanticQueryCount: embeddingQueries.length,
               embeddingModelId: this.embeddingModelId,
               reason: !primaryEmbedding ? 'embedding_undefined' : 'embedding_empty',
             },
@@ -700,7 +701,9 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       ...(denseDegraded ? ['dense' as RetrievalPhase] : []),
     ];
     const sharedLexicalQueries: readonly string[] = [...input.lexicalQueries];
-    const sharedSemanticQueries: readonly string[] = [...input.semanticQueries];
+    const sharedSemanticQueries: readonly string[] = [
+      ...(input.semanticEmbeddingQueries ?? input.semanticQueries),
+    ];
     candidates = candidates.map((c) => ({
       ...c,
       retrievalTrace: {

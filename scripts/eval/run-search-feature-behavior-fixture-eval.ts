@@ -150,7 +150,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   let timeoutMs = 60_000;
   let concurrency = DEFAULT_CONCURRENCY;
-  let executionLane: BenchmarkExecutionLane = 'public';
+  let executionLane: BenchmarkExecutionLane = 'trusted_benchmark';
   let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
   let smokePredictions = false;

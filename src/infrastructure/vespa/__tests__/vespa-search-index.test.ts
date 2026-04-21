@@ -175,6 +175,78 @@ describe('VespaSearchIndex', () => {
     expect(client.query.mock.calls[0]?.[0]).toContain(`entity_id in ("${publicEntityId}")`);
   });
 
+  it('skips malformed getDocuments hits and returns remaining valid documents', async () => {
+    const validId = createEntityId('vespa-get-doc-valid');
+    const malformedId = createEntityId('vespa-get-doc-malformed');
+    const client = {
+      get: vi.fn().mockResolvedValue(null),
+      query: vi.fn().mockResolvedValue({
+        root: {
+          id: 'root',
+          relevance: 1,
+          children: [
+            {
+              id: `id:wine:wine_entity::${validId}`,
+              relevance: 1,
+              source: 'content',
+              fields: {
+                entity_id: validId,
+                entity_type: 'wine',
+                canonical_label: 'Valid Wine',
+                producer: 'Valid Producer',
+                region: 'Region A',
+                grapes: ['Merlot'],
+                search_text_ko: '검색 텍스트',
+                search_text_en: 'search text',
+                semantic_summary: 'summary',
+                style: 'red',
+                price_band: 'mid',
+                pairing: ['steak'],
+                availability: true,
+                popularity_score: 0.8,
+                country: 'France',
+                drinking_window_start: 2024,
+                drinking_window_end: 2030,
+              },
+            },
+            {
+              id: `id:wine:wine_entity::${malformedId}`,
+              relevance: 1,
+              source: 'content',
+              fields: {
+                entity_id: malformedId,
+                entity_type: 'wine',
+                // canonical_label omitted on purpose -> malformed doc
+                producer: 'Malformed Producer',
+                region: 'Region B',
+                grapes: ['Pinot'],
+                search_text_ko: 'bad',
+                search_text_en: 'bad',
+                semantic_summary: 'bad',
+                style: 'red',
+                price_band: 'mid',
+                pairing: ['soup'],
+                availability: true,
+                popularity_score: 0.5,
+                country: 'Italy',
+                drinking_window_start: 2025,
+                drinking_window_end: 2031,
+              },
+            },
+          ],
+        },
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    const docs = await index.getDocuments([validId, malformedId]);
+
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(docs.get(validId)).toBeDefined();
+    expect(docs.get(validId)?.canonicalLabel).toBe('Valid Wine');
+    expect(docs.get(malformedId)).toBeUndefined();
+  });
+
   it('hydrates drinking-window projection by public entity_id without full document fields', async () => {
     const publicEntityId = createEntityId('wine-ce-drinking-window-only');
     const client = {
@@ -215,6 +287,51 @@ describe('VespaSearchIndex', () => {
       'select entity_id, canonical_label, drinking_window_start, drinking_window_end, drinking_window_model_version',
     );
     expect(client.query.mock.calls[0]?.[1]).toEqual({ 'presentation.summary': 'full' });
+  });
+
+  it('skips malformed feature-summary hits and returns remaining valid projections', async () => {
+    const validId = createEntityId('vespa-feature-valid');
+    const malformedId = createEntityId('vespa-feature-malformed');
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        root: {
+          id: 'root',
+          relevance: 1,
+          children: [
+            {
+              id: `id:wine:wine_entity::${validId}`,
+              relevance: 1,
+              source: 'content',
+              fields: {
+                entity_id: validId,
+                body: 0.7,
+                tannin: 0.4,
+                acidity: 0.2,
+                sweetness: 0.1,
+                critic_score_normalized: 0.91,
+              },
+            },
+            {
+              id: `id:wine:wine_entity::${malformedId}`,
+              relevance: 1,
+              source: 'content',
+              fields: {
+                // entity_id omitted on purpose -> malformed hit
+                body: 0.3,
+              },
+            },
+          ],
+        },
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    const docs = await index.fetchWithFeatureSummary([validId, malformedId]);
+
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(docs).toHaveLength(1);
+    expect(docs[0]?.entityId).toBe(validId);
+    expect(docs[0]?.body).toBe(0.7);
   });
 
   it('maps hit summaries through the shared retrieval summary transport', async () => {

@@ -67,6 +67,29 @@ const COMPARISON_MARKERS: readonly RegExp[] = [
   /(?:와|과|랑|하고|이랑)\s+.+?\s+(?:중|비교|비교해|비교해줘|비교하면|뭐가|어떤|차이|어느)(?:$|[^\p{L}\p{N}])/u,
 ] as const;
 
+/**
+ * Keep this aligned with planner exact-anchor semantics.
+ *
+ * Span expansion is a recall path. Once the base query views already admit a
+ * single exact-like entity hypothesis above the exact-anchor bar, span-level
+ * fallbacks must not inject weaker producer-family collisions into the anchor
+ * set.
+ */
+const EXACT_LIKE_SPAN_SHORT_CIRCUIT_CONFIDENCE = 0.85;
+
+const EXACT_LOOKUP_STRATEGIES = new Set([
+  'exact',
+  'lexical_exact',
+  'compact_exact',
+  'transliterated_exact',
+  'phonetic_exact',
+]);
+
+interface LookupQuerySet {
+  readonly baseQueries: readonly string[];
+  readonly spanQueries: readonly string[];
+}
+
 export function hasKoreanMixedQueryMarkers(normalizedQuery: string): boolean {
   return KOREAN_MIXED_QUERY_MARKERS.some((re) => re.test(normalizedQuery));
 }
@@ -125,16 +148,18 @@ export class AnchorExtractor {
     queryViews?: NormalizedQueryViews,
   ): Promise<AnchorExtractionWithRelative> {
     const relativeQuery = this.relativeQueryExtractor.extract(normalizedQuery);
-    const lookupQueries = new Set<string>(this.buildLookupQueries(normalizedQuery, queryViews));
+    const extraBaseQueries = new Set<string>();
 
     for (const anchorSurface of relativeQuery?.relativeExpressions.map((expr) => expr.anchorSurfaceForm) ?? []) {
       const trimmed = anchorSurface.trim();
       if (trimmed.length > 0) {
-        lookupQueries.add(trimmed);
+        extraBaseQueries.add(trimmed);
       }
     }
 
-    const anchors = await this.extractFromLookupQueries([...lookupQueries]);
+    const anchors = await this.extractFromLookupQueries(
+      this.buildLookupQueries(normalizedQuery, queryViews, extraBaseQueries),
+    );
 
     return { anchors, relativeQuery };
   }
@@ -148,36 +173,41 @@ export class AnchorExtractor {
   private buildLookupQueries(
     normalizedQuery: string,
     queryViews?: NormalizedQueryViews,
-  ): readonly string[] {
-    const ordered: string[] = [];
+    extraBaseQueries: Iterable<string> = [],
+  ): LookupQuerySet {
+    const baseQueries: string[] = [];
+    const spanQueries: string[] = [];
     const seen = new Set<string>();
-    const add = (value: string): void => {
+    const add = (target: string[], value: string): void => {
       const trimmed = value.trim();
       if (trimmed.length === 0 || seen.has(trimmed)) {
         return;
       }
       seen.add(trimmed);
-      ordered.push(trimmed);
+      target.push(trimmed);
     };
 
-    const baseQueries = queryViews?.lookupVariants ?? [normalizedQuery];
-    for (const query of baseQueries) {
-      add(query);
+    const primaryQueries = queryViews?.lookupVariants ?? [normalizedQuery];
+    for (const query of primaryQueries) {
+      add(baseQueries, query);
+    }
+    for (const query of extraBaseQueries) {
+      add(baseQueries, query);
     }
 
     for (const query of baseQueries) {
       for (const span of parseSpans(query)) {
-        add(span.text);
+        add(spanQueries, span.text);
       }
     }
 
-    return ordered;
+    return { baseQueries, spanQueries };
   }
 
   private async extractFromLookupQueries(
-    lookupQueries: readonly string[],
+    lookupQueries: LookupQuerySet,
   ): Promise<readonly AnchorCandidate[]> {
-    const aliasMatches = await this.lookupAliasMatches(lookupQueries);
+    const aliasMatches = await this.lookupAliasMatchesWithSpanFallback(lookupQueries);
 
     const candidates: AnchorCandidate[] = aliasMatches.map((match) => ({
       surfaceForm: match.surfaceForm,
@@ -204,15 +234,73 @@ export class AnchorExtractor {
     return candidates;
   }
 
+  private async lookupAliasMatchesWithSpanFallback(
+    lookupQueries: LookupQuerySet,
+  ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
+    const combinedQueries = [
+      ...lookupQueries.baseQueries,
+      ...lookupQueries.spanQueries,
+    ];
+    const batchMatches = this.aliasMatcher.findMatchesBatch !== undefined
+      ? await this.aliasMatcher.findMatchesBatch(combinedQueries)
+      : undefined;
+    const baseMatches = await this.lookupAliasMatches(
+      lookupQueries.baseQueries,
+      batchMatches,
+    );
+    if (
+      lookupQueries.spanQueries.length === 0 ||
+      this.shouldShortCircuitSpanExpansion(baseMatches)
+    ) {
+      return baseMatches;
+    }
+
+    return this.lookupAliasMatches(combinedQueries, batchMatches);
+  }
+
+  private shouldShortCircuitSpanExpansion(
+    matches: readonly AliasMatchResult[],
+  ): boolean {
+    const exactLikeMatches = matches.filter((match) => this.hasExactLikeStrategy(match.lookupStrategy));
+    if (exactLikeMatches.length === 0) {
+      return false;
+    }
+
+    const exactEntityIds = new Set(
+      exactLikeMatches.flatMap((match) => match.entityIds.map(String)),
+    );
+    if (exactEntityIds.size !== 1) {
+      return false;
+    }
+
+    return exactLikeMatches.some(
+      (match) => match.matchConfidence >= EXACT_LIKE_SPAN_SHORT_CIRCUIT_CONFIDENCE,
+    );
+  }
+
+  private hasExactLikeStrategy(strategy: string | undefined): boolean {
+    if (strategy === undefined) {
+      return false;
+    }
+
+    return strategy
+      .split('+')
+      .some((part) => EXACT_LOOKUP_STRATEGIES.has(part));
+  }
+
   private async lookupAliasMatches(
     lookupQueries: readonly string[],
+    batchMatches?: ReadonlyMap<string, readonly AliasMatchResult[]>,
   ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
     const normalizedLookupQueries = lookupQueries
       .map((query) => query.trim())
       .filter((query) => query.length > 0);
-    const batchMatches = this.aliasMatcher.findMatchesBatch !== undefined
-      ? await this.aliasMatcher.findMatchesBatch(normalizedLookupQueries)
-      : undefined;
+    const effectiveBatchMatches = batchMatches
+      ?? (
+        this.aliasMatcher.findMatchesBatch !== undefined
+          ? await this.aliasMatcher.findMatchesBatch(normalizedLookupQueries)
+          : undefined
+      );
     const merged = new Map<
       string,
       {
@@ -230,7 +318,7 @@ export class AnchorExtractor {
         continue;
       }
 
-      const aliasMatches = batchMatches?.get(trimmedLookupQuery)
+      const aliasMatches = effectiveBatchMatches?.get(trimmedLookupQuery)
         ?? await this.aliasMatcher.findMatches(trimmedLookupQuery);
       for (const match of aliasMatches) {
         const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;

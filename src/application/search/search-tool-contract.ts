@@ -14,7 +14,7 @@ export const FOOD_PAIRINGS_TOOL_DESCRIPTION =
 export const DRINKING_WINDOW_TOOL_DESCRIPTION =
   'Check if a wine is currently drinkable or predict its drinking window based on vintage and attributes.';
 export const COMPARE_WINES_TOOL_DESCRIPTION =
-  'Compare two wines side-by-side with rankings and attributes.';
+  'Compare two wines side-by-side with rankings and attributes. Optional structured constraints apply identically to both sides.';
 
 const SEARCH_TOOL_FILTER_TEXT_MAX_LEN = 100;
 const SEARCH_TOOL_STYLE_HINT_MAX_LEN = 50;
@@ -34,6 +34,8 @@ export const SEARCH_TOOL_EXCLUDE_GRAPES_DESCRIPTION =
   'Optional grape varieties to exclude via exact index-level NOT filters.';
 export const SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION =
   'Optional countries or regions to exclude via exact index-level NOT filters.';
+export const SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION =
+  'Optional minimum price in KRW (e.g. 10000 for 1만원 하한). Use together with max_price_krw for price ranges.';
 export const SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION =
   'Optional maximum price in KRW (e.g. 50000 for 5만원).';
 export const SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION =
@@ -69,9 +71,9 @@ export const DRINKING_WINDOW_ENTITY_ID_DESCRIPTION =
 export const DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
   'Optional year to check drinkability for (defaults to current year). Use for age predictions such as 2030.';
 export const COMPARE_WINES_QUERY_A_DESCRIPTION =
-  'First wine query (e.g. "Château Margaux 2015").';
+  'First wine query anchor (e.g. "Château Margaux 2015"). Preserve the user phrase; put shared filters into structured fields.';
 export const COMPARE_WINES_QUERY_B_DESCRIPTION =
-  'Second wine query (e.g. "Caymus Cabernet 2018").';
+  'Second wine query anchor (e.g. "Caymus Cabernet 2018"). Preserve the user phrase; put shared filters into structured fields.';
 const SEARCH_TOOL_PLACEHOLDER_PATTERN =
   /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
 
@@ -152,6 +154,10 @@ interface SearchToolFieldShapeOptions {
   readonly maxPriceKrwMax: number;
 }
 
+interface CompareToolFieldShapeOptions {
+  readonly maxPriceKrwMax: number;
+}
+
 export function buildSearchToolFieldShape(
   options: SearchToolFieldShapeOptions,
 ){
@@ -169,6 +175,7 @@ export function buildSearchToolFieldShape(
         : retrievalModeSchema,
     exclude_grapes: z.array(z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
     exclude_regions: z.array(z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
+    min_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     max_alcohol_pct: coerceFiniteNumber.pipe(z.number().positive().max(100)).optional(),
     wine_type: z.enum(SEARCH_TOOL_WINE_TYPES).optional(),
@@ -183,13 +190,41 @@ export function buildSearchToolFieldShape(
   } as const;
 }
 
+export function buildCompareToolFieldShape(
+  options: CompareToolFieldShapeOptions,
+){
+  const {
+    limit: _limit,
+    retrieval_mode: _retrievalMode,
+    want_diversity: _wantDiversity,
+    ...shared
+  } = buildSearchToolFieldShape({
+    limitMax: 1,
+    maxPriceKrwMax: options.maxPriceKrwMax,
+  });
+  return shared;
+}
+
 export function validateSearchToolVintageRange(
   data: {
+    readonly min_price_krw?: number | undefined;
+    readonly max_price_krw?: number | undefined;
     readonly vintage_min?: number | undefined;
     readonly vintage_max?: number | undefined;
   },
   ctx: z.RefinementCtx,
 ): void {
+  if (
+    data.min_price_krw !== undefined
+    && data.max_price_krw !== undefined
+    && data.min_price_krw > data.max_price_krw
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['max_price_krw'],
+      message: `max_price_krw (${data.max_price_krw}) must be >= min_price_krw (${data.min_price_krw})`,
+    });
+  }
   if (data.vintage_min !== undefined && data.vintage_max !== undefined && data.vintage_min > data.vintage_max) {
     ctx.addIssue({
       code: 'custom',
@@ -232,7 +267,7 @@ export function buildSearchWinesPromptContractLines(
   usd50ApproxKrw: number,
 ): readonly string[] {
   return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.',
+    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.',
     `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
     '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
     `  - wine_type: ${quoteEnum(SEARCH_TOOL_WINE_TYPES)} (use for type constraints, e.g. 레드→"red", 화이트→"white")`,
@@ -242,7 +277,9 @@ export function buildSearchWinesPromptContractLines(
     `  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include ${SEARCH_TOOL_STYLE_EXAMPLES.map((value) => `"${value}"`).join(', ')}. Use "sweet" / "off_dry" for sweetness intent instead of vague prose.`,
     `  - styles: OPTIONAL array of semantic style hints when the user asks for multiple simultaneous qualities. Example: non-expert gift query → styles:[${SEARCH_TOOL_STYLES_EXAMPLE_VALUES.map((value) => `"${value}"`).join(',')}]. Prefer styles over style when there are 2+ style meanings.`,
     '  - certification: "organic" or "biodynamic"',
+    '  - min_price_krw: KRW price floor ("1만원 이상"→10000)',
     `  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→${usd50ApproxKrw})`,
+    '  - Price ranges: "1-2만원 사이" → min_price_krw:10000, max_price_krw:20000',
     '  - max_alcohol_pct: ABV upper bound for low-alcohol requests ("도수 낮은" → 12)',
     '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
     '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',

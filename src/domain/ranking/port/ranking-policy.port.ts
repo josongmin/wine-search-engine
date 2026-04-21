@@ -10,6 +10,11 @@
 import type { RankedResult } from '../model/ranked-result.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 
+export interface AmbiguousBranchPolicyGroup {
+  readonly label: string;
+  readonly matchValues: readonly string[];
+}
+
 /**
  * Context provided to a policy during application.
  * Read-only; the policy must not mutate the context.
@@ -27,6 +32,10 @@ export interface PolicyContext {
   readonly effectiveRoute: string;
   /** True when the user explicitly constrained wine color/type. */
   readonly hasExplicitWineTypeConstraint?: boolean;
+  /** True when the query already carries a direct grape identity constraint. */
+  readonly hasDirectGrapePrimaryConstraint?: boolean;
+  /** Branch groups for ambiguity-preserving result balancing. */
+  readonly ambiguousBranchGroups?: readonly AmbiguousBranchPolicyGroup[] | undefined;
   /** If set, the policy must truncate results to at most this count. */
   readonly maxResults?: number;
 }

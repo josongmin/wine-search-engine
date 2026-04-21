@@ -13,6 +13,14 @@ export interface DocumentSparseVector {
   readonly schemaVersion: number;
 }
 
+export interface RetrievalRatingDistribution {
+  readonly '1'?: number | undefined;
+  readonly '2'?: number | undefined;
+  readonly '3'?: number | undefined;
+  readonly '4'?: number | undefined;
+  readonly '5'?: number | undefined;
+}
+
 /**
  * Summary projection — search hit display + evidence fields.
  * These are the fields returned in Vespa summary and needed for ranking evidence.
@@ -215,8 +223,32 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Critic score normalised from 0-100 scale to [0, 1]. */
   readonly criticScoreNormalized?: number | undefined;
 
+  /** Source average rating on the native 1–5 scale. */
+  readonly ratingAvg?: number | undefined;
+
+  /** Raw ratings count from the upstream source. */
+  readonly ratingsCount?: number | undefined;
+
+  /** Raw review count from the upstream source. */
+  readonly reviewCount?: number | undefined;
+
+  /** Star-bucket rating histogram from the upstream source. */
+  readonly ratingDistribution?: RetrievalRatingDistribution | undefined;
+
+  /** Winery-level raw ratings count from the upstream source. */
+  readonly wineryRatingCount?: number | undefined;
+
   /** Actual price in USD. */
   readonly priceUsd?: number | undefined;
+
+  /** Bottle volume in ml when available. */
+  readonly bottleSizeMl?: number | undefined;
+
+  /** Human-facing bottle size label when available. */
+  readonly bottleSize?: string | undefined;
+
+  /** Free-form closure label when available. */
+  readonly closure?: string | undefined;
 
   // -------------------------------------------------------------------------
   // SOTA++ taxonomy fields — Wine catalog master data layer

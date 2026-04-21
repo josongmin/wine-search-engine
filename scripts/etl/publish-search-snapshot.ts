@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../../src/config/env.js';
@@ -16,6 +17,7 @@ import { buildSearchSnapshot } from './build-search-snapshot.js';
 import {
   promoteRuntimeSubstrateArtifacts,
   publishRuntimeSubstrates,
+  resolveRuntimeSubstrateCutoverPaths,
   restoreRuntimeSubstrateArtifacts,
 } from './publish-runtime-substrates.js';
 import { verifySearchSnapshotReadiness } from './verify-search-snapshot-readiness.js';
@@ -25,7 +27,12 @@ import { atomicWriteFile } from './etl-utils.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
 import { hashStableJson } from '../../src/shared/utils/stable-json.js';
-import { parseManifest, type EntitySnapshotRecord, type SearchSnapshotManifest } from './search-snapshot-schema.js';
+import {
+  parseManifest,
+  type AliasSnapshotRecord,
+  type EntitySnapshotRecord,
+  type SearchSnapshotManifest,
+} from './search-snapshot-schema.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 import {
   materializePreparedVespaFeedArtifact,
@@ -47,8 +54,9 @@ export {
 
 const VESPA_NAMESPACE = 'wine';
 const VESPA_DOC_TYPE = 'wine_entity';
-const SNAPSHOT_PUBLISH_LOCK_A = 93721;
-const SNAPSHOT_PUBLISH_LOCK_B = 6006;
+const VESPA_SNAPSHOT_DOC_ID_QUERY_PAGE_SIZE = 1000;
+const SNAPSHOT_PUBLISH_LOCK_LEASE_MS = 60_000;
+const SNAPSHOT_PUBLISH_LOCK_HEARTBEAT_MS = 10_000;
 export const FIXTURE_REPO_REQUIRED_ERROR =
   'Fixture repo not found: set FIXTURE_REPO_PATH or --fixture-repo, or clone wine-engine-fixture as a sibling.';
 
@@ -63,6 +71,18 @@ interface Args {
   readonly fixtureRepoRoot?: string | undefined;
 }
 
+interface CommandRunnerOptions {
+  readonly cwd?: string | undefined;
+  readonly env?: NodeJS.ProcessEnv | undefined;
+}
+
+type CommandRunner = (
+  command: string,
+  args: readonly string[],
+  errorLabel: string,
+  options?: CommandRunnerOptions,
+) => Promise<void>;
+
 export function resolveAllowMissingLtrForPublish(
   cliAllowMissingLtr: boolean,
   previousRuntimeState?: Pick<
@@ -75,6 +95,18 @@ export function resolveAllowMissingLtrForPublish(
 
 type CriticalWineType = 'red' | 'white' | 'sparkling';
 type CriticalWineTypeCoverage = Record<CriticalWineType, number>;
+type CriticalWineTypeAliasCoverageEntry = {
+  readonly entityCount: number;
+  readonly entitiesWithAliases: number;
+  readonly aliasCount: number;
+};
+type CriticalWineTypeAliasCoverage = Record<CriticalWineType, CriticalWineTypeAliasCoverageEntry>;
+
+type CriticalWineTypeArtifactCoverage = {
+  readonly entityCoverage: CriticalWineTypeCoverage;
+  readonly vespaCoverage: CriticalWineTypeCoverage;
+  readonly aliasCoverage: CriticalWineTypeAliasCoverage;
+};
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 
@@ -127,6 +159,37 @@ function parseArgs(argv: readonly string[]): Args {
 
 type IndexerMode = 'input' | 'prepared-feed';
 
+async function runCommand(
+  command: string,
+  args: readonly string[],
+  errorLabel: string,
+  options: CommandRunnerOptions = {},
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, [...args], {
+      cwd: options.cwd ?? process.cwd(),
+      env: options.env ?? process.env,
+      stdio: 'inherit',
+    });
+
+    child.once('error', (error) => {
+      reject(error);
+    });
+
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `${errorLabel} exited with code=${code ?? 'null'} signal=${signal ?? 'null'}`,
+        ),
+      );
+    });
+  });
+}
+
 async function runIndexer(
   documentsPath: string,
   snapshotId: string,
@@ -143,33 +206,44 @@ async function runIndexer(
   if (fixtureRepoRoot != null && fixtureRepoRoot.length > 0) {
     tail.push('--fixture-repo', fixtureRepoRoot);
   }
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      'npx',
-      ['tsx', scriptPath, ...tail],
-      {
-        cwd: process.cwd(),
-        env: process.env,
-        stdio: 'inherit',
-      },
-    );
+  await runCommand(
+    'npx',
+    ['tsx', scriptPath, ...tail],
+    'index-to-vespa',
+  );
+}
 
-    child.once('error', (error) => {
-      reject(error);
-    });
+const DEFAULT_VESPA_DEPLOY_WAIT_SECONDS = 600;
 
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(
-        new Error(
-          `index-to-vespa exited with code=${code ?? 'null'} signal=${signal ?? 'null'}`,
-        ),
-      );
-    });
-  });
+export function resolveVespaApplicationPackagePath(cwd: string = process.cwd()): string {
+  return path.resolve(cwd, 'vespa/app');
+}
+
+export async function deployVespaApplicationPackage(args: {
+  readonly applicationPackagePath?: string | undefined;
+  readonly waitSeconds?: number | undefined;
+  readonly cwd?: string | undefined;
+  readonly runCommand?: CommandRunner | undefined;
+} = {}): Promise<void> {
+  const applicationPackagePath =
+    args.applicationPackagePath
+    ?? resolveVespaApplicationPackagePath(args.cwd);
+  await fs.access(applicationPackagePath);
+
+  const waitSeconds = args.waitSeconds ?? DEFAULT_VESPA_DEPLOY_WAIT_SECONDS;
+  const execute = args.runCommand ?? runCommand;
+  await execute(
+    'vespa',
+    ['deploy', applicationPackagePath, '--wait', String(waitSeconds)],
+    'vespa deploy',
+    { cwd: args.cwd },
+  );
+  await execute(
+    'vespa',
+    ['status', '--wait', String(waitSeconds)],
+    'vespa status',
+    { cwd: args.cwd },
+  );
 }
 
 function buildStagingPath(activePath: string, snapshotId: string): string {
@@ -364,6 +438,14 @@ function emptyCriticalWineTypeCoverage(): CriticalWineTypeCoverage {
   return { red: 0, white: 0, sparkling: 0 };
 }
 
+function emptyCriticalWineTypeAliasCoverage(): CriticalWineTypeAliasCoverage {
+  return {
+    red: { entityCount: 0, entitiesWithAliases: 0, aliasCount: 0 },
+    white: { entityCount: 0, entitiesWithAliases: 0, aliasCount: 0 },
+    sparkling: { entityCount: 0, entitiesWithAliases: 0, aliasCount: 0 },
+  };
+}
+
 function toCriticalWineType(value: unknown): CriticalWineType | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -380,7 +462,11 @@ export function collectCriticalWineTypeCoverageFromEntities(
 ): CriticalWineTypeCoverage {
   const coverage = emptyCriticalWineTypeCoverage();
   for (const entity of entities) {
-    const wineType = toCriticalWineType(entity.attributes['wineType'] ?? entity.attributes['wine_type']);
+    const wineType = toCriticalWineType(
+      entity.attributes['wineType']
+      ?? entity.attributes['wine_type']
+      ?? entity.attributes['style'],
+    );
     if (wineType !== undefined) {
       coverage[wineType] += 1;
     }
@@ -399,6 +485,53 @@ export function collectCriticalWineTypeCoverageFromPreparedFeed(
     }
   }
   return coverage;
+}
+
+export function collectCriticalWineTypeAliasCoverage(
+  entities: readonly EntitySnapshotRecord[],
+  aliases: readonly AliasSnapshotRecord[],
+): CriticalWineTypeAliasCoverage {
+  const coverage = emptyCriticalWineTypeAliasCoverage();
+  const wineTypeByEntityId = new Map<string, CriticalWineType>();
+  const entitiesWithAliases = {
+    red: new Set<string>(),
+    white: new Set<string>(),
+    sparkling: new Set<string>(),
+  } satisfies Record<CriticalWineType, Set<string>>;
+
+  for (const entity of entities) {
+    const wineType = toCriticalWineType(
+      entity.attributes['wineType']
+      ?? entity.attributes['wine_type']
+      ?? entity.attributes['style'],
+    );
+    if (wineType === undefined) {
+      continue;
+    }
+    wineTypeByEntityId.set(entity.entityId, wineType);
+    coverage[wineType] = {
+      ...coverage[wineType],
+      entityCount: coverage[wineType].entityCount + 1,
+    };
+  }
+
+  for (const alias of aliases) {
+    const wineType = wineTypeByEntityId.get(alias.entityId);
+    if (wineType === undefined) {
+      continue;
+    }
+    coverage[wineType] = {
+      ...coverage[wineType],
+      aliasCount: coverage[wineType].aliasCount + 1,
+    };
+    entitiesWithAliases[wineType].add(alias.entityId);
+  }
+
+  return {
+    red: { ...coverage.red, entitiesWithAliases: entitiesWithAliases.red.size },
+    white: { ...coverage.white, entitiesWithAliases: entitiesWithAliases.white.size },
+    sparkling: { ...coverage.sparkling, entitiesWithAliases: entitiesWithAliases.sparkling.size },
+  };
 }
 
 export function assertCriticalWineTypeCoverageForPublish(
@@ -420,17 +553,19 @@ export function assertCriticalWineTypeCoverageForPublish(
 
 export async function assertSnapshotArtifactCriticalWineTypeCoverage(
   manifest: Pick<SearchSnapshotManifest, 'snapshotId' | 'artifacts'>,
-): Promise<{
-  readonly entityCoverage: CriticalWineTypeCoverage;
-  readonly vespaCoverage: CriticalWineTypeCoverage;
-}> {
-  const [entitiesRaw, vespaFeedRaw] = await Promise.all([
+): Promise<CriticalWineTypeArtifactCoverage> {
+  const [entitiesRaw, aliasesRaw, vespaFeedRaw] = await Promise.all([
     fs.readFile(manifest.artifacts.entitiesNdjson, 'utf8'),
+    fs.readFile(manifest.artifacts.aliasesNdjson, 'utf8'),
     fs.readFile(manifest.artifacts.vespaFeedNdjson, 'utf8'),
   ]);
   const entities = parseNdjson<EntitySnapshotRecord>(
     entitiesRaw,
     manifest.artifacts.entitiesNdjson,
+  ).records;
+  const aliases = parseNdjson<AliasSnapshotRecord>(
+    aliasesRaw,
+    manifest.artifacts.aliasesNdjson,
   ).records;
   const preparedDocs = parsePreparedVespaFeedDocuments(
     vespaFeedRaw,
@@ -439,9 +574,48 @@ export async function assertSnapshotArtifactCriticalWineTypeCoverage(
 
   const entityCoverage = collectCriticalWineTypeCoverageFromEntities(entities);
   const vespaCoverage = collectCriticalWineTypeCoverageFromPreparedFeed(preparedDocs);
+  const aliasCoverage = collectCriticalWineTypeAliasCoverage(entities, aliases);
   assertCriticalWineTypeCoverageForPublish(entityCoverage, 'entities artifact', manifest.snapshotId);
   assertCriticalWineTypeCoverageForPublish(vespaCoverage, 'prepared Vespa feed', manifest.snapshotId);
-  return { entityCoverage, vespaCoverage };
+  return { entityCoverage, vespaCoverage, aliasCoverage };
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function writeCriticalWineTypeCoverageMetadata(
+  manifest: Pick<SearchSnapshotManifest, 'artifacts'>,
+  coverage: CriticalWineTypeArtifactCoverage,
+): Promise<void> {
+  let current: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(manifest.artifacts.metadataJson, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (isObjectRecord(parsed)) {
+      current = parsed;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  await atomicWriteFile(
+    manifest.artifacts.metadataJson,
+    `${JSON.stringify(
+      {
+        ...current,
+        criticalWineTypeCoverage: {
+          entities: coverage.entityCoverage,
+          preparedVespaFeed: coverage.vespaCoverage,
+          aliases: coverage.aliasCoverage,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
@@ -539,6 +713,13 @@ async function loadSnapshotEntityIds(entitiesPath: string): Promise<readonly str
     .sort((left, right) => left.localeCompare(right));
 }
 
+async function loadPreparedFeedDocIds(preparedFeedPath: string): Promise<readonly string[]> {
+  const raw = await fs.readFile(preparedFeedPath, 'utf8');
+  return parsePreparedVespaFeedDocuments(raw, preparedFeedPath)
+    .map((doc) => doc.id)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 async function loadCurrentRuntimeEntityIds(snapshotId: string): Promise<readonly string[]> {
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
@@ -559,18 +740,87 @@ async function loadCurrentRuntimeEntityIds(snapshotId: string): Promise<readonly
   }
 }
 
-async function deleteStaleVespaDocuments(docIds: readonly string[]): Promise<void> {
-  if (docIds.length === 0) {
-    return;
-  }
+function createPublishVespaClient(): VespaClient {
   const config = loadConfig();
   const vespaMtls = config.vespa.certPath !== undefined && config.vespa.keyPath !== undefined
     ? { certPath: config.vespa.certPath, keyPath: config.vespa.keyPath }
     : undefined;
-  const vespa = new VespaClient(config.vespa.url, VESPA_NAMESPACE, VESPA_DOC_TYPE, undefined, vespaMtls);
+  return new VespaClient(config.vespa.url, VESPA_NAMESPACE, VESPA_DOC_TYPE, undefined, vespaMtls);
+}
+
+async function loadLiveVespaSnapshotDocIds(snapshotId: string): Promise<readonly string[]> {
+  const vespa = createPublishVespaClient();
+  const liveDocIds = new Set<string>();
+  let offset = 0;
+  let totalCount = Number.POSITIVE_INFINITY;
+
+  while (offset < totalCount) {
+    const response = await vespa.query(
+      `select * from sources * where search_snapshot_id contains ${JSON.stringify(snapshotId)} `
+      + `order by entity_id asc limit ${VESPA_SNAPSHOT_DOC_ID_QUERY_PAGE_SIZE} offset ${offset};`,
+      { 'presentation.summary': 'full' },
+    );
+    totalCount = response.root.fields?.totalCount ?? 0;
+    const hits = response.root.children ?? [];
+    if (hits.length === 0) {
+      break;
+    }
+    for (const hit of hits) {
+      const entityId = typeof hit.fields['entity_id'] === 'string' ? hit.fields['entity_id'] : undefined;
+      if (entityId === undefined || entityId.length === 0) {
+        throw new Error(
+          `Vespa live snapshot doc probe returned a hit without entity_id for snapshot ${snapshotId}`,
+        );
+      }
+      liveDocIds.add(entityId);
+    }
+    offset += hits.length;
+  }
+
+  return [...liveDocIds].sort((left, right) => left.localeCompare(right));
+}
+
+export function diffSnapshotVespaDocIds(args: {
+  readonly expectedDocIds: readonly string[];
+  readonly liveDocIds: readonly string[];
+}): {
+  readonly missingDocIds: readonly string[];
+  readonly staleDocIds: readonly string[];
+} {
+  const expectedSet = new Set(args.expectedDocIds);
+  const liveSet = new Set(args.liveDocIds);
+  return {
+    missingDocIds: args.expectedDocIds.filter((docId) => !liveSet.has(docId)),
+    staleDocIds: args.liveDocIds.filter((docId) => !expectedSet.has(docId)),
+  };
+}
+
+async function deleteStaleVespaDocuments(docIds: readonly string[]): Promise<void> {
+  if (docIds.length === 0) {
+    return;
+  }
+  const vespa = createPublishVespaClient();
   for (const docId of docIds) {
     await vespa.delete(docId);
   }
+}
+
+async function reconcileTargetSnapshotVespaDocuments(
+  snapshotId: string,
+  expectedDocIds: readonly string[],
+): Promise<void> {
+  const liveDocIds = await loadLiveVespaSnapshotDocIds(snapshotId);
+  const { staleDocIds } = diffSnapshotVespaDocIds({
+    expectedDocIds,
+    liveDocIds,
+  });
+  if (staleDocIds.length === 0) {
+    return;
+  }
+  console.log(
+    `🧹 Deleting ${staleDocIds.length} stale Vespa docs already present under target snapshot ${snapshotId}`,
+  );
+  await deleteStaleVespaDocuments(staleDocIds);
 }
 
 async function acquireSnapshotPublishLock() {
@@ -578,15 +828,116 @@ async function acquireSnapshotPublishLock() {
   if (!shouldUsePgPool(config.pg)) {
     throw new Error('Postgres configuration is required to acquire search snapshot publish lock');
   }
-  const pool = createPgPool(config.pg);
-  const client = await pool.connect();
-  await client.query('SELECT pg_advisory_lock($1, $2)', [SNAPSHOT_PUBLISH_LOCK_A, SNAPSHOT_PUBLISH_LOCK_B]);
+  const pool = createPgPool(config.pg, {
+    statementTimeoutMs: 15_000,
+    idleInTransactionSessionTimeoutMs: 15_000,
+    queryTimeoutMs: 20_000,
+  });
+  const ownerId = `publish-search-snapshot:${process.pid}:${Date.now()}:${randomUUID()}`;
+  const leaseInterval = `${SNAPSHOT_PUBLISH_LOCK_LEASE_MS} milliseconds`;
+  let lockConnectionError: Error | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  let heartbeatInFlight = false;
+  let released = false;
+
+  const acquireLease = async (): Promise<void> => {
+    await pool.query(
+      `INSERT INTO search_snapshot_publish_lock (
+         id,
+         owner_id,
+         fencing_token,
+         lease_expires_at,
+         acquired_at,
+         heartbeat_at
+       )
+       VALUES (1, NULL, 0, NULL, NULL, NULL)
+       ON CONFLICT (id) DO NOTHING`,
+    );
+    const acquired = await pool.query<{ fencing_token: string }>(
+      `UPDATE search_snapshot_publish_lock
+         SET owner_id = $1,
+             fencing_token = CASE WHEN owner_id = $1 THEN fencing_token ELSE fencing_token + 1 END,
+             lease_expires_at = NOW() + $2::interval,
+             acquired_at = CASE WHEN owner_id = $1 THEN acquired_at ELSE NOW() END,
+             heartbeat_at = NOW()
+       WHERE id = 1
+         AND (owner_id IS NULL OR lease_expires_at <= NOW() OR owner_id = $1)
+       RETURNING fencing_token`,
+      [ownerId, leaseInterval],
+    );
+    if (acquired.rowCount === 0) {
+      const current = await pool.query<{ owner_id: string | null; lease_expires_at: string | null }>(
+        `SELECT owner_id, lease_expires_at
+         FROM search_snapshot_publish_lock
+         WHERE id = 1`,
+      );
+      const heldBy = current.rows[0]?.owner_id ?? '<unknown-owner>';
+      const expiresAt = current.rows[0]?.lease_expires_at ?? '<unknown-expiry>';
+      throw new Error(
+        `search snapshot publish lease is already held by ${heldBy} until ${expiresAt}`,
+      );
+    }
+  };
+
+  const renewLease = async (): Promise<void> => {
+    if (released || heartbeatInFlight) {
+      return;
+    }
+    heartbeatInFlight = true;
+    try {
+      const renewed = await pool.query(
+        `UPDATE search_snapshot_publish_lock
+           SET lease_expires_at = NOW() + $2::interval,
+               heartbeat_at = NOW()
+         WHERE id = 1
+           AND owner_id = $1
+         RETURNING fencing_token`,
+        [ownerId, leaseInterval],
+      );
+      if (renewed.rowCount === 0 && lockConnectionError === undefined) {
+        lockConnectionError = new Error('snapshot publish lease lost ownership');
+        console.error(lockConnectionError.message);
+      }
+    } catch (error) {
+      if (lockConnectionError === undefined) {
+        lockConnectionError = error instanceof Error ? error : new Error(String(error));
+        console.error(`snapshot publish lock heartbeat failed: ${lockConnectionError.message}`);
+      }
+    } finally {
+      heartbeatInFlight = false;
+    }
+  };
+
+  await acquireLease();
+  heartbeatTimer = setInterval(() => {
+    void renewLease();
+  }, SNAPSHOT_PUBLISH_LOCK_HEARTBEAT_MS);
   return {
+    assertHeld(): void {
+      if (lockConnectionError !== undefined) {
+        throw new Error(
+          `snapshot publish lock lease was lost: ${lockConnectionError.message}`,
+        );
+      }
+    },
     async release(): Promise<void> {
+      released = true;
+      if (heartbeatTimer !== undefined) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
       try {
-        await client.query('SELECT pg_advisory_unlock($1, $2)', [SNAPSHOT_PUBLISH_LOCK_A, SNAPSHOT_PUBLISH_LOCK_B]);
+        await pool.query(
+          `UPDATE search_snapshot_publish_lock
+             SET owner_id = NULL,
+                 lease_expires_at = NULL,
+                 acquired_at = NULL,
+                 heartbeat_at = NULL
+           WHERE id = 1
+             AND owner_id = $1`,
+          [ownerId],
+        );
       } finally {
-        client.release();
         await pool.end();
       }
     },
@@ -763,8 +1114,12 @@ async function run(): Promise<void> {
   }
 
   const fixtureRoot = resolvePublishFixtureRepoRoot(args.fixtureRepoRoot);
-  const stagedRuntimeStatePath = buildStagingPath(args.runtimeStatePath, built.manifest.snapshotId);
-  const stagedRuntimeNlMappingsPath = buildStagingPath(args.runtimeNlMappingsPath, built.manifest.snapshotId);
+  const cutoverPaths = resolveRuntimeSubstrateCutoverPaths({
+    snapshotId: built.manifest.snapshotId,
+    runtimeStatePath: args.runtimeStatePath,
+    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+  });
+  const { stagedRuntimeStatePath, stagedRuntimeNlMappingsPath } = cutoverPaths;
   const snapshotRootDir = path.dirname(path.dirname(built.manifest.artifacts.vespaFeedNdjson));
   const [previousRuntimeState, newSnapshotEntityIds] = await Promise.all([
     loadPublishedRuntimeState(args.runtimeStatePath),
@@ -805,6 +1160,8 @@ async function run(): Promise<void> {
   const publishState = createSnapshotPublishStateMachine();
   try {
     try {
+      console.log('☁️ Activating Vespa application package before document indexing');
+      await deployVespaApplicationPackage();
       console.log('🧾 Materializing exact Vespa replay artifact');
       const manifestWithExactFeed = await materializeExactVespaFeedForSnapshot({
         manifest: built.manifest,
@@ -812,12 +1169,17 @@ async function run(): Promise<void> {
         fixtureRepoRoot: fixtureRoot,
         previousPreparedManifest,
       });
+      const newSnapshotPreparedDocIds = await loadPreparedFeedDocIds(
+        manifestWithExactFeed.artifacts.vespaFeedNdjson,
+      );
       const artifactCoverage = await assertSnapshotArtifactCriticalWineTypeCoverage(
         manifestWithExactFeed,
       );
+      await writeCriticalWineTypeCoverageMetadata(manifestWithExactFeed, artifactCoverage);
       console.log(
         `🍇 Verified critical wine_type artifact coverage: entities=${JSON.stringify(artifactCoverage.entityCoverage)} `
-        + `vespa=${JSON.stringify(artifactCoverage.vespaCoverage)}`,
+        + `vespa=${JSON.stringify(artifactCoverage.vespaCoverage)} `
+        + `aliases=${JSON.stringify(artifactCoverage.aliasCoverage)}`,
       );
       console.log('🚦 Ensuring snapshot-bound LTR readiness');
       await ensureSnapshotBoundLtrModels({
@@ -834,6 +1196,7 @@ async function run(): Promise<void> {
         'prepared-feed',
         fixtureRoot,
       );
+      publishLock.assertHeld();
       publishState.advance('vespa_indexed');
       if (
         previousRuntimeState !== undefined
@@ -845,6 +1208,10 @@ async function run(): Promise<void> {
         const staleDocIds = currentRuntimeEntityIds.filter((entityId) => !nextEntityIdSet.has(entityId));
         await deleteStaleVespaDocuments(staleDocIds);
       }
+      await reconcileTargetSnapshotVespaDocuments(
+        manifestWithExactFeed.snapshotId,
+        newSnapshotPreparedDocIds,
+      );
       console.log('🗄️ Publishing runtime substrates');
       runtimeState = await publishRuntimeSubstrates({
         manifestPath: built.manifestPath,
@@ -891,12 +1258,7 @@ async function run(): Promise<void> {
         requirePointerParity: true,
       });
       console.log('📌 Promoting runtime substrate files');
-      runtimeState = await promoteRuntimeSubstrateArtifacts({
-        stagedRuntimeStatePath,
-        activeRuntimeStatePath: args.runtimeStatePath,
-        stagedRuntimeNlMappingsPath,
-        activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
-      });
+      runtimeState = await promoteRuntimeSubstrateArtifacts(cutoverPaths);
       publishState.advance('runtime_artifacts_promoted');
       console.log('✅ Verifying readiness after runtime substrate promotion');
       await verifySearchSnapshotReadiness({

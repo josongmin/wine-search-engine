@@ -28,6 +28,7 @@ import { ConstraintCompiler, type ConstraintCompilerResult } from './constraint-
 import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js';
 import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vintage.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
+import type { AmbiguousEntityHint } from '../../attribute/model/ambiguous-entity-hint.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import {
   ANCHOR_PRESENT_CONFIDENCE,
@@ -40,6 +41,14 @@ import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import {
+  AmbiguityIntentCompiler,
+  type AmbiguityIntentCompilerInput,
+} from './ambiguity-intent-compiler.js';
+import type {
+  AmbiguityIntentInterpretation,
+  AmbiguityIntentTrace,
+} from '../model/ambiguity-intent-interpretation.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -144,6 +153,7 @@ export class Planner {
     nlMapper: NLMapper,
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
     topologyPlanner?: ConstraintTopologyPlanner,
+    private readonly ambiguityIntentCompiler?: AmbiguityIntentCompiler,
   ) {
     this.constraintCompiler = new ConstraintCompiler(
       nlMapper,
@@ -339,6 +349,7 @@ export class Planner {
       normalizedQuery,
       allAnchors,
       relativeQuery,
+      intent,
     );
     const parsedPromise = (async () => {
       stageTimer?.start('planner.constraint_parsing');
@@ -353,10 +364,30 @@ export class Planner {
       }
     })();
 
-    const [queryClass, parsed] = await Promise.all([
+    const [classifiedQueryClass, parsed] = await Promise.all([
       queryClassPromise,
       parsedPromise,
     ]);
+    stageTimer?.start('planner.ambiguity_intent_compilation');
+    const ambiguityIntentResult = await this.compileAmbiguityIntent({
+      rawQuery: originalQuery,
+      normalizedQuery,
+      intent,
+      classifiedQueryClass,
+      parsed,
+      abortSignal: context?.abortSignal,
+    }).finally(() => {
+      stageTimer?.end('planner.ambiguity_intent_compilation');
+    });
+    const interpretedAmbiguousHints = applyAmbiguityIntentInterpretation(
+      parsed.ambiguousEntityHints,
+      ambiguityIntentResult.interpretation,
+    );
+    const queryClass = this.promoteQueryClassFromConstraintEvidence(
+      classifiedQueryClass,
+      interpretedAmbiguousHints,
+      ambiguityIntentResult.interpretation,
+    );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'query_class_classification',
@@ -391,14 +422,21 @@ export class Planner {
     // TA4: also surface fuzzy hits as entity hypothesis sources in
     // fuzzyEntityHypotheses, enabling the entity-first dual retrieval path
     // even when exact anchor extraction fails (anchor count === 0).
-    const expansions =
-      fuzzyExpansions.length > 0
+    const expansions = {
+      ...baseExpansions,
+      ...(fuzzyExpansions.length > 0
         ? {
-            ...baseExpansions,
             lexical: [...baseExpansions.lexical, ...fuzzyExpansions],
             fuzzyEntityHypotheses: fuzzyExpansions,
           }
-        : baseExpansions;
+        : {}),
+      ...(interpretedAmbiguousHints.length > 0
+        ? { ambiguousEntityHints: interpretedAmbiguousHints }
+        : {}),
+      ...(ambiguityIntentResult.interpretation !== undefined
+        ? { ambiguityIntentInterpretation: ambiguityIntentResult.interpretation }
+        : {}),
+    };
 
     // 8. Compute uncertainty.
     const uncertainty = await this.computeUncertainty(
@@ -498,6 +536,9 @@ export class Planner {
       // readers remain on `constraintAtoms` / `constraints` until Phase 1b.
       ...(parsed.constraintGraph !== undefined ? { constraintGraph: parsed.constraintGraph } : {}),
       ...(plannerTrace.length > 0 ? { plannerTrace } : {}),
+      ...(ambiguityIntentResult.trace.source !== 'not_applicable'
+        ? { ambiguityIntentTrace: ambiguityIntentResult.trace }
+        : {}),
     };
   }
 
@@ -693,6 +734,68 @@ export class Planner {
     }
   }
 
+  private promoteQueryClassFromConstraintEvidence(
+    classifiedQueryClass: QueryClass,
+    ambiguousEntityHints: readonly AmbiguousEntityHint[],
+    interpretation?: AmbiguityIntentInterpretation,
+  ): QueryClass {
+    const queryClassOverride = interpretation?.branchSelections
+      .map((selection) => selection.resolvedQueryClass)
+      .find((queryClass): queryClass is QueryClass => queryClass !== undefined);
+    if (queryClassOverride !== undefined) {
+      return queryClassOverride;
+    }
+
+    if (classifiedQueryClass === 'ambiguous_short_form') {
+      return classifiedQueryClass;
+    }
+
+    return ambiguousEntityHints.some((hint) => hint.explorationBranches.length > 1)
+      ? 'ambiguous_short_form'
+      : classifiedQueryClass;
+  }
+
+  private async compileAmbiguityIntent(args: {
+    readonly rawQuery: string;
+    readonly normalizedQuery: string;
+    readonly intent: QueryIntent;
+    readonly classifiedQueryClass: QueryClass;
+    readonly parsed: ConstraintCompilerResult;
+    readonly abortSignal?: AbortSignal | undefined;
+  }): Promise<{
+    readonly interpretation?: AmbiguityIntentInterpretation | undefined;
+    readonly trace: AmbiguityIntentTrace;
+  }> {
+    if (
+      this.ambiguityIntentCompiler === undefined
+      || args.parsed.ambiguousEntityHints.length === 0
+    ) {
+      return {
+        trace: {
+          source: 'not_applicable',
+          latencyMs: null,
+          branchSelectionCount: 0,
+          selectedBranchCount: 0,
+        },
+      };
+    }
+
+    const compilerInput: AmbiguityIntentCompilerInput = {
+      rawQuery: args.rawQuery,
+      normalizedQuery: args.normalizedQuery,
+      intent: args.intent,
+      classifiedQueryClass: args.classifiedQueryClass,
+      constraints: {
+        hard: args.parsed.bundle.hard,
+        soft: args.parsed.bundle.soft,
+      },
+      ambiguousEntityHints: args.parsed.ambiguousEntityHints,
+      abortSignal: args.abortSignal,
+    };
+
+    return this.ambiguityIntentCompiler.compile(compilerInput);
+  }
+
   /**
    * Parses constraints from the normalized query by scanning for known
    * natural-language phrases via the NLMapper.
@@ -763,11 +866,9 @@ export class Planner {
     normalizedQuery: string,
     anchors: readonly AnchorCandidate[],
     relativeQuery: AnchorConditionedQuery | null,
+    intent: QueryIntent,
   ): string {
-    if (anchors.length === 0 || relativeQuery === null) {
-      return normalizedQuery;
-    }
-
+    let sanitizedQuery = normalizedQuery;
     const matchedAnchorForms = new Set(
       anchors.flatMap((anchor) => [
         anchor.surfaceForm,
@@ -776,24 +877,132 @@ export class Planner {
       ].map((value) => value.trim().toLowerCase()).filter((value) => value.length > 0)),
     );
 
-    let sanitizedQuery = normalizedQuery;
-    for (const expression of relativeQuery.relativeExpressions) {
-      if (expression.operator !== 'not') {
-        continue;
-      }
+    if (relativeQuery !== null) {
+      for (const expression of relativeQuery.relativeExpressions) {
+        if (expression.operator !== 'not') {
+          continue;
+        }
 
-      const anchorSurface = expression.anchorSurfaceForm.trim();
-      if (anchorSurface.length === 0 || !matchedAnchorForms.has(anchorSurface.toLowerCase())) {
-        continue;
-      }
+        const anchorSurface = expression.anchorSurfaceForm.trim();
+        if (anchorSurface.length === 0 || !matchedAnchorForms.has(anchorSurface.toLowerCase())) {
+          continue;
+        }
 
-      const escapedAnchor = escapeRegex(anchorSurface);
-      sanitizedQuery = sanitizedQuery
-        .replace(new RegExp(`${escapedAnchor}${KOREAN_NOT_MARKER_PATTERN}`, 'u'), ' ')
-        .replace(new RegExp(`${ENGLISH_NOT_MARKER_PATTERN}${escapedAnchor}`, 'iu'), ' ');
+        const escapedAnchor = escapeRegex(anchorSurface);
+        sanitizedQuery = sanitizedQuery
+          .replace(new RegExp(`${escapedAnchor}${KOREAN_NOT_MARKER_PATTERN}`, 'u'), ' ')
+          .replace(new RegExp(`${ENGLISH_NOT_MARKER_PATTERN}${escapedAnchor}`, 'iu'), ' ');
+      }
+    }
+
+    if (this.shouldStripStrongEntityAnchorFromConstraintParsing(intent, anchors)) {
+      sanitizedQuery = this.stripDominantAnchorTokens(sanitizedQuery, matchedAnchorForms);
     }
 
     return sanitizedQuery.replace(/\s+/gu, ' ').trim();
+  }
+
+  private shouldStripStrongEntityAnchorFromConstraintParsing(
+    intent: QueryIntent,
+    anchors: readonly AnchorCandidate[],
+  ): boolean {
+    if (intent !== 'entity_exact') {
+      return false;
+    }
+
+    const strongAnchors = anchors.filter((anchor) => anchor.confidence >= EXACT_ANCHOR_CONFIDENCE);
+    if (strongAnchors.length === 0) {
+      return false;
+    }
+
+    const uniqueStrongEntityCount = new Set(
+      strongAnchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
+    ).size;
+    return uniqueStrongEntityCount === 1;
+  }
+
+  private stripDominantAnchorTokens(
+    normalizedQuery: string,
+    anchorForms: ReadonlySet<string>,
+  ): string {
+    const queryTokens = normalizedQuery
+      .trim()
+      .split(/\s+/u)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    if (queryTokens.length === 0) {
+      return normalizedQuery;
+    }
+
+    const dominantAnchorTokens = this.selectDominantAnchorTokenSequence(queryTokens, anchorForms);
+    if (dominantAnchorTokens.length === 0) {
+      return normalizedQuery;
+    }
+
+    const remainingCounts = new Map<string, number>();
+    for (const token of dominantAnchorTokens) {
+      remainingCounts.set(token, (remainingCounts.get(token) ?? 0) + 1);
+    }
+
+    const retainedTokens: string[] = [];
+    for (const token of queryTokens) {
+      const count = remainingCounts.get(token) ?? 0;
+      if (count > 0) {
+        remainingCounts.set(token, count - 1);
+        continue;
+      }
+      retainedTokens.push(token);
+    }
+
+    return retainedTokens.join(' ');
+  }
+
+  private selectDominantAnchorTokenSequence(
+    queryTokens: readonly string[],
+    anchorForms: ReadonlySet<string>,
+  ): readonly string[] {
+    const queryCounts = new Map<string, number>();
+    for (const token of queryTokens) {
+      queryCounts.set(token, (queryCounts.get(token) ?? 0) + 1);
+    }
+
+    let bestTokens: readonly string[] = [];
+    for (const form of anchorForms) {
+      const tokens = form
+        .split(/\s+/u)
+        .map((token) => token.trim())
+        .filter((token) => token.length > 0);
+      if (tokens.length === 0 || !this.isTokenMultisetCovered(tokens, queryCounts)) {
+        continue;
+      }
+
+      if (
+        tokens.length > bestTokens.length ||
+        (tokens.length === bestTokens.length && form.length > bestTokens.join(' ').length)
+      ) {
+        bestTokens = tokens;
+      }
+    }
+
+    return bestTokens;
+  }
+
+  private isTokenMultisetCovered(
+    candidateTokens: readonly string[],
+    queryCounts: ReadonlyMap<string, number>,
+  ): boolean {
+    const requiredCounts = new Map<string, number>();
+    for (const token of candidateTokens) {
+      requiredCounts.set(token, (requiredCounts.get(token) ?? 0) + 1);
+    }
+
+    for (const [token, requiredCount] of requiredCounts) {
+      if ((queryCounts.get(token) ?? 0) < requiredCount) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -994,6 +1203,49 @@ export class Planner {
     // No clear signal detected.
     return undefined;
   }
+}
+
+function applyAmbiguityIntentInterpretation(
+  hints: readonly AmbiguousEntityHint[],
+  interpretation: AmbiguityIntentInterpretation | undefined,
+): readonly AmbiguousEntityHint[] {
+  if (interpretation === undefined) {
+    return hints;
+  }
+
+  return hints.map((hint) => {
+    const selection = interpretation.branchSelections.find((entry) =>
+      entry.surface === hint.surface
+      && entry.entityType === hint.entityType,
+    );
+    if (selection === undefined || selection.decision !== 'select_branches') {
+      return hint;
+    }
+
+    const selectedBranchSet = new Set(selection.selectedBranchLabels);
+    const explorationBranches = hint.explorationBranches.filter((branch) => selectedBranchSet.has(branch.label));
+    if (explorationBranches.length === 0) {
+      return hint;
+    }
+
+    return {
+      ...hint,
+      clarifyOptions: hint.clarifyOptions.filter((label) => selectedBranchSet.has(label)),
+      lexicalExpansions: uniqueStrings([
+        ...hint.lexicalExpansions,
+        ...explorationBranches.flatMap((branch) => branch.lexicalExpansions),
+      ]),
+      semanticExpansions: uniqueStrings([
+        ...hint.semanticExpansions,
+        ...explorationBranches.flatMap((branch) => branch.semanticExpansions),
+      ]),
+      explorationBranches,
+    };
+  });
+}
+
+function uniqueStrings(values: readonly string[]): readonly string[] {
+  return Array.from(new Set(values));
 }
 
 function escapeRegex(value: string): string {

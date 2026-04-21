@@ -17,7 +17,11 @@ const {
 
 vi.mock('../../../src/config/env.js', () => ({
   loadConfig: vi.fn(() => ({
-    vespa: { url: 'http://vespa.test:8080' },
+    vespa: {
+      url: 'http://vespa.test:8080',
+      certPath: '/tmp/vespa-cert.pem',
+      keyPath: '/tmp/vespa-key.pem',
+    },
     pg: { host: 'localhost' },
   })),
 }));
@@ -138,6 +142,10 @@ describe('verifySearchSnapshotReadiness', () => {
     expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledTimes(1);
     expect(mockCreatePgPool).toHaveBeenCalledTimes(1);
     expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.requirePointerParity).toBeUndefined();
+    expect(mockVerifySearchSnapshotRuntimeStateLive.mock.calls[0]?.[0]?.vespaMtls).toEqual({
+      certPath: '/tmp/vespa-cert.pem',
+      keyPath: '/tmp/vespa-key.pem',
+    });
   });
 
   it('fails closed when manifest entity count diverges from runtime state', async () => {

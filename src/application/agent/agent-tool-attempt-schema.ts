@@ -23,6 +23,7 @@ export const SearchToolAttemptInputSchema = z.object({
   retrieval_mode: AttemptStringSchema.optional(),
   exclude_grapes: AttemptStringArraySchema.optional(),
   exclude_regions: AttemptStringArraySchema.optional(),
+  min_price_krw: AttemptNumberSchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
   max_alcohol_pct: AttemptNumberSchema.optional(),
   wine_type: AttemptStringSchema.optional(),
@@ -51,6 +52,19 @@ export const DrinkingWindowAttemptInputSchema = z.object({
 export const CompareWinesAttemptInputSchema = z.object({
   query_a: AttemptStringSchema.optional(),
   query_b: AttemptStringSchema.optional(),
+  exclude_grapes: AttemptStringArraySchema.optional(),
+  exclude_regions: AttemptStringArraySchema.optional(),
+  min_price_krw: AttemptNumberSchema.optional(),
+  max_price_krw: AttemptNumberSchema.optional(),
+  max_alcohol_pct: AttemptNumberSchema.optional(),
+  wine_type: AttemptStringSchema.optional(),
+  country: AttemptStringSchema.optional(),
+  vintage_min: AttemptNumberSchema.optional(),
+  vintage_max: AttemptNumberSchema.optional(),
+  appellation: AttemptStringSchema.optional(),
+  style: AttemptStringSchema.optional(),
+  styles: AttemptStringArraySchema.optional(),
+  certification: AttemptStringSchema.optional(),
 }).strict();
 
 // ── Inferred types for each tool's validated input ───────────────────────────

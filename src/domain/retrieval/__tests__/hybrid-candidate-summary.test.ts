@@ -49,6 +49,7 @@ describe('hybrid candidate summary helpers', () => {
       producer: 'Mapped Producer',
       region: 'Mapped Region',
       searchTextEn: 'Mapped search text',
+      semanticSummary: 'Mapped semantic summary',
       grapePrimary: 'Nebbiolo',
       style: 'savory red',
       priceBand: 'luxury',

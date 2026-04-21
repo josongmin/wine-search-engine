@@ -16,7 +16,11 @@ import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-
 import type { QueryRoute } from '../../query/model/query-route.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
-import { DEFAULT_THRESHOLD_PROFILE, computeDynamicGapThreshold } from '../../query/model/threshold-profile.js';
+import {
+  DEFAULT_THRESHOLD_PROFILE,
+  computeDynamicGapThreshold,
+  type NumericGateMode,
+} from '../../query/model/threshold-profile.js';
 import { hasExactMatchCandidate, type DecisionInput } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
 import type { DecisionTrace } from '../model/decision-trace.js';
@@ -180,7 +184,7 @@ export class DecisionEngine {
           },
         },
         signals: { decisionConfidence: 0, calibratedGap: undefined, ambiguity: false },
-        thresholds: { resolveThreshold: 0, gapThreshold: 0 },
+        thresholds: { resolveThreshold: 0, gapThreshold: 0, numericGateMode: 'strict' },
         versions: {
           plannerVersion: input.queryPlan.plannerVersion,
           policyRuleVersion: input.queryPlan.policyRuleVersion,
@@ -470,6 +474,7 @@ export class DecisionEngine {
     }
 
     const cMeetsThreshold = C >= thresholds.resolveTau;
+    const numericGateMode: NumericGateMode = thresholds.numericGateMode ?? 'strict';
     // thresholds.gapTau is already the dynamic gap threshold computed by
     // loadThresholds() via computeDynamicGapThreshold(). Using it directly
     // avoids a redundant computation with identical arguments (Rule 30: SSoT).
@@ -479,6 +484,51 @@ export class DecisionEngine {
     // and forcing ambiguous.
     const gapMeetsThreshold = delta === undefined ? true : delta >= effectiveGapTau;
     const deltaForLog = delta === undefined ? 'n/a' : delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES);
+
+    // Recommendation-style queries do not need identity-style disambiguation.
+    // Gap and conformal remain part of the trace, but they are not hard gates.
+    if (numericGateMode === 'preference') {
+      if (cMeetsThreshold) {
+        rulesApplied.push('NUMERIC_GATE_PREFERENCE_MODE');
+        return {
+          status: 'resolved',
+          nextAction: 'return_result',
+          rulesApplied: [...rulesApplied],
+          finalReason: `Preference-mode gate: calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}; gap/conformal are advisory only.`,
+        };
+      }
+
+      rulesApplied.push('NUMERIC_GATE_LOW_CONFIDENCE');
+      const fallbackMode = input.policy.fallbackMode;
+      if (fallbackMode === 'hybrid') {
+        rulesApplied.push('FALLBACK_HYBRID_SEARCH');
+        return {
+          status: 'ambiguous',
+          nextAction: 'hybrid_search',
+          rulesApplied: [...rulesApplied],
+          finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; falling back to hybrid search.`,
+        };
+      }
+
+      if (fallbackMode === 'clarify') {
+        rulesApplied.push('FALLBACK_CLARIFY');
+        return {
+          status: 'ambiguous',
+          nextAction: 'clarify',
+          rulesApplied: [...rulesApplied],
+          finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; requesting clarification.`,
+        };
+      }
+
+      // fallbackMode === 'fail'
+      rulesApplied.push('FALLBACK_FAIL');
+      return {
+        status: 'failed',
+        nextAction: 'fail',
+        rulesApplied: [...rulesApplied],
+        finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
+      };
+    }
 
     // Gate 1: Full resolution (conformal set size blocks resolution per §6.2)
     if (cMeetsThreshold && gapMeetsThreshold && !A && conformalSetSize < 2) {
@@ -721,7 +771,7 @@ export class DecisionEngine {
    * - Calibrated decision confidence C
    *
    * This allows query-specific disambiguation strategies:
-   * - semantic_preference: 1-1.5% gap (fuzzy matching OK)
+   * - semantic_preference: confidence-only admission; gap stays advisory for traces
    * - short_entity: 3% gap (moderate disambiguation)
    * - entity_exact variants: 5-10% gap (strict)
    */
@@ -782,6 +832,9 @@ export class DecisionEngine {
     return {
       resolveTau: safeResolveTau,
       gapTau: dynamicGapTau,
+      ...(baseThreshold?.numericGateMode !== undefined
+        ? { numericGateMode: baseThreshold.numericGateMode }
+        : {}),
     };
   }
 
@@ -833,6 +886,9 @@ export class DecisionEngine {
       thresholds: {
         resolveThreshold: thresholds.resolveTau,
         gapThreshold: dynamicGapThreshold ?? thresholds.gapTau,
+        ...(thresholds.numericGateMode !== undefined
+          ? { numericGateMode: thresholds.numericGateMode }
+          : {}),
       },
       versions: {
         plannerVersion: input.queryPlan.plannerVersion,

@@ -3,7 +3,10 @@ import { buildNormalizedQueryViews } from '../../domain/query/service/query-norm
 import { stripExactEntityMetadataSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
 import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../domain/attribute/service/span-parser.js';
-import { resolveEntity } from '../../domain/attribute/service/entity-resolver.js';
+import {
+  isDirectEntityResolution,
+  resolveEntity,
+} from '../../domain/attribute/service/entity-resolver.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 
 const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
@@ -81,7 +84,7 @@ function resolveCanonicalEntityTerms(
         ): entry is {
           span: Span;
           resolved: NonNullable<ReturnType<typeof resolveEntity>>;
-        } => entry.resolved !== null,
+        } => isDirectEntityResolution(entry.resolved),
       )
       .filter((entry) => entry.resolved.entityType !== 'wine_type');
 
@@ -196,7 +199,7 @@ export function buildSearchToolRetrievalCoreQuery(
         ): entry is {
           span: Span;
           resolved: NonNullable<ReturnType<typeof resolveEntity>>;
-        } => entry.resolved !== null,
+        } => isDirectEntityResolution(entry.resolved),
       )
       .filter((entry) => !isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input));
 

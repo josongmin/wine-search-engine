@@ -327,6 +327,563 @@ describe('retrieveHybridCandidatesForPlan', () => {
     );
   });
 
+  it('adds semantic-safe noisy entity views to semanticEmbeddingQueries while keeping semanticQueries narrow', () => {
+    const plan = minimalPlan({
+      rawQuery: '샤또마고1996',
+      normalizedQuery: '샤토 마고 1996',
+      normalizedQueryViews: {
+        raw: '샤또마고1996',
+        strict: '샤토 마고 1996',
+        accentless: '샤토 마고 1996',
+        collapsedWhitespace: '샤토 마고 1996',
+        punctuationStripped: '샤토 마고 1996',
+        compact: '샤토마고1996',
+        vintageCanonicalized: '샤토 마고 1996',
+        vintageStripped: '샤토 마고',
+        transliterated: 'chateau margaux',
+        reordered: ['마고 샤토'],
+        semanticVariants: [
+          '샤또마고1996',
+          '샤토 마고 1996',
+          '샤토 마고',
+          'chateau margaux',
+          '마고 샤토',
+        ],
+        lookupVariants: [
+          '샤토 마고 1996',
+          '샤토마고1996',
+          'chateau margaux',
+          'chtmrg1996',
+          '마고 샤토',
+        ],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+
+    expect(input.semanticEmbeddingQueries).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        '샤토 마고 1996',
+        '샤토 마고',
+        'chateau margaux',
+        '마고 샤토',
+      ]),
+    );
+    expect(input.semanticEmbeddingQueries).not.toEqual(
+      expect.arrayContaining([
+        '샤토마고1996',
+        'chtmrg1996',
+      ]),
+    );
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        'chateau margaux',
+      ]),
+    );
+    expect(input.semanticQueries).not.toEqual(
+      expect.arrayContaining([
+        '샤토 마고',
+        '마고 샤토',
+      ]),
+    );
+  });
+
+  it('derives semanticEmbeddingQueries from embedding-friendly normalized views when semanticVariants are absent', () => {
+    const plan = minimalPlan({
+      rawQuery: '샤또마고1996',
+      normalizedQuery: '샤토 마고 1996',
+      normalizedQueryViews: {
+        raw: '샤또마고1996',
+        strict: '샤토 마고 1996',
+        accentless: '샤토 마고 1996',
+        collapsedWhitespace: '샤토 마고 1996',
+        punctuationStripped: '샤토 마고 1996',
+        compact: '샤토마고1996',
+        vintageCanonicalized: '샤토 마고 1996',
+        vintageStripped: '샤토 마고',
+        transliterated: 'chateau margaux',
+        reordered: ['마고 샤토'],
+        semanticVariants: [],
+        lookupVariants: [
+          '샤토 마고 1996',
+          '샤토마고1996',
+          'chateau margaux',
+          'chtmrg1996',
+          '마고 샤토',
+        ],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+
+    expect(input.semanticEmbeddingQueries).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        '샤토 마고 1996',
+        '샤토 마고',
+        'chateau margaux',
+        '마고 샤토',
+      ]),
+    );
+    expect(input.semanticEmbeddingQueries).not.toEqual(
+      expect.arrayContaining([
+        '샤토마고1996',
+        'chtmrg1996',
+      ]),
+    );
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        'chateau margaux',
+      ]),
+    );
+    expect(input.semanticQueries).not.toEqual(
+      expect.arrayContaining([
+        '샤토 마고',
+        '마고 샤토',
+      ]),
+    );
+  });
+
+  it('forwards semantic noisy-query views into candidatePool semanticEmbeddingQueries', async () => {
+    const plan = minimalPlan({
+      rawQuery: '샤또마고1996',
+      normalizedQuery: '샤토 마고 1996',
+      normalizedQueryViews: {
+        raw: '샤또마고1996',
+        strict: '샤토 마고 1996',
+        accentless: '샤토 마고 1996',
+        collapsedWhitespace: '샤토 마고 1996',
+        punctuationStripped: '샤토 마고 1996',
+        compact: '샤토마고1996',
+        vintageCanonicalized: '샤토 마고 1996',
+        vintageStripped: '샤토 마고',
+        transliterated: 'chateau margaux',
+        reordered: ['마고 샤토'],
+        semanticVariants: [],
+        lookupVariants: [
+          '샤토 마고 1996',
+          '샤토마고1996',
+          'chateau margaux',
+          'chtmrg1996',
+          '마고 샤토',
+        ],
+      },
+    });
+    const compiled = buildCompiled(plan, {
+      effectiveRetrievalMode: 'attribute_search',
+    });
+    const candidatePool = {
+      execute: vi.fn(async () => []),
+      getLastDegradationCodes: vi.fn(() => []),
+      getLastDegradationSignals: vi.fn(() => []),
+    };
+
+    await retrieveHybridCandidatesForPlan(
+      plan,
+      { candidatePool: candidatePool as never },
+      async () => failedResolveResult(),
+      compiled,
+    );
+
+    expect(candidatePool.execute).toHaveBeenCalledOnce();
+    expect(candidatePool.execute.mock.calls[0]?.[0].semanticEmbeddingQueries).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        '샤토 마고',
+        'chateau margaux',
+        '마고 샤토',
+      ]),
+    );
+    expect(candidatePool.execute.mock.calls[0]?.[0].semanticEmbeddingQueries).not.toEqual(
+      expect.arrayContaining([
+        '샤토마고1996',
+        'chtmrg1996',
+      ]),
+    );
+    expect(candidatePool.execute.mock.calls[0]?.[0].semanticQueries).toEqual(
+      expect.arrayContaining([
+        '샤또마고1996',
+        'chateau margaux',
+      ]),
+    );
+    expect(candidatePool.execute.mock.calls[0]?.[0].semanticQueries).not.toEqual(
+      expect.arrayContaining([
+        '샤토 마고',
+        '마고 샤토',
+      ]),
+    );
+  });
+
+  it('uses ambiguous short-form family hints for retrieval fanout without promoting direct grape constraints', () => {
+    const plan = minimalPlan({
+      rawQuery: '피노 추천',
+      normalizedQuery: '피노 추천',
+      queryClass: 'ambiguous_short_form',
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: {
+        lexical: ['피노 추천'],
+        semantic: ['피노 추천'],
+        ambiguousEntityHints: [{
+          surface: '피노',
+          entityType: 'grape_primary',
+          retrievalConstraint: {
+            attribute: 'grape_family',
+            operator: '=',
+            value: 'Pinot',
+          },
+          lexicalExpansions: ['pinot'],
+          semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+          clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+          explorationBranches: [
+            {
+              label: 'Pinot Noir',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Noir',
+              },
+              matchValues: ['Pinot Noir'],
+              lexicalExpansions: ['pinot noir'],
+              semanticExpansions: ['pinot noir'],
+            },
+            {
+              label: 'Pinot Gris',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Gris',
+              },
+              matchValues: ['Pinot Gris', 'Pinot Grigio'],
+              lexicalExpansions: ['pinot gris', 'pinot grigio'],
+              semanticExpansions: ['pinot gris', 'pinot grigio'],
+            },
+            {
+              label: 'Pinot Blanc',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Blanc',
+              },
+              matchValues: ['Pinot Blanc'],
+              lexicalExpansions: ['pinot blanc'],
+              semanticExpansions: ['pinot blanc'],
+            },
+          ],
+        }],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+    expect(input.hardConstraints).toHaveLength(0);
+    expect(input.softConstraints).toEqual([
+      expect.objectContaining({
+        attribute: 'grape_family',
+        operator: '=',
+        value: 'Pinot',
+        source_phrase: 'ambiguous_entity_hint(피노)',
+      }),
+    ]);
+    expect(input.lexicalQueries).toEqual(expect.arrayContaining(['피노 추천', 'pinot']));
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining(['피노 추천', 'pinot noir', 'pinot gris', 'pinot blanc']),
+    );
+    expect(input.entityHypothesisTerms).toBeUndefined();
+  });
+
+  it('keeps Pinot family ambiguity hints branch-separated in retrieval fanout without promoting direct grape_primary constraints', () => {
+    const plan = minimalPlan({
+      rawQuery: '피노 추천',
+      normalizedQuery: '피노 추천',
+      queryClass: 'ambiguous_short_form',
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: {
+        lexical: ['피노 추천'],
+        semantic: ['피노 추천'],
+        ambiguousEntityHints: [{
+          surface: '피노',
+          entityType: 'grape_primary',
+          retrievalConstraint: {
+            attribute: 'grape_family',
+            operator: '=',
+            value: 'Pinot',
+          },
+          lexicalExpansions: ['pinot'],
+          semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+          clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+          explorationBranches: [
+            {
+              label: 'Pinot Noir',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Noir',
+              },
+              matchValues: ['Pinot Noir'],
+              lexicalExpansions: ['pinot noir'],
+              semanticExpansions: ['pinot noir'],
+            },
+            {
+              label: 'Pinot Gris',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Gris',
+              },
+              matchValues: ['Pinot Gris', 'Pinot Grigio'],
+              lexicalExpansions: ['pinot gris', 'pinot grigio'],
+              semanticExpansions: ['pinot gris', 'pinot grigio'],
+            },
+            {
+              label: 'Pinot Blanc',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Blanc',
+              },
+              matchValues: ['Pinot Blanc'],
+              lexicalExpansions: ['pinot blanc'],
+              semanticExpansions: ['pinot blanc'],
+            },
+          ],
+        }],
+      },
+    });
+
+    const input = buildHybridRetrievalInputForPlan(plan);
+
+    expect(input.softConstraints).toEqual([
+      expect.objectContaining({
+        attribute: 'grape_family',
+        operator: '=',
+        value: 'Pinot',
+        source_phrase: 'ambiguous_entity_hint(피노)',
+      }),
+    ]);
+    expect(input.softConstraints.some((constraint) => constraint.attribute === 'grape_primary')).toBe(false);
+    expect(input.lexicalQueries).toEqual(expect.arrayContaining(['피노 추천', 'pinot']));
+    expect(input.semanticQueries).toEqual(
+      expect.arrayContaining(['피노 추천', 'pinot noir', 'pinot gris', 'pinot blanc']),
+    );
+    expect(plan.expansions.ambiguousEntityHints?.[0]?.explorationBranches.map((branch) => branch.softConstraint.value)).toEqual([
+      'Pinot Noir',
+      'Pinot Gris',
+      'Pinot Blanc',
+    ]);
+  });
+
+  it('executes Pinot family ambiguity branches in parallel and merges them branch-balanced', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        rawQuery: '피노 추천',
+        normalizedQuery: '피노 추천',
+        queryClass: 'semantic_preference',
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: {
+          lexical: ['피노 추천'],
+          semantic: ['피노 추천'],
+          ambiguousEntityHints: [{
+            surface: '피노',
+            entityType: 'grape_primary',
+            retrievalConstraint: {
+              attribute: 'grape_family',
+              operator: '=',
+              value: 'Pinot',
+            },
+            lexicalExpansions: ['pinot'],
+            semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+            clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+            explorationBranches: [
+              {
+                label: 'Pinot Noir',
+                softConstraint: {
+                  attribute: 'grape_primary',
+                  operator: '=',
+                  value: 'Pinot Noir',
+                },
+                matchValues: ['Pinot Noir'],
+                lexicalExpansions: ['pinot noir'],
+                semanticExpansions: ['pinot noir'],
+              },
+              {
+                label: 'Pinot Gris',
+                softConstraint: {
+                  attribute: 'grape_primary',
+                  operator: '=',
+                  value: 'Pinot Gris',
+                },
+                matchValues: ['Pinot Gris', 'Pinot Grigio'],
+                lexicalExpansions: ['pinot gris', 'pinot grigio'],
+                semanticExpansions: ['pinot gris', 'pinot grigio'],
+              },
+              {
+                label: 'Pinot Blanc',
+                softConstraint: {
+                  attribute: 'grape_primary',
+                  operator: '=',
+                  value: 'Pinot Blanc',
+                },
+                matchValues: ['Pinot Blanc'],
+                lexicalExpansions: ['pinot blanc'],
+                semanticExpansions: ['pinot blanc'],
+              },
+            ],
+          }],
+        },
+      });
+      const compiled = buildCompiled(plan, {
+        effectiveRetrievalMode: 'attribute_search',
+      });
+
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          const grapePrimary = input.softConstraints.find(
+            (constraint) => constraint.attribute === 'grape_primary',
+          )?.value;
+          if (grapePrimary === 'Pinot Noir') {
+            return [
+              makeCandidate({
+                entityId: createEntityId('pinot-noir-1'),
+                canonicalLabel: 'Pinot Noir Lead',
+                grapePrimary: 'Pinot Noir',
+                fusionRrfTotal: 0.99,
+              }),
+              makeCandidate({
+                entityId: createEntityId('pinot-noir-2'),
+                canonicalLabel: 'Pinot Noir Second',
+                grapePrimary: 'Pinot Noir',
+                fusionRrfTotal: 0.89,
+              }),
+            ];
+          }
+          if (grapePrimary === 'Pinot Gris') {
+            return [
+              makeCandidate({
+                entityId: createEntityId('pinot-gris-1'),
+                canonicalLabel: 'Pinot Gris Lead',
+                grapePrimary: 'Pinot Gris',
+                fusionRrfTotal: 0.8,
+              }),
+            ];
+          }
+          if (grapePrimary === 'Pinot Blanc') {
+            return [
+              makeCandidate({
+                entityId: createEntityId('pinot-blanc-1'),
+                canonicalLabel: 'Pinot Blanc Lead',
+                grapePrimary: 'Pinot Blanc',
+                fusionRrfTotal: 0.7,
+              }),
+            ];
+          }
+          return [];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+        getLastDegradationSignals: vi.fn(() => []),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(3);
+      expect(result.candidates.map((candidate) => candidate.canonicalLabel)).toEqual([
+        'Pinot Noir Lead',
+        'Pinot Gris Lead',
+        'Pinot Blanc Lead',
+        'Pinot Noir Second',
+      ]);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('runs only the compiler-selected ambiguity branch when the compiler emits a single branch', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        rawQuery: '피노 추천',
+        normalizedQuery: '피노 추천',
+        queryClass: 'ambiguous_short_form',
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: {
+          lexical: ['피노 추천'],
+          semantic: ['피노 추천'],
+          ambiguousEntityHints: [{
+            surface: '피노',
+            entityType: 'grape_primary',
+            retrievalConstraint: {
+              attribute: 'grape_family',
+              operator: '=',
+              value: 'Pinot',
+            },
+            lexicalExpansions: ['pinot'],
+            semanticExpansions: ['pinot noir'],
+            clarifyOptions: ['Pinot Noir'],
+            explorationBranches: [
+              {
+                label: 'Pinot Noir',
+                softConstraint: {
+                  attribute: 'grape_primary',
+                  operator: '=',
+                  value: 'Pinot Noir',
+                },
+                matchValues: ['Pinot Noir'],
+                lexicalExpansions: ['pinot noir'],
+                semanticExpansions: ['pinot noir'],
+              },
+            ],
+          }],
+        },
+      });
+      const compiled = buildCompiled(plan, {
+        effectiveRetrievalMode: 'attribute_search',
+      });
+
+      const candidatePool = {
+        execute: vi.fn(async () => [
+          makeCandidate({
+            entityId: createEntityId('pinot-noir-1'),
+            canonicalLabel: 'Pinot Noir Lead',
+            grapePrimary: 'Pinot Noir',
+            fusionRrfTotal: 0.99,
+          }),
+        ]),
+        getLastDegradationCodes: vi.fn(() => []),
+        getLastDegradationSignals: vi.fn(() => []),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(1);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]?.canonicalLabel).toBe('Pinot Noir Lead');
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
   it('expands approachable/crowd-pleasing style semantics into retrieval archetype terms', () => {
     const plan = minimalPlan({
       constraints: {
@@ -353,7 +910,10 @@ describe('retrieveHybridCandidatesForPlan', () => {
 
     const input = buildHybridRetrievalInputForPlan(plan);
     expect(input.semanticQueries).toEqual(
-      expect.arrayContaining(['approachable', 'crowd pleasing', 'easy drinking', 'merlot', 'red blend']),
+      expect.arrayContaining(['approachable', 'crowd pleasing', 'easy drinking']),
+    );
+    expect(input.semanticQueries).not.toEqual(
+      expect.arrayContaining(['merlot', 'red blend']),
     );
   });
 
@@ -402,6 +962,189 @@ describe('retrieveHybridCandidatesForPlan', () => {
     expect(input.semanticQueries).not.toEqual(
       expect.arrayContaining(['merlot', 'red blend']),
     );
+  });
+
+  it('runs typed recommendation discovery for generic gift/non-expert queries without explicit wine type', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        rawQuery: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+        normalizedQuery: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+        constraints: {
+          hard: [],
+          soft: [
+            {
+              attribute: 'occasion',
+              operator: 'in',
+              value: ['gift'],
+              source_phrase: '선물',
+              confidence: 0.95,
+            },
+            {
+              attribute: 'style',
+              operator: 'in',
+              value: ['approachable', 'crowd_pleasing'],
+              source_phrase: '실패 없는',
+              confidence: 0.9,
+            },
+          ],
+          inferred: [],
+        },
+      });
+      const compiled = buildCompiled(plan, {
+        effectiveRetrievalMode: 'attribute_search',
+      });
+
+      const seenInputs: Array<{
+        hardValues: string[];
+        semanticQueries: readonly string[];
+      }> = [];
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          seenInputs.push({
+            hardValues: input.hardConstraints
+              .map((constraint) => `${constraint.attribute}:${String(constraint.value)}`)
+              .sort(),
+            semanticQueries: input.semanticQueries,
+          });
+          const wineType = input.hardConstraints.find((constraint) => constraint.attribute === 'wine_type')?.value;
+          return [
+            makeCandidate({
+              entityId: createEntityId(`wine-${String(wineType)}`),
+              wineType: typeof wineType === 'string' ? wineType : undefined,
+            }),
+          ];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+        getLastDegradationSignals: vi.fn(() => []),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(3);
+      expect(seenInputs.map((input) => input.hardValues)).toEqual([
+        ['wine_type:white'],
+        ['wine_type:sparkling'],
+        ['wine_type:red'],
+      ]);
+      expect(seenInputs[0]?.semanticQueries).toEqual(
+        expect.arrayContaining(['pinot grigio', 'riesling', 'moscato']),
+      );
+      expect(seenInputs[0]?.semanticQueries).not.toEqual(
+        expect.arrayContaining(['merlot', 'red blend']),
+      );
+      expect(seenInputs[1]?.semanticQueries).toEqual(
+        expect.arrayContaining(['prosecco', 'cava', 'cremant', 'champagne']),
+      );
+      expect(seenInputs[1]?.semanticQueries).not.toEqual(
+        expect.arrayContaining(['merlot', 'red blend']),
+      );
+      expect(seenInputs[2]?.semanticQueries).toEqual(
+        expect.arrayContaining(['merlot', 'red blend', 'pinot noir']),
+      );
+      expect(result.retrievalKind).toBe('generic_hybrid');
+      expect(result.candidates.map((candidate) => String(candidate.entityId)).sort()).toEqual([
+        'wine-red',
+        'wine-sparkling',
+        'wine-white',
+      ]);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('keeps typed recommendation branches branch-balanced so one wine type cannot monopolize the merge', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        rawQuery: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+        normalizedQuery: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+        constraints: {
+          hard: [],
+          soft: [
+            {
+              attribute: 'occasion',
+              operator: 'in',
+              value: ['gift'],
+              source_phrase: '선물',
+              confidence: 0.95,
+            },
+            {
+              attribute: 'style',
+              operator: 'in',
+              value: ['approachable', 'crowd_pleasing'],
+              source_phrase: '실패 없는',
+              confidence: 0.9,
+            },
+          ],
+          inferred: [],
+        },
+      });
+      const compiled = buildCompiled(plan, {
+        effectiveRetrievalMode: 'attribute_search',
+      });
+
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          const wineType = input.hardConstraints.find((constraint) => constraint.attribute === 'wine_type')?.value;
+          const scoreKey = typeof wineType === 'string' ? wineType : 'unknown';
+          const score =
+            scoreKey === 'white'
+              ? 0.86
+              : scoreKey === 'sparkling'
+                ? 0.95
+                : scoreKey === 'red'
+                  ? 0.91
+                  : 0.8;
+          return [
+            makeCandidate({
+              entityId: createEntityId(`wine-${scoreKey}`),
+              canonicalLabel: `branch-${scoreKey}`,
+              wineType: typeof wineType === 'string' ? wineType : undefined,
+              fusionRrfTotal: score,
+            }),
+          ];
+        }),
+        getLastDegradationCodes: vi.fn(() => []),
+        getLastDegradationSignals: vi.fn(() => []),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(3);
+      expect(result.candidates.map((candidate) => String(candidate.entityId))).toEqual([
+        'wine-white',
+        'wine-sparkling',
+        'wine-red',
+      ]);
+      expect(result.candidates.map((candidate) => candidate.canonicalLabel)).toEqual([
+        'branch-white',
+        'branch-sparkling',
+        'branch-red',
+      ]);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
   });
 
   it('treats presentation-forward style as a retrieval no-op because there is no backing data profile', () => {

@@ -73,6 +73,15 @@ describe('buildOntologySnapshot', () => {
     expect(napa!.aliases).toEqual(expect.arrayContaining(['나파', '나파 밸리']));
   });
 
+  it('exports direct Pinot Gris Korean aliases but excludes ambiguous 피노 short-form from the snapshot artifact', () => {
+    const snapshot = buildOntologySnapshot('2026-04-09T00:00:00.000Z');
+
+    const pinotGris = snapshot.entities['grape_primary:pinot gris'];
+    expect(pinotGris).toBeDefined();
+    expect(pinotGris!.aliases).toEqual(expect.arrayContaining(['피노 그리지오', '피노 그리']));
+    expect(pinotGris!.aliases).not.toContain('피노');
+  });
+
   it('country entities have no parent', () => {
     const snapshot = buildOntologySnapshot('2026-04-09T00:00:00.000Z');
 

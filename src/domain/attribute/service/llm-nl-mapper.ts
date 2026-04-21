@@ -538,7 +538,11 @@ function canonicalizeEntityLikeValue(
     return null;
   }
   const resolved = resolveEntity(item.value, { preferEntityOverStyle: true }, fuzzyMatcher);
-  if (resolved === null || resolved.entityType !== item.attribute) {
+  if (
+    resolved === null
+    || resolved.entityType !== item.attribute
+    || resolved.resolutionMode !== 'direct'
+  ) {
     return null;
   }
   return { value: resolved.canonicalValue };

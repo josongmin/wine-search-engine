@@ -3,10 +3,34 @@ import { buildSearchToolStyleQueryTerms } from './search-tool-contract.js';
 interface SearchToolSoftClauseInput {
   readonly exclude_grapes?: readonly string[] | undefined;
   readonly exclude_regions?: readonly string[] | undefined;
+  readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
   readonly certification?: string | undefined;
+}
+
+function formatKrwAsManWon(krw: number): string {
+  const manWon = krw / 10_000;
+  return Number.isInteger(manWon) ? String(manWon) : manWon.toString();
+}
+
+export function buildSearchToolPriceClauses(input: {
+  readonly min_price_krw?: number | undefined;
+  readonly max_price_krw?: number | undefined;
+}): readonly string[] {
+  if (input.min_price_krw !== undefined && input.max_price_krw !== undefined) {
+    return [`${formatKrwAsManWon(input.min_price_krw)}~${formatKrwAsManWon(input.max_price_krw)}만원`];
+  }
+
+  const clauses: string[] = [];
+  if (input.min_price_krw !== undefined) {
+    clauses.push(`${input.min_price_krw}원 이상`);
+  }
+  if (input.max_price_krw !== undefined) {
+    clauses.push(`${input.max_price_krw}원 이하`);
+  }
+  return clauses;
 }
 
 export function appendStructuredQueryClauses(
@@ -32,9 +56,7 @@ export function buildSearchToolSoftClauses(
   for (const region of input.exclude_regions ?? []) {
     clauses.push(`not ${region}`);
   }
-  if (input.max_price_krw !== undefined) {
-    clauses.push(`${input.max_price_krw}원 이하`);
-  }
+  clauses.push(...buildSearchToolPriceClauses(input));
   for (const style of buildSearchToolStyleQueryTerms(input)) {
     clauses.push(style);
   }

@@ -45,6 +45,7 @@ function makeResolverResult(overrides?: {
   gap?: number;
   ambiguityDetected?: boolean;
   topEntityLabel?: string;
+  conformalSetSize?: number;
 }): EntityResolveResult {
   const C = overrides?.C ?? 0.85;
   const gap = overrides?.gap ?? 0.2;
@@ -86,12 +87,13 @@ function makeResolverResult(overrides?: {
           compact: 'opusone18',
           vintageCanonicalized: 'opus one 2018',
           vintageStripped: 'opus one',
+          semanticVariants: ['Opus-One 18', 'opus-one 18', 'opus one 18', 'opus one 2018', 'opus one'],
           lookupVariants: ['opus-one 18', 'opus one 18', 'opusone18'],
         },
         anchorLookupVariants: ['opusone18', 'opus one 2018'],
       },
     },
-    conformalSetSize: 1,
+    conformalSetSize: overrides?.conformalSetSize ?? 1,
   };
 }
 
@@ -120,6 +122,9 @@ function makeUncertainty(overrides?: Partial<QueryUncertainty>): QueryUncertaint
 // ── Base query plan factory ───────────────────────────────────────────────────
 function makeQueryPlan(overrides?: {
   queryClass?: QueryPlanV1['queryClass'];
+  intent?: QueryPlanV1['intent'];
+  route?: QueryPlanV1['route'];
+  retrievalMode?: QueryPlanV1['retrievalMode'];
   hardConstraints?: any[];
   softConstraints?: any[];
   anchors?: any[];
@@ -129,8 +134,9 @@ function makeQueryPlan(overrides?: {
   return {
     rawQuery: 'opus one',
     normalizedQuery: 'opus one',
-    intent: 'entity_exact',
-    route: 'entity',
+    intent: overrides?.intent ?? 'entity_exact',
+    route: overrides?.route ?? 'entity',
+    retrievalMode: overrides?.retrievalMode ?? 'entity_lookup',
     queryClass: overrides?.queryClass ?? 'short_entity',
     anchors: overrides?.anchors ?? [],
     constraints: {
@@ -269,6 +275,34 @@ describe('DecisionEngine', () => {
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
+  });
+
+  it('semantic_preference recommendation uses confidence-only numeric gate and resolves despite wide conformal sets', async () => {
+    const input = makeDecisionInput({
+      queryPlan: makeQueryPlan({
+        queryClass: 'semantic_preference',
+        intent: 'pairing_search',
+        route: 'hybrid',
+        retrievalMode: 'recommendation',
+        policy: makePolicy({ allowApproximate: true }),
+      }),
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode: 'recommendation',
+      resolverResult: makeResolverResult({
+        C: 0.52,
+        gap: 0.0001,
+        ambiguityDetected: true,
+        conformalSetSize: 10,
+      }),
+      policy: makePolicy({ allowApproximate: true }),
+      evidenceSummary: {
+        identityEvidencePresent: true,
+      },
+    });
+    const output = await engine.decide(input, snapshot);
+    expect(output.decisionStatus).toBe('resolved');
+    expect(output.decisionTrace.rulesApplied).toContain('NUMERIC_GATE_PREFERENCE_MODE');
+    expect(output.decisionTrace.thresholds.numericGateMode).toBe('preference');
   });
 
   it('C >= T_resolve, gap >= T_gap, but NO identity evidence → downgrade to ambiguous', async () => {

@@ -27,6 +27,8 @@ import {
 } from '../../evaluation/service/wine-ontology.js';
 import { listDefaultEntityAliasMappings } from './nl-mapper.js';
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
+import type { EntityResolutionMode } from './entity-alias-catalog.js';
+import type { AmbiguousEntityHint, AmbiguousEntityHintSpec } from '../model/ambiguous-entity-hint.js';
 import type { FuzzyMatcherPort } from '../../query/port/fuzzy-matcher.port.js';
 import { wineTitleCase } from '../../shared/utils/title-case.js';
 
@@ -63,6 +65,10 @@ export interface ResolvedEntity {
   readonly matchedSurface: string;
   /** Confidence derived from source table type. */
   readonly confidence: number;
+  /** Whether this alias is safe to promote directly into planner constraints. */
+  readonly resolutionMode: EntityResolutionMode;
+  /** Retrieval/clarify hint for ambiguous short-form aliases. */
+  readonly ambiguityHint?: AmbiguousEntityHint | undefined;
   /** Provenance tag — which source table provided this resolution. */
   readonly provenance:
     | 'grape_aliases'
@@ -73,7 +79,9 @@ export interface ResolvedEntity {
     | 'fuzzy_fallback';
 }
 
-type ResolverEntry = Omit<ResolvedEntity, 'matchedSurface'>;
+type ResolverEntry =
+  Omit<ResolvedEntity, 'matchedSurface' | 'ambiguityHint'>
+  & { readonly ambiguityHint?: AmbiguousEntityHintSpec | undefined };
 
 interface ResolveEntityOptions {
   /**
@@ -110,6 +118,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
       canonicalValue: canonical,
       entityType: 'wine_type',
       confidence: CONFIDENCE_WINE_TYPE,
+      resolutionMode: 'direct',
       provenance: 'wine_type_aliases',
     });
   }
@@ -129,6 +138,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
       canonicalValue: wineTitleCase(country),
       entityType: 'country',
       confidence: CONFIDENCE_COUNTRY_DERIVED,
+      resolutionMode: 'direct',
       provenance: 'country_derived',
     });
   }
@@ -144,6 +154,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
       canonicalValue: wineTitleCase(regionKey),
       entityType: 'region',
       confidence: CONFIDENCE_REGION,
+      resolutionMode: 'direct',
       provenance: 'region_parents',
     });
   }
@@ -156,6 +167,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
       canonicalValue: wineTitleCase(canonical),
       entityType: 'grape_primary',
       confidence: CONFIDENCE_GRAPE,
+      resolutionMode: 'direct',
       provenance: 'grape_aliases',
     });
   }
@@ -165,6 +177,8 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
       canonicalValue: alias.canonicalValue,
       entityType: alias.entityType,
       confidence: alias.confidence,
+      resolutionMode: alias.resolutionMode,
+      ...(alias.ambiguityHint !== undefined ? { ambiguityHint: alias.ambiguityHint } : {}),
       provenance: alias.provenance,
     });
   }
@@ -176,6 +190,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
       canonicalValue: mapping.canonicalValue,
       entityType: toEntityType(mapping.mappedAttribute),
       confidence: mapping.mappingConfidence,
+      resolutionMode: 'direct',
       provenance: 'nl_mapper_defaults',
     });
   }
@@ -223,7 +238,16 @@ export function resolveEntity(
       if (byType !== 0) return byType;
       return right.confidence - left.confidence;
     })[0];
-    if (selected !== undefined) return { ...selected, matchedSurface: spanText };
+    if (selected !== undefined) {
+      const { ambiguityHint, ...rest } = selected;
+      return {
+        ...rest,
+        matchedSurface: spanText,
+        ...(ambiguityHint !== undefined
+          ? { ambiguityHint: materializeAmbiguityHint(ambiguityHint, spanText) }
+          : {}),
+      };
+    }
   }
 
   // ── Fuzzy fallback: re-lookup best fuzzy match in RESOLVER_INDEX ──
@@ -241,10 +265,15 @@ export function resolveEntity(
           return right.confidence - left.confidence;
         })[0];
         if (selected !== undefined) {
+          const { ambiguityHint, ...rest } = selected;
           return {
-            ...selected,
+            ...rest,
             matchedSurface: spanText,
             confidence: hit.combinedScore * FUZZY_CONFIDENCE_DISCOUNT,
+            resolutionMode: selected.resolutionMode,
+            ...(ambiguityHint !== undefined
+              ? { ambiguityHint: materializeAmbiguityHint(ambiguityHint, spanText) }
+              : {}),
             provenance: 'fuzzy_fallback',
           };
         }
@@ -253,6 +282,22 @@ export function resolveEntity(
   }
 
   return null;
+}
+
+export function isDirectEntityResolution(
+  entity: ResolvedEntity | null | undefined,
+): entity is ResolvedEntity {
+  return entity !== null && entity !== undefined && entity.resolutionMode === 'direct';
+}
+
+function materializeAmbiguityHint(
+  hint: AmbiguousEntityHintSpec,
+  surface: string,
+): AmbiguousEntityHint {
+  return {
+    ...hint,
+    surface,
+  };
 }
 
 function normalizeResolverKey(surface: string): string {

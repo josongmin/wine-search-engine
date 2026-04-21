@@ -90,6 +90,46 @@ describe('planToObservabilitySlice', () => {
     expect(slice.constraintExtraction).toEqual(extraction);
   });
 
+  it('surfaces LLM extraction metrics and decomposition hints on the observability slice', () => {
+    const extraction = {
+      candidatePhraseCount: 2,
+      ruleTableHitCount: 0,
+      llmHitCount: 1,
+      llmSkippedCount: 0,
+      fallbackTriggered: false,
+      source: 'llm_only' as const,
+      llmLatencyMs: 37,
+      phraseCacheHits: 1,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      llmLinkedEntityCount: 1,
+      resolvedEntityCount: 1,
+      directHardConstraintCount: 0,
+      ontologyExpandedConstraintCount: 0,
+      compositionalInferenceCount: 0,
+      missedPhrases: ['피노'],
+    };
+    const plan = makePlan({
+      constraintExtraction: extraction,
+      decompositionHint: {
+        strategy: 'multi_intent',
+        subQueryCount: 2,
+        confidence: 0.83,
+      },
+    });
+
+    const slice = planToObservabilitySlice('req-observability-trace', plan);
+
+    expect(slice.constraintExtraction).toMatchObject({
+      source: 'llm_only',
+      llmHitCount: 1,
+      llmSkippedCount: 0,
+      llmLatencyMs: 37,
+    });
+    expect(slice.decompositionStrategy).toBe('multi_intent');
+    expect(slice.decompositionConfidence).toBe(0.83);
+  });
+
   it('4th argument overrides plan.constraintExtraction when both are present', () => {
     const fromPlan = {
       candidatePhraseCount: 1,

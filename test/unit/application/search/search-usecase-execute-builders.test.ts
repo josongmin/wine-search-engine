@@ -3,9 +3,12 @@ import {
   buildConstraintContradictionResponseParams,
   buildEntropyAbstainResponseParams,
 } from '../../../../src/application/search/search-usecase-execute-builders.js';
+import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
+import type { RankedResult } from '../../../../src/domain/ranking/model/ranked-result.js';
 import type { DecisionSnapshot } from '../../../../src/domain/shared/types/index.js';
+import type { TypedAbstainDecision } from '../../../../src/domain/query/model/abstain-decision.js';
 
 function makePlan(): QueryPlanV1 {
   return {
@@ -69,6 +72,25 @@ function makeCompiled(): CompiledWineQuery {
   } as CompiledWineQuery;
 }
 
+function makeRankedResult(canonicalLabel: string, rank: number): RankedResult {
+  return {
+    entityId: createEntityId(`wine:${canonicalLabel}:${rank}`),
+    canonicalLabel,
+    finalScore: 0.9 - rank * 0.01,
+    rank,
+    componentScores: {
+      entityIntegrity: 1,
+      hardConstraintPass: true,
+      softConstraint: 0.5,
+      uncertaintyPenalty: 0,
+    },
+    evidenceItems: [],
+    matchedConstraints: [],
+    unmetConstraints: [],
+    inferredConstraints: [],
+  };
+}
+
 function makeSnapshot(): DecisionSnapshot {
   return {
     snapshot_id: 'snapshot-1',
@@ -122,5 +144,188 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
     });
 
     expect(params.decisionOutput.decisionTrace.signals.calibratedGap).toBeUndefined();
+  });
+
+  it('uses alias-aware clarification payload for ambiguous short-form low-confidence responses instead of generic top labels', () => {
+    const plan = {
+      ...makePlan(),
+      rawQuery: '피노 추천',
+      normalizedQuery: '피노 추천',
+      queryClass: 'ambiguous_short_form',
+      expansions: {
+        lexical: [],
+        semantic: [],
+        ambiguousEntityHints: [{
+          surface: '피노',
+          entityType: 'grape_primary',
+          retrievalConstraint: {
+            attribute: 'grape_family',
+            operator: '=',
+            value: 'Pinot',
+          },
+          lexicalExpansions: ['pinot'],
+          semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+          clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+          explorationBranches: [
+            {
+              label: 'Pinot Noir',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Noir',
+              },
+              matchValues: ['Pinot Noir'],
+              lexicalExpansions: ['pinot noir'],
+              semanticExpansions: ['pinot noir'],
+            },
+            {
+              label: 'Pinot Gris',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Gris',
+              },
+              matchValues: ['Pinot Gris', 'Pinot Grigio'],
+              lexicalExpansions: ['pinot gris', 'pinot grigio'],
+              semanticExpansions: ['pinot gris', 'pinot grigio'],
+            },
+            {
+              label: 'Pinot Blanc',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Blanc',
+              },
+              matchValues: ['Pinot Blanc'],
+              lexicalExpansions: ['pinot blanc'],
+              semanticExpansions: ['pinot blanc'],
+            },
+          ],
+        }],
+      },
+    } as QueryPlanV1;
+    const compiled = makeCompiled();
+    const rankedResults = [
+      makeRankedResult('Generic Top Label A', 1),
+      makeRankedResult('Generic Top Label B', 2),
+      makeRankedResult('Generic Top Label C', 3),
+    ];
+    const abstainDecision: TypedAbstainDecision = {
+      shouldAbstain: true,
+      reason: 'low_confidence',
+      detail: 'ambiguous short-form entity requires family disambiguation',
+      recoverableBy: 'clarify',
+      entropy: 0.97,
+    };
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled,
+      snapshot: makeSnapshot(),
+      requestId: 'req-alias-aware',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'attribute_search',
+      abstainDecision,
+      entropy: 0.97,
+      results: [],
+      rankedResults,
+    });
+
+    expect(params.clarification.structuredPayload).toEqual({
+      kind: 'anchor_disambiguation',
+      question: '피노는 어떤 계열을 찾으시나요?',
+      options: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+    });
+    expect(params.clarification.candidates.map((candidate) => candidate.label)).toEqual([
+      'Generic Top Label A',
+      'Generic Top Label B',
+      'Generic Top Label C',
+    ]);
+  });
+
+  it('prefers compiler-authored clarify payload over ambiguity-hint-derived clarification', () => {
+    const plan = {
+      ...makePlan(),
+      rawQuery: '피노 추천',
+      normalizedQuery: '피노 추천',
+      queryClass: 'ambiguous_short_form',
+      expansions: {
+        lexical: [],
+        semantic: [],
+        ambiguousEntityHints: [{
+          surface: '피노',
+          entityType: 'grape_primary',
+          retrievalConstraint: {
+            attribute: 'grape_family',
+            operator: '=',
+            value: 'Pinot',
+          },
+          lexicalExpansions: ['pinot'],
+          semanticExpansions: ['pinot noir', 'pinot gris', 'pinot blanc'],
+          clarifyOptions: ['Pinot Noir', 'Pinot Gris', 'Pinot Blanc'],
+          explorationBranches: [
+            {
+              label: 'Pinot Noir',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Noir',
+              },
+              matchValues: ['Pinot Noir'],
+              lexicalExpansions: ['pinot noir'],
+              semanticExpansions: ['pinot noir'],
+            },
+            {
+              label: 'Pinot Gris',
+              softConstraint: {
+                attribute: 'grape_primary',
+                operator: '=',
+                value: 'Pinot Gris',
+              },
+              matchValues: ['Pinot Gris', 'Pinot Grigio'],
+              lexicalExpansions: ['pinot gris', 'pinot grigio'],
+              semanticExpansions: ['pinot gris', 'pinot grigio'],
+            },
+          ],
+        }],
+      },
+    } as QueryPlanV1;
+    const compiled = makeCompiled();
+    const rankedResults = [
+      makeRankedResult('Generic Top Label A', 1),
+      makeRankedResult('Generic Top Label B', 2),
+    ];
+    const compilerPayload = {
+      kind: 'anchor_disambiguation' as const,
+      question: 'compiler-authored prompt wins',
+      options: ['Pinot Noir'],
+    };
+    const abstainDecision: TypedAbstainDecision = {
+      shouldAbstain: true,
+      reason: 'low_confidence',
+      detail: 'compiler-authored clarification should take precedence',
+      recoverableBy: 'clarify',
+      entropy: 0.97,
+      clarifyPayload: compilerPayload,
+    };
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled,
+      snapshot: makeSnapshot(),
+      requestId: 'req-compiler-priority',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'attribute_search',
+      abstainDecision,
+      entropy: 0.97,
+      results: [],
+      rankedResults,
+    });
+
+    expect(params.clarification.structuredPayload).toEqual(compilerPayload);
   });
 });

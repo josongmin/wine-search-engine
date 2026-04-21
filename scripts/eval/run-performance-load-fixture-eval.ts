@@ -105,7 +105,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   let timeoutMs = 30_000;
-  let executionLane: BenchmarkExecutionLane = 'public';
+  let executionLane: BenchmarkExecutionLane = 'trusted_benchmark';
   let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
 

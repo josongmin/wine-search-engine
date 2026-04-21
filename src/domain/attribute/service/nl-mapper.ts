@@ -4,6 +4,10 @@ import type { ConstraintExtractionTrace } from '../model/constraint-extraction-t
 import type { NLMapping } from '../model/nl-mapping.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
 import { generateKoreanPredicateVariants } from '../../query/service/korean-predicate-variants.js';
+import {
+  CURATED_ENTITY_ALIAS_CATALOG,
+  type ResolverCompatibleAttribute,
+} from './entity-alias-catalog.js';
 
 /**
  * Current version of the default mapping table.
@@ -535,7 +539,6 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['까쇼', { phrase: '까쇼', mappedAttribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['메를로', { phrase: '메를로', mappedAttribute: 'grape_primary', operator: '=', value: 'Merlot', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['merlot', { phrase: 'merlot', mappedAttribute: 'grape_primary', operator: '=', value: 'Merlot', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
-  ['피노', { phrase: '피노', mappedAttribute: 'grape_primary', operator: '=', value: 'Pinot Noir', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['피노 누아르', { phrase: '피노 누아르', mappedAttribute: 'grape_primary', operator: '=', value: 'Pinot Noir', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['피노누아', { phrase: '피노누아', mappedAttribute: 'grape_primary', operator: '=', value: 'Pinot Noir', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['pinot noir', { phrase: 'pinot noir', mappedAttribute: 'grape_primary', operator: '=', value: 'Pinot Noir', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
@@ -562,14 +565,8 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['게뷔르츠트라미너', { phrase: '게뷔르츠트라미너', mappedAttribute: 'grape_primary', operator: '=', value: 'Gewürztraminer', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['gewurztraminer', { phrase: 'gewurztraminer', mappedAttribute: 'grape_primary', operator: '=', value: 'Gewürztraminer', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['gewürztraminer', { phrase: 'gewürztraminer', mappedAttribute: 'grape_primary', operator: '=', value: 'Gewürztraminer', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ...buildCuratedEntityDefaultMappings(),
 ]);
-
-type ResolverCompatibleAttribute =
-  | 'wine_type'
-  | 'country'
-  | 'region'
-  | 'appellation'
-  | 'grape_primary';
 
 interface DefaultEntityAliasMapping {
   readonly phrase: string;
@@ -605,6 +602,23 @@ function isResolverCompatibleAttribute(value: string): value is ResolverCompatib
     || value === 'region'
     || value === 'appellation'
     || value === 'grape_primary';
+}
+
+function buildCuratedEntityDefaultMappings(): ReadonlyArray<readonly [string, NLMapping]> {
+  return CURATED_ENTITY_ALIAS_CATALOG
+    .filter((entry) => entry.exportToDefaultMappings)
+    .map((entry) => [
+      entry.surface,
+      {
+        phrase: entry.surface,
+        mappedAttribute: entry.mappedAttribute,
+        operator: '=',
+        value: entry.canonicalValue,
+        mappingConfidence: entry.mappingConfidence,
+        mappingVersion: DEFAULT_MAPPING_VERSION,
+        source: DEFAULT_SOURCE,
+      },
+    ] as const);
 }
 
 /**

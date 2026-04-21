@@ -104,6 +104,7 @@ export function buildOntologySnapshot(
     // Collect curated Korean aliases for this entity
     const curatedAliases: string[] = [];
     for (const alias of CURATED_ENTITY_ALIASES) {
+      if (alias.resolutionMode !== 'direct') continue;
       if (alias.canonicalValue.toLowerCase() === node.canonicalLabel.toLowerCase()) {
         curatedAliases.push(alias.surface);
       }
