@@ -18,8 +18,8 @@
     }
   },
   "expected": {
-    "execution_mode": "heuristic",
-    "degradation_reasons": ["heuristic_drinking_window"]
+    "execution_mode": "authoritative",
+    "degradation_reasons": []
   },
   "metadata": {
     "use_live_snapshot": true,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeAgentTool, type AgentToolDeps } from '../../../../src/application/agent/agent-tools.js';
+import { stripSideSpecificCompareSharedConstraints } from '../../../../src/application/search/compare-tool-shared-constraints.js';
 import { extractSearchConstraints } from '../../../../src/domain/query/service/search-constraint-extractor.js';
 import type { SearchExecutorPort } from '../../../../src/application/search/port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
@@ -129,9 +130,13 @@ describe('executeAgentTool', () => {
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
     expect(request?.query).toContain('approachable');
     expect(request?.query).not.toContain('presentation_forward');
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['presentation_forward'] }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
+    ]));
   });
 
-  it('pushes max_alcohol_pct into structured filters for low-alcohol queries', async () => {
+  it('pushes max_alcohol_pct into structured preferences for low-alcohol queries', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
     );
@@ -148,13 +153,16 @@ describe('executeAgentTool', () => {
     );
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
-    expect(request?.query).not.toContain('sweet');
-    expect(request?.filters).toEqual(expect.arrayContaining([
+    expect(request?.query).toContain('sweet');
+    expect(request?.query).toContain('low alcohol 12% 이하');
+    expect(request?.preferences).toEqual(expect.arrayContaining([
       expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+      expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
     ]));
+    expect(request?.filters).toBeUndefined();
   });
 
-  it('compiles sweet style into a structured sweetness filter instead of raw query text', async () => {
+  it('compiles sweet style into structured sweetness preference and retrieval text', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
     );
@@ -171,10 +179,12 @@ describe('executeAgentTool', () => {
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
     expect(request?.query).toContain('approachable');
-    expect(request?.query).not.toContain('sweet');
-    expect(request?.filters).toEqual(expect.arrayContaining([
+    expect(request?.query).toContain('sweet');
+    expect(request?.preferences).toEqual(expect.arrayContaining([
       expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
     ]));
+    expect(request?.filters).toBeUndefined();
   });
 
   it('raises limit to the diversity floor when want_diversity is true', async () => {
@@ -722,9 +732,19 @@ describe('executeAgentTool', () => {
       'req-123',
     );
 
-    const [subQueries, , originalQuery, , , parentContext] = mockDecomposedSearchExecute.mock.calls[0] ?? [];
-    expect(subQueries[0]).toContain('50000원 이하');
-    expect(subQueries[1]).toContain('50000원 이하');
+    const [
+      subQueries,
+      ,
+      originalQuery,
+      ,
+      ,
+      parentContext,
+      ,
+      retrievalSubQueries,
+    ] = mockDecomposedSearchExecute.mock.calls[0] ?? [];
+    expect(subQueries).toEqual(['Barolo', 'Brunello di Montalcino']);
+    expect(retrievalSubQueries[0]).toContain('50000원 이하');
+    expect(retrievalSubQueries[1]).toContain('50000원 이하');
     expect(originalQuery).toContain('50000원 이하');
     expect(parentContext?.filters).toEqual(
       expect.arrayContaining([
@@ -732,6 +752,119 @@ describe('executeAgentTool', () => {
         expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
       ]),
     );
+  });
+
+  it('removes side-specific comparison identity fields from shared comparison context', async () => {
+    const mockDecomposedSearchExecute = vi.fn().mockResolvedValue({
+      queryType: 'comparison',
+      originalQuery: '바롤로 vs 브루넬로',
+      comparisonIntent: 'compare',
+      entities: [],
+      overallStatus: 'resolved',
+      requestId: 'req-123',
+      executionTimeMs: 12,
+      authorityTraceRef: 'cmp-trace',
+      runtimeCorrelationRef: 'req-123',
+    });
+    deps = {
+      ...deps,
+      decomposedSearchExecute: mockDecomposedSearchExecute,
+    };
+
+    await executeAgentTool(
+      'compare_wines',
+      {
+        query_a: '바롤로',
+        query_b: '브루넬로',
+        appellation: 'Barolo',
+        max_price_krw: 100_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [
+      subQueries,
+      ,
+      originalQuery,
+      ,
+      ,
+      parentContext,
+      ,
+      retrievalSubQueries,
+    ] = mockDecomposedSearchExecute.mock.calls[0] ?? [];
+    expect(subQueries).toEqual(['바롤로', '브루넬로']);
+    expect(originalQuery).toContain('100000원 이하');
+    expect(originalQuery).not.toContain('Barolo');
+    expect(retrievalSubQueries[0]).toContain('100000원 이하');
+    expect(retrievalSubQueries[1]).toContain('100000원 이하');
+    expect(retrievalSubQueries[1]).not.toContain('Barolo');
+    expect(parentContext?.filters).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'appellation' }),
+      ]),
+    );
+  });
+
+  it.each([
+    { field: 'country', queryA: 'France', queryB: 'Italy', value: 'France' },
+    { field: 'region', queryA: 'Bordeaux', queryB: 'Burgundy', value: 'Bordeaux' },
+    { field: 'appellation', queryA: 'Barolo', queryB: 'Brunello di Montalcino', value: 'Barolo' },
+    { field: 'grape_primary', queryA: 'Pinot Noir', queryB: 'Syrah', value: 'Pinot Noir' },
+    { field: 'wine_type', queryA: 'red', queryB: 'white', value: 'red' },
+  ] as const)('strips side-specific shared compare $field constraints', ({ field, queryA, queryB, value }) => {
+    const input = {
+      query_a: queryA,
+      query_b: queryB,
+      max_price_krw: 100_000,
+      [field]: value,
+    };
+
+    const stripped = stripSideSpecificCompareSharedConstraints(input);
+
+    expect(stripped).not.toHaveProperty(field);
+    expect(stripped).toMatchObject({
+      query_a: queryA,
+      query_b: queryB,
+      max_price_krw: 100_000,
+    });
+  });
+
+  it('preserves shared compare constraints that do not identify exactly one comparison side', () => {
+    const input = {
+      query_a: 'Barolo',
+      query_b: 'Brunello di Montalcino',
+      country: 'Italy',
+      max_price_krw: 100_000,
+    };
+
+    expect(stripSideSpecificCompareSharedConstraints(input)).toEqual(input);
+  });
+
+  it('forwards occasion and suitability constraints as structured preferences', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '와인 초보자 선물',
+        occasion: ['gift'],
+        gift_suitability_min: 0.8,
+        beginner_suitability_min: 0.7,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+      expect.objectContaining({ attribute: 'gift_suitability', operator: '>=', value: 0.8 }),
+      expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.7 }),
+    ]));
+    expect(request?.filters).toBeUndefined();
   });
 
   it('post-filters results using structured exclusion inputs', async () => {
@@ -1127,6 +1260,120 @@ describe('executeAgentTool', () => {
     const filtered = result.rawResult as SearchResponseV1;
     expect(filtered.results).toHaveLength(1);
     expect(filtered.results[0]?.entity.entityId).toBe('wine-cheap');
+  });
+
+  it('alcohol post-filter: removes known wines above max_alcohol_pct while retaining unknown alcohol candidates', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-low', canonicalLabel: 'Low Alcohol Moscato', type: 'wine', alcoholPct: 7.5 },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-high', canonicalLabel: 'High Alcohol Red', type: 'wine', alcoholPct: 14.5 },
+          relevanceScore: 0.85,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.85, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-unknown', canonicalLabel: 'Unknown Alcohol Sparkling', type: 'wine' },
+          relevanceScore: 0.8,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.8, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '도수 낮은 달달한 와인', max_alcohol_pct: 12 }, deps, 'req-123');
+    const filtered = result.rawResult as SearchResponseV1;
+    expect(filtered.results.map((item) => item.entity.entityId)).toEqual(['wine-low', 'wine-unknown']);
+    expect(result.observation).toContain('[ALCOHOL_FILTER: 12% 초과로 확인된 1개 결과를 제외했습니다.');
+  });
+
+  it('preserves parseable GROUNDING_JSON when long observations are capped', async () => {
+    const longLineage = 'lineage-segment-'.repeat(80);
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Long Wine One',
+            type: 'wine',
+            region: 'Napa Valley',
+            priceRange: '$10',
+            sourceRecordRefs: [{ sourceSystem: longLineage, sourceRecordId: longLineage }],
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'wine-2',
+            canonicalLabel: 'Long Wine Two',
+            type: 'wine',
+            region: 'Burgundy',
+            priceRange: '$12',
+            sourceRecordRefs: [{ sourceSystem: longLineage, sourceRecordId: longLineage }],
+          },
+          relevanceScore: 0.8,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.8, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '긴 결과' }, deps, 'req-123');
+    const marker = 'GROUNDING_JSON: ';
+    const markerIndex = result.observation.lastIndexOf(marker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    expect(() => JSON.parse(result.observation.slice(markerIndex + marker.length))).not.toThrow();
+  });
+
+  it('keeps GROUNDING_JSON parseable when the grounding payload itself exceeds the cap', async () => {
+    const longText = 'very-long-grounding-field-'.repeat(30);
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse(
+        Array.from({ length: 5 }, (_, index) => ({
+          entity: {
+            entityId: `wine-heavy-${index}`,
+            canonicalLabel: `${longText}${index}`,
+            type: 'wine',
+            producer: `${longText}producer-${index}`,
+            region: `${longText}region-${index}`,
+            wineType: 'red',
+            grapes: [`${longText}grape-a`, `${longText}grape-b`, `${longText}grape-c`],
+            style: `${longText}style-${index}`,
+            priceRange: '$10',
+          },
+          relevanceScore: 0.9 - index * 0.01,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        })),
+      ),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '긴 grounding 결과' }, deps, 'req-123');
+    const marker = 'GROUNDING_JSON: ';
+    const markerIndex = result.observation.lastIndexOf(marker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    expect(result.observation.length).toBeLessThanOrEqual(2000);
+    const parsed = JSON.parse(result.observation.slice(markerIndex + marker.length)) as { truncated_for_observation_cap?: boolean };
+    expect(parsed.truncated_for_observation_cap).toBe(true);
   });
 
   it('price post-filter: drops wines with no price data (strict budget enforcement)', async () => {

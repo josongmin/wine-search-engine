@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentPlannerPhaseRunner } from '../../../../src/application/agent/agent-planner-phase-runner.js';
 import { createAgentExecutionState } from '../../../../src/application/agent/agent-execution-state.js';
+import {
+  buildPlannerContinuationSystemMessage,
+  buildPlannerSystemMessage,
+} from '../../../../src/application/agent/agent-prompt.js';
 import { DEFAULT_AGENT_CONFIG } from '../../../../src/domain/agent/model/agent-config.js';
 import type { ChatLlmPort } from '../../../../src/domain/ai/port/chat-llm.port.js';
 import { CircuitBreakerOpenError } from '../../../../src/domain/shared/error/circuit-breaker-open-error.js';
@@ -152,6 +156,39 @@ describe('AgentPlannerPhaseRunner', () => {
     expect(complete).toHaveBeenCalledWith(expect.objectContaining({
       maxOutputTokens: 1024,
     }));
+  });
+
+  it('uses compact continuation planner prompt after tool history exists', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ thought: 'answer', answer: '검색 결과 기준으로 답합니다.' }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+    });
+    const state = createAgentExecutionState();
+    state.steps.push({
+      index: 0,
+      thought: 'compare first',
+      action: { tool: 'compare_wines', input: { query_a: 'Barolo', query_b: 'Brunello' } },
+      observation: 'GROUNDING_JSON: {"query_type":"compare","wines":[]}',
+      durationMs: 10,
+      tokenCount: { input: 100, output: 20 },
+    });
+
+    await runner.run(
+      '바롤로랑 브루넬로 비교해줘',
+      'req-continuation-prompt',
+      DEFAULT_AGENT_CONFIG,
+      state,
+      2,
+      true,
+    );
+
+    const systemMessage = complete.mock.calls[0]?.[0].messages[0];
+    expect(systemMessage?.content).toBe(buildPlannerContinuationSystemMessage().content);
+    expect(systemMessage?.content.length).toBeLessThan(buildPlannerSystemMessage().content.length / 2);
   });
 
   it('restores Korean search query anchors when the planner drifts into English paraphrase', async () => {
@@ -408,7 +445,7 @@ describe('AgentPlannerPhaseRunner', () => {
     ]);
   });
 
-  it('fails closed on JSON-like but unparseable planner output so recovery can run', async () => {
+  it('recovers an embedded tool call from JSON-like but unparseable planner output', async () => {
     const runner = new AgentPlannerPhaseRunner({
       chatLlm: {
         complete: vi.fn().mockResolvedValue({
@@ -429,9 +466,11 @@ describe('AgentPlannerPhaseRunner', () => {
       false,
     );
 
-    expect(result).toBeNull();
-    expect(state.reasoningFailureDetected).toBe(true);
-    expect(state.terminationReason).toBe('error');
+    expect(result?.parsed).toEqual({
+      thought: 'recovered embedded tool call',
+      action: { tool: 'search_wines', input: { query: '결혼기념일' } },
+    });
+    expect(state.reasoningFailureDetected).toBe(false);
   });
 
   it('renders and clears typed planner directives in the next planner call', async () => {

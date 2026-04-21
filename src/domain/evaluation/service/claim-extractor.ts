@@ -17,7 +17,12 @@ import { containsHangul } from '../../shared/utils/hangul.js';
 import { Transliterator } from '../../alias/service/transliterator.js';
 import { resolveEntity } from '../../attribute/service/entity-resolver.js';
 import type { ExtractedClaim, ClaimCategory, WineField } from '../model/claim.js';
-import { resolveGrapeAlias, normalizeWineType, REGION_PARENTS } from './wine-ontology.js';
+import {
+  GRAPE_ALIASES as GRAPE_ALIAS_MAP,
+  resolveGrapeAlias,
+  normalizeWineType,
+  REGION_PARENTS,
+} from './wine-ontology.js';
 import { correctKoreanWineTypos } from '../../query/service/korean-wine-aliases.js';
 import { GENERATED_REGION_PARENTS } from './region-parents.generated.js';
 
@@ -54,22 +59,9 @@ const DRINK_WINDOW_CONTEXT_RE = /(?:drink(?:ing)?|consume[d]?|age[d]?|hold|cella
 
 /** Korean price patterns. */
 const PRICE_MAN_WON_RE = /(\d+(?:\.\d+)?)\s*만\s*원/gu;
+const PRICE_COMPOSITE_MAN_WON_RE = /(\d+(?:\.\d+)?)\s*만\s*(\d{1,3}(?:,\d{3})+|\d{1,4})\s*원/gu;
 const PRICE_PLAIN_WON_RE = /(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/gu;
 const PRICE_USD_RE = /\$\s*(\d+(?:\.\d+)?)/gu;
-
-/** Common grape varieties for extraction. */
-const KNOWN_GRAPES = new Set([
-  'cabernet sauvignon', 'merlot', 'pinot noir', 'syrah', 'shiraz',
-  'chardonnay', 'sauvignon blanc', 'riesling', 'grenache', 'tempranillo',
-  'nebbiolo', 'sangiovese', 'malbec', 'zinfandel', 'gamay',
-  'pinot grigio', 'pinot gris', 'gewurztraminer', 'viognier',
-  'chenin blanc', 'moscato', 'muscat', 'primitivo', 'mourvèdre',
-  'touriga nacional', 'corvina', 'barbera', 'dolcetto',
-  'cabernet franc', 'petit verdot', 'carmenère', 'petite sirah',
-  'grüner veltliner', 'albariño', 'torrontés', 'verdejo',
-  'nero d\'avola', 'nerello mascalese', 'aglianico', 'blaufränkisch',
-  'pinotage', 'tannat', 'mencía', 'carignan', 'cinsault', 'zweigelt',
-]);
 
 /** Known wine regions for extraction (lowercased keys → display form values). */
 const KNOWN_REGIONS: ReadonlyMap<string, string> = new Map([
@@ -127,7 +119,7 @@ const REGION_ALIASES: ReadonlyMap<string, string> = new Map([
 ]);
 
 /** Korean + Latin grape alias surfaces for claim extraction. */
-const GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
+const KOREAN_GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(?:카베르네\s*소비뇽|카베르네소비뇽|까쇼|cab(?:ernet)?\s*sauv(?:ignon)?)/iu, 'Cabernet Sauvignon'],
   [/(?:카베르네\s*프랑|cab(?:ernet)?\s*franc)/iu, 'Cabernet Franc'],
   [/(?:메를로|merlot)/iu, 'Merlot'],
@@ -143,6 +135,27 @@ const GRAPE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(?:네비올로|nebbiolo)/iu, 'Nebbiolo'],
   [/(?:말벡|malbec)/iu, 'Malbec'],
 ];
+
+/** Contract-driven grape surfaces that should never become identity claims. */
+const EXTRA_GRAPE_SURFACES: ReadonlyArray<readonly [string, string]> = [
+  ['furmint', 'furmint'],
+];
+
+/** Canonical grape surface index derived from the ontology and explicit extras. */
+const GRAPE_SURFACE_TO_CANONICAL: ReadonlyMap<string, string> = (() => {
+  const surfaces = new Map<string, string>();
+
+  const register = (surface: string, canonical: string): void => {
+    const key = normalizeSurfaceKey(surface);
+    if (key.length === 0) return;
+    surfaces.set(key, resolveGrapeAlias(canonical.toLowerCase().normalize('NFKC').trim()));
+  };
+
+  for (const [surface, canonical] of GRAPE_ALIAS_MAP) register(surface, canonical);
+  for (const [surface, canonical] of EXTRA_GRAPE_SURFACES) register(surface, canonical);
+
+  return surfaces;
+})();
 
 /** Latin words commonly capitalized in wine context but NOT wine identities. */
 const LATIN_IDENTITY_STOPWORDS: ReadonlySet<string> = new Set([
@@ -217,6 +230,20 @@ function containsAsWord(haystack: string, needle: string): boolean {
   return re.test(haystack);
 }
 
+function normalizeSurfaceKey(surface: string): string {
+  return surface.toLowerCase().normalize('NFKC').trim();
+}
+
+function resolveGrapeSurface(surface: string): string | undefined {
+  const normalized = normalizeSurfaceKey(surface);
+  for (const [pattern, canonicalGrape] of KOREAN_GRAPE_ALIASES) {
+    if (pattern.test(normalized)) {
+      return resolveGrapeAlias(canonicalGrape.toLowerCase().normalize('NFKC').trim());
+    }
+  }
+  return GRAPE_SURFACE_TO_CANONICAL.get(normalized);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main extraction function
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,7 +303,7 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
       const trimmed = name.trim();
       if (trimmed.length < 3) continue;
       const lowered = trimmed.toLowerCase().normalize('NFKC');
-      if (KNOWN_GRAPES.has(lowered)) continue;
+      if (resolveGrapeSurface(trimmed) !== undefined) continue;
       if (KNOWN_REGIONS.has(lowered)) continue;
       if (WINE_TYPE_KEYWORDS.has(lowered)) continue;
       if (LATIN_IDENTITY_STOPWORDS.has(lowered)) continue;
@@ -315,6 +342,7 @@ function extractKoreanIdentityCandidates(
         const rawCandidate = tokens.slice(start, start + width).join(' ');
         const normalizedCandidate = normalizeKoreanIdentityCandidate(rawCandidate);
         if (normalizedCandidate === undefined) continue;
+        if (resolveGrapeSurface(normalizedCandidate) !== undefined) continue;
 
         const romanized = Transliterator.romanizeWineTerm(normalizedCandidate);
         if (romanized === undefined) continue;
@@ -350,6 +378,7 @@ function normalizeKoreanIdentityCandidate(candidate: string): string | undefined
 
   if (normalized.length < 2) return undefined;
   if (KOREAN_STOPWORDS.has(normalized)) return undefined;
+  if (resolveGrapeSurface(normalized) !== undefined) return undefined;
   if (KNOWN_REGIONS.has(normalized.toLowerCase())) return undefined;
   if (WINE_TYPE_KEYWORDS.has(normalized.toLowerCase())) return undefined;
   if (KOREAN_PREDICATE_SUFFIX_RE.test(normalized)) return undefined;
@@ -380,9 +409,13 @@ function extractVintageClaims(text: string, currentYear: number): ExtractedClaim
   }
 
   for (let i = 0; i < allMatches.length; i++) {
-    const { year, yearStart } = allMatches[i]!;
+    const { year, yearStart, yearEnd } = allMatches[i]!;
     const leftContext = text.slice(Math.max(0, yearStart - VINTAGE_CONTEXT_LOOKBACK), yearStart);
     if (DRINK_WINDOW_CONTEXT_RE.test(leftContext)) continue;
+    const immediateLeft = text.slice(Math.max(0, yearStart - 10), yearStart);
+    const immediateRight = text.slice(yearEnd, Math.min(text.length, yearEnd + 10));
+    if (/(?:1[6-9]\d{2}|20\d{2})\s*[-–~]\s*$/u.test(immediateLeft)) continue;
+    if (/^\s*[-–~]\s*(?:1[6-9]\d{2}|20\d{2})/u.test(immediateRight)) continue;
 
     // Filter dash-pair drinking windows
     if (i > 0) {
@@ -390,6 +423,12 @@ function extractVintageClaims(text: string, currentYear: number): ExtractedClaim
       const gap = year - prev.year;
       const between = text.slice(prev.yearEnd, yearStart).trim();
       // Drinking-window dash pairs: any gap 1-VINTAGE_WINDOW_GAP_MAX with a dash separator suggests a range.
+      if (gap >= 1 && gap <= VINTAGE_WINDOW_GAP_MAX && /^[-–~]$/u.test(between)) continue;
+    }
+    if (i + 1 < allMatches.length) {
+      const next = allMatches[i + 1]!;
+      const gap = next.year - year;
+      const between = text.slice(allMatches[i]!.yearEnd, next.yearStart).trim();
       if (gap >= 1 && gap <= VINTAGE_WINDOW_GAP_MAX && /^[-–~]$/u.test(between)) continue;
     }
 
@@ -404,12 +443,24 @@ function extractVintageClaims(text: string, currentYear: number): ExtractedClaim
 
 function extractPriceClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
+  const consumedRanges: Array<{ readonly start: number; readonly end: number }> = [];
+  for (const m of text.matchAll(PRICE_COMPOSITE_MAN_WON_RE)) {
+    const manWon = Number(m[1]);
+    const trailingWon = Number(m[2]!.replace(/,/g, ''));
+    if (!Number.isFinite(manWon) || !Number.isFinite(trailingWon)) continue;
+    const start = m.index;
+    consumedRanges.push({ start, end: start + m[0].length });
+    const krw = manWon * KRW_PER_MAN_WON + trailingWon;
+    claims.push(makeClaim('core_structured_claim', 'price_usd', (krw / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
+  }
   for (const m of text.matchAll(PRICE_MAN_WON_RE)) {
+    if (isRangeConsumed(m.index, consumedRanges)) continue;
     const krw = Number(m[1]);
     if (!Number.isFinite(krw)) continue;
     claims.push(makeClaim('core_structured_claim', 'price_usd', (krw * KRW_PER_MAN_WON / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
   }
   for (const m of text.matchAll(PRICE_PLAIN_WON_RE)) {
+    if (isRangeConsumed(m.index, consumedRanges)) continue;
     const krw = Number(m[1]!.replace(/,/g, ''));
     if (!Number.isFinite(krw)) continue;
     claims.push(makeClaim('core_structured_claim', 'price_usd', (krw / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
@@ -419,6 +470,13 @@ function extractPriceClaims(text: string): ExtractedClaim[] {
   }
 
   return claims;
+}
+
+function isRangeConsumed(
+  index: number,
+  ranges: readonly { readonly start: number; readonly end: number }[],
+): boolean {
+  return ranges.some((range) => index >= range.start && index < range.end);
 }
 
 function extractRegionClaims(text: string): ExtractedClaim[] {
@@ -450,17 +508,16 @@ function extractGrapeClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
   const normalized = correctKoreanWineTypos(text).toLowerCase().normalize('NFKC');
 
-  for (const [pattern, canonicalGrape] of GRAPE_ALIASES) {
+  for (const [pattern, canonicalGrape] of KOREAN_GRAPE_ALIASES) {
     if (pattern.test(normalized)) {
       const canonical = resolveGrapeAlias(canonicalGrape.toLowerCase());
       claims.push(makeClaim('core_structured_claim', 'grape_primary', canonical, canonicalGrape));
     }
   }
 
-  for (const grape of KNOWN_GRAPES) {
-    if (containsAsWord(normalized, grape)) {
-      const canonical = resolveGrapeAlias(grape);
-      claims.push(makeClaim('core_structured_claim', 'grape_primary', canonical, grape));
+  for (const [surface, canonicalGrape] of GRAPE_SURFACE_TO_CANONICAL) {
+    if (containsAsWord(normalized, surface)) {
+      claims.push(makeClaim('core_structured_claim', 'grape_primary', canonicalGrape, surface));
     }
   }
 

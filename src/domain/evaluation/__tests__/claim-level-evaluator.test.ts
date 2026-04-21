@@ -145,6 +145,24 @@ describe('evaluateClaims — round 1+2+3 fixes', () => {
     expect(['entailed', 'partially_entailed']).toContain(regionVerification!.verdict);
   });
 
+  it('verifies comparison concept geography without mutating top-result region evidence', async () => {
+    const evidence: EvidenceRecord[] = [{
+      canonical_label: 'Representative Barolo',
+      region: 'Italy',
+      comparison_concept: 'Barolo',
+      comparison_concept_field: 'appellation',
+      comparison_sub_query: 'Barolo',
+    }];
+    const answer = 'Barolo is from Piedmont, Italy.';
+    const result = await evaluateClaims(answer, evidence, '', 'general_query', null);
+    const piedmontVerification = result.verifications.find(
+      (v) => v.evidenceAnchor?.value === 'Barolo' && v.matchType === 'hierarchy_match',
+    );
+    expect(piedmontVerification).toBeDefined();
+    expect(['entailed', 'partially_entailed']).toContain(piedmontVerification!.verdict);
+    expect(piedmontVerification!.evidenceAnchor?.field).toBe('comparison_concept');
+  });
+
   // R7: identity fallback for producer field
   it('identity claim falls back to producer field when canonical_label absent', async () => {
     const evidence: EvidenceRecord[] = [

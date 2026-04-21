@@ -268,7 +268,7 @@ describe('POST /v1/search/interpret + Accept human — V2 interpret response sha
     }
   });
 
-  it('surfaces canonical non-anchor channels for plain comparison queries', async () => {
+  it('surfaces canonical comparison channels for plain comparison queries', async () => {
     const res = await postHumanInterpret({
       query: 'Barolo vs Amarone',
     });
@@ -283,13 +283,13 @@ describe('POST /v1/search/interpret + Accept human — V2 interpret response sha
     expect(activeChannels).toEqual([
       'sparse_bm25',
       'dense_semantic',
+      'compare_anchor',
     ]);
     expect(new Set(activeChannels as string[]).size).toBe(
       (activeChannels as string[]).length,
     );
     expect(activeChannels).not.toContain('sparse');
     expect(activeChannels).not.toContain('dense');
-    expect(activeChannels).not.toContain('compare_anchor');
     expect(activeChannels).not.toContain('learned_sparse');
   });
 

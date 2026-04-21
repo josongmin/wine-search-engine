@@ -6,7 +6,10 @@ export type RetrievalObjectiveAxis =
   | 'beginner_suitability'
   | 'value'
   | 'drinking_window'
-  | 'style';
+  | 'style'
+  | 'sweetness'
+  | 'alcohol'
+  | 'presentation';
 
 export type RetrievalObjectiveSourceTier = 'hard' | 'soft' | 'inferred';
 
@@ -28,18 +31,40 @@ export interface RetrievalObjective {
 
 const OBJECTIVE_VERSION = 'retrieval-objective-v1.0' as const;
 
-function axisForConstraint(constraint: NormalizedConstraint): RetrievalObjectiveAxis | undefined {
+function stringValues(value: NormalizedConstraint['value']): readonly string[] {
+  if (typeof value === 'string') {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === 'string');
+  }
+  return [];
+}
+
+function axesForConstraint(constraint: NormalizedConstraint): readonly RetrievalObjectiveAxis[] {
   switch (constraint.attribute) {
     case 'occasion':
     case 'gift_suitability':
     case 'beginner_suitability':
     case 'drinking_window':
-    case 'style':
-      return constraint.attribute;
+    case 'sweetness':
+      return [constraint.attribute];
+    case 'style': {
+      const values = stringValues(constraint.value);
+      const hasPresentation = values.includes('presentation_forward');
+      const hasNonPresentationStyle = values.some((value) => value !== 'presentation_forward');
+      if (hasPresentation && hasNonPresentationStyle) {
+        return ['style', 'presentation'];
+      }
+      return hasPresentation ? ['presentation'] : ['style'];
+    }
+    case 'alcohol':
+    case 'alcohol_pct':
+      return ['alcohol'];
     case 'price_band':
-      return 'value';
+      return ['value'];
     default:
-      return undefined;
+      return [];
   }
 }
 
@@ -48,11 +73,8 @@ function collectSignalsFromTier(
   sourceTier: RetrievalObjectiveSourceTier,
 ): readonly RetrievalObjectiveSignal[] {
   return constraints.flatMap((constraint) => {
-    const axis = axisForConstraint(constraint);
-    if (axis === undefined) {
-      return [];
-    }
-    return [{
+    const axes = axesForConstraint(constraint);
+    return axes.map((axis) => ({
       axis,
       attribute: constraint.attribute,
       operator: constraint.operator,
@@ -63,7 +85,7 @@ function collectSignalsFromTier(
       ...(constraint.mapping_version !== undefined
         ? { mappingVersion: constraint.mapping_version }
         : {}),
-    }];
+    }));
   });
 }
 

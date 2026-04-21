@@ -148,7 +148,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.style?.description).not.toContain('presentation_forward');
     });
 
-    it('should expose max_alcohol_pct as a structured low-alcohol filter', () => {
+    it('should expose max_alcohol_pct as a structured low-alcohol preference', () => {
       const props = tool.input_schema.properties as Record<string, any>;
       expect(props.max_alcohol_pct?.description).toContain('low-alcohol');
       expect(props.max_alcohol_pct?.minimum).toBe(0.1);

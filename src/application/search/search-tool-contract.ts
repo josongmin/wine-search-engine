@@ -55,7 +55,7 @@ export const SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION =
 export const SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION =
   'Optional maximum price in KRW (e.g. 50000 for 5만원).';
 export const SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION =
-  'Optional maximum alcohol percentage ABV (e.g. 12 for low-alcohol / 도수 낮은 와인).';
+  'Optional low-alcohol ceiling as ABV percent (e.g. 12 for low-alcohol / 도수 낮은 와인). Used as a retrieval preference and excludes only results whose ABV is explicitly verified above the ceiling; unknown ABV candidates remain marked as unverified.';
 export const SEARCH_TOOL_WINE_TYPE_DESCRIPTION =
   'Optional exact wine-type constraint.';
 export const SEARCH_TOOL_COUNTRY_DESCRIPTION =
@@ -110,13 +110,10 @@ const SEARCH_TOOL_STYLE_EXAMPLES = [
   'crowd_pleasing',
 ] as const;
 const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing', 'sweet'] as const;
-const SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION = 'search_tool_style_v1';
-const SEARCH_TOOL_STYLE_HINTS_WITH_STRUCTURED_FILTERS: ReadonlySet<string> = new Set([
-  'dry',
-  'off_dry',
-  'sweet',
-]);
-
+const SEARCH_TOOL_SWEETNESS_DRY_MAX = 0.2;
+const SEARCH_TOOL_SWEETNESS_SWEET_MIN = 0.5;
+const SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN = 0.2;
+const SEARCH_TOOL_SWEETNESS_OFF_DRY_MAX = 0.6;
 const SearchToolOccasionArraySchema = z.preprocess(
   (value) => (typeof value === 'string' ? [value] : value),
   z.array(z.enum(SEARCH_TOOL_OCCASION_VALUES)).max(SEARCH_TOOL_MAX_STYLES),
@@ -313,7 +310,7 @@ export function buildSearchWinesPromptContractLines(
     '  - min_price_krw: KRW price floor ("1만원 이상"→10000)',
     `  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→${usd50ApproxKrw})`,
     '  - Price ranges: "1-2만원 사이" → min_price_krw:10000, max_price_krw:20000',
-    '  - max_alcohol_pct: ABV upper bound for low-alcohol requests ("도수 낮은" → 12)',
+    '  - max_alcohol_pct: ABV ceiling for low-alcohol requests ("도수 낮은" → 12); retrieval treats it as a preference, then post-result policy removes only verified over-ceiling wines and keeps unknown-ABV candidates as unverified',
     '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
     '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',
     '  - want_diversity: true when user wants varied options ("다양하게", "각각", "종류별로", "different styles")',
@@ -340,65 +337,123 @@ function collectSearchToolStyleHints(input: {
       : [];
 }
 
-export function buildSearchToolStyleDerivedFilters(input: {
+function collectSearchToolStylePreferenceConstraints(input: {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
-}): readonly NormalizedConstraint[] {
-  const filters: NormalizedConstraint[] = [];
+}, mappingVersion: string): readonly NormalizedConstraint[] {
+  const preferences: NormalizedConstraint[] = [];
   for (const styleHint of collectSearchToolStyleHints(input)) {
     if (styleHint === 'sweet') {
-      filters.push({
+      preferences.push({
         attribute: 'sweetness',
         operator: '>=',
-        value: 0.5,
+        value: SEARCH_TOOL_SWEETNESS_SWEET_MIN,
         source_phrase: 'sweet',
         confidence: 1.0,
-        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+        mapping_version: mappingVersion,
       });
       continue;
     }
     if (styleHint === 'dry') {
-      filters.push({
+      preferences.push({
         attribute: 'sweetness',
         operator: '<=',
-        value: 0.2,
+        value: SEARCH_TOOL_SWEETNESS_DRY_MAX,
         source_phrase: 'dry',
         confidence: 1.0,
-        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+        mapping_version: mappingVersion,
       });
       continue;
     }
     if (styleHint === 'off_dry') {
-      filters.push({
+      preferences.push({
         attribute: 'sweetness',
         operator: '>=',
-        value: 0.2,
+        value: SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN,
         source_phrase: 'off_dry',
         confidence: 1.0,
-        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+        mapping_version: mappingVersion,
       });
-      filters.push({
+      preferences.push({
         attribute: 'sweetness',
         operator: '<=',
-        value: 0.6,
+        value: SEARCH_TOOL_SWEETNESS_OFF_DRY_MAX,
         source_phrase: 'off_dry',
         confidence: 1.0,
-        mapping_version: SEARCH_TOOL_STYLE_FILTER_MAPPING_VERSION,
+        mapping_version: mappingVersion,
       });
+      continue;
     }
+    preferences.push({
+      attribute: 'style',
+      operator: 'in',
+      value: [styleHint],
+      source_phrase: styleHint,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
   }
-  return filters;
+  return preferences;
+}
+
+export function buildSearchToolStructuredPreferences(input: {
+  readonly max_alcohol_pct?: number | undefined;
+  readonly style?: string | undefined;
+  readonly styles?: readonly string[] | undefined;
+  readonly occasion?: readonly string[] | undefined;
+  readonly gift_suitability_min?: number | undefined;
+  readonly beginner_suitability_min?: number | undefined;
+}, mappingVersion: string): readonly NormalizedConstraint[] {
+  const preferences: NormalizedConstraint[] = [];
+
+  if (input.max_alcohol_pct !== undefined) {
+    preferences.push({
+      attribute: 'alcohol_pct',
+      operator: '<=',
+      value: input.max_alcohol_pct,
+      source_phrase: `${input.max_alcohol_pct}% 이하`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  preferences.push(...collectSearchToolStylePreferenceConstraints(input, mappingVersion));
+  if (input.occasion !== undefined && input.occasion.length > 0) {
+    preferences.push({
+      attribute: 'occasion',
+      operator: 'in',
+      value: [...input.occasion],
+      source_phrase: input.occasion.join(', '),
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.gift_suitability_min !== undefined) {
+    preferences.push({
+      attribute: 'gift_suitability',
+      operator: '>=',
+      value: input.gift_suitability_min,
+      source_phrase: `gift_suitability>=${input.gift_suitability_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.beginner_suitability_min !== undefined) {
+    preferences.push({
+      attribute: 'beginner_suitability',
+      operator: '>=',
+      value: input.beginner_suitability_min,
+      source_phrase: `beginner_suitability>=${input.beginner_suitability_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+
+  return preferences;
 }
 
 export function buildSearchToolStyleQueryTerms(input: {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
 }): readonly string[] {
-  const originalHints = new Set(collectSearchToolStyleHints(input));
-  return resolveSemanticStyleQueryTerms(input).filter((term) => {
-    if (term === 'off dry') {
-      return !originalHints.has('off_dry');
-    }
-    return !SEARCH_TOOL_STYLE_HINTS_WITH_STRUCTURED_FILTERS.has(term);
-  });
+  return resolveSemanticStyleQueryTerms(input);
 }

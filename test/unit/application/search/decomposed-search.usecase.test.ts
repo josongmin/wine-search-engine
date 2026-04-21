@@ -171,6 +171,7 @@ describe('DecomposedSearchUseCase', () => {
         mode: 'concept',
         retrievalMode: 'hybrid',
         evidenceSource: 'direct_entity_resolution',
+        conceptEntityType: 'appellation',
         canonicalConcept: 'Barolo',
       },
       {
@@ -179,6 +180,7 @@ describe('DecomposedSearchUseCase', () => {
         mode: 'concept',
         retrievalMode: 'hybrid',
         evidenceSource: 'direct_entity_resolution',
+        conceptEntityType: 'appellation',
         canonicalConcept: 'Brunello di Montalcino',
       },
     ];
@@ -214,8 +216,10 @@ describe('DecomposedSearchUseCase', () => {
     expect(response.entities[1].topResult?.entity.entityId).toBe('brunello-1');
     expect(response.entities[0].comparisonMode).toBe('concept');
     expect(response.entities[0].canonicalConcept).toBe('Barolo');
+    expect(response.entities[0].conceptEntityType).toBe('appellation');
     expect(response.entities[1].comparisonMode).toBe('concept');
     expect(response.entities[1].canonicalConcept).toBe('Brunello di Montalcino');
+    expect(response.entities[1].conceptEntityType).toBe('appellation');
     expect(response.entities[0].resolutionStatus).toBe('resolved');
     expect(response.entities[1].resolutionStatus).toBe('resolved');
     expect(response.overallStatus).toBe('resolved');

@@ -20,7 +20,7 @@ import type {
 import { createStageTimer } from '../../observability/stage-timer.js';
 import {
   buildCompareToolFieldShape,
-  buildSearchToolStyleDerivedFilters,
+  buildSearchToolStructuredPreferences,
   buildEntityIdToolField,
   buildFoodPairingFieldShape,
   buildSearchToolQueryField,
@@ -38,6 +38,11 @@ import {
 } from '../search/search-tool-query-policy.js';
 import { buildSearchToolRetrievalCoreQuery } from '../search/search-tool-retrieval-core.js';
 import {
+  buildCompareBaseRetrievalQueries,
+  stripSideSpecificCompareSharedConstraints,
+} from '../search/compare-tool-shared-constraints.js';
+import {
+  applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
   applySearchToolNegationResultPolicy,
   collectSearchToolNegationTerms,
@@ -93,6 +98,7 @@ const AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX = 3;
  * Truncation prevents a single tool result from exhausting the agent's token budget.
  * ~2000 chars ≈ 500 tokens (at 4 chars/token) — enough for 5 wine summaries. */
 const MAX_OBSERVATION_CHARS = 2_000;
+const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
 
 // ---------------------------------------------------------------------------
 // Input schemas (same as tool-schemas.ts — reusing patterns)
@@ -360,11 +366,6 @@ function buildStructuredFilters(input: StructuredSearchConstraintInput): readonl
     filters.push({ attribute: 'wine_type', operator: '=', value: input.wine_type, source_phrase: input.wine_type, confidence: 1.0, mapping_version: v });
   }
 
-  // Alcohol upper bound
-  if (input.max_alcohol_pct !== undefined) {
-    filters.push({ attribute: 'alcohol_pct', operator: '<=', value: input.max_alcohol_pct, source_phrase: `${input.max_alcohol_pct}% 이하`, confidence: 1.0, mapping_version: v });
-  }
-
   // Country
   if (input.country !== undefined) {
     filters.push({ attribute: 'country', operator: '=', value: input.country, source_phrase: input.country, confidence: 1.0, mapping_version: v });
@@ -383,18 +384,6 @@ function buildStructuredFilters(input: StructuredSearchConstraintInput): readonl
     filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: v });
   }
 
-  if (input.occasion !== undefined && input.occasion.length > 0) {
-    filters.push({ attribute: 'occasion', operator: 'in', value: [...input.occasion], source_phrase: input.occasion.join(', '), confidence: 1.0, mapping_version: v });
-  }
-  if (input.gift_suitability_min !== undefined) {
-    filters.push({ attribute: 'gift_suitability', operator: '>=', value: input.gift_suitability_min, source_phrase: `gift_suitability>=${input.gift_suitability_min}`, confidence: 1.0, mapping_version: v });
-  }
-  if (input.beginner_suitability_min !== undefined) {
-    filters.push({ attribute: 'beginner_suitability', operator: '>=', value: input.beginner_suitability_min, source_phrase: `beginner_suitability>=${input.beginner_suitability_min}`, confidence: 1.0, mapping_version: v });
-  }
-
-  filters.push(...buildSearchToolStyleDerivedFilters(input));
-
   // Style: NOT a hard Vespa filter — Vespa style values are compound strings like
   // "medium red", "bold red", "light red", "medium white", "full white". An exact-match
   // filter for agent-emitted values like "light" or "oaked" always returns 0 hits.
@@ -405,6 +394,10 @@ function buildStructuredFilters(input: StructuredSearchConstraintInput): readonl
   // field returns 0 hits. Certification is appended as a text hint to the query.
 
   return filters;
+}
+
+function buildStructuredPreferences(input: StructuredSearchConstraintInput): readonly NormalizedConstraint[] {
+  return buildSearchToolStructuredPreferences(input, AGENT_FILTER_VERSION);
 }
 
 function buildStructuredQuery(input: StructuredSearchConstraintInput & { readonly query: string }): string {
@@ -440,12 +433,95 @@ function buildPriceFilterObservation(input: {
   return undefined;
 }
 
+function compactGroundingJsonForObservationCap(
+  grounding: string,
+  maxChars: number,
+): string | undefined {
+  const rawJson = grounding.slice(GROUNDING_JSON_MARKER.length).trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson) as unknown;
+  } catch (err) {
+    void err;
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const source = parsed as Record<string, unknown>;
+  const wines = Array.isArray(source['wines']) ? source['wines'] : [];
+  const compactWines = wines
+    .filter((wine): wine is Record<string, unknown> =>
+      wine !== null && typeof wine === 'object' && !Array.isArray(wine))
+    .map((wine) => ({
+      ...(typeof wine['entity_id'] === 'string' ? { entity_id: wine['entity_id'] } : {}),
+      ...(typeof wine['canonical_label'] === 'string' ? { canonical_label: wine['canonical_label'] } : {}),
+      ...(typeof wine['producer'] === 'string' ? { producer: wine['producer'] } : {}),
+      ...(typeof wine['region'] === 'string' ? { region: wine['region'] } : {}),
+      ...(typeof wine['wine_type'] === 'string' ? { wine_type: wine['wine_type'] } : {}),
+      ...(typeof wine['vintage'] === 'number' ? { vintage: wine['vintage'] } : {}),
+      ...(Array.isArray(wine['grapes'])
+        ? { grapes: wine['grapes'].filter((grape): grape is string => typeof grape === 'string').slice(0, 2) }
+        : {}),
+      ...(typeof wine['style'] === 'string' ? { style: wine['style'] } : {}),
+      ...(typeof wine['sweetness'] === 'number' ? { sweetness: wine['sweetness'] } : {}),
+      ...(typeof wine['alcohol_pct'] === 'number' ? { alcohol_pct: wine['alcohol_pct'] } : {}),
+      ...(typeof wine['price_usd'] === 'number' ? { price_usd: wine['price_usd'] } : {}),
+      ...(typeof wine['price'] === 'string' ? { price: wine['price'] } : {}),
+      ...(typeof wine['price_krw_approx'] === 'number' ? { price_krw_approx: wine['price_krw_approx'] } : {}),
+    }));
+
+  for (let count = compactWines.length; count >= 1; count -= 1) {
+    const candidate = `${GROUNDING_JSON_MARKER}${JSON.stringify({
+      query_type: source['query_type'],
+      total_results: source['total_results'],
+      wines: compactWines.slice(0, count),
+      truncated_for_observation_cap: count < compactWines.length,
+    })}`;
+    if (candidate.length <= maxChars) {
+      return candidate;
+    }
+  }
+
+  const first = compactWines[0];
+  if (first === undefined) {
+    return undefined;
+  }
+  const minimal = `${GROUNDING_JSON_MARKER}${JSON.stringify({
+    query_type: source['query_type'],
+    total_results: source['total_results'],
+    wines: [{
+      ...(first['entity_id'] !== undefined ? { entity_id: first['entity_id'] } : {}),
+      ...(first['canonical_label'] !== undefined ? { canonical_label: first['canonical_label'] } : {}),
+    }],
+    truncated_for_observation_cap: true,
+  })}`;
+  return minimal.length <= maxChars ? minimal : undefined;
+}
+
 /**
  * Truncates an observation string to MAX_OBSERVATION_CHARS to prevent a single
  * tool result from exhausting the agent's token budget in one step.
  */
 function capObservation(obs: string): string {
   if (obs.length <= MAX_OBSERVATION_CHARS) return obs;
+  const groundingIndex = obs.lastIndexOf(GROUNDING_JSON_MARKER);
+  if (groundingIndex >= 0) {
+    const grounding = obs.slice(groundingIndex);
+    const head = obs.slice(0, groundingIndex).trimEnd();
+    const truncationNotice = `\n[observation summary truncated to preserve grounding JSON]\n`;
+    const availableHeadChars = MAX_OBSERVATION_CHARS - grounding.length - truncationNotice.length;
+    if (availableHeadChars > 0) {
+      return `${head.slice(0, availableHeadChars)}${truncationNotice}${grounding}`;
+    }
+    const compactGrounding = compactGroundingJsonForObservationCap(
+      grounding,
+      MAX_OBSERVATION_CHARS - truncationNotice.length,
+    );
+    if (compactGrounding !== undefined) {
+      return `${truncationNotice}${compactGrounding}`;
+    }
+  }
   return obs.slice(0, MAX_OBSERVATION_CHARS) + `\n[observation truncated at ${MAX_OBSERVATION_CHARS} chars]`;
 }
 
@@ -621,6 +697,7 @@ function buildSearchRequestForAgentQuery(
   limit: number | undefined,
   retrievalMode: z.infer<typeof SearchInputSchema>['retrieval_mode'],
   filters: readonly NormalizedConstraint[],
+  preferences: readonly NormalizedConstraint[] = [],
 ): Parameters<SearchExecutorPort['execute']>[0] {
   return {
     query,
@@ -629,6 +706,7 @@ function buildSearchRequestForAgentQuery(
       ? { options: { mode: retrievalMode, explain: false, clarification: false } }
       : {}),
     ...(filters.length > 0 ? { filters } : {}),
+    ...(preferences.length > 0 ? { preferences } : {}),
   };
 }
 
@@ -678,6 +756,7 @@ async function executeAgentToolInner(
       // Build structured hard constraints from agent params (price, exclusions)
       // so they flow directly to Vespa as YQL filters.
       const structuredFilters = buildStructuredFilters(parsed);
+      const structuredPreferences = buildStructuredPreferences(parsed);
 
       const wantsDiversity = parsed.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(parsed.query);
       const effectiveLimit = wantsDiversity
@@ -689,6 +768,7 @@ async function executeAgentToolInner(
         effectiveLimit,
         parsed.retrieval_mode,
         structuredFilters,
+        structuredPreferences,
       );
 
       // Create a per-tool-call StageTimer so pipeline stage latencies
@@ -713,6 +793,7 @@ async function executeAgentToolInner(
             SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
             parsed.retrieval_mode,
             withWineTypeFilter(structuredFilters, wineType, 'agent_tool_diversity_v1'),
+            structuredPreferences,
           ),
         ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
         ...(deps.corpusCardinality !== undefined ? { corpusCardinality: deps.corpusCardinality } : {}),
@@ -779,6 +860,9 @@ async function executeAgentToolInner(
         ).response;
       }
 
+      const alcoholFiltered = applySearchToolAlcoholResultPolicy(response, parsed.max_alcohol_pct);
+      response = alcoholFiltered.response;
+
       // Zero-result escalation: guide the agent to relax constraints one by one,
       // or signal corpus exhaustion when the wine type has very few entries.
       if (response.results.length === 0) {
@@ -824,6 +908,9 @@ async function executeAgentToolInner(
       if (priceFilterObservation !== undefined) {
         obs += `\n${priceFilterObservation}`;
       }
+      if (alcoholFiltered.filteredCount > 0 && parsed.max_alcohol_pct !== undefined) {
+        obs += `\n[ALCOHOL_FILTER: ${parsed.max_alcohol_pct}% 초과로 확인된 ${alcoholFiltered.filteredCount}개 결과를 제외했습니다. 도수 정보가 없는 후보는 미확인으로 유지했습니다.]`;
+      }
 
       return {
         observation: obs,
@@ -854,19 +941,27 @@ async function executeAgentToolInner(
           structuredOutput: { kind: 'no_op', reason: 'decomposedSearchExecute port not wired' },
         };
       }
-      const sharedFilters = buildStructuredFilters(parsed);
+      const sharedContextInput = stripSideSpecificCompareSharedConstraints(parsed);
+      const sharedFilters = buildStructuredFilters(sharedContextInput);
+      const sharedPreferences = buildStructuredPreferences(sharedContextInput);
+      const baseRetrievalQueries = buildCompareBaseRetrievalQueries(parsed);
       const retrievalSubQueries = [
-        buildStructuredQuery({ ...parsed, query: parsed.query_a }),
-        buildStructuredQuery({ ...parsed, query: parsed.query_b }),
+        buildStructuredQuery({ ...sharedContextInput, query: baseRetrievalQueries[0] }),
+        buildStructuredQuery({ ...sharedContextInput, query: baseRetrievalQueries[1] }),
       ] as const;
       const rawSubQueries = [parsed.query_a, parsed.query_b] as const;
       const response = await deps.decomposedSearchExecute(
         rawSubQueries,
         'compare',
-        buildComparisonOriginalQuery(parsed),
+        buildComparisonOriginalQuery(sharedContextInput),
         requestId,
         Date.now(),
-        sharedFilters.length > 0 ? { filters: sharedFilters } : undefined,
+        sharedFilters.length > 0 || sharedPreferences.length > 0
+          ? {
+              ...(sharedFilters.length > 0 ? { filters: sharedFilters } : {}),
+              ...(sharedPreferences.length > 0 ? { preferences: sharedPreferences } : {}),
+            }
+          : undefined,
         options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
         retrievalSubQueries,
       );
@@ -1309,8 +1404,23 @@ interface GroundingWineFact {
   readonly grapes?: readonly string[];
   readonly style?: string;
   readonly critic_score_100?: number;
+  readonly alcohol_pct?: number;
+  readonly sweetness?: number;
+  readonly price_usd?: number;
   readonly price?: string;
   readonly price_krw_approx?: number;
+}
+
+function parseObservationPriceUsd(priceRange: string | undefined): number | undefined {
+  if (priceRange === undefined) {
+    return undefined;
+  }
+  const usdMatch = /^\$(\d[\d,]*(?:\.\d+)?)$/.exec(priceRange.trim());
+  if (usdMatch === null) {
+    return undefined;
+  }
+  const usd = Number(usdMatch[1]!.replace(/,/g, ''));
+  return Number.isFinite(usd) ? usd : undefined;
 }
 
 function parseObservationPriceKrw(priceRange: string | undefined): number | undefined {
@@ -1344,6 +1454,7 @@ function buildGroundingJsonFromSearch(
   displayResults: readonly SearchResponseV1['results'][number][],
 ): string {
   const facts: GroundingWineFact[] = displayResults.slice(0, SUMMARY_TOP_N).map((r) => {
+    const priceUsd = parseObservationPriceUsd(r.entity.priceRange);
     const priceKrwApprox = parseObservationPriceKrw(r.entity.priceRange);
     const base: GroundingWineFact = {
       entity_id: r.entity.entityId,
@@ -1357,6 +1468,9 @@ function buildGroundingJsonFromSearch(
         : {}),
       ...(r.entity.style !== undefined ? { style: sanitizeObservationField(r.entity.style) } : {}),
       ...(r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore) ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
+      ...(r.entity.alcoholPct !== undefined ? { alcohol_pct: r.entity.alcoholPct } : {}),
+      ...(r.entity.sweetness !== undefined ? { sweetness: r.entity.sweetness } : {}),
+      ...(priceUsd !== undefined ? { price_usd: priceUsd } : {}),
       ...(r.entity.priceRange !== undefined ? { price: sanitizeObservationField(r.entity.priceRange) } : {}),
       ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
     };
@@ -1376,6 +1490,7 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
     .flatMap((entry) => {
       const top = entry.topResult;
       if (top === null) return [];
+      const priceUsd = parseObservationPriceUsd(top.entity.priceRange);
       const priceKrwApprox = parseObservationPriceKrw(top.entity.priceRange);
       const fact: GroundingWineFact = {
         entity_id: top.entity.entityId,
@@ -1389,6 +1504,9 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
           : {}),
         ...(top.entity.style !== undefined ? { style: sanitizeObservationField(top.entity.style) } : {}),
         ...(top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore) ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
+        ...(top.entity.alcoholPct !== undefined ? { alcohol_pct: top.entity.alcoholPct } : {}),
+        ...(top.entity.sweetness !== undefined ? { sweetness: top.entity.sweetness } : {}),
+        ...(priceUsd !== undefined ? { price_usd: priceUsd } : {}),
         ...(top.entity.priceRange !== undefined ? { price: sanitizeObservationField(top.entity.priceRange) } : {}),
         ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
       };

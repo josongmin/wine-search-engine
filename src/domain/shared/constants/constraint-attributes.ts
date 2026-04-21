@@ -34,6 +34,10 @@ export const SOFT_CONSTRAINT_ATTRIBUTES: ReadonlySet<string> = new Set([
   // and LLM_ALLOWED_ATTRIBUTES. Adding 'finish' back would silently break soft ranking.
   'finish_length',
   'drinking_window',
+  // Low-alcohol intent is a preference ceiling, not an identity predicate.
+  // Hard-filtering on sparse ABV coverage can collapse otherwise relevant gift/beginner queries.
+  'alcohol',
+  'alcohol_pct',
   'flavor_profile',
   'certification',
   // ETL Track C suitability scores — soft ranking 신호, hard 필터 아님.

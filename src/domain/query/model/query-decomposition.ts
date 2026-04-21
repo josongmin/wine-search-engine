@@ -18,7 +18,7 @@ export type ComparisonDecompositionSubtype = 'entity' | 'concept' | 'mixed';
 
 export type ComparisonLegMode = 'entity' | 'concept';
 
-export type ComparisonLegRetrievalMode = 'auto' | 'hybrid';
+export type ComparisonLegRetrievalMode = 'auto' | 'entity' | 'hybrid';
 
 export type ComparisonLegEvidenceSource =
   | 'direct_entity_resolution'
@@ -31,6 +31,7 @@ export interface ComparisonDecompositionLeg {
   readonly mode: ComparisonLegMode;
   readonly retrievalMode: ComparisonLegRetrievalMode;
   readonly evidenceSource: ComparisonLegEvidenceSource;
+  readonly conceptEntityType?: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type' | undefined;
   readonly canonicalConcept?: string | undefined;
 }
 

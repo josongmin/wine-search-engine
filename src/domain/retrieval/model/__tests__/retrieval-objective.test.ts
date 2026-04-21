@@ -33,6 +33,30 @@ describe('buildRetrievalObjective', () => {
           mapping_version: 'test',
         },
         {
+          attribute: 'sweetness',
+          operator: '>=',
+          value: 0.5,
+          source_phrase: '달달한',
+          confidence: 0.87,
+          mapping_version: 'test',
+        },
+        {
+          attribute: 'alcohol_pct',
+          operator: '<=',
+          value: 12,
+          source_phrase: '도수 낮은',
+          confidence: 0.86,
+          mapping_version: 'test',
+        },
+        {
+          attribute: 'style',
+          operator: 'in',
+          value: ['presentation_forward'],
+          source_phrase: '예쁜 라벨',
+          confidence: 0.82,
+          mapping_version: 'test',
+        },
+        {
           attribute: 'price_band',
           operator: '=',
           value: 'value',
@@ -59,6 +83,9 @@ describe('buildRetrievalObjective', () => {
     expect(objective.signals).toEqual([
       expect.objectContaining({ axis: 'occasion', sourceTier: 'hard', value: ['gift'] }),
       expect.objectContaining({ axis: 'gift_suitability', sourceTier: 'soft', value: 0.8 }),
+      expect.objectContaining({ axis: 'sweetness', attribute: 'sweetness', sourceTier: 'soft', value: 0.5 }),
+      expect.objectContaining({ axis: 'alcohol', attribute: 'alcohol_pct', sourceTier: 'soft', value: 12 }),
+      expect.objectContaining({ axis: 'presentation', attribute: 'style', sourceTier: 'soft', value: ['presentation_forward'] }),
       expect.objectContaining({ axis: 'value', attribute: 'price_band', sourceTier: 'soft' }),
       expect.objectContaining({ axis: 'beginner_suitability', sourceTier: 'inferred', value: 0.7 }),
     ]);

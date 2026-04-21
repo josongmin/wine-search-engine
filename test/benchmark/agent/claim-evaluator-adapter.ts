@@ -8,6 +8,7 @@
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import type { DiagnosticVector, TaskType } from '../../../src/domain/evaluation/model/claim.js';
 import { evaluateClaims } from '../../../src/domain/evaluation/service/claim-level-evaluator.js';
+import { buildEvidenceRecordsFromFrames } from '../../../src/domain/evaluation/service/build-evidence-records-from-frames.js';
 import { parseObservations } from '../../../src/domain/evaluation/service/evidence-parser.js';
 import type { AgentBenchmarkScenario, ScenarioTier } from './scenario.js';
 import type { ScenarioExecution } from './scorer.js';
@@ -24,7 +25,12 @@ export async function evaluateScenarioClaims(
   execution: ScenarioExecution,
   llm: ChatLlmPort | null,
 ): Promise<DiagnosticVector> {
-  const evidenceRecords = parseObservations(execution.observations);
+  const frameEvidenceRecords = execution.evidenceFrames !== undefined
+    ? buildEvidenceRecordsFromFrames(execution.evidenceFrames)
+    : [];
+  const evidenceRecords = frameEvidenceRecords.length > 0
+    ? frameEvidenceRecords
+    : parseObservations(execution.observations);
   const evidenceContext = execution.observations.join('\n\n');
   const taskType = inferTaskType(scenario.tier);
 

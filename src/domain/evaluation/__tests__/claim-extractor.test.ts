@@ -44,6 +44,12 @@ describe('extractClaims', () => {
     expect(claims.some((c) => c.field === 'grape_primary' && c.normalizedValue === 'cabernet sauvignon')).toBe(true);
   });
 
+  it('extracts grape-only English variety surfaces as grape claims in Korean recommendation prose', () => {
+    const claims = extractClaims('Furmint 추천해줘.');
+    expect(claims.some((c) => c.category === 'core_structured_claim' && c.field === 'grape_primary' && c.normalizedValue === 'furmint')).toBe(true);
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Furmint')).toBe(false);
+  });
+
   it('does not promote generic Korean recommendation prose to identity claims', () => {
     const claims = extractClaims('풀바디 레드 와인 추천: 검색 결과 기준으로 맞는 표기를 정리해드릴게요.');
     const identities = claims.filter((c) => c.category === 'identity_claim');
@@ -93,6 +99,12 @@ describe('extractClaims', () => {
     expect(vintages).toHaveLength(0);
   });
 
+  it('does not extract Korean drinking-window dash ranges as vintages', () => {
+    const claims = extractClaims('음용창이 바롤로는 2017–2022, 브루넬로는 2011–2016입니다.');
+    const vintages = claims.filter((c) => c.field === 'vintage_year');
+    expect(vintages).toHaveLength(0);
+  });
+
   it('extracts Korean price (만원)', () => {
     const claims = extractClaims('가격은 5만원입니다.');
     const price = claims.find((c) => c.field === 'price_usd');
@@ -105,16 +117,24 @@ describe('extractClaims', () => {
     expect(price).toBeDefined();
   });
 
+  it('extracts composite Korean prices without splitting the trailing won amount', () => {
+    const claims = extractClaims('바롤로는 약 20만 1,150원, 브루넬로는 약 53만 4,600원입니다.');
+    const prices = claims.filter((c) => c.field === 'price_usd').map((c) => c.normalizedValue);
+    expect(prices).toEqual(['149.00', '396.00']);
+  });
+
   it('extracts grape variety', () => {
     const claims = extractClaims('Made from Cabernet Sauvignon.');
     const grape = claims.find((c) => c.field === 'grape_primary');
     expect(grape?.normalizedValue).toBe('cabernet sauvignon');
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Cabernet Sauvignon')).toBe(false);
   });
 
   it('resolves grape alias (Shiraz → Syrah)', () => {
     const claims = extractClaims('Australian Shiraz from Barossa.');
     const grape = claims.find((c) => c.field === 'grape_primary' && c.normalizedValue === 'syrah');
     expect(grape).toBeDefined();
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Shiraz')).toBe(false);
   });
 
   it('extracts wine type (red)', () => {

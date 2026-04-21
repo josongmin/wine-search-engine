@@ -5,6 +5,7 @@ interface SearchToolSoftClauseInput {
   readonly exclude_regions?: readonly string[] | undefined;
   readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;
+  readonly max_alcohol_pct?: number | undefined;
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
   readonly certification?: string | undefined;
@@ -58,6 +59,9 @@ export function buildSearchToolSoftClauses(
     clauses.push(`not ${region}`);
   }
   clauses.push(...buildSearchToolPriceClauses(input));
+  if (input.max_alcohol_pct !== undefined) {
+    clauses.push(`low alcohol ${input.max_alcohol_pct}% 이하`);
+  }
   for (const style of buildSearchToolStyleQueryTerms(input)) {
     clauses.push(style);
   }

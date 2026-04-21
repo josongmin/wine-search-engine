@@ -40,7 +40,8 @@ export type WineStructuredField =
   | 'popularity_score'
   | 'certifications' | 'classification' | 'oak_treatment'
   | 'grape_family' | 'region_hierarchy'
-  | 'drinking_window_start' | 'drinking_window_end';
+  | 'drinking_window_start' | 'drinking_window_end'
+  | 'comparison_concept';
 
 /** Fields requiring LLM semantic verification (NLI). */
 export type WineSemanticField =

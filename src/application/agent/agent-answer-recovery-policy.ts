@@ -8,7 +8,7 @@ import type { SynthesisContext } from './tool-outcome.js';
 import type { AgentToolDeps } from './agent-tools.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
-  buildSearchToolStyleDerivedFilters,
+  buildSearchToolStructuredPreferences,
   buildSearchToolStyleQueryTerms,
 } from '../search/search-tool-contract.js';
 import { buildSearchToolPriceClauses } from '../search/search-tool-query-policy.js';
@@ -44,6 +44,10 @@ function asNonEmptyString(value: unknown): string | undefined {
 
 function asPositiveInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function asStringArray(value: unknown): readonly string[] | undefined {
@@ -102,13 +106,6 @@ function buildRecoveryFilters(input: Record<string, unknown>): readonly Normaliz
     filters.push({ attribute: 'wine_type', operator: '=', value: wineType, source_phrase: wineType, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
   }
 
-  const maxAlcoholPct = typeof input['max_alcohol_pct'] === 'number' && Number.isFinite(input['max_alcohol_pct']) && input['max_alcohol_pct'] > 0
-    ? input['max_alcohol_pct']
-    : undefined;
-  if (maxAlcoholPct !== undefined) {
-    filters.push({ attribute: 'alcohol_pct', operator: '<=', value: maxAlcoholPct, source_phrase: `${maxAlcoholPct}% 이하`, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
-  }
-
   const country = asNonEmptyString(input['country']);
   if (country !== undefined) {
     filters.push({ attribute: 'country', operator: '=', value: country, source_phrase: country, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
@@ -129,12 +126,26 @@ function buildRecoveryFilters(input: Record<string, unknown>): readonly Normaliz
     filters.push({ attribute: 'appellation', operator: '=', value: appellation, source_phrase: appellation, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
   }
 
-  filters.push(...buildSearchToolStyleDerivedFilters({
-    style: asNonEmptyString(input['style']),
-    styles: asStringArray(input['styles']),
-  }));
-
   return filters;
+}
+
+function buildRecoveryPreferences(input: Record<string, unknown>): readonly NormalizedConstraint[] {
+  const maxAlcoholPct = typeof input['max_alcohol_pct'] === 'number' && Number.isFinite(input['max_alcohol_pct']) && input['max_alcohol_pct'] > 0
+    ? input['max_alcohol_pct']
+    : undefined;
+  const style = asNonEmptyString(input['style']);
+  const styles = asStringArray(input['styles']);
+  const occasion = asStringArray(input['occasion']);
+  const giftSuitabilityMin = asFiniteNumber(input['gift_suitability_min']);
+  const beginnerSuitabilityMin = asFiniteNumber(input['beginner_suitability_min']);
+  return buildSearchToolStructuredPreferences({
+    ...(maxAlcoholPct !== undefined ? { max_alcohol_pct: maxAlcoholPct } : {}),
+    ...(style !== undefined ? { style } : {}),
+    ...(styles !== undefined ? { styles } : {}),
+    ...(occasion !== undefined ? { occasion } : {}),
+    ...(giftSuitabilityMin !== undefined ? { gift_suitability_min: giftSuitabilityMin } : {}),
+    ...(beginnerSuitabilityMin !== undefined ? { beginner_suitability_min: beginnerSuitabilityMin } : {}),
+  }, RECOVERY_FILTER_VERSION);
 }
 
 function buildRecoveredSearchRequest(input: Record<string, unknown>): SearchRequest | undefined {
@@ -145,6 +156,7 @@ function buildRecoveredSearchRequest(input: Record<string, unknown>): SearchRequ
 
   const rebuiltQuery = appendRecoverySearchClauses(query, input);
   const filters = buildRecoveryFilters(input);
+  const preferences = buildRecoveryPreferences(input);
   const retrievalMode = asNonEmptyString(input['retrieval_mode']);
   const request: SearchRequest = {
     query: rebuiltQuery,
@@ -153,6 +165,7 @@ function buildRecoveredSearchRequest(input: Record<string, unknown>): SearchRequ
       ? { options: { mode: retrievalMode as NonNullable<SearchRequest['options']>['mode'], explain: false, clarification: false } }
       : {}),
     ...(filters.length > 0 ? { filters } : {}),
+    ...(preferences.length > 0 ? { preferences } : {}),
   };
   return request;
 }

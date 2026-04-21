@@ -47,6 +47,41 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('recovers a bare tool JSON object embedded inside malformed thought output', () => {
+    const parsed = parseLlmOutput(
+      '\n{"thought":"{"tool":"compare_wines","input":{"query_a":"바롤로","query_b":"브루넬로","wine_type":"red"}}"}',
+    );
+
+    expect(parsed).toEqual({
+      thought: 'recovered embedded tool call',
+      action: {
+        tool: 'compare_wines',
+        input: {
+          query_a: '바롤로',
+          query_b: '브루넬로',
+          wine_type: 'red',
+        },
+      },
+    });
+  });
+
+  it('recovers a stringified bare tool object carried only in thought', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: JSON.stringify({
+        tool: 'compare_wines',
+        input: { query_a: 'Barolo', query_b: 'Brunello' },
+      }),
+    }));
+
+    expect(parsed).toEqual({
+      thought: 'recovered embedded tool call',
+      action: {
+        tool: 'compare_wines',
+        input: { query_a: 'Barolo', query_b: 'Brunello' },
+      },
+    });
+  });
+
   it('recovers the first valid JSON object when a later concatenated object is truncated', () => {
     const parsed = parseLlmOutput(
       '{"thought":"search","action":{"tool":"search_wines","input":{"query":"anniversary dinner"}}}\n{"thought":"partial"',

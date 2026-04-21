@@ -65,6 +65,7 @@ describe('search replay fixtures — executable HTTP subset', () => {
       if ('error_code' in fixture.expected) {
         expect(assertionSummary.errorCode).toBe(fixture.expected.error_code);
         expect(assertionSummary.assertedFields).toEqual(['error.code']);
+        expect(assertionSummary.traceDrifts).toEqual([]);
         expect(assertionSummary.decodedIds).toEqual({});
         return;
       }
@@ -87,6 +88,7 @@ describe('search replay fixtures — executable HTTP subset', () => {
         ]);
         expect(assertionSummary.degradationReasons).toBeUndefined();
         expect(assertionSummary.executionMode).toBeUndefined();
+        expect(assertionSummary.traceDrifts).toEqual([]);
         expect(assertionSummary.decodedIds.authorityTraceRef?.ok).toBe(true);
         return;
       }
@@ -131,6 +133,10 @@ describe('search replay fixtures — executable HTTP subset', () => {
             'decision_snapshot.snapshot_id',
             'determinism_fingerprint',
           ]);
+      expect(
+        assertionSummary.traceDrifts.every((drift) =>
+          assertionSummary.driftClassification.traceFields.includes(drift.field)),
+      ).toBe(true);
       expect(assertionSummary.executionMode).toBe(fixture.expected.execution_mode);
       expect(assertionSummary.degradationReasons).toEqual(fixture.expected.degradation_reasons);
       expect(assertionSummary.decodedIds.authorityTraceRef?.ok).toBe(true);

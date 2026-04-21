@@ -13,6 +13,7 @@ import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import type { EvidenceRecord } from './claim-verifier-deterministic.js';
 
 // ── Module-scope regex constants (CLAUDE.md rule 16) ─────────────────────
+const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
 /** Match "N. <label>" or "Side A/B: <subQuery>: <label>" at start of pipe-delimited line. */
 const LABEL_LINE_RE = /^(?:\d+\.\s*|Side\s+[AB]:\s*[^:]*:\s*)(.+)$/u;
 /** Match "(id: xxx)" entity ID format. */
@@ -85,6 +86,15 @@ function parseObservation(observation: string): EvidenceRecord[] {
     void jsonProbeError;
   }
 
+  // Strategy 1b: agent tool observations are human-readable text with an
+  // embedded `GROUNDING_JSON: {...}` payload. Prefer that payload over
+  // pipe-delimited lines because observation capping may truncate the human
+  // summary while preserving the full grounding block.
+  const groundingRecords = parseEmbeddedGroundingJson(trimmed);
+  if (groundingRecords.length > 0) {
+    return groundingRecords;
+  }
+
   // Strategy 2: pipe-delimited wine lines from agent-tools.ts summarizers
   const pipeRecords = parsePipeDelimitedObservation(trimmed);
   if (pipeRecords.length > 0) {
@@ -93,6 +103,73 @@ function parseObservation(observation: string): EvidenceRecord[] {
 
   // Strategy 3: opaque raw text (verifier can still keyword-match)
   return [{ __raw__: trimmed }];
+}
+
+function parseEmbeddedGroundingJson(text: string): EvidenceRecord[] {
+  const markerIndex = text.lastIndexOf(GROUNDING_JSON_MARKER);
+  if (markerIndex < 0) {
+    return [];
+  }
+
+  const jsonStart = text.indexOf('{', markerIndex + GROUNDING_JSON_MARKER.length);
+  if (jsonStart < 0) {
+    return [];
+  }
+
+  const jsonEnd = findJsonObjectEnd(text, jsonStart);
+  if (jsonEnd < 0) {
+    return [];
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+    return extractRecordsFromJson(parsed);
+  } catch (err) {
+    void err;
+    return [];
+  }
+}
+
+function findJsonObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const ch = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
 }
 
 /**
@@ -328,7 +405,26 @@ const MAX_ARRAY_ELEMENTS = 256;
 function flattenRecord(obj: Record<string, unknown>): EvidenceRecord {
   const flat: Record<string, string | number | readonly string[]> = {};
   flattenInto(obj, '', flat, 0);
+  normalizeGroundingAliases(flat);
   return flat as EvidenceRecord;
+}
+
+function normalizeGroundingAliases(
+  flat: Record<string, string | number | readonly string[]>,
+): void {
+  if (flat['vintage_year'] === undefined && flat['vintage'] !== undefined) {
+    flat['vintage_year'] = flat['vintage'];
+  }
+  if (flat['critic_score_normalized'] === undefined && typeof flat['critic_score_100'] === 'number') {
+    flat['critic_score_normalized'] = flat['critic_score_100'] / 100;
+  }
+  if (flat['price_usd'] === undefined && typeof flat['price'] === 'string') {
+    const usdMatch = PRICE_USD_RE.exec(flat['price']);
+    if (usdMatch?.[1] !== undefined) {
+      const usd = Number(usdMatch[1]);
+      if (Number.isFinite(usd)) flat['price_usd'] = usd;
+    }
+  }
 }
 
 function flattenInto(

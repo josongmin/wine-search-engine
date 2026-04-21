@@ -13,7 +13,7 @@ import type { DecomposedSearchUseCasePort } from '../../application/search/port/
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
 import {
-  buildSearchToolStyleDerivedFilters,
+  buildSearchToolStructuredPreferences as buildContractSearchToolStructuredPreferences,
   sanitizeOptionalToolNulls,
 } from '../../application/search/search-tool-contract.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -34,6 +34,11 @@ import {
 } from '../../application/search/search-tool-query-policy.js';
 import { buildSearchToolRetrievalCoreQuery } from '../../application/search/search-tool-retrieval-core.js';
 import {
+  buildCompareBaseRetrievalQueries,
+  stripSideSpecificCompareSharedConstraints,
+} from '../../application/search/compare-tool-shared-constraints.js';
+import {
+  applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
   applySearchToolNegationResultPolicy,
   collectSearchToolNegationTerms,
@@ -121,9 +126,6 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   if (input.wine_type !== undefined) {
     pushSearchToolStructuredFilter(filters, 'wine_type', '=', input.wine_type, input.wine_type);
   }
-  if (input.max_alcohol_pct !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'alcohol_pct', '<=', input.max_alcohol_pct, `${input.max_alcohol_pct}% 이하`);
-  }
   if (input.country !== undefined) {
     pushSearchToolStructuredFilter(filters, 'country', '=', input.country, input.country);
   }
@@ -136,31 +138,12 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   if (input.appellation !== undefined) {
     pushSearchToolStructuredFilter(filters, 'appellation', '=', input.appellation, input.appellation);
   }
-  if (input.occasion !== undefined && input.occasion.length > 0) {
-    pushSearchToolStructuredFilter(filters, 'occasion', 'in', [...input.occasion], input.occasion.join(', '));
-  }
-  if (input.gift_suitability_min !== undefined) {
-    pushSearchToolStructuredFilter(
-      filters,
-      'gift_suitability',
-      '>=',
-      input.gift_suitability_min,
-      `gift_suitability>=${input.gift_suitability_min}`,
-    );
-  }
-  if (input.beginner_suitability_min !== undefined) {
-    pushSearchToolStructuredFilter(
-      filters,
-      'beginner_suitability',
-      '>=',
-      input.beginner_suitability_min,
-      `beginner_suitability>=${input.beginner_suitability_min}`,
-    );
-  }
-
-  filters.push(...buildSearchToolStyleDerivedFilters(input));
 
   return filters;
+}
+
+function buildSearchToolStructuredPreferences(input: SearchToolInput): readonly NormalizedConstraint[] {
+  return buildContractSearchToolStructuredPreferences(input, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
 }
 
 function buildSearchToolQuery(input: SearchToolInput): string {
@@ -174,6 +157,7 @@ function buildSearchToolQuery(input: SearchToolInput): string {
 
 function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
   const filters = buildSearchToolStructuredFilters(input);
+  const preferences = buildSearchToolStructuredPreferences(input);
   const limit = input.limit ?? 10;
   const retrievalMode = input.retrieval_mode ?? 'auto';
   return {
@@ -185,58 +169,72 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
       clarification: false,
     },
     ...(filters.length > 0 ? { filters } : {}),
+    ...(preferences.length > 0 ? { preferences } : {}),
   };
 }
 
 function buildCompareToolRequestContext(input: CompareToolInput): {
-  readonly parentContext?: { readonly filters: readonly NormalizedConstraint[] } | undefined;
+  readonly parentContext?: {
+    readonly filters?: readonly NormalizedConstraint[] | undefined;
+    readonly preferences?: readonly NormalizedConstraint[] | undefined;
+  } | undefined;
   readonly subQueries: readonly [string, string];
   readonly originalQuery: string;
 } {
+  const sharedInput = stripSideSpecificCompareSharedConstraints(input);
   const sharedSearchInput: SearchToolInput = {
-    query: input.query_a,
-    ...(input.exclude_grapes !== undefined ? { exclude_grapes: input.exclude_grapes } : {}),
-    ...(input.exclude_regions !== undefined ? { exclude_regions: input.exclude_regions } : {}),
-    ...(input.min_price_krw !== undefined ? { min_price_krw: input.min_price_krw } : {}),
-    ...(input.max_price_krw !== undefined ? { max_price_krw: input.max_price_krw } : {}),
-    ...(input.max_alcohol_pct !== undefined ? { max_alcohol_pct: input.max_alcohol_pct } : {}),
-    ...(input.wine_type !== undefined ? { wine_type: input.wine_type } : {}),
-    ...(input.country !== undefined ? { country: input.country } : {}),
-    ...(input.vintage_min !== undefined ? { vintage_min: input.vintage_min } : {}),
-    ...(input.vintage_max !== undefined ? { vintage_max: input.vintage_max } : {}),
-    ...(input.appellation !== undefined ? { appellation: input.appellation } : {}),
-    ...(input.style !== undefined ? { style: input.style } : {}),
-    ...(input.styles !== undefined ? { styles: input.styles } : {}),
-    ...(input.certification !== undefined ? { certification: input.certification } : {}),
-    ...(input.occasion !== undefined ? { occasion: input.occasion } : {}),
-    ...(input.gift_suitability_min !== undefined
-      ? { gift_suitability_min: input.gift_suitability_min }
+    query: sharedInput.query_a,
+    ...(sharedInput.exclude_grapes !== undefined ? { exclude_grapes: sharedInput.exclude_grapes } : {}),
+    ...(sharedInput.exclude_regions !== undefined ? { exclude_regions: sharedInput.exclude_regions } : {}),
+    ...(sharedInput.min_price_krw !== undefined ? { min_price_krw: sharedInput.min_price_krw } : {}),
+    ...(sharedInput.max_price_krw !== undefined ? { max_price_krw: sharedInput.max_price_krw } : {}),
+    ...(sharedInput.max_alcohol_pct !== undefined ? { max_alcohol_pct: sharedInput.max_alcohol_pct } : {}),
+    ...(sharedInput.wine_type !== undefined ? { wine_type: sharedInput.wine_type } : {}),
+    ...(sharedInput.country !== undefined ? { country: sharedInput.country } : {}),
+    ...(sharedInput.vintage_min !== undefined ? { vintage_min: sharedInput.vintage_min } : {}),
+    ...(sharedInput.vintage_max !== undefined ? { vintage_max: sharedInput.vintage_max } : {}),
+    ...(sharedInput.appellation !== undefined ? { appellation: sharedInput.appellation } : {}),
+    ...(sharedInput.style !== undefined ? { style: sharedInput.style } : {}),
+    ...(sharedInput.styles !== undefined ? { styles: sharedInput.styles } : {}),
+    ...(sharedInput.certification !== undefined ? { certification: sharedInput.certification } : {}),
+    ...(sharedInput.occasion !== undefined ? { occasion: sharedInput.occasion } : {}),
+    ...(sharedInput.gift_suitability_min !== undefined
+      ? { gift_suitability_min: sharedInput.gift_suitability_min }
       : {}),
-    ...(input.beginner_suitability_min !== undefined
-      ? { beginner_suitability_min: input.beginner_suitability_min }
+    ...(sharedInput.beginner_suitability_min !== undefined
+      ? { beginner_suitability_min: sharedInput.beginner_suitability_min }
       : {}),
   };
   const filters = buildSearchToolStructuredFilters(sharedSearchInput);
+  const preferences = buildSearchToolStructuredPreferences(sharedSearchInput);
+  const baseRetrievalQueries = buildCompareBaseRetrievalQueries(input);
   const buildSubQuery = (query: string): string => {
     const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery({
       query,
-      wine_type: input.wine_type,
-      country: input.country,
-      appellation: input.appellation,
-      vintage_min: input.vintage_min,
-      vintage_max: input.vintage_max,
-      occasion: input.occasion,
+      wine_type: sharedInput.wine_type,
+      country: sharedInput.country,
+      appellation: sharedInput.appellation,
+      vintage_min: sharedInput.vintage_min,
+      vintage_max: sharedInput.vintage_max,
+      occasion: sharedInput.occasion,
     });
-    const clauses = buildSearchToolSoftClauses(input);
+    const clauses = buildSearchToolSoftClauses(sharedInput);
     return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
   };
   const originalQuery = appendStructuredQueryClauses(
     `${input.query_a} vs ${input.query_b}`,
-    buildSearchToolSoftClauses(input),
+    buildSearchToolSoftClauses(sharedInput),
   );
   return {
-    ...(filters.length > 0 ? { parentContext: { filters } } : {}),
-    subQueries: [buildSubQuery(input.query_a), buildSubQuery(input.query_b)],
+    ...(filters.length > 0 || preferences.length > 0
+      ? {
+          parentContext: {
+            ...(filters.length > 0 ? { filters } : {}),
+            ...(preferences.length > 0 ? { preferences } : {}),
+          },
+        }
+      : {}),
+    subQueries: [buildSubQuery(baseRetrievalQueries[0]), buildSubQuery(baseRetrievalQueries[1])],
     originalQuery,
   };
 }
@@ -419,13 +417,17 @@ export class WineToolExecutor {
       response,
       collectSearchToolNegationTerms(validated),
     );
-    return applySearchToolBudgetResultPolicy(
+    const budgetFiltered = applySearchToolBudgetResultPolicy(
       negationFiltered.response,
       {
         minKrw: validated.min_price_krw,
         maxKrw: validated.max_price_krw,
       },
       { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+    ).response;
+    return applySearchToolAlcoholResultPolicy(
+      budgetFiltered,
+      validated.max_alcohol_pct,
     ).response;
   }
 

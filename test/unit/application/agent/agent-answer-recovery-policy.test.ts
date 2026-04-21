@@ -128,19 +128,23 @@ describe('AgentAnswerRecoveryPolicy', () => {
 
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: '선물용 와인, not Merlot, not France, 1~5만원, approachable, crowd pleasing',
+        query: '선물용 와인, not Merlot, not France, 1~5만원, approachable, crowd pleasing, sweet',
         limit: 3,
         options: { mode: 'hybrid', explain: false, clarification: false },
         filters: expect.arrayContaining([
           expect.objectContaining({ attribute: 'grape_primary', operator: 'exclude', value: 'Merlot' }),
           expect.objectContaining({ attribute: 'region', operator: 'exclude', value: 'France' }),
-          expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
-          expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
           expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
           expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
           expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2019 }),
           expect.objectContaining({ attribute: 'vintage_year', operator: '<=', value: 2022 }),
           expect.objectContaining({ attribute: 'appellation', operator: '=', value: 'Barolo' }),
+        ]),
+        preferences: expect.arrayContaining([
+          expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+          expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
+          expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
+          expect.objectContaining({ attribute: 'style', operator: 'in', value: ['crowd_pleasing'] }),
         ]),
       }),
       'req-fallback-structured-fallback',

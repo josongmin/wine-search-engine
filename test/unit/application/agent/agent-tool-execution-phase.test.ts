@@ -6,6 +6,7 @@ import type { AgentToolDeps } from '../../../../src/application/agent/agent-tool
 import { DEFAULT_AGENT_CONFIG } from '../../../../src/domain/agent/model/agent-config.js';
 import { StepBudget } from '../../../../src/domain/agent/service/step-budget.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
+import type { ComparisonSearchResponse } from '../../../../src/domain/response/model/comparison-response.js';
 import { PolicyBlockedError } from '../../../../src/domain/shared/error/policy-blocked.js';
 
 function makeSearchResponse(): SearchResponseV1 {
@@ -66,6 +67,21 @@ function makeEmptySearchResponse(): SearchResponseV1 {
   return {
     ...makeSearchResponse(),
     results: [],
+  };
+}
+
+function makeComparisonResponse(): ComparisonSearchResponse {
+  return {
+    queryType: 'comparison',
+    originalQuery: 'Barolo vs Brunello',
+    comparisonIntent: 'compare',
+    entities: [
+      { subQuery: 'Barolo', topResult: null, resultCount: 0, resolutionStatus: 'ambiguous', allResults: [] },
+      { subQuery: 'Brunello', topResult: null, resultCount: 0, resolutionStatus: 'ambiguous', allResults: [] },
+    ],
+    overallStatus: 'ambiguous',
+    requestId: 'req-compare',
+    executionTimeMs: 5,
   };
 }
 
@@ -385,6 +401,146 @@ describe('AgentToolExecutionPhase', () => {
     expect(state.toolOutcomes).toHaveLength(2);
     expect(state.lastSearchResult?.results[0]?.entity.entityId).toBe('wine-1');
     expect(runDrinkabilityChecks).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects compare_wines mixed batches without dropping other calls', async () => {
+    const searchExecute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const decomposedSearchExecute = vi.fn();
+    const { phase, runDrinkabilityChecks } = makePhase({
+      searchUseCase: { execute: searchExecute } as never,
+      decomposedSearchExecute,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 8 });
+
+    const shouldBreak = await phase.run(
+      'req-compare-mix',
+      DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'bad mixed compare batch',
+        actions: [
+          { tool: 'compare_wines', input: { query_a: 'Barolo', query_b: 'Brunello' } },
+          { tool: 'search_wines', input: { query: 'barolo' } },
+        ],
+      }),
+    );
+
+    expect(shouldBreak).toBe(false);
+    expect(searchExecute).not.toHaveBeenCalled();
+    expect(decomposedSearchExecute).not.toHaveBeenCalled();
+    expect(state.steps[0]?.actions).toEqual([
+      { tool: 'compare_wines', input: { query_a: 'Barolo', query_b: 'Brunello' } },
+      { tool: 'search_wines', input: { query: 'barolo' } },
+    ]);
+    expect(state.steps[0]?.actionPairs).toHaveLength(2);
+    expect(state.steps[0]?.observations?.every((observation) =>
+      observation.includes('Invalid parallel batch'),
+    )).toBe(true);
+    expect(state.toolOutcomes).toEqual([
+      expect.objectContaining({ tool: 'compare_wines', kind: 'policy_violation' }),
+      expect.objectContaining({ tool: 'search_wines', kind: 'policy_violation' }),
+    ]);
+    expect(runDrinkabilityChecks).not.toHaveBeenCalled();
+  });
+
+  it('collapses duplicate compare calls with lossless non-conflicting constraint union', async () => {
+    const decomposedSearchExecute = vi.fn().mockResolvedValue(makeComparisonResponse());
+    const { phase } = makePhase({
+      searchUseCase: { execute: vi.fn() } as never,
+      decomposedSearchExecute,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 8 });
+
+    const shouldBreak = await phase.run(
+      'req-compare-duplicate',
+      DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'duplicate side-specific compare batch',
+        actions: [
+          {
+            tool: 'compare_wines',
+            input: { query_a: 'Barolo', query_b: 'Brunello', max_price_krw: 100000 },
+          },
+          {
+            tool: 'compare_wines',
+            input: { query_a: 'Barolo', query_b: 'Brunello', country: 'Italy', max_price_krw: 100000 },
+          },
+        ],
+      }),
+    );
+
+    expect(shouldBreak).toBe(false);
+    expect(decomposedSearchExecute).toHaveBeenCalledOnce();
+    expect(state.steps[0]?.actions).toEqual([
+      {
+        tool: 'compare_wines',
+        input: {
+          query_a: 'Barolo',
+          query_b: 'Brunello',
+          country: 'Italy',
+          max_price_krw: 100000,
+        },
+      },
+    ]);
+    const [subQueries, , , , , parentContext, , retrievalSubQueries] = decomposedSearchExecute.mock.calls[0] ?? [];
+    expect(subQueries).toEqual(['Barolo', 'Brunello']);
+    expect(parentContext?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
+    ]));
+    expect(retrievalSubQueries[0]).toContain('100000원 이하');
+    expect(retrievalSubQueries[1]).toContain('100000원 이하');
+  });
+
+  it('leaves conflicting duplicate compare calls for batch policy rejection', async () => {
+    const decomposedSearchExecute = vi.fn().mockResolvedValue(makeComparisonResponse());
+    const { phase } = makePhase({
+      searchUseCase: { execute: vi.fn() } as never,
+      decomposedSearchExecute,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 8 });
+
+    const shouldBreak = await phase.run(
+      'req-compare-duplicate-conflict',
+      DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'conflicting duplicate compare batch',
+        actions: [
+          {
+            tool: 'compare_wines',
+            input: { query_a: '바롤로', query_b: '브루넬로', appellation: 'Barolo', max_price_krw: 100000 },
+          },
+          {
+            tool: 'compare_wines',
+            input: { query_a: '바롤로', query_b: '브루넬로', appellation: 'Brunello di Montalcino', max_price_krw: 100000 },
+          },
+        ],
+      }),
+    );
+
+    expect(shouldBreak).toBe(false);
+    expect(decomposedSearchExecute).not.toHaveBeenCalled();
+    expect(state.steps[0]?.actions).toEqual([
+      {
+        tool: 'compare_wines',
+        input: { query_a: '바롤로', query_b: '브루넬로', appellation: 'Barolo', max_price_krw: 100000 },
+      },
+      {
+        tool: 'compare_wines',
+        input: { query_a: '바롤로', query_b: '브루넬로', appellation: 'Brunello di Montalcino', max_price_krw: 100000 },
+      },
+    ]);
+    expect(state.steps[0]?.observations?.[0]).toContain('Invalid parallel batch');
   });
 
   it('records unknown single-tool attempts without executing any dependency', async () => {

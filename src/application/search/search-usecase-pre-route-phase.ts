@@ -140,6 +140,9 @@ export async function runSearchPreRoutePhase(
               ...(ctx.request.filters !== undefined && ctx.request.filters.length > 0
                 ? { filters: ctx.request.filters }
                 : {}),
+              ...(ctx.request.preferences !== undefined && ctx.request.preferences.length > 0
+                ? { preferences: ctx.request.preferences }
+                : {}),
               // Forward explain so a comparison-route caller (options.explain=true)
               // gets counterfactuals on both sub-search legs.
               ...(ctx.request.options?.explain === true ? { explain: true } : {}),
@@ -258,7 +261,7 @@ export async function runSearchPreRoutePhase(
     //   Override applies per (attribute, operator) pair — so agent's exclude_grapes
     //   replaces any NL-extracted exclude for the same attribute, but does NOT
     //   override a different attribute like wine_type.
-    let structuredFiltersMerged = false;
+    let structuredConstraintsMerged = false;
     if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
       // Attributes covered by structured agent filters (operator-aware override).
       // For 'exclude'/'not_in' operators, override only same-operator NL constraints.
@@ -278,10 +281,27 @@ export async function runSearchPreRoutePhase(
           hard: [...nonOverridden, ...ctx.request.filters],
         },
       };
-      structuredFiltersMerged = true;
+      structuredConstraintsMerged = true;
     }
 
-    if (structuredFiltersMerged) {
+    if (ctx.request.preferences !== undefined && ctx.request.preferences.length > 0) {
+      const preferenceCoveredKeys = new Set(
+        ctx.request.preferences.map((f) => `${f.attribute}:${f.operator}`),
+      );
+      const nonOverriddenSoft = plan.constraints.soft.filter(
+        (c) => !preferenceCoveredKeys.has(`${c.attribute}:${c.operator}`),
+      );
+      plan = {
+        ...plan,
+        constraints: {
+          ...plan.constraints,
+          soft: [...nonOverriddenSoft, ...ctx.request.preferences],
+        },
+      };
+      structuredConstraintsMerged = true;
+    }
+
+    if (structuredConstraintsMerged) {
       const admissionContext = {
         requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
         requires_constraint_evidence: plan.constraints.hard.length > 0,

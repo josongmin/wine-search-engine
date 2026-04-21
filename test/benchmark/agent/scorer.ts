@@ -32,6 +32,10 @@ import type {
   TerminationReason,
 } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
+import type { ToolCallEvidenceFrame } from '../../../src/domain/agent/model/tool-call-evidence-frame.js';
+import type { EvidenceRecord } from '../../../src/domain/evaluation/service/claim-level-evaluator.js';
+import { buildEvidenceRecordsFromFrames } from '../../../src/domain/evaluation/service/build-evidence-records-from-frames.js';
+import { parseObservations } from '../../../src/domain/evaluation/service/evidence-parser.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../../src/domain/shared/constants.js';
 
 export interface ToolCallTrace {
@@ -64,18 +68,18 @@ function getToolCallSemanticSignature(call: ToolCallTrace): string | null {
   }
 }
 
-function countSemanticallyDistinctCalls(calls: readonly ToolCallTrace[]): number {
-  const signatures = new Set<string>();
+function countSemanticToolInvocations(calls: readonly ToolCallTrace[]): number {
+  const signatureCounts = new Map<string, number>();
   let opaqueCallCount = 0;
   for (const call of calls) {
     const signature = getToolCallSemanticSignature(call);
     if (signature !== null) {
-      signatures.add(signature);
+      signatureCounts.set(signature, (signatureCounts.get(signature) ?? 0) + 1);
       continue;
     }
     opaqueCallCount += 1;
   }
-  return signatures.size + opaqueCallCount;
+  return [...signatureCounts.values()].reduce((sum, count) => sum + count, opaqueCallCount);
 }
 
 function parseToolCallInput(call: ToolCallTrace): Record<string, unknown> | null {
@@ -133,6 +137,8 @@ export interface ScenarioExecution {
   readonly toolsUsed: readonly ToolCallTrace[];
   /** Raw observation strings from each tool call step (used by grounding checks). */
   readonly observations: readonly string[];
+  /** Typed tool evidence frames. Claim evaluation must prefer this over observation reparsing. */
+  readonly evidenceFrames?: readonly ToolCallEvidenceFrame[] | undefined;
   readonly terminationReason: TerminationReason;
   readonly totalDurationMs: number;
   readonly totalTokens: { input: number; output: number };
@@ -593,6 +599,146 @@ const CTX_REGION_MAP: ReadonlyArray<readonly [string, string]> = [
   ['론', 'rhone'],
   ['피에몬테', 'piedmont'],
 ];
+
+type ContextRelevanceCheck = { readonly passed: boolean; readonly label: string };
+
+function buildContextEvidenceRecords(execution: ScenarioExecution): readonly EvidenceRecord[] {
+  if (execution.evidenceFrames !== undefined && execution.evidenceFrames.length > 0) {
+    const records = buildEvidenceRecordsFromFrames(execution.evidenceFrames);
+    if (records.length > 0) return records;
+  }
+  return parseObservations(execution.observations);
+}
+
+function normalizeEvidenceText(value: unknown): string {
+  return String(value).trim().toLowerCase().normalize('NFKC');
+}
+
+function evidenceTextIncludes(
+  records: readonly EvidenceRecord[],
+  fields: readonly string[],
+  expected: string,
+): boolean {
+  const needle = normalizeEvidenceText(expected);
+  if (needle.length === 0) return false;
+  return records.some((record) =>
+    fields.some((field) => {
+      const value = record[field];
+      if (value === undefined || value === null) return false;
+      if (Array.isArray(value)) {
+        return value.some((entry) => normalizeEvidenceText(entry).includes(needle));
+      }
+      return normalizeEvidenceText(value).includes(needle);
+    }),
+  );
+}
+
+function evidenceNumericValues(
+  records: readonly EvidenceRecord[],
+  field: string,
+): readonly number[] {
+  return records
+    .map((record) => record[field])
+    .flatMap((value) => {
+      if (typeof value === 'number' && Number.isFinite(value)) return [value];
+      if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? [parsed] : [];
+      }
+      return [];
+    });
+}
+
+function collectStyleHintsFromToolInput(input: Record<string, unknown>): readonly string[] {
+  const styles = input['styles'];
+  if (Array.isArray(styles)) {
+    return styles.filter((style): style is string => typeof style === 'string');
+  }
+  const style = input['style'];
+  return typeof style === 'string' ? [style] : [];
+}
+
+function collectStructuredToolContextRelevanceChecks(
+  execution: ScenarioExecution,
+): readonly ContextRelevanceCheck[] {
+  const records = buildContextEvidenceRecords(execution);
+  if (records.length === 0) return [];
+
+  const checks: ContextRelevanceCheck[] = [];
+  for (const call of execution.toolsUsed) {
+    const input = parseToolCallInput(call);
+    if (input === null) continue;
+
+    const wineType = input['wine_type'];
+    if (typeof wineType === 'string') {
+      checks.push({
+        passed: evidenceTextIncludes(records, ['wine_type', 'style'], wineType),
+        label: `tool_wine_type_${wineType}`,
+      });
+    }
+
+    const country = input['country'];
+    if (typeof country === 'string') {
+      checks.push({
+        passed: evidenceTextIncludes(records, ['country', 'region', 'appellation'], country),
+        label: `tool_country_${country}`,
+      });
+    }
+
+    const appellation = input['appellation'];
+    if (typeof appellation === 'string') {
+      checks.push({
+        passed: evidenceTextIncludes(records, ['appellation', 'region'], appellation),
+        label: `tool_appellation_${appellation}`,
+      });
+    }
+
+    const maxAlcoholPct = input['max_alcohol_pct'];
+    if (typeof maxAlcoholPct === 'number' && Number.isFinite(maxAlcoholPct)) {
+      const alcoholValues = evidenceNumericValues(records, 'alcohol_pct');
+      checks.push({
+        passed: alcoholValues.some((value) => value <= maxAlcoholPct),
+        label: `tool_alcohol_pct_lte_${maxAlcoholPct}`,
+      });
+    }
+
+    for (const style of collectStyleHintsFromToolInput(input)) {
+      const normalizedStyle = normalizeEvidenceText(style).replace(/_/gu, ' ');
+      if (normalizedStyle === 'sweet') {
+        const sweetnessValues = evidenceNumericValues(records, 'sweetness');
+        checks.push({
+          passed:
+            evidenceTextIncludes(records, ['style', 'wine_type'], 'sweet')
+            || evidenceTextIncludes(records, ['wine_type'], 'dessert')
+            || sweetnessValues.some((value) => value >= 0.5),
+          label: 'tool_style_sweet',
+        });
+        continue;
+      }
+      if (normalizedStyle === 'off dry') {
+        const sweetnessValues = evidenceNumericValues(records, 'sweetness');
+        checks.push({
+          passed:
+            evidenceTextIncludes(records, ['style'], 'off dry')
+            || sweetnessValues.some((value) => value >= 0.2 && value <= 0.6),
+          label: 'tool_style_off_dry',
+        });
+        continue;
+      }
+      if (normalizedStyle === 'dry') {
+        const sweetnessValues = evidenceNumericValues(records, 'sweetness');
+        checks.push({
+          passed:
+            evidenceTextIncludes(records, ['style'], 'dry')
+            || sweetnessValues.some((value) => value <= 0.2),
+          label: 'tool_style_dry',
+        });
+      }
+    }
+  }
+
+  return checks;
+}
 
 /** Korean 만원 multiplier for price extraction. */
 const MAN_WON_MULTIPLIER = 10_000;
@@ -1089,7 +1235,7 @@ function scoreToolAccuracy(
     const actReps =
       tool === 'search_wines' && expReps === 1 && isSearchWinesPartitionBatch(actualCalls)
         ? expReps
-        : countSemanticallyDistinctCalls(actualCalls);
+        : countSemanticToolInvocations(actualCalls);
     if (actReps > expReps) {
       const ratio = expReps / actReps; // 0 < ratio < 1
       const penalty = Math.max(ratio, PENALTY_TOOL_DUPLICATE);
@@ -1814,6 +1960,9 @@ function scoreContextRelevance(
       }
     }
   }
+
+  const structuredToolChecks = collectStructuredToolContextRelevanceChecks(execution);
+  checks.push(...structuredToolChecks);
 
   // Query-context alignment: check if the tool results mention keywords from
   // the agent's search queries. For each tool call, extract significant words

@@ -18,6 +18,12 @@ interface SearchToolBudgetFilterResult {
   readonly mode: 'unchanged' | 'strict' | 'lenient_fallback';
 }
 
+interface SearchToolAlcoholFilterResult {
+  readonly response: SearchResponseV1;
+  readonly filteredCount: number;
+  readonly unknownCount: number;
+}
+
 interface SearchToolNegationFilterResult {
   readonly response: SearchResponseV1;
   readonly filteredCount: number;
@@ -174,4 +180,37 @@ export function applySearchToolBudgetResultPolicy(
   }
 
   return { response, mode: 'unchanged' };
+}
+
+export function applySearchToolAlcoholResultPolicy(
+  response: SearchResponseV1,
+  maxAlcoholPct: number | undefined,
+): SearchToolAlcoholFilterResult {
+  if (maxAlcoholPct === undefined) {
+    return { response, filteredCount: 0, unknownCount: 0 };
+  }
+
+  const verifiedWithinLimit = response.results.filter((result) => {
+    const alcoholPct = result.entity.alcoholPct;
+    return alcoholPct !== undefined && alcoholPct <= maxAlcoholPct;
+  });
+  const unknownAlcohol = response.results.filter((result) => result.entity.alcoholPct === undefined);
+  const filtered = [...verifiedWithinLimit, ...unknownAlcohol];
+
+  if (filtered.length === response.results.length) {
+    return {
+      response:
+        verifiedWithinLimit.length === response.results.length
+          ? response
+          : { ...response, results: filtered },
+      filteredCount: 0,
+      unknownCount: unknownAlcohol.length,
+    };
+  }
+
+  return {
+    response: { ...response, results: filtered },
+    filteredCount: response.results.length - filtered.length,
+    unknownCount: unknownAlcohol.length,
+  };
 }

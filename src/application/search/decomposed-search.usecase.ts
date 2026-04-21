@@ -65,6 +65,9 @@ export class DecomposedSearchUseCase {
       ...(parentContext?.filters !== undefined && parentContext.filters.length > 0
         ? { filters: parentContext.filters }
         : {}),
+      ...(parentContext?.preferences !== undefined && parentContext.preferences.length > 0
+        ? { preferences: parentContext.preferences }
+        : {}),
     };
 
     // Reuse the main search seam for both sub-queries while honoring caller cancellation.
@@ -123,6 +126,9 @@ export class DecomposedSearchUseCase {
       ...(comparisonLegs[0].canonicalConcept !== undefined
         ? { canonicalConcept: comparisonLegs[0].canonicalConcept }
         : {}),
+      ...(comparisonLegs[0].conceptEntityType !== undefined
+        ? { conceptEntityType: comparisonLegs[0].conceptEntityType }
+        : {}),
       topResult: resultA.results[0] ?? null,
       resultCount: resultA.results.length,
       resolutionStatus: comparisonLegs[0].mode === 'concept' && resultA.results.length > 0
@@ -136,6 +142,9 @@ export class DecomposedSearchUseCase {
       comparisonMode: comparisonLegs[1].mode,
       ...(comparisonLegs[1].canonicalConcept !== undefined
         ? { canonicalConcept: comparisonLegs[1].canonicalConcept }
+        : {}),
+      ...(comparisonLegs[1].conceptEntityType !== undefined
+        ? { conceptEntityType: comparisonLegs[1].conceptEntityType }
         : {}),
       topResult: resultB.results[0] ?? null,
       resultCount: resultB.results.length,

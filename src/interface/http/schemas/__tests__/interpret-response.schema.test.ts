@@ -5,6 +5,18 @@ function makeValidV1InterpretResponse() {
   return {
     raw_query: 'Opus One 2018',
     normalized_query: 'opus one 2018',
+    normalized_query_views: {
+      raw: 'Opus One 2018',
+      strict: 'opus one 2018',
+      accentless: 'opus one 2018',
+      collapsed_whitespace: 'opus one 2018',
+      punctuation_stripped: 'opus one 2018',
+      compact: 'opusone2018',
+      vintage_canonicalized: 'opus one 2018',
+      vintage_stripped: 'opus one',
+      semantic_variants: ['opus one 2018', 'opus one'],
+      lookup_variants: ['opus one 2018', 'opusone2018', 'opus one'],
+    },
     intent: 'entity_exact',
     route: 'entity',
     retrieval_mode: 'entity_lookup',

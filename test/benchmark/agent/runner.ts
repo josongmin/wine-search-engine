@@ -1200,6 +1200,9 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           toolCallCount: result.toolCallCount,
           toolsUsed,
           observations,
+          ...(result.evidenceFrames !== undefined && result.evidenceFrames.length > 0
+            ? { evidenceFrames: result.evidenceFrames }
+            : {}),
           terminationReason: mapTerminationReason(result.terminationReason),
           totalDurationMs: result.totalDurationMs,
           totalTokens: result.totalTokens,

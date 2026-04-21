@@ -351,6 +351,17 @@ function assertExactMatch(actual: unknown, expected: unknown, label: string): vo
   }
 }
 
+function collectTraceDrift(
+  traceDrifts: FixtureTraceDrift[],
+  actual: unknown,
+  expected: unknown,
+  field: string,
+): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    traceDrifts.push({ field, expected, actual });
+  }
+}
+
 async function buildLiveSnapshotReplayPayload(
   fixture: ReplayHttpFixtureFile,
   app: FastifyInstance,
@@ -440,6 +451,12 @@ interface FixtureDriftClassification {
   readonly traceFields: readonly string[];
 }
 
+interface FixtureTraceDrift {
+  readonly field: string;
+  readonly expected: unknown;
+  readonly actual: unknown;
+}
+
 /** Result drift: the behaviorally-meaningful fields. */
 const RESULT_DRIFT_FIELDS = [
   'execution_mode',
@@ -468,6 +485,7 @@ export async function runSearchFixture(
     readonly skipped: boolean;
     readonly assertedFields: readonly string[];
     readonly driftClassification: FixtureDriftClassification;
+    readonly traceDrifts: readonly FixtureTraceDrift[];
     readonly executionMode?: string;
     readonly degradationReasons?: readonly string[];
     readonly errorCode?: string;
@@ -506,6 +524,7 @@ export async function runSearchFixture(
         skipped: false,
         assertedFields: ['error.code'],
         driftClassification: { resultFields: ['error.code'], traceFields: [] },
+        traceDrifts: [],
         errorCode: fixture.expected.error_code,
         decodedIds: {},
       },
@@ -543,6 +562,7 @@ export async function runSearchFixture(
           resultFields: ['comparison_intent', 'overall_status'],
           traceFields: ['authority_trace_ref', 'runtime_correlation_ref'],
         },
+        traceDrifts: [],
         executionMode: undefined,
         degradationReasons: undefined,
         decodedIds: {
@@ -554,7 +574,7 @@ export async function runSearchFixture(
   }
 
   const response = parseSearchResponse(httpResponse);
-  assertSearchFixtureExpectation(response, fixture);
+  const traceDrifts = assertSearchFixtureExpectation(response, fixture);
   const authorityTraceRef = response.engine_decision.authority_trace_ref ?? response.meta.authority_trace_ref;
   if (authorityTraceRef === undefined) {
     throw new Error('missing authority_trace_ref on replay fixture response');
@@ -611,6 +631,7 @@ export async function runSearchFixture(
             ]
           : [...TRACE_DRIFT_FIELDS],
       },
+      traceDrifts,
       executionMode: fixture.expected.execution_mode,
       degradationReasons: fixture.expected.degradation_reasons,
       decodedIds: {
@@ -625,7 +646,7 @@ export async function runSearchFixture(
 function assertSearchFixtureExpectation(
   body: SearchResponseBody,
   fixture: SearchReplayFixtureFile,
-): void {
+): readonly FixtureTraceDrift[] {
   if ('error_code' in fixture.expected) {
     throw new Error('error fixture cannot be asserted with success expectation helper');
   }
@@ -652,6 +673,7 @@ function assertSearchFixtureExpectation(
     throw new Error('Expected meta.determinism_fingerprint to be present');
   }
 
+  const traceDrifts: FixtureTraceDrift[] = [];
   if ('golden_trace' in fixture.expected && fixture.expected.golden_trace !== undefined) {
     const goldenTrace = fixture.expected.golden_trace;
     const auditExtension = body.meta.audit_extension;
@@ -659,37 +681,47 @@ function assertSearchFixtureExpectation(
       throw new Error('Expected meta.audit_extension to be present when golden_trace is declared');
     }
     if (goldenTrace.authority_trace_ref !== undefined) {
-      assertExactMatch(body.meta.authority_trace_ref, goldenTrace.authority_trace_ref, 'authority_trace_ref');
+      collectTraceDrift(
+        traceDrifts,
+        body.meta.authority_trace_ref,
+        goldenTrace.authority_trace_ref,
+        'authority_trace_ref',
+      );
     }
     if (goldenTrace.snapshot_id !== undefined) {
-      assertExactMatch(
+      collectTraceDrift(
+        traceDrifts,
         body.meta.decision_snapshot?.snapshot_id,
         goldenTrace.snapshot_id,
         'decision_snapshot.snapshot_id',
       );
     }
     if (goldenTrace.determinism_fingerprint !== undefined) {
-      assertExactMatch(
+      collectTraceDrift(
+        traceDrifts,
         body.meta.determinism_fingerprint,
         goldenTrace.determinism_fingerprint,
         'determinism_fingerprint',
       );
     }
     if (goldenTrace.execution_trace !== undefined) {
-      assertExactMatch(
+      collectTraceDrift(
+        traceDrifts,
         auditExtension.execution_trace,
         goldenTrace.execution_trace,
-        'audit_extension.execution_trace',
+        'execution_trace',
       );
     }
     if (goldenTrace.resolver_provenance_trace !== undefined) {
-      assertExactMatch(
+      collectTraceDrift(
+        traceDrifts,
         auditExtension.resolver_provenance_trace,
         goldenTrace.resolver_provenance_trace,
-        'audit_extension.resolver_provenance_trace',
+        'resolver_provenance_trace',
       );
     }
   }
+  return traceDrifts;
 }
 
 function assertComparisonFixtureExpectation(

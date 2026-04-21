@@ -174,8 +174,9 @@ function buildComparisonDecompositionLeg(query: string): ComparisonDecomposition
       rawQuery: query,
       retrievalQuery: `${conceptResolution.canonicalConcept} wine`,
       mode: 'concept',
-      retrievalMode: 'hybrid',
+      retrievalMode: getConceptComparisonRetrievalMode(conceptResolution.entityType),
       evidenceSource: conceptResolution.evidenceSource,
+      conceptEntityType: conceptResolution.entityType,
       canonicalConcept: conceptResolution.canonicalConcept,
     };
   }
@@ -183,10 +184,19 @@ function buildComparisonDecompositionLeg(query: string): ComparisonDecomposition
   return buildEntityComparisonLeg(query);
 }
 
+function getConceptComparisonRetrievalMode(
+  _entityType: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type',
+): 'entity' | 'hybrid' {
+  // Concept/category comparisons need representative wine sets, not exact entity
+  // lookup for the concept label itself (for example "Barolo" as an appellation).
+  return 'hybrid';
+}
+
 function resolveConceptComparisonCanonical(
   query: string,
 ): {
   readonly canonicalConcept: string;
+  readonly entityType: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
   readonly evidenceSource: 'direct_entity_resolution' | 'span_entity_resolution';
 } | undefined {
   const normalized = buildNormalizedQueryViews(query).punctuationStripped.trim();
@@ -201,6 +211,7 @@ function resolveConceptComparisonCanonical(
   ) {
     return {
       canonicalConcept: direct.canonicalValue,
+      entityType: direct.entityType,
       evidenceSource: 'direct_entity_resolution',
     };
   }
@@ -229,6 +240,7 @@ function resolveConceptComparisonCanonical(
 
   return {
     canonicalConcept: conceptResolution.resolved.canonicalValue,
+    entityType: conceptResolution.resolved.entityType,
     evidenceSource: 'span_entity_resolution',
   };
 }

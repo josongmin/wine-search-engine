@@ -72,6 +72,9 @@ export type EvidenceRecord = Readonly<Record<string, string | number | readonly 
  */
 /** For identity_claim with canonical_label field, also check these alt fields. */
 const IDENTITY_FALLBACK_FIELDS = ['producer', 'canonical_label'] as const;
+const GEO_CLAIM_FIELDS: ReadonlySet<string> = new Set(['region', 'country', 'appellation']);
+const GEO_COMPARISON_CONCEPT_FIELDS: ReadonlySet<string> = new Set(['country', 'region', 'appellation']);
+const GRAPE_CLAIM_FIELDS: ReadonlySet<string> = new Set(['grape_primary', 'grapes']);
 
 export function verifyDeterministic(
   claim: ExtractedClaim,
@@ -82,16 +85,8 @@ export function verifyDeterministic(
   let sawFieldEvidence = false;
   let bestIsContradiction = false;
 
-  // For identity claims on canonical_label, search both canonical_label AND producer.
-  // The agent may emit a producer name as identity claim, which should match
-  // the producer field even if it's not in canonical_label.
-  const fieldsToCheck: readonly string[] =
-    claim.category === 'identity_claim' &&
-    (claim.field === 'canonical_label' || claim.field === 'producer')
-      ? IDENTITY_FALLBACK_FIELDS
-      : [claim.field];
-
   for (const evidence of evidenceRecords) {
+    const fieldsToCheck = fieldsToCheckForEvidence(claim, evidence);
     for (const fld of fieldsToCheck) {
       const evidenceValue = evidence[fld];
       if (evidenceValue === undefined || evidenceValue === null) continue;
@@ -143,6 +138,49 @@ export function verifyDeterministic(
     confidence: bestMatch.score,
     explanation: bestMatch.details,
   };
+}
+
+function fieldsToCheckForEvidence(
+  claim: ExtractedClaim,
+  evidence: EvidenceRecord,
+): readonly string[] {
+  // For identity claims on canonical_label, search both canonical_label AND producer.
+  // The agent may emit a producer name as identity claim, which should match
+  // the producer field even if it's not in canonical_label.
+  const fields: string[] =
+    claim.category === 'identity_claim' &&
+    (claim.field === 'canonical_label' || claim.field === 'producer')
+      ? [...IDENTITY_FALLBACK_FIELDS]
+      : [claim.field];
+
+  const comparisonConcept = evidence['comparison_concept'];
+  const comparisonConceptField = evidence['comparison_concept_field'];
+  if (
+    typeof comparisonConcept === 'string'
+    && comparisonConcept.trim().length > 0
+    && typeof comparisonConceptField === 'string'
+    && comparisonConceptSupportsClaimField(comparisonConceptField, claim.field)
+  ) {
+    fields.push('comparison_concept');
+  }
+
+  return [...new Set(fields)];
+}
+
+function comparisonConceptSupportsClaimField(
+  comparisonConceptField: string,
+  claimField: string,
+): boolean {
+  if (GEO_CLAIM_FIELDS.has(claimField)) {
+    return GEO_COMPARISON_CONCEPT_FIELDS.has(comparisonConceptField);
+  }
+  if (GRAPE_CLAIM_FIELDS.has(claimField)) {
+    return comparisonConceptField === 'grape_primary';
+  }
+  if (claimField === 'wine_type') {
+    return comparisonConceptField === 'wine_type';
+  }
+  return false;
 }
 
 /**
@@ -356,4 +394,3 @@ function isWithinTolerance(claim: number, evidence: number, tolerance: RangeTole
   const maxDelta = Math.abs(evidence * tolerance.value);
   return Math.abs(claim - evidence) <= maxDelta;
 }
-

@@ -155,6 +155,9 @@ describe('runSearchPreRoutePhase', () => {
         filters: [
           constraint({ attribute: 'wine_type', operator: '=', value: 'red' }),
         ],
+        preferences: [
+          constraint({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+        ],
       },
       requestId: 'r-filters',
       startTime: Date.now(),
@@ -175,6 +178,9 @@ describe('runSearchPreRoutePhase', () => {
         constraint({ attribute: 'country', operator: '=', value: 'France' }),
         constraint({ attribute: 'wine_type', operator: '=', value: 'red' }),
       ]);
+      expect(result.plan.constraints.soft).toEqual([
+        constraint({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+      ]);
       expect(result.plan.admission_context).toEqual({
         requires_identity_seal: false,
         requires_constraint_evidence: true,
@@ -187,9 +193,9 @@ describe('runSearchPreRoutePhase', () => {
       expect(result.compiled.query.retrievalObjective).toEqual(
         buildRetrievalObjective(result.plan.constraints),
       );
-      expect(result.compiled.query.retrievalObjective.constraintTargets).toEqual(
+      expect(result.compiled.query.retrievalObjective.signals).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+          expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
         ]),
       );
       expect(result.compiled.execution.provenancePolicy.requireConstraintEvidence).toBe(true);

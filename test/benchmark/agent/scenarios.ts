@@ -217,7 +217,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       judgeRequired: true,
       rubric: 'Must recommend NON-Pinot Noir grapes with similar style characteristics (light body, elegant). The RECOMMENDED wines must not be Pinot Noir, but referencing Pinot Noir for comparison is acceptable.' } },
   { id: 15, tier: 'complex_reasoning', query: '보르도 2015 vs 2016 빈티지 비교, 둘 다 지금 마시기 좋은지도 알려줘', description: 'Compare + dual drinking window',
-    expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
+    expectation: { tools: [{ tool: 'compare_wines' }, { tool: 'check_drinking_window' }, { tool: 'check_drinking_window' }], maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       answerMustMatch: ['(2015)', '(2016)', '(보르도|bordeaux)'],
       // judgeRequired: answerMustMatch checks presence of vintage numbers and region name,
       // but cannot verify that BOTH vintages' drinking windows were addressed — that requires
@@ -334,7 +334,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // Tier 7: Comparison + Condition Nested
   // ─────────────────────────────────────────────────────────────────────
   { id: 30, tier: 'comparison_nested', query: '바롤로랑 브루넬로 비교해주고, 둘 중 지금 마시기 좋은 거로 골라줘', description: 'Compare + dual drinking window',
-    expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 5, maxDurationMs: 60_000, maxTotalTokens: 8_000,
+    expectation: { tools: [{ tool: 'compare_wines' }, { tool: 'check_drinking_window' }, { tool: 'check_drinking_window' }], maxSteps: 5, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       drinkingWindowStatus: 'now',
       answerMustMatch: ['(바롤로|barolo)', '(브루넬로|brunello)'],
       rubric: 'Must compare Barolo and Brunello, then select the one currently at drinking peak. Must address drinking window for both.',

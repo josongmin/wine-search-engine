@@ -1243,6 +1243,55 @@ describe('RAGAS Context Relevance', () => {
     expect(r.scores.contextRelevance).toBeNull();
   });
 
+  it('uses structured tool input and grounding evidence before raw query-term matching', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [
+          tool('search_wines', '{"query":"달달하고 도수 낮은 선물용","styles":["sweet"],"max_alcohol_pct":12}'),
+        ],
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"sweet-1","canonical_label":"Sweet Dessert Wine","wine_type":"dessert","style":"sweet","sweetness":0.9}]}',
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBe(0.5);
+    expect(r.diagnostics?.some((d) => d.message.includes('tool_alcohol_pct_lte_12'))).toBe(true);
+  });
+
+  it('keeps query/entity alignment active when structured wine_type passes but entity is absent', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"Opus One","wine_type":"red"}')],
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"random-red-1","canonical_label":"Random Red Wine","wine_type":"red","style":"red","producer":"Benchmark Winery"}]}',
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBeLessThan(1);
+    expect(r.diagnostics?.some((d) => d.message.includes('query_terms_in_context'))).toBe(true);
+  });
+
+  it('passes context relevance when structured wine_type and query entity are both present', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"Opus One","wine_type":"red"}')],
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"opus-one-2018","canonical_label":"Opus One 2018","wine_type":"red","style":"red","producer":"Opus One Winery"}]}',
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBe(1);
+  });
+
   it('cross-lingual: English query + English observation → normal term-matching still applies', () => {
     // English query + English observation: normal matching, not bypassed
     const r = scoreScenario(

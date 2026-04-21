@@ -123,11 +123,11 @@ function sanitizeLlmPhrase(phrase: string): string | null {
 
 const SYSTEM_PROMPT = `You are a wine search query constraint parser. Given Korean or English wine search phrases, extract structured attribute constraints.
 
-Allowed attributes: body, sweetness, acidity, tannin, price_band, occasion, wine_type, country, region, appellation, grape_primary, style, critic_score, producer_prestige, finish_length, drinking_window, flavor_profile, certification.
+Allowed attributes: body, sweetness, acidity, tannin, alcohol_pct, price_band, occasion, wine_type, country, region, appellation, grape_primary, style, critic_score, producer_prestige, finish_length, drinking_window, flavor_profile, certification.
 
 Price band values: budget, mid, premium, luxury.
 Wine type values: red, white, rosé, sparkling, natural, dessert, fortified, orange.
-Body/sweetness/acidity/tannin/critic_score/producer_prestige: numeric 0-1.
+Body/sweetness/acidity/tannin/critic_score/producer_prestige: numeric 0-1. alcohol_pct is ABV percentage.
 Occasion values: gift, party, celebration, anniversary, wedding, date_night, housewarming, solo, healing, camping, romantic, comforting.
 Style values: dry, off_dry, sweet, sparkling, fortified, rose, natural, orange, chillable, screw_cap, approachable, crowd_pleasing, presentation_forward.
 
@@ -143,6 +143,7 @@ Examples:
 - "시원하게 마실" → [{"phrase":"시원하게 마실","attribute":"style","operator":"in","value":"chillable","confidence":0.8}]
 - "실패 없는" → [{"phrase":"실패 없는","attribute":"style","operator":"in","value":"crowd_pleasing","confidence":0.8}]
 - "예쁜 라벨" → [{"phrase":"예쁜 라벨","attribute":"style","operator":"in","value":"presentation_forward","confidence":0.8}]
+- "도수 낮은" → [{"phrase":"도수 낮은","attribute":"alcohol_pct","operator":"<=","value":12,"confidence":0.85}]
 - "샴페인 말고" → [{"phrase":"샴페인 말고","attribute":"region","operator":"exclude","value":"Champagne","confidence":0.85}]
 - "레드인데" → [{"phrase":"레드인데","attribute":"wine_type","operator":"=","value":"red","confidence":0.9}]
 

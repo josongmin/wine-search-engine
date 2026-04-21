@@ -119,6 +119,48 @@ function extractFirstParsableJsonObject(text: string): string | null {
   return null;
 }
 
+function extractBalancedJsonObjectAt(text: string, startIndex: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = startIndex; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') {
+      depth++;
+      continue;
+    }
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return text.slice(startIndex, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+function extractParsableJsonObjectsFromAnyStart(text: string): readonly Record<string, unknown>[] {
+  const objects: Record<string, unknown>[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    const candidate = extractBalancedJsonObjectAt(text, i);
+    if (candidate === null) continue;
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        objects.push(parsed as Record<string, unknown>);
+      }
+    } catch (err) {
+      void err;
+    }
+  }
+  return objects;
+}
+
 export function parseLlmJsonObject(text: string): Record<string, unknown> | null {
   try {
     const cleaned = cleanLlmJsonText(text);
@@ -193,11 +235,37 @@ function parseToolCallCandidate(candidate: Record<string, unknown>): ToolCallCan
   return { attempt: { tool, input: {} } };
 }
 
+function recoverEmbeddedToolCall(text: string): LlmAction | null {
+  const candidates = extractParsableJsonObjectsFromAnyStart(cleanLlmJsonText(text));
+  for (const candidate of candidates) {
+    if (typeof candidate['tool'] !== 'string' || candidate['tool'].length === 0) {
+      continue;
+    }
+    const parsed = parseToolCallCandidate(candidate);
+    const thought = 'recovered embedded tool call';
+    if (parsed.attempt !== null) {
+      log.warn(
+        { tool: parsed.attempt.tool },
+        'agent LLM embedded a bare tool JSON object inside malformed output; recovered',
+      );
+      return { thought, action: parsed.attempt };
+    }
+    if (parsed.plannerDefect !== undefined) {
+      return { thought, plannerDefect: parsed.plannerDefect };
+    }
+  }
+  return null;
+}
+
 export function parseLlmOutput(text: string): LlmAction {
   try {
     const trimmed = text.trim();
     const parsed = parseLlmJsonObject(text);
     if (parsed === null) {
+      const recovered = recoverEmbeddedToolCall(text);
+      if (recovered !== null) {
+        return recovered;
+      }
       log.warn(
         { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },
         'agent LLM produced non-JSON output; falling back to raw text',
@@ -282,6 +350,17 @@ export function parseLlmOutput(text: string): LlmAction {
         'agent LLM emitted bare tool call (missing action wrapper); recovered',
       );
       return { thought, action: bareAction.attempt };
+    }
+
+    const embeddedThoughtToolCall = recoverEmbeddedToolCall(thought);
+    if (
+      embeddedThoughtToolCall !== null
+      && !hasAnswer
+      && !hasActionObject
+      && !hasActionsArray
+      && !hasBareTool
+    ) {
+      return embeddedThoughtToolCall;
     }
 
     log.warn(

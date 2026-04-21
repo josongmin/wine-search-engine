@@ -37,9 +37,12 @@ function makeResultItem(overrides: Partial<ResultItem['entity']> = {}): ResultIt
       type: 'wine',
       producer: 'Opus One Winery',
       region: 'Napa Valley',
+      wineType: 'red',
       vintage: 2018,
       priceRange: '$450',
       grapes: ['Cabernet Sauvignon'],
+      alcoholPct: 14.5,
+      sweetness: 0.2,
       ...overrides,
     },
   } as ResultItem;
@@ -65,9 +68,13 @@ describe('buildEvidenceRecordsFromFrames', () => {
     expect(rec['canonical_label']).toBe('Opus One 2018');
     expect(rec['producer']).toBe('Opus One Winery');
     expect(rec['region']).toBe('Napa Valley');
+    expect(rec['wine_type']).toBe('red');
     expect(rec['vintage_year']).toBe(2018);
     expect(rec['price_range']).toBe('$450');
+    expect(rec['price_usd']).toBe(450);
     expect(rec['grapes']).toEqual(['Cabernet Sauvignon']);
+    expect(rec['alcohol_pct']).toBe(14.5);
+    expect(rec['sweetness']).toBe(0.2);
   });
 
   it('skips tool_error and no_op frames (no verifiable evidence)', () => {
@@ -101,6 +108,55 @@ describe('buildEvidenceRecordsFromFrames', () => {
     expect(records[0]!['currently_drinkable']).toBe('true');
     expect(records[0]!['target_year']).toBe(2026);
     expect(records[0]!['drinking_window_confidence']).toBe('high');
+  });
+
+  it('preserves comparison concept axis evidence instead of only the representative top result', () => {
+    const frame = makeFrame({
+      structuredOutput: {
+        kind: 'comparison_result',
+        response: {
+          queryType: 'comparison',
+          originalQuery: 'Barolo vs Brunello',
+          comparisonIntent: 'compare',
+          entities: [
+            {
+              subQuery: 'Barolo',
+              comparisonMode: 'concept',
+              canonicalConcept: 'Barolo',
+              conceptEntityType: 'appellation',
+              topResult: makeResultItem({ entityId: createCanonicalEntityId('barolo-rep'), region: 'Italy' }),
+              resultCount: 1,
+              resolutionStatus: 'resolved',
+              allResults: [],
+            },
+            {
+              subQuery: 'Brunello',
+              comparisonMode: 'concept',
+              canonicalConcept: 'Brunello di Montalcino',
+              conceptEntityType: 'appellation',
+              topResult: makeResultItem({ entityId: createCanonicalEntityId('brunello-rep'), region: 'Italy' }),
+              resultCount: 1,
+              resolutionStatus: 'resolved',
+              allResults: [],
+            },
+          ],
+          overallStatus: 'resolved',
+          requestId: 'req-compare',
+          executionTimeMs: 10,
+        },
+      },
+    });
+
+    const records = buildEvidenceRecordsFromFrames([frame]);
+    expect(records).toHaveLength(2);
+    expect(records[0]!['region']).toBe('Italy');
+    expect(records[0]!['appellation']).toBeUndefined();
+    expect(records[0]!['comparison_concept']).toBe('Barolo');
+    expect(records[0]!['comparison_concept_field']).toBe('appellation');
+    expect(records[1]!['region']).toBe('Italy');
+    expect(records[1]!['appellation']).toBeUndefined();
+    expect(records[1]!['comparison_concept']).toBe('Brunello di Montalcino');
+    expect(records[1]!['comparison_concept_field']).toBe('appellation');
   });
 
   it('preserves frame order and per-frame result order across multiple frames', () => {

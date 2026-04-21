@@ -1013,6 +1013,7 @@ export const ComparisonEntitySchema = z.object({
   sub_query: z.string().min(1),
   comparison_mode: z.enum(['entity', 'concept']).optional(),
   canonical_concept: z.string().min(1).optional(),
+  concept_entity_type: z.enum(['country', 'region', 'appellation', 'grape_primary', 'wine_type']).optional(),
   top_result: ResultItemSchema.nullable(),
   result_count: z.number().int().nonnegative(),
   resolution_status: z.enum(['resolved', 'ambiguous', 'failed']),
@@ -1057,6 +1058,7 @@ const NormalizedQueryViewsSchema = z.object({
   vintage_stripped: z.string().min(1),
   transliterated: z.string().min(1).optional(),
   reordered: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS).optional(),
+  semantic_variants: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
   lookup_variants: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
 }).strict();
 

@@ -9,6 +9,12 @@ import type { ResultItem } from './result-item.js';
 import type { DecisionStatus } from '../../shared/types/index.js';
 
 export type ComparisonEntityMode = 'entity' | 'concept';
+export type ComparisonConceptEntityType =
+  | 'country'
+  | 'region'
+  | 'appellation'
+  | 'grape_primary'
+  | 'wine_type';
 
 /**
  * Single entity in a comparison result.
@@ -22,6 +28,9 @@ export interface ComparisonEntity {
 
   /** Canonical concept label used for concept/category comparisons. */
   readonly canonicalConcept?: string | undefined;
+
+  /** Structured field represented by `canonicalConcept` for concept comparisons. */
+  readonly conceptEntityType?: ComparisonConceptEntityType | undefined;
 
   /** Top-ranked result item (null if no match). */
   readonly topResult: ResultItem | null;

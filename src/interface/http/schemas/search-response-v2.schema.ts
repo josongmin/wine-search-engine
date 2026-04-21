@@ -108,6 +108,7 @@ export const ComparisonEntityV2HumanSchema = z.object({
   subQuery: z.string().min(1),
   comparisonMode: z.enum(['entity', 'concept']).optional(),
   canonicalConcept: z.string().min(1).optional(),
+  conceptEntityType: z.enum(['country', 'region', 'appellation', 'grape_primary', 'wine_type']).optional(),
   resolutionStatus: z.enum(DECISION_STATUS_V2),
   resultCount: z.number().int().nonnegative(),
   topResult: ResultItemV2HumanSchema.nullable(),

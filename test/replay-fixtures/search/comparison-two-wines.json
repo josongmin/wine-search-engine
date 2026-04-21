@@ -13,7 +13,7 @@
   },
   "expected": {
     "comparison_intent": "compare",
-    "overall_status": "ambiguous",
+    "overall_status": "resolved",
     "top_result_entity_ids": [
       "opus-one-2018",
       "chateau-margaux-2015"

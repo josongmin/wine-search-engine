@@ -2,6 +2,7 @@ import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.por
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
+  buildPlannerContinuationSystemMessage,
   buildPlannerSystemMessage,
   buildStepMessages,
   buildUserMessage,
@@ -71,8 +72,11 @@ function buildPlannerLoopMessages(
   const baseUserContent = baseUserContentRaw.length > maxContextChars
     ? baseUserContentRaw.slice(0, maxContextChars)
     : baseUserContentRaw;
+  const systemMessage = steps.length === 0
+    ? buildPlannerSystemMessage()
+    : buildPlannerContinuationSystemMessage();
   const messages = [
-    buildPlannerSystemMessage(),
+    systemMessage,
     buildUserMessage(baseUserContent),
     ...buildStepMessages(steps),
   ];

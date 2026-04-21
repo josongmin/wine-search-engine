@@ -45,4 +45,9 @@ export interface SearchRequest {
    * on the constraint extractor's regex matching.
    */
   readonly filters?: readonly NormalizedConstraint[] | undefined;
+  /**
+   * Structured preference constraints injected by callers.
+   * These merge into ConstraintBundle.soft instead of hard YQL filters.
+   */
+  readonly preferences?: readonly NormalizedConstraint[] | undefined;
 }

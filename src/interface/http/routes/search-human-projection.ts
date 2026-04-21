@@ -135,6 +135,7 @@ function projectComparisonToHuman(
     subQuery: string;
     comparisonMode?: 'entity' | 'concept';
     canonicalConcept?: string;
+    conceptEntityType?: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
     resolutionStatus: 'resolved' | 'ambiguous' | 'failed';
     resultCount: number;
     topResult: ResultItemV2Human | null;
@@ -142,6 +143,7 @@ function projectComparisonToHuman(
     subQuery: entity.subQuery,
     ...(entity.comparisonMode !== undefined ? { comparisonMode: entity.comparisonMode } : {}),
     ...(entity.canonicalConcept !== undefined ? { canonicalConcept: entity.canonicalConcept } : {}),
+    ...(entity.conceptEntityType !== undefined ? { conceptEntityType: entity.conceptEntityType } : {}),
     resolutionStatus: entity.resolutionStatus,
     resultCount: entity.resultCount,
     topResult:

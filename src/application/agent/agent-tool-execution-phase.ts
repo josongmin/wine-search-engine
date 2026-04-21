@@ -29,6 +29,96 @@ import { AgentToolExecutionResultPolicy } from './agent-tool-execution-result-po
 
 const log = bootstrapLogger.child({ component: 'AgentToolExecutionPhase' });
 
+type BatchToolCall = {
+  readonly tool: string;
+  readonly input: Record<string, unknown>;
+};
+
+function normalizeForStableJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeForStableJson);
+  }
+  if (value !== null && typeof value === 'object') {
+    const normalized: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) {
+      const child = (value as Record<string, unknown>)[key];
+      if (child !== undefined) {
+        normalized[key] = normalizeForStableJson(child);
+      }
+    }
+    return normalized;
+  }
+  return value;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(normalizeForStableJson(value)) ?? String(value);
+}
+
+function stableEqual(left: unknown, right: unknown): boolean {
+  return stableJson(left) === stableJson(right);
+}
+
+function sameComparePair(
+  left: BatchToolCall,
+  right: BatchToolCall,
+): boolean {
+  return typeof left.input['query_a'] === 'string'
+    && typeof left.input['query_b'] === 'string'
+    && stableEqual(left.input['query_a'], right.input['query_a'])
+    && stableEqual(left.input['query_b'], right.input['query_b']);
+}
+
+function buildMergedCompareInput(
+  compareCalls: readonly BatchToolCall[],
+): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {};
+  const keys = new Set<string>();
+  for (const call of compareCalls) {
+    for (const key of Object.keys(call.input)) {
+      keys.add(key);
+    }
+  }
+
+  for (const key of [...keys].sort()) {
+    const values = compareCalls
+      .map((call) => call.input[key])
+      .filter((value): value is NonNullable<unknown> => value !== undefined);
+    if (values.length === 0) {
+      continue;
+    }
+    const distinct = new Set(values.map(stableJson));
+    if (distinct.size > 1) {
+      return null;
+    }
+    merged[key] = values[0];
+  }
+
+  return merged;
+}
+
+function collapseDuplicateCompareBatch(
+  calls: readonly BatchToolCall[],
+): readonly BatchToolCall[] {
+  const compareCalls = calls.filter((call) => call.tool === 'compare_wines');
+  if (compareCalls.length <= 1 || compareCalls.length !== calls.length) {
+    return calls;
+  }
+  const firstCompare = compareCalls[0]!;
+  if (!compareCalls.every((call) => sameComparePair(firstCompare, call))) {
+    return calls;
+  }
+  const mergedInput = buildMergedCompareInput(compareCalls);
+  if (mergedInput === null) {
+    return calls;
+  }
+
+  return [{
+    tool: 'compare_wines',
+    input: mergedInput,
+  }];
+}
+
 interface AgentToolExecutionPhaseDeps {
   readonly toolDeps: AgentToolDeps;
   readonly contractExecutionPhase: {
@@ -226,10 +316,11 @@ export class AgentToolExecutionPhase {
       return false;
     }
 
-    const effectiveBatchCalls = this.policy.resolveParallelBatch({
+    let effectiveBatchCalls = this.policy.resolveParallelBatch({
       calls: batchCalls,
       queryExecutionContract,
     });
+    effectiveBatchCalls = collapseDuplicateCompareBatch(effectiveBatchCalls);
 
     const batchPolicy = evaluateBatchPolicy(effectiveBatchCalls);
     if (!batchPolicy.allowed) {
