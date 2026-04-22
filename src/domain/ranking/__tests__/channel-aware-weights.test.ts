@@ -354,6 +354,50 @@ describe('resolveChannelAwareWeights', () => {
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });
 
+    it('raises softConstraint from retrievalObjective drinking-window signal', () => {
+      const base = resolveWeights('semantic_preference');
+      const objective = makeRetrievalObjective([
+        {
+          axis: 'drinking_window',
+          attribute: 'drinking_window',
+          operator: '=',
+          value: 2026,
+          sourcePhrase: '지금 마시기 좋은',
+          confidence: 1,
+          sourceTier: 'soft',
+        },
+      ]);
+
+      const result = applySituationIntentWeightOverlay(base, makeConstraintBundle(), objective);
+
+      expect(result.softConstraint).toBeGreaterThan(base.softConstraint);
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+      expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
+    it('raises producerPrestige from retrievalObjective prestige signal', () => {
+      const base = resolveWeights('semantic_preference');
+      const objective = makeRetrievalObjective([
+        {
+          axis: 'producer_prestige',
+          attribute: 'producer_prestige',
+          operator: '>=',
+          value: 0.7,
+          sourcePhrase: '품격',
+          confidence: 1,
+          sourceTier: 'soft',
+        },
+      ]);
+
+      const result = applySituationIntentWeightOverlay(base, makeConstraintBundle(), objective);
+
+      expect(result.producerPrestige).toBeGreaterThan(base.producerPrestige);
+      expect(result.giftSuitability).toBeCloseTo(base.giftSuitability, 10);
+      expect(result.beginnerSuitability).toBeCloseTo(base.beginnerSuitability, 10);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
     it('does not raise giftSuitability when gift_suitability is below minimum threshold', () => {
       const base = resolveWeights('semantic_preference');
       const result = applySituationIntentWeightOverlay(

@@ -6,6 +6,7 @@ interface SearchToolSoftClauseInput {
   readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;
   readonly max_alcohol_pct?: number | undefined;
+  readonly grape_primary?: string | undefined;
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
   readonly certification?: string | undefined;
@@ -61,6 +62,9 @@ export function buildSearchToolSoftClauses(
   clauses.push(...buildSearchToolPriceClauses(input));
   if (input.max_alcohol_pct !== undefined) {
     clauses.push(`low alcohol ${input.max_alcohol_pct}% 이하`);
+  }
+  if (input.grape_primary !== undefined) {
+    clauses.push(input.grape_primary);
   }
   for (const style of buildSearchToolStyleQueryTerms(input)) {
     clauses.push(style);

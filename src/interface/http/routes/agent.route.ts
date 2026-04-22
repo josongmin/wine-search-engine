@@ -170,12 +170,13 @@ export function registerAgentRoute(
         MAX_AGENT_STEPS_CAP,
       );
 
-      // Wire the agent loop to the request lifecycle: when the client
-      // disconnects, abort the orchestrator so we stop spending LLM tokens.
-      // Without this, a closed connection still costs us ~10 LLM round-trips.
+      // Wire the agent loop to real request-abort events. Do not use
+      // request.raw/reply.raw "close": Node can emit close while a long-running
+      // handler is still healthy, which aborts normal LLM calls before the
+      // planner can finish.
       const lifecycleController = new AbortController();
-      const onClose = () => { lifecycleController.abort(); };
-      request.raw.once('close', onClose);
+      const onClientAbort = () => { lifecycleController.abort(); };
+      request.raw.once('aborted', onClientAbort);
 
       let result;
       try {
@@ -190,7 +191,7 @@ export function registerAgentRoute(
           lifecycleController.signal,
         );
       } finally {
-        request.raw.off('close', onClose);
+        request.raw.off('aborted', onClientAbort);
         // Always abort the controller on request completion (success or error) so
         // that AbortController internal listener maps are cleaned up. Without this,
         // AbortSignal listeners registered by the orchestrator accumulate on every

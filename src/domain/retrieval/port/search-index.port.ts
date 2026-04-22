@@ -20,6 +20,7 @@ export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entit
   readonly canonicalLabel?: string;
   readonly producer?: string;
   readonly region?: string;
+  readonly closure?: string | undefined;
   readonly searchTextEn?: string;
   readonly searchTextKo?: string;
   readonly semanticSummary?: string;
@@ -63,6 +64,7 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'canonicalLabel',
   'producer',
   'region',
+  'closure',
   'searchTextEn',
   'searchTextKo',
   'semanticSummary',

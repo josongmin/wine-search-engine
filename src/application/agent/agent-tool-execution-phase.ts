@@ -1,6 +1,8 @@
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentTerminationReason, AgentToolCallPair } from '../../domain/agent/model/agent-step.js';
 import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-evidence-frame.js';
+import type { ResultItem } from '../../domain/response/model/result-item.js';
+import type { ComparisonEntity, ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import { toolCallIdForStep } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import type { StepBudget } from '../../domain/agent/service/step-budget.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -8,6 +10,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { PlannerPhaseResult } from './agent-planner-phase-runner.js';
 import type { AgentToolDeps, AgentToolResult } from './agent-tools.js';
+import type { RetrievalDrinkingWindowProjection } from '../../domain/retrieval/model/retrieval-document.js';
 import {
   executeAgentTool,
   executeAgentToolsBatch,
@@ -34,6 +37,22 @@ type BatchToolCall = {
   readonly input: Record<string, unknown>;
 };
 
+type BatchNormalizationResult =
+  | { readonly kind: 'calls'; readonly calls: readonly BatchToolCall[] }
+  | { readonly kind: 'defect'; readonly calls: readonly BatchToolCall[]; readonly observation: string };
+
+type CompareMergeConflict = {
+  readonly key: string;
+  readonly values: readonly unknown[];
+};
+
+function formatInvalidParallelBatchObservation(
+  reason: string,
+  detail: string,
+): string {
+  return `Invalid parallel batch: ${reason}. ${detail}`;
+}
+
 function normalizeForStableJson(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(normalizeForStableJson);
@@ -59,6 +78,20 @@ function stableEqual(left: unknown, right: unknown): boolean {
   return stableJson(left) === stableJson(right);
 }
 
+function dedupeStableValues<T>(values: readonly T[]): readonly T[] {
+  const deduped: T[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = stableJson(value);
+    if (seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    deduped.push(value);
+  }
+  return deduped;
+}
+
 function sameComparePair(
   left: BatchToolCall,
   right: BatchToolCall,
@@ -69,10 +102,35 @@ function sameComparePair(
     && stableEqual(left.input['query_b'], right.input['query_b']);
 }
 
+function mergeCompareFieldValues(
+  values: readonly unknown[],
+): { readonly kind: 'merged'; readonly value: unknown } | { readonly kind: 'conflict'; readonly values: readonly unknown[] } {
+  const distinctValues = dedupeStableValues(values);
+  if (distinctValues.length === 1) {
+    return { kind: 'merged', value: distinctValues[0] };
+  }
+
+  if (distinctValues.every(Array.isArray)) {
+    const mergedItems: unknown[] = [];
+    for (const candidate of distinctValues) {
+      for (const item of candidate) {
+        if (mergedItems.some((existing) => stableEqual(existing, item))) {
+          continue;
+        }
+        mergedItems.push(item);
+      }
+    }
+    return { kind: 'merged', value: mergedItems };
+  }
+
+  return { kind: 'conflict', values: distinctValues };
+}
+
 function buildMergedCompareInput(
   compareCalls: readonly BatchToolCall[],
-): Record<string, unknown> | null {
+): { readonly kind: 'merged'; readonly input: Record<string, unknown> } | { readonly kind: 'conflict'; readonly conflicts: readonly CompareMergeConflict[] } {
   const merged: Record<string, unknown> = {};
+  const conflicts: CompareMergeConflict[] = [];
   const keys = new Set<string>();
   for (const call of compareCalls) {
     for (const key of Object.keys(call.input)) {
@@ -87,36 +145,217 @@ function buildMergedCompareInput(
     if (values.length === 0) {
       continue;
     }
-    const distinct = new Set(values.map(stableJson));
-    if (distinct.size > 1) {
-      return null;
+    const mergeResult = mergeCompareFieldValues(values);
+    if (mergeResult.kind === 'conflict') {
+      conflicts.push({
+        key,
+        values: mergeResult.values,
+      });
+      continue;
     }
-    merged[key] = values[0];
+    merged[key] = mergeResult.value;
   }
 
-  return merged;
+  if (conflicts.length > 0) {
+    return { kind: 'conflict', conflicts };
+  }
+
+  return { kind: 'merged', input: merged };
 }
 
-function collapseDuplicateCompareBatch(
+function normalizeCompareBatch(
   calls: readonly BatchToolCall[],
-): readonly BatchToolCall[] {
+): BatchNormalizationResult {
   const compareCalls = calls.filter((call) => call.tool === 'compare_wines');
-  if (compareCalls.length <= 1 || compareCalls.length !== calls.length) {
-    return calls;
+  if (compareCalls.length === 0) {
+    return { kind: 'calls', calls };
+  }
+
+  if (compareCalls.length !== calls.length) {
+    const coTools = dedupeStableValues(calls
+      .filter((call) => call.tool !== 'compare_wines')
+      .map((call) => call.tool));
+    return {
+      kind: 'defect',
+      calls,
+      observation: formatInvalidParallelBatchObservation(
+        'compare_wines_must_run_alone',
+        `Planner defect: compare_wines cannot share a parallel batch with ${coTools.join(', ')}. Preserve all requested calls, execute compare_wines in its own step, then replan the remaining tool calls sequentially.`,
+      ),
+    };
+  }
+
+  if (compareCalls.length === 1) {
+    return { kind: 'calls', calls };
   }
   const firstCompare = compareCalls[0]!;
   if (!compareCalls.every((call) => sameComparePair(firstCompare, call))) {
-    return calls;
+    return {
+      kind: 'defect',
+      calls,
+      observation: formatInvalidParallelBatchObservation(
+        'multiple_compare_wines_calls',
+        'Planner defect: multiple compare_wines calls were requested in one parallel batch. compare_wines must run alone; split each comparison into its own sequential step.',
+      ),
+    };
   }
   const mergedInput = buildMergedCompareInput(compareCalls);
-  if (mergedInput === null) {
-    return calls;
+  if (mergedInput.kind === 'conflict') {
+    const conflictingKeys = mergedInput.conflicts.map((conflict) => conflict.key).sort();
+    return {
+      kind: 'defect',
+      calls,
+      observation: formatInvalidParallelBatchObservation(
+        'conflicting_duplicate_compare_constraints',
+        `Planner defect: conflicting duplicate compare_wines constraints for the same pair on keys [${conflictingKeys.join(', ')}]. Preserve every constraint and replan with one lossless compare_wines call or separate sequential steps; do not weaken constraints.`,
+      ),
+    };
   }
 
-  return [{
-    tool: 'compare_wines',
-    input: mergedInput,
-  }];
+  return {
+    kind: 'calls',
+    calls: [{
+      tool: 'compare_wines',
+      input: mergedInput.input,
+    }],
+  };
+}
+
+const FORBIDDEN_PLACEHOLDER_VALUES = new Set([
+  '__TO_BE_FILLED__',
+  '<top_result_entity_id>',
+  '{{id}}',
+  'TBD',
+  'PLACEHOLDER',
+]);
+
+function isForbiddenPlaceholderValue(value: unknown): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (FORBIDDEN_PLACEHOLDER_VALUES.has(trimmed)) {
+    return true;
+  }
+  const normalized = trimmed.toLowerCase().replace(/[\s-]+/gu, '_');
+  return (
+    /^<[^>]+>$/u.test(trimmed) &&
+    /(?:to_be_filled|fill(?:ed)?_later|top_result|placeholder|entity_id|tbd)/u.test(normalized)
+  )
+    || /^(?:to_be_filled|fill(?:ed)?_later|top_result_entity_id|placeholder|tbd)$/u.test(normalized);
+}
+
+function isUnresolvedDrinkabilityCheck(call: BatchToolCall): boolean {
+  return call.tool === 'check_drinking_window'
+    && (
+      call.input['entity_id'] === undefined ||
+      isForbiddenPlaceholderValue(call.input['entity_id'])
+    );
+}
+
+function buildDrinkingWindowProjectionFromResultItem(
+  item: ResultItem | null | undefined,
+): RetrievalDrinkingWindowProjection | undefined {
+  if (item?.drinkingWindow === undefined) {
+    return undefined;
+  }
+  return {
+    entityId: item.entity.entityId,
+    canonicalLabel: item.entity.canonicalLabel,
+    drinkingWindowStart: item.drinkingWindow.drinkingWindowStart,
+    drinkingWindowEnd: item.drinkingWindow.drinkingWindowEnd,
+    ...(item.drinkingWindow.modelVersion !== undefined
+      ? { drinkingWindowModelVersion: item.drinkingWindow.modelVersion }
+      : {}),
+  };
+}
+
+function ingestDrinkingWindowProjection(
+  state: AgentExecutionState,
+  projection: RetrievalDrinkingWindowProjection | undefined,
+): void {
+  if (projection === undefined) {
+    return;
+  }
+  if (projection.drinkingWindowStart === undefined || projection.drinkingWindowEnd === undefined) {
+    return;
+  }
+  state.groundedDrinkingWindowByEntityId.set(projection.entityId, projection);
+}
+
+function collectComparisonLegCandidates(entity: ComparisonEntity): readonly ResultItem[] {
+  const candidates: ResultItem[] = [];
+  const push = (item: ResultItem | null | undefined): void => {
+    if (item === null || item === undefined) {
+      return;
+    }
+    if (candidates.some((existing) => existing.entity.entityId === item.entity.entityId)) {
+      return;
+    }
+    candidates.push(item);
+  };
+
+  push(entity.topResult);
+  push(entity.conceptAggregate?.representativeResult ?? undefined);
+  for (const item of entity.allResults) {
+    push(item);
+  }
+  return candidates;
+}
+
+function ingestGroundedDrinkabilityFromRawResult(
+  state: AgentExecutionState,
+  rawResult: unknown,
+): void {
+  if (rawResult === null || typeof rawResult !== 'object') {
+    return;
+  }
+  const result = rawResult as Record<string, unknown>;
+  if (result['queryType'] === 'search') {
+    const search = rawResult as SearchResponseV1;
+    for (const item of search.results) {
+      ingestDrinkingWindowProjection(state, buildDrinkingWindowProjectionFromResultItem(item));
+    }
+    return;
+  }
+  if (result['queryType'] === 'comparison') {
+    const comparison = rawResult as ComparisonSearchResponse;
+    for (const entity of comparison.entities) {
+      for (const item of collectComparisonLegCandidates(entity)) {
+        ingestDrinkingWindowProjection(state, buildDrinkingWindowProjectionFromResultItem(item));
+      }
+    }
+  }
+}
+
+function detectDeferredDrinkabilityBatchDefect(
+  calls: readonly BatchToolCall[],
+  queryExecutionContract: AgentQueryExecutionContract,
+): BatchNormalizationResult | null {
+  if (!queryExecutionContract.requiresDrinkabilityCheck || calls.length < 2) {
+    return null;
+  }
+
+  const unresolvedDrinkabilityChecks = calls.filter(isUnresolvedDrinkabilityCheck);
+  if (unresolvedDrinkabilityChecks.length === 0) {
+    return null;
+  }
+
+  const coTools = dedupeStableValues(calls
+    .filter((call) => !isUnresolvedDrinkabilityCheck(call))
+    .map((call) => call.tool));
+  if (coTools.length === 0) {
+    return null;
+  }
+
+  return {
+    kind: 'defect',
+    calls,
+    observation: formatInvalidParallelBatchObservation(
+      'deferred_drinkability_requires_prior_retrieval',
+      `Planner defect: Deferred drinkability placeholders cannot run in the same batch as ${coTools.join(', ')}. Preserve all requested calls, execute the retrieval step first, then replan concrete check_drinking_window(entity_id=...) calls with resolved entity ids.`,
+    ),
+  };
 }
 
 interface AgentToolExecutionPhaseDeps {
@@ -139,6 +378,56 @@ export class AgentToolExecutionPhase {
   private readonly resultPolicy = new AgentToolExecutionResultPolicy();
 
   constructor(private readonly deps: AgentToolExecutionPhaseDeps) {}
+
+  private buildRuntimeToolDeps(state: AgentExecutionState): AgentToolDeps {
+    return {
+      ...this.deps.toolDeps,
+      groundedDrinkingWindowLookup: (id) => state.groundedDrinkingWindowByEntityId.get(String(id)),
+    };
+  }
+
+  private applyPlannerRepairToObservation(
+    observation: string,
+    repairObservation: string | undefined,
+  ): string {
+    if (repairObservation === undefined || repairObservation.trim().length === 0) {
+      return observation;
+    }
+    return `[PLANNER_REPAIR] ${repairObservation}\n${observation}`;
+  }
+
+  private recordBatchPolicyViolation(
+    requestId: string,
+    stepIndex: number,
+    thought: string,
+    calls: readonly BatchToolCall[],
+    observation: string,
+    durationMs: number,
+    inputTokens: number,
+    outputTokens: number,
+    state: AgentExecutionState,
+    reasoningFailureDetected: boolean = false,
+    plannerRepairObservation?: string,
+  ): false {
+    if (reasoningFailureDetected) {
+      state.reasoningFailureDetected = true;
+    }
+    this.resultPolicy.recordBatchStep({
+      requestId,
+      stepIndex,
+      thought,
+      calls,
+      observation: this.applyPlannerRepairToObservation(observation, plannerRepairObservation),
+      durationMs,
+      inputTokens,
+      outputTokens,
+      state,
+      execError: false,
+      timedOut: false,
+      policyViolation: true,
+    });
+    return false;
+  }
 
   async run(
     requestId: string,
@@ -185,6 +474,15 @@ export class AgentToolExecutionPhase {
     if (typeof parsed.answer === 'string') {
       const trimmedAnswer = parsed.answer.trim();
       if (trimmedAnswer.length > 0) {
+        if (state.pendingRefinementRetry) {
+          state.pendingPlannerDirective = { kind: 'relax_constraints_retry' };
+          return false;
+        }
+        if (queryExecutionContract.requiresGroundedWineSearch === true && state.toolOutcomes.length === 0) {
+          state.reasoningFailureDetected = true;
+          state.pendingPlannerDirective = this.contractPolicy.buildGroundedSearchDirective();
+          return false;
+        }
         if (pendingDrinkabilityEntityIds.length > 0) {
           state.pendingPlannerDirective = this.contractPolicy.buildPendingDrinkabilityDirective(pendingDrinkabilityEntityIds);
           return false;
@@ -216,6 +514,30 @@ export class AgentToolExecutionPhase {
     }
 
     if (parsed.action !== undefined) {
+      const expandedCalls = this.policy.resolveSingleCallExpansion({
+        tool: parsed.action.tool,
+        input: parsed.action.input,
+        queryExecutionContract,
+      });
+      if (expandedCalls !== undefined) {
+        return await this.runParallelBatch(
+          requestId,
+          effectiveConfig,
+          budget,
+          state,
+          queryExecutionContract,
+          pendingDrinkabilityEntityIds,
+          {
+            ...plannerPhase,
+            parsed: {
+              thought: parsed.thought,
+              actions: expandedCalls,
+              ...(parsed.plannerRepair !== undefined ? { plannerRepair: parsed.plannerRepair } : {}),
+            },
+          },
+          abortSignal,
+        );
+      }
       return await this.runSingleTool(
         requestId,
         effectiveConfig,
@@ -245,6 +567,10 @@ export class AgentToolExecutionPhase {
     const batchCalls = parsed.actions ?? [];
     const batchStepIndex = state.steps.length;
     const batchDurationMs = Math.max(0, Date.now() - stepStartMs);
+    const plannerRepairObservation = parsed.plannerRepair?.observation;
+    if (plannerRepairObservation !== undefined) {
+      state.reasoningFailureDetected = true;
+    }
 
     const pendingBatchViolation = this.contractPolicy.validateDrinkabilityBatch(
       pendingDrinkabilityEntityIds,
@@ -256,7 +582,10 @@ export class AgentToolExecutionPhase {
         stepIndex: batchStepIndex,
         thought: parsed.thought,
         calls: batchCalls,
-        observation: pendingBatchViolation,
+        observation: this.applyPlannerRepairToObservation(
+          pendingBatchViolation,
+          plannerRepairObservation,
+        ),
         durationMs: batchDurationMs,
         state,
         inputTokens,
@@ -278,7 +607,7 @@ export class AgentToolExecutionPhase {
         stepIndex: batchStepIndex,
         thought: parsed.thought,
         calls: truncatedActions,
-        observation: batchErrorMsg,
+        observation: this.applyPlannerRepairToObservation(batchErrorMsg, plannerRepairObservation),
         durationMs: batchDurationMs,
         inputTokens,
         outputTokens,
@@ -304,7 +633,10 @@ export class AgentToolExecutionPhase {
         stepIndex: batchStepIndex,
         thought: parsed.thought,
         calls: batchCalls,
-        observation: unknownToolMsg,
+        observation: this.applyPlannerRepairToObservation(
+          unknownToolMsg,
+          plannerRepairObservation,
+        ),
         durationMs: batchDurationMs,
         inputTokens,
         outputTokens,
@@ -320,27 +652,60 @@ export class AgentToolExecutionPhase {
       calls: batchCalls,
       queryExecutionContract,
     });
-    effectiveBatchCalls = collapseDuplicateCompareBatch(effectiveBatchCalls);
+    const deferredDrinkabilityDefect = detectDeferredDrinkabilityBatchDefect(
+      effectiveBatchCalls,
+      queryExecutionContract,
+    );
+    if (deferredDrinkabilityDefect?.kind === 'defect') {
+      return this.recordBatchPolicyViolation(
+        requestId,
+        batchStepIndex,
+        parsed.thought,
+        deferredDrinkabilityDefect.calls,
+        deferredDrinkabilityDefect.observation,
+        batchDurationMs,
+        inputTokens,
+        outputTokens,
+        state,
+        true,
+        plannerRepairObservation,
+      );
+    }
+    const normalizedCompareBatch = normalizeCompareBatch(effectiveBatchCalls);
+    if (normalizedCompareBatch.kind === 'defect') {
+      return this.recordBatchPolicyViolation(
+        requestId,
+        batchStepIndex,
+        parsed.thought,
+        normalizedCompareBatch.calls,
+        normalizedCompareBatch.observation,
+        batchDurationMs,
+        inputTokens,
+        outputTokens,
+        state,
+        true,
+        plannerRepairObservation,
+      );
+    }
+    effectiveBatchCalls = normalizedCompareBatch.calls;
 
     const batchPolicy = evaluateBatchPolicy(effectiveBatchCalls);
     if (!batchPolicy.allowed) {
       const policyReason = 'reason' in batchPolicy ? batchPolicy.reason : 'invalid_parallel_batch';
       const policyMsg = `Invalid parallel batch: ${policyReason}. Allowed: search_wines+search_wines/get_food_pairings, or check_drinking_window-only batches, or compare_wines alone.`;
-      this.resultPolicy.recordBatchStep({
+      return this.recordBatchPolicyViolation(
         requestId,
-        stepIndex: batchStepIndex,
-        thought: parsed.thought,
-        calls: effectiveBatchCalls,
-        observation: policyMsg,
-        durationMs: batchDurationMs,
+        batchStepIndex,
+        parsed.thought,
+        effectiveBatchCalls,
+        policyMsg,
+        batchDurationMs,
         inputTokens,
         outputTokens,
         state,
-        execError: false,
-        timedOut: false,
-        policyViolation: true,
-      });
-      return false;
+        false,
+        plannerRepairObservation,
+      );
     }
 
     const batchCheck = budget.recordParallelBatch(effectiveBatchCalls, { skipNearDuplicate: true });
@@ -358,7 +723,7 @@ export class AgentToolExecutionPhase {
       batchResults = await withTimeout(
         executeAgentToolsBatch(
           effectiveBatchCalls,
-          this.deps.toolDeps,
+          this.buildRuntimeToolDeps(state),
           `${requestId}-step${state.steps.length}`,
           {
             abortSignal: batchAbortController.signal,
@@ -380,6 +745,7 @@ export class AgentToolExecutionPhase {
         inputTokens,
         outputTokens,
         state,
+        observationContext: plannerRepairObservation,
       });
       if (!handled) {
         log.error({ err: batchErr, requestId, stepIndex: batchStepIndex }, 'parallel tool batch failed');
@@ -395,7 +761,13 @@ export class AgentToolExecutionPhase {
     for (let bi = 0; bi < batchResults.length; bi++) {
       const result = batchResults[bi]!;
       const call = effectiveBatchCalls[bi]!;
-      const obs = truncateObservation(result.observation, effectiveConfig.maxContextChars);
+      const obs = truncateObservation(
+        this.applyPlannerRepairToObservation(
+          result.observation,
+          plannerRepairObservation,
+        ),
+        effectiveConfig.maxContextChars,
+      );
       observations.push(obs);
       batchPairs.push({ action: call, observation: obs });
       if (
@@ -406,6 +778,7 @@ export class AgentToolExecutionPhase {
       ) {
         state.lastSearchResult = result.rawResult as SearchResponseV1;
       }
+      ingestGroundedDrinkabilityFromRawResult(state, result.rawResult);
       if (result.evidenceFrame !== undefined) {
         batchFrames.push(result.evidenceFrame);
         state.collectedFrames.push(result.evidenceFrame);
@@ -432,6 +805,7 @@ export class AgentToolExecutionPhase {
       );
     }
 
+    state.pendingRefinementRetry = false;
     this.policy.maybeInjectRefinementHint(state, observations, effectiveConfig.maxSteps - budget.getStepCount());
 
     if (!await this.deps.contractExecutionPhase.runDrinkabilityChecks(queryExecutionContract, requestId, effectiveConfig, budget, state, abortSignal)) {
@@ -452,15 +826,21 @@ export class AgentToolExecutionPhase {
   ): Promise<boolean> {
     const { stepStartMs, parsed, inputTokens, outputTokens } = plannerPhase;
     const { tool, input } = parsed.action!;
-    const effectiveInput = this.policy.resolveSingleTool({
+    const plannerRepairObservation = parsed.plannerRepair?.observation;
+    if (plannerRepairObservation !== undefined) {
+      state.reasoningFailureDetected = true;
+    }
+    const effectiveCall = this.policy.resolveSingleCall({
       tool,
       input,
       queryExecutionContract,
     });
+    const effectiveTool = effectiveCall.tool;
+    const effectiveInput = effectiveCall.input;
 
     const pendingSingleViolation = this.contractPolicy.validateDrinkabilitySingleStep(
       pendingDrinkabilityEntityIds,
-      tool,
+      effectiveTool,
       effectiveInput,
     );
     if (pendingSingleViolation !== null) {
@@ -469,9 +849,12 @@ export class AgentToolExecutionPhase {
         requestId,
         stepIndex: state.steps.length,
         thought: parsed.thought,
-        tool,
+        tool: effectiveTool,
         input: effectiveInput,
-        observation: pendingSingleViolation,
+        observation: this.applyPlannerRepairToObservation(
+          pendingSingleViolation,
+          plannerRepairObservation,
+        ),
         rawResult: null,
         durationMs: stepDurationMs,
         inputTokens,
@@ -484,22 +867,23 @@ export class AgentToolExecutionPhase {
       return false;
     }
 
-    if (!isKnownAgentToolName(tool)) {
+    if (!isKnownAgentToolName(effectiveTool)) {
       const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
       return this.resultPolicy.applyUnknownTool({
         requestId,
         stepIndex: state.steps.length,
         thought: parsed.thought,
-        tool,
+        tool: effectiveTool,
         toolInput: effectiveInput,
         durationMs: stepDurationMs,
         inputTokens,
         outputTokens,
         state,
+        observationContext: plannerRepairObservation,
       });
     }
 
-    const loopCheck = budget.recordStep(tool, effectiveInput);
+    const loopCheck = budget.recordStep(effectiveTool, effectiveInput);
     if (!loopCheck.allowed) {
       state.terminationReason = loopCheck.reason ?? 'loop_detected';
       return true;
@@ -514,19 +898,22 @@ export class AgentToolExecutionPhase {
     try {
       const timedToolResult = await withTimeout(
         executeAgentTool(
-          tool,
+          effectiveTool,
           effectiveInput,
-          this.deps.toolDeps,
+          this.buildRuntimeToolDeps(state),
           `${requestId}-step${state.steps.length}`,
           {
             abortSignal: toolAbortController.signal,
             toolCallId: toolCallIdForStep(requestId, state.steps.length),
           },
         ),
-        getToolTimeoutMs(tool, effectiveConfig.toolTimeoutMs),
-        `Tool "${tool}" timed out`,
+        getToolTimeoutMs(effectiveTool, effectiveConfig.toolTimeoutMs),
+        `Tool "${effectiveTool}" timed out`,
       );
-      observation = truncateObservation(timedToolResult.observation, effectiveConfig.maxContextChars);
+      observation = truncateObservation(
+        this.applyPlannerRepairToObservation(timedToolResult.observation, plannerRepairObservation),
+        effectiveConfig.maxContextChars,
+      );
       rawResult = timedToolResult.rawResult;
       sequentialEvidenceFrame = timedToolResult.evidenceFrame;
       if (sequentialEvidenceFrame !== undefined) {
@@ -539,17 +926,18 @@ export class AgentToolExecutionPhase {
         requestId,
         stepIndex: state.steps.length,
         thought: parsed.thought,
-        tool,
+        tool: effectiveTool,
         input: effectiveInput,
         durationMs: Math.max(0, Date.now() - stepStartMs),
         inputTokens,
         outputTokens,
         state,
+        observationContext: plannerRepairObservation,
       });
       if (disposition.kind === 'terminal') {
         return true;
       }
-      log.error({ err: toolErr, requestId, tool }, 'sequential tool execution failed');
+      log.error({ err: toolErr, requestId, tool: effectiveTool }, 'sequential tool execution failed');
       observation = disposition.observation;
       rawResult = disposition.rawResult;
     } finally {
@@ -565,12 +953,13 @@ export class AgentToolExecutionPhase {
     ) {
       state.lastSearchResult = rawResult as SearchResponseV1;
     }
+    ingestGroundedDrinkabilityFromRawResult(state, rawResult);
 
     const stepDurationMs = Math.max(0, Date.now() - stepStartMs);
     state.steps.push({
       index: state.steps.length,
       thought: parsed.thought,
-      action: { tool, input: effectiveInput },
+      action: { tool: effectiveTool, input: effectiveInput },
       observation,
       durationMs: stepDurationMs,
       tokenCount: { input: inputTokens, output: outputTokens },
@@ -579,9 +968,10 @@ export class AgentToolExecutionPhase {
         : {}),
     });
     state.toolOutcomes.push(
-      buildToolOutcome(requestId, state.steps.length - 1, 0, tool, observation, rawResult, stepDurationMs, rawResult === null, false, false),
+      buildToolOutcome(requestId, state.steps.length - 1, 0, effectiveTool, observation, rawResult, stepDurationMs, rawResult === null, false, false),
     );
 
+    state.pendingRefinementRetry = false;
     this.policy.maybeInjectRefinementHint(state, [observation], effectiveConfig.maxSteps - budget.getStepCount());
 
     if (!await this.deps.contractExecutionPhase.runDrinkabilityChecks(queryExecutionContract, requestId, effectiveConfig, budget, state, abortSignal)) {

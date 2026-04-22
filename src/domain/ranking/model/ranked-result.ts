@@ -223,6 +223,8 @@ export interface RankedResult {
   /** Display metadata for responses & offline eval (browse diversity, prestige@k). */
   readonly producer?: string | undefined;
   readonly region?: string | undefined;
+  readonly closure?: string | undefined;
+  readonly country?: string | undefined;
   readonly grapePrimary?: string | undefined;
   readonly appellation?: string | undefined;
   readonly producerPrestige?: number | undefined;

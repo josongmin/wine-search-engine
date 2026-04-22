@@ -11,10 +11,12 @@ import {
   createJudgeLlm,
   evaluateAnswerPatterns,
   judgeFixtureAnswer,
-  type AgentFixtureCase,
+  normalizeAgentFixtureCase,
 } from './agent-fixture-runner-common.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
+import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
+import { bootstrapBenchmarkLedgerPersistence } from './benchmark-ledger-bootstrap.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/agentic-answer-quality-fixture-eval-results.json');
 const SUITE_ID = 'agentic_answer_quality';
@@ -56,10 +58,10 @@ interface AnswerQualityFixtureReport {
 
 function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
-  let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
+  let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://127.0.0.1:3000';
   let timeoutMs = 90_000;
   let judgeModel = DEFAULT_JUDGE_MODEL;
-  let judgeSamples = 1;
+  let judgeSamples = 3;
   let useThresholds = true;
 
   for (let i = 0; i < argv.length; i++) {
@@ -82,10 +84,6 @@ function parseArgs(argv: readonly string[]): CliArgs {
   }
 
   return { output, apiUrl, timeoutMs, judgeModel, judgeSamples, useThresholds };
-}
-
-function castAgentFixtureCase(raw: unknown): AgentFixtureCase {
-  return raw as AgentFixtureCase;
 }
 
 export function buildAnswerQualityFixtureReport(
@@ -149,7 +147,7 @@ async function assertThresholds(report: AnswerQualityFixtureReport): Promise<voi
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const rawCases = await loadFixtureCases([SUITE_ID]);
-  const cases = rawCases.map(castAgentFixtureCase);
+  const cases = rawCases.map(normalizeAgentFixtureCase);
   const judgeLlm = createJudgeLlm(args.judgeModel);
   const results: AnswerQualityCaseResult[] = [];
 
@@ -191,8 +189,54 @@ async function run(): Promise<void> {
   console.log(`  judge_model: ${report.judge_model} (N=${report.judge_samples})`);
   console.log(`  output: ${args.output}`);
 
+  let thresholdsPassed = true;
+  let thresholdError: unknown;
   if (args.useThresholds) {
-    await assertThresholds(report);
+    try {
+      await assertThresholds(report);
+    } catch (err: unknown) {
+      thresholdsPassed = false;
+      thresholdError = err;
+    }
+  }
+
+  try {
+    const ledger = await bootstrapBenchmarkLedgerPersistence();
+    try {
+      if (ledger.status === 'skipped') {
+        console.warn(`  [WARN] Skipped benchmark DB persistence: ${ledger.detail}`);
+      } else {
+        const persistResult = await ledger.persistRun({
+          benchmarkKind: 'agentic_answer_quality_fixture',
+          evalDatasetVersion: 'v1',
+          featureSchemaHash: getCurrentFeatureSchemaHash(),
+          queryCount: report.query_count,
+          releaseGatePassed: thresholdsPassed,
+          activationStatus: 'shadow_only',
+          report: report as unknown as Readonly<Record<string, unknown>>,
+          metrics: {
+            rubric_pass_rate: report.rubric_pass_rate,
+            pattern_coverage_rate: report.pattern_coverage_rate,
+            forbidden_pattern_violation_rate: report.forbidden_pattern_violation_rate,
+            pass_rate: report.min_pass_rate,
+          },
+        });
+        if (persistResult.status === 'persisted') {
+          console.log(`  Benchmark run persisted to DB (${persistResult.runId}).`);
+        } else {
+          console.warn(`  [WARN] Skipped benchmark DB persistence: ${persistResult.detail}`);
+        }
+      }
+    } finally {
+      await ledger.close();
+    }
+  } catch (persistErr: unknown) {
+    const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+    console.warn(`  [WARN] Could not persist benchmark run to DB: ${msg}`);
+  }
+
+  if (thresholdError !== undefined) {
+    throw thresholdError;
   }
 }
 

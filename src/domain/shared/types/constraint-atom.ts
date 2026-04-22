@@ -206,6 +206,7 @@ const INTRINSIC_ATTRIBUTES = new Set([
   'country',
   'producer',
   'style',
+  'closure',
   'color',
   'classification',
   'certifications',
@@ -220,6 +221,7 @@ const INTRINSIC_ATTRIBUTES = new Set([
 /** Wine attribute names that are temporal. */
 const TEMPORAL_ATTRIBUTES = new Set([
   'vintage_year',
+  'drinking_window',
   'drinking_window_start',
   'drinking_window_end',
   'release_year',

@@ -11,14 +11,23 @@ import { Transliterator } from '../../domain/alias/service/transliterator.js';
 
 const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
 
-interface SearchToolRetrievalCoreInput {
+export interface SearchToolRetrievalCoreInput {
   readonly query: string;
+  readonly grape_primary?: string | undefined;
   readonly wine_type?: string | undefined;
   readonly country?: string | undefined;
+  readonly region?: string | undefined;
   readonly appellation?: string | undefined;
   readonly vintage_min?: number | undefined;
   readonly vintage_max?: number | undefined;
   readonly occasion?: readonly string[] | undefined;
+  readonly drinking_window?: 'now' | undefined;
+  readonly drinking_window_target_year?: number | undefined;
+  /**
+   * Concept comparison legs need representative-set retrieval ("Barolo wine"),
+   * not a collapsed bare canonical lookup ("barolo").
+   */
+  readonly preserveRepresentativeSearch?: boolean | undefined;
 }
 
 function pairingTagToSemanticTerm(tag: PairingTag): string {
@@ -117,8 +126,12 @@ function isResolvedEntityRepresentedByStructuredFilters(
       const structuredWineType = wineTypeToSemanticTerm(input.wine_type);
       return structuredWineType !== undefined && canonical === structuredWineType.toLowerCase();
     }
+    case 'grape_primary':
+      return input.grape_primary?.trim().toLowerCase() === canonical;
     case 'country':
       return input.country?.trim().toLowerCase() === canonical;
+    case 'region':
+      return input.region?.trim().toLowerCase() === canonical;
     case 'appellation':
       return input.appellation?.trim().toLowerCase() === canonical;
     default:
@@ -148,8 +161,10 @@ export function buildSearchToolRetrievalCoreQuery(
   ];
   const occasionTerms = [...new Set((input.occasion ?? []).map(occasionTagToSemanticTerm))];
   const hasPositiveStructuredFilters =
-    input.wine_type !== undefined
+    input.grape_primary !== undefined
+    || input.wine_type !== undefined
     || input.country !== undefined
+    || input.region !== undefined
     || input.appellation !== undefined
     || input.vintage_min !== undefined
     || input.vintage_max !== undefined;
@@ -159,7 +174,12 @@ export function buildSearchToolRetrievalCoreQuery(
     if (queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query) && canonicalEntityTerms.length > 0) {
       return [...canonicalEntityTerms].sort((a, b) => b.length - a.length)[0]!;
     }
-    if (tokenCount > 0 && tokenCount <= SHORT_BARE_ENTITY_QUERY_MAX_TOKENS && canonicalEntityTerms.length === 1) {
+    if (
+      input.preserveRepresentativeSearch !== true
+      && tokenCount > 0
+      && tokenCount <= SHORT_BARE_ENTITY_QUERY_MAX_TOKENS
+      && canonicalEntityTerms.length === 1
+    ) {
       return canonicalEntityTerms[0]!;
     }
     if (
@@ -218,6 +238,10 @@ export function buildSearchToolRetrievalCoreQuery(
     }
   }
 
+  if (!hasEntitySemanticTerm && (pairingTags.length > 0 || occasionTerms.length > 0 || hasPositiveStructuredFilters)) {
+    add(buildLexicalNucleus(queryViews, input.query));
+  }
+
   for (const tag of pairingTags) {
     add(pairingTagToSemanticTerm(tag));
   }
@@ -226,8 +250,8 @@ export function buildSearchToolRetrievalCoreQuery(
     add(occasion);
   }
 
-  if (!hasEntitySemanticTerm && pairingTags.length === 0 && occasionTerms.length === 0 && hasPositiveStructuredFilters) {
-    add(buildLexicalNucleus(queryViews, input.query));
+  if (!hasEntitySemanticTerm) {
+    add(input.grape_primary);
   }
 
   if (!hasEntitySemanticTerm) {

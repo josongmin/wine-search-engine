@@ -86,12 +86,23 @@ function getObservabilityRetrievalMode(plan: PlanLike, compiled?: CompiledWineQu
     : getSuggestedRetrievalMode(plan);
 }
 
+function isConvergedExactLookupTelemetryContract(
+  plan: PlanLike,
+  compiled?: CompiledWineQuery,
+): boolean {
+  const mode = getObservabilityRetrievalMode(plan, compiled);
+  return plan.intent === 'entity_exact'
+    && plan.queryClass === 'short_entity'
+    && mode === 'entity_lookup';
+}
+
 export function deriveQueryFamily(
   plan: PlanLike,
   compiled?: CompiledWineQuery,
 ): QueryFamilyLabel {
   const mode = getObservabilityRetrievalMode(plan, compiled);
   const intent = plan.intent;
+  const queryClass = plan.queryClass;
   // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
   const decompositionHint = plan.decompositionHint;
 
@@ -100,6 +111,15 @@ export function deriveQueryFamily(
   if (mode === 'region_browse') return 'region_browse';
   if (mode === 'compare_candidates') return 'comparison';
   if (mode === 'recommendation' || mode === 'similar_items') return 'recommendation';
+
+  // When the planner/runtime have already converged on an exact entity lookup,
+  // keep the family aligned with that contract even if a coarse ambiguity bit
+  // remains set upstream. This preserves telemetry consistency for exact
+  // metadata / freshness queries that intentionally fail closed after an
+  // entity lookup attempt.
+  if (isConvergedExactLookupTelemetryContract(plan, compiled)) {
+    return 'entity_exact';
+  }
 
   if (plan.uncertainty.ambiguityDetected) return 'ambiguous';
 
@@ -147,6 +167,9 @@ export function planToObservabilitySlice(
   const overallUncertainty = Number.isFinite(plan.uncertainty.overall)
     ? plan.uncertainty.overall
     : 1;
+  const ambiguityDetected = isConvergedExactLookupTelemetryContract(plan, compiled)
+    ? false
+    : plan.uncertainty.ambiguityDetected;
 
   return {
     queryId,
@@ -160,7 +183,7 @@ export function planToObservabilitySlice(
     hardConstraintCount: plan.constraints.hard.length,
     softConstraintCount: plan.constraints.soft.length,
     overallUncertainty,
-    ambiguityDetected: plan.uncertainty.ambiguityDetected,
+    ambiguityDetected,
     plannerVersion: plan.plannerVersion,
     policyRuleVersion: plan.policyRuleVersion,
     thresholdProfileId: plan.thresholdProfileId,

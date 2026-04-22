@@ -89,10 +89,12 @@ describe('CandidatePoolService — killSwitchDenseRetrieval pre-flight guard', (
       true, // killSwitchDenseRetrieval
     );
 
-    await pool.execute(createInput());
+    const result = await pool.execute(createInput());
 
     expect(embeddingService.embedBatch).not.toHaveBeenCalled();
     expect(embeddingService.embed).not.toHaveBeenCalled();
+    expect(result.lanes?.dense?.status).toBe('disabled');
+    expect(result.degradationSignals?.some((signal) => signal.component === 'dense_semantic')).toBe(true);
   });
 
   it('does NOT call denseSearch when kill switch is true (dense_semantic path)', async () => {
@@ -188,6 +190,8 @@ describe('CandidatePoolService — killSwitchDenseRetrieval pre-flight guard', (
     // Dense path should still fire (lexicalQueries emptiness must not kill dense)
     expect(searchIndex.denseSearch).toHaveBeenCalled();
     expect(result).toBeDefined();
+    expect(result.lanes?.sparse?.status).toBe('disabled');
+    expect(result.candidates?.[0]?.entityId).toBe('wine-1');
   });
 
   it('DOES call embedBatch/denseSearch when kill switch is false (control)', async () => {

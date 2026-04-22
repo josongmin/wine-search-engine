@@ -6,7 +6,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildSystemMessage, buildSynthesisSystemMessage } from '../../src/application/agent/agent-prompt.js';
+import {
+  buildPlannerContinuationSystemMessage,
+  buildSystemMessage,
+  buildSynthesisSystemMessage,
+} from '../../src/application/agent/agent-prompt.js';
 
 describe('agent system prompt contract', () => {
   it('routes mixed red+white requests away from get_food_pairings', () => {
@@ -99,5 +103,16 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('Do NOT call tools');
     expect(prompt).toContain('Do NOT output "action" or "actions"');
     expect(prompt).toContain('Do NOT decide new tool work; that belongs to the planner phase');
+  });
+
+  it('keeps continuation answers on the same drinkability and pairing quality contract', () => {
+    const prompt = buildPlannerContinuationSystemMessage().content;
+
+    expect(prompt).toContain('For drinking-window answers: first answer yes/no');
+    expect(prompt).toContain('cite the drinking-window years');
+    expect(prompt).toContain('repeat BOTH the generic wine name and the resolved vintage');
+    expect(prompt).toContain('For food-pairing answers');
+    expect(prompt).toContain('only recommend wines with explicit pairing evidence');
+    expect(prompt).toContain('If the latest observation is insufficient for an explicit pairing or drinkability answer');
   });
 });

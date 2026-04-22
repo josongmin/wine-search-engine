@@ -11,6 +11,13 @@ import type {
 } from '../model/candidate-envelope.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
+import type {
+  RetrievalExecutionLane,
+  RetrievalExecutionLanes,
+  RetrievalExecutionResult,
+  RetrievalLaneStatus,
+} from '../model/retrieval-execution-result.js';
+import { buildRetrievalExecutionResult } from '../model/retrieval-execution-result.js';
 import { CandidateProvenanceV2Schema } from '../model/retrieval-contract-v2.js';
 import {
   preferCanonicalRetrievalChannelLabels,
@@ -114,21 +121,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   private readonly cascadeRouter: CascadeRouter;
   private readonly constraintFilter: ConstraintFilter;
   private readonly candidateAssembler: CandidateAssembler;
-  /** E4: Last RRF fusion trace, populated after each execute() call. */
-  private _lastFusionTrace: RrfFusionTrace | undefined = undefined;
-  /** E4: Drop log from the most recent execute() call's hard-filter step. */
-  private _lastDropLog: readonly CandidateDropRecord[] = [];
-  /** Critic-facing structured degradation codes from the most recent call. */
-  private _lastDegradationCodes: readonly RetrievalDegradationCode[] = [];
-  /**
-   * Bugbash 2026-04-14: structured retrieval degradation signals from the most
-   * recent execute() call. The `degradationObserver` callback alone is not
-   * enough — its payload never reaches the HTTP response because the observer
-   * only pipes to metrics. The use case must read these signals and merge
-   * them into `routeDegradation.degradationReasons` so the wire contract
-   * reflects sub-channel failures (sparse/dense/anchor/relative_filter).
-   */
-  private _lastDegradationSignals: readonly RetrievalDegradationSignal[] = [];
+  /** Authoritative request-scoped retrieval result; replaces mutable getLast* state. */
+  private _lastExecutionResult: RetrievalExecutionResult | undefined = undefined;
 
   constructor(
     private readonly searchIndex: SearchIndexPort,
@@ -161,12 +155,11 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    * @param input - The retrieval input derived from the query plan.
    * @returns Fused, filtered, and ranked candidates.
    */
-  async execute(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
+  async execute(input: HybridRetrievalInput): Promise<RetrievalExecutionResult> {
     this.degradationObserver?.onRetrievalStarted();
+    this._lastExecutionResult = undefined;
     const degradationSignals: RetrievalDegradationSignal[] = [];
-    this._lastDegradationSignals = degradationSignals;
     const degradationCodes: RetrievalDegradationCode[] = [];
-    this._lastDegradationCodes = degradationCodes;
     const queryFamily = deriveQueryFamily(input.queryPlan);
     const retrievalMode = this.resolveRuntimeRetrievalMode(input);
     // Specialized routing (producer_browse / region_browse / compare_candidates)
@@ -286,20 +279,15 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       readonly fallbackApplied: string;
     };
 
-    type SparseResult = {
-      readonly hits: readonly SparseHit[];
+    type LaneResult<THit> = {
+      readonly hits: readonly THit[];
+      readonly status: RetrievalLaneStatus;
       readonly degraded: boolean;
       readonly degradation?: DegradationReport;
     };
-    type DenseLikeResult = {
-      readonly hits: readonly DenseHit[];
-      readonly degraded: boolean;
-      readonly degradation?: DegradationReport;
-    };
-    type AnchorResult = {
-      readonly hits: readonly DenseHit[] | undefined;
-      readonly degradation?: DegradationReport;
-    };
+    type SparseResult = LaneResult<SparseHit>;
+    type DenseLikeResult = LaneResult<DenseHit>;
+    type AnchorResult = LaneResult<DenseHit>;
     const sparseTopN = resolveExplorationTopN(
       profile.sparseTopN,
       input.executionBudgetMaxCandidates,
@@ -311,7 +299,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
 
     const sparseTask = async (): Promise<SparseResult> => {
       if (!activeChannels.has('sparse_bm25')) {
-        return { hits: [], degraded: false };
+        return { hits: [], status: 'disabled', degraded: false };
       }
       // TA4: Merge entity hypothesis terms from fuzzy match into lexical queries.
       // These are fuzzy-entity surface forms forwarded from the planner's anchor-miss
@@ -328,7 +316,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       // to the vespa-search-index.ts guard — defence-in-depth, and allows the
       // candidate-pool to be tested without a Vespa dependency.
       if (effectiveLexicalQueries.length === 0) {
-        return { hits: [], degraded: false };
+        return { hits: [], status: 'disabled', degraded: false };
       }
       try {
         const hits = await this.searchIndex.sparseSearch(
@@ -338,7 +326,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           vespaRankProfile,
           requestId,
         );
-        return { hits, degraded: false };
+        return { hits, status: hits.length > 0 ? 'ok' : 'empty', degraded: false };
       } catch (sparseErr) {
         bootstrapLogger.warn(
           {
@@ -349,6 +337,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         );
         return {
           hits: [],
+          status: 'infra_failure',
           degraded: true,
           degradation: {
             component: 'sparse_bm25',
@@ -365,7 +354,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       // already excludes learned_sparse when killSwitchLearning is true (see
       // resolveActiveChannels), so this guard is the canonical channel check.
       if (!activeChannels.has('learned_sparse')) {
-        return { hits: [], degraded: false };
+        return { hits: [], status: 'disabled', degraded: false };
       }
       try {
         const hits = await this.searchIndex.searchLearnedSparse(
@@ -374,7 +363,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           sparseTopN,
           requestId,
         );
-        return { hits, degraded: false };
+        return { hits, status: hits.length > 0 ? 'ok' : 'empty', degraded: false };
       } catch (learnedErr) {
         bootstrapLogger.warn(
           {
@@ -385,6 +374,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         );
         return {
           hits: [],
+          status: 'infra_failure',
           degraded: true,
           degradation: {
             component: 'learned_sparse',
@@ -404,6 +394,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       if (this.killSwitchDenseRetrieval) {
         return {
           hits: [],
+          status: 'disabled',
           degraded: true,
           degradation: {
             component: 'dense_semantic',
@@ -414,7 +405,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         };
       }
       if (!(activeChannels.has('dense_semantic') && embeddingQueries.length > 0)) {
-        return { hits: [], degraded: false };
+        return { hits: [], status: 'disabled', degraded: false };
       }
       try {
         const embeddings = this.cacheService
@@ -447,6 +438,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           );
           return {
             hits: [],
+            status: 'infra_failure',
             degraded: true,
             degradation: {
               component: 'embedding_combiner',
@@ -463,7 +455,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           vespaRankProfile,
           requestId,
         );
-        return { hits, degraded: false };
+        return { hits, status: hits.length > 0 ? 'ok' : 'empty', degraded: false };
       } catch (denseErr) {
         bootstrapLogger.warn(
           {
@@ -475,6 +467,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         );
         return {
           hits: [],
+          status: 'infra_failure',
           degraded: true,
           degradation: {
             component: 'dense_semantic',
@@ -490,10 +483,10 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       // T02-2: anchor similarity also uses an embedding (anchor.semanticSummary
       // → embed → denseSearch), so it's gated by the same kill switch.
       if (this.killSwitchDenseRetrieval) {
-        return { hits: undefined };
+        return { hits: [], status: 'disabled', degraded: false };
       }
       if (!(activeChannels.has('anchor_similarity') && anchorProfile !== undefined)) {
-        return { hits: undefined };
+        return { hits: [], status: 'disabled', degraded: false };
       }
       try {
         // BUG-04: use cacheService.getOrEmbedBatch() when available so the
@@ -526,7 +519,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           vespaRankProfile,
           requestId,
         );
-        return { hits };
+        return { hits, status: hits.length > 0 ? 'ok' : 'empty', degraded: false };
       } catch (anchorErr) {
         bootstrapLogger.warn(
           {
@@ -537,7 +530,9 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           '[CandidatePool] Anchor embedding failed — degrading to no-anchor retrieval',
         );
         return {
-          hits: undefined,
+          hits: [],
+          status: 'infra_failure',
+          degraded: true,
           degradation: {
             component: 'anchor_similarity',
             severity: 'warning',
@@ -582,6 +577,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
 
     const sparseFallback: SparseResult = {
       hits: [],
+      status: 'infra_failure',
       degraded: true,
       degradation: {
         component: 'sparse_bm25',
@@ -592,6 +588,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     };
     const learnedSparseFallback: DenseLikeResult = {
       hits: [],
+      status: 'infra_failure',
       degraded: true,
       degradation: {
         component: 'learned_sparse',
@@ -602,6 +599,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     };
     const denseFallback: DenseLikeResult = {
       hits: [],
+      status: 'infra_failure',
       degraded: true,
       degradation: {
         component: 'dense_semantic',
@@ -611,7 +609,9 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       },
     };
     const anchorFallback: AnchorResult = {
-      hits: undefined,
+      hits: [],
+      status: 'infra_failure',
+      degraded: true,
       degradation: {
         component: 'anchor_similarity',
         severity: 'warning',
@@ -664,6 +664,11 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     const denseHits = denseResult.hits;
     const denseDegraded = denseResult.degraded;
     const anchorHits = anchorResult.hits;
+    let relativeLane: RetrievalExecutionLane<never> = {
+      status: 'disabled',
+      hits: [],
+      degraded: false,
+    };
 
     // Step 4: Fuse via RRF
     stageTimer?.start('retrieval.rrf_fusion');
@@ -740,6 +745,22 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         this.degradationObserver?.onDegradation(relativeFilterSignal);
         degradationSignals.push(relativeFilterSignal);
         candidates = [];
+        relativeLane = {
+          status: 'infra_failure',
+          hits: [],
+          degraded: true,
+          error: relativeFilterSignal.reason,
+          inputCount: preFilterCount,
+          outputCount: 0,
+        };
+      } else {
+        relativeLane = {
+          status: candidates.length > 0 ? 'ok' : 'empty',
+          hits: [],
+          degraded: false,
+          inputCount: preFilterCount,
+          outputCount: candidates.length,
+        };
       }
     }
 
@@ -762,7 +783,6 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     const { filtered: hardFiltered, drops: hardFilterDrops } =
       this.constraintFilter.applyHardFiltersWithDropLog(candidates, input.hardConstraints);
     candidates = [...hardFiltered];
-    this._lastDropLog = hardFilterDrops;
     const countAfterHardFilter = candidates.length;
     stageTimer?.end('retrieval.hard_filter');
 
@@ -796,7 +816,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       degradationCodes.push('no_matches');
     }
 
-    this._lastFusionTrace = {
+    const fusionTrace: RrfFusionTrace = {
       queryClass: input.queryPlan.queryClass,
       fusionClass: fusionQueryClass,
       rrfK: effectiveFusionK,
@@ -817,6 +837,38 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         afterAssembly: assembled.candidates.length,
       },
     };
+    const resultCandidates = assembled.candidates.map((candidate) => ({
+      ...candidate.legacyCandidate,
+      retrievalProvenance: candidate.provenance,
+    }));
+    const lanes: RetrievalExecutionLanes = {
+      sparse: toExecutionLane(sparseResult),
+      learnedSparse: toExecutionLane(learnedSparseResult),
+      dense: toExecutionLane(denseResult),
+      anchor: toExecutionLane(anchorResult),
+      relative: relativeLane,
+    };
+    const executionResult = buildRetrievalExecutionResult({
+      candidates: resultCandidates,
+      lanes,
+      degradation: {
+        signals: degradationSignals,
+        codes: degradationCodes,
+      },
+      fusionTrace,
+      dropLog: hardFilterDrops,
+      telemetry: {
+        queryClass: input.queryPlan.queryClass,
+        route: input.route,
+        runtimeRetrievalMode: retrievalMode,
+        retrievalProfile: profile.name,
+        vespaRankProfile,
+        activeChannels: [...activeChannels],
+        filtersApplied: filters,
+        skippedPhases: effectiveSkippedPhases,
+      },
+    });
+    this._lastExecutionResult = executionResult;
 
     pipelineDebug(
       {
@@ -834,16 +886,13 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       'pipeline candidate pool',
     );
 
-    return assembled.candidates.map((candidate) => ({
-      ...candidate.legacyCandidate,
-      retrievalProvenance: candidate.provenance,
-    }));
+    return executionResult;
   }
 
   /**
    * @deprecated Use execute() for RetrievalExecutorV2 contract.
    */
-  async generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
+  async generate(input: HybridRetrievalInput): Promise<RetrievalExecutionResult> {
     return this.execute(input);
   }
 
@@ -853,7 +902,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    * Mirrors the getLastFunnelMetrics() pattern on RankingPort.
    */
   getLastFusionTrace(): RrfFusionTrace | undefined {
-    return this._lastFusionTrace;
+    return this._lastExecutionResult?.fusionTrace;
   }
 
   /**
@@ -861,7 +910,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    * Empty array before the first execute() call or when no candidates were dropped.
    */
   getLastDropLog(): readonly CandidateDropRecord[] {
-    return this._lastDropLog;
+    return this._lastExecutionResult?.dropLog ?? [];
   }
 
   /**
@@ -872,7 +921,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    * or when no degradations occurred.
    */
   getLastDegradationSignals(): readonly RetrievalDegradationSignal[] {
-    return this._lastDegradationSignals;
+    return this._lastExecutionResult?.degradationSignals ?? [];
   }
 
   /**
@@ -881,7 +930,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    * production-reachable sparse/no-match condition was observed.
    */
   getLastDegradationCodes(): readonly RetrievalDegradationCode[] {
-    return this._lastDegradationCodes;
+    return this._lastExecutionResult?.degradationCodes ?? [];
   }
 
   /**
@@ -1090,6 +1139,22 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       anchorConfidence: input.queryPlan.anchors[0]?.confidence ?? HYBRID_ANCHOR_CONFIDENCE_DEFAULT,
     };
   }
+}
+
+function toExecutionLane<THit>(
+  lane: {
+    readonly status: RetrievalLaneStatus;
+    readonly hits: readonly THit[];
+    readonly degraded: boolean;
+    readonly degradation?: { readonly reason: string } | undefined;
+  },
+): RetrievalExecutionLane<THit> {
+  return {
+    status: lane.status,
+    hits: lane.hits,
+    degraded: lane.degraded,
+    error: lane.degradation?.reason,
+  };
 }
 
 /**

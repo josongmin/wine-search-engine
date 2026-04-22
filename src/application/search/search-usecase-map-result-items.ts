@@ -9,6 +9,7 @@ import {
   inferDrinkingWindowBlockingEligibility,
   inferDrinkingWindowConfidence,
   inferDrinkingWindowEvidenceLevel,
+  isProjectableDrinkingWindowModelVersion,
 } from './drinking-window-confidence.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
@@ -346,7 +347,7 @@ export async function mapRankedResultsToResultItems(
     if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
         && r.drinkingWindowStart <= r.drinkingWindowEnd
         && r.drinkingWindowModelVersion !== undefined
-        && !r.drinkingWindowModelVersion.startsWith('heuristic')) {
+        && isProjectableDrinkingWindowModelVersion(r.drinkingWindowModelVersion)) {
       // Guard: inverted windows (start > end) from ETL bugs or Track-C backfill errors
       // would fail the Zod response schema refine → HTTP 500. Omit the block instead.
       drinkingWindowBlock = {
@@ -378,6 +379,8 @@ export async function mapRankedResultsToResultItems(
         type: 'wine',
         ...(r.producer !== undefined ? { producer: r.producer } : {}),
         ...(r.region !== undefined ? { region: r.region } : {}),
+        ...(r.closure !== undefined ? { closure: r.closure } : {}),
+        ...(r.country !== undefined ? { country: r.country } : {}),
         ...(r.appellation !== undefined ? { appellation: r.appellation } : {}),
         ...(r.grapePrimary !== undefined ? { grapes: [r.grapePrimary] } : {}),
         ...(r.vintageYear !== undefined ? { vintage: r.vintageYear } : {}),

@@ -27,6 +27,7 @@ function makeDocument(): RetrievalDocument {
     searchTextEn: '2014 Kalaris Merlot Napa Valley',
     semanticSummary: 'Merlot from Napa Valley',
     style: 'velvety red',
+    closure: 'Screw cap',
     priceBand: 'premium',
     pairing: ['beef'],
     occasion: ['dinner'],
@@ -87,6 +88,7 @@ describe('entity attribute projection SSOT', () => {
     expect(projected.grapePrimary).toBe('Merlot');
     expect(projected.grapes).toEqual(['Merlot', 'Cabernet Sauvignon']);
     expect(projected.style).toBe('velvety red');
+    expect(projected.closure).toBe('Screw cap');
     expect(projected.priceBand).toBe('premium');
     expect(projected.pairing).toEqual(['beef']);
     expect(projected.occasion).toEqual(['dinner']);
@@ -140,6 +142,7 @@ describe('entity attribute projection SSOT', () => {
       'drinking_window_start',
       'finish_length',
       'flavor_profiles',
+      'closure',
       'price_band',
       'producer_prestige',
     ]));

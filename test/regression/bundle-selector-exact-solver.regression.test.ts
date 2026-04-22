@@ -13,6 +13,9 @@
  *   9. Empty slot pool → fail-closed with empty_slot_pool reason.
  *  10. Solver is pure — same input, same output across 100 calls.
  *  11. Budget-infeasible (all candidates exceed ceiling) → fail-closed.
+ *  12. Optional empty rows are pruned before fail-closed checks.
+ *  13. K_EXACT_LIMIT applies after optional-row pruning.
+ *  14. OR/XOR group obligations constrain optional-row selection.
  *
  * Never delete this file.
  */
@@ -210,6 +213,23 @@ describe('solveAssignmentExact (ADR-013)', () => {
     }
   });
 
+  it('treats empty rows as fail-closed at the solver boundary; optional pruning must happen before exact solve', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [
+        [1],
+        [2],
+        [3],
+        [4],
+        [5],
+        [],
+      ],
+    });
+    expect(r.solved).toBe(false);
+    if (!r.solved) {
+      expect(r.reason).toBe('bundle_selector_fail_closed:k_exceeds_exact_limit');
+    }
+  });
+
   it('budget-infeasible returns fail-closed (no best-effort silent picks)', () => {
     // Every candidate exceeds the ceiling.
     const budget: AssignmentBudgetConstraint = {
@@ -231,6 +251,177 @@ describe('solveAssignmentExact (ADR-013)', () => {
     }
   });
 
+  it('prunes optional empty rows instead of failing empty_slot_pool', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [[1, 2], []],
+      rowSpecs: [
+        { label: 'required', obligation: 'required' },
+        { label: 'optional', obligation: 'optional' },
+      ],
+    });
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.activeRowIndices).toEqual([0]);
+      expect(r.assignedColumns).toEqual([0]);
+      expect(r.totalCost).toBe(1);
+    }
+  });
+
+  it('applies K_EXACT_LIMIT after optional-row selection, so a non-empty optional sixth row can still be pruned', () => {
+    expect(K_EXACT_LIMIT).toBe(5);
+    const row = [0, 0, 0, 0, 0, 0];
+    const r = solveAssignmentExact({
+      costMatrix: [row, row, row, row, row, row],
+      rowSpecs: [
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'optional' },
+      ],
+    });
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.activeRowIndices).toEqual([0, 1, 2, 3, 4]);
+      expect(r.assignedColumns).toHaveLength(5);
+    }
+
+    const pruned = solveAssignmentExact({
+      costMatrix: [row, row, row, row, row, []],
+      rowSpecs: [
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'required' },
+        { obligation: 'optional' },
+      ],
+    });
+    expect(pruned.solved).toBe(true);
+    if (pruned.solved) {
+      expect(pruned.activeRowIndices).toEqual([0, 1, 2, 3, 4]);
+      expect(pruned.assignedColumns).toHaveLength(5);
+    }
+  });
+
+  it('selects the cheapest optional row that satisfies an at_least_one group obligation', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [
+        [0, 100, 100],
+        [100, 1, 100],
+        [100, 100, 2],
+      ],
+      rowSpecs: [
+        { label: 'required', obligation: 'required' },
+        { label: 'or-left', obligation: 'optional' },
+        { label: 'or-right', obligation: 'optional' },
+      ],
+      groupConstraints: [
+        { kind: 'at_least_one', rows: [1, 2], label: 'taste_or' },
+      ],
+    });
+
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.activeRowIndices).toEqual([0, 1]);
+      expect(r.assignedColumns).toEqual([0, 1]);
+      expect(r.totalCost).toBe(1);
+    }
+  });
+
+  it('selects exactly one optional row for an exactly_one group obligation', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [
+        [1, 100],
+        [100, 2],
+      ],
+      rowSpecs: [
+        { label: 'xor-left', obligation: 'optional' },
+        { label: 'xor-right', obligation: 'optional' },
+      ],
+      groupConstraints: [
+        { kind: 'exactly_one', rows: [0, 1], label: 'style_xor' },
+      ],
+    });
+
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.activeRowIndices).toEqual([0]);
+      expect(r.assignedColumns).toEqual([0]);
+      expect(r.totalCost).toBe(1);
+    }
+  });
+
+  it('fails closed when no optional-row selection can satisfy a group obligation', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [[], []],
+      rowSpecs: [
+        { label: 'or-left', obligation: 'optional' },
+        { label: 'or-right', obligation: 'optional' },
+      ],
+      groupConstraints: [
+        { kind: 'at_least_one', rows: [0, 1], label: 'taste_or' },
+      ],
+    });
+
+    expect(r.solved).toBe(false);
+    if (!r.solved) {
+      expect(r.reason).toBe('bundle_selector_fail_closed:group_obligation_unsatisfied');
+    }
+  });
+
+  it('accepts only row selections allowed by an authoritative selection validator', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [
+        [0, 100, 100],
+        [100, 1, 100],
+        [100, 100, 2],
+      ],
+      rowSpecs: [
+        { label: 'left-a', obligation: 'optional' },
+        { label: 'left-b', obligation: 'optional' },
+        { label: 'right', obligation: 'optional' },
+      ],
+      selectionValidator: (selectedRows) => {
+        const key = JSON.stringify(selectedRows);
+        return key === JSON.stringify([0, 1]) || key === JSON.stringify([2]);
+      },
+    });
+
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.activeRowIndices).toEqual([0, 1]);
+      expect(r.assignedColumns).toEqual([0, 1]);
+      expect(r.totalCost).toBe(1);
+    }
+  });
+
+  it('prefers the selection with higher structural utility before raw cost', () => {
+    const r = solveAssignmentExact({
+      costMatrix: [
+        [0, 100, 100],
+        [100, 5, 100],
+        [100, 100, 1],
+      ],
+      rowSpecs: [
+        { label: 'required', obligation: 'required' },
+        { label: 'complement-left', obligation: 'optional' },
+        { label: 'fallback-right', obligation: 'optional' },
+      ],
+      selectionUtility: (selectedRows) => (
+        JSON.stringify(selectedRows) === JSON.stringify([0, 1]) ? 1 : 0
+      ),
+    });
+
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.activeRowIndices).toEqual([0, 1]);
+      expect(r.assignedColumns).toEqual([0, 1]);
+      expect(r.totalCost).toBe(5);
+    }
+  });
+
   it('is pure — same input yields same output across 100 calls', () => {
     const matrix = [
       [3, 8, 4, 1, 6],
@@ -246,6 +437,72 @@ describe('solveAssignmentExact (ADR-013)', () => {
         expect(r.assignedColumns).toEqual(baseline.assignedColumns);
         expect(r.totalCost).toBe(baseline.totalCost);
       }
+    }
+  });
+
+  it.skip('draft: solver-level optional empty row is pruned before exact solve and does not fail with empty_slot_pool', () => {
+    type DraftOptionalRowInput = Parameters<typeof solveAssignmentExact>[0] & {
+      readonly rowObligations: readonly ('required' | 'optional')[];
+    };
+
+    const input: DraftOptionalRowInput = {
+      costMatrix: [
+        [0, 100, 100, 100, 100],
+        [100, 0, 100, 100, 100],
+        [100, 100, 0, 100, 100],
+        [100, 100, 100, 0, 100],
+        [100, 100, 100, 100, 0],
+        [],
+      ],
+      rowObligations: [
+        'required',
+        'required',
+        'required',
+        'required',
+        'required',
+        'optional',
+      ],
+    };
+
+    const r = solveAssignmentExact(input as Parameters<typeof solveAssignmentExact>[0]);
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.assignedColumns).toEqual([0, 1, 2, 3, 4]);
+      expect(r.totalCost).toBe(0);
+    }
+  });
+
+  it.skip('draft: optional empty-row pruning applies before K_EXACT_LIMIT, so raw K>5 can still solve when active rows are 5', () => {
+    type DraftOptionalRowInput = Parameters<typeof solveAssignmentExact>[0] & {
+      readonly rowObligations: readonly ('required' | 'optional')[];
+    };
+
+    const input: DraftOptionalRowInput = {
+      costMatrix: [
+        [0, 100, 100, 100, 100],
+        [100, 0, 100, 100, 100],
+        [100, 100, 0, 100, 100],
+        [100, 100, 100, 0, 100],
+        [100, 100, 100, 100, 0],
+        [],
+        [],
+      ],
+      rowObligations: [
+        'required',
+        'required',
+        'required',
+        'required',
+        'required',
+        'optional',
+        'optional',
+      ],
+    };
+
+    const r = solveAssignmentExact(input as Parameters<typeof solveAssignmentExact>[0]);
+    expect(r.solved).toBe(true);
+    if (r.solved) {
+      expect(r.assignedColumns).toEqual([0, 1, 2, 3, 4]);
+      expect(r.totalCost).toBe(0);
     }
   });
 });

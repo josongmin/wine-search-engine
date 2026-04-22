@@ -19,6 +19,8 @@ const CHANNEL_WEIGHT_SEMANTIC_LEARNED_SPARSE_BOOST = 1.1;
 const CHANNEL_WEIGHT_SOFT_CONSTRAINT_RELATIVE_FILTER_BOOST = 1.2;
 /** Attribute alignment emphasis when only sparse BM25 fires. */
 const CHANNEL_WEIGHT_ATTRIBUTE_SPARSE_ONLY_BOOST = 1.2;
+/** Explicit drinkability objective must be strong enough to beat generic top1 popularity/age. */
+const SITUATION_INTENT_DRINKING_WINDOW_SOFT_WEIGHT_FLOOR = 0.32;
 
 /**
  * Weight configuration for the score aggregation formula.
@@ -255,6 +257,7 @@ export { DEFAULT_WEIGHTS };
 
 const SITUATION_INTENT_GIFT_WEIGHT_FLOOR = 0.15;
 const SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR = 0.15;
+const SITUATION_INTENT_PRESTIGE_WEIGHT_FLOOR = 0.12;
 const SITUATION_INTENT_FACET_TRIGGER_MIN = 0.5;
 
 function constraintValueMatches(
@@ -405,6 +408,22 @@ function isNumericRangeValue(
   return Number.isFinite(rangeValue.min) && Number.isFinite(rangeValue.max);
 }
 
+function objectiveHasAxis(
+  retrievalObjective: RetrievalObjective,
+  axis: RetrievalObjective['signals'][number]['axis'],
+): boolean {
+  return retrievalObjective.signals.some((signal) => signal.axis === axis);
+}
+
+function constraintsHaveAttribute(
+  constraints: ConstraintBundle,
+  attribute: string,
+): boolean {
+  return constraints.hard.some((constraint) => constraint.attribute === attribute)
+    || constraints.soft.some((constraint) => constraint.attribute === attribute)
+    || constraints.inferred.some((constraint) => constraint.attribute === attribute);
+}
+
 /**
  * Applies a query-constraint-driven overlay for explicit situation intents.
  *
@@ -449,8 +468,22 @@ export function applySituationIntentWeightOverlay(
 
   const resolvedHasGiftIntent = hasGiftIntent || hasGiftSuitabilityIntent;
   const resolvedHasBeginnerIntent = hasBeginnerIntent || hasBeginnerSuitabilityIntent;
+  const hasDrinkabilityIntent = retrievalObjective !== undefined
+    ? objectiveHasAxis(retrievalObjective, 'drinking_window')
+    : constraintsHaveAttribute(constraints, 'drinking_window');
+  const hasPrestigeIntent = retrievalObjective !== undefined
+    ? objectiveNumericMeetsMinimum(
+      retrievalObjective,
+      'producer_prestige',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    )
+    : constraintNumericMeetsMinimum(
+      constraints,
+      'producer_prestige',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    );
 
-  if (!resolvedHasGiftIntent && !resolvedHasBeginnerIntent) {
+  if (!resolvedHasGiftIntent && !resolvedHasBeginnerIntent && !hasDrinkabilityIntent && !hasPrestigeIntent) {
     return baseWeights;
   }
 
@@ -460,6 +493,12 @@ export function applySituationIntentWeightOverlay(
   const beginnerSuitability = resolvedHasBeginnerIntent
     ? Math.max(baseWeights.beginnerSuitability, SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR)
     : baseWeights.beginnerSuitability;
+  const softConstraint = hasDrinkabilityIntent
+    ? Math.max(baseWeights.softConstraint, SITUATION_INTENT_DRINKING_WINDOW_SOFT_WEIGHT_FLOOR)
+    : baseWeights.softConstraint;
+  const producerPrestige = hasPrestigeIntent
+    ? Math.max(baseWeights.producerPrestige, SITUATION_INTENT_PRESTIGE_WEIGHT_FLOOR)
+    : baseWeights.producerPrestige;
 
   const baseNonPenaltySum =
     baseWeights.entityIntegrity +
@@ -481,12 +520,12 @@ export function applySituationIntentWeightOverlay(
     baseWeights.entityIntegrity +
     baseWeights.anchorSimilarity +
     baseWeights.semantic +
-    baseWeights.softConstraint +
+    softConstraint +
     baseWeights.attributeAlignment +
     baseWeights.preferenceAlignment +
     baseWeights.popularity +
     baseWeights.availability +
-    baseWeights.producerPrestige +
+    producerPrestige +
     baseWeights.recency +
     baseWeights.criticScore +
     baseWeights.multilingualScore +
@@ -500,14 +539,14 @@ export function applySituationIntentWeightOverlay(
     entityIntegrity: baseWeights.entityIntegrity * normFactor,
     anchorSimilarity: baseWeights.anchorSimilarity * normFactor,
     semantic: baseWeights.semantic * normFactor,
-    softConstraint: baseWeights.softConstraint * normFactor,
+    softConstraint: softConstraint * normFactor,
     attributeAlignment: baseWeights.attributeAlignment * normFactor,
     preferenceAlignment: baseWeights.preferenceAlignment * normFactor,
     popularity: baseWeights.popularity * normFactor,
     availability: baseWeights.availability * normFactor,
     uncertaintyPenalty: baseWeights.uncertaintyPenalty,
     entityIntegrityThreshold: baseWeights.entityIntegrityThreshold,
-    producerPrestige: baseWeights.producerPrestige * normFactor,
+    producerPrestige: producerPrestige * normFactor,
     recency: baseWeights.recency * normFactor,
     criticScore: baseWeights.criticScore * normFactor,
     multilingualScore: baseWeights.multilingualScore * normFactor,

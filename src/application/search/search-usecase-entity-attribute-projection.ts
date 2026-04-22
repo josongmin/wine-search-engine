@@ -79,6 +79,7 @@ const ENTITY_ATTRIBUTE_HINT_PROJECTORS: readonly HintProjector[] = [
   stringHint('grape_primary', (doc) => doc.grapePrimary, 'grapePrimary'),
   stringArrayHint('grapes', (doc) => doc.grapes, 'grapes'),
   stringHint('style', (doc) => doc.style, 'style'),
+  stringHint('closure', (doc) => doc.closure, 'closure'),
   stringHint('price_band', (doc) => doc.priceBand, 'priceBand'),
   stringArrayHint('pairing', (doc) => doc.pairing, 'pairing'),
   stringArrayHint('occasion', (doc) => doc.occasion, 'occasion'),

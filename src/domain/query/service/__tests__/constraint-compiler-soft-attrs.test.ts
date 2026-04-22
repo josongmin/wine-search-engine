@@ -293,7 +293,7 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     expect(result.bundle.soft).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ attribute: 'occasion', value: ['camping'] }),
-        expect.objectContaining({ attribute: 'style', value: ['screw_cap'] }),
+        expect.objectContaining({ attribute: 'closure', value: 'screw cap' }),
         expect.objectContaining({ attribute: 'style', value: ['chillable'] }),
       ]),
     );

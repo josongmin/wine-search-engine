@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });
 dotenv.config();
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { loadConfig } from '../../src/config/env.js';
 import { OpenAiChatLlm } from '../../src/infrastructure/ai/openai-chat-llm.js';
@@ -28,6 +29,134 @@ export interface AgentFixtureCase {
   readonly rubric?: string;
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readRequiredString(record: Readonly<Record<string, unknown>>, field: string): string {
+  const value = record[field];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Fixture case is missing required string field: ${field}`);
+  }
+  return value;
+}
+
+function readOptionalNumber(record: Readonly<Record<string, unknown>>, field: string): number | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Fixture case field ${field} must be a finite number when present.`);
+  }
+  return value;
+}
+
+function readOptionalString(record: Readonly<Record<string, unknown>>, field: string): string | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') {
+    throw new Error(`Fixture case field ${field} must be a string when present.`);
+  }
+  return value;
+}
+
+function readEnumValue<T extends string>(
+  record: Readonly<Record<string, unknown>>,
+  field: string,
+  allowed: readonly T[],
+): T {
+  const value = readRequiredString(record, field);
+  if (!allowed.includes(value as T)) {
+    throw new Error(`Fixture case field ${field} must be one of: ${allowed.join(', ')}`);
+  }
+  return value as T;
+}
+
+function readOptionalStringArray(
+  record: Readonly<Record<string, unknown>>,
+  field: string,
+): readonly string[] | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error(`Fixture case field ${field} must be a string array when present.`);
+  }
+  return value;
+}
+
+function readExpectedTools(record: Readonly<Record<string, unknown>>): readonly AgentFixtureExpectedTool[] | undefined {
+  const value = record['expected_tools'];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error('Fixture case field expected_tools must be an array when present.');
+  }
+  return value.map((item, index): AgentFixtureExpectedTool => {
+    if (!isRecord(item)) {
+      throw new Error(`Fixture case expected_tools[${index}] must be an object.`);
+    }
+    const tool = item['tool'];
+    if (typeof tool !== 'string' || tool.trim().length === 0) {
+      throw new Error(`Fixture case expected_tools[${index}].tool must be a non-empty string.`);
+    }
+    const inputContains = item['input_contains'];
+    if (
+      inputContains !== undefined
+      && (!Array.isArray(inputContains) || !inputContains.every((part) => typeof part === 'string'))
+    ) {
+      throw new Error(`Fixture case expected_tools[${index}].input_contains must be a string array when present.`);
+    }
+    const optional = item['optional'];
+    if (optional !== undefined && typeof optional !== 'boolean') {
+      throw new Error(`Fixture case expected_tools[${index}].optional must be boolean when present.`);
+    }
+    return {
+      tool,
+      ...(inputContains !== undefined ? { input_contains: inputContains } : {}),
+      ...(optional !== undefined ? { optional } : {}),
+    };
+  });
+}
+
+function readFixtureEvaluation(raw: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const value = raw['evaluation'];
+  if (value === undefined) return {};
+  if (!isRecord(value)) {
+    throw new Error('Fixture case field evaluation must be an object when present.');
+  }
+  return value;
+}
+
+function preferEvaluationField(
+  raw: Readonly<Record<string, unknown>>,
+  evaluation: Readonly<Record<string, unknown>>,
+  field: string,
+): Readonly<Record<string, unknown>> {
+  return evaluation[field] !== undefined ? evaluation : raw;
+}
+
+export function normalizeAgentFixtureCase(raw: unknown): AgentFixtureCase {
+  if (!isRecord(raw)) {
+    throw new Error('Fixture case must be an object.');
+  }
+  const evaluation = readFixtureEvaluation(raw);
+  const maxStepsSource = preferEvaluationField(raw, evaluation, 'max_steps');
+  const expectedToolsSource = preferEvaluationField(raw, evaluation, 'expected_tools');
+  const mustMatchSource = preferEvaluationField(raw, evaluation, 'answer_must_match');
+  const mustNotMatchSource = preferEvaluationField(raw, evaluation, 'answer_must_not_match');
+  const rubricSource = preferEvaluationField(raw, evaluation, 'rubric');
+
+  return {
+    id: readRequiredString(raw, 'id'),
+    query: readRequiredString(raw, 'query'),
+    language: readEnumValue(raw, 'language', ['ko', 'en', 'mixed']),
+    difficulty: readEnumValue(raw, 'difficulty', ['easy', 'medium', 'hard']),
+    max_steps: readOptionalNumber(maxStepsSource, 'max_steps'),
+    expected_tools: readExpectedTools(expectedToolsSource),
+    answer_must_match: readOptionalStringArray(mustMatchSource, 'answer_must_match'),
+    answer_must_not_match: readOptionalStringArray(mustNotMatchSource, 'answer_must_not_match'),
+    rubric: readOptionalString(rubricSource, 'rubric'),
+  };
+}
+
 interface AgentStepLike {
   readonly action?: { readonly tool: string; readonly input: Record<string, unknown> } | undefined;
   readonly actions?: readonly { readonly tool: string; readonly input: Record<string, unknown> }[] | undefined;
@@ -49,22 +178,41 @@ export async function callAgentApi(
   maxSteps?: number,
   timeoutMs = 90_000,
 ): Promise<AgentResponseLike> {
-  const response = await fetch(`${apiUrl}/v1/agent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      query,
-      ...(maxSteps !== undefined ? { options: { max_steps: maxSteps } } : {}),
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const normalizedApiUrl = apiUrl.replace(/^http:\/\/localhost(?=[:/]|$)/u, 'http://127.0.0.1');
+  const maxTransportAttempts = 5;
+  let lastTransportError: unknown;
+  for (let attempt = 1; attempt <= maxTransportAttempts; attempt++) {
+    try {
+      const response = await fetch(`${normalizedApiUrl}/v1/agent`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          connection: 'close',
+        },
+        body: JSON.stringify({
+          query,
+          ...(maxSteps !== undefined ? { options: { max_steps: maxSteps } } : {}),
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) {
+        const body = await response.text().catch(() => '(unreadable)');
+        throw new Error(`HTTP ${response.status} from /v1/agent: ${body.slice(0, 400)}`);
+      }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '(unreadable)');
-    throw new Error(`HTTP ${response.status} from /v1/agent: ${body.slice(0, 400)}`);
+      const payload = await response.json() as AgentResponseLike;
+      lastTransportError = undefined;
+      return payload;
+    } catch (err) {
+      lastTransportError = err;
+      if (attempt < maxTransportAttempts) {
+        await delay(400 * attempt);
+      }
+    }
   }
 
-  return response.json() as Promise<AgentResponseLike>;
+  const message = lastTransportError instanceof Error ? lastTransportError.message : String(lastTransportError);
+  throw new Error(`Fetch failed for /v1/agent query "${query.slice(0, 120)}": ${message}`);
 }
 
 export function collectToolCalls(steps: readonly AgentStepLike[]): readonly {
@@ -140,25 +288,46 @@ export function evaluateAnswerPatterns(
   };
 }
 
-export function createJudgeLlm(modelId?: string): ChatLlmPort {
-  const config = loadConfig();
+export interface JudgeLlmConfig {
+  readonly openai: {
+    readonly apiKey: string | undefined;
+    readonly baseUrl: string;
+    readonly chatModel: string;
+    readonly httpTimeoutMs: number;
+  };
+  readonly anthropic: {
+    readonly apiKey: string | undefined;
+  };
+}
+
+export function createJudgeLlmFromConfig(config: JudgeLlmConfig, modelId?: string): ChatLlmPort {
   const judgeModelId = modelId ?? config.openai.chatModel;
   if (judgeModelId.startsWith('claude-')) {
+    if (config.anthropic.apiKey === undefined) {
+      throw new Error('ANTHROPIC_API_KEY required for claude-* fixture judge models.');
+    }
     return new AnthropicChatLlm({
       apiKey: config.anthropic.apiKey,
       defaultModel: judgeModelId,
-      timeoutMs: config.anthropic.timeoutMs,
-      maxRetries: config.anthropic.maxRetries,
+      httpTimeoutMs: config.openai.httpTimeoutMs,
     });
+  }
+
+  if (config.openai.apiKey === undefined) {
+    throw new Error('OPENAI_API_KEY required for OpenAI fixture judge models.');
   }
 
   return new OpenAiChatLlm({
     apiKey: config.openai.apiKey,
     baseUrl: config.openai.baseUrl,
     defaultModel: judgeModelId,
-    timeoutMs: config.openai.timeoutMs,
-    maxRetries: config.openai.maxRetries,
+    httpTimeoutMs: config.openai.httpTimeoutMs,
   });
+}
+
+export function createJudgeLlm(modelId?: string): ChatLlmPort {
+  const config = loadConfig();
+  return createJudgeLlmFromConfig(config, modelId);
 }
 
 export async function judgeFixtureAnswer(

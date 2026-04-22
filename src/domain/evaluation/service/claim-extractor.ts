@@ -56,6 +56,9 @@ const VINTAGE_RE = /(?:^|[^\p{L}\p{N}])(1[6-9]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/
  *  Includes: drink/drinking, consume/consumed, age/aged, hold, cellar,
  *  through, until, peak, closed, Korean equivalents. */
 const DRINK_WINDOW_CONTEXT_RE = /(?:drink(?:ing)?|consume[d]?|age[d]?|hold|cellar|through|until|peak|closed|음용|마시기|숙성|셀러링?|적기|까지|~)\s*(?:window|기간|동안)?\s*:?\s*$/iu;
+/** Reference-year context — not a wine vintage claim. */
+const REFERENCE_YEAR_LEFT_CONTEXT_RE = /(?:as\s+of|current(?:ly)?|현재|기준|올해)\s*(?:\(|:)?\s*$/iu;
+const REFERENCE_YEAR_RIGHT_CONTEXT_RE = /^\s*(?:\)|년)?\s*(?:현재|기준|as\s+of|current(?:ly)?)/iu;
 
 /** Korean price patterns. */
 const PRICE_MAN_WON_RE = /(\d+(?:\.\d+)?)\s*만\s*원/gu;
@@ -295,20 +298,28 @@ export function extractClaims(
 
 function extractIdentityClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
+  const latinCandidates: string[] = [];
 
   // Latin proper nouns: "Opus One", "Château Margaux", "Cepa 21 Malabrigo"
   const latinMatches = text.match(LATIN_IDENTITY_RE);
   if (latinMatches) {
-    for (const name of latinMatches) {
+    for (const match of text.matchAll(LATIN_IDENTITY_RE)) {
+      const name = match[0];
+      if (name === undefined) continue;
       const trimmed = name.trim();
       if (trimmed.length < 3) continue;
+      if (isPairingListContext(text, match.index ?? 0)) continue;
       const lowered = trimmed.toLowerCase().normalize('NFKC');
       if (resolveGrapeSurface(trimmed) !== undefined) continue;
       if (KNOWN_REGIONS.has(lowered)) continue;
       if (WINE_TYPE_KEYWORDS.has(lowered)) continue;
       if (LATIN_IDENTITY_STOPWORDS.has(lowered)) continue;
       if (isStructuredEntitySurface(trimmed)) continue;
-      claims.push(makeClaim('identity_claim', 'canonical_label', trimmed, trimmed));
+      if (isProducerShardSurface(text, trimmed)) continue;
+      latinCandidates.push(trimmed);
+    }
+    for (const candidate of filterSubsumedSingleTokenLatinIdentityCandidates(latinCandidates)) {
+      claims.push(makeClaim('identity_claim', 'canonical_label', candidate, candidate));
     }
   }
 
@@ -320,6 +331,48 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
   }
 
   return claims;
+}
+
+function tokenizeLatinIdentityCandidate(value: string): readonly string[] {
+  return value
+    .toLowerCase()
+    .normalize('NFKC')
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !/^\d{1,4}$/u.test(token));
+}
+
+function filterSubsumedSingleTokenLatinIdentityCandidates(
+  candidates: readonly string[],
+): readonly string[] {
+  const tokenized = candidates.map((candidate) => ({
+    candidate,
+    tokens: tokenizeLatinIdentityCandidate(candidate),
+  }));
+
+  return tokenized
+    .filter(({ tokens }, index) =>
+      tokens.length !== 1 || !tokenized.some(
+        (other, otherIndex) =>
+          otherIndex !== index
+          && other.tokens.length > 1
+          && other.tokens.includes(tokens[0]!),
+      ))
+    .map(({ candidate }) => candidate);
+}
+
+function isProducerShardSurface(text: string, candidate: string): boolean {
+  if (tokenizeLatinIdentityCandidate(candidate).length !== 1) {
+    return false;
+  }
+  const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`${escaped}\\s*(?:&|and)\\s*[A-Z]`, 'u').test(text);
+}
+
+function isPairingListContext(text: string, startIndex: number): boolean {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, startIndex - 1)) + 1;
+  const prefix = text.slice(lineStart, startIndex);
+  return /^\s*(?:[-*]\s*)?(?:pairing|페어링)\s*:\s*[\p{L}\p{N},/&+\-\s]*$/iu.test(prefix);
 }
 
 function extractKoreanIdentityCandidates(
@@ -414,6 +467,7 @@ function extractVintageClaims(text: string, currentYear: number): ExtractedClaim
     if (DRINK_WINDOW_CONTEXT_RE.test(leftContext)) continue;
     const immediateLeft = text.slice(Math.max(0, yearStart - 10), yearStart);
     const immediateRight = text.slice(yearEnd, Math.min(text.length, yearEnd + 10));
+    if (REFERENCE_YEAR_LEFT_CONTEXT_RE.test(leftContext) || REFERENCE_YEAR_RIGHT_CONTEXT_RE.test(immediateRight)) continue;
     if (/(?:1[6-9]\d{2}|20\d{2})\s*[-–~]\s*$/u.test(immediateLeft)) continue;
     if (/^\s*[-–~]\s*(?:1[6-9]\d{2}|20\d{2})/u.test(immediateRight)) continue;
 
@@ -449,6 +503,8 @@ function extractPriceClaims(text: string): ExtractedClaim[] {
     const trailingWon = Number(m[2]!.replace(/,/g, ''));
     if (!Number.isFinite(manWon) || !Number.isFinite(trailingWon)) continue;
     const start = m.index;
+    const end = start + m[0].length;
+    if (isAggregatePriceContext(text, start, end)) continue;
     consumedRanges.push({ start, end: start + m[0].length });
     const krw = manWon * KRW_PER_MAN_WON + trailingWon;
     claims.push(makeClaim('core_structured_claim', 'price_usd', (krw / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
@@ -457,15 +513,24 @@ function extractPriceClaims(text: string): ExtractedClaim[] {
     if (isRangeConsumed(m.index, consumedRanges)) continue;
     const krw = Number(m[1]);
     if (!Number.isFinite(krw)) continue;
+    const start = m.index;
+    const end = start + m[0].length;
+    if (isAggregatePriceContext(text, start, end)) continue;
     claims.push(makeClaim('core_structured_claim', 'price_usd', (krw * KRW_PER_MAN_WON / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
   }
   for (const m of text.matchAll(PRICE_PLAIN_WON_RE)) {
     if (isRangeConsumed(m.index, consumedRanges)) continue;
     const krw = Number(m[1]!.replace(/,/g, ''));
     if (!Number.isFinite(krw)) continue;
+    const start = m.index;
+    const end = start + m[0].length;
+    if (isAggregatePriceContext(text, start, end)) continue;
     claims.push(makeClaim('core_structured_claim', 'price_usd', (krw / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
   }
   for (const m of text.matchAll(PRICE_USD_RE)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (isAggregatePriceContext(text, start, end)) continue;
     claims.push(makeClaim('core_structured_claim', 'price_usd', m[1]!, m[0]));
   }
 
@@ -477,6 +542,21 @@ function isRangeConsumed(
   ranges: readonly { readonly start: number; readonly end: number }[],
 ): boolean {
   return ranges.some((range) => index >= range.start && index < range.end);
+}
+
+function isAggregatePriceContext(text: string, start: number, end: number): boolean {
+  const left = text.slice(Math.max(0, start - 16), start);
+  const right = text.slice(end, Math.min(text.length, end + 6));
+  if (/(?:총|예산|합계|총액|평균|병당|budget|total|sum)\s*$/iu.test(left)) {
+    return true;
+  }
+  if (/^\s*대/iu.test(right)) {
+    return true;
+  }
+
+  const lineStart = text.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  const linePrefix = text.slice(lineStart, start);
+  return /(?:총|예산|합계|총액|평균|병당|budget|total|sum)[^:\n]*[:：]?\s*(?:약\s*)?$/iu.test(linePrefix);
 }
 
 function extractRegionClaims(text: string): ExtractedClaim[] {

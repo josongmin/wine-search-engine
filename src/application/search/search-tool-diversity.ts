@@ -6,6 +6,7 @@ import type { StageTimer } from '../../observability/stage-timer.js';
 import { WINE_TYPE_DETECTION_PATTERNS, type WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 import type { CorpusCardinalityCache } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
 import { CORPUS_LIMITED_THRESHOLD } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 export const SEARCH_TOOL_DIVERSITY_MIN_LIMIT = 5;
 export const SEARCH_TOOL_DIVERSITY_WINE_TYPES = ['white', 'sparkling', 'red'] as const satisfies readonly WineTypeValue[];
@@ -253,19 +254,34 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
     );
   }
 
-  const typedResponses = await Promise.all(
-    eligibleTypes.map((wineType) =>
-      input.searchUseCase.execute(
-        input.buildTypedRequest(wineType),
-        `${input.requestId}:diversity:${wineType}`,
-        typedExecOpts,
-      ),
+  const typedSettled = await Promise.allSettled(
+    eligibleTypes.map(async (wineType) =>
+      ({
+        wineType,
+        result: await input.searchUseCase.execute(
+          input.buildTypedRequest(wineType),
+          `${input.requestId}:diversity:${wineType}`,
+          typedExecOpts,
+        ),
+      }),
     ),
   );
-
-  const successfulTypedResponses = typedResponses.filter(
-    (typed): typed is SearchResponseV1 => typed.queryType === 'search',
-  );
+  const successfulTypedResponses: SearchResponseV1[] = [];
+  for (const settled of typedSettled) {
+    if (settled.status === 'rejected') {
+      bootstrapLogger.warn(
+        {
+          err: settled.reason instanceof Error ? settled.reason.message : String(settled.reason),
+          requestId: input.requestId,
+        },
+        '[search-tool-diversity] typed diversity branch failed — continuing with surviving branches',
+      );
+      continue;
+    }
+    if (settled.value.result.queryType === 'search') {
+      successfulTypedResponses.push(settled.value.result);
+    }
+  }
   if (successfulTypedResponses.length > 0) {
     return mergeSearchResponsesForDiversityDiscovery(
       successfulTypedResponses,

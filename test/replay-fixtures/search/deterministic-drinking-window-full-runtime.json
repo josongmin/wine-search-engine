@@ -1,5 +1,5 @@
 {
-  "name": "heuristic-drinking-window-full-runtime",
+  "name": "deterministic-drinking-window-full-runtime",
   "endpoint": "/v1/search/replay",
   "execution_lane": "runtime_required",
   "replay_request": {

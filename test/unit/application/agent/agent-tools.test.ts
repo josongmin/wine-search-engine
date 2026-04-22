@@ -112,6 +112,75 @@ describe('executeAgentTool', () => {
     expect(request?.query).toContain('crowd pleasing');
   });
 
+  it('pushes grape_primary into structured filters and retrieval text for varietal queries', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '까쇼 추천해줘',
+        grape_primary: 'Cabernet Sauvignon',
+        wine_type: 'red',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toContain('Cabernet Sauvignon');
+    expect(request?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' }),
+      expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+    ]));
+  });
+
+  it('surfaces accessibility grounding and popularity for online tasting recommendations', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Accessible Wine',
+            type: 'wine',
+            priceRange: '$30',
+          },
+          relevanceScore: 0.91,
+          match: {
+            matchType: 'hybrid',
+            scoreComponents: {
+              lexical: 0.8,
+              semantic: 0.8,
+              attribute: 0.8,
+              popularity: 0.73,
+              preferenceAlignment: 0.6,
+            },
+          },
+          constraints: { matched: ['max_price_krw'], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      {
+        query: '온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거',
+        max_price_krw: 50_000,
+        styles: ['approachable', 'crowd_pleasing'],
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('ACCESSIBILITY_GROUNDING');
+    expect(result.observation).toContain('popularity_score: 0.73');
+    expect(result.observation).toContain('"popularity_score":0.73');
+    expect(result.observation).toContain('do not claim a specific store carries');
+  });
+
   it('does not serialize unsupported presentation_forward style hints into search query text', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -429,8 +498,8 @@ describe('executeAgentTool', () => {
     expect(request?.query).toContain('aperitif');
     expect(request?.query).toContain('white');
     expect(request?.query).toContain('wine');
-    expect(request?.query).not.toContain('결혼기념일');
-    expect(request?.query).not.toContain('코스요리');
+    expect(request?.query).toContain('결혼기념일');
+    expect(request?.query).toContain('코스요리');
   });
 
   it('rewrites colloquial grape queries to canonical retrieval cores', async () => {
@@ -478,7 +547,7 @@ describe('executeAgentTool', () => {
     expect(request?.query).toContain('beef');
     expect(request?.query).toContain('red');
     expect(request?.query).toContain('wine');
-    expect(request?.query).not.toContain('소고기용');
+    expect(request?.query).toContain('소고기용');
   });
 
   it('transliterates short bare Korean entity queries to canonical Latin retrieval cores', async () => {
@@ -535,7 +604,7 @@ describe('executeAgentTool', () => {
     expect(request?.query).toBe('opus one');
   });
 
-  it('preserves the lexical nucleus when structured filters exist but no semantic anchor survives reconstruction', async () => {
+  it('preserves the resolved lexical nucleus when structured filters exist', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
     );
@@ -552,7 +621,6 @@ describe('executeAgentTool', () => {
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
     expect(request?.query).toMatch(/보졸레|beaujolais/i);
-    expect(request?.query).toContain('red');
     expect(request?.query).toContain('wine');
   });
 
@@ -612,6 +680,94 @@ describe('executeAgentTool', () => {
     });
   });
 
+  it('falls back to authoritative search projection when direct drinkability lookup lacks window data', async () => {
+    const drinkingWindowEntityLookup = vi.fn().mockResolvedValue({
+      entityId: 'wine-opus-one-2018',
+      canonicalLabel: 'Opus One 2018',
+    });
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-opus-one-2018',
+            canonicalLabel: 'Opus One 2018',
+          },
+          drinkingWindow: {
+            drinkingWindowStart: 2021,
+            drinkingWindowEnd: 2032,
+            currentlyDrinkable: true,
+            confidence: 'medium',
+            modelVersion: 'search-dw-v1',
+          },
+        } as SearchResponseV1['results'][number],
+      ]),
+    );
+    deps = {
+      searchUseCase: mockSearchUseCase,
+      drinkingWindowEntityLookup,
+    };
+
+    const result = await executeAgentTool(
+      'check_drinking_window',
+      {
+        entity_id: 'wine-opus-one-2018',
+        target_year: 2026,
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(drinkingWindowEntityLookup).toHaveBeenCalledWith('wine-opus-one-2018');
+    expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'Opus One 2018',
+        options: expect.objectContaining({ mode: 'entity' }),
+      }),
+      'req-123',
+      {},
+    );
+    expect(result.observation).toContain('Opus One 2018: drinking window 2021-2032');
+    expect(result.rawResult).toMatchObject({
+      drinkingWindowStart: 2021,
+      drinkingWindowEnd: 2032,
+      currentlyDrinkable: true,
+      modelVersion: 'search-dw-v1',
+    });
+  });
+
+  it('reuses grounded drinkability projection captured from a prior compare/search step', async () => {
+    deps = {
+      searchUseCase: mockSearchUseCase,
+      groundedDrinkingWindowLookup: vi.fn().mockReturnValue({
+        entityId: 'wine-opus-one-2018',
+        canonicalLabel: 'Opus One 2018',
+        drinkingWindowStart: 2021,
+        drinkingWindowEnd: 2032,
+        drinkingWindowModelVersion: 'comparison-dw-v1',
+      }),
+    };
+
+    const result = await executeAgentTool(
+      'check_drinking_window',
+      {
+        entity_id: 'wine-opus-one-2018',
+        target_year: 2026,
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(vi.mocked(mockSearchUseCase.execute)).not.toHaveBeenCalled();
+    expect(result.observation).toContain('Opus One 2018: drinking window 2021-2032');
+    expect(result.observation).toContain('currently drinkable');
+    expect(result.rawResult).toMatchObject({
+      drinkingWindowStart: 2021,
+      drinkingWindowEnd: 2032,
+      currentlyDrinkable: true,
+      modelVersion: 'comparison-dw-v1',
+    });
+  });
+
   it('forwards abortSignal to search use case execution context', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -651,6 +807,7 @@ describe('executeAgentTool', () => {
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
     expect(request?.query).toContain('30000원 이하');
     expect(request?.query).not.toContain('under 30000 KRW');
+    expect(request?.options).toEqual({ mode: 'hybrid', explain: false, clarification: false });
 
     const parsed = extractSearchConstraints(request!.query);
     expect(parsed.maxPriceKrw).toBe(30_000);
@@ -672,8 +829,46 @@ describe('executeAgentTool', () => {
     );
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
-    expect(request?.query).toContain('wines for 쌈싸먹을 때');
+    expect(request?.query).toContain('wine pairing for 쌈싸먹을 때');
     expect(request?.query).not.toContain('both');
+  });
+
+  it('forwards typed pairing objectives as structured constraints', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    const result = await executeAgentTool(
+      'get_food_pairings',
+      {
+        food: '매운 떡볶이',
+        color: 'white',
+        sweetness_target: 0.35,
+        acidity_min: 6,
+        tannin_max: 3,
+        styles: ['off_dry'],
+        pairing_tags: ['spicy_food'],
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query).toContain('off_dry');
+    expect(request?.query).toContain('spicy_food');
+    expect(request?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'white' }),
+    ]));
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.2 }),
+      expect.objectContaining({ attribute: 'sweetness', operator: '<=', value: 0.6 }),
+      expect.objectContaining({ attribute: 'sweetness', operator: '=', value: 0.35 }),
+      expect.objectContaining({ attribute: 'acidity', operator: '>=', value: 6 }),
+      expect.objectContaining({ attribute: 'tannin', operator: '<=', value: 3 }),
+      expect.objectContaining({ attribute: 'pairing', operator: 'in', value: ['spicy_food'] }),
+    ]));
+    expect(result.observation).toContain('PAIRING_OBJECTIVE_STYLES: off_dry');
+    expect(result.observation).toContain('PAIRING_STYLE_GUIDANCE: For spicy food');
   });
 
   it('rejects placeholder food values for get_food_pairings', async () => {
@@ -743,6 +938,8 @@ describe('executeAgentTool', () => {
       retrievalSubQueries,
     ] = mockDecomposedSearchExecute.mock.calls[0] ?? [];
     expect(subQueries).toEqual(['Barolo', 'Brunello di Montalcino']);
+    expect(retrievalSubQueries[0].toLowerCase()).toContain('barolo wine');
+    expect(retrievalSubQueries[1].toLowerCase()).toContain('brunello di montalcino wine');
     expect(retrievalSubQueries[0]).toContain('50000원 이하');
     expect(retrievalSubQueries[1]).toContain('50000원 이하');
     expect(originalQuery).toContain('50000원 이하');
@@ -752,6 +949,106 @@ describe('executeAgentTool', () => {
         expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
       ]),
     );
+  });
+
+  it('preserves concept aggregate evidence in compare grounding output', async () => {
+    const mockDecomposedSearchExecute = vi.fn().mockResolvedValue({
+      queryType: 'comparison',
+      originalQuery: 'Barolo vs Brunello di Montalcino',
+      comparisonIntent: 'compare',
+      entities: [
+        {
+          subQuery: 'Barolo',
+          comparisonMode: 'concept',
+          canonicalConcept: 'Barolo',
+          conceptEntityType: 'appellation',
+          conceptAggregate: {
+            canonicalConcept: 'Barolo',
+            conceptEntityType: 'appellation',
+            representativeResult: {
+              entity: { entityId: 'barolo-1', canonicalLabel: 'Massolino Barolo', type: 'wine', wineType: 'red' },
+              match: { matchType: 'hybrid', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+              relevanceScore: 0.9,
+              constraints: { matched: [], unmet: [], inferred: [] },
+              uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+              evidenceItems: [],
+            },
+            prototypeAxis: [
+              {
+                entity: { entityId: 'barolo-1', canonicalLabel: 'Massolino Barolo', type: 'wine', wineType: 'red' },
+                match: { matchType: 'hybrid', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+                relevanceScore: 0.9,
+                constraints: { matched: [], unmet: [], inferred: [] },
+                uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+                evidenceItems: [],
+              },
+              {
+                entity: { entityId: 'barolo-2', canonicalLabel: 'Vietti Barolo Castiglione', type: 'wine', wineType: 'red' },
+                match: { matchType: 'hybrid', scoreComponents: { lexical: 0.9, semantic: 0.9, attribute: 0.9, popularity: 0.9, preferenceAlignment: 0.9 } },
+                relevanceScore: 0.88,
+                constraints: { matched: [], unmet: [], inferred: [] },
+                uncertainty: { uncertaintyConfidence: 0.88, missingInfo: [], approximationUsed: false },
+                evidenceItems: [],
+              },
+            ],
+            aggregateResultCount: 2,
+          },
+          topResult: {
+            entity: { entityId: 'barolo-1', canonicalLabel: 'Massolino Barolo', type: 'wine', wineType: 'red' },
+            match: { matchType: 'hybrid', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+            relevanceScore: 0.9,
+            constraints: { matched: [], unmet: [], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+            evidenceItems: [],
+          },
+          resultCount: 2,
+          resolutionStatus: 'resolved',
+          allResults: [],
+        },
+        {
+          subQuery: 'Brunello di Montalcino',
+          comparisonMode: 'concept',
+          canonicalConcept: 'Brunello di Montalcino',
+          conceptEntityType: 'appellation',
+          conceptAggregate: {
+            canonicalConcept: 'Brunello di Montalcino',
+            conceptEntityType: 'appellation',
+            representativeResult: null,
+            prototypeAxis: [],
+            aggregateResultCount: 0,
+          },
+          topResult: null,
+          resultCount: 0,
+          resolutionStatus: 'resolved',
+          allResults: [],
+        },
+      ],
+      overallStatus: 'resolved',
+      requestId: 'req-123',
+      executionTimeMs: 12,
+      authorityTraceRef: 'cmp-trace',
+      runtimeCorrelationRef: 'req-123',
+    });
+    deps = {
+      ...deps,
+      decomposedSearchExecute: mockDecomposedSearchExecute,
+    };
+
+    const result = await executeAgentTool(
+      'compare_wines',
+      {
+        query_a: 'Barolo',
+        query_b: 'Brunello di Montalcino',
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('prototype_count: 2');
+    expect(result.observation).toContain('comparison_concept: Barolo');
+    expect(result.observation).toContain('"comparison_legs"');
+    expect(result.observation).toContain('"aggregate_result_count":2');
+    expect(result.observation).toContain('"prototype_axis"');
   });
 
   it('removes side-specific comparison identity fields from shared comparison context', async () => {
@@ -802,6 +1099,72 @@ describe('executeAgentTool', () => {
     expect(parentContext?.filters).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ attribute: 'appellation' }),
+      ]),
+    );
+  });
+
+  it('forwards side-specific comparison filters through the agent tool executor', async () => {
+    const mockDecomposedSearchExecute = vi.fn().mockResolvedValue({
+      queryType: 'comparison',
+      originalQuery: '말벡 vs 말벡',
+      comparisonIntent: 'compare',
+      entities: [],
+      overallStatus: 'resolved',
+      requestId: 'req-123',
+      executionTimeMs: 12,
+      authorityTraceRef: 'cmp-trace',
+      runtimeCorrelationRef: 'req-123',
+    });
+    deps = {
+      ...deps,
+      decomposedSearchExecute: mockDecomposedSearchExecute,
+    };
+
+    await executeAgentTool(
+      'compare_wines',
+      {
+        query_a: '말벡',
+        query_b: '말벡',
+        country_a: 'France',
+        country_b: 'Argentina',
+        region_b: 'Mendoza',
+        grape_primary_a: 'Malbec',
+        grape_primary_b: 'Malbec',
+        wine_type_a: 'red',
+        wine_type_b: 'red',
+      },
+      deps,
+      'req-123',
+    );
+
+    const [
+      subQueries,
+      ,
+      ,
+      ,
+      ,
+      parentContext,
+      ,
+      retrievalSubQueries,
+    ] = mockDecomposedSearchExecute.mock.calls.at(-1) ?? [];
+
+    expect(subQueries).toEqual(['말벡', '말벡']);
+    expect(retrievalSubQueries[0].toLowerCase()).toContain('malbec');
+    expect(retrievalSubQueries[1].toLowerCase()).toContain('malbec');
+    expect(parentContext?.filters ?? []).toHaveLength(0);
+    expect(parentContext?.perSideFilters?.[0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'country', operator: '=', value: 'France' }),
+        expect.objectContaining({ attribute: 'grape_primary', operator: '=', value: 'Malbec' }),
+        expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+      ]),
+    );
+    expect(parentContext?.perSideFilters?.[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'country', operator: '=', value: 'Argentina' }),
+        expect.objectContaining({ attribute: 'region', operator: '=', value: 'Mendoza' }),
+        expect.objectContaining({ attribute: 'grape_primary', operator: '=', value: 'Malbec' }),
+        expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
       ]),
     );
   });
@@ -865,6 +1228,28 @@ describe('executeAgentTool', () => {
       expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.7 }),
     ]));
     expect(request?.filters).toBeUndefined();
+  });
+
+  it('forwards drinking-window objective as a structured preference', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '이탈리아 레드',
+        drinking_window: 'now',
+        drinking_window_target_year: 2026,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'drinking_window', operator: '=', value: 2026 }),
+    ]));
   });
 
   it('post-filters results using structured exclusion inputs', async () => {
@@ -1079,7 +1464,14 @@ describe('executeAgentTool', () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([
         {
-          entity: { entityId: 'wine-1', canonicalLabel: 'Wine A', type: 'wine', region: 'Bordeaux', grapes: ['Merlot'] },
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Wine A',
+            type: 'wine',
+            region: 'Bordeaux',
+            country: 'France',
+            grapes: ['Merlot'],
+          },
           relevanceScore: 0.9,
           match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
           constraints: { matched: [], unmet: [], inferred: [] },
@@ -1093,6 +1485,7 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('GROUNDING_JSON:');
     expect(result.observation).toContain('"canonical_label":"Wine A"');
     expect(result.observation).toContain('"region":"Bordeaux"');
+    expect(result.observation).toContain('"country":"France"');
   });
 
   it('keeps lineage in observation but omits source_record_refs from GROUNDING_JSON when present', async () => {
@@ -1262,7 +1655,7 @@ describe('executeAgentTool', () => {
     expect(filtered.results[0]?.entity.entityId).toBe('wine-cheap');
   });
 
-  it('alcohol post-filter: removes known wines above max_alcohol_pct while retaining unknown alcohol candidates', async () => {
+  it('alcohol preference: keeps known over-ceiling wines but demotes them behind compliant results', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([
         {
@@ -1294,8 +1687,9 @@ describe('executeAgentTool', () => {
 
     const result = await executeAgentTool('search_wines', { query: '도수 낮은 달달한 와인', max_alcohol_pct: 12 }, deps, 'req-123');
     const filtered = result.rawResult as SearchResponseV1;
-    expect(filtered.results.map((item) => item.entity.entityId)).toEqual(['wine-low', 'wine-unknown']);
-    expect(result.observation).toContain('[ALCOHOL_FILTER: 12% 초과로 확인된 1개 결과를 제외했습니다.');
+    expect(filtered.results.map((item) => item.entity.entityId)).toEqual(['wine-low', 'wine-unknown', 'wine-high']);
+    expect(result.observation).toContain('[ALCOHOL_PREFERENCE: 12% 이하를 우선 정렬했습니다.');
+    expect(result.observation).toContain('뒤로 보냈고');
   });
 
   it('preserves parseable GROUNDING_JSON when long observations are capped', async () => {

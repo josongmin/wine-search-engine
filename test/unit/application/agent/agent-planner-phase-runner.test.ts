@@ -469,6 +469,40 @@ describe('AgentPlannerPhaseRunner', () => {
     expect(result?.parsed).toEqual({
       thought: 'recovered embedded tool call',
       action: { tool: 'search_wines', input: { query: '결혼기념일' } },
+      plannerRepair: expect.objectContaining({
+        code: 'embedded_tool_recovery',
+        recoveredFrom: 'embedded_json',
+      }),
+    });
+    expect(state.reasoningFailureDetected).toBe(false);
+  });
+
+  it('surfaces pure malformed JSON-like planner output as a planner defect instead of terminating early', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: '{"thought":"검색","action":',
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+    const state = createAgentExecutionState();
+
+    const result = await runner.run(
+      '바롤로 추천해줘',
+      'req-json-like-defect',
+      DEFAULT_AGENT_CONFIG,
+      state,
+      3,
+      false,
+    );
+
+    expect(result?.parsed).toEqual({
+      thought: 'malformed planner output',
+      plannerDefect: expect.objectContaining({
+        code: 'malformed_json_output',
+      }),
     });
     expect(state.reasoningFailureDetected).toBe(false);
   });

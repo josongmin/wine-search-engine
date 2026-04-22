@@ -482,7 +482,7 @@ cp .env.example .env
 | Vespa | `VESPA_URL`, `VESPA_CONTENT_CLUSTER` |
 | ML HTTP | `EMBEDDING_SERVICE_URL`, 선택 `COHERE_API_KEY`/`COHERE_RERANK_MODEL`, `RERANK_BLEND_SCALE`, 선택 `LEARNED_MATCHER_SERVICE_URL` |
 | Anthropic | `ANTHROPIC_API_KEY`(선택 기능) |
-| 음주 가능 기간 | `ALLOW_HEURISTIC_DRINKING_WINDOW`, `DRINKING_WINDOW_MODEL_DIR` |
+| 음주 가능 기간 | 기본 deterministic runtime, 선택 `DRINKING_WINDOW_MODEL_DIR`(ONNX override) |
 | 워치리스트 | `WATCHLIST_ENABLED`, `WEBHOOK_SECRET` |
 | 킬 스위치 | `KILL_SWITCH_ALIAS_OVERLAY`, `KILL_SWITCH_LEARNING`, `KILL_SWITCH_DENSE_RETRIEVAL`, `KILL_SWITCH_INJECTION_JUDGE`, `KILL_SWITCH_QUERY_CACHE` |
 | 테스트 | `PG_TEST_URL` — 테스트 Compose에서는 `postgresql://wine:wine_test@localhost:5433/wine_engine_test` 등 |

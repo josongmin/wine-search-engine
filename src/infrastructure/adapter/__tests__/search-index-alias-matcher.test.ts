@@ -6,6 +6,8 @@ import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieva
 import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 import type { SearchIndexPort } from '../../../domain/retrieval/port/search-index.port.js';
 import { CascadingAliasMatcher } from '../search-index-alias-matcher.js';
+import { CircuitBreakerOpenError } from '../../../domain/shared/error/circuit-breaker-open-error.js';
+import { VespaNetworkError } from '../../vespa/vespa-client.js';
 
 function makeDoc(overrides: Partial<RetrievalDocument> = {}): RetrievalDocument {
   return {
@@ -123,6 +125,42 @@ describe('SearchIndexAliasMatcher', () => {
     expect(batch.get('오퍼스원')?.[0]?.entityIds).toContain(
       createCanonicalEntityId('wine-opus-one-2018'),
     );
+  });
+
+  it('degrades Vespa transport failures to empty alias matches instead of throwing', async () => {
+    const searchIndex = {
+      sparseSearch: vi.fn(async () => {
+        throw new VespaNetworkError('HTTP/2 GOAWAY', new TypeError('HTTP/2 GOAWAY'));
+      }),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    const batch = await matcher.findMatchesBatch([
+      '오푸스원 지금 마시기 좋아?',
+      '오퍼스원',
+    ]);
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(batch.get('오푸스원 지금 마시기 좋아?')).toEqual([]);
+    expect(batch.get('오퍼스원')).toEqual([]);
+  });
+
+  it('degrades OPEN circuit-breaker alias lookups to empty matches instead of crashing', async () => {
+    const searchIndex = {
+      sparseSearch: vi.fn(async () => {
+        throw new CircuitBreakerOpenError('vespa-search');
+      }),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    const batch = await matcher.findMatchesBatch([
+      '오푸스원',
+      '오퍼스원',
+    ]);
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(batch.get('오푸스원')).toEqual([]);
+    expect(batch.get('오퍼스원')).toEqual([]);
   });
 
   it('falls back to secondary batch for unresolved primary misses', async () => {

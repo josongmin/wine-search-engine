@@ -1027,7 +1027,6 @@ export class Ranker {
       // E3-U5: compiled-first route for gate — falls back to V1 plan.route
       const gateEffectiveRoute = input.compiled.execution.effectiveRoute;
       const compiledBudget = input.compiled.execution.budget;
-      const hasPrimaryLtrModel = this.ltrModels?.has(queryPlan.queryClass) === true;
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
         queryClass: queryPlan.queryClass,
@@ -1043,7 +1042,8 @@ export class Ranker {
 
       if (gateDecision.shouldRerank) {
         const effectiveTopK = gateDecision.topKOverride ?? this.rerankTopK;
-        if (this.reranker !== undefined && !hasPrimaryLtrModel) {
+        let remoteRerankApplied = false;
+        if (this.reranker !== undefined) {
           try {
             const preRerankCount = viable.length;
             stageTimer?.start('ranking.cross_encoder');
@@ -1076,6 +1076,8 @@ export class Ranker {
               localRerankExecuted = true;
               localRerankDecisionCode = 'applied';
               localRuntimeSignal = rerankOutcome.runtimeSignal ?? { rerankerStatus: 'executed' };
+              localRerankModelId = this.reranker?.modelId;
+              remoteRerankApplied = true;
             }
           } catch (err) {
             stageTimer?.end('ranking.cross_encoder');
@@ -1102,7 +1104,7 @@ export class Ranker {
             };
           }
         }
-        if (hasConfiguredLearnedRerank) {
+        if (hasConfiguredLearnedRerank && !remoteRerankApplied) {
           shouldApplyLearnedRerank = true;
         }
       } else if (localLtrSkipReason === undefined) {

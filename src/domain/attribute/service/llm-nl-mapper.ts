@@ -123,13 +123,14 @@ function sanitizeLlmPhrase(phrase: string): string | null {
 
 const SYSTEM_PROMPT = `You are a wine search query constraint parser. Given Korean or English wine search phrases, extract structured attribute constraints.
 
-Allowed attributes: body, sweetness, acidity, tannin, alcohol_pct, price_band, occasion, wine_type, country, region, appellation, grape_primary, style, critic_score, producer_prestige, finish_length, drinking_window, flavor_profile, certification.
+Allowed attributes: body, sweetness, acidity, tannin, alcohol_pct, price_band, occasion, wine_type, country, region, appellation, grape_primary, style, closure, critic_score, producer_prestige, finish_length, drinking_window, flavor_profile, certification.
 
 Price band values: budget, mid, premium, luxury.
 Wine type values: red, white, rosé, sparkling, natural, dessert, fortified, orange.
 Body/sweetness/acidity/tannin/critic_score/producer_prestige: numeric 0-1. alcohol_pct is ABV percentage.
 Occasion values: gift, party, celebration, anniversary, wedding, date_night, housewarming, solo, healing, camping, romantic, comforting.
-Style values: dry, off_dry, sweet, sparkling, fortified, rose, natural, orange, chillable, screw_cap, approachable, crowd_pleasing, presentation_forward.
+Style values: dry, off_dry, sweet, sparkling, fortified, rose, natural, orange, chillable, approachable, crowd_pleasing, presentation_forward.
+Closure values: screw cap.
 
 Return a JSON array. Each item: { "phrase": string, "attribute": string, "operator": "=" | "<=" | ">=" | "range" | "in" | "exclude", "value": string | number | { "min": number, "max": number }, "confidence": 0-1 }.
 
@@ -139,7 +140,7 @@ Examples:
 - "비싼" → [{"phrase":"비싼","attribute":"price_band","operator":"=","value":"luxury","confidence":0.85}]
 - "평점좋은" → [{"phrase":"평점좋은","attribute":"critic_score","operator":">=","value":0.7,"confidence":0.8}]
 - "과일향 풍부한" → [{"phrase":"과일향 풍부한","attribute":"flavor_profile","operator":"in","value":"fruity","confidence":0.8}]
-- "스크류캡" → [{"phrase":"스크류캡","attribute":"style","operator":"in","value":"screw_cap","confidence":0.85}]
+- "스크류캡" → [{"phrase":"스크류캡","attribute":"closure","operator":"=","value":"screw cap","confidence":0.85}]
 - "시원하게 마실" → [{"phrase":"시원하게 마실","attribute":"style","operator":"in","value":"chillable","confidence":0.8}]
 - "실패 없는" → [{"phrase":"실패 없는","attribute":"style","operator":"in","value":"crowd_pleasing","confidence":0.8}]
 - "예쁜 라벨" → [{"phrase":"예쁜 라벨","attribute":"style","operator":"in","value":"presentation_forward","confidence":0.8}]

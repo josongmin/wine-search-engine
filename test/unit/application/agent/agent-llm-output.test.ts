@@ -30,6 +30,17 @@ describe('agent-llm-output', () => {
         { tool: 'search_wines', input: { query: 'opus one' } },
         { tool: 'get_food_pairings', input: { food: 'steak' } },
       ],
+      plannerRepair: expect.objectContaining({
+        code: 'partial_actions_batch',
+        recoveredFrom: 'actions',
+        droppedCandidates: [
+          expect.objectContaining({
+            location: 'actions',
+            index: 2,
+            reason: 'missing_tool_name',
+          }),
+        ],
+      }),
     });
   });
 
@@ -44,6 +55,10 @@ describe('agent-llm-output', () => {
         tool: 'search_wines',
         input: { query: 'barolo' },
       },
+      plannerRepair: expect.objectContaining({
+        code: 'embedded_tool_recovery',
+        recoveredFrom: 'bare_tool',
+      }),
     });
   });
 
@@ -62,6 +77,10 @@ describe('agent-llm-output', () => {
           wine_type: 'red',
         },
       },
+      plannerRepair: expect.objectContaining({
+        code: 'embedded_tool_recovery',
+        recoveredFrom: 'embedded_json',
+      }),
     });
   });
 
@@ -79,6 +98,10 @@ describe('agent-llm-output', () => {
         tool: 'compare_wines',
         input: { query_a: 'Barolo', query_b: 'Brunello' },
       },
+      plannerRepair: expect.objectContaining({
+        code: 'embedded_tool_recovery',
+        recoveredFrom: 'thought_string',
+      }),
     });
   });
 
@@ -106,6 +129,13 @@ describe('agent-llm-output', () => {
     expect(parsed.thought).toBe('bad typed input');
     expect(parsed.plannerDefect).toEqual(expect.objectContaining({
       code: 'invalid_tool_input',
+      candidateIssues: [
+        expect.objectContaining({
+          location: 'action',
+          tool: 'get_food_pairings',
+          reason: 'invalid_tool_input',
+        }),
+      ],
     }));
   });
 
@@ -172,6 +202,17 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('routes JSON-like but unparseable output to planner defect recovery', () => {
+    const parsed = parseLlmOutput('{"thought":"search","action":');
+
+    expect(parsed).toEqual({
+      thought: 'malformed planner output',
+      plannerDefect: expect.objectContaining({
+        code: 'malformed_json_output',
+      }),
+    });
+  });
+
   it('fails closed on mixed answer+action JSON objects', () => {
     const parsed = parseLlmOutput(JSON.stringify({
       thought: 'bad mix',
@@ -182,6 +223,31 @@ describe('agent-llm-output', () => {
     expect(parsed.thought).toBe('bad mix');
     expect(parsed.plannerDefect).toEqual(expect.objectContaining({
       code: 'mixed_answer_and_tool',
+      recoveredAnswer: '오퍼스 원입니다.',
+      recoveredAction: {
+        tool: 'search_wines',
+        input: { query: 'opus one' },
+      },
+    }));
+  });
+
+  it('fails closed on mixed answer payloads even when action is malformed', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'bad mixed primitive action',
+      answer: '그 와인입니다.',
+      action: 'search_wines',
+    }));
+
+    expect(parsed.thought).toBe('bad mixed primitive action');
+    expect(parsed.plannerDefect).toEqual(expect.objectContaining({
+      code: 'mixed_answer_and_tool',
+      recoveredAnswer: '그 와인입니다.',
+      candidateIssues: [
+        expect.objectContaining({
+          location: 'action',
+          reason: 'non_object_action',
+        }),
+      ],
     }));
   });
 
@@ -204,6 +270,17 @@ describe('agent-llm-output', () => {
     expect(parsed.actions).toHaveLength(2);
     expect(parsed.actions![0]).toEqual({ tool: 'search_wines', input: { query: 'barolo' } });
     expect(parsed.actions![1]).toEqual({ tool: 'check_drinking_window', input: { entity_id: 'wine-1' } });
+    expect(parsed.plannerRepair).toEqual(expect.objectContaining({
+      code: 'partial_actions_batch',
+      droppedCandidates: [
+        expect.objectContaining({
+          location: 'actions',
+          index: 1,
+          tool: 'get_food_pairings',
+          reason: 'invalid_tool_input',
+        }),
+      ],
+    }));
   });
 
   it('fails closed on bare tool call with invalid known-tool typed input', () => {
@@ -217,6 +294,13 @@ describe('agent-llm-output', () => {
     expect(parsed.thought).toBe('bare invalid');
     expect(parsed.plannerDefect).toEqual(expect.objectContaining({
       code: 'invalid_tool_input',
+      candidateIssues: [
+        expect.objectContaining({
+          location: 'bare_tool',
+          tool: 'compare_wines',
+          reason: 'invalid_tool_input',
+        }),
+      ],
     }));
   });
 
@@ -242,6 +326,17 @@ describe('agent-llm-output', () => {
           query_b: 'Brunello',
         },
       },
+      plannerRepair: expect.objectContaining({
+        code: 'tool_input_repaired',
+        recoveredFrom: 'action',
+        repairedCandidates: [
+          expect.objectContaining({
+            location: 'action',
+            tool: 'compare_wines',
+            removedUnknownKeys: ['food'],
+          }),
+        ],
+      }),
     });
   });
 
@@ -275,5 +370,104 @@ describe('agent-llm-output', () => {
     expect(parsed.actions).toHaveLength(2);
     expect(parsed.actions![0]).toEqual({ tool: 'search_wines', input: {} });
     expect(parsed.actions![1]).toEqual({ tool: 'nonexistent_tool', input: { x: 1 } });
+    expect(parsed.plannerRepair).toEqual(expect.objectContaining({
+      code: 'partial_actions_batch',
+      droppedCandidates: [
+        expect.objectContaining({
+          tool: 'get_food_pairings',
+          reason: 'invalid_tool_input',
+        }),
+      ],
+    }));
+  });
+
+  it('preserves recovered valid actions inside mixed answer+batch defect', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'mixed parallel payload',
+      answer: '먼저 검색해 보겠습니다.',
+      actions: [
+        { tool: 'search_wines', input: { query: 'Barolo' } },
+        { tool: 'get_food_pairings', input: { food: 42 } },
+        'bad-entry',
+      ],
+    }));
+
+    expect(parsed.plannerDefect).toEqual(expect.objectContaining({
+      code: 'mixed_answer_and_tool',
+      recoveredAnswer: '먼저 검색해 보겠습니다.',
+      recoveredActions: [
+        { tool: 'search_wines', input: { query: 'Barolo' } },
+      ],
+      candidateIssues: [
+        expect.objectContaining({
+          location: 'actions',
+          index: 1,
+          tool: 'get_food_pairings',
+          reason: 'invalid_tool_input',
+        }),
+        expect.objectContaining({
+          location: 'actions',
+          index: 2,
+          reason: 'non_object_action',
+        }),
+      ],
+    }));
+  });
+
+  it('reports repaired and dropped candidates separately for partially valid batches', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'repairable batch',
+      actions: [
+        {
+          tool: 'compare_wines',
+          input: { query_a: 'Barolo', query_b: 'Brunello', food: 'steak' },
+        },
+        {
+          tool: 'get_food_pairings',
+          input: { food: 42 },
+        },
+      ],
+    }));
+
+    expect(parsed.actions).toEqual([
+      { tool: 'compare_wines', input: { query_a: 'Barolo', query_b: 'Brunello' } },
+    ]);
+    expect(parsed.plannerRepair).toEqual(expect.objectContaining({
+      code: 'partial_actions_batch',
+      repairedCandidates: [
+        expect.objectContaining({
+          location: 'actions',
+          index: 0,
+          tool: 'compare_wines',
+          removedUnknownKeys: ['food'],
+        }),
+      ],
+      droppedCandidates: [
+        expect.objectContaining({
+          location: 'actions',
+          index: 1,
+          tool: 'get_food_pairings',
+          reason: 'invalid_tool_input',
+        }),
+      ],
+    }));
+  });
+
+  it('keeps scanning embedded JSON candidates after an invalid tool payload', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: 'prefix {"tool":"get_food_pairings","input":{"food":42}} middle {"tool":"search_wines","input":{"query":"barolo"}} suffix',
+    }));
+
+    expect(parsed).toEqual({
+      thought: 'recovered embedded tool call',
+      action: {
+        tool: 'search_wines',
+        input: { query: 'barolo' },
+      },
+      plannerRepair: expect.objectContaining({
+        code: 'embedded_tool_recovery',
+        recoveredFrom: 'thought_string',
+      }),
+    });
   });
 });

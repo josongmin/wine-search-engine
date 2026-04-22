@@ -29,7 +29,8 @@ import {
   validateSearchToolVintageRange,
 } from '../search/search-tool-contract.js';
 import {
-  buildFoodPairingColorClause,
+  buildFoodPairingStructuredFilters,
+  buildFoodPairingStructuredPreferences,
   resolveFoodPairingBudgetKrw,
 } from '../search/food-pairing-tool-policy.js';
 import {
@@ -42,7 +43,6 @@ import {
   stripSideSpecificCompareSharedConstraints,
 } from '../search/compare-tool-shared-constraints.js';
 import {
-  applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
   applySearchToolNegationResultPolicy,
   collectSearchToolNegationTerms,
@@ -76,6 +76,7 @@ import {
   withWineTypeFilter,
 } from '../search/search-tool-diversity.js';
 import { isKnownAgentToolName } from './agent-tool-attempt-schema.js';
+import { isAccessibleOnlineTastingQuery } from './agent-situational-query-policy.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -99,6 +100,16 @@ const AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX = 3;
  * ~2000 chars ≈ 500 tokens (at 4 chars/token) — enough for 5 wine summaries. */
 const MAX_OBSERVATION_CHARS = 2_000;
 const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
+
+function appendObservationNote(obs: string, note: string): string {
+  const groundingIndex = obs.lastIndexOf(GROUNDING_JSON_MARKER);
+  if (groundingIndex < 0) {
+    return `${obs}\n${note}`;
+  }
+  const head = obs.slice(0, groundingIndex).trimEnd();
+  const grounding = obs.slice(groundingIndex);
+  return `${head}\n${note}\n${grounding}`;
+}
 
 // ---------------------------------------------------------------------------
 // Input schemas (same as tool-schemas.ts — reusing patterns)
@@ -126,8 +137,44 @@ const CompareInputSchema = z.object({
   ...buildCompareToolFieldShape({
     maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
   }),
+  country_a: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  country_b: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  region_a: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  region_b: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  appellation_a: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  appellation_b: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  grape_primary_a: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  grape_primary_b: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LEN).optional(),
+  wine_type_a: z.enum(['red', 'white', 'sparkling', 'rose', 'dessert']).optional(),
+  wine_type_b: z.enum(['red', 'white', 'sparkling', 'rose', 'dessert']).optional(),
+  vintage_min_a: coercePositiveInt.pipe(z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR)).optional(),
+  vintage_min_b: coercePositiveInt.pipe(z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR)).optional(),
+  vintage_max_a: coercePositiveInt.pipe(z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR)).optional(),
+  vintage_max_b: coercePositiveInt.pipe(z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR)).optional(),
 }).superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
+  if (
+    data.vintage_min_a !== undefined
+    && data.vintage_max_a !== undefined
+    && data.vintage_min_a > data.vintage_max_a
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['vintage_max_a'],
+      message: `vintage_max_a (${data.vintage_max_a}) must be >= vintage_min_a (${data.vintage_min_a})`,
+    });
+  }
+  if (
+    data.vintage_min_b !== undefined
+    && data.vintage_max_b !== undefined
+    && data.vintage_min_b > data.vintage_max_b
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['vintage_max_b'],
+      message: `vintage_max_b (${data.vintage_max_b}) must be >= vintage_min_b (${data.vintage_min_b})`,
+    });
+  }
 });
 
 /** Max length for entity_id to prevent unbounded strings reaching Vespa GET / NL parser.
@@ -229,6 +276,10 @@ export interface AgentToolDeps {
   readonly drinkingWindowEntityLookup?: (
     id: CanonicalEntityId,
   ) => Promise<RetrievalDrinkingWindowProjection | undefined>;
+  /** Step-local grounded projection cache built from previous search/compare tool outputs. */
+  readonly groundedDrinkingWindowLookup?: (
+    id: CanonicalEntityId,
+  ) => RetrievalDrinkingWindowProjection | undefined;
   /** Corpus cardinality cache for distinguishing corpus exhaustion from query specificity.
    *  When undefined, all 0-result responses are tagged as `unreliable` (legacy behavior). */
   readonly corpusCardinality?: CorpusCardinalityCache | undefined;
@@ -328,8 +379,10 @@ interface StructuredSearchConstraintInput {
   readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;
   readonly max_alcohol_pct?: number | undefined;
+  readonly grape_primary?: string | undefined;
   readonly wine_type?: string | undefined;
   readonly country?: string | undefined;
+  readonly region?: string | undefined;
   readonly vintage_min?: number | undefined;
   readonly vintage_max?: number | undefined;
   readonly appellation?: string | undefined;
@@ -339,6 +392,19 @@ interface StructuredSearchConstraintInput {
   readonly occasion?: readonly string[] | undefined;
   readonly gift_suitability_min?: number | undefined;
   readonly beginner_suitability_min?: number | undefined;
+  readonly producer_prestige_min?: number | undefined;
+  readonly drinking_window?: 'now' | undefined;
+  readonly drinking_window_target_year?: number | undefined;
+}
+
+interface CompareSideSearchOverrides {
+  readonly country?: string | undefined;
+  readonly region?: string | undefined;
+  readonly appellation?: string | undefined;
+  readonly grape_primary?: string | undefined;
+  readonly wine_type?: string | undefined;
+  readonly vintage_min?: number | undefined;
+  readonly vintage_max?: number | undefined;
 }
 
 /**
@@ -361,6 +427,10 @@ function buildStructuredFilters(input: StructuredSearchConstraintInput): readonl
     filters.push({ attribute: 'region', operator: 'exclude', value: region, source_phrase: region, confidence: 1.0, mapping_version: v });
   }
 
+  if (input.grape_primary !== undefined) {
+    filters.push({ attribute: 'grape_primary', operator: '=', value: input.grape_primary, source_phrase: input.grape_primary, confidence: 1.0, mapping_version: v });
+  }
+
   // Wine type
   if (input.wine_type !== undefined) {
     filters.push({ attribute: 'wine_type', operator: '=', value: input.wine_type, source_phrase: input.wine_type, confidence: 1.0, mapping_version: v });
@@ -369,6 +439,11 @@ function buildStructuredFilters(input: StructuredSearchConstraintInput): readonl
   // Country
   if (input.country !== undefined) {
     filters.push({ attribute: 'country', operator: '=', value: input.country, source_phrase: input.country, confidence: 1.0, mapping_version: v });
+  }
+
+  // Region
+  if (input.region !== undefined) {
+    filters.push({ attribute: 'region', operator: '=', value: input.region, source_phrase: input.region, confidence: 1.0, mapping_version: v });
   }
 
   // Vintage range
@@ -400,7 +475,12 @@ function buildStructuredPreferences(input: StructuredSearchConstraintInput): rea
   return buildSearchToolStructuredPreferences(input, AGENT_FILTER_VERSION);
 }
 
-function buildStructuredQuery(input: StructuredSearchConstraintInput & { readonly query: string }): string {
+function buildStructuredQuery(
+  input: StructuredSearchConstraintInput & {
+    readonly query: string;
+    readonly preserveRepresentativeSearch?: boolean | undefined;
+  },
+): string {
   const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
   const clauses = buildSearchToolSoftClauses(input);
   return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
@@ -415,6 +495,88 @@ function buildComparisonOriginalQuery(
   const sharedClauses = buildSearchToolSoftClauses(input);
   const base = `${input.query_a} vs ${input.query_b}`;
   return appendStructuredQueryClauses(base, sharedClauses);
+}
+
+function buildCompareSideOverrides(
+  input: z.infer<typeof CompareInputSchema>,
+): readonly [CompareSideSearchOverrides, CompareSideSearchOverrides] {
+  return [
+    {
+      ...(input.country_a !== undefined ? { country: input.country_a } : {}),
+      ...(input.region_a !== undefined ? { region: input.region_a } : {}),
+      ...(input.appellation_a !== undefined ? { appellation: input.appellation_a } : {}),
+      ...(input.grape_primary_a !== undefined ? { grape_primary: input.grape_primary_a } : {}),
+      ...(input.wine_type_a !== undefined ? { wine_type: input.wine_type_a } : {}),
+      ...(input.vintage_min_a !== undefined ? { vintage_min: input.vintage_min_a } : {}),
+      ...(input.vintage_max_a !== undefined ? { vintage_max: input.vintage_max_a } : {}),
+    },
+    {
+      ...(input.country_b !== undefined ? { country: input.country_b } : {}),
+      ...(input.region_b !== undefined ? { region: input.region_b } : {}),
+      ...(input.appellation_b !== undefined ? { appellation: input.appellation_b } : {}),
+      ...(input.grape_primary_b !== undefined ? { grape_primary: input.grape_primary_b } : {}),
+      ...(input.wine_type_b !== undefined ? { wine_type: input.wine_type_b } : {}),
+      ...(input.vintage_min_b !== undefined ? { vintage_min: input.vintage_min_b } : {}),
+      ...(input.vintage_max_b !== undefined ? { vintage_max: input.vintage_max_b } : {}),
+    },
+  ] as const;
+}
+
+function buildCompareSideOnlyFilters(
+  overrides: CompareSideSearchOverrides,
+): readonly NormalizedConstraint[] {
+  return buildStructuredFilters({
+    ...(overrides.country !== undefined ? { country: overrides.country } : {}),
+    ...(overrides.region !== undefined ? { region: overrides.region } : {}),
+    ...(overrides.appellation !== undefined ? { appellation: overrides.appellation } : {}),
+    ...(overrides.grape_primary !== undefined ? { grape_primary: overrides.grape_primary } : {}),
+    ...(overrides.wine_type !== undefined ? { wine_type: overrides.wine_type } : {}),
+    ...(overrides.vintage_min !== undefined ? { vintage_min: overrides.vintage_min } : {}),
+    ...(overrides.vintage_max !== undefined ? { vintage_max: overrides.vintage_max } : {}),
+  });
+}
+
+interface SearchToolAlcoholPreferenceResult {
+  readonly response: SearchResponseV1;
+  readonly demotedCount: number;
+  readonly unknownCount: number;
+}
+
+function applySearchToolAlcoholPreference(
+  response: SearchResponseV1,
+  maxAlcoholPct: number | undefined,
+): SearchToolAlcoholPreferenceResult {
+  if (maxAlcoholPct === undefined) {
+    return { response, demotedCount: 0, unknownCount: 0 };
+  }
+
+  const preferred: SearchResponseV1['results'][number][] = [];
+  const unknown: SearchResponseV1['results'][number][] = [];
+  const demoted: SearchResponseV1['results'][number][] = [];
+
+  for (const result of response.results) {
+    const alcoholPct = result.entity.alcoholPct;
+    if (alcoholPct === undefined) {
+      unknown.push(result);
+      continue;
+    }
+    if (alcoholPct <= maxAlcoholPct) {
+      preferred.push(result);
+      continue;
+    }
+    demoted.push(result);
+  }
+
+  const reordered = [...preferred, ...unknown, ...demoted];
+  const reorderedResponse = reordered.every((result, index) => result === response.results[index])
+    ? response
+    : { ...response, results: reordered };
+
+  return {
+    response: reorderedResponse,
+    demotedCount: demoted.length,
+    unknownCount: unknown.length,
+  };
 }
 
 function buildPriceFilterObservation(input: {
@@ -450,6 +612,7 @@ function compactGroundingJsonForObservationCap(
   }
   const source = parsed as Record<string, unknown>;
   const wines = Array.isArray(source['wines']) ? source['wines'] : [];
+  const comparisonLegs = Array.isArray(source['comparison_legs']) ? source['comparison_legs'] : [];
   const compactWines = wines
     .filter((wine): wine is Record<string, unknown> =>
       wine !== null && typeof wine === 'object' && !Array.isArray(wine))
@@ -470,12 +633,48 @@ function compactGroundingJsonForObservationCap(
       ...(typeof wine['price'] === 'string' ? { price: wine['price'] } : {}),
       ...(typeof wine['price_krw_approx'] === 'number' ? { price_krw_approx: wine['price_krw_approx'] } : {}),
     }));
+  const compactComparisonLegs = comparisonLegs
+    .filter((leg): leg is Record<string, unknown> =>
+      leg !== null && typeof leg === 'object' && !Array.isArray(leg))
+    .map((leg) => ({
+      ...(typeof leg['sub_query'] === 'string' ? { sub_query: leg['sub_query'] } : {}),
+      ...(typeof leg['comparison_mode'] === 'string' ? { comparison_mode: leg['comparison_mode'] } : {}),
+      ...(typeof leg['canonical_concept'] === 'string' ? { canonical_concept: leg['canonical_concept'] } : {}),
+      ...(typeof leg['concept_entity_type'] === 'string' ? { concept_entity_type: leg['concept_entity_type'] } : {}),
+      ...(typeof leg['aggregate_result_count'] === 'number'
+        ? { aggregate_result_count: leg['aggregate_result_count'] }
+        : {}),
+      ...(Array.isArray(leg['prototype_axis'])
+        ? {
+            prototype_axis: leg['prototype_axis']
+              .filter((item): item is Record<string, unknown> =>
+                item !== null && typeof item === 'object' && !Array.isArray(item))
+              .slice(0, 2)
+              .map((item) => ({
+                ...(typeof item['entity_id'] === 'string' ? { entity_id: item['entity_id'] } : {}),
+                ...(typeof item['canonical_label'] === 'string'
+                  ? { canonical_label: item['canonical_label'] }
+                  : {}),
+                ...(typeof item['wine_type'] === 'string' ? { wine_type: item['wine_type'] } : {}),
+                ...(typeof item['region'] === 'string' ? { region: item['region'] } : {}),
+                ...(Array.isArray(item['grapes'])
+                  ? {
+                      grapes: item['grapes']
+                        .filter((grape): grape is string => typeof grape === 'string')
+                        .slice(0, 2),
+                    }
+                  : {}),
+              })),
+          }
+        : {}),
+    }));
 
   for (let count = compactWines.length; count >= 1; count -= 1) {
     const candidate = `${GROUNDING_JSON_MARKER}${JSON.stringify({
       query_type: source['query_type'],
       total_results: source['total_results'],
       wines: compactWines.slice(0, count),
+      ...(compactComparisonLegs.length > 0 ? { comparison_legs: compactComparisonLegs } : {}),
       truncated_for_observation_cap: count < compactWines.length,
     })}`;
     if (candidate.length <= maxChars) {
@@ -494,16 +693,64 @@ function compactGroundingJsonForObservationCap(
       ...(first['entity_id'] !== undefined ? { entity_id: first['entity_id'] } : {}),
       ...(first['canonical_label'] !== undefined ? { canonical_label: first['canonical_label'] } : {}),
     }],
+    ...(compactComparisonLegs.length > 0
+      ? { comparison_legs: compactComparisonLegs.map((leg) => ({
+        ...(leg['sub_query'] !== undefined ? { sub_query: leg['sub_query'] } : {}),
+        ...(leg['canonical_concept'] !== undefined ? { canonical_concept: leg['canonical_concept'] } : {}),
+        ...(leg['concept_entity_type'] !== undefined ? { concept_entity_type: leg['concept_entity_type'] } : {}),
+        ...(leg['aggregate_result_count'] !== undefined
+          ? { aggregate_result_count: leg['aggregate_result_count'] }
+          : {}),
+      })) }
+      : {}),
     truncated_for_observation_cap: true,
   })}`;
   return minimal.length <= maxChars ? minimal : undefined;
+}
+
+function buildGroundingJsonFromStructuredOutput(
+  structuredOutput: ToolCallStructuredOutput | undefined,
+): string | undefined {
+  if (structuredOutput === undefined) {
+    return undefined;
+  }
+
+  switch (structuredOutput.kind) {
+    case 'search_result_set': {
+      return buildGroundingJsonFromSearch(
+        {
+          queryType: 'search',
+          results: structuredOutput.resultSet,
+        } as SearchResponseV1,
+        structuredOutput.resultSet.slice(0, SUMMARY_TOP_N),
+      );
+    }
+    case 'food_pairing': {
+      return buildGroundingJsonFromSearch(
+        {
+          queryType: 'search',
+          results: structuredOutput.resultSet,
+        } as SearchResponseV1,
+        structuredOutput.resultSet.slice(0, SUMMARY_TOP_N),
+      );
+    }
+    case 'comparison_result':
+      return buildGroundingJsonFromComparison(structuredOutput.response);
+    case 'drinking_window':
+    case 'tool_error':
+    case 'no_op':
+      return undefined;
+  }
 }
 
 /**
  * Truncates an observation string to MAX_OBSERVATION_CHARS to prevent a single
  * tool result from exhausting the agent's token budget in one step.
  */
-function capObservation(obs: string): string {
+function capObservation(
+  obs: string,
+  structuredOutput?: ToolCallStructuredOutput,
+): string {
   if (obs.length <= MAX_OBSERVATION_CHARS) return obs;
   const groundingIndex = obs.lastIndexOf(GROUNDING_JSON_MARKER);
   if (groundingIndex >= 0) {
@@ -522,6 +769,25 @@ function capObservation(obs: string): string {
       return `${truncationNotice}${compactGrounding}`;
     }
   }
+
+  const structuredGrounding = buildGroundingJsonFromStructuredOutput(structuredOutput);
+  if (structuredGrounding !== undefined) {
+    const availableGroundingChars = MAX_OBSERVATION_CHARS - `\n[observation summary truncated to preserve grounding JSON]\n`.length;
+    const compactStructuredGrounding = compactGroundingJsonForObservationCap(
+      structuredGrounding,
+      availableGroundingChars,
+    );
+    if (compactStructuredGrounding !== undefined) {
+      return `\n[observation summary truncated to preserve grounding JSON]\n${compactStructuredGrounding}`;
+    }
+    if (structuredGrounding.length <= availableGroundingChars) {
+      return `\n[observation summary truncated to preserve grounding JSON]\n${structuredGrounding}`;
+    }
+    if (structuredGrounding.length <= MAX_OBSERVATION_CHARS) {
+      return structuredGrounding;
+    }
+  }
+
   return obs.slice(0, MAX_OBSERVATION_CHARS) + `\n[observation truncated at ${MAX_OBSERVATION_CHARS} chars]`;
 }
 
@@ -542,7 +808,7 @@ function finalizeToolResult(
   invokedAt: Date,
   durationMs: number,
 ): AgentToolResult {
-  const observation = capObservation(inner.observation);
+  const observation = capObservation(inner.observation, inner.structuredOutput);
   if (toolCallId === undefined) {
     return { observation, rawResult: inner.rawResult };
   }
@@ -692,6 +958,80 @@ function buildDrinkingWindowToolResult(
   };
 }
 
+function buildDrinkingWindowProjectionFromSearchResult(
+  result: unknown,
+  fallbackEntity: RetrievalDrinkingWindowProjection,
+): RetrievalDrinkingWindowProjection | undefined {
+  if (typeof result !== 'object' || result === null) {
+    return undefined;
+  }
+  const record = result as Record<string, unknown>;
+  const entityRecord = typeof record['entity'] === 'object' && record['entity'] !== null
+    ? record['entity'] as Record<string, unknown>
+    : undefined;
+  const drinkingWindowRecord = typeof record['drinkingWindow'] === 'object' && record['drinkingWindow'] !== null
+    ? record['drinkingWindow'] as Record<string, unknown>
+    : undefined;
+  const start = drinkingWindowRecord?.['drinkingWindowStart'];
+  const end = drinkingWindowRecord?.['drinkingWindowEnd'];
+  if (typeof start !== 'number' || typeof end !== 'number') {
+    return undefined;
+  }
+  const entityId = typeof entityRecord?.['entityId'] === 'string'
+    ? createCanonicalEntityId(entityRecord['entityId'])
+    : fallbackEntity.entityId;
+  const canonicalLabel = typeof entityRecord?.['canonicalLabel'] === 'string'
+    ? entityRecord['canonicalLabel']
+    : fallbackEntity.canonicalLabel;
+  const modelVersion = typeof drinkingWindowRecord?.['modelVersion'] === 'string'
+    ? drinkingWindowRecord['modelVersion']
+    : fallbackEntity.drinkingWindowModelVersion;
+  return {
+    ...fallbackEntity,
+    entityId,
+    canonicalLabel,
+    drinkingWindowStart: start,
+    drinkingWindowEnd: end,
+    ...(modelVersion !== undefined ? { drinkingWindowModelVersion: modelVersion } : {}),
+  };
+}
+
+async function buildDrinkingWindowToolResultWithSearchFallback(
+  entity: RetrievalDrinkingWindowProjection,
+  targetYear: number,
+  deps: AgentToolDeps,
+  requestId: string,
+  options?: AgentToolExecutionOptions,
+): Promise<AgentToolInnerResult> {
+  const direct = buildDrinkingWindowToolResult(entity, targetYear);
+  if (direct.structuredOutput.kind !== 'no_op' || deps.searchUseCase === undefined) {
+    return direct;
+  }
+
+  const searchResult = await deps.searchUseCase.execute(
+    { query: entity.canonicalLabel, options: { mode: 'entity', explain: false, clarification: false } },
+    requestId,
+    { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+  );
+  if (searchResult.queryType !== 'search') {
+    return direct;
+  }
+
+  const matchedResult = searchResult.results.find((result) => {
+    const searchEntityId = result.entity.entityId;
+    if (searchEntityId === entity.entityId) {
+      return true;
+    }
+    return result.entity.canonicalLabel === entity.canonicalLabel;
+  });
+  const fallbackProjection = matchedResult !== undefined
+    ? buildDrinkingWindowProjectionFromSearchResult(matchedResult, entity)
+    : undefined;
+  return fallbackProjection !== undefined
+    ? buildDrinkingWindowToolResult(fallbackProjection, targetYear)
+    : direct;
+}
+
 function buildSearchRequestForAgentQuery(
   query: string,
   limit: number | undefined,
@@ -831,9 +1171,10 @@ async function executeAgentToolInner(
           }
           response = negationFiltered.response;
           return {
-            observation:
-              summarizeSearchResults(response, wantsDiversity)
-              + `\n[Excluded ${negationFiltered.filteredCount} result(s) matching negation terms: ${negTerms.join(', ')}]`,
+            observation: appendObservationNote(
+              summarizeSearchResults(response, wantsDiversity),
+              `[Excluded ${negationFiltered.filteredCount} result(s) matching negation terms: ${negTerms.join(', ')}]`,
+            ),
             rawResult: response,
             structuredOutput: {
               kind: 'search_result_set',
@@ -860,8 +1201,8 @@ async function executeAgentToolInner(
         ).response;
       }
 
-      const alcoholFiltered = applySearchToolAlcoholResultPolicy(response, parsed.max_alcohol_pct);
-      response = alcoholFiltered.response;
+      const alcoholPreference = applySearchToolAlcoholPreference(response, parsed.max_alcohol_pct);
+      response = alcoholPreference.response;
 
       // Zero-result escalation: guide the agent to relax constraints one by one,
       // or signal corpus exhaustion when the wine type has very few entries.
@@ -885,7 +1226,10 @@ async function executeAgentToolInner(
       let obs = summarizeSearchResults(response, wantsDiversity);
       const constraintHints = detectConstraintKeywords(parsed.query);
       if (constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT) {
-        obs += `\n[감지된 조건 ${constraintHints.length}개: ${constraintHints.join(', ')}. 결과가 부족하면 조건을 하나씩 제거하며 재검색하세요.]`;
+        obs = appendObservationNote(
+          obs,
+          `[감지된 조건 ${constraintHints.length}개: ${constraintHints.join(', ')}. 결과가 부족하면 조건을 하나씩 제거하며 재검색하세요.]`,
+        );
       }
 
       // Corrective RAG quality tag: structured annotation that classifies retrieval
@@ -900,16 +1244,25 @@ async function executeAgentToolInner(
         ? '[RETRIEVAL_QUALITY: partial — consider relaxing one NICE-TO-HAVE constraint before answering]'
         : '[RETRIEVAL_QUALITY: reliable]';
       obs = `${qualityTag}\n${obs}`;
+      if (isAccessibleOnlineTastingQuery(parsed.query)) {
+        obs = appendObservationNote(
+          obs,
+          '[ACCESSIBILITY_GROUNDING: User asked for wines all online-tasting participants can access. This corpus does not expose retailer inventory, supermarket listings, or real-time stock. Use only grounded wine/price/popularity fields; do not claim a specific store carries a bottle. Explicitly tell the user to confirm availability through their chosen retailer before the event.]',
+        );
+      }
 
       // Price filter context: when a budget bound/range was applied, annotate
       // the observation so the agent can explicitly cite the enforced range even
       // when some per-wine prices are sparse in the index.
       const priceFilterObservation = buildPriceFilterObservation(parsed);
       if (priceFilterObservation !== undefined) {
-        obs += `\n${priceFilterObservation}`;
+        obs = appendObservationNote(obs, priceFilterObservation);
       }
-      if (alcoholFiltered.filteredCount > 0 && parsed.max_alcohol_pct !== undefined) {
-        obs += `\n[ALCOHOL_FILTER: ${parsed.max_alcohol_pct}% 초과로 확인된 ${alcoholFiltered.filteredCount}개 결과를 제외했습니다. 도수 정보가 없는 후보는 미확인으로 유지했습니다.]`;
+      if (parsed.max_alcohol_pct !== undefined && (alcoholPreference.demotedCount > 0 || alcoholPreference.unknownCount > 0)) {
+        obs = appendObservationNote(
+          obs,
+          `[ALCOHOL_PREFERENCE: ${parsed.max_alcohol_pct}% 이하를 우선 정렬했습니다. 검증된 초과 도수 ${alcoholPreference.demotedCount}개 결과는 뒤로 보냈고, 도수 정보가 없는 후보 ${alcoholPreference.unknownCount}개는 유지했습니다.]`,
+        );
       }
 
       return {
@@ -945,9 +1298,36 @@ async function executeAgentToolInner(
       const sharedFilters = buildStructuredFilters(sharedContextInput);
       const sharedPreferences = buildStructuredPreferences(sharedContextInput);
       const baseRetrievalQueries = buildCompareBaseRetrievalQueries(parsed);
+      const [sideAOverrides, sideBOverrides] = buildCompareSideOverrides(parsed);
+      const sideSpecificFilters = [
+        buildCompareSideOnlyFilters(sideAOverrides),
+        buildCompareSideOnlyFilters(sideBOverrides),
+      ] as const;
       const retrievalSubQueries = [
-        buildStructuredQuery({ ...sharedContextInput, query: baseRetrievalQueries[0] }),
-        buildStructuredQuery({ ...sharedContextInput, query: baseRetrievalQueries[1] }),
+        buildStructuredQuery({
+          ...sharedContextInput,
+          query: baseRetrievalQueries[0],
+          grape_primary: sideAOverrides.grape_primary ?? sharedContextInput.grape_primary,
+          wine_type: sideAOverrides.wine_type ?? sharedContextInput.wine_type,
+          country: sideAOverrides.country ?? sharedContextInput.country,
+          region: sideAOverrides.region ?? sharedContextInput.region,
+          appellation: sideAOverrides.appellation ?? sharedContextInput.appellation,
+          vintage_min: sideAOverrides.vintage_min ?? sharedContextInput.vintage_min,
+          vintage_max: sideAOverrides.vintage_max ?? sharedContextInput.vintage_max,
+          preserveRepresentativeSearch: true,
+        }),
+        buildStructuredQuery({
+          ...sharedContextInput,
+          query: baseRetrievalQueries[1],
+          grape_primary: sideBOverrides.grape_primary ?? sharedContextInput.grape_primary,
+          wine_type: sideBOverrides.wine_type ?? sharedContextInput.wine_type,
+          country: sideBOverrides.country ?? sharedContextInput.country,
+          region: sideBOverrides.region ?? sharedContextInput.region,
+          appellation: sideBOverrides.appellation ?? sharedContextInput.appellation,
+          vintage_min: sideBOverrides.vintage_min ?? sharedContextInput.vintage_min,
+          vintage_max: sideBOverrides.vintage_max ?? sharedContextInput.vintage_max,
+          preserveRepresentativeSearch: true,
+        }),
       ] as const;
       const rawSubQueries = [parsed.query_a, parsed.query_b] as const;
       const response = await deps.decomposedSearchExecute(
@@ -956,10 +1336,20 @@ async function executeAgentToolInner(
         buildComparisonOriginalQuery(sharedContextInput),
         requestId,
         Date.now(),
-        sharedFilters.length > 0 || sharedPreferences.length > 0
+        sharedFilters.length > 0 || sharedPreferences.length > 0 || sideSpecificFilters.some((entries) => entries.length > 0)
           ? {
               ...(sharedFilters.length > 0 ? { filters: sharedFilters } : {}),
               ...(sharedPreferences.length > 0 ? { preferences: sharedPreferences } : {}),
+              ...(sideSpecificFilters.some((entries) => entries.length > 0)
+                ? {
+                    perSideFilters: sideSpecificFilters.map((entries) =>
+                      entries.length > 0 ? entries : undefined,
+                    ) as [
+                      readonly NormalizedConstraint[] | undefined,
+                      readonly NormalizedConstraint[] | undefined,
+                    ],
+                  }
+                : {}),
             }
           : undefined,
         options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
@@ -985,6 +1375,13 @@ async function executeAgentToolInner(
       const parsed = parseResult.data;
       const targetYear = parsed.target_year ?? new Date().getFullYear();
       const entityId = createCanonicalEntityId(parsed.entity_id);
+      const groundedProjection = deps.groundedDrinkingWindowLookup?.(entityId);
+      if (groundedProjection !== undefined) {
+        const grounded = buildDrinkingWindowToolResult(groundedProjection, targetYear);
+        if (grounded.structuredOutput.kind !== 'no_op') {
+          return grounded;
+        }
+      }
 
       if (deps.drinkingWindowEntityLookup !== undefined) {
         const entity = await deps.drinkingWindowEntityLookup(entityId);
@@ -995,7 +1392,13 @@ async function executeAgentToolInner(
             structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
           };
         }
-        return buildDrinkingWindowToolResult(entity, targetYear);
+        return buildDrinkingWindowToolResultWithSearchFallback(
+          entity,
+          targetYear,
+          deps,
+          requestId,
+          options,
+        );
       }
 
       // Prefer direct entity lookup (O(1) Vespa GET) over the full search
@@ -1011,7 +1414,13 @@ async function executeAgentToolInner(
             structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
           };
         }
-        return buildDrinkingWindowToolResult(doc, targetYear);
+        return buildDrinkingWindowToolResultWithSearchFallback(
+          doc,
+          targetYear,
+          deps,
+          requestId,
+          options,
+        );
       }
 
       // Fallback: search-as-lookup when entityLookup port is not wired.
@@ -1068,13 +1477,24 @@ async function executeAgentToolInner(
         krwPerUsd: KRW_PER_USD_APPROXIMATE,
         maxPriceKrwCap: MAX_PRICE_KRW_BOUND,
       });
-      const queryBase = `wines for ${parsed.food}${buildFoodPairingColorClause(parsed)}`;
+      const queryBase = `wine pairing for ${parsed.food}`;
       const query = appendStructuredQueryClauses(
         queryBase,
-        budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],
+        [
+          ...(budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : []),
+          ...(parsed.styles !== undefined ? [...parsed.styles] : []),
+          ...(parsed.pairing_tags !== undefined ? [...parsed.pairing_tags] : []),
+        ],
       );
+      const structuredFilters = buildFoodPairingStructuredFilters(parsed, AGENT_FILTER_VERSION);
+      const structuredPreferences = buildFoodPairingStructuredPreferences(parsed, AGENT_FILTER_VERSION);
       const responseWithContext = await deps.searchUseCase.execute(
-        { query },
+        {
+          query,
+          options: { mode: 'hybrid', explain: false, clarification: false },
+          ...(structuredFilters.length > 0 ? { filters: structuredFilters } : {}),
+          ...(structuredPreferences.length > 0 ? { preferences: structuredPreferences } : {}),
+        },
         requestId,
         { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
       );
@@ -1089,14 +1509,25 @@ async function executeAgentToolInner(
       // Enrich with pairing context so the LLM gives a richer answer that
       // explains WHY each wine pairs with the food (not just "here are results").
       const baseObs = summarizeSearchResults(responseWithContext);
+      const hasSpicyPairingObjective = parsed.pairing_tags?.includes('spicy_food') === true;
+      const hasSweetHeatBalanceObjective = parsed.styles?.some((style) => style === 'off_dry' || style === 'sweet') === true;
       const pairingHint = [
         '',
         `PAIRING_CONTEXT: These wines were matched for "${parsed.food}" pairing.`,
+        ...(parsed.styles !== undefined && parsed.styles.length > 0
+          ? [`PAIRING_OBJECTIVE_STYLES: ${parsed.styles.join(', ')}`]
+          : []),
+        ...(parsed.pairing_tags !== undefined && parsed.pairing_tags.length > 0
+          ? [`PAIRING_OBJECTIVE_TAGS: ${parsed.pairing_tags.join(', ')}`]
+          : []),
+        ...(hasSpicyPairingObjective || hasSweetHeatBalanceObjective
+          ? ['PAIRING_STYLE_GUIDANCE: For spicy food, explicitly preserve the heat-balance objective: off-dry or slightly sweet, refreshing acidity, and low tannin. If GROUNDING_JSON lacks sweetness/acidity/tannin for a candidate, say that field is unavailable instead of reframing the match as generic dry white.']
+          : []),
         'When synthesizing your answer, explain WHY each wine pairs well with the food (acidity, tannin, body, flavour bridge).',
         'Include practical serving suggestions (temperature, decanting) if relevant.',
       ].join('\n');
       return {
-        observation: baseObs + pairingHint,
+        observation: `${pairingHint.trim()}\n${baseObs}`,
         rawResult: responseWithContext,
         structuredOutput: {
           kind: 'food_pairing',
@@ -1233,6 +1664,10 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     ];
     if (r.entity.producer) parts.push(`producer: ${sanitizeObservationField(r.entity.producer)}`);
     if (r.entity.region) parts.push(`region: ${sanitizeObservationField(r.entity.region)}`);
+    if (r.entity.closure) parts.push(`closure: ${sanitizeObservationField(r.entity.closure)}`);
+    if (r.entity.country) parts.push(`country: ${sanitizeObservationField(r.entity.country)}`);
+    if (r.entity.producerPrestige !== undefined) parts.push(`producer_prestige: ${r.entity.producerPrestige}`);
+    if (Number.isFinite(r.match.scoreComponents.popularity)) parts.push(`popularity_score: ${r.match.scoreComponents.popularity}`);
     if (r.entity.wineType) parts.push(`wine_type: ${sanitizeObservationField(r.entity.wineType)}`);
     if (r.entity.vintage) parts.push(`vintage: ${r.entity.vintage}`);
     if (r.entity.grapes !== undefined && r.entity.grapes.length > 0) {
@@ -1240,6 +1675,10 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     }
     if (r.entity.style) parts.push(`style: ${sanitizeObservationField(r.entity.style)}`);
     if (r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore)) parts.push(`critic: ${(r.entity.criticScore * 100).toFixed(0)}/100`);
+    if (r.entity.body !== undefined) parts.push(`body: ${r.entity.body}`);
+    if (r.entity.tannin !== undefined) parts.push(`tannin: ${r.entity.tannin}`);
+    if (r.entity.acidity !== undefined) parts.push(`acidity: ${r.entity.acidity}`);
+    if (r.entity.sweetness !== undefined) parts.push(`sweetness: ${r.entity.sweetness}`);
     if (r.entity.alcoholPct !== undefined) parts.push(`alc: ${r.entity.alcoholPct}%`);
     if (r.entity.priceRange !== undefined) {
       parts.push(`price: ${buildObservationPriceText(r.entity.priceRange)}`);
@@ -1352,12 +1791,19 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     ];
     if (top.entity.producer) parts.push(`producer: ${sanitizeObservationField(top.entity.producer)}`);
     if (top.entity.region) parts.push(`region: ${sanitizeObservationField(top.entity.region)}`);
+    if (top.entity.closure) parts.push(`closure: ${sanitizeObservationField(top.entity.closure)}`);
+    if (top.entity.country) parts.push(`country: ${sanitizeObservationField(top.entity.country)}`);
+    if (top.entity.producerPrestige !== undefined) parts.push(`producer_prestige: ${top.entity.producerPrestige}`);
     if (top.entity.vintage) parts.push(`vintage: ${top.entity.vintage}`);
     if (top.entity.grapes !== undefined && top.entity.grapes.length > 0) {
       parts.push(`grapes: ${top.entity.grapes.slice(0, 3).map(sanitizeObservationField).join(', ')}`);
     }
     if (top.entity.style) parts.push(`style: ${sanitizeObservationField(top.entity.style)}`);
     if (top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore)) parts.push(`critic: ${(top.entity.criticScore * 100).toFixed(0)}/100`);
+    if (top.entity.body !== undefined) parts.push(`body: ${top.entity.body}`);
+    if (top.entity.tannin !== undefined) parts.push(`tannin: ${top.entity.tannin}`);
+    if (top.entity.acidity !== undefined) parts.push(`acidity: ${top.entity.acidity}`);
+    if (top.entity.sweetness !== undefined) parts.push(`sweetness: ${top.entity.sweetness}`);
     if (top.entity.alcoholPct !== undefined) parts.push(`alc: ${top.entity.alcoholPct}%`);
     if (top.entity.priceRange !== undefined) {
       parts.push(`price: ${buildObservationPriceText(top.entity.priceRange)}`);
@@ -1374,6 +1820,18 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
         .join(', ');
       const suffix = top.entity.sourceRecordRefs.length > AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX ? ',…' : '';
       parts.push(`lineage: ${refText}${suffix}`);
+    }
+    if (e.conceptAggregate !== undefined) {
+      parts.push(`comparison_concept: ${sanitizeObservationField(e.conceptAggregate.canonicalConcept)}`);
+      parts.push(`concept_axis: ${sanitizeObservationField(e.conceptAggregate.conceptEntityType)}`);
+      parts.push(`prototype_count: ${e.conceptAggregate.aggregateResultCount}`);
+      const prototypePreview = e.conceptAggregate.prototypeAxis
+        .slice(0, 3)
+        .map((item) => sanitizeObservationField(item.entity.canonicalLabel))
+        .join(', ');
+      if (prototypePreview.length > 0) {
+        parts.push(`prototype_preview: ${prototypePreview}`);
+      }
     }
     parts.push(`match: ${top.match.matchType}`);
     return parts.join(' | ');
@@ -1399,16 +1857,35 @@ interface GroundingWineFact {
   readonly canonical_label: string;
   readonly producer?: string;
   readonly region?: string;
+  readonly closure?: string;
+  readonly country?: string;
+  readonly producer_prestige?: number;
+  readonly popularity_score?: number;
   readonly wine_type?: string;
   readonly vintage?: number;
   readonly grapes?: readonly string[];
   readonly style?: string;
   readonly critic_score_100?: number;
+  readonly body?: number;
+  readonly tannin?: number;
+  readonly acidity?: number;
   readonly alcohol_pct?: number;
   readonly sweetness?: number;
+  readonly pairing_tags?: readonly string[];
+  readonly occasion?: readonly string[];
   readonly price_usd?: number;
   readonly price?: string;
   readonly price_krw_approx?: number;
+}
+
+interface ComparisonGroundingLeg {
+  readonly sub_query: string;
+  readonly comparison_mode?: string;
+  readonly canonical_concept?: string;
+  readonly concept_entity_type?: string;
+  readonly aggregate_result_count?: number;
+  readonly representative_result?: GroundingWineFact | undefined;
+  readonly prototype_axis?: readonly GroundingWineFact[] | undefined;
 }
 
 function parseObservationPriceUsd(priceRange: string | undefined): number | undefined {
@@ -1449,33 +1926,49 @@ function buildObservationPriceText(priceRange: string): string {
   return `${sanitizeObservationField(priceRange)} (~${priceKrwApprox.toLocaleString('ko-KR')}원)`;
 }
 
+function buildGroundingFactFromResultItem(
+  item: SearchResponseV1['results'][number],
+): GroundingWineFact {
+  const priceUsd = parseObservationPriceUsd(item.entity.priceRange);
+  const priceKrwApprox = parseObservationPriceKrw(item.entity.priceRange);
+  return {
+    entity_id: item.entity.entityId,
+    canonical_label: sanitizeObservationField(item.entity.canonicalLabel),
+    ...(item.entity.producer !== undefined ? { producer: sanitizeObservationField(item.entity.producer) } : {}),
+    ...(item.entity.region !== undefined ? { region: sanitizeObservationField(item.entity.region) } : {}),
+    ...(item.entity.closure !== undefined ? { closure: sanitizeObservationField(item.entity.closure) } : {}),
+    ...(item.entity.country !== undefined ? { country: sanitizeObservationField(item.entity.country) } : {}),
+    ...(item.entity.producerPrestige !== undefined ? { producer_prestige: item.entity.producerPrestige } : {}),
+    ...(Number.isFinite(item.match.scoreComponents.popularity) ? { popularity_score: item.match.scoreComponents.popularity } : {}),
+    ...(item.entity.wineType !== undefined ? { wine_type: sanitizeObservationField(item.entity.wineType) } : {}),
+    ...(item.entity.vintage !== undefined ? { vintage: item.entity.vintage } : {}),
+    ...(item.entity.grapes !== undefined
+      ? { grapes: item.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
+      : {}),
+    ...(item.entity.style !== undefined ? { style: sanitizeObservationField(item.entity.style) } : {}),
+    ...(item.entity.criticScore !== undefined && Number.isFinite(item.entity.criticScore) ? { critic_score_100: Math.round(item.entity.criticScore * 100) } : {}),
+    ...(item.entity.body !== undefined ? { body: item.entity.body } : {}),
+    ...(item.entity.tannin !== undefined ? { tannin: item.entity.tannin } : {}),
+    ...(item.entity.acidity !== undefined ? { acidity: item.entity.acidity } : {}),
+    ...(item.entity.alcoholPct !== undefined ? { alcohol_pct: item.entity.alcoholPct } : {}),
+    ...(item.entity.sweetness !== undefined ? { sweetness: item.entity.sweetness } : {}),
+    ...(item.entity.pairingTags !== undefined
+      ? { pairing_tags: item.entity.pairingTags.map((tag) => sanitizeObservationField(tag)) }
+      : {}),
+    ...(item.entity.occasion !== undefined
+      ? { occasion: item.entity.occasion.map((tag) => sanitizeObservationField(tag)) }
+      : {}),
+    ...(priceUsd !== undefined ? { price_usd: priceUsd } : {}),
+    ...(item.entity.priceRange !== undefined ? { price: sanitizeObservationField(item.entity.priceRange) } : {}),
+    ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
+  };
+}
+
 function buildGroundingJsonFromSearch(
   response: SearchResponseV1,
   displayResults: readonly SearchResponseV1['results'][number][],
 ): string {
-  const facts: GroundingWineFact[] = displayResults.slice(0, SUMMARY_TOP_N).map((r) => {
-    const priceUsd = parseObservationPriceUsd(r.entity.priceRange);
-    const priceKrwApprox = parseObservationPriceKrw(r.entity.priceRange);
-    const base: GroundingWineFact = {
-      entity_id: r.entity.entityId,
-      canonical_label: sanitizeObservationField(r.entity.canonicalLabel),
-      ...(r.entity.producer !== undefined ? { producer: sanitizeObservationField(r.entity.producer) } : {}),
-      ...(r.entity.region !== undefined ? { region: sanitizeObservationField(r.entity.region) } : {}),
-      ...(r.entity.wineType !== undefined ? { wine_type: sanitizeObservationField(r.entity.wineType) } : {}),
-      ...(r.entity.vintage !== undefined ? { vintage: r.entity.vintage } : {}),
-      ...(r.entity.grapes !== undefined
-        ? { grapes: r.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
-        : {}),
-      ...(r.entity.style !== undefined ? { style: sanitizeObservationField(r.entity.style) } : {}),
-      ...(r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore) ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
-      ...(r.entity.alcoholPct !== undefined ? { alcohol_pct: r.entity.alcoholPct } : {}),
-      ...(r.entity.sweetness !== undefined ? { sweetness: r.entity.sweetness } : {}),
-      ...(priceUsd !== undefined ? { price_usd: priceUsd } : {}),
-      ...(r.entity.priceRange !== undefined ? { price: sanitizeObservationField(r.entity.priceRange) } : {}),
-      ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
-    };
-    return base;
-  });
+  const facts: GroundingWineFact[] = displayResults.slice(0, SUMMARY_TOP_N).map(buildGroundingFactFromResultItem);
 
   return `GROUNDING_JSON: ${JSON.stringify({
     query_type: response.queryType,
@@ -1490,32 +1983,29 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
     .flatMap((entry) => {
       const top = entry.topResult;
       if (top === null) return [];
-      const priceUsd = parseObservationPriceUsd(top.entity.priceRange);
-      const priceKrwApprox = parseObservationPriceKrw(top.entity.priceRange);
-      const fact: GroundingWineFact = {
-        entity_id: top.entity.entityId,
-        canonical_label: sanitizeObservationField(top.entity.canonicalLabel),
-        ...(top.entity.producer !== undefined ? { producer: sanitizeObservationField(top.entity.producer) } : {}),
-        ...(top.entity.region !== undefined ? { region: sanitizeObservationField(top.entity.region) } : {}),
-        ...(top.entity.wineType !== undefined ? { wine_type: sanitizeObservationField(top.entity.wineType) } : {}),
-        ...(top.entity.vintage !== undefined ? { vintage: top.entity.vintage } : {}),
-        ...(top.entity.grapes !== undefined
-          ? { grapes: top.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
-          : {}),
-        ...(top.entity.style !== undefined ? { style: sanitizeObservationField(top.entity.style) } : {}),
-        ...(top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore) ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
-        ...(top.entity.alcoholPct !== undefined ? { alcohol_pct: top.entity.alcoholPct } : {}),
-        ...(top.entity.sweetness !== undefined ? { sweetness: top.entity.sweetness } : {}),
-        ...(priceUsd !== undefined ? { price_usd: priceUsd } : {}),
-        ...(top.entity.priceRange !== undefined ? { price: sanitizeObservationField(top.entity.priceRange) } : {}),
-        ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
-      };
-      return [fact];
+      return [buildGroundingFactFromResultItem(top)];
     });
+  const comparisonLegs: ComparisonGroundingLeg[] = response.entities.slice(0, 2).map((entry) => ({
+    sub_query: sanitizeObservationField(entry.subQuery),
+    ...(entry.comparisonMode !== undefined ? { comparison_mode: entry.comparisonMode } : {}),
+    ...(entry.canonicalConcept !== undefined ? { canonical_concept: sanitizeObservationField(entry.canonicalConcept) } : {}),
+    ...(entry.conceptEntityType !== undefined ? { concept_entity_type: entry.conceptEntityType } : {}),
+    ...(entry.conceptAggregate !== undefined
+      ? {
+          aggregate_result_count: entry.conceptAggregate.aggregateResultCount,
+          representative_result:
+            entry.conceptAggregate.representativeResult !== null
+              ? buildGroundingFactFromResultItem(entry.conceptAggregate.representativeResult)
+              : undefined,
+          prototype_axis: entry.conceptAggregate.prototypeAxis.map(buildGroundingFactFromResultItem),
+        }
+      : {}),
+  }));
 
   return `GROUNDING_JSON: ${JSON.stringify({
     query_type: 'comparison',
     total_results: wines.length,
     wines,
+    comparison_legs: comparisonLegs,
   })}`;
 }

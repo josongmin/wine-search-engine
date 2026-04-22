@@ -47,11 +47,13 @@ interface ApplySingleFailureInput extends StepRecordInput {
   readonly err: unknown;
   readonly tool: string;
   readonly input: Record<string, unknown>;
+  readonly observationContext?: string | undefined;
 }
 
 interface ApplyBatchFailureInput extends StepRecordInput {
   readonly err: unknown;
   readonly calls: readonly ToolCall[];
+  readonly observationContext?: string | undefined;
 }
 
 export type SingleToolFailureDisposition =
@@ -59,6 +61,16 @@ export type SingleToolFailureDisposition =
   | { readonly kind: 'recoverable'; readonly observation: string; readonly rawResult: null };
 
 export class AgentToolExecutionResultPolicy {
+  private applyObservationContext(
+    observation: string,
+    observationContext: string | undefined,
+  ): string {
+    if (observationContext === undefined || observationContext.trim().length === 0) {
+      return observation;
+    }
+    return `[PLANNER_REPAIR] ${observationContext}\n${observation}`;
+  }
+
   recordSingleToolStep(input: SingleToolStepInput): void {
     const {
       requestId,
@@ -144,6 +156,7 @@ export class AgentToolExecutionResultPolicy {
     readonly inputTokens: number;
     readonly outputTokens: number;
     readonly state: AgentExecutionState;
+    readonly observationContext?: string | undefined;
   }): boolean {
     const { state, tool } = input;
     state.reasoningFailureDetected = true;
@@ -155,7 +168,10 @@ export class AgentToolExecutionResultPolicy {
     this.recordSingleToolStep({
       ...input,
       input: input.toolInput,
-      observation: this.buildUnknownToolObservation(tool),
+      observation: this.applyObservationContext(
+        this.buildUnknownToolObservation(tool),
+        input.observationContext,
+      ),
       rawResult: null,
       execError: false,
       timedOut: false,
@@ -164,7 +180,12 @@ export class AgentToolExecutionResultPolicy {
     return false;
   }
 
-  applyUnknownBatchTool(input: BatchStepInput & { readonly unknownTool: string }): boolean {
+  applyUnknownBatchTool(
+    input: BatchStepInput & {
+      readonly unknownTool: string;
+      readonly observationContext?: string | undefined;
+    },
+  ): boolean {
     const { state, unknownTool } = input;
     state.reasoningFailureDetected = true;
     state.unknownToolAttempts += 1;
@@ -174,7 +195,10 @@ export class AgentToolExecutionResultPolicy {
     }
     this.recordBatchStep({
       ...input,
-      observation: this.buildUnknownToolObservation(unknownTool),
+      observation: this.applyObservationContext(
+        this.buildUnknownToolObservation(unknownTool),
+        input.observationContext,
+      ),
       execError: false,
       timedOut: false,
       policyViolation: true,
@@ -183,14 +207,17 @@ export class AgentToolExecutionResultPolicy {
   }
 
   applySingleExecutionFailure(input: ApplySingleFailureInput): SingleToolFailureDisposition {
-    const { err, state, tool } = input;
+    const { err, state, tool, observationContext } = input;
 
     if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
       state.timeoutStats.tool += 1;
       state.terminationReason = 'timeout';
       this.recordSingleToolStep({
         ...input,
-        observation: `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`,
+        observation: this.applyObservationContext(
+          `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`,
+          observationContext,
+        ),
         rawResult: null,
         execError: false,
         timedOut: true,
@@ -203,7 +230,10 @@ export class AgentToolExecutionResultPolicy {
       state.terminationReason = 'aborted';
       this.recordSingleToolStep({
         ...input,
-        observation: '[ABORTED] Request cancelled during tool execution.',
+        observation: this.applyObservationContext(
+          '[ABORTED] Request cancelled during tool execution.',
+          observationContext,
+        ),
         rawResult: null,
         execError: true,
         timedOut: false,
@@ -217,7 +247,10 @@ export class AgentToolExecutionResultPolicy {
       state.terminationReason = 'blocked';
       this.recordSingleToolStep({
         ...input,
-        observation: formatPolicyBlockedObservation(err),
+        observation: this.applyObservationContext(
+          formatPolicyBlockedObservation(err),
+          observationContext,
+        ),
         rawResult: null,
         execError: false,
         timedOut: false,
@@ -228,19 +261,25 @@ export class AgentToolExecutionResultPolicy {
 
     return {
       kind: 'recoverable',
-      observation: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+      observation: this.applyObservationContext(
+        `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+        observationContext,
+      ),
       rawResult: null,
     };
   }
 
   applyBatchExecutionFailure(input: ApplyBatchFailureInput): boolean {
-    const { err, state } = input;
+    const { err, state, observationContext } = input;
 
     if (isAbortError(err)) {
       state.terminationReason = 'aborted';
       this.recordBatchStep({
         ...input,
-        observation: '[ABORTED] Request cancelled during parallel tool execution.',
+        observation: this.applyObservationContext(
+          '[ABORTED] Request cancelled during parallel tool execution.',
+          observationContext,
+        ),
         execError: true,
         timedOut: false,
         policyViolation: false,
@@ -254,7 +293,10 @@ export class AgentToolExecutionResultPolicy {
       state.terminationReason = 'timeout';
       this.recordBatchStep({
         ...input,
-        observation: '[TIMEOUT] Parallel tool batch timed out.',
+        observation: this.applyObservationContext(
+          '[TIMEOUT] Parallel tool batch timed out.',
+          observationContext,
+        ),
         execError: false,
         timedOut: true,
         policyViolation: false,
@@ -267,7 +309,10 @@ export class AgentToolExecutionResultPolicy {
       state.terminationReason = 'blocked';
       this.recordBatchStep({
         ...input,
-        observation: formatPolicyBlockedObservation(err),
+        observation: this.applyObservationContext(
+          formatPolicyBlockedObservation(err),
+          observationContext,
+        ),
         execError: false,
         timedOut: false,
         policyViolation: true,

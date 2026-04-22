@@ -694,11 +694,13 @@ describe('SearchResponseSchema', () => {
       entityId: 'wine:test',
       canonicalLabel: 'Test',
       type: 'wine',
+      country: 'United States',
       sourceRecordRefs: [{ sourceSystem: 'vivino-silver', sourceRecordId: 'silver-99' }],
     });
     const parsed = EntitySummarySchema.safeParse(entity);
     expect(parsed.success).toBe(true);
     if (parsed.success) {
+      expect(parsed.data.country).toBe('United States');
       expect(parsed.data.source_record_refs).toEqual([
         { source_system: 'vivino-silver', source_record_id: 'silver-99' },
       ]);

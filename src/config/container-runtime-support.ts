@@ -6,6 +6,7 @@ import { LLMInjectionJudge } from '../domain/security/service/llm-injection-judg
 import type { InjectionJudgePort } from '../domain/security/port/injection-judge.port.js';
 import type { JudgmentCachePort } from '../domain/security/port/judgment-cache.port.js';
 import { AnthropicLLMInjectionClassifier } from '../infrastructure/adapter/anthropic-llm-injection-classifier.js';
+import { OpenAiLLMInjectionClassifier } from '../infrastructure/adapter/openai-llm-injection-classifier.js';
 import { CacheService } from '../domain/performance/index.js';
 import type { QueryClassWeights } from '../domain/ranking/index.js';
 import type { RedisClient } from '../infrastructure/db/redis-client.js';
@@ -19,6 +20,7 @@ import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-mode
 import { getCurrentFeatureSchemaHash } from '../domain/ranking/service/feature-parity-hash.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
+import { DeterministicDrinkingWindowPredictor } from '../infrastructure/ml/deterministic-drinking-window-predictor.js';
 import { loadSearchSnapshotRuntimeState } from '../infrastructure/health/search-snapshot-readiness.js';
 
 /** Consecutive cache failures before opening circuit (matches CacheService default). */
@@ -91,6 +93,32 @@ export interface RuntimeSupportServices {
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly phraseCache?: PhraseCachePort | undefined;
+  readonly runtimeReadiness: RuntimeReadinessSnapshot;
+}
+
+export type RuntimeReadinessIssueKind =
+  | 'unconfigured'
+  | 'missing_or_invalid'
+  | 'pg_pool_missing';
+
+export interface RuntimeReadinessSnapshot {
+  readonly drinkingWindowPredictor: {
+    readonly configured: boolean;
+    readonly loaded: boolean;
+    readonly modelVersion: string;
+    readonly issue?: RuntimeReadinessIssueKind | undefined;
+  };
+  readonly runtimeLtrArtifact: {
+    readonly configured: boolean;
+    readonly loaded: boolean;
+    readonly modelCount?: number | undefined;
+    readonly issue?: RuntimeReadinessIssueKind | undefined;
+  };
+  readonly benchmarkPersistence: {
+    readonly configured: boolean;
+    readonly available: boolean;
+    readonly issue?: RuntimeReadinessIssueKind | undefined;
+  };
 }
 
 export async function buildRuntimeSupportServices(
@@ -119,38 +147,60 @@ export async function buildRuntimeSupportServices(
   }
 
   let injectionJudge: InjectionJudgePort | undefined;
-  if (config.anthropic.apiKey && !config.killSwitch.injectionJudge) {
-    injectionJudge = new LLMInjectionJudge(
-      new AnthropicLLMInjectionClassifier(config.anthropic.apiKey, {
-        model: config.anthropic.injectionModel,
-      }),
-      redisClient
-        ? new RedisJudgmentCacheAdapter(redisClient)
-        : new InMemoryJudgmentCacheAdapter(),
-    );
-    bootstrapLogger.info(
-      { model: config.anthropic.injectionModel, cache: redisClient ? 'redis' : 'memory' },
-      '[Container] LLM injection judge (Layer 2) enabled',
-    );
-    if (!redisClient) {
+  if (!config.killSwitch.injectionJudge) {
+    const judgmentCache = redisClient
+      ? new RedisJudgmentCacheAdapter(redisClient)
+      : new InMemoryJudgmentCacheAdapter();
+    const provider = config.queryEntrySecurity.injectionProvider;
+
+    if (provider === 'openai' && config.openai.apiKey !== undefined) {
+      injectionJudge = new LLMInjectionJudge(
+        new OpenAiLLMInjectionClassifier({
+          apiKey: config.openai.apiKey,
+          baseUrl: config.openai.baseUrl,
+          model: config.openai.injectionModel,
+          httpTimeoutMs: config.openai.injectionHttpTimeoutMs,
+        }),
+        judgmentCache,
+      );
+      bootstrapLogger.info(
+        { provider, model: config.openai.injectionModel, cache: redisClient ? 'redis' : 'memory' },
+        '[Container] LLM injection judge (Layer 2) enabled',
+      );
+    } else if (provider === 'anthropic' && config.anthropic.apiKey !== undefined) {
+      injectionJudge = new LLMInjectionJudge(
+        new AnthropicLLMInjectionClassifier(config.anthropic.apiKey, {
+          model: config.anthropic.injectionModel,
+        }),
+        judgmentCache,
+      );
+      bootstrapLogger.info(
+        { provider, model: config.anthropic.injectionModel, cache: redisClient ? 'redis' : 'memory' },
+        '[Container] LLM injection judge (Layer 2) enabled',
+      );
+    }
+
+    if (injectionJudge !== undefined && !redisClient) {
       bootstrapLogger.warn(
         '[Container] Redis unavailable; using in-memory cache for LLMInjectionJudge',
       );
     }
-  } else if (!config.killSwitch.injectionJudge) {
+  }
+  if (!config.killSwitch.injectionJudge && injectionJudge === undefined) {
     // Loud warning: Layer 2 prompt-injection defense is silently disabled
-    // because ANTHROPIC_API_KEY is unset. Production env validation throws
+    // because the selected provider key is unset. Production env validation throws
     // for this combination (env.ts) but dev/test silently skip — historically
     // this hid the SQL injection bypass that the SOTA++ benchmark caught.
     // The warning makes the gap visible at boot.
     bootstrapLogger.warn(
       {
         nodeEnv: config.nodeEnv,
+        injectionProvider: config.queryEntrySecurity.injectionProvider,
         killSwitchInjectionJudge: config.killSwitch.injectionJudge,
       },
       '[SECURITY] Layer 2 LLM injection judge DISABLED — '
-      + 'ANTHROPIC_API_KEY is unset. Layer 1 sanitizer is the only line of defense. '
-      + 'Set ANTHROPIC_API_KEY or KILL_SWITCH_INJECTION_JUDGE=true to silence this warning.',
+      + 'the selected provider API key is unset. Layer 1 sanitizer is the only line of defense. '
+      + 'Set a provider API key or KILL_SWITCH_INJECTION_JUDGE=true to silence this warning.',
     );
   }
 
@@ -172,6 +222,7 @@ export async function buildRuntimeSupportServices(
   }
 
   let ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined;
+  let runtimeLtrArtifactModels: ReadonlyMap<string, QueryClassWeights> | undefined;
   if (pool) {
     const ltrRegistry = new PgLtrModelRegistry(pool);
     let runtimeSearchSnapshotId: string | undefined;
@@ -223,12 +274,12 @@ export async function buildRuntimeSupportServices(
     }
   }
 
-  if ((ltrModels === undefined || ltrModels.size === 0) && config.runtimeLtrModelsPath !== undefined) {
-    const fallbackModels = await loadRuntimeLtrModels(config.runtimeLtrModelsPath);
-    if (fallbackModels !== undefined) {
+  if (config.runtimeLtrModelsPath !== undefined) {
+    runtimeLtrArtifactModels = await loadRuntimeLtrModels(config.runtimeLtrModelsPath);
+    if ((ltrModels === undefined || ltrModels.size === 0) && runtimeLtrArtifactModels !== undefined) {
       if (ltrModels === undefined) {
         bootstrapLogger.info(
-          { source: 'runtime-file', ltrModelCount: fallbackModels.size },
+          { source: 'runtime-file', ltrModelCount: runtimeLtrArtifactModels.size },
           '[Container] Loaded LTR models from runtime artifact',
         );
       } else {
@@ -237,20 +288,23 @@ export async function buildRuntimeSupportServices(
           '[Container] PG returned no active LTR models; switched to runtime artifact fallback',
         );
       }
-      ltrModels = fallbackModels;
+      ltrModels = runtimeLtrArtifactModels;
     }
   }
 
-  const drinkingWindowPredictor = new DrinkingWindowPredictor();
+  let drinkingWindowPredictor: DrinkingWindowPredictorPort =
+    new DeterministicDrinkingWindowPredictor();
+  bootstrapLogger.info(
+    { modelVersion: drinkingWindowPredictor.modelVersion },
+    '[Container] Drinking-window predictor loaded (deterministic default)',
+  );
   if (config.drinkingWindow.modelDir !== undefined) {
-    await drinkingWindowPredictor.load(config.drinkingWindow.modelDir);
+    const onnxPredictor = new DrinkingWindowPredictor();
+    await onnxPredictor.load(config.drinkingWindow.modelDir);
+    drinkingWindowPredictor = onnxPredictor;
     bootstrapLogger.info(
       { modelVersion: drinkingWindowPredictor.modelVersion },
-      '[Container] Drinking-window predictor loaded (ONNX)',
-    );
-  } else {
-    bootstrapLogger.info(
-      '[Container] Drinking-window predictor: no ONNX model dir configured — predictions will be unavailable',
+      '[Container] Drinking-window predictor upgraded to ONNX runtime',
     );
   }
 
@@ -269,6 +323,33 @@ export async function buildRuntimeSupportServices(
     }
   }
 
+  const runtimeReadiness: RuntimeReadinessSnapshot = {
+    drinkingWindowPredictor: {
+      configured: true,
+      loaded: true,
+      modelVersion: drinkingWindowPredictor.modelVersion,
+    },
+    runtimeLtrArtifact: {
+      configured: config.runtimeLtrModelsPath !== undefined,
+      loaded: runtimeLtrArtifactModels !== undefined,
+      ...(runtimeLtrArtifactModels !== undefined
+        ? { modelCount: runtimeLtrArtifactModels.size }
+        : {}),
+      ...(config.runtimeLtrModelsPath === undefined
+        ? { issue: 'unconfigured' as const }
+        : runtimeLtrArtifactModels === undefined
+          ? { issue: 'missing_or_invalid' as const }
+          : {}),
+    },
+    benchmarkPersistence: {
+      configured: config.eval.runAtStartup,
+      available: config.eval.runAtStartup ? pool !== undefined : false,
+      ...(config.eval.runAtStartup
+        ? (pool !== undefined ? {} : { issue: 'pg_pool_missing' as const })
+        : { issue: 'unconfigured' as const }),
+    },
+  };
+
   return {
     querySanitizer,
     injectionJudge,
@@ -276,5 +357,6 @@ export async function buildRuntimeSupportServices(
     ltrModels,
     drinkingWindowPredictor,
     ...(phraseCache !== undefined ? { phraseCache } : {}),
+    runtimeReadiness,
   };
 }

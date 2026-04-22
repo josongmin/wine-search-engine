@@ -28,6 +28,10 @@ import type {
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { SpecializedFallbackReason } from './specialized-fallback-reason.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
+import {
+  executeRetrievalBranches,
+  formatRetrievalBranchFailureReasons,
+} from './retrieval-branch-execution.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
@@ -38,6 +42,7 @@ import {
 } from './search-usecase-provenance-closure.js';
 import {
   executeGraphAware,
+  executeCandidatePoolRetrieval,
   type CriticSignalProbe,
   type GraphExecutorOptions,
   type SubqueryRetrievalResult,
@@ -385,6 +390,7 @@ function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
   return attribute === 'region'
     || attribute === 'country'
     || attribute === 'appellation'
+    || attribute === 'closure'
     || attribute === 'grape_family'
     || attribute === 'grape_primary'
     || attribute === 'style'
@@ -479,11 +485,17 @@ function hasRecommendationSemanticStylePreference(plan: QueryPlanV1): boolean {
   );
 }
 
+function hasClosurePreference(plan: QueryPlanV1): boolean {
+  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+    constraint.attribute === 'closure',
+  );
+}
+
 function shouldRunTypedRecommendationDiscovery(plan: QueryPlanV1): boolean {
   if (hasExplicitWineTypeConstraint(plan.constraints.hard)) {
     return false;
   }
-  return hasGiftOccasionPreference(plan) || hasRecommendationSemanticStylePreference(plan);
+  return hasGiftOccasionPreference(plan) || hasRecommendationSemanticStylePreference(plan) || hasClosurePreference(plan);
 }
 
 function shouldRunAmbiguousEntityBranchExploration(plan: QueryPlanV1): boolean {
@@ -546,6 +558,14 @@ function candidateDiscoveryScore(candidate: HybridCandidate): number {
 interface BranchCandidateSet {
   readonly branchLabel: string;
   readonly candidates: readonly HybridCandidate[];
+}
+
+interface BranchCandidateRetrievalResult {
+  readonly status: 'ok' | 'fail_closed';
+  readonly candidates: readonly HybridCandidate[];
+  readonly degradationSignals: RankingDegradationSignal['degradationReasons'];
+  readonly criticRewrites: readonly RewriteTrace[];
+  readonly criticRetriesExhausted: boolean;
 }
 
 function buildAmbiguousEntityBranchPlan(
@@ -677,12 +697,7 @@ async function retrieveAmbiguousEntityBranchCandidates(
   compiled: CompiledWineQuery,
   requestContext: RequestExecutionContext | undefined,
   anchorEntityId: CanonicalEntityId | undefined,
-): Promise<{
-  readonly candidates: readonly HybridCandidate[];
-  readonly degradationSignals: RankingDegradationSignal['degradationReasons'];
-  readonly criticRewrites: readonly RewriteTrace[];
-  readonly criticRetriesExhausted: boolean;
-}> {
+): Promise<BranchCandidateRetrievalResult> {
   const queryRewriter = createQueryRewriter(
     ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
   );
@@ -690,42 +705,68 @@ async function retrieveAmbiguousEntityBranchCandidates(
     hint.explorationBranches.map((branch) => ({ hint, branch })),
   );
 
-  const branchResults = await Promise.all(
-    branchSpecs.map(async ({ hint, branch }) => {
-      const branchPlan = buildAmbiguousEntityBranchPlan(plan, hint, branch);
-      const branchInput = buildAmbiguousEntityBranchRetrievalInput(
-        branchPlan,
-        compiled,
-        requestContext,
-        anchorEntityId,
-      );
-      const graphResult = await executeGraphAware(
-        branchInput,
-        compiled.constraintGraph,
-        {
-          candidatePool: ports.candidatePool,
-          bundleSelector: new BundleSelectorImpl(),
-          subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
-          queryRewriter,
-          budgetLedger: new InMemoryBudgetLedger(
-            deriveBudgetLedgerOptionsFromCompiled(compiled),
-          ),
-        },
-        DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
-        buildCriticSignalProbeForCompiledQuery(branchPlan, compiled),
-      );
-
-      return {
-        branchLabel: branch.label,
-        candidates: graphResult.candidates,
-        retrievalTelemetry: graphResult.retrievalTelemetry,
-        criticRewrites: graphResult.criticRewrites,
-        criticRetriesExhausted: graphResult.criticRetriesExhausted,
-      };
-    }),
+  const branchExecution = await executeRetrievalBranches(
+    branchSpecs.map(({ hint, branch }) => ({
+      key: branch.label,
+      obligation: 'required' as const,
+      execute: async () => {
+        const branchPlan = buildAmbiguousEntityBranchPlan(plan, hint, branch);
+        const branchInput = buildAmbiguousEntityBranchRetrievalInput(
+          branchPlan,
+          compiled,
+          requestContext,
+          anchorEntityId,
+        );
+        const graphResult = await executeGraphAware(
+          branchInput,
+          compiled.constraintGraph,
+          {
+            candidatePool: ports.candidatePool,
+            bundleSelector: new BundleSelectorImpl(),
+            subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
+            queryRewriter,
+            budgetLedger: new InMemoryBudgetLedger(
+              deriveBudgetLedgerOptionsFromCompiled(compiled),
+            ),
+          },
+          DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
+          buildCriticSignalProbeForCompiledQuery(branchPlan, compiled),
+        );
+        return {
+          branchLabel: branch.label,
+          candidates: graphResult.candidates,
+          retrievalTelemetry: graphResult.retrievalTelemetry,
+          criticRewrites: graphResult.criticRewrites ?? [],
+          criticRetriesExhausted: graphResult.criticRetriesExhausted ?? false,
+        };
+      },
+    })),
   );
+  const branchResults = branchExecution.successes.map((success) => success.result);
+  const optionalBranchDegradation = formatRetrievalBranchFailureReasons(
+    'ambiguous_entity',
+    branchExecution.optionalFailures,
+    'degraded',
+  );
+  if (branchExecution.status === 'fail_closed') {
+    return {
+      status: 'fail_closed',
+      candidates: [],
+      degradationSignals: [
+        ...formatRetrievalBranchFailureReasons(
+          'ambiguous_entity',
+          branchExecution.requiredFailures,
+          'fail_closed',
+        ),
+        ...optionalBranchDegradation,
+      ],
+      criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
+      criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
+    };
+  }
 
   return {
+    status: 'ok',
     candidates: mergeBalancedBranchCandidates(
       branchResults.map((result) => ({
         branchLabel: result.branchLabel,
@@ -733,10 +774,13 @@ async function retrieveAmbiguousEntityBranchCandidates(
       })),
       compiled.execution.budget.maxCandidates,
     ),
-    degradationSignals: branchResults.flatMap((result) =>
-      result.retrievalTelemetry?.degradationSignals.map((signal) =>
-        `retrieval_degraded:${signal.component}:${signal.reason}`,
-      ) ?? []),
+    degradationSignals: [
+      ...optionalBranchDegradation,
+      ...branchResults.flatMap((result) =>
+        result.retrievalTelemetry?.degradationSignals.map((signal) =>
+          `retrieval_degraded:${signal.component}:${signal.reason}`,
+        ) ?? []),
+    ],
     criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
     criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
   };
@@ -748,51 +792,72 @@ async function retrieveTypedRecommendationCandidates(
   compiled: CompiledWineQuery,
   requestContext: RequestExecutionContext | undefined,
   anchorEntityId: CanonicalEntityId | undefined,
-): Promise<{
-  readonly candidates: readonly HybridCandidate[];
-  readonly degradationSignals: RankingDegradationSignal['degradationReasons'];
-  readonly criticRewrites: readonly RewriteTrace[];
-  readonly criticRetriesExhausted: boolean;
-}> {
+): Promise<BranchCandidateRetrievalResult> {
   const queryRewriter = createQueryRewriter(
     ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
   );
 
-  const branchResults = await Promise.all(
-    SEARCH_TOOL_DIVERSITY_WINE_TYPES.map(async (wineType) => {
-      const typedPlan = buildTypedRecommendationPlan(plan, wineType);
-      const typedInput = buildTypedRecommendationRetrievalInput(
-        typedPlan,
-        compiled,
-        requestContext,
-        anchorEntityId,
-      );
-      const graphResult = await executeGraphAware(
-        typedInput,
-        compiled.constraintGraph,
-        {
-          candidatePool: ports.candidatePool,
-          bundleSelector: new BundleSelectorImpl(),
-          subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
-          queryRewriter,
-          budgetLedger: new InMemoryBudgetLedger(
-            deriveBudgetLedgerOptionsFromCompiled(compiled),
-          ),
-        },
-        DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
-        buildCriticSignalProbeForCompiledQuery(typedPlan, compiled),
-      );
+  const branchExecution = await executeRetrievalBranches(
+    SEARCH_TOOL_DIVERSITY_WINE_TYPES.map((wineType) => ({
+      key: wineType,
+      obligation: 'required' as const,
+      execute: async () => {
+        const typedPlan = buildTypedRecommendationPlan(plan, wineType);
+        const typedInput = buildTypedRecommendationRetrievalInput(
+          typedPlan,
+          compiled,
+          requestContext,
+          anchorEntityId,
+        );
+        const graphResult = await executeGraphAware(
+          typedInput,
+          compiled.constraintGraph,
+          {
+            candidatePool: ports.candidatePool,
+            bundleSelector: new BundleSelectorImpl(),
+            subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
+            queryRewriter,
+            budgetLedger: new InMemoryBudgetLedger(
+              deriveBudgetLedgerOptionsFromCompiled(compiled),
+            ),
+          },
+          DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
+          buildCriticSignalProbeForCompiledQuery(typedPlan, compiled),
+        );
 
-      return graphResult;
-    }),
+        return { wineType, graphResult };
+      },
+    })),
   );
+  const branchResults = branchExecution.successes.map((success) => success.result);
+  const optionalBranchDegradation = formatRetrievalBranchFailureReasons(
+    'typed_recommendation',
+    branchExecution.optionalFailures,
+    'degraded',
+  );
+  if (branchExecution.status === 'fail_closed') {
+    return {
+      status: 'fail_closed',
+      candidates: [],
+      degradationSignals: [
+        ...formatRetrievalBranchFailureReasons(
+          'typed_recommendation',
+          branchExecution.requiredFailures,
+          'fail_closed',
+        ),
+        ...optionalBranchDegradation,
+      ],
+      criticRewrites: branchResults.flatMap(({ graphResult }) => graphResult.criticRewrites ?? []),
+      criticRetriesExhausted: branchResults.some(({ graphResult }) => graphResult.criticRetriesExhausted ?? false),
+    };
+  }
 
-  const branchSets: BranchCandidateSet[] = branchResults.map((result, index) => ({
-    branchLabel: SEARCH_TOOL_DIVERSITY_WINE_TYPES[index] ?? `typed-${index}`,
-    candidates: result.candidates,
+  const branchSets: BranchCandidateSet[] = branchResults.map(({ wineType, graphResult }) => ({
+    branchLabel: wineType,
+    candidates: graphResult.candidates,
   }));
-
   return {
+    status: 'ok',
     // Keep the discovery pool branch-balanced. Score still sorts within each
     // wine-type branch, but the merged top-k must not collapse back into a
     // single score-dominant pool or the gift/non-expert path regresses to the
@@ -801,12 +866,15 @@ async function retrieveTypedRecommendationCandidates(
       branchSets,
       compiled.execution.budget.maxCandidates,
     ),
-    degradationSignals: branchResults.flatMap((result) =>
-      result.retrievalTelemetry?.degradationSignals.map((signal) =>
-        `retrieval_degraded:${signal.component}:${signal.reason}`,
-      ) ?? []),
-    criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
-    criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
+    degradationSignals: [
+      ...optionalBranchDegradation,
+      ...branchResults.flatMap(({ graphResult }) =>
+        graphResult.retrievalTelemetry?.degradationSignals.map((signal) =>
+          `retrieval_degraded:${signal.component}:${signal.reason}`,
+        ) ?? []),
+    ],
+    criticRewrites: branchResults.flatMap(({ graphResult }) => graphResult.criticRewrites ?? []),
+    criticRetriesExhausted: branchResults.some(({ graphResult }) => graphResult.criticRetriesExhausted ?? false),
   };
 }
 
@@ -997,6 +1065,7 @@ function buildStructuredQueryExpansionsFromGraph(
       node.attribute === 'region'
       || node.attribute === 'country'
       || node.attribute === 'appellation'
+      || node.attribute === 'closure'
       || node.attribute === 'grape_family'
       || node.attribute === 'grape_primary'
       || node.attribute === 'style'
@@ -1041,21 +1110,10 @@ function buildProductionSubqueryRetriever(
     stateIsolation: 'shared_mutable',
     async retrieve(base, subquery, graph) {
       const scopedInput = scopeHybridRetrievalInputToSubquery(base, subquery, graph);
-      const candidates = candidatePool.execute !== undefined
-        ? await candidatePool.execute(scopedInput)
-        : await candidatePool.generate(scopedInput);
-      const degradationCodes = candidatePool.getLastDegradationCodes?.() ?? [];
-      const degradationSignals = candidatePool.getLastDegradationSignals?.() ?? [];
-      const fusionTrace = candidatePool.getLastFusionTrace?.();
-      const dropLog = candidatePool.getLastDropLog?.();
+      const retrieval = await executeCandidatePoolRetrieval(candidatePool, scopedInput);
       return {
-        candidates,
-        telemetry: {
-          degradationCodes: [...degradationCodes],
-          degradationSignals: [...degradationSignals],
-          ...(fusionTrace !== undefined ? { fusionTrace } : {}),
-          ...(dropLog !== undefined ? { dropLog: [...dropLog] } : {}),
-        },
+        candidates: retrieval.candidates,
+        telemetry: retrieval.telemetry,
       };
     },
   };
@@ -1470,7 +1528,11 @@ export async function retrieveHybridCandidatesForPlan(
   const retrievalFusionTrace = graphResult.retrievalTelemetry?.fusionTrace;
   const hardFilterDropLog = graphResult.retrievalTelemetry?.dropLog;
   const retrievalDegradationSignals = graphResult.retrievalTelemetry?.degradationSignals ?? [];
-  const retrievalInternalReasons = retrievalSignalsToReasons(retrievalDegradationSignals);
+  const retrievalInternalReasons = [
+    ...retrievalSignalsToReasons(retrievalDegradationSignals),
+    ...(graphResult.assignmentSolution?.degradationReasons ?? []),
+    ...(graphResult.executionDegradationReasons ?? []),
+  ];
   const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
   const provenanceShortfall = buildMissingProvenanceObligations(
     compiled.execution.provenancePolicy,

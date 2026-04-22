@@ -15,6 +15,7 @@ type OntologyAxis =
   | 'grape'
   | 'region'
   | 'style'
+  | 'closure'
   | 'body'
   | 'sweetness'
   | 'acidity'
@@ -228,9 +229,9 @@ const EXACT_MAPPINGS: ReadonlyMap<string, MappingEntry> = new Map<string, Mappin
   ['serve chilled', { axis: 'style', canonicalValue: 'chillable', displayValue: 'Chillable' }],
   ['시원하게', { axis: 'style', canonicalValue: 'chillable', displayValue: 'Chillable' }],
   ['차갑게 마실', { axis: 'style', canonicalValue: 'chillable', displayValue: 'Chillable' }],
-  ['screw cap', { axis: 'style', canonicalValue: 'screw_cap', displayValue: 'Screw Cap' }],
-  ['screwcap', { axis: 'style', canonicalValue: 'screw_cap', displayValue: 'Screw Cap' }],
-  ['스크류캡', { axis: 'style', canonicalValue: 'screw_cap', displayValue: 'Screw Cap' }],
+  ['screw cap', { axis: 'closure', canonicalValue: 'screw cap', displayValue: 'Screw Cap' }],
+  ['screwcap', { axis: 'closure', canonicalValue: 'screw cap', displayValue: 'Screw Cap' }],
+  ['스크류캡', { axis: 'closure', canonicalValue: 'screw cap', displayValue: 'Screw Cap' }],
   ['approachable', { axis: 'style', canonicalValue: 'approachable', displayValue: 'Approachable' }],
   ['beginner friendly', { axis: 'style', canonicalValue: 'approachable', displayValue: 'Approachable' }],
   ['입문자', { axis: 'style', canonicalValue: 'approachable', displayValue: 'Approachable' }],

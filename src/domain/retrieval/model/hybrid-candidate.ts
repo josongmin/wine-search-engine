@@ -50,6 +50,9 @@ export interface HybridCandidate {
   /** Region from index summary (rerank / evidence). */
   readonly region?: string | undefined;
 
+  /** Bottle closure from index summary (e.g. screw cap, cork). */
+  readonly closure?: string | undefined;
+
   /** English search text snippet from index (cross-encoder passage). */
   readonly searchTextEn?: string | undefined;
 

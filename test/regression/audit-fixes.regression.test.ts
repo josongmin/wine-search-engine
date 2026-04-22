@@ -574,8 +574,16 @@ describe('Audit regressions — session 5 (2026-04-09)', () => {
       const parsed = parseLlmOutput(mixed);
 
       expect(parsed).toEqual({
-        thought: '[invalid mixed LLM output]',
-        answer: mixed,
+        thought: 'bad mix',
+        plannerDefect: expect.objectContaining({
+          code: 'mixed_answer_and_tool',
+          rawText: mixed,
+          recoveredAnswer: 'final answer',
+          recoveredAction: {
+            tool: 'search_wines',
+            input: { query: 'opus one' },
+          },
+        }),
       });
     });
   });

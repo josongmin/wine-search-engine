@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PgEvalBenchmarkRunStore } from '../pg-eval-benchmark-run-store.js';
+import { EVAL_BENCHMARK_LEDGER_BOOTSTRAP_STATEMENTS } from '../../db/eval-benchmark-ledger-bootstrap.js';
 
 describe('PgEvalBenchmarkRunStore', () => {
   it('persists and lists noisy benchmark runs with newest-first ordering', async () => {
@@ -314,5 +315,58 @@ describe('PgEvalBenchmarkRunStore', () => {
 
     expect(runs).toHaveLength(1);
     expect(runs[0]!.metrics).toEqual({ ndcg_at_10: 0.85, decision_utility: 0.72 });
+  });
+
+  it('bootstraps the targeted ledger schema and retries saveRun on 42P01', async () => {
+    const missingTable = new Error('relation "eval_benchmark_runs" does not exist') as Error & { code: string };
+    missingTable.code = '42P01';
+    const query = vi.fn()
+      .mockRejectedValueOnce(missingTable)
+      .mockImplementation(async () => ({ rows: [] }));
+    const store = new PgEvalBenchmarkRunStore({ query } as never);
+
+    await store.saveRun({
+      benchmarkKind: 'agentic_tool_use_fixture',
+      evalDatasetVersion: 'fixture.v1',
+      featureSchemaHash: 'hash-fixture',
+      queryCount: 6,
+      releaseGatePassed: true,
+      activationStatus: 'shadow_only',
+      report: { benchmark: 'agentic-tool-use-fixture' },
+      metrics: { tool_selection_accuracy: 1 },
+      createdAt: new Date('2026-04-22T00:00:00.000Z'),
+    });
+
+    expect(query).toHaveBeenCalledTimes(2 + EVAL_BENCHMARK_LEDGER_BOOTSTRAP_STATEMENTS.length);
+    expect(query.mock.calls[1]?.[0]).toContain('CREATE TABLE IF NOT EXISTS eval_benchmark_runs');
+    expect(query.mock.calls.at(-1)?.[0]).toContain('INSERT INTO eval_benchmark_runs');
+  });
+
+  it('bootstraps the targeted ledger schema and retries saveRun on legacy 017 metrics-column miss', async () => {
+    const missingColumn = new Error('column "metrics" of relation "eval_benchmark_runs" does not exist') as Error & {
+      code: string;
+    };
+    missingColumn.code = '42703';
+    const query = vi.fn()
+      .mockRejectedValueOnce(missingColumn)
+      .mockImplementation(async () => ({ rows: [] }));
+    const store = new PgEvalBenchmarkRunStore({ query } as never);
+
+    await store.saveRun({
+      benchmarkKind: 'search_feature_behavior_fixture',
+      snapshotId: 'snap-metrics',
+      evalDatasetVersion: 'fixture.v1',
+      featureSchemaHash: 'hash-metrics',
+      queryCount: 30,
+      releaseGatePassed: true,
+      activationStatus: 'activated',
+      report: { benchmark: 'feature-behavior' },
+      metrics: { ndcg_at_10: 0.85 },
+      createdAt: new Date('2026-04-22T00:00:00.000Z'),
+    });
+
+    expect(query).toHaveBeenCalledTimes(2 + EVAL_BENCHMARK_LEDGER_BOOTSTRAP_STATEMENTS.length);
+    expect(query.mock.calls[3]?.[0]).toContain('ADD COLUMN IF NOT EXISTS metrics JSONB');
+    expect(query.mock.calls.at(-1)?.[0]).toContain('INSERT INTO eval_benchmark_runs');
   });
 });

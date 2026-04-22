@@ -3,6 +3,7 @@ import { createEntityId } from '../../../domain/shared/types/index.js';
 import type { AnchorProfile } from '../../../domain/mixed/model/anchor-profile.js';
 import type { SearchIndexPort } from '../../../domain/retrieval/port/search-index.port.js';
 import { VespaSimilarRetrieval } from '../vespa-similar-retrieval.js';
+import type { NormalizedConstraint } from '../../../domain/shared/types/index.js';
 
 function makeAnchorProfile(): AnchorProfile {
   return {
@@ -57,9 +58,65 @@ describe('VespaSimilarRetrieval', () => {
       certifications: ['organic'],
       retrievalTrace: expect.objectContaining({
         retrievalProfile: 'similar_anchor',
+        filtersApplied: [],
         candidateSources: ['anchor_similarity'],
       }),
     });
     expect(candidate?.searchTextEn).toBe('S'.repeat(800));
+  });
+
+  it('pushes hard constraints down into dense retrieval filters', async () => {
+    const searchIndex = {
+      denseSearch: vi.fn().mockResolvedValue([]),
+    } as unknown as SearchIndexPort;
+    const hardConstraints: readonly NormalizedConstraint[] = [
+      {
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'white',
+        source: 'planner',
+        source_tier: 'hard',
+      },
+    ];
+
+    const retrieval = new VespaSimilarRetrieval(searchIndex);
+    await retrieval.retrieveSimilar(makeAnchorProfile(), 7, hardConstraints);
+
+    expect(searchIndex.denseSearch).toHaveBeenCalledWith(
+      makeAnchorProfile().embedding,
+      ['wine_type:white'],
+      7,
+    );
+  });
+
+  it('records pushed-down filters in retrieval trace', async () => {
+    const entityId = createEntityId('similar-filter-trace');
+    const searchIndex = {
+      denseSearch: vi.fn().mockResolvedValue([
+        {
+          entityId,
+          score: 0.88,
+          rank: 1,
+          similarity: 0.88,
+          summary: {
+            canonicalLabel: 'Filtered Similar Wine',
+          },
+        },
+      ]),
+    } as unknown as SearchIndexPort;
+    const hardConstraints: readonly NormalizedConstraint[] = [
+      {
+        attribute: 'wine_type',
+        operator: '=',
+        value: 'white',
+        source: 'planner',
+        source_tier: 'hard',
+      },
+    ];
+
+    const retrieval = new VespaSimilarRetrieval(searchIndex);
+    const [candidate] = await retrieval.retrieveSimilar(makeAnchorProfile(), 5, hardConstraints);
+
+    expect(candidate?.retrievalTrace.filtersApplied).toEqual(['wine_type:white']);
   });
 });

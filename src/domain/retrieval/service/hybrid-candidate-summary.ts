@@ -102,6 +102,7 @@ function normalizeRetrievalHitSummaryValue(
     case 'canonicalLabel':
     case 'producer':
     case 'region':
+    case 'closure':
     case 'grapePrimary':
     case 'style':
     case 'priceBand':
@@ -242,6 +243,7 @@ export function retrievalDocumentToHitSummary(doc: RetrievalDocument): Retrieval
     canonicalLabel: doc.canonicalLabel,
     producer: doc.producer,
     region: doc.region,
+    closure: doc.closure,
     searchTextEn: doc.searchTextEn,
     searchTextKo: doc.searchTextKo,
     grapePrimary,

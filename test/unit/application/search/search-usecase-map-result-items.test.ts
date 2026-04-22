@@ -11,6 +11,7 @@ function makeRankedResult(): RankedResult {
     rank: 1,
     producer: 'Opus One',
     region: 'Napa Valley',
+    country: 'United States',
     grapePrimary: 'Cabernet Sauvignon',
     vintageYear: 2018,
     grapePrimaryEnc: 1,
@@ -40,6 +41,12 @@ function makeRankedResult(): RankedResult {
 }
 
 describe('mapRankedResultsToResultItems', () => {
+  it('preserves country provenance from ranked results into entity summaries', async () => {
+    const items = await mapRankedResultsToResultItems([makeRankedResult()], undefined, 2025);
+
+    expect(items[0]?.entity.country).toBe('United States');
+  });
+
   it('clears drinking-window timeout timers after a successful fast prediction', async () => {
     vi.useFakeTimers();
     const drinkingWindow = {
@@ -48,7 +55,7 @@ describe('mapRankedResultsToResultItems', () => {
         drinkingWindowEnd: 2032,
         currentlyDrinkable: false,
         confidence: 'high',
-        evidenceLevel: 'model_based',
+        evidenceLevel: 'deterministic',
         blockingEligible: true,
       }),
     };
@@ -63,7 +70,7 @@ describe('mapRankedResultsToResultItems', () => {
       drinkingWindowEnd: 2032,
       currentlyDrinkable: false,
       confidence: 'high',
-      evidenceLevel: 'model_based',
+      evidenceLevel: 'deterministic',
       blockingEligible: true,
     });
     expect(vi.getTimerCount()).toBe(0);
@@ -193,7 +200,7 @@ describe('mapRankedResultsToResultItems', () => {
         drinkingWindowEnd: 2032,
         currentlyDrinkable: false,
         confidence: 'high',
-        evidenceLevel: 'model_based',
+        evidenceLevel: 'deterministic',
         blockingEligible: true,
       }),
     };
@@ -225,7 +232,7 @@ describe('mapRankedResultsToResultItems', () => {
         drinkingWindowEnd: 2032,
         currentlyDrinkable: false,
         confidence: 'high',
-        evidenceLevel: 'model_based',
+        evidenceLevel: 'deterministic',
         blockingEligible: true,
       }),
     };
@@ -254,5 +261,60 @@ describe('mapRankedResultsToResultItems', () => {
     expect(items[2]?.drinkingWindow).toBeDefined();
     expect(items[3]?.drinkingWindow).toBeUndefined();
     vi.useRealTimers();
+  });
+
+  it('omits indexed drinking-window blocks for unsupported model-version namespaces', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        drinkingWindowStart: 2024,
+        drinkingWindowEnd: 2030,
+        drinkingWindowModelVersion: 'mystery-v1',
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.drinkingWindow).toBeUndefined();
+  });
+
+  it('projects indexed deterministic drinking-window blocks with deterministic evidence', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        drinkingWindowStart: 2024,
+        drinkingWindowEnd: 2030,
+        drinkingWindowModelVersion: 'deterministic:structural-slot-v2',
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.drinkingWindow).toEqual({
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2030,
+      currentlyDrinkable: true,
+      confidence: 'high',
+      evidenceLevel: 'deterministic',
+      blockingEligible: true,
+      modelVersion: 'deterministic:structural-slot-v2',
+    });
+  });
+
+  it('keeps legacy indexed learned drinking-window blocks projectable for compatibility', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        drinkingWindowStart: 2024,
+        drinkingWindowEnd: 2030,
+        drinkingWindowModelVersion: 'dw-v1',
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.drinkingWindow).toEqual({
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2030,
+      currentlyDrinkable: true,
+      confidence: 'high',
+      evidenceLevel: 'learned',
+      blockingEligible: true,
+      modelVersion: 'dw-v1',
+    });
   });
 });

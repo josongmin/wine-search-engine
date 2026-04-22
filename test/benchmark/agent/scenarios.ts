@@ -433,7 +433,19 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 41, tier: 'situation_based', query: '와인 입문자 선물용, 달달하면서 도수 낮은 거, 예쁜 라벨이면 좋겠다', description: 'Gift + sweet + semantic',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
-      rubric: 'Must recommend a sweet, low-alcohol wine suitable for beginners as a gift. Aesthetic/label mention is a plus.' } },
+      rubric: 'Must recommend a sweet, low-alcohol wine suitable for beginners as a gift. Aesthetic/label mention is a plus.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'max_alcohol_pct', predicate: 'lte', value: 12 },
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'sweetness', operator: '>=', value: 0.5 },
+          { attribute: 'alcohol_pct', operator: '<=', value: 12 },
+          { attribute: 'occasion', operator: 'in', value: ['gift'] },
+        ],
+      },
+    } },
   { id: 42, tier: 'situation_based', query: '회사 회식 10명, 레드/화이트 반반, 총 20만원', description: 'Multi-search + budget split',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       // Two search_wines expected: once for red, once for white. A single call covering
@@ -452,11 +464,40 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // so judge can partially offset on false-positives that slip through.
       answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
       judgeRequired: true,
-      rubric: 'Must recommend BOTH red AND white wines. Total budget ≤200,000 KRW for 10 people (~2만원/병). Must name specific wines. Should note crowd-pleasing, accessible styles.' } },
+      rubric: 'Must recommend BOTH red AND white wines. Total budget ≤200,000 KRW for 10 people (~2만원/병). Must name specific wines. Should note crowd-pleasing, accessible styles.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+          { attribute: 'wine_type', operator: '=', value: 'white' },
+        ],
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 200000 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+      ],
+    } },
   { id: 43, tier: 'situation_based', query: '캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거', description: 'Semantic (screw cap, chillable)',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
-      rubric: 'Must recommend wines with screw cap closure that can be served chilled. Camping-friendly practical considerations.' } },
+      requiredRegister: 'casual',
+      judgeRequired: true,
+      rubric: 'Must recommend wines with screw cap closure that can be served chilled. Camping-friendly practical considerations. Casual Korean register expected.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'styles', predicate: 'contains', value: 'screw_cap' },
+        { tool: 'search_wines', argPath: 'styles', predicate: 'contains', value: 'chillable' },
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'camping' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'closure', operator: '=', value: 'screw cap' },
+          { attribute: 'style', operator: 'in', value: ['chillable'] },
+          { attribute: 'occasion', operator: 'in', value: ['camping'] },
+        ],
+      },
+    } },
   { id: 44, tier: 'situation_based', query: '부모님 환갑 선물, 의미 있는 와인으로. 1960년산 같은 거 있어?', description: 'Rare vintage search + fallback',
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -588,7 +629,6 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       },
       expectedEntities: [
         { surface: '화이트', canonical: 'white', type: 'wine_type' },
-        { surface: '레드', canonical: 'red', type: 'wine_type' },
       ],
     } },
   { id: 58, tier: 'extreme', query: '피노 누아르 좋아하는 친구한테 생일 선물, 근데 이미 DRC는 마셔봤대, 비슷한 급인데 잘 모르는 거로', description: 'Premium + exclude + hidden gem',
@@ -620,7 +660,18 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 62, tier: 'korean_colloquial', query: '까쇼 추천해줘', description: 'Slang abbreviation: 까쇼 = Cabernet Sauvignon',
     expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(카베르네\\s*소비뇽|cabernet\\s*sauvignon|까쇼|Cab\\s*(?:Sauv|Sauvignon))'],
-      rubric: 'Must interpret 까쇼 as Cabernet Sauvignon (Korean slang abbreviation) and recommend Cab Sauv wines.' } },
+      requiredRegister: 'casual',
+      judgeRequired: true,
+      rubric: 'Must interpret 까쇼 as Cabernet Sauvignon (Korean slang abbreviation) and recommend Cab Sauv wines. Casual Korean register expected.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '까쇼', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+      ],
+    } },
   { id: 63, tier: 'korean_colloquial', query: '오퍼스원 얼마야?', description: 'Typo: 오퍼스원 → 오푸스원',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(Opus\\s*One|오푸스\\s*원|오퍼스\\s*원)'],
@@ -650,6 +701,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'wine_type', operator: 'exclude', value: ['red'] },
         ],
       },
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'wine_type', predicate: 'equals', value: 'white' },
+      ],
       expectedEntities: [
         { surface: '화이트', canonical: 'white', type: 'wine_type' },
         { surface: '레드', canonical: 'red', type: 'wine_type' },
@@ -748,18 +802,46 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // ─────────────────────────────────────────────────────────────────────
   { id: 81, tier: 'korean_food_pairing', query: '삼겹살이랑 와인 조합 추천', description: 'Samgyeopsal pairing',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
-      tools: [{ tool: 'search_wines' }],
+      tools: [{ tool: 'get_food_pairings' }],
+      expectedToolArgs: [
+        { tool: 'get_food_pairings', argPath: 'food', predicate: 'contains', value: '삼겹살' },
+        { tool: 'get_food_pairings', argPath: 'pairing_tags', predicate: 'contains', value: 'pork' },
+      ],
       rubric: 'Must recommend wines that pair with samgyeopsal (grilled pork belly). Should consider the fatty, smoky profile.' } },
   { id: 82, tier: 'korean_food_pairing', query: '치맥 대신 치킨이랑 마실 와인', description: 'Chicken + wine (instead of beer)',
     expectation: { tools: [{ tool: 'get_food_pairings' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       rubric: 'Must recommend wines to pair with fried chicken as an alternative to beer (치맥). Light, refreshing styles preferred.' } },
   { id: 83, tier: 'korean_food_pairing', query: '매운 떡볶이랑 먹을 수 있는 와인 있어?', description: 'Spicy tteokbokki pairing',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
-      tools: [{ tool: 'search_wines' }],
-      rubric: 'Must address the spicy challenge of tteokbokki. Should recommend off-dry or slightly sweet wines to balance heat.' } },
+      tools: [{ tool: 'get_food_pairings' }],
+      requiredRegister: 'casual',
+      judgeRequired: true,
+      rubric: 'Must address the spicy challenge of tteokbokki. Should recommend off-dry or slightly sweet wines to balance heat. Casual Korean register expected.',
+      expectedToolArgs: [
+        { tool: 'get_food_pairings', argPath: 'food', predicate: 'contains', value: '떡볶이' },
+        { tool: 'get_food_pairings', argPath: 'pairing_tags', predicate: 'contains', value: 'spicy_food' },
+        { tool: 'get_food_pairings', argPath: 'styles', predicate: 'contains', value: 'off_dry' },
+      ],
+      expectedConstraints: {
+        inferred: [
+          { attribute: 'style', operator: 'in', value: ['off_dry', 'sweet'] },
+        ],
+      },
+    } },
   { id: 84, tier: 'korean_food_pairing', query: '회 먹을 건데 와인 추천해줘', description: 'Raw fish / sashimi pairing',
     expectation: { tools: [{ tool: 'get_food_pairings' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
-      rubric: 'Must recommend wines for sashimi/raw fish. White, sparkling, or light rosé expected. Avoid recommending tannic red wines.' } },
+      requiredRegister: 'casual',
+      judgeRequired: true,
+      rubric: 'Must recommend wines for sashimi/raw fish. White, sparkling, or light rosé expected. Avoid recommending tannic red wines. Casual Korean register expected.',
+      expectedToolArgs: [
+        { tool: 'get_food_pairings', argPath: 'food', predicate: 'contains', value: '회' },
+      ],
+      expectedConstraints: {
+        inferred: [
+          { attribute: 'wine_type', operator: 'in', value: ['white', 'sparkling', 'rosé'] },
+        ],
+      },
+    } },
   { id: 85, tier: 'korean_food_pairing', query: '김치찌개에 와인이 말이 돼?', description: 'Kimchi stew — edge case pairing',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       rubric: 'Must honestly address whether wine pairs with kimchi stew. Can recommend if genuine options exist, or acknowledge the challenge.' } },
@@ -790,7 +872,19 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // so judge can partially offset on false-positives that slip through.
       answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
       judgeRequired: true,
-      rubric: 'Must recommend universally-liked, approachable wines for a non-expert gift recipient. Must name at least one specific wine. Safe choices: Prosecco, Pinot Grigio, soft Merlot, or similar crowd-pleasers. Must NOT ask for more information — answer with concrete recommendations.' } },
+      rubric: 'Must recommend universally-liked, approachable wines for a non-expert gift recipient. Must name at least one specific wine. Safe choices: Prosecco, Pinot Grigio, soft Merlot, or similar crowd-pleasers. Must NOT ask for more information — answer with concrete recommendations.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'styles', predicate: 'contains', value: 'approachable' },
+        { tool: 'search_wines', argPath: 'styles', predicate: 'contains', value: 'crowd_pleasing' },
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'style', operator: 'in', value: ['approachable', 'crowd_pleasing'] },
+          { attribute: 'occasion', operator: 'in', value: ['gift'] },
+        ],
+      },
+    } },
   { id: 89, tier: 'gift_refined', query: '와인 좀 아는 사람한테 깜짝 선물, 의외의 거', description: 'Surprise gift for expert',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -809,19 +903,55 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // so judge can partially offset on false-positives that slip through.
       answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
       judgeRequired: true,
-      rubric: 'Must recommend exactly ONE red wine AND ONE white wine as a couple gift set. Must name specific wines for both. Aesthetic/label appeal or packaging should be mentioned.' } },
+      rubric: 'Must recommend exactly ONE red wine AND ONE white wine as a couple gift set. Must name specific wines for both. Aesthetic/label appeal or packaging should be mentioned.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+          { attribute: 'wine_type', operator: '=', value: 'white' },
+        ],
+        soft: [
+          { attribute: 'occasion', operator: 'in', value: ['gift'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+      ],
+    } },
   { id: 91, tier: 'gift_refined', query: '집들이 선물용 와인, 1-2만원 사이', description: 'Housewarming gift, tight budget',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       priceBandKrw: { min: 10_000, max: 20_000 },
-      rubric: 'Must recommend gift-appropriate wine in the 10,000-20,000 KRW range. Should look good as a gift despite tight budget.' } },
+      rubric: 'Must recommend gift-appropriate wine in the 10,000-20,000 KRW range. Should look good as a gift despite tight budget.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'min_price_krw', predicate: 'gte', value: 10000 },
+        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 20000 },
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'housewarming' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: 'range', value: { min: 10000, max: 20000 } },
+          { attribute: 'occasion', operator: 'in', value: ['housewarming', 'gift'] },
+        ],
+      },
+    } },
   { id: 92, tier: 'gift_refined', query: '퇴직하는 상사한테 드릴 건데, 격식 있는 와인으로', description: 'Retirement gift, formal',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       requiredRegister: 'formal',
       // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
       judgeRequired: true,
-      rubric: 'Must recommend a prestigious, formal wine appropriate for a retirement gift to a superior. Formal Korean tone (합니다/습니다) required.' } },
+      rubric: 'Must recommend a prestigious, formal wine appropriate for a retirement gift to a superior. Formal Korean tone (합니다/습니다) required.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+        { tool: 'search_wines', argPath: 'producer_prestige_min', predicate: 'exists' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'occasion', operator: 'in', value: ['gift'] },
+        ],
+      },
+    } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 18: Seasonal/Temporal
@@ -846,6 +976,156 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       rubric: 'Must recommend romantic/special-occasion wines for Valentine dinner. Champagne, elegant Pinot Noir, or Barolo-style prestige.' } },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Targeted Regression Guards (remaining likely gaps)
+  // ─────────────────────────────────────────────────────────────────────
+  { id: 117, tier: 'comparison_nested', query: '오푸스 원 2018이랑 알마비바 2019 중 지금 마시기 더 좋은 쪽 골라줘', description: 'Exact pair compare + explicit dual drinking-window verification',
+    expectation: { tools: [{ tool: 'compare_wines' }, { tool: 'check_drinking_window' }, { tool: 'check_drinking_window' }], ordered: true, maxSteps: 5, maxDurationMs: 60_000, maxTotalTokens: 8_000,
+      drinkingWindowStatus: 'any',
+      answerMustMatch: ['(오푸스\\s*원|opus\\s*one)', '(알마비바|almaviva)', '(지금|현재|now)'],
+      judgeRequired: true,
+      rubric: 'Must compare Opus One 2018 and Almaviva 2019, explicitly verify current drinkability for BOTH wines, then choose which is better to drink now. A compare-only answer without dual drinking-window verification fails.',
+      expectedToolArgs: [
+        { tool: 'compare_wines', argPath: 'query_a', predicate: 'contains', value: 'Opus One' },
+        { tool: 'compare_wines', argPath: 'query_b', predicate: 'contains', value: 'Almaviva' },
+        { tool: 'compare_wines', argPath: 'vintage_min_a', predicate: 'equals', value: 2018 },
+        { tool: 'compare_wines', argPath: 'vintage_max_a', predicate: 'equals', value: 2018 },
+        { tool: 'compare_wines', argPath: 'vintage_min_b', predicate: 'equals', value: 2019 },
+        { tool: 'compare_wines', argPath: 'vintage_max_b', predicate: 'equals', value: 2019 },
+      ],
+      expectedConstraints: {
+        hard: [
+          { attribute: 'vintage_year', operator: '=', value: 2018 },
+          { attribute: 'vintage_year', operator: '=', value: 2019 },
+        ],
+      },
+    },
+    goldenKeywords: ['opus one 2018', 'almaviva 2019'] },
+  { id: 118, tier: 'knowledge_hybrid', query: '프랑스 말벡 와인 결과랑 아르헨티나 말벡 와인 결과를 각각 비교해줘. 프랑스 쪽 근거 없으면 없다고 말해.', description: 'Grounded side-specific Malbec compare with fail-closed honesty',
+    expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 3, maxDurationMs: 60_000, maxTotalTokens: 8_000,
+      answerMustMatch: ['(말벡|malbec)', '(프랑스|france|cahors)', '(아르헨티나|argentina|mendoza)'],
+      judgeRequired: true,
+      rubric: 'Must perform a side-specific grounded comparison: France-side evidence must stay on the France side, Argentina-side evidence must stay on the Argentina side. If France-side evidence is missing or weak, the answer must say so explicitly instead of projecting Argentine evidence onto France.',
+      expectedToolArgs: [
+        { tool: 'compare_wines', argPath: 'country_a', predicate: 'equals', value: 'France' },
+        { tool: 'compare_wines', argPath: 'country_b', predicate: 'equals', value: 'Argentina' },
+        { tool: 'compare_wines', argPath: 'grape_primary_a', predicate: 'equals', value: 'Malbec' },
+        { tool: 'compare_wines', argPath: 'grape_primary_b', predicate: 'equals', value: 'Malbec' },
+      ],
+      expectedConstraints: {
+        hard: [
+          { attribute: 'grape_primary', operator: '=', value: 'Malbec' },
+          { attribute: 'country', operator: '=', value: 'France' },
+          { attribute: 'country', operator: '=', value: 'Argentina' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '프랑스', canonical: 'France', type: 'country' },
+        { surface: '아르헨티나', canonical: 'Argentina', type: 'country' },
+        { surface: '말벡', canonical: 'Malbec', type: 'grape_primary' },
+      ],
+    } },
+  { id: 119, tier: 'seasonal_temporal', query: '보졸레누보 올해꺼 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘', description: 'Fail-closed freshness honesty for current-year Beaujolais Nouveau',
+    expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+      answerMustMatch: ['(보졸레|beaujolais|nouveau)'],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
+      rubric: 'Must address current-year Beaujolais Nouveau availability. If the corpus cannot confirm the current release, the answer must say that explicitly and avoid bluffing a definite yes/no. If grounded evidence exists, it may answer definitively with the evidence basis.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Beaujolais' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '보졸레누보', canonical: 'Beaujolais', type: 'region' },
+      ],
+    } },
+  { id: 120, tier: 'seasonal_temporal', query: '보졸레 누보 올해 나왔는지 근거 없으면 모른다고만 해줘', description: 'Fail-closed concept freshness abstention with spaced Korean alias',
+    expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
+      rubric: 'Must handle Beaujolais Nouveau current-year availability as a concept freshness query. If the corpus cannot confirm the current release, it must answer that it does not know rather than broadening to generic Beaujolais evidence or bluffing.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['보졸레 누보', '보졸레누보', 'beaujolais nouveau'] },
+      ],
+      expectedConstraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Beaujolais' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '보졸레 누보', canonical: 'Beaujolais', type: 'region' },
+      ],
+    } },
+  { id: 121, tier: 'wine_name_lookup', query: '알마비바 2026 빈티지 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘', description: 'Exact-entity freshness honesty for future vintage release',
+    expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+      answerMustMatch: ['(알마비바|almaviva)', '(2026|올해|출시|나왔)'],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
+      rubric: 'Must treat Almaviva 2026 as an exact-entity freshness question. If the corpus cannot confirm the 2026 release, it must say so explicitly and avoid inventing a yes/no answer.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['Almaviva', '알마비바'] },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'search_wines', argPath: 'vintage_min', predicate: 'equals', value: 2026 },
+        { tool: 'search_wines', argPath: 'vintage_max', predicate: 'equals', value: 2026 },
+      ],
+      expectedEntities: [
+        { surface: '알마비바', canonical: 'Almaviva', type: 'appellation' },
+      ],
+    },
+    goldenKeywords: ['almaviva'] },
+  { id: 122, tier: 'wine_name_lookup', query: 'Opus One 2027 vintage released yet? If you do not have hard evidence, say you do not know.', description: 'English exact-entity future-vintage honesty',
+    expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+      answerMustMatch: ['(opus\\s*one)', "(2027|released|release|available|don't know|do not know)"],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
+      rubric: 'Must treat Opus One 2027 as an exact-entity future-vintage availability query. If the corpus cannot confirm that the 2027 vintage has been released, it must say it does not know rather than inventing a release status.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains', value: 'Opus One' },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'search_wines', argPath: 'vintage_min', predicate: 'equals', value: 2027 },
+        { tool: 'search_wines', argPath: 'vintage_max', predicate: 'equals', value: 2027 },
+      ],
+      expectedEntities: [
+        { surface: 'Opus One', canonical: 'Opus One', type: 'appellation' },
+      ],
+    },
+    goldenKeywords: ['opus one'] },
+  { id: 123, tier: 'wine_name_lookup', query: '오푸스 원 2027 빈티지 나왔는지 근거 없으면 모른다고만 해줘', description: 'Korean spaced alias future-vintage exact metadata query',
+    expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+      answerMustMatch: ['(오푸스\\s*원|opus\\s*one)', '(2027|출시|나왔|모른다)'],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
+      rubric: 'Must keep the spaced Korean alias "오푸스 원" on the exact-entity route for future-vintage availability. If the corpus cannot confirm Opus One 2027, it must abstain honestly instead of broadening the query or bluffing.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['오푸스 원', 'Opus One', '오푸스원'] },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'search_wines', argPath: 'vintage_min', predicate: 'equals', value: 2027 },
+        { tool: 'search_wines', argPath: 'vintage_max', predicate: 'equals', value: 2027 },
+      ],
+      expectedEntities: [
+        { surface: '오푸스 원', canonical: 'Opus One', type: 'appellation' },
+      ],
+    },
+    goldenKeywords: ['opus one'] },
+  { id: 124, tier: 'wine_name_lookup', query: 'Sassicaia 2025 release 있나? 확실한 근거 없으면 추정하지 말고 말해줘', description: 'Bilingual exact-entity future-vintage release honesty',
+    expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+      answerMustMatch: ['(sassicaia)', "(2025|release|출시|나왔|모른다|don't know|do not know)"],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
+      rubric: 'Must treat Sassicaia 2025 as an exact-entity future-vintage release query even when the phrasing is bilingual. If the corpus cannot confirm the 2025 release, it must abstain honestly.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains', value: 'Sassicaia' },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'search_wines', argPath: 'vintage_min', predicate: 'equals', value: 2025 },
+        { tool: 'search_wines', argPath: 'vintage_max', predicate: 'equals', value: 2025 },
+      ],
+      expectedEntities: [
+        { surface: 'Sassicaia', canonical: 'Sassicaia', type: 'appellation' },
+      ],
+    },
+    goldenKeywords: ['sassicaia'] },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 19: Adversarial/Stress
@@ -886,7 +1166,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
 ];
 
 /**
- * Aggregated benchmark suite. Order matters: main first (1-105), then
+ * Aggregated benchmark suite. Order matters: main first (1-119, sparse), then
  * adversarial extensions (106-116), then coverage expansion (200+).
  */
 export const AGENT_SCENARIOS: readonly AgentBenchmarkScenario[] = [

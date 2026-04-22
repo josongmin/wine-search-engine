@@ -111,15 +111,15 @@ describe('DrinkingWindowUseCase', () => {
     });
   });
 
-  it('returns undefined evidence for non-ONNX model versions', async () => {
+  it('returns deterministic evidence for deterministic predictor model versions', async () => {
     const predictor = {
-      modelVersion: 'unloaded',
+      modelVersion: 'deterministic:structural-slot-v2',
       predict: vi.fn().mockReturnValue({
         drinkingWindowStart: 2024,
         drinkingWindowEnd: 2030,
         peakYear: 2027,
-        confidence: 'low' as const,
-        modelVersion: 'unloaded',
+        confidence: 'medium' as const,
+        modelVersion: 'deterministic:structural-slot-v2',
       }),
     };
 
@@ -137,7 +137,7 @@ describe('DrinkingWindowUseCase', () => {
       targetYear: 2027,
     });
 
-    expect(result.evidenceLevel).toBeUndefined();
-    expect(result.blockingEligible).toBe(false);
+    expect(result.evidenceLevel).toBe('deterministic');
+    expect(result.blockingEligible).toBe(true);
   });
 });

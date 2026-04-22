@@ -8,7 +8,7 @@ import { analyzeQueryDecomposition, isValidDecomposition } from '../../domain/qu
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { ResponseBuilderPort } from './port/search-pipeline-deps.port.js';
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
-import type { SearchRequest } from './search-request.dto.js';
+import type { RepresentativeConceptSearchContext, SearchRequest } from './search-request.dto.js';
 import { buildConstraintContradictionExitParams } from './search-usecase-constraint-early-exit.js';
 import { mergeCachedSearchResponseMeta } from './search-usecase-cache-hit.js';
 import { tryGetCachedSearchResponse } from './search-usecase-cache-lookup.js';
@@ -27,12 +27,181 @@ import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js'
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
 const DECOMPOSED_SEARCH_MIN_TIMEOUT_MS = 1;
+const STRUCTURED_SET_RETRIEVAL_PREFERENCE_ATTRIBUTES = new Set([
+  'alcohol_pct',
+  'beginner_suitability',
+  'closure',
+  'gift_suitability',
+  'occasion',
+  'producer_prestige',
+  'style',
+]);
+const STRUCTURED_RECOMMENDATION_DEFAULT_MAX_CANDIDATES = 20;
+const STRUCTURED_RECOMMENDATION_DEFAULT_RERANK_LIMIT = 20;
 
 type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
 type SearchPreRoutePhaseResult =
   | { readonly outcome: 'continue'; readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery }
   | { readonly outcome: 'return'; readonly response: SearchPreRouteEarlyResponse };
+
+function normalizeRepresentativeValue(value: unknown): readonly string[] {
+  if (typeof value === 'string') {
+    const normalized = value.normalize('NFKC').trim().toLowerCase();
+    return normalized.length > 0 ? [normalized] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => normalizeRepresentativeValue(entry));
+  }
+  return [];
+}
+
+function constraintMatchesRepresentativeConcept(
+  constraint: QueryPlanV1['constraints']['hard'][number],
+  concept: RepresentativeConceptSearchContext,
+): boolean {
+  if (constraint.attribute !== concept.field) {
+    return false;
+  }
+  const target = concept.value.normalize('NFKC').trim().toLowerCase();
+  if (target.length === 0) {
+    return false;
+  }
+  return normalizeRepresentativeValue(constraint.value).includes(target);
+}
+
+function representativeConstraintKey(
+  constraint: QueryPlanV1['constraints']['hard'][number],
+): string {
+  return JSON.stringify([
+    constraint.attribute,
+    constraint.operator,
+    constraint.value,
+    constraint.source_phrase,
+    constraint.mapping_version,
+  ]);
+}
+
+function applyRepresentativeConceptContext(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  concept: RepresentativeConceptSearchContext | undefined,
+): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
+  if (concept === undefined) {
+    return { plan, compiled };
+  }
+
+  const representativeHard = plan.constraints.hard.filter((constraint) =>
+    constraintMatchesRepresentativeConcept(constraint, concept),
+  );
+  if (representativeHard.length === 0) {
+    return { plan, compiled };
+  }
+
+  const representativeKeys = new Set(representativeHard.map(representativeConstraintKey));
+  const hard = plan.constraints.hard.filter((constraint) =>
+    !representativeKeys.has(representativeConstraintKey(constraint)),
+  );
+  const existingSoftKeys = new Set(plan.constraints.soft.map(representativeConstraintKey));
+  const demotedSoft = representativeHard.filter((constraint) =>
+    !existingSoftKeys.has(representativeConstraintKey(constraint)),
+  );
+  const constraints = {
+    ...plan.constraints,
+    hard,
+    soft: [...plan.constraints.soft, ...demotedSoft],
+  };
+  const admissionContext = {
+    requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
+    requires_constraint_evidence: hard.length > 0,
+    requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
+  } as const;
+  const nextPlan: QueryPlanV1 = {
+    ...plan,
+    constraints,
+    admission_context: admissionContext,
+  };
+  const nextCompiled: CompiledWineQuery = {
+    query: {
+      ...compiled.query,
+      constraints,
+      retrievalPlan: buildRetrievalPlan(constraints),
+      retrievalObjective: buildRetrievalObjective(constraints),
+    },
+    execution: {
+      ...compiled.execution,
+      provenancePolicy: {
+        ...compiled.execution.provenancePolicy,
+        requireConstraintEvidence: admissionContext.requires_constraint_evidence,
+      },
+    },
+    ...(compiled.plannerTrace !== undefined ? { plannerTrace: compiled.plannerTrace } : {}),
+  };
+
+  return { plan: nextPlan, compiled: nextCompiled };
+}
+
+function requestHasStructuredSetRetrievalPreference(
+  request: SearchRequest,
+): boolean {
+  return (request.preferences ?? []).some((constraint) =>
+    STRUCTURED_SET_RETRIEVAL_PREFERENCE_ATTRIBUTES.has(constraint.attribute),
+  );
+}
+
+function applyStructuredSetRetrievalContext(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  request: SearchRequest,
+): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
+  if (
+    compiled.execution.routeSource !== 'planner'
+    || compiled.execution.effectiveRoute !== 'entity'
+    || !requestHasStructuredSetRetrievalPreference(request)
+  ) {
+    return { plan, compiled };
+  }
+
+  const maxCandidates =
+    request.queryBudget?.maxCandidates
+    ?? Math.max(STRUCTURED_RECOMMENDATION_DEFAULT_MAX_CANDIDATES, compiled.execution.budget.maxCandidates);
+  const rerankLimit = Math.min(
+    maxCandidates,
+    request.queryBudget?.rerankLimit ?? STRUCTURED_RECOMMENDATION_DEFAULT_RERANK_LIMIT,
+  );
+  const admissionContext = {
+    requires_identity_seal: false,
+    requires_constraint_evidence: plan.admission_context?.requires_constraint_evidence ?? plan.constraints.hard.length > 0,
+    requires_anchor_evidence: false,
+  } as const;
+  const nextPlan: QueryPlanV1 = {
+    ...plan,
+    route: 'hybrid',
+    retrievalMode: 'recommendation',
+    admission_context: admissionContext,
+  };
+  const nextCompiled: CompiledWineQuery = {
+    ...compiled,
+    execution: {
+      ...compiled.execution,
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode: 'recommendation',
+      budget: {
+        maxCandidates,
+        rerankLimit,
+        enablePrecisionRerank: true,
+      },
+      provenancePolicy: {
+        ...compiled.execution.provenancePolicy,
+        requireIdentitySeal: false,
+        requireConstraintEvidence: admissionContext.requires_constraint_evidence,
+        requireAnchorEvidence: false,
+      },
+    },
+  };
+
+  return { plan: nextPlan, compiled: nextCompiled };
+}
 
 function resolveDecomposedSearchTimeoutMs(
   request: SearchRequest,
@@ -328,6 +497,18 @@ export async function runSearchPreRoutePhase(
         },
       };
     }
+
+    ({ plan, compiled } = applyRepresentativeConceptContext(
+      plan,
+      compiled,
+      ctx.request.representativeConcept,
+    ));
+
+    ({ plan, compiled } = applyStructuredSetRetrievalContext(
+      plan,
+      compiled,
+      ctx.request,
+    ));
 
     logSearchEvent({
       runtime_correlation_ref: ctx.requestId,

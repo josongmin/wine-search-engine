@@ -15,9 +15,8 @@ import { StructuralDrinkingWindowFormula } from './structural-drinking-window-fo
 /**
  * Deterministic drinking-window predictor.
  *
- * This is not wired into the production runtime yet. It exists as a structural
- * seam so a future parametric formula can replace the fixed formula without
- * changing use-case or port contracts.
+ * This is the runtime baseline predictor. ONNX, when configured, can override
+ * it as the learned path without changing use-case or port contracts.
  *
  * Mapping contract:
  * - formula emits offsets, never absolute years

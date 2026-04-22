@@ -7,8 +7,10 @@ export type RetrievalObjectiveAxis =
   | 'value'
   | 'drinking_window'
   | 'style'
+  | 'closure'
   | 'sweetness'
   | 'alcohol'
+  | 'producer_prestige'
   | 'presentation';
 
 export type RetrievalObjectiveSourceTier = 'hard' | 'soft' | 'inferred';
@@ -48,6 +50,8 @@ function axesForConstraint(constraint: NormalizedConstraint): readonly Retrieval
     case 'beginner_suitability':
     case 'drinking_window':
     case 'sweetness':
+    case 'closure':
+    case 'producer_prestige':
       return [constraint.attribute];
     case 'style': {
       const values = stringValues(constraint.value);

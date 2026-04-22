@@ -87,6 +87,18 @@ describe('extractClaims', () => {
     expect(ids.map((c) => c.value)).toEqual(['Cepa 21 Malabrigo']);
   });
 
+  it('does not extract producer shards split by ampersand as standalone identity claims', () => {
+    const claims = extractClaims('Moët & Chandon Brut Impérial NV를 추천합니다.');
+    const ids = claims.filter((c) => c.category === 'identity_claim').map((c) => c.value);
+    expect(ids).not.toContain('Moët');
+  });
+
+  it('does not extract pairing-list food nouns as identity claims', () => {
+    const claims = extractClaims('- 페어링: Pasta, Cheese');
+    const ids = claims.filter((c) => c.category === 'identity_claim').map((c) => c.value);
+    expect(ids).toEqual([]);
+  });
+
   it('extracts vintage year', () => {
     const claims = extractClaims('Château Margaux 2015 is excellent.');
     const vintage = claims.find((c) => c.field === 'vintage_year');
@@ -101,6 +113,12 @@ describe('extractClaims', () => {
 
   it('does not extract Korean drinking-window dash ranges as vintages', () => {
     const claims = extractClaims('음용창이 바롤로는 2017–2022, 브루넬로는 2011–2016입니다.');
+    const vintages = claims.filter((c) => c.field === 'vintage_year');
+    expect(vintages).toHaveLength(0);
+  });
+
+  it('does not extract current reference years as vintages', () => {
+    const claims = extractClaims('현재(2026) 마시기 좋고, 2026년 현재 피크 구간입니다.');
     const vintages = claims.filter((c) => c.field === 'vintage_year');
     expect(vintages).toHaveLength(0);
   });
@@ -121,6 +139,12 @@ describe('extractClaims', () => {
     const claims = extractClaims('바롤로는 약 20만 1,150원, 브루넬로는 약 53만 4,600원입니다.');
     const prices = claims.filter((c) => c.field === 'price_usd').map((c) => c.normalizedValue);
     expect(prices).toEqual(['149.00', '396.00']);
+  });
+
+  it('does not extract aggregate budgets, sums, or price-band prose as wine price claims', () => {
+    const claims = extractClaims('총 20만원, 예상 합계는 70,457원이고 3만 원대나 5만 원대 옵션도 가능합니다.');
+    const prices = claims.filter((c) => c.field === 'price_usd');
+    expect(prices).toEqual([]);
   });
 
   it('extracts grape variety', () => {

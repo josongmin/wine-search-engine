@@ -31,7 +31,7 @@ import { ConstraintOverlay } from '../../../src/domain/mixed/service/constraint-
 import type { DrinkingWindowPredictorPort } from '../../../src/domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { RerankerPort } from '../../../src/domain/ranking/port/reranker.port.js';
 import type { LearnedMatcherPort } from '../../../src/domain/resolver/port/learned-matcher.port.js';
-import { DrinkingWindowPredictor } from '../../../src/infrastructure/ml/drinking-window-predictor.js';
+import { DeterministicDrinkingWindowPredictor } from '../../../src/infrastructure/ml/deterministic-drinking-window-predictor.js';
 import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/drinking-window.usecase.js';
 import { SearchUseCase } from '../../../src/application/search/search.usecase.js';
 import { DecomposedSearchAdapter } from '../../../src/application/search/decomposed-search-adapter.js';
@@ -210,7 +210,8 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const responseBuilder = new ResponseBuilder();
   const querySanitizer = new QuerySanitizer();
   const injectionJudge = { judge: async () => false };
-  const drinkingWindowPredictor = options.drinkingWindowPredictor ?? new DrinkingWindowPredictor();
+  const drinkingWindowPredictor =
+    options.drinkingWindowPredictor ?? new DeterministicDrinkingWindowPredictor();
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const anchorProfiler = new AnchorProfiler();
   const similarityScorer = new SimilarityScorer();

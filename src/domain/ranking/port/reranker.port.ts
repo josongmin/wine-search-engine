@@ -36,6 +36,8 @@ export interface RerankResult {
  * reranking step and uses the aggregated scores directly.
  */
 export interface RerankerPort {
+  /** Optional infrastructure model identifier for audit / replay provenance. */
+  readonly modelId?: string | undefined;
   /**
    * Reranks candidates using a cross-encoder model.
    *

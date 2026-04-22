@@ -31,6 +31,23 @@ describe('verifyDeterministic — exact match', () => {
     expect(result.verdict).toBe('entailed');
     expect(result.matchType).toBe('exact_match');
   });
+
+  it('uses evidence-frame provenance metadata for anchors when present', () => {
+    const claim = makeClaim('canonical_label', 'Opus One');
+    const evidence: EvidenceRecord[] = [{
+      canonical_label: 'opus one',
+      entity_id: 'wine-1',
+      __source_tool_name: 'compare_wines',
+      __source_step_index: 3,
+      __source_tool_call_id: 'req-1-s3-p0',
+    }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.evidenceAnchor?.source).toEqual({
+      type: 'tool_observation',
+      stepIndex: 3,
+      toolName: 'compare_wines',
+    });
+  });
 });
 
 describe('verifyDeterministic — region hierarchy', () => {
@@ -64,6 +81,14 @@ describe('verifyDeterministic — grape alias', () => {
     const result = verifyDeterministic(claim, evidence);
     expect(result.matchType).toBe('normalized_match');
     expect(result.verdict).toBe('entailed');
+  });
+
+  it('grape_primary claim matches grapes array evidence', () => {
+    const claim = makeClaim('grape_primary', 'Nebbiolo');
+    const evidence: EvidenceRecord[] = [{ grapes: ['Nebbiolo'] }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('entailed');
+    expect(result.evidenceAnchor?.field).toBe('grapes');
   });
 
   it('matches grape in array evidence', () => {
@@ -205,5 +230,41 @@ describe('verifyDeterministic — Korean↔Latin cross-script matching', () => {
     const result = verifyDeterministic(claim, evidence);
     expect(result.verdict).toBe('entailed');
     expect(result.matchType).toBe('exact_match');
+  });
+
+  it('does not mark structured sublabels as contradicted identity claims', () => {
+    const claim = makeClaim('canonical_label', 'Delle Venezie', 'identity_claim');
+    const evidence: EvidenceRecord[] = [{
+      canonical_label: 'cesari pinot grigio',
+      appellation: 'delle venezie',
+      entity_id: 'wine-structured',
+    }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('not_entailed');
+    expect(result.evidenceAnchor?.field).toBe('appellation');
+    expect(result.explanation).toContain('structured field');
+  });
+
+  it('treats producer shards as partial identity matches instead of contradictions', () => {
+    const claim = makeClaim('canonical_label', 'Moët', 'identity_claim');
+    const evidence: EvidenceRecord[] = [{
+      canonical_label: 'moët & chandon brut impérial nv',
+      producer: 'moët & chandon',
+      entity_id: 'wine-moet',
+    }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('partially_entailed');
+    expect(result.matchType).toBe('normalized_match');
+  });
+
+  it('treats gapped label aliases as partial identity matches', () => {
+    const claim = makeClaim('canonical_label', 'Abremundos Red Blend', 'identity_claim');
+    const evidence: EvidenceRecord[] = [{
+      canonical_label: '2014 Abremundos Wines Octava Alta Red Blend',
+      entity_id: 'wine-abremundos',
+    }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('partially_entailed');
+    expect(result.matchType).toBe('normalized_match');
   });
 });

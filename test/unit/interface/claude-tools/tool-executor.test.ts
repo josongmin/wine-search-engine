@@ -279,6 +279,28 @@ describe('WineToolExecutor', () => {
       ]));
     });
 
+    it('should forward explicit grape_primary as a hard structured filter', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: '까쇼 추천',
+          grape_primary: 'Cabernet Sauvignon',
+        },
+        'req-grape-primary-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'grape_primary',
+          operator: '=',
+          value: 'Cabernet Sauvignon',
+        }),
+      ]));
+    });
+
     it('should forward occasion and learned suitability constraints into SearchRequest preferences', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
 
@@ -289,6 +311,7 @@ describe('WineToolExecutor', () => {
           occasion: ['gift', 'anniversary'],
           gift_suitability_min: 0.7,
           beginner_suitability_min: 0.65,
+          producer_prestige_min: 0.72,
           styles: ['approachable', 'crowd_pleasing'],
         },
         'req-latent-intent-123',
@@ -303,8 +326,28 @@ describe('WineToolExecutor', () => {
         expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift', 'anniversary'] }),
         expect.objectContaining({ attribute: 'gift_suitability', operator: '>=', value: 0.7 }),
         expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.65 }),
+        expect.objectContaining({ attribute: 'producer_prestige', operator: '>=', value: 0.72 }),
       ]));
       expect(request.filters).toBeUndefined();
+    });
+
+    it('should map screw_cap style hints to closure evidence instead of unsupported style matching', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: 'camping wine',
+          styles: ['screw_cap', 'chillable'],
+        },
+        'req-screwcap-closure-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      expect(request.preferences).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'closure', operator: '=', value: 'screw cap' }),
+        expect.objectContaining({ attribute: 'style', operator: 'in', value: ['chillable'] }),
+      ]));
     });
 
     it('should coerce numeric strings for structured search fields', async () => {
@@ -673,10 +716,11 @@ describe('WineToolExecutor', () => {
       await executor.execute('get_food_pairings', { food: 'grilled salmon' }, 'req-123');
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('wines for grilled salmon');
+      expect(request.query).toContain('wine pairing for grilled salmon');
+      expect(request.options).toEqual({ mode: 'hybrid', explain: false, clarification: false });
     });
 
-    it('should include color in query when provided', async () => {
+    it('should keep color as a structured filter instead of lexical anchor when provided', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
 
       await executor.execute(
@@ -686,7 +730,10 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('red wine');
+      expect(request.query).not.toContain('red wine');
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+      ]));
     });
 
     it('should treat color both as no hard color filter', async () => {
@@ -699,7 +746,7 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
-      expect(request.query).toContain('wines for ssam');
+      expect(request.query).toContain('wine pairing for ssam');
       expect(request.query).not.toContain('both wine');
     });
 
@@ -728,6 +775,39 @@ describe('WineToolExecutor', () => {
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       expect(request.query).toContain('30000원 이하');
       expect(request.query).not.toContain('67500');
+    });
+
+    it('should forward typed pairing objectives as structured filters and preferences', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'get_food_pairings',
+        {
+          food: '매운 떡볶이',
+          color: 'white',
+          sweetness_target: 0.35,
+          acidity_min: 6,
+          tannin_max: 3,
+          styles: ['off_dry'],
+          pairing_tags: ['spicy_food'],
+        },
+        'req-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
+      expect(request.query).toContain('off_dry');
+      expect(request.query).toContain('spicy_food');
+      expect(request.filters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'white' }),
+      ]));
+      expect(request.preferences).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.2 }),
+        expect.objectContaining({ attribute: 'sweetness', operator: '<=', value: 0.6 }),
+        expect.objectContaining({ attribute: 'sweetness', operator: '=', value: 0.35 }),
+        expect.objectContaining({ attribute: 'acidity', operator: '>=', value: 6 }),
+        expect.objectContaining({ attribute: 'tannin', operator: '<=', value: 3 }),
+        expect.objectContaining({ attribute: 'pairing', operator: 'in', value: ['spicy_food'] }),
+      ]));
     });
 
     it('should pass requestId correctly', async () => {
@@ -977,6 +1057,8 @@ describe('WineToolExecutor', () => {
         retrievalMode: 'hybrid',
         canonicalConcept: expect.stringMatching(/^brunello di montalcino$/i),
       }));
+      expect(comparisonLegs[0].retrievalQuery.toLowerCase()).toContain('barolo wine');
+      expect(comparisonLegs[1].retrievalQuery.toLowerCase()).toContain('brunello di montalcino wine');
       expect(comparisonLegs[0].retrievalQuery).toContain('50000원 이하');
       expect(comparisonLegs[1].retrievalQuery).toContain('50000원 이하');
       expect(originalQuery).toContain('50000원 이하');
@@ -1021,6 +1103,43 @@ describe('WineToolExecutor', () => {
       );
     });
 
+    it('forwards side-specific comparison filters to each leg independently', async () => {
+      vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
+        mockComparisonResponse,
+      );
+
+      await executor.execute(
+        'compare_wines',
+        {
+          query_a: '말벡',
+          query_b: '말벡',
+          country_a: 'France',
+          country_b: 'Argentina',
+          region_b: 'Mendoza',
+        },
+        'compare-req-side-filters-123',
+      );
+
+      const [, comparisonLegs, , , , , parentContext] = vi.mocked(
+        mockDecomposedSearchUseCase.execute,
+      ).mock.calls.at(-1)!;
+
+      expect(comparisonLegs[0].retrievalQuery.toLowerCase()).toContain('malbec');
+      expect(comparisonLegs[1].retrievalQuery.toLowerCase()).toContain('malbec');
+      expect(parentContext?.filters ?? []).toHaveLength(0);
+      expect(parentContext?.perSideFilters?.[0]).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'country', operator: '=', value: 'France' }),
+        ]),
+      );
+      expect(parentContext?.perSideFilters?.[1]).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'country', operator: '=', value: 'Argentina' }),
+          expect.objectContaining({ attribute: 'region', operator: '=', value: 'Mendoza' }),
+        ]),
+      );
+    });
+
     it('should forward shared occasion and suitability constraints to comparison legs', async () => {
       vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
         mockComparisonResponse,
@@ -1051,6 +1170,67 @@ describe('WineToolExecutor', () => {
           expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
           expect.objectContaining({ attribute: 'gift_suitability', operator: '>=', value: 0.75 }),
           expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.6 }),
+        ]),
+      );
+    });
+
+    it('should forward shared drinking-window objective to comparison legs', async () => {
+      vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
+        mockComparisonResponse,
+      );
+
+      await executor.execute(
+        'compare_wines',
+        {
+          query_a: 'Barolo',
+          query_b: 'Brunello di Montalcino',
+          drinking_window: 'now',
+          drinking_window_target_year: 2026,
+        },
+        'compare-req-drinkability-123',
+      );
+
+      const [, comparisonLegs, , , , , parentContext] = vi.mocked(
+        mockDecomposedSearchUseCase.execute,
+      ).mock.calls.at(-1)!;
+
+      expect(comparisonLegs[0].retrievalQuery).toContain('Barolo wine');
+      expect(comparisonLegs[1].retrievalQuery).toContain('Brunello di Montalcino wine');
+      expect(parentContext?.preferences).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'drinking_window', operator: '=', value: 2026 }),
+        ]),
+      );
+    });
+
+    it('should propagate shared grape_primary filters into comparison legs and parent context', async () => {
+      vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
+        mockComparisonResponse,
+      );
+
+      await executor.execute(
+        'compare_wines',
+        {
+          query_a: '나파',
+          query_b: '보르도',
+          grape_primary: 'Cabernet Sauvignon',
+        },
+        'compare-req-grape-primary-123',
+      );
+
+      const [, comparisonLegs, , , , , parentContext] = vi.mocked(
+        mockDecomposedSearchUseCase.execute,
+      ).mock.calls.at(-1)!;
+
+      expect(comparisonLegs[0].retrievalQuery).toContain('Cabernet Sauvignon');
+      expect(comparisonLegs[1].retrievalQuery).toContain('Cabernet Sauvignon');
+      expect(parentContext?.filters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            attribute: 'grape_primary',
+            operator: '=',
+            value: 'Cabernet Sauvignon',
+          }),
         ]),
       );
     });

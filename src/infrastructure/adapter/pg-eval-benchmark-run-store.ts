@@ -9,6 +9,8 @@ import type {
   EvalBenchmarkRunFilter,
   EvalBenchmarkRunStore,
 } from '../../domain/evaluation/port/eval-benchmark-run-store.port.js';
+import { ensureEvalBenchmarkLedgerBootstrap } from '../db/eval-benchmark-ledger-bootstrap.js';
+import { readPgSqlState } from '../db/pg-sqlstate.js';
 
 interface EvalBenchmarkRunRow {
   run_id: string;
@@ -89,70 +91,87 @@ function rowToEvalBenchmarkRun(row: EvalBenchmarkRunRow): EvalBenchmarkRun {
 export class PgEvalBenchmarkRunStore implements EvalBenchmarkRunStore {
   constructor(private readonly pool: Pool) {}
 
+  private async withLedgerBootstrapRetry<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (err) {
+      const code = readPgSqlState(err);
+      if (code !== '42P01' && code !== '42703') {
+        throw err;
+      }
+      await ensureEvalBenchmarkLedgerBootstrap(this.pool);
+      return operation();
+    }
+  }
+
   async saveRun(run: EvalBenchmarkRunInput): Promise<string> {
-    const runId = nanoid();
-    await this.pool.query(
-      `INSERT INTO eval_benchmark_runs (
-        run_id, benchmark_kind, search_snapshot_id, eval_dataset_version, feature_schema_hash,
-        query_count, recall_at_1, recall_at_3, mrr, false_exact_rate,
-        release_gate_passed, activation_status, report_json, metrics, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [
-        runId,
-        run.benchmarkKind,
-        run.snapshotId ?? null,
-        run.evalDatasetVersion,
-        run.featureSchemaHash,
-        run.queryCount,
-        run.recallAt1 ?? null,
-        run.recallAt3 ?? null,
-        run.mrr ?? null,
-        run.falseExactRate ?? null,
-        run.releaseGatePassed,
-        run.activationStatus,
-        JSON.stringify(run.report),
-        run.metrics != null ? JSON.stringify(run.metrics) : null,
-        run.createdAt ?? new Date(),
-      ],
-    );
-    return runId;
+    return this.withLedgerBootstrapRetry(async () => {
+      const runId = nanoid();
+      await this.pool.query(
+        `INSERT INTO eval_benchmark_runs (
+          run_id, benchmark_kind, search_snapshot_id, eval_dataset_version, feature_schema_hash,
+          query_count, recall_at_1, recall_at_3, mrr, false_exact_rate,
+          release_gate_passed, activation_status, report_json, metrics, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        [
+          runId,
+          run.benchmarkKind,
+          run.snapshotId ?? null,
+          run.evalDatasetVersion,
+          run.featureSchemaHash,
+          run.queryCount,
+          run.recallAt1 ?? null,
+          run.recallAt3 ?? null,
+          run.mrr ?? null,
+          run.falseExactRate ?? null,
+          run.releaseGatePassed,
+          run.activationStatus,
+          JSON.stringify(run.report),
+          run.metrics != null ? JSON.stringify(run.metrics) : null,
+          run.createdAt ?? new Date(),
+        ],
+      );
+      return runId;
+    });
   }
 
   async listRuns(filter?: EvalBenchmarkRunFilter): Promise<readonly EvalBenchmarkRun[]> {
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-    let index = 1;
+    return this.withLedgerBootstrapRetry(async () => {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      let index = 1;
 
-    if (filter?.benchmarkKind !== undefined) {
-      conditions.push(`benchmark_kind = $${index++}`);
-      params.push(filter.benchmarkKind);
-    }
-    if (filter?.snapshotId !== undefined) {
-      conditions.push(`search_snapshot_id = $${index++}`);
-      params.push(filter.snapshotId);
-    }
-    if (filter?.since !== undefined) {
-      conditions.push(`created_at >= $${index++}`);
-      params.push(filter.since);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    let limitClause = '';
-    if (filter?.limit !== undefined) {
-      const safeLimit = Math.max(1, Math.trunc(filter.limit));
-      if (Number.isFinite(safeLimit)) {
-        params.push(safeLimit);
-        limitClause = `LIMIT $${params.length}`;
+      if (filter?.benchmarkKind !== undefined) {
+        conditions.push(`benchmark_kind = $${index++}`);
+        params.push(filter.benchmarkKind);
       }
-    }
-    const result = await this.pool.query<EvalBenchmarkRunRow>(
-      `SELECT *
-       FROM eval_benchmark_runs
-       ${whereClause}
-       ORDER BY created_at DESC
-       ${limitClause}`,
-      params,
-    );
-    return result.rows.map(rowToEvalBenchmarkRun);
+      if (filter?.snapshotId !== undefined) {
+        conditions.push(`search_snapshot_id = $${index++}`);
+        params.push(filter.snapshotId);
+      }
+      if (filter?.since !== undefined) {
+        conditions.push(`created_at >= $${index++}`);
+        params.push(filter.since);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      let limitClause = '';
+      if (filter?.limit !== undefined) {
+        const safeLimit = Math.max(1, Math.trunc(filter.limit));
+        if (Number.isFinite(safeLimit)) {
+          params.push(safeLimit);
+          limitClause = `LIMIT $${params.length}`;
+        }
+      }
+      const result = await this.pool.query<EvalBenchmarkRunRow>(
+        `SELECT *
+         FROM eval_benchmark_runs
+         ${whereClause}
+         ORDER BY created_at DESC
+         ${limitClause}`,
+        params,
+      );
+      return result.rows.map(rowToEvalBenchmarkRun);
+    });
   }
 }

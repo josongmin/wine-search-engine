@@ -121,6 +121,7 @@ export async function buildCoreContainerServices(
     browseRetriever,
     compareRetriever,
     entityLookup: adapters.searchIndex,
+    ...(adapters.chatLlm !== undefined ? { chatLlm: adapters.chatLlm } : {}),
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),
     responseBuilder: buildResponseBuilder(),

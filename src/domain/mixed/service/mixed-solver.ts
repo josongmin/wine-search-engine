@@ -138,6 +138,7 @@ export class MixedSolver {
     let candidates = await this.similarRetrieval.retrieveSimilar(
       anchorProfile,
       this.retrievalLimit,
+      queryPlan.constraints.hard,
     );
     let fallbackReason: MixedFallbackReason | undefined;
 

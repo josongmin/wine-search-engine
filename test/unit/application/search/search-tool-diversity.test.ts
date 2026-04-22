@@ -130,4 +130,30 @@ describe('executeSearchWithTypedWineDiversityDiscovery', () => {
       stageTimer,
     });
   });
+
+  it('keeps surviving typed search results when one diversity branch throws', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async (_request: SearchRequest, requestId: string): Promise<SearchExecutorResult> => {
+        if (requestId.endsWith(':diversity:sparkling')) {
+          throw new Error('HTTP/2 GOAWAY');
+        }
+        return makeSearchResponse(requestId);
+      }),
+    } satisfies SearchExecutorPort;
+
+    const response = await executeSearchWithTypedWineDiversityDiscovery({
+      searchUseCase,
+      requestId: 'req-4',
+      fallbackRequest: { query: 'find fallback wines' },
+      effectiveLimit: 5,
+      shouldRun: true,
+      buildTypedRequest: (wineType) => ({
+        query: `find ${wineType} wines`,
+      }),
+    });
+
+    expect(searchUseCase.execute).toHaveBeenCalledTimes(3);
+    expect(response.queryType).toBe('search');
+    expect(response.meta.requestId).toBe('req-4');
+  });
 });

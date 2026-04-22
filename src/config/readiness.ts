@@ -8,7 +8,7 @@ import {
 } from './watchlist.js';
 import { probeJsonPostEndpoint } from '../infrastructure/health/readiness-probes.js';
 import {
-  probeSearchSnapshotRuntimeState,
+  loadSearchSnapshotRuntimeState,
   verifySearchSnapshotRuntimeStateLive,
 } from '../infrastructure/health/search-snapshot-readiness.js';
 import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
@@ -16,15 +16,30 @@ import { createSnapshotHealthReader } from '../infrastructure/health/snapshot-he
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
+import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
+import { inspectEvalBenchmarkLedgerStatus } from '../infrastructure/db/eval-benchmark-ledger-bootstrap.js';
+import type { Pool, PoolClient } from 'pg';
 import type {
   HealthRouteOptions,
   ReadinessStatus,
 } from '../interface/http/routes/health.route.js';
 import { bootstrapLogger } from './bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
+import { isRuntimeSupportedDrinkingWindowModelVersion } from '../application/search/drinking-window-confidence.js';
 
 const log = bootstrapLogger.child({ component: 'readiness' });
 const PROBE_TIMEOUT_MS = 3_000;
+
+async function raceWithProbeTimeout<T>(
+  operation: Promise<T>,
+  timeoutMessage: string,
+  timerRef: { current?: ReturnType<typeof setTimeout> | undefined },
+): Promise<T> {
+  const timeoutPromise: Promise<never> = new Promise((_, reject) => {
+    timerRef.current = setTimeout(() => { reject(new Error(timeoutMessage)); }, PROBE_TIMEOUT_MS);
+  });
+  return await Promise.race<T | never>([operation, timeoutPromise]);
+}
 
 async function probePostgres(
   pool: NonNullable<RuntimeHandles['pool']>,
@@ -97,6 +112,70 @@ async function probeCalibrationStore(
   }
 }
 
+async function probeBenchmarkPersistence(pool: Pool): Promise<ReadinessStatus> {
+  let client: PoolClient | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timerRef: { current?: ReturnType<typeof setTimeout> | undefined } = {};
+  try {
+    client = await raceWithProbeTimeout(
+      pool.connect(),
+      'benchmark persistence connect timeout',
+      timerRef,
+    );
+    timer = timerRef.current;
+    if (client === undefined) {
+      throw new Error('benchmark persistence connect returned no client');
+    }
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+
+    const status = await raceWithProbeTimeout(
+      inspectEvalBenchmarkLedgerStatus(client),
+      'benchmark persistence schema probe timeout',
+      timerRef,
+    );
+    timer = timerRef.current;
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (status.missingObjects.length > 0) {
+      throw new Error(`missing objects: ${status.missingObjects.join(', ')}`);
+    }
+    if (status.missingColumns.length > 0) {
+      throw new Error(`missing columns: ${status.missingColumns.join(', ')}`);
+    }
+    if (!status.canInsert) {
+      throw new Error('missing INSERT privilege on eval_benchmark_runs');
+    }
+    return 'up';
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`benchmark persistence unavailable: ${detail}`);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    client?.release();
+  }
+}
+
+async function probeRuntimeLtrArtifact(path: string): Promise<ReadinessStatus> {
+  const runtimeModels = await loadRuntimeLtrModels(path);
+  if (runtimeModels === undefined) {
+    throw new Error(`runtime LTR artifact unavailable at ${path}`);
+  }
+  return runtimeModels.size > 0 ? 'up' : 'down';
+}
+
+async function probeSearchSnapshotRuntimeWithoutPool(): Promise<ReadinessStatus> {
+  const runtimeState = await loadSearchSnapshotRuntimeState();
+  if (!runtimeState.allowMissingLtr && runtimeState.counts.activeLtrModels <= 0) {
+    throw new Error('Active LTR runtime count is zero without explicit no-LTR mode');
+  }
+  return 'up';
+}
+
 async function probeAliasSubstrate(
   pool: NonNullable<RuntimeHandles['pool']>,
 ): Promise<ReadinessStatus> {
@@ -148,6 +227,10 @@ export function buildHealthRouteOptions(
   const redisRequired = expectsRedis;
   const isProduction = config.nodeEnv === 'production';
   const hasPool = runtime.pool !== undefined;
+  const runtimeLtrModelsPath = config.runtimeLtrModelsPath;
+  const runtimePool = runtime.pool;
+  const runStartupEval = config.eval?.runAtStartup === true;
+  const rerankerConfigured = config.cohere.apiKey !== undefined;
   const blockerZeroCandidatesBaseline =
     globalSilentSkipCounter.snapshot().blocker_zero_candidates;
 
@@ -225,7 +308,10 @@ export function buildHealthRouteOptions(
         required: true, // T-E7-02: strict fail-closed regardless of NODE_ENV
         check: async (): Promise<ReadinessStatus> => {
           if (runtime.pool === undefined) {
-            return isProduction ? 'down' : probeSearchSnapshotRuntimeState();
+            if (isProduction) {
+              return 'down';
+            }
+            return probeSearchSnapshotRuntimeWithoutPool();
           }
           try {
             await verifySearchSnapshotRuntimeStateLive({
@@ -243,6 +329,33 @@ export function buildHealthRouteOptions(
           }
         },
       },
+      ...(runtimeLtrModelsPath !== undefined
+        ? {
+            runtime_ltr_artifact: {
+              required: !rerankerConfigured,
+              check: async (): Promise<ReadinessStatus> =>
+                probeRuntimeLtrArtifact(runtimeLtrModelsPath),
+            },
+          }
+        : {}),
+      ...(rerankerConfigured
+        ? {
+            reranker: {
+              required: false,
+              check: async (): Promise<ReadinessStatus> =>
+                probeJsonPostEndpoint(
+                  `${config.cohere.baseUrl.replace(/\/$/, '')}/rerank`,
+                  {
+                    model: config.cohere.rerankModel,
+                    query: '__healthcheck__',
+                    documents: ['__healthcheck__'],
+                    top_n: 1,
+                  },
+                  { Authorization: `Bearer ${config.cohere.apiKey}` },
+                ),
+            },
+          }
+        : {}),
       blocking_zero_candidates: {
         required: false,
         check: (): ReadinessStatus =>
@@ -285,13 +398,36 @@ export function buildHealthRouteOptions(
         ? {
             drinking_window_model: {
               required: false,
-              check: (): Promise<ReadinessStatus> =>
-                Promise.resolve(
-                  drinkingWindowPredictor.modelVersion.startsWith('onnx:') ? 'up' : 'down',
-                ),
+              check: async (): Promise<ReadinessStatus> => {
+                if (drinkingWindowPredictor.modelVersion === 'unloaded') {
+                  throw new Error('drinking window predictor unloaded');
+                }
+                if (!isRuntimeSupportedDrinkingWindowModelVersion(drinkingWindowPredictor.modelVersion)) {
+                  throw new Error(`drinking window predictor is not a supported runtime model: ${drinkingWindowPredictor.modelVersion}`);
+                }
+                return 'up';
+              },
             },
           }
         : {}),
+      ...(runStartupEval && runtimePool !== undefined
+        ? {
+            benchmark_persistence: {
+              required: true,
+              check: async (): Promise<ReadinessStatus> =>
+                probeBenchmarkPersistence(runtimePool),
+            },
+          }
+        : runStartupEval
+          ? {
+              benchmark_persistence: {
+                required: true,
+                check: async (): Promise<ReadinessStatus> => {
+                  throw new Error('benchmark persistence unavailable: PostgreSQL pool missing');
+                },
+              },
+            }
+          : {}),
       ...(config.nodeEnv === 'production' && calibrationStore !== undefined
         ? {
             calibration_store: {

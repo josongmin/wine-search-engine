@@ -21,6 +21,7 @@ export const PAIRING_TAXONOMY = [
   'tuna',
   'shellfish',
   'white_fish',
+  'spicy_food',
 
   // Vegetarian
   'mushroom',
@@ -47,7 +48,8 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Beef
   beef: [
     /(?<!\p{L})(?<!\p{N})(?:beef|steak|ribeye|filet|sirloin|t[\s-]?bone)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:소고기(?:용)?|스테이크(?:용)?|비프(?:용)?|소|쇠고기(?:용)?)(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:소고기|스테이크|비프|쇠고기)(?:용|에|와|과|랑|이랑|하고)?(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])소(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Lamb
@@ -56,11 +58,11 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Pork
   pork: [
     /(?<!\p{L})(?<!\p{N})(?:pork|ham|bacon|chop|loin)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:돼지고기|돼지|햄|베이컨)(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:돼지고기|돼지|햄|베이컨|삼겹살)(?:이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Chicken
-  chicken: [/(?<!\p{L})(?<!\p{N})(?:chicken|poultry|fowl)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:닭|닭고기|가금류)(?=$|[^\p{L}\p{N}])/u],
+  chicken: [/(?<!\p{L})(?<!\p{N})(?:chicken|poultry|fowl)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:닭|닭고기|치킨|가금류)(?:이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u],
 
   // Duck
   duck: [/(?<!\p{L})(?<!\p{N})(?:duck|confit|magret)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:오리|오리고기|덕)(?=$|[^\p{L}\p{N}])/u],
@@ -85,8 +87,14 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
 
   // White fish
   white_fish: [
-    /(?<!\p{L})(?<!\p{N})(?:cod|halibut|flounder|sole|sea bass|branzino|white fish)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:흰살고기|대구|넙치|광어|농어)(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:cod|halibut|flounder|sole|sea bass|branzino|white fish|sashimi|raw fish)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:흰살고기|대구|넙치|광어|농어|회|사시미)(?:랑|하고|과|와|를)?(?=$|[^\p{L}\p{N}])/u,
+  ],
+
+  // Spicy food
+  spicy_food: [
+    /(?<!\p{L})(?<!\p{N})(?:spicy food|spicy|tteokbokki|topokki)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:매운\s*음식|매콤한\s*음식|떡볶이|매운\s*떡볶이)(?:랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Mushroom

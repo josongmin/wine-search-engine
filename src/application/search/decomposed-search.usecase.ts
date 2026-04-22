@@ -19,6 +19,8 @@ import type {
   ComparisonDecompositionLegs,
   ComparisonIntent,
 } from '../../domain/query/model/query-decomposition.js';
+import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 export class UnexpectedDecomposedResponseError extends DomainError {
   constructor() {
@@ -32,6 +34,218 @@ export class UnexpectedDecomposedResponseError extends DomainError {
 
 export class DecomposedSearchUseCase {
   constructor(private readonly searchUseCase: SearchExecutorPort) {}
+
+  private normalizeConceptValue(value: string | undefined): string | undefined {
+    const normalized = value?.normalize('NFKC').trim().toLowerCase();
+    return normalized !== undefined && normalized.length > 0 ? normalized : undefined;
+  }
+
+  private normalizeComparableString(value: string | undefined): string | undefined {
+    const normalized = value
+      ?.trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    return normalized !== undefined && normalized.length > 0 ? normalized : undefined;
+  }
+
+  private geographyContains(
+    observed: string | undefined,
+    expected: string | undefined,
+  ): boolean {
+    const normalizedObserved = this.normalizeComparableString(observed);
+    const normalizedExpected = this.normalizeComparableString(expected);
+    return normalizedObserved !== undefined
+      && normalizedExpected !== undefined
+      && normalizedObserved.includes(normalizedExpected);
+  }
+
+  private splitRegionPath(value: string | undefined): readonly string[] {
+    if (value === undefined) {
+      return [];
+    }
+    return value
+      .split('/')
+      .map((part) => this.normalizeConceptValue(part))
+      .filter((part): part is string => part !== undefined);
+  }
+
+  private resultMatchesConcept(
+    result: SearchResponseV1['results'][number],
+    conceptEntityType: NonNullable<ComparisonEntity['conceptEntityType']>,
+    canonicalConcept: string,
+  ): boolean {
+    const canonical = this.normalizeConceptValue(canonicalConcept);
+    if (canonical === undefined) {
+      return false;
+    }
+
+    switch (conceptEntityType) {
+      case 'country':
+        return this.geographyContains(result.entity.country, canonicalConcept);
+      case 'region':
+        return this.splitRegionPath(result.entity.region).includes(canonical)
+          || this.geographyContains(result.entity.region, canonicalConcept);
+      case 'appellation':
+        return this.geographyContains(result.entity.appellation, canonicalConcept);
+      case 'grape_primary':
+        return (result.entity.grapes ?? [])
+          .map((grape) => this.normalizeConceptValue(grape))
+          .includes(canonical);
+      case 'wine_type':
+        return this.normalizeConceptValue(result.entity.wineType) === canonical;
+    }
+  }
+
+  private resultMatchesConstraint(
+    result: SearchResponseV1['results'][number],
+    constraint: NormalizedConstraint,
+  ): boolean {
+    const normalize = (value: string | undefined) => this.normalizeConceptValue(value);
+    const entity = result.entity;
+
+    switch (constraint.attribute) {
+      case 'country': {
+        const target = typeof constraint.value === 'string' ? normalize(constraint.value) : undefined;
+        if (target === undefined) {
+          return false;
+        }
+        const includes = this.geographyContains(entity.country, target);
+        return constraint.operator === 'exclude' ? !includes : includes;
+      }
+      case 'region': {
+        const target = typeof constraint.value === 'string' ? normalize(constraint.value) : undefined;
+        if (target === undefined) {
+          return false;
+        }
+        const observed = this.splitRegionPath(entity.region);
+        const includes = observed.includes(target) || this.geographyContains(entity.region, target);
+        return constraint.operator === 'exclude' ? !includes : includes;
+      }
+      case 'appellation': {
+        const target = typeof constraint.value === 'string' ? normalize(constraint.value) : undefined;
+        if (target === undefined) {
+          return false;
+        }
+        const includes = this.geographyContains(entity.appellation, target);
+        return constraint.operator === 'exclude' ? !includes : includes;
+      }
+      case 'grape_primary': {
+        const target = typeof constraint.value === 'string' ? normalize(constraint.value) : undefined;
+        if (target === undefined) {
+          return false;
+        }
+        const grapes = (entity.grapes ?? [])
+          .map((grape) => normalize(grape))
+          .filter((grape): grape is string => grape !== undefined);
+        const includes = grapes.includes(target);
+        return constraint.operator === 'exclude' ? !includes : includes;
+      }
+      case 'wine_type': {
+        const target = typeof constraint.value === 'string' ? normalize(constraint.value) : undefined;
+        const observed = normalize(entity.wineType);
+        if (target === undefined || observed === undefined) {
+          return false;
+        }
+        return constraint.operator === 'exclude' ? observed !== target : observed === target;
+      }
+      case 'vintage_year': {
+        const observed = entity.vintage;
+        if (typeof observed !== 'number' || !Number.isFinite(observed) || typeof constraint.value !== 'number') {
+          return false;
+        }
+        if (constraint.operator === '>=') {
+          return observed >= constraint.value;
+        }
+        if (constraint.operator === '<=') {
+          return observed <= constraint.value;
+        }
+        if (constraint.operator === '=') {
+          return observed === constraint.value;
+        }
+        return false;
+      }
+      default:
+        return true;
+    }
+  }
+
+  private applySideFilters(
+    results: readonly SearchResponseV1['results'][number][],
+    sideFilters: readonly NormalizedConstraint[] | undefined,
+  ): readonly SearchResponseV1['results'][number][] {
+    if (sideFilters === undefined || sideFilters.length === 0) {
+      return results;
+    }
+    return results.filter((entry) =>
+      sideFilters.every((constraint) => this.resultMatchesConstraint(entry, constraint)),
+    );
+  }
+
+  private buildConceptConsistentResultSet(
+    leg: ComparisonDecompositionLegs[number],
+    result: SearchResponseV1,
+    sideFilters?: readonly NormalizedConstraint[],
+  ): readonly SearchResponseV1['results'][number][] {
+    const conceptEntityType = leg.conceptEntityType;
+    const canonicalConcept = leg.canonicalConcept;
+    if (
+      leg.mode !== 'concept'
+      || canonicalConcept === undefined
+      || conceptEntityType === undefined
+    ) {
+      return this.applySideFilters(result.results, sideFilters);
+    }
+
+    return this.applySideFilters(result.results.filter((entry) =>
+      this.resultMatchesConcept(entry, conceptEntityType, canonicalConcept),
+    ), sideFilters);
+  }
+
+  private buildComparisonEntity(
+    subQuery: string,
+    leg: ComparisonDecompositionLegs[number],
+    result: SearchResponseV1,
+    sideFilters?: readonly NormalizedConstraint[],
+  ): ComparisonEntity {
+    const allResults = this.buildConceptConsistentResultSet(leg, result, sideFilters);
+    const topResult = allResults[0] ?? null;
+    const isConceptLeg = leg.mode === 'concept';
+
+    return {
+      subQuery,
+      comparisonMode: leg.mode,
+      ...(leg.canonicalConcept !== undefined
+        ? { canonicalConcept: leg.canonicalConcept }
+        : {}),
+      ...(leg.conceptEntityType !== undefined
+        ? { conceptEntityType: leg.conceptEntityType }
+        : {}),
+      ...(isConceptLeg
+        && leg.canonicalConcept !== undefined
+        && leg.conceptEntityType !== undefined
+        ? {
+            conceptAggregate: {
+              canonicalConcept: leg.canonicalConcept,
+              conceptEntityType: leg.conceptEntityType,
+              representativeResult: topResult,
+              prototypeAxis: allResults,
+              aggregateResultCount: allResults.length,
+            },
+          }
+        : {}),
+      topResult,
+      resultCount: allResults.length,
+      resolutionStatus: result.engineDecision.decisionStatus === 'failed'
+        ? 'failed'
+        : isConceptLeg && allResults.length > 0
+          ? 'resolved'
+          : isConceptLeg
+            ? 'failed'
+          : result.engineDecision.decisionStatus,
+      allResults,
+    };
+  }
 
   /**
    * Executes two reused searches for a decomposed comparison.
@@ -77,7 +291,25 @@ export class DecomposedSearchUseCase {
       this.searchUseCase.execute(
         {
           ...baseRequest,
+          ...(parentContext?.perSideFilters?.[0] !== undefined
+            ? {
+                filters: [
+                  ...(baseRequest.filters ?? []),
+                  ...parentContext.perSideFilters[0],
+                ],
+              }
+            : {}),
           query: comparisonLegs[0].retrievalQuery,
+          ...(comparisonLegs[0].mode === 'concept'
+            && comparisonLegs[0].conceptEntityType !== undefined
+            && comparisonLegs[0].canonicalConcept !== undefined
+            ? {
+                representativeConcept: {
+                  field: comparisonLegs[0].conceptEntityType,
+                  value: comparisonLegs[0].canonicalConcept,
+                },
+              }
+            : {}),
           options: {
             explain: parentContext?.explain ?? false,
             clarification: false,
@@ -90,7 +322,25 @@ export class DecomposedSearchUseCase {
       this.searchUseCase.execute(
         {
           ...baseRequest,
+          ...(parentContext?.perSideFilters?.[1] !== undefined
+            ? {
+                filters: [
+                  ...(baseRequest.filters ?? []),
+                  ...parentContext.perSideFilters[1],
+                ],
+              }
+            : {}),
           query: comparisonLegs[1].retrievalQuery,
+          ...(comparisonLegs[1].mode === 'concept'
+            && comparisonLegs[1].conceptEntityType !== undefined
+            && comparisonLegs[1].canonicalConcept !== undefined
+            ? {
+                representativeConcept: {
+                  field: comparisonLegs[1].conceptEntityType,
+                  value: comparisonLegs[1].canonicalConcept,
+                },
+              }
+            : {}),
           options: {
             explain: parentContext?.explain ?? false,
             clarification: false,
@@ -120,39 +370,18 @@ export class DecomposedSearchUseCase {
     const resultB = rawResultB;
 
     // Build comparison entities from SearchResponseV1 results
-    const entityA: ComparisonEntity = {
-      subQuery: subQueries[0],
-      comparisonMode: comparisonLegs[0].mode,
-      ...(comparisonLegs[0].canonicalConcept !== undefined
-        ? { canonicalConcept: comparisonLegs[0].canonicalConcept }
-        : {}),
-      ...(comparisonLegs[0].conceptEntityType !== undefined
-        ? { conceptEntityType: comparisonLegs[0].conceptEntityType }
-        : {}),
-      topResult: resultA.results[0] ?? null,
-      resultCount: resultA.results.length,
-      resolutionStatus: comparisonLegs[0].mode === 'concept' && resultA.results.length > 0
-        ? 'resolved'
-        : resultA.engineDecision.decisionStatus,
-      allResults: resultA.results,
-    };
-
-    const entityB: ComparisonEntity = {
-      subQuery: subQueries[1],
-      comparisonMode: comparisonLegs[1].mode,
-      ...(comparisonLegs[1].canonicalConcept !== undefined
-        ? { canonicalConcept: comparisonLegs[1].canonicalConcept }
-        : {}),
-      ...(comparisonLegs[1].conceptEntityType !== undefined
-        ? { conceptEntityType: comparisonLegs[1].conceptEntityType }
-        : {}),
-      topResult: resultB.results[0] ?? null,
-      resultCount: resultB.results.length,
-      resolutionStatus: comparisonLegs[1].mode === 'concept' && resultB.results.length > 0
-        ? 'resolved'
-        : resultB.engineDecision.decisionStatus,
-      allResults: resultB.results,
-    };
+    const entityA = this.buildComparisonEntity(
+      subQueries[0],
+      comparisonLegs[0],
+      resultA,
+      parentContext?.perSideFilters?.[0],
+    );
+    const entityB = this.buildComparisonEntity(
+      subQueries[1],
+      comparisonLegs[1],
+      resultB,
+      parentContext?.perSideFilters?.[1],
+    );
 
     // Compute overall status
     const overallStatus = this.computeOverallStatus(

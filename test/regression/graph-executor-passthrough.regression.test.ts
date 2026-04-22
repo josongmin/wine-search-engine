@@ -132,6 +132,30 @@ describe('executeGraphAware passthrough (ADR-013)', () => {
     expect(r.candidates).toBe(STUB_POOL_OUTPUT);
   });
 
+  it('binds candidatePool.execute so class-backed ports keep their receiver state', async () => {
+    class StatefulPool implements CandidatePoolPort {
+      private readonly candidates = [mkCandidate('bound-this')];
+
+      async execute(): Promise<readonly HybridCandidate[]> {
+        return this.candidates;
+      }
+
+      async generate(): Promise<readonly HybridCandidate[]> {
+        return this.candidates;
+      }
+    }
+
+    const statefulDeps: GraphExecutorDeps = {
+      candidatePool: new StatefulPool(),
+      bundleSelector: new BundleSelectorImpl(),
+    };
+
+    const r = await executeGraphAware(stubInput, undefined, statefulDeps, baseOpts);
+
+    expect(r.mode).toBe('passthrough');
+    expect(r.candidates).toEqual([expect.objectContaining({ entityId: 'bound-this' })]);
+  });
+
   it('flag on, graph undefined → pass-through', async () => {
     process.env['BUNDLE_SELECTOR_ENABLED'] = 'true';
     const r = await executeGraphAware(stubInput, undefined, deps, baseOpts);

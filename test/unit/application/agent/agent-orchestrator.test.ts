@@ -413,7 +413,10 @@ describe('AgentOrchestrator', () => {
 
     expect(result.terminationReason).toBe('answer');
     expect(result.toolCallCount).toBe(2);
-    expect(result.steps[0]?.actionPairs?.every((pair) => pair.observation.includes('Invalid parallel batch'))).toBe(true);
+    expect(result.steps[0]?.actionPairs?.every((pair) =>
+      pair.observation.includes('Invalid parallel batch')
+      && pair.observation.includes('compare_wines cannot share a parallel batch')
+    )).toBe(true);
     expect(vi.mocked(toolDeps.searchUseCase.execute)).not.toHaveBeenCalled();
     expect(vi.mocked(toolDeps.decomposedSearchExecute)).not.toHaveBeenCalled();
   });

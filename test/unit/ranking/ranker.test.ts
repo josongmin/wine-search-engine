@@ -1194,11 +1194,11 @@ describe('Ranker', () => {
       }));
     });
 
-    it('prefers local LTR over remote cross-encoder when the query class has an LTR model', async () => {
+    it('prefers remote cross-encoder over local LTR when a reranker is configured', async () => {
       const candidates = makeCandidates(6, 'wine-ltr-primary');
       const rerankSpy = vi.fn().mockResolvedValue(makeDescendingRerankResults(candidates));
       const ranker = makeRanker(makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]), {
-        reranker: { rerank: rerankSpy },
+        reranker: { modelId: 'rerank-v4.0-pro', rerank: rerankSpy },
         ltrModels: new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]),
       });
       const stageTimer = createStageTimer();
@@ -1208,19 +1208,54 @@ describe('Ranker', () => {
         requestContext: { stageTimer },
       }));
 
-      expect(rerankSpy).not.toHaveBeenCalled();
+      expect(rerankSpy).toHaveBeenCalledTimes(1);
+      expect(metadata.rerankExecuted).toBe(true);
+      expect(metadata.rerankDecision).toMatchObject({
+        applied: true,
+        decision: 'applied',
+        modelId: 'rerank-v4.0-pro',
+      });
+      expect(stageTimer.snapshot()).toEqual(expect.objectContaining({
+        'ranking.cross_encoder': expect.any(Number),
+        'ranking.cross_encoder.remote': expect.any(Number),
+        'ranking.cross_encoder.postprocess': expect.any(Number),
+      }));
+      expect(stageTimer.snapshot()).not.toEqual(expect.objectContaining({
+        'ranking.ltr': expect.any(Number),
+      }));
+    });
+
+    it('falls back to local LTR when the remote reranker fails', async () => {
+      const candidates = makeCandidates(6, 'wine-ltr-fallback');
+      const rerankSpy = vi.fn().mockRejectedValue(new Error('HTTP 503 from reranker'));
+      const ranker = makeRanker(makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]), {
+        reranker: { modelId: 'rerank-v4.0-pro', rerank: rerankSpy },
+        ltrModels: new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]),
+      });
+      const stageTimer = createStageTimer();
+
+      const { metadata } = await ranker.rank(makeInputWithOverrides(candidates, {
+        rerankForced: true,
+        requestContext: { stageTimer },
+      }));
+
+      expect(rerankSpy).toHaveBeenCalledTimes(1);
       expect(metadata.rerankExecuted).toBe(true);
       expect(metadata.rerankDecision).toMatchObject({
         applied: true,
         decision: 'applied',
         modelId: 'semantic_preference',
       });
-      expect(stageTimer.snapshot()).not.toEqual(expect.objectContaining({
-        'ranking.cross_encoder': expect.any(Number),
-        'ranking.cross_encoder.remote': expect.any(Number),
-        'ranking.cross_encoder.postprocess': expect.any(Number),
-      }));
+      expect(metadata.runtimeSignal).toMatchObject({
+        rerankerStatus: 'failed',
+        rerankerFailureReason: 'http_error',
+        degradation: {
+          executionMode: 'degraded',
+          degradationReasons: ['reranker_http_error'],
+        },
+      });
       expect(stageTimer.snapshot()).toEqual(expect.objectContaining({
+        'ranking.cross_encoder': expect.any(Number),
         'ranking.ltr': expect.any(Number),
       }));
     });

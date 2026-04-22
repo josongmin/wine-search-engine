@@ -64,25 +64,25 @@ describe('buildHealthRouteOptions', () => {
     expect(health.readiness?.learned_matcher?.required).toBe(false);
   });
 
-  it('surfaces heuristic drinking-window models as a non-required degraded check', async () => {
+  it('treats deterministic drinking-window models as an available readiness substrate', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
     });
 
     const health = buildHealthRouteOptions(config, {}, undefined, {
-      modelVersion: 'heuristic-v1.0-enc20260405',
+      modelVersion: 'deterministic:structural-slot-v2',
       predict: () => ({
         drinkingWindowStart: 2020,
         drinkingWindowEnd: 2030,
         peakYear: 2025,
         confidence: 'medium',
-        modelVersion: 'heuristic-v1.0-enc20260405',
+        modelVersion: 'deterministic:structural-slot-v2',
       }),
     });
 
     expect(health.readiness?.drinking_window_model).toBeDefined();
     expect(health.readiness?.drinking_window_model?.required).toBe(false);
-    await expect(health.readiness?.drinking_window_model?.check?.()).resolves.toBe('down');
+    await expect(health.readiness?.drinking_window_model?.check?.()).resolves.toBe('up');
   });
 
   it('surfaces blocker zero-candidate events as a non-required degraded check', async () => {

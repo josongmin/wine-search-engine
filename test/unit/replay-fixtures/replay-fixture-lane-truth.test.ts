@@ -8,14 +8,14 @@ import {
 describe('replay fixture lane truth', () => {
   const fixtures = loadSearchReplayFixtures();
 
-  it('keeps drinking-window runtime replay split between shadow and full-runtime honesty lanes', () => {
+  it('keeps drinking-window runtime replay split between in-memory and full-runtime honesty lanes', () => {
     const drinkingWindowFixtures = fixtures.filter(({ fixture }) =>
       fixture.requires_runtime_capability?.includes('drinking_window_runtime'),
     );
 
     expect(drinkingWindowFixtures.map(({ file }) => file)).toEqual([
-      'heuristic-drinking-window-full-runtime.json',
-      'heuristic-drinking-window.json',
+      'deterministic-drinking-window-full-runtime.json',
+      'deterministic-drinking-window.json',
     ]);
     expect(isFullRuntimeSearchReplayFixture(drinkingWindowFixtures[0]!.fixture)).toBe(true);
     expect(isInMemoryRuntimeSearchReplayFixture(drinkingWindowFixtures[0]!.fixture)).toBe(false);

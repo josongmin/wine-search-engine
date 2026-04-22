@@ -20,7 +20,7 @@ export const FeaturesEnvSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
 
-  /** Optional directory containing `window_start.onnx` and `window_end.onnx`. */
+  /** Optional ONNX override directory containing `window_start.onnx` and `window_end.onnx`. */
   DRINKING_WINDOW_MODEL_DIR: z.string().min(1).optional(),
 
   // Watchlist webhook signing secret (Epic 17.1)

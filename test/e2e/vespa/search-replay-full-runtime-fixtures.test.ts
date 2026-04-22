@@ -25,30 +25,30 @@ import {
 
 const HTTP_TIMEOUT_MS = 50;
 const OPUS_ONE_2018_ID = createEntityId('opus-one-2018');
-const FULL_RUNTIME_HEURISTIC_DOC_ID = createEntityId('full-runtime-heuristic-cabernet-2018');
+const FULL_RUNTIME_DETERMINISTIC_DOC_ID = createEntityId('full-runtime-deterministic-cabernet-2018');
 const FULL_RUNTIME_REPORT_PATH = process.env['REPLAY_FULL_RUNTIME_REPORT_PATH'];
-const FULL_RUNTIME_HEURISTIC_PREDICTOR = {
-  modelVersion: 'heuristic-v1.0-full-runtime',
+const FULL_RUNTIME_DETERMINISTIC_PREDICTOR = {
+  modelVersion: 'deterministic:full-runtime-fixture',
   predict: () => ({
     drinkingWindowStart: 2024,
     drinkingWindowEnd: 2032,
     peakYear: 2028,
-    confidence: 'low' as const,
-    modelVersion: 'heuristic-v1.0-full-runtime',
+    confidence: 'medium' as const,
+    modelVersion: 'deterministic:full-runtime-fixture',
   }),
 };
 const FULL_RUNTIME_LEARNED_DRINKING_WINDOW_MODEL_VERSION = 'learned-v1.0-full-runtime';
 const SEEDED_FULL_RUNTIME_WINES = applyDefaultDrinkingWindowModelVersion(SEEDED_WINES);
-const FULL_RUNTIME_HEURISTIC_DOCUMENT: RetrievalDocument = {
+const FULL_RUNTIME_DETERMINISTIC_DOCUMENT: RetrievalDocument = {
   ...SEEDED_FULL_RUNTIME_WINES.find((doc) => doc.entityId === OPUS_ONE_2018_ID)!,
-  entityId: FULL_RUNTIME_HEURISTIC_DOC_ID,
-  canonicalLabel: 'Full Runtime Heuristic Cabernet 2018',
-  aliasesIdentitySafe: ['Full Runtime Heuristic Cabernet 2018'],
-  aliasesNoisyRecall: ['full runtime heuristic cabernet', 'heuristic cabernet 2018'],
-  searchTextKo: '풀 런타임 휴리스틱 카베르네 2018 리플레이 전용 카베르네 소비뇽 와인',
-  searchTextEn: 'full runtime heuristic cabernet 2018 replay only cabernet sauvignon wine',
+  entityId: FULL_RUNTIME_DETERMINISTIC_DOC_ID,
+  canonicalLabel: 'Full Runtime Deterministic Cabernet 2018',
+  aliasesIdentitySafe: ['Full Runtime Deterministic Cabernet 2018'],
+  aliasesNoisyRecall: ['full runtime deterministic cabernet', 'deterministic cabernet 2018'],
+  searchTextKo: '풀 런타임 디터미니스틱 카베르네 2018 리플레이 전용 카베르네 소비뇽 와인',
+  searchTextEn: 'full runtime deterministic cabernet 2018 replay only cabernet sauvignon wine',
   semanticSummary:
-    'Replay-only Cabernet fixture for the full-runtime heuristic drinking-window lane.',
+    'Replay-only Cabernet fixture for the full-runtime deterministic drinking-window lane.',
   drinkingWindowStart: undefined,
   drinkingWindowEnd: undefined,
   drinkingWindowModelVersion: undefined,
@@ -96,7 +96,7 @@ function buildFixtureDocuments(
   fixture: SearchReplayFixtureFile,
 ): readonly RetrievalDocument[] {
   if (fixture.requires_runtime_capability?.includes('drinking_window_runtime')) {
-    return [FULL_RUNTIME_HEURISTIC_DOCUMENT];
+    return [FULL_RUNTIME_DETERMINISTIC_DOCUMENT];
   }
 
   return TEST_DOCUMENTS.map((doc) => ({
@@ -115,7 +115,7 @@ async function resetCorpusForFixture(
   const idsToDelete = new Set<string>([
     ...SEEDED_FULL_RUNTIME_WINES.map((doc) => String(doc.entityId)),
     ...TEST_DOCUMENTS.map((doc) => String(doc.entityId)),
-    String(FULL_RUNTIME_HEURISTIC_DOC_ID),
+    String(FULL_RUNTIME_DETERMINISTIC_DOC_ID),
   ]);
 
   await Promise.all(
@@ -123,7 +123,7 @@ async function resetCorpusForFixture(
   );
 
   if (fixture.requires_runtime_capability?.includes('drinking_window_runtime')) {
-    await server.parts.vespaSearchIndex.bulkUpsert([FULL_RUNTIME_HEURISTIC_DOCUMENT]);
+    await server.parts.vespaSearchIndex.bulkUpsert([FULL_RUNTIME_DETERMINISTIC_DOCUMENT]);
     return;
   }
 
@@ -165,7 +165,7 @@ describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — replay full-runtime fixture
       mlServiceHttpTimeoutMs: HTTP_TIMEOUT_MS,
       rerankThreshold: 0,
       killSwitchLearning: true,
-      drinkingWindowPredictor: FULL_RUNTIME_HEURISTIC_PREDICTOR,
+      drinkingWindowPredictor: FULL_RUNTIME_DETERMINISTIC_PREDICTOR,
     });
     await server.parts.seedAlias('오푸스원', OPUS_ONE_2018_ID, 0.99);
     await probeFullRuntimeDependencies(fakeMlService);

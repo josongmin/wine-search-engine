@@ -27,6 +27,10 @@ export interface DecomposedSearchParentContext {
   readonly queryBudget?: SearchQueryBudget | undefined;
   readonly filters?: readonly NormalizedConstraint[] | undefined;
   readonly preferences?: readonly NormalizedConstraint[] | undefined;
+  readonly perSideFilters?: readonly [
+    readonly NormalizedConstraint[] | undefined,
+    readonly NormalizedConstraint[] | undefined,
+  ] | undefined;
   /**
    * Forwards the parent search request's `options.explain` to each sub-search
    * so that explain=true on a comparison query produces counterfactuals on

@@ -113,4 +113,36 @@ describe('StructuralDrinkingWindowFormula', () => {
     expect(result.termBreakdown?.offsets.drinkFromYears).toBe(result.startOffsetYears);
     expect(result.termBreakdown?.offsets.bestUntilYears).toBe(result.endOffsetYears);
   });
+
+  it('ignores malformed bottle size strings instead of propagating non-finite size adjustments', () => {
+    const formula = new StructuralDrinkingWindowFormula();
+
+    const malformed = formula.evaluate({
+      vintage: 2020,
+      grapePrimaryEnc: 1,
+      regionEnc: 2,
+      countryEnc: 3,
+      body: 3,
+      tannin: 3,
+      acidity: 3,
+      sweetness: 1,
+      avgCriticProxyScore: 90,
+      bottleSize: 'bad-size-l',
+    });
+    const baseline = formula.evaluate({
+      vintage: 2020,
+      grapePrimaryEnc: 1,
+      regionEnc: 2,
+      countryEnc: 3,
+      body: 3,
+      tannin: 3,
+      acidity: 3,
+      sweetness: 1,
+      avgCriticProxyScore: 90,
+    });
+
+    expect(malformed.startOffsetYears).toBe(baseline.startOffsetYears);
+    expect(malformed.endOffsetYears).toBe(baseline.endOffsetYears);
+    expect(malformed.peakOffsetYears).toBe(baseline.peakOffsetYears);
+  });
 });

@@ -29,6 +29,8 @@ import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js
 import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vintage.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import type { AmbiguousEntityHint } from '../../attribute/model/ambiguous-entity-hint.js';
+import { parseSpans } from '../../attribute/service/span-parser.js';
+import { isDirectEntityResolution, resolveEntity } from '../../attribute/service/entity-resolver.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import {
   ANCHOR_PRESENT_CONFIDENCE,
@@ -38,6 +40,10 @@ import {
 import { analyzeQueryDecomposition } from './decomposition-detector.js';
 import { extractAllPairingConstraints } from './pairing-extractor.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
+import {
+  hasEntityMetadataKeyword,
+  stripExactEntityMetadataSuffix,
+} from './exact-entity-metadata-signals.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
@@ -110,8 +116,36 @@ const REGION_KEYWORDS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
+function hasDirectResolvableAttributeEntity(normalizedQuery: string): boolean {
+  return parseSpans(normalizedQuery).some((span) => {
+    const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
+    return isDirectEntityResolution(resolved) && resolved.entityType !== 'wine_type';
+  });
+}
+
 const KOREAN_NOT_MARKER_PATTERN = '\\s*(?:말고|대신)\\s*';
 const ENGLISH_NOT_MARKER_PATTERN = '(?<!\\p{L})(?<!\\p{N})instead\\s+of\\s+';
+
+const EMPTY_FALLBACK_MAPPER: NLMapper = {
+  mapPhrase: async () => null,
+  mapConstraints: async (phrases: readonly string[]) => ({
+    constraints: [],
+    constraintExtraction: {
+      candidatePhraseCount: phrases.length,
+      ruleTableHitCount: 0,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: true,
+      source: 'fallback',
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [],
+      fallbackReason: 'nlmapper_exception',
+    },
+  }),
+} as unknown as NLMapper;
 
 /**
  * Context passed to the planner alongside the raw query.
@@ -146,6 +180,7 @@ export interface PlannerContext extends RequestExecutionContext {
 export class Planner {
   private readonly queryNormalizer = new QueryNormalizer();
   private readonly constraintCompiler: ConstraintCompiler;
+  private readonly fallbackConstraintCompiler: ConstraintCompiler;
 
   constructor(
     private readonly ambiguityDict: AmbiguityDictionary,
@@ -158,6 +193,11 @@ export class Planner {
   ) {
     this.constraintCompiler = new ConstraintCompiler(
       nlMapper,
+      fuzzyMatcher,
+      topologyPlanner,
+    );
+    this.fallbackConstraintCompiler = new ConstraintCompiler(
+      EMPTY_FALLBACK_MAPPER,
       fuzzyMatcher,
       topologyPlanner,
     );
@@ -206,6 +246,12 @@ export class Planner {
     const typoFixed = correctKoreanWineTypos(safeQuery);
     const queryViews = this.queryNormalizer.normalize(typoFixed);
     const normalizedQuery = queryViews.accentless;
+    const metadataSafeQuery = hasEntityMetadataKeyword(normalizedQuery)
+      ? stripExactEntityMetadataSuffix(typoFixed)
+      : typoFixed;
+    const metadataSafeQueryViews = this.queryNormalizer.normalize(metadataSafeQuery);
+    const plannerSurfaceViews = metadataSafeQuery.trim().length > 0 ? metadataSafeQueryViews : queryViews;
+    const plannerSurfaceNormalized = plannerSurfaceViews.accentless;
 
     // E3: planner policy trace — opt-in only (context.enablePlannerTrace === true).
     // Absent on the hot path to avoid allocation overhead on high-QPS requests.
@@ -216,8 +262,8 @@ export class Planner {
     // 2. Extract anchors.
     stageTimer?.start('planner.anchor_extraction');
     const { anchors, relativeQuery } = await this.anchorExtractor.extractWithRelative(
-      normalizedQuery,
-      queryViews,
+      plannerSurfaceNormalized,
+      plannerSurfaceViews,
     ).finally(() => {
       stageTimer?.end('planner.anchor_extraction');
     });
@@ -232,7 +278,7 @@ export class Planner {
     let fuzzyExpansions: readonly string[] = [];
     let fuzzyAnchors: readonly AnchorCandidate[] = [];
     if (anchors.length === 0 && this.fuzzyMatcher !== undefined) {
-      const fuzzyHits = this.fuzzyMatcher.match(normalizedQuery);
+      const fuzzyHits = this.fuzzyMatcher.match(plannerSurfaceNormalized);
       fuzzyExpansions = fuzzyHits.map((h) => h.term);
       const fuzzyLookupTerms = Array.from(
         new Set(
@@ -323,7 +369,7 @@ export class Planner {
     const retrievalMode = this.determineRetrievalMode(
       intent,
       allAnchors,
-      normalizedQuery,
+      plannerSurfaceNormalized,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
@@ -339,7 +385,7 @@ export class Planner {
     const queryClassPromise = (async () => {
       stageTimer?.start('planner.query_class');
       try {
-        return await this.determineQueryClass(normalizedQuery, intent, allAnchors);
+        return await this.determineQueryClass(plannerSurfaceNormalized, intent, allAnchors);
       } finally {
         stageTimer?.end('planner.query_class');
       }
@@ -347,7 +393,7 @@ export class Planner {
 
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
     const constraintQuery = this.buildConstraintParsingQuery(
-      normalizedQuery,
+      plannerSurfaceNormalized,
       allAnchors,
       relativeQuery,
       intent,
@@ -372,7 +418,7 @@ export class Planner {
     stageTimer?.start('planner.ambiguity_intent_compilation');
     const ambiguityIntentResult = await this.compileAmbiguityIntent({
       rawQuery: originalQuery,
-      normalizedQuery,
+      normalizedQuery: plannerSurfaceNormalized,
       intent,
       classifiedQueryClass,
       parsed,
@@ -415,7 +461,7 @@ export class Planner {
 
     // 7. Build expansions.
     const baseExpansions = this.expansionBuilder.build(
-      normalizedQuery,
+      plannerSurfaceNormalized,
       intent,
       allAnchors,
     );
@@ -445,6 +491,10 @@ export class Planner {
       normalizedQuery,
       allAnchors,
       constraints,
+      intent,
+      queryClass,
+      retrievalMode,
+      plannerSurfaceNormalized,
     );
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
@@ -681,6 +731,12 @@ export class Planner {
     intent: QueryIntent,
     anchors: readonly AnchorCandidate[],
   ): Promise<QueryClass> {
+    if (
+      (intent === 'entity_exact' || intent === 'entity_fuzzy')
+      && hasDirectResolvableAttributeEntity(normalizedQuery)
+    ) {
+      return 'short_entity';
+    }
     // Check whether the full normalized query is itself a known ambiguous form.
     const fullQueryAmbiguous =
       await this.ambiguityDict.isKnownAmbiguous(normalizedQuery);
@@ -838,7 +894,14 @@ export class Planner {
     _intent: QueryIntent,
     abortSignal?: AbortSignal,
   ): Promise<ConstraintCompilerResult> {
-    return this.constraintCompiler.compile(normalizedQuery, abortSignal);
+    try {
+      return await this.constraintCompiler.compile(normalizedQuery, abortSignal);
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      return this.fallbackConstraintCompiler.compile(normalizedQuery, abortSignal);
+    }
   }
 
   private contextualizeConstraintAtoms(
@@ -909,7 +972,7 @@ export class Planner {
     intent: QueryIntent,
     anchors: readonly AnchorCandidate[],
   ): boolean {
-    if (intent !== 'entity_exact') {
+    if (intent !== 'entity_exact' && intent !== 'mixed_query') {
       return false;
     }
 
@@ -1015,6 +1078,10 @@ export class Planner {
     normalizedQuery: string,
     anchors: readonly AnchorCandidate[],
     constraints: ConstraintBundle,
+    intent?: QueryIntent,
+    queryClass?: QueryClass,
+    retrievalMode?: RetrievalMode,
+    ambiguityQuerySurface?: string,
   ): Promise<QueryUncertainty> {
     // Parser confidence: higher for shorter, cleaner queries.
     // Guard: "".split(/\s+/) → [''] (length 1); use trimmed token count to avoid
@@ -1057,14 +1124,51 @@ export class Planner {
         : UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL;
 
     // Detect ambiguity from anchors and dictionary.
-    const ambiguityTypes: string[] = [];
+    const ambiguityTypes = new Set<string>();
     let ambiguitySeverity: QueryUncertainty['ambiguitySeverity'] = 'low';
+    const uncertaintyQuerySurface =
+      ambiguityQuerySurface !== undefined && ambiguityQuerySurface.trim().length > 0
+        ? ambiguityQuerySurface
+        : normalizedQuery;
+    const convergedExactEntityLookup =
+      intent === 'entity_exact'
+      && queryClass === 'short_entity'
+      && retrievalMode === 'entity_lookup'
+      && anchors.length === 1
+      && anchors[0] !== undefined
+      && anchors[0].confidence >= EXACT_ANCHOR_CONFIDENCE
+      && anchors[0].candidateEntityIds.length === 1;
+
+    if (convergedExactEntityLookup) {
+      const overall = Math.min(
+        1.0,
+        Math.max(
+          0.0,
+          1.0
+            - UNCERTAINTY_OVERALL_WEIGHT_PARSER * parserConfidence
+            - UNCERTAINTY_OVERALL_WEIGHT_ANCHOR * anchorConfidence
+            - UNCERTAINTY_OVERALL_WEIGHT_CONSTRAINT * constraintConfidence,
+        ),
+      );
+      return {
+        overall,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity,
+        decisionEffect: 'trace_only',
+        parserConfidence,
+        anchorConfidence,
+        constraintConfidence,
+      };
+    }
 
     // Check whether the full normalized query is a known ambiguous form.
     const fullQueryInfo =
-      await this.ambiguityDict.getAmbiguityInfo(normalizedQuery);
+      await this.ambiguityDict.getAmbiguityInfo(uncertaintyQuerySurface);
     if (fullQueryInfo !== null) {
-      ambiguityTypes.push(...fullQueryInfo.types);
+      for (const type of fullQueryInfo.types) {
+        ambiguityTypes.add(type);
+      }
       // Escalate severity: high always wins; medium wins unless already high.
       const currentSeverity: string = ambiguitySeverity;
       if (
@@ -1078,7 +1182,7 @@ export class Planner {
     for (const anchor of anchors) {
       // Multiple candidate entities -> ambiguous.
       if (anchor.candidateEntityIds.length > 1) {
-        ambiguityTypes.push('multiple_candidates');
+        ambiguityTypes.add('multiple_candidates');
       }
 
       // Check ambiguity dictionary.
@@ -1086,7 +1190,9 @@ export class Planner {
         anchor.normalizedForm,
       );
       if (info !== null) {
-        ambiguityTypes.push(...info.types);
+        for (const type of info.types) {
+          ambiguityTypes.add(type);
+        }
         if (
           info.severity === 'high' ||
           (info.severity === 'medium' && ambiguitySeverity !== 'high')
@@ -1098,13 +1204,14 @@ export class Planner {
 
     // Low anchor confidence with anchors present -> ambiguity.
     if (anchors.length > 0 && anchorConfidence < UNCERTAINTY_LOW_ANCHOR_CONFIDENCE_THRESHOLD) {
-      ambiguityTypes.push('low_anchor_confidence');
+      ambiguityTypes.add('low_anchor_confidence');
       if (ambiguitySeverity === 'low') {
         ambiguitySeverity = 'medium';
       }
     }
 
-    const ambiguityDetected = ambiguityTypes.length > 0;
+    const ambiguityTypeList = [...ambiguityTypes];
+    const ambiguityDetected = ambiguityTypeList.length > 0;
 
     // Overall uncertainty: weighted combination.
     const overall = Math.min(
@@ -1134,7 +1241,7 @@ export class Planner {
     return {
       overall,
       ambiguityDetected,
-      ambiguityTypes,
+      ambiguityTypes: ambiguityTypeList,
       ambiguitySeverity,
       decisionEffect,
       parserConfidence,
@@ -1206,6 +1313,10 @@ export class Planner {
     // No clear signal detected.
     return undefined;
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function applyAmbiguityIntentInterpretation(

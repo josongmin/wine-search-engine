@@ -4,6 +4,7 @@ import type { ResolverInput } from '../../../domain/resolver/service/resolver.js
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
+import type { RetrievalExecutionResult } from '../../../domain/retrieval/model/retrieval-execution-result.js';
 import type {
   RetrievalDocument,
   RetrievalDrinkingWindowProjection,
@@ -55,35 +56,24 @@ export interface EntityResolverPort {
 }
 
 export interface CandidatePoolPort {
-  execute?(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
-  generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
+  execute?(input: HybridRetrievalInput): Promise<RetrievalExecutionResult>;
+  generate(input: HybridRetrievalInput): Promise<RetrievalExecutionResult>;
   /**
-   * Returns the RRF fusion trace from the most recent execute() call.
-   * Pattern mirrors getLastFunnelMetrics() on RankingPort.
-   * Only implemented by CandidatePoolService — optional so existing stubs/adapters
-   * do not need to be updated.
+   * Backward-compat shim for application/search callers that still pull
+   * telemetry out-of-band. New code should consume execute()/generate()
+   * return metadata directly.
    */
   getLastFusionTrace?(): RrfFusionTrace | undefined;
   /**
-   * Returns the hard-filter drop log from the most recent execute() call.
-   * Pattern mirrors getLastFusionTrace().
-   * Only implemented by CandidatePoolService — optional so existing stubs/adapters
-   * do not need to be updated.
+   * Backward-compat shim. Prefer `result.dropLog`.
    */
   getLastDropLog?(): readonly CandidateDropRecord[] | undefined;
   /**
-   * Returns structured retrieval degradation signals emitted during the most
-   * recent execute() call (sparse/dense/anchor/embedding-combiner/relative_filter
-   * fallbacks). These are observability signals that the hybrid-candidates
-   * use case must merge into route-level `routeDegradation.degradationReasons`
-   * so the HTTP wire contract reflects the degradation instead of silently
-   * returning an empty pool. Optional so in-memory/test stubs remain minimal.
+   * Backward-compat shim. Prefer `result.degradation.signals`.
    */
   getLastDegradationSignals?(): readonly RetrievalDegradationSignal[];
   /**
-   * Returns the structured degradation codes from the most recent execute()
-   * call. These are the critic-facing categories derived at producer
-   * boundaries; they intentionally exclude free-form log strings.
+   * Backward-compat shim. Prefer `result.degradation.codes`.
    */
   getLastDegradationCodes?(): readonly RetrievalDegradationCode[];
 }

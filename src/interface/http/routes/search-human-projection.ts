@@ -66,6 +66,8 @@ function projectResultItemToHuman(
     rank,
     ...(item.entity.producer !== undefined ? { producer: item.entity.producer } : {}),
     ...(item.entity.region !== undefined ? { region: item.entity.region } : {}),
+    ...(item.entity.closure !== undefined ? { closure: item.entity.closure } : {}),
+    ...(item.entity.country !== undefined ? { country: item.entity.country } : {}),
     ...(item.entity.vintage !== undefined ? { vintage: item.entity.vintage } : {}),
     ...(item.entity.grapes !== undefined && item.entity.grapes.length > 0
       ? { grapePrimary: item.entity.grapes[0] }
@@ -83,6 +85,13 @@ function projectResultItemToHuman(
     version: '2',
     responseType: 'human',
   };
+}
+
+function projectResultItemWithIntrinsicConfidence(
+  item: ResultItem,
+  rank: number,
+): ResultItemV2Human {
+  return projectResultItemToHuman(item, rank, clamp01(item.relevanceScore));
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +145,13 @@ function projectComparisonToHuman(
     comparisonMode?: 'entity' | 'concept';
     canonicalConcept?: string;
     conceptEntityType?: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
+    conceptAggregate?: {
+      canonicalConcept: string;
+      conceptEntityType: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
+      representativeResult: ResultItemV2Human | null;
+      prototypeAxis: ResultItemV2Human[];
+      aggregateResultCount: number;
+    };
     resolutionStatus: 'resolved' | 'ambiguous' | 'failed';
     resultCount: number;
     topResult: ResultItemV2Human | null;
@@ -144,11 +160,26 @@ function projectComparisonToHuman(
     ...(entity.comparisonMode !== undefined ? { comparisonMode: entity.comparisonMode } : {}),
     ...(entity.canonicalConcept !== undefined ? { canonicalConcept: entity.canonicalConcept } : {}),
     ...(entity.conceptEntityType !== undefined ? { conceptEntityType: entity.conceptEntityType } : {}),
+    ...(entity.conceptAggregate !== undefined
+      ? {
+          conceptAggregate: {
+            canonicalConcept: entity.conceptAggregate.canonicalConcept,
+            conceptEntityType: entity.conceptAggregate.conceptEntityType,
+            representativeResult:
+              entity.conceptAggregate.representativeResult !== null
+                ? projectResultItemWithIntrinsicConfidence(entity.conceptAggregate.representativeResult, 1)
+                : null,
+            prototypeAxis: entity.conceptAggregate.prototypeAxis.map((item, index) =>
+              projectResultItemWithIntrinsicConfidence(item, index + 1)),
+            aggregateResultCount: entity.conceptAggregate.aggregateResultCount,
+          },
+        }
+      : {}),
     resolutionStatus: entity.resolutionStatus,
     resultCount: entity.resultCount,
     topResult:
       entity.topResult !== null
-        ? projectResultItemToHuman(entity.topResult, 1, 1.0)
+        ? projectResultItemWithIntrinsicConfidence(entity.topResult, 1)
         : null,
   });
 

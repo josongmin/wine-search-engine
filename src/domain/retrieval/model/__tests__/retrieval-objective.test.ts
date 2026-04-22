@@ -25,6 +25,22 @@ describe('buildRetrievalObjective', () => {
       ],
       soft: [
         {
+          attribute: 'producer_prestige',
+          operator: '>=',
+          value: 0.7,
+          source_phrase: '품격 있는',
+          confidence: 0.9,
+          mapping_version: 'test',
+        },
+        {
+          attribute: 'closure',
+          operator: '=',
+          value: 'screw cap',
+          source_phrase: '스크류캡',
+          confidence: 0.9,
+          mapping_version: 'test',
+        },
+        {
           attribute: 'gift_suitability',
           operator: '>=',
           value: 0.8,
@@ -82,6 +98,8 @@ describe('buildRetrievalObjective', () => {
     expect(objective.objectiveVersion).toBe('retrieval-objective-v1.0');
     expect(objective.signals).toEqual([
       expect.objectContaining({ axis: 'occasion', sourceTier: 'hard', value: ['gift'] }),
+      expect.objectContaining({ axis: 'producer_prestige', sourceTier: 'soft', value: 0.7 }),
+      expect.objectContaining({ axis: 'closure', sourceTier: 'soft', value: 'screw cap' }),
       expect.objectContaining({ axis: 'gift_suitability', sourceTier: 'soft', value: 0.8 }),
       expect.objectContaining({ axis: 'sweetness', attribute: 'sweetness', sourceTier: 'soft', value: 0.5 }),
       expect.objectContaining({ axis: 'alcohol', attribute: 'alcohol_pct', sourceTier: 'soft', value: 12 }),

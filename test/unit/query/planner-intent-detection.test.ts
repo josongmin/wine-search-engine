@@ -17,6 +17,15 @@ function anchor(confidence: number): AnchorCandidate {
   };
 }
 
+function multiEntityAnchor(confidence: number): AnchorCandidate {
+  return {
+    surfaceForm: 'barolo',
+    normalizedForm: 'barolo',
+    candidateEntityIds: [createEntityId(), createEntityId()],
+    confidence,
+  };
+}
+
 const noopExtractor: IntentDetectionAnchorExtractor = {
   hasComparisonMarkers: () => false,
   hasKoreanMixedQueryMarkers: () => false,
@@ -41,7 +50,7 @@ describe('detectQueryIntent', () => {
 
   it('returns entity_fuzzy for weak anchor only', () => {
     const c = (ANCHOR_PRESENT_CONFIDENCE + EXACT_ANCHOR_CONFIDENCE) / 2;
-    expect(detectQueryIntent('fuzzy match', [anchor(c)], noopExtractor)).toBe('entity_fuzzy');
+    expect(detectQueryIntent('rare bottle', [anchor(c)], noopExtractor)).toBe('entity_fuzzy');
   });
 
   it('returns budget_search when price keyword and no anchor', () => {
@@ -52,8 +61,33 @@ describe('detectQueryIntent', () => {
     expect(detectQueryIntent('wine pairing with steak', [], noopExtractor)).toBe('pairing_search');
   });
 
+  it('prefers pairing_search over weak mixed anchors for occasion-driven recommendation queries', () => {
+    const weakAnchor = anchor((ANCHOR_PRESENT_CONFIDENCE + EXACT_ANCHOR_CONFIDENCE) / 2);
+    expect(
+      detectQueryIntent('회사 회식 10명 레드 와인 추천 party', [weakAnchor], noopExtractor),
+    ).toBe('pairing_search');
+    expect(
+      detectQueryIntent('캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거', [weakAnchor], noopExtractor),
+    ).toBe('pairing_search');
+  });
+
+  it('keeps strong anchored occasion queries on mixed_query', () => {
+    expect(
+      detectQueryIntent('opus one anniversary gift', [anchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
+    ).toBe('mixed_query');
+  });
+
   it('returns facet_search when only constraint keywords', () => {
     expect(detectQueryIntent('dry red wine from burgundy', [], noopExtractor)).toBe('facet_search');
+  });
+
+  it('keeps direct-resolved top-level appellations on entity_exact even when anchor candidates fan out', () => {
+    expect(
+      detectQueryIntent('barolo', [multiEntityAnchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
+    ).toBe('entity_exact');
+    expect(
+      detectQueryIntent('bordeaux', [multiEntityAnchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
+    ).toBe('entity_exact');
   });
 
   it('returns semantic_discovery when empty query and no anchors', () => {

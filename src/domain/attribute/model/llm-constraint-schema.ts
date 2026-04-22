@@ -22,6 +22,7 @@ export const LLM_ALLOWED_ATTRIBUTES = new Set([
   'appellation',
   'grape_primary',
   'style',
+  'closure',
   'critic_score',
   'producer_prestige',
   'finish_length',

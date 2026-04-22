@@ -136,6 +136,7 @@ const LlmTopologyNodeSchema = z.discriminatedUnion('kind', [
       nodeId: TopologyNodeIdSchema,
       purpose: z.string().min(1).max(TOPOLOGY_LABEL_MAX_LEN),
       targetCardinality: z.number().int().nonnegative(),
+      obligation: z.enum(['required', 'optional']).optional(),
     })
     .strict(),
 ]);

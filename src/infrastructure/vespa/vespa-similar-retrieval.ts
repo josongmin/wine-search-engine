@@ -1,8 +1,10 @@
-import type { SimilarRetrievalPort } from '../../domain/mixed/service/mixed-solver.js';
+import type { SimilarRetrievalPort } from '../../domain/mixed/port/mixed-query.port.js';
 import type { AnchorProfile } from '../../domain/mixed/model/anchor-profile.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
 import { summaryToHybridCandidateFields } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
+import { hardConstraintsToSparseFilterTokens } from '../../domain/retrieval/service/constraint-to-sparse-filter-tokens.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 /**
  * Vespa-backed implementation of {@link SimilarRetrievalPort}.
@@ -20,6 +22,7 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
   async retrieveSimilar(
     anchorProfile: AnchorProfile,
     limit: number,
+    hardConstraints: readonly NormalizedConstraint[] = [],
   ): Promise<readonly HybridCandidate[]> {
     if (
       anchorProfile.embedding === undefined ||
@@ -28,9 +31,10 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
       return [];
     }
 
+    const filters = hardConstraintsToSparseFilterTokens(hardConstraints);
     const hits = await this.searchIndex.denseSearch(
       anchorProfile.embedding,
-      [],
+      filters,
       limit,
     );
 
@@ -47,7 +51,7 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
           retrievalProfile: 'similar_anchor',
           lexicalQueriesUsed: [],
           semanticQueriesUsed: [anchorProfile.canonicalLabel],
-          filtersApplied: [],
+          filtersApplied: filters,
           candidateSources: ['anchor_similarity'],
         },
         ...summaryToHybridCandidateFields(hit.summary),

@@ -54,7 +54,10 @@ function renderPlannerDirective(directive: AgentPlannerDirective | undefined): s
   if (directive.kind === 'relax_constraints_retry') {
     return '[RETRY_RELAX_ONE] Previous search returned no match. Retry once by relaxing exactly one non-must-have constraint. Keep must-have constraints.';
   }
-  return `[DRINKABILITY_PENDING] Before answering, call check_drinking_window for ${directive.entityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+  if (directive.kind === 'pending_drinkability_check') {
+    return `[DRINKABILITY_PENDING] Before answering, call check_drinking_window for ${directive.entityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+  }
+  return `[SEARCH_REQUIRED] ${directive.instruction}`;
 }
 
 function buildPlannerLoopMessages(
@@ -396,7 +399,8 @@ export class AgentPlannerPhaseRunner {
       ),
     );
     if (
-      parsed.thought === '[unparseable LLM output]'
+      parsed.plannerDefect === undefined
+      && parsed.thought === '[unparseable LLM output]'
       && isLikelyJsonAttempt(llmResult.text)
     ) {
       log.warn(

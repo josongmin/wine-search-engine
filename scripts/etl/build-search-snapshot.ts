@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseNdjson } from './ndjson.js';
-import type { EnrichedSilverRecord } from './types.js';
+import type { EnrichedSilverRecord, PriceBand, WineType } from './types.js';
 import { atomicWriteFile } from './etl-utils.js';
 import {
   buildSearchSnapshotContentHash,
@@ -115,6 +115,22 @@ const BENCHMARK_ANCHOR_SUITABILITY_GENERATED_AT = '2026-04-17T00:00:00.000Z';
 const BENCHMARK_ANCHOR_SUITABILITY_MODEL = 'gpt-5.4-mini';
 const BENCHMARK_ANCHOR_GIFT_PROMPT_VERSION = 'gift-suitability-scorer-v2';
 const BENCHMARK_ANCHOR_BEGINNER_PROMPT_VERSION = 'beginner-suitability-scorer-v2';
+
+const SILVER_WINE_TYPES: readonly WineType[] = [
+  'red',
+  'white',
+  'rosé',
+  'sparkling',
+  'dessert',
+  'fortified',
+] as const;
+
+const SILVER_PRICE_BANDS: readonly PriceBand[] = [
+  'value',
+  'mid',
+  'premium',
+  'luxury',
+] as const;
 
 const BENCHMARK_ANCHOR_SUITABILITY: Readonly<Record<string, {
   readonly gift: {
@@ -431,7 +447,7 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
       country: doc.country ?? '',
       region: doc.region ?? '',
       appellation: doc.appellation ?? null,
-      wineType: doc.wineType,
+      wineType: toRequiredSilverWineType(doc.wineType, doc.entityId),
       grapePrimary: doc.grapePrimary ?? null,
       grapes: doc.grapes ?? [],
       body: doc.body ?? null,
@@ -445,7 +461,7 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
       ratingAvg: null,
       ratingsCount: 0,
       priceUsd: doc.priceUsd ?? null,
-      priceBand: doc.priceBand,
+      priceBand: toRequiredSilverPriceBand(doc.priceBand, doc.entityId),
       popularityScore: doc.popularityScore ?? 0,
       scrapedAt: null,
       alcoholPct: doc.alcoholPct ?? null,
@@ -453,7 +469,7 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
       ...(doc.bottleSize !== undefined ? { bottleSize: doc.bottleSize } : {}),
       ...(doc.closure !== undefined ? { closure: doc.closure } : {}),
       producerPrestige: doc.producerPrestige ?? null,
-      isTopRated: doc.isTopRated ?? false,
+      isTopRated: readSeedIsTopRated(doc, doc.entityId),
       ...(doc.grapeFamily !== undefined ? { grapeFamily: doc.grapeFamily } : {}),
       ...(doc.regionHierarchy !== undefined ? { regionHierarchy: doc.regionHierarchy } : {}),
       ...(doc.finishLength !== undefined ? { finishLength: doc.finishLength } : {}),
@@ -479,6 +495,31 @@ function resolveSourceSystemForRecord(record: EnrichedSilverRecord): string {
     ?? (record.sourceId.startsWith('benchmark-anchor-')
       ? SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG
       : SOURCE_SYSTEM_VIVINO_SILVER);
+}
+
+function toRequiredSilverWineType(value: string | undefined, entityId: string): WineType {
+  if (value !== undefined && (SILVER_WINE_TYPES as readonly string[]).includes(value)) {
+    return value as WineType;
+  }
+  throw new Error(`benchmark anchor ${entityId} has invalid wineType=${JSON.stringify(value)}`);
+}
+
+function toRequiredSilverPriceBand(value: string | undefined, entityId: string): PriceBand {
+  if (value !== undefined && (SILVER_PRICE_BANDS as readonly string[]).includes(value)) {
+    return value as PriceBand;
+  }
+  throw new Error(`benchmark anchor ${entityId} has invalid priceBand=${JSON.stringify(value)}`);
+}
+
+function readSeedIsTopRated(doc: object, entityId: string): boolean {
+  const value = (doc as { readonly isTopRated?: unknown }).isTopRated;
+  if (value === undefined) {
+    return false;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  throw new Error(`benchmark anchor ${entityId} has invalid isTopRated=${JSON.stringify(value)}`);
 }
 
 function buildGiftSuitabilityContentHash(record: EnrichedSilverRecord): string {

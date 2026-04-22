@@ -61,6 +61,19 @@ const SEMANTIC_STYLE_PROFILES: ReadonlyMap<string, SemanticStyleProfile> = new M
     evidenceGrapeTerms: ['merlot', 'pinot noir', 'pinot grigio', 'pinot gris', 'sauvignon blanc', 'chardonnay'],
     evidenceStyleTerms: ['easy drinking', 'medium', 'red blend'],
   }],
+  ['chillable', {
+    renderedTerm: 'chillable',
+    genericRetrievalTerms: ['chilled', 'crisp', 'refreshing'],
+    untypedArchetypeTerms: [],
+    wineTypeRetrievalTerms: {
+      white: ['pinot grigio', 'sauvignon blanc', 'riesling'],
+      sparkling: ['prosecco', 'cava', 'cremant'],
+      rosé: ['rosé'],
+    },
+    evidenceWineTypes: ['white', 'sparkling', 'rosé'],
+    evidenceGrapeTerms: ['pinot grigio', 'pinot gris', 'sauvignon blanc', 'riesling'],
+    evidenceStyleTerms: ['crisp', 'light', 'sparkling'],
+  }],
   // presentation_forward: REMOVED — no backing data in Vivino for label
   // aesthetics/packaging. Retrieval terms ('giftable', 'celebration',
   // 'prosecco', 'rosé') polluted BM25 recall without data-backed signal.

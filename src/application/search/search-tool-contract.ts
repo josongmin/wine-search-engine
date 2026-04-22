@@ -6,6 +6,7 @@ import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 export const SEARCH_TOOL_WINE_TYPES = ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'] as const;
+export const SEARCH_TOOL_DRINKING_WINDOW_VALUES = ['now'] as const;
 export const SEARCH_TOOL_OCCASION_VALUES = [
   'gift',
   'celebration',
@@ -35,6 +36,11 @@ export const COMPARE_WINES_TOOL_DESCRIPTION =
 const SEARCH_TOOL_FILTER_TEXT_MAX_LEN = 100;
 const SEARCH_TOOL_STYLE_HINT_MAX_LEN = 50;
 export const SEARCH_TOOL_MAX_STYLES = 5;
+export const FOOD_PAIRING_MAX_PAIRING_TAGS = 5;
+export const FOOD_PAIRING_SWEETNESS_TARGET_MIN = 0;
+export const FOOD_PAIRING_SWEETNESS_TARGET_MAX = 1;
+export const FOOD_PAIRING_SENSORY_SCALE_MIN = 0;
+export const FOOD_PAIRING_SENSORY_SCALE_MAX = 10;
 export const SEARCH_TOOL_MAX_EXCLUDE_FILTERS = 10;
 export const SEARCH_TOOL_VINTAGE_MIN = 1600;
 export const SEARCH_TOOL_VINTAGE_MAX = 2100;
@@ -56,10 +62,14 @@ export const SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION =
   'Optional maximum price in KRW (e.g. 50000 for 5만원).';
 export const SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION =
   'Optional low-alcohol ceiling as ABV percent (e.g. 12 for low-alcohol / 도수 낮은 와인). Used as a retrieval preference and excludes only results whose ABV is explicitly verified above the ceiling; unknown ABV candidates remain marked as unverified.';
+export const SEARCH_TOOL_GRAPE_PRIMARY_DESCRIPTION =
+  'Optional exact primary-grape constraint using canonical grape names (e.g. "Cabernet Sauvignon", "Pinot Noir", "Chardonnay"). Use for explicit varietal requests.';
 export const SEARCH_TOOL_WINE_TYPE_DESCRIPTION =
   'Optional exact wine-type constraint.';
 export const SEARCH_TOOL_COUNTRY_DESCRIPTION =
   'Optional exact country constraint using English canonical country names.';
+export const SEARCH_TOOL_REGION_DESCRIPTION =
+  'Optional exact region constraint using canonical region names (e.g. "Bordeaux", "Burgundy", "Napa Valley", "Beaujolais"). Use for top-level region requests.';
 export const SEARCH_TOOL_VINTAGE_MIN_DESCRIPTION =
   'Optional minimum vintage year (inclusive).';
 export const SEARCH_TOOL_VINTAGE_MAX_DESCRIPTION =
@@ -78,6 +88,12 @@ export const SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION =
   'Optional minimum learned gift-suitability score in [0,1]. Use for safe/formal/gift-worthy recommendation intent when the request explicitly implies gifting.';
 export const SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION =
   'Optional minimum learned beginner-suitability score in [0,1]. Use for non-expert / approachable / easy-drinking recommendation intent when the request explicitly implies it.';
+export const SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION =
+  'Optional minimum indexed producer-prestige score in [0,1]. Use only for explicit prestige/formal/classic-region intent (e.g. 품격, 격식, 상사 선물, 고급스러운), not for generic gifts.';
+export const SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION =
+  'Optional typed drinking-window objective. Use "now" when the user asks for currently drinkable / 지금 마시기 좋은 / 피크인 후보; still call check_drinking_window afterward for exact verification.';
+export const SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
+  'Optional target year for drinking_window. Defaults to the current calendar year when drinking_window is set.';
 export const SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION =
   'When true, prefer varied grapes, regions, or styles rather than near-duplicates.';
 export const FOOD_PAIRING_MAX_PRICE_KRW_DESCRIPTION =
@@ -88,6 +104,16 @@ const FOOD_PAIRING_COLOR_DESCRIPTION =
   'Optional wine color filter. Use "both" when red and white are both acceptable.';
 export const FOOD_PAIRING_FOOD_DESCRIPTION =
   'Food item or dish to pair against (e.g. "grilled salmon", "pasta carbonara", "cheese platter").';
+export const FOOD_PAIRING_SWEETNESS_TARGET_DESCRIPTION =
+  'Optional typed sweetness target on the indexed [0,1] sweetness scale. Use only when the user gives an explicit sweetness objective; do not infer it from food alone.';
+export const FOOD_PAIRING_ACIDITY_MIN_DESCRIPTION =
+  'Optional minimum acidity on the indexed 0-10 sensory scale. Use for explicit high-acidity / bright / refreshing pairing objectives.';
+export const FOOD_PAIRING_TANNIN_MAX_DESCRIPTION =
+  'Optional maximum tannin on the indexed 0-10 sensory scale. Use for explicit low-tannin / soft-tannin pairing objectives.';
+export const FOOD_PAIRING_STYLES_DESCRIPTION =
+  'Optional semantic style hints for the pairing objective. Same semantics as search_wines.styles; prefer this over adding prose to food.';
+export const FOOD_PAIRING_PAIRING_TAGS_DESCRIPTION =
+  'Optional canonical pairing tags to match against indexed pairing metadata, e.g. ["spicy_food","salmon"]. Use only when the tag is explicitly known.';
 export const DRINKING_WINDOW_ENTITY_ID_DESCRIPTION =
   'Wine entity ID copied from previous search results.';
 export const DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
@@ -202,8 +228,10 @@ export function buildSearchToolFieldShape(
     min_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     max_alcohol_pct: coerceFiniteNumber.pipe(z.number().positive().max(100)).optional(),
+    grape_primary: z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN).optional(),
     wine_type: z.enum(SEARCH_TOOL_WINE_TYPES).optional(),
     country: z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN).optional(),
+    region: z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN).optional(),
     vintage_min: coercePositiveInt.pipe(z.number().int().min(SEARCH_TOOL_VINTAGE_MIN).max(SEARCH_TOOL_VINTAGE_MAX)).optional(),
     vintage_max: coercePositiveInt.pipe(z.number().int().min(SEARCH_TOOL_VINTAGE_MIN).max(SEARCH_TOOL_VINTAGE_MAX)).optional(),
     appellation: z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN).optional(),
@@ -213,6 +241,9 @@ export function buildSearchToolFieldShape(
     occasion: SearchToolOccasionArraySchema.optional(),
     gift_suitability_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
     beginner_suitability_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
+    producer_prestige_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
+    drinking_window: z.enum(SEARCH_TOOL_DRINKING_WINDOW_VALUES).optional(),
+    drinking_window_target_year: coercePositiveInt.pipe(z.number().int().min(SEARCH_TOOL_VINTAGE_MIN).max(SEARCH_TOOL_VINTAGE_MAX)).optional(),
     want_diversity: z.boolean().optional(),
   } as const;
 }
@@ -279,6 +310,11 @@ export function buildFoodPairingFieldShape(
     max_price: coerceFiniteNumber.pipe(z.number().finite().min(1).max(maxPriceUsdMax)).optional(),
     max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     color: z.enum(FOOD_PAIRING_COLORS).optional(),
+    sweetness_target: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
+    acidity_min: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SENSORY_SCALE_MIN).max(FOOD_PAIRING_SENSORY_SCALE_MAX)).optional(),
+    tannin_max: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SENSORY_SCALE_MIN).max(FOOD_PAIRING_SENSORY_SCALE_MAX)).optional(),
+    styles: z.array(z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN)).max(SEARCH_TOOL_MAX_STYLES).optional(),
+    pairing_tags: z.array(z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN)).max(FOOD_PAIRING_MAX_PAIRING_TAGS).optional(),
   } as const;
 }
 
@@ -294,11 +330,13 @@ export function buildSearchWinesPromptContractLines(
   usd50ApproxKrw: number,
 ): readonly string[] {
   return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, wine_type?, country?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
+    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, grape_primary?, wine_type?, country?, region?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, producer_prestige_min?, drinking_window?, drinking_window_target_year?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
     `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
     '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
+    '  - grape_primary: canonical grape name for explicit varietal requests ("까쇼"→"Cabernet Sauvignon", "피노 누아"→"Pinot Noir")',
     `  - wine_type: ${quoteEnum(SEARCH_TOOL_WINE_TYPES)} (use for type constraints, e.g. 레드→"red", 화이트→"white")`,
     '  - country: English name (e.g. "France", "Italy", "Chile", "United States", "Spain", "Australia")',
+    '  - region: canonical region name for top-level regions (e.g. "Bordeaux", "Burgundy", "Napa Valley", "Beaujolais")',
     '  - vintage_min/vintage_max: year range (e.g. "2018-2020년산" → vintage_min:2018, vintage_max:2020)',
     '  - appellation: specific appellation (e.g. "Pauillac", "Barolo", "Chianti Classico")',
     `  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include ${SEARCH_TOOL_STYLE_EXAMPLES.map((value) => `"${value}"`).join(', ')}. Use "sweet" / "off_dry" for sweetness intent instead of vague prose.`,
@@ -306,10 +344,16 @@ export function buildSearchWinesPromptContractLines(
     `  - occasion: OPTIONAL canonical situation tags such as ${quoteEnum(SEARCH_TOOL_OCCASION_VALUES)}. Use for gift/anniversary/date/housewarming/healing intent.`,
     '  - gift_suitability_min: OPTIONAL [0,1] learned suitability floor for gifting queries (safe/formal/gift-worthy).',
     '  - beginner_suitability_min: OPTIONAL [0,1] learned suitability floor for non-expert / approachable requests.',
+    '  - producer_prestige_min: OPTIONAL [0,1] indexed producer-prestige floor for explicit prestige/formal/classic intent (품격, 격식, 상사 선물, 고급스러운).',
+    '  - drinking_window: OPTIONAL "now" when the user asks for currently drinkable / 지금 마시기 좋은 / 피크 후보. For compare_wines + drinkability, include drinking_window:"now" and still call check_drinking_window on both returned entity_ids.',
+    '  - drinking_window_target_year: OPTIONAL explicit year paired with drinking_window.',
     '  - certification: "organic" or "biodynamic"',
     '  - min_price_krw: KRW price floor ("1만원 이상"→10000)',
     `  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→${usd50ApproxKrw})`,
     '  - Price ranges: "1-2만원 사이" → min_price_krw:10000, max_price_krw:20000',
+    '  - Formal senior-colleague/promotion/retirement gifts require an explicit range when no user range is given: min_price_krw:50000 and max_price_krw:150000.',
+    '  - Top-level regions such as Bordeaux/Burgundy/Napa/Tuscany/Beaujolais should use region, not appellation. Use appellation only for subregions such as Pauillac, Margaux, Saint-Émilion, Barolo, Chianti.',
+    '  - Online/virtual tasting with all participants needing access: preserve the accessibility anchor in query, keep max_price_krw, use approachable/crowd_pleasing styles, and do not convert it to occasion:party unless the user explicitly says party.',
     '  - max_alcohol_pct: ABV ceiling for low-alcohol requests ("도수 낮은" → 12); retrieval treats it as a preference, then post-result policy removes only verified over-ceiling wines and keeps unknown-ABV candidates as unverified',
     '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
     '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',
@@ -319,9 +363,11 @@ export function buildSearchWinesPromptContractLines(
 
 export function buildFoodPairingsPromptContractLines(): readonly string[] {
   return [
-    '- get_food_pairings(food, max_price?, max_price_krw?, color?) — food-wine pairing for a single wine color only.',
+    '- get_food_pairings(food, max_price?, max_price_krw?, color?, sweetness_target?, acidity_min?, tannin_max?, styles?, pairing_tags?) — food-wine pairing for a single wine color only.',
+    '  - Legacy shorthand: get_food_pairings(food, max_price?, max_price_krw?, color?). New calls should use the typed objective fields when the query provides them.',
     '  - max_price is legacy USD input; prefer max_price_krw for new calls.',
     `  - color must be one of ${quoteEnum(FOOD_PAIRING_COLORS.filter((color) => color !== 'both'))}. Never use both, mixed, any, or a multi-color shorthand here.`,
+    '  - Put explicit pairing objectives into typed fields: sweetness_target [0,1], acidity_min/tannin_max [0,10], styles, and pairing_tags. Do not bury these in food text.',
     '  - For mixed red+white requests (e.g. couple sets, "both colors"), do NOT call get_food_pairings. Use search_wines with want_diversity=true or parallel search_wines calls instead.',
   ];
 }
@@ -343,6 +389,17 @@ function collectSearchToolStylePreferenceConstraints(input: {
 }, mappingVersion: string): readonly NormalizedConstraint[] {
   const preferences: NormalizedConstraint[] = [];
   for (const styleHint of collectSearchToolStyleHints(input)) {
+    if (styleHint === 'screw_cap') {
+      preferences.push({
+        attribute: 'closure',
+        operator: '=',
+        value: 'screw cap',
+        source_phrase: 'screw_cap',
+        confidence: 1.0,
+        mapping_version: mappingVersion,
+      });
+      continue;
+    }
     if (styleHint === 'sweet') {
       preferences.push({
         attribute: 'sweetness',
@@ -403,6 +460,9 @@ export function buildSearchToolStructuredPreferences(input: {
   readonly occasion?: readonly string[] | undefined;
   readonly gift_suitability_min?: number | undefined;
   readonly beginner_suitability_min?: number | undefined;
+  readonly producer_prestige_min?: number | undefined;
+  readonly drinking_window?: (typeof SEARCH_TOOL_DRINKING_WINDOW_VALUES)[number] | undefined;
+  readonly drinking_window_target_year?: number | undefined;
 }, mappingVersion: string): readonly NormalizedConstraint[] {
   const preferences: NormalizedConstraint[] = [];
 
@@ -443,6 +503,29 @@ export function buildSearchToolStructuredPreferences(input: {
       operator: '>=',
       value: input.beginner_suitability_min,
       source_phrase: `beginner_suitability>=${input.beginner_suitability_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.producer_prestige_min !== undefined) {
+    preferences.push({
+      attribute: 'producer_prestige',
+      operator: '>=',
+      value: input.producer_prestige_min,
+      source_phrase: `producer_prestige>=${input.producer_prestige_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.drinking_window !== undefined || input.drinking_window_target_year !== undefined) {
+    const targetYear = input.drinking_window_target_year ?? new Date().getFullYear();
+    preferences.push({
+      attribute: 'drinking_window',
+      operator: '=',
+      value: targetYear,
+      source_phrase: input.drinking_window === 'now'
+        ? `drinking_window:now@${targetYear}`
+        : `drinking_window@${targetYear}`,
       confidence: 1.0,
       mapping_version: mappingVersion,
     });

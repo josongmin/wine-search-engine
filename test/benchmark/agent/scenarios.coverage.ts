@@ -780,10 +780,28 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
+      priceBandKrw: { max: 135_000 },
       answerMustMatch: ['(bordeaux|보르도)'],
       rubric:
         'Must handle pure English query and recommend Bordeaux under $100. '
         + 'Response language should match user (English) or default to Korean.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 135000 },
+      ],
+      expectedConstraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Bordeaux' },
+        ],
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 135000 },
+        ],
+        inferred: [
+          { attribute: 'country', operator: '=', value: 'France' },
+        ],
+      },
+      expectedEntities: [
+        { surface: 'Bordeaux', canonical: 'Bordeaux', type: 'region' },
+      ],
     },
   },
   {
@@ -1861,6 +1879,11 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
+      expectedConstraints: {
+        soft: [
+          { attribute: 'style', operator: 'in', value: ['approachable'] },
+        ],
+      },
       rubric:
         'Must recommend approachable, crowd-pleasing wines suitable for a beginner at a wine bar. '
         + 'Should address the social context (first visit, friend who is new to wine). '
@@ -2043,6 +2066,15 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'beginner_suitability_min', predicate: 'exists' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'style', operator: 'in', value: ['approachable'] },
+          { attribute: 'beginner_suitability', operator: '>=', value: 0.5 },
+        ],
+      },
       rubric:
         'Must recommend beginner-friendly wines for parents who have never drunk wine before. '
         + 'Sweet, fruity, low-tannin or low-acid options expected. '
@@ -2076,6 +2108,15 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxSteps: 2,
       maxDurationMs: 40_000,
       maxTotalTokens: 6_000,
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'style', operator: 'in', value: ['crowd_pleasing'] },
+          { attribute: 'occasion', operator: 'in', value: ['gift'] },
+        ],
+      },
       rubric:
         'Must recommend crowd-pleasing, universally appealing wines suitable as a romantic gift when the recipient\'s preferences are unknown. '
         + 'Should suggest safe but thoughtful options (a rosé, a light red, or a food-friendly white). '
@@ -2113,6 +2154,19 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       requiredRegister: 'formal',
       // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
       judgeRequired: true,
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'min_price_krw', predicate: 'gte', value: 50000 },
+        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 150000 },
+        { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'gift' },
+        { tool: 'search_wines', argPath: 'producer_prestige_min', predicate: 'exists' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: 'range', value: { min: 50000, max: 150000 } },
+          { attribute: 'style', operator: 'in', value: ['crowd_pleasing'] },
+          { attribute: 'occasion', operator: 'in', value: ['gift'] },
+        ],
+      },
       rubric:
         'Must recommend dignified, universally respectable wines appropriate for gifting to a senior colleague on a promotion. '
         + 'Price range 50,000-150,000 KRW. Should feel prestigious without being ostentatious. '
@@ -2200,10 +2254,21 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 50_000 },
+      requiredRegister: 'casual',
+      judgeRequired: true,
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'max_price_krw', predicate: 'lte', value: 50000 },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 50000 },
+        ],
+      },
       rubric:
         'Must recommend wines under 50,000 KRW that are widely available for online tasting participants. '
         + 'Should consider that participants may be at different locations but can access the same bottle. '
-        + 'Major supermarket or widely distributed brands expected.',
+        + 'Major supermarket or widely distributed brands expected. '
+        + 'Casual Korean register expected.',
     },
   },
   {
@@ -2317,6 +2382,17 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       requireHedging: false,
+      requiredRegister: 'casual',
+      judgeRequired: true,
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'beginner_suitability_min', predicate: 'exists' },
+      ],
+      expectedConstraints: {
+        soft: [
+          { attribute: 'style', operator: 'in', value: ['approachable'] },
+          { attribute: 'beginner_suitability', operator: '>=', value: 0.5 },
+        ],
+      },
       rubric:
         'Must recommend beginner-friendly wines: approachable (low tannin, light-medium body), '
         + 'affordable, widely available. Should explain WHY it suits a beginner '

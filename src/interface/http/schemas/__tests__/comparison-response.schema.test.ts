@@ -37,6 +37,34 @@ describe('ComparisonSearchResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('accepts concept comparison payloads with concept aggregate evidence', () => {
+    const parsed = ComparisonSearchResponseSchema.safeParse({
+      ...makeValidComparisonResponse(),
+      entities: [
+        {
+          sub_query: 'Barolo',
+          comparison_mode: 'concept',
+          canonical_concept: 'Barolo',
+          concept_entity_type: 'appellation',
+          concept_aggregate: {
+            canonical_concept: 'Barolo',
+            concept_entity_type: 'appellation',
+            representative_result: null,
+            prototype_axis: [],
+            aggregate_result_count: 0,
+          },
+          top_result: null,
+          result_count: 0,
+          resolution_status: 'resolved',
+          all_results: [],
+        },
+        makeValidComparisonResponse().entities[1],
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it('rejects V2 envelope fields on the V1 comparison contract', () => {
     const parsed = ComparisonSearchResponseSchema.safeParse({
       ...makeValidComparisonResponse(),

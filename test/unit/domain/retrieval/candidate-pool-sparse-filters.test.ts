@@ -244,6 +244,8 @@ describe('CandidatePoolService sparse filter tokens', () => {
 
     expect(out).toHaveLength(1);
     expect(out[0]?.entityId).toBe('wine-1');
+    expect(out.candidates).toHaveLength(1);
+    expect(out.fusionTrace?.candidateCount.afterAssembly).toBe(1);
     expect(pool.getLastFusionTrace()?.candidateCount.afterFusion).toBe(3);
     expect(pool.getLastFusionTrace()?.candidateCount.afterHardFilter).toBe(3);
     expect(pool.getLastFusionTrace()?.candidateCount.afterAssembly).toBe(1);

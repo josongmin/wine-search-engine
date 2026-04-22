@@ -393,6 +393,19 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
   });
 
+  it('exact future-vintage metadata query for Almaviva stays on the entity route', async () => {
+    const entries = new Map([['알마비바', makeMatchResult('알마비바', 0.95, ['entity-almaviva'])]]);
+    const planner = makePlanner(entries);
+    const plan = await planner.plan('알마비바 2026 빈티지 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘');
+
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.queryClass).toBe('short_entity');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    expect(plan.uncertainty.ambiguityDetected).toBe(false);
+    expect(plan.uncertainty.ambiguityTypes).toEqual([]);
+  });
+
   it('slang grape query with trailing request words still routes as exact entity', async () => {
     const anchorMatcher = new ExactAliasMatcher(
       new Map([
@@ -502,6 +515,23 @@ describe('Planner – suggestedRoute matches expected routing', () => {
     expect(plan.suggestedRoute).toBe('entity');
     expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
     expect(plan.constraints.hard).toHaveLength(0);
+  });
+
+  it('mixed similar-items queries do not leak anchor-local vintage into hard constraints', async () => {
+    const entries = new Map([
+      ['opus one 2018', makeMatchResult('Opus One 2018', 0.97, ['opus-one-2018'])],
+    ]);
+    const planner = makePlanner(entries);
+
+    const plan = await planner.plan('Opus One 2018 비슷한 와인');
+
+    expect(plan.intent).toBe('mixed_query');
+    expect(plan.queryClass).toBe('anchored_similarity');
+    expect(plan.suggestedRoute).toBe('mixed');
+    expect(plan.suggestedRetrievalMode).toBe('similar_items');
+    expect(
+      plan.constraints.hard.some((constraint) => constraint.attribute === 'vintage_year'),
+    ).toBe(false);
   });
 });
 

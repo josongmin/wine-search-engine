@@ -1,0 +1,219 @@
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import type {
+  LLMInjectionClassifierOptions,
+  LLMInjectionClassifierPort,
+} from '../../domain/security/port/llm-injection-classifier.port.js';
+import {
+  fetchWithTimeout,
+  isAbortError,
+} from '../http/fetch-with-timeout.js';
+import {
+  parseRetryAfterHeader,
+  retryWithBackoff,
+  type RetryConfig,
+} from '../http/retry-with-backoff.js';
+import { runUnderLlmBreaker } from '../ai/llm-circuit-breaker-classifier.js';
+import {
+  INJECTION_CLASSIFIER_SYSTEM_PROMPT,
+  normalizeClassifierJsonText,
+} from './anthropic-llm-injection-classifier.js';
+
+const DEFAULT_OPENAI_INJECTION_MODEL = 'gpt-5.4-mini';
+const DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS = 45_000;
+const OPENAI_CLASSIFIER_MAX_OUTPUT_TOKENS = 50;
+const OPENAI_PARSE_ERROR_PREVIEW_CHARS = 120;
+
+const OPENAI_INJECTION_BREAKER_FAILURE_THRESHOLD = 5;
+const OPENAI_INJECTION_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
+const OPENAI_INJECTION_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const OPENAI_INJECTION_BREAKER_NAME = 'openai-injection-classifier';
+
+const OPENAI_INJECTION_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 4,
+  transientBackoffBaseMs: 250,
+  transientBackoffCapMs: 2_000,
+  rateLimitBackoffBaseMs: 2_000,
+  rateLimitBackoffCapMs: 30_000,
+  label: 'OpenAI injection classifier',
+};
+
+interface OpenAiInjectionClassifierOptions {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly model?: string | undefined;
+  readonly httpTimeoutMs?: number | undefined;
+}
+
+interface ChatCompletionsMessage {
+  readonly role: string;
+  readonly content: string | null;
+}
+
+interface ChatCompletionsChoice {
+  readonly message?: ChatCompletionsMessage;
+}
+
+interface ChatCompletionsResponse {
+  readonly choices: readonly ChatCompletionsChoice[];
+}
+
+function trimTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function isChatCompletionsResponse(v: unknown): v is ChatCompletionsResponse {
+  if (typeof v !== 'object' || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (!Array.isArray(o['choices']) || o['choices'].length === 0) return false;
+  const first = o['choices'][0];
+  if (typeof first !== 'object' || first === null) return false;
+  const message = (first as Record<string, unknown>)['message'];
+  if (message === undefined) return true;
+  if (typeof message !== 'object' || message === null) return false;
+  const content = (message as Record<string, unknown>)['content'];
+  return content === null || typeof content === 'string';
+}
+
+function tokenLimitKey(model: string): 'max_completion_tokens' | 'max_tokens' {
+  return /^(?:gpt-5|o\d)/i.test(model) ? 'max_completion_tokens' : 'max_tokens';
+}
+
+export class OpenAiLLMInjectionClassifier implements LLMInjectionClassifierPort {
+  private readonly endpoint: string;
+  private readonly apiKey: string;
+  private readonly model: string;
+  private readonly httpTimeoutMs: number;
+  private readonly circuitBreaker: CircuitBreaker;
+
+  constructor(options: OpenAiInjectionClassifierOptions) {
+    if (!options.apiKey || options.apiKey.trim().length === 0) {
+      throw new Error('OpenAiLLMInjectionClassifier: apiKey is required');
+    }
+    this.endpoint = `${trimTrailingSlash(options.baseUrl)}/chat/completions`;
+    this.apiKey = options.apiKey;
+    this.model = options.model ?? DEFAULT_OPENAI_INJECTION_MODEL;
+    this.httpTimeoutMs = options.httpTimeoutMs ?? DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS;
+    this.circuitBreaker = createCircuitBreaker({
+      name: OPENAI_INJECTION_BREAKER_NAME,
+      failureThreshold: OPENAI_INJECTION_BREAKER_FAILURE_THRESHOLD,
+      recoveryTimeoutMs: OPENAI_INJECTION_BREAKER_RECOVERY_TIMEOUT_MS,
+      halfOpenMaxAttempts: OPENAI_INJECTION_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
+    });
+    globalCircuitBreakerRegistry.register(OPENAI_INJECTION_BREAKER_NAME, this.circuitBreaker);
+  }
+
+  async classify(query: string, options?: LLMInjectionClassifierOptions): Promise<boolean> {
+    try {
+      return await runUnderLlmBreaker(
+        this.circuitBreaker,
+        OPENAI_INJECTION_BREAKER_NAME,
+        () => this.classifyOnce(query, options),
+      );
+    } catch (err) {
+      bootstrapLogger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        '[OpenAiLLMInjectionClassifier] OpenAI API error — propagating to caller for fail-open/closed policy',
+      );
+      throw err;
+    }
+  }
+
+  private async classifyOnce(
+    query: string,
+    options?: LLMInjectionClassifierOptions,
+  ): Promise<boolean> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: [
+        { role: 'system', content: INJECTION_CLASSIFIER_SYSTEM_PROMPT },
+        { role: 'user', content: query },
+      ],
+      [tokenLimitKey(this.model)]: OPENAI_CLASSIFIER_MAX_OUTPUT_TOKENS,
+    };
+
+    const text = await retryWithBackoff(
+      async () => {
+        let response: Response;
+        try {
+          response = await fetchWithTimeout(
+            this.endpoint,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${this.apiKey}`,
+              },
+              body: JSON.stringify(body),
+            },
+            this.httpTimeoutMs,
+            options?.abortSignal,
+          );
+        } catch (err) {
+          if (isAbortError(err)) {
+            const abortErr = new Error(`OpenAI injection classifier: request timed out after ${this.httpTimeoutMs}ms`);
+            abortErr.name = 'AbortError';
+            throw abortErr;
+          }
+          throw err;
+        }
+
+        if (!response.ok) {
+          return {
+            kind: 'http-error' as const,
+            status: response.status,
+            bodyText: await response.text().catch(() => ''),
+            retryAfterSec: parseRetryAfterHeader(response),
+          };
+        }
+
+        const data: unknown = await response.json();
+        if (!isChatCompletionsResponse(data)) {
+          throw new Error('OpenAI injection classifier: unexpected chat completions response');
+        }
+
+        const content = data.choices[0]?.message?.content;
+        return {
+          kind: 'success' as const,
+          value: typeof content === 'string' ? content : '',
+        };
+      },
+      OPENAI_INJECTION_RETRY_CONFIG,
+      options?.abortSignal,
+    );
+
+    if (text.trim().length === 0) {
+      bootstrapLogger.error('[OpenAiLLMInjectionClassifier] No text content in OpenAI response');
+      return true;
+    }
+
+    try {
+      const jsonText = normalizeClassifierJsonText(text);
+      const parsedUnknown: unknown = JSON.parse(jsonText) as unknown;
+      if (
+        typeof parsedUnknown !== 'object' ||
+        parsedUnknown === null ||
+        Array.isArray(parsedUnknown) ||
+        typeof (parsedUnknown as { is_injection?: unknown }).is_injection !== 'boolean'
+      ) {
+        bootstrapLogger.warn(
+          { responseShape: typeof parsedUnknown },
+          '[OpenAiLLMInjectionClassifier] Strict shape mismatch — fail-closed',
+        );
+        return true;
+      }
+      return (parsedUnknown as { is_injection: boolean }).is_injection;
+    } catch {
+      const preview = text.slice(0, OPENAI_PARSE_ERROR_PREVIEW_CHARS);
+      bootstrapLogger.error(
+        { responsePreview: preview },
+        '[OpenAiLLMInjectionClassifier] Failed to parse OpenAI JSON response',
+      );
+      return true;
+    }
+  }
+}

@@ -19,6 +19,8 @@
  *     No feasible assignment existed under the shared-budget ceiling.
  *   - BUNDLE_SELECTOR_EMPTY_SLOT_POOL_COUNT
  *     At least one subquery produced zero candidates.
+ *   - BUNDLE_SELECTOR_GROUP_OBLIGATION_UNSATISFIED_COUNT
+ *     No active row selection satisfied the graph's OR/XOR group obligation.
  */
 
 import type { AssignmentSolverFailReason } from '../domain/retrieval/service/assignment-solver.js';
@@ -27,13 +29,15 @@ type BundleSelectorCounterKind =
   | 'BUNDLE_SELECTOR_BUDGET_UNSELECTED_RESERVED_COUNT'
   | 'BUNDLE_SELECTOR_K_EXCEEDS_EXACT_LIMIT_COUNT'
   | 'BUNDLE_SELECTOR_BUDGET_INFEASIBLE_COUNT'
-  | 'BUNDLE_SELECTOR_EMPTY_SLOT_POOL_COUNT';
+  | 'BUNDLE_SELECTOR_EMPTY_SLOT_POOL_COUNT'
+  | 'BUNDLE_SELECTOR_GROUP_OBLIGATION_UNSATISFIED_COUNT';
 
 const COUNTER_KINDS: readonly BundleSelectorCounterKind[] = [
   'BUNDLE_SELECTOR_BUDGET_UNSELECTED_RESERVED_COUNT',
   'BUNDLE_SELECTOR_K_EXCEEDS_EXACT_LIMIT_COUNT',
   'BUNDLE_SELECTOR_BUDGET_INFEASIBLE_COUNT',
   'BUNDLE_SELECTOR_EMPTY_SLOT_POOL_COUNT',
+  'BUNDLE_SELECTOR_GROUP_OBLIGATION_UNSATISFIED_COUNT',
 ] as const;
 
 const REASON_TO_COUNTER: Readonly<Record<AssignmentSolverFailReason, BundleSelectorCounterKind>> = {
@@ -43,6 +47,8 @@ const REASON_TO_COUNTER: Readonly<Record<AssignmentSolverFailReason, BundleSelec
     'BUNDLE_SELECTOR_BUDGET_INFEASIBLE_COUNT',
   'bundle_selector_fail_closed:empty_slot_pool':
     'BUNDLE_SELECTOR_EMPTY_SLOT_POOL_COUNT',
+  'bundle_selector_fail_closed:group_obligation_unsatisfied':
+    'BUNDLE_SELECTOR_GROUP_OBLIGATION_UNSATISFIED_COUNT',
 };
 
 interface BundleSelectorCounter {

@@ -102,12 +102,14 @@ const QUICK_SCENARIO_IDS = new Set([
 ]);
 
 /**
- * "quick-realdata" profile — 60 high-signal scenarios for fast iteration with real infra.
+ * "quick-realdata" profile — high-signal scenarios for fast iteration with real infra.
  * Selection criteria:
  *   - All 5 worst performers from last standard run (#32, #42, #63, #90, #106)
  *   - Adversarial tier: full coverage (refusal, injection, jailbreak, PII, unicode)
  *   - Weak tiers: single_shot×5, negation_complex×4, wine_type_basic×3, korean_colloquial×4
  *   - Healthy regression guards: nested_condition×4, comparison_nested×3, multi_step×3
+ *   - Targeted gap guards: exact-pair drinkability, side-specific grounded compare,
+ *     fail-closed freshness honesty
  *   - Broad tier sampling: negation, situation_based, gift_refined, knowledge_hybrid, extreme
  * Concurrency 5 (keeps the initial burst below the observed gpt-5.4-mini TPM ceiling), judge on, ~6-10 min wall clock.
  */
@@ -142,6 +144,8 @@ const QUICK_REALDATA_SCENARIO_IDS = new Set([
   80, 81,
   // taste_descriptor
   20, 21,
+  // targeted gap guards
+  117, 118, 119, 120, 121, 122, 123, 124,
 ]);
 
 /**

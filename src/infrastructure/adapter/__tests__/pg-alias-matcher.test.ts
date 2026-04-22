@@ -173,6 +173,30 @@ describe('PgAliasMatcher', () => {
     expect(pool.queries).toHaveLength(2);
   });
 
+  it('accepts string query_id values in batch alias rows without dropping matches', async () => {
+    const pool = {
+      async query(sql: string, _params: readonly unknown[]): Promise<{ rows: unknown[] }> {
+        if (sql.includes('FROM active_search_snapshot')) {
+          return { rows: [POINTER_ROW] };
+        }
+        return {
+          rows: [{
+            entity_id: 'entity-opus-one',
+            surface_form: 'Opus One',
+            normalized_value: 'opus one',
+            confidence: 0.93,
+            query_id: '0',
+          }],
+        };
+      },
+    };
+    const matcher = new PgAliasMatcher(pool as never);
+
+    const batch = await matcher.findMatchesBatch(['opusone']);
+
+    expect(batch.get('opusone')?.[0]?.entityIds).toEqual(['entity-opus-one']);
+  });
+
   it('scores fuzzy candidates against multiple normalized variants, including transliterated compact forms', async () => {
     const pool = new MockPool([
       [],

@@ -21,6 +21,34 @@ import type {
 import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import type { EvidenceRecord } from './claim-verifier-deterministic.js';
 
+type EvidenceRecordValue = string | number | readonly string[] | null | undefined;
+
+function parseStepIndexFromToolCallId(toolCallId: string): number | undefined {
+  const match = /-s(?<stepIndex>\d+)(?:-p\d+)?$/u.exec(toolCallId);
+  if (match?.groups?.['stepIndex'] === undefined) {
+    return undefined;
+  }
+  const stepIndex = Number(match.groups['stepIndex']);
+  if (!Number.isFinite(stepIndex)) {
+    return undefined;
+  }
+  return Number.isInteger(stepIndex) && stepIndex >= 0 ? stepIndex : undefined;
+}
+
+function withFrameProvenance(
+  record: Record<string, EvidenceRecordValue>,
+  frame: ToolCallEvidenceFrame,
+): EvidenceRecord {
+  const stepIndex = parseStepIndexFromToolCallId(frame.toolCallId);
+  return {
+    ...record,
+    __source_tool_name: frame.toolName,
+    __source_tool_call_id: frame.toolCallId,
+    __source_request_id: frame.requestId,
+    ...(stepIndex !== undefined ? { __source_step_index: stepIndex } : {}),
+  };
+}
+
 /**
  * Build a flat EvidenceRecord list from the typed structured outputs of
  * every tool call frame in a run. Ordering: frame order, then result order
@@ -37,7 +65,8 @@ export function buildEvidenceRecordsFromFrames(
 }
 
 function recordsForFrame(frame: ToolCallEvidenceFrame): readonly EvidenceRecord[] {
-  return recordsForStructuredOutput(frame.structuredOutput);
+  return recordsForStructuredOutput(frame.structuredOutput).map((record) =>
+    withFrameProvenance({ ...record }, frame));
 }
 
 function recordsForStructuredOutput(
@@ -49,16 +78,10 @@ function recordsForStructuredOutput(
     case 'food_pairing':
       return output.resultSet.map((item) => resultItemToEvidenceRecord(item));
     case 'comparison_result': {
-      // ComparisonSearchResponse.entities[n].topResult may be null (e.g.
-      // no-match side in a comparison). Drop those entries; nothing
-      // verifiable lives inside a null top result.
-      return output.response.entities
-        .filter((entry): entry is ComparisonEntity & { readonly topResult: ResultItem } =>
-          entry.topResult !== null)
-        .map((entry) => resultItemToEvidenceRecord(entry.topResult, entry));
+      return output.response.entities.flatMap((entry) => comparisonEntityToEvidenceRecords(entry));
     }
     case 'drinking_window': {
-      const rec: Record<string, string | number | readonly string[] | null | undefined> = {
+      const rec: Record<string, EvidenceRecordValue> = {
         entity_id: String(output.entityId),
         drinking_window_start: output.window.drinkingWindowStart,
         drinking_window_end: output.window.drinkingWindowEnd,
@@ -75,6 +98,19 @@ function recordsForStructuredOutput(
   }
 }
 
+function comparisonEntityToEvidenceRecords(
+  entry: ComparisonEntity,
+): readonly EvidenceRecord[] {
+  const conceptPrototypeAxis = entry.conceptAggregate?.prototypeAxis ?? [];
+  if (conceptPrototypeAxis.length > 0) {
+    return conceptPrototypeAxis.map((item) => resultItemToEvidenceRecord(item, entry));
+  }
+  if (entry.topResult === null) {
+    return [];
+  }
+  return [resultItemToEvidenceRecord(entry.topResult, entry)];
+}
+
 /**
  * Flatten a `ResultItem` into the column-name projection that
  * `claim-verifier-deterministic.ts` already expects. This mirrors the field
@@ -86,13 +122,16 @@ function resultItemToEvidenceRecord(
   comparisonEntry?: ComparisonEntity,
 ): EvidenceRecord {
   const entity = item.entity;
-  const rec: Record<string, string | number | readonly string[] | null | undefined> = {
+  const rec: Record<string, EvidenceRecordValue> = {
     entity_id: entity.entityId,
     canonical_label: entity.canonicalLabel,
   };
   if (entity.producer !== undefined) rec['producer'] = entity.producer;
   if (entity.region !== undefined) rec['region'] = entity.region;
+  if (entity.closure !== undefined) rec['closure'] = entity.closure;
+  if (entity.country !== undefined) rec['country'] = entity.country;
   if (entity.appellation !== undefined) rec['appellation'] = entity.appellation;
+  if (entity.producerPrestige !== undefined) rec['producer_prestige'] = entity.producerPrestige;
   if (entity.style !== undefined) rec['style'] = entity.style;
   if (entity.wineType !== undefined) rec['wine_type'] = entity.wineType;
   if (entity.vintage !== undefined) rec['vintage_year'] = entity.vintage;
@@ -105,12 +144,18 @@ function resultItemToEvidenceRecord(
     rec['grapes'] = entity.grapes;
   }
   if (entity.alcoholPct !== undefined) rec['alcohol_pct'] = entity.alcoholPct;
+  if (entity.body !== undefined) rec['body'] = entity.body;
+  if (entity.tannin !== undefined) rec['tannin'] = entity.tannin;
+  if (entity.acidity !== undefined) rec['acidity'] = entity.acidity;
   if (entity.sweetness !== undefined) rec['sweetness'] = entity.sweetness;
   if (entity.criticScore !== undefined) {
     rec['critic_score_normalized'] = entity.criticScore;
   }
   if (entity.pairingTags !== undefined && entity.pairingTags.length > 0) {
     rec['pairing'] = entity.pairingTags;
+  }
+  if (entity.occasion !== undefined && entity.occasion.length > 0) {
+    rec['occasion'] = entity.occasion;
   }
   if (item.drinkingWindow !== undefined) {
     rec['drinking_window_start'] = item.drinkingWindow.drinkingWindowStart;
@@ -122,7 +167,7 @@ function resultItemToEvidenceRecord(
 }
 
 function applyComparisonConceptEvidence(
-  rec: Record<string, string | number | readonly string[] | null | undefined>,
+  rec: Record<string, EvidenceRecordValue>,
   comparisonEntry: ComparisonEntity | undefined,
 ): void {
   if (
@@ -133,9 +178,20 @@ function applyComparisonConceptEvidence(
     return;
   }
 
+  // comparison_concept is supplemental comparison-leg provenance only.
+  // It must never overwrite the representative result's primary evidence
+  // field (e.g. appellation / region / grape / wine_type) on this record.
   rec['comparison_concept'] = comparisonEntry.canonicalConcept;
   rec['comparison_concept_field'] = comparisonEntry.conceptEntityType;
   rec['comparison_sub_query'] = comparisonEntry.subQuery;
+  if (comparisonEntry.conceptAggregate !== undefined) {
+    rec['comparison_aggregate_result_count'] = comparisonEntry.conceptAggregate.aggregateResultCount;
+    if (comparisonEntry.conceptAggregate.representativeResult?.entity.entityId === rec['entity_id']) {
+      rec['comparison_candidate_role'] = 'representative';
+    } else {
+      rec['comparison_candidate_role'] = 'prototype';
+    }
+  }
 
   switch (comparisonEntry.conceptEntityType) {
     case 'country':
@@ -153,10 +209,16 @@ function applyComparisonConceptEvidence(
 
 function parsePriceRangeAsUsd(priceRange: string): number | undefined {
   const trimmed = priceRange.trim();
-  const usdMatch = /^\$\s*([0-9]+(?:\.[0-9]+)?)/u.exec(trimmed);
+  if (/^\$\s*[0-9]+(?:\.[0-9]+)?\s*-\s*\$\s*[0-9]+(?:\.[0-9]+)?$/u.test(trimmed)) {
+    return undefined;
+  }
+  const usdMatch = /^\$\s*([0-9]+(?:\.[0-9]+)?)$/u.exec(trimmed);
   if (usdMatch?.[1] !== undefined) {
     const usd = Number(usdMatch[1]);
     return Number.isFinite(usd) ? usd : undefined;
+  }
+  if (/^(?:₩|)?[0-9][0-9,]*\s*원?\s*-\s*(?:₩|)?[0-9][0-9,]*\s*원?$/u.test(trimmed)) {
+    return undefined;
   }
   const krwMatch = /^(?:₩|)([0-9][0-9,]*)\s*원?$/u.exec(trimmed);
   if (krwMatch?.[1] !== undefined) {

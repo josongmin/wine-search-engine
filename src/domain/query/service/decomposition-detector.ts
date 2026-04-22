@@ -68,6 +68,9 @@ const COMPARISON_PATTERNS: ReadonlyArray<RegExp> = [
   /(?:compare)\s+(.+?)\s+(?:and|with)\s+(.+?)(?:\?|$)/i,
 
   // Korean: "X와 Y", "X랑 Y", "X하고 Y"
+  /(.+?)(?:와|과|랑|하고|이랑)\s+(.+?)(?=\s+(?:중|비교|비교하면|뭐가|어떤|차이|어느))/u,
+
+  // Korean: "X 와 Y", "X 랑 Y", "X 하고 Y"
   /(.+?)\s+(?:와|과|랑|하고|이랑)\s+(.+?)\s+(?:중|비교|비교하면|뭐가|어떤|차이|어느)(?:\?|$)/u,
 
   // English: "X or Y which is better"
@@ -172,7 +175,7 @@ function buildComparisonDecompositionLeg(query: string): ComparisonDecomposition
   if (conceptResolution !== undefined) {
     return {
       rawQuery: query,
-      retrievalQuery: `${conceptResolution.canonicalConcept} wine`,
+      retrievalQuery: buildConceptComparisonRetrievalQuery(query, conceptResolution),
       mode: 'concept',
       retrievalMode: getConceptComparisonRetrievalMode(conceptResolution.entityType),
       evidenceSource: conceptResolution.evidenceSource,
@@ -190,6 +193,40 @@ function getConceptComparisonRetrievalMode(
   // Concept/category comparisons need representative wine sets, not exact entity
   // lookup for the concept label itself (for example "Barolo" as an appellation).
   return 'hybrid';
+}
+
+function buildConceptComparisonRetrievalQuery(
+  rawQuery: string,
+  primaryConcept: {
+    readonly canonicalConcept: string;
+    readonly entityType: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
+  },
+): string {
+  const normalized = buildNormalizedQueryViews(rawQuery).punctuationStripped.trim();
+  const canonicalParts: string[] = [primaryConcept.canonicalConcept];
+  const seen = new Set(canonicalParts.map((part) => part.toLowerCase()));
+  const resolvedSpans = resolveOverlaps(
+    parseSpans(normalized).map((span) => ({
+      span,
+      resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
+    })),
+  );
+
+  for (const entry of resolvedSpans) {
+    const resolved = entry.resolved;
+    if (!isDirectEntityResolution(resolved) || !CONCEPT_COMPARE_ENTITY_TYPES.has(resolved.entityType)) {
+      continue;
+    }
+    const canonical = resolved.canonicalValue;
+    const key = canonical.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    canonicalParts.push(canonical);
+  }
+
+  return `${canonicalParts.join(' ')} wine`;
 }
 
 function resolveConceptComparisonCanonical(

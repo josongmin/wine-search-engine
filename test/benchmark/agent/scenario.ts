@@ -163,7 +163,7 @@ export interface ScenarioExpectation {
   readonly expectedToolArgs?: readonly {
     readonly tool: string;
     readonly argPath: string; // dot-path e.g. "filters.priceMaxKrw"
-    readonly predicate: 'equals' | 'lte' | 'gte' | 'contains' | 'exists';
+    readonly predicate: 'equals' | 'equals_any' | 'lte' | 'gte' | 'contains' | 'contains_any' | 'exists';
     readonly value?: unknown;
   }[];
 
@@ -190,6 +190,19 @@ export interface ScenarioExpectation {
    * criterion (e.g. negation: "recommended wine must not be Cabernet").
    */
   readonly judgeRequired?: boolean;
+
+  /**
+   * When true, explicit "no evidence / 0 results / corpus limited" retrieval
+   * outcomes are treated as an unmeasurable grounding condition rather than a
+   * context-relevance failure. This is for fail-closed freshness / availability
+   * scenarios where the correct behavior is to abstain honestly if the corpus
+   * cannot confirm the claim.
+   *
+   * The honesty itself is still scored by answerQuality + judge. This flag only
+   * prevents contextRelevance/contextRecall from misclassifying a deliberate,
+   * evidence-preserving abstention as a retrieval mismatch.
+   */
+  readonly allowHonestNoEvidenceAbstention?: boolean;
 
   // ─────────────────────────────────────────────────────────────────────
   // RFC-020: Constraint extraction ground truth

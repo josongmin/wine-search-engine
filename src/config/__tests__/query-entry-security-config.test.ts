@@ -28,4 +28,22 @@ describe('query entry security config', () => {
 
     expect(config.queryEntrySecurity.judgeFailureMode).toBe('fail_closed');
   });
+
+  it('selects Anthropic injection provider by default', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+    });
+
+    expect(config.queryEntrySecurity.injectionProvider).toBe('anthropic');
+  });
+
+  it('allows OpenAI injection provider to be selected explicitly', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LLM_INJECTION_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'sk-test',
+    });
+
+    expect(config.queryEntrySecurity.injectionProvider).toBe('openai');
+  });
 });

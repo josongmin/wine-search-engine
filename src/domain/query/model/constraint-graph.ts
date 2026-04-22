@@ -81,6 +81,15 @@ export interface SubqueryNode {
   /** Human-readable tag — 'appetiser', 'main_course', 'dessert', etc. */
   readonly purpose: string;
   readonly targetCardinality: number;
+  readonly obligation?: SubqueryObligation | undefined;
+}
+
+export type SubqueryObligation = 'required' | 'optional';
+
+export function getSubqueryObligation(
+  node: Pick<SubqueryNode, 'obligation'>,
+): SubqueryObligation {
+  return node.obligation ?? 'required';
 }
 
 export interface GroupAndNode {
@@ -212,6 +221,7 @@ const SubqueryNodeSchema = z.object({
   nodeId: z.string().min(1).max(NODE_ID_MAX_LEN),
   purpose: z.string().min(1).max(LABEL_MAX_LEN),
   targetCardinality: z.number().int().nonnegative(),
+  obligation: z.enum(['required', 'optional']).optional(),
 }).strict();
 
 const groupSchema = <K extends 'group_and' | 'group_or' | 'group_xor'>(kind: K) =>

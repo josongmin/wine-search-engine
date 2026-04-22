@@ -11,17 +11,52 @@ import type { ToolOutcome } from '../../../../src/application/agent/tool-outcome
 
 describe('agent query execution contract', () => {
   it('classifies drinkability and entity-metadata signals from normalized Korean queries', () => {
-    expect(buildAgentQueryExecutionContract('오푸스원 지금 마시기 좋아?')).toEqual({
+    expect(buildAgentQueryExecutionContract('오푸스원 지금 마시기 좋아?')).toMatchObject({
       requiresDrinkabilityCheck: true,
       hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: '오푸스원',
     });
-    expect(buildAgentQueryExecutionContract('오푸스원 가격 얼마야')).toEqual({
+    expect(buildAgentQueryExecutionContract('오푸스원 가격 얼마야')).toMatchObject({
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: '오푸스원',
     });
-    expect(buildAgentQueryExecutionContract('오퍼스원 얼마야?')).toEqual({
+    expect(buildAgentQueryExecutionContract('오퍼스원 얼마야?')).toMatchObject({
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: '오퍼스원',
+    });
+    expect(buildAgentQueryExecutionContract('보졸레누보 올해꺼 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      hasTemporalReleaseSignal: true,
+      temporalReleaseQuery: '보졸레누보',
+      temporalReleaseConceptQuery: true,
+    });
+    expect(buildAgentQueryExecutionContract('보졸레 누보 올해 나왔는지 근거 없으면 모른다고만 해줘')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      hasTemporalReleaseSignal: true,
+      temporalReleaseQuery: '보졸레 누보',
+      temporalReleaseConceptQuery: true,
+    });
+    expect(buildAgentQueryExecutionContract('알마비바 2026 빈티지 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: '알마비바 2026 빈티지',
+      exactMetadataTargetVintage: 2026,
+    });
+    expect(buildAgentQueryExecutionContract('Opus One 2027 vintage released yet? If you do not have hard evidence, say you do not know.')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: 'Opus One 2027',
+      exactMetadataTargetVintage: 2027,
+    });
+    expect(buildAgentQueryExecutionContract('Sassicaia 2025 release 있나? 확실한 근거 없으면 추정하지 말고 말해줘')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: 'Sassicaia 2025',
+      exactMetadataTargetVintage: 2025,
     });
   });
 
@@ -36,6 +71,174 @@ describe('agent query execution contract', () => {
     });
   });
 
+  it('requires grounded search for generic decanting guidance without a specific wine anchor', () => {
+    expect(buildAgentQueryExecutionContract('디캔팅 해야 되는 와인이면 미리 알려줘')).toEqual({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+      requiresGroundedWineSearch: true,
+    });
+  });
+
+  it('requires the food-pairing tool for single-dish pairing requests from the pairing taxonomy', () => {
+    expect(buildAgentQueryExecutionContract('스테이크에 어울리는 와인')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+      requiredTool: 'get_food_pairings',
+      foodPairing: {
+        food: '스테이크에 어울리는 와인',
+        pairingTags: ['beef'],
+      },
+    });
+    expect(buildAgentQueryExecutionContract('치맥 대신 치킨이랑 마실 와인')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+      requiredTool: 'get_food_pairings',
+      foodPairing: {
+        food: '치맥 대신 치킨이랑 마실 와인',
+        pairingTags: ['chicken'],
+      },
+    });
+    expect(buildAgentQueryExecutionContract('회 먹을 건데 와인 추천해줘')).toMatchObject({
+      requiredTool: 'get_food_pairings',
+      foodPairing: {
+        pairingTags: ['white_fish'],
+      },
+    });
+    expect(buildAgentQueryExecutionContract('삼겹살이랑 와인 조합 추천')).toMatchObject({
+      requiredTool: 'get_food_pairings',
+      foodPairing: {
+        pairingTags: ['pork'],
+      },
+    });
+  });
+
+  it('does not force the pairing tool for mixed-color or decomposed food requests', () => {
+    expect(buildAgentQueryExecutionContract('회사 회식 10명, 레드/화이트 반반, 총 20만원')).not.toHaveProperty('requiredTool');
+    expect(buildAgentQueryExecutionContract('피노 누아르 vs 가메이, 어떤 게 치킨에 더 맞아?')).not.toHaveProperty('requiredTool');
+  });
+
+  it('builds typed search defaults for explicit situational semantics', () => {
+    expect(buildAgentQueryExecutionContract('이탈리아 레드 중에 평점 좋고 지금 마실 수 있는 거')).toMatchObject({
+      requiresDrinkabilityCheck: true,
+      hasEntityMetadataSignal: true,
+    });
+    expect(buildAgentQueryExecutionContract('캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      searchDefaults: {
+        styles: ['screw_cap', 'chillable'],
+        occasion: ['camping'],
+      },
+    });
+    expect(buildAgentQueryExecutionContract('와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로')).toMatchObject({
+      searchDefaults: {
+        styles: ['approachable', 'crowd_pleasing'],
+        occasion: ['gift'],
+        gift_suitability_min: 0.7,
+        beginner_suitability_min: 0.65,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('와인 입문자 선물용, 달달하면서 도수 낮은 거, 예쁜 라벨이면 좋겠다')).toMatchObject({
+      searchDefaults: {
+        occasion: ['gift'],
+        max_alcohol_pct: 12,
+        gift_suitability_min: 0.65,
+        beginner_suitability_min: 0.65,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('와인 입문자 선물용, 달달하면서 도수 낮은 거, 예쁜 라벨이면 좋겠다').searchDefaults?.styles)
+      .toEqual(expect.arrayContaining(['presentation_forward', 'sweet', 'approachable']));
+    expect(buildAgentQueryExecutionContract('데이트 전 와인 선물, 상대방이 뭘 좋아하는지 몰라')).toMatchObject({
+      searchDefaults: {
+        styles: ['crowd_pleasing'],
+        occasion: ['date_night', 'gift'],
+      },
+    });
+    expect(buildAgentQueryExecutionContract('와인 처음 마시는 부모님께 추천할 와인')).toMatchObject({
+      searchDefaults: {
+        styles: ['approachable', 'crowd_pleasing'],
+        beginner_suitability_min: 0.65,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('와인 잘 모르는데 처음 마셔보기 좋은 거 알려줘')).toMatchObject({
+      searchDefaults: {
+        styles: ['approachable'],
+        beginner_suitability_min: 0.65,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('퇴직하는 상사한테 드릴 건데, 격식 있는 와인으로')).toMatchObject({
+      searchDefaults: {
+        styles: ['crowd_pleasing'],
+        occasion: ['gift'],
+        min_price_krw: 50_000,
+        max_price_krw: 150_000,
+        gift_suitability_min: 0.75,
+        producer_prestige_min: 0.7,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거 5만원 이하')).toMatchObject({
+      searchDefaults: {
+        styles: ['approachable', 'crowd_pleasing'],
+        max_price_krw: 50_000,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('스테이크에 어울리는 와인 중에 10만원 이하로')).toMatchObject({
+      requiredTool: 'get_food_pairings',
+      searchDefaults: {
+        max_price_krw: 100_000,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('까쇼 추천해줘')).toMatchObject({
+      searchDefaults: {
+        grape_primary: 'Cabernet Sauvignon',
+      },
+    });
+    expect(buildAgentQueryExecutionContract('보르도 2018 추천해줘')).toMatchObject({
+      searchDefaults: {
+        region: 'Bordeaux',
+      },
+    });
+    expect(buildAgentQueryExecutionContract('보졸레누보 올해꺼 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘')).toMatchObject({
+      hasTemporalReleaseSignal: true,
+      temporalReleaseQuery: '보졸레누보',
+      temporalReleaseConceptQuery: true,
+      searchDefaults: {
+        region: 'Beaujolais',
+      },
+    });
+  });
+
+  it('builds explicit parallel search slots for red plus white requests', () => {
+    expect(buildAgentQueryExecutionContract('커플 세트로 레드 화이트 한 병씩, 예쁜 거')).toMatchObject({
+      requiredParallelSearches: [
+        { wineType: 'red', limit: 1 },
+        { wineType: 'white', limit: 1 },
+      ],
+    });
+    expect(buildAgentQueryExecutionContract('회사 회식 10명, 레드/화이트 반반, 총 20만원')).toMatchObject({
+      requiredParallelSearches: [
+        { wineType: 'red' },
+        { wineType: 'white' },
+      ],
+    });
+  });
+
+  it('extracts explicit total budgets for parallel slot budgeting', () => {
+    expect(buildAgentQueryExecutionContract('회사 회식 10명, 레드/화이트 반반, 총 20만원')).toMatchObject({
+      totalBudgetKrw: 200_000,
+      requiredParallelSearches: [
+        { wineType: 'red' },
+        { wineType: 'white' },
+      ],
+    });
+  });
+
+  it('detects attached Korean comparison particles as explicit drinkability comparison', () => {
+    expect(buildAgentQueryExecutionContract('바롤로랑 브루넬로 비교해주고, 둘 중 지금 마시기 좋은 거로 골라줘')).toEqual({
+      requiresDrinkabilityCheck: true,
+      hasEntityMetadataSignal: true,
+    });
+  });
+
   it('detects specific-sku-like queries through the adaptive-budget classifier contract', () => {
     expect(isSpecificSkuLikeQuery('opus one 2018')).toBe(true);
     expect(isSpecificSkuLikeQuery('레드 와인 추천해줘')).toBe(false);
@@ -43,7 +246,10 @@ describe('agent query execution contract', () => {
 
   it('treats metadata-suffixed exact entity queries as exact lookup candidates', () => {
     expect(isExactMetadataEntityLookupCandidate('오푸스원 얼마야?')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('오퍼스원 얼마야?')).toBe(true);
     expect(isExactMetadataEntityLookupCandidate('오푸스원 지금 마시기 좋아?')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('Opus One 2027 vintage released yet? If you do not have hard evidence, say you do not know.')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('Sassicaia 2025 release 있나? 확실한 근거 없으면 추정하지 말고 말해줘')).toBe(true);
     expect(isExactMetadataEntityLookupCandidate('레드 와인 추천해줘')).toBe(false);
   });
 
@@ -161,5 +367,82 @@ describe('agent query execution contract', () => {
     );
 
     expect(pending).toEqual(['wine-b']);
+  });
+
+  it('extracts comparison drinkability ids from conceptAggregate representative results when topResult is absent', () => {
+    const pending = extractPendingDrinkabilityEntityIds(
+      { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      [],
+      [
+        {
+          stepId: 'req:0:0',
+          tool: 'compare_wines',
+          kind: 'success',
+          result: {
+            queryType: 'comparison',
+            entities: [
+              {
+                topResult: null,
+                conceptAggregate: {
+                  representativeResult: { entity: { entityId: 'wine-a' } },
+                },
+                allResults: [],
+              },
+              {
+                topResult: null,
+                conceptAggregate: {
+                  representativeResult: null,
+                },
+                allResults: [{ entity: { entityId: 'wine-b' } }],
+              },
+            ],
+          },
+          durationMs: 1,
+        } satisfies ToolOutcome,
+      ],
+    );
+
+    expect(pending).toEqual(['wine-a', 'wine-b']);
+  });
+
+  it('extracts pending drinkability ids from the latest parallel search batch in step order', () => {
+    const pending = extractPendingDrinkabilityEntityIds(
+      { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      [],
+      [
+        {
+          stepId: 'req:0:0',
+          tool: 'search_wines',
+          kind: 'success',
+          result: {
+            queryType: 'search',
+            results: [{ entity: { entityId: 'wine-2015', canonicalLabel: 'Wine 2015' } }],
+          },
+          durationMs: 1,
+        } satisfies ToolOutcome,
+        {
+          stepId: 'req:0:1',
+          tool: 'search_wines',
+          kind: 'success',
+          result: {
+            queryType: 'search',
+            results: [{ entity: { entityId: 'wine-2016', canonicalLabel: 'Wine 2016' } }],
+          },
+          durationMs: 1,
+        } satisfies ToolOutcome,
+        {
+          stepId: 'req:0:2',
+          tool: 'search_wines',
+          kind: 'success',
+          result: {
+            queryType: 'search',
+            results: [],
+          },
+          durationMs: 1,
+        } satisfies ToolOutcome,
+      ],
+    );
+
+    expect(pending).toEqual(['wine-2015', 'wine-2016']);
   });
 });

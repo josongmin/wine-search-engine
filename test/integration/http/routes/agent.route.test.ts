@@ -121,6 +121,54 @@ describe('POST /v1/agent', () => {
     expect(call?.[3]).toBeInstanceOf(AbortSignal);
   });
 
+  it('keeps lifecycle signal active while a healthy request is still executing', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let resolveStarted: (() => void) | undefined;
+    let resolveExecution: (() => void) | undefined;
+    const executionStarted = new Promise<void>((resolve) => { resolveStarted = resolve; });
+    const executionRelease = new Promise<void>((resolve) => { resolveExecution = resolve; });
+
+    deps.agentOrchestrator.execute = vi.fn().mockImplementation(
+      async (_query: string, _requestId: string, _overrides: unknown, signal?: AbortSignal) => {
+        capturedSignal = signal;
+        resolveStarted?.();
+        await new Promise<void>((resolve) => { setImmediate(resolve); });
+        expect(signal?.aborted).toBe(false);
+        await executionRelease;
+        expect(signal?.aborted).toBe(false);
+        return {
+          answer: 'ok',
+          steps: [],
+          totalDurationMs: 1,
+          totalTokens: { input: 1, output: 1 },
+          toolCallCount: 0,
+          fallbackApplied: false,
+          terminationReason: 'answer',
+        };
+      },
+    );
+
+    const responsePromise = app.inject({
+      method: 'POST',
+      url: '/v1/agent',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: 'long running healthy request',
+      },
+    });
+
+    await executionStarted;
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    resolveExecution?.();
+    const response = await responsePromise;
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
   it('aborts lifecycle signal in finally after successful request completion', async () => {
     let capturedSignal: AbortSignal | undefined;
     deps.agentOrchestrator.execute = vi.fn().mockImplementation(

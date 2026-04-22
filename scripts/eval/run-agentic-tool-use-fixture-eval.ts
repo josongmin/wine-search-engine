@@ -11,12 +11,12 @@ import {
   collectToolCalls,
   evaluateAnswerPatterns,
   evaluateExpectedToolSequence,
-  type AgentFixtureCase,
+  normalizeAgentFixtureCase,
 } from './agent-fixture-runner-common.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
-import { PgEvalBenchmarkRunStore } from '../../src/infrastructure/adapter/pg-eval-benchmark-run-store.js';
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
+import { bootstrapBenchmarkLedgerPersistence } from './benchmark-ledger-bootstrap.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/agentic-tool-use-fixture-eval-results.json');
 const SUITE_ID = 'agentic_tool_use';
@@ -55,7 +55,7 @@ interface ToolUseFixtureReport {
 
 function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
-  let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
+  let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://127.0.0.1:3000';
   let timeoutMs = 90_000;
   let useThresholds = true;
 
@@ -85,10 +85,6 @@ function percentile(sortedAsc: readonly number[], p: number): number {
   const loVal = sortedAsc[lo] ?? 0;
   const hiVal = sortedAsc[hi] ?? 0;
   return loVal + (hiVal - loVal) * (idx - lo);
-}
-
-function castAgentFixtureCase(raw: unknown): AgentFixtureCase {
-  return raw as AgentFixtureCase;
 }
 
 export function buildToolUseFixtureReport(
@@ -142,7 +138,7 @@ async function assertThresholds(report: ToolUseFixtureReport): Promise<void> {
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const rawCases = await loadFixtureCases([SUITE_ID]);
-  const cases = rawCases.map(castAgentFixtureCase);
+  const cases = rawCases.map(normalizeAgentFixtureCase);
   const results: ToolUseCaseResult[] = [];
 
   for (const benchmarkCase of cases) {
@@ -198,27 +194,33 @@ async function run(): Promise<void> {
 
   // Persist benchmark run to DB (best-effort — eval succeeds even if DB is unavailable)
   try {
-    const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
-    const pool = getPgPool();
+    const ledger = await bootstrapBenchmarkLedgerPersistence();
     try {
-      const evalBenchmarkRunStore = new PgEvalBenchmarkRunStore(pool);
-      await evalBenchmarkRunStore.saveRun({
-        benchmarkKind: 'agentic_tool_use_fixture',
-        evalDatasetVersion: 'v1',
-        featureSchemaHash: getCurrentFeatureSchemaHash(),
-        queryCount: report.query_count,
-        releaseGatePassed: thresholdsPassed,
-        activationStatus: 'shadow_only',
-        report: report as unknown as Readonly<Record<string, unknown>>,
-        metrics: {
-          tool_selection_accuracy: report.tool_selection_accuracy,
-          step_budget_compliance: report.step_budget_compliance,
-          pass_rate: report.min_pass_rate,
-        },
-      });
-      console.log('  Benchmark run persisted to DB.');
+      if (ledger.status === 'skipped') {
+        console.warn(`  [WARN] Skipped benchmark DB persistence: ${ledger.detail}`);
+      } else {
+        const persistResult = await ledger.persistRun({
+          benchmarkKind: 'agentic_tool_use_fixture',
+          evalDatasetVersion: 'v1',
+          featureSchemaHash: getCurrentFeatureSchemaHash(),
+          queryCount: report.query_count,
+          releaseGatePassed: thresholdsPassed,
+          activationStatus: 'shadow_only',
+          report: report as unknown as Readonly<Record<string, unknown>>,
+          metrics: {
+            tool_selection_accuracy: report.tool_selection_accuracy,
+            step_budget_compliance: report.step_budget_compliance,
+            pass_rate: report.min_pass_rate,
+          },
+        });
+        if (persistResult.status === 'persisted') {
+          console.log(`  Benchmark run persisted to DB (${persistResult.runId}).`);
+        } else {
+          console.warn(`  [WARN] Skipped benchmark DB persistence: ${persistResult.detail}`);
+        }
+      }
     } finally {
-      await pool.end();
+      await ledger.close();
     }
   } catch (persistErr: unknown) {
     const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);

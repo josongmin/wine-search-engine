@@ -71,17 +71,20 @@ function buildConfig(parsed: EnvVars) {
   }
 
   // Production security invariant: Layer 2 prompt-injection defense (LLMInjectionJudge)
-  // requires ANTHROPIC_API_KEY. Without the key the judge is silently undefined and
+  // requires a live provider key. Without a key the judge is silently undefined and
   // every query bypasses Layer 2 — INJECTION_JUDGE_FAIL_OPEN=false has NO effect on
   // judge *absence*, only on judge errors. The only legal opt-out is the explicit
   // KILL_SWITCH_INJECTION_JUDGE.
   if (
     parsed.NODE_ENV === 'production'
-    && parsed.ANTHROPIC_API_KEY === undefined
+    && (
+      (parsed.LLM_INJECTION_PROVIDER === 'anthropic' && parsed.ANTHROPIC_API_KEY === undefined) ||
+      (parsed.LLM_INJECTION_PROVIDER === 'openai' && parsed.OPENAI_API_KEY === undefined)
+    )
     && !parsed.KILL_SWITCH_INJECTION_JUDGE
   ) {
     throw new Error(
-      'Production startup requires ANTHROPIC_API_KEY (Layer 2 prompt-injection defense). ' +
+      `Production startup requires a ${parsed.LLM_INJECTION_PROVIDER} API key (Layer 2 prompt-injection defense). ` +
         'To intentionally disable Layer 2, set KILL_SWITCH_INJECTION_JUDGE=true with explicit approval. ' +
         'Silently disabling Layer 2 by omitting the API key is not allowed.',
     );
@@ -177,6 +180,8 @@ function buildConfig(parsed: EnvVars) {
       apiKey: parsed.OPENAI_API_KEY,
       baseUrl: parsed.OPENAI_BASE_URL,
       chatModel: parsed.OPENAI_CHAT_MODEL,
+      injectionModel: parsed.OPENAI_INJECTION_MODEL ?? parsed.OPENAI_CHAT_MODEL,
+      injectionHttpTimeoutMs: parsed.OPENAI_INJECTION_HTTP_TIMEOUT_MS,
       doc2queryModel: parsed.OPENAI_DOC2QUERY_MODEL,
       embeddingModel: parsed.OPENAI_EMBEDDING_MODEL,
       httpTimeoutMs: parsed.OPENAI_HTTP_TIMEOUT_MS,
@@ -193,6 +198,7 @@ function buildConfig(parsed: EnvVars) {
 
     /** Query-entry security behavior (Layer 1 + Layer 2 prompt-injection defense). */
     queryEntrySecurity: {
+      injectionProvider: parsed.LLM_INJECTION_PROVIDER,
       judgeFailureMode: parsed.INJECTION_JUDGE_FAIL_OPEN ? 'fail_open' : 'fail_closed',
     },
 
@@ -207,7 +213,7 @@ function buildConfig(parsed: EnvVars) {
       threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
     },
 
-    /** Drinking-window runtime policy. */
+    /** Drinking-window runtime policy. Defaults to deterministic; ONNX is an explicit override. */
     drinkingWindow: {
       modelDir: parsed.DRINKING_WINDOW_MODEL_DIR,
     },

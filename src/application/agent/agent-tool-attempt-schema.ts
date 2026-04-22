@@ -30,8 +30,10 @@ export const SearchToolAttemptInputSchema = z.object({
   min_price_krw: AttemptNumberSchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
   max_alcohol_pct: AttemptNumberSchema.optional(),
+  grape_primary: AttemptStringSchema.optional(),
   wine_type: AttemptStringSchema.optional(),
   country: AttemptStringSchema.optional(),
+  region: AttemptStringSchema.optional(),
   vintage_min: AttemptNumberSchema.optional(),
   vintage_max: AttemptNumberSchema.optional(),
   appellation: AttemptStringSchema.optional(),
@@ -41,6 +43,9 @@ export const SearchToolAttemptInputSchema = z.object({
   occasion: AttemptSingleOrStringArraySchema.optional(),
   gift_suitability_min: AttemptNumberSchema.optional(),
   beginner_suitability_min: AttemptNumberSchema.optional(),
+  producer_prestige_min: AttemptNumberSchema.optional(),
+  drinking_window: AttemptStringSchema.optional(),
+  drinking_window_target_year: AttemptNumberSchema.optional(),
   want_diversity: AttemptBooleanSchema.optional(),
 }).strict();
 
@@ -49,6 +54,11 @@ export const FoodPairingAttemptInputSchema = z.object({
   max_price: AttemptNumberSchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
   color: AttemptStringSchema.optional(),
+  sweetness_target: AttemptNumberSchema.optional(),
+  acidity_min: AttemptNumberSchema.optional(),
+  tannin_max: AttemptNumberSchema.optional(),
+  styles: AttemptStringArraySchema.optional(),
+  pairing_tags: AttemptStringArraySchema.optional(),
 }).strict();
 
 export const DrinkingWindowAttemptInputSchema = z.object({
@@ -64,8 +74,24 @@ export const CompareWinesAttemptInputSchema = z.object({
   min_price_krw: AttemptNumberSchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
   max_alcohol_pct: AttemptNumberSchema.optional(),
+  grape_primary: AttemptStringSchema.optional(),
   wine_type: AttemptStringSchema.optional(),
   country: AttemptStringSchema.optional(),
+  region: AttemptStringSchema.optional(),
+  country_a: AttemptStringSchema.optional(),
+  country_b: AttemptStringSchema.optional(),
+  region_a: AttemptStringSchema.optional(),
+  region_b: AttemptStringSchema.optional(),
+  appellation_a: AttemptStringSchema.optional(),
+  appellation_b: AttemptStringSchema.optional(),
+  grape_primary_a: AttemptStringSchema.optional(),
+  grape_primary_b: AttemptStringSchema.optional(),
+  wine_type_a: AttemptStringSchema.optional(),
+  wine_type_b: AttemptStringSchema.optional(),
+  vintage_min_a: AttemptNumberSchema.optional(),
+  vintage_min_b: AttemptNumberSchema.optional(),
+  vintage_max_a: AttemptNumberSchema.optional(),
+  vintage_max_b: AttemptNumberSchema.optional(),
   vintage_min: AttemptNumberSchema.optional(),
   vintage_max: AttemptNumberSchema.optional(),
   appellation: AttemptStringSchema.optional(),
@@ -75,6 +101,9 @@ export const CompareWinesAttemptInputSchema = z.object({
   occasion: AttemptSingleOrStringArraySchema.optional(),
   gift_suitability_min: AttemptNumberSchema.optional(),
   beginner_suitability_min: AttemptNumberSchema.optional(),
+  producer_prestige_min: AttemptNumberSchema.optional(),
+  drinking_window: AttemptStringSchema.optional(),
+  drinking_window_target_year: AttemptNumberSchema.optional(),
 }).strict();
 
 // ── Inferred types for each tool's validated input ───────────────────────────

@@ -35,8 +35,8 @@ Each fixture JSON contains:
 | `noisy-entity.json` | Entity (fuzzy/noisy) |
 | `transliteration-ko-en.json` | Entity (Korean transliteration) |
 | `ambiguous-vintage.json` | Entity (ambiguous) |
-| `heuristic-drinking-window.json` | Hybrid (constraint) |
-| `heuristic-drinking-window-full-runtime.json` | Hybrid (constraint, full runtime) |
+| `deterministic-drinking-window.json` | Hybrid (constraint) |
+| `deterministic-drinking-window-full-runtime.json` | Hybrid (constraint, full runtime) |
 | `comparison-two-wines.json` | Comparison |
 | `learned-matcher-timeout.json` | Error/degradation (timeout) |
 | `reranker-timeout.json` | Error/degradation (timeout) |

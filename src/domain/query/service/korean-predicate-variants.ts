@@ -87,7 +87,17 @@ const SUFFIX_RULES: readonly (readonly [string, string])[] = [
  * normalizeQueryPredicates("hello world")          // → "hello world" (unchanged)
  */
 export function normalizeQueryPredicates(query: string): string {
-  return query.replace(/\S+/gu, (token) => {
+  const detachedAuxiliaryNormalized = query
+    .replace(/(\S+)\s+있고(?=$|\s)/gu, '$1 있는')
+    .replace(/(\S+)\s+있으며(?=$|\s)/gu, '$1 있는')
+    .replace(/(\S+)\s+있으면서(?=$|\s)/gu, '$1 있는')
+    .replace(/(\S+)\s+있지만(?=$|\s)/gu, '$1 있는')
+    .replace(/(\S+)\s+없고(?=$|\s)/gu, '$1 없는')
+    .replace(/(\S+)\s+없으며(?=$|\s)/gu, '$1 없는')
+    .replace(/(\S+)\s+없으면서(?=$|\s)/gu, '$1 없는')
+    .replace(/(\S+)\s+없지만(?=$|\s)/gu, '$1 없는');
+
+  return detachedAuxiliaryNormalized.replace(/\S+/gu, (token) => {
     for (const [suffix, replacement] of SUFFIX_RULES) {
       if (token.endsWith(suffix)) {
         const stem = token.slice(0, -suffix.length);

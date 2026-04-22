@@ -202,6 +202,279 @@ describe('runSearchPreRoutePhase', () => {
     }
   });
 
+  it('promotes planner-chosen entity execution to recommendation when typed set-retrieval preferences exist', async () => {
+    const plan = {
+      rawQuery: '캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거',
+      normalizedQuery: '캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거 camping wine',
+      intent: 'entity_fuzzy' as const,
+      route: 'entity' as const,
+      retrievalMode: 'entity_resolution' as const,
+      queryClass: 'ambiguous_short_form',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {} as QueryPlanV1['policy'],
+      uncertainty: {} as QueryPlanV1['uncertainty'],
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      admission_context: {
+        requires_identity_seal: true,
+        requires_constraint_evidence: false,
+        requires_anchor_evidence: false,
+      },
+    } as QueryPlanV1;
+
+    const compiled = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+        retrievalPlan: buildRetrievalPlan(plan.constraints),
+      },
+      execution: {
+        effectiveRoute: 'entity' as const,
+        effectiveRetrievalMode: 'entity_resolution' as const,
+        routeSource: 'planner' as const,
+        budget: { maxCandidates: 10, rerankLimit: 0, enablePrecisionRerank: false },
+        provenancePolicy: {
+          requireIdentitySeal: true,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+
+    const result = await runSearchPreRoutePhase({
+      request: {
+        query: plan.rawQuery,
+        preferences: [
+          constraint({ attribute: 'closure', operator: '=', value: 'screw cap' }),
+          constraint({ attribute: 'style', operator: 'in', value: ['chillable'] }),
+          constraint({ attribute: 'occasion', operator: 'in', value: ['camping'] }),
+        ],
+      },
+      requestId: 'r-structured-recommendation',
+      startTime: Date.now(),
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner: {
+        plan: vi.fn(async () => plan),
+        planWithCompiled: vi.fn(async () => ({ v1: plan, compiled })),
+      },
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch: undefined,
+    });
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome === 'continue') {
+      expect(result.plan.route).toBe('hybrid');
+      expect(result.plan.retrievalMode).toBe('recommendation');
+      expect(result.plan.admission_context?.requires_identity_seal).toBe(false);
+      expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
+      expect(result.compiled.execution.effectiveRetrievalMode).toBe('recommendation');
+      expect(result.compiled.execution.budget).toEqual({
+        maxCandidates: 20,
+        rerankLimit: 20,
+        enablePrecisionRerank: true,
+      });
+      expect(result.compiled.execution.provenancePolicy.requireIdentitySeal).toBe(false);
+    }
+  });
+
+  it('does not override an explicit API route when structured preferences exist', async () => {
+    const plan = {
+      rawQuery: '샤또 마고',
+      normalizedQuery: 'margaux',
+      intent: 'entity_exact' as const,
+      route: 'entity' as const,
+      retrievalMode: 'entity_lookup' as const,
+      queryClass: 'short_entity',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {} as QueryPlanV1['policy'],
+      uncertainty: {} as QueryPlanV1['uncertainty'],
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    } as QueryPlanV1;
+
+    const compiled = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+      },
+      execution: {
+        effectiveRoute: 'entity' as const,
+        effectiveRetrievalMode: 'entity_lookup' as const,
+        routeSource: 'api_override' as const,
+        budget: { maxCandidates: 10, rerankLimit: 0, enablePrecisionRerank: false },
+        provenancePolicy: {
+          requireIdentitySeal: true,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+
+    const result = await runSearchPreRoutePhase({
+      request: {
+        query: plan.rawQuery,
+        preferences: [
+          constraint({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+        ],
+      },
+      requestId: 'r-api-route-preserved',
+      startTime: Date.now(),
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner: {
+        plan: vi.fn(async () => plan),
+        planWithCompiled: vi.fn(async () => ({ v1: plan, compiled })),
+      },
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch: undefined,
+    });
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome === 'continue') {
+      expect(result.compiled.execution.effectiveRoute).toBe('entity');
+      expect(result.compiled.execution.effectiveRetrievalMode).toBe('entity_lookup');
+      expect(result.compiled.execution.routeSource).toBe('api_override');
+    }
+  });
+
+  it('demotes representative concept identity constraints from hard gates to soft objectives', async () => {
+    const baroloConstraint = constraint({
+      attribute: 'appellation',
+      operator: '=',
+      value: 'Barolo',
+      source_phrase: 'Barolo',
+    });
+    const plan = {
+      rawQuery: 'Barolo wine',
+      normalizedQuery: 'barolo wine',
+      intent: 'facet_search' as const,
+      route: 'hybrid' as const,
+      retrievalMode: 'attribute_search' as const,
+      queryClass: 'ambiguous_short_form',
+      anchors: [],
+      constraints: {
+        hard: [baroloConstraint],
+        soft: [],
+        inferred: [],
+      },
+      expansions: { lexical: [], semantic: [] },
+      policy: {} as QueryPlanV1['policy'],
+      uncertainty: {} as QueryPlanV1['uncertainty'],
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      admission_context: {
+        requires_identity_seal: false,
+        requires_constraint_evidence: true,
+        requires_anchor_evidence: false,
+      },
+    } as QueryPlanV1;
+
+    const compiled = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+        retrievalPlan: buildRetrievalPlan(plan.constraints),
+        retrievalObjective: buildRetrievalObjective(plan.constraints),
+      },
+      execution: {
+        effectiveRoute: 'hybrid' as const,
+        effectiveRetrievalMode: 'attribute_search' as const,
+        routeSource: 'planner' as const,
+        budget: { maxCandidates: 20, rerankLimit: 20, enablePrecisionRerank: true },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: false,
+        },
+      },
+      constraintGraph: {
+        graphSchemaVersion: 'constraint_graph_v1' as const,
+        origin: 'deterministic_from_atoms' as const,
+        rootNodeId: 'root',
+        nodes: [],
+        edges: [],
+        globalBudgets: {},
+      },
+    };
+
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn(async () => plan),
+      planWithCompiled: vi.fn(async () => ({ v1: plan, compiled })),
+    };
+
+    const result = await runSearchPreRoutePhase({
+      request: {
+        query: 'Barolo wine',
+        representativeConcept: { field: 'appellation', value: 'Barolo' },
+      },
+      requestId: 'r-representative-concept',
+      startTime: Date.now(),
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner,
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch: undefined,
+    });
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome === 'continue') {
+      expect(result.plan.constraints.hard).toEqual([]);
+      expect(result.plan.constraints.soft).toEqual([baroloConstraint]);
+      expect(result.plan.admission_context?.requires_constraint_evidence).toBe(false);
+      expect(result.compiled.query.constraints.hard).toEqual([]);
+      expect(result.compiled.query.constraints.soft).toEqual([baroloConstraint]);
+      expect(result.compiled.execution.provenancePolicy.requireConstraintEvidence).toBe(false);
+      expect(result.compiled.constraintGraph).toBeUndefined();
+    }
+  });
+
   it('rejects compiled-less fallback unless the explicit seam is enabled', async () => {
     const plan = {
       rawQuery: 'red wine',

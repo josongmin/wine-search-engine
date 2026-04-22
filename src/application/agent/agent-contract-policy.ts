@@ -4,6 +4,13 @@ import type { AgentQueryExecutionContract } from './agent-query-execution-contra
 import { extractPendingDrinkabilityEntityIds } from './agent-query-execution-contract.js';
 
 export class AgentContractPolicy {
+  buildGroundedSearchDirective(): AgentPlannerDirective {
+    return {
+      kind: 'grounded_search_required',
+      instruction: 'This request still requires a grounded wine search before answering. Call search_wines first and answer only from the returned evidence.',
+    };
+  }
+
   getPendingDrinkabilityEntityIds(
     queryExecutionContract: AgentQueryExecutionContract,
     state: AgentExecutionState,

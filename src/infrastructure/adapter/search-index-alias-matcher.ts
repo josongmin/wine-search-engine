@@ -7,8 +7,12 @@ import { buildNormalizedQueryViews } from '../../domain/query/service/query-norm
 import { parseSpans } from '../../domain/attribute/service/span-parser.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { SparseHit } from '../../domain/retrieval/port/search-index.port.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
+import { VespaNetworkError } from '../vespa/vespa-client.js';
 
 const SEARCH_INDEX_ALIAS_LIMIT = 24;
+const log = bootstrapLogger.child({ component: 'SearchIndexAliasMatcher' });
 
 const EXACT_MULTIPLIER = 1.0;
 const COMPACT_MULTIPLIER = 0.93;
@@ -282,12 +286,30 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
       trimmedQueries.flatMap((query) => buildSearchQueries(query)),
     );
 
-    const hits = await this.searchIndex.sparseSearch(
-      mergedSearchQueries,
-      [],
-      SEARCH_INDEX_ALIAS_LIMIT * trimmedQueries.length,
-      'hybrid',
-    );
+    let hits: readonly SparseHit[];
+    try {
+      hits = await this.searchIndex.sparseSearch(
+        mergedSearchQueries,
+        [],
+        SEARCH_INDEX_ALIAS_LIMIT * trimmedQueries.length,
+        'hybrid',
+      );
+    } catch (error) {
+      if (!(error instanceof VespaNetworkError) && !(error instanceof CircuitBreakerOpenError)) {
+        throw error;
+      }
+      log.warn(
+        {
+          err: error,
+          queryCount: trimmedQueries.length,
+          lookupQueryCount: mergedSearchQueries.length,
+        },
+        '[SearchIndexAliasMatcher] Vespa alias lookup failed — degrading to empty alias matches',
+      );
+      return new Map(
+        trimmedQueries.map((query) => [query, [] satisfies readonly AliasMatchResult[]]),
+      );
+    }
     const matchesByQuery = new Map<string, readonly AliasMatchResult[]>();
     for (const query of trimmedQueries) {
       matchesByQuery.set(query, this.resolveMatchesForQuery(query, hits));

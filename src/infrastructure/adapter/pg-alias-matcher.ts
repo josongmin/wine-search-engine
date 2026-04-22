@@ -303,11 +303,12 @@ function resolveQueryId(row: PgAliasMatcherRow): number | undefined {
     return row.query_id;
   }
   if ('query_id' in row && typeof row.query_id === 'bigint') {
-    return Number(row.query_id);
+    const parsed = Number(row.query_id);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
   if ('query_id' in row && typeof row.query_id === 'string') {
     const parsed = Number.parseInt(row.query_id, 10);
-    return Number.isNaN(parsed) ? undefined : parsed;
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
 }

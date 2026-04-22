@@ -1,4 +1,4 @@
-import type { CanonicalEntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId, NormalizedConstraint } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
 import type { AnchorEntityData } from '../service/anchor-profiler.js';
@@ -18,6 +18,7 @@ export interface SimilarRetrievalPort {
   retrieveSimilar(
     anchorProfile: AnchorProfile,
     limit: number,
+    hardConstraints?: readonly NormalizedConstraint[],
   ): Promise<readonly HybridCandidate[]>;
 }
 

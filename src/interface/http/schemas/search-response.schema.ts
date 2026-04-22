@@ -111,6 +111,8 @@ export const EntitySummarySchema = z.object({
   type: z.string().min(1),
   producer: z.string().min(1).optional(),
   region: z.string().min(1).optional(),
+  closure: z.string().min(1).optional(),
+  country: z.string().min(1).optional(),
   appellation: z.string().min(1).optional(),
   producer_prestige: z.number().finite().optional(),
   vintage: z.number().int().optional(),
@@ -168,7 +170,7 @@ export const DrinkingWindowSchema = z.object({
   peak_year: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR).optional(),
   currently_drinkable: z.boolean(),
   confidence: z.enum(['high', 'medium', 'low']),
-  evidence_level: z.enum(['learned', 'heuristic']).optional(),
+  evidence_level: z.enum(['learned', 'heuristic', 'deterministic']).optional(),
   blocking_eligible: z.boolean().optional(),
   model_version: z.string().min(1).optional(),
 }).strict().refine(
@@ -1009,11 +1011,20 @@ export const SearchResponseSchema = z.object({
 
 export type SearchResponseBody = z.infer<typeof SearchResponseSchema>;
 
+const ComparisonConceptAggregateSchema = z.object({
+  canonical_concept: z.string().min(1),
+  concept_entity_type: z.enum(['country', 'region', 'appellation', 'grape_primary', 'wine_type']),
+  representative_result: ResultItemSchema.nullable(),
+  prototype_axis: z.array(ResultItemSchema).max(MAX_SEARCH_RESULTS_PER_RESPONSE),
+  aggregate_result_count: z.number().int().nonnegative(),
+}).strict();
+
 export const ComparisonEntitySchema = z.object({
   sub_query: z.string().min(1),
   comparison_mode: z.enum(['entity', 'concept']).optional(),
   canonical_concept: z.string().min(1).optional(),
   concept_entity_type: z.enum(['country', 'region', 'appellation', 'grape_primary', 'wine_type']).optional(),
+  concept_aggregate: ComparisonConceptAggregateSchema.optional(),
   top_result: ResultItemSchema.nullable(),
   result_count: z.number().int().nonnegative(),
   resolution_status: z.enum(['resolved', 'ambiguous', 'failed']),

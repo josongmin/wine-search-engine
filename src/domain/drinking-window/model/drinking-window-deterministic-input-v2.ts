@@ -528,7 +528,7 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'string',
     required: false,
     description: 'Model version that produced cached drinking-window years.',
-    examples: ['onnx:v2.1', 'heuristic-runtime-required'],
+    examples: ['onnx:v2.1', 'deterministic:structural-slot-v2'],
     sourceCandidates: ['retrieval.drinkingWindowModelVersion', 'entity.drinkingWindowModelVersion'],
   },
   hasCompleteStructureSignals: {

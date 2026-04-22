@@ -281,13 +281,13 @@ export async function createVespaTestContainer(
     featureFlags: {},
   };
   const defaultDrinkingWindowPredictor = {
-    modelVersion: 'vespa-test',
+    modelVersion: 'deterministic:vespa-test',
     predict: () => ({
       drinkingWindowStart: 2020,
       drinkingWindowEnd: 2030,
       peakYear: 2025,
       confidence: 'medium' as const,
-      modelVersion: 'vespa-test',
+      modelVersion: 'deterministic:vespa-test',
     }),
   };
   const drinkingWindowPredictor =

@@ -139,7 +139,7 @@ export class ConstraintCompiler {
     }
 
     type ResolverResolution =
-      | { entity: ResolvedEntity; kind: 'primary' | 'shadow' }
+      | { entity: ResolvedEntity; kind: 'primary' | 'shadow' | 'covered' }
       | { hint: AmbiguousEntityHint; kind: 'ambiguous_hint' };
     const resolverCandidates: {
       span: Span;
@@ -176,6 +176,14 @@ export class ConstraintCompiler {
           span,
           resolved: { entity: preferredEntity, kind: 'shadow' },
         });
+      } else if (
+        isDirectEntityResolution(preferredEntity)
+        && coveredAttributes.has(preferredEntity.entityType)
+      ) {
+        resolverCandidates.push({
+          span,
+          resolved: { entity: preferredEntity, kind: 'covered' },
+        });
       } else {
         resolverCandidates.push({ span, resolved: null });
       }
@@ -198,6 +206,9 @@ export class ConstraintCompiler {
         continue;
       }
       resolvedEntities.push(resolved.entity);
+      if (resolved.kind === 'covered') {
+        continue;
+      }
       const constraint = {
         attribute: resolved.entity.entityType,
         operator: '=' as const,

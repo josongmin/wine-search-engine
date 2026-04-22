@@ -208,8 +208,8 @@ interface EntityIdentityRow {
 }
 
 type LearnedFacetCoverage = {
-  readonly giftSuitabilityScore: number;
-  readonly beginnerSuitabilityScore: number;
+  giftSuitabilityScore: number;
+  beginnerSuitabilityScore: number;
 };
 
 function emptyLearnedFacetCoverage(): LearnedFacetCoverage {

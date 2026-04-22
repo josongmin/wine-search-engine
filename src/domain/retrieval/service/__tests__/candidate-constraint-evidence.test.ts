@@ -31,6 +31,7 @@ function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidat
     // type
     wineType: undefined,
     style: undefined,
+    closure: undefined,
     // variety
     grapePrimary: undefined,
     grapes: undefined,
@@ -311,6 +312,27 @@ describe('unknown attribute — silent-drop guard (Fix 4)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Closure matching
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('closure constraint evidence', () => {
+  it('matches screw cap even when catalog closure is compacted as "Screwcap"', () => {
+    const candidate = makeCandidate({ closure: 'Screwcap' });
+    const bundle = makeBundle([], [makeConstraint('closure', '=', 'screw cap')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('closure');
+  });
+
+  it('does not match screw cap against cork closure evidence', () => {
+    const candidate = makeCandidate({ closure: 'Cork' });
+    const bundle = makeBundle([makeConstraint('closure', '=', 'screw cap')]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).not.toContain('closure');
+    expect(result.unmetHardConstraints).toContain('closure');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Drinking window special case
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -334,6 +356,14 @@ describe('drinking_window special case', () => {
     const bundle = makeBundle([makeConstraint('drinking_window', '=', 2025)]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
     expect(result.unmetHardConstraints).toContain('drinking_window');
+  });
+
+  it('treats missing soft drinking-window evidence as not evaluable instead of throwing', () => {
+    const candidate = makeCandidate({ drinkingWindowStart: undefined, drinkingWindowEnd: undefined });
+    const bundle = makeBundle([], [makeConstraint('drinking_window', '=', 2025)]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('drinking_window');
+    expect(result.unmetHardConstraints).toBeUndefined();
   });
 });
 

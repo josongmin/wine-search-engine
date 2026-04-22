@@ -16,6 +16,13 @@ import {
   getLastGroundingObservationText,
   hasGroundingToolObservations,
 } from './agent-grounding-observation-policy.js';
+import {
+  buildOutOfDomainWineRedirectAnswer,
+  buildUnsupportedWineExternalInfoAnswer,
+  isUnsupportedWineExternalInfoQuery,
+  isWineOutOfDomainAlcoholQuery,
+} from './agent-situational-query-policy.js';
+import { buildAgentQueryExecutionContract } from './agent-query-execution-contract.js';
 
 const defaultLog = bootstrapLogger.child({ component: 'AgentAnswerRecoveryPolicy' });
 
@@ -240,6 +247,30 @@ function applyFallbackAnswer(
   return answer;
 }
 
+function isMinimalAbstentionAnswer(answer: string): boolean {
+  const trimmed = answer.trim();
+  return /^(?:모르겠습니다|잘\s*모르겠습니다|확인\s*어렵습니다|확인하기\s*어렵습니다|알\s*수\s*없습니다)[.?!…\s]*$/u.test(trimmed)
+    || /^(?:i\s+do\s+not\s+know|i\s+don't\s+know|not\s+sure|unknown|cannot\s+confirm)[.?!…\s]*$/iu.test(trimmed);
+}
+
+function normalizeExactMetadataAbstentionAnswer(query: string, answer: string): string {
+  if (!isMinimalAbstentionAnswer(answer)) {
+    return answer;
+  }
+  const contract = buildAgentQueryExecutionContract(query);
+  const entityQuery = contract.exactMetadataEntityQuery?.trim();
+  if (entityQuery === undefined || entityQuery.length === 0) {
+    return answer;
+  }
+  const queryHasHangul = containsHangul(query);
+  const target = contract.exactMetadataTargetVintage !== undefined
+    ? entityQuery
+    : entityQuery.replace(/\s+/gu, ' ').trim();
+  return queryHasHangul
+    ? `${target}의 출시/가용성은 현재 확인 가능한 근거가 없어 모르겠습니다.`
+    : `I do not know whether ${target} is released or available based on the currently available evidence.`;
+}
+
 export function hasToolObservations(state: AgentExecutionState): boolean {
   return hasGroundingToolObservations(state);
 }
@@ -344,6 +375,25 @@ export class AgentAnswerRecoveryPolicy {
       this.logger.error({ requestId, query, steps: state.steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
     }
 
-    return answer;
+    return this.normalizeSituationalDirectAnswer(query, answer, observedToolOutput);
+  }
+
+  private normalizeSituationalDirectAnswer(
+    query: string,
+    answer: string,
+    observedToolOutput: boolean,
+  ): string {
+    const normalizedMetadataAbstention = normalizeExactMetadataAbstentionAnswer(query, answer);
+    if (observedToolOutput) {
+      return normalizedMetadataAbstention;
+    }
+    const queryHasHangul = containsHangul(query);
+    if (isWineOutOfDomainAlcoholQuery(query)) {
+      return buildOutOfDomainWineRedirectAnswer(queryHasHangul);
+    }
+    if (isUnsupportedWineExternalInfoQuery(query)) {
+      return buildUnsupportedWineExternalInfoAnswer(queryHasHangul);
+    }
+    return normalizedMetadataAbstention;
   }
 }

@@ -119,13 +119,15 @@ describe('CandidatePoolService degradation observer', () => {
       observer,
     );
 
-    await pool.generate(createInput());
+    const result = await pool.generate(createInput());
 
     expect(signals).toHaveLength(1);
     expect(signals[0]!.component).toBe('sparse_bm25');
     expect(signals[0]!.severity).toBe('error');
     expect(signals[0]!.reason).toContain('vespa timeout');
     expect(signals[0]!.fallbackApplied).toBe('dense-only retrieval');
+    expect(result.lanes?.sparse?.status).toBe('infra_failure');
+    expect(result.degradation?.codes).toEqual(['no_matches']);
     expect(pool.getLastDegradationCodes()).toEqual(['no_matches']);
   });
 
@@ -141,8 +143,10 @@ describe('CandidatePoolService degradation observer', () => {
       observer,
     );
 
-    await pool.generate(createInput());
+    const result = await pool.generate(createInput());
 
+    expect(result.lanes?.sparse?.status).toBe('empty');
+    expect(result.degradation?.codes).toEqual(['sparse_pool', 'no_matches']);
     expect(pool.getLastDegradationCodes()).toEqual(['sparse_pool', 'no_matches']);
   });
 

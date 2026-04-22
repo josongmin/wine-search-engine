@@ -188,11 +188,11 @@ describe('OntologyNormalizer', () => {
     expect(result!.canonicalValue).toBe('chillable');
   });
 
-  it('"스크류캡" → style/screw_cap', () => {
+  it('"스크류캡" → closure/screw cap', () => {
     const result = normalizer.normalize('스크류캡');
     expect(result).not.toBeNull();
-    expect(result!.axis).toBe('style');
-    expect(result!.canonicalValue).toBe('screw_cap');
+    expect(result!.axis).toBe('closure');
+    expect(result!.canonicalValue).toBe('screw cap');
   });
 
   it('"실패 없는" → style/crowd_pleasing', () => {

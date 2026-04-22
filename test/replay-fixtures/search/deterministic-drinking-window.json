@@ -1,5 +1,5 @@
 {
-  "name": "heuristic-drinking-window",
+  "name": "deterministic-drinking-window",
   "endpoint": "/v1/search/replay",
   "execution_lane": "runtime_required",
   "replay_request": {
@@ -7,7 +7,7 @@
     "decision_snapshot": {
       "snapshot_id": "default:1.0.0:1.0.0::",
       "model_versions": {
-        "drinking_window": "heuristic-only"
+        "drinking_window": "deterministic:fixture-runtime-required"
       },
       "index_versions": {},
       "policy_rule_version": "1.0.0",

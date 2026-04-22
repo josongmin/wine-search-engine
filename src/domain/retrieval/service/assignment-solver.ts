@@ -60,6 +60,17 @@ export interface AssignmentBudgetConstraint {
   readonly ceiling: number;
 }
 
+export interface AssignmentRowSpec {
+  readonly label?: string | undefined;
+  readonly obligation?: 'required' | 'optional' | undefined;
+}
+
+export interface AssignmentGroupConstraint {
+  readonly kind: 'at_least_one' | 'exactly_one';
+  readonly rows: readonly number[];
+  readonly label?: string | undefined;
+}
+
 interface AssignmentSolverInput {
   /**
    * K x M cost matrix. `costMatrix[row][col]` is the cost of assigning
@@ -71,15 +82,22 @@ interface AssignmentSolverInput {
    */
   readonly costMatrix: readonly (readonly number[])[];
   readonly budgetConstraints?: readonly AssignmentBudgetConstraint[];
+  readonly rowSpecs?: readonly AssignmentRowSpec[];
+  readonly groupConstraints?: readonly AssignmentGroupConstraint[];
+  readonly selectionValidator?: ((selectedRows: readonly number[]) => boolean) | undefined;
+  readonly selectionUtility?: ((selectedRows: readonly number[]) => number) | undefined;
 }
 
 export type AssignmentSolverFailReason =
   | 'bundle_selector_fail_closed:k_exceeds_exact_limit'
   | 'bundle_selector_fail_closed:budget_infeasible'
-  | 'bundle_selector_fail_closed:empty_slot_pool';
+  | 'bundle_selector_fail_closed:empty_slot_pool'
+  | 'bundle_selector_fail_closed:group_obligation_unsatisfied';
 
 interface AssignmentSolverSuccess {
   readonly solved: true;
+  /** Original row indices that remained active after optional-row pruning. */
+  readonly activeRowIndices: readonly number[];
   /** `assignedColumns[row]` = column index chosen for that row. */
   readonly assignedColumns: readonly number[];
   /** Sum of cell costs over the chosen permutation (excludes penalties). */
@@ -111,11 +129,169 @@ type AssignmentSolverResult =
 export function solveAssignmentExact(
   input: AssignmentSolverInput,
 ): AssignmentSolverResult {
+  const rowSpecs = input.rowSpecs ?? input.costMatrix.map(() => ({ obligation: 'required' as const }));
+  const groupConstraints = input.groupConstraints ?? [];
+  const selectionValidator = input.selectionValidator;
+  const selectionUtility = input.selectionUtility;
+  const requiredRows: number[] = [];
+  const optionalRows: number[] = [];
+  for (let rowIdx = 0; rowIdx < input.costMatrix.length; rowIdx += 1) {
+    if ((rowSpecs[rowIdx]?.obligation ?? 'required') === 'optional') {
+      optionalRows.push(rowIdx);
+    } else {
+      requiredRows.push(rowIdx);
+    }
+  }
+
+  const validSelections: number[][] = [];
+  const currentSelection = new Set<number>(requiredRows);
+  const pushSelectionIfValid = (): void => {
+    for (const constraint of groupConstraints) {
+      const selectedCount = constraint.rows.filter((rowIdx) => currentSelection.has(rowIdx)).length;
+      if (constraint.kind === 'at_least_one' && selectedCount < 1) {
+        return;
+      }
+      if (constraint.kind === 'exactly_one' && selectedCount !== 1) {
+        return;
+      }
+    }
+    const selectedRows = [...currentSelection].sort((a, b) => a - b);
+    if (selectionValidator !== undefined && !selectionValidator(selectedRows)) {
+      return;
+    }
+    validSelections.push(selectedRows);
+  };
+  const recurseSelections = (index: number): void => {
+    if (index >= optionalRows.length) {
+      pushSelectionIfValid();
+      return;
+    }
+    const rowIdx = optionalRows[index]!;
+    const row = input.costMatrix[rowIdx] ?? [];
+    // Optional empty rows can only be excluded.
+    recurseSelections(index + 1);
+    if (row.length > 0) {
+      currentSelection.add(rowIdx);
+      recurseSelections(index + 1);
+      currentSelection.delete(rowIdx);
+    }
+  };
+  recurseSelections(0);
+
+  if (validSelections.length === 0) {
+    return {
+      solved: false,
+      reason: 'bundle_selector_fail_closed:group_obligation_unsatisfied',
+    };
+  }
+
+  let sawKLimit = false;
+  let sawEmptySlot = false;
+  let sawBudgetInfeasible = false;
+  let bestSolved:
+    | (AssignmentSolverSuccess & {
+        readonly activeRowIndices: readonly number[];
+        readonly selectionUtility: number;
+      })
+    | undefined;
+
+  for (const selectedRows of validSelections) {
+    const selectedMatrix = selectedRows.map((rowIdx) => input.costMatrix[rowIdx] ?? []);
+    const rowIndexByOriginal = new Map<number, number>();
+    for (let activeIdx = 0; activeIdx < selectedRows.length; activeIdx += 1) {
+      rowIndexByOriginal.set(selectedRows[activeIdx]!, activeIdx);
+    }
+    const selectedBudgets = (input.budgetConstraints ?? []).flatMap((constraint) => {
+      const rows = constraint.rows.flatMap((rowIdx) => {
+        const mapped = rowIndexByOriginal.get(rowIdx);
+        return mapped === undefined ? [] : [mapped];
+      });
+      if (rows.length === 0) {
+        return [];
+      }
+      return [{ ...constraint, rows }];
+    });
+    const fixed = solveAssignmentFixedRows({
+      costMatrix: selectedMatrix,
+      budgetConstraints: selectedBudgets,
+    });
+    if (!fixed.solved) {
+      if (fixed.reason === 'bundle_selector_fail_closed:k_exceeds_exact_limit') sawKLimit = true;
+      if (fixed.reason === 'bundle_selector_fail_closed:empty_slot_pool') sawEmptySlot = true;
+      if (fixed.reason === 'bundle_selector_fail_closed:budget_infeasible') sawBudgetInfeasible = true;
+      continue;
+    }
+    const candidate: AssignmentSolverSuccess & {
+      readonly activeRowIndices: readonly number[];
+      readonly selectionUtility: number;
+    } = {
+      ...fixed,
+      activeRowIndices: selectedRows,
+      selectionUtility: selectionUtility?.(selectedRows) ?? 0,
+    };
+    if (bestSolved === undefined) {
+      bestSolved = candidate;
+      continue;
+    }
+    if (candidate.selectionUtility > bestSolved.selectionUtility) {
+      bestSolved = candidate;
+      continue;
+    }
+    if (candidate.selectionUtility < bestSolved.selectionUtility) {
+      continue;
+    }
+    if (candidate.totalCost < bestSolved.totalCost - COST_EQUALITY_EPSILON) {
+      bestSolved = candidate;
+      continue;
+    }
+    if (Math.abs(candidate.totalCost - bestSolved.totalCost) <= COST_EQUALITY_EPSILON) {
+      const candidateLex = JSON.stringify(candidate.activeRowIndices) + JSON.stringify(candidate.assignedColumns);
+      const bestLex = JSON.stringify(bestSolved.activeRowIndices) + JSON.stringify(bestSolved.assignedColumns);
+      if (candidateLex < bestLex) {
+        bestSolved = candidate;
+      }
+    }
+  }
+
+  if (bestSolved !== undefined) {
+    return bestSolved;
+  }
+  if (sawEmptySlot) {
+    return {
+      solved: false,
+      reason: 'bundle_selector_fail_closed:empty_slot_pool',
+    };
+  }
+  if (sawBudgetInfeasible) {
+    return {
+      solved: false,
+      reason: 'bundle_selector_fail_closed:budget_infeasible',
+    };
+  }
+  if (sawKLimit) {
+    return {
+      solved: false,
+      reason: 'bundle_selector_fail_closed:k_exceeds_exact_limit',
+    };
+  }
+  return {
+    solved: false,
+    reason: 'bundle_selector_fail_closed:group_obligation_unsatisfied',
+  };
+}
+
+function solveAssignmentFixedRows(
+  input: {
+    readonly costMatrix: readonly (readonly number[])[];
+    readonly budgetConstraints?: readonly AssignmentBudgetConstraint[];
+  },
+): AssignmentSolverResult {
   const matrix = input.costMatrix;
   const k = matrix.length;
   if (k === 0) {
     return {
       solved: true,
+      activeRowIndices: [],
       assignedColumns: [],
       totalCost: 0,
       penaltyPaid: 0,
@@ -308,6 +484,7 @@ export function solveAssignmentExact(
 
   return {
     solved: true,
+    activeRowIndices: matrix.map((_, index) => index),
     assignedColumns: best.perm,
     totalCost: best.cost,
     penaltyPaid: best.penalty,

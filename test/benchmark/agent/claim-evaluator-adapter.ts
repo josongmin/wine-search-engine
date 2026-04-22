@@ -25,11 +25,8 @@ export async function evaluateScenarioClaims(
   execution: ScenarioExecution,
   llm: ChatLlmPort | null,
 ): Promise<DiagnosticVector> {
-  const frameEvidenceRecords = execution.evidenceFrames !== undefined
+  const evidenceRecords = execution.evidenceFrames !== undefined
     ? buildEvidenceRecordsFromFrames(execution.evidenceFrames)
-    : [];
-  const evidenceRecords = frameEvidenceRecords.length > 0
-    ? frameEvidenceRecords
     : parseObservations(execution.observations);
   const evidenceContext = execution.observations.join('\n\n');
   const taskType = inferTaskType(scenario.tier);

@@ -25,7 +25,8 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
 import { buildMachineResponseV2 } from '../../domain/response/service/machine-response-builder-v2.js';
 import {
-  buildFoodPairingColorClause,
+  buildFoodPairingStructuredFilters,
+  buildFoodPairingStructuredPreferences,
   resolveFoodPairingBudgetKrw,
 } from '../../application/search/food-pairing-tool-policy.js';
 import {
@@ -70,6 +71,15 @@ const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as cons
 
 type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
 type CompareToolInput = z.infer<typeof CompareWinesInputSchema>;
+interface CompareSideSearchOverrides {
+  readonly country?: string | undefined;
+  readonly region?: string | undefined;
+  readonly appellation?: string | undefined;
+  readonly grape_primary?: string | undefined;
+  readonly wine_type?: SearchToolInput['wine_type'] | undefined;
+  readonly vintage_min?: number | undefined;
+  readonly vintage_max?: number | undefined;
+}
 
 const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
 
@@ -126,8 +136,14 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   if (input.wine_type !== undefined) {
     pushSearchToolStructuredFilter(filters, 'wine_type', '=', input.wine_type, input.wine_type);
   }
+  if (input.grape_primary !== undefined) {
+    pushSearchToolStructuredFilter(filters, 'grape_primary', '=', input.grape_primary, input.grape_primary);
+  }
   if (input.country !== undefined) {
     pushSearchToolStructuredFilter(filters, 'country', '=', input.country, input.country);
+  }
+  if (input.region !== undefined) {
+    pushSearchToolStructuredFilter(filters, 'region', '=', input.region, input.region);
   }
   if (input.vintage_min !== undefined) {
     pushSearchToolStructuredFilter(filters, 'vintage_year', '>=', input.vintage_min, `${input.vintage_min}년 이후`);
@@ -173,10 +189,55 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
   };
 }
 
+function buildCompareSideOverrides(
+  input: CompareToolInput,
+): readonly [CompareSideSearchOverrides, CompareSideSearchOverrides] {
+  return [
+    {
+      ...(input.country_a !== undefined ? { country: input.country_a } : {}),
+      ...(input.region_a !== undefined ? { region: input.region_a } : {}),
+      ...(input.appellation_a !== undefined ? { appellation: input.appellation_a } : {}),
+      ...(input.grape_primary_a !== undefined ? { grape_primary: input.grape_primary_a } : {}),
+      ...(input.wine_type_a !== undefined ? { wine_type: input.wine_type_a } : {}),
+      ...(input.vintage_min_a !== undefined ? { vintage_min: input.vintage_min_a } : {}),
+      ...(input.vintage_max_a !== undefined ? { vintage_max: input.vintage_max_a } : {}),
+    },
+    {
+      ...(input.country_b !== undefined ? { country: input.country_b } : {}),
+      ...(input.region_b !== undefined ? { region: input.region_b } : {}),
+      ...(input.appellation_b !== undefined ? { appellation: input.appellation_b } : {}),
+      ...(input.grape_primary_b !== undefined ? { grape_primary: input.grape_primary_b } : {}),
+      ...(input.wine_type_b !== undefined ? { wine_type: input.wine_type_b } : {}),
+      ...(input.vintage_min_b !== undefined ? { vintage_min: input.vintage_min_b } : {}),
+      ...(input.vintage_max_b !== undefined ? { vintage_max: input.vintage_max_b } : {}),
+    },
+  ] as const;
+}
+
+function buildCompareSideOnlyFilters(
+  overrides: CompareSideSearchOverrides,
+): readonly NormalizedConstraint[] {
+  const sideInput: SearchToolInput = {
+    query: '__side_specific__',
+    ...(overrides.country !== undefined ? { country: overrides.country } : {}),
+    ...(overrides.region !== undefined ? { region: overrides.region } : {}),
+    ...(overrides.appellation !== undefined ? { appellation: overrides.appellation } : {}),
+    ...(overrides.grape_primary !== undefined ? { grape_primary: overrides.grape_primary } : {}),
+    ...(overrides.wine_type !== undefined ? { wine_type: overrides.wine_type } : {}),
+    ...(overrides.vintage_min !== undefined ? { vintage_min: overrides.vintage_min } : {}),
+    ...(overrides.vintage_max !== undefined ? { vintage_max: overrides.vintage_max } : {}),
+  };
+  return buildSearchToolStructuredFilters(sideInput);
+}
+
 function buildCompareToolRequestContext(input: CompareToolInput): {
   readonly parentContext?: {
     readonly filters?: readonly NormalizedConstraint[] | undefined;
     readonly preferences?: readonly NormalizedConstraint[] | undefined;
+    readonly perSideFilters?: readonly [
+      readonly NormalizedConstraint[] | undefined,
+      readonly NormalizedConstraint[] | undefined,
+    ] | undefined;
   } | undefined;
   readonly subQueries: readonly [string, string];
   readonly originalQuery: string;
@@ -189,8 +250,10 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
     ...(sharedInput.min_price_krw !== undefined ? { min_price_krw: sharedInput.min_price_krw } : {}),
     ...(sharedInput.max_price_krw !== undefined ? { max_price_krw: sharedInput.max_price_krw } : {}),
     ...(sharedInput.max_alcohol_pct !== undefined ? { max_alcohol_pct: sharedInput.max_alcohol_pct } : {}),
+    ...(sharedInput.grape_primary !== undefined ? { grape_primary: sharedInput.grape_primary } : {}),
     ...(sharedInput.wine_type !== undefined ? { wine_type: sharedInput.wine_type } : {}),
     ...(sharedInput.country !== undefined ? { country: sharedInput.country } : {}),
+    ...(sharedInput.region !== undefined ? { region: sharedInput.region } : {}),
     ...(sharedInput.vintage_min !== undefined ? { vintage_min: sharedInput.vintage_min } : {}),
     ...(sharedInput.vintage_max !== undefined ? { vintage_max: sharedInput.vintage_max } : {}),
     ...(sharedInput.appellation !== undefined ? { appellation: sharedInput.appellation } : {}),
@@ -204,19 +267,30 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
     ...(sharedInput.beginner_suitability_min !== undefined
       ? { beginner_suitability_min: sharedInput.beginner_suitability_min }
       : {}),
+    ...(sharedInput.producer_prestige_min !== undefined
+      ? { producer_prestige_min: sharedInput.producer_prestige_min }
+      : {}),
+    ...(sharedInput.drinking_window !== undefined ? { drinking_window: sharedInput.drinking_window } : {}),
+    ...(sharedInput.drinking_window_target_year !== undefined
+      ? { drinking_window_target_year: sharedInput.drinking_window_target_year }
+      : {}),
   };
   const filters = buildSearchToolStructuredFilters(sharedSearchInput);
   const preferences = buildSearchToolStructuredPreferences(sharedSearchInput);
   const baseRetrievalQueries = buildCompareBaseRetrievalQueries(input);
-  const buildSubQuery = (query: string): string => {
+  const [sideAOverrides, sideBOverrides] = buildCompareSideOverrides(input);
+  const buildSubQuery = (query: string, sideOverrides: CompareSideSearchOverrides): string => {
     const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery({
       query,
-      wine_type: sharedInput.wine_type,
-      country: sharedInput.country,
-      appellation: sharedInput.appellation,
-      vintage_min: sharedInput.vintage_min,
-      vintage_max: sharedInput.vintage_max,
+      grape_primary: sideOverrides.grape_primary ?? sharedInput.grape_primary,
+      wine_type: sideOverrides.wine_type ?? sharedInput.wine_type,
+      country: sideOverrides.country ?? sharedInput.country,
+      region: sideOverrides.region ?? sharedInput.region,
+      appellation: sideOverrides.appellation ?? sharedInput.appellation,
+      vintage_min: sideOverrides.vintage_min ?? sharedInput.vintage_min,
+      vintage_max: sideOverrides.vintage_max ?? sharedInput.vintage_max,
       occasion: sharedInput.occasion,
+      preserveRepresentativeSearch: true,
     });
     const clauses = buildSearchToolSoftClauses(sharedInput);
     return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
@@ -225,16 +299,33 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
     `${input.query_a} vs ${input.query_b}`,
     buildSearchToolSoftClauses(sharedInput),
   );
+  const sideSpecificFilters = [
+    buildCompareSideOnlyFilters(sideAOverrides),
+    buildCompareSideOnlyFilters(sideBOverrides),
+  ] as const;
   return {
-    ...(filters.length > 0 || preferences.length > 0
+    ...(filters.length > 0 || preferences.length > 0 || sideSpecificFilters.some((entries) => entries.length > 0)
       ? {
           parentContext: {
             ...(filters.length > 0 ? { filters } : {}),
             ...(preferences.length > 0 ? { preferences } : {}),
+            ...(sideSpecificFilters.some((entries) => entries.length > 0)
+              ? {
+                  perSideFilters: sideSpecificFilters.map((entries) =>
+                    entries.length > 0 ? entries : undefined,
+                  ) as [
+                    readonly NormalizedConstraint[] | undefined,
+                    readonly NormalizedConstraint[] | undefined,
+                  ],
+                }
+              : {}),
           },
         }
       : {}),
-    subQueries: [buildSubQuery(baseRetrievalQueries[0]), buildSubQuery(baseRetrievalQueries[1])],
+    subQueries: [
+      buildSubQuery(baseRetrievalQueries[0], sideAOverrides),
+      buildSubQuery(baseRetrievalQueries[1], sideBOverrides),
+    ],
     originalQuery,
   };
 }
@@ -455,17 +546,25 @@ export class WineToolExecutor {
       maxPriceKrwCap: Number.MAX_SAFE_INTEGER,
     });
     const query = appendStructuredQueryClauses(
-      `wines for ${validated.food}${buildFoodPairingColorClause(validated)}`,
-      budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],
+      `wine pairing for ${validated.food}`,
+      [
+        ...(budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : []),
+        ...(validated.styles !== undefined ? [...validated.styles] : []),
+        ...(validated.pairing_tags !== undefined ? [...validated.pairing_tags] : []),
+      ],
     );
+    const filters = buildFoodPairingStructuredFilters(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
+    const preferences = buildFoodPairingStructuredPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
 
     const request: SearchRequest = {
       query,
       options: {
-        mode: 'auto',
+        mode: 'hybrid',
         explain: false,
         clarification: false,
       },
+      ...(filters.length > 0 ? { filters } : {}),
+      ...(preferences.length > 0 ? { preferences } : {}),
     };
 
     return this.deps.searchUseCase.execute(request, requestId);

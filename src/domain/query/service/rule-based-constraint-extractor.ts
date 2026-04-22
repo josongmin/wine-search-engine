@@ -8,6 +8,7 @@ import {
   extractSearchConstraints,
   krwToUsd,
 } from './search-constraint-extractor.js';
+import { normalizeQueryPredicates } from './korean-predicate-variants.js';
 
 /** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
 const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
@@ -33,6 +34,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   const hard: ConstraintBundle['hard'][number][] = [];
   const soft: ConstraintBundle['soft'][number][] = [];
   const q = normalizedQuery;
+  const predicateNormalizedQuery = normalizeQueryPredicates(q);
   const mv = RULE_BASED_CONSTRAINT_MAPPING_VERSION;
 
   for (const [pattern, value] of WINE_TYPE_RULES) {
@@ -173,12 +175,15 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   // Critic score / rating keywords: "평점 좋은/높은" and their connective variants
   // (좋고, 높고) are handled by DEFAULT_MAPPINGS in nl-mapper.ts (SSoT) +
   // predicate variant lookup. Only non-NL structural patterns remain here.
-  if (/(?:^|[^\p{L}\p{N}])(?:별점|리뷰)\s*(?:좋은|높은|훌륭|최고)(?=$|[^\p{L}\p{N}])/u.test(q)) {
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:평점|점수|별점|리뷰)\s*(?:좋은|높은|훌륭한|최고)(?=$|[^\p{L}\p{N}])/u
+      .test(predicateNormalizedQuery)
+  ) {
     soft.push({
       attribute: 'critic_score',
       operator: '>=',
       value: 0.7,
-      source_phrase: '별점 좋은',
+      source_phrase: '평점/점수 좋은',
       confidence: 0.75,
       mapping_version: mv,
     });
@@ -204,12 +209,25 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  // "바디감 있는/좋은" and "타닌 없는" are handled by DEFAULT_MAPPINGS in
-  // nl-mapper.ts (SSoT for phrase→attribute mappings). The predicate normalizer
-  // generates connective variants (있고→있는), so NL mapper catches them.
+  // Query-local connective normalization restores direct regex coverage for
+  // connective/adnominal Korean quality phrases without mutating the original
+  // query surface that SearchConstraints relies on for negation parsing.
+  if (/(?:^|[^\p{L}\p{N}])(?:바디감|바디)\s*(?:있는|좋은)(?=$|[^\p{L}\p{N}])/u.test(predicateNormalizedQuery)) {
+    soft.push({
+      attribute: 'body',
+      operator: '>=',
+      value: 0.5,
+      source_phrase: '바디감 있는',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
 
   // "low tannin" intent
-  if (/(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|부드러(?:운|움|운편)?)/u.test(q)) {
+  if (
+    /(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|타닌감?\s*없는|부드러(?:운|움|운편)?)/u
+      .test(predicateNormalizedQuery)
+  ) {
     soft.push({
       attribute: 'tannin',
       operator: '<=',
@@ -221,7 +239,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   // "fruity" intensity intent
-  if (/(?:과일향\s*풍부(?:한|하게)?|과일향\s*진하(?:다|한|게)?|fruity)/iu.test(q)) {
+  if (/(?:과일향\s*풍부(?:한|하게)?|과일향\s*진하(?:다|한|게)?|fruity)/iu.test(predicateNormalizedQuery)) {
     soft.push({
       attribute: 'fruit_intensity',
       operator: '>=',

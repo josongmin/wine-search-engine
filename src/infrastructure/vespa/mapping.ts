@@ -288,6 +288,7 @@ const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   canonicalLabel: { vespaField: 'canonical_label', kind: 'string' },
   producer: { vespaField: 'producer', kind: 'string' },
   region: { vespaField: 'region', kind: 'string' },
+  closure: { vespaField: 'closure', kind: 'string' },
   searchTextEn: { vespaField: 'search_text_en', kind: 'string' },
   semanticSummary: { vespaField: 'semantic_summary', kind: 'string' },
   grapePrimary: { vespaField: 'grape_primary', kind: 'string' },
@@ -659,6 +660,7 @@ export function toRetrievalHitProjection(doc: RetrievalDocument): RetrievalHitPr
     ...base,
     ...(doc.producer !== '' ? { producer: doc.producer } : {}),
     ...(doc.region !== '' ? { region: doc.region } : {}),
+    ...(doc.closure !== undefined ? { closure: doc.closure } : {}),
     ...(doc.appellation !== undefined ? { appellation: doc.appellation } : {}),
     ...(doc.grapePrimary !== undefined ? { grapePrimary: doc.grapePrimary } : {}),
     ...(doc.vintageYear !== undefined ? { vintageYear: doc.vintageYear } : {}),
@@ -731,6 +733,7 @@ export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProje
   const canonicalLabel = getOptionalString(raw, 'canonical_label');
   const producer = getOptionalString(raw, 'producer');
   const region = getOptionalString(raw, 'region');
+  const closure = getOptionalString(raw, 'closure');
   const appellation = getOptionalString(raw, 'appellation');
   const grapePrimary = getOptionalString(raw, 'grape_primary');
   const vintageYear = getOptionalNumber(raw, 'vintage_year');
@@ -743,6 +746,7 @@ export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProje
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
     ...(producer !== undefined ? { producer } : {}),
     ...(region !== undefined ? { region } : {}),
+    ...(closure !== undefined ? { closure } : {}),
     ...(appellation !== undefined ? { appellation } : {}),
     ...(grapePrimary !== undefined ? { grapePrimary } : {}),
     ...(vintageYear !== undefined ? { vintageYear } : {}),

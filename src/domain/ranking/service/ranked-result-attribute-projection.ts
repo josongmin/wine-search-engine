@@ -12,6 +12,8 @@ type RankedResultAttributeProjection = Pick<
   RankedResult,
   | 'producer'
   | 'region'
+  | 'closure'
+  | 'country'
   | 'grapePrimary'
   | 'appellation'
   | 'producerPrestige'
@@ -45,6 +47,8 @@ type RankedResultAttributeProjection = Pick<
 interface RankedResultAttributeSource {
   readonly producer?: string | undefined;
   readonly region?: string | undefined;
+  readonly closure?: string | undefined;
+  readonly country?: string | undefined;
   readonly grapePrimary?: string | undefined;
   readonly appellation?: string | undefined;
   readonly producerPrestige?: number | undefined;
@@ -94,6 +98,8 @@ function buildRankedResultProjection(
   return {
     ...(source.producer !== undefined ? { producer: source.producer } : {}),
     ...(source.region !== undefined ? { region: source.region } : {}),
+    ...(source.closure !== undefined ? { closure: source.closure } : {}),
+    ...(source.country !== undefined ? { country: source.country } : {}),
     ...(source.grapePrimary !== undefined ? { grapePrimary: source.grapePrimary } : {}),
     ...(source.appellation !== undefined ? { appellation: source.appellation } : {}),
     ...(source.producerPrestige !== undefined
@@ -152,6 +158,8 @@ export function projectHybridCandidateToRankedResultAttributes(
   return buildRankedResultProjection({
     producer: candidate.producer,
     region: candidate.region,
+    closure: candidate.closure,
+    country: candidate.country,
     grapePrimary: candidate.grapePrimary,
     appellation: candidate.appellation,
     producerPrestige: candidate.producerPrestige,

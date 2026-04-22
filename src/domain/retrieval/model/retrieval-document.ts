@@ -46,6 +46,7 @@ export interface RetrievalHitProjection {
   readonly producer?: string | undefined;
   readonly region?: string | undefined;
   readonly appellation?: string | undefined;
+  readonly closure?: string | undefined;
   readonly grapePrimary?: string | undefined;
   readonly vintageYear?: number | undefined;
   readonly searchTextEn?: string | undefined;

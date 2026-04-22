@@ -123,12 +123,12 @@ describe('NLMapper', () => {
         expect(mapping?.value).toBe('value');
       });
 
-      it('"스크류캡" → style in [screw_cap]', async () => {
+      it('"스크류캡" → closure = screw cap', async () => {
         const mapping = await mapper.mapPhrase('스크류캡');
         expect(mapping).not.toBeNull();
-        expect(mapping?.mappedAttribute).toBe('style');
-        expect(mapping?.operator).toBe('in');
-        expect(mapping?.value).toBe('screw_cap');
+        expect(mapping?.mappedAttribute).toBe('closure');
+        expect(mapping?.operator).toBe('=');
+        expect(mapping?.value).toBe('screw cap');
       });
 
       it('"차갑게 마실 수 있는" → style in [chillable]', async () => {

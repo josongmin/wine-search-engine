@@ -2,7 +2,7 @@
  * Port for predicting a wine's drinking window.
  *
  * Application use cases depend on this contract, while infrastructure adapters
- * provide the concrete ONNX implementation.
+ * provide deterministic or learned runtime implementations.
  */
 
 /**
@@ -26,9 +26,10 @@ export interface DrinkingWindowInputRatingDistribution {
 /**
  * Drinking-window predictor input.
  *
- * The encoded core features are mandatory because the learned ONNX predictor
- * still depends on them. The wider optional fields carry source-backed
- * structural priors for deterministic / hybrid drinking-window models.
+ * The encoded core features remain mandatory because both the legacy learned
+ * predictor and the current deterministic runtime consume them. The wider
+ * optional fields carry source-backed structural priors for deterministic /
+ * hybrid drinking-window models.
  *
  * All sensory fields (body, tannin, acidity, sweetness) must be provided on
  * the [1–5 ordinal] scale — convert from Vespa [0,1] using

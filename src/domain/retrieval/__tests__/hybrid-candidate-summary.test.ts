@@ -52,6 +52,7 @@ describe('hybrid candidate summary helpers', () => {
       semanticSummary: 'Mapped semantic summary',
       grapePrimary: 'Nebbiolo',
       style: 'savory red',
+      closure: 'Screw cap',
       priceBand: 'luxury',
       pairing: ['truffle'],
       occasion: ['cellaring'],
@@ -86,6 +87,7 @@ describe('hybrid candidate summary helpers', () => {
       producer: 'Sparse Producer',
       body: 0.7,
       sweetness: 0.1,
+      closure: 'Cork',
     };
     const dense: RetrievalHitSummary = {
       producerPrestige: 0.91,
@@ -105,6 +107,7 @@ describe('hybrid candidate summary helpers', () => {
       producer: 'Sparse Producer',
       body: 0.7,
       sweetness: 0.1,
+      closure: 'Cork',
       producerPrestige: 0.91,
       country: 'France',
       drinkingWindowStart: 2028,

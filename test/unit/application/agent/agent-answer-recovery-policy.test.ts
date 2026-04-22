@@ -215,6 +215,26 @@ describe('AgentAnswerRecoveryPolicy', () => {
     expect(state.fallbackApplied).toBe(false);
   });
 
+  it('expands bare exact-metadata abstentions into label-plus-vintage abstentions', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.answer = '모르겠습니다.';
+    state.terminationReason = 'answer';
+
+    const answer = await policy.recoverAnswer(
+      '오푸스 원 2027 빈티지 나왔는지 근거 없으면 모른다고만 해줘',
+      'req-metadata-abstain',
+      state,
+      true,
+    );
+
+    expect(answer).toBe('오푸스 원 2027 빈티지의 출시/가용성은 현재 확인 가능한 근거가 없어 모르겠습니다.');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('falls through to the absolute layer-4 template when fallback search also fails', async () => {
     const execute = vi.fn().mockRejectedValue(new Error('search backend down'));
     const policy = new AgentAnswerRecoveryPolicy({
@@ -254,5 +274,39 @@ describe('AgentAnswerRecoveryPolicy', () => {
     expect(state.answer).toBe('');
     expect(state.fallbackApplied).toBe(false);
     expect(state.fallbackLayer).toBeNull();
+  });
+
+  it('normalizes out-of-domain alcohol answers into a wine-domain refusal contract', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.answer = '와인 추천은 도와드릴 수 있어요.';
+    state.terminationReason = 'answer';
+
+    const answer = await policy.recoverAnswer('와인 말고 맥주 추천', 'req-beer-refusal', state, false);
+
+    expect(answer).toContain('와인');
+    expect(answer).toContain('맥주');
+    expect(answer).toContain('도와드리지');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('normalizes unsupported weather answers into an explicit wine-domain boundary', async () => {
+    const execute = vi.fn();
+    const policy = new AgentAnswerRecoveryPolicy({
+      toolDeps: { searchUseCase: { execute } as never },
+    });
+    const state = createAgentExecutionState();
+    state.answer = '보르도 오늘 날씨는 현재 확인할 수 없습니다.';
+    state.terminationReason = 'answer';
+
+    const answer = await policy.recoverAnswer('보르도 오늘 날씨 어때?', 'req-weather-refusal', state, false);
+
+    expect(answer).toContain('와인');
+    expect(answer).toContain('날씨');
+    expect(answer).toContain('실시간');
+    expect(execute).not.toHaveBeenCalled();
   });
 });

@@ -17,7 +17,9 @@ import { getHeader, getJson, postJson } from './helpers/http-transport.js';
 let server: TestServer;
 
 beforeAll(async () => {
-  server = await createTestServer();
+  server = await createTestServer({
+    serverOptions: { trustProxy: true },
+  });
 });
 
 afterAll(async () => {

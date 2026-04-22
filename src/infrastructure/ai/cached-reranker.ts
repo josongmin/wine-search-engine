@@ -145,11 +145,13 @@ function buildCacheKey(
 }
 
 export class CachedReranker implements RerankerPort {
+  readonly modelId: string;
   private readonly cacheStore: RerankCacheStore;
 
   constructor(
     private readonly options: CachedRerankerOptions,
   ) {
+    this.modelId = options.modelId;
     this.cacheStore = options.redis !== undefined
       ? new RedisRerankCacheStore(options.redis)
       : new InMemoryRerankCacheStore();

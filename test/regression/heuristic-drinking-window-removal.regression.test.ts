@@ -46,11 +46,13 @@ describe('heuristic drinking-window removal', () => {
     expect(inferDrinkingWindowEvidenceLevel('unloaded')).toBeUndefined();
   });
 
-  it('inferDrinkingWindowEvidenceLevel returns learned only for onnx: prefix', () => {
+  it('inferDrinkingWindowEvidenceLevel returns typed evidence only for supported runtime namespaces', () => {
+    expect(inferDrinkingWindowEvidenceLevel('deterministic:structural-slot-v2')).toBe('deterministic');
     expect(inferDrinkingWindowEvidenceLevel('onnx:v2.1-enc20260405')).toBe('learned');
   });
 
-  it('inferDrinkingWindowBlockingEligibility is false for non-ONNX versions', () => {
+  it('inferDrinkingWindowBlockingEligibility is false for unsupported namespaces only', () => {
+    expect(inferDrinkingWindowBlockingEligibility('deterministic:structural-slot-v2')).toBe(true);
     expect(inferDrinkingWindowBlockingEligibility('heuristic-v1.0')).toBe(false);
     expect(inferDrinkingWindowBlockingEligibility(undefined)).toBe(false);
     expect(inferDrinkingWindowBlockingEligibility('unloaded')).toBe(false);

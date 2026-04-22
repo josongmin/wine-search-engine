@@ -144,6 +144,11 @@ describe('ConstraintAtom + liftToAtom (E2-T1)', () => {
     expect(atom.semantic_scope).toBe('temporal');
   });
 
+  it('semantic_scope treats drinking_window as temporal, not extrinsic', () => {
+    const atom = liftToAtom(makeConstraint('drinking_window', 2026), 'soft');
+    expect(atom.semantic_scope).toBe('temporal');
+  });
+
   it('semantic_scope falls back to extrinsic for unknown attributes', () => {
     const atom = liftToAtom(makeConstraint('price', '100'), 'soft');
     expect(atom.semantic_scope).toBe('extrinsic');

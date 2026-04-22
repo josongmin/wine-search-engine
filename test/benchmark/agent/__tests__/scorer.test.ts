@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { scoreScenario, DEFAULT_WEIGHTS, TIER_WEIGHTS, type ScenarioExecution, type ToolCallTrace } from '../scorer.js';
+import { scoreScenario, DEFAULT_WEIGHTS, TIER_WEIGHTS, evaluatePredicate, type ScenarioExecution, type ToolCallTrace } from '../scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation } from '../scenario.js';
+import type { ToolCallEvidenceFrame } from '../../../../src/domain/agent/model/tool-call-evidence-frame.js';
 import {
   scoreConstraintSatisfactionRate,
   scoreUDCG,
@@ -38,6 +39,22 @@ function makeExecution(overrides: Partial<ScenarioExecution> = {}): ScenarioExec
     terminationReason: 'answer',
     totalDurationMs: 1_000,
     totalTokens: { input: 500, output: 200 },
+    ...overrides,
+  };
+}
+
+function makeEvidenceFrame(overrides: Partial<ToolCallEvidenceFrame>): ToolCallEvidenceFrame {
+  return {
+    frameSchemaVersion: 'tool_evidence_v1',
+    toolCallId: 'tc-1',
+    toolName: 'search_wines',
+    invokedAt: '2026-04-15T00:00:00Z',
+    requestId: 'req-1',
+    request: { toolName: 'search_wines', input: {} },
+    structuredOutput: { kind: 'no_op', reason: 'stub' },
+    observationSnapshot: '',
+    observationHash: 'a'.repeat(64),
+    durationMs: 5,
     ...overrides,
   };
 }
@@ -506,8 +523,24 @@ describe('overall score (weighted geometric mean)', () => {
   it('fallback dim at 0.25 with rest at 1: clearly distinguishable from arithmetic mean', () => {
     // termination=0.25 (fallback partial credit), answer/tool/step/cost/judge all at 1
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ terminationReason: 'fallback' }),
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '레드', canonical: 'red', type: 'wine_type' }],
+        weights: {
+          executionEfficiency: 0.2,
+          answerQuality: 0.2,
+          terminationCorrectness: 0.2,
+          costEfficiency: 0.2,
+          contextRelevance: 0.1,
+          judge: 0.1,
+        },
+      }),
+      makeExecution({
+        terminationReason: 'fallback',
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"red-1","canonical_label":"Benchmark Red","wine_type":"red"}]}',
+        ],
+      }),
       1,
     );
     // Arithmetic mean would be 5/6 ≈ 0.833. Geometric should be lower.
@@ -1058,7 +1091,10 @@ describe('scoreStructuredChecks', () => {
       undefined,
     );
     // 100000 > 50000 → lte predicate fails
-    expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBe(true);
+    const diagnostic = r.diagnostics?.find((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING');
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.observed).toBe('100000');
+    expect(diagnostic?.expected).toBe('lte 50000');
   });
 
   it('expectedToolArgs: passes when predicate satisfied', () => {
@@ -1075,6 +1111,63 @@ describe('scoreStructuredChecks', () => {
       undefined,
     );
     expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBeFalsy();
+  });
+
+  it('expectedToolArgs: supports contains predicate over array-valued tool args', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedToolArgs: [
+          { tool: 'search_wines', argPath: 'styles', predicate: 'contains', value: 'screw_cap' },
+          { tool: 'search_wines', argPath: 'occasion', predicate: 'contains', value: 'camping' },
+        ],
+      }),
+      makeExecution({
+        toolsUsed: [
+          tool('search_wines', '{"query":"캠핑 와인","styles":["screw_cap","chillable"],"occasion":["camping"]}'),
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBeFalsy();
+    expect(evaluatePredicate(['screw_cap', 'chillable'], 'contains', 'screw_cap')).toBe(true);
+  });
+
+  it('expectedToolArgs: supports contains_any predicate for localized canonical forms', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedToolArgs: [
+          { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['Almaviva', '알마비바'] },
+        ],
+      }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"알마비바 2026 빈티지","retrieval_mode":"entity"}')],
+      }),
+      undefined,
+    );
+
+    expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBeFalsy();
+    expect(evaluatePredicate('알마비바 2026 빈티지', 'contains_any', ['Almaviva', '알마비바'])).toBe(true);
+  });
+
+  it('expectedToolArgs: supports equals_any predicate for normalized anchor queries', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedToolArgs: [
+          { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['보졸레 누보', 'beaujolais nouveau'] },
+        ],
+      }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"보졸레 누보"}')],
+      }),
+      undefined,
+    );
+
+    expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBeFalsy();
+    expect(evaluatePredicate('보졸레 누보', 'equals_any', ['보졸레 누보', 'beaujolais nouveau'])).toBe(true);
   });
 });
 
@@ -1134,15 +1227,118 @@ describe('RAGAS Context Relevance', () => {
     expect(r.scores.contextRelevance).toBeNull();
   });
 
+  it('scores frame-only executions without requiring raw observations', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
+      }),
+      makeExecution({
+        observations: [],
+        evidenceFrames: [
+          makeEvidenceFrame({
+            structuredOutput: {
+              kind: 'search_result_set',
+              resultSet: [{
+                entity: {
+                  entityId: 'barolo-1',
+                  canonicalLabel: 'Benchmark Barolo',
+                  type: 'wine',
+                  appellation: 'Barolo',
+                },
+                relevanceScore: 0.82,
+                match: {
+                  matchType: 'semantic',
+                  scoreComponents: {
+                    lexical: 0.2,
+                    semantic: 0.8,
+                    attribute: 0.5,
+                    popularity: 0.1,
+                  },
+                },
+                constraints: { matched: [], unmet: [], inferred: [] },
+                uncertainty: { missingInfo: [], approximationUsed: false },
+                evidenceItems: [{ type: 'entity', source: 'fixture', contribution: 'matched appellation', strength: 'high', provenance: 'fixture' }],
+              }],
+              resultCount: 1,
+            },
+          }),
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBe(1);
+  });
+
   it('returns null when no structured constraints', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ observations: ['Found: Wine A | vintage: 2019'] }),
       undefined,
     );
-    // No priceBandKrw, vintageRange, drinkingWindowStatus → null
-    // (query_terms_in_context check may still fire if tools have query)
-    expect(r.scores.contextRelevance).not.toBeUndefined();
+    // No priceBandKrw, vintageRange, drinkingWindowStatus, structured tool
+    // fields, or expectedEntities signal → not measurable.
+    expect(r.scores.contextRelevance).toBeNull();
+  });
+
+  it('treats explicit no-evidence abstention scenarios as unmeasurable instead of failed context relevance', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 2,
+        allowHonestNoEvidenceAbstention: true,
+        expectedConstraints: {
+          hard: [
+            { attribute: 'region', operator: '=', value: 'Beaujolais' },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      }, {
+        query: '보졸레누보 올해꺼 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘',
+        goldenKeywords: ['beaujolais', 'nouveau'],
+      }),
+      makeExecution({
+        observations: [
+          '[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "보졸레누보".',
+        ],
+        answer: '확실한 근거가 없어서 올해 보졸레 누보가 나왔는지 확인할 수 없습니다. 추정해서 말하지 않겠습니다.',
+      }),
+      1,
+      1,
+    );
+
+    expect(r.scores.contextRelevance).toBeNull();
+    expect(r.scores.contextRecall).toBeNull();
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_RELEVANCE_SKIPPED_NO_EVIDENCE_ABSTENTION')).toBe(true);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_RECALL_SKIPPED_NO_EVIDENCE_ABSTENTION')).toBe(true);
+  });
+
+  it('still scores context relevance normally when no-evidence abstention is not explicitly allowed', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 2,
+        expectedConstraints: {
+          hard: [
+            { attribute: 'region', operator: '=', value: 'Beaujolais' },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      }, {
+        query: '보졸레누보 올해꺼 나왔는지',
+        goldenKeywords: ['beaujolais', 'nouveau'],
+      }),
+      makeExecution({
+        observations: [
+          '[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "보졸레누보".',
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBe(0);
+    expect(r.scores.contextRecall).toBeCloseTo(0.5, 5);
   });
 
   it('vintageRange: passes when observation contains in-range year', () => {
@@ -1181,69 +1377,102 @@ describe('RAGAS Context Relevance', () => {
     expect(r.scores.contextRelevance).toBeGreaterThan(0);
   });
 
-  it('query-context alignment: passes when tool query terms in observations', () => {
+  it('expected entity alignment: passes when canonical entity evidence is present', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
+      }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"Opus One"}')],
-        observations: ['Found: Opus One 2018 | producer: Mondavi'],
+        toolsUsed: [tool('search_wines', '{"query":"바롤로"}')],
+        observations: ['Found: Barolo 2018 | appellation: Barolo | producer: Benchmark Winery'],
       }),
       undefined,
     );
-    // "opus" from query should appear in observations
     expect(r.scores.contextRelevance).toBeGreaterThan(0);
   });
 
-  it('query-context alignment: Korean 2-syllable words (e.g. "레드") count as significant', () => {
-    // "레드" is 2 chars (Hangul) — old ASCII threshold of 3 excluded it.
-    // With Hangul min-length=2, "레드" should be included and match the observation.
+  it('expected entity alignment: supports Korean surface to English canonical evidence', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '레드', canonical: 'red', type: 'wine_type' }],
+      }),
       makeExecution({
         toolsUsed: [tool('search_wines', '{"query":"레드 와인 추천"}')],
-        observations: ['Found: 레드와인 1번 | producer: 와이너리A'],
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"red-1","canonical_label":"Benchmark Red","wine_type":"red","style":"red"}]}',
+        ],
       }),
       undefined,
     );
-    // "레드" (2 chars, Hangul) should be found in observation → contextRelevance > 0
     expect(r.scores.contextRelevance).toBeGreaterThan(0);
   });
 
-  it('query-context alignment: passes with Korean food-wine query terms', () => {
+  it('expected entity alignment: fails when structured wine_type passes but entity axis is absent', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
+      }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"삼겹살과 어울리는 레드"}')],
-        observations: ['Found: Cabernet Sauvignon | region: 나파 밸리 | grapes: Cabernet'],
+        toolsUsed: [tool('search_wines', '{"query":"바롤로","wine_type":"red"}')],
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"random-red-1","canonical_label":"Random Red Wine","wine_type":"red","style":"red","producer":"Benchmark Winery"}]}',
+        ],
       }),
       undefined,
     );
-    // "삼겹살" (3 Hangul chars) should be present — even without match in obs,
-    // "레드" from query should appear in observation ("레드" and Cabernet both present)
-    expect(r.scores.contextRelevance).not.toBeNull();
+
+    expect(r.scores.contextRelevance).toBeLessThan(1);
+    const diagnostic = r.diagnostics?.find((d) => d.code === 'CONTEXT_RELEVANCE_LOW');
+    expect(r.scores.contextRelevance).toBe(0.5);
+    expect(diagnostic?.message).toContain('raw_alignment passed 0/1');
+    expect(diagnostic?.message).toContain('structured passed 1/1');
+    expect(diagnostic?.message).toContain('expected_entity_appellation_Barolo');
   });
 
-  it('cross-lingual: Korean query + English-only observation → contextRelevance null (v4 honest skip)', () => {
-    // v4 fix: when query has Hangul but observation is English-only, we CANNOT
-    // assess term relevance ("이탈리아" ≠ "Italy"). Skip the check entirely (null),
-    // rather than auto-passing (true). null is honest: "insufficient info to assess".
-    // Previously auto-passed, which made 96%+ of Korean scenarios score contextRelevance=1
-    // regardless of retrieval quality, defeating the metric.
+  it('expected entity alignment: cross-lingual Korean query can be measured via canonical entities', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [
+          { surface: '이탈리아', canonical: 'Italy', type: 'country' },
+          { surface: '레드', canonical: 'red', type: 'wine_type' },
+        ],
+      }),
       makeExecution({
         toolsUsed: [tool('search_wines', '{"query":"이탈리아 레드 평점 좋고 지금 마실 수 있는"}')],
-        // English-only observation — no Hangul characters
         observations: ['Found 5 results: 1. Barolo 2018 (id: wine-001) | producer: Giacomo Conterno | region: Piedmont, Italy | grapes: Nebbiolo | price: 80000-120000'],
       }),
       undefined,
     );
-    // No structured constraints (no priceBandKrw, vintageRange, etc.)
-    // AND cross-lingual bypass skips query_terms_in_context → no checks at all → null
-    expect(r.scores.contextRelevance).toBeNull();
+
+    expect(r.scores.contextRelevance).not.toBeNull();
   });
 
-  it('uses structured tool input and grounding evidence before raw query-term matching', () => {
+  it('does not fall back to regex observations when frame output has no evidence records', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '오퍼스 원', canonical: 'Opus One', type: 'appellation' }],
+      }),
+      makeExecution({
+        observations: ['Found 1 result: Opus One 2018 | appellation: Opus One'],
+        evidenceFrames: [
+          makeEvidenceFrame({
+            structuredOutput: { kind: 'no_op', reason: 'no structured evidence' },
+          }),
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBe(0);
+    expect(r.diagnostics?.some((d) => d.message.includes('expected_entity_appellation_Opus One'))).toBe(true);
+  });
+
+  it('uses structured tool input and grounding evidence for context relevance', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({
@@ -1261,29 +1490,16 @@ describe('RAGAS Context Relevance', () => {
     expect(r.diagnostics?.some((d) => d.message.includes('tool_alcohol_pct_lte_12'))).toBe(true);
   });
 
-  it('keeps query/entity alignment active when structured wine_type passes but entity is absent', () => {
+  it('passes context relevance when structured wine_type and expected entity are both present', () => {
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"Opus One","wine_type":"red"}')],
-        observations: [
-          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"random-red-1","canonical_label":"Random Red Wine","wine_type":"red","style":"red","producer":"Benchmark Winery"}]}',
-        ],
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
       }),
-      undefined,
-    );
-
-    expect(r.scores.contextRelevance).toBeLessThan(1);
-    expect(r.diagnostics?.some((d) => d.message.includes('query_terms_in_context'))).toBe(true);
-  });
-
-  it('passes context relevance when structured wine_type and query entity are both present', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
       makeExecution({
-        toolsUsed: [tool('search_wines', '{"query":"Opus One","wine_type":"red"}')],
+        toolsUsed: [tool('search_wines', '{"query":"바롤로","wine_type":"red"}')],
         observations: [
-          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"opus-one-2018","canonical_label":"Opus One 2018","wine_type":"red","style":"red","producer":"Opus One Winery"}]}',
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"barolo-2018","canonical_label":"Benchmark Barolo 2018","appellation":"Barolo","wine_type":"red","style":"red","producer":"Benchmark Winery"}]}',
         ],
       }),
       undefined,
@@ -1292,8 +1508,50 @@ describe('RAGAS Context Relevance', () => {
     expect(r.scores.contextRelevance).toBe(1);
   });
 
-  it('cross-lingual: English query + English observation → normal term-matching still applies', () => {
-    // English query + English observation: normal matching, not bypassed
+  it('keeps raw entity alignment independent from multiple structured passes', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedEntities: [{ surface: '바롤로', canonical: 'Barolo', type: 'appellation' }],
+        expectedConstraints: {
+          hard: [
+            {
+              attribute: 'wine_type',
+              operator: '=',
+              value: 'red',
+              source_phrase: '레드',
+              confidence: 1,
+            },
+            {
+              attribute: 'country',
+              operator: '=',
+              value: 'Italy',
+              source_phrase: '이탈리아',
+              confidence: 1,
+            },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      }),
+      makeExecution({
+        toolsUsed: [
+          tool('search_wines', '{"query":"바롤로","wine_type":"red","country":"Italy","styles":["dry"]}'),
+        ],
+        observations: [
+          'Found 1 result\nGROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"random-red-1","canonical_label":"Random Red Wine","wine_type":"red","style":"dry","country":"Italy","producer":"Benchmark Winery"}]}',
+        ],
+      }),
+      undefined,
+    );
+
+    expect(r.scores.contextRelevance).toBe(0.5);
+    const diagnostic = r.diagnostics?.find((d) => d.code === 'CONTEXT_RELEVANCE_LOW');
+    expect(diagnostic?.message).toContain('raw_alignment passed 0/1');
+    expect(diagnostic?.message).toContain('structured passed 4/4');
+  });
+
+  it('returns null when no structured or expected-entity context signal exists', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({
@@ -1302,9 +1560,7 @@ describe('RAGAS Context Relevance', () => {
       }),
       undefined,
     );
-    // Italian + red should partially match (Italian→not present, but "red" is a stopword; "rating" missing)
-    // Key point: this path goes through normal matching, not the cross-lingual bypass
-    expect(r.scores.contextRelevance).not.toBeUndefined();
+    expect(r.scores.contextRelevance).toBeNull();
   });
 });
 
@@ -1942,9 +2198,15 @@ describe('P1-B regression — contextRelevance hard constraint collapse', () => 
     // Price is a soft constraint (search pipeline has no real price filter).
     // Out-of-range price docks contextRelevance but does NOT trigger critical failure.
     const r = scoreScenario(
-      makeScenario({ maxSteps: 5, priceBandKrw: { min: 50_000, max: 100_000 } }),
+      makeScenario({
+        maxSteps: 5,
+        priceBandKrw: { min: 50_000, max: 100_000 },
+        expectedEntities: [
+          { surface: 'Cabernet', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+        ],
+      }),
       makeExecution({
-        observations: ['Wine A: 200,000원 | Napa Cabernet 2019 | score: 95'],
+        observations: ['Wine A: 200,000원 | Napa Cabernet 2019 | grapes: Cabernet Sauvignon | score: 95'],
         toolsUsed: [tool('search_wines', JSON.stringify({ query: 'Cabernet Napa' }))],
       }),
       undefined,

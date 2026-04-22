@@ -921,7 +921,8 @@ export class VespaSearchIndex implements SearchIndexPort {
    *
    * Batches entity IDs into chunks of FETCH_SUMMARY_BATCH_SIZE, runs batches
    * in parallel via Promise.allSettled, re-keys results by entity_id, and
-   * emits in input order. A single batch failure does not discard the rest.
+   * emits in input order. Any batch failure fails the whole fetch closed
+   * because these summary projections are ranker-critical follow-up reads.
    */
   private async batchFetchBySummary<T>(opts: {
     entityIds: readonly CanonicalEntityId[];
@@ -967,12 +968,15 @@ export class VespaSearchIndex implements SearchIndexPort {
     // Log failed batches — previously they were silently swallowed, making partial
     // failures invisible in production and causing silent ranking feature data loss.
     const projectionMap = new Map<string, T>();
+    const batchFailures: string[] = [];
     for (const result of settled) {
       if (result.status === 'rejected') {
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
         bootstrapLogger.warn(
-          { err: result.reason instanceof Error ? result.reason.message : String(result.reason), callerName },
+          { err: message, callerName },
           `[VespaSearchIndex] ${callerName}: batch query failed — refusing partial results`,
         );
+        batchFailures.push(message);
         continue;
       }
       for (const proj of result.value) {
@@ -982,6 +986,13 @@ export class VespaSearchIndex implements SearchIndexPort {
         }
       }
     }
+
+    if (batchFailures.length > 0) {
+      throw new Error(
+        `Vespa summary batch failed (${callerName}): ${batchFailures.join(' | ')}`,
+      );
+    }
+
     // Emit in input order, dropping IDs that did not return a doc.
     const ordered: T[] = [];
     for (const id of entityIds) {

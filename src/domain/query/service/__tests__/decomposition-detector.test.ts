@@ -84,7 +84,7 @@ describe('detectDecomposition', () => {
       expect(analysis.outcome.comparisonSubtype).toBe('concept');
       expect(analysis.outcome.comparisonLegs[0]).toEqual(expect.objectContaining({
         rawQuery: 'Napa Cabernet',
-        retrievalQuery: 'Napa Valley wine',
+        retrievalQuery: 'Napa Valley Cabernet Sauvignon wine',
         mode: 'concept',
         retrievalMode: 'hybrid',
         evidenceSource: 'span_entity_resolution',
@@ -92,11 +92,31 @@ describe('detectDecomposition', () => {
       }));
       expect(analysis.outcome.comparisonLegs[1]).toEqual(expect.objectContaining({
         rawQuery: 'Burgundy Pinot Noir',
-        retrievalQuery: 'Burgundy wine',
+        retrievalQuery: 'Burgundy Pinot Noir wine',
         mode: 'concept',
         retrievalMode: 'hybrid',
         evidenceSource: 'span_entity_resolution',
         canonicalConcept: 'Burgundy',
+      }));
+    }
+  });
+
+  it('preserves secondary concept spans in Korean region-grape comparison retrieval queries', () => {
+    const analysis = analyzeQueryDecomposition('보르도 카베르네 vs 나파 카베르네');
+
+    expect(analysis.outcome.decomposed).toBe(true);
+    if (analysis.outcome.decomposed) {
+      expect(analysis.outcome.comparisonLegs[0]).toEqual(expect.objectContaining({
+        rawQuery: '보르도 카베르네',
+        retrievalQuery: 'Bordeaux Cabernet Sauvignon wine',
+        canonicalConcept: 'Bordeaux',
+        conceptEntityType: 'region',
+      }));
+      expect(analysis.outcome.comparisonLegs[1]).toEqual(expect.objectContaining({
+        rawQuery: '나파 카베르네',
+        retrievalQuery: 'Napa Valley Cabernet Sauvignon wine',
+        canonicalConcept: 'Napa Valley',
+        conceptEntityType: 'region',
       }));
     }
   });

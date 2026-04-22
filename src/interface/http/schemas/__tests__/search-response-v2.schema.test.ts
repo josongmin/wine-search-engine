@@ -15,6 +15,7 @@ const validResultItemV2Human = {
   rank: 1,
   producer: 'Opus One Winery',
   region: 'Napa Valley',
+  country: 'United States',
   vintage: 2018,
   grapePrimary: 'Cabernet Sauvignon',
   drinkingWindow: { start: 2024, end: 2038 },
@@ -116,6 +117,30 @@ describe('SearchResponseV2HumanSchema', () => {
 
   it('parses a valid comparison-branch SearchResponseV2Human object', () => {
     const result = SearchResponseV2HumanSchema.safeParse(validSearchResponseV2HumanComparison);
+    expect(result.success).toBe(true);
+  });
+
+  it('parses concept aggregate evidence on V2 human comparison responses', () => {
+    const result = SearchResponseV2HumanSchema.safeParse({
+      ...validSearchResponseV2HumanComparison,
+      entities: [
+        {
+          ...validSearchResponseV2HumanComparison.entities[0],
+          comparisonMode: 'concept',
+          canonicalConcept: 'Opus One',
+          conceptEntityType: 'appellation',
+          conceptAggregate: {
+            canonicalConcept: 'Opus One',
+            conceptEntityType: 'appellation',
+            representativeResult: validResultItemV2Human,
+            prototypeAxis: [validResultItemV2Human],
+            aggregateResultCount: 1,
+          },
+        },
+        validSearchResponseV2HumanComparison.entities[1],
+      ],
+    });
+
     expect(result.success).toBe(true);
   });
 

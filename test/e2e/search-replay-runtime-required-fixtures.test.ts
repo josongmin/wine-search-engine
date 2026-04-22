@@ -70,13 +70,13 @@ function buildRuntimeDrinkingWindowPredictor(
   }
 
   return {
-    modelVersion: 'heuristic-v1.0-runtime-required',
+    modelVersion: 'deterministic:runtime-required-fixture',
     predict: () => ({
       drinkingWindowStart: 2024,
       drinkingWindowEnd: 2032,
       peakYear: 2028,
-      confidence: 'low',
-      modelVersion: 'heuristic-v1.0-runtime-required',
+      confidence: 'medium',
+      modelVersion: 'deterministic:runtime-required-fixture',
     }),
   };
 }
@@ -102,7 +102,7 @@ describe('search replay fixtures — runtime-required HTTP lane', () => {
             ? { stripCachedDrinkingWindow: true }
             : {}),
           ...(fixture.requires_runtime_capability?.includes('drinking_window_runtime')
-            ? { drinkingWindowModelVersionOverride: 'heuristic-runtime-required' }
+            ? { drinkingWindowModelVersionOverride: 'deterministic:runtime-required-fixture' }
             : {}),
           ...(fixture.requires_runtime_capability?.includes('reranker_runtime')
             ? { rerankThreshold: 0 }

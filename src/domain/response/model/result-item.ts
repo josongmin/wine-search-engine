@@ -11,7 +11,7 @@ export interface DrinkingWindowBlock {
   readonly peakYear?: number | undefined; // Optional peak maturity year
   readonly currentlyDrinkable: boolean;   // true if current year is within window
   readonly confidence: 'high' | 'medium' | 'low';
-  readonly evidenceLevel?: 'learned' | undefined;
+  readonly evidenceLevel?: 'learned' | 'deterministic' | undefined;
   readonly blockingEligible?: boolean | undefined;
   readonly modelVersion?: string | undefined;
 }
@@ -34,6 +34,12 @@ export interface EntitySummary {
 
   /** Region of origin. */
   readonly region?: string | undefined;
+
+  /** Bottle closure, when indexed (e.g. screw cap, cork). */
+  readonly closure?: string | undefined;
+
+  /** Country of origin. */
+  readonly country?: string | undefined;
 
   /** Appellation when distinct from region (browse / eval signals). */
   readonly appellation?: string | undefined;

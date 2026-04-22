@@ -1342,20 +1342,39 @@ describe('retrieveHybridCandidatesForPlan', () => {
             .sort();
           seenHardValues.push(values);
           const suffix = values.find((value) => value.startsWith('wine_type:'))?.replace('wine_type:', '') ?? 'root';
-          return [
-            makeCandidate({
-              entityId: createEntityId(`wine-${suffix}`),
-              matchedConstraints: values.length > 0 ? ['wine_type', 'region'] : [],
-              matchedAtomRefs:
-                suffix === 'red'
-                  ? ['slot_red', 'slot_region']
-                  : suffix === 'white'
-                  ? ['slot_white', 'slot_region']
-                  : [],
-            }),
-          ];
+          return {
+            candidates: [
+              makeCandidate({
+                entityId: createEntityId(`wine-${suffix}`),
+                matchedConstraints: values.length > 0 ? ['wine_type', 'region'] : [],
+                matchedAtomRefs:
+                  suffix === 'red'
+                    ? ['slot_red', 'slot_region']
+                    : suffix === 'white'
+                    ? ['slot_white', 'slot_region']
+                    : [],
+              }),
+            ],
+            telemetry: {
+              degradationCodes: [],
+              degradationSignals: suffix === 'red'
+                ? [{
+                    component: 'dense_semantic',
+                    severity: 'warning' as const,
+                    reason: 'timeout',
+                    fallbackApplied: 'sparse_only',
+                  }]
+                : [],
+              dropLog: [{
+                entityId: `dropped-${suffix}`,
+                dropStage: 'hard_filter' as const,
+                dropReason: `${suffix}-filter`,
+                lastKnownScore: 0.05,
+                channels: [],
+              }],
+            },
+          };
         }),
-        getLastDegradationCodes: vi.fn(() => []),
       };
 
       const result = await retrieveHybridCandidatesForPlan(
@@ -1378,6 +1397,181 @@ describe('retrieveHybridCandidatesForPlan', () => {
         'wine-red',
         'wine-white',
       ]);
+      expect(result.routeDegradation?.degradationReasons).toContain(
+        'retrieval_degraded:dense_semantic:timeout',
+      );
+      expect(result.hardFilterDropLog).toEqual([
+        {
+          entityId: 'dropped-red',
+          dropStage: 'hard_filter',
+          dropReason: 'red-filter',
+          lastKnownScore: 0.05,
+          channels: [],
+        },
+        {
+          entityId: 'dropped-white',
+          dropStage: 'hard_filter',
+          dropReason: 'white-filter',
+          lastKnownScore: 0.05,
+          channels: [],
+        },
+      ]);
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('fail-closes typed recommendation discovery when a required wine-type branch rejects', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan({
+        rawQuery: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+        normalizedQuery: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
+        constraints: {
+          hard: [],
+          soft: [
+            {
+              attribute: 'occasion',
+              operator: 'in',
+              value: ['gift'],
+              source_phrase: '선물',
+              confidence: 0.95,
+            },
+            {
+              attribute: 'style',
+              operator: 'in',
+              value: ['approachable', 'crowd_pleasing'],
+              source_phrase: '실패 없는',
+              confidence: 0.9,
+            },
+          ],
+          inferred: [],
+        },
+      });
+      const compiled = buildCompiled(plan, {
+        effectiveRetrievalMode: 'attribute_search',
+      });
+
+      const candidatePool = {
+        execute: vi.fn(async (input) => {
+          const wineType = input.hardConstraints.find((constraint) => constraint.attribute === 'wine_type')?.value;
+          if (wineType === 'sparkling') {
+            throw new Error('HTTP/2 GOAWAY');
+          }
+          return [
+            makeCandidate({
+              entityId: createEntityId(`wine-${String(wineType)}`),
+              wineType: typeof wineType === 'string' ? wineType : undefined,
+            }),
+          ];
+        }),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(3);
+      expect(result.candidates).toEqual([]);
+      expect(result.routeDegradation?.degradationReasons).toContain(
+        'retrieval_branch_fail_closed:typed_recommendation:sparkling',
+      );
+    } finally {
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('propagates typed retrieval execution telemetry through generic hybrid retrieval without candidate-pool getters', async () => {
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan();
+      const compiled = buildCompiled(plan, {
+        effectiveRetrievalMode: 'attribute_search',
+      });
+
+      const candidatePool = {
+        execute: vi.fn(async () => ({
+          candidates: [
+            makeCandidate({
+              entityId: createEntityId('wine-typed'),
+              canonicalLabel: 'Typed Telemetry Wine',
+            }),
+          ],
+          telemetry: {
+            degradationCodes: ['sparse_pool'],
+            degradationSignals: [{
+              component: 'dense_semantic',
+              severity: 'warning' as const,
+              reason: 'timeout',
+              fallbackApplied: 'sparse_only',
+            }],
+            fusionTrace: {
+              queryClass: plan.queryClass,
+              fusionClass: plan.queryClass,
+              rrfK: 60,
+              channelWeights: { sparse: 1, dense: 1, anchor: 0, learnedSparse: 0 },
+              candidateCount: {
+                beforeFusion: { sparse: 1, dense: 0, anchor: 0 },
+                afterFusion: 1,
+                afterHardFilter: 1,
+                afterAssembly: 1,
+              },
+            },
+            dropLog: [{
+              entityId: 'dropped-typed',
+              dropStage: 'hard_filter' as const,
+              dropReason: 'typed filter',
+              lastKnownScore: 0.11,
+              channels: [],
+            }],
+          },
+        })),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(candidatePool.execute).toHaveBeenCalledTimes(1);
+      expect(result.candidates.map((candidate) => String(candidate.entityId))).toEqual(['wine-typed']);
+      expect(result.retrievalFusionTrace).toEqual({
+        queryClass: plan.queryClass,
+        fusionClass: plan.queryClass,
+        rrfK: 60,
+        channelWeights: { sparse: 1, dense: 1, anchor: 0, learnedSparse: 0 },
+        candidateCount: {
+          beforeFusion: { sparse: 1, dense: 0, anchor: 0 },
+          afterFusion: 1,
+          afterHardFilter: 1,
+          afterAssembly: 1,
+        },
+      });
+      expect(result.hardFilterDropLog).toEqual([{
+        entityId: 'dropped-typed',
+        dropStage: 'hard_filter',
+        dropReason: 'typed filter',
+        lastKnownScore: 0.11,
+        channels: [],
+      }]);
+      expect(result.routeDegradation?.degradationReasons).toContain(
+        'retrieval_degraded:dense_semantic:timeout',
+      );
     } finally {
       if (previousCriticFlag === undefined) {
         delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
@@ -1588,6 +1782,67 @@ describe('retrieveHybridCandidatesForPlan', () => {
         'main-cheap',
       ]);
       expect(result.routeDegradation?.degradationReasons ?? []).not.toContain(
+        'bundle_selector_fail_closed:budget_infeasible',
+      );
+    } finally {
+      if (previousBundleFlag === undefined) {
+        delete process.env['BUNDLE_SELECTOR_ENABLED'];
+      } else {
+        process.env['BUNDLE_SELECTOR_ENABLED'] = previousBundleFlag;
+      }
+      if (previousCriticFlag === undefined) {
+        delete process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+      } else {
+        process.env['RETRIEVAL_EXECUTOR_CRITIC'] = previousCriticFlag;
+      }
+    }
+  });
+
+  it('surfaces bundle-selector fail-closed reasons into route degradation', async () => {
+    const previousBundleFlag = process.env['BUNDLE_SELECTOR_ENABLED'];
+    const previousCriticFlag = process.env['RETRIEVAL_EXECUTOR_CRITIC'];
+    process.env['BUNDLE_SELECTOR_ENABLED'] = 'true';
+    process.env['RETRIEVAL_EXECUTOR_CRITIC'] = 'false';
+    try {
+      const plan = minimalPlan();
+      const compiled = {
+        ...buildCompiled(plan),
+        constraintGraph: sharedBudgetHybridGraph(),
+      } satisfies CompiledWineQuery;
+
+      let callCount = 0;
+      const candidatePool = {
+        execute: vi.fn(async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return [
+              makeCandidate({
+                entityId: createEntityId('app-only'),
+                priceUsd: 100,
+                fusionRrfTotal: 0.95,
+              }),
+            ];
+          }
+          return [
+            makeCandidate({
+              entityId: createEntityId('main-only'),
+              priceUsd: 100,
+              fusionRrfTotal: 0.96,
+            }),
+          ];
+        }),
+      };
+
+      const result = await retrieveHybridCandidatesForPlan(
+        plan,
+        { candidatePool: candidatePool as never },
+        async () => failedResolveResult(),
+        compiled,
+      );
+
+      expect(result.retrievalKind).toBe('generic_hybrid');
+      expect(result.candidates).toEqual([]);
+      expect(result.routeDegradation?.degradationReasons).toContain(
         'bundle_selector_fail_closed:budget_infeasible',
       );
     } finally {

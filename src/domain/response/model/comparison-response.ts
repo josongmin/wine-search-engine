@@ -17,6 +17,27 @@ export type ComparisonConceptEntityType =
   | 'wine_type';
 
 /**
+ * Concept/category comparison evidence that preserves the full candidate set
+ * instead of collapsing the leg to a single representative top result.
+ */
+export interface ComparisonConceptAggregate {
+  /** Canonical concept label for this concept leg. */
+  readonly canonicalConcept: string;
+
+  /** Structured field represented by `canonicalConcept`. */
+  readonly conceptEntityType: ComparisonConceptEntityType;
+
+  /** Representative result retained for backward-compatible top-result semantics. */
+  readonly representativeResult: ResultItem | null;
+
+  /** Full prototype axis for this concept leg, preserving all candidate evidence. */
+  readonly prototypeAxis: readonly ResultItem[];
+
+  /** Aggregate cardinality for the concept result set. */
+  readonly aggregateResultCount: number;
+}
+
+/**
  * Single entity in a comparison result.
  */
 export interface ComparisonEntity {
@@ -31,6 +52,12 @@ export interface ComparisonEntity {
 
   /** Structured field represented by `canonicalConcept` for concept comparisons. */
   readonly conceptEntityType?: ComparisonConceptEntityType | undefined;
+
+  /**
+   * Concept/category aggregate evidence. Present only for concept legs so
+   * callers can reason over the full prototype set instead of just `topResult`.
+   */
+  readonly conceptAggregate?: ComparisonConceptAggregate | undefined;
 
   /** Top-ranked result item (null if no match). */
   readonly topResult: ResultItem | null;

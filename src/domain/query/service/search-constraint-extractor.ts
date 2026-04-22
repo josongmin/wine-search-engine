@@ -25,7 +25,6 @@ import {
   extractKoreanVintageAfter,
   extractKoreanVintageBefore,
   extractVintageRange,
-  extractVintageYear,
 } from '../../shared/utils/vintage.js';
 import { normalizeKoreanNegation } from './korean-negation-normalizer.js';
 
@@ -633,6 +632,15 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
  *   "YYYY-YYYY"           — year range
  *   "YYYY년산"            — exact vintage year (vintageMin = vintageMax = YYYY)
  */
+const EXPLICIT_VINTAGE_YEAR_RE =
+  /(?<![\p{L}\p{N}])((?:19|20)\d{2})년산?(?![\p{L}\p{N}])/u;
+
+const POSTFIX_BARE_VINTAGE_CONTEXT_RE =
+  /(?<![\p{L}\p{N}])((?:19|20)\d{2})(?=\s*(?:빈티지|vintage|와인|wine|레드|화이트|로제|스파클링)(?![\p{L}\p{N}]))/iu;
+
+const PREFIX_BARE_VINTAGE_CONTEXT_RE =
+  /(?:빈티지|vintage)\s*((?:19|20)\d{2})(?![\p{L}\p{N}])/iu;
+
 function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vintageMax'> {
   // All vintage patterns delegate to the vintage SSoT
   // (`@domain/shared/utils/vintage`). Range parsing returns a normalized
@@ -652,14 +660,45 @@ function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vint
     return { vintageMax: before };
   }
 
-  // Bare vintage year without directional modifier ("2015년산 중에", "2018 와인").
-  // Treat as exact year constraint: vintageMin = vintageMax = year.
-  const bareYear = extractVintageYear(q);
+  const explicitYear = extractExplicitVintageYear(q);
+  if (explicitYear !== null) {
+    return { vintageMin: explicitYear, vintageMax: explicitYear };
+  }
+
+  // Bare 4-digit years are only promoted when they are syntactically tied to
+  // a vintage-bearing context. This blocks false positives such as
+  // "2018 FIFA World Cup wine" or producer labels like "Chateau Petrus 2015".
+  const bareYear = extractContextualBareVintageYear(q);
   if (bareYear !== null) {
     return { vintageMin: bareYear, vintageMax: bareYear };
   }
 
   return {};
+}
+
+function extractExplicitVintageYear(q: string): number | null {
+  const match = EXPLICIT_VINTAGE_YEAR_RE.exec(q);
+  if (match?.[1] === undefined) {
+    return null;
+  }
+  const year = Number.parseInt(match[1], 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+function extractContextualBareVintageYear(q: string): number | null {
+  const prefixMatch = PREFIX_BARE_VINTAGE_CONTEXT_RE.exec(q);
+  if (prefixMatch?.[1] !== undefined) {
+    const year = Number.parseInt(prefixMatch[1], 10);
+    return Number.isFinite(year) ? year : null;
+  }
+
+  const postfixMatch = POSTFIX_BARE_VINTAGE_CONTEXT_RE.exec(q);
+  if (postfixMatch?.[1] !== undefined) {
+    const year = Number.parseInt(postfixMatch[1], 10);
+    return Number.isFinite(year) ? year : null;
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------

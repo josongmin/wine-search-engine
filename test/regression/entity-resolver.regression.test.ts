@@ -5,12 +5,18 @@ import type { FuzzyMatcherPort } from '../../src/domain/query/port/fuzzy-matcher
 describe('RFC-019 regression: entity resolver', () => {
   it.each([
     ['보르도', 'region', 'Bordeaux'],
+    ['보졸레누보', 'region', 'Beaujolais'],
     ['샤르도네', 'grape_primary', 'Chardonnay'],
     ['피노 그리지오', 'grape_primary', 'Pinot Gris'],
     ['프랑스', 'country', 'France'],
     ['부르고뉴', 'region', 'Burgundy'],
     ['카베르네 소비뇽', 'grape_primary', 'Cabernet Sauvignon'],
     ['소비뇽 블랑', 'grape_primary', 'Sauvignon Blanc'],
+    ['Opus One', 'appellation', 'Opus One'],
+    ['오푸스 원', 'appellation', 'Opus One'],
+    ['오푸스원', 'appellation', 'Opus One'],
+    ['알마비바', 'appellation', 'Almaviva'],
+    ['almaviva', 'appellation', 'Almaviva'],
   ])('resolves %s → %s:%s', (span, expectedType, expectedValue) => {
     const result = resolveEntity(span);
     expect(result).not.toBeNull();

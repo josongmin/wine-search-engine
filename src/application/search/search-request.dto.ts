@@ -22,6 +22,11 @@ export interface SearchOptions {
   readonly clarification: boolean;
 }
 
+export interface RepresentativeConceptSearchContext {
+  readonly field: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
+  readonly value: string;
+}
+
 /**
  * Application-layer search request DTO.
  *
@@ -50,4 +55,9 @@ export interface SearchRequest {
    * These merge into ConstraintBundle.soft instead of hard YQL filters.
    */
   readonly preferences?: readonly NormalizedConstraint[] | undefined;
+  /**
+   * Typed marker for comparison concept legs. The concept identity itself is a
+   * representative-set objective, not an exact hard gate.
+   */
+  readonly representativeConcept?: RepresentativeConceptSearchContext | undefined;
 }

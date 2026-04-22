@@ -8,6 +8,7 @@ import { z } from 'zod';
 /** OpenAI-compatible client read timeout (chat/completions can be slow). */
 const DEFAULT_OPENAI_HTTP_TIMEOUT_MS = 120_000;
 const DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS = 5_000;
+const DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS = 45_000;
 
 export const AiEnvSchema = z.object({
   // OpenAI API (optional — hexagonal ChatLlmPort + optional OpenAiEmbeddingService)
@@ -20,6 +21,13 @@ export const AiEnvSchema = z.object({
   /** Must include `/v1` for official API, e.g. `https://api.openai.com/v1` */
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
+  /** OpenAI model for Layer 2 prompt-injection classification when selected. */
+  OPENAI_INJECTION_MODEL: z.string().min(1).optional(),
+  OPENAI_INJECTION_HTTP_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS),
   /**
    * Model used for index-time Doc2Query synthetic-query generation
    * (`scripts/etl/generate-doc-queries.ts`). Decoupled from
@@ -57,6 +65,8 @@ export const AiEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
   /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
   ANTHROPIC_INJECTION_MODEL: z.string().min(1).optional(),
+  /** Provider for Layer 2 prompt-injection classification. */
+  LLM_INJECTION_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
   /**
    * Allow LLM injection judge failures to bypass Layer 2 blocking.
    *

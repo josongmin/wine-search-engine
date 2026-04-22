@@ -50,14 +50,36 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.injectionJudge).toBeDefined();
   });
 
-  it('creates drinking-window predictor in unloaded state without ONNX model dir', async () => {
+  it('initializes OpenAI injection judge when OpenAI provider is selected', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LLM_INJECTION_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'sk-test',
+      OPENAI_CHAT_MODEL: 'gpt-5.4-mini',
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.injectionJudge).toBeDefined();
+    const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
+    expect(names).toContain('openai-injection-classifier');
+  });
+
+  it('creates a deterministic drinking-window predictor when no ONNX override is configured', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
     });
 
     const services = await buildRuntimeSupportServices(config, {});
 
-    expect(services.drinkingWindowPredictor.modelVersion).toBe('unloaded');
+    expect(services.drinkingWindowPredictor.modelVersion).toMatch(/^deterministic:/);
+    expect(services.runtimeReadiness.drinkingWindowPredictor).toEqual(
+      expect.objectContaining({
+        configured: true,
+        loaded: true,
+        modelVersion: services.drinkingWindowPredictor.modelVersion,
+      }),
+    );
   });
 
   it('does NOT instantiate phraseCache when Redis is unavailable', async () => {
@@ -82,7 +104,7 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.phraseCache).toBeUndefined();
   });
 
-  it('fails startup when an explicit drinking-window model directory cannot be loaded', async () => {
+  it('fails startup when an explicit ONNX override directory cannot be loaded', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       DRINKING_WINDOW_MODEL_DIR: '/tmp/definitely-missing-drinking-window-model',
@@ -118,6 +140,45 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.ltrModels?.size).toBe(1);
     expect(services.ltrModels?.get('red_wine')).toBeDefined();
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('surfaces a missing runtime LTR artifact in the typed readiness snapshot without failing startup', async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'runtime-ltr-missing-'));
+    const missingPath = path.join(tempDir, 'runtime-ltr-models.json');
+
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      RUNTIME_LTR_MODELS_PATH: missingPath,
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.runtimeReadiness.runtimeLtrArtifact).toEqual(
+      expect.objectContaining({
+        configured: true,
+        loaded: false,
+        issue: 'missing_or_invalid',
+      }),
+    );
+    expect(services.ltrModels).toBeUndefined();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('marks benchmark persistence unavailable when the eval startup gate is enabled but no PG pool exists', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      EVAL_RUN_AT_STARTUP: 'true',
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.runtimeReadiness.benchmarkPersistence).toEqual(
+      expect.objectContaining({
+        configured: true,
+        available: false,
+        issue: 'pg_pool_missing',
+      }),
+    );
   });
 
   it('falls back to local runtime artifact when PG returns zero models', async () => {

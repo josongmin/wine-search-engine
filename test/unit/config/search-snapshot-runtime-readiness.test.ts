@@ -4,8 +4,12 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from '../../../src/config/env.js';
 import { buildHealthRouteOptions } from '../../../src/config/readiness.js';
-const { mockVerifySearchSnapshotRuntimeStateLive } = vi.hoisted(() => ({
+const {
+  mockVerifySearchSnapshotRuntimeStateLive,
+  mockLoadSearchSnapshotRuntimeState,
+} = vi.hoisted(() => ({
   mockVerifySearchSnapshotRuntimeStateLive: vi.fn(),
+  mockLoadSearchSnapshotRuntimeState: vi.fn(),
 }));
 
 vi.mock('../../../src/infrastructure/health/search-snapshot-readiness.js', async () => {
@@ -14,6 +18,7 @@ vi.mock('../../../src/infrastructure/health/search-snapshot-readiness.js', async
   );
   return {
     ...actual,
+    loadSearchSnapshotRuntimeState: mockLoadSearchSnapshotRuntimeState,
     verifySearchSnapshotRuntimeStateLive: mockVerifySearchSnapshotRuntimeStateLive,
   };
 });
@@ -38,6 +43,7 @@ describe('search snapshot runtime readiness', () => {
   beforeEach(() => {
     mockVerifySearchSnapshotRuntimeStateLive.mockReset();
     mockVerifySearchSnapshotRuntimeStateLive.mockResolvedValue(undefined);
+    mockLoadSearchSnapshotRuntimeState.mockReset();
   });
 
   it('returns up for a coherent runtime state with zero ambiguity rows', async () => {
@@ -216,6 +222,155 @@ describe('search snapshot runtime readiness', () => {
         strictHashes: true,
       }),
     );
+  });
+
+  it('surfaces the no-active-LTR runtime state explicitly when no pool is available', async () => {
+    mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
+      allowMissingLtr: false,
+      counts: {
+        activeLtrModels: 0,
+      },
+    });
+
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      KILL_SWITCH_INJECTION_JUDGE: 'true',
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    await expect(health.readiness?.search_snapshot_runtime?.check?.()).rejects.toThrow(
+      /Active LTR runtime count is zero without explicit no-LTR mode/,
+    );
+  });
+
+  it('surfaces an unloaded drinking-window predictor as a degraded readiness check', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+    });
+
+    const health = buildHealthRouteOptions(config, {}, undefined, {
+      modelVersion: 'unloaded',
+      predict: () => ({
+        drinkingWindowStart: 2020,
+        drinkingWindowEnd: 2030,
+        peakYear: 2025,
+        confidence: 'medium',
+        modelVersion: 'unloaded',
+      }),
+    });
+
+    expect(health.readiness?.drinking_window_model).toBeDefined();
+    await expect(health.readiness?.drinking_window_model?.check?.()).rejects.toThrow(
+      /drinking window predictor unloaded/,
+    );
+  });
+
+  it('accepts deterministic drinking-window predictors as a healthy readiness check', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+    });
+
+    const health = buildHealthRouteOptions(config, {}, undefined, {
+      modelVersion: 'deterministic:structural-slot-v2',
+      predict: () => ({
+        drinkingWindowStart: 2020,
+        drinkingWindowEnd: 2030,
+        peakYear: 2025,
+        confidence: 'medium',
+        modelVersion: 'deterministic:structural-slot-v2',
+      }),
+    });
+
+    await expect(health.readiness?.drinking_window_model?.check?.()).resolves.toBe('up');
+  });
+
+  it('surfaces a missing runtime LTR artifact as a required readiness check', async () => {
+    const dir = await makeTempDir();
+    const missingPath = path.join(dir, 'runtime-ltr-models.json');
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      RUNTIME_LTR_MODELS_PATH: missingPath,
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    expect(health.readiness?.runtime_ltr_artifact).toBeDefined();
+    expect(health.readiness?.runtime_ltr_artifact?.required).toBe(true);
+    await expect(health.readiness?.runtime_ltr_artifact?.check?.()).rejects.toThrow(
+      /runtime LTR artifact unavailable/,
+    );
+  });
+
+  it('downgrades runtime LTR artifact to advisory when the remote reranker is configured', async () => {
+    const dir = await makeTempDir();
+    const missingPath = path.join(dir, 'runtime-ltr-models.json');
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      RUNTIME_LTR_MODELS_PATH: missingPath,
+      COHERE_API_KEY: 'co-test-key',
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    expect(health.readiness?.runtime_ltr_artifact).toBeDefined();
+    expect(health.readiness?.runtime_ltr_artifact?.required).toBe(false);
+    expect(health.readiness?.reranker).toBeDefined();
+  });
+
+  it('probes benchmark persistence with a read-only schema and privilege check when eval startup is enabled', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      EVAL_RUN_AT_STARTUP: 'true',
+    });
+
+    const query = vi.fn(async (text: string) => {
+        if (text.includes('to_regclass')) {
+          return {
+            rows: [{
+              runs_table: 'eval_benchmark_runs',
+              metrics_view: 'eval_benchmark_run_metrics_v',
+              trends_view: 'eval_benchmark_run_trends_v',
+              can_insert: true,
+            }],
+          };
+        }
+        return {
+          rows: [
+            { column_name: 'run_id' },
+            { column_name: 'benchmark_kind' },
+            { column_name: 'search_snapshot_id' },
+            { column_name: 'eval_dataset_version' },
+            { column_name: 'feature_schema_hash' },
+            { column_name: 'query_count' },
+            { column_name: 'recall_at_1' },
+            { column_name: 'recall_at_3' },
+            { column_name: 'mrr' },
+            { column_name: 'false_exact_rate' },
+            { column_name: 'release_gate_passed' },
+            { column_name: 'activation_status' },
+            { column_name: 'report_json' },
+            { column_name: 'metrics' },
+            { column_name: 'created_at' },
+          ],
+        };
+      });
+    const client = {
+      query,
+      release: () => {},
+    };
+    const health = buildHealthRouteOptions(config, {
+      pool: {
+        connect: async () => client,
+      } as never,
+    });
+
+    expect(health.readiness?.benchmark_persistence).toBeDefined();
+    expect(health.readiness?.benchmark_persistence?.required).toBe(true);
+    await expect(health.readiness?.benchmark_persistence?.check?.()).resolves.toBe('up');
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls.some(([text]) => String(text).includes('INSERT INTO eval_benchmark_runs'))).toBe(false);
+    expect(query.mock.calls.some(([text]) => String(text).includes('BEGIN'))).toBe(false);
   });
 
   it('canonicalizes runtime entity/alias/ambiguity rows into snapshot hash space', () => {

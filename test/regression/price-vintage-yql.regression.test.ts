@@ -64,17 +64,9 @@ describe('Price/Vintage YQL — extractSearchConstraints price', () => {
 
 describe('Price/Vintage YQL — extractSearchConstraints vintage', () => {
   it('R-PVY-05: "2018년산 와인" extracts vintageMin=2018, vintageMax=2018 (exact)', () => {
-    // Note: extractVintage does NOT extract "YYYY년산" as an exact match unless
-    // there is a specific pattern. Let's test what we actually support.
-    // The extractor handles "YYYY년 이후", "YYYY년 이전", and year ranges "YYYY-YYYY".
-    // "2018년산" has no operator suffix, so it falls through to no match in current extractor.
-    // The test validates the CURRENT behaviour (append-only regression).
     const c = extractSearchConstraints('2018년산 와인');
-    // vintageMin/vintageMax may both be undefined for "년산" without an operator — document this.
-    // This serves as a guard: if the extractor is later extended to handle "년산", the test
-    // confirms the new value (update the expect) rather than silently passing.
-    expect(c.vintageMin === undefined || typeof c.vintageMin === 'number').toBe(true);
-    expect(c.vintageMax === undefined || typeof c.vintageMax === 'number').toBe(true);
+    expect(c.vintageMin).toBe(2018);
+    expect(c.vintageMax).toBe(2018);
   });
 
   it('R-PVY-06: "2015년 이후 와인" extracts vintageMin=2015', () => {

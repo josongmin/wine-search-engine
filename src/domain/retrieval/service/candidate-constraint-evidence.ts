@@ -78,6 +78,16 @@ function normalizeWineType(value: string): string {
   return normalized === 'rose' ? 'rosé' : normalized;
 }
 
+function normalizeClosure(value: string): string {
+  return normalizeString(value).replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function closureMatches(attrValue: string, constraintValue: string): boolean {
+  const normalizedAttr = normalizeClosure(attrValue);
+  const normalizedConstraint = normalizeClosure(constraintValue);
+  return normalizedConstraint.length > 0 && normalizedAttr.includes(normalizedConstraint);
+}
+
 function collectCandidateStyleFragments(candidate: HybridCandidate): readonly string[] {
   const style = candidate.style?.trim();
   if (style === undefined || style.length === 0) {
@@ -208,6 +218,8 @@ function resolveCandidateValue(
       return candidate.appellation;
     case 'region':
       return candidate.region;
+    case 'closure':
+      return candidate.closure;
     case 'vintage':
     case 'vintage_year':
       return candidate.vintageYear;
@@ -222,6 +234,10 @@ function resolveCandidateValue(
     case 'max_price_krw':
     case 'min_price_krw':
       return priceUsdToApproxKrw(candidate.priceUsd);
+    case 'drinking_window':
+      return candidate.drinkingWindowStart !== undefined && candidate.drinkingWindowEnd !== undefined
+        ? candidate.drinkingWindowStart
+        : undefined;
     case 'classification':
       return candidate.classification;
     case 'alcohol':
@@ -447,6 +463,24 @@ function satisfiesConstraint(
   const attrValue = resolveCandidateValue(candidate, constraint.attribute);
   if (attrValue === undefined) {
     return false;
+  }
+
+  if (constraint.attribute === 'closure' && typeof attrValue === 'string') {
+    const { operator, value } = constraint;
+    const vals = Array.isArray(value)
+      ? value.filter((v): v is string => typeof v === 'string')
+      : typeof value === 'string'
+        ? [value]
+        : [];
+    if (operator === '=') {
+      return vals.length === 1 && closureMatches(attrValue, vals[0]!);
+    }
+    if (operator === 'in') {
+      return vals.some((v) => closureMatches(attrValue, v));
+    }
+    if (operator === 'exclude' || operator === 'not_in') {
+      return vals.every((v) => !closureMatches(attrValue, v));
+    }
   }
 
   // Geography attributes (country, region, appellation) use Vespa `contains`

@@ -41,7 +41,19 @@ describe('parseEnv invariants', () => {
 
   it('production without ANTHROPIC_API_KEY throws (Layer 2 security invariant)', () => {
     expect(() => parseEnv({ NODE_ENV: 'production', PG_PASSWORD: 'secret' })).toThrowError(
-      /requires ANTHROPIC_API_KEY \(Layer 2/,
+      /requires a anthropic API key \(Layer 2/,
+    );
+  });
+
+  it('production with OpenAI injection provider requires OPENAI_API_KEY', () => {
+    expect(() =>
+      parseEnv({
+        NODE_ENV: 'production',
+        PG_PASSWORD: 'secret',
+        LLM_INJECTION_PROVIDER: 'openai',
+      }),
+    ).toThrowError(
+      /requires a openai API key \(Layer 2/,
     );
   });
 
@@ -61,6 +73,18 @@ describe('parseEnv invariants', () => {
       ANTHROPIC_API_KEY: 'sk-ant-test',
     });
     expect(config.anthropic.apiKey).toBe('sk-ant-test');
+  });
+
+  it('production with OpenAI injection provider and OPENAI_API_KEY succeeds', () => {
+    const config = parseEnv({
+      NODE_ENV: 'production',
+      PG_PASSWORD: 'secret',
+      LLM_INJECTION_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'sk-test',
+      OPENAI_CHAT_MODEL: 'gpt-5.4-mini',
+    });
+    expect(config.queryEntrySecurity.injectionProvider).toBe('openai');
+    expect(config.openai.injectionModel).toBe('gpt-5.4-mini');
   });
 
   it('non-production without ANTHROPIC_API_KEY does NOT throw', () => {

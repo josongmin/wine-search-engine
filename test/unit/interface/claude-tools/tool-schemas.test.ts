@@ -107,6 +107,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.min_price_krw?.type).toBe('number');
       expect(props.max_price_krw?.type).toBe('number');
       expect(props.max_alcohol_pct?.type).toBe('number');
+      expect(props.grape_primary?.type).toBe('string');
       expect(props.wine_type?.enum).toEqual([
         'red',
         'white',
@@ -117,6 +118,7 @@ describe('WINE_SEARCH_TOOLS', () => {
         'orange',
         'natural',
       ]);
+      expect(props.grape_primary?.type).toBe('string');
       expect(props.country?.type).toBe('string');
       expect(props.vintage_min?.minimum).toBe(1600);
       expect(props.vintage_max?.maximum).toBe(2100);
@@ -128,6 +130,9 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.occasion?.type).toBe('array');
       expect(props.gift_suitability_min?.type).toBe('number');
       expect(props.beginner_suitability_min?.type).toBe('number');
+      expect(props.producer_prestige_min?.type).toBe('number');
+      expect(props.producer_prestige_min?.minimum).toBe(0);
+      expect(props.producer_prestige_min?.maximum).toBe(1);
       expect(props.want_diversity?.type).toBe('boolean');
     });
 
@@ -145,6 +150,7 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.occasion?.description).toContain('date_night');
       expect(props.gift_suitability_min?.description).toContain('gift-suitability');
       expect(props.beginner_suitability_min?.description).toContain('beginner-suitability');
+      expect(props.producer_prestige_min?.description).toContain('producer-prestige');
       expect(props.style?.description).not.toContain('presentation_forward');
     });
 
@@ -190,6 +196,17 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(colorProp).toBeDefined();
       expect(colorProp.enum).toEqual(['red', 'white', 'rosé', 'sparkling', 'both']);
       expect(colorProp.description).toContain('legacy compatibility');
+    });
+
+    it('should expose typed pairing objective fields', () => {
+      const props = tool.input_schema.properties as Record<string, any>;
+      expect(props.sweetness_target).toMatchObject({ type: 'number', minimum: 0, maximum: 1 });
+      expect(props.acidity_min).toMatchObject({ type: 'number', minimum: 0, maximum: 10 });
+      expect(props.tannin_max).toMatchObject({ type: 'number', minimum: 0, maximum: 10 });
+      expect(props.styles).toMatchObject({ type: 'array', maxItems: SEARCH_TOOL_MAX_STYLES });
+      expect(props.pairing_tags).toMatchObject({ type: 'array', maxItems: 5 });
+      expect(props.sweetness_target.description).toContain('typed sweetness target');
+      expect(props.pairing_tags.description).toContain('canonical pairing tags');
     });
   });
 
@@ -252,12 +269,20 @@ describe('WINE_SEARCH_TOOLS', () => {
         'natural',
       ]);
       expect(props.country?.type).toBe('string');
+      expect(props.region?.type).toBe('string');
       expect(props.vintage_min?.minimum).toBe(1600);
       expect(props.styles?.type).toBe('array');
       expect(props.certification?.type).toBe('string');
       expect(props.occasion?.type).toBe('array');
       expect(props.gift_suitability_min?.type).toBe('number');
       expect(props.beginner_suitability_min?.type).toBe('number');
+      expect(props.producer_prestige_min?.type).toBe('number');
+      expect(props.producer_prestige_min?.minimum).toBe(0);
+      expect(props.producer_prestige_min?.maximum).toBe(1);
+      expect(props.country_a?.type).toBe('string');
+      expect(props.country_b?.type).toBe('string');
+      expect(props.region_a?.type).toBe('string');
+      expect(props.region_b?.type).toBe('string');
     });
   });
 });
@@ -290,10 +315,53 @@ describe('Claude tool input schemas', () => {
     expect(parsed.occasion).toEqual(['anniversary']);
   });
 
+  it('compare_wines should accept side-specific comparison fields', () => {
+    const parsed = CompareWinesInputSchema.parse({
+      query_a: '말벡',
+      query_b: '말벡',
+      country_a: 'France',
+      country_b: 'Argentina',
+      region_b: 'Mendoza',
+    });
+
+    expect(parsed.country_a).toBe('France');
+    expect(parsed.country_b).toBe('Argentina');
+    expect(parsed.region_b).toBe('Mendoza');
+  });
+
   it('get_food_pairings should reject placeholder food', () => {
     const parsed = FoodPairingInputSchema.safeParse({
       food: '__TO_BE_FILLED__',
     });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('get_food_pairings should accept typed objective fields', () => {
+    const parsed = FoodPairingInputSchema.parse({
+      food: '매운 떡볶이',
+      sweetness_target: '0.35',
+      acidity_min: '6',
+      tannin_max: 3,
+      styles: ['off_dry'],
+      pairing_tags: ['spicy_food'],
+    });
+
+    expect(parsed).toMatchObject({
+      sweetness_target: 0.35,
+      acidity_min: 6,
+      tannin_max: 3,
+      styles: ['off_dry'],
+      pairing_tags: ['spicy_food'],
+    });
+  });
+
+  it('get_food_pairings should reject out-of-scale typed objectives', () => {
+    const parsed = FoodPairingInputSchema.safeParse({
+      food: 'salmon',
+      sweetness_target: 1.5,
+      acidity_min: 11,
+    });
+
     expect(parsed.success).toBe(false);
   });
 
@@ -326,6 +394,25 @@ describe('Claude tool input schemas', () => {
       food: 123,
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('get_food_pairings attempt schema should preserve typed objective keys', () => {
+    const parsed = FoodPairingAttemptInputSchema.parse({
+      food: 'tteokbokki',
+      sweetness_target: 0.35,
+      acidity_min: 6,
+      tannin_max: 3,
+      styles: ['off_dry'],
+      pairing_tags: ['spicy_food'],
+    });
+
+    expect(parsed).toMatchObject({
+      sweetness_target: 0.35,
+      acidity_min: 6,
+      tannin_max: 3,
+      styles: ['off_dry'],
+      pairing_tags: ['spicy_food'],
+    });
   });
 
   it('check_drinking_window attempt schema should reject non-string entity_id', () => {
@@ -378,9 +465,27 @@ describe('manifest ↔ validator ↔ contract parity', () => {
   it('compare_wines manifest properties match validator schema keys', () => {
     const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'compare_wines')!;
     const manifestKeys = Object.keys(tool.input_schema.properties).sort();
-    const contractKeys = ['query_a', 'query_b', ...Object.keys(buildCompareToolFieldShape({
-      maxPriceKrwMax: Number.MAX_SAFE_INTEGER,
-    }))].sort();
+    const contractKeys = [
+      'query_a',
+      'query_b',
+      ...Object.keys(buildCompareToolFieldShape({
+        maxPriceKrwMax: Number.MAX_SAFE_INTEGER,
+      })),
+      'country_a',
+      'country_b',
+      'region_a',
+      'region_b',
+      'appellation_a',
+      'appellation_b',
+      'grape_primary_a',
+      'grape_primary_b',
+      'wine_type_a',
+      'wine_type_b',
+      'vintage_min_a',
+      'vintage_min_b',
+      'vintage_max_a',
+      'vintage_max_b',
+    ].sort();
     expect(manifestKeys).toEqual(contractKeys);
   });
 

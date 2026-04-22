@@ -69,12 +69,14 @@ function parseBottleSizeMl(input: DrinkingWindowDeterministicInputV2): number | 
 
   const mlMatch = normalized.match(/^(\d+(?:\.\d+)?)ml$/);
   if (mlMatch) {
-    return Math.round(Number.parseFloat(mlMatch[1] ?? '0'));
+    const parsed = Number.parseFloat(mlMatch[1] ?? '');
+    return Number.isFinite(parsed) ? Math.round(parsed) : undefined;
   }
 
   const literMatch = normalized.match(/^(\d+(?:\.\d+)?)l$/);
   if (literMatch) {
-    return Math.round(Number.parseFloat(literMatch[1] ?? '0') * 1000);
+    const parsed = Number.parseFloat(literMatch[1] ?? '');
+    return Number.isFinite(parsed) ? Math.round(parsed * 1000) : undefined;
   }
 
   return undefined;

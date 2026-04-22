@@ -12,7 +12,7 @@ import type { RankerPort } from '../../../../src/domain/ranking/port/ranker.port
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { RankerRuntimeSignal } from '../../../../src/domain/ranking/model/ranking-runtime-signal.js';
-import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import { createEntityId, type NormalizedConstraint } from '../../../../src/domain/shared/types/index.js';
 import { MixedRouteDegradationError } from '../../../../src/domain/mixed/model/mixed-degradation.js';
 
 function minimalPlan(): QueryPlanV1 {
@@ -258,5 +258,79 @@ describe('MixedSolver', () => {
     await expect(solver.solve(minimalPlan(), minimalCompiled())).rejects.toMatchObject<Partial<MixedRouteDegradationError>>({
       reason: 'mixed_constraint_overlay_failed',
     });
+  });
+
+  it('threads hard constraints into similar retrieval before ranking', async () => {
+    const hardConstraint: NormalizedConstraint = {
+      attribute: 'wine_type',
+      operator: '=',
+      value: 'white',
+      source: 'planner',
+      source_tier: 'hard',
+    };
+    const plan = {
+      ...minimalPlan(),
+      constraints: {
+        hard: [hardConstraint],
+        soft: [],
+        inferred: [],
+      },
+    };
+    const retrieveSimilar = vi.fn<SimilarRetrievalPort['retrieveSimilar']>().mockResolvedValue([]);
+    const anchorResolver: AnchorResolverPort = {
+      resolve: async () => ({
+        entityId: createEntityId('anchor-1'),
+        canonicalLabel: 'Opus One',
+        region: 'Napa Valley',
+        grapes: ['Cabernet Sauvignon'],
+      }),
+    };
+    const anchorProfiler: AnchorProfiler = {
+      buildProfile: (entity, confidence) => ({
+        ...entity,
+        anchorConfidence: confidence,
+        embedding: [0.1, 0.2, 0.3],
+      }),
+    } as AnchorProfiler;
+    const candidateAttributes: CandidateAttributePort = {
+      loadAttributes: async () => new Map(),
+      loadSimilarityCandidate: async () => undefined,
+    };
+    const similarityScorer: SimilarityScorer = {
+      score: () => 0.5,
+    } as SimilarityScorer;
+    const constraintOverlay: ConstraintOverlay = {
+      apply: (rankedResults) => [...rankedResults],
+    } as ConstraintOverlay;
+    const ranker: RankerPort = {
+      rank: async () => ({
+        results: [],
+        metadata: {
+          coarsePruneSummary: undefined,
+          rerankExecuted: false,
+          rerankGateReason: undefined,
+          runtimeSignal: undefined,
+          preRerankTop5: [],
+        },
+      }),
+      getLastFunnelMetrics: () => undefined,
+    };
+    const solver = new MixedSolver(
+      anchorResolver,
+      anchorProfiler,
+      { retrieveSimilar },
+      candidateAttributes,
+      similarityScorer,
+      constraintOverlay,
+      ranker,
+    );
+
+    await solver.solve(plan, minimalCompiled());
+
+    expect(retrieveSimilar).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: createEntityId('anchor-1') }),
+      100,
+      [hardConstraint],
+    );
   });
 });

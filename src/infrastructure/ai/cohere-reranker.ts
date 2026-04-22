@@ -68,6 +68,7 @@ function isCohereRerankResponse(value: unknown): value is CohereRerankResponse {
 }
 
 export class CohereReranker implements RerankerPort {
+  readonly modelId: string;
   private readonly endpoint: string;
   private readonly apiKey: string;
   private readonly model: string;
@@ -78,6 +79,7 @@ export class CohereReranker implements RerankerPort {
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/rerank`;
     this.apiKey = options.apiKey;
     this.model = options.model;
+    this.modelId = options.model;
     this.httpTimeoutMs = options.httpTimeoutMs;
     this.circuitBreaker = createCircuitBreaker({
       name: COHERE_RERANK_BREAKER_NAME,

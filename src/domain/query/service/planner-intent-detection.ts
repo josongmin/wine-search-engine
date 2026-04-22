@@ -2,9 +2,12 @@ import type { QueryIntent } from '../model/query-intent.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { WINE_TYPE_DETECTION_PATTERNS } from '../model/wine-type-patterns.js';
+import { parseSpans } from '../../attribute/service/span-parser.js';
+import { isDirectEntityResolution, resolveEntity } from '../../attribute/service/entity-resolver.js';
 import type { AnchorExtractor } from './anchor-extractor.js';
 import {
   hasEntityMetadataKeyword,
+  stripExactEntityMetadataSuffix,
 } from './exact-entity-metadata-signals.js';
 
 /** Minimum anchor confidence to consider an anchor "present" for intent detection. */
@@ -33,8 +36,8 @@ const PAIRING_KEYWORDS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:어울리|곁들|맞는|페어링)(?=$|[^\p{L}\p{N}])/u,
   /(?<!\p{L})(?<!\p{N})(?:steak|fish|cheese|chicken|pasta|pizza|beef|pork|seafood)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:스테이크|생선|치즈|치킨|파스타|피자|소고기|돼지고기|해산물)(?=$|[^\p{L}\p{N}])/u,
-  /(?<!\p{L})(?<!\p{N})(?:gift|anniversary|date\s+night|birthday|celebration|party|housewarming|dinner)(?!\p{L})(?!\p{N})/iu,
-  /(?:선물(?:용|할|하려|하고)?|(?:결혼)?기념일|데이트|생일|축하|파티|집들이|디너)/u,
+  /(?<!\p{L})(?<!\p{N})(?:gift|anniversary|date\s+night|birthday|celebration|party|housewarming|dinner|camping)(?!\p{L})(?!\p{N})/iu,
+  /(?:선물(?:용|할|하려|하고)?|(?:결혼)?기념일|데이트|생일|축하|파티|집들이|디너|캠핑)/u,
 ] as const;
 
 const OCCASION_SUBSTRINGS: readonly string[] = [
@@ -48,6 +51,7 @@ const OCCASION_SUBSTRINGS: readonly string[] = [
   '데이트',
   '디너',
   '힐링',
+  '캠핑',
 ] as const;
 
 /** Constraint keywords indicating structured filtering.
@@ -84,6 +88,14 @@ export function detectQueryIntent(
   anchorExtractor: IntentDetectionAnchorExtractor,
   relativeQuery: AnchorConditionedQuery | null = null,
 ): QueryIntent {
+  const hasEntityMetadataSignal = hasEntityMetadataKeyword(normalizedQuery);
+  const intentQuerySurface = hasEntityMetadataSignal
+    ? stripExactEntityMetadataSuffix(normalizedQuery)
+    : normalizedQuery;
+  const hasDirectAttributeEntity = parseSpans(intentQuerySurface).some((span) => {
+    const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
+    return isDirectEntityResolution(resolved) && resolved.entityType !== 'wine_type';
+  });
   const hasStrongAnchor = anchors.some(
     (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
   );
@@ -95,22 +107,21 @@ export function detectQueryIntent(
     (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
   );
   const hasComparisonMarker =
-    anchorExtractor.hasComparisonMarkers(normalizedQuery);
+    anchorExtractor.hasComparisonMarkers(intentQuerySurface);
   const hasKoreanMixed =
-    anchorExtractor.hasKoreanMixedQueryMarkers(normalizedQuery);
+    anchorExtractor.hasKoreanMixedQueryMarkers(intentQuerySurface);
   const hasRelativeAnchorQuery =
     relativeQuery !== null &&
     relativeQuery.relativeExpressions.length > 0 &&
     anchors.length > 0;
   const hasPriceKeyword = PRICE_KEYWORDS.some((re) =>
-    re.test(normalizedQuery),
+    re.test(intentQuerySurface),
   );
   const hasPairingKeyword = PAIRING_KEYWORDS.some((re) =>
-    re.test(normalizedQuery),
-  ) || OCCASION_SUBSTRINGS.some((token) => normalizedQuery.includes(token));
-  const hasEntityMetadataSignal = hasEntityMetadataKeyword(normalizedQuery);
+    re.test(intentQuerySurface),
+  ) || OCCASION_SUBSTRINGS.some((token) => intentQuerySurface.includes(token));
   const hasConstraintKeyword = CONSTRAINT_KEYWORDS.some((re) =>
-    re.test(normalizedQuery),
+    re.test(intentQuerySurface),
   );
   const strongAnchorEntityCount = new Set(
     anchors
@@ -133,8 +144,16 @@ export function detectQueryIntent(
     return 'mixed_query';
   }
 
+  if (hasStrongAnchor && hasPairingKeyword) {
+    return 'mixed_query';
+  }
+
+  if (hasPairingKeyword && !hasStrongAnchor) {
+    return 'pairing_search';
+  }
+
   if (hasStrongAnchor && hasEntityMetadataSignal) {
-    return strongAnchorEntityCount > 1 ? 'facet_search' : 'entity_exact';
+    return hasDirectAttributeEntity || strongAnchorEntityCount <= 1 ? 'entity_exact' : 'facet_search';
   }
 
   if (hasStrongAnchor && hasConstraintKeyword) {
@@ -142,6 +161,9 @@ export function detectQueryIntent(
   }
 
   if (hasStrongAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
+    if (hasDirectAttributeEntity) {
+      return 'entity_exact';
+    }
     // A single strong anchor pointing to exactly ONE entity → genuine
     // entity lookup. But if anchors span MULTIPLE distinct entities (e.g.
     // "Barolo" matching 2+ wines from different producers), the query is a

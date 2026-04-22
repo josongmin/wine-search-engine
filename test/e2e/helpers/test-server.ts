@@ -26,7 +26,7 @@ export interface TestServer {
 
 interface TestServerOptions {
   readonly containerOptions?: TestContainerOptions;
-  readonly serverOptions?: Pick<ServerOptions, 'rateLimitMax'>;
+  readonly serverOptions?: Pick<ServerOptions, 'rateLimitMax' | 'trustProxy'>;
 }
 
 type FixtureDoc = (typeof TEST_DOCUMENTS)[number];

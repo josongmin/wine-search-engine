@@ -23,21 +23,37 @@ import {
   DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
   DRINKING_WINDOW_TOOL_DESCRIPTION,
   FOOD_PAIRING_COLORS,
+  FOOD_PAIRING_ACIDITY_MIN_DESCRIPTION,
   FOOD_PAIRING_FOOD_DESCRIPTION,
+  FOOD_PAIRING_MAX_PAIRING_TAGS,
   FOOD_PAIRING_MAX_PRICE_KRW_DESCRIPTION,
   FOOD_PAIRING_MAX_PRICE_USD_DESCRIPTION,
+  FOOD_PAIRING_PAIRING_TAGS_DESCRIPTION,
+  FOOD_PAIRING_SENSORY_SCALE_MAX,
+  FOOD_PAIRING_SENSORY_SCALE_MIN,
+  FOOD_PAIRING_STYLES_DESCRIPTION,
+  FOOD_PAIRING_SWEETNESS_TARGET_DESCRIPTION,
+  FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+  FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+  FOOD_PAIRING_TANNIN_MAX_DESCRIPTION,
   FOOD_PAIRINGS_TOOL_DESCRIPTION,
   SEARCH_TOOL_APPELLATION_DESCRIPTION,
   SEARCH_TOOL_CERTIFICATION_DESCRIPTION,
   SEARCH_TOOL_COUNTRY_DESCRIPTION,
+  SEARCH_TOOL_REGION_DESCRIPTION,
   SEARCH_TOOL_DESCRIPTION,
   SEARCH_TOOL_EXCLUDE_GRAPES_DESCRIPTION,
   SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
-    SEARCH_TOOL_LIMIT_DESCRIPTION,
-    SEARCH_TOOL_OCCASION_DESCRIPTION,
-    SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION,
-    SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION,
-    SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
+  SEARCH_TOOL_LIMIT_DESCRIPTION,
+  SEARCH_TOOL_OCCASION_DESCRIPTION,
+  SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION,
+  SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION,
+  SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION,
+  SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
+  SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
+  SEARCH_TOOL_DRINKING_WINDOW_VALUES,
+  SEARCH_TOOL_GRAPE_PRIMARY_DESCRIPTION,
+  SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
   SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
   SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION,
   SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION,
@@ -178,8 +194,38 @@ export const CompareWinesInputSchema = z.object({
   ...buildCompareToolFieldShape({
     maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
   }),
+  country_a: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  country_b: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  region_a: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  region_b: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  appellation_a: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  appellation_b: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  grape_primary_a: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  grape_primary_b: z.string().trim().min(1).max(MAX_QUERY_LENGTH).optional(),
+  wine_type_a: z.enum(SEARCH_TOOL_WINE_TYPES).optional(),
+  wine_type_b: z.enum(SEARCH_TOOL_WINE_TYPES).optional(),
+  vintage_min_a: coercePositiveInt.pipe(
+    z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
+  ).optional(),
+  vintage_min_b: coercePositiveInt.pipe(
+    z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
+  ).optional(),
+  vintage_max_a: coercePositiveInt.pipe(
+    z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
+  ).optional(),
+  vintage_max_b: coercePositiveInt.pipe(
+    z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
+  ).optional(),
 }).strict().superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
+  validateSearchToolVintageRange({
+    vintage_min: data.vintage_min_a,
+    vintage_max: data.vintage_max_a,
+  }, ctx);
+  validateSearchToolVintageRange({
+    vintage_min: data.vintage_min_b,
+    vintage_max: data.vintage_max_b,
+  }, ctx);
 });
 
 /**
@@ -238,6 +284,10 @@ export const WINE_SEARCH_TOOLS = [
           minimum: 0.1,
           maximum: 100,
         },
+        grape_primary: {
+          type: 'string',
+          description: SEARCH_TOOL_GRAPE_PRIMARY_DESCRIPTION,
+        },
         wine_type: {
           type: 'string',
           enum: [...SEARCH_TOOL_WINE_TYPES],
@@ -246,6 +296,10 @@ export const WINE_SEARCH_TOOLS = [
         country: {
           type: 'string',
           description: SEARCH_TOOL_COUNTRY_DESCRIPTION,
+        },
+        region: {
+          type: 'string',
+          description: SEARCH_TOOL_REGION_DESCRIPTION,
         },
         vintage_min: {
           type: 'number',
@@ -295,6 +349,23 @@ export const WINE_SEARCH_TOOLS = [
           minimum: 0,
           maximum: 1,
         },
+        producer_prestige_min: {
+          type: 'number',
+          description: SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION,
+          minimum: 0,
+          maximum: 1,
+        },
+        drinking_window: {
+          type: 'string',
+          enum: [...SEARCH_TOOL_DRINKING_WINDOW_VALUES],
+          description: SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
+        },
+        drinking_window_target_year: {
+          type: 'number',
+          description: SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
+        },
         want_diversity: {
           type: 'boolean',
           description: SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION,
@@ -326,6 +397,36 @@ export const WINE_SEARCH_TOOLS = [
           type: 'string',
           enum: [...FOOD_PAIRING_COLORS],
           description: buildFoodPairingColorSchemaDescription(),
+        },
+        sweetness_target: {
+          type: 'number',
+          description: FOOD_PAIRING_SWEETNESS_TARGET_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        acidity_min: {
+          type: 'number',
+          description: FOOD_PAIRING_ACIDITY_MIN_DESCRIPTION,
+          minimum: FOOD_PAIRING_SENSORY_SCALE_MIN,
+          maximum: FOOD_PAIRING_SENSORY_SCALE_MAX,
+        },
+        tannin_max: {
+          type: 'number',
+          description: FOOD_PAIRING_TANNIN_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SENSORY_SCALE_MIN,
+          maximum: FOOD_PAIRING_SENSORY_SCALE_MAX,
+        },
+        styles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: FOOD_PAIRING_STYLES_DESCRIPTION,
+          maxItems: SEARCH_TOOL_MAX_STYLES,
+        },
+        pairing_tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: FOOD_PAIRING_PAIRING_TAGS_DESCRIPTION,
+          maxItems: FOOD_PAIRING_MAX_PAIRING_TAGS,
         },
       },
       required: ['food'],
@@ -391,6 +492,10 @@ export const WINE_SEARCH_TOOLS = [
           minimum: 0.1,
           maximum: 100,
         },
+        grape_primary: {
+          type: 'string',
+          description: SEARCH_TOOL_GRAPE_PRIMARY_DESCRIPTION,
+        },
         wine_type: {
           type: 'string',
           enum: [...SEARCH_TOOL_WINE_TYPES],
@@ -399,6 +504,76 @@ export const WINE_SEARCH_TOOLS = [
         country: {
           type: 'string',
           description: SEARCH_TOOL_COUNTRY_DESCRIPTION,
+        },
+        region: {
+          type: 'string',
+          description: SEARCH_TOOL_REGION_DESCRIPTION,
+        },
+        country_a: {
+          type: 'string',
+          description: 'Optional side-A exact country constraint. Use when the two sides differ by country.',
+        },
+        country_b: {
+          type: 'string',
+          description: 'Optional side-B exact country constraint. Use when the two sides differ by country.',
+        },
+        region_a: {
+          type: 'string',
+          description: 'Optional side-A exact region constraint. Use when the two sides differ by region.',
+        },
+        region_b: {
+          type: 'string',
+          description: 'Optional side-B exact region constraint. Use when the two sides differ by region.',
+        },
+        appellation_a: {
+          type: 'string',
+          description: 'Optional side-A exact appellation constraint. Use when the two sides differ by appellation.',
+        },
+        appellation_b: {
+          type: 'string',
+          description: 'Optional side-B exact appellation constraint. Use when the two sides differ by appellation.',
+        },
+        grape_primary_a: {
+          type: 'string',
+          description: 'Optional side-A exact primary-grape constraint. Use when the two sides differ by grape.',
+        },
+        grape_primary_b: {
+          type: 'string',
+          description: 'Optional side-B exact primary-grape constraint. Use when the two sides differ by grape.',
+        },
+        wine_type_a: {
+          type: 'string',
+          enum: [...SEARCH_TOOL_WINE_TYPES],
+          description: 'Optional side-A exact wine-type constraint.',
+        },
+        wine_type_b: {
+          type: 'string',
+          enum: [...SEARCH_TOOL_WINE_TYPES],
+          description: 'Optional side-B exact wine-type constraint.',
+        },
+        vintage_min_a: {
+          type: 'number',
+          description: 'Optional side-A minimum vintage year (inclusive).',
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
+        },
+        vintage_min_b: {
+          type: 'number',
+          description: 'Optional side-B minimum vintage year (inclusive).',
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
+        },
+        vintage_max_a: {
+          type: 'number',
+          description: 'Optional side-A maximum vintage year (inclusive).',
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
+        },
+        vintage_max_b: {
+          type: 'number',
+          description: 'Optional side-B maximum vintage year (inclusive).',
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
         },
         vintage_min: {
           type: 'number',
@@ -447,6 +622,23 @@ export const WINE_SEARCH_TOOLS = [
           description: SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION,
           minimum: 0,
           maximum: 1,
+        },
+        producer_prestige_min: {
+          type: 'number',
+          description: SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION,
+          minimum: 0,
+          maximum: 1,
+        },
+        drinking_window: {
+          type: 'string',
+          enum: [...SEARCH_TOOL_DRINKING_WINDOW_VALUES],
+          description: SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
+        },
+        drinking_window_target_year: {
+          type: 'number',
+          description: SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
+          minimum: SEARCH_TOOL_VINTAGE_MIN,
+          maximum: SEARCH_TOOL_VINTAGE_MAX,
         },
       },
       required: ['query_a', 'query_b'],

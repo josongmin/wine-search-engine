@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateKoreanPredicateVariants } from '../korean-predicate-variants.js';
+import {
+  generateKoreanPredicateVariants,
+  normalizeQueryPredicates,
+} from '../korean-predicate-variants.js';
 
 describe('generateKoreanPredicateVariants', () => {
   // ── Regular adjective -고 → -은 ──────────────────────────────────
@@ -126,5 +129,15 @@ describe('generateKoreanPredicateVariants', () => {
 
   it('emoji input "🍷고" → ["🍷고", "🍷은"] (emoji is valid stem)', () => {
     expect(generateKoreanPredicateVariants('🍷고')).toEqual(['🍷고', '🍷은']);
+  });
+});
+
+describe('normalizeQueryPredicates', () => {
+  it('"평점 좋고 바디감 있고" → "평점 좋은 바디감 있는"', () => {
+    expect(normalizeQueryPredicates('평점 좋고 바디감 있고')).toBe('평점 좋은 바디감 있는');
+  });
+
+  it('"타닌 없고 과일향 풍부한" → "타닌 없는 과일향 풍부한"', () => {
+    expect(normalizeQueryPredicates('타닌 없고 과일향 풍부한')).toBe('타닌 없는 과일향 풍부한');
   });
 });

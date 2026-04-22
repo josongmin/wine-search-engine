@@ -44,6 +44,7 @@ import type { AdversarialGuardPort } from '../../../src/domain/learning/service/
 import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
 import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/service/hybrid-candidate-summary.js';
+import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InMemoryAmbiguityDictionary
@@ -705,6 +706,7 @@ export class InMemorySimilarRetrieval implements SimilarRetrievalPort {
   async retrieveSimilar(
     anchorProfile: AnchorProfile,
     _limit: number,
+    _hardConstraints?: readonly NormalizedConstraint[],
   ): Promise<readonly HybridCandidate[]> {
     return this.results.get(anchorProfile.entityId) ?? [];
   }

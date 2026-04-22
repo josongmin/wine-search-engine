@@ -48,6 +48,10 @@ const LABEL_CONTAINMENT_RATIO_MIN = 0.3;
 const LABEL_CONTAINMENT_FORWARD_FLOOR = 0.7;
 /** Label containment: score floor for evidence-in-claim match (weaker signal). */
 const LABEL_CONTAINMENT_REVERSE_FLOOR = 0.6;
+const LABEL_TOKEN_SUBSEQUENCE_FLOOR = 0.72;
+const LABEL_TOKEN_SET_FLOOR = 0.65;
+const LABEL_SINGLETON_TOKEN_FLOOR = 0.58;
+const LABEL_SINGLETON_TOKEN_MIN_LEN = 4;
 /** Score at/above which a match is considered partial entailment. */
 const PARTIAL_THRESHOLD = 0.5;
 const CROSS_SCRIPT_DICTIONARY_SCORE = 0.95;
@@ -64,6 +68,21 @@ import {
  */
 export type EvidenceRecord = Readonly<Record<string, string | number | readonly string[] | null | undefined>>;
 
+function buildEvidenceAnchorSource(evidence: EvidenceRecord): FieldAnchor['source'] {
+  const toolName = evidence['__source_tool_name'];
+  const stepIndex = evidence['__source_step_index'];
+  if (typeof toolName === 'string' && toolName.trim().length > 0) {
+    return {
+      type: 'tool_observation',
+      stepIndex: typeof stepIndex === 'number' && Number.isInteger(stepIndex) && stepIndex >= 0
+        ? stepIndex
+        : 0,
+      toolName,
+    };
+  }
+  return { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' };
+}
+
 /**
  * Verify a single claim against evidence deterministically.
  *
@@ -72,9 +91,42 @@ export type EvidenceRecord = Readonly<Record<string, string | number | readonly 
  */
 /** For identity_claim with canonical_label field, also check these alt fields. */
 const IDENTITY_FALLBACK_FIELDS = ['producer', 'canonical_label'] as const;
+const IDENTITY_STRUCTURED_MISMATCH_FIELDS = [
+  'region',
+  'country',
+  'appellation',
+  'grape_primary',
+  'grapes',
+  'wine_type',
+] as const satisfies readonly WineStructuredField[];
 const GEO_CLAIM_FIELDS: ReadonlySet<string> = new Set(['region', 'country', 'appellation']);
 const GEO_COMPARISON_CONCEPT_FIELDS: ReadonlySet<string> = new Set(['country', 'region', 'appellation']);
 const GRAPE_CLAIM_FIELDS: ReadonlySet<string> = new Set(['grape_primary', 'grapes']);
+const LABEL_SINGLETON_STOPWORDS: ReadonlySet<string> = new Set([
+  'red',
+  'white',
+  'rose',
+  'rosé',
+  'wine',
+  'wines',
+  'blend',
+  'brut',
+  'reserve',
+  'cuvee',
+  'cuvée',
+  'classic',
+  'estate',
+  'grand',
+  'cru',
+  'nv',
+]);
+
+function anchorFieldForEvidenceCheck(
+  claimField: WineField,
+  evidenceField: string,
+): WineField {
+  return evidenceField === 'price_range' ? claimField : evidenceField as WineField;
+}
 
 export function verifyDeterministic(
   claim: ExtractedClaim,
@@ -94,16 +146,17 @@ export function verifyDeterministic(
       if (Array.isArray(evidenceValue) && evidenceValue.length === 0) continue;
 
       sawFieldEvidence = true;
-      const match = matchFieldValue(claim.field, claim.normalizedValue, evidenceValue);
+      const matchField = fld === 'comparison_concept' ? claim.field : fld;
+      const match = matchFieldValue(matchField, claim.normalizedValue, evidenceValue);
 
       if (match.score > bestMatch.score) {
         bestMatch = match;
         bestIsContradiction = false;
         bestAnchor = {
           wineId: String(evidence['entity_id'] ?? evidence['canonical_label'] ?? 'unknown'),
-          field: fld as WineField,
+          field: anchorFieldForEvidenceCheck(claim.field, fld),
           value: String(evidenceValue),
-          source: { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' },
+          source: buildEvidenceAnchorSource(evidence),
         };
       } else if (bestMatch.score === 0 && match.type === 'no_match') {
         // No positive match found yet — record this as a contradiction signal.
@@ -113,9 +166,9 @@ export function verifyDeterministic(
         bestMatch = match;
         bestAnchor = {
           wineId: String(evidence['entity_id'] ?? evidence['canonical_label'] ?? 'unknown'),
-          field: fld as WineField,
+          field: anchorFieldForEvidenceCheck(claim.field, fld),
           value: String(evidenceValue),
-          source: { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' },
+          source: buildEvidenceAnchorSource(evidence),
         };
       }
     }
@@ -128,6 +181,26 @@ export function verifyDeterministic(
     return 'not_entailed';
   })();
 
+  if (
+    verdict === 'contradicted'
+    && claim.category === 'identity_claim'
+    && (claim.field === 'canonical_label' || claim.field === 'producer')
+  ) {
+    const structuredMismatch = detectStructuredIdentityMismatch(claim, evidenceRecords);
+    if (structuredMismatch !== undefined) {
+      return {
+        claimId: claim.id,
+        verdict: 'not_entailed',
+        matchType: 'no_match',
+        verifierUsed: 'deterministic',
+        status: 'ok',
+        evidenceAnchor: structuredMismatch.anchor,
+        confidence: 0,
+        explanation: structuredMismatch.explanation,
+      };
+    }
+  }
+
   return {
     claimId: claim.id,
     verdict,
@@ -137,6 +210,58 @@ export function verifyDeterministic(
     ...(bestAnchor !== undefined ? { evidenceAnchor: bestAnchor } : {}),
     confidence: bestMatch.score,
     explanation: bestMatch.details,
+  };
+}
+
+function detectStructuredIdentityMismatch(
+  claim: ExtractedClaim,
+  evidenceRecords: readonly EvidenceRecord[],
+): { readonly anchor: FieldAnchor; readonly explanation: string } | undefined {
+  let best:
+    | {
+        readonly field: WineStructuredField;
+        readonly evidenceValue: string | number | readonly string[];
+        readonly evidence: EvidenceRecord;
+        readonly wineId: string;
+        readonly score: number;
+      }
+    | undefined;
+
+  for (const evidence of evidenceRecords) {
+    for (const field of IDENTITY_STRUCTURED_MISMATCH_FIELDS) {
+      const evidenceValue = evidence[field];
+      if (evidenceValue === undefined || evidenceValue === null) continue;
+      if (typeof evidenceValue === 'string' && evidenceValue.trim() === '') continue;
+      if (Array.isArray(evidenceValue) && evidenceValue.length === 0) continue;
+
+      const match = matchFieldValue(field, claim.normalizedValue, evidenceValue);
+      if (match.score < PARTIAL_THRESHOLD) continue;
+      if (best === undefined || match.score > best.score) {
+        best = {
+          field,
+          evidenceValue,
+          evidence,
+          wineId: String(evidence['entity_id'] ?? evidence['canonical_label'] ?? 'unknown'),
+          score: match.score,
+        };
+      }
+    }
+  }
+
+  if (best === undefined) {
+    return undefined;
+  }
+
+  return {
+    anchor: {
+      wineId: best.wineId,
+      field: best.field,
+      value: String(best.evidenceValue),
+      source: buildEvidenceAnchorSource(best.evidence as EvidenceRecord),
+    },
+    explanation:
+      `identity claim "${claim.value}" matched structured field ${best.field}=` +
+      `"${String(best.evidenceValue)}" rather than a wine identity`,
   };
 }
 
@@ -153,18 +278,38 @@ function fieldsToCheckForEvidence(
       ? [...IDENTITY_FALLBACK_FIELDS]
       : [claim.field];
 
+  if (GRAPE_CLAIM_FIELDS.has(claim.field)) {
+    fields.push('grape_primary', 'grapes');
+  }
+
+  if (claim.field === 'price_usd') {
+    fields.push('price_range');
+  }
+
   const comparisonConcept = evidence['comparison_concept'];
   const comparisonConceptField = evidence['comparison_concept_field'];
   if (
     typeof comparisonConcept === 'string'
     && comparisonConcept.trim().length > 0
     && typeof comparisonConceptField === 'string'
+    && !hasPrimaryComparisonConceptFieldEvidence(comparisonConceptField, evidence)
     && comparisonConceptSupportsClaimField(comparisonConceptField, claim.field)
   ) {
     fields.push('comparison_concept');
   }
 
   return [...new Set(fields)];
+}
+
+function hasPrimaryComparisonConceptFieldEvidence(
+  comparisonConceptField: string,
+  evidence: EvidenceRecord,
+): boolean {
+  const value = evidence[comparisonConceptField];
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
 }
 
 function comparisonConceptSupportsClaimField(
@@ -192,6 +337,16 @@ function matchFieldValue(
   evidenceValue: string | number | readonly string[],
 ): MatchResult {
   const claimNorm = claimValue.toLowerCase().normalize('NFKC').trim();
+  if (field === 'price_range') {
+    const claimNum = Number(claimNorm);
+    if (!Number.isFinite(claimNum) || typeof evidenceValue !== 'string') {
+      return { type: 'no_match', score: 0, details: `no match: claim="${claimNorm}", field=${field}` };
+    }
+    const rangeMatch = matchClaimAgainstPriceRange(claimNum, evidenceValue);
+    if (rangeMatch !== undefined) {
+      return rangeMatch;
+    }
+  }
   const evidenceNorm = Array.isArray(evidenceValue)
     ? evidenceValue.map(v => String(v).toLowerCase().normalize('NFKC').trim())
     : String(evidenceValue).toLowerCase().normalize('NFKC').trim();
@@ -376,6 +531,10 @@ function matchFieldValue(
           };
         }
       }
+      const tokenCoverageMatch = matchLabelTokenCoverage(claimForMatch, evStr);
+      if (tokenCoverageMatch !== undefined) {
+        return tokenCoverageMatch;
+      }
       break;
     }
 
@@ -384,6 +543,99 @@ function matchFieldValue(
   }
 
   return { type: 'no_match', score: 0, details: `no match: claim="${claimNorm}", field=${field}` };
+}
+
+function matchClaimAgainstPriceRange(
+  claimUsd: number,
+  priceRange: string,
+): MatchResult | undefined {
+  const normalized = priceRange.trim().replace(/,/gu, '');
+  const usdRange = /^\$\s*([0-9]+(?:\.[0-9]+)?)\s*-\s*\$\s*([0-9]+(?:\.[0-9]+)?)$/u.exec(normalized);
+  if (usdRange?.[1] !== undefined && usdRange[2] !== undefined) {
+    const minUsd = Number(usdRange[1]);
+    const maxUsd = Number(usdRange[2]);
+    if (Number.isFinite(minUsd) && Number.isFinite(maxUsd)) {
+      return claimUsd >= minUsd && claimUsd <= maxUsd
+        ? { type: 'range_match', score: 1.0, details: `price ${claimUsd} within evidence range ${minUsd}-${maxUsd} USD` }
+        : { type: 'no_match', score: 0, details: `price ${claimUsd} outside evidence range ${minUsd}-${maxUsd} USD` };
+    }
+  }
+
+  const krwRange = /^(?:₩|)?([0-9][0-9]*)\s*원?\s*-\s*(?:₩|)?([0-9][0-9]*)\s*원?$/u.exec(normalized);
+  if (krwRange?.[1] !== undefined && krwRange[2] !== undefined) {
+    const minUsd = Number(krwRange[1]) / 1350;
+    const maxUsd = Number(krwRange[2]) / 1350;
+    if (Number.isFinite(minUsd) && Number.isFinite(maxUsd)) {
+      return claimUsd >= minUsd && claimUsd <= maxUsd
+        ? { type: 'range_match', score: 1.0, details: `price ${claimUsd} within evidence range ${minUsd.toFixed(2)}-${maxUsd.toFixed(2)} USD` }
+        : { type: 'no_match', score: 0, details: `price ${claimUsd} outside evidence range ${minUsd.toFixed(2)}-${maxUsd.toFixed(2)} USD` };
+    }
+  }
+
+  return undefined;
+}
+
+function tokenizeLabelish(value: string): readonly string[] {
+  return value
+    .toLowerCase()
+    .normalize('NFKC')
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !/^\d{1,4}$/u.test(token));
+}
+
+function isTokenSubsequence(
+  claimTokens: readonly string[],
+  evidenceTokens: readonly string[],
+): boolean {
+  let evidenceIndex = 0;
+  for (const claimToken of claimTokens) {
+    while (evidenceIndex < evidenceTokens.length && evidenceTokens[evidenceIndex] !== claimToken) {
+      evidenceIndex += 1;
+    }
+    if (evidenceIndex >= evidenceTokens.length) {
+      return false;
+    }
+    evidenceIndex += 1;
+  }
+  return true;
+}
+
+function matchLabelTokenCoverage(
+  claimValue: string,
+  evidenceValue: string,
+): MatchResult | undefined {
+  const claimTokens = tokenizeLabelish(claimValue);
+  const evidenceTokens = tokenizeLabelish(evidenceValue);
+  if (claimTokens.length === 0 || evidenceTokens.length === 0) {
+    return undefined;
+  }
+
+  const evidenceTokenSet = new Set(evidenceTokens);
+  if (!claimTokens.every((token) => evidenceTokenSet.has(token))) {
+    return undefined;
+  }
+
+  if (claimTokens.length === 1) {
+    const token = claimTokens[0]!;
+    if (token.length < LABEL_SINGLETON_TOKEN_MIN_LEN || LABEL_SINGLETON_STOPWORDS.has(token)) {
+      return undefined;
+    }
+    return {
+      type: 'normalized_match',
+      score: LABEL_SINGLETON_TOKEN_FLOOR,
+      details: `identity token "${token}" matched evidence tokenization "${evidenceValue}"`,
+    };
+  }
+
+  const ordered = isTokenSubsequence(claimTokens, evidenceTokens);
+  return {
+    type: 'normalized_match',
+    score: ordered ? LABEL_TOKEN_SUBSEQUENCE_FLOOR : LABEL_TOKEN_SET_FLOOR,
+    details: ordered
+      ? `claim tokens "${claimTokens.join(' ')}" appear in order within evidence "${evidenceValue}"`
+      : `claim tokens "${claimTokens.join(' ')}" matched evidence token set "${evidenceValue}"`,
+  };
 }
 
 function isWithinTolerance(claim: number, evidence: number, tolerance: RangeTolerance): boolean {

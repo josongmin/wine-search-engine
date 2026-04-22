@@ -173,6 +173,23 @@ export function normalizeObservations(observations: readonly string[]): string {
   return observations.join('\n').toLowerCase().normalize('NFKC');
 }
 
+function hasExplicitNoEvidenceObservation(observations: readonly string[]): boolean {
+  const normalized = normalizeObservations(observations);
+  return normalized.includes('[retrieval_quality: unreliable — 0 results]')
+    || normalized.includes('[retrieval_quality: unreliable - 0 results]')
+    || normalized.includes('[retrieval_quality: corpus_limited')
+    || normalized.includes('검색 결과가 없습니다')
+    || normalized.includes('데이터베이스에 매우 적습니다');
+}
+
+function isHonestNoEvidenceAbstentionScenario(
+  exp: ScenarioExpectation,
+  execution: ScenarioExecution,
+): boolean {
+  return exp.allowHonestNoEvidenceAbstention === true
+    && hasExplicitNoEvidenceObservation(execution.observations);
+}
+
 export type DiagnosticSeverity = 'info' | 'warn' | 'critical';
 // v4: 'answerRelevancy' removed — dimension is always null, weight=0, no code emits
 // diagnostics with that dim. Keeping it would allow accidental misuse.
@@ -528,29 +545,6 @@ const PENALTY_REGEX_MISS = 0.5;
 const PENALTY_MUST_NOT_MATCH = 0.50;
 /** Faithfulness: threshold below which a warning diagnostic fires. */
 const FAITHFULNESS_WARN_THRESHOLD = 0.5;
-/** Context precision: minimum fraction of significant words in context. */
-const CONTEXT_PRECISION_WORD_THRESHOLD = 0.3;
-/** Context precision: minimum word length for ASCII/Latin words. */
-const CONTEXT_PRECISION_MIN_WORD_LEN_ASCII = 3;
-/** Context precision: minimum word length for Hangul-dominant words.
- *  Korean 2-syllable words (e.g. "레드", "화이트", "드라이") are meaningful
- *  content terms — ASCII threshold of 3 would incorrectly exclude them. */
-const CONTEXT_PRECISION_MIN_WORD_LEN_HANGUL = 2;
-/**
- * Stopwords for query-context alignment check in scoreContextRelevance.
- * Module-scope to avoid per-call allocation (rule 16: deterministic sets).
- * Korean structural words (이하/이상/부터/까지) are excluded from content matching
- * because they appear in enriched queries (agent-tools appendStructuredQueryClauses)
- * but not in observation summaries.
- */
-const CONTEXT_RELEVANCE_STOPWORDS: ReadonlySet<string> = new Set([
-  // English
-  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'wine', 'wines', 'under', 'over', 'not',
-  // Korean structural/functional words — frequent in queries but not observations
-  '와인', '추천', '좋은', '이하', '이상', '부터', '까지', '해줘', '해주세요', '있는', '없는', '중에', '같은',
-  '정도', '주세요', '원하는', '원해요', '알려줘', '알려주세요', '찾아줘', '찾아주세요',
-]);
-
 /**
  * Korean wine type → English canonical. Used by scoreContextRelevance to check
  * that observations match the query's wine type. Module-scope (rule 16).
@@ -600,12 +594,18 @@ const CTX_REGION_MAP: ReadonlyArray<readonly [string, string]> = [
   ['피에몬테', 'piedmont'],
 ];
 
-type ContextRelevanceCheck = { readonly passed: boolean; readonly label: string };
+type ContextRelevanceAxis = 'raw_alignment' | 'structured';
+
+type ContextRelevanceCheck = {
+  readonly passed: boolean;
+  readonly label: string;
+  readonly axis: ContextRelevanceAxis;
+  readonly hard?: boolean | undefined;
+};
 
 function buildContextEvidenceRecords(execution: ScenarioExecution): readonly EvidenceRecord[] {
   if (execution.evidenceFrames !== undefined && execution.evidenceFrames.length > 0) {
-    const records = buildEvidenceRecordsFromFrames(execution.evidenceFrames);
-    if (records.length > 0) return records;
+    return buildEvidenceRecordsFromFrames(execution.evidenceFrames);
   }
   return parseObservations(execution.observations);
 }
@@ -674,6 +674,7 @@ function collectStructuredToolContextRelevanceChecks(
       checks.push({
         passed: evidenceTextIncludes(records, ['wine_type', 'style'], wineType),
         label: `tool_wine_type_${wineType}`,
+        axis: 'structured',
       });
     }
 
@@ -682,6 +683,7 @@ function collectStructuredToolContextRelevanceChecks(
       checks.push({
         passed: evidenceTextIncludes(records, ['country', 'region', 'appellation'], country),
         label: `tool_country_${country}`,
+        axis: 'structured',
       });
     }
 
@@ -690,6 +692,7 @@ function collectStructuredToolContextRelevanceChecks(
       checks.push({
         passed: evidenceTextIncludes(records, ['appellation', 'region'], appellation),
         label: `tool_appellation_${appellation}`,
+        axis: 'structured',
       });
     }
 
@@ -699,6 +702,7 @@ function collectStructuredToolContextRelevanceChecks(
       checks.push({
         passed: alcoholValues.some((value) => value <= maxAlcoholPct),
         label: `tool_alcohol_pct_lte_${maxAlcoholPct}`,
+        axis: 'structured',
       });
     }
 
@@ -712,6 +716,7 @@ function collectStructuredToolContextRelevanceChecks(
             || evidenceTextIncludes(records, ['wine_type'], 'dessert')
             || sweetnessValues.some((value) => value >= 0.5),
           label: 'tool_style_sweet',
+          axis: 'structured',
         });
         continue;
       }
@@ -722,6 +727,7 @@ function collectStructuredToolContextRelevanceChecks(
             evidenceTextIncludes(records, ['style'], 'off dry')
             || sweetnessValues.some((value) => value >= 0.2 && value <= 0.6),
           label: 'tool_style_off_dry',
+          axis: 'structured',
         });
         continue;
       }
@@ -732,12 +738,66 @@ function collectStructuredToolContextRelevanceChecks(
             evidenceTextIncludes(records, ['style'], 'dry')
             || sweetnessValues.some((value) => value <= 0.2),
           label: 'tool_style_dry',
+          axis: 'structured',
         });
       }
     }
   }
 
   return checks;
+}
+
+function expectedEntityEvidenceFields(
+  type: NonNullable<ScenarioExpectation['expectedEntities']>[number]['type'],
+): readonly string[] {
+  switch (type) {
+    case 'wine_type':
+      return ['wine_type', 'style', 'comparison_concept'];
+    case 'country':
+      return ['country', 'region', 'appellation', 'comparison_concept'];
+    case 'region':
+      return ['region', 'appellation', 'comparison_concept'];
+    case 'appellation':
+      return ['appellation', 'region', 'canonical_label', 'comparison_concept'];
+    case 'grape_primary':
+      return ['grapes', 'canonical_label', 'comparison_concept'];
+  }
+}
+
+function collectExpectedEntityContextRelevanceChecks(
+  exp: ScenarioExpectation,
+  execution: ScenarioExecution,
+): readonly ContextRelevanceCheck[] {
+  if (exp.expectedEntities === undefined || exp.expectedEntities.length === 0) {
+    return [];
+  }
+  const records = buildContextEvidenceRecords(execution);
+  if (records.length === 0) return [];
+
+  return exp.expectedEntities.map((entity) => ({
+    passed: evidenceTextIncludes(records, expectedEntityEvidenceFields(entity.type), entity.canonical),
+    label: `expected_entity_${entity.type}_${entity.canonical}`,
+    axis: 'raw_alignment',
+  }));
+}
+
+function formatContextCheckSummary(
+  checks: readonly ContextRelevanceCheck[],
+  failed: readonly string[],
+): string {
+  const passedCount = checks.length - failed.length;
+  return `passed ${passedCount}/${checks.length}; failed=${failed.length > 0 ? failed.join(', ') : 'none'}`;
+}
+
+function summarizeContextAxisChecks(
+  axis: ContextRelevanceAxis,
+  checks: readonly ContextRelevanceCheck[],
+): string {
+  if (checks.length === 0) {
+    return `${axis}=n/a`;
+  }
+  const failed = checks.filter((check) => !check.passed).map((check) => check.label);
+  return `${axis} ${formatContextCheckSummary(checks, failed)}`;
 }
 
 /** Korean 만원 multiplier for price extraction. */
@@ -1525,10 +1585,12 @@ function scoreStructuredChecks(
   if (exp.expectedToolArgs !== undefined && exp.expectedToolArgs.length > 0) {
     for (const argSpec of exp.expectedToolArgs) {
       const matchingCalls = execution.toolsUsed.filter((t) => t.tool === argSpec.tool);
+      const observedValues: string[] = [];
       const anyMatch = matchingCalls.some((call) => {
         try {
           const parsed = (JSON.parse(call.input ?? '{}') as unknown) as Record<string, unknown>;
           const value = getNestedValue(parsed, argSpec.argPath);
+          observedValues.push(formatToolArgValue(value));
           return evaluatePredicate(value, argSpec.predicate, argSpec.value);
         } catch {
           diagnostics.push({
@@ -1545,7 +1607,9 @@ function scoreStructuredChecks(
           dim: 'toolAccuracy',
           severity: 'warn',
           code: 'EXPECTED_TOOL_ARG_MISSING',
-          message: `${argSpec.tool}.${argSpec.argPath} ${argSpec.predicate} ${argSpec.value === undefined ? '' : JSON.stringify(argSpec.value)} not satisfied`,
+          message: `${argSpec.tool}.${argSpec.argPath} ${argSpec.predicate} ${argSpec.value === undefined ? '' : JSON.stringify(argSpec.value)} not satisfied across ${matchingCalls.length} matching tool call(s)`,
+          observed: observedValues.length > 0 ? observedValues.join(' | ') : '<no matching tool calls>',
+          expected: `${argSpec.predicate} ${argSpec.value === undefined ? '' : JSON.stringify(argSpec.value)}`.trim(),
         });
         multiplier *= PENALTY_TOOL_ARG_MISSING;
       }
@@ -1816,11 +1880,19 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
+function formatToolArgValue(value: unknown): string {
+  if (value === undefined) return '<missing>';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return stableJsonStringify(value);
+}
+
 /** Evaluate a predicate against a value
  * @internal exported for direct unit testing of predicate branches. */
 export function evaluatePredicate(
   actual: unknown,
-  predicate: 'equals' | 'lte' | 'gte' | 'contains' | 'exists',
+  predicate: 'equals' | 'equals_any' | 'lte' | 'gte' | 'contains' | 'contains_any' | 'exists',
   expected?: unknown,
 ): boolean {
   switch (predicate) {
@@ -1828,38 +1900,55 @@ export function evaluatePredicate(
       return actual !== undefined && actual !== null;
     case 'equals':
       return actual === expected;
+    case 'equals_any':
+      return Array.isArray(expected) && expected.some((candidate) => actual === candidate);
     case 'lte':
       return typeof actual === 'number' && typeof expected === 'number' && actual <= expected;
     case 'gte':
       return typeof actual === 'number' && typeof expected === 'number' && actual >= expected;
     case 'contains':
+      if (Array.isArray(actual)) {
+        return actual.some((entry) => {
+          if (typeof entry === 'string' && typeof expected === 'string') {
+            return entry.toLowerCase().includes(expected.toLowerCase());
+          }
+          return entry === expected;
+        });
+      }
       return typeof actual === 'string' && typeof expected === 'string'
         && actual.toLowerCase().includes(expected.toLowerCase());
+    case 'contains_any':
+      if (!Array.isArray(expected)) {
+        return false;
+      }
+      return expected.some((candidate) => evaluatePredicate(actual, 'contains', candidate));
     default:
       return false;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// RAGAS Context Relevance (rule-based, no LLM needed)
+// RAGAS Context Relevance (structured evidence, no LLM needed)
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Evaluates whether tool results are relevant to the query's constraints.
+ * Evaluates whether tool results are relevant to the query's typed constraints
+ * and hand-curated entity expectations.
  *
  * Unlike faithfulness (does the ANSWER cite the context?), context relevance
  * asks: did the RETRIEVAL return results that match what was asked? This
  * separates "search pipeline returned junk" from "agent hallucinated".
  *
- * Checks each available structured constraint against observations text:
+ * Checks each available structured signal against typed evidence records:
  * - priceBandKrw: prices in observations within range?
  * - vintageRange: years in observations within range?
- * - drinkingWindowStatus: keywords present?
+ * - drinkingWindowStatus: parsed drinking-window status present?
+ * - expectedEntities: canonical entity evidence present on the right field axis?
  *
  * Returns null when no structured constraints exist or no observations.
  *
  * Renamed from scoreContextPrecision — the metric is now "contextRelevance"
- * to align with RAGAS v2 terminology. The algorithm is unchanged.
+ * to align with RAGAS v2 terminology.
  */
 function scoreContextRelevance(
   scenario: AgentBenchmarkScenario,
@@ -1867,13 +1956,27 @@ function scoreContextRelevance(
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
 ): number | null {
-  if (execution.observations.length === 0) return null;
+  if (
+    execution.observations.length === 0
+    && (execution.evidenceFrames === undefined || execution.evidenceFrames.length === 0)
+  ) {
+    return null;
+  }
+  if (isHonestNoEvidenceAbstentionScenario(exp, execution)) {
+    diagnostics.push({
+      dim: 'contextRelevance',
+      severity: 'info',
+      code: 'CONTEXT_RELEVANCE_SKIPPED_NO_EVIDENCE_ABSTENTION',
+      message: 'context relevance not scored: scenario explicitly allows honest abstention when retrieval returned no confirmable evidence',
+    });
+    return null;
+  }
   // normalizeObservations() is the single source of truth for joining.
   // Note: scoreContextRelevance uses the un-lowercased form for regex matching below,
   // so we call join directly here but with the canonical '\n' separator.
   const obsText = execution.observations.join('\n');
 
-  const checks: { passed: boolean; label: string }[] = [];
+  const checks: ContextRelevanceCheck[] = [];
 
   // Price check: any prices mentioned in observations should be in range
   if (exp.priceBandKrw !== undefined) {
@@ -1884,7 +1987,7 @@ function scoreContextRelevance(
         if (exp.priceBandKrw!.max !== undefined && p > exp.priceBandKrw!.max) return false;
         return true;
       });
-      checks.push({ passed: inRange.length > 0, label: 'price_in_range' });
+      checks.push({ passed: inRange.length > 0, label: 'price_in_range', axis: 'structured' });
     }
   }
 
@@ -1897,7 +2000,12 @@ function scoreContextRelevance(
         if (exp.vintageRange!.max !== undefined && y > exp.vintageRange!.max) return false;
         return true;
       });
-      checks.push({ passed: inRange.length > 0, label: 'vintage_in_range' });
+      checks.push({
+        passed: inRange.length > 0,
+        label: 'vintage_in_range',
+        axis: 'structured',
+        hard: true,
+      });
     }
   }
 
@@ -1910,7 +2018,11 @@ function scoreContextRelevance(
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
     const dwResult = parseDrinkingWindowFromObs(obsText, exp.drinkingWindowStatus);
     if (dwResult !== null) {
-      checks.push({ passed: dwResult, label: `dw_status_${exp.drinkingWindowStatus}` });
+      checks.push({
+        passed: dwResult,
+        label: `dw_status_${exp.drinkingWindowStatus}`,
+        axis: 'structured',
+      });
     }
   }
 
@@ -1923,7 +2035,11 @@ function scoreContextRelevance(
   // Wine type check
   for (const [korean, english] of CTX_WINE_TYPE_MAP) {
     if (queryNfkc.includes(korean)) {
-      checks.push({ passed: obsNfkc.includes(english), label: `wine_type_${english}` });
+      checks.push({
+        passed: obsNfkc.includes(english),
+        label: `wine_type_${english}`,
+        axis: 'raw_alignment',
+      });
       break;
     }
   }
@@ -1931,7 +2047,11 @@ function scoreContextRelevance(
   // Country check
   for (const [pattern, canonical] of CTX_COUNTRY_MAP) {
     if (pattern.test(queryNfkc)) {
-      checks.push({ passed: obsNfkc.includes(canonical.toLowerCase()), label: `country_${canonical}` });
+      checks.push({
+        passed: obsNfkc.includes(canonical.toLowerCase()),
+        label: `country_${canonical}`,
+        axis: 'raw_alignment',
+      });
       break;
     }
   }
@@ -1939,7 +2059,11 @@ function scoreContextRelevance(
   // Region check
   for (const [korean, english] of CTX_REGION_MAP) {
     if (queryNfkc.includes(korean)) {
-      checks.push({ passed: obsNfkc.includes(english), label: `region_${english}` });
+      checks.push({
+        passed: obsNfkc.includes(english),
+        label: `region_${english}`,
+        axis: 'raw_alignment',
+      });
       break;
     }
   }
@@ -1956,6 +2080,7 @@ function scoreContextRelevance(
         checks.push({
           passed: obsNfkc.includes(valueLower),
           label: `${constraint.attribute}_constraint_${constraint.value}`,
+          axis: 'structured',
         });
       }
     }
@@ -1963,115 +2088,49 @@ function scoreContextRelevance(
 
   const structuredToolChecks = collectStructuredToolContextRelevanceChecks(execution);
   checks.push(...structuredToolChecks);
-
-  // Query-context alignment: check if the tool results mention keywords from
-  // the agent's search queries. For each tool call, extract significant words
-  // (≥3 chars, not stopwords) from the query and check how many appear in
-  // observations. Threshold: at least 30% of significant words should appear
-  // for the context to be considered relevant.
-  if (execution.toolsUsed.length > 0) {
-    const queryTerms = execution.toolsUsed
-      .map((t) => {
-        try {
-          const parsed = (JSON.parse(t.input ?? '{}') as unknown) as Record<string, unknown>;
-          // Extract query-bearing fields from all tools:
-          //   search_wines: query
-          //   compare_wines: query_a, query_b
-          //   get_food_pairings: food
-          //   check_drinking_window: entity_id (skip — opaque ID, not a semantic query)
-          if (typeof parsed['query'] === 'string') return parsed['query'];
-          if (typeof parsed['food'] === 'string') return parsed['food'];
-          // compare_wines: join both sides
-          const qa = typeof parsed['query_a'] === 'string' ? parsed['query_a'] : '';
-          const qb = typeof parsed['query_b'] === 'string' ? parsed['query_b'] : '';
-          return [qa, qb].filter((s) => s.length > 0).join(' ');
-        } catch (err) {
-          console.error('[scorer] query term extraction failed:', err instanceof Error ? err.message : String(err));
-          return '';
-        }
-      })
-      .filter((q) => q.length > 0);
-    if (queryTerms.length > 0) {
-      // NFKC-normalize both sides so composed/decomposed Hangul match consistently.
-      const lower = obsText.toLowerCase().normalize('NFKC');
-
-      // Cross-lingual guard: if the agent query contains Hangul but the tool
-      // observation is English-only (no Hangul), direct term matching is meaningless —
-      // "이탈리아" ≠ "Italy", "레드" ≠ "red wine" in the data. Skip the check
-      // (pass by default) to avoid systematic false-negatives on Korean queries.
-      const HANGUL_RE = /\p{Script=Hangul}/u;
-      const queryHasHangul = queryTerms.some((q) => HANGUL_RE.test(q));
-      const obsHasHangul = HANGUL_RE.test(obsText);
-      if (queryHasHangul && !obsHasHangul) {
-        // Cross-lingual scenario: Korean query terms cannot be matched against
-        // English-only observations ("이탈리아" ≠ "Italy", "레드" ≠ "red wine").
-        // Skip this check entirely rather than auto-passing — auto-pass would make
-        // contextRelevance=1 for 96%+ of Korean scenarios regardless of retrieval
-        // quality, defeating the metric. null is more honest: "cannot measure".
-        // contextRelevance may still score via price/vintage/drinkingWindow checks.
-      } else {
-        // Extract meaningful (non-stopword, min-length) words from a query string.
-        // Returns an empty array when the query is all stopwords (no signal available).
-        const extractContentWords = (q: string): string[] =>
-          q.toLowerCase().normalize('NFKC')
-            // Split on whitespace OR Unicode punctuation — handles Korean without spaces.
-            .split(/[\s\p{P}]+/u)
-            .filter((w) => {
-              if (CONTEXT_RELEVANCE_STOPWORDS.has(w)) return false;
-              // Use lower min-length for Hangul-dominant tokens (2 chars) vs ASCII (3 chars).
-              // Korean 2-syllable words like "레드", "화이트" are content-bearing.
-              const isHangulToken = HANGUL_RE.test(w);
-              const minLen = isHangulToken ? CONTEXT_PRECISION_MIN_WORD_LEN_HANGUL : CONTEXT_PRECISION_MIN_WORD_LEN_ASCII;
-              return w.length >= minLen;
-            });
-
-        const allContentWords = queryTerms.map(extractContentWords);
-        // Only push the check when at least one query had meaningful content words.
-        // Queries that are entirely stopwords ("와인 추천해줘") produce no signal → skip.
-        const hasContentWords = allContentWords.some((words) => words.length > 0);
-        if (hasContentWords) {
-          const anyRelevant = allContentWords.some((words) => {
-            if (words.length === 0) return false; // stopword-only query → no information
-            const found = words.filter((w) => lower.includes(w));
-            return found.length / words.length >= CONTEXT_PRECISION_WORD_THRESHOLD;
-          });
-          checks.push({ passed: anyRelevant, label: 'query_terms_in_context' });
-        }
-        // else: all queries are pure stopwords — skip this check (null if no other checks)
-      }
-    }
-  }
+  checks.push(...collectExpectedEntityContextRelevanceChecks(exp, execution));
 
   if (checks.length === 0) return null; // no constraints to evaluate
 
-  // P1-B fix: vintage is a HARD constraint — if the retrieval returned results
-  // outside the vintage range, the context is wrong regardless of soft checks.
-  //
-  // Price is intentionally SOFT: the search pipeline does not have a real price
-  // filter — max_price_krw is appended as a text hint (e.g. "50000원 이하") so
-  // Vespa can return out-of-range results. Penalising this as critical would
-  // collapse overall to 0% for a pipeline limitation, not an agent failure.
-  //
-  // Soft checks (query_terms_in_context, drinkingWindowStatus, price_in_range)
-  // are averaged: only vintage hard-fail collapses the overall to 0.
+  // P1-B fix: hard constraints remain fail-closed, but all non-hard checks are
+  // now partitioned into explicit axes. Structured passes must not wash out a
+  // miss on raw query/entity alignment, and vice versa.
   const hardFailed = checks
-    .filter((c) => !c.passed && c.label === 'vintage_in_range')
-    .map((c) => c.label);
+    .filter((check) => check.hard === true && !check.passed)
+    .map((check) => check.label);
+  const rawAlignmentChecks = checks.filter((check) => check.axis === 'raw_alignment');
+  const structuredChecks = checks.filter((check) => check.axis === 'structured' && check.hard !== true);
+  const axisScores = [
+    rawAlignmentChecks.length > 0
+      ? rawAlignmentChecks.filter((check) => check.passed).length / rawAlignmentChecks.length
+      : null,
+    structuredChecks.length > 0
+      ? structuredChecks.filter((check) => check.passed).length / structuredChecks.length
+      : null,
+  ].filter((value): value is number => value !== null);
 
-  const failed = checks.filter((c) => !c.passed).map((c) => c.label);
-  const passedCount = checks.filter((c) => c.passed).length;
-  // Hard constraint failure → 0; otherwise soft-average across all checks.
-  const score = hardFailed.length > 0 ? 0 : passedCount / checks.length;
+  const failed = checks.filter((check) => !check.passed).map((check) => check.label);
+  const score = hardFailed.length > 0
+    ? 0
+    : axisScores.length > 0
+      ? axisScores.reduce((sum, value) => sum + value, 0) / axisScores.length
+      : 1;
 
   if (score < 1) {
     const severity: DiagnosticSeverity = hardFailed.length > 0 ? 'critical' : 'warn';
+    const checkSummary = [
+      summarizeContextAxisChecks('raw_alignment', rawAlignmentChecks),
+      summarizeContextAxisChecks('structured', structuredChecks),
+      `hard_failed=${hardFailed.length > 0 ? hardFailed.join(', ') : 'none'}`,
+      `failed=${failed.length > 0 ? failed.join(', ') : 'none'}`,
+    ].join('; ');
     diagnostics.push({
       dim: 'contextRelevance',
       severity,
       code: hardFailed.length > 0 ? 'CONTEXT_HARD_CONSTRAINT_FAILED' : 'CONTEXT_RELEVANCE_LOW',
       message: hardFailed.length > 0
-        ? `hard constraint(s) failed — retrieval returned out-of-range results: ${hardFailed.join(', ')}`
-        : `tool results did not match constraints: ${failed.join(', ')}`,
+        ? `hard constraint(s) failed — retrieval returned out-of-range results: ${hardFailed.join(', ')} (${checkSummary})`
+        : `tool results did not match constraints (${checkSummary})`,
       observed: score,
       expected: 1,
     });
@@ -2162,6 +2221,15 @@ function scoreContextRecall(
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
 ): number | null {
+  if (isHonestNoEvidenceAbstentionScenario(scenario.expectation, execution)) {
+    diagnostics.push({
+      dim: 'contextRecall',
+      severity: 'info',
+      code: 'CONTEXT_RECALL_SKIPPED_NO_EVIDENCE_ABSTENTION',
+      message: 'context recall not scored: scenario explicitly allows honest abstention when retrieval returned no confirmable evidence',
+    });
+    return null;
+  }
   // Explicit goldenKeywords take precedence. If absent, attempt auto-inference
   // from answerMustMatch regex groups (e.g. "(바롤로|barolo)" → ["barolo"]) so
   // scenarios without hand-curated keywords still get measured — context recall

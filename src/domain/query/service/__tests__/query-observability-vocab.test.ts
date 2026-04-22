@@ -380,6 +380,46 @@ describe('planToObservabilitySlice', () => {
     expect(slice.queryFamily).toBe('ambiguous');
   });
 
+  it('keeps entity_exact family for exact short-entity lookups even if ambiguityDetected is still set', () => {
+    const plan = makePlan({
+      intent: 'entity_exact',
+      queryClass: 'short_entity',
+      suggestedRetrievalMode: 'entity_lookup',
+      uncertainty: {
+        overall: 0.4,
+        ambiguityDetected: true,
+        ambiguityTypes: ['entity'],
+        ambiguitySeverity: 'medium',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.8,
+        anchorConfidence: 0.9,
+        constraintConfidence: 0.7,
+      },
+    });
+    const slice = planToObservabilitySlice('q1', plan);
+    expect(slice.queryFamily).toBe('entity_exact');
+  });
+
+  it('suppresses ambiguityDetected on the observability slice for converged exact lookups', () => {
+    const plan = makePlan({
+      uncertainty: {
+        overall: 0.31,
+        ambiguityDetected: true,
+        ambiguityTypes: ['multiple_candidates'],
+        ambiguitySeverity: 'medium',
+        decisionEffect: 'raise_threshold',
+        parserConfidence: 0.9,
+        anchorConfidence: 0.95,
+        constraintConfidence: 0.7,
+      },
+    });
+
+    const slice = planToObservabilitySlice('req-exact-telemetry', plan);
+
+    expect(slice.queryFamily).toBe('entity_exact');
+    expect(slice.ambiguityDetected).toBe(false);
+  });
+
   it('derives queryFamily multi_intent for non-comparison decomposition hints', () => {
     const plan = makePlan({
       intent: 'facet_search',

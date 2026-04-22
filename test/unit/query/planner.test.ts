@@ -42,6 +42,11 @@ const noAmbiguityDict: AmbiguityDictionary = {
   getAmbiguityInfo: () => Promise.resolve(null),
 };
 
+const baroloAmbiguityDict: AmbiguityDictionary = {
+  isKnownAmbiguous: (surface: string) => Promise.resolve(surface === 'barolo'),
+  getAmbiguityInfo: () => Promise.resolve(null),
+};
+
 /** NLMapper stub that returns no constraints. */
 const noOpNLMapper: NLMapper = {
   mapPhrase: () => Promise.resolve(null),
@@ -141,6 +146,10 @@ describe('Planner – NLMapper resilience', () => {
     await expect(planner.plan('pinot under 40')).resolves.toMatchObject({
       rawQuery: 'pinot under 40',
       normalizedQuery: expect.any(String),
+      constraintExtraction: expect.objectContaining({
+        fallbackTriggered: true,
+        fallbackReason: 'nlmapper_exception',
+      }),
     });
   });
 });
@@ -169,6 +178,19 @@ describe('Planner – route determination', () => {
     // No attribute/constraint words → entity_exact → entity
     const plan = await planner.plan('Opus One');
     expect(plan.suggestedRoute).toBe('entity');
+  });
+
+  it('direct-resolved appellations stay on entity route even when ambiguity registry knows the short form', async () => {
+    const entries = new Map([
+      ['barolo', makeMatchResult('Barolo', 0.95, ['entity-barolo-a', 'entity-barolo-b'])],
+    ]);
+    const planner = makePlanner(entries, baroloAmbiguityDict);
+    const plan = await planner.plan('Barolo');
+
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.queryClass).toBe('short_entity');
+    expect(plan.suggestedRoute).toBe('entity');
+    expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
   });
 
   it('attribute-heavy query without entity anchors → suggestedRoute is "hybrid"', async () => {

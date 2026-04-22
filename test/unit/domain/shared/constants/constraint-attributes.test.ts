@@ -51,6 +51,10 @@ describe('SOFT_CONSTRAINT_ATTRIBUTES SSoT', () => {
     expect(SOFT_CONSTRAINT_ATTRIBUTES.has('producer_prestige')).toBe(true);
   });
 
+  it('contains closure for screw-cap evidence without hard-filter recall collapse', () => {
+    expect(SOFT_CONSTRAINT_ATTRIBUTES.has('closure')).toBe(true);
+  });
+
   it('contains finish_length (W2-01 addition)', () => {
     expect(SOFT_CONSTRAINT_ATTRIBUTES.has('finish_length')).toBe(true);
   });
