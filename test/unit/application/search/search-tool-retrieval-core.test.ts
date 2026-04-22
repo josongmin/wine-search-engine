@@ -39,4 +39,14 @@ describe('buildSearchToolRetrievalCoreQuery', () => {
     expect(query).toContain('red');
     expect(query).toContain('wine');
   });
+
+  it('preserves exact-vintage sku anchors even when structured vintage bounds are present', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: 'almaviva 2019',
+      vintage_min: 2019,
+      vintage_max: 2019,
+    });
+
+    expect(query).toBe('almaviva 2019');
+  });
 });

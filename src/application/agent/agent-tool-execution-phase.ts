@@ -445,15 +445,6 @@ export class AgentToolExecutionPhase {
     );
 
     if (parsed.plannerDefect !== undefined) {
-      const defectBudgetCheck = budget.recordStep(
-        '__planner_defect__',
-        { query: parsed.plannerDefect.code },
-      );
-      if (!defectBudgetCheck.allowed) {
-        state.terminationReason = defectBudgetCheck.reason ?? 'loop_detected';
-        return true;
-      }
-
       state.reasoningFailureDetected = true;
       state.plannerDefectAttempts += 1;
       state.steps.push({

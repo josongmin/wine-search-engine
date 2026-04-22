@@ -90,7 +90,8 @@ export function resolveAllowMissingLtrForPublish(
     'allowMissingLtr'
   > | undefined,
 ): boolean {
-  return cliAllowMissingLtr || previousRuntimeState?.allowMissingLtr === true;
+  void previousRuntimeState;
+  return cliAllowMissingLtr;
 }
 
 type CriticalWineType = 'red' | 'white' | 'sparkling';

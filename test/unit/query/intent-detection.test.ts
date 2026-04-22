@@ -309,6 +309,17 @@ describe('Intent Detection — SOTA++ Improvements', () => {
       expect(plan.intent).toBe('pairing_search');
       expect(plan.suggestedRetrievalMode).toBe('recommendation');
     });
+
+    it('should keep strong-anchor occasion recommendations on pairing_search instead of mixed_query', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['opus one', makeMatchResult('Opus One', 0.95)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('Opus One anniversary gift');
+      expect(plan.intent).toBe('pairing_search');
+      expect(plan.suggestedRetrievalMode).toBe('recommendation');
+    });
   });
 
   describe('Default semantic discovery', () => {

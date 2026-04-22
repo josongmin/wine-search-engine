@@ -144,11 +144,7 @@ export function detectQueryIntent(
     return 'mixed_query';
   }
 
-  if (hasStrongAnchor && hasPairingKeyword) {
-    return 'mixed_query';
-  }
-
-  if (hasPairingKeyword && !hasStrongAnchor) {
+  if (hasPairingKeyword) {
     return 'pairing_search';
   }
 

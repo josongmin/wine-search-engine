@@ -30,6 +30,7 @@ import {
   type ComparisonIntent,
   type QueryDecompositionHint,
 } from '../model/query-decomposition.js';
+import { classifyQueryBudget } from '../../agent/service/adaptive-budget.js';
 import { buildNormalizedQueryViews } from './query-normalizer.js';
 import {
   isDirectEntityResolution,
@@ -87,6 +88,7 @@ const CONCEPT_COMPARE_ENTITY_TYPES = new Set([
   'appellation',
   'grape_primary',
 ] as const);
+const VINTAGE_PATTERN = /(?<!\p{L})(?<!\p{N})(?:18|19|20)\d{2}(?!\p{L})(?!\p{N})/u;
 
 /**
  * Detects whether a query is a decomposable comparison query.
@@ -171,6 +173,10 @@ export function buildComparisonDecompositionLegsForRetrieval(
 }
 
 function buildComparisonDecompositionLeg(query: string): ComparisonDecompositionLeg {
+  if (shouldPreserveEntityComparisonLeg(query)) {
+    return buildEntityComparisonLeg(query);
+  }
+
   const conceptResolution = resolveConceptComparisonCanonical(query);
   if (conceptResolution !== undefined) {
     return {
@@ -185,6 +191,27 @@ function buildComparisonDecompositionLeg(query: string): ComparisonDecomposition
   }
 
   return buildEntityComparisonLeg(query);
+}
+
+function shouldPreserveEntityComparisonLeg(query: string): boolean {
+  if (!VINTAGE_PATTERN.test(query)) {
+    return false;
+  }
+  return classifyQueryBudget(query.normalize('NFC').trim())?.classification === 'specific_sku'
+    || hasVintageBearingDirectEntityAnchor(query);
+}
+
+function hasVintageBearingDirectEntityAnchor(query: string): boolean {
+  const stripped = query
+    .replace(/(?<![\p{L}\p{N}])(?:18|19|20)\d{2}(?:년산?|년대)?(?![\p{L}\p{N}])/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (stripped.length === 0) {
+    return false;
+  }
+  const resolved = resolveEntity(stripped, { preferEntityOverStyle: true });
+  return isDirectEntityResolution(resolved)
+    && CONCEPT_COMPARE_ENTITY_TYPES.has(resolved.entityType);
 }
 
 function getConceptComparisonRetrievalMode(

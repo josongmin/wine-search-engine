@@ -353,6 +353,36 @@ describe('AgentToolExecutionPhase', () => {
     expect(state.steps[0]?.observation).toContain('[PLANNER_REPAIR] Recovered embedded tool call');
   });
 
+  it('does not consume tool-step budget for planner defects', async () => {
+    const { phase } = makePhase({
+      searchUseCase: { execute: vi.fn() } as never,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 2 });
+
+    const shouldBreak = await phase.run(
+      'req-planner-defect-budget',
+      DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'malformed planner output',
+        plannerDefect: {
+          code: 'malformed_json_output',
+          observation: 'Planner emitted malformed JSON.',
+          rawText: '{"thought":"broken"',
+        },
+      }),
+    );
+
+    expect(shouldBreak).toBe(false);
+    expect(budget.getStepCount()).toBe(0);
+    expect(state.plannerDefectAttempts).toBe(1);
+    expect(state.reasoningFailureDetected).toBe(true);
+    expect(state.steps[0]?.observation).toBe('Planner emitted malformed JSON.');
+  });
+
   it('hydrates drinkability checks from grounded comparison projections across steps', async () => {
     const execute = vi.fn().mockRejectedValue(new Error('search fallback must not run'));
     const decomposedSearchExecute = vi.fn().mockResolvedValue(makeComparisonResponse());

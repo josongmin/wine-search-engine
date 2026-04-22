@@ -102,7 +102,6 @@ export function deriveQueryFamily(
 ): QueryFamilyLabel {
   const mode = getObservabilityRetrievalMode(plan, compiled);
   const intent = plan.intent;
-  const queryClass = plan.queryClass;
   // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
   const decompositionHint = plan.decompositionHint;
 

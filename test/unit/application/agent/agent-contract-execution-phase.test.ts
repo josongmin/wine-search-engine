@@ -89,6 +89,59 @@ describe('AgentContractExecutionPhase', () => {
     });
   });
 
+  it('reuses grounded drinkability projections captured from prior compare/search steps', async () => {
+    const drinkingWindowEntityLookup = vi.fn();
+    const entityLookup = vi.fn();
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: { execute: vi.fn() } as never,
+      drinkingWindowEntityLookup,
+      entityLookup,
+    };
+    const phase = new AgentContractExecutionPhase({ toolDeps });
+    const state = createAgentExecutionState();
+    state.toolOutcomes.push({
+      stepId: 'req:0:0',
+      tool: 'compare_wines',
+      kind: 'success',
+      result: {
+        queryType: 'comparison',
+        entities: [
+          { topResult: { entity: { entityId: 'wine-1', canonicalLabel: 'Wine 1' } } },
+          { topResult: { entity: { entityId: 'wine-2', canonicalLabel: 'Wine 2' } } },
+        ],
+      },
+      durationMs: 1,
+    });
+    state.groundedDrinkingWindowByEntityId.set('wine-1', {
+      entityId: createCanonicalEntityId('wine-1'),
+      canonicalLabel: 'Wine 1',
+      drinkingWindowStart: 2021,
+      drinkingWindowEnd: 2032,
+      drinkingWindowModelVersion: 'compare-cache-v1',
+    });
+    state.groundedDrinkingWindowByEntityId.set('wine-2', {
+      entityId: createCanonicalEntityId('wine-2'),
+      canonicalLabel: 'Wine 2',
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2036,
+      drinkingWindowModelVersion: 'compare-cache-v1',
+    });
+
+    const ok = await phase.runDrinkabilityChecks(
+      { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      'req-cache',
+      DEFAULT_AGENT_CONFIG,
+      new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 5 }),
+      state,
+    );
+
+    expect(ok).toBe(true);
+    expect(drinkingWindowEntityLookup).not.toHaveBeenCalled();
+    expect(entityLookup).not.toHaveBeenCalled();
+    expect(state.steps[0]?.observations?.[0]).toContain('Wine 1: drinking window 2021-2032');
+    expect(state.steps[0]?.observations?.[1]).toContain('Wine 2: drinking window 2024-2036');
+  });
+
   it('fails closed when budget cannot reserve the required contract checks', async () => {
     const phase = new AgentContractExecutionPhase({
       toolDeps: { searchUseCase: { execute: vi.fn() } as never },

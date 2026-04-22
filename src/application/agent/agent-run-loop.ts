@@ -49,8 +49,11 @@ export class AgentRunLoop {
         }
 
         const remainingSteps = effectiveConfig.maxSteps - budget.getStepCount();
-        const hasToolHistory = state.steps.length > 0;
-        const isLastStep = remainingSteps === 1 || (remainingSteps === 2 && hasToolHistory);
+        // Planner-defect retries are recorded in `state.steps` for observability,
+        // but they should not consume the "you already have grounded results"
+        // last-step pressure path. Use actual tool progress instead.
+        const hasToolProgress = state.toolOutcomes.length > 0;
+        const isLastStep = remainingSteps === 1 || (remainingSteps === 2 && hasToolProgress);
 
         if (state.totalInputTokens + state.totalOutputTokens >= effectiveConfig.maxTotalTokens) {
           log.info(

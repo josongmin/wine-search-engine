@@ -628,8 +628,8 @@ describe('resolvePublishFixtureRepoRoot', () => {
 });
 
 describe('resolveAllowMissingLtrForPublish', () => {
-  it('inherits allowMissingLtr from the active runtime state when CLI flag is absent', () => {
-    expect(resolveAllowMissingLtrForPublish(false, { allowMissingLtr: true })).toBe(true);
+  it('does not inherit allowMissingLtr from the active runtime state when CLI flag is absent', () => {
+    expect(resolveAllowMissingLtrForPublish(false, { allowMissingLtr: true })).toBe(false);
   });
 
   it('keeps strict mode when neither CLI nor active runtime allow missing LTR', () => {

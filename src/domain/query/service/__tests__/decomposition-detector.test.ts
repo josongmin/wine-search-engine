@@ -57,14 +57,14 @@ describe('detectDecomposition', () => {
     expect(analysis.outcome.decomposed).toBe(true);
     expect(analysis.hint.strategy).toBe('comparison');
     expect(analysis.hint.subQueryCount).toBe(2);
-    expect(analysis.hint.comparisonSubtype).toBe('entity');
+    expect(analysis.hint.comparisonSubtype).toBe('mixed');
     expect(analysis.hint.comparisonLegs).toEqual([
       expect.objectContaining({
         rawQuery: 'Opus One',
-        retrievalQuery: 'Opus One',
-        mode: 'entity',
-        retrievalMode: 'auto',
-        evidenceSource: 'entity_default',
+        retrievalQuery: 'Opus One wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
       }),
       expect.objectContaining({
         rawQuery: 'Screaming Eagle',
@@ -117,6 +117,27 @@ describe('detectDecomposition', () => {
         retrievalQuery: 'Napa Valley Cabernet Sauvignon wine',
         canonicalConcept: 'Napa Valley',
         conceptEntityType: 'region',
+      }));
+    }
+  });
+
+  it('preserves exact-vintage label comparisons as entity legs instead of concept wine queries', () => {
+    const analysis = analyzeQueryDecomposition('Opus One 2018 vs Almaviva 2019');
+
+    expect(analysis.outcome.decomposed).toBe(true);
+    if (analysis.outcome.decomposed) {
+      expect(analysis.outcome.comparisonSubtype).toBe('entity');
+      expect(analysis.outcome.comparisonLegs[0]).toEqual(expect.objectContaining({
+        rawQuery: 'Opus One 2018',
+        retrievalQuery: 'Opus One 2018',
+        mode: 'entity',
+        retrievalMode: 'auto',
+      }));
+      expect(analysis.outcome.comparisonLegs[1]).toEqual(expect.objectContaining({
+        rawQuery: 'Almaviva 2019',
+        retrievalQuery: 'Almaviva 2019',
+        mode: 'entity',
+        retrievalMode: 'auto',
       }));
     }
   });

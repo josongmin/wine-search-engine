@@ -1,4 +1,8 @@
-import { buildAgentQueryExecutionContract, isExactMetadataEntityLookupCandidate } from '../agent/agent-query-execution-contract.js';
+import {
+  buildAgentQueryExecutionContract,
+  isExactMetadataEntityLookupCandidate,
+  isSpecificSkuLikeQuery,
+} from '../agent/agent-query-execution-contract.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { stripExactEntityMetadataSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
 import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';
@@ -10,6 +14,7 @@ import {
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 
 const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
+const VINTAGE_TOKEN_PATTERN = /(?<![\p{L}\p{N}])(?:18|19|20)\d{2}(?:년산?|년대)?(?![\p{L}\p{N}])/gu;
 
 export interface SearchToolRetrievalCoreInput {
   readonly query: string;
@@ -139,6 +144,18 @@ function isResolvedEntityRepresentedByStructuredFilters(
   }
 }
 
+function hasVintageBearingDirectEntityAnchor(query: string): boolean {
+  const stripped = query
+    .replace(VINTAGE_TOKEN_PATTERN, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (stripped.length === 0) {
+    return false;
+  }
+  const resolved = resolveEntity(stripped, { preferEntityOverStyle: true });
+  return isDirectEntityResolution(resolved) && resolved.entityType !== 'wine_type';
+}
+
 export function buildSearchToolRetrievalCoreQuery(
   input: SearchToolRetrievalCoreInput,
 ): string {
@@ -168,6 +185,21 @@ export function buildSearchToolRetrievalCoreQuery(
     || input.appellation !== undefined
     || input.vintage_min !== undefined
     || input.vintage_max !== undefined;
+  const hasExactVintageBounds =
+    input.vintage_min !== undefined
+    && input.vintage_max !== undefined
+    && input.vintage_min === input.vintage_max;
+  if (
+    hasExactVintageBounds
+    && (
+      isSpecificSkuLikeQuery(normalizedQuery)
+      || hasVintageBearingDirectEntityAnchor(normalizedQuery)
+    )
+  ) {
+    return queryViews.transliterated?.trim().length
+      ? queryViews.transliterated.trim()
+      : normalizedQuery;
+  }
 
   if (pairingTags.length === 0 && occasionTerms.length === 0 && !hasPositiveStructuredFilters) {
     const canonicalEntityTerms = resolveCanonicalEntityTerms(queryViews);

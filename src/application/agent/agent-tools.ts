@@ -52,6 +52,7 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
+import type { DecisionStatus } from '../../domain/shared/types/index.js';
 import type {
   ToolCallEvidenceFrame,
   ToolCallStructuredOutput,
@@ -534,6 +535,101 @@ function buildCompareSideOnlyFilters(
     ...(overrides.vintage_min !== undefined ? { vintage_min: overrides.vintage_min } : {}),
     ...(overrides.vintage_max !== undefined ? { vintage_max: overrides.vintage_max } : {}),
   });
+}
+
+function hasExactVintageSideSearch(
+  overrides: CompareSideSearchOverrides,
+): boolean {
+  return overrides.vintage_min !== undefined
+    && overrides.vintage_max !== undefined
+    && overrides.vintage_min === overrides.vintage_max;
+}
+
+function recomputeComparisonOverallStatus(
+  entities: readonly ComparisonSearchResponse['entities'][number][],
+): DecisionStatus {
+  if (entities.every((entity) => entity.resolutionStatus === 'resolved')) {
+    return 'resolved';
+  }
+  if (entities.some((entity) => entity.resolutionStatus === 'ambiguous')) {
+    return 'ambiguous';
+  }
+  return 'failed';
+}
+
+async function rescueExactComparisonResponse(
+  response: ComparisonSearchResponse,
+  deps: AgentToolDeps,
+  requestId: string,
+  rawSubQueries: readonly [string, string],
+  sharedFilters: readonly NormalizedConstraint[],
+  sharedPreferences: readonly NormalizedConstraint[],
+  sideSpecificFilters: readonly [
+    readonly NormalizedConstraint[],
+    readonly NormalizedConstraint[],
+  ],
+  sideOverrides: readonly [CompareSideSearchOverrides, CompareSideSearchOverrides],
+  options?: AgentToolExecutionOptions,
+): Promise<ComparisonSearchResponse> {
+  const rescuedEntities = await Promise.all(response.entities.map(async (entity, index) => {
+    if (
+      !hasExactVintageSideSearch(sideOverrides[index]!)
+      || (entity.topResult !== null && entity.resolutionStatus === 'resolved')
+    ) {
+      return entity;
+    }
+
+    const rescued = await deps.searchUseCase.execute(
+      {
+        query: rawSubQueries[index]!,
+        options: { mode: 'entity', explain: false, clarification: false },
+        ...(sharedFilters.length > 0 || sideSpecificFilters[index]!.length > 0
+          ? {
+              filters: [
+                ...sharedFilters,
+                ...sideSpecificFilters[index]!,
+              ],
+            }
+          : {}),
+        ...(sharedPreferences.length > 0 ? { preferences: sharedPreferences } : {}),
+      },
+      `${requestId}-compare-rescue-${index}`,
+      { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+    );
+
+    if (rescued.queryType !== 'search' || rescued.results.length === 0) {
+      return entity;
+    }
+    if (rescued.engineDecision.decisionStatus !== 'resolved') {
+      return {
+        subQuery: entity.subQuery,
+        comparisonMode: 'entity',
+        topResult: null,
+        resultCount: 0,
+        resolutionStatus: 'failed',
+        allResults: [],
+      };
+    }
+
+    return {
+      subQuery: entity.subQuery,
+      comparisonMode: 'entity',
+      topResult: rescued.results[0] ?? null,
+      resultCount: rescued.results.length,
+      resolutionStatus: rescued.engineDecision.decisionStatus,
+      allResults: rescued.results,
+    };
+  })) as ComparisonSearchResponse['entities'];
+
+  if (rescuedEntities.every((entity, index) => entity === response.entities[index])) {
+    return response;
+  }
+
+  return {
+    ...response,
+    entities: rescuedEntities,
+    overallStatus: recomputeComparisonOverallStatus(rescuedEntities),
+  };
 }
 
 interface SearchToolAlcoholPreferenceResult {
@@ -1355,10 +1451,21 @@ async function executeAgentToolInner(
         options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
         retrievalSubQueries,
       );
+      const rescuedResponse = await rescueExactComparisonResponse(
+        response,
+        deps,
+        requestId,
+        retrievalSubQueries,
+        sharedFilters,
+        sharedPreferences,
+        sideSpecificFilters,
+        [sideAOverrides, sideBOverrides] as const,
+        options,
+      );
       return {
-        observation: summarizeComparison(response),
-        rawResult: response,
-        structuredOutput: { kind: 'comparison_result', response },
+        observation: summarizeComparison(rescuedResponse),
+        rawResult: rescuedResponse,
+        structuredOutput: { kind: 'comparison_result', response: rescuedResponse },
       };
     }
 

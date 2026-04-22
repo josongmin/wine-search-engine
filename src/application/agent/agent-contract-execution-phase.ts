@@ -29,6 +29,13 @@ export class AgentContractExecutionPhase {
 
   constructor(private readonly deps: AgentContractExecutionPhaseDeps) {}
 
+  private buildRuntimeToolDeps(state: AgentExecutionState): AgentToolDeps {
+    return {
+      ...this.deps.toolDeps,
+      groundedDrinkingWindowLookup: (id) => state.groundedDrinkingWindowByEntityId.get(String(id)),
+    };
+  }
+
   async runDrinkabilityChecks(
     queryExecutionContract: AgentQueryExecutionContract,
     requestId: string,
@@ -63,7 +70,7 @@ export class AgentContractExecutionPhase {
       results = await withTimeout(
         executeAgentToolsBatch(
           checkCalls,
-          this.deps.toolDeps,
+          this.buildRuntimeToolDeps(state),
           `${requestId}-step${stepIndex}`,
           {
             abortSignal: autoAbortController.signal,

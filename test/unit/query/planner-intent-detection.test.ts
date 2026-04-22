@@ -71,10 +71,10 @@ describe('detectQueryIntent', () => {
     ).toBe('pairing_search');
   });
 
-  it('keeps strong anchored occasion queries on mixed_query', () => {
+  it('keeps strong anchored occasion queries on pairing_search so recommendation mode survives', () => {
     expect(
       detectQueryIntent('opus one anniversary gift', [anchor(EXACT_ANCHOR_CONFIDENCE + 0.05)], noopExtractor),
-    ).toBe('mixed_query');
+    ).toBe('pairing_search');
   });
 
   it('returns facet_search when only constraint keywords', () => {

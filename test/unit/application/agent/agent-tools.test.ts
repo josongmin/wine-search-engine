@@ -1169,6 +1169,80 @@ describe('executeAgentTool', () => {
     );
   });
 
+  it('rescues failed exact-vintage compare sides through authoritative entity search', async () => {
+    const mockDecomposedSearchExecute = vi.fn().mockResolvedValue({
+      queryType: 'comparison',
+      originalQuery: 'Opus One 2018 vs Almaviva 2019',
+      comparisonIntent: 'compare',
+      entities: [
+        {
+          subQuery: 'opus one 2018',
+          comparisonMode: 'entity',
+          topResult: null,
+          resultCount: 0,
+          resolutionStatus: 'failed',
+          allResults: [],
+        },
+        {
+          subQuery: 'almaviva 2019',
+          comparisonMode: 'entity',
+          topResult: null,
+          resultCount: 0,
+          resolutionStatus: 'ambiguous',
+          allResults: [],
+        },
+      ],
+      overallStatus: 'failed',
+      requestId: 'req-123',
+      executionTimeMs: 12,
+    });
+    deps = {
+      ...deps,
+      decomposedSearchExecute: mockDecomposedSearchExecute,
+    };
+    vi.mocked(mockSearchUseCase.execute)
+      .mockResolvedValueOnce(makeSearchResponse([
+        {
+          entity: { entityId: 'opus-one-2018', canonicalLabel: 'Opus One 2018', type: 'wine', vintage: 2018, wineType: 'red' },
+          match: { matchType: 'entity', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+          relevanceScore: 0.99,
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.99, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]))
+      .mockResolvedValueOnce(makeSearchResponse([
+        {
+          entity: { entityId: 'almaviva-2019', canonicalLabel: 'Almaviva 2019', type: 'wine', vintage: 2019, wineType: 'red' },
+          match: { matchType: 'entity', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+          relevanceScore: 0.98,
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.98, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]));
+
+    const result = await executeAgentTool(
+      'compare_wines',
+      {
+        query_a: 'Opus One 2018',
+        query_b: 'Almaviva 2019',
+        vintage_min_a: 2018,
+        vintage_max_a: 2018,
+        vintage_min_b: 2019,
+        vintage_max_b: 2019,
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(mockSearchUseCase.execute).toHaveBeenCalledTimes(2);
+    expect(result.observation).toContain('Opus One 2018');
+    expect(result.observation).toContain('Almaviva 2019');
+    expect(result.observation).toContain('entity_id: opus-one-2018');
+    expect(result.observation).toContain('entity_id: almaviva-2019');
+  });
+
   it.each([
     { field: 'country', queryA: 'France', queryB: 'Italy', value: 'France' },
     { field: 'region', queryA: 'Bordeaux', queryB: 'Burgundy', value: 'Bordeaux' },

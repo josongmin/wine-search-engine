@@ -187,4 +187,59 @@ describe('AgentRunLoop', () => {
     expect(plannerPhaseRunner.run).not.toHaveBeenCalled();
     expect(toolExecutionPhase.run).not.toHaveBeenCalled();
   });
+
+  it('does not treat planner-defect-only history as last-step tool progress', async () => {
+    const plannerPhase = {
+      stepStartMs: Date.now(),
+      parsed: { thought: 'retry planner', answer: 'done' },
+      inputTokens: 1,
+      outputTokens: 1,
+      wasTruncated: false,
+    };
+    const plannerPhaseRunner = {
+      run: vi.fn()
+        .mockResolvedValueOnce(plannerPhase)
+        .mockResolvedValueOnce(plannerPhase),
+    };
+    const toolExecutionPhase = {
+      run: vi.fn()
+        .mockImplementationOnce(async (
+          _requestId: string,
+          _effectiveConfig: typeof DEFAULT_AGENT_CONFIG,
+          _budget: StepBudget,
+          state: ReturnType<typeof createAgentExecutionState>,
+        ) => {
+          state.reasoningFailureDetected = true;
+          state.plannerDefectAttempts += 1;
+          state.steps.push({
+            index: state.steps.length,
+            thought: 'malformed planner output',
+            observation: 'Planner emitted malformed JSON.',
+            durationMs: 1,
+            tokenCount: { input: 1, output: 1 },
+          });
+          return false;
+        })
+        .mockResolvedValueOnce(true),
+    };
+    const loop = new AgentRunLoop({
+      plannerPhaseRunner: plannerPhaseRunner as never,
+      toolExecutionPhase: toolExecutionPhase as never,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 2 });
+
+    await loop.run({
+      query: 'barolo 추천',
+      requestId: 'req-defect-retry',
+      effectiveConfig: { ...DEFAULT_AGENT_CONFIG, maxSteps: 2 },
+      queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      budget,
+      state,
+    });
+
+    expect(plannerPhaseRunner.run).toHaveBeenCalledTimes(2);
+    expect(plannerPhaseRunner.run.mock.calls[1]?.[4]).toBe(2);
+    expect(plannerPhaseRunner.run.mock.calls[1]?.[5]).toBe(false);
+  });
 });
