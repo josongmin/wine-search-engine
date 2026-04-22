@@ -269,6 +269,54 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     );
   });
 
+  it('exact wine aliases resolve for identity but do not become appellation hard constraints', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('샤또 마고');
+
+    expect(result.resolvedEntities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entityType: 'appellation', canonicalValue: 'Château Margaux' }),
+      ]),
+    );
+    expect(result.bundle.hard).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'appellation', value: 'Château Margaux' }),
+      ]),
+    );
+  });
+
+  it('exact wine alias shields overlapping bare appellation subspans', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('샤또 마고 보르도');
+
+    expect(result.resolvedEntities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entityType: 'appellation', canonicalValue: 'Château Margaux' }),
+      ]),
+    );
+    expect(result.bundle.hard).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'appellation', value: 'Margaux' }),
+      ]),
+    );
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'region', value: 'Bordeaux' }),
+      ]),
+    );
+  });
+
+  it('ontology appellations still become appellation hard constraints', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('바롤로 추천');
+
+    expect(result.bundle.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'appellation', value: 'Barolo' }),
+      ]),
+    );
+  });
+
   it('real NLMapper extracts date occasion and affordability from situational Korean phrasing', async () => {
     const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
     const result = await compiler.compile('이번 주말 소개팅인데, 분위기 좋은 와인 추천. 너무 비싸면 부담스럽고');

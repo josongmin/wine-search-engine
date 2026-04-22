@@ -10,6 +10,7 @@ import {
 } from '../../attribute/service/entity-resolver.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
+import { REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
 import {
   applyCompositionalInference,
   inferComparisonImpliedWineType,
@@ -89,6 +90,68 @@ const CONSTRAINT_REASONER = new ConstraintReasoner();
 /** Wave F1: single shared deterministic detector — stateless, safe to reuse. */
 const DETERMINISTIC_TOPOLOGY_DETECTOR = new DeterministicTopologyDetector();
 
+function foldOntologyKey(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim();
+}
+
+function isOntologyAppellationValue(value: string): boolean {
+  const foldedValue = foldOntologyKey(value);
+  return [...REGION_PARENTS.keys()].some((key) => foldOntologyKey(key) === foldedValue);
+}
+
+function canPromoteResolvedEntityToConstraint(entity: ResolvedEntity): boolean {
+  if (entity.entityType !== 'appellation') {
+    return true;
+  }
+  return isOntologyAppellationValue(entity.canonicalValue);
+}
+
+function spanContains(container: Span, candidate: Span): boolean {
+  return (
+    container.startChar <= candidate.startChar
+    && container.endChar >= candidate.endChar
+    && (container.startChar !== candidate.startChar || container.endChar !== candidate.endChar)
+  );
+}
+
+function buildIdentityOnlyShieldSpans(
+  spans: readonly Span[],
+  fuzzyMatcher: FuzzyMatcherPort | undefined,
+): readonly Span[] {
+  return spans.filter((span) => {
+    const resolved = resolveEntity(span.text, { preferEntityOverStyle: true }, fuzzyMatcher);
+    return isDirectEntityResolution(resolved) && !canPromoteResolvedEntityToConstraint(resolved);
+  });
+}
+
+function constraintSourceIsShieldedByIdentityOnlySpan(
+  constraint: NormalizedConstraint,
+  spans: readonly Span[],
+  identityOnlyShieldSpans: readonly Span[],
+): boolean {
+  const source = constraint.source_phrase.trim().toLowerCase();
+  if (source.length === 0 || identityOnlyShieldSpans.length === 0) {
+    return false;
+  }
+  return spans
+    .filter((span) => span.text === source)
+    .some((span) => identityOnlyShieldSpans.some((shield) => spanContains(shield, span)));
+}
+
+function stripIdentityOnlyShadowConstraints(
+  constraints: readonly NormalizedConstraint[],
+  spans: readonly Span[],
+  identityOnlyShieldSpans: readonly Span[],
+): readonly NormalizedConstraint[] {
+  return constraints.filter((constraint) =>
+    !constraintSourceIsShieldedByIdentityOnlySpan(constraint, spans, identityOnlyShieldSpans),
+  );
+}
+
 export class ConstraintCompiler {
   constructor(
     private readonly nlMapper: NLMapper,
@@ -108,7 +171,12 @@ export class ConstraintCompiler {
       candidatePhrases,
       abortSignal !== undefined ? { abortSignal } : undefined,
     );
-    const matched = mapped.constraints;
+    const identityOnlyShieldSpans = buildIdentityOnlyShieldSpans(spans, this.fuzzyMatcher);
+    const matched = stripIdentityOnlyShadowConstraints(
+      mapped.constraints,
+      spans,
+      identityOnlyShieldSpans,
+    );
     const mapperTrace = mapped.constraintExtraction;
 
     const hard: ConstraintBundle['hard'][number][] = [];
@@ -207,6 +275,9 @@ export class ConstraintCompiler {
       }
       resolvedEntities.push(resolved.entity);
       if (resolved.kind === 'covered') {
+        continue;
+      }
+      if (!canPromoteResolvedEntityToConstraint(resolved.entity)) {
         continue;
       }
       const constraint = {
