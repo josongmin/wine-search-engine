@@ -56,6 +56,8 @@ interface CompositionContext {
   readonly wineType: string | undefined;
   readonly country: string | undefined;
   readonly grapePrimary: string | undefined;
+  readonly styles: ReadonlySet<string>;
+  readonly occasions: ReadonlySet<string>;
 }
 
 interface CompositionalInferenceOptions {
@@ -72,8 +74,14 @@ function normalizedStringValues(
   const values: string[] = [];
   for (const list of [bundle.hard, bundle.soft]) {
     for (const c of list) {
-      if (c.attribute !== attribute || c.operator !== '=' || typeof c.value !== 'string') continue;
-      values.push(c.value.toLowerCase());
+      if (c.attribute !== attribute || (c.operator !== '=' && c.operator !== 'in')) continue;
+      if (typeof c.value === 'string') {
+        values.push(c.value.toLowerCase());
+        continue;
+      }
+      if (Array.isArray(c.value)) {
+        values.push(...c.value.filter((value): value is string => typeof value === 'string').map((value) => value.toLowerCase()));
+      }
     }
   }
   return values;
@@ -138,6 +146,8 @@ function extractContext(
     wineType: findString('wine_type')?.toLowerCase() ?? options?.impliedWineType,
     country: findString('country')?.toLowerCase(),
     grapePrimary: findString('grape_primary'),
+    styles: new Set(normalizedStringValues(bundle, 'style')),
+    occasions: new Set(normalizedStringValues(bundle, 'occasion')),
   };
 }
 
@@ -267,6 +277,22 @@ const RULES: readonly CompositionRule[] = [
     emit: () => [
       makeInferredConstraint('grape_primary', '=', 'Syrah', 'composition(barossa)'),
       makeInferredConstraint('body', '>=', LEVEL_HIGH, 'composition(barossa)'),
+    ],
+  },
+  // approachable style → stronger beginner suitability prior
+  {
+    id: 'approachable_beginner',
+    matches: (ctx) => ctx.styles.has('approachable'),
+    emit: () => [
+      makeInferredConstraint('beginner_suitability', '>=', LEVEL_MED_PLUS, 'composition(style:approachable)'),
+    ],
+  },
+  // gift occasion → stronger gift-suitability prior
+  {
+    id: 'gift_occasion',
+    matches: (ctx) => ctx.occasions.has('gift'),
+    emit: () => [
+      makeInferredConstraint('gift_suitability', '>=', LEVEL_MED_PLUS, 'composition(occasion:gift)'),
     ],
   },
 ];

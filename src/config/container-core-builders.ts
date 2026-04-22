@@ -266,10 +266,17 @@ export function buildRanker(
   config: Config,
   support?: RuntimeSupportServices,
 ): Ranker {
+  const ltrEffective = support?.runtimeReadiness.ltrModels.effective;
   if (support?.ltrModels === undefined) {
-    bootstrapLogger.warn('[Ranker] ltrModels not configured — LTR reranking disabled for all query classes');
+    bootstrapLogger.warn(
+      { ltrEffective },
+      '[Ranker] ltrModels not configured — LTR reranking disabled for all query classes',
+    );
   } else if (support.ltrModels.size === 0) {
-    bootstrapLogger.warn('[Ranker] ltrModels is an empty Map — LTR reranking will be skipped for all query classes');
+    bootstrapLogger.warn(
+      { ltrEffective },
+      '[Ranker] ltrModels is an empty Map — LTR reranking will be skipped for all query classes',
+    );
   }
 
   return new Ranker(

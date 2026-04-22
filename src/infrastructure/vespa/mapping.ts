@@ -278,7 +278,7 @@ function getOptionalRatingDistribution(
   return distribution;
 }
 
-type RetrievalSummaryFieldKind = 'string' | 'number' | 'string_array';
+type RetrievalSummaryFieldKind = 'string' | 'number' | 'string_array' | 'boolean';
 type VespaRetrievalSummaryFieldSpec = {
   readonly vespaField: string;
   readonly kind: RetrievalSummaryFieldKind;
@@ -305,6 +305,8 @@ const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   wineType: { vespaField: 'wine_type', kind: 'string' },
   criticScoreNormalized: { vespaField: 'critic_score_normalized', kind: 'number' },
   producerPrestige: { vespaField: 'producer_prestige', kind: 'number' },
+  popularityScore: { vespaField: 'popularity_score', kind: 'number' },
+  availability: { vespaField: 'availability', kind: 'boolean' },
   country: { vespaField: 'country', kind: 'string' },
   appellation: { vespaField: 'appellation', kind: 'string' },
   classification: { vespaField: 'classification', kind: 'string' },
@@ -350,6 +352,10 @@ function readRawVespaRetrievalSummaryField(
       return getOptionalNumberStrict(fields, spec.vespaField);
     case 'string_array':
       return getOptionalStringArrayStrict(fields, spec.vespaField);
+    case 'boolean':
+      return typeof fields[spec.vespaField] === 'boolean'
+        ? fields[spec.vespaField] as boolean
+        : undefined;
   }
 }
 

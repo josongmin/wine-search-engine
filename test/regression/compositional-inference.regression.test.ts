@@ -79,4 +79,46 @@ describe('RFC-019 regression: compositional inference', () => {
     expect(result.hard).toBe(b.hard);
     expect(result.soft).toBe(b.soft);
   });
+
+  it('infers beginner suitability from approachable style priors', () => {
+    const b = bundle([
+      {
+        attribute: 'style',
+        operator: 'in',
+        value: ['approachable'],
+        source_phrase: 'test(style=approachable)',
+        confidence: 0.95,
+        mapping_version: 'test',
+      },
+    ]);
+    const result = applyCompositionalInference(b);
+    expect(result.inferred).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute: 'beginner_suitability',
+        operator: '>=',
+        value: 0.65,
+      }),
+    ]));
+  });
+
+  it('infers gift suitability from gift occasion priors', () => {
+    const b = bundle([
+      {
+        attribute: 'occasion',
+        operator: 'in',
+        value: ['gift'],
+        source_phrase: 'test(occasion=gift)',
+        confidence: 0.95,
+        mapping_version: 'test',
+      },
+    ]);
+    const result = applyCompositionalInference(b);
+    expect(result.inferred).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute: 'gift_suitability',
+        operator: '>=',
+        value: 0.65,
+      }),
+    ]));
+  });
 });

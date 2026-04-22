@@ -59,11 +59,79 @@ export type AttackType =
   | 'output_hijack';
 
 export type Severity = 'critical' | 'major' | 'minor';
+export type ExactLookupMatchPolicy =
+  | 'exact_entity'
+  | 'must_not_exact_match'
+  | 'must_not_return_guarded_entity'
+  | 'optional_alias_or_fail_closed';
+export type ExactLookupPhenomenon =
+  | 'canonical-ko'
+  | 'space-collapse'
+  | 'space-insertion'
+  | 'transliteration-variant'
+  | 'common-korean-variant'
+  | 'truncated-popular-name'
+  | 'headless-brand'
+  | 'suffix-noise'
+  | 'vintage-noise'
+  | 'type-noise'
+  | 'region-noise'
+  | 'country-noise'
+  | 'grape-noise'
+  | 'style-noise'
+  | 'brand-parent-noise'
+  | 'spacing-variant'
+  | 'brand-shortening'
+  | 'size-noise'
+  | 'token-order-variant'
+  | 'final-vowel-variation'
+  | 'brand-family-ambiguous'
+  | 'category-not-entity'
+  | 'region-only'
+  | 'grape-style-not-entity'
+  | 'comparative-phrase'
+  | 'style-not-entity'
+  | 'recommendation-like'
+  | 'malformed-near-match'
+  | 'far-variant'
+  | 'strict-fail-closed'
+  | 'garbled-transliteration'
+  | 'comparison-like'
+  | 'descriptive-category'
+  | 'object-type-mismatch'
+  | 'wrong-brand-nearby'
+  | 'underspecified'
+  | 'alias';
 
 export interface ExpectedToolCall {
   readonly tool: string;
   /** If set, the tool's input must include each substring (case-insensitive). */
   readonly inputContains?: readonly string[];
+}
+
+export interface ExactLookupExpectation {
+  readonly locale: 'ko-KR';
+  readonly domain: 'wine';
+  /**
+   * Stable product-level entity id when the corpus exposes one.
+   * Optional because some current live snapshots only expose vintage/SKU labels
+   * but not a stable family-level exact entity id for bare label lookups.
+   */
+  readonly expectedEntityId?: string | null;
+  readonly canonicalKo?: string;
+  readonly canonicalEn?: string;
+  /**
+   * Explicit accepted aliases for exact lookup evaluation.
+   * This keeps the benchmark contract-driven instead of relying on scorer-side guesses.
+   */
+  readonly acceptedCanonicalAliases?: readonly string[];
+  readonly matchPolicy: ExactLookupMatchPolicy;
+  readonly allowAliasMatch?: boolean;
+  readonly allowSpaceNormalization?: boolean;
+  readonly allowVariantTransliteration?: boolean;
+  readonly mustNotReturnEntityIds?: readonly string[];
+  readonly mustNotReturnCanonicalAliases?: readonly string[];
+  readonly phenomena: readonly ExactLookupPhenomenon[];
 }
 
 /**
@@ -203,6 +271,17 @@ export interface ScenarioExpectation {
    * evidence-preserving abstention as a retrieval mismatch.
    */
   readonly allowHonestNoEvidenceAbstention?: boolean;
+  /**
+   * Exact entity-resolution contract for transliterated wine-name lookup.
+   *
+   * Use this for Korean exact lookup scenarios where success means:
+   *   - resolve to the intended wine entity / canonical label, OR
+   *   - fail closed honestly when the input is ambiguous / unsupported.
+   *
+   * Unlike expectedEntities (ELA), this measures final wine-label resolution,
+   * not mention extraction from the raw query.
+   */
+  readonly exactLookup?: ExactLookupExpectation;
 
   // ─────────────────────────────────────────────────────────────────────
   // RFC-020: Constraint extraction ground truth

@@ -5,6 +5,7 @@ import { buildWatchlistContainerServices } from './container-watchlist.js';
 import { buildLearningContainerServices } from './container-learning.js';
 import type { LearningContainerServices } from './container-learning.js';
 import type { RuntimeHandles } from './runtime-handles.js';
+import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
 import type { DrinkingWindowUseCasePort } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
@@ -67,6 +68,7 @@ export interface Container extends LearningContainerServices {
   /** True when Postgres feedback store is wired and learning kill-switch is off. */
   readonly feedbackIngestEnabled: boolean;
   readonly calibrationStore: CalibrationStore;
+  readonly runtimeReadiness: RuntimeReadinessSnapshot;
   /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort available. */
   readonly agentOrchestrator?: AgentOrchestrator | undefined;
 }
@@ -106,6 +108,7 @@ export async function createContainer(
     ...features,
     drinkingWindowPredictor: core.drinkingWindowPredictor,
     calibrationStore: core.calibrationStore,
+    runtimeReadiness: core.runtimeReadiness,
     ...watchlist,
     ...(config.agent.enabled && core.chatLlm !== undefined
       ? /* agent orchestrator wired */ {

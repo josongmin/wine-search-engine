@@ -102,6 +102,60 @@ describe('buildHealthRouteOptions', () => {
     globalSilentSkipCounter.reset();
   });
 
+  it('surfaces the effective serving LTR model state instead of only probing artifact readability', async () => {
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    const health = buildHealthRouteOptions(
+      config,
+      {},
+      undefined,
+      undefined,
+      undefined,
+      {
+        drinkingWindowPredictor: {
+          configured: true,
+          loaded: true,
+          modelVersion: 'deterministic:structural-slot-v2',
+        },
+        runtimeLtrArtifact: {
+          configured: false,
+          loaded: false,
+          issue: 'unconfigured',
+        },
+        ltrModels: {
+          registry: {
+            configured: true,
+            loaded: false,
+            searchSnapshotId: 'search-snapshot:v1:active',
+            issue: 'empty_registry',
+          },
+          artifact: {
+            configured: false,
+            loaded: false,
+            selected: false,
+            issue: 'unconfigured',
+          },
+          effective: {
+            source: 'none',
+            loaded: false,
+            required: true,
+            modelCount: 0,
+            issue: 'empty_registry',
+          },
+        },
+        benchmarkPersistence: {
+          configured: false,
+          available: false,
+          issue: 'unconfigured',
+        },
+      },
+    );
+
+    expect(health.readiness?.runtime_ltr_effective).toBeDefined();
+    expect(health.readiness?.runtime_ltr_effective?.required).toBe(true);
+    await expect(health.readiness?.runtime_ltr_effective?.check?.()).resolves.toBe('down');
+  });
+
   it('scopes blocker zero-candidate readiness to events after route construction', () => {
     globalSilentSkipCounter.reset();
     globalSilentSkipCounter.increment('blocker_zero_candidates');

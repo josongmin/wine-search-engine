@@ -122,6 +122,10 @@ export interface HybridCandidate {
 
   /** Producer prestige from the search index (browse / rerank signal). */
   readonly producerPrestige?: number | undefined;
+  /** Catalog popularity / recognizability score in [0,1]. */
+  readonly popularityScore?: number | undefined;
+  /** Current catalog availability flag when propagated from retrieval summaries. */
+  readonly availability?: boolean | undefined;
 
   /** Country of origin (e.g. "France"). */
   readonly country?: string | undefined;

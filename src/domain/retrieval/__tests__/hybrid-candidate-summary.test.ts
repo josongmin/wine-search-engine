@@ -65,6 +65,8 @@ describe('hybrid candidate summary helpers', () => {
       wineType: 'red',
       criticScoreNormalized: 0.95,
       producerPrestige: 0.88,
+      popularityScore: 0.91,
+      availability: true,
       country: 'Italy',
       appellation: 'Barolo',
       classification: 'DOCG',

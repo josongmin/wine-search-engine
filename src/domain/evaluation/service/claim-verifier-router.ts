@@ -14,7 +14,7 @@
  */
 
 import type { ChatLlmPort } from '../../../domain/ai/port/chat-llm.port.js';
-import type { ExtractedClaim, ClaimVerification } from '../model/claim.js';
+import type { ExtractedClaim, ClaimVerification, FieldAnchor, WineField } from '../model/claim.js';
 import { VERIFIER_ROUTING } from '../model/claim.js';
 import { verifyDeterministic } from './claim-verifier-deterministic.js';
 import type { EvidenceRecord } from './claim-verifier-deterministic.js';
@@ -97,10 +97,15 @@ export async function routeAndVerify(
 
   if (allSemanticClaims.length > 0 && llm !== null) {
     const semanticResults = await verifySemanticBatch(llm, allSemanticClaims, evidenceContext);
+    const semanticClaimsById = new Map(allSemanticClaims.map((claim) => [claim.id, claim]));
     for (const result of semanticResults) {
       const isHybridFallback = hybridFallbackIds.has(result.claimId);
+      const claim = semanticClaimsById.get(result.claimId);
+      const anchoredResult = claim === undefined
+        ? result
+        : attachSemanticEvidenceAnchor(result, claim, evidenceRecords);
       resultMap.set(result.claimId, {
-        ...result,
+        ...anchoredResult,
         verifierUsed: isHybridFallback ? 'hybrid' : 'llm_semantic',
       });
     }
@@ -136,4 +141,98 @@ export async function routeAndVerify(
       explanation: 'claim not routed (internal error)',
     };
   });
+}
+
+const SEMANTIC_ANCHOR_FIELDS: readonly WineField[] = [
+  'profile_evidence',
+  'claimable_attributes',
+  'pairing_tags',
+  'occasion',
+  'style',
+  'sweetness',
+  'acidity',
+  'tannin',
+  'body',
+  'wine_type',
+];
+
+function attachSemanticEvidenceAnchor(
+  verification: ClaimVerification,
+  claim: ExtractedClaim,
+  evidenceRecords: readonly EvidenceRecord[],
+): ClaimVerification {
+  if (
+    verification.evidenceAnchor !== undefined
+    || verification.status !== 'ok'
+    || (verification.verdict !== 'entailed' && verification.verdict !== 'partially_entailed')
+  ) {
+    return verification;
+  }
+
+  const anchor = findSemanticEvidenceAnchor(claim, evidenceRecords);
+  return anchor === undefined ? verification : { ...verification, evidenceAnchor: anchor };
+}
+
+function findSemanticEvidenceAnchor(
+  claim: ExtractedClaim,
+  evidenceRecords: readonly EvidenceRecord[],
+): FieldAnchor | undefined {
+  for (const field of SEMANTIC_ANCHOR_FIELDS) {
+    for (const evidence of evidenceRecords) {
+      const value = evidence[field];
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const renderedValue = Array.isArray(value) ? value.join(', ') : String(value);
+      if (renderedValue.trim().length === 0) {
+        continue;
+      }
+      return {
+        wineId: semanticAnchorWineId(evidence),
+        field,
+        value: renderedValue,
+        source: semanticAnchorSource(evidence),
+      };
+    }
+  }
+
+  const rawEvidence = evidenceRecords.find((evidence) =>
+    typeof evidence['__raw__'] === 'string' && evidence['__raw__'].trim().length > 0);
+  if (rawEvidence !== undefined && typeof rawEvidence['__raw__'] === 'string') {
+    return {
+      wineId: semanticAnchorWineId(rawEvidence),
+      field: claim.field,
+      value: rawEvidence['__raw__'].slice(0, 500),
+      source: semanticAnchorSource(rawEvidence),
+    };
+  }
+
+  return undefined;
+}
+
+function semanticAnchorWineId(evidence: EvidenceRecord): string {
+  const entityId = evidence['entity_id'];
+  if (typeof entityId === 'string' && entityId.trim().length > 0) {
+    return entityId;
+  }
+  const label = evidence['canonical_label'];
+  if (typeof label === 'string' && label.trim().length > 0) {
+    return label;
+  }
+  return 'semantic-evidence';
+}
+
+function semanticAnchorSource(evidence: EvidenceRecord): FieldAnchor['source'] {
+  const toolName = evidence['__source_tool_name'];
+  const stepIndex = evidence['__source_step_index'];
+  if (typeof toolName === 'string' && toolName.trim().length > 0) {
+    return {
+      type: 'tool_observation',
+      stepIndex: typeof stepIndex === 'number' && Number.isInteger(stepIndex) && stepIndex >= 0
+        ? stepIndex
+        : 0,
+      toolName,
+    };
+  }
+  return { type: 'tool_observation', stepIndex: 0, toolName: 'search_wines' };
 }

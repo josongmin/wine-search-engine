@@ -25,6 +25,7 @@ import {
   buildFoodPairingFieldShape,
   buildSearchToolQueryField,
   buildSearchToolFieldShape,
+  SEARCH_TOOL_MAX_STYLES,
   sanitizeOptionalToolNulls,
   validateSearchToolVintageRange,
 } from '../search/search-tool-contract.js';
@@ -37,7 +38,11 @@ import {
   appendStructuredQueryClauses,
   buildSearchToolSoftClauses,
 } from '../search/search-tool-query-policy.js';
-import { buildSearchToolRetrievalCoreQuery } from '../search/search-tool-retrieval-core.js';
+import {
+  buildSearchToolRetrievalCoreQuery,
+  shouldPreferTypedStructuredQuery,
+  shouldPreserveRepresentativeAnchorOnlyQuery,
+} from '../search/search-tool-retrieval-core.js';
 import {
   buildCompareBaseRetrievalQueries,
   stripSideSpecificCompareSharedConstraints,
@@ -68,6 +73,12 @@ import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { CorpusCardinalityCache } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
+import type {
+  RecipientProfileEvidenceAxis,
+  RecipientProfileValue,
+} from '../../domain/query/service/recipient-situation-profile.js';
+import { recipientProfileEvidenceAxes } from '../../domain/query/service/recipient-situation-profile.js';
+import { CURATED_ENTITY_ALIAS_CATALOG } from '../../domain/attribute/service/entity-alias-catalog.js';
 import {
   SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
   SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
@@ -101,6 +112,50 @@ const AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX = 3;
  * ~2000 chars ≈ 500 tokens (at 4 chars/token) — enough for 5 wine summaries. */
 const MAX_OBSERVATION_CHARS = 2_000;
 const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
+const PARENTS_FIRST_TIME_PORTFOLIO_SLOTS: readonly RecipientProfilePortfolioSlot[] = [
+  { id: 'sweet_light', requiredAxes: ['sweet_light'], excludedAxes: ['light_rose', 'low_tannin_red'] },
+  { id: 'light_rose', requiredAxes: ['light_rose'] },
+  { id: 'low_tannin_red', requiredAxes: ['low_tannin_red'] },
+];
+const EXACT_LOOKUP_OPTIONAL_VINTAGE_RE = /(?:19|20)\d{2}$/u;
+const EXACT_LOOKUP_CHATEAU_PREFIX_RE = /^chateau/u;
+const NON_EXACT_LOOKUP_INTENT_RE =
+  /(?:같은\s*와인|대체|스타일|느낌|비교|(?:급)(?=$|[^\p{L}\p{N}])|명작|명품|와인\s*추천|추천(?!\s*(?:해줘|해주세요|해\s*줘)))/u;
+const NON_EXACT_LOOKUP_SURFACE_CATALOG: readonly {
+  readonly surface: string;
+  readonly reason: string;
+  readonly allowAugmentedQueryPrefix?: true;
+}[] = [
+  { surface: '모엣', reason: 'brand family, not a single cuvee' },
+  { surface: '모엣샹동', reason: 'producer family, not a single cuvee' },
+  { surface: '모엣 샹동', reason: 'producer family, not a single cuvee' },
+  { surface: '모엣 로제', reason: 'brand family and style, not a single cuvee' },
+  { surface: '모엣샹동 로제', reason: 'brand family and style, not a single cuvee' },
+  { surface: '모엣 샴페인', reason: 'producer family and category, not a single cuvee' },
+  { surface: '모엣샹동 샴페인', reason: 'producer family and category, not a single cuvee' },
+  { surface: '모엣 임페리얼', reason: 'producer family plus cuvee family, not the requested exact rose cuvee' },
+  { surface: '모엣샹동 임페리얼', reason: 'producer family plus cuvee family, not the requested exact rose cuvee' },
+  { surface: '모엣 브뤼', reason: 'producer family plus style, not a single confirmed cuvee' },
+  { surface: '샴페인', reason: 'category / region, not a single wine entity' },
+  { surface: '프랑스 샴페인', reason: 'category / region, not a single wine entity' },
+  { surface: '로제 샴페인', reason: 'category / style, not a single wine entity' },
+  { surface: '핑크 샴페인', reason: 'category / style, not a single wine entity' },
+  { surface: '포므롤', reason: 'appellation / region, not a single wine entity' },
+  { surface: '포므롤 와인', reason: 'appellation / region category, not a single wine entity' },
+  { surface: '마고', reason: 'underspecified appellation / estate surface' },
+  { surface: '마고 와인', reason: 'underspecified appellation / estate surface' },
+  { surface: '볼게리', reason: 'region / appellation, not a single wine entity' },
+  { surface: '볼게리 레드', reason: 'region / category, not a single wine entity' },
+  { surface: '수퍼 투스칸', reason: 'style category, not a single wine entity' },
+  { surface: '슈퍼 투스칸', reason: 'style category, not a single wine entity' },
+  { surface: '토스카나 레드', reason: 'region / category, not a single wine entity' },
+  { surface: '메를로 명작', reason: 'descriptive grape category, not a single wine entity', allowAugmentedQueryPrefix: true },
+  { surface: '카베르네 명작', reason: 'descriptive grape category, not a single wine entity', allowAugmentedQueryPrefix: true },
+  { surface: '프랑스 명문 레드', reason: 'descriptive country/category query, not a single wine entity', allowAugmentedQueryPrefix: true },
+  { surface: '이탈리아 명품 레드', reason: 'descriptive country/category query, not a single wine entity', allowAugmentedQueryPrefix: true },
+  { surface: '카베르네 수퍼투스칸', reason: 'descriptive grape/style category, not a single wine entity', allowAugmentedQueryPrefix: true },
+  { surface: '카베르네 슈퍼투스칸', reason: 'descriptive grape/style category, not a single wine entity', allowAugmentedQueryPrefix: true },
+];
 
 function appendObservationNote(obs: string, note: string): string {
   const groundingIndex = obs.lastIndexOf(GROUNDING_JSON_MARKER);
@@ -116,7 +171,25 @@ function appendObservationNote(obs: string, note: string): string {
 // Input schemas (same as tool-schemas.ts — reusing patterns)
 // ---------------------------------------------------------------------------
 
-const SearchInputSchema = z.object({
+function normalizeSingularStyleArrayInput(input: unknown): unknown {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    return input;
+  }
+  const record = input as Record<string, unknown>;
+  if (!Array.isArray(record['style'])) {
+    return input;
+  }
+  const styleValues = record['style'].filter((value): value is string =>
+    typeof value === 'string' && value.trim().length > 0);
+  const existingStyles = Array.isArray(record['styles'])
+    ? record['styles'].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const mergedStyles = [...styleValues, ...existingStyles].slice(0, SEARCH_TOOL_MAX_STYLES);
+  const { style: _style, ...rest } = record;
+  return mergedStyles.length > 0 ? { ...rest, styles: mergedStyles } : rest;
+}
+
+const SearchInputObjectSchema = z.object({
   query: buildSearchToolQueryField({ maxLen: SEARCH_QUERY_MAX_LEN }),
   ...buildSearchToolFieldShape({
     limitMax: SEARCH_LIMIT_MAX,
@@ -126,7 +199,9 @@ const SearchInputSchema = z.object({
   validateSearchToolVintageRange(data, ctx);
 });
 
-const CompareInputSchema = z.object({
+const SearchInputSchema = z.preprocess(normalizeSingularStyleArrayInput, SearchInputObjectSchema);
+
+const CompareInputObjectSchema = z.object({
   query_a: buildSearchToolQueryField({
     maxLen: SEARCH_QUERY_MAX_LEN,
     requiredMessage: 'Query A must not be empty',
@@ -177,6 +252,8 @@ const CompareInputSchema = z.object({
     });
   }
 });
+
+const CompareInputSchema = z.preprocess(normalizeSingularStyleArrayInput, CompareInputObjectSchema);
 
 /** Max length for entity_id to prevent unbounded strings reaching Vespa GET / NL parser.
  * Vespa document IDs are typically ≤200 chars; 500 is a conservative upper bound. */
@@ -394,6 +471,13 @@ interface StructuredSearchConstraintInput {
   readonly gift_suitability_min?: number | undefined;
   readonly beginner_suitability_min?: number | undefined;
   readonly producer_prestige_min?: number | undefined;
+  readonly popularity_min?: number | undefined;
+  readonly recipient_profile?: RecipientProfileValue | undefined;
+  readonly sweetness_min?: number | undefined;
+  readonly sweetness_max?: number | undefined;
+  readonly acidity_min?: number | undefined;
+  readonly acidity_max?: number | undefined;
+  readonly tannin_max?: number | undefined;
   readonly drinking_window?: 'now' | undefined;
   readonly drinking_window_target_year?: number | undefined;
 }
@@ -483,7 +567,9 @@ function buildStructuredQuery(
   },
 ): string {
   const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
-  const clauses = buildSearchToolSoftClauses(input);
+  const clauses = shouldPreferTypedStructuredQuery(input) || shouldPreserveRepresentativeAnchorOnlyQuery(input)
+    ? []
+    : buildSearchToolSoftClauses(input);
   return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
 }
 
@@ -724,6 +810,22 @@ function compactGroundingJsonForObservationCap(
         : {}),
       ...(typeof wine['style'] === 'string' ? { style: wine['style'] } : {}),
       ...(typeof wine['sweetness'] === 'number' ? { sweetness: wine['sweetness'] } : {}),
+      ...(typeof wine['recipient_profile'] === 'string' ? { recipient_profile: wine['recipient_profile'] } : {}),
+      ...(Array.isArray(wine['profile_evidence'])
+        ? { profile_evidence: wine['profile_evidence'].filter((axis): axis is string => typeof axis === 'string') }
+        : {}),
+      ...(Array.isArray(wine['matched_constraints'])
+        ? { matched_constraints: wine['matched_constraints'].filter((attribute): attribute is string => typeof attribute === 'string') }
+        : {}),
+      ...(Array.isArray(wine['unmet_constraints'])
+        ? { unmet_constraints: wine['unmet_constraints'].filter((attribute): attribute is string => typeof attribute === 'string') }
+        : {}),
+      ...(Array.isArray(wine['inferred_constraints'])
+        ? { inferred_constraints: wine['inferred_constraints'].filter((attribute): attribute is string => typeof attribute === 'string') }
+        : {}),
+      ...(Array.isArray(wine['claimable_attributes'])
+        ? { claimable_attributes: wine['claimable_attributes'].filter((attribute): attribute is string => typeof attribute === 'string') }
+        : {}),
       ...(typeof wine['alcohol_pct'] === 'number' ? { alcohol_pct: wine['alcohol_pct'] } : {}),
       ...(typeof wine['price_usd'] === 'number' ? { price_usd: wine['price_usd'] } : {}),
       ...(typeof wine['price'] === 'string' ? { price: wine['price'] } : {}),
@@ -765,16 +867,49 @@ function compactGroundingJsonForObservationCap(
         : {}),
     }));
 
+  const wineProjectionTiers = [
+    compactWines,
+    compactWines.map((wine) => ({
+      ...wine,
+      ...(Array.isArray(wine.claimable_attributes)
+        ? {
+            claimable_attributes: wine.claimable_attributes
+              .filter((attribute) =>
+                attribute.startsWith('profile_evidence:')
+                || attribute.startsWith('matched_constraint:')
+                || attribute === 'recipient_profile')
+              .slice(0, 8),
+          }
+        : {}),
+    })),
+    compactWines.map(({ claimable_attributes: _claimableAttributes, ...wine }) => wine),
+    compactWines.map((wine) => ({
+      ...(wine.entity_id !== undefined ? { entity_id: wine.entity_id } : {}),
+      ...(wine.canonical_label !== undefined ? { canonical_label: wine.canonical_label } : {}),
+      ...(wine.wine_type !== undefined ? { wine_type: wine.wine_type } : {}),
+      ...(wine.grapes !== undefined ? { grapes: wine.grapes } : {}),
+      ...(wine.style !== undefined ? { style: wine.style } : {}),
+      ...(wine.sweetness !== undefined ? { sweetness: wine.sweetness } : {}),
+      ...(wine.recipient_profile !== undefined ? { recipient_profile: wine.recipient_profile } : {}),
+      ...(wine.profile_evidence !== undefined ? { profile_evidence: wine.profile_evidence } : {}),
+      ...(wine.matched_constraints !== undefined ? { matched_constraints: wine.matched_constraints } : {}),
+      ...(wine.price !== undefined ? { price: wine.price } : {}),
+      ...(wine.price_krw_approx !== undefined ? { price_krw_approx: wine.price_krw_approx } : {}),
+    })),
+  ];
+
   for (let count = compactWines.length; count >= 1; count -= 1) {
-    const candidate = `${GROUNDING_JSON_MARKER}${JSON.stringify({
-      query_type: source['query_type'],
-      total_results: source['total_results'],
-      wines: compactWines.slice(0, count),
-      ...(compactComparisonLegs.length > 0 ? { comparison_legs: compactComparisonLegs } : {}),
-      truncated_for_observation_cap: count < compactWines.length,
-    })}`;
-    if (candidate.length <= maxChars) {
-      return candidate;
+    for (const projectedWines of wineProjectionTiers) {
+      const candidate = `${GROUNDING_JSON_MARKER}${JSON.stringify({
+        query_type: source['query_type'],
+        total_results: source['total_results'],
+        wines: projectedWines.slice(0, count),
+        ...(compactComparisonLegs.length > 0 ? { comparison_legs: compactComparisonLegs } : {}),
+        truncated_for_observation_cap: count < compactWines.length || projectedWines !== compactWines,
+      })}`;
+      if (candidate.length <= maxChars) {
+        return candidate;
+      }
     }
   }
 
@@ -1173,7 +1308,9 @@ async function executeAgentToolInner(
       // clauses (exclusions, price) are never silently truncated mid-token.
       // Slicing the enriched string after appending can cut e.g. "not Cabern"
       // (malformed exclusion) — truncating base-first guarantees clauses intact.
-      const clauses = buildSearchToolSoftClauses(parsed);
+      const clauses = shouldPreferTypedStructuredQuery(parsed) || shouldPreserveRepresentativeAnchorOnlyQuery(parsed)
+        ? []
+        : buildSearchToolSoftClauses(parsed);
       const clausesStr = clauses.length > 0 ? `, ${clauses.join(', ')}` : '';
       // Truncate BASE query so that the full enriched string never exceeds the limit.
       // `Math.max(0, ...)` prevents negative slice when clauses alone exceed the limit;
@@ -1256,7 +1393,11 @@ async function executeAgentToolInner(
                 `[NEGATION_FALLBACK: All ${response.results.length} result(s) matched excluded terms (${negTerms.join(', ')}). `
                 + `Showing unfiltered results — YOU MUST skip any wine whose grape/region matches the excluded terms and recommend only the non-matching ones. `
                 + `If all wines match, tell the user and suggest broadening.]\n`
-                + summarizeSearchResults(response, wantsDiversity),
+                + summarizeSearchResults(response, wantsDiversity, {
+                  requestedQuery: parsed.query,
+                  requestedRetrievalMode: parsed.retrieval_mode,
+                  requestedRecipientProfile: parsed.recipient_profile,
+                }),
               rawResult: response,
               structuredOutput: {
                 kind: 'search_result_set',
@@ -1268,7 +1409,11 @@ async function executeAgentToolInner(
           response = negationFiltered.response;
           return {
             observation: appendObservationNote(
-              summarizeSearchResults(response, wantsDiversity),
+              summarizeSearchResults(response, wantsDiversity, {
+                requestedQuery: parsed.query,
+                requestedRetrievalMode: parsed.retrieval_mode,
+                requestedRecipientProfile: parsed.recipient_profile,
+              }),
               `[Excluded ${negationFiltered.filteredCount} result(s) matching negation terms: ${negTerms.join(', ')}]`,
             ),
             rawResult: response,
@@ -1319,7 +1464,11 @@ async function executeAgentToolInner(
 
       // Multi-constraint hint: when 3+ constraint types are detected, remind the
       // agent it can relax constraints if results are insufficient.
-      let obs = summarizeSearchResults(response, wantsDiversity);
+      let obs = summarizeSearchResults(response, wantsDiversity, {
+        requestedQuery: parsed.query,
+        requestedRetrievalMode: parsed.retrieval_mode,
+        requestedRecipientProfile: parsed.recipient_profile,
+      });
       const constraintHints = detectConstraintKeywords(parsed.query);
       if (constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT) {
         obs = appendObservationNote(
@@ -1715,7 +1864,141 @@ function sanitizeObservationField(value: string): string {
     .replace(/[\r\n]+/g, ' ');
 }
 
-function summarizeSearchResults(response: SearchResponseV1, diversify = false): string {
+interface SearchObservationSummaryContext {
+  readonly requestedQuery?: string | undefined;
+  readonly requestedRetrievalMode?: z.infer<typeof SearchInputSchema>['retrieval_mode'] | undefined;
+  readonly requestedRecipientProfile?: RecipientProfileValue | undefined;
+}
+
+function normalizeExactLookupLabel(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .normalize('NFKC')
+    .replace(/&/gu, 'and')
+    .replace(/[^a-z0-9가-힣]+/gu, '');
+}
+
+function buildExactLookupAliasVariants(canonicalValue: string): readonly string[] {
+  const variants = new Set<string>([canonicalValue]);
+  for (const alias of CURATED_ENTITY_ALIAS_CATALOG) {
+    if (
+      alias.mappedAttribute === 'appellation'
+      && alias.resolutionMode === 'direct'
+      && alias.canonicalValue === canonicalValue
+    ) {
+      variants.add(alias.surface);
+    }
+  }
+  return [...variants];
+}
+
+function resolveCuratedExactLookupTarget(query: string | undefined): { readonly canonicalValue: string; readonly acceptedVariants: readonly string[] } | undefined {
+  if (query === undefined) return undefined;
+  const normalizedQuery = normalizeExactLookupLabel(query).replace(EXACT_LOOKUP_OPTIONAL_VINTAGE_RE, '');
+  if (normalizedQuery.length === 0) return undefined;
+
+  const candidates = CURATED_ENTITY_ALIAS_CATALOG
+    .filter((alias) =>
+      alias.mappedAttribute === 'appellation'
+      && alias.resolutionMode === 'direct'
+      && normalizeExactLookupLabel(alias.surface) === normalizedQuery,
+    )
+    .sort((a, b) => b.surface.length - a.surface.length);
+  const target = candidates[0];
+  if (target === undefined) return undefined;
+  return {
+    canonicalValue: target.canonicalValue,
+    acceptedVariants: buildExactLookupAliasVariants(target.canonicalValue),
+  };
+}
+
+function resolveCuratedNonExactLookupPolicy(query: string | undefined): { readonly surface: string; readonly reason: string } | undefined {
+  if (query === undefined) return undefined;
+  const normalizedQuery = normalizeExactLookupLabel(query);
+  const exactSurfacePolicy = NON_EXACT_LOOKUP_SURFACE_CATALOG.find((entry) =>
+    normalizeExactLookupLabel(entry.surface) === normalizedQuery
+    || (
+      entry.allowAugmentedQueryPrefix === true
+      && normalizedQuery.startsWith(normalizeExactLookupLabel(entry.surface))
+    ),
+  );
+  if (exactSurfacePolicy !== undefined) return exactSurfacePolicy;
+
+  if (!NON_EXACT_LOOKUP_INTENT_RE.test(query)) {
+    return undefined;
+  }
+  const embeddedExactAlias = CURATED_ENTITY_ALIAS_CATALOG
+    .filter((alias) =>
+      alias.mappedAttribute === 'appellation'
+      && alias.resolutionMode === 'direct',
+    )
+    .sort((a, b) => b.surface.length - a.surface.length)
+    .find((alias) => {
+      const normalizedAlias = normalizeExactLookupLabel(alias.surface);
+      return normalizedAlias.length > 0 && normalizedQuery.includes(normalizedAlias);
+    });
+  if (embeddedExactAlias === undefined) {
+    return undefined;
+  }
+  return {
+    surface: query.trim(),
+    reason: `non-exact lookup intent around ${embeddedExactAlias.canonicalValue}; not a single confirmed wine entity request`,
+  };
+}
+
+function exactLookupLabelMatchesTarget(label: string, acceptedVariants: readonly string[]): boolean {
+  const normalizedLabel = normalizeExactLookupLabel(label);
+  return acceptedVariants.some((variant) => {
+    const normalizedVariant = normalizeExactLookupLabel(variant);
+    if (normalizedVariant.length === 0) return false;
+    const normalizedVariantWithoutChateau = normalizedVariant.replace(EXACT_LOOKUP_CHATEAU_PREFIX_RE, '');
+    const accepted = new Set([normalizedVariant, normalizedVariantWithoutChateau].filter((value) => value.length > 0));
+    return [...accepted].some((candidate) =>
+      normalizedLabel === candidate
+      || normalizedLabel === `chateau${candidate}`
+      || normalizedLabel.replace(EXACT_LOOKUP_OPTIONAL_VINTAGE_RE, '') === candidate
+      || normalizedLabel.replace(EXACT_LOOKUP_OPTIONAL_VINTAGE_RE, '') === `chateau${candidate}`,
+    );
+  });
+}
+
+function needsResolvedExactLabelContractGuard(
+  response: SearchResponseV1,
+  context: SearchObservationSummaryContext | undefined,
+): { readonly target: string; readonly observedLabels: readonly string[]; readonly nonExactReason?: string | undefined } | undefined {
+  const observedLabels = response.results
+    .map((result) => result.entity.canonicalLabel)
+    .filter((label) => label.trim().length > 0);
+  if (observedLabels.length === 0) return undefined;
+
+  const nonExactPolicy = resolveCuratedNonExactLookupPolicy(context?.requestedQuery);
+  if (nonExactPolicy !== undefined) {
+    return {
+      target: nonExactPolicy.surface,
+      nonExactReason: nonExactPolicy.reason,
+      observedLabels,
+    };
+  }
+
+  if (response.engineDecision.decisionStatus !== 'resolved') return undefined;
+  const target = resolveCuratedExactLookupTarget(context?.requestedQuery);
+  if (target === undefined) return undefined;
+  const hasExactLabelMatch = observedLabels.some((label) =>
+    exactLookupLabelMatchesTarget(label, target.acceptedVariants),
+  );
+  return hasExactLabelMatch
+    ? undefined
+    : { target: target.canonicalValue, observedLabels };
+}
+
+function summarizeSearchResults(
+  response: SearchResponseV1,
+  diversify = false,
+  context?: SearchObservationSummaryContext,
+): string {
   const { results, engineDecision } = response;
   if (results.length === 0) {
     // Differentiate between three failure modes so the LLM can stop retrying
@@ -1757,9 +2040,11 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     );
   }
 
-  const displayResults = diversify
-    ? selectDiverseSummaryResults(results, SUMMARY_TOP_N)
-    : results;
+  const displayResults = context?.requestedRecipientProfile !== undefined
+    ? selectRecipientProfileSummaryResults(results, SUMMARY_TOP_N, context.requestedRecipientProfile)
+    : diversify
+      ? selectDiverseSummaryResults(results, SUMMARY_TOP_N)
+      : results;
 
   const lines = displayResults.slice(0, SUMMARY_TOP_N).map((r, i) => {
     // v5: sanitize all string fields against indirect prompt injection
@@ -1786,6 +2071,16 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     if (r.entity.tannin !== undefined) parts.push(`tannin: ${r.entity.tannin}`);
     if (r.entity.acidity !== undefined) parts.push(`acidity: ${r.entity.acidity}`);
     if (r.entity.sweetness !== undefined) parts.push(`sweetness: ${r.entity.sweetness}`);
+    if (context?.requestedRecipientProfile !== undefined) {
+      const profileEvidenceAxes = recipientProfileEvidenceAxes(
+        resultToRecipientProfileCandidate(r),
+        context.requestedRecipientProfile,
+      );
+      if (profileEvidenceAxes.length > 0) {
+        parts.push(`recipient_profile: ${context.requestedRecipientProfile}`);
+        parts.push(`profile_evidence: ${profileEvidenceAxes.join(', ')}`);
+      }
+    }
     if (r.entity.alcoholPct !== undefined) parts.push(`alc: ${r.entity.alcoholPct}%`);
     if (r.entity.priceRange !== undefined) {
       parts.push(`price: ${buildObservationPriceText(r.entity.priceRange)}`);
@@ -1807,7 +2102,61 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
   });
 
   const summary = `Found ${results.length} results (showing top ${Math.min(SUMMARY_TOP_N, displayResults.length)}):\n${lines.join('\n')}`;
-  return `${summary}\n${buildGroundingJsonFromSearch(response, displayResults)}`;
+  const isEntityResolutionResponse =
+    response.retrievalMode === 'entity_lookup'
+    || response.retrievalMode === 'entity_resolution'
+    || response.resultType === 'single_entity';
+  const resolvedExactLabelContractViolation = needsResolvedExactLabelContractGuard(response, context);
+  const needsExactResolutionGuard =
+    (engineDecision.decisionStatus !== 'resolved' && isEntityResolutionResponse)
+    || resolvedExactLabelContractViolation !== undefined;
+  const resolutionGuard = !needsExactResolutionGuard
+    ? ''
+    : (
+      'EXACT_LOOKUP_NEGATIVE: DO NOT answer with any listed wine label as the exact answer. '
+      + 'Say no single exact wine entity is confirmed by current evidence; ask for a clarifying exact label or constraints.\n'
+      + `RESOLUTION_NOT_CONFIRMED: engine decision is ${engineDecision.decisionStatus}`
+      + ` with next_action=${engineDecision.nextAction}. `
+      + (
+        resolvedExactLabelContractViolation === undefined
+          ? ''
+          : (
+            `Exact-label contract target=${resolvedExactLabelContractViolation.target}`
+            + (
+              resolvedExactLabelContractViolation.nonExactReason === undefined
+                ? ''
+                : `; non_exact_surface_reason=${resolvedExactLabelContractViolation.nonExactReason}. `
+                  + 'This query is a brand/category/region surface, not a confirmed single wine entity. '
+                  + 'For exact-lookup answers, do not name any returned wine label as the answer; ask for clarification or state that the surface is not a single exact entity. '
+                  + 'Never say "candidate", "example", "confirmed one item", "정확한 1종", "후보", "예시", or "확인된 항목" for this query. '
+            )
+            + (
+              resolvedExactLabelContractViolation.nonExactReason === undefined
+                ? `; observed=${resolvedExactLabelContractViolation.observedLabels.slice(0, SUMMARY_TOP_N).join(' | ')}. `
+                : ''
+            )
+          )
+      )
+      + 'Treat listed wines as candidates/evidence only; do not state any candidate as the confirmed exact match. '
+      + 'For exact-entity questions, ask a targeted clarification or explicitly say the exact wine is not confirmed by current evidence.\n'
+    );
+  if (resolvedExactLabelContractViolation?.nonExactReason !== undefined) {
+    return (
+      resolutionGuard
+      + `Exact-lookup negative surface: "${sanitizeObservationField(resolvedExactLabelContractViolation.target)}" is not a single confirmed wine entity. `
+      + 'Returned wine labels are intentionally withheld from this observation so the final answer cannot promote them as exact matches.\n'
+      + `GROUNDING_JSON: ${JSON.stringify({
+        query_type: response.queryType,
+        total_results: response.results.length,
+        wines: [],
+        exact_lookup_negative: {
+          target: resolvedExactLabelContractViolation.target,
+          reason: resolvedExactLabelContractViolation.nonExactReason,
+        },
+      })}`
+    );
+  }
+  return `${resolutionGuard}${summary}\n${buildGroundingJsonFromSearch(response, displayResults, context?.requestedRecipientProfile)}`;
 }
 
 function normalizeDiversityKey(value: string | undefined): string | undefined {
@@ -1883,6 +2232,203 @@ function selectDiverseSummaryResults(
   }
 
   return selected;
+}
+
+function resultToRecipientProfileCandidate(
+  result: SearchResponseV1['results'][number],
+) {
+  return {
+    wineType: result.entity.wineType,
+    style: result.entity.style,
+    grapePrimary: result.entity.grapes?.[0],
+    grapes: result.entity.grapes,
+    region: result.entity.region,
+    occasion: result.entity.occasion,
+    body: result.entity.body,
+    tannin: result.entity.tannin,
+    acidity: result.entity.acidity,
+    sweetness: result.entity.sweetness,
+    producerPrestige: result.entity.producerPrestige,
+    popularityScore: result.match.scoreComponents.popularity,
+  };
+}
+
+interface RecipientProfilePortfolioSlot {
+  readonly id: string;
+  readonly requiredAxes: readonly RecipientProfileEvidenceAxis[];
+  readonly excludedAxes?: readonly RecipientProfileEvidenceAxis[] | undefined;
+}
+
+interface RecipientProfileSelectionCandidate {
+  readonly result: SearchResponseV1['results'][number];
+  readonly index: number;
+  readonly axes: readonly RecipientProfileEvidenceAxis[];
+  readonly portfolioSlotIds: readonly string[];
+}
+
+interface RecipientProfileSelectionObjective {
+  readonly portfolioCoverageCount: number;
+  readonly portfolioCoverageBySlot: readonly boolean[];
+  readonly axisCoverageCount: number;
+  readonly matchedCandidateCount: number;
+  readonly relevanceSum: number;
+  readonly sourceOrderSum: number;
+}
+
+function recipientProfilePortfolioSlots(profile: RecipientProfileValue): readonly RecipientProfilePortfolioSlot[] {
+  switch (profile) {
+    case 'parents_first_time':
+      return PARENTS_FIRST_TIME_PORTFOLIO_SLOTS;
+    default:
+      return [];
+  }
+}
+
+function axesSatisfyPortfolioSlot(
+  axes: readonly RecipientProfileEvidenceAxis[],
+  slot: RecipientProfilePortfolioSlot,
+): boolean {
+  const axisSet = new Set(axes);
+  const hasRequiredAxes = slot.requiredAxes.every((axis) => axisSet.has(axis));
+  if (!hasRequiredAxes) {
+    return false;
+  }
+  return !(slot.excludedAxes ?? []).some((axis) => axisSet.has(axis));
+}
+
+function buildRecipientProfileSelectionCandidate(
+  result: SearchResponseV1['results'][number],
+  index: number,
+  profile: RecipientProfileValue,
+  portfolioSlots: readonly RecipientProfilePortfolioSlot[],
+): RecipientProfileSelectionCandidate {
+  const axes = recipientProfileEvidenceAxes(resultToRecipientProfileCandidate(result), profile);
+  return {
+    result,
+    index,
+    axes,
+    portfolioSlotIds: portfolioSlots
+      .filter((slot) => axesSatisfyPortfolioSlot(axes, slot))
+      .map((slot) => slot.id),
+  };
+}
+
+function evaluateRecipientProfileSelection(
+  candidates: readonly RecipientProfileSelectionCandidate[],
+  portfolioSlots: readonly RecipientProfilePortfolioSlot[],
+): RecipientProfileSelectionObjective {
+  const coveredSlotIds = new Set(candidates.flatMap((candidate) => candidate.portfolioSlotIds));
+  const coveredAxes = new Set(candidates.flatMap((candidate) => candidate.axes));
+  return {
+    portfolioCoverageCount: coveredSlotIds.size,
+    portfolioCoverageBySlot: portfolioSlots.map((slot) => coveredSlotIds.has(slot.id)),
+    axisCoverageCount: coveredAxes.size,
+    matchedCandidateCount: candidates.filter((candidate) => candidate.axes.length > 0).length,
+    relevanceSum: candidates.reduce(
+      (sum, candidate) =>
+        sum + (Number.isFinite(candidate.result.relevanceScore) ? candidate.result.relevanceScore : 0),
+      0,
+    ),
+    sourceOrderSum: candidates.reduce((sum, candidate) => sum + candidate.index, 0),
+  };
+}
+
+function compareRecipientProfileSelectionObjective(
+  left: RecipientProfileSelectionObjective,
+  right: RecipientProfileSelectionObjective,
+): number {
+  if (left.portfolioCoverageCount !== right.portfolioCoverageCount) {
+    return left.portfolioCoverageCount - right.portfolioCoverageCount;
+  }
+  for (let index = 0; index < left.portfolioCoverageBySlot.length; index += 1) {
+    const leftCovered = left.portfolioCoverageBySlot[index] === true;
+    const rightCovered = right.portfolioCoverageBySlot[index] === true;
+    if (leftCovered !== rightCovered) {
+      return leftCovered ? 1 : -1;
+    }
+  }
+  if (left.axisCoverageCount !== right.axisCoverageCount) {
+    return left.axisCoverageCount - right.axisCoverageCount;
+  }
+  if (left.matchedCandidateCount !== right.matchedCandidateCount) {
+    return left.matchedCandidateCount - right.matchedCandidateCount;
+  }
+  if (left.relevanceSum !== right.relevanceSum) {
+    return left.relevanceSum - right.relevanceSum;
+  }
+  return right.sourceOrderSum - left.sourceOrderSum;
+}
+
+function orderRecipientProfileSelection(
+  selection: readonly RecipientProfileSelectionCandidate[],
+  portfolioSlots: readonly RecipientProfilePortfolioSlot[],
+): readonly SearchResponseV1['results'][number][] {
+  const selected = [...selection];
+  const ordered: RecipientProfileSelectionCandidate[] = [];
+  const usedIds = new Set<string>();
+
+  for (const slot of portfolioSlots) {
+    const slotCandidate = selected
+      .filter((candidate) =>
+        !usedIds.has(candidate.result.entity.entityId)
+        && candidate.portfolioSlotIds.includes(slot.id))
+      .sort((left, right) => {
+        const relevanceDelta = right.result.relevanceScore - left.result.relevanceScore;
+        return relevanceDelta !== 0 ? relevanceDelta : left.index - right.index;
+      })[0];
+    if (slotCandidate !== undefined) {
+      ordered.push(slotCandidate);
+      usedIds.add(slotCandidate.result.entity.entityId);
+    }
+  }
+
+  ordered.push(
+    ...selected
+      .filter((candidate) => !usedIds.has(candidate.result.entity.entityId))
+      .sort((left, right) => left.index - right.index),
+  );
+  return ordered.map((candidate) => candidate.result);
+}
+
+function selectRecipientProfileSummaryResults(
+  results: readonly SearchResponseV1['results'][number][],
+  limit: number,
+  profile: RecipientProfileValue,
+): readonly SearchResponseV1['results'][number][] {
+  const selectionSize = Math.min(limit, results.length);
+  if (selectionSize <= 0) {
+    return [];
+  }
+
+  const portfolioSlots = recipientProfilePortfolioSlots(profile);
+  const candidates = results.map((result, index) =>
+    buildRecipientProfileSelectionCandidate(result, index, profile, portfolioSlots));
+  let bestSelection: readonly RecipientProfileSelectionCandidate[] = [];
+  let bestObjective: RecipientProfileSelectionObjective | undefined;
+
+  function visit(startIndex: number, currentSelection: readonly RecipientProfileSelectionCandidate[]): void {
+    if (currentSelection.length === selectionSize) {
+      const objective = evaluateRecipientProfileSelection(currentSelection, portfolioSlots);
+      if (
+        bestObjective === undefined
+        || compareRecipientProfileSelectionObjective(objective, bestObjective) > 0
+      ) {
+        bestObjective = objective;
+        bestSelection = currentSelection;
+      }
+      return;
+    }
+    const remainingSlots = selectionSize - currentSelection.length;
+    for (let index = startIndex; index <= candidates.length - remainingSlots; index += 1) {
+      const candidate = candidates[index];
+      if (candidate !== undefined) {
+        visit(index + 1, [...currentSelection, candidate]);
+      }
+    }
+  }
+
+  visit(0, []);
+  return orderRecipientProfileSelection(bestSelection, portfolioSlots);
 }
 
 function summarizeComparison(response: ComparisonSearchResponse): string {
@@ -1980,6 +2526,12 @@ interface GroundingWineFact {
   readonly sweetness?: number;
   readonly pairing_tags?: readonly string[];
   readonly occasion?: readonly string[];
+  readonly recipient_profile?: RecipientProfileValue;
+  readonly profile_evidence?: readonly string[];
+  readonly matched_constraints?: readonly string[];
+  readonly unmet_constraints?: readonly string[];
+  readonly inferred_constraints?: readonly string[];
+  readonly claimable_attributes?: readonly string[];
   readonly price_usd?: number;
   readonly price?: string;
   readonly price_krw_approx?: number;
@@ -2033,11 +2585,57 @@ function buildObservationPriceText(priceRange: string): string {
   return `${sanitizeObservationField(priceRange)} (~${priceKrwApprox.toLocaleString('ko-KR')}원)`;
 }
 
+function uniqueClaimableAttributes(attributes: readonly string[]): readonly string[] {
+  return [...new Set(attributes.filter((attribute) => attribute.trim().length > 0))];
+}
+
+function buildClaimableAttributes(
+  item: SearchResponseV1['results'][number],
+  profileEvidence: readonly RecipientProfileEvidenceAxis[],
+  priceUsd: number | undefined,
+  priceKrwApprox: number | undefined,
+): readonly string[] {
+  const attributes: string[] = ['canonical_label', 'entity_id'];
+  if (item.entity.producer !== undefined) attributes.push('producer');
+  if (item.entity.region !== undefined) attributes.push('region');
+  if (item.entity.closure !== undefined) attributes.push('closure');
+  if (item.entity.country !== undefined) attributes.push('country');
+  if (item.entity.producerPrestige !== undefined) attributes.push('producer_prestige');
+  if (Number.isFinite(item.match.scoreComponents.popularity)) attributes.push('popularity_score');
+  if (item.entity.wineType !== undefined) attributes.push('wine_type');
+  if (item.entity.vintage !== undefined) attributes.push('vintage');
+  if (item.entity.grapes !== undefined && item.entity.grapes.length > 0) attributes.push('grapes');
+  if (item.entity.style !== undefined) attributes.push('style');
+  if (item.entity.criticScore !== undefined && Number.isFinite(item.entity.criticScore)) attributes.push('critic_score_100');
+  if (item.entity.body !== undefined) attributes.push('body');
+  if (item.entity.tannin !== undefined) attributes.push('tannin');
+  if (item.entity.acidity !== undefined) attributes.push('acidity');
+  if (item.entity.alcoholPct !== undefined) attributes.push('alcohol_pct');
+  if (item.entity.sweetness !== undefined) attributes.push('sweetness');
+  if (item.entity.pairingTags !== undefined && item.entity.pairingTags.length > 0) attributes.push('pairing_tags');
+  if (item.entity.occasion !== undefined && item.entity.occasion.length > 0) attributes.push('occasion');
+  if (profileEvidence.length > 0) {
+    attributes.push('recipient_profile');
+    attributes.push(...profileEvidence.map((axis) => `profile_evidence:${axis}`));
+  }
+  attributes.push(...item.constraints.matched.map((attribute) => `matched_constraint:${attribute}`));
+  attributes.push(...item.constraints.inferred.map((attribute) => `inferred_constraint:${attribute}`));
+  if (priceUsd !== undefined) attributes.push('price_usd');
+  if (item.entity.priceRange !== undefined) attributes.push('price');
+  if (priceKrwApprox !== undefined) attributes.push('price_krw_approx');
+  return uniqueClaimableAttributes(attributes);
+}
+
 function buildGroundingFactFromResultItem(
   item: SearchResponseV1['results'][number],
+  recipientProfile?: RecipientProfileValue | undefined,
 ): GroundingWineFact {
   const priceUsd = parseObservationPriceUsd(item.entity.priceRange);
   const priceKrwApprox = parseObservationPriceKrw(item.entity.priceRange);
+  const profileEvidence = recipientProfile === undefined
+    ? []
+    : recipientProfileEvidenceAxes(resultToRecipientProfileCandidate(item), recipientProfile);
+  const claimableAttributes = buildClaimableAttributes(item, profileEvidence, priceUsd, priceKrwApprox);
   return {
     entity_id: item.entity.entityId,
     canonical_label: sanitizeObservationField(item.entity.canonicalLabel),
@@ -2065,6 +2663,13 @@ function buildGroundingFactFromResultItem(
     ...(item.entity.occasion !== undefined
       ? { occasion: item.entity.occasion.map((tag) => sanitizeObservationField(tag)) }
       : {}),
+    ...(recipientProfile !== undefined && profileEvidence.length > 0
+      ? { recipient_profile: recipientProfile, profile_evidence: profileEvidence }
+      : {}),
+    ...(item.constraints.matched.length > 0 ? { matched_constraints: item.constraints.matched } : {}),
+    ...(item.constraints.unmet.length > 0 ? { unmet_constraints: item.constraints.unmet } : {}),
+    ...(item.constraints.inferred.length > 0 ? { inferred_constraints: item.constraints.inferred } : {}),
+    ...(claimableAttributes.length > 0 ? { claimable_attributes: claimableAttributes } : {}),
     ...(priceUsd !== undefined ? { price_usd: priceUsd } : {}),
     ...(item.entity.priceRange !== undefined ? { price: sanitizeObservationField(item.entity.priceRange) } : {}),
     ...(priceKrwApprox !== undefined ? { price_krw_approx: priceKrwApprox } : {}),
@@ -2074,8 +2679,11 @@ function buildGroundingFactFromResultItem(
 function buildGroundingJsonFromSearch(
   response: SearchResponseV1,
   displayResults: readonly SearchResponseV1['results'][number][],
+  recipientProfile?: RecipientProfileValue | undefined,
 ): string {
-  const facts: GroundingWineFact[] = displayResults.slice(0, SUMMARY_TOP_N).map(buildGroundingFactFromResultItem);
+  const facts: GroundingWineFact[] = displayResults
+    .slice(0, SUMMARY_TOP_N)
+    .map((item) => buildGroundingFactFromResultItem(item, recipientProfile));
 
   return `GROUNDING_JSON: ${JSON.stringify({
     query_type: response.queryType,
@@ -2104,7 +2712,7 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
             entry.conceptAggregate.representativeResult !== null
               ? buildGroundingFactFromResultItem(entry.conceptAggregate.representativeResult)
               : undefined,
-          prototype_axis: entry.conceptAggregate.prototypeAxis.map(buildGroundingFactFromResultItem),
+          prototype_axis: entry.conceptAggregate.prototypeAxis.map((item) => buildGroundingFactFromResultItem(item)),
         }
       : {}),
   }));

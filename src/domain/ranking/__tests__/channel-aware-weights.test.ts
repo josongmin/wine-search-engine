@@ -398,6 +398,26 @@ describe('resolveChannelAwareWeights', () => {
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     });
 
+    it('raises popularity from retrievalObjective accessibility/popularity signal', () => {
+      const base = resolveWeights('semantic_preference');
+      const objective = makeRetrievalObjective([
+        {
+          axis: 'popularity',
+          attribute: 'popularity_score',
+          operator: '>=',
+          value: 0.5,
+          sourcePhrase: '모두가 살 수 있는',
+          confidence: 1,
+          sourceTier: 'soft',
+        },
+      ]);
+
+      const result = applySituationIntentWeightOverlay(base, makeConstraintBundle(), objective);
+
+      expect(result.popularity).toBeGreaterThan(base.popularity);
+      expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    });
+
     it('does not raise giftSuitability when gift_suitability is below minimum threshold', () => {
       const base = resolveWeights('semantic_preference');
       const result = applySituationIntentWeightOverlay(

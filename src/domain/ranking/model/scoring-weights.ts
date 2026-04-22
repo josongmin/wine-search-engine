@@ -258,6 +258,7 @@ export { DEFAULT_WEIGHTS };
 const SITUATION_INTENT_GIFT_WEIGHT_FLOOR = 0.15;
 const SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR = 0.15;
 const SITUATION_INTENT_PRESTIGE_WEIGHT_FLOOR = 0.12;
+const SITUATION_INTENT_POPULARITY_WEIGHT_FLOOR = 0.12;
 const SITUATION_INTENT_FACET_TRIGGER_MIN = 0.5;
 
 function constraintValueMatches(
@@ -454,6 +455,10 @@ export function applySituationIntentWeightOverlay(
     retrievalObjective !== undefined
       ? objectiveValueMatches(retrievalObjective, 'style', 'approachable')
       : constraintValueMatches(constraints, 'style', 'approachable');
+  const hasParentsFirstTimeProfileIntent =
+    retrievalObjective !== undefined
+      ? objectiveValueMatches(retrievalObjective, 'recipient_profile', 'parents_first_time')
+      : constraintValueMatches(constraints, 'recipient_profile', 'parents_first_time');
   const hasBeginnerSuitabilityIntent = retrievalObjective !== undefined
     ? objectiveNumericMeetsMinimum(
       retrievalObjective,
@@ -465,13 +470,25 @@ export function applySituationIntentWeightOverlay(
       'beginner_suitability',
       SITUATION_INTENT_FACET_TRIGGER_MIN,
     );
+  const hasSeniorColleagueGiftProfileIntent =
+    retrievalObjective !== undefined
+      ? objectiveValueMatches(retrievalObjective, 'recipient_profile', 'senior_colleague_gift')
+      : constraintValueMatches(constraints, 'recipient_profile', 'senior_colleague_gift');
+  const hasUnknownPreferenceRecipientProfileIntent =
+    retrievalObjective !== undefined
+      ? objectiveValueMatches(retrievalObjective, 'recipient_profile', 'unknown_preference_recipient')
+      : constraintValueMatches(constraints, 'recipient_profile', 'unknown_preference_recipient');
+  const hasRecipientProfileIntent =
+    hasParentsFirstTimeProfileIntent
+    || hasSeniorColleagueGiftProfileIntent
+    || hasUnknownPreferenceRecipientProfileIntent;
 
-  const resolvedHasGiftIntent = hasGiftIntent || hasGiftSuitabilityIntent;
-  const resolvedHasBeginnerIntent = hasBeginnerIntent || hasBeginnerSuitabilityIntent;
+  const resolvedHasGiftIntent = hasGiftIntent || hasGiftSuitabilityIntent || hasSeniorColleagueGiftProfileIntent;
+  const resolvedHasBeginnerIntent = hasBeginnerIntent || hasBeginnerSuitabilityIntent || hasParentsFirstTimeProfileIntent;
   const hasDrinkabilityIntent = retrievalObjective !== undefined
     ? objectiveHasAxis(retrievalObjective, 'drinking_window')
     : constraintsHaveAttribute(constraints, 'drinking_window');
-  const hasPrestigeIntent = retrievalObjective !== undefined
+  const hasPrestigeIntent = hasSeniorColleagueGiftProfileIntent || (retrievalObjective !== undefined
     ? objectiveNumericMeetsMinimum(
       retrievalObjective,
       'producer_prestige',
@@ -481,9 +498,20 @@ export function applySituationIntentWeightOverlay(
       constraints,
       'producer_prestige',
       SITUATION_INTENT_FACET_TRIGGER_MIN,
-    );
+    ));
+  const hasPopularityIntent = hasUnknownPreferenceRecipientProfileIntent || (retrievalObjective !== undefined
+    ? objectiveNumericMeetsMinimum(
+      retrievalObjective,
+      'popularity_score',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    )
+    : constraintNumericMeetsMinimum(
+      constraints,
+      'popularity_score',
+      SITUATION_INTENT_FACET_TRIGGER_MIN,
+    ));
 
-  if (!resolvedHasGiftIntent && !resolvedHasBeginnerIntent && !hasDrinkabilityIntent && !hasPrestigeIntent) {
+  if (!resolvedHasGiftIntent && !resolvedHasBeginnerIntent && !hasRecipientProfileIntent && !hasDrinkabilityIntent && !hasPrestigeIntent && !hasPopularityIntent) {
     return baseWeights;
   }
 
@@ -493,12 +521,15 @@ export function applySituationIntentWeightOverlay(
   const beginnerSuitability = resolvedHasBeginnerIntent
     ? Math.max(baseWeights.beginnerSuitability, SITUATION_INTENT_BEGINNER_WEIGHT_FLOOR)
     : baseWeights.beginnerSuitability;
-  const softConstraint = hasDrinkabilityIntent
+  const softConstraint = hasDrinkabilityIntent || hasRecipientProfileIntent
     ? Math.max(baseWeights.softConstraint, SITUATION_INTENT_DRINKING_WINDOW_SOFT_WEIGHT_FLOOR)
     : baseWeights.softConstraint;
   const producerPrestige = hasPrestigeIntent
     ? Math.max(baseWeights.producerPrestige, SITUATION_INTENT_PRESTIGE_WEIGHT_FLOOR)
     : baseWeights.producerPrestige;
+  const popularity = hasPopularityIntent
+    ? Math.max(baseWeights.popularity, SITUATION_INTENT_POPULARITY_WEIGHT_FLOOR)
+    : baseWeights.popularity;
 
   const baseNonPenaltySum =
     baseWeights.entityIntegrity +
@@ -523,7 +554,7 @@ export function applySituationIntentWeightOverlay(
     softConstraint +
     baseWeights.attributeAlignment +
     baseWeights.preferenceAlignment +
-    baseWeights.popularity +
+    popularity +
     baseWeights.availability +
     producerPrestige +
     baseWeights.recency +
@@ -542,7 +573,7 @@ export function applySituationIntentWeightOverlay(
     softConstraint: softConstraint * normFactor,
     attributeAlignment: baseWeights.attributeAlignment * normFactor,
     preferenceAlignment: baseWeights.preferenceAlignment * normFactor,
-    popularity: baseWeights.popularity * normFactor,
+    popularity: popularity * normFactor,
     availability: baseWeights.availability * normFactor,
     uncertaintyPenalty: baseWeights.uncertaintyPenalty,
     entityIntegrityThreshold: baseWeights.entityIntegrityThreshold,

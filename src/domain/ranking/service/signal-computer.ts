@@ -405,6 +405,10 @@ export class SignalComputer {
    * @returns Popularity score in [0, 1], intentionally small.
    */
   computePopularity(candidate: HybridCandidate): number | undefined {
+    if (candidate.popularityScore !== undefined) {
+      return clamp01(candidate.popularityScore);
+    }
+
     // Sparse rank serves as a proxy: lower rank = more popular/relevant
     const sparseRank = candidate.sparseRank;
     if (sparseRank === undefined) {
@@ -418,15 +422,18 @@ export class SignalComputer {
   /**
    * Computes availability signal.
    *
-   * Penalizes candidates that are unavailable. Since the current
-   * HybridCandidate model doesn't carry availability data. Preserve
-   * missingness until the infrastructure wires a real availability field.
+   * Penalizes candidates that are unavailable when the retrieval summary
+   * propagated the catalog availability flag. Preserve missingness when
+   * the underlying retrieval path does not expose availability.
    *
-   * @param _candidate - The hybrid candidate to evaluate.
+   * @param candidate - The hybrid candidate to evaluate.
    * @returns Availability score in [0, 1], or undefined when unavailable.
    */
-  computeAvailability(_candidate: HybridCandidate): number | undefined {
-    return undefined;
+  computeAvailability(candidate: HybridCandidate): number | undefined {
+    if (candidate.availability === undefined) {
+      return undefined;
+    }
+    return candidate.availability ? 1 : 0;
   }
 
   /**

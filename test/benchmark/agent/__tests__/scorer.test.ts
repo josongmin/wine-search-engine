@@ -1338,7 +1338,7 @@ describe('RAGAS Context Relevance', () => {
     );
 
     expect(r.scores.contextRelevance).toBe(0);
-    expect(r.scores.contextRecall).toBeCloseTo(0.5, 5);
+    expect(r.scores.contextRecall).toBe(0);
   });
 
   it('vintageRange: passes when observation contains in-range year', () => {
@@ -1468,8 +1468,8 @@ describe('RAGAS Context Relevance', () => {
       undefined,
     );
 
-    expect(r.scores.contextRelevance).toBe(0);
-    expect(r.diagnostics?.some((d) => d.message.includes('expected_entity_appellation_Opus One'))).toBe(true);
+    expect(r.scores.contextRelevance).toBeNull();
+    expect(r.diagnostics?.some((d) => d.message.includes('expected_entity_appellation_Opus One'))).not.toBe(true);
   });
 
   it('uses structured tool input and grounding evidence for context relevance', () => {
@@ -1548,7 +1548,7 @@ describe('RAGAS Context Relevance', () => {
     expect(r.scores.contextRelevance).toBe(0.5);
     const diagnostic = r.diagnostics?.find((d) => d.code === 'CONTEXT_RELEVANCE_LOW');
     expect(diagnostic?.message).toContain('raw_alignment passed 0/1');
-    expect(diagnostic?.message).toContain('structured passed 4/4');
+    expect(diagnostic?.message).toContain('structured passed 5/5');
   });
 
   it('returns null when no structured or expected-entity context signal exists', () => {
@@ -2592,6 +2592,25 @@ describe('scoreConstraintSatisfactionRate', () => {
     expect(result.csrOverall).toBeCloseTo(0.75, 5);
   });
 
+  it('treats GROUNDING_JSON matched_constraints as structured CSR evidence', () => {
+    const bundle: ConstraintBundle = {
+      hard: [],
+      soft: [
+        { attribute: 'style', operator: 'in', value: ['approachable'] },
+        { attribute: 'beginner_suitability', operator: '>=', value: 0.5 },
+      ],
+      inferred: [],
+    };
+    const observations = [
+      'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine-1","canonical_label":"Beginner Wine","matched_constraints":["style","beginner_suitability"]}]}',
+    ];
+
+    const result = scoreConstraintSatisfactionRate(bundle, observations);
+
+    expect(result.csrSoft).toBe(1);
+    expect(result.csrOverall).toBe(1);
+  });
+
   it('inferred constraints contribute to overall with 0.2 weight', () => {
     const bundle: ConstraintBundle = {
       hard: [],
@@ -2791,5 +2810,268 @@ describe('computeJudgeSCRCorrelation', () => {
     // Weak or near-zero correlation — just verify it's between -1 and 1
     expect(result.pearsonR!).toBeGreaterThanOrEqual(-1);
     expect(result.pearsonR!).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('scoreScenario — exact lookup contract', () => {
+  it('records exactLookupHit=1 when the expected canonical wine appears in evidence', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        canonicalKo: '사시까이아',
+        canonicalEn: 'Sassicaia',
+        acceptedCanonicalAliases: ['사시카이아'],
+        matchPolicy: 'exact_entity',
+        allowAliasMatch: true,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: true,
+        phenomena: ['common-korean-variant'],
+      },
+    });
+
+    const execution = makeExecution({
+      observations: [
+        'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.sassicaia","canonical_label":"2019 Tenuta San Guido Sassicaia"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, undefined);
+    expect(result.scores.exactLookupHit).toBe(1);
+    expect(result.scores.answerQuality).toBe(1);
+  });
+
+  it('penalizes exact lookup misses when nearby but wrong canonicals are returned', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        canonicalKo: '사시까이아',
+        canonicalEn: 'Sassicaia',
+        matchPolicy: 'exact_entity',
+        allowAliasMatch: true,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: true,
+        phenomena: ['canonical-ko'],
+      },
+    });
+
+    const execution = makeExecution({
+      observations: [
+        'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.ornellaia","canonical_label":"2019 Ornellaia Bolgheri Superiore"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, undefined);
+    expect(result.scores.exactLookupHit).toBe(0);
+    expect(result.scores.answerQuality).toBeCloseTo(0.35, 5);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_MISS')).toBe(true);
+  });
+
+  it('skips exact lookup miss penalties when the tool explicitly marks exact resolution unconfirmed', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      allowHonestNoEvidenceAbstention: true,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        canonicalKo: '샤또 페트뤼스',
+        canonicalEn: 'Pétrus',
+        acceptedCanonicalAliases: ['Petrus', '페트뤼스'],
+        matchPolicy: 'exact_entity',
+        allowAliasMatch: true,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: true,
+        mustNotReturnCanonicalAliases: ['Pomerol'],
+        phenomena: ['alias'],
+      },
+    });
+
+    const execution = makeExecution({
+      observations: [
+        'RESOLUTION_NOT_CONFIRMED: Exact-label contract target=Pétrus. GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.nearby","canonical_label":"2012 Château Pétrus Saute-Loup Reserve de la Famille Pomerol"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, 1);
+    expect(result.scores.exactLookupHit).toBeNull();
+    expect(result.scores.answerQuality).toBe(1);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_SKIPPED_NO_EVIDENCE_ABSTENTION')).toBe(true);
+  });
+
+  it('records failClosedAccuracy=1 when ambiguous exact lookup returns no exact candidates', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        expectedEntityId: null,
+        canonicalKo: '샤또 마고',
+        canonicalEn: 'Château Margaux',
+        matchPolicy: 'must_not_exact_match',
+        allowAliasMatch: false,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: false,
+        mustNotReturnCanonicalAliases: ['Château Margaux', '샤또 마고'],
+        phenomena: ['underspecified'],
+      },
+    }, { query: '마고' });
+
+    const execution = makeExecution({
+      observations: ['검색 결과가 없습니다'],
+    });
+
+    const result = scoreScenario(scenario, execution, 1);
+    expect(result.scores.failClosedAccuracy).toBe(1);
+    expect(result.scores.answerQuality).toBe(1);
+  });
+
+  it('penalizes fail-closed violations when ambiguous exact lookup returns a specific exact candidate', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        expectedEntityId: null,
+        canonicalKo: '샤또 마고',
+        canonicalEn: 'Château Margaux',
+        matchPolicy: 'must_not_exact_match',
+        allowAliasMatch: false,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: false,
+        mustNotReturnCanonicalAliases: ['Château Margaux', '샤또 마고'],
+        phenomena: ['underspecified'],
+      },
+    }, { query: '마고' });
+
+    const execution = makeExecution({
+      observations: [
+        'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.chateau_margaux","canonical_label":"2018 Château Margaux"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, undefined);
+    expect(result.scores.failClosedAccuracy).toBe(0);
+    expect(result.scores.answerQuality).toBeCloseTo(0.1225, 5);
+    expect(result.diagnostics?.some((d) => d.code === 'FAIL_CLOSED_EXACT_LOOKUP_VIOLATED')).toBe(true);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_FORBIDDEN_MATCH')).toBe(true);
+  });
+
+  it('passes guarded hard negatives when retrieval returns non-guarded category candidates', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        expectedEntityId: null,
+        matchPolicy: 'must_not_return_guarded_entity',
+        allowAliasMatch: false,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: false,
+        mustNotReturnCanonicalAliases: ['Pétrus', 'Château Pétrus', '샤또 페트뤼스'],
+        phenomena: ['descriptive-category'],
+      },
+    }, { query: '메를로 명작' });
+
+    const execution = makeExecution({
+      observations: [
+        'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.columbia_crest_merlot","canonical_label":"2021 Columbia Crest Soft Merlot"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, undefined);
+    expect(result.scores.failClosedAccuracy).toBe(1);
+    expect(result.scores.answerQuality).toBe(1);
+    expect(result.diagnostics?.some((d) => d.code === 'FAIL_CLOSED_EXACT_LOOKUP_VIOLATED')).toBe(false);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_FORBIDDEN_MATCH')).toBe(false);
+  });
+
+  it('penalizes guarded hard negatives when retrieval returns a guarded canonical alias', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        expectedEntityId: null,
+        matchPolicy: 'must_not_return_guarded_entity',
+        allowAliasMatch: false,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: false,
+        mustNotReturnCanonicalAliases: ['Château Margaux', '샤또 마고'],
+        phenomena: ['descriptive-category'],
+      },
+    }, { query: '프랑스 명문 레드' });
+
+    const execution = makeExecution({
+      observations: [
+        'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.chateau_margaux","canonical_label":"Château Margaux 2015"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, undefined);
+    expect(result.scores.failClosedAccuracy).toBe(0);
+    expect(result.scores.answerQuality).toBeCloseTo(0.35, 5);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_FORBIDDEN_MATCH')).toBe(true);
+  });
+
+  it('does not treat generic forbidden aliases as violations inside the expected exact canonical label', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        expectedEntityId: 'wine.chateau_margaux',
+        canonicalKo: '샤또 마고',
+        canonicalEn: 'Chateau Margaux',
+        acceptedCanonicalAliases: ['샤토 마고', 'Château Margaux'],
+        matchPolicy: 'exact_entity',
+        allowAliasMatch: true,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: true,
+        mustNotReturnCanonicalAliases: ['Margaux', '마고'],
+        phenomena: ['region-noise'],
+      },
+    }, { query: '샤토 마고 보르도' });
+
+    const execution = makeExecution({
+      observations: [
+        'GROUNDING_JSON: {"query_type":"search","total_results":1,"wines":[{"entity_id":"wine.chateau_margaux","canonical_label":"2022 Château Margaux Château Margaux (Premier Grand Cru Classé)"}]}',
+      ],
+    });
+
+    const result = scoreScenario(scenario, execution, undefined);
+    expect(result.scores.exactLookupHit).toBe(1);
+    expect(result.scores.answerQuality).toBe(1);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_FORBIDDEN_MATCH')).toBe(false);
+  });
+
+  it('treats optional alias-or-fail-closed as pass when no exact evidence is returned', () => {
+    const scenario = makeScenario({
+      maxSteps: 2,
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        canonicalKo: '샤또 페트뤼스',
+        canonicalEn: 'Pétrus',
+        acceptedCanonicalAliases: ['Petrus', '페트뤼스', '페트루스'],
+        matchPolicy: 'optional_alias_or_fail_closed',
+        allowAliasMatch: true,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: true,
+        phenomena: ['transliteration-variant'],
+      },
+      allowHonestNoEvidenceAbstention: true,
+    }, { query: '페트루스' });
+
+    const execution = makeExecution({
+      observations: ['[retrieval_quality: unreliable — 0 results]'],
+    });
+
+    const result = scoreScenario(scenario, execution, 1);
+    expect(result.scores.exactLookupHit).toBeNull();
+    expect(result.scores.failClosedAccuracy).toBe(1);
+    expect(result.diagnostics?.some((d) => d.code === 'EXACT_LOOKUP_SKIPPED_NO_EVIDENCE_ABSTENTION')).toBe(true);
   });
 });

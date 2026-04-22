@@ -312,6 +312,18 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     );
   });
 
+  it('real NLMapper extracts approachable and beginner constraints for first-time parents query', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('와인 처음 마시는 부모님께 추천할 와인');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'style', value: ['approachable'] }),
+        expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.5 }),
+      ]),
+    );
+  });
+
   it('real NLMapper extracts presentation-forward style for pretty-label gift query', async () => {
     const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
     const result = await compiler.compile('와인 입문자 선물용, 예쁜 라벨이면 좋겠다');

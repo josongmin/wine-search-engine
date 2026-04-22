@@ -19,6 +19,8 @@ import {
   computeCsrInferredGraph,
 } from './graph-coverage-metric.js';
 
+const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
+
 // ─────────────────────────────────────────────────────────────────────────
 // Shared tier weights (Rule 25: single source-of-truth for SCR + CSR)
 // ─────────────────────────────────────────────────────────────────────────
@@ -449,6 +451,86 @@ interface ConstraintSatisfactionScore {
 
 // CSR uses the same tier weights as SCR (TIER_WEIGHT_HARD/SOFT/INFERRED above).
 
+function normalizeEvidenceAttribute(value: string): string {
+  return normalizeComparableString(value);
+}
+
+function extractGroundingJsonObjects(observation: string): readonly Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  let searchFrom = 0;
+  while (searchFrom < observation.length) {
+    const markerIndex = observation.indexOf(GROUNDING_JSON_MARKER, searchFrom);
+    if (markerIndex < 0) break;
+    const jsonStart = observation.indexOf('{', markerIndex + GROUNDING_JSON_MARKER.length);
+    if (jsonStart < 0) break;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let jsonEnd = -1;
+    for (let index = jsonStart; index < observation.length; index += 1) {
+      const ch = observation[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === '{') {
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          jsonEnd = index + 1;
+          break;
+        }
+      }
+    }
+    if (jsonEnd < 0) break;
+    try {
+      const parsed = JSON.parse(observation.slice(jsonStart, jsonEnd)) as unknown;
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        out.push(parsed as Record<string, unknown>);
+      }
+    } catch (err) {
+      void err;
+    }
+    searchFrom = jsonEnd;
+  }
+  return out;
+}
+
+function groundingJsonEvidencesConstraint(
+  constraint: NormalizedConstraint,
+  observations: readonly string[],
+): boolean {
+  const expected = normalizeEvidenceAttribute(constraint.attribute);
+  for (const observation of observations) {
+    for (const payload of extractGroundingJsonObjects(observation)) {
+      const wines = Array.isArray(payload['wines']) ? payload['wines'] : [];
+      for (const wine of wines) {
+        if (wine === null || typeof wine !== 'object' || Array.isArray(wine)) continue;
+        const matched = (wine as Record<string, unknown>)['matched_constraints'];
+        if (!Array.isArray(matched)) continue;
+        if (matched.some((attribute) =>
+          typeof attribute === 'string' && normalizeEvidenceAttribute(attribute) === expected,
+        )) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Check whether a single constraint is evidenced by any observation text.
  *
@@ -458,6 +540,10 @@ interface ConstraintSatisfactionScore {
  * - Array value → every element must be evidenced.
  */
 function constraintEvidenced(constraint: NormalizedConstraint, observations: readonly string[]): boolean {
+  if (groundingJsonEvidencesConstraint(constraint, observations)) {
+    return true;
+  }
+
   const haystack = observations.map((o) => o.normalize('NFKC').toLowerCase()).join('\n');
   const val = constraint.value;
 

@@ -28,6 +28,38 @@ describe('buildSearchToolRetrievalCoreQuery', () => {
     expect(query).toContain('wine');
   });
 
+  it('preserves representative anchors for structured recommendation queries', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: 'Opus One anniversary gift',
+      occasion: ['anniversary'],
+      styles: ['approachable'],
+      max_alcohol_pct: 12,
+    });
+
+    expect(query).toBe('opus one');
+  });
+
+  it('suppresses duplicated structured entity semantics for budgeted region recommendations', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: 'best Bordeaux under 100 dollars',
+      region: 'Bordeaux',
+      max_price_krw: 135_000,
+    });
+
+    expect(query).toBe('wine');
+  });
+
+  it('retains non-duplicative structured type semantics when geography anchors are suppressed', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: '이탈리아 레드 가성비',
+      country: 'Italy',
+      wine_type: 'red',
+      max_price_krw: 50_000,
+    });
+
+    expect(query).toBe('red wine');
+  });
+
   it('keeps Korean food context while adding canonical pairing and type terms', () => {
     const query = buildSearchToolRetrievalCoreQuery({
       query: '메인 소고기용 레드 추천',
@@ -48,5 +80,27 @@ describe('buildSearchToolRetrievalCoreQuery', () => {
     });
 
     expect(query).toBe('almaviva 2019');
+  });
+
+  it('normalizes canonical exact-entity labels into lexical-safe query terms', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: '모엣샹동 로제 임페리얼',
+    });
+
+    expect(query).toBe('moet chandon rose imperial');
+    expect(query).not.toContain('&');
+  });
+
+  it('does not re-lexicalize cellaring defaults that have no retrieval-side evidence profile', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: '와인',
+      occasion: ['cellaring'],
+      styles: ['ageworthy', 'cellarworthy'],
+    });
+
+    expect(query).toBe('와인');
+    expect(query).not.toContain('cellaring');
+    expect(query).not.toContain('ageworthy');
+    expect(query).not.toContain('cellarworthy');
   });
 });

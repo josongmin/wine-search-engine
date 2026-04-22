@@ -108,8 +108,32 @@ describe('executeAgentTool', () => {
     );
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
-    expect(request?.query).toContain('approachable');
-    expect(request?.query).toContain('crowd pleasing');
+    expect(request?.query).not.toContain('approachable');
+    expect(request?.query).not.toContain('crowd pleasing');
+  });
+
+  it('normalizes singular style arrays into structured styles', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '와인 처음 마시는 부모님께 추천할 와인',
+        style: ['slightly sweet', 'fruity', 'gentle acidity'],
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toContain('와인 처음 마시는 부모님께 추천할 와인');
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['slightly sweet'] }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['fruity'] }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['gentle acidity'] }),
+    ]));
   });
 
   it('pushes grape_primary into structured filters and retrieval text for varietal queries', async () => {
@@ -181,7 +205,7 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('do not claim a specific store carries');
   });
 
-  it('does not serialize unsupported presentation_forward style hints into search query text', async () => {
+  it('does not serialize abstract learned styles into search query text', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
     );
@@ -197,7 +221,7 @@ describe('executeAgentTool', () => {
     );
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
-    expect(request?.query).toContain('approachable');
+    expect(request?.query).not.toContain('approachable');
     expect(request?.query).not.toContain('presentation_forward');
     expect(request?.preferences).toEqual(expect.arrayContaining([
       expect.objectContaining({ attribute: 'style', operator: 'in', value: ['presentation_forward'] }),
@@ -247,13 +271,43 @@ describe('executeAgentTool', () => {
     );
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
-    expect(request?.query).toContain('approachable');
+    expect(request?.query).not.toContain('approachable');
     expect(request?.query).toContain('sweet');
     expect(request?.preferences).toEqual(expect.arrayContaining([
       expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
       expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
     ]));
     expect(request?.filters).toBeUndefined();
+  });
+
+  it('compiles typed sensory search preferences without rewriting the lexical anchor', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '와인 처음 마시는 부모님께 추천할 와인',
+        recipient_profile: 'parents_first_time',
+        sweetness_min: 0.2,
+        sweetness_max: 0.75,
+        acidity_max: 0.75,
+        tannin_max: 0.3,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toBe('와인 처음 마시는 부모님께 추천할 와인');
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.2 }),
+      expect.objectContaining({ attribute: 'sweetness', operator: '<=', value: 0.75 }),
+      expect.objectContaining({ attribute: 'acidity', operator: '<=', value: 0.75 }),
+      expect.objectContaining({ attribute: 'tannin', operator: '<=', value: 0.3 }),
+      expect.objectContaining({ attribute: 'recipient_profile', operator: '=', value: 'parents_first_time' }),
+    ]));
   });
 
   it('raises limit to the diversity floor when want_diversity is true', async () => {
@@ -472,8 +526,8 @@ describe('executeAgentTool', () => {
     expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledTimes(3);
     for (const [request] of vi.mocked(mockSearchUseCase.execute).mock.calls) {
       expect(request?.query).toContain('와인 잘 모르는 사람한테 선물할 거');
-      expect(request?.query).toContain('approachable');
-      expect(request?.query).toContain('crowd pleasing');
+      expect(request?.query).not.toContain('approachable');
+      expect(request?.query).not.toContain('crowd pleasing');
       expect(request?.query).toContain('50000원 이하');
     }
   });
@@ -1304,6 +1358,80 @@ describe('executeAgentTool', () => {
     expect(request?.filters).toBeUndefined();
   });
 
+  it('keeps representative anchor queries free of duplicated structured recommendation clauses', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: 'Opus One anniversary gift',
+        occasion: ['anniversary'],
+        styles: ['approachable'],
+        max_price_krw: 50_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toBe('opus one');
+    expect(request?.query).not.toContain('anniversary');
+    expect(request?.query).not.toContain('approachable');
+    expect(request?.query).not.toContain('50000원 이하');
+    expect(request?.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['anniversary'] }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
+    ]));
+    expect(request?.filters).toBeUndefined();
+  });
+
+  it('suppresses duplicated structured entity clauses when typed filters already cover recommendation anchors', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: 'best Bordeaux under 100 dollars',
+        region: 'Bordeaux',
+        max_price_krw: 135_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toBe('wine');
+    expect(request?.query).not.toContain('bordeaux');
+    expect(request?.query).not.toContain('135000원 이하');
+  });
+
+  it('retains wine type semantics when typed geography filters suppress duplicated lexical anchors', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '이탈리아 레드 가성비',
+        country: 'Italy',
+        wine_type: 'red',
+        max_price_krw: 50_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.query).toBe('red wine');
+    expect(request?.query).not.toContain('italy');
+    expect(request?.query).not.toContain('50000원 이하');
+  });
+
   it('forwards drinking-window objective as a structured preference', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
@@ -1560,6 +1688,395 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('"canonical_label":"Wine A"');
     expect(result.observation).toContain('"region":"Bordeaux"');
     expect(result.observation).toContain('"country":"France"');
+  });
+
+  it('selects recipient-profile evidence coverage for first-time parents summaries', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-beaujolais-1',
+            canonicalLabel: 'Beaujolais Village',
+            type: 'wine',
+            region: 'Beaujolais',
+            grapes: ['Gamay'],
+            wineType: 'red',
+            sweetness: 0.02,
+          },
+          relevanceScore: 0.98,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.9, semantic: 0.9, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: ['recipient_profile'], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'wine-beaujolais-2',
+            canonicalLabel: 'Second Gamay',
+            type: 'wine',
+            region: 'Beaujolais',
+            grapes: ['Gamay'],
+            wineType: 'red',
+            sweetness: 0.01,
+          },
+          relevanceScore: 0.97,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.9, semantic: 0.9, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: ['recipient_profile'], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'wine-napa-red',
+            canonicalLabel: 'Napa Cabernet',
+            type: 'wine',
+            region: 'Napa Valley',
+            grapes: ['Cabernet Sauvignon'],
+            wineType: 'red',
+            tannin: 0.8,
+            sweetness: 0.01,
+          },
+          relevanceScore: 0.96,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.9, semantic: 0.9, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'wine-light-rose',
+            canonicalLabel: 'Gentle Light Rose',
+            type: 'wine',
+            grapes: ['Grenache'],
+            wineType: 'rosé',
+            style: 'light rosé',
+            tannin: 0.1,
+            body: 0.3,
+            sweetness: 0.25,
+          },
+          relevanceScore: 0.68,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.6, semantic: 0.6, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: ['recipient_profile'], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'wine-moscato',
+            canonicalLabel: 'Sweet Moscato',
+            type: 'wine',
+            grapes: ['Moscato'],
+            wineType: 'sparkling',
+            style: 'slightly sweet',
+            sweetness: 0.45,
+          },
+          relevanceScore: 0.70,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.6, semantic: 0.6, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: ['recipient_profile', 'sweetness'], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      {
+        query: '와인 처음 마시는 부모님께 달콤한 와인 추천',
+        recipient_profile: 'parents_first_time',
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('Sweet Moscato');
+    expect(result.observation).toContain('Gentle Light Rose');
+    expect(result.observation).toContain('Beaujolais Village');
+    expect(result.observation.indexOf('Sweet Moscato')).toBeLessThan(result.observation.indexOf('Gentle Light Rose'));
+    expect(result.observation.indexOf('Gentle Light Rose')).toBeLessThan(result.observation.indexOf('Beaujolais Village'));
+    expect(result.observation).not.toContain('Second Gamay');
+    expect(result.observation).not.toContain('Napa Cabernet');
+    expect(result.observation).toContain('"recipient_profile":"parents_first_time"');
+    expect(result.observation).toContain('"profile_evidence":["sweet_light","fruit_forward"]');
+    expect(result.observation).toContain('"profile_evidence":["sweet_light","light_rose","soft_structure"]');
+    expect(result.observation).toContain('"profile_evidence":["fruit_forward","low_tannin_red"]');
+    expect(result.observation).toContain('"claimable_attributes":[');
+    expect(result.observation).toContain('"profile_evidence:light_rose"');
+    expect(result.observation).toContain('"matched_constraint:recipient_profile"');
+    const marker = 'GROUNDING_JSON: ';
+    const markerIndex = result.observation.lastIndexOf(marker);
+    const grounding = JSON.parse(result.observation.slice(markerIndex + marker.length)) as {
+      readonly wines: readonly { readonly canonical_label: string }[];
+    };
+    expect(grounding.wines.map((wine) => wine.canonical_label)).toEqual([
+      'Sweet Moscato',
+      'Gentle Light Rose',
+      'Beaujolais Village',
+    ]);
+  });
+
+  it('marks non-resolved search results as unconfirmed candidates before grounding JSON', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Candidate A',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '모호한 와인', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('do not state any candidate as the confirmed exact match');
+    expect(result.observation).toContain('GROUNDING_JSON:');
+  });
+
+  it('marks resolved exact-name collisions as unconfirmed when labels violate the exact lookup contract', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: '2012 Château Pétrus Saute-Loup Reserve de la Famille Pomerol',
+            producer: 'Château Pétrus',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '페트뤼스', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('Exact-label contract target=Pétrus');
+    expect(result.observation).toContain('do not state any candidate as the confirmed exact match');
+  });
+
+  it('does not mark exact-name vintage labels as collisions', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Pétrus 2016',
+            producer: 'Pétrus',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '페트뤼스', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('Pétrus 2016');
+  });
+
+  it('marks curated brand-family surfaces as non-exact even when search returns concrete wines', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Moët & Chandon Brut Impérial NV',
+            producer: 'Moët & Chandon',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'attribute_search',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '모엣' }, deps, 'req-123');
+    expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('brand family, not a single cuvee');
+    expect(result.observation).toContain('do not state any candidate as the confirmed exact match');
+    expect(result.observation).not.toContain('Moet & Chandon Brut Imperial');
+  });
+
+  it('marks non-exact intent around a known label as unconfirmed exact lookup evidence', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Sassicaia 2018',
+            producer: 'Tenuta San Guido',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'recommendation',
+        resultType: 'entity_set',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '사씨카이아 스타일' }, deps, 'req-123');
+    expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('non-exact lookup intent around Sassicaia');
+    expect(result.observation).toContain('not a single confirmed wine entity request');
+    expect(result.observation).not.toContain('Sassicaia 2018');
+  });
+
+  it('marks descriptive category surfaces as non-exact exact lookup evidence', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: '2021 Columbia Crest Soft Merlot',
+            producer: 'Columbia Crest',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'attribute_search',
+        resultType: 'entity_set',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '메를로 명작' }, deps, 'req-123');
+    expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('descriptive grape category');
+    expect(result.observation).toContain('not a single wine entity');
+    expect(result.observation).not.toContain('2021 Columbia Crest Soft Merlot');
+  });
+
+  it('keeps descriptive non-exact guard after search query augmentation', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: '2021 Columbia Crest Soft Merlot',
+            producer: 'Columbia Crest',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'attribute_search',
+        resultType: 'entity_set',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '메를로 명작 Merlot wine, Merlot' }, deps, 'req-123');
+    expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('descriptive grape category');
+    expect(result.observation).not.toContain('2021 Columbia Crest Soft Merlot');
+  });
+
+  it('does not apply exact-match uncertainty guard to recommendation candidate sets', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Candidate A',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'wine-2',
+            canonicalLabel: 'Candidate B',
+            type: 'wine',
+          },
+          relevanceScore: 0.8,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.8, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        resultType: 'entity_set',
+        engineDecision: {
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '상사 선물 와인 추천' }, deps, 'req-123');
+
+    expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).not.toContain('Ask a targeted clarification');
+    expect(result.observation).toContain('GROUNDING_JSON:');
   });
 
   it('keeps lineage in observation but omits source_record_refs from GROUNDING_JSON when present', async () => {

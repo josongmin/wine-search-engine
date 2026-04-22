@@ -322,6 +322,80 @@ function buildMalformedJsonPlannerDefect(rawText: string): PlannerDefect {
   };
 }
 
+function extractLooseJsonStringField(text: string, field: string): string | undefined {
+  const fieldPattern = new RegExp(`"${field}"\\s*:\\s*"`, 'u');
+  const match = fieldPattern.exec(text);
+  if (match?.index === undefined) {
+    return undefined;
+  }
+
+  const start = match.index + match[0].length;
+  let value = '';
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === '\\') {
+      const next = text[i + 1];
+      if (next === undefined) {
+        value += ch;
+        continue;
+      }
+      switch (next) {
+        case 'n':
+          value += '\n';
+          break;
+        case 'r':
+          value += '\r';
+          break;
+        case 't':
+          value += '\t';
+          break;
+        case '"':
+        case '\\':
+          value += next;
+          break;
+        default:
+          value += next;
+          break;
+      }
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      const rest = text.slice(i + 1);
+      if (/^\s*(?:,|\})/u.test(rest)) {
+        return value;
+      }
+    }
+    value += ch;
+  }
+  return undefined;
+}
+
+function recoverMalformedJsonAnswer(text: string): LlmAction | null {
+  const answer = extractLooseJsonStringField(text, 'answer')?.trim();
+  if (answer === undefined || answer.length === 0) {
+    return null;
+  }
+
+  const hasActionSurface = /"(?:action|actions|tool)"\s*:/u.test(text);
+  if (hasActionSurface) {
+    return {
+      thought: extractLooseJsonStringField(text, 'thought')?.trim() ?? 'malformed planner output',
+      plannerDefect: {
+        code: 'mixed_answer_and_tool',
+        observation: 'Planner output mixed a final answer with tool instructions. Re-emit exactly one JSON shape: either {"thought":"...","answer":"..."} or {"thought":"...","action":{...}}.',
+        rawText: text,
+        recoveredAnswer: answer,
+      },
+    };
+  }
+
+  return {
+    thought: extractLooseJsonStringField(text, 'thought')?.trim() ?? 'recovered malformed answer',
+    answer,
+  };
+}
+
 function summarizeRepairObservation(
   code: PlannerRepair['code'],
   validCount: number,
@@ -438,6 +512,10 @@ export function parseLlmOutput(text: string): LlmAction {
         return recovered;
       }
       if (isLikelyJsonAttempt(text)) {
+        const recoveredAnswer = recoverMalformedJsonAnswer(trimmed);
+        if (recoveredAnswer !== null) {
+          return recoveredAnswer;
+        }
         log.warn(
           { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },
           'agent LLM produced JSON-like but unparseable output; routing to planner defect recovery',

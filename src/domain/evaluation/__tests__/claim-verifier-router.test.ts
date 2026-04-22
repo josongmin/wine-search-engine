@@ -37,6 +37,28 @@ describe('routeAndVerify', () => {
     expect(results[0]?.verdict).toBe('not_entailed');
   });
 
+  it('anchors entailed semantic claims to profile evidence when available', async () => {
+    const claims: ExtractedClaim[] = [makeClaim('semantic_claim', 'style_description', 'sweet and fruit-forward')];
+    const evidence: EvidenceRecord[] = [{
+      entity_id: 'wine-1',
+      profile_evidence: ['sweet_light', 'fruit_forward'],
+      claimable_attributes: ['profile_evidence:sweet_light', 'profile_evidence:fruit_forward'],
+    }];
+    const llm = {
+      complete: async () => ({
+        text: JSON.stringify([
+          { claim_id: claims[0]!.id, verdict: 'entailed', explanation: 'supported by profile_evidence' },
+        ]),
+      }),
+    } as any;
+
+    const results = await routeAndVerify(claims, evidence, 'GROUNDING_JSON evidence', llm);
+
+    expect(results[0]?.verdict).toBe('entailed');
+    expect(results[0]?.evidenceAnchor?.field).toBe('profile_evidence');
+    expect(results[0]?.evidenceAnchor?.value).toBe('sweet_light, fruit_forward');
+  });
+
   it('returns results in same order as input', async () => {
     const claims: ExtractedClaim[] = [
       makeClaim('identity_claim', 'canonical_label', 'A'),

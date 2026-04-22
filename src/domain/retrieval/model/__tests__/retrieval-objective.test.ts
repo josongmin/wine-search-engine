@@ -80,6 +80,22 @@ describe('buildRetrievalObjective', () => {
           confidence: 0.83,
           mapping_version: 'test',
         },
+        {
+          attribute: 'popularity_score',
+          operator: '>=',
+          value: 0.5,
+          source_phrase: '누구나 쉽게 살 수 있는',
+          confidence: 0.84,
+          mapping_version: 'test',
+        },
+        {
+          attribute: 'recipient_profile',
+          operator: '=',
+          value: 'parents_first_time',
+          source_phrase: '와인 처음 마시는 부모님',
+          confidence: 0.86,
+          mapping_version: 'test',
+        },
       ],
       inferred: [
         {
@@ -105,6 +121,8 @@ describe('buildRetrievalObjective', () => {
       expect.objectContaining({ axis: 'alcohol', attribute: 'alcohol_pct', sourceTier: 'soft', value: 12 }),
       expect.objectContaining({ axis: 'presentation', attribute: 'style', sourceTier: 'soft', value: ['presentation_forward'] }),
       expect.objectContaining({ axis: 'value', attribute: 'price_band', sourceTier: 'soft' }),
+      expect.objectContaining({ axis: 'popularity', attribute: 'popularity_score', sourceTier: 'soft', value: 0.5 }),
+      expect.objectContaining({ axis: 'recipient_profile', attribute: 'recipient_profile', sourceTier: 'soft', value: 'parents_first_time' }),
       expect.objectContaining({ axis: 'beginner_suitability', sourceTier: 'inferred', value: 0.7 }),
     ]);
     expect(objective.signals).not.toEqual(expect.arrayContaining([

@@ -49,6 +49,13 @@ import {
   SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION,
   SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION,
   SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION,
+  SEARCH_TOOL_POPULARITY_MIN_DESCRIPTION,
+  SEARCH_TOOL_RECIPIENT_PROFILE_DESCRIPTION,
+  SEARCH_TOOL_SWEETNESS_MIN_DESCRIPTION,
+  SEARCH_TOOL_SWEETNESS_MAX_DESCRIPTION,
+  SEARCH_TOOL_ACIDITY_MIN_DESCRIPTION,
+  SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION,
+  SEARCH_TOOL_TANNIN_MAX_DESCRIPTION,
   SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
   SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
   SEARCH_TOOL_DRINKING_WINDOW_VALUES,
@@ -77,6 +84,7 @@ import {
   buildSearchToolQueryField,
   validateSearchToolVintageRange,
 } from '../../application/search/search-tool-contract.js';
+import { RECIPIENT_PROFILE_VALUES } from '../../domain/query/service/recipient-situation-profile.js';
 export {
   CompareWinesAttemptInputSchema,
   DrinkingWindowAttemptInputSchema,
@@ -355,6 +363,47 @@ export const WINE_SEARCH_TOOLS = [
           minimum: 0,
           maximum: 1,
         },
+        popularity_min: {
+          type: 'number',
+          description: SEARCH_TOOL_POPULARITY_MIN_DESCRIPTION,
+          minimum: 0,
+          maximum: 1,
+        },
+        recipient_profile: {
+          type: 'string',
+          enum: [...RECIPIENT_PROFILE_VALUES],
+          description: SEARCH_TOOL_RECIPIENT_PROFILE_DESCRIPTION,
+        },
+        sweetness_min: {
+          type: 'number',
+          description: SEARCH_TOOL_SWEETNESS_MIN_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        sweetness_max: {
+          type: 'number',
+          description: SEARCH_TOOL_SWEETNESS_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        acidity_min: {
+          type: 'number',
+          description: SEARCH_TOOL_ACIDITY_MIN_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        acidity_max: {
+          type: 'number',
+          description: SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        tannin_max: {
+          type: 'number',
+          description: SEARCH_TOOL_TANNIN_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
         drinking_window: {
           type: 'string',
           enum: [...SEARCH_TOOL_DRINKING_WINDOW_VALUES],
@@ -628,6 +677,47 @@ export const WINE_SEARCH_TOOLS = [
           description: SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION,
           minimum: 0,
           maximum: 1,
+        },
+        popularity_min: {
+          type: 'number',
+          description: SEARCH_TOOL_POPULARITY_MIN_DESCRIPTION,
+          minimum: 0,
+          maximum: 1,
+        },
+        recipient_profile: {
+          type: 'string',
+          enum: [...RECIPIENT_PROFILE_VALUES],
+          description: SEARCH_TOOL_RECIPIENT_PROFILE_DESCRIPTION,
+        },
+        sweetness_min: {
+          type: 'number',
+          description: SEARCH_TOOL_SWEETNESS_MIN_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        sweetness_max: {
+          type: 'number',
+          description: SEARCH_TOOL_SWEETNESS_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        acidity_min: {
+          type: 'number',
+          description: SEARCH_TOOL_ACIDITY_MIN_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        acidity_max: {
+          type: 'number',
+          description: SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
+        },
+        tannin_max: {
+          type: 'number',
+          description: SEARCH_TOOL_TANNIN_MAX_DESCRIPTION,
+          minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
+          maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
         },
         drinking_window: {
           type: 'string',

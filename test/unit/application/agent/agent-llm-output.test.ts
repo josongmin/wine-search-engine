@@ -213,6 +213,17 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('recovers final answers when JSON strings contain raw newlines', () => {
+    const parsed = parseLlmOutput(`{"thought":"검색 결과를 종합한다","answer":"추천 1: Moët & Chandon Brut Impérial NV
+- 가격: 약 74,250원
+- 프랑스 샹파뉴"}`);
+
+    expect(parsed).toEqual({
+      thought: '검색 결과를 종합한다',
+      answer: '추천 1: Moët & Chandon Brut Impérial NV\n- 가격: 약 74,250원\n- 프랑스 샹파뉴',
+    });
+  });
+
   it('fails closed on mixed answer+action JSON objects', () => {
     const parsed = parseLlmOutput(JSON.stringify({
       thought: 'bad mix',

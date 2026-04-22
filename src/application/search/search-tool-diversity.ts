@@ -11,7 +11,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 export const SEARCH_TOOL_DIVERSITY_MIN_LIMIT = 5;
 export const SEARCH_TOOL_DIVERSITY_WINE_TYPES = ['white', 'sparkling', 'red'] as const satisfies readonly WineTypeValue[];
 export const SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE = 3;
-export const SEARCH_TOOL_WANTS_DIVERSITY_RE = /(?:^|[^\p{L}\p{N}])(?:diverse|different|다른|다르게|각각|variety)(?=$|[^\p{L}\p{N}])/iu;
+export const SEARCH_TOOL_WANTS_DIVERSITY_RE = /(?:^|[^\p{L}\p{N}])(?:diverse|different|varied|variety|다양(?:하게|한)?|여러|다른|다르게|각각|종류별로)(?=$|[^\p{L}\p{N}])/iu;
 
 export function queryMentionsWineType(query: string): boolean {
   return WINE_TYPE_DETECTION_PATTERNS.some((pattern) => pattern.test(query));

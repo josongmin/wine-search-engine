@@ -41,6 +41,8 @@ export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entit
   readonly criticScoreNormalized?: number | undefined;
   /** Producer prestige score from the index (scale varies; browse uses it for ranking only). */
   readonly producerPrestige?: number | undefined;
+  readonly popularityScore?: number | undefined;
+  readonly availability?: boolean | undefined;
   readonly country?: string | undefined;
   readonly appellation?: string | undefined;
   readonly classification?: string | undefined;
@@ -82,6 +84,8 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'wineType',
   'criticScoreNormalized',
   'producerPrestige',
+  'popularityScore',
+  'availability',
   'country',
   'appellation',
   'classification',

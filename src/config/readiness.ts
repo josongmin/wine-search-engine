@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { Agent as UndiciAgent } from 'undici';
 import type { Config } from './env.js';
+import type { RuntimeReadinessSnapshot } from './container-runtime-support.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import {
   expectsRedisAtStartup,
@@ -221,6 +222,7 @@ export function buildHealthRouteOptions(
   watchlistRuntime?: WatchlistRuntimePort | null,
   drinkingWindowPredictor?: DrinkingWindowPredictorPort,
   calibrationStore?: CalibrationStore,
+  runtimeReadiness?: RuntimeReadinessSnapshot,
 ): HealthRouteOptions {
   const expectsRedis = expectsRedisAtStartup(config);
   const watchlistEnabled = isWatchlistEnabled(config);
@@ -335,6 +337,15 @@ export function buildHealthRouteOptions(
               required: !rerankerConfigured,
               check: async (): Promise<ReadinessStatus> =>
                 probeRuntimeLtrArtifact(runtimeLtrModelsPath),
+            },
+          }
+        : {}),
+      ...(runtimeReadiness !== undefined
+        ? {
+            runtime_ltr_effective: {
+              required: runtimeReadiness.ltrModels.effective.required,
+              check: (): Promise<ReadinessStatus> =>
+                Promise.resolve(runtimeReadiness.ltrModels.effective.loaded ? 'up' : 'down'),
             },
           }
         : {}),

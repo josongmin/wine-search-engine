@@ -42,7 +42,8 @@ import { extractAllPairingConstraints } from './pairing-extractor.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 import {
   hasEntityMetadataKeyword,
-  stripExactEntityMetadataSuffix,
+  hasExactEntityLookupKeyword,
+  stripExactEntityLookupSuffix,
 } from './exact-entity-metadata-signals.js';
 import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 import { buildBundleFromAtoms } from './constraint-reasoner.js';
@@ -246,11 +247,20 @@ export class Planner {
     const typoFixed = correctKoreanWineTypos(safeQuery);
     const queryViews = this.queryNormalizer.normalize(typoFixed);
     const normalizedQuery = queryViews.accentless;
-    const metadataSafeQuery = hasEntityMetadataKeyword(normalizedQuery)
-      ? stripExactEntityMetadataSuffix(typoFixed)
+    const exactLookupSafeQuery = hasExactEntityLookupKeyword(normalizedQuery)
+      ? stripExactEntityLookupSuffix(typoFixed)
       : typoFixed;
-    const metadataSafeQueryViews = this.queryNormalizer.normalize(metadataSafeQuery);
-    const plannerSurfaceViews = metadataSafeQuery.trim().length > 0 ? metadataSafeQueryViews : queryViews;
+    const exactLookupSafeQueryViews = this.queryNormalizer.normalize(exactLookupSafeQuery);
+    const exactLookupSafeNormalized = exactLookupSafeQueryViews.accentless;
+    const shouldUseExactLookupSurface =
+      exactLookupSafeQuery.trim().length > 0
+      && exactLookupSafeQuery !== typoFixed
+      && (
+        hasEntityMetadataKeyword(normalizedQuery)
+        || hasBoundedVintageYear(exactLookupSafeNormalized)
+        || hasDirectResolvableAttributeEntity(exactLookupSafeNormalized)
+      );
+    const plannerSurfaceViews = shouldUseExactLookupSurface ? exactLookupSafeQueryViews : queryViews;
     const plannerSurfaceNormalized = plannerSurfaceViews.accentless;
 
     // E3: planner policy trace — opt-in only (context.enablePlannerTrace === true).

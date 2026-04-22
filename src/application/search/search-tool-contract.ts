@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import { coerceFiniteNumber, coerceNonNegativeInt, coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
 import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/semantic-style-query-terms.js';
+import { RECIPIENT_PROFILE_VALUES } from '../../domain/query/service/recipient-situation-profile.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
@@ -21,6 +22,7 @@ export const SEARCH_TOOL_OCCASION_VALUES = [
   'healing',
   'comforting',
   'camping',
+  'cellaring',
   'romantic',
 ] as const;
 export const FOOD_PAIRING_COLORS = ['red', 'white', 'rosé', 'sparkling', 'both'] as const;
@@ -83,13 +85,27 @@ export const SEARCH_TOOL_STYLES_DESCRIPTION =
 export const SEARCH_TOOL_CERTIFICATION_DESCRIPTION =
   'Optional certification hint such as organic or biodynamic.';
 export const SEARCH_TOOL_OCCASION_DESCRIPTION =
-  'Optional occasion semantics using canonical tags (e.g. gift, anniversary, birthday, date_night, housewarming, healing). Use when the user intent is situational rather than entity-specific.';
+  'Optional occasion semantics using canonical tags (e.g. gift, anniversary, birthday, date_night, housewarming, healing, cellaring). Use when the user intent is situational rather than entity-specific.';
 export const SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION =
   'Optional minimum learned gift-suitability score in [0,1]. Use for safe/formal/gift-worthy recommendation intent when the request explicitly implies gifting.';
 export const SEARCH_TOOL_BEGINNER_SUITABILITY_MIN_DESCRIPTION =
   'Optional minimum learned beginner-suitability score in [0,1]. Use for non-expert / approachable / easy-drinking recommendation intent when the request explicitly implies it.';
 export const SEARCH_TOOL_PRODUCER_PRESTIGE_MIN_DESCRIPTION =
   'Optional minimum indexed producer-prestige score in [0,1]. Use only for explicit prestige/formal/classic-region intent (e.g. 품격, 격식, 상사 선물, 고급스러운), not for generic gifts.';
+export const SEARCH_TOOL_POPULARITY_MIN_DESCRIPTION =
+  'Optional minimum indexed recognizability / broad-market popularity score in [0,1]. Use for explicit "everyone can buy it", widely available, supermarket-safe, or broadly recognizable recommendation intent.';
+export const SEARCH_TOOL_RECIPIENT_PROFILE_DESCRIPTION =
+  'Optional typed recipient/social situation profile (parents_first_time, senior_colleague_gift, unknown_preference_recipient). Use only for explicit recipient context such as parents first-time wine drinkers, formal senior-colleague gifts, or unknown-preference recipients.';
+export const SEARCH_TOOL_SWEETNESS_MIN_DESCRIPTION =
+  'Optional minimum indexed sweetness on the [0,1] sensory scale. Use for explicit off-dry / slightly sweet / sweeter-than-dry search intent without rewriting the lexical query.';
+export const SEARCH_TOOL_SWEETNESS_MAX_DESCRIPTION =
+  'Optional maximum indexed sweetness on the [0,1] sensory scale. Use for explicit dry / off-dry / not-too-sweet search intent without rewriting the lexical query.';
+export const SEARCH_TOOL_ACIDITY_MIN_DESCRIPTION =
+  'Optional minimum indexed acidity on the [0,1] sensory scale. Use for explicit bright / refreshing / high-acid recommendation intent.';
+export const SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION =
+  'Optional maximum indexed acidity on the [0,1] sensory scale. Use for explicit low-acid / not-too-sharp / gentle-acidity recommendation intent.';
+export const SEARCH_TOOL_TANNIN_MAX_DESCRIPTION =
+  'Optional maximum indexed tannin on the [0,1] sensory scale. Use for explicit soft / low-tannin / gentle-mouthfeel recommendation intent.';
 export const SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION =
   'Optional typed drinking-window objective. Use "now" when the user asks for currently drinkable / 지금 마시기 좋은 / 피크인 후보; still call check_drinking_window afterward for exact verification.';
 export const SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
@@ -242,6 +258,13 @@ export function buildSearchToolFieldShape(
     gift_suitability_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
     beginner_suitability_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
     producer_prestige_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
+    popularity_min: coerceFiniteNumber.pipe(z.number().min(0).max(1)).optional(),
+    recipient_profile: z.enum(RECIPIENT_PROFILE_VALUES).optional(),
+    sweetness_min: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
+    sweetness_max: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
+    acidity_min: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
+    acidity_max: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
+    tannin_max: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
     drinking_window: z.enum(SEARCH_TOOL_DRINKING_WINDOW_VALUES).optional(),
     drinking_window_target_year: coercePositiveInt.pipe(z.number().int().min(SEARCH_TOOL_VINTAGE_MIN).max(SEARCH_TOOL_VINTAGE_MAX)).optional(),
     want_diversity: z.boolean().optional(),
@@ -330,7 +353,7 @@ export function buildSearchWinesPromptContractLines(
   usd50ApproxKrw: number,
 ): readonly string[] {
   return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, grape_primary?, wine_type?, country?, region?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, producer_prestige_min?, drinking_window?, drinking_window_target_year?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
+    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, grape_primary?, wine_type?, country?, region?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, producer_prestige_min?, popularity_min?, recipient_profile?, sweetness_min?, sweetness_max?, acidity_min?, acidity_max?, tannin_max?, drinking_window?, drinking_window_target_year?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
     `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
     '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
     '  - grape_primary: canonical grape name for explicit varietal requests ("까쇼"→"Cabernet Sauvignon", "피노 누아"→"Pinot Noir")',
@@ -345,6 +368,10 @@ export function buildSearchWinesPromptContractLines(
     '  - gift_suitability_min: OPTIONAL [0,1] learned suitability floor for gifting queries (safe/formal/gift-worthy).',
     '  - beginner_suitability_min: OPTIONAL [0,1] learned suitability floor for non-expert / approachable requests.',
     '  - producer_prestige_min: OPTIONAL [0,1] indexed producer-prestige floor for explicit prestige/formal/classic intent (품격, 격식, 상사 선물, 고급스러운).',
+    '  - popularity_min: OPTIONAL [0,1] indexed recognizability / broad-market popularity floor for "participants can all buy it", widely available, supermarket-safe, or broadly recognizable recommendation intent.',
+    `  - recipient_profile: OPTIONAL ${RECIPIENT_PROFILE_VALUES.map((value) => `"${value}"`).join(' | ')} for explicit recipient/social situation semantics. For parents who have never tried wine, use "parents_first_time".`,
+    '  - sweetness_min/sweetness_max: OPTIONAL [0,1] indexed sweetness range for explicit off-dry / slightly sweet / not-too-sweet recommendation intent. Prefer this when the sweetness objective should not rewrite the lexical anchor.',
+    '  - acidity_min/acidity_max/tannin_max: OPTIONAL [0,1] sensory bounds for explicit bright / gentle-acidity / soft / low-tannin recommendation objectives.',
     '  - drinking_window: OPTIONAL "now" when the user asks for currently drinkable / 지금 마시기 좋은 / 피크 후보. For compare_wines + drinkability, include drinking_window:"now" and still call check_drinking_window on both returned entity_ids.',
     '  - drinking_window_target_year: OPTIONAL explicit year paired with drinking_window.',
     '  - certification: "organic" or "biodynamic"',
@@ -461,6 +488,13 @@ export function buildSearchToolStructuredPreferences(input: {
   readonly gift_suitability_min?: number | undefined;
   readonly beginner_suitability_min?: number | undefined;
   readonly producer_prestige_min?: number | undefined;
+  readonly popularity_min?: number | undefined;
+  readonly recipient_profile?: (typeof RECIPIENT_PROFILE_VALUES)[number] | undefined;
+  readonly sweetness_min?: number | undefined;
+  readonly sweetness_max?: number | undefined;
+  readonly acidity_min?: number | undefined;
+  readonly acidity_max?: number | undefined;
+  readonly tannin_max?: number | undefined;
   readonly drinking_window?: (typeof SEARCH_TOOL_DRINKING_WINDOW_VALUES)[number] | undefined;
   readonly drinking_window_target_year?: number | undefined;
 }, mappingVersion: string): readonly NormalizedConstraint[] {
@@ -513,6 +547,76 @@ export function buildSearchToolStructuredPreferences(input: {
       operator: '>=',
       value: input.producer_prestige_min,
       source_phrase: `producer_prestige>=${input.producer_prestige_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.popularity_min !== undefined) {
+    preferences.push({
+      attribute: 'popularity_score',
+      operator: '>=',
+      value: input.popularity_min,
+      source_phrase: `popularity_score>=${input.popularity_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.recipient_profile !== undefined) {
+    preferences.push({
+      attribute: 'recipient_profile',
+      operator: '=',
+      value: input.recipient_profile,
+      source_phrase: `recipient_profile:${input.recipient_profile}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.sweetness_min !== undefined) {
+    preferences.push({
+      attribute: 'sweetness',
+      operator: '>=',
+      value: input.sweetness_min,
+      source_phrase: `sweetness>=${input.sweetness_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.sweetness_max !== undefined) {
+    preferences.push({
+      attribute: 'sweetness',
+      operator: '<=',
+      value: input.sweetness_max,
+      source_phrase: `sweetness<=${input.sweetness_max}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.acidity_min !== undefined) {
+    preferences.push({
+      attribute: 'acidity',
+      operator: '>=',
+      value: input.acidity_min,
+      source_phrase: `acidity>=${input.acidity_min}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.acidity_max !== undefined) {
+    preferences.push({
+      attribute: 'acidity',
+      operator: '<=',
+      value: input.acidity_max,
+      source_phrase: `acidity<=${input.acidity_max}`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (input.tannin_max !== undefined) {
+    preferences.push({
+      attribute: 'tannin',
+      operator: '<=',
+      value: input.tannin_max,
+      source_phrase: `tannin<=${input.tannin_max}`,
       confidence: 1.0,
       mapping_version: mappingVersion,
     });

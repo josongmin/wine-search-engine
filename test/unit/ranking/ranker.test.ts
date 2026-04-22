@@ -719,6 +719,36 @@ describe('Ranker', () => {
       expect(passedWeights.beginnerSuitability).toBe(0);
     });
 
+    it('activates profile-aware situation weights from parents_first_time recipient profile', async () => {
+      const candidate: HybridCandidate = {
+        ...makeCandidate('wine-parents-profile'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      } as HybridCandidate;
+      const aggregate = vi.fn().mockReturnValue(0.8);
+      const aggregator = { aggregate } as unknown as ScoreAggregator;
+      const ranker = makeRanker(aggregator);
+      const constraints = makeConstraintsWithSoftEntries([
+        makeConstraint('recipient_profile', 'parents_first_time'),
+      ]);
+      const input = makeInputWithOverrides([candidate], {
+        constraints,
+        queryPlan: { constraints },
+      });
+
+      await ranker.rank(input);
+
+      const passedWeights = aggregate.mock.calls[0]?.[1];
+      expect(passedWeights.softConstraint).toBeGreaterThan(0.1);
+      expect(passedWeights.beginnerSuitability).toBeGreaterThan(0);
+      expect(passedWeights.giftSuitability).toBe(0);
+    });
+
     it('keeps situation learned facets off when the constraint bundle has no explicit trigger', async () => {
       const candidate: HybridCandidate = {
         ...makeCandidate('wine-situation-none'),

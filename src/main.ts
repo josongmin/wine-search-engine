@@ -115,6 +115,7 @@ async function main(): Promise<void> {
     container.watchlistRuntime,
     container.drinkingWindowPredictor,
     container.calibrationStore,
+    container.runtimeReadiness,
   );
 
   // Step 3: Create server (async: registers plugins including rate-limiting)

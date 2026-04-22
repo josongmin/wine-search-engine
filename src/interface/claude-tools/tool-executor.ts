@@ -270,6 +270,27 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
     ...(sharedInput.producer_prestige_min !== undefined
       ? { producer_prestige_min: sharedInput.producer_prestige_min }
       : {}),
+    ...(sharedInput.popularity_min !== undefined
+      ? { popularity_min: sharedInput.popularity_min }
+      : {}),
+    ...(sharedInput.recipient_profile !== undefined
+      ? { recipient_profile: sharedInput.recipient_profile }
+      : {}),
+    ...(sharedInput.sweetness_min !== undefined
+      ? { sweetness_min: sharedInput.sweetness_min }
+      : {}),
+    ...(sharedInput.sweetness_max !== undefined
+      ? { sweetness_max: sharedInput.sweetness_max }
+      : {}),
+    ...(sharedInput.acidity_min !== undefined
+      ? { acidity_min: sharedInput.acidity_min }
+      : {}),
+    ...(sharedInput.acidity_max !== undefined
+      ? { acidity_max: sharedInput.acidity_max }
+      : {}),
+    ...(sharedInput.tannin_max !== undefined
+      ? { tannin_max: sharedInput.tannin_max }
+      : {}),
     ...(sharedInput.drinking_window !== undefined ? { drinking_window: sharedInput.drinking_window } : {}),
     ...(sharedInput.drinking_window_target_year !== undefined
       ? { drinking_window_target_year: sharedInput.drinking_window_target_year }

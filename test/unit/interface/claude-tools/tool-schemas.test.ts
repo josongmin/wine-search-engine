@@ -131,8 +131,26 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.gift_suitability_min?.type).toBe('number');
       expect(props.beginner_suitability_min?.type).toBe('number');
       expect(props.producer_prestige_min?.type).toBe('number');
+      expect(props.popularity_min?.type).toBe('number');
       expect(props.producer_prestige_min?.minimum).toBe(0);
       expect(props.producer_prestige_min?.maximum).toBe(1);
+      expect(props.popularity_min?.minimum).toBe(0);
+      expect(props.popularity_min?.maximum).toBe(1);
+      expect(props.sweetness_min?.minimum).toBe(0);
+      expect(props.sweetness_min?.maximum).toBe(1);
+      expect(props.sweetness_max?.minimum).toBe(0);
+      expect(props.sweetness_max?.maximum).toBe(1);
+      expect(props.recipient_profile?.enum).toEqual([
+        'parents_first_time',
+        'senior_colleague_gift',
+        'unknown_preference_recipient',
+      ]);
+      expect(props.acidity_min?.minimum).toBe(0);
+      expect(props.acidity_min?.maximum).toBe(1);
+      expect(props.acidity_max?.minimum).toBe(0);
+      expect(props.acidity_max?.maximum).toBe(1);
+      expect(props.tannin_max?.minimum).toBe(0);
+      expect(props.tannin_max?.maximum).toBe(1);
       expect(props.want_diversity?.type).toBe('boolean');
     });
 
@@ -151,6 +169,12 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.gift_suitability_min?.description).toContain('gift-suitability');
       expect(props.beginner_suitability_min?.description).toContain('beginner-suitability');
       expect(props.producer_prestige_min?.description).toContain('producer-prestige');
+      expect(props.popularity_min?.description).toContain('recognizability');
+      expect(props.recipient_profile?.description).toContain('parents_first_time');
+      expect(props.sweetness_min?.description).toContain('off-dry');
+      expect(props.tannin_max?.description).toContain('low-tannin');
+      expect(props.acidity_min?.description).toContain('bright');
+      expect(props.acidity_max?.description).toContain('gentle');
       expect(props.style?.description).not.toContain('presentation_forward');
     });
 
@@ -277,8 +301,26 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.gift_suitability_min?.type).toBe('number');
       expect(props.beginner_suitability_min?.type).toBe('number');
       expect(props.producer_prestige_min?.type).toBe('number');
+      expect(props.popularity_min?.type).toBe('number');
       expect(props.producer_prestige_min?.minimum).toBe(0);
       expect(props.producer_prestige_min?.maximum).toBe(1);
+      expect(props.popularity_min?.minimum).toBe(0);
+      expect(props.popularity_min?.maximum).toBe(1);
+      expect(props.sweetness_min?.minimum).toBe(0);
+      expect(props.sweetness_min?.maximum).toBe(1);
+      expect(props.sweetness_max?.minimum).toBe(0);
+      expect(props.sweetness_max?.maximum).toBe(1);
+      expect(props.recipient_profile?.enum).toEqual([
+        'parents_first_time',
+        'senior_colleague_gift',
+        'unknown_preference_recipient',
+      ]);
+      expect(props.acidity_min?.minimum).toBe(0);
+      expect(props.acidity_min?.maximum).toBe(1);
+      expect(props.acidity_max?.minimum).toBe(0);
+      expect(props.acidity_max?.maximum).toBe(1);
+      expect(props.tannin_max?.minimum).toBe(0);
+      expect(props.tannin_max?.maximum).toBe(1);
       expect(props.country_a?.type).toBe('string');
       expect(props.country_b?.type).toBe('string');
       expect(props.region_a?.type).toBe('string');
@@ -305,6 +347,35 @@ describe('Claude tool input schemas', () => {
     expect(parsed.occasion).toEqual(['date_night']);
   });
 
+  it('search_wines should accept recipient profile and indexed sensory bounds', () => {
+    const parsed = SearchToolInputSchema.parse({
+      query: '와인 처음 마시는 부모님께 추천할 와인',
+      recipient_profile: 'parents_first_time',
+      sweetness_min: '0.2',
+      sweetness_max: 0.75,
+      acidity_max: 0.75,
+      tannin_max: 0.3,
+    });
+
+    expect(parsed).toMatchObject({
+      recipient_profile: 'parents_first_time',
+      sweetness_min: 0.2,
+      sweetness_max: 0.75,
+      acidity_max: 0.75,
+      tannin_max: 0.3,
+    });
+  });
+
+  it('search_wines should reject food-pairing-scale sensory values', () => {
+    const parsed = SearchToolInputSchema.safeParse({
+      query: '와인 처음 마시는 부모님께 추천할 와인',
+      acidity_max: 6,
+      tannin_max: 4,
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it('compare_wines should normalize a single shared occasion tag to the canonical array shape', () => {
     const parsed = CompareWinesInputSchema.parse({
       query_a: 'Barolo',
@@ -313,6 +384,22 @@ describe('Claude tool input schemas', () => {
     });
 
     expect(parsed.occasion).toEqual(['anniversary']);
+  });
+
+  it('compare_wines should accept shared recipient profile and indexed sensory bounds', () => {
+    const parsed = CompareWinesInputSchema.parse({
+      query_a: 'Moscato',
+      query_b: 'Beaujolais',
+      recipient_profile: 'parents_first_time',
+      acidity_max: 0.75,
+      tannin_max: 0.3,
+    });
+
+    expect(parsed).toMatchObject({
+      recipient_profile: 'parents_first_time',
+      acidity_max: 0.75,
+      tannin_max: 0.3,
+    });
   });
 
   it('compare_wines should accept side-specific comparison fields', () => {

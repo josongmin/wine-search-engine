@@ -90,6 +90,12 @@ describe('SignalComputer SOTA++ signals', () => {
 describe('SignalComputer.computePopularity (SCAN4-01)', () => {
   const computer = new SignalComputer();
 
+  it('prefers explicit popularityScore over sparse-rank proxy when available', () => {
+    expect(
+      computer.computePopularity(makeCandidate({ popularityScore: 0.82, sparseRank: 50 })),
+    ).toBeCloseTo(0.82, 5);
+  });
+
   it('rank=1 (best sparse hit) produces higher popularity score than rank=10', () => {
     const rank1 = computer.computePopularity(makeCandidate({ sparseRank: 1 }));
     const rank10 = computer.computePopularity(makeCandidate({ sparseRank: 10 }));
@@ -177,6 +183,11 @@ describe('SignalComputer specialized signals', () => {
     );
 
     expect(coverage).toBeCloseTo(2 / 3, 5);
+  });
+
+  it('maps explicit availability boolean to a ranking signal', () => {
+    expect(computer.computeAvailability(makeCandidate({ availability: true }))).toBe(1);
+    expect(computer.computeAvailability(makeCandidate({ availability: false }))).toBe(0);
   });
 
   it('computes anchor preservation from shared metadata and attribute similarity', () => {

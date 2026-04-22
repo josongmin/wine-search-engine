@@ -26,6 +26,20 @@ describe('evaluateClaims', () => {
     expect(result.claims.length).toBeGreaterThan(0);
   });
 
+  it('treats Moscato Bianco evidence as Muscat/Moscato grape provenance', async () => {
+    const evidence: EvidenceRecord[] = [
+      {
+        canonical_label: "2023 Ceretto Moscato d'Asti",
+        grapes: ['Moscato Bianco'],
+      },
+    ];
+    const result = await evaluateClaims('Ceretto Moscato d’Asti입니다.', evidence, '', 'single_recommendation', null);
+    const grapeVerification = result.verifications.find((verification) =>
+      verification.evidenceAnchor?.field === 'grapes');
+    expect(grapeVerification?.verdict).toBe('entailed');
+    expect(result.criticalErrorRate).toBe(0);
+  });
+
   it('contradicted vintage → critical error rate > 0', async () => {
     const evidence: EvidenceRecord[] = [{ vintage_year: 2018 }];
     const answer = 'The 2010 vintage is excellent.';

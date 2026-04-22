@@ -70,6 +70,9 @@ export function buildSearchToolSoftClauses(
     clauses.push(style);
   }
   for (const occasion of input.occasion ?? []) {
+    if (occasion === 'cellaring') {
+      continue;
+    }
     clauses.push(occasion.replace(/_/gu, ' '));
   }
   if (input.certification !== undefined) {

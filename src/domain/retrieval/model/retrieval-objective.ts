@@ -11,6 +11,8 @@ export type RetrievalObjectiveAxis =
   | 'sweetness'
   | 'alcohol'
   | 'producer_prestige'
+  | 'popularity'
+  | 'recipient_profile'
   | 'presentation';
 
 export type RetrievalObjectiveSourceTier = 'hard' | 'soft' | 'inferred';
@@ -46,13 +48,23 @@ function stringValues(value: NormalizedConstraint['value']): readonly string[] {
 function axesForConstraint(constraint: NormalizedConstraint): readonly RetrievalObjectiveAxis[] {
   switch (constraint.attribute) {
     case 'occasion':
+      return ['occasion'];
     case 'gift_suitability':
+      return ['gift_suitability'];
     case 'beginner_suitability':
+      return ['beginner_suitability'];
     case 'drinking_window':
+      return ['drinking_window'];
     case 'sweetness':
+      return ['sweetness'];
     case 'closure':
+      return ['closure'];
     case 'producer_prestige':
-      return [constraint.attribute];
+      return ['producer_prestige'];
+    case 'popularity_score':
+      return ['popularity'];
+    case 'recipient_profile':
+      return ['recipient_profile'];
     case 'style': {
       const values = stringValues(constraint.value);
       const hasPresentation = values.includes('presentation_forward');

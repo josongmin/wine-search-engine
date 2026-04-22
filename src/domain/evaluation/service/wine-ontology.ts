@@ -229,6 +229,7 @@ export const GRAPE_ALIASES: ReadonlyMap<string, string> = new Map([
   ['zinfandel', 'zinfandel'],
   // Muscat family
   ['moscato', 'muscat'],
+  ['moscato bianco', 'muscat'],
   ['muscat', 'muscat'],
   ['muscat blanc', 'muscat'],
   ['moscatel', 'muscat'],

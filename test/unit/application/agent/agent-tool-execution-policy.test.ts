@@ -3,7 +3,7 @@ import { createAgentExecutionState } from '../../../../src/application/agent/age
 import { AgentToolExecutionPolicy } from '../../../../src/application/agent/agent-tool-execution-policy.js';
 
 describe('AgentToolExecutionPolicy', () => {
-  it('preserves exact metadata search anchors while keeping explicit structured filters', () => {
+  it('normalizes exact metadata search anchors while removing non-vintage overconstraints', () => {
     const policy = new AgentToolExecutionPolicy();
 
     const resolved = policy.resolveSingleTool({
@@ -14,12 +14,12 @@ describe('AgentToolExecutionPolicy', () => {
 
     expect(resolved).toEqual({
       query: 'opus one',
-      country: 'United States',
       vintage_min: 2018,
+      retrieval_mode: 'entity',
     });
   });
 
-  it('normalizes only eligible search calls inside parallel batches while preserving explicit filters', () => {
+  it('normalizes only eligible search calls inside parallel batches while removing exact lookup overconstraints', () => {
     const policy = new AgentToolExecutionPolicy();
 
     const resolved = policy.resolveParallelBatch({
@@ -34,10 +34,56 @@ describe('AgentToolExecutionPolicy', () => {
       tool: 'search_wines',
       input: {
         query: 'opus one',
-        country: 'United States',
+        retrieval_mode: 'entity',
       },
     });
     expect(resolved[1]).toEqual({ tool: 'check_drinking_window', input: { entity_id: 'wine-1' } });
+  });
+
+  it('collapses Korean exact-label suffix noise to the curated entity anchor', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '샤또 마고 보르도',
+        retrieval_mode: 'entity',
+        country: 'France',
+        region: 'Bordeaux',
+        wine_type: 'red',
+        styles: ['classic'],
+      },
+      queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+    });
+
+    expect(resolved).toEqual({
+      query: '샤또 마고',
+      retrieval_mode: 'entity',
+    });
+  });
+
+  it('preserves exact vintage bounds while collapsing exact-label suffix noise', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '샤또페트루스 2016',
+        retrieval_mode: 'entity',
+        vintage_min: 2016,
+        vintage_max: 2016,
+        country: 'France',
+        region: 'Bordeaux',
+      },
+      queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+    });
+
+    expect(resolved).toEqual({
+      query: '샤또 페트루스',
+      retrieval_mode: 'entity',
+      vintage_min: 2016,
+      vintage_max: 2016,
+    });
   });
 
   it('injects compare drinkability objective from the query execution contract', () => {
@@ -46,13 +92,18 @@ describe('AgentToolExecutionPolicy', () => {
     const resolved = policy.resolveSingleTool({
       tool: 'compare_wines',
       input: { query_a: 'Barolo', query_b: 'Brunello' },
-      queryExecutionContract: { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
     });
 
     expect(resolved).toEqual({
       query_a: 'Barolo',
       query_b: 'Brunello',
       drinking_window: 'now',
+      drinking_window_target_year: 2026,
     });
   });
 
@@ -62,7 +113,11 @@ describe('AgentToolExecutionPolicy', () => {
     const resolved = policy.resolveSingleTool({
       tool: 'compare_wines',
       input: { query_a: 'Barolo', query_b: 'Brunello', drinking_window: 'now', drinking_window_target_year: 2030 },
-      queryExecutionContract: { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
     });
 
     expect(resolved).toEqual({
@@ -88,7 +143,11 @@ describe('AgentToolExecutionPolicy', () => {
         appellation_a: 'Barolo',
         appellation_b: 'Brunello di Montalcino',
       },
-      queryExecutionContract: { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
     });
 
     expect(resolved).toEqual({
@@ -97,6 +156,7 @@ describe('AgentToolExecutionPolicy', () => {
       appellation_a: 'Barolo',
       appellation_b: 'Brunello di Montalcino',
       drinking_window: 'now',
+      drinking_window_target_year: 2026,
     });
   });
 
@@ -109,7 +169,11 @@ describe('AgentToolExecutionPolicy', () => {
         query_a: '오푸스 원 2018',
         query_b: '알마비바 2019',
       },
-      queryExecutionContract: { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
     });
 
     expect(resolved).toEqual({
@@ -120,6 +184,7 @@ describe('AgentToolExecutionPolicy', () => {
       vintage_min_b: 2019,
       vintage_max_b: 2019,
       drinking_window: 'now',
+      drinking_window_target_year: 2026,
     });
   });
 
@@ -134,7 +199,11 @@ describe('AgentToolExecutionPolicy', () => {
         grape_primary_a: 'Cabernet Sauvignon',
         country_b: 'Chile',
       },
-      queryExecutionContract: { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
     });
 
     expect(resolved).toEqual({
@@ -145,6 +214,7 @@ describe('AgentToolExecutionPolicy', () => {
       vintage_min_b: 2019,
       vintage_max_b: 2019,
       drinking_window: 'now',
+      drinking_window_target_year: 2026,
     });
   });
 
@@ -160,13 +230,197 @@ describe('AgentToolExecutionPolicy', () => {
         drinking_window: 'now',
         drinking_window_target_year: 2026,
       },
-      queryExecutionContract: { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: true },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: true,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
     });
 
     expect(resolved).toEqual({
       query: '이탈리아 레드 중에 평점 좋고',
       wine_type: 'red',
       country: 'Italy',
+      drinking_window: 'now',
+      drinking_window_target_year: 2026,
+    });
+  });
+
+  it('normalizes direct exact-entity lookup suffixes to the bare entity plus exact vintage bounds', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: 'Tignanello 2019 정보',
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: true,
+        exactMetadataEntityQuery: 'Tignanello 2019',
+        exactMetadataTargetVintage: 2019,
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: 'Tignanello 2019',
+      retrieval_mode: 'entity',
+      vintage_min: 2019,
+      vintage_max: 2019,
+      limit: 1,
+    });
+  });
+
+  it('forces entity retrieval for curated Korean transliteration exact labels with generic object suffix only', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: { query: '사씨카이아 와인' },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '사씨카이아',
+      retrieval_mode: 'entity',
+    });
+  });
+
+  it('does not force entity retrieval for non-exact recommendation intent around a known label', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: { query: '사씨카이아' },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        nonExactEntityLookupQuery: '사씨카이아 스타일',
+      },
+    });
+
+    expect(resolved).toEqual({ query: '사씨카이아 스타일' });
+  });
+
+  it('does not inject now-drinkability retrieval objectives for cellar-worthiness comparisons', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'compare_wines',
+      input: { query_a: 'Barolo', query_b: 'Brunello' },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: true,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { occasion: ['cellaring'], styles: ['ageworthy'] },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query_a: 'Barolo',
+      query_b: 'Brunello',
+    });
+  });
+
+  it('strips generic now-drinkability objective text and keeps a vintage-only lexical anchor', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '2015년산 중에 지금 바로 마셔야 하는 거 있어?',
+        retrieval_mode: 'auto',
+        vintage_min: 2015,
+        vintage_max: 2015,
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { drinking_window: 'now', drinking_window_target_year: 2026 },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '2015년산 와인',
+      retrieval_mode: 'auto',
+      vintage_min: 2015,
+      vintage_max: 2015,
+      drinking_window: 'now',
+      drinking_window_target_year: 2026,
+    });
+  });
+
+  it('strips generic cellaring objective text and leaves only the lexical anchor', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '셀러에 넣어둘 만한 거, 지금 마시면 아까운 와인',
+        limit: 3,
+        want_diversity: true,
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { occasion: ['cellaring'], styles: ['ageworthy'] },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '와인',
+      limit: 3,
+      occasion: ['cellaring'],
+      styles: ['ageworthy'],
+    });
+  });
+
+  it('strips sentimental birth-year cellaring wrapper and preserves the exact vintage anchor', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '아이 태어난 해 와인 사서 성인 될 때 같이 마시려고, 2024년산',
+        vintage_min: 2024,
+        vintage_max: 2024,
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        searchDefaults: { occasion: ['cellaring'], styles: ['ageworthy'] },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '2024년산 와인',
+      vintage_min: 2024,
+      vintage_max: 2024,
+      occasion: ['cellaring'],
+      styles: ['ageworthy'],
+    });
+  });
+
+  it('preserves entity retrieval mode for bare exact label searches', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '모엣샹동 로제 임페리얼',
+        retrieval_mode: 'entity',
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '모엣샹동 로제 임페리얼',
+      retrieval_mode: 'entity',
     });
   });
 
@@ -680,7 +934,6 @@ describe('AgentToolExecutionPolicy', () => {
       query: '직장 상사 승진 선물, 품격 있고 무난한 거',
       max_price_krw: 100_000,
       min_price_krw: 50_000,
-      style: 'approachable',
       styles: ['crowd_pleasing'],
       occasion: ['gift'],
       gift_suitability_min: 0.75,
@@ -735,6 +988,145 @@ describe('AgentToolExecutionPolicy', () => {
       max_price_krw: 50_000,
       style: 'approachable',
       styles: ['approachable', 'crowd_pleasing'],
+      popularity_min: 0.5,
+    });
+  });
+
+  it('removes special_occasion from accessible online tasting recommendation searches', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거',
+        max_price_krw: 50_000,
+        occasion: ['special_occasion'],
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거',
+      max_price_krw: 50_000,
+      styles: ['approachable', 'crowd_pleasing'],
+      popularity_min: 0.5,
+    });
+  });
+
+  it('strips planner-invented situation overrides that are unsupported by deterministic search defaults', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '와인 처음 마시는 부모님께 추천할 와인',
+        style: 'sweet',
+        styles: ['approachable', 'crowd_pleasing', 'sweet'],
+        occasion: ['gift', 'date_night'],
+        gift_suitability_min: 0.8,
+        beginner_suitability_min: 0.9,
+        want_diversity: true,
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        searchDefaults: {
+          styles: ['approachable', 'crowd_pleasing'],
+          recipient_profile: 'parents_first_time',
+          beginner_suitability_min: 0.65,
+          sweetness_min: 0.2,
+          sweetness_max: 0.75,
+          acidity_max: 0.75,
+          tannin_max: 0.3,
+        },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '와인 처음 마시는 부모님께 추천할 와인',
+      styles: ['approachable', 'crowd_pleasing'],
+      recipient_profile: 'parents_first_time',
+      beginner_suitability_min: 0.65,
+      sweetness_min: 0.2,
+      sweetness_max: 0.75,
+      acidity_max: 0.75,
+      tannin_max: 0.3,
+    });
+  });
+
+  it('preserves explicit diversity requests even when situation defaults exist', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '와인 처음 마시는 부모님께 다양하게 추천할 와인',
+        want_diversity: true,
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        searchDefaults: {
+          styles: ['approachable', 'crowd_pleasing'],
+          recipient_profile: 'parents_first_time',
+          beginner_suitability_min: 0.65,
+          sweetness_min: 0.2,
+          sweetness_max: 0.75,
+          acidity_max: 0.75,
+          tannin_max: 0.3,
+        },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '와인 처음 마시는 부모님께 다양하게 추천할 와인',
+      styles: ['approachable', 'crowd_pleasing'],
+      recipient_profile: 'parents_first_time',
+      beginner_suitability_min: 0.65,
+      sweetness_min: 0.2,
+      sweetness_max: 0.75,
+      acidity_max: 0.75,
+      tannin_max: 0.3,
+      want_diversity: true,
+    });
+  });
+
+  it('strips unsupported planner styles from formal senior-colleague gift searches', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveSingleTool({
+      tool: 'search_wines',
+      input: {
+        query: '직장 상사 승진 선물, 품격 있고 무난한 거',
+        styles: ['approachable', 'crowd_pleasing'],
+        producer_prestige_min: 0.75,
+        beginner_suitability_min: 0.7,
+      },
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        searchDefaults: {
+          styles: ['crowd_pleasing'],
+          occasion: ['gift'],
+          min_price_krw: 50_000,
+          max_price_krw: 150_000,
+          gift_suitability_min: 0.75,
+          producer_prestige_min: 0.7,
+        },
+      },
+    });
+
+    expect(resolved).toEqual({
+      query: '직장 상사 승진 선물, 품격 있고 무난한 거',
+      styles: ['crowd_pleasing'],
+      occasion: ['gift'],
+      min_price_krw: 50_000,
+      max_price_krw: 150_000,
+      gift_suitability_min: 0.75,
+      producer_prestige_min: 0.7,
     });
   });
 
@@ -803,7 +1195,6 @@ describe('AgentToolExecutionPolicy', () => {
         input: {
           query: '회사 회식 10명 레드 총 20만원',
           max_price_krw: 100_000,
-          occasion: ['party'],
           wine_type: 'red',
         },
       },
@@ -812,7 +1203,6 @@ describe('AgentToolExecutionPolicy', () => {
         input: {
           query: '회사 회식 10명 화이트 총 20만원',
           max_price_krw: 100_000,
-          occasion: ['party'],
           wine_type: 'white',
         },
       },
@@ -874,6 +1264,58 @@ describe('AgentToolExecutionPolicy', () => {
     ]);
   });
 
+  it('normalizes planner-emitted parallel gift slots to slot-local anchors while preserving gift suitability', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveParallelBatch({
+      calls: [
+        {
+          tool: 'search_wines',
+          input: {
+            query: '커플 세트 레드 화이트 예쁜 거',
+            wine_type: 'red',
+            occasion: ['gift'],
+          },
+        },
+        {
+          tool: 'search_wines',
+          input: {
+            query: '커플 세트 레드 화이트 예쁜 거',
+            wine_type: 'white',
+            occasion: ['gift'],
+          },
+        },
+      ],
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        requiredParallelSearches: [
+          { wineType: 'red', limit: 1 },
+          { wineType: 'white', limit: 1 },
+        ],
+      },
+    });
+
+    expect(resolved).toEqual([
+      {
+        tool: 'search_wines',
+        input: {
+          query: '커플 세트 레드 예쁜 거',
+          wine_type: 'red',
+          occasion: ['gift'],
+        },
+      },
+      {
+        tool: 'search_wines',
+        input: {
+          query: '커플 세트 화이트 예쁜 거',
+          wine_type: 'white',
+          occasion: ['gift'],
+        },
+      },
+    ]);
+  });
+
   it('preserves eligible search_wines calls inside parallel batches', () => {
     const policy = new AgentToolExecutionPolicy();
 
@@ -909,7 +1351,7 @@ describe('AgentToolExecutionPolicy', () => {
       queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: true },
     });
 
-    expect(resolved).toEqual({ query: '오푸스원 얼마야?', limit: 1 });
+    expect(resolved).toEqual({ query: '오푸스 원', retrieval_mode: 'entity', limit: 1 });
   });
 
   it('injects refinement hint only once when no-match observations appear with enough remaining steps', () => {

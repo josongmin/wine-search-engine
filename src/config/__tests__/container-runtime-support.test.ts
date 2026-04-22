@@ -139,6 +139,13 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.ltrModels).toBeDefined();
     expect(services.ltrModels?.size).toBe(1);
     expect(services.ltrModels?.get('red_wine')).toBeDefined();
+    expect(services.runtimeReadiness.ltrModels.effective).toEqual(
+      expect.objectContaining({
+        source: 'runtime_artifact',
+        loaded: true,
+        modelCount: 1,
+      }),
+    );
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -211,7 +218,70 @@ describe('buildRuntimeSupportServices', () => {
     expect(services.ltrModels).toBeDefined();
     expect(services.ltrModels?.size).toBe(1);
     expect(services.ltrModels?.get('red_wine')).toBeDefined();
+    expect(services.runtimeReadiness.ltrModels.effective.source).toBe('runtime_artifact');
+    expect(services.runtimeReadiness.ltrModels.artifact.selected).toBe(true);
     expect(pool.query).toHaveBeenCalled();
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('binds PG LTR registry loading to the active serving snapshot pointer', async () => {
+    const activeSnapshotId = 'search-snapshot:v1:active-serving';
+    const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      if (sql.includes('active_search_snapshot')) {
+        return {
+          rows: [{
+            active_snapshot_id: activeSnapshotId,
+            previous_snapshot_id: null,
+            content_hash: 'content-hash',
+            promoted_at: new Date('2026-04-01T00:00:00Z'),
+          }],
+        };
+      }
+      if (sql.includes('ltr_model_registry')) {
+        expect(params).toEqual([activeSnapshotId]);
+        return {
+          rows: [{
+            registry_id: 'ltr-registry-id',
+            query_class: 'semantic_preference',
+            model_version: 7,
+            is_active: true,
+            search_snapshot_id: activeSnapshotId,
+            eval_dataset_version: 'eval-v1',
+            feature_schema_hash: 'feature-hash',
+            copied_from_registry_id: null,
+            copied_from_snapshot_id: null,
+            weights: [0.2, 0.1, -0.05, 0.2, 0.15, 0.03, 0.08, 0.27],
+            bias: 0.12,
+            training_example_count: 33,
+            ndcg5_validation_score: 0.72,
+            trained_at: new Date('2026-04-01T00:00:00Z'),
+            created_at: new Date('2026-04-01T00:00:00Z'),
+          }],
+        };
+      }
+      return { rows: [] };
+    });
+    const pool = { query } as never;
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    const services = await buildRuntimeSupportServices(config, { pool });
+
+    expect(services.ltrModels?.get('semantic_preference')).toBeDefined();
+    expect(services.runtimeReadiness.ltrModels.registry).toEqual(
+      expect.objectContaining({
+        configured: true,
+        loaded: true,
+        searchSnapshotId: activeSnapshotId,
+        modelCount: 1,
+      }),
+    );
+    expect(services.runtimeReadiness.ltrModels.effective).toEqual(
+      expect.objectContaining({
+        source: 'registry',
+        loaded: true,
+        searchSnapshotId: activeSnapshotId,
+        modelCount: 1,
+      }),
+    );
   });
 });

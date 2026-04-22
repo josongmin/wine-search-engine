@@ -145,6 +145,14 @@ function buildRecoveryPreferences(input: Record<string, unknown>): readonly Norm
   const occasion = asStringArray(input['occasion']);
   const giftSuitabilityMin = asFiniteNumber(input['gift_suitability_min']);
   const beginnerSuitabilityMin = asFiniteNumber(input['beginner_suitability_min']);
+  const producerPrestigeMin = asFiniteNumber(input['producer_prestige_min']);
+  const popularityMin = asFiniteNumber(input['popularity_min']);
+  const recipientProfile = asNonEmptyString(input['recipient_profile']);
+  const sweetnessMin = asFiniteNumber(input['sweetness_min']);
+  const sweetnessMax = asFiniteNumber(input['sweetness_max']);
+  const acidityMin = asFiniteNumber(input['acidity_min']);
+  const acidityMax = asFiniteNumber(input['acidity_max']);
+  const tanninMax = asFiniteNumber(input['tannin_max']);
   return buildSearchToolStructuredPreferences({
     ...(maxAlcoholPct !== undefined ? { max_alcohol_pct: maxAlcoholPct } : {}),
     ...(style !== undefined ? { style } : {}),
@@ -152,6 +160,16 @@ function buildRecoveryPreferences(input: Record<string, unknown>): readonly Norm
     ...(occasion !== undefined ? { occasion } : {}),
     ...(giftSuitabilityMin !== undefined ? { gift_suitability_min: giftSuitabilityMin } : {}),
     ...(beginnerSuitabilityMin !== undefined ? { beginner_suitability_min: beginnerSuitabilityMin } : {}),
+    ...(producerPrestigeMin !== undefined ? { producer_prestige_min: producerPrestigeMin } : {}),
+    ...(popularityMin !== undefined ? { popularity_min: popularityMin } : {}),
+    ...(recipientProfile === 'parents_first_time' || recipientProfile === 'senior_colleague_gift' || recipientProfile === 'unknown_preference_recipient'
+      ? { recipient_profile: recipientProfile }
+      : {}),
+    ...(sweetnessMin !== undefined ? { sweetness_min: sweetnessMin } : {}),
+    ...(sweetnessMax !== undefined ? { sweetness_max: sweetnessMax } : {}),
+    ...(acidityMin !== undefined ? { acidity_min: acidityMin } : {}),
+    ...(acidityMax !== undefined ? { acidity_max: acidityMax } : {}),
+    ...(tanninMax !== undefined ? { tannin_max: tanninMax } : {}),
   }, RECOVERY_FILTER_VERSION);
 }
 

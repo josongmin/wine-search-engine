@@ -267,6 +267,46 @@ describe('AgentPlannerPhaseRunner', () => {
     expect(result?.parsed.action?.input).not.toHaveProperty('retrieval_mode');
   });
 
+  it('removes ungrounded wine_type constraints invented by the planner', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '부모님 첫 와인 추천 검색',
+            action: {
+              tool: 'search_wines',
+              input: {
+                query: '와인 처음 마시는 부모님께 추천할 와인 red wine',
+                recipient_profile: 'parents_first_time',
+                wine_type: 'red',
+                styles: ['approachable', 'crowd_pleasing'],
+              },
+            },
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '와인 처음 마시는 부모님께 추천할 와인',
+      'req-ungrounded-wine-type',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.action?.tool).toBe('search_wines');
+    expect(result?.parsed.action?.input).toEqual(expect.objectContaining({
+      query: '와인 처음 마시는 부모님께 추천할 와인',
+      recipient_profile: 'parents_first_time',
+      styles: ['approachable', 'crowd_pleasing'],
+    }));
+    expect(result?.parsed.action?.input).not.toHaveProperty('wine_type');
+  });
+
   it('preserves mixed retrieval overrides for anchored mixed-query searches', async () => {
     const runner = new AgentPlannerPhaseRunner({
       chatLlm: {

@@ -13,6 +13,7 @@ import {
 } from '../../attribute/service/constraint-ontology-normalization.js';
 import { resolveSemanticStyleEvidenceProfile } from '../../query/service/semantic-style-query-terms.js';
 import { isNoOpSemanticStyleHint } from '../../query/service/semantic-style-query-terms.js';
+import { candidateMatchesRecipientProfile } from '../../query/service/recipient-situation-profile.js';
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
@@ -183,6 +184,30 @@ function satisfiesSemanticStyleConstraint(
   return semanticProfiles.some((profile) => candidateMatchesSemanticStyleProfile(candidate, profile));
 }
 
+function satisfiesRecipientProfileConstraint(
+  candidate: HybridCandidate,
+  constraint: NormalizedConstraint,
+): boolean | undefined {
+  if (constraint.attribute !== 'recipient_profile') {
+    return undefined;
+  }
+  if (constraint.operator !== '=' && constraint.operator !== 'in') {
+    return undefined;
+  }
+
+  const requestedProfiles =
+    typeof constraint.value === 'string'
+      ? [constraint.value]
+      : Array.isArray(constraint.value)
+        ? constraint.value.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+  if (requestedProfiles.length === 0) {
+    return undefined;
+  }
+
+  return requestedProfiles.some((profile) => candidateMatchesRecipientProfile(candidate, profile) === true);
+}
+
 function resolveCandidateValue(
   candidate: HybridCandidate,
   attribute: string,
@@ -228,6 +253,8 @@ function resolveCandidateValue(
       return candidate.criticScoreNormalized;
     case 'producer_prestige':
       return candidate.producerPrestige;
+    case 'popularity_score':
+      return candidate.popularityScore;
     case 'price':
     case 'price_usd':
       return candidate.priceUsd;
@@ -429,6 +456,11 @@ function satisfiesConstraint(
     return semanticStyleMatch;
   }
 
+  const recipientProfileMatch = satisfiesRecipientProfileConstraint(candidate, constraint);
+  if (recipientProfileMatch !== undefined) {
+    return recipientProfileMatch;
+  }
+
   // grape_primary uses OR semantics at retrieval time (grape_or filter covers both
   // grape_primary AND grapes fields). Annotation must mirror Vespa's retrieval logic:
   // a candidate satisfies grape_primary = X if X appears in EITHER grapePrimary OR grapes[].
@@ -568,6 +600,9 @@ export function annotateCandidateConstraintEvidence(
   for (const constraint of constraints.soft) {
     if (satisfiesConstraint(candidate, constraint)) {
       matched.add(constraint.attribute);
+    } else if (constraint.attribute === 'recipient_profile') {
+      // Recipient profiles are backed by derived candidate evidence above.
+      // A non-match must remain a real soft miss, not a missing-field exemption.
     } else if (isConstraintStyleWithoutBackedSemanticProfile(constraint)) {
       // Unsupported style preferences (예: presentation_forward) are not backed by
       // measurable catalog evidence. Treat as "not evaluable" instead of strict

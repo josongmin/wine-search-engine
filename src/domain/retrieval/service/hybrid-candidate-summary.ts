@@ -50,10 +50,11 @@ function toSafeHybridCandidateSummaryFields(
       }
       continue;
     }
-    // Accept string, number, and string[] — the three value families in RetrievalHitSummaryKey
+    // Accept string, number, boolean, and string[] — the value families in RetrievalHitSummaryKey
     if (
       typeof value === 'string' ||
       typeof value === 'number' ||
+      typeof value === 'boolean' ||
       (Array.isArray(value) && value.every((v) => typeof v === 'string'))
     ) {
       result[key] = value;
@@ -260,6 +261,8 @@ export function retrievalDocumentToHitSummary(doc: RetrievalDocument): Retrieval
     wineType: doc.wineType,
     criticScoreNormalized: doc.criticScoreNormalized,
     producerPrestige: doc.producerPrestige,
+    popularityScore: doc.popularityScore,
+    availability: doc.availability,
     country: doc.country,
     appellation: doc.appellation,
     classification: doc.classification,

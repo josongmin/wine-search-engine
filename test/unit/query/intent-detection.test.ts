@@ -107,6 +107,30 @@ describe('Intent Detection — SOTA++ Improvements', () => {
       expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
     });
 
+    it('should keep direct exact-lookup info suffixes on entity_exact for a strong anchor', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['tignanello', makeMatchResult('Tignanello', 0.95)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('Tignanello 2019 정보');
+      expect(plan.intent).toBe('entity_exact');
+      expect(plan.suggestedRoute).toBe('entity');
+      expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    });
+
+    it('should keep direct exact-lookup recommendation tails on entity_exact for a strong anchor', async () => {
+      const matcher = new StubAliasMatcher(
+        new Map([['돔페리뇽', makeMatchResult('돔페리뇽', 0.95)]]),
+      );
+      const planner = createPlanner(matcher);
+
+      const plan = await planner.plan('돔페리뇽 추천해줘');
+      expect(plan.intent).toBe('entity_exact');
+      expect(plan.suggestedRoute).toBe('entity');
+      expect(plan.suggestedRetrievalMode).toBe('entity_lookup');
+    });
+
     it('should keep release-availability questions on entity_exact for a strong anchor', async () => {
       const matcher = new StubAliasMatcher(
         new Map([['보졸레 누보', makeMatchResult('보졸레 누보', 0.93)]]),

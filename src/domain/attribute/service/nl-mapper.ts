@@ -8,6 +8,7 @@ import {
   CURATED_ENTITY_ALIAS_CATALOG,
   type ResolverCompatibleAttribute,
 } from './entity-alias-catalog.js';
+import { REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
 
 /**
  * Current version of the default mapping table.
@@ -389,6 +390,8 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['approachable', { phrase: 'approachable', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['입문자', { phrase: '입문자', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.83, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['와인 잘 모르는', { phrase: '와인 잘 모르는', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['처음 마시는', { phrase: '처음 마시는', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['처음 마셔보는', { phrase: '처음 마셔보는', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['wine beginner', { phrase: 'wine beginner', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['beginner friendly', { phrase: 'beginner friendly', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['for wine beginner', { phrase: 'for wine beginner', mappedAttribute: 'style', operator: 'in', value: 'approachable', mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
@@ -430,6 +433,8 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['초보자', { phrase: '초보자', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['easy to drink', { phrase: 'easy to drink', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['마시기 쉬운', { phrase: '마시기 쉬운', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['처음 마시는 부모님께', { phrase: '처음 마시는 부모님께', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.82, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['처음 마셔보는 사람', { phrase: '처음 마셔보는 사람', mappedAttribute: 'beginner_suitability', operator: '>=', value: 0.5, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
   // ── Wine types (Korean + English) ──────────────────────────────────
   // Maps to wine_type attribute via '=' operator for hard Vespa filter.
@@ -604,9 +609,26 @@ function isResolverCompatibleAttribute(value: string): value is ResolverCompatib
     || value === 'grape_primary';
 }
 
+function foldOntologyKey(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim();
+}
+
+function shouldExportCuratedEntryToDefaultMappings(
+  entry: typeof CURATED_ENTITY_ALIAS_CATALOG[number],
+): boolean {
+  if (!entry.exportToDefaultMappings) return false;
+  if (entry.mappedAttribute !== 'appellation') return true;
+  const canonical = foldOntologyKey(entry.canonicalValue);
+  return [...REGION_PARENTS.keys()].some((key) => foldOntologyKey(key) === canonical);
+}
+
 function buildCuratedEntityDefaultMappings(): ReadonlyArray<readonly [string, NLMapping]> {
   return CURATED_ENTITY_ALIAS_CATALOG
-    .filter((entry) => entry.exportToDefaultMappings)
+    .filter(shouldExportCuratedEntryToDefaultMappings)
     .map((entry) => [
       entry.surface,
       {

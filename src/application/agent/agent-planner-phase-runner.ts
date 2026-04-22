@@ -33,6 +33,10 @@ import {
   hasComparisonMarkers,
   hasKoreanMixedQueryMarkers,
 } from '../../domain/query/service/anchor-extractor.js';
+import {
+  WINE_TYPE_RULES,
+  type WineTypeValue,
+} from '../../domain/query/model/wine-type-patterns.js';
 
 const log = bootstrapLogger.child({ component: 'AgentPlannerPhaseRunner' });
 const STEP_LOG_PREVIEW_CHARS = 500;
@@ -137,6 +141,78 @@ function enforceSearchQueryLanguageAnchor(
       actions: parsed.actions.map((action) =>
         action.tool === 'search_wines'
           ? { ...action, input: enforceActionInput(action.input) }
+          : action
+      ),
+    };
+  }
+
+  return parsed;
+}
+
+const WINE_TYPE_QUERY_TAIL_PATTERN =
+  /^(?:red|white|rose|rosé|sparkling|natural|dessert|fortified|orange)(?:\s+wine)?$/iu;
+
+function normalizePlannerWineType(value: unknown): WineTypeValue | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'rose') return 'rosé';
+  return WINE_TYPE_RULES.some(([, wineType]) => wineType === normalized)
+    ? normalized as WineTypeValue
+    : undefined;
+}
+
+function queryExplicitlyMentionsWineType(query: string, wineType: WineTypeValue): boolean {
+  return WINE_TYPE_RULES.some(([pattern, value]) => value === wineType && pattern.test(query));
+}
+
+function stripUngroundedWineTypeTail(toolQuery: unknown, originalQuery: string): unknown {
+  if (typeof toolQuery !== 'string' || !containsHangul(originalQuery)) {
+    return toolQuery;
+  }
+  const originalTrimmed = originalQuery.trim();
+  const toolTrimmed = toolQuery.trim();
+  if (originalTrimmed.length === 0 || toolTrimmed === originalTrimmed) {
+    return toolQuery;
+  }
+  if (!toolTrimmed.startsWith(originalTrimmed)) {
+    return toolQuery;
+  }
+  const tail = toolTrimmed.slice(originalTrimmed.length).trim();
+  return WINE_TYPE_QUERY_TAIL_PATTERN.test(tail) ? originalTrimmed : toolQuery;
+}
+
+function enforceExplicitWineTypeProvenance(
+  originalQuery: string,
+  parsed: LlmAction,
+): LlmAction {
+  const sanitizeInput = (input: Record<string, unknown>): Record<string, unknown> => {
+    const wineType = normalizePlannerWineType(input['wine_type']);
+    if (wineType === undefined || queryExplicitlyMentionsWineType(originalQuery, wineType)) {
+      return input;
+    }
+    const { wine_type: _removed, ...rest } = input;
+    return {
+      ...rest,
+      query: stripUngroundedWineTypeTail(rest['query'], originalQuery),
+    };
+  };
+
+  if (parsed.action?.tool === 'search_wines') {
+    return {
+      ...parsed,
+      action: {
+        ...parsed.action,
+        input: sanitizeInput(parsed.action.input),
+      },
+    };
+  }
+
+  if (parsed.actions !== undefined) {
+    return {
+      ...parsed,
+      actions: parsed.actions.map((action) =>
+        action.tool === 'search_wines'
+          ? { ...action, input: sanitizeInput(action.input) }
           : action
       ),
     };
@@ -395,7 +471,10 @@ export class AgentPlannerPhaseRunner {
     const parsed = sanitizeSearchRetrievalModeOverrides(
       enforceExplicitPerSlotCardinality(
         query,
-        enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text)),
+        enforceExplicitWineTypeProvenance(
+          query,
+          enforceSearchQueryLanguageAnchor(query, parseLlmOutput(llmResult.text)),
+        ),
       ),
     );
     if (

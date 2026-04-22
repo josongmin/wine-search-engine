@@ -16,11 +16,17 @@
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
  *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off, retries 1
- *   npx tsx test/benchmark/agent/runner.ts --profile quick-realdata             # 60 high-signal scenarios, concurrency 5, judge on (~6-10 min)
+ *   npx tsx test/benchmark/agent/runner.ts --profile quick-realdata             # 72 high-signal scenarios, concurrency 5, judge on (~6-10 min)
  *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 80 curated scenarios, concurrency 3, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 233 scenarios, concurrency 3, judge on (3 samples)
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # agent benchmark on scenarios with golden retrieval IDs
  *   npx tsx test/benchmark/agent/runner.ts --profile messy-search              # in-domain messy search slice, judge on
+ *   npx tsx test/benchmark/agent/runner.ts --profile messy-query-robustness    # Korean typo/slang/no-spacing robustness slice
+ *   npx tsx test/benchmark/agent/runner.ts --profile transliteration-exact-lookup # Korean common-transliteration exact lookup slice
+ *   npx tsx test/benchmark/agent/runner.ts --profile transliteration-exact-lookup-core # positive exact-lookup core
+ *   npx tsx test/benchmark/agent/runner.ts --profile transliteration-exact-lookup-hard-negative # fail-closed negatives
+ *   npx tsx test/benchmark/agent/runner.ts --profile transliteration-exact-lookup-policy-pending # policy-pending aliases
+ *   npx tsx test/benchmark/agent/runner.ts --profile transliteration-exact-lookup-large # 200-case Korean exact lookup stress set
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
  * Wall-clock profiling: `wallClock` in JSON + "wall clock" section on stderr
@@ -45,7 +51,19 @@ import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestr
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
 import { AnthropicChatLlm } from '../../../src/infrastructure/ai/anthropic-chat-llm.js';
 import { QuerySanitizer } from '../../../src/domain/security/service/query-sanitizer.js';
-import { AGENT_SCENARIOS, MESSY_SEARCH_SCENARIO_IDS, STANDARD_SCENARIO_IDS } from './scenarios.js';
+import {
+  AGENT_SCENARIOS,
+  MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS,
+  MESSY_SEARCH_SCENARIO_IDS,
+  STANDARD_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_PROFILE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_LARGE_HARD_NEGATIVE_PROFILE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_LARGE_POSITIVE_PROFILE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_LARGE_PROFILE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_PROFILE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_POSITIVE_CORE_PROFILE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_PROFILE_SCENARIO_IDS,
+} from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTrace } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
@@ -76,7 +94,21 @@ export { formatBenchmarkDurationMs } from './benchmark-duration-format.js';
 // ─────────────────────────────────────────────────────────────────────
 
 interface CliArgs {
-  readonly profile?: 'quick' | 'quick-realdata' | 'standard' | 'nightly' | 'retrieval' | 'messy-search';
+  readonly profile?:
+    | 'quick'
+    | 'quick-realdata'
+    | 'standard'
+    | 'nightly'
+    | 'retrieval'
+    | 'messy-search'
+    | 'messy-query-robustness'
+    | 'transliteration-exact-lookup'
+    | 'transliteration-exact-lookup-core'
+    | 'transliteration-exact-lookup-hard-negative'
+    | 'transliteration-exact-lookup-policy-pending'
+    | 'transliteration-exact-lookup-large'
+    | 'transliteration-exact-lookup-large-positive'
+    | 'transliteration-exact-lookup-large-hard-negative';
   readonly tierFilter?: ScenarioTier;
   readonly idFilter?: readonly number[];
   readonly container: 'real';
@@ -109,7 +141,9 @@ const QUICK_SCENARIO_IDS = new Set([
  *   - Weak tiers: single_shot×5, negation_complex×4, wine_type_basic×3, korean_colloquial×4
  *   - Healthy regression guards: nested_condition×4, comparison_nested×3, multi_step×3
  *   - Targeted gap guards: exact-pair drinkability, side-specific grounded compare,
- *     fail-closed freshness honesty
+ *     fail-closed freshness honesty, exact metadata future-vintage honesty
+ *   - Coverage promotions: transliterated exact entity lookup, bilingual exact search,
+ *     cellar-aging / drinkability semantics
  *   - Broad tier sampling: negation, situation_based, gift_refined, knowledge_hybrid, extreme
  * Concurrency 5 (keeps the initial burst below the observed gpt-5.4-mini TPM ceiling), judge on, ~6-10 min wall clock.
  */
@@ -146,6 +180,10 @@ const QUICK_REALDATA_SCENARIO_IDS = new Set([
   20, 21,
   // targeted gap guards
   117, 118, 119, 120, 121, 122, 123, 124,
+  // coverage promotions: exact lookup / bilingual overlap / cellar aging
+  200, 202, 203, 204, 208, 209,
+  321, 322,
+  340, 341, 342, 343,
 ]);
 
 /**
@@ -161,6 +199,8 @@ const QUICK_REALDATA_SCENARIO_IDS = new Set([
  * judge burst below provider RPM/TPM ceilings while still moving steadily.
  */
 const MESSY_SEARCH_DEFAULT_CONCURRENCY = 2;
+const MESSY_QUERY_ROBUSTNESS_DEFAULT_CONCURRENCY = 2;
+const TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY = 2;
 
 function parseOptionalInt(raw: string | undefined, fallback: number): number {
   if (raw === undefined) return fallback;
@@ -286,6 +326,102 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
     }
     if (explicitConcurrency === undefined) {
       args = { ...args, concurrency: MESSY_SEARCH_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'messy-query-robustness') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: MESSY_QUERY_ROBUSTNESS_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup-core') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_POSITIVE_CORE_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup-hard-negative') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup-policy-pending') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup-large') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_LARGE_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup-large-positive') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_LARGE_POSITIVE_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+  }
+
+  if (profile === 'transliteration-exact-lookup-large-hard-negative') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...TRANSLITERATION_EXACT_LOOKUP_LARGE_HARD_NEGATIVE_PROFILE_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: TRANSLITERATION_EXACT_LOOKUP_DEFAULT_CONCURRENCY };
     }
     if (!explicitJudge) {
       args = { ...args, enableJudge: true };

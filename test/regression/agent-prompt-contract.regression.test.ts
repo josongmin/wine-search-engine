@@ -52,7 +52,7 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('beginner_suitability_min?');
     expect(prompt).toContain('retrieval_mode: "auto" | "entity" | "hybrid" | "mixed"');
     expect(prompt).toContain('"fortified" | "dessert" | "orange" | "natural"');
-    expect(prompt).toContain('get_food_pairings(food, max_price?, max_price_krw?, color?)');
+    expect(prompt).toContain('get_food_pairings(food, max_price?, max_price_krw?, color?, sweetness_target?, acidity_min?, tannin_max?, styles?, pairing_tags?)');
     expect(prompt).toContain('max_price is legacy USD input; prefer max_price_krw for new calls');
   });
 
@@ -103,6 +103,17 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('Do NOT call tools');
     expect(prompt).toContain('Do NOT output "action" or "actions"');
     expect(prompt).toContain('Do NOT decide new tool work; that belongs to the planner phase');
+  });
+
+  it('makes exact lookup negative observations override recommendation synthesis', () => {
+    const synthesisPrompt = buildSynthesisSystemMessage().content;
+    const continuationPrompt = buildPlannerContinuationSystemMessage().content;
+
+    for (const prompt of [synthesisPrompt, continuationPrompt]) {
+      expect(prompt).toContain('EXACT_LOOKUP_NEGATIVE');
+      expect(prompt).toContain('do NOT present any');
+      expect(prompt).toContain('never use the reference wine itself as the answer');
+    }
   });
 
   it('keeps continuation answers on the same drinkability and pairing quality contract', () => {

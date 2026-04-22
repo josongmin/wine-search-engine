@@ -38,6 +38,7 @@ export type WineStructuredField =
   | 'critic_score_normalized' | 'producer_prestige'
   | 'style' | 'alcohol_pct'
   | 'popularity_score'
+  | 'pairing_tags' | 'profile_evidence' | 'claimable_attributes'
   | 'certifications' | 'classification' | 'oak_treatment'
   | 'grape_family' | 'region_hierarchy'
   | 'drinking_window_start' | 'drinking_window_end'

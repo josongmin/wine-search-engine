@@ -17,6 +17,7 @@ import {
 import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../../shared/types/index.js';
 import type { CanonicalEntityId } from '../../../shared/types/index.js';
+import { recipientProfileEvidenceAxes } from '../../../query/service/recipient-situation-profile.js';
 
 // Minimal HybridCandidate factory — only sets the fields under test.
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
@@ -272,6 +273,97 @@ describe('unmetHardConstraints annotation', () => {
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
     expect(result.matchedConstraints).toContain('occasion');
     expect(result.unmetHardConstraints).toBeUndefined();
+  });
+});
+
+describe('recipient_profile constraint evidence', () => {
+  it('matches parents_first_time against canonical beginner-friendly archetype grapes', () => {
+    const candidate = makeCandidate({
+      wineType: 'white',
+      grapePrimary: 'Moscato',
+      style: 'lightly sparkling white',
+    });
+    const bundle = makeBundle([], [makeConstraint('recipient_profile', '=', 'parents_first_time')]);
+
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+
+    expect(result.matchedConstraints).toContain('recipient_profile');
+    expect(result.unmetHardConstraints).toBeUndefined();
+  });
+
+  it('matches parents_first_time from backed sensory evidence without lexical profile terms', () => {
+    const candidate = makeCandidate({
+      wineType: 'sparkling',
+      body: 0.45,
+      sweetness: 0.35,
+      acidity: 0.62,
+      tannin: 0.05,
+    });
+    const bundle = makeBundle([], [makeConstraint('recipient_profile', '=', 'parents_first_time')]);
+
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+
+    expect(result.matchedConstraints).toContain('recipient_profile');
+  });
+
+  it('does not infer light_rose evidence from Prosecco substring overlap', () => {
+    const axes = recipientProfileEvidenceAxes({
+      wineType: 'sparkling',
+      grapePrimary: 'Glera',
+      style: 'Prosecco',
+      sweetness: 0.11,
+      tannin: 0.02,
+      acidity: 0.55,
+      body: 0.4,
+    }, 'parents_first_time');
+
+    expect(axes).toContain('fruit_forward');
+    expect(axes).not.toContain('light_rose');
+  });
+
+  it('keeps recipient_profile as a real soft miss for dry high-acid candidates', () => {
+    const candidate = makeCandidate({
+      wineType: 'white',
+      grapePrimary: 'Riesling',
+      sweetness: 0.14,
+      acidity: 0.91,
+      tannin: 0,
+      body: 0.3,
+    });
+    const bundle = makeBundle([], [makeConstraint('recipient_profile', '=', 'parents_first_time')]);
+
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+
+    expect(result.matchedConstraints).not.toContain('recipient_profile');
+    expect(result.unmetHardConstraints).toBeUndefined();
+  });
+
+  it('matches senior_colleague_gift against classic formal-gift evidence', () => {
+    const candidate = makeCandidate({
+      wineType: 'sparkling',
+      region: 'Champagne',
+      producerPrestige: 0.82,
+      occasion: ['celebration'],
+    });
+    const bundle = makeBundle([], [makeConstraint('recipient_profile', '=', 'senior_colleague_gift')]);
+
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+
+    expect(result.matchedConstraints).toContain('recipient_profile');
+  });
+
+  it('does not satisfy senior_colleague_gift from popularity alone', () => {
+    const candidate = makeCandidate({
+      wineType: 'red',
+      region: 'Rutherford',
+      grapePrimary: 'Cabernet Sauvignon',
+      popularityScore: 1,
+    });
+    const bundle = makeBundle([], [makeConstraint('recipient_profile', '=', 'senior_colleague_gift')]);
+
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+
+    expect(result.matchedConstraints).not.toContain('recipient_profile');
   });
 });
 
@@ -588,6 +680,13 @@ describe('resolveCandidateValue — gift/beginner suitability (L2)', () => {
     const bundle = makeBundle([], [makeConstraint('beginner_suitability', '>=', 0.5)]);
     const result = annotateCandidateConstraintEvidence(candidate, bundle);
     expect(result.matchedConstraints).not.toContain('beginner_suitability');
+  });
+
+  it('matches popularity_score >= 0.5 soft constraint when popularity is high', () => {
+    const candidate = makeCandidate({ popularityScore: 0.72 });
+    const bundle = makeBundle([], [makeConstraint('popularity_score', '>=', 0.5)]);
+    const result = annotateCandidateConstraintEvidence(candidate, bundle);
+    expect(result.matchedConstraints).toContain('popularity_score');
   });
 });
 

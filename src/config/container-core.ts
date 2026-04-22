@@ -70,6 +70,7 @@ export interface CoreContainerServices {
   readonly cacheLookupRuntimeState: CacheLookupRuntimeState;
   readonly cacheLookupRuntimeStateProvider: () => CacheLookupRuntimeState;
   readonly ltrModels?: RuntimeSupportServices['ltrModels'];
+  readonly runtimeReadiness: RuntimeSupportServices['runtimeReadiness'];
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly calibrationStore: CalibrationStore;
   /**

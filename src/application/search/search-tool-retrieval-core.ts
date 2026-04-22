@@ -4,7 +4,7 @@ import {
   isSpecificSkuLikeQuery,
 } from '../agent/agent-query-execution-contract.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
-import { stripExactEntityMetadataSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
+import { stripExactEntityLookupSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
 import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../domain/attribute/service/span-parser.js';
 import {
@@ -18,6 +18,9 @@ const VINTAGE_TOKEN_PATTERN = /(?<![\p{L}\p{N}])(?:18|19|20)\d{2}(?:년산?|년�
 
 export interface SearchToolRetrievalCoreInput {
   readonly query: string;
+  readonly min_price_krw?: number | undefined;
+  readonly max_price_krw?: number | undefined;
+  readonly max_alcohol_pct?: number | undefined;
   readonly grape_primary?: string | undefined;
   readonly wine_type?: string | undefined;
   readonly country?: string | undefined;
@@ -25,6 +28,18 @@ export interface SearchToolRetrievalCoreInput {
   readonly appellation?: string | undefined;
   readonly vintage_min?: number | undefined;
   readonly vintage_max?: number | undefined;
+  readonly style?: string | undefined;
+  readonly styles?: readonly string[] | undefined;
+  readonly gift_suitability_min?: number | undefined;
+  readonly beginner_suitability_min?: number | undefined;
+  readonly producer_prestige_min?: number | undefined;
+  readonly popularity_min?: number | undefined;
+  readonly recipient_profile?: string | undefined;
+  readonly sweetness_min?: number | undefined;
+  readonly sweetness_max?: number | undefined;
+  readonly acidity_min?: number | undefined;
+  readonly acidity_max?: number | undefined;
+  readonly tannin_max?: number | undefined;
   readonly occasion?: readonly string[] | undefined;
   readonly drinking_window?: 'now' | undefined;
   readonly drinking_window_target_year?: number | undefined;
@@ -35,11 +50,160 @@ export interface SearchToolRetrievalCoreInput {
   readonly preserveRepresentativeSearch?: boolean | undefined;
 }
 
+function hasStructuredSetRetrievalPreferenceHints(
+  input: SearchToolRetrievalCoreInput,
+): boolean {
+  return input.min_price_krw !== undefined
+    || input.max_price_krw !== undefined
+    || input.max_alcohol_pct !== undefined
+    || input.style !== undefined
+    || (input.styles?.length ?? 0) > 0
+    || input.gift_suitability_min !== undefined
+    || input.beginner_suitability_min !== undefined
+    || input.producer_prestige_min !== undefined
+    || input.popularity_min !== undefined
+    || input.recipient_profile !== undefined
+    || input.sweetness_min !== undefined
+    || input.sweetness_max !== undefined
+    || input.acidity_min !== undefined
+    || input.acidity_max !== undefined
+    || input.tannin_max !== undefined
+    || (input.occasion?.length ?? 0) > 0
+    || input.drinking_window !== undefined
+    || input.drinking_window_target_year !== undefined;
+}
+
+export function shouldPreserveRepresentativeAnchorOnlyQuery(
+  input: SearchToolRetrievalCoreInput,
+): boolean {
+  if (input.preserveRepresentativeSearch === true) {
+    return false;
+  }
+  if (!hasStructuredSetRetrievalPreferenceHints(input)) {
+    return false;
+  }
+
+  const normalizedQuery = buildAgentQueryExecutionContract(input.query).hasEntityMetadataSignal
+    && isExactMetadataEntityLookupCandidate(input.query)
+    ? stripExactEntityLookupSuffix(input.query)
+    : input.query;
+  const queryViews = buildNormalizedQueryViews(normalizedQuery);
+  return resolveCanonicalEntityTerms(queryViews).length > 0;
+}
+
+function hasStructuredGeographyFilter(input: SearchToolRetrievalCoreInput): boolean {
+  return input.country !== undefined
+    || input.region !== undefined
+    || input.appellation !== undefined;
+}
+
+function shouldSuppressStructuredEntityLexicalDuplication(
+  input: SearchToolRetrievalCoreInput,
+  options: {
+    readonly hasStructuredEntityAnchor: boolean;
+    readonly hasUnrepresentedEntityAnchor: boolean;
+    readonly pairingTagCount: number;
+    readonly occasionTermCount: number;
+  },
+): boolean {
+  if (input.preserveRepresentativeSearch === true) {
+    return false;
+  }
+  if (!options.hasStructuredEntityAnchor || options.hasUnrepresentedEntityAnchor) {
+    return false;
+  }
+  if (options.pairingTagCount > 0 || options.occasionTermCount > 0) {
+    return false;
+  }
+
+  return hasStructuredGeographyFilter(input) || hasStructuredSetRetrievalPreferenceHints(input);
+}
+
+export function shouldPreferTypedStructuredQuery(
+  input: SearchToolRetrievalCoreInput,
+): boolean {
+  if (shouldPreserveRepresentativeAnchorOnlyQuery(input)) {
+    return true;
+  }
+
+  const normalizedQuery = buildAgentQueryExecutionContract(input.query).hasEntityMetadataSignal
+    && isExactMetadataEntityLookupCandidate(input.query)
+    ? stripExactEntityLookupSuffix(input.query)
+    : input.query;
+  const queryViews = buildNormalizedQueryViews(normalizedQuery);
+  const pairingTags = [
+    ...new Set<PairingTag>([
+      ...extractAllPairingConstraints(input.query),
+      ...extractAllPairingConstraints(queryViews.punctuationStripped),
+      ...(queryViews.transliterated !== undefined
+        ? extractAllPairingConstraints(queryViews.transliterated)
+        : []),
+    ]),
+  ];
+  const occasionTerms = [
+    ...new Set(
+      (input.occasion ?? [])
+        .map(occasionTagToSemanticTerm)
+        .filter((term): term is string => typeof term === 'string' && term.length > 0),
+    ),
+  ];
+  const lookupQueries = [
+    ...new Set<string>([
+      queryViews.punctuationStripped,
+      ...(queryViews.transliterated !== undefined ? [queryViews.transliterated] : []),
+    ]),
+  ];
+
+  let hasStructuredEntityAnchor = false;
+  let hasUnrepresentedEntityAnchor = false;
+  for (const lookupQuery of lookupQueries) {
+    const resolvedSpans = resolveOverlaps(
+      parseSpans(lookupQuery).map((span) => ({
+        span,
+        resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
+      })),
+    )
+      .filter(
+        (
+          entry,
+        ): entry is {
+          span: Span;
+          resolved: NonNullable<ReturnType<typeof resolveEntity>>;
+        } => isDirectEntityResolution(entry.resolved),
+      );
+
+    for (const entry of resolvedSpans) {
+      if (
+        entry.resolved.entityType === 'wine_type'
+        && input.wine_type !== undefined
+      ) {
+        hasStructuredEntityAnchor = true;
+        continue;
+      }
+      if (isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input)) {
+        hasStructuredEntityAnchor = true;
+        continue;
+      }
+      hasUnrepresentedEntityAnchor = true;
+    }
+  }
+
+  return shouldSuppressStructuredEntityLexicalDuplication(input, {
+    hasStructuredEntityAnchor,
+    hasUnrepresentedEntityAnchor,
+    pairingTagCount: pairingTags.length,
+    occasionTermCount: occasionTerms.length,
+  });
+}
+
 function pairingTagToSemanticTerm(tag: PairingTag): string {
   return tag.replace(/_/gu, ' ');
 }
 
-function occasionTagToSemanticTerm(tag: string): string {
+function occasionTagToSemanticTerm(tag: string): string | undefined {
+  if (tag === 'cellaring') {
+    return undefined;
+  }
   return tag.replace(/_/gu, ' ');
 }
 
@@ -62,6 +226,16 @@ function buildLexicalNucleus(
   }
   const trimmedRawQuery = rawQuery.trim();
   return trimmedRawQuery.length > 0 ? trimmedRawQuery : undefined;
+}
+
+function normalizeCanonicalEntityQueryTerm(rawValue: string): string | undefined {
+  const queryViews = buildNormalizedQueryViews(rawValue);
+  const transliterated = queryViews.transliterated?.trim();
+  if (transliterated !== undefined && transliterated.length > 0) {
+    return transliterated.toLowerCase();
+  }
+  const punctuationStripped = queryViews.punctuationStripped.trim();
+  return punctuationStripped.length > 0 ? punctuationStripped.toLowerCase() : undefined;
 }
 
 function resolveCanonicalEntityTerms(
@@ -108,7 +282,10 @@ function resolveCanonicalEntityTerms(
       .filter((entry) => entry.resolved.entityType !== 'wine_type');
 
     for (const entry of resolvedSpans) {
-      const canonical = entry.resolved.canonicalValue.trim().toLowerCase();
+      const canonical = normalizeCanonicalEntityQueryTerm(entry.resolved.canonicalValue);
+      if (canonical === undefined) {
+        continue;
+      }
       if (canonical.length === 0 || seen.has(canonical)) {
         continue;
       }
@@ -161,7 +338,7 @@ export function buildSearchToolRetrievalCoreQuery(
 ): string {
   const queryContract = buildAgentQueryExecutionContract(input.query);
   const normalizedQuery = queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query)
-    ? stripExactEntityMetadataSuffix(input.query)
+    ? stripExactEntityLookupSuffix(input.query)
     : input.query;
   const queryViews = buildNormalizedQueryViews(normalizedQuery);
   const tokenCount = queryViews.punctuationStripped.length === 0
@@ -176,7 +353,13 @@ export function buildSearchToolRetrievalCoreQuery(
         : []),
       ]),
   ];
-  const occasionTerms = [...new Set((input.occasion ?? []).map(occasionTagToSemanticTerm))];
+  const occasionTerms = [
+    ...new Set(
+      (input.occasion ?? [])
+        .map(occasionTagToSemanticTerm)
+        .filter((term): term is string => typeof term === 'string' && term.length > 0),
+    ),
+  ];
   const hasPositiveStructuredFilters =
     input.grape_primary !== undefined
     || input.wine_type !== undefined
@@ -228,6 +411,8 @@ export function buildSearchToolRetrievalCoreQuery(
   const semanticTerms: string[] = [];
   const seen = new Set<string>();
   let hasEntitySemanticTerm = false;
+  let hasStructuredEntityAnchor = false;
+  let hasUnrepresentedEntityAnchor = false;
   const add = (value: string | undefined): void => {
     const trimmed = value?.trim();
     if (trimmed === undefined || trimmed.length === 0) return;
@@ -258,19 +443,45 @@ export function buildSearchToolRetrievalCoreQuery(
           span: Span;
           resolved: NonNullable<ReturnType<typeof resolveEntity>>;
         } => isDirectEntityResolution(entry.resolved),
-      )
-      .filter((entry) => !isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input));
+      );
 
     for (const entry of resolvedSpans) {
-      if (entry.resolved.entityType === 'wine_type' && input.wine_type !== undefined) {
+      if (
+        entry.resolved.entityType === 'wine_type'
+        && input.wine_type !== undefined
+      ) {
+        hasStructuredEntityAnchor = true;
         continue;
       }
+      if (isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input)) {
+        hasStructuredEntityAnchor = true;
+        continue;
+      }
+      hasUnrepresentedEntityAnchor = true;
       hasEntitySemanticTerm = true;
-      add(entry.resolved.canonicalValue.toLowerCase());
+      add(normalizeCanonicalEntityQueryTerm(entry.resolved.canonicalValue));
     }
   }
 
-  if (!hasEntitySemanticTerm && (pairingTags.length > 0 || occasionTerms.length > 0 || hasPositiveStructuredFilters)) {
+  const suppressStructuredEntityLexicalDuplication = shouldSuppressStructuredEntityLexicalDuplication(
+    input,
+    {
+      hasStructuredEntityAnchor,
+      hasUnrepresentedEntityAnchor,
+      pairingTagCount: pairingTags.length,
+      occasionTermCount: occasionTerms.length,
+    },
+  );
+
+  if (hasEntitySemanticTerm && shouldPreserveRepresentativeAnchorOnlyQuery(input)) {
+    return semanticTerms.join(' ');
+  }
+
+  if (
+    !hasEntitySemanticTerm
+    && !suppressStructuredEntityLexicalDuplication
+    && (pairingTags.length > 0 || occasionTerms.length > 0 || hasPositiveStructuredFilters)
+  ) {
     add(buildLexicalNucleus(queryViews, input.query));
   }
 
@@ -291,6 +502,9 @@ export function buildSearchToolRetrievalCoreQuery(
   }
 
   if (semanticTerms.length === 0) {
+    if (suppressStructuredEntityLexicalDuplication) {
+      return 'wine';
+    }
     return normalizedQuery;
   }
 

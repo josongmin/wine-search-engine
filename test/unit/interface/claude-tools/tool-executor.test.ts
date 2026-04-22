@@ -312,6 +312,7 @@ describe('WineToolExecutor', () => {
           gift_suitability_min: 0.7,
           beginner_suitability_min: 0.65,
           producer_prestige_min: 0.72,
+          popularity_min: 0.6,
           styles: ['approachable', 'crowd_pleasing'],
         },
         'req-latent-intent-123',
@@ -320,13 +321,14 @@ describe('WineToolExecutor', () => {
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
       expect(request.query).toContain('gift');
       expect(request.query).toContain('anniversary');
-      expect(request.query).toContain('approachable');
-      expect(request.query).toContain('crowd pleasing');
+      expect(request.query).not.toContain('approachable');
+      expect(request.query).not.toContain('crowd pleasing');
       expect(request.preferences).toEqual(expect.arrayContaining([
         expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift', 'anniversary'] }),
         expect.objectContaining({ attribute: 'gift_suitability', operator: '>=', value: 0.7 }),
         expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=', value: 0.65 }),
         expect.objectContaining({ attribute: 'producer_prestige', operator: '>=', value: 0.72 }),
+        expect.objectContaining({ attribute: 'popularity_score', operator: '>=', value: 0.6 }),
       ]));
       expect(request.filters).toBeUndefined();
     });
@@ -410,13 +412,13 @@ describe('WineToolExecutor', () => {
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       expect(request.query).toContain('gift wine');
-      expect(request.query).toContain('approachable');
-      expect(request.query).toContain('crowd pleasing');
+      expect(request.query).not.toContain('approachable');
+      expect(request.query).not.toContain('crowd pleasing');
       expect(request.query).not.toContain('ignored-style');
       expect(request.filters).toBeUndefined();
     });
 
-    it('should treat presentation_forward as a no-op style hint instead of polluting the retrieval query', async () => {
+    it('should keep abstract learned styles out of the retrieval query while preserving structured preferences', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
 
       await executor.execute(
@@ -429,7 +431,7 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
-      expect(request.query).toContain('approachable');
+      expect(request.query).not.toContain('approachable');
       expect(request.query).not.toContain('presentation_forward');
       expect(request.preferences).toEqual(expect.arrayContaining([
         expect.objectContaining({ attribute: 'style', operator: 'in', value: ['presentation_forward'] }),
@@ -450,13 +452,40 @@ describe('WineToolExecutor', () => {
       );
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
-      expect(request.query).toContain('approachable');
+      expect(request.query).not.toContain('approachable');
       expect(request.query).toContain('sweet');
       expect(request.preferences).toEqual(expect.arrayContaining([
         expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
         expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
       ]));
       expect(request.filters).toBeUndefined();
+    });
+
+    it('should compile typed sensory search preferences without polluting the retrieval query', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: '와인 처음 마시는 부모님께 추천할 와인',
+          recipient_profile: 'parents_first_time',
+          sweetness_min: 0.2,
+          sweetness_max: 0.75,
+          acidity_max: 0.75,
+          tannin_max: 0.3,
+        },
+        'req-typed-sensory-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      expect(request.query).toBe('와인 처음 마시는 부모님께 추천할 와인');
+      expect(request.preferences).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.2 }),
+        expect.objectContaining({ attribute: 'sweetness', operator: '<=', value: 0.75 }),
+        expect.objectContaining({ attribute: 'acidity', operator: '<=', value: 0.75 }),
+        expect.objectContaining({ attribute: 'tannin', operator: '<=', value: 0.3 }),
+        expect.objectContaining({ attribute: 'recipient_profile', operator: '=', value: 'parents_first_time' }),
+      ]));
     });
 
     it('should run typed diversity discovery when want_diversity is true without explicit wine_type', async () => {
@@ -1038,6 +1067,8 @@ describe('WineToolExecutor', () => {
           max_price_krw: 50000,
           country: 'Italy',
           vintage_min: 2018,
+          popularity_min: 0.55,
+          tannin_max: 0.3,
         },
         'compare-req-456',
       );
@@ -1066,6 +1097,12 @@ describe('WineToolExecutor', () => {
         expect.arrayContaining([
           expect.objectContaining({ attribute: 'country', operator: '=', value: 'Italy' }),
           expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
+        ]),
+      );
+      expect(parentContext?.preferences).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ attribute: 'popularity_score', operator: '>=', value: 0.55 }),
+          expect.objectContaining({ attribute: 'tannin', operator: '<=', value: 0.3 }),
         ]),
       );
     });

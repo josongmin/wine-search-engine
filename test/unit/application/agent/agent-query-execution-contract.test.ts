@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAgentQueryExecutionContract,
   extractPendingDrinkabilityEntityIds,
+  hasBareExactEntityAnchor,
   isExactMetadataEntityLookupCandidate,
   isSpecificSkuLikeQuery,
   normalizeExactMetadataSearchInput,
@@ -57,6 +58,22 @@ describe('agent query execution contract', () => {
       hasEntityMetadataSignal: true,
       exactMetadataEntityQuery: 'Sassicaia 2025',
       exactMetadataTargetVintage: 2025,
+    });
+    expect(buildAgentQueryExecutionContract('Tignanello 2019 정보')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: 'Tignanello 2019',
+      exactMetadataTargetVintage: 2019,
+    });
+    expect(buildAgentQueryExecutionContract('돔페리뇽 추천해줘')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      exactMetadataEntityQuery: '돔페리뇽',
+    });
+    expect(buildAgentQueryExecutionContract('페트뤼스 와인 추천')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+      nonExactEntityLookupQuery: '페트뤼스 와인 추천',
     });
   });
 
@@ -119,8 +136,11 @@ describe('agent query execution contract', () => {
 
   it('builds typed search defaults for explicit situational semantics', () => {
     expect(buildAgentQueryExecutionContract('이탈리아 레드 중에 평점 좋고 지금 마실 수 있는 거')).toMatchObject({
-      requiresDrinkabilityCheck: true,
+      requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
+      searchDefaults: {
+        drinking_window: 'now',
+      },
     });
     expect(buildAgentQueryExecutionContract('캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거')).toMatchObject({
       requiresDrinkabilityCheck: false,
@@ -156,7 +176,12 @@ describe('agent query execution contract', () => {
     expect(buildAgentQueryExecutionContract('와인 처음 마시는 부모님께 추천할 와인')).toMatchObject({
       searchDefaults: {
         styles: ['approachable', 'crowd_pleasing'],
+        recipient_profile: 'parents_first_time',
         beginner_suitability_min: 0.65,
+        sweetness_min: 0.2,
+        sweetness_max: 0.75,
+        acidity_max: 0.75,
+        tannin_max: 0.3,
       },
     });
     expect(buildAgentQueryExecutionContract('와인 잘 모르는데 처음 마셔보기 좋은 거 알려줘')).toMatchObject({
@@ -171,6 +196,7 @@ describe('agent query execution contract', () => {
         occasion: ['gift'],
         min_price_krw: 50_000,
         max_price_krw: 150_000,
+        recipient_profile: 'senior_colleague_gift',
         gift_suitability_min: 0.75,
         producer_prestige_min: 0.7,
       },
@@ -178,6 +204,8 @@ describe('agent query execution contract', () => {
     expect(buildAgentQueryExecutionContract('온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거 5만원 이하')).toMatchObject({
       searchDefaults: {
         styles: ['approachable', 'crowd_pleasing'],
+        beginner_suitability_min: 0.65,
+        popularity_min: 0.5,
         max_price_krw: 50_000,
       },
     });
@@ -203,6 +231,27 @@ describe('agent query execution contract', () => {
       temporalReleaseConceptQuery: true,
       searchDefaults: {
         region: 'Beaujolais',
+      },
+    });
+    expect(buildAgentQueryExecutionContract('셀러에 넣어둘 만한 거, 지금 마시면 아까운 와인')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      searchDefaults: {
+        occasion: ['cellaring'],
+        styles: ['ageworthy'],
+      },
+    });
+    expect(buildAgentQueryExecutionContract('2015년산 중에 지금 바로 마셔야 하는 거 있어?')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+      searchDefaults: {
+        drinking_window: 'now',
+      },
+    });
+    expect(buildAgentQueryExecutionContract('아이 태어난 해 와인 사서 성인 될 때 같이 마시려고, 2024년산')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      searchDefaults: {
+        occasion: ['cellaring'],
+        styles: ['ageworthy'],
       },
     });
   });
@@ -233,9 +282,12 @@ describe('agent query execution contract', () => {
   });
 
   it('detects attached Korean comparison particles as explicit drinkability comparison', () => {
-    expect(buildAgentQueryExecutionContract('바롤로랑 브루넬로 비교해주고, 둘 중 지금 마시기 좋은 거로 골라줘')).toEqual({
+    expect(buildAgentQueryExecutionContract('바롤로랑 브루넬로 비교해주고, 둘 중 지금 마시기 좋은 거로 골라줘')).toMatchObject({
       requiresDrinkabilityCheck: true,
       hasEntityMetadataSignal: true,
+      searchDefaults: {
+        drinking_window: 'now',
+      },
     });
   });
 
@@ -250,7 +302,14 @@ describe('agent query execution contract', () => {
     expect(isExactMetadataEntityLookupCandidate('오푸스원 지금 마시기 좋아?')).toBe(true);
     expect(isExactMetadataEntityLookupCandidate('Opus One 2027 vintage released yet? If you do not have hard evidence, say you do not know.')).toBe(true);
     expect(isExactMetadataEntityLookupCandidate('Sassicaia 2025 release 있나? 확실한 근거 없으면 추정하지 말고 말해줘')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('Tignanello 2019 정보')).toBe(true);
+    expect(isExactMetadataEntityLookupCandidate('돔페리뇽 추천해줘')).toBe(true);
     expect(isExactMetadataEntityLookupCandidate('레드 와인 추천해줘')).toBe(false);
+  });
+
+  it('detects bare exact label anchors that should preserve entity retrieval mode', () => {
+    expect(hasBareExactEntityAnchor('돔페리뇽')).toBe(true);
+    expect(hasBareExactEntityAnchor('모엣샹동 로제 임페리얼')).toBe(true);
   });
 
   it('strips structured filters from exact metadata search input while preserving allowed execution keys', () => {

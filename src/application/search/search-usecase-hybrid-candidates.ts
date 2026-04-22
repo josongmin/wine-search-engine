@@ -72,6 +72,7 @@ import {
   expandSemanticStyleRetrievalTerms,
   resolveSemanticStyleEvidenceProfile,
 } from '../../domain/query/service/semantic-style-query-terms.js';
+import { recipientProfileToRetrievalTerms } from '../../domain/query/service/recipient-situation-profile.js';
 import type { WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 import { SEARCH_TOOL_DIVERSITY_WINE_TYPES } from './search-tool-diversity.js';
 
@@ -397,7 +398,8 @@ function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
     || attribute === 'flavor_profile'
     || attribute === 'certification'
     || attribute === 'pairing'
-    || attribute === 'occasion';
+    || attribute === 'occasion'
+    || attribute === 'recipient_profile';
 }
 
 function retrievalValueToPhrases(
@@ -411,6 +413,21 @@ function retrievalValueToPhrases(
     || attribute === 'drinking_window'
   ) {
     return [];
+  }
+
+  if (attribute === 'recipient_profile') {
+    if (typeof value === 'string') {
+      return recipientProfileToRetrievalTerms(value);
+    }
+    if (Array.isArray(value)) {
+      return [
+        ...new Set(
+          value
+            .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+            .flatMap((entry) => recipientProfileToRetrievalTerms(entry)),
+        ),
+      ];
+    }
   }
 
   if (attribute === 'style') {

@@ -1,6 +1,7 @@
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentQueryExecutionContract } from './agent-query-execution-contract.js';
 import {
+  hasBareExactEntityAnchor,
   isExactMetadataEntityLookupCandidate,
   isSpecificSkuLikeQuery,
   normalizeExactMetadataSearchInput,
@@ -9,7 +10,9 @@ import { isAccessibleOnlineTastingQuery } from './agent-situational-query-policy
 import { extractAllPairingConstraints } from '../../domain/query/service/pairing-extractor.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
+import { SEARCH_TOOL_WANTS_DIVERSITY_RE } from '../search/search-tool-diversity.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
+import { CURATED_ENTITY_ALIAS_CATALOG } from '../../domain/attribute/service/entity-alias-catalog.js';
 
 const TOP_LEVEL_REGION_VALUES = new Set([
   'alsace',
@@ -27,6 +30,29 @@ const TOP_LEVEL_REGION_VALUES = new Set([
   'rhone',
   'tuscany',
 ]);
+const EXACT_LOOKUP_GENERIC_OBJECT_SUFFIX_RE = /(?:\s*(?:와인|wine))(?:\s*)$/iu;
+const NON_EXACT_LOOKUP_INTENT_RE =
+  /(?:같은\s*와인|대체|스타일|느낌|비교|(?:급)(?=$|[^\p{L}\p{N}])|명작|명품|와인\s*추천|추천(?!\s*(?:해줘|해주세요|해\s*줘)))/u;
+const EXACT_LOOKUP_OVERCONSTRAINT_KEYS = [
+  'country',
+  'region',
+  'appellation',
+  'grape_primary',
+  'wine_type',
+  'style',
+  'styles',
+  'occasion',
+  'gift_suitability_min',
+  'beginner_suitability_min',
+  'producer_prestige_min',
+  'popularity_min',
+  'recipient_profile',
+  'sweetness_min',
+  'sweetness_max',
+  'acidity_min',
+  'acidity_max',
+  'tannin_max',
+] as const;
 
 function shouldInjectRefinementHint(observation: string): boolean {
   return observation.includes('0개') || observation.includes('검색 결과가 없습니다') || observation.startsWith('NO_MATCH:');
@@ -55,15 +81,25 @@ function normalizeSearchInput(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
 ): Record<string, unknown> {
-  const next = { ...input };
+  let next: Record<string, unknown> = { ...input };
   if (
+    typeof queryExecutionContract.nonExactEntityLookupQuery === 'string'
+    && queryExecutionContract.nonExactEntityLookupQuery.trim().length > 0
+  ) {
+    next['query'] = queryExecutionContract.nonExactEntityLookupQuery.trim();
+  } else if (
     queryExecutionContract.hasEntityMetadataSignal
     && typeof queryExecutionContract.exactMetadataEntityQuery === 'string'
     && queryExecutionContract.exactMetadataEntityQuery.trim().length > 0
   ) {
     next['query'] = queryExecutionContract.exactMetadataEntityQuery.trim();
   }
-  const query = typeof next['query'] === 'string' ? next['query'] : undefined;
+  let query = typeof next['query'] === 'string' ? next['query'] : undefined;
+
+  if (next['retrieval_mode'] === 'entity') {
+    next = normalizeExactLookupEntitySearchInput(next, queryExecutionContract);
+    query = typeof next['query'] === 'string' ? next['query'] : undefined;
+  }
 
   if (
     next['retrieval_mode'] === 'entity'
@@ -73,6 +109,7 @@ function normalizeSearchInput(
       || (
         !isSpecificSkuLikeQuery(query)
         && !isExactMetadataEntityLookupCandidate(query)
+        && !hasBareExactEntityAnchor(query)
       )
     )
   ) {
@@ -91,6 +128,13 @@ function normalizeSearchInput(
     delete next['gift_suitability_min'];
     delete next['beginner_suitability_min'];
     delete next['producer_prestige_min'];
+    delete next['popularity_min'];
+    delete next['recipient_profile'];
+    delete next['sweetness_min'];
+    delete next['sweetness_max'];
+    delete next['acidity_min'];
+    delete next['acidity_max'];
+    delete next['tannin_max'];
   }
 
   if (
@@ -142,17 +186,129 @@ function normalizeSearchInput(
     : { ...withExactVintage, limit: 1 };
 }
 
+function normalizeExactLookupAliasSurface(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .normalize('NFKC')
+    .replace(/&/gu, 'and')
+    .replace(/[^a-z0-9가-힣]+/gu, '');
+}
+
+function extractCuratedExactLookupAnchor(query: string): string | undefined {
+  const normalizedQuery = normalizeExactLookupAliasSurface(query);
+  if (normalizedQuery.length === 0) {
+    return undefined;
+  }
+  const matches = CURATED_ENTITY_ALIAS_CATALOG
+    .filter((alias) =>
+      alias.mappedAttribute === 'appellation'
+      && alias.resolutionMode === 'direct',
+    )
+    .map((alias) => ({
+      surface: alias.surface,
+      normalizedSurface: normalizeExactLookupAliasSurface(alias.surface),
+    }))
+    .filter((alias) =>
+      alias.normalizedSurface.length > 0
+      && normalizedQuery.includes(alias.normalizedSurface),
+    )
+    .sort((a, b) => b.normalizedSurface.length - a.normalizedSurface.length);
+  return matches[0]?.surface;
+}
+
+function normalizeExactLookupEntitySearchInput(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): Record<string, unknown> {
+  if (input['retrieval_mode'] !== 'entity') {
+    return input;
+  }
+  if (
+    queryExecutionContract.exactMetadataTargetVintage !== undefined
+    && typeof queryExecutionContract.exactMetadataEntityQuery === 'string'
+  ) {
+    return input;
+  }
+  const query = input['query'];
+  if (typeof query !== 'string' || query.trim().length === 0 || NON_EXACT_LOOKUP_INTENT_RE.test(query)) {
+    return input;
+  }
+  const anchor = extractCuratedExactLookupAnchor(query);
+  if (anchor === undefined) {
+    return input;
+  }
+  const normalized: Record<string, unknown> = { ...input, query: anchor };
+  for (const key of EXACT_LOOKUP_OVERCONSTRAINT_KEYS) {
+    delete normalized[key];
+  }
+  return normalized;
+}
+
+function shouldForceEntityRetrievalMode(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): boolean {
+  if (input['retrieval_mode'] !== undefined) {
+    return false;
+  }
+  if (queryExecutionContract.temporalReleaseConceptQuery === true) {
+    return false;
+  }
+  const query = input['query'];
+  if (typeof query !== 'string' || query.trim().length === 0) {
+    return false;
+  }
+  if (
+    queryExecutionContract.hasEntityMetadataSignal
+    && (
+      typeof queryExecutionContract.exactMetadataEntityQuery === 'string'
+      || isExactMetadataEntityLookupCandidate(query)
+    )
+  ) {
+    return true;
+  }
+  if (NON_EXACT_LOOKUP_INTENT_RE.test(query)) {
+    return false;
+  }
+  if (isSpecificSkuLikeQuery(query) || hasBareExactEntityAnchor(query)) {
+    return true;
+  }
+  const genericSuffixStripped = query.replace(EXACT_LOOKUP_GENERIC_OBJECT_SUFFIX_RE, '').trim();
+  return genericSuffixStripped.length > 0
+    && genericSuffixStripped !== query
+    && hasBareExactEntityAnchor(genericSuffixStripped);
+}
+
+function enforceExactLookupRetrievalMode(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): Record<string, unknown> {
+  return shouldForceEntityRetrievalMode(input, queryExecutionContract)
+    ? { ...input, retrieval_mode: 'entity' }
+    : input;
+}
+
 function addDrinkabilityRetrievalObjective(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
 ): Record<string, unknown> {
-  if (!queryExecutionContract.requiresDrinkabilityCheck) {
+  const objective = queryExecutionContract.searchDefaults?.drinking_window;
+  if (!queryExecutionContract.requiresDrinkabilityCheck || objective === undefined) {
     return input;
   }
   if (input['drinking_window'] !== undefined) {
     return input;
   }
-  return { ...input, drinking_window: 'now' };
+  return {
+    ...input,
+    drinking_window: objective,
+    ...(queryExecutionContract.searchDefaults?.drinking_window_target_year !== undefined
+      ? { drinking_window_target_year: queryExecutionContract.searchDefaults.drinking_window_target_year }
+      : {}),
+  };
 }
 
 function stripSearchDrinkabilityVerificationFields(
@@ -175,7 +331,11 @@ function stripSearchDrinkabilityObjectiveFromQuery(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
 ): Record<string, unknown> {
-  if (!queryExecutionContract.requiresDrinkabilityCheck) {
+  const searchDefaults = queryExecutionContract.searchDefaults;
+  const hasSearchLevelDrinkabilityObjective =
+    searchDefaults?.drinking_window !== undefined
+    || searchDefaults?.occasion?.includes('cellaring') === true;
+  if (!queryExecutionContract.requiresDrinkabilityCheck && !hasSearchLevelDrinkabilityObjective) {
     return input;
   }
   const query = input['query'];
@@ -185,11 +345,33 @@ function stripSearchDrinkabilityObjectiveFromQuery(
   const normalized = query
     .replace(/(?:지금|현재)\s*(?:마실\s*수\s*있는|마시기\s*좋은|마셔도\s*되는)\s*(?:와인|거|것)?/giu, ' ')
     .replace(/(?:마실\s*수\s*있는|마시기\s*좋은|마셔도\s*되는)\s*(?:와인|거|것)?/giu, ' ')
+    .replace(/(?:지금\s*바로\s*마셔야\s*하(?:는|나|나요)?|바로\s*마셔야\s*하(?:는|나|나요)?)(?:\s*(?:와인|거|것))?/giu, ' ')
+    .replace(/(?:지금\s*마시면\s*아까운|셀러(?:에)?\s*넣어둘\s*만한|셀러(?:에)?\s*넣어둘|장기\s*숙성(?:용|할|해둘|하려는)?)(?:\s*(?:와인|거|것))?/giu, ' ')
+    .replace(/(?:아이\s*태어난\s*해\s*와인\s*사서|성인\s*될\s*때\s*(?:같이\s*)?마시(?:려고|려는|려면)|birth[\s-]?year\s+wine|for\s+when\s+(?:my\s+)?child\s+turns\s+adult)/giu, ' ')
     .replace(/(?:currently\s+drinkable|drink\s+now|ready\s+to\s+drink|drinking\s+well\s+now)/giu, ' ')
+    .replace(/(?:cellar(?:ing)?(?:\s+worthy)?|ageworthy|aging\s+potential|long[\s-]?term\s+aging|hold(?:\s+for)?)/giu, ' ')
+    .replace(/(?:있(?:어|나요|나|을까|을까요)|추천(?:해줘|해주세요|해\s*줘)|tell\s+me|show\s+me)[?？!！]*$/giu, ' ')
     .replace(/\s+/gu, ' ')
+    .replace(/\s*,\s*/gu, ' ')
+    .replace(/^\s*(?:중에|중|and)\s*/giu, '')
     .replace(/\s*(?:중에|and|,)\s*$/giu, '')
     .trim();
-  return normalized.length > 0 && normalized !== query ? { ...input, query: normalized } : input;
+  const vintageMin = input['vintage_min'];
+  const vintageMax = input['vintage_max'];
+  const exactVintageQuery =
+    typeof vintageMin === 'number'
+    && typeof vintageMax === 'number'
+    && vintageMin === vintageMax
+      ? `${vintageMin}년산 와인`
+      : undefined;
+  const normalizedVintageOnly = /^(?:18|19|20)\d{2}(?:\s*년산?)?$/u.test(normalized);
+  const finalQuery =
+    normalized.length === 0
+      ? exactVintageQuery ?? (/와인/u.test(query) ? '와인' : /wine/iu.test(query) ? 'wine' : undefined)
+      : normalizedVintageOnly
+        ? exactVintageQuery ?? normalized
+        : normalized;
+  return finalQuery !== undefined && finalQuery !== query ? { ...input, query: finalQuery } : input;
 }
 
 function wineTypeToFoodPairingColor(value: unknown): string | undefined {
@@ -268,12 +450,21 @@ function applySearchDefaults(
     next = { ...next, region: defaults.region };
   }
   for (const key of [
+    'drinking_window',
+    'drinking_window_target_year',
     'min_price_krw',
     'max_price_krw',
     'max_alcohol_pct',
     'gift_suitability_min',
     'beginner_suitability_min',
     'producer_prestige_min',
+    'popularity_min',
+    'recipient_profile',
+    'sweetness_min',
+    'sweetness_max',
+    'acidity_min',
+    'acidity_max',
+    'tannin_max',
   ] as const) {
     if (next[key] === undefined && defaults[key] !== undefined) {
       next = { ...next, [key]: defaults[key] };
@@ -328,15 +519,108 @@ function normalizeAccessibleOnlineTastingSearch(input: Record<string, unknown>):
   }
 
   let next = mergeStringArrayInput(input, 'styles', ['approachable', 'crowd_pleasing']);
-  const occasion = collectStringArray(next['occasion']).filter((value) => value !== 'party');
-  next = occasion.length > 0
-    ? { ...next, occasion }
-    : (() => {
-        const { occasion: _occasion, ...withoutOccasion } = next;
-        return withoutOccasion;
-      })();
+  const { occasion: _occasion, ...withoutOccasion } = next;
+  next = withoutOccasion;
   if (next['max_price_krw'] === undefined && /(?:5\s*만\s*원\s*이하|5만원\s*이하|under\s*(?:₩|krw)?\s*50[, ]?000|under\s*50k)/iu.test(query)) {
     next = { ...next, max_price_krw: 50_000 };
+  }
+  if (next['popularity_min'] === undefined) {
+    next = { ...next, popularity_min: 0.5 };
+  }
+  return next;
+}
+
+function normalizeSupportedSituationOverrides(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): Record<string, unknown> {
+  const defaults = queryExecutionContract.searchDefaults;
+  if (defaults === undefined) {
+    return input;
+  }
+
+  let next = { ...input };
+  const supportedStyles = defaults.styles;
+  const styleValues = uniqueStrings([
+    ...collectStringArray(next['styles']),
+    ...(typeof next['style'] === 'string' ? [next['style']] : []),
+  ]);
+  if (styleValues.length > 0 && supportedStyles !== undefined && supportedStyles.length > 0) {
+    const allowed = new Set(supportedStyles);
+    const normalizedStyles = uniqueStrings(styleValues.filter((value) => allowed.has(value)));
+    if (normalizedStyles.length > 0) {
+      next['styles'] = normalizedStyles;
+    } else {
+      delete next['styles'];
+    }
+    if (typeof next['style'] === 'string' && !allowed.has(next['style'])) {
+      delete next['style'];
+    }
+  }
+
+  const supportedOccasion = defaults.occasion;
+  const inputOccasion = collectStringArray(next['occasion']);
+  if (inputOccasion.length > 0) {
+    if (supportedOccasion === undefined || supportedOccasion.length === 0) {
+      delete next['occasion'];
+    } else {
+      const allowed = new Set(supportedOccasion);
+      const normalizedOccasion = uniqueStrings(inputOccasion.filter((value) => allowed.has(value)));
+      if (normalizedOccasion.length > 0) {
+        next['occasion'] = normalizedOccasion;
+      } else {
+        delete next['occasion'];
+      }
+    }
+  }
+
+  for (const key of [
+    'gift_suitability_min',
+    'beginner_suitability_min',
+    'producer_prestige_min',
+    'popularity_min',
+    'recipient_profile',
+    'sweetness_min',
+    'sweetness_max',
+    'acidity_min',
+    'acidity_max',
+    'tannin_max',
+  ] as const) {
+    if (defaults[key] === undefined) {
+      delete next[key];
+      continue;
+    }
+    next[key] = defaults[key];
+  }
+
+  if (next['want_diversity'] === true) {
+    const query = typeof next['query'] === 'string' ? next['query'] : '';
+    if (!SEARCH_TOOL_WANTS_DIVERSITY_RE.test(query)) {
+      delete next['want_diversity'];
+    }
+  }
+
+  return next;
+}
+
+function normalizeCellaringSearchSemantics(input: Record<string, unknown>): Record<string, unknown> {
+  const occasion = collectStringArray(input['occasion']);
+  if (!occasion.includes('cellaring')) {
+    return input;
+  }
+
+  const normalizedStyles = collectStringArray(input['styles'])
+    .map((value) => value.trim())
+    .filter((value) => !['cellaring', 'approachable', 'crowd_pleasing'].includes(value));
+  const uniqueStyles = uniqueStrings(normalizedStyles);
+  const next: Record<string, unknown> = { ...input };
+  if (uniqueStyles.length > 0) {
+    next['styles'] = uniqueStyles;
+  } else {
+    delete next['styles'];
+  }
+  if (typeof next['style'] === 'string' && ['cellaring', 'approachable', 'crowd_pleasing'].includes(next['style'].trim())) {
+    delete next['style'];
   }
   return next;
 }
@@ -397,8 +681,20 @@ function buildSlotSearchInput(
     ? maxPriceKrw
     : undefined);
   const totalBudgetSplit = totalBudgetKrw !== undefined;
+  const normalizedBaseInput = (() => {
+    const occasion = collectStringArray(baseInput['occasion']);
+    if (occasion.length === 0) {
+      return baseInput;
+    }
+    const preserved = occasion.filter((value) => value === 'gift');
+    if (preserved.length > 0) {
+      return { ...baseInput, occasion: preserved };
+    }
+    const { occasion: _occasion, ...withoutOccasion } = baseInput;
+    return withoutOccasion;
+  })();
   const next: Record<string, unknown> = {
-    ...baseInput,
+    ...normalizedBaseInput,
     ...(typeof query === 'string' ? { query } : {}),
     wine_type: slot.wineType,
     ...(totalBudgetSplit ? { max_price_krw: Math.floor(totalBudgetKrw / slotCount) } : {}),
@@ -406,6 +702,50 @@ function buildSlotSearchInput(
   };
   if (totalBudgetSplit) {
     delete next['min_price_krw'];
+  }
+  return next;
+}
+
+function normalizeParallelSlotOccasion(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): Record<string, unknown> {
+  if (queryExecutionContract.requiredParallelSearches === undefined) {
+    return input;
+  }
+  const occasion = collectStringArray(input['occasion']);
+  if (occasion.length === 0) {
+    return input;
+  }
+  const preserved = occasion.filter((value) => value === 'gift');
+  if (preserved.length > 0) {
+    return { ...input, occasion: preserved };
+  }
+  const { occasion: _occasion, ...withoutOccasion } = input;
+  return withoutOccasion;
+}
+
+function normalizeParallelSlotSearchInput(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): Record<string, unknown> {
+  const slots = queryExecutionContract.requiredParallelSearches;
+  const wineType = input['wine_type'];
+  const query = input['query'];
+  if (
+    slots === undefined
+    || typeof wineType !== 'string'
+    || !slots.some((slot) => slot.wineType === wineType)
+  ) {
+    return input;
+  }
+
+  let next = normalizeParallelSlotOccasion(input, queryExecutionContract);
+  if (typeof query === 'string') {
+    const normalizedQuery = buildSlotQueryAnchor(query, wineType);
+    if (normalizedQuery !== query) {
+      next = { ...next, query: normalizedQuery };
+    }
   }
   return next;
 }
@@ -598,23 +938,41 @@ function normalizeSearchExecutionInput(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
 ): Record<string, unknown> {
+  const normalizedInput = normalizeSearchInput(input, queryExecutionContract);
+  const withoutVerificationFields = stripSearchDrinkabilityVerificationFields(
+    normalizedInput,
+    queryExecutionContract,
+  );
+  const withoutDrinkabilityQueryObjective = stripSearchDrinkabilityObjectiveFromQuery(
+    withoutVerificationFields,
+    queryExecutionContract,
+  );
+  const withSearchDefaults = applySearchDefaults(
+    withoutDrinkabilityQueryObjective,
+    queryExecutionContract,
+  );
+  const withNormalizedAppellation = normalizeTopLevelRegionAppellation(withSearchDefaults);
+  const withoutNegatedWineTypeNoise = normalizeNegatedWineTypeSearchAnchor(withNormalizedAppellation);
+  const withCellaringSemanticsNormalized = normalizeCellaringSearchSemantics(withoutNegatedWineTypeNoise);
+  const withSupportedSituationOverrides = normalizeSupportedSituationOverrides(
+    withCellaringSemanticsNormalized,
+    queryExecutionContract,
+  );
+  const withAccessibilityNormalization = normalizeAccessibleOnlineTastingSearch(withSupportedSituationOverrides);
+  const withParallelSlotNormalization = normalizeParallelSlotSearchInput(
+    withAccessibilityNormalization,
+    queryExecutionContract,
+  );
+  const withExactLookupRetrievalMode = enforceExactLookupRetrievalMode(
+    withParallelSlotNormalization,
+    queryExecutionContract,
+  );
+  const withExactLookupEntitySearch = normalizeExactLookupEntitySearchInput(
+    withExactLookupRetrievalMode,
+    queryExecutionContract,
+  );
   return applyExplicitTotalBudgetParallelSlot(
-    normalizeAccessibleOnlineTastingSearch(
-      normalizeNegatedWineTypeSearchAnchor(
-        normalizeTopLevelRegionAppellation(
-          applySearchDefaults(
-            stripSearchDrinkabilityObjectiveFromQuery(
-              stripSearchDrinkabilityVerificationFields(
-                normalizeSearchInput(input, queryExecutionContract),
-                queryExecutionContract,
-              ),
-              queryExecutionContract,
-            ),
-            queryExecutionContract,
-          ),
-        ),
-      ),
-    ),
+    withExactLookupEntitySearch,
     queryExecutionContract,
   );
 }

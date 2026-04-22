@@ -7,7 +7,8 @@ import { isDirectEntityResolution, resolveEntity } from '../../attribute/service
 import type { AnchorExtractor } from './anchor-extractor.js';
 import {
   hasEntityMetadataKeyword,
-  stripExactEntityMetadataSuffix,
+  hasExactEntityLookupKeyword,
+  stripExactEntityLookupSuffix,
 } from './exact-entity-metadata-signals.js';
 
 /** Minimum anchor confidence to consider an anchor "present" for intent detection. */
@@ -89,8 +90,14 @@ export function detectQueryIntent(
   relativeQuery: AnchorConditionedQuery | null = null,
 ): QueryIntent {
   const hasEntityMetadataSignal = hasEntityMetadataKeyword(normalizedQuery);
-  const intentQuerySurface = hasEntityMetadataSignal
-    ? stripExactEntityMetadataSuffix(normalizedQuery)
+  const hasAnyAnchor = anchors.some(
+    (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
+  );
+  const hasExactEntityLookupSignal =
+    hasEntityMetadataSignal
+    || (hasExactEntityLookupKeyword(normalizedQuery) && hasAnyAnchor);
+  const intentQuerySurface = hasExactEntityLookupSignal
+    ? stripExactEntityLookupSuffix(normalizedQuery)
     : normalizedQuery;
   const hasDirectAttributeEntity = parseSpans(intentQuerySurface).some((span) => {
     const resolved = resolveEntity(span.text, { preferEntityOverStyle: true });
@@ -102,9 +109,6 @@ export function detectQueryIntent(
   const hasWeakAnchor = anchors.some(
     (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE &&
       a.confidence < EXACT_ANCHOR_CONFIDENCE,
-  );
-  const hasAnyAnchor = anchors.some(
-    (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
   );
   const hasComparisonMarker =
     anchorExtractor.hasComparisonMarkers(intentQuerySurface);
@@ -148,7 +152,7 @@ export function detectQueryIntent(
     return 'pairing_search';
   }
 
-  if (hasStrongAnchor && hasEntityMetadataSignal) {
+  if (hasStrongAnchor && hasExactEntityLookupSignal) {
     return hasDirectAttributeEntity || strongAnchorEntityCount <= 1 ? 'entity_exact' : 'facet_search';
   }
 
@@ -181,7 +185,7 @@ export function detectQueryIntent(
     return 'entity_fuzzy';
   }
 
-  if (hasWeakAnchor && hasEntityMetadataSignal) {
+  if (hasWeakAnchor && hasExactEntityLookupSignal) {
     return 'entity_fuzzy';
   }
 

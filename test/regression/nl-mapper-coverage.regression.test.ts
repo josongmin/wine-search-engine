@@ -56,6 +56,28 @@ describe('RFC-019 regression: NL mapper coverage', () => {
     expect(m).toBeNull();
   });
 
+  it.each([
+    '샤또 마고',
+    '샤토 마고',
+    '페트뤼스',
+    '돔페리뇽',
+    '사시카이아',
+    '모엣샹동 로제 임페리얼',
+  ])('exact wine alias %s stays out of NLMapper hard constraints', async (phrase) => {
+    const m = await mapper.mapPhrase(phrase);
+    expect(m).toBeNull();
+  });
+
+  it.each([
+    ['바롤로', 'appellation', 'Barolo'],
+    ['브루넬로', 'appellation', 'Brunello di Montalcino'],
+  ])('ontology appellation still maps: %s → %s=%s', async (phrase, attr, value) => {
+    const m = await mapper.mapPhrase(phrase);
+    expect(m).not.toBeNull();
+    expect(m!.mappedAttribute).toBe(attr);
+    expect(m!.value).toBe(value);
+  });
+
   it('unknown phrase returns null', async () => {
     const m = await mapper.mapPhrase('알수없는단어');
     expect(m).toBeNull();

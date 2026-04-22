@@ -25,6 +25,17 @@ import type { AgentBenchmarkScenario } from './scenario.js';
 import { ADVERSARIAL_SCENARIOS } from './scenarios.adversarial.js';
 import { COVERAGE_SCENARIOS } from './scenarios.coverage.js';
 import { BUNDLE_SCENARIOS } from './scenarios.bundle.js';
+import {
+  MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS as ROBUSTNESS_MESSY_QUERY_SCENARIO_IDS,
+  ROBUSTNESS_SCENARIOS,
+  TRANSLITERATION_EXACT_LOOKUP_CORE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_LARGE_HARD_NEGATIVE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_LARGE_POSITIVE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_LARGE_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_SCENARIO_IDS,
+  TRANSLITERATION_EXACT_LOOKUP_SCENARIO_IDS,
+} from './scenarios.robustness.js';
 
 const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // ─────────────────────────────────────────────────────────────────────
@@ -1173,6 +1184,7 @@ export const AGENT_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   ...ADVERSARIAL_SCENARIOS,
   ...COVERAGE_SCENARIOS,
   ...BUNDLE_SCENARIOS,
+  ...ROBUSTNESS_SCENARIOS,
 ];
 
 /**
@@ -1285,4 +1297,56 @@ export const MESSY_SEARCH_SCENARIO_IDS: ReadonlySet<number> = new Set([
   320, 322, 323,
   // coverage: beginner / unknown preference / safe respectable gifts
   460, 471, 473, 475, 480, 487,
+  // robustness: Korean messy input handling
+  ...ROBUSTNESS_MESSY_QUERY_SCENARIO_IDS,
+]);
+
+/**
+ * Korean messy-query robustness profile.
+ *
+ * Focus:
+ *   - typo / shorthand / no-spacing / chat-style Korean
+ *   - messy future-vintage release queries with honesty tails
+ *   - beginner slang / colloquial recommendation phrasing
+ */
+export const MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  61, 62, 63, 65, 66, 67,
+  ...ROBUSTNESS_MESSY_QUERY_SCENARIO_IDS,
+]);
+
+/**
+ * Korean transliteration exact-lookup profile.
+ *
+ * Focus:
+ *   - Korean market / retail discourse에서 통용되는 producer/label/SKU 음역 exact lookup
+ *   - hard negatives: underspecified / family / category queries must fail closed
+ *   - exact entity routing (`retrieval_mode:"entity"`) stability
+ *   - fail-closed honesty when the live corpus cannot confirm the exact wine
+ */
+export const TRANSLITERATION_EXACT_LOOKUP_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_SCENARIO_IDS,
+]);
+
+export const TRANSLITERATION_EXACT_LOOKUP_POSITIVE_CORE_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_CORE_SCENARIO_IDS,
+]);
+
+export const TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_SCENARIO_IDS,
+]);
+
+export const TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_SCENARIO_IDS,
+]);
+
+export const TRANSLITERATION_EXACT_LOOKUP_LARGE_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_LARGE_SCENARIO_IDS,
+]);
+
+export const TRANSLITERATION_EXACT_LOOKUP_LARGE_POSITIVE_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_LARGE_POSITIVE_SCENARIO_IDS,
+]);
+
+export const TRANSLITERATION_EXACT_LOOKUP_LARGE_HARD_NEGATIVE_PROFILE_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  ...TRANSLITERATION_EXACT_LOOKUP_LARGE_HARD_NEGATIVE_SCENARIO_IDS,
 ]);

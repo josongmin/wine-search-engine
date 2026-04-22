@@ -28,6 +28,7 @@
 
 import type {
   AgentBenchmarkScenario,
+  ExactLookupExpectation,
   ScenarioExpectation,
   TerminationReason,
 } from './scenario.js';
@@ -178,6 +179,7 @@ function hasExplicitNoEvidenceObservation(observations: readonly string[]): bool
   return normalized.includes('[retrieval_quality: unreliable — 0 results]')
     || normalized.includes('[retrieval_quality: unreliable - 0 results]')
     || normalized.includes('[retrieval_quality: corpus_limited')
+    || normalized.includes('resolution_not_confirmed')
     || normalized.includes('검색 결과가 없습니다')
     || normalized.includes('데이터베이스에 매우 적습니다');
 }
@@ -237,6 +239,10 @@ export interface ScenarioScores {
    * observations. null when scenario has no goldenKeywords or no observations.
    */
   readonly contextRecall: number | null;
+  /** Exact lookup hit rate for transliteration exact-entity scenarios. */
+  readonly exactLookupHit: number | null;
+  /** Fail-closed correctness for ambiguous / negative exact-lookup scenarios. */
+  readonly failClosedAccuracy: number | null;
   /**
    * RAGAS Answer Relevancy: always null in SOTA++ v4 — dimension removed from scoring.
    * answerMustMatch patterns penalize answerQuality via PENALTY_REGEX_MISS instead.
@@ -345,6 +351,8 @@ const ZERO_SCORES: ScenarioScores = {
   faithfulness: null,
   contextRelevance: null,
   contextRecall: null,
+  exactLookupHit: null,
+  failClosedAccuracy: null,
   answerRelevancy: null,
   judge: null,
   overall: 0,
@@ -401,7 +409,10 @@ const ZERO_SCORES: ScenarioScores = {
  * is sparse (only 6 scenarios define goldenKeywords out of 233).
  */
 export type DimensionWeights = Partial<Record<
-  Exclude<keyof ScenarioScores, 'overall' | 'toolAccuracy' | 'stepEfficiency' | 'criticalFailure'>,
+  Exclude<
+    keyof ScenarioScores,
+    'overall' | 'toolAccuracy' | 'stepEfficiency' | 'criticalFailure' | 'exactLookupHit' | 'failClosedAccuracy'
+  >,
   number
 >>;
 
@@ -522,6 +533,8 @@ const EXEC_STEP_WEIGHT = 0.4;
 const PENALTY_PRICE_BAND_VIOLATED = 0.7;
 const PENALTY_VINTAGE_RANGE_VIOLATED = 0.7;
 const PENALTY_DRINKING_WINDOW_MISMATCH = 0.8;
+const PENALTY_EXACT_LOOKUP_MISS = 0.35;
+const PENALTY_FAIL_CLOSED_VIOLATED = 0.35;
 /** v4: raised from 0.9 → 0.7. A missing tool argument is a structural execution
  * failure (tool was called but lacked a required arg). The old 10% dock was far
  * too mild — milder than price band violations (30%) despite being a more
@@ -612,6 +625,232 @@ function buildContextEvidenceRecords(execution: ScenarioExecution): readonly Evi
 
 function normalizeEvidenceText(value: unknown): string {
   return String(value).trim().toLowerCase().normalize('NFKC');
+}
+
+function normalizeExactLookupSurface(
+  value: string,
+  collapseWhitespace: boolean,
+): string {
+  const normalized = value.trim().toLowerCase().normalize('NFKC');
+  return collapseWhitespace
+    ? normalized.replace(/\s+/gu, '')
+    : normalized.replace(/\s+/gu, ' ');
+}
+
+function collectObservedExactLookupValues(records: readonly EvidenceRecord[]): {
+  readonly entityIds: readonly string[];
+  readonly canonicalLabels: readonly string[];
+} {
+  const entityIds = new Set<string>();
+  const canonicalLabels = new Set<string>();
+  for (const record of records) {
+    const entityId = record['entity_id'];
+    if (typeof entityId === 'string' && entityId.trim().length > 0) {
+      entityIds.add(entityId.trim());
+    }
+    const canonicalLabel = record['canonical_label'];
+    if (typeof canonicalLabel === 'string' && canonicalLabel.trim().length > 0) {
+      canonicalLabels.add(canonicalLabel.trim());
+    }
+  }
+  return {
+    entityIds: [...entityIds],
+    canonicalLabels: [...canonicalLabels],
+  };
+}
+
+function buildExactLookupNeedles(exactLookup: ExactLookupExpectation): readonly string[] {
+  const rawNeedles = [
+    exactLookup.canonicalKo,
+    exactLookup.canonicalEn,
+    ...(exactLookup.acceptedCanonicalAliases ?? []),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  return [...new Set(rawNeedles)];
+}
+
+function observedCanonicalIncludesNeedle(
+  canonicalLabels: readonly string[],
+  needle: string,
+  collapseWhitespace: boolean,
+): boolean {
+  const normalizedNeedle = normalizeExactLookupSurface(needle, collapseWhitespace);
+  if (normalizedNeedle.length === 0) return false;
+  return canonicalLabels.some((label) =>
+    normalizeExactLookupSurface(label, collapseWhitespace).includes(normalizedNeedle),
+  );
+}
+
+function observedForbiddenCanonicalHit(
+  canonicalLabels: readonly string[],
+  forbiddenAlias: string,
+  expectedNeedles: readonly string[],
+  collapseWhitespace: boolean,
+): boolean {
+  const normalizedForbidden = normalizeExactLookupSurface(forbiddenAlias, collapseWhitespace);
+  if (normalizedForbidden.length === 0) return false;
+  return canonicalLabels.some((label) => {
+    const normalizedLabel = normalizeExactLookupSurface(label, collapseWhitespace);
+    if (!normalizedLabel.includes(normalizedForbidden)) {
+      return false;
+    }
+    return !expectedNeedles.some((needle) => {
+      const normalizedExpected = normalizeExactLookupSurface(needle, collapseWhitespace);
+      return normalizedExpected.length > 0 && normalizedLabel.includes(normalizedExpected);
+    });
+  });
+}
+
+function formatObservedExactLookupSummary(
+  observed: { readonly entityIds: readonly string[]; readonly canonicalLabels: readonly string[] },
+): string {
+  const entitySummary = observed.entityIds.length > 0
+    ? observed.entityIds.slice(0, 5).join(', ')
+    : 'none';
+  const labelSummary = observed.canonicalLabels.length > 0
+    ? observed.canonicalLabels.slice(0, 5).join(' | ')
+    : 'none';
+  return `entity_ids=${entitySummary}; canonical_labels=${labelSummary}`;
+}
+
+interface ExactLookupScore {
+  readonly exactLookupHit: number | null;
+  readonly failClosedAccuracy: number | null;
+  readonly multiplier: number;
+}
+
+function scoreExactLookupContract(
+  exp: ScenarioExpectation,
+  execution: ScenarioExecution,
+  diagnostics: Diagnostic[],
+): ExactLookupScore {
+  const exactLookup = exp.exactLookup;
+  if (exactLookup === undefined) {
+    return { exactLookupHit: null, failClosedAccuracy: null, multiplier: 1 };
+  }
+  if (isHonestNoEvidenceAbstentionScenario(exp, execution)) {
+    diagnostics.push({
+      dim: 'answerQuality',
+      severity: 'info',
+      code: 'EXACT_LOOKUP_SKIPPED_NO_EVIDENCE_ABSTENTION',
+      message: 'exact lookup contract not penalized: scenario explicitly allows honest abstention when retrieval returned no confirmable evidence',
+    });
+    return {
+      exactLookupHit: null,
+      failClosedAccuracy:
+        exactLookup.matchPolicy === 'must_not_exact_match'
+        || exactLookup.matchPolicy === 'optional_alias_or_fail_closed'
+          ? 1
+          : null,
+      multiplier: 1,
+    };
+  }
+
+  const records = buildContextEvidenceRecords(execution);
+  const observed = collectObservedExactLookupValues(records);
+  const hasAnyObservedExactCandidate = observed.entityIds.length > 0 || observed.canonicalLabels.length > 0;
+  const collapseWhitespace = exactLookup.allowSpaceNormalization !== false;
+  const expectedNeedles = buildExactLookupNeedles(exactLookup);
+  const canonicalHit = expectedNeedles.some((needle) =>
+    observedCanonicalIncludesNeedle(observed.canonicalLabels, needle, collapseWhitespace),
+  );
+  const entityHit = exactLookup.expectedEntityId !== undefined
+    && exactLookup.expectedEntityId !== null
+    && observed.entityIds.includes(exactLookup.expectedEntityId);
+  const matchedExactEntity = entityHit || canonicalHit;
+
+  const forbiddenEntityHit = (exactLookup.mustNotReturnEntityIds ?? []).find((entityId) =>
+    observed.entityIds.includes(entityId),
+  );
+  const forbiddenExpectedNeedles =
+    exactLookup.matchPolicy === 'exact_entity' ? expectedNeedles : [];
+  const forbiddenCanonicalHit = (exactLookup.mustNotReturnCanonicalAliases ?? []).find((alias) =>
+    observedForbiddenCanonicalHit(observed.canonicalLabels, alias, forbiddenExpectedNeedles, collapseWhitespace),
+  );
+
+  let multiplier = 1;
+  let exactLookupHit: number | null = null;
+  let failClosedAccuracy: number | null = null;
+
+  if (exactLookup.matchPolicy === 'exact_entity') {
+    exactLookupHit = matchedExactEntity ? 1 : 0;
+    if (!matchedExactEntity) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'EXACT_LOOKUP_MISS',
+        message: 'exact lookup contract missed the expected wine entity / canonical label',
+        observed: formatObservedExactLookupSummary(observed),
+        expected: expectedNeedles.join(' | '),
+      });
+      multiplier *= PENALTY_EXACT_LOOKUP_MISS;
+    }
+  } else if (exactLookup.matchPolicy === 'must_not_exact_match') {
+    failClosedAccuracy = hasAnyObservedExactCandidate ? 0 : 1;
+    if (hasAnyObservedExactCandidate) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'FAIL_CLOSED_EXACT_LOOKUP_VIOLATED',
+        message: 'ambiguous / non-entity exact-lookup query returned specific exact candidates instead of failing closed',
+        observed: formatObservedExactLookupSummary(observed),
+      });
+      multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
+    }
+  } else if (exactLookup.matchPolicy === 'must_not_return_guarded_entity') {
+    const hasGuardedContract =
+      (exactLookup.mustNotReturnEntityIds?.length ?? 0) > 0
+      || (exactLookup.mustNotReturnCanonicalAliases?.length ?? 0) > 0;
+    const guardedHit = forbiddenEntityHit !== undefined || forbiddenCanonicalHit !== undefined;
+    failClosedAccuracy = guardedHit || (!hasGuardedContract && hasAnyObservedExactCandidate) ? 0 : 1;
+    if (!hasGuardedContract && hasAnyObservedExactCandidate) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'FAIL_CLOSED_EXACT_LOOKUP_VIOLATED',
+        message: 'ambiguous exact-lookup query has no guarded entity list and returned specific exact candidates',
+        observed: formatObservedExactLookupSummary(observed),
+      });
+      multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
+    }
+  } else {
+    if (matchedExactEntity) {
+      exactLookupHit = 1;
+      failClosedAccuracy = 1;
+    } else if (!hasAnyObservedExactCandidate) {
+      exactLookupHit = 0;
+      failClosedAccuracy = 1;
+    } else {
+      exactLookupHit = 0;
+      failClosedAccuracy = 0;
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'OPTIONAL_ALIAS_OR_FAIL_CLOSED_VIOLATED',
+        message: 'policy-pending exact lookup neither matched the accepted alias target nor failed closed',
+        observed: formatObservedExactLookupSummary(observed),
+        expected: expectedNeedles.join(' | '),
+      });
+      multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
+    }
+  }
+
+  if (forbiddenEntityHit !== undefined || forbiddenCanonicalHit !== undefined) {
+    diagnostics.push({
+      dim: 'answerQuality',
+      severity: 'warn',
+      code: 'EXACT_LOOKUP_FORBIDDEN_MATCH',
+      message: 'exact lookup returned a forbidden nearby entity / canonical label',
+      observed: formatObservedExactLookupSummary(observed),
+      expected: `${forbiddenEntityHit ?? ''}${forbiddenEntityHit !== undefined && forbiddenCanonicalHit !== undefined ? ' | ' : ''}${forbiddenCanonicalHit ?? ''}`,
+    });
+    multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
+  }
+
+  return {
+    exactLookupHit,
+    failClosedAccuracy,
+    multiplier,
+  };
 }
 
 function evidenceTextIncludes(
@@ -922,7 +1161,8 @@ export function scoreScenario(
   const baseAnswerQuality = scoreAnswerQuality(exp, execution.answer, diagnostics, judgeScore);
   // Structured checks multiply into answerQuality — each failed check docks a %.
   const structuredMultiplier = scoreStructuredChecks(exp, execution.answer, execution, diagnostics, judgeScore);
-  const answerQuality = clamp01(baseAnswerQuality * structuredMultiplier);
+  const exactLookupScore = scoreExactLookupContract(exp, execution, diagnostics);
+  const answerQuality = clamp01(baseAnswerQuality * structuredMultiplier * exactLookupScore.multiplier);
   const terminationCorrectness = scoreTermination(
     exp,
     execution.terminationReason,
@@ -1103,6 +1343,8 @@ export function scoreScenario(
       faithfulness,
       contextRelevance,
       contextRecall,
+      exactLookupHit: exactLookupScore.exactLookupHit,
+      failClosedAccuracy: exactLookupScore.failClosedAccuracy,
       judge,
       overall,
       criticalFailure,

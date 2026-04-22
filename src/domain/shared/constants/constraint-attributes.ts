@@ -30,6 +30,8 @@ export const SOFT_CONSTRAINT_ATTRIBUTES: ReadonlySet<string> = new Set([
   // LLM_ALLOWED_ATTRIBUTES에도 있는 속성들: hard 필터가 아닌 soft 신호로 처리해야 함.
   // 누락 시 "과일향" / "드링킹 윈도우" 등 쿼리가 하드 필터로 오분류되어 0 결과 반환.
   'producer_prestige',
+  'popularity_score',
+  'recipient_profile',
   // Closure coverage is sparse enough to keep user requests like "스크류캡" in
   // soft evidence/ranking instead of collapsing recall through a hard filter.
   'closure',

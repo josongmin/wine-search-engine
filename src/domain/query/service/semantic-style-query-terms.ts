@@ -5,6 +5,16 @@ const NO_OP_SEMANTIC_STYLE_HINTS: ReadonlySet<string> = new Set([
   // Keep the ontology token for upstream intent capture, but do not let it
   // pollute tool query text or semantic retrieval expansion.
   'presentation_forward',
+  'ageworthy',
+  'cellaring',
+  'cellarworthy',
+]);
+
+const STRUCTURED_ONLY_SEMANTIC_STYLE_HINTS: ReadonlySet<string> = new Set([
+  // Backed by learned suitability facets / retrieval evidence expansion, but
+  // not useful as literal lexical query clauses.
+  'approachable',
+  'crowd_pleasing',
 ]);
 
 function renderSemanticStyleQueryTerm(style: string): string {
@@ -132,7 +142,9 @@ export function resolveSemanticStyleQueryTerms(input: {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
 }): readonly string[] {
-  return collectStyleHints(input).map(renderSemanticStyleQueryTerm);
+  return collectStyleHints(input)
+    .filter((style) => !STRUCTURED_ONLY_SEMANTIC_STYLE_HINTS.has(style))
+    .map(renderSemanticStyleQueryTerm);
 }
 
 export function expandSemanticStyleRetrievalTerms(input: {

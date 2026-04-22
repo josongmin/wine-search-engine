@@ -25,6 +25,13 @@ const ENTITY_METADATA_KEYWORDS: readonly RegExp[] = [
   ...DRINKABILITY_KEYWORDS,
 ] as const;
 
+/** Direct lookup / info tails that still target a specific known wine label. */
+const EXACT_ENTITY_LOOKUP_KEYWORDS: readonly RegExp[] = [
+  ...ENTITY_METADATA_KEYWORDS,
+  /(?<!\p{L})(?<!\p{N})(?:info(?:rmation)?|tell\s+me\s+about|what\s+is\s+it|recommend(?:\s+me)?|suggest(?:ion)?)(?!\p{L})(?!\p{N})/iu,
+  /(?:^|[^\p{L}\p{N}])(?:정보|설명(?:해줘|해주세요)?|어떤\s*와인이(?:야|에요|예요)?|무슨\s*와인이(?:야|에요|예요)?|추천(?:해줘|해주세요)?)($|[^\p{L}\p{N}])/u,
+] as const;
+
 /** Metadata-only tails that should be removed before exact entity lookup. */
 const EXACT_ENTITY_METADATA_SUFFIX_PATTERNS: readonly RegExp[] = [
   /(?:\s*(?:가격(?:이|은|는)?\s*)?얼마(?:야|예요|에요|지|인지)?)[?？!！]*$/u,
@@ -39,6 +46,14 @@ const EXACT_ENTITY_METADATA_SUFFIX_PATTERNS: readonly RegExp[] = [
   /(?:\s*(?:출시(?:했|됐)?(?:어|나|는지)?|출시\s*여부|나왔(?:어|나|는지)?|재고\s*있(?:어|나)?|구할\s*수\s*있(?:어|나)?|살\s*수\s*있(?:어|나)?))[?？!！]*$/u,
 ] as const;
 
+/** Direct-lookup tails that should collapse back to the bare entity anchor. */
+const EXACT_ENTITY_LOOKUP_SUFFIX_PATTERNS: readonly RegExp[] = [
+  /(?:\s*(?:정보|설명(?:해줘|해주세요)?))[?？!！]*$/u,
+  /(?:\s*(?:어떤|무슨)\s*와인이(?:야|에요|예요)?)[?？!！]*$/u,
+  /(?:\s*추천(?:해줘|해주세요)?)[?？!！]*$/u,
+  /(?:\s*(?:info(?:rmation)?|tell\s+me\s+about|what\s+is\s+it|recommend(?:\s+me)?|suggest(?:ion)?))[?？!！]*$/iu,
+] as const;
+
 export function hasDrinkabilityKeyword(normalizedQuery: string): boolean {
   return DRINKABILITY_KEYWORDS.some((re) => re.test(normalizedQuery));
 }
@@ -47,9 +62,21 @@ export function hasEntityMetadataKeyword(normalizedQuery: string): boolean {
   return ENTITY_METADATA_KEYWORDS.some((re) => re.test(normalizedQuery));
 }
 
+export function hasExactEntityLookupKeyword(normalizedQuery: string): boolean {
+  return EXACT_ENTITY_LOOKUP_KEYWORDS.some((re) => re.test(normalizedQuery));
+}
+
 export function stripExactEntityMetadataSuffix(rawQuery: string): string {
   let stripped = rawQuery.trim();
   for (const pattern of EXACT_ENTITY_METADATA_SUFFIX_PATTERNS) {
+    stripped = stripped.replace(pattern, '').trim();
+  }
+  return stripped.length > 0 ? stripped : rawQuery.trim();
+}
+
+export function stripExactEntityLookupSuffix(rawQuery: string): string {
+  let stripped = stripExactEntityMetadataSuffix(rawQuery);
+  for (const pattern of EXACT_ENTITY_LOOKUP_SUFFIX_PATTERNS) {
     stripped = stripped.replace(pattern, '').trim();
   }
   return stripped.length > 0 ? stripped : rawQuery.trim();

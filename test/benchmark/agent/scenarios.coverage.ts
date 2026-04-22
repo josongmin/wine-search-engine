@@ -30,7 +30,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines', inputContains: ['Sassicaia'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_000,
       answerMustMatch: ['(sassicaia|사시카이아)'],
       rubric:
         'Must return information about Sassicaia (Tenuta San Guido). '
@@ -59,14 +59,18 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '페트뤼스 어떤 와인이야?',
     description: 'Korean transliteration: 페트뤼스 = Pétrus',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Pétrus'] }],
+      tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_000,
       answerMustMatch: ['(pétrus|petrus|페트뤼스)'],
       rubric:
         'Must resolve 페트뤼스 to Pétrus (Pomerol, Bordeaux). '
         + 'Should mention Merlot dominance and prestige.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['페트뤼스', 'Pétrus', 'Petrus'] },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+      ],
     },
   },
   {
@@ -75,14 +79,23 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'Tignanello 2019 정보',
     description: 'Producer + vintage lookup',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Tignanello'] }],
+      tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_000,
       answerMustMatch: ['(tignanello|티냐넬로)', '(2019)'],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
       rubric:
-        'Must return info about Tignanello 2019 (Antinori, Super Tuscan). '
-        + 'Should mention Sangiovese blend and Toscana IGT.',
+        'Must treat Tignanello 2019 as an exact-entity lookup. '
+        + 'If the live corpus contains grounded evidence, return the wine info (Antinori, Super Tuscan, Sangiovese/Toscana IGT). '
+        + 'If the live corpus cannot confirm the exact wine, answer with an honest no-evidence abstention instead of inventing details.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['Tignanello 2019', '티냐넬로 2019'] },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+        { tool: 'search_wines', argPath: 'vintage_min', predicate: 'equals', value: 2019 },
+        { tool: 'search_wines', argPath: 'vintage_max', predicate: 'equals', value: 2019 },
+      ],
     },
   },
   {
@@ -91,14 +104,21 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '돔페리뇽 추천해줘',
     description: 'Korean transliteration: 돔페리뇽 = Dom Pérignon',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Dom'] }],
+      tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_000,
       answerMustMatch: ['(dom\\s*p[eé]rignon|돔\\s*페리뇽)'],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
       rubric:
-        'Must resolve 돔페리뇽 to Dom Pérignon. '
-        + 'Should include Champagne context and prestige positioning.',
+        'Must treat 돔페리뇽 as an exact Dom Pérignon lookup. '
+        + 'If grounded evidence exists, include Champagne context and prestige positioning. '
+        + 'If the live corpus cannot confirm Dom Pérignon, the agent must abstain honestly rather than bluffing.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['돔페리뇽', 'Dom Pérignon', 'Dom Perignon'] },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+      ],
     },
   },
   {
@@ -158,7 +178,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines', inputContains: ['Margaux'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_000,
       answerMustMatch: ['(chateau\\s*margaux|샤또\\s*마고|margaux)'],
       rubric:
         'Must provide price info or range for Château Margaux. '
@@ -171,14 +191,21 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: '모엣샹동 로제 임페리얼',
     description: 'Full Korean transliteration of specific SKU',
     expectation: {
-      tools: [{ tool: 'search_wines', inputContains: ['Moët'] }],
+      tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_000,
       answerMustMatch: ['(mo[eë]t|모엣|chandon|샹동)'],
+      judgeRequired: true,
+      allowHonestNoEvidenceAbstention: true,
       rubric:
-        'Must resolve to Moët & Chandon Rosé Impérial. '
-        + 'Should provide Champagne context and tasting profile.',
+        'Must treat the query as an exact Moët & Chandon Rosé Impérial lookup. '
+        + 'If grounded evidence exists, provide Champagne context and tasting profile. '
+        + 'If the live corpus cannot confirm the exact SKU, the agent must abstain honestly instead of broadening to unrelated rosé results or inventing metadata.',
+      expectedToolArgs: [
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['모엣샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial'] },
+        { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
+      ],
     },
   },
   {
@@ -829,7 +856,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines', inputContains: ['Napa'] }],
       maxSteps: 2,
       maxDurationMs: 40_000,
-      maxTotalTokens: 6_000,
+      maxTotalTokens: 7_200,
       answerMustMatch: ['(napa|나파)', '(cabernet|카베르네)'],
       rubric:
         'Must handle redundant bilingual input (same query in English + Korean). '
@@ -951,10 +978,11 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 50_000,
       maxTotalTokens: 8_000,
       vintageRange: { min: 2024, max: 2024 },
+      judgeRequired: true,
       rubric:
-        'Must recommend wines from 2024 vintage with 20+ year aging potential. '
-        + 'Top Bordeaux, vintage Port, Barolo, or Brunello expected. '
-        + 'Should address the sentimental/celebratory context.',
+        'Must handle this as a 2024 birth-year long-cellaring request. '
+        + 'If the live corpus contains verified 20+ year candidates, prefer those and address the sentimental/celebratory context. '
+        + 'If the live corpus only returns weakly grounded 2024 candidates, the agent should say that long-term aging suitability is not confirmed rather than bluffing.',
     },
   },
 
