@@ -101,12 +101,24 @@ function isProducerOnlyAliasForDistinctWine(
 
 function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
   const keys = new Set<string>();
-  const aliases: readonly string[] = doc.aliasesIdentitySafe;
-  const label = doc.canonicalLabel;
-  const identitySurfaces: string[] = [
-    ...(typeof label === 'string' ? [label] : []),
-    ...aliases,
-  ];
+  const rawAliases = doc.aliasesIdentitySafe;
+  // Only build identity surfaces when the document actually carries the alias
+  // substrate field as an array (possibly empty). If the field is absent
+  // (partial projections / tests), leave surfaces empty so
+  // anchorMatchesIdentitySafeProjection returns undefined and exact-like
+  // anchor signals stay allowed (see buildSignals exactSignalAllowed).
+  const identitySurfaces: string[] = [];
+  if (Array.isArray(rawAliases)) {
+    const label = doc.canonicalLabel;
+    if (typeof label === 'string') {
+      identitySurfaces.push(label);
+    }
+    for (const alias of rawAliases) {
+      if (typeof alias === 'string') {
+        identitySurfaces.push(alias);
+      }
+    }
+  }
 
   for (const surface of identitySurfaces) {
     if (isProducerOnlyAliasForDistinctWine(doc, surface)) {

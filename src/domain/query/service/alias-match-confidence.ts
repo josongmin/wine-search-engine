@@ -28,5 +28,10 @@ export function resolveAliasMatchConfidence(
   strategy: AliasMatchConfidenceStrategy,
 ): number {
   const multiplier = STRATEGY_CONFIDENCE_MULTIPLIER[strategy];
-  return Number((baseConfidence * multiplier).toFixed(ALIAS_CONFIDENCE_DECIMAL_PLACES));
+  const raw = baseConfidence * multiplier;
+  if (!Number.isFinite(raw)) {
+    return raw;
+  }
+  const factor = 10 ** ALIAS_CONFIDENCE_DECIMAL_PLACES;
+  return Math.round(raw * factor) / factor;
 }
