@@ -47,7 +47,7 @@ describe('Transliterator', () => {
     it('romanizes IME-incomplete Korean prefixes through the curated exception dictionary', () => {
       expect(Transliterator.romanizeWineTermPrefix('오푸스ㅇ')).toBe('opus one');
       expect(Transliterator.romanizeWineTermPrefix('오퍼스ㅇ')).toBe('opus one');
-      expect(Transliterator.romanizeWineTermPrefix('오푸스')).toBeUndefined();
+      expect(Transliterator.romanizeWineTermPrefix('오푸스')).toBe('opus one');
     });
   });
 

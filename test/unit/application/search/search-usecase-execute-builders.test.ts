@@ -406,6 +406,18 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       kind: 'anchor_disambiguation',
       question: '결과가 모호합니다. 어떤 후보를 찾으시나요?',
       options: ['2019 Opus One Overture', 'Opus One 2018'],
+      optionEntities: [
+        {
+          entityId: createEntityId('wine:2019 Opus One Overture:1'),
+          label: '2019 Opus One Overture',
+          distinguishingFeatures: [],
+        },
+        {
+          entityId: createEntityId('wine:Opus One 2018:2'),
+          label: 'Opus One 2018',
+          distinguishingFeatures: [],
+        },
+      ],
     });
   });
 
@@ -478,6 +490,18 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       kind: 'anchor_disambiguation',
       question: '결과가 모호합니다. 어떤 후보를 찾으시나요?',
       options: ['2019 Opus One Overture', 'Opus One 2018'],
+      optionEntities: [
+        {
+          entityId: 'wine-opus-overture-a' as never,
+          label: '2019 Opus One Overture',
+          distinguishingFeatures: [],
+        },
+        {
+          entityId: createEntityId('wine:Opus One 2018:3'),
+          label: 'Opus One 2018',
+          distinguishingFeatures: [],
+        },
+      ],
     });
   });
 

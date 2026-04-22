@@ -35,7 +35,18 @@ function makeMinimalConfig(overrides: Partial<Config['embedding']> = {}): Config
     port: 3000,
     host: '0.0.0.0',
     vespa: { url: 'http://vespa:8080' },
-    openai: {},
+    openai: {
+      apiKeys: [],
+      baseUrl: 'https://api.openai.com/v1',
+      chatModel: 'gpt-4',
+      injectionModel: 'gpt-4',
+      injectionHttpTimeoutMs: 60_000,
+      doc2queryModel: 'gpt-4',
+      embeddingModel: 'text-embedding-3-small',
+      httpTimeoutMs: 60_000,
+      llmQueryInterpreter: false,
+      llmQueryInterpreterTimeoutMs: 60_000,
+    },
     cohere: {},
     embedding: { model: 'test-model', ...overrides },
     learnedMatcher: {},
@@ -47,6 +58,7 @@ function makeMinimalConfig(overrides: Partial<Config['embedding']> = {}): Config
     rateLimiting: {},
     auth: {},
     telemetry: {},
+    eval: { runAtStartup: false },
   } as unknown as Config;
 }
 
