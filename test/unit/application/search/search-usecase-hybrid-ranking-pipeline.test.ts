@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   executeHybridRouteRankingPipeline,
   resolveEntityRouteForPlan,
+  runHybridRankingPipeline,
 } from '../../../../src/application/search/search-usecase-hybrid-ranking-pipeline.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
@@ -80,6 +81,7 @@ function buildCompiled(plan: QueryPlanV1): CompiledWineQuery {
     },
     execution: {
       effectiveRoute: 'hybrid',
+      executionTopology: 'general_only',
       effectiveRetrievalMode: 'recommendation',
       routeSource: 'planner',
       budget: {
@@ -307,6 +309,39 @@ describe('executeHybridRouteRankingPipeline', () => {
     expect(result.routeDegradation?.degradationReasons).toContain(
       'provenance_shortfall:identity_evidence',
     );
+  });
+
+  it('rejects dual-lane artifacts on a general-only compiled contract', async () => {
+    const plan = minimalPlan();
+    const compiled = buildCompiled(plan);
+    const ranker = {
+      rank: vi.fn().mockResolvedValue({
+        results: [],
+        metadata: { runtimeSignal: undefined, funnelMetrics: undefined },
+      }),
+    };
+
+    await expect(
+      runHybridRankingPipeline(
+        plan,
+        [],
+        ranker as never,
+        compiled,
+        undefined,
+        undefined,
+        undefined,
+        {
+          attemptId: 'attempt-1',
+          executionTopology: 'dual_lane',
+          identityResolveResult: minimalResolveResult(),
+          laneArtifacts: {
+            identity: [],
+            general: [],
+            fused: [],
+          },
+        },
+      ),
+    ).rejects.toThrow('General-only hybrid ranking pipeline cannot receive dual-lane execution artifacts');
   });
 
   it('skips constraint relaxation when request latency budget is already exhausted', async () => {

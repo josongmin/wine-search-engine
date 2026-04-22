@@ -11,14 +11,12 @@ import {
   createTestContainer,
   type TestContainerOptions,
 } from '../../integration/helpers/test-container.js';
-import {
-  TEST_DOCUMENTS,
-} from '../../integration/helpers/test-fixtures.js';
 import { SimilarityScorer } from '../../../src/domain/mixed/service/similarity-scorer.js';
 import type { AnchorProfile } from '../../../src/domain/mixed/model/anchor-profile.js';
 import type { AnchorEntityData } from '../../../src/domain/mixed/service/anchor-profiler.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { SimilarityCandidate } from '../../../src/domain/mixed/service/similarity-scorer.js';
+import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
 
 export interface TestServer {
   readonly app: FastifyInstance;
@@ -29,7 +27,7 @@ interface TestServerOptions {
   readonly serverOptions?: Pick<ServerOptions, 'rateLimitMax' | 'trustProxy'>;
 }
 
-type FixtureDoc = (typeof TEST_DOCUMENTS)[number];
+type FixtureDoc = RetrievalDocument;
 
 const mixedSimilarityScorer = new SimilarityScorer();
 
@@ -120,7 +118,6 @@ function buildHybridCandidate(
     sparseRank: rank,
     denseRank: rank,
     anchorRank: rank,
-    retrievalFusionScore: retrievalScore,
     fusionRrfTotal: retrievalScore,
     matchedConstraints: [],
     retrievalTrace: {

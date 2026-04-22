@@ -127,10 +127,17 @@ describe('E6: StructuredClarifyPayload', () => {
       kind: 'anchor_disambiguation',
       question: '마르고라고 하신 게 Château Margaux인가요?',
       options: ['Château Margaux', 'Margaux AOC wines'],
+      optionEntities: [
+        {
+          entityId: 'chateau-margaux-2015' as never,
+          label: 'Château Margaux',
+        },
+      ],
     };
     expect(payload.kind).toBe('anchor_disambiguation');
     expect(typeof payload.question).toBe('string');
     expect(payload.options).toHaveLength(2);
+    expect(payload.optionEntities).toHaveLength(1);
   });
 
   it('E6-18: StructuredClarifyPayload.conflictingAtoms is [string, string] tuple', () => {
@@ -298,9 +305,16 @@ describe('E6: ClarificationPayload + legacy compatibility', () => {
         kind: 'anchor_disambiguation',
         question: '어떤 마르고를 찾으시나요?',
         options: ['Château Margaux', 'Margaux AOC'],
+        optionEntities: [
+          {
+            entityId: 'chateau-margaux-2015' as never,
+            label: 'Château Margaux',
+          },
+        ],
       },
     };
     expect(structured.structuredPayload?.kind).toBe('anchor_disambiguation');
+    expect(structured.structuredPayload?.optionEntities?.[0]?.entityId).toBe('chateau-margaux-2015');
   });
 
   it('E6-17: AbstainPolicy.shouldAbstain() legacy API still returns AbstainDecision', () => {

@@ -202,12 +202,28 @@ export interface ClarificationPayload {
   reason: string;
   candidates: readonly ClarificationCandidate[];
   suggestion_type: 'disambiguation' | 'missing_info';
+  structured_payload?: StructuredClarificationPayload;
 }
 
 export interface ClarificationCandidate {
   entity_id: EntityId;
   label: string;
   distinguishing_features: readonly string[];
+}
+
+export interface StructuredClarificationPayload {
+  kind: 'anchor_disambiguation' | 'constraint_conflict' | 'preference_gap' | 'budget_gap';
+  question: string;
+  options?: readonly string[];
+  option_entities?: readonly StructuredClarificationOptionEntity[];
+  conflicting_atoms?: readonly [string, string];
+  gap_description?: string;
+}
+
+export interface StructuredClarificationOptionEntity {
+  entity_id: EntityId;
+  label: string;
+  distinguishing_features?: readonly string[];
 }
 
 export interface CounterfactualReject {

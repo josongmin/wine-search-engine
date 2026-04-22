@@ -55,6 +55,10 @@ import { toSpecializedRouteMeta } from '../model/specialized-route.js';
 import { EvidenceObligationError } from '../../shared/error/domain-error.js';
 import { isCorruptedSnapshot } from '../../shared/types/index.js';
 import {
+  buildClarificationCandidateSignature,
+  buildDisplayIdentitySignature,
+} from './display-identity.js';
+import {
   buildDeterminismFingerprint,
   type DeterminismFingerprintParams,
 } from '../../shared/utils/determinism-fingerprint.js';
@@ -185,7 +189,9 @@ export class ResponseBuilder {
    * @returns A fully assembled, immutable search response.
    */
   build(params: ResponseBuildParams): SearchResponseV1 {
-    const validatedResults = this.enforceEvidence(params.results);
+    const validatedResults = this.dedupeResultsByDisplayIdentity(
+      this.enforceEvidence(params.results),
+    );
     const enrichedResults = this.enrichResults(validatedResults);
     const contract = this.resolveContract(params, enrichedResults);
     const executionTopology =
@@ -300,7 +306,7 @@ export class ResponseBuilder {
       engineDecision: enrichedEngineDecision,
       results: enrichedResults,
       ...(params.counterfactuals !== undefined ? { counterfactuals: params.counterfactuals } : {}),
-      clarification: params.clarification ?? null,
+      clarification: this.dedupeClarificationCandidates(params.clarification),
       meta,
       retrievalMode,
       ...(resultType !== undefined ? { resultType } : {}),
@@ -509,6 +515,81 @@ export class ResponseBuilder {
     }
 
     return results;
+  }
+
+  private dedupeResultsByDisplayIdentity(
+    results: readonly ResultItem[],
+  ): readonly ResultItem[] {
+    const deduped = new Map<string, ResultItem>();
+    for (const result of results) {
+      const signature = buildDisplayIdentitySignature({
+        canonicalLabel: result.entity.canonicalLabel,
+        producer: result.entity.producer,
+        region: result.entity.region,
+        country: result.entity.country,
+        vintage: result.entity.vintage,
+        type: result.entity.type,
+      });
+      const existing = deduped.get(signature);
+      if (existing === undefined || result.relevanceScore > existing.relevanceScore) {
+        deduped.set(signature, result);
+      }
+    }
+    return [...deduped.values()];
+  }
+
+  private dedupeClarificationCandidates(
+    clarification: ClarificationPayload | undefined,
+  ): ClarificationPayload | null {
+    if (clarification === undefined) {
+      return null;
+    }
+
+    const deduped = new Map<string, ClarificationPayload['candidates'][number]>();
+    for (const candidate of clarification.candidates) {
+      const signature = buildClarificationCandidateSignature(candidate);
+      const existing = deduped.get(signature);
+      if (
+        existing === undefined
+        || candidate.distinguishingFeatures.length > existing.distinguishingFeatures.length
+      ) {
+        deduped.set(signature, candidate);
+      }
+    }
+    const candidates = [...deduped.values()];
+    const structuredPayload = clarification.structuredPayload === undefined
+      ? undefined
+      : {
+          ...clarification.structuredPayload,
+          ...(clarification.structuredPayload.options !== undefined
+            ? {
+                options: clarification.suggestionType === 'disambiguation' && candidates.length > 0
+                  ? candidates.map((candidate) => candidate.label)
+                  : [...new Set(clarification.structuredPayload.options)],
+              }
+            : {}),
+          ...(clarification.suggestionType === 'disambiguation' && candidates.length > 0
+            ? {
+                optionEntities: candidates.map((candidate) => ({
+                  entityId: candidate.entityId,
+                  label: candidate.label,
+                  ...(candidate.distinguishingFeatures.length > 0
+                    ? { distinguishingFeatures: candidate.distinguishingFeatures }
+                    : {}),
+                })),
+              }
+            : clarification.structuredPayload.optionEntities !== undefined
+            ? {
+                optionEntities: clarification.structuredPayload.optionEntities,
+              }
+            : {}),
+        };
+
+    return {
+      ...clarification,
+      candidates,
+      ...(structuredPayload !== undefined ? { structuredPayload } : {}),
+    };
   }
 
   /**

@@ -29,16 +29,16 @@ import type {
   ConstraintBundle,
   NormalizedConstraint,
 } from '../../src/domain/shared/types/index.js';
-import type { CanonicalEntityId } from '../../src/domain/shared/types/index.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 function makeCandidate(
   id: string,
   overrides: Partial<HybridCandidate> = {},
 ): HybridCandidate {
-  return {
-    entityId: id as CanonicalEntityId,
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
     canonicalLabel: `Wine ${id}`,
-    retrievalFusionScore: 0.5,
     fusionRrfTotal: 0.5,
     sparseRank: 1,
     denseRank: 1,
@@ -53,7 +53,7 @@ function makeCandidate(
       candidateSources: ['sparse_bm25'],
     },
     ...overrides,
-  } as unknown as HybridCandidate;
+  });
 }
 
 function makePlan(constraints: ConstraintBundle): QueryPlanV1 {

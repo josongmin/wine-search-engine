@@ -34,6 +34,18 @@ const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Map([
   ['보졸레누보', '보졸레 누보'],
 ]);
 
+const KOREAN_WINE_ALIAS_VARIANTS = (() => {
+  const variants = new Map<string, string[]>();
+  for (const [variant, canonical] of KOREAN_WINE_ALIAS_CORRECTIONS) {
+    const existing = variants.get(canonical) ?? [];
+    if (!existing.includes(variant)) {
+      existing.push(variant);
+    }
+    variants.set(canonical, existing);
+  }
+  return variants;
+})();
+
 /**
  * Applies Korean wine alias corrections to a query string.
  * Replaces known typos/abbreviations with canonical forms.
@@ -50,4 +62,9 @@ export function correctKoreanWineTypos(query: string): string {
     }
   }
   return corrected;
+}
+
+export function expandKoreanWineTypoVariants(surface: string): readonly string[] {
+  const normalized = surface.normalize('NFC');
+  return KOREAN_WINE_ALIAS_VARIANTS.get(normalized) ?? [];
 }

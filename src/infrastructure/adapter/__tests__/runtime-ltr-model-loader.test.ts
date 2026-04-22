@@ -4,12 +4,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { loadRuntimeLtrModels } from '../runtime-ltr-model-loader.js';
 import {
-  LTR_FEATURE_DIMENSION,
+  LAMBDAMART_FEATURE_DIMENSION,
   LTR_FEATURE_SCHEMA_HASH,
 } from '../../../domain/ranking/service/lambdamart-ranker.js';
 
 function makeWeights(seed: number): number[] {
-  return Array.from({ length: LTR_FEATURE_DIMENSION }, (_, index) => Number(((seed + index) / 100).toFixed(2)));
+  return Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) => Number(((seed + index) / 100).toFixed(2)));
 }
 
 const makeValidArtifact = () => ({
@@ -58,7 +58,7 @@ describe('loadRuntimeLtrModels', () => {
 
     expect(models).toBeDefined();
     expect(models?.size).toBe(2);
-    expect(models?.get('red_wine')?.weights).toHaveLength(LTR_FEATURE_DIMENSION);
+    expect(models?.get('red_wine')?.weights).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
     expect(models?.get('white_wine')?.weights[0]).toBe(0.2);
   });
 
@@ -86,10 +86,10 @@ describe('loadRuntimeLtrModels', () => {
   it('keeps first duplicate queryClass and drops invalid entries', async () => {
     const filePath = await writeArtifact([
       {
-        query_class: 'dup_class',
+        queryClass: 'dup_class',
         weights: makeWeights(40),
         bias: 0.01,
-        feature_schema_hash: LTR_FEATURE_SCHEMA_HASH,
+        featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 7,
         ndcg5ValidationScore: 0.5,
         trainedAt: '2026-04-01T00:00:00Z',
@@ -112,10 +112,10 @@ describe('loadRuntimeLtrModels', () => {
         trainedAt: '2026-04-01T00:00:00Z',
       },
       {
-        query_class: 'valid_after_bad',
+        queryClass: 'valid_after_bad',
         weights: makeWeights(60),
         bias: 0.03,
-        feature_schema_hash: LTR_FEATURE_SCHEMA_HASH,
+        featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 9,
         ndcg5ValidationScore: 0.61,
         trainedAt: '2026-04-01T00:00:00Z',
@@ -173,6 +173,25 @@ describe('loadRuntimeLtrModels', () => {
         weights: makeWeights(70),
         bias: 0.01,
         featureSchemaHash: 'stale-schema-v1',
+        trainingExampleCount: 1,
+        ndcg5ValidationScore: 0.4,
+        trainedAt: '2026-04-01T00:00:00Z',
+      },
+    ]);
+    tempDirs.add(path.dirname(filePath));
+
+    const models = await loadRuntimeLtrModels(filePath);
+
+    expect(models).toBeUndefined();
+  });
+
+  it('rejects legacy snake_case runtime model fields', async () => {
+    const filePath = await writeArtifact([
+      {
+        query_class: 'legacy_model',
+        weights: makeWeights(80),
+        bias: 0.01,
+        feature_schema_hash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 1,
         ndcg5ValidationScore: 0.4,
         trainedAt: '2026-04-01T00:00:00Z',

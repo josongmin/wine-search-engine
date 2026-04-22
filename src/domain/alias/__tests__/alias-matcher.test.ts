@@ -141,6 +141,10 @@ describe('normalizeForMatch', () => {
   it('handles combined diacritical marks', () => {
     expect(normalizeForMatch('Château Margaux')).toBe('chateau margaux');
   });
+
+  it('recomposes decomposed Hangul back to NFC', () => {
+    expect(normalizeForMatch('샤또 디켐'.normalize('NFD'))).toBe('샤또 디켐');
+  });
 });
 
 describe('AliasMatcher', () => {

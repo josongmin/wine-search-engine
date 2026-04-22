@@ -49,21 +49,25 @@ describe('buildUseCaseContainerServices', () => {
     expect((useCases.searchUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
+      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }));
     expect((useCases.hybridUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
+      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }));
     expect((useCases.interpretUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
+      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }));
     expect((useCases.resolveUseCase as any).deps).toEqual(expect.objectContaining({
       injectionJudge,
       judgeFailureMode: 'fail_open',
+      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }));
   });

@@ -30,6 +30,8 @@ import {
 import {
   buildEmptySearchExecutionLaneArtifacts,
   buildSearchExecutionLaneTrace,
+  type DualLaneRouteResult,
+  type GeneralOnlyRouteResult,
   type SearchExecutionLaneArtifacts,
   type SearchRouteExecutionResult,
 } from './search-usecase-route-dispatch.js';
@@ -69,7 +71,8 @@ export interface RankedRouteEntityResolutionDeps {
 export interface HybridRankedRoutePipelineDeps
   extends HybridRankingRouteDeps, RankedRouteEntityResolutionDeps {}
 
-export interface HybridRouteRetrievalExecutionArtifacts {
+export interface DualLaneRouteExecutionArtifacts {
+  readonly attemptId: string;
   readonly executionTopology: 'dual_lane';
   readonly identityResolveResult: EntityResolveResult;
   readonly laneArtifacts: SearchExecutionLaneArtifacts<
@@ -80,7 +83,7 @@ export interface HybridRouteRetrievalExecutionArtifacts {
 }
 
 export interface HybridRouteRetrievalResult extends HybridCandidateRetrievalResult {
-  readonly executionArtifacts?: HybridRouteRetrievalExecutionArtifacts | undefined;
+  readonly executionArtifacts?: DualLaneRouteExecutionArtifacts | undefined;
 }
 
 export interface EntityRoutePlanResolutionExecution {
@@ -94,6 +97,98 @@ export type HybridRouteRetrievalExecutor = (
   requestContext?: RequestExecutionContext,
   anchorEntityId?: CanonicalEntityId,
 ) => Promise<HybridRouteRetrievalResult>;
+
+function buildDualLaneRouteExecutionFacts(
+  fusedResolveResult: EntityResolveResult,
+  executionArtifacts: DualLaneRouteExecutionArtifacts,
+): Pick<
+  DualLaneRouteResult,
+  'executionTopology'
+  | 'identityResolveResult'
+  | 'fusedResolveResult'
+  | 'laneArtifacts'
+  | 'laneTrace'
+  | 'dualLaneExecutionAttemptId'
+> {
+  return {
+    executionTopology: 'dual_lane',
+    identityResolveResult: executionArtifacts.identityResolveResult,
+    fusedResolveResult,
+    laneArtifacts: executionArtifacts.laneArtifacts,
+    laneTrace: buildSearchExecutionLaneTrace({
+      executionTopology: 'dual_lane',
+      identityResolveResult: executionArtifacts.identityResolveResult,
+      fusedResolveResult,
+      laneArtifacts: executionArtifacts.laneArtifacts,
+    }),
+    dualLaneExecutionAttemptId: executionArtifacts.attemptId,
+  };
+}
+
+function buildGeneralOnlyRouteExecutionFacts(
+  fusedResolveResult: EntityResolveResult,
+): Pick<
+  GeneralOnlyRouteResult,
+  'executionTopology'
+  | 'identityResolveResult'
+  | 'fusedResolveResult'
+  | 'laneArtifacts'
+  | 'laneTrace'
+  > {
+  const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
+  return {
+    executionTopology: 'general_only',
+    identityResolveResult: null,
+    fusedResolveResult,
+    laneArtifacts,
+    laneTrace: buildSearchExecutionLaneTrace({
+      executionTopology: 'general_only',
+      identityResolveResult: null,
+      fusedResolveResult,
+      laneArtifacts,
+    }),
+  };
+}
+
+function bindHybridRankingExecutionContract(
+  compiled: CompiledWineQuery,
+  executionArtifacts?: DualLaneRouteExecutionArtifacts,
+): (
+  | {
+      readonly executionTopology: 'general_only';
+      readonly executionArtifacts?: undefined;
+    }
+  | {
+      readonly executionTopology: 'dual_lane';
+      readonly executionArtifacts: DualLaneRouteExecutionArtifacts;
+    }
+) {
+  switch (compiled.execution.executionTopology) {
+    case 'general_only':
+      if (executionArtifacts !== undefined) {
+        throw new Error(
+          'General-only hybrid ranking pipeline cannot receive dual-lane execution artifacts',
+        );
+      }
+      return { executionTopology: 'general_only' };
+    case 'dual_lane':
+      if (executionArtifacts === undefined) {
+        throw new Error(
+          'Dual-lane hybrid ranking pipeline requires dual-lane execution artifacts',
+        );
+      }
+      return {
+        executionTopology: 'dual_lane',
+        executionArtifacts,
+      };
+    case 'entity_only':
+      throw new Error('Hybrid ranking pipeline cannot execute with executionTopology=entity_only');
+    default: {
+      const _exhaustive: never = compiled.execution.executionTopology;
+      throw new Error(`Unhandled hybrid ranking execution topology: ${String(_exhaustive)}`);
+    }
+  }
+}
 
 function capAnchorResolverBlockerSeedIds(
   plan: QueryPlanV1,
@@ -367,8 +462,8 @@ export async function runHybridRankingPipeline(
   retrievalProvenanceCoverage?: ProvenanceCoverageStage,
   retrievalPlanOverride?: ReturnType<typeof buildRetrievalPlan>,
   requestContext?: RequestExecutionContext,
-  executionArtifacts?: HybridRouteRetrievalExecutionArtifacts,
-): Promise<SearchRouteExecutionResult> {
+  executionArtifacts?: DualLaneRouteExecutionArtifacts,
+): Promise<GeneralOnlyRouteResult | DualLaneRouteResult> {
   const retrievalPlan = retrievalPlanOverride ?? compiled.query.retrievalPlan;
   const rankingInput: RankingInput = {
     queryPlan: plan,
@@ -429,17 +524,18 @@ export async function runHybridRankingPipeline(
     'pipeline hybrid ranking',
   );
 
+  const executionContract = bindHybridRankingExecutionContract(compiled, executionArtifacts);
   const fusedResolveResult: EntityResolveResult = buildHybridRouteResolveResult(
     plan,
     rankedResults,
     {
-      executionTopology: executionArtifacts !== undefined ? 'dual_lane' : 'general_only',
+      executionTopology: executionContract.executionTopology,
       effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
-      ...(executionArtifacts !== undefined
+      ...(executionContract.executionArtifacts !== undefined
         ? {
             dualLaneCalibration: {
-              identityResolveResult: executionArtifacts.identityResolveResult,
-              laneArtifacts: executionArtifacts.laneArtifacts,
+              identityResolveResult: executionContract.executionArtifacts.identityResolveResult,
+              laneArtifacts: executionContract.executionArtifacts.laneArtifacts,
             },
           }
         : {}),
@@ -451,19 +547,14 @@ export async function runHybridRankingPipeline(
     sparseExecuted: true,
   });
 
-  if (executionArtifacts !== undefined) {
+  if (executionContract.executionTopology === 'dual_lane') {
+    const dualLaneExecutionArtifacts = executionContract.executionArtifacts;
     return {
       executedCompiled: compiled,
-      executionTopology: 'dual_lane',
-      identityResolveResult: executionArtifacts.identityResolveResult,
-      fusedResolveResult,
-      laneArtifacts: executionArtifacts.laneArtifacts,
-      laneTrace: buildSearchExecutionLaneTrace({
-        executionTopology: 'dual_lane',
-        identityResolveResult: executionArtifacts.identityResolveResult,
+      ...buildDualLaneRouteExecutionFacts(
         fusedResolveResult,
-        laneArtifacts: executionArtifacts.laneArtifacts,
-      }),
+        dualLaneExecutionArtifacts,
+      ),
       rankedResults,
       ...executionFacts,
       ...(rankerDegradation !== undefined ? { routeDegradation: rankerDegradation } : {}),
@@ -471,20 +562,9 @@ export async function runHybridRankingPipeline(
       rankingMetadata: enrichedRankingMetadata,
     };
   }
-
-  const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
   return {
     executedCompiled: compiled,
-    executionTopology: 'general_only',
-    identityResolveResult: null,
-    fusedResolveResult,
-    laneArtifacts,
-    laneTrace: buildSearchExecutionLaneTrace({
-      executionTopology: 'general_only',
-      identityResolveResult: null,
-      fusedResolveResult,
-      laneArtifacts,
-    }),
+    ...buildGeneralOnlyRouteExecutionFacts(fusedResolveResult),
     rankedResults,
     ...executionFacts,
     ...(rankerDegradation !== undefined ? { routeDegradation: rankerDegradation } : {}),
@@ -538,7 +618,11 @@ export async function executeHybridRouteRankingPipeline(
   requestContext?: RequestExecutionContext,
   anchorEntityId?: CanonicalEntityId,
   retrievalExecutor?: HybridRouteRetrievalExecutor,
-): Promise<SearchRouteExecutionResult> {
+): Promise<GeneralOnlyRouteResult | DualLaneRouteResult> {
+  if (compiled.execution.executionTopology === 'entity_only') {
+    throw new Error('Hybrid route ranking pipeline cannot execute with executionTopology=entity_only');
+  }
+
   const executeRetrieval: HybridRouteRetrievalExecutor =
     retrievalExecutor
     ?? ((retrievalPlan, retrievalCompiled, retrievalRequestContext, retrievalAnchorEntityId) =>

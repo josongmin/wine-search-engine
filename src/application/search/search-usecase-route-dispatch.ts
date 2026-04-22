@@ -96,15 +96,31 @@ export interface SearchRouteExecutionResultBase<
   readonly criticRetriesExhausted?: boolean | undefined;
 }
 
-export type SearchRouteExecutionResult = SearchRouteExecutionResultBase;
-
-/**
- * Minimal entity route result — wraps EntityResolveResult with optional TA5 calibration.
- */
 export type EntityRouteResult = SearchRouteExecutionResultBase<
   'entity_only',
   EntityResolveResult
->;
+> & {
+  readonly dualLaneExecutionAttemptId?: never;
+};
+
+export type GeneralOnlyRouteResult = SearchRouteExecutionResultBase<
+  'general_only',
+  null
+> & {
+  readonly dualLaneExecutionAttemptId?: never;
+};
+
+export type DualLaneRouteResult = SearchRouteExecutionResultBase<
+  'dual_lane',
+  EntityResolveResult
+> & {
+  readonly dualLaneExecutionAttemptId: string;
+};
+
+export type SearchRouteExecutionResult =
+  | EntityRouteResult
+  | GeneralOnlyRouteResult
+  | DualLaneRouteResult;
 
 export function buildEmptySearchExecutionLaneArtifacts<
   TIdentityArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
@@ -129,6 +145,7 @@ export function buildSearchExecutionLaneTrace(params: {
     executionTopology === 'entity_only' || executionTopology === 'dual_lane';
   const generalParticipated =
     executionTopology === 'general_only' || executionTopology === 'dual_lane';
+  const fusedParticipated = executionTopology !== 'entity_only';
 
   return {
     identity: {
@@ -141,9 +158,9 @@ export function buildSearchExecutionLaneTrace(params: {
       artifactCount: laneArtifacts.general.length,
     },
     fused: {
-      participated: true,
-      artifactCount: laneArtifacts.fused.length,
-      resolveStatus: fusedResolveResult.status,
+      participated: fusedParticipated,
+      artifactCount: fusedParticipated ? laneArtifacts.fused.length : 0,
+      ...(fusedParticipated ? { resolveStatus: fusedResolveResult.status } : {}),
     },
   };
 }

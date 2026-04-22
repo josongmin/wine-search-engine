@@ -83,6 +83,18 @@ describe('Search Pipeline Integration', () => {
       expect(ids).toContain(OPUS_ONE_ID);
     });
 
+    it('recovers the short Korean prefix "오푸" into the Opus One candidate set', async () => {
+      const response = await parts.container.searchUseCase.execute(
+        makeRequest('오푸', { options: { mode: 'entity', explain: false, clarification: true } }),
+        'req-test-2c',
+      );
+
+      expect(response.meta.requestId).toBe('req-test-2c');
+      expect(response.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous)$/);
+      const ids = response.results.map((r) => r.entity.entityId);
+      expect(ids).toContain(OPUS_ONE_ID);
+    });
+
     it('resolves "Château Margaux" to Château Margaux 2015', async () => {
       const response = await parts.container.searchUseCase.execute(
         makeRequest('Château Margaux', { options: { mode: 'entity', explain: false, clarification: false } }),

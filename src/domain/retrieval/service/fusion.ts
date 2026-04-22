@@ -206,6 +206,7 @@ export class FusionService {
         anchorRank,
         ...(anchorRawScore !== undefined ? { anchorRawScore } : {}),
         fusionRrfTotal: fusionScore,
+        identityExactnessTier: 'none',
         matchedConstraints: [],
         retrievalTrace: trace,
         ...summaryToHybridCandidateFields(merged),

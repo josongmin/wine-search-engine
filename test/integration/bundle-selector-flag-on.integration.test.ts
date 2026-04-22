@@ -61,6 +61,8 @@ import type {
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../src/domain/retrieval/model/retrieval-input.js';
 import type { CandidatePoolPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 // ─── Fakes ──────────────────────────────────────────────────────────────────
 
@@ -68,13 +70,12 @@ import type { CandidatePoolPort } from '../../src/application/search/port/search
  * Minimum-viable HybridCandidate. The bundle-selector path only reads
  * `entityId` (for distinct-column keying) and `priceUsd` (for the
  * ledger's KRW conversion); the rest of the interface is opaque to
- * this test. We construct a bare object and cast through `unknown`
- * because the full shape requires fields (retrievalTrace, etc.) that
- * are orthogonal to the flag-on invariant being locked.
+ * this test. We still mint candidates through the canonical test
+ * factory so topology / exactness invariants stay sealed.
  */
 function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
-  return {
-    entityId: id as never,
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
     ...(priceUsd !== undefined ? { priceUsd } : {}),
     retrievalTrace: {
       retrievalProfile: 'test',
@@ -84,7 +85,7 @@ function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
       candidateSources: [],
     },
     matchedConstraints: [],
-  } as unknown as HybridCandidate;
+  });
 }
 
 /** Retrieval input is passed through to the fakes verbatim — no real

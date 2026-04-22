@@ -233,19 +233,26 @@ export class DecisionEngine {
     }
 
     // ── Step 1.5: Apply clarificationBias to effective thresholds ──
-    // Combine policy bias + uncertainty force_clarify into a single
-    // threshold modifier. Both are soft signals, not hard gates.
+    // Combine policy bias + uncertainty/ambiguity soft signals into a single
+    // threshold modifier. These raise the bar without short-circuiting.
     const UNCERTAINTY_FORCE_CLARIFY_BIAS = 0.10;
+    const AMBIGUITY_RAISE_THRESHOLD_BIAS = 0.10;
     const policyBias = input.policy.clarificationBias;
     const uncertaintyBias = input.uncertainty.decisionEffect === 'force_clarify'
       ? UNCERTAINTY_FORCE_CLARIFY_BIAS
       : 0;
-    const clarificationBias = Math.max(policyBias, uncertaintyBias);
+    const ambiguityBias = input.ambiguitySummary?.decisionEffect === 'raise_threshold'
+      ? AMBIGUITY_RAISE_THRESHOLD_BIAS
+      : 0;
+    const clarificationBias = Math.max(policyBias, uncertaintyBias, ambiguityBias);
     const effectiveThresholds = clarificationBias > 0
       ? { resolveTau: thresholds.resolveTau + clarificationBias, gapTau: thresholds.gapTau }
       : thresholds;
     if (clarificationBias > 0) {
       rulesApplied.push(`CLARIFICATION_BIAS_${clarificationBias.toFixed(2)}`);
+    }
+    if (ambiguityBias > 0) {
+      rulesApplied.push('AMBIGUITY_RAISE_THRESHOLD');
     }
 
     // ── Step 2: Numeric gate (RFC-007 §6.2) ────────────────────────
@@ -326,8 +333,9 @@ export class DecisionEngine {
    *
    * Short-circuits the decision when policy directives mandate a specific outcome:
    * - `require_clarification=true` → AMBIGUOUS immediately.
-   * - Uncertainty `decisionEffect=force_clarify` → AMBIGUOUS immediately.
+   * - Uncertainty `decisionEffect=force_clarify` → raised threshold bias.
    * - Uncertainty `decisionEffect=block_resolve` → FAILED immediately.
+   * - Ambiguity `decisionEffect=raise_threshold` → raised threshold bias.
    *
    * @returns A DecisionState if short-circuited, or null to continue.
    */

@@ -6,6 +6,7 @@ import type { NormalizedQueryViews } from '../../query/model/query-views.js';
 import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
+import { hasExactLikeLookupStrategy } from '../../query/service/lookup-strategy-taxonomy.js';
 import type { EntityResolveResult } from '../model/resolve-result.js';
 import type { ResolvedCandidate, ResolverCandidate } from '../model/resolved-candidate.js';
 import type { ResolverDecisionTrace, ResolverCandidateTrace } from '../model/decision-trace.js';
@@ -106,6 +107,8 @@ const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
   lexical_exact: 0.05,
   compact_exact: 0.04,
   transliterated_exact: 0.05,
+  prefix_exact: 0.05,
+  transliterated_prefix: 0.05,
   phonetic_exact: 0.045,
   fuzzy_char_ngram: 0.025,
   transliterated_fuzzy: 0.03,
@@ -557,7 +560,7 @@ export class Resolver {
       strategies.includes('transliterated_fuzzy') ||
       strategies.includes('substring');
 
-    if (!hasNoisyLookup) {
+    if (!hasNoisyLookup || hasExactLikeLookupStrategy(strategies)) {
       return false;
     }
 
@@ -1039,14 +1042,7 @@ export class Resolver {
       queryClass === 'exact_entity' ||
       queryClass === 'short_entity' ||
       queryClass === 'ambiguous_short_form';
-    const hasOnlyNoisySupport = strategies.every(
-      (strategy) =>
-        strategy !== 'exact' &&
-        strategy !== 'lexical_exact' &&
-        strategy !== 'compact_exact' &&
-        strategy !== 'transliterated_exact' &&
-        strategy !== 'phonetic_exact',
-    );
+    const hasOnlyNoisySupport = !hasExactLikeLookupStrategy(strategies);
 
     if (isShortForm && hasOnlyNoisySupport && delta > 0) {
       return Math.min(delta, SHORT_FORM_NOISY_SUPPORT_GAP_CAP);

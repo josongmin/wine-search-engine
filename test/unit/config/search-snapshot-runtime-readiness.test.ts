@@ -261,7 +261,7 @@ describe('search snapshot runtime readiness', () => {
     });
 
     expect(health.readiness?.drinking_window_model).toBeDefined();
-    await expect(health.readiness?.drinking_window_model?.check?.()).rejects.toThrow(
+    expect(() => health.readiness?.drinking_window_model?.check?.()).toThrow(
       /drinking window predictor unloaded/,
     );
   });
@@ -282,10 +282,10 @@ describe('search snapshot runtime readiness', () => {
       }),
     });
 
-    await expect(health.readiness?.drinking_window_model?.check?.()).resolves.toBe('up');
+    expect(health.readiness?.drinking_window_model?.check?.()).toBe('up');
   });
 
-  it('surfaces a missing runtime LTR artifact as a required readiness check', async () => {
+  it('omits runtime LTR artifact readiness while live LTR serving is disabled', async () => {
     const dir = await makeTempDir();
     const missingPath = path.join(dir, 'runtime-ltr-models.json');
     const config = parseEnv({
@@ -295,14 +295,10 @@ describe('search snapshot runtime readiness', () => {
 
     const health = buildHealthRouteOptions(config, {});
 
-    expect(health.readiness?.runtime_ltr_artifact).toBeDefined();
-    expect(health.readiness?.runtime_ltr_artifact?.required).toBe(true);
-    await expect(health.readiness?.runtime_ltr_artifact?.check?.()).rejects.toThrow(
-      /runtime LTR artifact unavailable/,
-    );
+    expect(health.readiness?.runtime_ltr_artifact).toBeUndefined();
   });
 
-  it('downgrades runtime LTR artifact to advisory when the remote reranker is configured', async () => {
+  it('does not register runtime LTR artifact readiness even when reranker is configured', async () => {
     const dir = await makeTempDir();
     const missingPath = path.join(dir, 'runtime-ltr-models.json');
     const config = parseEnv({
@@ -313,8 +309,7 @@ describe('search snapshot runtime readiness', () => {
 
     const health = buildHealthRouteOptions(config, {});
 
-    expect(health.readiness?.runtime_ltr_artifact).toBeDefined();
-    expect(health.readiness?.runtime_ltr_artifact?.required).toBe(false);
+    expect(health.readiness?.runtime_ltr_artifact).toBeUndefined();
     expect(health.readiness?.reranker).toBeDefined();
   });
 
@@ -369,8 +364,8 @@ describe('search snapshot runtime readiness', () => {
     expect(health.readiness?.benchmark_persistence?.required).toBe(true);
     await expect(health.readiness?.benchmark_persistence?.check?.()).resolves.toBe('up');
     expect(query).toHaveBeenCalledTimes(2);
-    expect(query.mock.calls.some(([text]) => String(text).includes('INSERT INTO eval_benchmark_runs'))).toBe(false);
-    expect(query.mock.calls.some(([text]) => String(text).includes('BEGIN'))).toBe(false);
+    expect(query.mock.calls.some(([text]) => text.includes('INSERT INTO eval_benchmark_runs'))).toBe(false);
+    expect(query.mock.calls.some(([text]) => text.includes('BEGIN'))).toBe(false);
   });
 
   it('canonicalizes runtime entity/alias/ambiguity rows into snapshot hash space', () => {

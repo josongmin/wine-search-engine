@@ -49,8 +49,6 @@ function makeEntityArtifact(
       entityPosteriorScore: 0.97,
       identityExactnessTier: 'exact',
       lanePresence: 'entity_only',
-      laneCorroborated: false,
-      laneDisagreement: true,
     },
     resolvedCandidate: {
       entityId: createCanonicalEntityId(entityId),
@@ -92,16 +90,12 @@ describe('fuseDualLaneArtifacts', () => {
     expect(result.laneArtifacts[0]).toMatchObject({
       entityId: ENTITY_A,
       lanePresence: 'corroborated',
-      exactnessTier: 'exact',
-      agreement: {
-        corroborated: true,
-        disagreement: false,
-        entityOnly: false,
-        generalOnly: false,
+      identityProvenance: {
+        exactnessTier: 'exact',
+        calibratedScore: 0.97,
       },
     });
     expect(result.fusedCandidates[0]?.lanePresence).toBe('corroborated');
-    expect(result.fusedCandidates[0]?.laneCorroborated).toBe(true);
     expect(result.fusedCandidates[0]?.entityPosteriorScore).toBe(0.97);
     expect(result.fusedCandidates[0]?.identityExactnessTier).toBe('exact');
     expect(result.fusedCandidates[0]?.retrievalTrace.candidateSources).toEqual([
@@ -159,15 +153,8 @@ describe('fuseDualLaneArtifacts', () => {
 
     expect(result.laneArtifacts[0]).toMatchObject({
       lanePresence: 'general_only',
-      exactnessTier: 'none',
-      agreement: {
-        corroborated: false,
-        disagreement: true,
-        entityOnly: false,
-        generalOnly: true,
-      },
     });
     expect(result.fusedCandidates[0]?.identityExactnessTier).toBe('none');
-    expect(result.fusedCandidates[0]?.laneDisagreement).toBe(true);
+    expect(result.fusedCandidates[0]?.lanePresence).toBe('general_only');
   });
 });

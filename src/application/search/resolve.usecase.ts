@@ -36,6 +36,7 @@ interface ResolveUseCaseDeps {
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly judgeTimeoutMs?: number | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   /**
    * TA2-T5: High-recall blocker for seeding candidates not covered by alias anchors.
@@ -74,6 +75,7 @@ export class ResolveUseCase {
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
       judgeFailureMode: this.deps.judgeFailureMode,
+      judgeTimeoutMs: this.deps.judgeTimeoutMs,
       queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);

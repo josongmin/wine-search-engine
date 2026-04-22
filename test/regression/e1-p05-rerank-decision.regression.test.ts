@@ -5,7 +5,7 @@
  *
  *  1. no_model_for_query_class — ltrModels Map has no entry for the queryClass
  *  2. empty_candidates         — ltrModels present but candidate list is empty
- *  3. feature_dimension_mismatch — model weight vector length ≠ 14 (LTR_MODEL_FEATURE_DIMENSION)
+ *  3. feature_dimension_mismatch — model weight vector length ≠ live LambdaMART dimension
  *  4. gate_blocked             — gate evaluation returns shouldRerank=false
  *  5. applied                  — LTR ran normally; applied=true, modelId set
  *
@@ -18,7 +18,7 @@ import { SignalComputer } from '../../src/domain/ranking/service/signal-computer
 import { ScoreAggregator } from '../../src/domain/ranking/service/score-aggregator.js';
 import { EvidenceMapper } from '../../src/domain/ranking/service/evidence-mapper.js';
 import {
-  LTR_FEATURE_DIMENSION,
+  LAMBDAMART_FEATURE_DIMENSION,
   LTR_FEATURE_SCHEMA_HASH,
   type QueryClassWeights,
 } from '../../src/domain/ranking/service/lambdamart-ranker.js';
@@ -43,8 +43,8 @@ const NEUTRAL_COMPONENT_SCORES: ComponentScores = {
   recency: 0,
   criticScore: 0,
   multilingualScore: 0,
+  uncertaintyPenalty: 0,
   hardConstraintPass: true,
-  finalScore: 0.5,
 };
 
 /** Builds a minimal HybridCandidate for ranking tests. */
@@ -52,7 +52,7 @@ function makeCandidate(entityId: string): HybridCandidate {
   return {
     entityId,
     canonicalLabel: `Wine ${entityId}`,
-    retrievalFusionScore: 0.5,
+    fusionRrfTotal: 0.5,
     matchedConstraints: [],
     retrievalTrace: {
       candidateSources: [],
@@ -109,12 +109,12 @@ function makeRankingInput(
   };
 }
 
-/** Builds a valid QueryClassWeights model with the current 14-feature weight vector. */
+/** Builds a valid QueryClassWeights model with the current live weight vector. */
 function makeValidLtrModel(queryClass: string): QueryClassWeights {
   return {
     queryClass,
     featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
-    weights: Array(LTR_FEATURE_DIMENSION).fill(1 / LTR_FEATURE_DIMENSION) as number[],
+    weights: Array(LAMBDAMART_FEATURE_DIMENSION).fill(1 / LAMBDAMART_FEATURE_DIMENSION) as number[],
     bias: 0,
     trainingExampleCount: 100,
     ndcg5ValidationScore: 0.8,
@@ -194,7 +194,7 @@ describe('E1-P0-5 RerankDecision: empty_candidates', () => {
 // ─── Test 3: feature_dimension_mismatch ───────────────────────────────────────
 
 describe('E1-P0-5 RerankDecision: feature_dimension_mismatch', () => {
-  it('returns decision=feature_dimension_mismatch when model weights length ≠ 14', async () => {
+  it('returns decision=feature_dimension_mismatch when model weights length mismatches the live schema', async () => {
     const queryClass = 'semantic_preference';
     // Wrong dimension: 5 weights instead of 8
     const badModel: QueryClassWeights = {

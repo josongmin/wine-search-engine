@@ -6,7 +6,8 @@ import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-build
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
   return {
     entityId: 'entity-1' as never,
-    retrievalFusionScore: 0.08,
+    fusionRrfTotal: 0.08,
+    identityExactnessTier: 'none',
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'test',
@@ -72,7 +73,11 @@ describe('SignalComputer SOTA++ signals', () => {
   // ── dual-lane identity substrate ───────────────────────────────────────────
   describe('dual-lane ranking signals', () => {
     it('preserves calibrated entity posterior when present', () => {
-      expect(computer.computeEntityPosterior(makeCandidate({ entityPosteriorScore: 0.97 }))).toBeCloseTo(0.97);
+      expect(
+        computer.computeEntityPosterior(
+          makeCandidate({ lanePresence: 'entity_only', entityPosteriorScore: 0.97 }),
+        ),
+      ).toBeCloseTo(0.97);
     });
 
     it('returns undefined entity posterior when the candidate has no identity lane', () => {
@@ -80,7 +85,11 @@ describe('SignalComputer SOTA++ signals', () => {
     });
 
     it('returns canonical identity exactness tier with none as the absence sentinel', () => {
-      expect(computer.computeIdentityExactnessTier(makeCandidate({ identityExactnessTier: 'alias_fuzzy' }))).toBe('alias_fuzzy');
+      expect(
+        computer.computeIdentityExactnessTier(
+          makeCandidate({ lanePresence: 'entity_only', identityExactnessTier: 'alias_fuzzy' }),
+        ),
+      ).toBe('alias_fuzzy');
       expect(computer.computeIdentityExactnessTier(makeCandidate())).toBe('none');
     });
 
@@ -237,7 +246,7 @@ describe('SignalComputer specialized signals', () => {
         body: 4,
         tannin: 3,
         acidity: 3,
-        retrievalFusionScore: 0.09,
+        fusionRrfTotal: 0.09,
       }),
     );
 

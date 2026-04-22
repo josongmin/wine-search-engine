@@ -194,6 +194,7 @@ describe('POST /v1/search — happy paths', () => {
     expect(body.meta.execution_contract?.execution_topology).toBe('entity_only');
     expect(body.meta.execution_contract?.lane_trace?.identity?.participated).toBe(true);
     expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(false);
+    expect(body.meta.execution_contract?.lane_trace?.fused?.participated).toBe(false);
   });
 
   it('explain=false keeps decision keys present', async () => {

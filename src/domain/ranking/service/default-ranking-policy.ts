@@ -19,6 +19,12 @@
 
 import type { RankedResult } from '../model/ranked-result.js';
 import type { RankingPolicyPort, PolicyContext } from '../port/ranking-policy.port.js';
+import {
+  deriveCanonicalFamilyBranchLabel,
+  extractSingleTokenNormalizedQuery,
+  resolveAmbiguousBranchLabel,
+  shouldApplyCanonicalFamilyBranchPrior,
+} from './ambiguous-branch.js';
 
 /** Number of results considered the "top" window for diversity enforcement. */
 const DIVERSITY_TOP_WINDOW = 10;
@@ -164,58 +170,84 @@ function applyAmbiguousBranchDiversity(
   results: readonly RankedResult[],
   context: PolicyContext,
 ): readonly RankedResult[] {
-  if (!shouldApplyAmbiguousBranchDiversity(context)) {
+  const branchOrder = deriveAmbiguousBranchOrder(results, context);
+  if (branchOrder.length < 2) {
     return results;
   }
 
-  const topWindow = results.slice(0, DIVERSITY_TOP_WINDOW);
-  const tail = results.slice(DIVERSITY_TOP_WINDOW);
-  const availableBranches = new Set(
-    results
-      .map((result) => resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups))
-      .filter((label): label is string => label !== undefined),
-  );
-  if (availableBranches.size < 2) {
-    return results;
-  }
+  const representatives: RankedResult[] = [];
+  const representativeIds = new Set<string>();
 
-  const seenBranches = new Set<string>();
-  const retained: RankedResult[] = [];
-  const demoted: RankedResult[] = [];
-
-  for (const result of topWindow) {
-    const branchLabel = resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups);
-    if (branchLabel === undefined) {
-      retained.push(result);
+  for (const branchLabel of branchOrder) {
+    const representative = results.find((result) =>
+      resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups) === branchLabel,
+    );
+    if (representative === undefined) {
       continue;
     }
-    if (!seenBranches.has(branchLabel)) {
-      seenBranches.add(branchLabel);
-      retained.push(result);
-      continue;
-    }
-    demoted.push({ ...result, policyDemoted: true });
+    representatives.push(representative);
+    representativeIds.add(String(representative.entityId));
   }
 
-  const promotedTailIndices = new Set<number>();
-  for (let index = 0; index < tail.length; index += 1) {
-    const candidate = tail[index];
-    const branchLabel = candidate !== undefined
-      ? resolveAmbiguousBranchLabel(candidate, context.ambiguousBranchGroups)
-      : undefined;
-    if (candidate === undefined || branchLabel === undefined || seenBranches.has(branchLabel)) {
+  const demoted = results
+    .filter((result) => !representativeIds.has(String(result.entityId)))
+    .map((result) => {
+      const branchLabel = resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups);
+      return branchLabel !== undefined ? { ...result, policyDemoted: true } : result;
+    });
+
+  return [...representatives, ...demoted];
+}
+
+function deriveAmbiguousBranchOrder(
+  results: readonly RankedResult[],
+  context: PolicyContext,
+): readonly string[] {
+  if (context.ambiguousBranchGroups !== undefined && context.ambiguousBranchGroups.length > 0) {
+    const availableBranches = new Set(
+      results
+        .map((result) => resolveAmbiguousBranchLabel(result, context.ambiguousBranchGroups))
+        .filter((label): label is string => label !== undefined),
+    );
+    return context.ambiguousBranchGroups
+      .map((group) => group.label)
+      .filter((label) => availableBranches.has(label));
+  }
+
+  if (!shouldApplyCanonicalFamilyBranchPrior(context.queryClass)) {
+    return [];
+  }
+
+  const queryToken = extractSingleTokenNormalizedQuery(context.normalizedQuery);
+  if (queryToken === undefined) {
+    return [];
+  }
+
+  const branches = new Map<string, { firstRank: number; tokenExcess: number }>();
+  for (const result of results) {
+    const label = deriveCanonicalFamilyBranchLabel(result);
+    if (label === undefined) {
       continue;
     }
-    retained.push(candidate);
-    seenBranches.add(branchLabel);
-    promotedTailIndices.add(index);
-    if (seenBranches.size >= availableBranches.size) {
-      break;
+    const branchTokens = label.split(/\s+/).filter(Boolean);
+    if (!branchTokens.includes(queryToken)) {
+      continue;
+    }
+    const tokenExcess = Math.max(0, branchTokens.length - 1);
+    const existing = branches.get(label);
+    if (existing === undefined || result.rank < existing.firstRank) {
+      branches.set(label, { firstRank: result.rank, tokenExcess });
     }
   }
 
-  const remainingTail = tail.filter((_, index) => !promotedTailIndices.has(index));
-  return [...retained, ...demoted, ...remainingTail];
+  return [...branches.entries()]
+    .sort((left, right) => {
+      if (left[1].tokenExcess !== right[1].tokenExcess) {
+        return left[1].tokenExcess - right[1].tokenExcess;
+      }
+      return left[1].firstRank - right[1].firstRank;
+    })
+    .map(([label]) => label);
 }
 
 /**
@@ -237,32 +269,6 @@ function shouldApplyWineTypeDiversity(context: PolicyContext): boolean {
   }
 
   return context.queryClass === 'semantic_preference' || context.queryClass === 'anchored_similarity';
-}
-
-function shouldApplyAmbiguousBranchDiversity(context: PolicyContext): boolean {
-  return (context.ambiguousBranchGroups?.length ?? 0) > 1;
-}
-
-function resolveAmbiguousBranchLabel(
-  result: RankedResult,
-  groups: PolicyContext['ambiguousBranchGroups'],
-): string | undefined {
-  if (groups === undefined || groups.length === 0) {
-    return undefined;
-  }
-  const candidateValues = [
-    result.grapePrimary,
-  ]
-    .filter((value): value is string => value !== undefined && value.trim().length > 0)
-    .map((value) => value.trim().toLowerCase());
-
-  for (const group of groups) {
-    const normalizedMatches = group.matchValues.map((value) => value.trim().toLowerCase());
-    if (candidateValues.some((value) => normalizedMatches.includes(value))) {
-      return group.label;
-    }
-  }
-  return undefined;
 }
 
 /**

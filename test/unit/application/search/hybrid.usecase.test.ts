@@ -230,7 +230,7 @@ function createCompareRetrieverResult(entityId: string) {
   return [{
     entityId,
     canonicalLabel: 'Dominus 2021',
-    retrievalFusionScore: 0.84,
+    fusionRrfTotal: 0.84,
     sparseRawScore: 0.84,
     matchedConstraints: [],
     retrievalTrace: {
@@ -374,7 +374,7 @@ describe('HybridUseCase', () => {
       browseProducer: vi.fn().mockResolvedValue([{
         entityId: createEntityId(),
         canonicalLabel: 'Ridge Monte Bello 2021',
-        retrievalFusionScore: 0.88,
+        fusionRrfTotal: 0.88,
         sparseRawScore: 0.88,
         matchedConstraints: [],
         retrievalTrace: {

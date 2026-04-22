@@ -11,14 +11,23 @@ vi.mock('next/navigation', () => ({
 }));
 
 describe('ClarificationCard', () => {
-  it('renders reason text', () => {
+  it('renders similar-result guidance for disambiguation candidates', () => {
     renderWithProviders(<ClarificationCard payload={mockClarification} />);
+    expect(screen.getByText('비슷한 검색 결과가 있어요')).toBeInTheDocument();
+    expect(
+      screen.getByText('입력하신 표현과 가까운 후보입니다. 아래에서 바로 선택할 수 있습니다.'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the generic clarification prompt when no candidates are available', () => {
+    renderWithProviders(<ClarificationCard payload={{ ...mockClarification, candidates: [] }} />);
+    expect(screen.getByText('어떤 걸 찾으시나요?')).toBeInTheDocument();
     expect(screen.getByText('여러 와인이 일치합니다')).toBeInTheDocument();
   });
 
-  it('renders clarification prompt', () => {
+  it('renders clarification prompt for candidate suggestions', () => {
     renderWithProviders(<ClarificationCard payload={mockClarification} />);
-    expect(screen.getByText('어떤 걸 찾으시나요?')).toBeInTheDocument();
+    expect(screen.getByText('비슷한 검색 결과가 있어요')).toBeInTheDocument();
   });
 
   it('renders all candidates', () => {
@@ -38,7 +47,7 @@ describe('ClarificationCard', () => {
 
     await user.click(screen.getByText('Château Margaux 2018'));
     expect(pushMock).toHaveBeenCalledWith(
-      expect.stringContaining('/search?q='),
+      expect.stringContaining('/wine/'),
     );
   });
 });

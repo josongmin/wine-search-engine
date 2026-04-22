@@ -17,7 +17,7 @@ import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-ca
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
   return {
     entityId: 'entity-1' as never,
-    retrievalFusionScore: 0.08,
+    fusionRrfTotal: 0.08,
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'test',

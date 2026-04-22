@@ -1,5 +1,6 @@
 import type { SearchExecutorPort } from '../../../application/search/port/search-executor.port.js';
 import type {
+  AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
@@ -34,6 +35,10 @@ export interface ResolveRouteDeps {
   readonly resolveUseCase: ResolveUseCasePort;
 }
 
+export interface AutocompleteRouteDeps {
+  readonly autocompleteUseCase: AutocompleteUseCasePort;
+}
+
 export interface HybridRouteDeps {
   readonly hybridUseCase: HybridUseCasePort;
 }
@@ -63,6 +68,7 @@ export interface HttpServerDeps
     ClaudeToolsRouteDeps,
     WatchlistRouteDeps,
     FeedbackRouteDeps {
+  readonly autocompleteUseCase?: AutocompleteUseCasePort | undefined;
   readonly evalRunner: EvalRunnerContract | null;
   /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort is available. */
   readonly agentOrchestrator?: AgentOrchestrator | undefined;

@@ -100,6 +100,8 @@ describe('dispatchSearchRouteExecution', () => {
     expect(out.sparseExecuted).toBe(false);
     expect(out.specializedRouteExecuted).toBeNull();
     expect(out.usedCompiledExecution).toBe(false);
+    expect(out.laneTrace.fused.participated).toBe(false);
+    expect(out.laneTrace.fused.resolveStatus).toBeUndefined();
   });
 
   it('delegates hybrid and mixed', async () => {

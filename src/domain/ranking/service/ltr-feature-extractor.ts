@@ -95,29 +95,6 @@ export function rankingFeaturesToVector(
   });
 }
 
-export function scaleRankingFeatures(
-  features: RankingFeatures,
-  factor: number,
-): RankingFeatures {
-  return {
-    bm25Score: features.bm25Score * factor,
-    semanticScore: features.semanticScore * factor,
-    popularityScore: features.popularityScore * factor,
-    recencyScore: features.recencyScore * factor,
-    classMatchScore: features.classMatchScore * factor,
-    attributeMatchScore: features.attributeMatchScore * factor,
-    diversityScore: features.diversityScore * factor,
-    multilingualScore: features.multilingualScore * factor,
-    entityPosteriorScore: features.entityPosteriorScore * factor,
-    identityExactnessTierScore: features.identityExactnessTierScore * factor,
-    laneCorroborationScore: features.laneCorroborationScore * factor,
-    laneDisagreementScore: features.laneDisagreementScore * factor,
-    entityOnlyIndicator: features.entityOnlyIndicator * factor,
-    generalOnlyIndicator: features.generalOnlyIndicator * factor,
-  };
-}
-
-
 /**
  * The minimal score components needed for LTR feature extraction.
  * This is the shared contract between the ranking pipeline (ComponentScores)

@@ -106,6 +106,27 @@ describe('Unicode and special character queries', () => {
     },
   );
 
+  it.each(['오푸스', '오퍼스'])(
+    'completed entity prefix resolves through POST /v1/search (%s)',
+    async (query) => {
+      const res = await post('/v1/search', { query });
+      expect(res.statusCode).toBe(200);
+
+      const body = parseSearchResponse(res);
+      expect(body.engine_decision.decision_status).toBe('resolved');
+      expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
+    },
+  );
+
+  it('latin partial prefix opu resolves through POST /v1/search', async () => {
+    const res = await post('/v1/search', { query: 'opu', options: { clarification: true } });
+    expect(res.statusCode).toBe(200);
+
+    const body = parseSearchResponse(res);
+    expect(body.engine_decision.decision_status).toBe('resolved');
+    expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
+  });
+
   it('latin short-form Opus does not leak uppercase acronym alias collisions through POST /v1/search', async () => {
     const res = await post('/v1/search', {
       query: 'opus',
@@ -134,6 +155,22 @@ describe('Unicode and special character queries', () => {
       body.clarification?.candidates.every((candidate) => candidate.label.toLowerCase().includes('opus'))
         ?? true,
     ).toBe(true);
+    if (body.clarification?.structured_payload?.options !== undefined && body.clarification.candidates.length > 0) {
+      expect(body.clarification.structured_payload.options).toEqual(
+        body.clarification.candidates.map((candidate) => candidate.label),
+      );
+    }
+    if (body.clarification?.structured_payload?.option_entities !== undefined && body.clarification.candidates.length > 0) {
+      expect(body.clarification.structured_payload.option_entities).toEqual(
+        body.clarification.candidates.map((candidate) => ({
+          entity_id: candidate.entity_id,
+          label: candidate.label,
+          ...(candidate.distinguishing_features.length > 0
+            ? { distinguishing_features: candidate.distinguishing_features }
+            : {}),
+        })),
+      );
+    }
   });
 
   it('combining diacritical characters (NFD form) — NFC normalization handles it', async () => {

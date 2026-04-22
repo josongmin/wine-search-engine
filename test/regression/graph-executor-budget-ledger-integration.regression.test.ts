@@ -36,15 +36,14 @@ import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-ca
 import type { HybridRetrievalInput } from '../../src/domain/retrieval/model/retrieval-input.js';
 import type { CandidatePoolPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../src/domain/shared/constants.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
-  const base = {
-    entityId: id,
-    retrievalTrace: {},
-    matchedConstraints: [],
-  } as unknown as HybridCandidate;
-  if (priceUsd === undefined) return base;
-  return { ...base, priceUsd } as HybridCandidate;
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
+    ...(priceUsd !== undefined ? { priceUsd } : {}),
+  });
 }
 
 const stubInput = {

@@ -279,6 +279,13 @@ describe('SearchResponseSchema', () => {
           kind: 'anchor_disambiguation',
           question: '어떤 후보를 찾으시나요?',
           options: ['Opus One 2018', 'Château Margaux 2015'],
+          option_entities: [
+            {
+              entity_id: 'wine:opus-one-2018',
+              label: 'Opus One 2018',
+              distinguishing_features: ['Napa Valley', 'Cabernet Sauvignon'],
+            },
+          ],
         },
       },
     });

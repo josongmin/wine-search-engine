@@ -32,7 +32,7 @@ describe('noisy entity benchmark eval', () => {
   it('loads the benchmark artifact with the expected category coverage', async () => {
     const cases = await loadNoisyEntityBenchmark(resolveDataPath('data/noisy-entity-benchmark.jsonl'));
 
-    expect(cases).toHaveLength(102);
+    expect(cases).toHaveLength(104);
 
     const categoryCounts = new Map<string, number>();
     const languageCounts = new Map<string, number>();
@@ -51,12 +51,12 @@ describe('noisy entity benchmark eval', () => {
       ['vintage_partial', 8],
       ['mixed_language', 9],
       ['noisy_short_form', 9],
-      ['adversarial_near_miss', 7],
+      ['adversarial_near_miss', 9],
       ['phonetic', 6],
     ]));
 
     expect(languageCounts.get('en')).toBe(79);
-    expect(languageCounts.get('ko')).toBe(14);
+    expect(languageCounts.get('ko')).toBe(16);
     expect(languageCounts.get('mixed')).toBe(9);
   });
 
@@ -124,14 +124,14 @@ describe('noisy entity benchmark eval', () => {
 
     const report = scoreNoisyEntityBenchmark(cases, predictions);
 
-    expect(report.query_count).toBe(102);
+    expect(report.query_count).toBe(104);
     expect(report.recall_at_1).toBe(1);
     expect(report.recall_at_3).toBe(1);
     expect(report.mrr).toBe(1);
     expect(report.provenance_checked_count).toBe(18);
     expect(report.provenance_match_rate).toBe(1);
     expect(report.provenance_misses).toHaveLength(0);
-    expect(report.resolution_checked_count).toBe(9);
+    expect(report.resolution_checked_count).toBe(11);
     expect(report.resolution_match_rate).toBe(1);
     expect(report.false_exact_rate).toBe(0);
     expect(report.resolution_misses).toHaveLength(0);
@@ -259,7 +259,7 @@ describe('noisy entity benchmark eval', () => {
     );
 
     expect(report.source).toBe('search-executor');
-    expect(report.query_count).toBe(102);
+    expect(report.query_count).toBe(104);
     expect(report.recall_at_3).toBeGreaterThan(0);
     expect(report.resolution_checked_count).toBeGreaterThan(0);
     expect(report.by_category.transliteration).toBeDefined();

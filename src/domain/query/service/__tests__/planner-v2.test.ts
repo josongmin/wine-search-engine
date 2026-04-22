@@ -811,6 +811,15 @@ describe('Planner – regression (same query → same intent, anchors, constrain
     expect(plan.intent).toBe('entity_exact');
   });
 
+  it('Korean noisy prefix query still plans as entity_exact when the curated prefix resolves to Opus One', async () => {
+    const entries = new Map([['opus one', makeMatchResult('Opus One', 0.95)]]);
+    const planner = makePlanner(entries);
+    const plan = await planner.plan('오푸');
+
+    expect(plan.intent).toBe('entity_exact');
+    expect(plan.anchors[0]?.normalizedForm).toBe('opus one');
+  });
+
   it('anchors are extracted for known entities', async () => {
     const entries = new Map([['opus one', makeMatchResult('Opus One', 0.95)]]);
     const planner = makePlanner(entries);

@@ -457,8 +457,6 @@ describe('buildEntityRouteRankedResults', () => {
       entityPosteriorScore: 0.97,
       identityExactnessTier: 'exact',
       lanePresence: 'entity_only',
-      laneCorroborated: false,
-      laneDisagreement: true,
     });
     expect(artifacts[0]?.evidenceItems[0]?.metadata).toMatchObject({
       matchType: 'exact',

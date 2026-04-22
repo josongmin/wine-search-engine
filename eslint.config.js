@@ -148,6 +148,32 @@ export default tseslint.config(
             'JSON.parse(...) as unknown as T bypasses the safety rule. Assign to a `const x: unknown` variable first, then validate shape. (CLAUDE.md rule 12)',
         },
         {
+          selector: 'ImportDeclaration[source.value=/ltr-features\\.js$/]',
+          message:
+            'ltr-features.ts is removed. Use @domain/ranking/service/ltr-feature-extractor.js as the single LTR schema SSOT.',
+        },
+        {
+          selector: 'Property[key.name="retrievalFusionScore"], MemberExpression[property.name="retrievalFusionScore"]',
+          message:
+            'retrievalFusionScore is removed. Use fusionRrfTotal for fused retrieval or per-channel raw score fields instead.',
+        },
+        {
+          selector: 'Property[key.name="laneCorroborated"], MemberExpression[property.name="laneCorroborated"]',
+          message:
+            'laneCorroborated is removed. Use lanePresence as the sole topology contract.',
+        },
+        {
+          selector: 'Property[key.name="laneDisagreement"], MemberExpression[property.name="laneDisagreement"]',
+          message:
+            'laneDisagreement is removed. Use lanePresence as the sole topology contract.',
+        },
+        {
+          selector:
+            'TSAsExpression[typeAnnotation.type="TSTypeReference"][typeAnnotation.typeName.name="HybridCandidate"]',
+          message:
+            'Do not cast to HybridCandidate in production code. Build a topology-valid object explicitly so lanePresence/exactness invariants stay enforced.',
+        },
+        {
           // \b word boundary is ASCII-only — silently fails on Korean/accented Latin.
           // 50+ instances of this bug were found in audit rounds 22-27.
           // Use (?:^|[^\p{L}\p{N}])...(?=$|[^\p{L}\p{N}]) with /u flag instead.
@@ -440,6 +466,29 @@ export default tseslint.config(
           enforceConst: true,
           ignoreDefaultValues: true,
           ignoreClassFieldInitialValues: true,
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      'test/regression/**/*.ts',
+      'test/integration/**/*.ts',
+      'test/unit/ranking/**/*.ts',
+      'test/unit/application/search/**/*.ts',
+      'src/domain/ranking/__tests__/**/*.ts',
+      'src/domain/ranking/service/__tests__/**/*.ts',
+      'src/domain/retrieval/service/__tests__/**/*.ts',
+      'src/application/search/__tests__/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'TSAsExpression[typeAnnotation.type="TSTypeReference"][typeAnnotation.typeName.name="HybridCandidate"]',
+          message:
+            'Do not cast to HybridCandidate in protected test lanes. Use test/support/hybrid-candidate-test-factory.ts so topology/exactness invariants stay explicit.',
         },
       ],
     },

@@ -29,6 +29,7 @@ import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
+import { buildAliasPrefixTerms } from '../../src/domain/query/service/alias-prefix-terms.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
 import {
   loadGoldCanonicalLookupForBuild,
@@ -621,6 +622,12 @@ export function silverToIndexable(
     ?? (rec.grapePrimary != null
       ? (GRAPE_FAMILY_MAP.get(rec.grapePrimary.toLowerCase()) ?? rec.grapePrimary.split(/\s+/)[0])
       : undefined);
+  const aliasPrefixTerms = buildAliasPrefixTerms([
+    rec.canonicalLabel,
+    rec.producer,
+    ...rec.aliases.identitySafeProjection,
+    ...rec.aliases.noisyRecallProjection,
+  ]);
   const regionHierarchy = normalizeStringArray(rec.regionHierarchy);
   const occasion = normalizeStringArray(
     rec.occasionClassification?.values ?? rec.occasion,
@@ -664,6 +671,7 @@ export function silverToIndexable(
     entityType: 'wine',
     aliasesIdentitySafe: rec.aliases.identitySafeProjection,
     aliasesNoisyRecall: rec.aliases.noisyRecallProjection,
+    ...(aliasPrefixTerms.length > 0 ? { aliasPrefixTerms } : {}),
     grapes: rec.grapes,
     searchTextKo: buildSearchTextKo(rec),
     semanticSummary: buildEmbedText(rec),

@@ -187,6 +187,23 @@ export const mockClarification: ClarificationPayload = {
     },
   ],
   suggestion_type: 'disambiguation',
+  structured_payload: {
+    kind: 'anchor_disambiguation',
+    question: '어떤 와인을 찾으시나요?',
+    options: ['Château Margaux 2018', 'Margaux AOC 와인 전체'],
+    option_entities: [
+      {
+        entity_id: 'wine:abc123',
+        label: 'Château Margaux 2018',
+        distinguishing_features: ['1er Grand Cru Classé', 'Bordeaux'],
+      },
+      {
+        entity_id: 'wine:abc456',
+        label: 'Margaux AOC 와인 전체',
+        distinguishing_features: ['Appellation', '다수 생산자'],
+      },
+    ],
+  },
 };
 
 const mockEntityResolveResponse: EntityResolveResponse = {

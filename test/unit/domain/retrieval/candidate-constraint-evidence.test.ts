@@ -19,7 +19,7 @@ function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidat
     body: 5,
     sweetness: 1,
     wineType: 'red',
-    retrievalFusionScore: 0.42,
+    fusionRrfTotal: 0.42,
     sparseRawScore: 0.42,
     matchedConstraints: [],
     retrievalTrace: {

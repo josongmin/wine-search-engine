@@ -32,6 +32,11 @@ schema wine_entity {
       index: enable-bm25
     }
 
+    field alias_prefix_terms type array<string> {
+      indexing: attribute
+      attribute: fast-search
+    }
+
     field producer type string {
       indexing: summary | attribute | index
       index: enable-bm25

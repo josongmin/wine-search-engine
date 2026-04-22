@@ -42,7 +42,13 @@ import type { EvalResult } from '../../../src/domain/evaluation/model/eval-resul
 import type { ExistingAliasChecker } from '../../../src/domain/learning/service/alias-proposer.js';
 import type { AdversarialGuardPort } from '../../../src/domain/learning/service/promotion-gate.js';
 import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
+import { Transliterator } from '../../../src/domain/alias/service/transliterator.js';
+import {
+  buildAliasPrefixTerms,
+  isEligiblePrefixQuery,
+} from '../../../src/domain/query/service/alias-prefix-terms.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
+import { buildHangulJamoKey } from '../../../src/domain/shared/utils/hangul.js';
 import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/service/hybrid-candidate-summary.js';
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 
@@ -138,6 +144,9 @@ export class InMemorySearchIndex implements SearchIndexPort {
   ): Promise<readonly SparseHit[]> {
     const hits: SparseHit[] = [];
     const queryLower = queries.map((q) => q.toLowerCase());
+    const prefixQueries = queries
+      .map((q) => buildNormalizedQueryViews(q).strict)
+      .filter((q) => isEligiblePrefixQuery(q));
 
     for (const doc of this.docs.values()) {
       const searchableText = [
@@ -149,12 +158,28 @@ export class InMemorySearchIndex implements SearchIndexPort {
       ]
         .join(' ')
         .toLowerCase();
+      const prefixTerms = doc.aliasPrefixTerms ?? buildAliasPrefixTerms([
+        doc.canonicalLabel,
+        doc.producer,
+        ...doc.aliasesIdentitySafe,
+        ...doc.aliasesNoisyRecall,
+      ]);
 
       let score = 0;
+      const matchedFields = new Set<string>();
       for (const q of queryLower) {
         const terms = q.split(/\s+/).filter(Boolean);
         for (const term of terms) {
-          if (searchableText.includes(term)) score += 1;
+          if (searchableText.includes(term)) {
+            score += 1;
+            matchedFields.add('searchText');
+          }
+        }
+      }
+      for (const prefixQuery of prefixQueries) {
+        if (prefixTerms.some((term) => term.startsWith(prefixQuery))) {
+          score += 1;
+          matchedFields.add('alias_prefix_terms');
         }
       }
 
@@ -163,7 +188,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
           entityId: doc.entityId,
           score,
           rank: 0, // will be assigned after sort
-          matchedFields: ['searchText'],
+          matchedFields: [...matchedFields],
           summary: retrievalDocumentToHitSummary(doc),
         });
       }
@@ -302,6 +327,17 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     string,
     Array<{ entityId: EntityId; surfaceForm: string; confidence: number }>
   >();
+  private readonly hangulCompletionPrefixIndex = new Map<
+    string,
+    Array<{
+      entityId: EntityId;
+      surfaceForm: string;
+      normalizedForm: string;
+      confidence: number;
+      jamoKey: string;
+      syllableBoundaryOffsets: ReadonlySet<number>;
+    }>
+  >();
 
   // entityId → document for smart alias generation
   private readonly documents = new Map<EntityId, RetrievalDocument>();
@@ -327,6 +363,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     }
     existing.push({ entityId, surfaceForm, confidence });
     this.aliases.set(normalized, existing);
+    this.indexHangulCompletionSurface(surfaceForm, normalized, entityId, confidence);
   }
 
   /**
@@ -420,6 +457,72 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         transliteratedResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
         return transliteratedResults;
       }
+    }
+
+    // Stage 1.8: IME-aware Hangul completion match for curated Korean exception surfaces
+    const hangulCompletionResults = this.findHangulCompletionMatches(views.strict);
+    if (hangulCompletionResults.length > 0) {
+      hangulCompletionResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+      return hangulCompletionResults;
+    }
+
+    // Stage 1.85: dedicated prefix substrate parity with production alias matchers
+    const queryPrefixTerms = isEligiblePrefixQuery(views.strict)
+      ? buildAliasPrefixTerms([views.strict])
+      : [];
+    const transliteratedPrefixTerms =
+      views.transliterated !== undefined && isEligiblePrefixQuery(views.transliterated)
+        ? buildAliasPrefixTerms([views.transliterated])
+        : [];
+    const transliteratedPrefixResults: AliasMatchResult[] = [];
+    const prefixResults: AliasMatchResult[] = [];
+
+    for (const [normalized, entries] of this.aliases) {
+      const candidatePrefixTerms = buildAliasPrefixTerms([
+        normalized,
+        ...entries.map((entry) => entry.surfaceForm),
+      ]);
+      const entityIds = entries.map((entry) => entry.entityId);
+      const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+
+      if (
+        transliteratedPrefixTerms.some((term) =>
+          candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term))
+        )
+      ) {
+        transliteratedPrefixResults.push({
+          surfaceForm: entries[0]?.surfaceForm ?? normalized,
+          normalizedForm: normalized,
+          entityIds,
+          matchConfidence: maxConfidence * 0.89,
+          lookupStrategy: 'transliterated_prefix',
+        });
+        continue;
+      }
+
+      if (
+        queryPrefixTerms.some((term) =>
+          candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term))
+        )
+      ) {
+        prefixResults.push({
+          surfaceForm: entries[0]?.surfaceForm ?? normalized,
+          normalizedForm: normalized,
+          entityIds,
+          matchConfidence: maxConfidence * 0.9,
+          lookupStrategy: 'prefix_exact',
+        });
+      }
+    }
+
+    if (transliteratedPrefixResults.length > 0) {
+      transliteratedPrefixResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+      return transliteratedPrefixResults;
+    }
+
+    if (prefixResults.length > 0) {
+      prefixResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+      return prefixResults;
     }
 
     // Stage 1.9: phonetic compact match for consonant-skeleton / digraph noise
@@ -669,6 +772,126 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
   private normalize(input: string): string {
     return buildNormalizedQueryViews(input).strict;
+  }
+
+  private indexHangulCompletionSurface(
+    surfaceForm: string,
+    normalizedForm: string,
+    entityId: EntityId,
+    confidence: number,
+  ): void {
+    for (const surface of this.buildHangulCompletionSurfaces(surfaceForm, normalizedForm)) {
+      const key = buildHangulJamoKey(surface);
+      if (!key.containsHangul || key.key.length === 0) {
+        continue;
+      }
+
+      const record = {
+        entityId,
+        surfaceForm,
+        normalizedForm,
+        confidence,
+        jamoKey: key.key,
+        syllableBoundaryOffsets: key.syllableBoundaryOffsets,
+      };
+
+      for (let prefixLength = 1; prefixLength < key.key.length; prefixLength += 1) {
+        if (key.syllableBoundaryOffsets.has(prefixLength)) {
+          continue;
+        }
+        const prefix = key.key.slice(0, prefixLength);
+        const existing = this.hangulCompletionPrefixIndex.get(prefix) ?? [];
+        if (
+          existing.some(
+            (entry) =>
+              entry.entityId === entityId &&
+              entry.surfaceForm === surfaceForm &&
+              entry.jamoKey === key.key,
+          )
+        ) {
+          continue;
+        }
+        existing.push(record);
+        this.hangulCompletionPrefixIndex.set(prefix, existing);
+      }
+    }
+  }
+
+  private buildHangulCompletionSurfaces(
+    surfaceForm: string,
+    normalizedForm: string,
+  ): readonly string[] {
+    const surfaces = new Set<string>();
+    for (const value of [surfaceForm, normalizedForm]) {
+      const key = buildHangulJamoKey(value);
+      if (key.containsHangul && key.key.length > 0) {
+        surfaces.add(value);
+      }
+
+      const exceptionSurface = Transliterator.koreanExceptionSurfaceForLatinTerm(value);
+      if (exceptionSurface !== undefined) {
+        surfaces.add(exceptionSurface);
+      }
+    }
+    return [...surfaces];
+  }
+
+  private findHangulCompletionMatches(normalizedQuery: string): AliasMatchResult[] {
+    const queryKey = buildHangulJamoKey(normalizedQuery);
+    if (
+      !queryKey.containsHangul ||
+      queryKey.key.length === 0 ||
+      queryKey.syllableCount < 2
+    ) {
+      return [];
+    }
+
+    const grouped = new Map<
+      string,
+      {
+        surfaceForm: string;
+        normalizedForm: string;
+        entityIds: Set<EntityId>;
+        matchConfidence: number;
+      }
+    >();
+
+    for (const entry of this.hangulCompletionPrefixIndex.get(queryKey.key) ?? []) {
+      if (!entry.jamoKey.startsWith(queryKey.key)) {
+        continue;
+      }
+      if (
+        entry.syllableBoundaryOffsets.has(queryKey.key.length) &&
+        !queryKey.containsStandaloneJamo
+      ) {
+        continue;
+      }
+
+      const key = `${entry.surfaceForm}\u0000${entry.normalizedForm}`;
+      const existing = grouped.get(key);
+      if (existing === undefined) {
+        grouped.set(key, {
+          surfaceForm: entry.surfaceForm,
+          normalizedForm: entry.normalizedForm,
+          entityIds: new Set([entry.entityId]),
+          matchConfidence: entry.confidence,
+        });
+        continue;
+      }
+
+      existing.entityIds.add(entry.entityId);
+      if (entry.confidence > existing.matchConfidence) {
+        existing.matchConfidence = entry.confidence;
+      }
+    }
+
+    return [...grouped.values()].map((match) => ({
+      surfaceForm: match.surfaceForm,
+      normalizedForm: match.normalizedForm,
+      entityIds: [...match.entityIds],
+      matchConfidence: match.matchConfidence,
+      lookupStrategy: 'hangul_ime_completion+transliterated_fuzzy',
+    }));
   }
 
   private punctuationStripped(input: string): string {

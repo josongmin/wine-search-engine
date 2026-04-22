@@ -9,6 +9,7 @@ import type { CompiledWineQuery } from '../../../../src/domain/query/model/compi
 import type { RankedResult } from '../../../../src/domain/ranking/model/ranked-result.js';
 import type { DecisionSnapshot } from '../../../../src/domain/shared/types/index.js';
 import type { TypedAbstainDecision } from '../../../../src/domain/query/model/abstain-decision.js';
+import type { ResultItem } from '../../../../src/domain/response/model/result-item.js';
 
 function makePlan(): QueryPlanV1 {
   return {
@@ -101,6 +102,45 @@ function makeSnapshot(): DecisionSnapshot {
     planner_version: '1.0.0',
     feature_flags: {},
     response_contract_version: 'v1',
+  };
+}
+
+function makeResultItem(
+  ranked: RankedResult,
+  matchType: ResultItem['match']['matchType'],
+): ResultItem {
+  return {
+    entity: {
+      entityId: ranked.entityId,
+      canonicalLabel: ranked.canonicalLabel,
+      type: 'wine',
+    },
+    relevanceScore: ranked.finalScore,
+    match: {
+      matchType,
+      scoreComponents: {
+        lexical: matchType === 'hybrid' ? 0.2 : 1,
+        semantic: matchType === 'hybrid' ? 0.8 : 0,
+        attribute: 0,
+        popularity: 0,
+      },
+    },
+    constraints: {
+      matched: [],
+      unmet: [],
+      inferred: [],
+    },
+    uncertainty: {
+      missingInfo: [],
+      approximationUsed: matchType === 'hybrid',
+    },
+    evidenceItems: [{
+      type: 'identity',
+      source: 'test',
+      contribution: '+0.90',
+      strength: 'high',
+      provenance: 'test evidence',
+    }],
   };
 }
 
@@ -274,11 +314,7 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       makeRankedResult('Generic Top Label B', 2),
       makeRankedResult('Generic Top Label C', 3),
     ];
-    const results = [
-      { entity: { entity_id: rankedResults[0]!.entityId, label: rankedResults[0]!.canonicalLabel } },
-      { entity: { entity_id: rankedResults[1]!.entityId, label: rankedResults[1]!.canonicalLabel } },
-      { entity: { entity_id: rankedResults[2]!.entityId, label: rankedResults[2]!.canonicalLabel } },
-    ] as never;
+    const results = rankedResults.map((ranked) => makeResultItem(ranked, 'alias_exact'));
 
     const params = buildEntropyAbstainResponseParams({
       plan,
@@ -309,7 +345,7 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
     });
   });
 
-  it('filters ambiguous short-form presentation to lexical-token-consistent candidates', () => {
+  it('filters ambiguous short-form presentation to authoritative identity-supported candidates', () => {
     const plan = {
       ...makePlan(),
       rawQuery: 'opus',
@@ -331,12 +367,11 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
         producer: 'Domaines Ott',
       },
     ] as RankedResult[];
-    const results = rankedResults.map((ranked) => ({
-      entity: {
-        entityId: ranked.entityId,
-        canonicalLabel: ranked.canonicalLabel,
-      },
-    })) as never;
+    const results = [
+      makeResultItem(rankedResults[0]!, 'alias_exact'),
+      makeResultItem(rankedResults[1]!, 'alias_exact'),
+      makeResultItem(rankedResults[2]!, 'hybrid'),
+    ];
 
     const params = buildEntropyAbstainResponseParams({
       plan,
@@ -371,6 +406,127 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       kind: 'anchor_disambiguation',
       question: '결과가 모호합니다. 어떤 후보를 찾으시나요?',
       options: ['2019 Opus One Overture', 'Opus One 2018'],
+    });
+  });
+
+  it('deduplicates ambiguous short-form presentation candidates by display identity', () => {
+    const plan = {
+      ...makePlan(),
+      rawQuery: 'opus',
+      normalizedQuery: 'opus',
+      intent: 'semantic_discovery',
+      queryClass: 'ambiguous_short_form',
+    } as QueryPlanV1;
+    const overturePrimary = {
+      ...makeRankedResult('2019 Opus One Overture', 1),
+      entityId: 'wine-opus-overture-a' as never,
+      producer: 'Opus One',
+      region: 'Napa Valley',
+      wineType: 'red',
+      vintageYear: 2019,
+      finalScore: 0.95,
+    };
+    const overtureDuplicate = {
+      ...makeRankedResult('2019 Opus One Overture', 2),
+      entityId: 'wine-opus-overture-b' as never,
+      producer: 'Opus One',
+      region: 'Napa Valley',
+      wineType: 'red',
+      vintageYear: 2019,
+      finalScore: 0.91,
+    };
+    const opusOne = {
+      ...makeRankedResult('Opus One 2018', 3),
+      producer: 'Opus One',
+      region: 'Napa Valley',
+      wineType: 'red',
+      vintageYear: 2018,
+    };
+    const rankedResults = [overturePrimary, overtureDuplicate, opusOne] as RankedResult[];
+    const results = rankedResults.map((ranked) => makeResultItem(ranked, 'alias_exact'));
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled: makeCompiled(),
+      snapshot: makeSnapshot(),
+      requestId: 'req-opus-dedupe',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'entity_resolution',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'low_confidence',
+        detail: 'ambiguous short-form entity requires clarification',
+        recoverableBy: 'clarify',
+        entropy: 0.99,
+      },
+      entropy: 0.99,
+      results,
+      rankedResults,
+    });
+
+    expect(params.results.map((result) => result.entity.canonicalLabel)).toEqual([
+      '2019 Opus One Overture',
+      'Opus One 2018',
+    ]);
+    expect(params.clarification.candidates.map((candidate) => candidate.label)).toEqual([
+      '2019 Opus One Overture',
+      'Opus One 2018',
+    ]);
+    expect(params.clarification.structuredPayload).toEqual({
+      kind: 'anchor_disambiguation',
+      question: '결과가 모호합니다. 어떤 후보를 찾으시나요?',
+      options: ['2019 Opus One Overture', 'Opus One 2018'],
+    });
+  });
+
+  it('fails closed when ambiguous short-form presentation has no authoritative identity-supported candidates', () => {
+    const plan = {
+      ...makePlan(),
+      rawQuery: 'opus',
+      normalizedQuery: 'opus',
+      intent: 'semantic_discovery',
+      queryClass: 'ambiguous_short_form',
+    } as QueryPlanV1;
+    const rankedResults = [
+      {
+        ...makeRankedResult('2023 Domaines Ott Rose de Provence', 1),
+        producer: 'Domaines Ott',
+      },
+      {
+        ...makeRankedResult('2020 Oremus Tokaji Aszu', 2),
+        producer: 'Oremus',
+      },
+    ] as RankedResult[];
+    const results = rankedResults.map((ranked) => makeResultItem(ranked, 'hybrid'));
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled: makeCompiled(),
+      snapshot: makeSnapshot(),
+      requestId: 'req-opus-filter-empty',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'entity_resolution',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'low_confidence',
+        detail: 'ambiguous short-form entity requires clarification',
+        recoverableBy: 'clarify',
+        entropy: 0.99,
+      },
+      entropy: 0.99,
+      results,
+      rankedResults,
+    });
+
+    expect(params.results).toEqual([]);
+    expect(params.clarification.candidates).toEqual([]);
+    expect(params.clarification.structuredPayload).toEqual({
+      kind: 'preference_gap',
+      question: '결과가 모호합니다. 조건을 더 구체적으로 알려주세요.',
     });
   });
 

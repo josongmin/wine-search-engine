@@ -139,6 +139,16 @@ describe('HTTP route contract registry', () => {
       },
       {
         method: 'POST',
+        url: '/v1/entity/autocomplete',
+        operationId: 'entity.autocomplete',
+        hasBody: true,
+        hasParams: false,
+        responseStatusCodes: [200, 400, 403, 408, 429, 500, 503],
+        successStatusCodes: [200],
+        errorStatusCodes: [400, 403, 408, 429, 500, 503],
+      },
+      {
+        method: 'POST',
         url: '/v1/search/hybrid',
         operationId: 'search.hybrid',
         hasBody: true,

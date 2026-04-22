@@ -175,6 +175,125 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(secondWine?.sourceSignals.canonicalNormalizedMatch).toBe(0);
   });
 
+  it('treats hangul IME completion identity artifacts as exact-like alias evidence', async () => {
+    const entityId = createEntityId('opus-one-2018');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: 'Opus One 2018',
+      producer: 'Opus One',
+      aliasesIdentitySafe: ['Opus One', '오푸스원'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오푸스ㅇ',
+        normalizedQuery: '오푸스ㅇ',
+        anchors: [
+          {
+            surfaceForm: 'Opus One',
+            normalizedForm: 'opus one',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['오푸스ㅇ'],
+            lookupStrategies: ['hangul_ime_completion', 'transliterated_fuzzy'],
+            confidence: 0.97,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.97);
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeCloseTo(0.97);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.97);
+  });
+
+  it('treats latin prefix identity artifacts as exact-like alias evidence', async () => {
+    const entityId = createEntityId('opus-one-2018');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: 'Opus One 2018',
+      producer: 'Opus One',
+      aliasesIdentitySafe: ['Opus One', '오푸스원'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: 'opu',
+        normalizedQuery: 'opu',
+        anchors: [
+          {
+            surfaceForm: 'Opus One',
+            normalizedForm: 'opus one',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['opu'],
+            lookupStrategies: ['prefix_exact'],
+            confidence: 0.95,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.aliasMatches).toEqual([
+      expect.objectContaining({
+        aliasValue: 'Opus One',
+        aliasType: 'canonical',
+        matchScore: 0.95,
+      }),
+    ]);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
+  });
+
+  it('treats transliterated prefix identity artifacts as exact-like translation evidence', async () => {
+    const entityId = createEntityId('opus-one-2018');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: 'Opus One 2018',
+      producer: 'Opus One',
+      aliasesIdentitySafe: ['Opus One', '오퍼스 원', '오푸스원'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오퍼스',
+        normalizedQuery: '오퍼스',
+        anchors: [
+          {
+            surfaceForm: 'Opus One',
+            normalizedForm: 'opus one',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['오퍼스'],
+            lookupStrategies: ['transliterated_prefix'],
+            confidence: 0.95,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.aliasMatches).toEqual([
+      expect.objectContaining({
+        aliasValue: 'Opus One',
+        aliasType: 'translation',
+        matchScore: 0.95,
+      }),
+    ]);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
+  });
+
   it('uses batch getDocuments as the sole production hydration path', async () => {
     const entityId = createEntityId('opus-one-2018');
     const getDocuments = vi.fn().mockResolvedValue(

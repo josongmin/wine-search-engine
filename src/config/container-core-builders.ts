@@ -268,7 +268,8 @@ export function buildRanker(
 ): Ranker {
   const ltrEffective = support?.runtimeReadiness.ltrModels.effective;
   if (support?.ltrModels === undefined) {
-    bootstrapLogger.warn(
+    const logLevel = ltrEffective?.issue === 'disabled' ? 'info' : 'warn';
+    bootstrapLogger[logLevel](
       { ltrEffective },
       '[Ranker] ltrModels not configured — LTR reranking disabled for all query classes',
     );

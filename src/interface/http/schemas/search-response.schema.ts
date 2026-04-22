@@ -212,6 +212,12 @@ export const ClarificationCandidateSchema = z.object({
   distinguishing_features: z.array(z.string()).max(MAX_CLARIFICATION_CANDIDATES),
 }).strict();
 
+export const StructuredClarificationOptionEntitySchema = z.object({
+  entity_id: z.string().min(1),
+  label: z.string().min(1),
+  distinguishing_features: z.array(z.string()).max(MAX_CLARIFICATION_CANDIDATES).optional(),
+}).strict();
+
 export const ClarificationPayloadSchema = z.object({
   reason: z.string().min(1),
   candidates: z.array(ClarificationCandidateSchema).max(MAX_CLARIFICATION_CANDIDATES),
@@ -225,6 +231,7 @@ export const ClarificationPayloadSchema = z.object({
     ]),
     question: z.string().min(1),
     options: z.array(z.string().min(1)).max(MAX_CLARIFICATION_CANDIDATES).optional(),
+    option_entities: z.array(StructuredClarificationOptionEntitySchema).max(MAX_CLARIFICATION_CANDIDATES).optional(),
     conflicting_atoms: z.tuple([z.string().min(1), z.string().min(1)]).optional(),
     gap_description: z.string().min(1).optional(),
   }).strict().optional(),
@@ -581,6 +588,7 @@ const StructuredClarifyPayloadWireSchema = z.object({
   ]),
   question: z.string().min(1),
   options: z.array(z.string().min(1)).max(MAX_CLARIFICATION_CANDIDATES).optional(),
+  option_entities: z.array(StructuredClarificationOptionEntitySchema).max(MAX_CLARIFICATION_CANDIDATES).optional(),
   conflicting_atoms: z.tuple([z.string().min(1), z.string().min(1)]).optional(),
   gap_description: z.string().min(1).optional(),
 }).strict();
@@ -1220,6 +1228,36 @@ export const ResolveCandidateSchema = z.object({
   trace: ResolveCandidateTraceSchema.optional(),
 }).strict();
 
+export const AutocompleteEntitySummarySchema = z.object({
+  entity_id: z.string().min(1),
+  canonical_label: z.string().min(1),
+  entity_type: z.string().min(1).optional(),
+  producer: z.string().min(1).optional(),
+  region: z.string().min(1).optional(),
+  country: z.string().min(1).optional(),
+  appellation: z.string().min(1).optional(),
+  vintage: z.number().int().optional(),
+  wine_type: z.string().min(1).optional(),
+  grapes: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_GRAPES).optional(),
+  style: z.string().min(1).optional(),
+  availability: z.boolean().optional(),
+}).strict();
+
+export const AutocompleteSuggestionSchema = z.object({
+  entity: AutocompleteEntitySummarySchema,
+  rank: z.number().int().positive(),
+  calibrated_score: z.number().finite().min(0).max(1),
+  source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']).optional(),
+  sources: z
+    .array(z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']))
+    .max(MAX_RESOLVE_CANDIDATE_SOURCES_LIST)
+    .optional(),
+  blocker_seed: z.literal(true).optional(),
+  evidence_refs: z.array(z.string().min(1)).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
+  match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
+  trace: ResolveCandidateTraceSchema.optional(),
+}).strict();
+
 export const ResolveTopEntitySchema = z.object({
   entity_id: z.string().min(1),
   canonical_label: z.string().min(1),
@@ -1242,5 +1280,23 @@ export const ResolveResponseSchema = z.object({
     });
   }
 });
+
+export const AutocompleteResponseSchema = z.object({
+  status: z.enum(['resolved', 'ambiguous', 'failed']),
+  suggestions: z.array(AutocompleteSuggestionSchema).max(MAX_RESOLVE_CANDIDATES),
+  decision_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN),
+  authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN),
+  request_id: z.string().min(1).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.authority_trace_ref !== value.decision_trace_ref) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'authority_trace_ref must equal decision_trace_ref on autocomplete responses',
+      path: ['authority_trace_ref'],
+    });
+  }
+});
+
+export type AutocompleteResponseBody = z.infer<typeof AutocompleteResponseSchema>;
 
 export type ResolveResponseBody = z.infer<typeof ResolveResponseSchema>;

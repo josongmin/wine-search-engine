@@ -232,6 +232,7 @@ function buildConfig(parsed: EnvVars) {
     queryEntrySecurity: {
       injectionProvider: parsed.LLM_INJECTION_PROVIDER,
       judgeFailureMode: parsed.INJECTION_JUDGE_FAIL_OPEN ? 'fail_open' : 'fail_closed',
+      judgeTimeoutMs: parsed.INJECTION_JUDGE_TIMEOUT_MS ?? parsed.OPENAI_INJECTION_HTTP_TIMEOUT_MS,
     },
 
     /** Watchlist webhook settings (Epic 17.1). */

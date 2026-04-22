@@ -5,7 +5,6 @@ import type {
   GeneralLaneCandidateArtifact,
   IdentityExactnessTier,
 } from '../model/dual-lane-artifact.js';
-import { buildDualLaneAgreement } from '../model/dual-lane-artifact.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
@@ -97,7 +96,6 @@ function mergeCandidates(params: {
   }
 
   const substrate = generalCandidate ?? entityCandidate!;
-  const agreement = buildDualLaneAgreement(params.lanePresence);
   const sourceRecordRefs = mergeSourceRecordRefs(
     generalCandidate?.sourceRecordRefs,
     entityCandidate?.sourceRecordRefs,
@@ -119,7 +117,7 @@ function mergeCandidates(params: {
     : substrate.retrievalTrace;
   const entityPosteriorScore = params.entityArtifact?.identityProvenance.calibratedScore;
 
-  return {
+  const mergedCandidate = {
     entityId: substrate.entityId,
     ...(pickFirstDefined(generalCandidate?.canonicalLabel, entityCandidate?.canonicalLabel) !== undefined
       ? { canonicalLabel: pickFirstDefined(generalCandidate?.canonicalLabel, entityCandidate?.canonicalLabel) }
@@ -267,11 +265,22 @@ function mergeCandidates(params: {
       : entityCandidate?.retrievalProvenance !== undefined
         ? { retrievalProvenance: entityCandidate.retrievalProvenance }
         : {}),
+  };
+
+  if (params.lanePresence === 'general_only') {
+    return {
+      ...mergedCandidate,
+      identityExactnessTier: 'none',
+      lanePresence: 'general_only',
+    };
+  }
+
+  const lanePresence: Exclude<DualLanePresence, 'general_only'> = params.lanePresence;
+  return {
+    ...mergedCandidate,
     ...(entityPosteriorScore !== undefined ? { entityPosteriorScore } : {}),
     identityExactnessTier: params.exactnessTier,
-    lanePresence: params.lanePresence,
-    laneCorroborated: agreement.corroborated,
-    laneDisagreement: agreement.disagreement,
+    lanePresence,
   };
 }
 
@@ -337,8 +346,6 @@ export function fuseDualLaneArtifacts(params: {
       entityArtifact,
       generalArtifact,
     });
-    const agreement = buildDualLaneAgreement(lanePresence);
-
     artifacts.push({
       entityId: fusedCandidate.entityId,
       canonicalLabel:
@@ -346,13 +353,8 @@ export function fuseDualLaneArtifacts(params: {
         ?? entityArtifact?.resolvedCandidate.canonicalLabel
         ?? String(fusedCandidate.entityId),
       lanePresence,
-      agreement,
-      exactnessTier,
       ...(entityArtifact?.identityProvenance !== undefined
-        ? {
-            entityPosteriorScore: entityArtifact.identityProvenance.calibratedScore,
-            identityProvenance: entityArtifact.identityProvenance,
-          }
+        ? { identityProvenance: entityArtifact.identityProvenance }
         : {}),
       ...(entityArtifact !== undefined ? { entityLane: entityArtifact } : {}),
       ...(generalArtifact !== undefined ? { generalLane: generalArtifact } : {}),

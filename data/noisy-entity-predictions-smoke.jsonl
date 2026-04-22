@@ -100,3 +100,5 @@
 {"benchmark_id":"neb-100","ranked_entities":[{"entity_id":"barolo-giacomo"}],"decision_status":"ambiguous"}
 {"benchmark_id":"neb-101","ranked_entities":[{"entity_id":"opus-one-2018","provenance_stage":"transliteration","provenance_source":"rule:transliteration_ko_v1"}],"decision_status":"resolved"}
 {"benchmark_id":"neb-102","ranked_entities":[{"entity_id":"opus-one-2018","provenance_stage":"transliteration","provenance_source":"rule:transliteration_ko_v1"}],"decision_status":"resolved"}
+{"benchmark_id":"neb-103","ranked_entities":[{"entity_id":"opus-one-2018"}],"decision_status":"resolved"}
+{"benchmark_id":"neb-104","ranked_entities":[{"entity_id":"opus-one-2018"}],"decision_status":"ambiguous"}

@@ -3,6 +3,14 @@ import type {
   AliasMatchResult,
   AliasMatcher,
 } from '../../domain/query/service/anchor-extractor.js';
+import {
+  buildAliasPrefixTerms,
+  isEligiblePrefixQuery,
+} from '../../domain/query/service/alias-prefix-terms.js';
+import {
+  resolveAliasMatchConfidence,
+  type AliasMatchConfidenceStrategy,
+} from '../../domain/query/service/alias-match-confidence.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { parseSpans } from '../../domain/attribute/service/span-parser.js';
@@ -14,13 +22,6 @@ import { VespaNetworkError } from '../vespa/vespa-client.js';
 
 const SEARCH_INDEX_ALIAS_LIMIT = 24;
 const log = bootstrapLogger.child({ component: 'SearchIndexAliasMatcher' });
-
-const EXACT_MULTIPLIER = 1.0;
-const LEXICAL_EXACT_MULTIPLIER = 1.0;
-const COMPACT_MULTIPLIER = 0.93;
-const TRANSLITERATED_MULTIPLIER = 0.91;
-const TRANSLITERATED_FUZZY_MULTIPLIER = 0.89;
-const PHONETIC_MULTIPLIER = 0.88;
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 
 const FIELD_CONFIDENCE = {
@@ -31,13 +32,7 @@ const FIELD_CONFIDENCE = {
 } as const;
 
 type AliasFieldName = keyof typeof FIELD_CONFIDENCE;
-type AliasStrategy =
-  | 'exact'
-  | 'lexical_exact'
-  | 'compact_exact'
-  | 'transliterated_exact'
-  | 'transliterated_fuzzy'
-  | 'phonetic_exact';
+type AliasStrategy = Exclude<AliasMatchConfidenceStrategy, 'hangul_ime_completion'>;
 
 interface CandidateSurface {
   readonly field: AliasFieldName;
@@ -46,7 +41,6 @@ interface CandidateSurface {
 
 interface ClassifiedMatch {
   readonly strategy: AliasStrategy;
-  readonly multiplier: number;
   readonly normalizedForm: string;
 }
 
@@ -72,9 +66,14 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   const queryVintage = queryViews.vintageStripped;
   const candidateVintage = candidateViews.vintageStripped;
   const imeRomanizedPrefix = Transliterator.romanizeWineTermPrefix(query);
+  const candidatePrefixTerms = buildAliasPrefixTerms([candidate]);
+  const queryPrefixTerms = buildAliasPrefixTerms([query]).filter((term) => isEligiblePrefixQuery(term));
 
   const queryTransliterated = queryViews.transliterated;
   const candidateTransliterated = candidateViews.transliterated;
+  const transliteratedPrefixTerms = queryTransliterated !== undefined
+    ? buildAliasPrefixTerms([queryTransliterated]).filter((term) => isEligiblePrefixQuery(term))
+    : [];
   if (
     (queryTransliterated !== undefined &&
       (queryTransliterated === candidateViews.strict ||
@@ -90,7 +89,6 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   ) {
     return {
       strategy: 'transliterated_exact',
-      multiplier: TRANSLITERATED_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -106,7 +104,6 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   ) {
     return {
       strategy: 'transliterated_fuzzy',
-      multiplier: TRANSLITERATED_FUZZY_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -124,9 +121,6 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
       strategy: queryTransliterated !== undefined
         ? 'transliterated_exact'
         : 'exact',
-      multiplier: queryTransliterated !== undefined
-        ? TRANSLITERATED_MULTIPLIER
-        : EXACT_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -139,7 +133,6 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   ) {
     return {
       strategy: 'exact',
-      multiplier: EXACT_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -151,7 +144,6 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   ) {
     return {
       strategy: 'compact_exact',
-      multiplier: COMPACT_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -165,7 +157,20 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   ) {
     return {
       strategy: 'lexical_exact',
-      multiplier: LEXICAL_EXACT_MULTIPLIER,
+      normalizedForm: candidateViews.strict,
+    };
+  }
+
+  if (transliteratedPrefixTerms.some((term) => candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term)))) {
+    return {
+      strategy: 'transliterated_prefix',
+      normalizedForm: candidateViews.strict,
+    };
+  }
+
+  if (queryPrefixTerms.some((term) => candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term)))) {
+    return {
+      strategy: 'prefix_exact',
       normalizedForm: candidateViews.strict,
     };
   }
@@ -177,7 +182,6 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   ) {
     return {
       strategy: 'phonetic_exact',
-      multiplier: PHONETIC_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -287,7 +291,10 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
           continue;
         }
 
-        const confidence = resolveBaseConfidence(hit, surface.field) * classified.multiplier;
+        const confidence = resolveAliasMatchConfidence(
+          resolveBaseConfidence(hit, surface.field),
+          classified.strategy,
+        );
         const key = `${surface.value}\u0000${classified.normalizedForm}`;
         const existing = grouped.get(key);
         if (existing === undefined) {

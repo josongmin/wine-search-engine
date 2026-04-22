@@ -2,6 +2,7 @@ import { SearchUseCase } from '../application/search/search.usecase.js';
 import { ReplayUseCase } from '../application/search/replay.usecase.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
+import { AutocompleteUseCase } from '../application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { DecomposedSearchAdapter } from '../application/search/decomposed-search-adapter.js';
@@ -13,6 +14,7 @@ import type {
 } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
+  AutocompleteUseCasePort,
   BatchSearchUseCasePort,
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
@@ -28,6 +30,7 @@ export interface UseCaseContainerServices {
   readonly replayUseCase: ReplayUseCasePort;
   readonly interpretUseCase: InterpretUseCasePort;
   readonly resolveUseCase: ResolveUseCasePort;
+  readonly autocompleteUseCase: AutocompleteUseCasePort;
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
@@ -68,6 +71,7 @@ export function buildUseCaseContainerServices(
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
     queryEntrySecurityObserver,
     drinkingWindow: drinkingWindowUseCase,
     cacheService: core.cacheService,
@@ -79,6 +83,18 @@ export function buildUseCaseContainerServices(
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
   const decomposedSearchUseCase = decomposedRef.impl;
+  const resolveUseCase = new ResolveUseCase({
+    queryPlanner: core.queryPlanner,
+    blocker: core.blocker,
+    entityResolver: core.entityResolver,
+    entityLookup: core.entityLookup,
+    snapshotVersions: core.snapshotVersions,
+    querySanitizer: core.querySanitizer,
+    injectionJudge: core.injectionJudge,
+    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+    judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
+    queryEntrySecurityObserver,
+  });
 
   return {
     searchUseCase,
@@ -91,18 +107,13 @@ export function buildUseCaseContainerServices(
       querySanitizer: core.querySanitizer,
       injectionJudge: core.injectionJudge,
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
     }),
-    resolveUseCase: new ResolveUseCase({
-      queryPlanner: core.queryPlanner,
-      blocker: core.blocker,
-      entityResolver: core.entityResolver,
+    resolveUseCase,
+    autocompleteUseCase: new AutocompleteUseCase({
+      resolveUseCase,
       entityLookup: core.entityLookup,
-      snapshotVersions: core.snapshotVersions,
-      querySanitizer: core.querySanitizer,
-      injectionJudge: core.injectionJudge,
-      judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
-      queryEntrySecurityObserver,
     }),
     hybridUseCase: new HybridUseCase({
       queryPlanner: core.queryPlanner,
@@ -119,6 +130,7 @@ export function buildUseCaseContainerServices(
       querySanitizer: core.querySanitizer,
       injectionJudge: core.injectionJudge,
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+      judgeTimeoutMs: config.queryEntrySecurity.judgeTimeoutMs,
       queryEntrySecurityObserver,
       cacheService: core.cacheService,
       cacheLookupRuntimeState: core.cacheLookupRuntimeState,

@@ -6,6 +6,7 @@ import { parseSpans } from '../../attribute/service/span-parser.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import { buildAliasLookupPlan } from './alias-lookup-plan.js';
+import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -77,14 +78,6 @@ const COMPARISON_MARKERS: readonly RegExp[] = [
  * set.
  */
 const EXACT_LIKE_SPAN_SHORT_CIRCUIT_CONFIDENCE = 0.85;
-
-const EXACT_LOOKUP_STRATEGIES = new Set([
-  'exact',
-  'lexical_exact',
-  'compact_exact',
-  'transliterated_exact',
-  'phonetic_exact',
-]);
 
 function normalizeLookupStrategyPart(part: string): string {
   return part.startsWith('index_') ? part.slice('index_'.length) : part;
@@ -297,7 +290,7 @@ export class AnchorExtractor {
 
   private hasExactLikeStrategy(strategy: string | undefined): boolean {
     return splitLookupStrategies(strategy)
-      .some((part) => EXACT_LOOKUP_STRATEGIES.has(part));
+      .some((part) => isExactLikeLookupStrategy(part));
   }
 
   private async lookupAliasMatches(
@@ -355,8 +348,47 @@ export class AnchorExtractor {
           merged.get(key)?.lookupStrategies.add(match.lookupStrategy);
         }
       }
+
+      if (this.shouldShortCircuitOrderedLookup(this.materializeMergedMatches(merged))) {
+        return this.materializeMergedMatches(merged);
+      }
     }
 
+    return this.materializeMergedMatches(merged);
+  }
+
+  private shouldShortCircuitOrderedLookup(
+    matches: readonly AliasMatchResult[],
+  ): boolean {
+    const exactLikeMatches = matches.filter((match) => this.hasExactLikeStrategy(match.lookupStrategy));
+    if (exactLikeMatches.length === 0) {
+      return false;
+    }
+
+    const exactEntityIds = new Set(
+      exactLikeMatches.flatMap((match) => match.entityIds.map(String)),
+    );
+    if (exactEntityIds.size !== 1) {
+      return false;
+    }
+
+    return exactLikeMatches.some(
+      (match) => match.matchConfidence >= EXACT_LIKE_SPAN_SHORT_CIRCUIT_CONFIDENCE,
+    );
+  }
+
+  private materializeMergedMatches(
+    merged: Map<
+      string,
+      {
+        readonly match: AliasMatchResult;
+        readonly confidence: number;
+        readonly priority: number;
+        readonly lookupVariants: Set<string>;
+        readonly lookupStrategies: Set<string>;
+      }
+    >,
+  ): readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[] {
     return [...merged.values()]
       .sort((left, right) => {
         if (right.confidence !== left.confidence) {

@@ -46,6 +46,7 @@ import { DrinkingWindowUseCase } from '../../../../src/application/drinking-wind
 import { ReplayUseCase } from '../../../../src/application/search/replay.usecase.js';
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
+import { AutocompleteUseCase } from '../../../../src/application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
 import { WatchlistService } from '../../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../../src/config/container.js';
@@ -264,6 +265,7 @@ export async function createVespaTestContainer(
   const anchorProfiler = new AnchorProfiler();
   const similarityScorer = new SimilarityScorer();
   const constraintOverlay = new ConstraintOverlay();
+  const judgeTimeoutMs = 5_000;
 
   const mixedSolver = new MixedSolver(
     anchorResolver,
@@ -307,6 +309,7 @@ export async function createVespaTestContainer(
     ...(!options.disableDrinkingWindow ? { drinkingWindow: drinkingWindowUseCase } : {}),
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
     ltrModels,
   });
 
@@ -318,6 +321,7 @@ export async function createVespaTestContainer(
     queryPlanner,
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
   });
   const resolveUseCase = new ResolveUseCase({
     queryPlanner,
@@ -325,6 +329,11 @@ export async function createVespaTestContainer(
     entityLookup: vespaSearchIndex,
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
+  });
+  const autocompleteUseCase = new AutocompleteUseCase({
+    resolveUseCase,
+    entityLookup: vespaSearchIndex,
   });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const hybridUseCase = new HybridUseCase({
@@ -340,6 +349,7 @@ export async function createVespaTestContainer(
     ltrModels,
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
     judgeFailureMode: 'fail_closed',
     decomposedSearch: decomposedSearchUseCase,
   });
@@ -374,6 +384,7 @@ export async function createVespaTestContainer(
     replayUseCase,
     interpretUseCase,
     resolveUseCase,
+    autocompleteUseCase,
     hybridUseCase,
     decomposedSearchUseCase,
     drinkingWindowUseCase,

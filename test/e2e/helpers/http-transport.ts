@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodType } from 'zod';
 import {
+  AutocompleteResponseSchema,
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,
   InterpretResponseSchema,
   ResolveResponseSchema,
   SearchResponseSchema,
+  type AutocompleteResponseBody,
   type ComparisonSearchResponseBody,
   type ErrorResponseBody,
   type InterpretResponseBody,
@@ -127,6 +129,10 @@ export function parseInterpretResponse(response: JsonHttpResponse): InterpretRes
 
 export function parseResolveResponse(response: JsonHttpResponse): ResolveResponseBody {
   return parseWithSchema(response, ResolveResponseSchema, 'resolve response');
+}
+
+export function parseAutocompleteResponse(response: JsonHttpResponse): AutocompleteResponseBody {
+  return parseWithSchema(response, AutocompleteResponseSchema, 'autocomplete response');
 }
 
 export function getSearchDecision(body: SearchResponseBody): SearchResponseBody['engine_decision'] {

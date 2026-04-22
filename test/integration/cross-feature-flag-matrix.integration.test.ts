@@ -96,6 +96,7 @@ import type {
 } from '../../src/domain/ranking/model/ranked-result.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { EvidenceItem } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 // ─── Per-case timeout — no combo may deadlock ────────────────────────────────
 
@@ -321,8 +322,8 @@ function hybridGraphWithSubqueries(sqCount: number): ConstraintGraph {
 // ─── Candidate + input fakes ─────────────────────────────────────────────────
 
 function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
-  return {
-    entityId: id as never,
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
     ...(priceUsd !== undefined ? { priceUsd } : {}),
     retrievalTrace: {
       retrievalProfile: 'f5-xflag',
@@ -332,7 +333,7 @@ function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
       candidateSources: [],
     },
     matchedConstraints: [],
-  } as unknown as HybridCandidate;
+  });
 }
 
 const stubRetrievalInput = {

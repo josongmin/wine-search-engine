@@ -27,6 +27,7 @@ import type {
 import { bootstrapLogger } from './bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
 import { isRuntimeSupportedDrinkingWindowModelVersion } from '../application/search/drinking-window-confidence.js';
+import { isLtrServingEnabled } from './ltr-serving-mode.js';
 
 const log = bootstrapLogger.child({ component: 'readiness' });
 const PROBE_TIMEOUT_MS = 3_000;
@@ -39,7 +40,7 @@ async function raceWithProbeTimeout<T>(
   const timeoutPromise: Promise<never> = new Promise((_, reject) => {
     timerRef.current = setTimeout(() => { reject(new Error(timeoutMessage)); }, PROBE_TIMEOUT_MS);
   });
-  return await Promise.race<T | never>([operation, timeoutPromise]);
+  return await Promise.race([operation, timeoutPromise]);
 }
 
 async function probePostgres(
@@ -124,9 +125,6 @@ async function probeBenchmarkPersistence(pool: Pool): Promise<ReadinessStatus> {
       timerRef,
     );
     timer = timerRef.current;
-    if (client === undefined) {
-      throw new Error('benchmark persistence connect returned no client');
-    }
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
@@ -231,8 +229,9 @@ export function buildHealthRouteOptions(
   const hasPool = runtime.pool !== undefined;
   const runtimeLtrModelsPath = config.runtimeLtrModelsPath;
   const runtimePool = runtime.pool;
-  const runStartupEval = config.eval?.runAtStartup === true;
+  const runStartupEval = config.eval.runAtStartup;
   const rerankerConfigured = config.cohere.apiKey !== undefined;
+  const ltrServingEnabled = isLtrServingEnabled();
   const blockerZeroCandidatesBaseline =
     globalSilentSkipCounter.snapshot().blocker_zero_candidates;
 
@@ -331,7 +330,7 @@ export function buildHealthRouteOptions(
           }
         },
       },
-      ...(runtimeLtrModelsPath !== undefined
+      ...(ltrServingEnabled && runtimeLtrModelsPath !== undefined
         ? {
             runtime_ltr_artifact: {
               required: !rerankerConfigured,
@@ -345,7 +344,12 @@ export function buildHealthRouteOptions(
             runtime_ltr_effective: {
               required: runtimeReadiness.ltrModels.effective.required,
               check: (): Promise<ReadinessStatus> =>
-                Promise.resolve(runtimeReadiness.ltrModels.effective.loaded ? 'up' : 'down'),
+                Promise.resolve(
+                  runtimeReadiness.ltrModels.effective.loaded
+                    || runtimeReadiness.ltrModels.effective.issue === 'disabled'
+                    ? 'up'
+                    : 'down',
+                ),
             },
           }
         : {}),
@@ -381,7 +385,7 @@ export function buildHealthRouteOptions(
               check: async (): Promise<ReadinessStatus> => {
                 // OpenAI embedding takes priority (same logic as container-adapters.ts).
                 const openAiApiKeys =
-                  (config.openai.apiKeys?.length ?? 0) > 0
+                  config.openai.apiKeys.length > 0
                     ? config.openai.apiKeys
                     : config.openai.apiKey !== undefined
                       ? [config.openai.apiKey]
@@ -419,7 +423,7 @@ export function buildHealthRouteOptions(
         ? {
             drinking_window_model: {
               required: false,
-              check: async (): Promise<ReadinessStatus> => {
+              check: (): ReadinessStatus => {
                 if (drinkingWindowPredictor.modelVersion === 'unloaded') {
                   throw new Error('drinking window predictor unloaded');
                 }
@@ -443,7 +447,7 @@ export function buildHealthRouteOptions(
           ? {
               benchmark_persistence: {
                 required: true,
-                check: async (): Promise<ReadinessStatus> => {
+                check: (): ReadinessStatus => {
                   throw new Error('benchmark persistence unavailable: PostgreSQL pool missing');
                 },
               },

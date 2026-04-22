@@ -40,6 +40,8 @@ import {
   extractLTRFeatures,
   rankingFeaturesToVector,
   LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_NAME_ORDER,
+  LTR_FEATURE_SCHEMA_HASH,
 } from './ltr-feature-extractor.js';
 import { MS_PER_DAY } from '../../shared/utils/time-units.js';
 import {
@@ -53,7 +55,10 @@ import {
 import type { SafetyCandidateDescriptor } from './rerank-safety.js';
 import type { ScoreDecomposition, ScoreDriftRecord } from '../model/score-decomposition.js';
 import type { LTRScoreComponents } from './ltr-feature-extractor.js';
-import { incrementLtrInferenceComponentScoreAbsent } from '../../../observability/silent-skip-counters.js';
+import {
+  incrementLtrInferenceComponentScoreAbsent,
+  type LtrInferenceComponentScoreField,
+} from '../../../observability/silent-skip-counters.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -259,6 +264,19 @@ const NON_PENALTY_WEIGHT_FIELDS = [
   'giftSuitability', 'beginnerSuitability',
 ] as const;
 
+function projectObservedLtrComponentScore(
+  componentScores: ComponentScores,
+  key: LtrInferenceComponentScoreField,
+): Partial<Pick<LTRScoreComponents, LtrInferenceComponentScoreField>> {
+  const value = componentScores[key];
+  if (value === undefined) {
+    incrementLtrInferenceComponentScoreAbsent(key);
+    return {};
+  }
+
+  return { [key]: value } as Pick<LTRScoreComponents, typeof key>;
+}
+
 function buildObservedLtrInferenceScoreComponents(
   input: {
     readonly componentScores: ComponentScores;
@@ -268,33 +286,14 @@ function buildObservedLtrInferenceScoreComponents(
   },
 ): LTRScoreComponents {
   const { componentScores } = input;
-  const semantic =
-    componentScores.semantic !== undefined
-      ? { semantic: componentScores.semantic }
-      : (incrementLtrInferenceComponentScoreAbsent('semantic'), {});
-  const popularity =
-    componentScores.popularity !== undefined
-      ? { popularity: componentScores.popularity }
-      : (incrementLtrInferenceComponentScoreAbsent('popularity'), {});
-  const attributeAlignment =
-    componentScores.attributeAlignment !== undefined
-      ? { attributeAlignment: componentScores.attributeAlignment }
-      : (incrementLtrInferenceComponentScoreAbsent('attributeAlignment'), {});
-  const preferenceAlignment =
-    componentScores.preferenceAlignment !== undefined
-      ? { preferenceAlignment: componentScores.preferenceAlignment }
-      : (incrementLtrInferenceComponentScoreAbsent('preferenceAlignment'), {});
-  const multilingualScore =
-    componentScores.multilingualScore !== undefined
-      ? { multilingualScore: componentScores.multilingualScore }
-      : (incrementLtrInferenceComponentScoreAbsent('multilingualScore'), {});
 
   return {
-    ...semantic,
-    ...popularity,
-    ...attributeAlignment,
-    ...preferenceAlignment,
-    ...multilingualScore,
+    ...projectObservedLtrComponentScore(componentScores, 'semantic'),
+    ...projectObservedLtrComponentScore(componentScores, 'popularity'),
+    ...projectObservedLtrComponentScore(componentScores, 'attributeAlignment'),
+    ...projectObservedLtrComponentScore(componentScores, 'preferenceAlignment'),
+    ...projectObservedLtrComponentScore(componentScores, 'multilingualScore'),
+    ...projectObservedLtrComponentScore(componentScores, 'recency'),
     ...(input.entityPosteriorScore !== undefined
       ? { entityPosterior: input.entityPosteriorScore }
       : {}),
@@ -629,7 +628,12 @@ function applyLearnedLtrRerank(
         // C4: attach the feature vector used for LTR inference so ScoreDecomposition
         // is self-contained for drift analysis and debugging.
         ...(ltrFeatureVectorMap.has(entityKey)
-          ? { ltrFeatureVector: ltrFeatureVectorMap.get(entityKey) }
+          ? {
+              ltrFeatureVector: ltrFeatureVectorMap.get(entityKey),
+              ltrFeatureDimension: LTR_FEATURE_DIMENSION,
+              ltrFeatureNameOrder: LTR_FEATURE_NAME_ORDER,
+              ltrFeatureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+            }
           : {}),
         finalScore: reranked.ltrScore,
       };

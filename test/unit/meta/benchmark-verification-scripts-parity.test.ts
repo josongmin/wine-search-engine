@@ -39,6 +39,9 @@ describe('benchmark / verification package scripts parity (ADR-005)', () => {
   });
 
   it('keeps noisy release verification on slice-aware gate flags', () => {
+    expect(scripts['test:verification:noisy']).toContain(
+      'test/regression/noisy-runtime-execution-contract.regression.test.ts',
+    );
     expect(scripts['test:verification:noisy']).toContain('--enforce-min-recall-at-3-by-category');
     expect(scripts['test:verification:noisy']).toContain('--enforce-min-recall-at-3-by-language');
     expect(scripts['eval:noisy:gate']).toContain('--enforce-min-recall-at-3-by-category');

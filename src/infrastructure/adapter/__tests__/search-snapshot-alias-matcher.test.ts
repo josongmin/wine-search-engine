@@ -78,20 +78,29 @@ describe('SearchSnapshotAliasMatcher', () => {
 
     const exact = await matcher.findMatches('opus one');
     const lexicalShortForm = await matcher.findMatches('opus');
+    const latinPrefix = await matcher.findMatches('opu');
     const compact = await matcher.findMatches('opusone');
+    const koreanTypoPrefix = await matcher.findMatches('오퍼스');
+    const koreanCanonicalPrefix = await matcher.findMatches('오푸스');
     const transliterated = await matcher.findMatches('오푸스 원');
 
-    expect(exact[0]?.lookupStrategy).toBe('compact_exact');
+    expect(exact[0]?.lookupStrategy).toBe('exact');
     expect(exact[0]?.surfaceForm).toBe('Opus One');
     expect(lexicalShortForm[0]?.lookupStrategy).toBe('lexical_exact');
     expect(lexicalShortForm[0]?.surfaceForm).toBe('Opus One');
+    expect(latinPrefix[0]?.lookupStrategy).toBe('prefix_exact');
+    expect(latinPrefix[0]?.surfaceForm).toBe('Opus One');
     expect(compact[0]?.lookupStrategy).toBe('compact_exact');
     expect(compact[0]?.surfaceForm).toBe('Opus One');
+    expect(koreanTypoPrefix[0]?.lookupStrategy).toContain('transliterated_exact');
+    expect(koreanTypoPrefix[0]?.surfaceForm).toBe('Opus One');
+    expect(koreanCanonicalPrefix[0]?.lookupStrategy).toContain('transliterated_exact');
+    expect(koreanCanonicalPrefix[0]?.surfaceForm).toBe('Opus One');
     expect(transliterated[0]?.lookupStrategy).toContain('transliterated_exact');
     expect(transliterated[0]?.surfaceForm).toBe('Opus One');
   });
 
-  it('resolves incomplete Hangul IME syllable prefixes against curated Korean transliteration surfaces', async () => {
+  it('resolves Hangul syllable prefixes against curated Korean transliteration surfaces', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {
         aliasId: 'a1',
@@ -103,33 +112,71 @@ describe('SearchSnapshotAliasMatcher', () => {
       },
     ]);
 
+    const completedPrefix = await matcher.findMatches('오푸');
     const choseongPrefix = await matcher.findMatches('오푸스ㅇ');
     const medialPrefix = await matcher.findMatches('오푸스우');
     const compoundMedialPrefix = await matcher.findMatches('오푸스워');
     const completeSyllable = await matcher.findMatches('오푸스');
     const singleJamo = await matcher.findMatches('ㅇ');
 
+    expect(completedPrefix[0]).toMatchObject({
+      surfaceForm: 'Opus One',
+      entityIds: ['wine:opus-one'],
+    });
+    expect(completedPrefix[0]?.lookupStrategy).toContain('hangul_ime_completion');
+    expect(completedPrefix[0]?.lookupStrategy).toContain('transliterated_fuzzy');
     expect(choseongPrefix[0]).toMatchObject({
       surfaceForm: 'Opus One',
       entityIds: ['wine:opus-one'],
-      lookupStrategy: 'hangul_ime_completion+transliterated_fuzzy',
     });
+    expect(choseongPrefix[0]?.lookupStrategy).toContain('hangul_ime_completion');
+    expect(choseongPrefix[0]?.lookupStrategy).toContain('transliterated_fuzzy');
     expect(medialPrefix[0]).toMatchObject({
       surfaceForm: 'Opus One',
       entityIds: ['wine:opus-one'],
-      lookupStrategy: 'hangul_ime_completion+transliterated_fuzzy',
     });
+    expect(medialPrefix[0]?.lookupStrategy).toContain('hangul_ime_completion');
+    expect(medialPrefix[0]?.lookupStrategy).toContain('transliterated_fuzzy');
     expect(compoundMedialPrefix[0]).toMatchObject({
       surfaceForm: 'Opus One',
       entityIds: ['wine:opus-one'],
-      lookupStrategy: 'hangul_ime_completion+transliterated_fuzzy',
     });
-    expect(completeSyllable[0]).toMatchObject({
-      surfaceForm: 'Opus One',
-      entityIds: ['wine:opus-one'],
-      lookupStrategy: 'transliterated_exact',
-    });
+    expect(compoundMedialPrefix[0]?.lookupStrategy).toContain('hangul_ime_completion');
+    expect(compoundMedialPrefix[0]?.lookupStrategy).toContain('transliterated_fuzzy');
+    expect(completeSyllable[0]?.surfaceForm).toBe('Opus One');
+    expect(completeSyllable[0]?.entityIds).toEqual(['wine:opus-one']);
+    expect(completeSyllable[0]?.lookupStrategy).toContain('transliterated_exact');
     expect(singleJamo).toEqual([]);
+  });
+
+  it('prefers explicit Korean exact aliases over broad Chateau-family Hangul completion collisions', async () => {
+    const matcher = new SearchSnapshotAliasMatcher([
+      {
+        aliasId: 'a1',
+        entityId: 'wine:dyquem',
+        value: '샤또 디켐',
+        normalizedValue: '샤또 디켐',
+        sourceTrust: 1,
+        confidencePrior: 0.95,
+      },
+      {
+        aliasId: 'a2',
+        entityId: 'wine:cheval-blanc',
+        value: 'Chateau Cheval Blanc',
+        normalizedValue: 'chateau cheval blanc',
+        sourceTrust: 1,
+        confidencePrior: 1,
+      },
+    ]);
+
+    const matches = await matcher.findMatches('샤또 디켐');
+
+    expect(matches[0]).toMatchObject({
+      surfaceForm: '샤또 디켐',
+      entityIds: ['wine:dyquem'],
+    });
+    expect(matches[0]?.lookupStrategy).toContain('exact');
+    expect(matches[1]?.lookupStrategy).toContain('hangul_ime_completion');
   });
 
   it('supports request-scoped batch lookups without downstream I/O', async () => {
@@ -175,7 +222,7 @@ describe('SearchSnapshotAliasMatcher', () => {
     await expect(matcher.findMatches('ps')).resolves.toMatchObject([
       expect.objectContaining({
         surfaceForm: 'PS',
-        lookupStrategy: 'compact_exact',
+        lookupStrategy: 'exact',
       }),
     ]);
   });

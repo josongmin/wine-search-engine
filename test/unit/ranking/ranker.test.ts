@@ -12,6 +12,7 @@ import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled
 import type { ConstraintBundle, EvidenceItem, NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 import {
   LAMBDAMART_FEATURE_DIMENSION,
+  LAMBDAMART_FEATURE_NAMES,
   LTR_FEATURE_SCHEMA_HASH,
   type QueryClassWeights,
 } from '../../../src/domain/ranking/service/lambdamart-ranker.js';
@@ -24,6 +25,7 @@ import {
 import { getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
 import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
 import { createStageTimer } from '../../../src/observability/stage-timer.js';
+import { makeHybridCandidate } from '../../support/hybrid-candidate-test-factory.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -45,11 +47,9 @@ function makeComponentScores(overrides?: Partial<ComponentScores>): ComponentSco
 
 /** Minimal HybridCandidate. */
 function makeCandidate(id: string): HybridCandidate {
-  return {
+  return makeHybridCandidate({
     entityId: createEntityId(id),
-    retrievalFusionScore: 0.5,
     fusionRrfTotal: 0.5,
-    matchedConstraints: [],
     unmetHardConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'default',
@@ -58,7 +58,7 @@ function makeCandidate(id: string): HybridCandidate {
       filtersApplied: [],
       candidateSources: [],
     },
-  } as unknown as HybridCandidate;
+  });
 }
 
 function makeCandidateWithOverrides(
@@ -68,7 +68,7 @@ function makeCandidateWithOverrides(
   return {
     ...makeCandidate(id),
     ...overrides,
-  } as HybridCandidate;
+  };
 }
 
 function makeCandidates(count: number, prefix = 'wine'): HybridCandidate[] {
@@ -621,7 +621,7 @@ describe('Ranker', () => {
           filtersApplied: [],
           candidateSources: ['learned_sparse'],
         },
-      } as HybridCandidate;
+      };
       const aggregate = vi.fn().mockReturnValue(0.8);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
       const ranker = makeRanker(aggregator);
@@ -645,7 +645,7 @@ describe('Ranker', () => {
           filtersApplied: [],
           candidateSources: ['sparse_bm25'],
         },
-      } as HybridCandidate;
+      };
       const relativeCandidate: HybridCandidate = {
         ...makeCandidate('wine-relative'),
         retrievalTrace: {
@@ -655,7 +655,7 @@ describe('Ranker', () => {
           filtersApplied: ['relative'],
           candidateSources: ['relative_filter'],
         },
-      } as HybridCandidate;
+      };
       const aggregate = vi.fn()
         .mockReturnValueOnce(0.7)
         .mockReturnValueOnce(0.6);
@@ -686,7 +686,7 @@ describe('Ranker', () => {
           filtersApplied: [],
           candidateSources: [],
         },
-      } as HybridCandidate;
+      };
       const aggregate = vi.fn().mockReturnValue(0.8);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
       const ranker = makeRanker(aggregator);
@@ -721,7 +721,7 @@ describe('Ranker', () => {
           filtersApplied: [],
           candidateSources: [],
         },
-      } as HybridCandidate;
+      };
       const aggregate = vi.fn().mockReturnValue(0.8);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
       const ranker = makeRanker(aggregator);
@@ -752,7 +752,7 @@ describe('Ranker', () => {
           filtersApplied: [],
           candidateSources: [],
         },
-      } as HybridCandidate;
+      };
       const aggregate = vi.fn().mockReturnValue(0.8);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
       const ranker = makeRanker(aggregator);
@@ -782,7 +782,7 @@ describe('Ranker', () => {
           filtersApplied: [],
           candidateSources: [],
         },
-      } as HybridCandidate;
+      };
       const aggregate = vi.fn().mockReturnValue(0.8);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
       const ranker = makeRanker(aggregator);
@@ -967,11 +967,13 @@ describe('Ranker', () => {
     it('projects dual-lane ranking features into the LTR inference vector', async () => {
       const candidates = [
         makeCandidateWithOverrides('wine-dual-top', {
+          vintageYear: 2022,
           entityPosteriorScore: 0.97,
           identityExactnessTier: 'exact',
           lanePresence: 'corroborated',
         }),
         makeCandidateWithOverrides('wine-dual-tail', {
+          vintageYear: 2018,
           entityPosteriorScore: 0.99,
           identityExactnessTier: 'exact',
           lanePresence: 'general_only',
@@ -996,6 +998,9 @@ describe('Ranker', () => {
       expect(metadata.rerankExecuted).toBe(true);
       const top = results.find((result) => String(result.entityId) === 'wine-dual-top');
       expect(top?.scoreDecomposition?.ltrFeatureVector).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
+      expect(top?.scoreDecomposition?.ltrFeatureDimension).toBe(LAMBDAMART_FEATURE_DIMENSION);
+      expect(top?.scoreDecomposition?.ltrFeatureNameOrder).toEqual(LAMBDAMART_FEATURE_NAMES);
+      expect(top?.scoreDecomposition?.ltrFeatureSchemaHash).toBe(LTR_FEATURE_SCHEMA_HASH);
       expect(top?.scoreDecomposition?.ltrFeatureVector).toEqual([
         0.0,
         0.5,
@@ -1030,6 +1035,36 @@ describe('Ranker', () => {
         0.0,
         1.0,
       ]);
+    });
+
+    it('preserves recency in live LTR inference artifacts', async () => {
+      const candidates = [makeCandidateWithOverrides('wine-recency', {
+        vintageYear: 2023,
+      })];
+      const aggregatorScores = [0.8];
+      const recencyWeightIndex = 3;
+      const ltrModels = new Map([
+        [
+          'semantic_preference',
+          makeLtrModel(
+            Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
+              index === recencyWeightIndex ? 1 : 0,
+            ),
+          ),
+        ],
+      ]);
+      const ranker = makeRanker(
+        makeScoreAggregatorSequence(aggregatorScores),
+        {
+          ltrModels,
+          signalScores: makeComponentScores({ recency: 0.65 }),
+        },
+      );
+
+      const { results, metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(metadata.rerankExecuted).toBe(true);
+      expect(results[0]?.scoreDecomposition?.ltrFeatureVector?.[recencyWeightIndex]).toBeCloseTo(0.65, 5);
     });
 
     it('no_model_for_query_class is reported when no LTR model is registered', async () => {

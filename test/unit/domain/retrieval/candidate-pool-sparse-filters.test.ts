@@ -454,7 +454,6 @@ describe('CandidatePoolService sparse filter tokens', () => {
       fuse: vi.fn(() => [{
         entityId: 'wine-alias',
         canonicalLabel: 'Alias Wine',
-        retrievalFusionScore: 0.83,
         fusionRrfTotal: 0.83,
         matchedConstraints: [],
         retrievalTrace: {

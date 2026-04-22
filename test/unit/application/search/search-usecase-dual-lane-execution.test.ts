@@ -247,6 +247,7 @@ describe('search-usecase-dual-lane-execution', () => {
     expect(execution.dualLaneExecution.identityResolveResult).toBe(resolveResult);
     expect(execution.routeExecution.executionTopology).toBe('dual_lane');
     expect(execution.routeExecution.identityResolveResult).toBe(resolveResult);
+    expect(execution.routeExecution.dualLaneExecutionAttemptId).toMatch(/^dual-lane-attempt-/u);
     expect(execution.routeExecution.laneArtifacts.identity).toHaveLength(2);
     expect(execution.routeExecution.laneArtifacts.general).toHaveLength(2);
     expect(execution.routeExecution.laneArtifacts.fused).toHaveLength(3);

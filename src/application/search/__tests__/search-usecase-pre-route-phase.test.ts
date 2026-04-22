@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runSearchPreRoutePhase } from '../search-usecase-pre-route-phase.js';
 import type { SearchPreRoutePhaseContext } from '../search-usecase-pre-route-phase.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
+import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
 
 /** Minimal V1 plan fixture. */
 function makeV1Plan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
@@ -271,5 +272,45 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
     expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
     expect(result.compiled.execution.effectiveRetrievalMode).toBe('recommendation');
     expect(result.compiled.execution.budget.enablePrecisionRerank).toBe(true);
+  });
+
+  it('fail-closes on Layer 2 timeout without waiting for pre-route planner work to finish', async () => {
+    vi.useFakeTimers();
+
+    const neverResolvingPlanner = {
+      plan: vi.fn().mockImplementation(
+        () => new Promise<QueryPlanV1>(() => {
+          // Intentionally never resolves: reproduces planner / alias lookup
+          // work that ignores cancellation after the security gate blocks.
+        }),
+      ),
+    };
+
+    const ctx = makeBaseContext({
+      queryPlanner: neverResolvingPlanner,
+      securityGateDeps: {
+        querySanitizer: {
+          sanitize: vi.fn().mockReturnValue({ safe: true, sanitizedQuery: 'red wine' }),
+        },
+        injectionJudge: {
+          judge: vi.fn().mockImplementation(
+            () => new Promise<boolean>(() => {
+              // Never resolves; Layer 2 timeout must fail-close the request
+              // without waiting for the planner promise above.
+            }),
+          ),
+        },
+        judgeFailureMode: 'fail_closed',
+        judgeTimeoutMs: 5_000,
+      },
+    });
+
+    const blockedExpectation = expect(runSearchPreRoutePhase(ctx)).rejects.toBeInstanceOf(PolicyBlockedError);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await blockedExpectation;
+    expect(neverResolvingPlanner.plan).toHaveBeenCalledOnce();
+
+    vi.useRealTimers();
   });
 });

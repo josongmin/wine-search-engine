@@ -29,6 +29,7 @@ interface QueryEntrySecurityDeps {
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly judgeTimeoutMs?: number | undefined;
   readonly observer?: QueryEntrySecurityObserver | undefined;
 }
 
@@ -70,7 +71,13 @@ async function evaluateQueryEntrySecurityLayer2(
     return { sanitizedQuery };
   }
 
-  const JUDGE_TIMEOUT_MS = 5_000;
+  if (deps.judgeTimeoutMs === undefined) {
+    throw new Error(
+      'QueryEntrySecurityGate requires judgeTimeoutMs when injectionJudge is configured',
+    );
+  }
+
+  const judgeTimeoutMs = deps.judgeTimeoutMs;
   const judgeAbortController = new AbortController();
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const judgeAbortSignal =
@@ -85,7 +92,7 @@ async function evaluateQueryEntrySecurityLayer2(
         timeoutHandle = setTimeout(() => {
           judgeAbortController.abort();
           reject(new Error('injection_judge_timeout'));
-        }, JUDGE_TIMEOUT_MS);
+        }, judgeTimeoutMs);
       }),
     ]);
     if (isInjection) {
@@ -108,7 +115,7 @@ async function evaluateQueryEntrySecurityLayer2(
       {
         err,
         judgeFailureMode,
-        ...(isTimeout ? { timeout_ms: JUDGE_TIMEOUT_MS } : {}),
+        ...(isTimeout ? { timeout_ms: judgeTimeoutMs } : {}),
       },
       isTimeout
         ? '[QueryEntrySecurity] LLM judge timed out'

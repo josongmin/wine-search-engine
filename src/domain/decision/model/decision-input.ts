@@ -25,7 +25,7 @@ export interface AmbiguitySummary {
   readonly severity: 'low' | 'medium' | 'high';
 
   /** Pipeline stages that contributed ambiguity signals. */
-  readonly sources: readonly ('planner' | 'resolver' | 'alias')[];
+  readonly sources: readonly ('planner' | 'resolver' | 'alias' | 'ranking')[];
 
   /**
    * The effect this ambiguity should have on the decision.
@@ -54,10 +54,10 @@ export interface EvidenceSummary {
     /** Fused resolve winner exists. */
     readonly resolveTopEntityPresent: boolean;
 
-    /** Identity lane emitted an artifact for the winning entity. */
+    /** A winner-aligned identity-bearing artifact is present for the selected entity. */
     readonly winnerIdentityArtifactPresent: boolean;
 
-    /** Identity artifact agrees with the fused resolve winner. */
+    /** Artifact payload agrees with the fused winner and any supplied identity resolve set. */
     readonly winnerIdentityArtifactMatchesResolveResult: boolean;
 
     /** Dual-lane presence for the winner-aligned identity artifact. */

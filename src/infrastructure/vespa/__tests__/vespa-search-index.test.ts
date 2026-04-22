@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createEntityId } from '../../../domain/shared/types/index.js';
-import type { VespaClient } from '../vespa-client.js';
+import { VespaHttpError, type VespaClient } from '../vespa-client.js';
 import type { VespaQueryResponse } from '../vespa-client.js';
 import { VespaSearchIndex } from '../vespa-search-index.js';
 
@@ -389,19 +389,78 @@ describe('VespaSearchIndex', () => {
     );
   });
 
-  it('includes aliases_noisy_recall phrase matching in sparseSearch YQL', async () => {
+  it('includes alias prefix substrate matching in sparseSearch YQL', async () => {
     let capturedYql = '';
+    let capturedParams: Record<string, unknown> | undefined;
     const client = {
-      query: vi.fn().mockImplementation((yql: string) => {
+      query: vi.fn().mockImplementation((yql: string, params?: Record<string, unknown>) => {
         capturedYql = yql;
+        capturedParams = params;
         return Promise.resolve(makeQueryResponse([]));
       }),
     } as unknown as VespaClient;
 
     const index = new VespaSearchIndex(client);
-    await index.sparseSearch(['오푸스원'], [], 5);
+    await index.sparseSearch(['opu'], [], 5);
 
     expect(capturedYql).toContain('aliases_noisy_recall contains phrase(@query0)');
+    expect(capturedYql).toContain('alias_prefix_terms contains ({prefix:true}@query0_prefix)');
+    expect(capturedParams?.['query0_prefix']).toBe('opu');
+  });
+
+  it('retries sparseSearch without alias prefix substrate when deployed Vespa schema lacks the field', async () => {
+    const capturedYql: string[] = [];
+    const client = {
+      query: vi.fn().mockImplementation((yql: string) => {
+        capturedYql.push(yql);
+        if (capturedYql.length === 1) {
+          return Promise.reject(
+            new VespaHttpError(
+              'Vespa query failed [HTTP 400]: {"root":{"errors":[{"message":"Field \'alias_prefix_terms\' does not exist."}]}}',
+              400,
+              false,
+              true,
+            ),
+          );
+        }
+        return Promise.resolve(makeQueryResponse([]));
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await index.sparseSearch(['opu'], [], 5);
+
+    expect(client.query).toHaveBeenCalledTimes(2);
+    expect(capturedYql[0]).toContain('alias_prefix_terms contains ({prefix:true}@query0_prefix)');
+    expect(capturedYql[1]).not.toContain('alias_prefix_terms contains ({prefix:true}@query0_prefix)');
+  });
+
+  it('remembers alias prefix substrate downgrade after first schema-mismatch retry', async () => {
+    const capturedYql: string[] = [];
+    const client = {
+      query: vi.fn().mockImplementation((yql: string) => {
+        capturedYql.push(yql);
+        if (capturedYql.length === 1) {
+          return Promise.reject(
+            new VespaHttpError(
+              'Vespa query failed [HTTP 400]: {"root":{"errors":[{"message":"Field \'alias_prefix_terms\' does not exist."}]}}',
+              400,
+              false,
+              true,
+            ),
+          );
+        }
+        return Promise.resolve(makeQueryResponse([]));
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await index.sparseSearch(['opu'], [], 5);
+    await index.sparseSearch(['opu'], [], 5);
+
+    expect(client.query).toHaveBeenCalledTimes(3);
+    expect(capturedYql[1]).not.toContain('alias_prefix_terms contains ({prefix:true}@query0_prefix)');
+    expect(capturedYql[2]).not.toContain('alias_prefix_terms contains ({prefix:true}@query0_prefix)');
   });
 
   it('rejects Vespa hits whose indexed entity_id uses the forbidden source-record public namespace (ADR-007)', async () => {

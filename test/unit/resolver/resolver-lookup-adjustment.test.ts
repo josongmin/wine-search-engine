@@ -110,6 +110,87 @@ describe('Resolver lookup strategy adjustments', () => {
     expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toBeUndefined();
   });
 
+  it.each([
+    ['prefix_exact', 'opu', 'opus one'],
+    ['transliterated_prefix', '오퍼스', '오퍼스 원'],
+  ] as const)(
+    'treats %s as exact-like support and does not conservatively clarify short-form queries',
+    async (strategy, rawQuery, surfaceForm) => {
+      const resolver = new Resolver(
+        new Blocker(blockingPort),
+        new CandidateScorer(),
+        new AmbiguityClassifier(),
+        new Calibrator(calibrationStore),
+      );
+
+      const input: ResolverInput = {
+        rawQuery,
+        normalizedQuery: rawQuery,
+        queryClass: 'short_entity',
+        policy: {
+          requireExact: false,
+          allowApproximate: true,
+          requireClarification: true,
+          fallbackMode: 'fail',
+          policyReasonCodes: [],
+        },
+        anchorCandidates: [
+          {
+            surfaceForm,
+            normalizedForm: surfaceForm,
+            candidateEntityIds: [createEntityId('entity-a')],
+            lookupStrategies: [strategy],
+            confidence: 0.95,
+            source: 'alias',
+          },
+          {
+            surfaceForm: 'fallback noisy alias',
+            normalizedForm: 'fallback noisy alias',
+            candidateEntityIds: [createEntityId('entity-b')],
+            lookupStrategies: ['fuzzy_char_ngram'],
+            confidence: 0.4,
+            source: 'alias',
+          },
+        ],
+        uncertainty: {
+          overall: 0.35,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          ambiguitySeverity: 'low',
+          decisionEffect: 'trace_only',
+          parserConfidence: 0.85,
+          anchorConfidence: 0.95,
+          constraintConfidence: 0.8,
+        },
+        candidateEntities: [
+          makeCandidate('entity-a'),
+          makeCandidate('entity-b'),
+        ],
+      };
+
+      const result = await resolver.resolve(input);
+
+      const adjustments = result.decisionTrace.queryProvenance?.lookupStrategyAdjustments ?? [];
+      expect(adjustments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            entityId: 'entity-a',
+            strategies: [strategy],
+            rawScoreDelta: 0.05,
+          }),
+          expect.objectContaining({
+            entityId: 'entity-b',
+            strategies: ['fuzzy_char_ngram'],
+            rawScoreDelta: 0.01,
+          }),
+        ]),
+      );
+      expect(result.decisionTrace.outcomeReasonCodes).not.toContain(
+        'NOISY_SHORT_FORM_REQUIRE_CLARIFICATION',
+      );
+    },
+  );
+
   it('keeps fuzzy-only short-form support conservative', async () => {
     const resolver = new Resolver(
       new Blocker(blockingPort),

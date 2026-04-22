@@ -11,7 +11,10 @@ import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker.port.js';
 import { AbstainPolicy } from '../../../../src/domain/query/service/abstain-policy.js';
 import { buildDeterminismFingerprint } from '../../../../src/domain/shared/utils/determinism-fingerprint.js';
-import type { DualLaneArtifact } from '../../../../src/domain/retrieval/model/dual-lane-artifact.js';
+import type {
+  DualLaneArtifact,
+  EntityLaneCandidateArtifact,
+} from '../../../../src/domain/retrieval/model/dual-lane-artifact.js';
 
 const GENERIC_HYBRID_EXECUTION_FACTS = {
   executionTopology: 'general_only',
@@ -849,14 +852,6 @@ describe('runSearchPostRoutePhase', () => {
       entityId: winnerEntityId,
       canonicalLabel: 'Ranked Wine',
       lanePresence: 'corroborated',
-      agreement: {
-        corroborated: true,
-        disagreement: false,
-        entityOnly: false,
-        generalOnly: false,
-      },
-      exactnessTier: 'exact',
-      entityPosteriorScore: 0.97,
       identityProvenance: {
         source: 'entity_resolver',
         entityId: winnerEntityId,
@@ -967,14 +962,6 @@ describe('runSearchPostRoutePhase', () => {
       entityId: winnerEntityId,
       canonicalLabel: 'Ranked Wine',
       lanePresence: 'corroborated',
-      agreement: {
-        corroborated: true,
-        disagreement: false,
-        entityOnly: false,
-        generalOnly: false,
-      },
-      exactnessTier: 'exact',
-      entityPosteriorScore: 0.97,
       identityProvenance: {
         source: 'entity_resolver',
         entityId: winnerEntityId,
@@ -1070,6 +1057,535 @@ describe('runSearchPostRoutePhase', () => {
     );
     expect(decisionInput?.evidenceSummary?.identityEvidence?.lanePresence).toBe('corroborated');
     expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('exact');
+  });
+
+  it('uses entity-only winner identity artifact exactness on entity lookup post-route paths', async () => {
+    const plan = {
+      ...minimalPlan(),
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
+      intent: 'entity_exact',
+      queryClass: 'short_entity',
+    } as QueryPlanV1;
+    const request: SearchRequest = { query: 'x', retrieval_mode: 'lookup' };
+    const winnerEntityId = createEntityId('entity-only-ranked');
+    const rankedResults = [makeRankedResult({ entityId: winnerEntityId })] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(makeDecisionOutput()) };
+    const responseBuilder = makeResponseBuilder();
+    const resolveResult = makeResolveResult({
+      topEntity: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Entity Lookup Wine',
+        calibratedScore: 0.98,
+      },
+      candidates: [{
+        entityId: winnerEntityId,
+        canonicalLabel: 'Entity Lookup Wine',
+        calibratedScore: 0.98,
+        rank: 1,
+        evidenceRefs: ['identity:entity-only'],
+      }],
+    });
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: winnerEntityId,
+      candidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Entity Lookup Wine',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.98,
+        identityExactnessTier: 'exact',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: resolveResult.candidates[0]!,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'exact',
+        calibratedScore: 0.98,
+        resolverRank: 1,
+        canonicalLabel: 'Entity Lookup Wine',
+        evidenceRefs: ['identity:entity-only'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    await runSearchPostRoutePhase({
+      plan,
+      compiled: {
+        ...makeTestCompiled(),
+        execution: {
+          ...makeTestCompiled().execution,
+          effectiveRoute: 'entity',
+          effectiveRetrievalMode: 'entity_lookup',
+          provenancePolicy: {
+            requireIdentitySeal: true,
+            requireConstraintEvidence: false,
+            requireAnchorEvidence: false,
+          },
+        },
+      },
+      request,
+      requestId: 'entity-only-1',
+      startTime: Date.now() - 10,
+      resolveResult,
+      identityResolveResult: resolveResult,
+      rankedResults,
+      effectiveRoute: 'entity',
+      executionTopology: 'entity_only',
+      laneTrace: {
+        identity: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+        general: { participated: false, artifactCount: 0 },
+        fused: { participated: false, artifactCount: 0 },
+      },
+      laneArtifacts: {
+        identity: [winnerIdentityArtifact],
+        general: [],
+        fused: [],
+      },
+      effectiveRetrievalMode: 'entity_lookup',
+      retrievalKind: 'entity_lookup',
+      sparseExecuted: false,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'entity_lookup',
+      retrievalModeSource: 'api_override',
+      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    expect(decisionInput?.identityResolveResult?.topEntity?.entityId).toBe(winnerEntityId);
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(true);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      true,
+    );
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.lanePresence).toBe('entity_only');
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('exact');
+  });
+
+  it('does not keep dual-lane identity evidence when the fused winner is absent from identity top1', async () => {
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const winnerEntityId = createEntityId('dual-lane-fused-winner');
+    const identityOnlyWinnerId = createEntityId('dual-lane-identity-winner');
+    const rankedResults = [makeRankedResult({ entityId: winnerEntityId })] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(makeDecisionOutput()) };
+    const responseBuilder = makeResponseBuilder();
+    const identityResolveResult = makeResolveResult({
+      topEntity: {
+        entityId: identityOnlyWinnerId,
+        canonicalLabel: 'Identity Winner',
+        calibratedScore: 0.99,
+      },
+      candidates: [{
+        entityId: identityOnlyWinnerId,
+        canonicalLabel: 'Identity Winner',
+        calibratedScore: 0.99,
+        rank: 1,
+        evidenceRefs: ['identity:identity-winner'],
+      }, {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Fused Winner',
+        calibratedScore: 0.91,
+        rank: 2,
+        evidenceRefs: ['identity:fused-winner'],
+      }],
+    });
+    const corroboratedWinnerArtifact: DualLaneArtifact = {
+      entityId: winnerEntityId,
+      canonicalLabel: 'Fused Winner',
+      lanePresence: 'corroborated',
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'exact',
+        calibratedScore: 0.91,
+        resolverRank: 2,
+        canonicalLabel: 'Fused Winner',
+        evidenceRefs: ['identity:fused-winner'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 1,
+        },
+      },
+      fusedCandidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Fused Winner',
+        matchedConstraints: [],
+        evidenceItems: [],
+        retrievalTrace: {
+          retrievalProfile: 'dual_lane_fusion',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan,
+      compiled: {
+        ...makeTestCompiled(),
+        execution: {
+          ...makeTestCompiled().execution,
+          executionTopology: 'dual_lane',
+        },
+      },
+      request,
+      requestId: 'dual-lane-misaligned-identity',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult({
+        topEntity: {
+          entityId: winnerEntityId,
+          canonicalLabel: 'Fused Winner',
+          calibratedScore: 0.91,
+        },
+        candidates: [{
+          entityId: winnerEntityId,
+          canonicalLabel: 'Fused Winner',
+          calibratedScore: 0.91,
+          rank: 1,
+          evidenceRefs: [],
+        }],
+      }),
+      identityResolveResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      executionTopology: 'dual_lane',
+      laneTrace: {
+        identity: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+        general: { participated: true, artifactCount: 0 },
+        fused: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+      },
+      laneArtifacts: {
+        identity: [],
+        general: [],
+        fused: [corroboratedWinnerArtifact],
+      },
+      effectiveRetrievalMode: 'attribute_search',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    expect(decisionInput?.identityResolveResult?.topEntity?.entityId).toBe(identityOnlyWinnerId);
+    expect(decisionInput?.resolveResult?.topEntity?.entityId).toBe(winnerEntityId);
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(false);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      false,
+    );
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.lanePresence).toBeUndefined();
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('none');
+  });
+
+  it('keeps fused dual-lane exactness authoritative when the identity-lane artifact disagrees', async () => {
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const winnerEntityId = createEntityId('dual-lane-precedence-winner');
+    const rankedResults = [makeRankedResult({ entityId: winnerEntityId })] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(makeDecisionOutput()) };
+    const responseBuilder = makeResponseBuilder();
+    const identityResolveResult = makeResolveResult({
+      topEntity: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Winner',
+        calibratedScore: 0.97,
+      },
+      candidates: [{
+        entityId: winnerEntityId,
+        canonicalLabel: 'Winner',
+        calibratedScore: 0.97,
+        rank: 1,
+        evidenceRefs: ['identity:winner'],
+      }],
+    });
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: winnerEntityId,
+      candidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Winner',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.97,
+        identityExactnessTier: 'alias_fuzzy',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: identityResolveResult.candidates[0]!,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'alias_fuzzy',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'Winner',
+        evidenceRefs: ['identity:entity-lane'],
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 1,
+          editDistanceScore: 0.5,
+        },
+      },
+      evidenceItems: [],
+    };
+    const corroboratedWinnerArtifact: DualLaneArtifact = {
+      entityId: winnerEntityId,
+      canonicalLabel: 'Winner',
+      lanePresence: 'corroborated',
+      entityLane: winnerIdentityArtifact,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'alias_exact',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'Winner',
+        evidenceRefs: ['identity:dual-lane'],
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      fusedCandidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Winner',
+        matchedConstraints: [],
+        evidenceItems: [],
+        identityExactnessTier: 'alias_exact',
+        lanePresence: 'corroborated',
+        retrievalTrace: {
+          retrievalProfile: 'dual_lane_fusion',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan,
+      compiled: {
+        ...makeTestCompiled(),
+        execution: {
+          ...makeTestCompiled().execution,
+          executionTopology: 'dual_lane',
+        },
+      },
+      request,
+      requestId: 'dual-lane-precedence',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult({
+        topEntity: {
+          entityId: winnerEntityId,
+          canonicalLabel: 'Winner',
+          calibratedScore: 0.97,
+        },
+        candidates: [{
+          entityId: winnerEntityId,
+          canonicalLabel: 'Winner',
+          calibratedScore: 0.97,
+          rank: 1,
+          evidenceRefs: [],
+        }],
+      }),
+      identityResolveResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      executionTopology: 'dual_lane',
+      laneTrace: {
+        identity: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+        general: { participated: true, artifactCount: 0 },
+        fused: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+      },
+      laneArtifacts: {
+        identity: [winnerIdentityArtifact],
+        general: [],
+        fused: [corroboratedWinnerArtifact],
+      },
+      effectiveRetrievalMode: 'attribute_search',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(true);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.lanePresence).toBe('corroborated');
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('alias_exact');
+  });
+
+  it('does not mint dual-lane identity evidence when the fused winner is absent from identity candidates', async () => {
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const winnerEntityId = createEntityId('dual-lane-fused-winner-missing');
+    const identityOnlyWinnerId = createEntityId('dual-lane-identity-only');
+    const rankedResults = [makeRankedResult({ entityId: winnerEntityId })] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(makeDecisionOutput()) };
+    const responseBuilder = makeResponseBuilder();
+    const identityResolveResult = makeResolveResult({
+      topEntity: {
+        entityId: identityOnlyWinnerId,
+        canonicalLabel: 'Identity Winner',
+        calibratedScore: 0.99,
+      },
+      candidates: [{
+        entityId: identityOnlyWinnerId,
+        canonicalLabel: 'Identity Winner',
+        calibratedScore: 0.99,
+        rank: 1,
+        evidenceRefs: ['identity:identity-only'],
+      }],
+    });
+    const corroboratedWinnerArtifact: DualLaneArtifact = {
+      entityId: winnerEntityId,
+      canonicalLabel: 'Fused Winner',
+      lanePresence: 'corroborated',
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'exact',
+        calibratedScore: 0.91,
+        resolverRank: 2,
+        canonicalLabel: 'Fused Winner',
+        evidenceRefs: ['identity:fused-winner'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 1,
+        },
+      },
+      fusedCandidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Fused Winner',
+        matchedConstraints: [],
+        evidenceItems: [],
+        retrievalTrace: {
+          retrievalProfile: 'dual_lane_fusion',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan,
+      compiled: {
+        ...makeTestCompiled(),
+        execution: {
+          ...makeTestCompiled().execution,
+          executionTopology: 'dual_lane',
+        },
+      },
+      request,
+      requestId: 'dual-lane-missing-identity-candidate',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult({
+        topEntity: {
+          entityId: winnerEntityId,
+          canonicalLabel: 'Fused Winner',
+          calibratedScore: 0.91,
+        },
+        candidates: [{
+          entityId: winnerEntityId,
+          canonicalLabel: 'Fused Winner',
+          calibratedScore: 0.91,
+          rank: 1,
+          evidenceRefs: [],
+        }],
+      }),
+      identityResolveResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      executionTopology: 'dual_lane',
+      laneTrace: {
+        identity: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+        general: { participated: true, artifactCount: 0 },
+        fused: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+      },
+      laneArtifacts: {
+        identity: [],
+        general: [],
+        fused: [corroboratedWinnerArtifact],
+      },
+      effectiveRetrievalMode: 'attribute_search',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(false);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      false,
+    );
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('none');
   });
 
   it('keeps the shared ranked-route decision phase aligned with the main post-route response shape', async () => {

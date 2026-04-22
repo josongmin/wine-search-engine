@@ -17,7 +17,6 @@ import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import {
-  buildEmptySearchExecutionLaneArtifacts,
   buildSearchExecutionLaneTrace,
   dispatchSearchRouteExecution,
   type SearchRouteExecutionResult,
@@ -62,7 +61,10 @@ import {
   resolveCorrectiveRetryOutcome,
   computeCorrectiveRetryCalibration,
 } from './search-usecase-corrective-retry.js';
-import { buildEntityRouteRankedResults } from './search-usecase-entity-ranked-results.js';
+import {
+  buildEntityRouteRankedResults,
+  liftEntityResolveResultToLaneArtifacts,
+} from './search-usecase-entity-ranked-results.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import {
@@ -124,6 +126,7 @@ export interface SearchUseCaseDeps {
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). Optional. */
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly judgeTimeoutMs?: number | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   /** Unified cache service for query/embedding/result caching (Wave 4, Phase 3). Optional. */
   readonly cacheService?: SearchResponseCachePort | undefined;
@@ -265,6 +268,7 @@ export class SearchUseCase {
         querySanitizer: this.deps.querySanitizer,
         injectionJudge: this.deps.injectionJudge,
         judgeFailureMode: this.deps.judgeFailureMode,
+        judgeTimeoutMs: this.deps.judgeTimeoutMs,
         queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
       },
       queryPlanner: this.deps.queryPlanner,
@@ -565,7 +569,11 @@ export class SearchUseCase {
 
     if (!triggerRetry) {
       const rankedResults = buildEntityRouteRankedResults(plan, firstResult, candidateEntities);
-      const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
+      const laneArtifacts = {
+        identity: liftEntityResolveResultToLaneArtifacts(plan, firstResult, candidateEntities),
+        general: [],
+        fused: [],
+      };
       const topRankedResult = rankedResults[0];
       pipelineDebug(
         {
@@ -690,7 +698,11 @@ export class SearchUseCase {
     // clarify/fail routing in the decision layer (post-route phase).
     const resolved = retryResult;
     const rankedResults = buildEntityRouteRankedResults(plan, resolved, retryCandidateEntities);
-    const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
+    const laneArtifacts = {
+      identity: liftEntityResolveResultToLaneArtifacts(plan, resolved, retryCandidateEntities),
+      general: [],
+      fused: [],
+    };
     const topRankedResult = rankedResults[0];
 
     pipelineDebug(

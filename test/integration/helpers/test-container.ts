@@ -40,6 +40,7 @@ import { BatchSearchUseCase } from '../../../src/application/search/batch-search
 import { ReplayUseCase } from '../../../src/application/search/replay.usecase.js';
 import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
+import { AutocompleteUseCase } from '../../../src/application/search/autocomplete.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import { WatchlistService } from '../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../src/config/container.js';
@@ -69,13 +70,21 @@ import {
   toHybridCandidate,
   toSimilarityCandidate,
 } from './test-fixtures.js';
+import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
+import type { EntityId } from '../../../src/domain/shared/types/index.js';
+
+export interface TestFixtureAlias {
+  readonly surfaceForm: string;
+  readonly entityId: EntityId;
+  readonly confidence: number;
+}
 
 export interface TestContainerParts {
   container: Container;
   ambiguityDict: InMemoryAmbiguityDictionary;
   blockingAdapter: InMemoryBlockingAdapter;
   searchIndex: InMemorySearchIndex;
-  fixtureDocuments: readonly (typeof TEST_DOCUMENTS)[number][];
+  fixtureDocuments: readonly RetrievalDocument[];
   browseRetriever: BrowseRetriever;
   compareRetriever: CompareRetriever;
   aliasMatcher: InMemoryAliasMatcher;
@@ -93,6 +102,8 @@ export interface TestContainerOptions {
   readonly rerankThreshold?: number;
   readonly stripCachedDrinkingWindow?: boolean;
   readonly drinkingWindowModelVersionOverride?: string;
+  readonly fixtureAliases?: readonly TestFixtureAlias[];
+  readonly fixtureDocuments?: readonly RetrievalDocument[];
 }
 
 /**
@@ -112,11 +123,14 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const candidateAttributes = new InMemoryCandidateAttributes();
   const watchlistStore = new InMemoryWatchlistStore();
 
-  for (const alias of TEST_ALIASES) {
+  const fixtureAliases = options.fixtureAliases ?? TEST_ALIASES;
+  const fixtureDocuments = options.fixtureDocuments ?? TEST_DOCUMENTS;
+
+  for (const alias of fixtureAliases) {
     aliasMatcher.addAlias(alias.surfaceForm, alias.entityId, alias.confidence);
   }
 
-  const materializedDocuments = TEST_DOCUMENTS.map((doc) => {
+  const materializedDocuments = fixtureDocuments.map((doc) => {
     const baseDoc = options.stripCachedDrinkingWindow === true
       ? {
         ...doc,
@@ -145,13 +159,13 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     candidateAttributes.setSimilarity(doc.entityId, toSimilarityCandidate(doc));
   }
 
-  const uniqueIds = new Set(TEST_ALIASES.map((alias) => alias.entityId));
+  const uniqueIds = new Set(fixtureAliases.map((alias) => alias.entityId));
   blockingAdapter.addEntityIds(Array.from(uniqueIds));
 
   for (const neighborhood of MIXED_NEIGHBORHOOD_FIXTURES) {
     const docs = neighborhood.candidateIds
       .map((entityId) => materializedDocuments.find((doc) => doc.entityId === entityId))
-      .filter((doc): doc is (typeof TEST_DOCUMENTS)[number] => doc !== undefined);
+      .filter((doc): doc is RetrievalDocument => doc !== undefined);
 
     const candidates = docs.map((doc, index) =>
       toHybridCandidate(doc, index + 1, ['anchor', 'dense', 'sparse']),
@@ -210,6 +224,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const responseBuilder = new ResponseBuilder();
   const querySanitizer = new QuerySanitizer();
   const injectionJudge = { judge: async () => false };
+  const judgeTimeoutMs = 5_000;
   const drinkingWindowPredictor =
     options.drinkingWindowPredictor ?? new DeterministicDrinkingWindowPredictor();
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
@@ -258,6 +273,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     mixedSolver,
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
     snapshotVersions,
     decomposedSearch: decomposedAdapter,
     ...(options.drinkingWindowPredictor !== undefined ? { drinkingWindow: drinkingWindowUseCase } : {}),
@@ -271,13 +287,23 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     searchUseCase,
     snapshotVersions,
   });
-  const interpretUseCase = new InterpretUseCase({ queryPlanner, querySanitizer, injectionJudge });
+  const interpretUseCase = new InterpretUseCase({
+    queryPlanner,
+    querySanitizer,
+    injectionJudge,
+    judgeTimeoutMs,
+  });
   const resolveUseCase = new ResolveUseCase({
     queryPlanner,
     entityResolver,
     entityLookup: searchIndex,
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
+  });
+  const autocompleteUseCase = new AutocompleteUseCase({
+    resolveUseCase,
+    entityLookup: searchIndex,
   });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
@@ -293,6 +319,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     drinkingWindow: drinkingWindowUseCase,
     querySanitizer,
     injectionJudge,
+    judgeTimeoutMs,
     judgeFailureMode: 'fail_closed',
     decomposedSearch: decomposedSearchUseCase,
   });
@@ -325,6 +352,7 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     replayUseCase,
     interpretUseCase,
     resolveUseCase,
+    autocompleteUseCase,
     hybridUseCase,
     decomposedSearchUseCase,
     drinkingWindowUseCase,

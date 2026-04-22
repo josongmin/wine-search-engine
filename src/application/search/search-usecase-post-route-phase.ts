@@ -26,7 +26,10 @@ import type {
   SearchExecutionLaneArtifactRef,
   SearchRouteRetrievalKind,
 } from './search-usecase-route-dispatch.js';
-import type { DualLaneArtifact } from '../../domain/retrieval/model/dual-lane-artifact.js';
+import type {
+  DualLaneArtifact,
+  EntityLaneCandidateArtifact,
+} from '../../domain/retrieval/model/dual-lane-artifact.js';
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
@@ -107,7 +110,6 @@ function isDualLaneArtifact(
 ): artifact is DualLaneArtifact {
   return (
     'lanePresence' in artifact &&
-    'exactnessTier' in artifact &&
     'fusedCandidate' in artifact
   );
 }
@@ -124,6 +126,76 @@ function findWinnerDualLaneArtifact(
   return fusedArtifacts.find(
     (artifact): artifact is DualLaneArtifact =>
       isDualLaneArtifact(artifact) && artifact.entityId === winnerEntityId,
+  );
+}
+
+function isEntityLaneArtifact(
+  artifact: SearchExecutionLaneArtifactRef,
+): artifact is EntityLaneCandidateArtifact {
+  return (
+    'identityProvenance' in artifact &&
+    'candidate' in artifact &&
+    'resolvedCandidate' in artifact
+  );
+}
+
+function hasWinnerAlignedIdentityResolveCandidate(
+  identityResolveResult: EntityResolveResult,
+  winnerEntityId: string,
+): boolean {
+  return identityResolveResult.candidates.some((candidate) => candidate.entityId === winnerEntityId);
+}
+
+function isWinnerAlignedEntityLaneArtifact(
+  artifact: EntityLaneCandidateArtifact | undefined,
+  winnerEntityId: string,
+): artifact is EntityLaneCandidateArtifact {
+  return artifact !== undefined
+    && artifact.entityId === winnerEntityId
+    && artifact.identityProvenance.entityId === winnerEntityId
+    && artifact.candidate.entityId === winnerEntityId
+    && artifact.resolvedCandidate.entityId === winnerEntityId;
+}
+
+function isWinnerAlignedDualLaneArtifact(
+  artifact: DualLaneArtifact | undefined,
+  winnerEntityId: string,
+): artifact is DualLaneArtifact & { readonly identityProvenance: NonNullable<DualLaneArtifact['identityProvenance']> } {
+  if (
+    artifact === undefined
+    || artifact.entityId !== winnerEntityId
+    || artifact.fusedCandidate.entityId !== winnerEntityId
+    || artifact.identityProvenance?.entityId !== winnerEntityId
+  ) {
+    return false;
+  }
+
+  if (
+    artifact.entityLane !== undefined
+    && !isWinnerAlignedEntityLaneArtifact(artifact.entityLane, winnerEntityId)
+  ) {
+    return false;
+  }
+
+  return artifact.generalLane === undefined
+    || (
+      artifact.generalLane.entityId === winnerEntityId
+      && artifact.generalLane.candidate.entityId === winnerEntityId
+    );
+}
+
+function findWinnerIdentityLaneArtifact(
+  resolveResult: EntityResolveResult,
+  identityArtifacts: SearchExecutionLaneArtifacts['identity'],
+): EntityLaneCandidateArtifact | undefined {
+  const winnerEntityId = resolveResult.topEntity?.entityId;
+  if (winnerEntityId === undefined) {
+    return undefined;
+  }
+
+  return identityArtifacts.find(
+    (artifact): artifact is EntityLaneCandidateArtifact =>
+      isEntityLaneArtifact(artifact) && artifact.entityId === winnerEntityId,
   );
 }
 
@@ -146,15 +218,43 @@ function resolveWinnerAlignedDualLaneArtifact(params: {
   );
   const winnerEntityId = params.resolveResult.topEntity?.entityId;
   if (
-    winnerDualLaneArtifact === undefined
-    || winnerEntityId === undefined
-    || winnerDualLaneArtifact.entityId !== winnerEntityId
-    || winnerDualLaneArtifact.identityProvenance?.entityId !== winnerEntityId
+    winnerEntityId === undefined
+    || !hasWinnerAlignedIdentityResolveCandidate(params.identityResolveResult, winnerEntityId)
+    || !isWinnerAlignedDualLaneArtifact(winnerDualLaneArtifact, winnerEntityId)
   ) {
     return undefined;
   }
 
   return winnerDualLaneArtifact;
+}
+
+function resolveWinnerAlignedIdentityArtifact(params: {
+  readonly executionTopology: ExecutionTopology;
+  readonly identityResolveResult: EntityResolveResult | null;
+  readonly resolveResult: EntityResolveResult;
+  readonly identityArtifacts: SearchExecutionLaneArtifacts['identity'];
+}): EntityLaneCandidateArtifact | undefined {
+  if (
+    params.executionTopology === 'general_only'
+    || params.identityResolveResult === null
+  ) {
+    return undefined;
+  }
+
+  const winnerIdentityArtifact = findWinnerIdentityLaneArtifact(
+    params.resolveResult,
+    params.identityArtifacts,
+  );
+  const winnerEntityId = params.resolveResult.topEntity?.entityId;
+  if (
+    winnerEntityId === undefined
+    || !hasWinnerAlignedIdentityResolveCandidate(params.identityResolveResult, winnerEntityId)
+    || !isWinnerAlignedEntityLaneArtifact(winnerIdentityArtifact, winnerEntityId)
+  ) {
+    return undefined;
+  }
+
+  return winnerIdentityArtifact;
 }
 
 /**
@@ -851,6 +951,12 @@ export async function runRankedRouteDecisionPhase(
     resolveResult: ctx.resolveResult,
     fusedArtifacts: ctx.laneArtifacts.fused,
   });
+  const winnerIdentityArtifact = resolveWinnerAlignedIdentityArtifact({
+    executionTopology: ctx.executionTopology,
+    identityResolveResult: ctx.identityResolveResult,
+    resolveResult: ctx.resolveResult,
+    identityArtifacts: ctx.laneArtifacts.identity,
+  });
   const decisionInputBase = buildSearchDecisionInput({
     plan: ctx.plan,
     resolveResult: ctx.resolveResult,
@@ -863,6 +969,7 @@ export async function runRankedRouteDecisionPhase(
       retrievalKind: ctx.retrievalKind,
       provenancePolicy: ctx.compiled.execution.provenancePolicy,
       ...(winnerDualLaneArtifact !== undefined ? { winnerDualLaneArtifact } : {}),
+      ...(winnerIdentityArtifact !== undefined ? { winnerIdentityArtifact } : {}),
       ...(ctx.compiled.constraintGraph !== undefined
         ? { constraintGraph: ctx.compiled.constraintGraph }
         : {}),
@@ -1251,6 +1358,12 @@ export async function runSearchPostRoutePhase(
       resolveResult: ctx.resolveResult,
       fusedArtifacts: ctx.laneArtifacts.fused,
     });
+    const winnerIdentityArtifact = resolveWinnerAlignedIdentityArtifact({
+      executionTopology: ctx.executionTopology,
+      identityResolveResult: ctx.identityResolveResult,
+      resolveResult: ctx.resolveResult,
+      identityArtifacts: ctx.laneArtifacts.identity,
+    });
     const abstainDecisionInput = buildSearchDecisionInput({
       plan: ctx.plan,
       resolveResult: ctx.resolveResult,
@@ -1263,6 +1376,7 @@ export async function runSearchPostRoutePhase(
         retrievalKind: ctx.retrievalKind,
         provenancePolicy: ctx.compiled.execution.provenancePolicy,
         ...(winnerDualLaneArtifact !== undefined ? { winnerDualLaneArtifact } : {}),
+        ...(winnerIdentityArtifact !== undefined ? { winnerIdentityArtifact } : {}),
         ...(ctx.compiled.constraintGraph !== undefined
           ? { constraintGraph: ctx.compiled.constraintGraph }
           : {}),

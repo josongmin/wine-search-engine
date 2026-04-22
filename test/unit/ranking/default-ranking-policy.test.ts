@@ -327,6 +327,34 @@ describe('DefaultRankingPolicy (T5.5a)', () => {
         'pg-1',
       ]);
     });
+
+    it('prioritizes canonical family branches for single-token short-entity queries', () => {
+      const results: RankedResult[] = [
+        {
+          ...makeResult('overture-2019', 1, { producer: 'Opus One', grapePrimary: 'Cabernet Sauvignon' }),
+          canonicalLabel: '2019 Opus One Overture',
+        },
+        {
+          ...makeResult('opus-2018', 2, { producer: 'Opus One', grapePrimary: 'Cabernet Sauvignon' }),
+          canonicalLabel: 'Opus One 2018',
+        },
+        {
+          ...makeResult('opus-2019', 3, { producer: 'Opus One', grapePrimary: 'Cabernet Sauvignon' }),
+          canonicalLabel: 'Opus One 2019',
+        },
+      ];
+
+      const out = policy.apply(results, makeContext({
+        queryClass: 'short_entity',
+        normalizedQuery: 'opus',
+      }));
+
+      expect(out.map((result) => String(result.entityId))).toEqual([
+        'opus-2018',
+        'overture-2019',
+        'opus-2019',
+      ]);
+    });
   });
 
   describe('maxResults truncation', () => {

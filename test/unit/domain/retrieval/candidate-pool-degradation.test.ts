@@ -304,7 +304,6 @@ describe('CandidatePoolService degradation observer', () => {
       sparseSearch: vi.fn(async () => [{
         entityId: createEntityId('wine-peer'),
         canonicalLabel: 'Peer Wine',
-        retrievalFusionScore: 0.7,
         fusionRrfTotal: 0.7,
         matchedConstraints: [],
         retrievalTrace: {

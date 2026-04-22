@@ -12,6 +12,7 @@ import type { InterpretRequest } from '../interpret-request.dto.js';
 import type { InterpretResultWithV2 } from '../interpret.usecase.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
 import type { ResolveResponse } from '../resolve-response.dto.js';
+import type { AutocompleteResponse } from '../autocomplete-response.dto.js';
 import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
 import type { SearchQueryBudget, SearchRequestContext, SearchSessionContext } from '../search-request.dto.js';
@@ -86,6 +87,12 @@ export type ResolveExecutionOptions = RequestExecutionContext;
 
 export interface ResolveUseCasePort {
   execute(request: ResolveRequest, options?: ResolveExecutionOptions): Promise<ResolveResponse>;
+}
+
+export type AutocompleteExecutionOptions = RequestExecutionContext;
+
+export interface AutocompleteUseCasePort {
+  execute(request: ResolveRequest, options?: AutocompleteExecutionOptions): Promise<AutocompleteResponse>;
 }
 
 export type HybridExecutionOptions = RequestExecutionContext;

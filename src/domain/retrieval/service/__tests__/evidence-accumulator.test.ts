@@ -26,7 +26,7 @@ function makeCandidate(
     },
     legacyCandidate: {
       entityId,
-      retrievalFusionScore: fusionScore,
+      fusionRrfTotal: fusionScore,
       matchedConstraints: [],
       retrievalTrace: { channels: ['sparse'], queryViews: [] },
       ...legacyOverrides,

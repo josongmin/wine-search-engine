@@ -897,6 +897,26 @@ describe('DecisionEngine', () => {
       expect(output.decisionStatus).toBe('ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('AMBIGUITY_FORCE_CLARIFY');
     });
+
+    it('ambiguitySummary.decisionEffect=raise_threshold applies ambiguity bias without short-circuit', async () => {
+      const input = makeInput({
+        resolveResult: makeResolverResult(0.52, 0.20, false),
+        ambiguitySummary: {
+          types: ['ranking_family_branch_collision'],
+          severity: 'medium',
+          sources: ['ranking'],
+          decisionEffect: 'raise_threshold',
+        },
+        evidenceSummary: makeStrongIdentityEvidence(),
+      });
+
+      const output = await engine.decide(input, TEST_SNAPSHOT);
+
+      expect(output.decisionStatus).toBe('ambiguous');
+      expect(output.decisionTrace.rulesApplied).toContain('AMBIGUITY_RAISE_THRESHOLD');
+      expect(output.decisionTrace.rulesApplied).toContain('CLARIFICATION_BIAS_0.10');
+      expect(output.decisionTrace.rulesApplied).not.toContain('AMBIGUITY_FORCE_CLARIFY');
+    });
   });
 
   describe('query class thresholds', () => {

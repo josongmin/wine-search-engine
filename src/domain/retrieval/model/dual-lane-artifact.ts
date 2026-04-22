@@ -73,9 +73,6 @@ export interface DualLaneArtifact {
   readonly entityId: CanonicalEntityId;
   readonly canonicalLabel: string;
   readonly lanePresence: DualLanePresence;
-  readonly agreement: DualLaneAgreement;
-  readonly exactnessTier: IdentityExactnessTier;
-  readonly entityPosteriorScore?: number | undefined;
   readonly identityProvenance?: IdentityLaneProvenance | undefined;
   readonly entityLane?: EntityLaneCandidateArtifact | undefined;
   readonly generalLane?: GeneralLaneCandidateArtifact | undefined;

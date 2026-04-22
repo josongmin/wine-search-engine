@@ -4,13 +4,12 @@ import { SignalComputer } from '../signal-computer.js';
 import type { HybridCandidate } from '../../../retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../../query/model/query-plan.js';
 import { createEntityId } from '../../../shared/types/index.js';
+import { makeHybridCandidate } from '../../../../../test/support/hybrid-candidate-test-factory.js';
 
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
-  return {
+  return makeHybridCandidate({
     entityId: createEntityId('wine-test'),
-    retrievalFusionScore: 0.5,
     fusionRrfTotal: 0.5,
-    matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'default',
       lexicalQueriesUsed: [],
@@ -19,7 +18,7 @@ function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidat
       candidateSources: [],
     },
     ...overrides,
-  } as HybridCandidate;
+  });
 }
 
 function makeQueryPlan(): QueryPlanV1 {

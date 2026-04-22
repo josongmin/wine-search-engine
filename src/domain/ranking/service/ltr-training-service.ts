@@ -11,10 +11,7 @@ import type { EvalCase } from '../../evaluation/model/eval-case.js';
 const ltrLog = bootstrapLogger.child({ component: 'LTRTrainingService' });
 import type { RankingFeatures, LambdaMARTExample, QueryClassWeights } from './lambdamart-ranker.js';
 import { trainLambdaMARTModel } from './lambdamart-ranker.js';
-import {
-  extractLTRFeatures,
-  LTR_FEATURE_NAME_ORDER,
-} from './ltr-feature-extractor.js';
+import { extractLTRFeatures } from './ltr-feature-extractor.js';
 /** Strong degradation retains most of the label (synthetic hard negative). */
 const TRAINING_LABEL_DEGRADATION_STRONG = 0.7;
 /** Medium degradation for mid-tier negatives. */
@@ -45,17 +42,33 @@ function extractFeaturesFromResult(result: EvalResult): RankingFeatures {
   return extractLTRFeatures(result.topResultScoreComponents);
 }
 
-function scaleRankingFeatures(
+/**
+ * Synthetic negatives may attenuate only continuous ranking evidence.
+ *
+ * Dual-lane exactness / topology features are categorical serve-time states,
+ * not continuous magnitudes. Preserving them verbatim keeps training examples
+ * on the same live-reachable feature manifold as inference.
+ */
+function synthesizeNegativeFeatures(
   features: RankingFeatures,
   factor: number,
 ): RankingFeatures {
-  return LTR_FEATURE_NAME_ORDER.reduce<RankingFeatures>(
-    (scaled, featureName) => ({
-      ...scaled,
-      [featureName]: features[featureName] * factor,
-    }),
-    {} as RankingFeatures,
-  );
+  return {
+    bm25Score: features.bm25Score * factor,
+    semanticScore: features.semanticScore * factor,
+    popularityScore: features.popularityScore * factor,
+    recencyScore: features.recencyScore * factor,
+    classMatchScore: features.classMatchScore * factor,
+    attributeMatchScore: features.attributeMatchScore * factor,
+    diversityScore: features.diversityScore * factor,
+    multilingualScore: features.multilingualScore * factor,
+    entityPosteriorScore: features.entityPosteriorScore * factor,
+    identityExactnessTierScore: features.identityExactnessTierScore,
+    laneCorroborationScore: features.laneCorroborationScore,
+    laneDisagreementScore: features.laneDisagreementScore,
+    entityOnlyIndicator: features.entityOnlyIndicator,
+    generalOnlyIndicator: features.generalOnlyIndicator,
+  };
 }
 
 /**
@@ -103,7 +116,7 @@ export function buildTrainingExamples(
           label1: label,
           features1: features,
           label2: degradedLabel,
-          features2: scaleRankingFeatures(features, factor),
+          features2: synthesizeNegativeFeatures(features, factor),
         });
       }
     }

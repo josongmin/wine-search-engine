@@ -543,9 +543,6 @@ export class Transliterator {
       };
 
       for (let prefixLength = 1; prefixLength < key.key.length; prefixLength += 1) {
-        if (key.syllableBoundaryOffsets.has(prefixLength)) {
-          continue;
-        }
         const prefix = key.key.slice(0, prefixLength);
         const existing = index.get(prefix);
         if (existing === undefined) {
@@ -586,13 +583,13 @@ export class Transliterator {
   /**
    * IME-aware prefix lookup over curated Korean wine exception surfaces.
    *
-   * Returns the canonical Latin term when the Korean input is an incomplete
-   * Hangul syllable prefix of a known exception surface, such as:
+   * Returns the canonical Latin term when the Korean input is a multi-syllable
+   * prefix of a known exception surface, including both incomplete IME states
+   * and completed syllable boundaries, such as:
+   *   "오푸"     -> "opus one"
    *   "오푸스ㅇ" -> "opus one"
    *   "오퍼스ㅇ" -> "opus one"  (typo-corrected before lookup)
-   *
-   * Completed syllable boundaries like "오푸스" do not match here; those must
-   * continue through the normal exact transliteration path.
+   *   "오푸스"   -> "opus one"
    */
   static romanizeWineTermPrefix(koreanTerm: string): string | undefined {
     Transliterator.KO_TO_LATIN_IME_PREFIX_INDEX ??= Transliterator.buildKoToLatinImePrefixIndex();
@@ -609,9 +606,6 @@ export class Transliterator {
 
     for (const record of Transliterator.KO_TO_LATIN_IME_PREFIX_INDEX.get(key.key) ?? []) {
       if (!record.jamoKey.startsWith(key.key)) {
-        continue;
-      }
-      if (record.syllableBoundaryOffsets.has(key.key.length) && !key.containsStandaloneJamo) {
         continue;
       }
       return record.latin;

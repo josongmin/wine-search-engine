@@ -4,6 +4,7 @@ import {
   extractExtendedLTRFeatures,
   LTR_FEATURE_DIMENSION,
   LTR_FEATURE_NAME_ORDER,
+  LTR_FEATURE_SCHEMA,
   LTR_FEATURE_SCHEMA_HASH,
   rankingFeaturesToVector,
   type LTRScoreComponents,
@@ -130,6 +131,12 @@ describe('extractLTRFeatures', () => {
     expect(LTR_FEATURE_SCHEMA_HASH).toMatch(/^[0-9a-f]{16}$/u);
   });
 
+  it('publishes dimension, canonical order, and schema hash from one SSOT', () => {
+    expect(LTR_FEATURE_SCHEMA.dimension).toBe(LTR_FEATURE_DIMENSION);
+    expect(LTR_FEATURE_SCHEMA.nameOrder).toEqual(LTR_FEATURE_NAME_ORDER);
+    expect(LTR_FEATURE_SCHEMA.hash).toBe(LTR_FEATURE_SCHEMA_HASH);
+  });
+
   it('inference and training produce identical features from same scores', () => {
     // This test documents the core invariant: the SAME function is used
     // by both inference (search.usecase.ts) and training (ltr-training-service.ts).
@@ -146,6 +153,7 @@ describe('extractLTRFeatures', () => {
 
     expect(inferenceFeatures).toEqual(trainingFeatures);
   });
+
 });
 
 // BUG-13: extractExtendedLTRFeatures() 테스트 전무

@@ -23,19 +23,13 @@ import type {
 } from '../../src/domain/query/model/constraint-graph.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../src/domain/retrieval/model/retrieval-input.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 function mkCandidate(id: string): HybridCandidate {
-  return {
-    entityId: id as never,
-    retrievalTrace: {
-      retrievalProfile: 'test',
-      lexicalQueriesUsed: [],
-      semanticQueriesUsed: [],
-      filtersApplied: [],
-      candidateSources: [],
-    },
-    matchedConstraints: [],
-  } as unknown as HybridCandidate;
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
+  });
 }
 
 function hybridGraph(): ConstraintGraph {

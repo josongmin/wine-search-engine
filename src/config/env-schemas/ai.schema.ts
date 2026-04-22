@@ -32,6 +32,15 @@ export const AiEnvSchema = z.object({
     .positive()
     .default(DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS),
   /**
+   * Wall-clock timeout for the Layer 2 injection judge orchestration.
+   * When omitted, runtime wiring aligns this with the provider HTTP timeout
+   * to avoid fail-closed drift between the outer gate and the inner adapter.
+   */
+  INJECTION_JUDGE_TIMEOUT_MS: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+  /**
    * Model used for index-time Doc2Query synthetic-query generation
    * (`scripts/etl/generate-doc-queries.ts`). Decoupled from
    * `OPENAI_CHAT_MODEL` so the ETL pass can run on a cheaper / different

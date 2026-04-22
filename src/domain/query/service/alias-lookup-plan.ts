@@ -1,9 +1,14 @@
 import type { NormalizedQueryViews } from '../model/query-views.js';
 import { buildNormalizedQueryViews } from './query-normalizer.js';
+import { Transliterator } from '../../alias/service/transliterator.js';
 
 const LATIN_VOWEL_RE = /[aeiouy]/i;
 const ASCII_ACRONYM_RE = /^[A-Z0-9]+$/;
 const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/u;
+/** Minimum compact Latin length to treat a token as a lexical word (not an acronym). */
+const MIN_LATIN_LEXICAL_CHAR_COUNT = 4;
+/** Uppercase acronym surfaces are bounded to avoid matching long product codes. */
+const MAX_ACRONYM_SURFACE_LENGTH = 6;
 
 function compactForLookup(value: string): string {
   return value.replace(/[^\p{L}\p{N}]+/gu, '');
@@ -27,16 +32,29 @@ function trimDeduped(values: Iterable<string>): readonly string[] {
 
 function isLexicalLatinWord(value: string): boolean {
   const compact = compactForLookup(value).toLowerCase();
-  return compact.length >= 4 && /[a-z]/.test(compact) && LATIN_VOWEL_RE.test(compact);
+  return (
+    compact.length >= MIN_LATIN_LEXICAL_CHAR_COUNT
+    && /[a-z]/.test(compact)
+    && LATIN_VOWEL_RE.test(compact)
+  );
 }
 
 function isUppercaseAcronymSurface(value: string): boolean {
   const trimmed = value.trim();
-  if (trimmed.length < 2 || trimmed.length > 6 || /\s/u.test(trimmed) || HANGUL_RE.test(trimmed)) {
+  if (
+    trimmed.length < 2
+    || trimmed.length > MAX_ACRONYM_SURFACE_LENGTH
+    || /\s/u.test(trimmed)
+    || HANGUL_RE.test(trimmed)
+  ) {
     return false;
   }
   const compact = trimmed.replace(/[^A-Za-z0-9]+/g, '');
-  return compact.length >= 2 && compact.length <= 6 && ASCII_ACRONYM_RE.test(compact);
+  return (
+    compact.length >= 2
+    && compact.length <= MAX_ACRONYM_SURFACE_LENGTH
+    && ASCII_ACRONYM_RE.test(compact)
+  );
 }
 
 export interface AliasLookupPlan {
@@ -52,6 +70,7 @@ export function buildAliasLookupPlan(
   queryViews?: NormalizedQueryViews,
 ): AliasLookupPlan {
   const views = queryViews ?? buildNormalizedQueryViews(normalizedQuery);
+  const prefixRomanized = Transliterator.romanizeWineTermPrefix(normalizedQuery);
   const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
   const tokenSet = new Set<string>();
   const compactSet = new Set<string>();
@@ -76,6 +95,13 @@ export function buildAliasLookupPlan(
   if (views.transliterated !== undefined && views.transliterated.length > 0) {
     transliteratedSet.add(views.transliterated);
     transliteratedSet.add(compactForLookup(views.transliterated));
+  }
+
+  if (prefixRomanized !== undefined && prefixRomanized.length > 0) {
+    tokenSet.add(prefixRomanized);
+    compactSet.add(compactForLookup(prefixRomanized));
+    transliteratedSet.add(prefixRomanized);
+    transliteratedSet.add(compactForLookup(prefixRomanized));
   }
 
   if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {

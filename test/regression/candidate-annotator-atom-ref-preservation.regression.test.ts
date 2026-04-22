@@ -15,12 +15,13 @@
 import { describe, expect, it } from 'vitest';
 import { annotateCandidateConstraintEvidence } from '../../src/domain/retrieval/service/candidate-constraint-evidence.js';
 import type { ConstraintBundle } from '../../src/domain/shared/types/index.js';
-import type { CanonicalEntityId } from '../../src/domain/shared/types/index.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type {
   ConstraintGraph,
   ConstraintGraphNode,
 } from '../../src/domain/query/model/constraint-graph.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 function slot(id: string, attribute: string): ConstraintGraphNode {
   return {
@@ -55,12 +56,11 @@ function bundle(): ConstraintBundle {
 }
 
 function baseCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
-  return {
-    entityId: 'wine-xxxx' as CanonicalEntityId,
-    matchedConstraints: [],
-    retrievalFusionScore: 0,
+  return makeHybridCandidate({
+    entityId: createEntityId('wine-xxxx'),
+    fusionRrfTotal: 0,
     ...overrides,
-  } as unknown as HybridCandidate;
+  });
 }
 
 describe('annotator atomRef preservation — ADR-014 Phase 1b.3b', () => {

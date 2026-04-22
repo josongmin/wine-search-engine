@@ -7,6 +7,7 @@ export interface SearchSecurityGateDeps {
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly judgeTimeoutMs?: number | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
 }
 
@@ -15,6 +16,7 @@ export function createSearchQuerySecurityGate(deps: SearchSecurityGateDeps): Que
     querySanitizer: deps.querySanitizer,
     injectionJudge: deps.injectionJudge,
     judgeFailureMode: deps.judgeFailureMode,
+    judgeTimeoutMs: deps.judgeTimeoutMs,
     ...(deps.queryEntrySecurityObserver !== undefined
       ? { observer: deps.queryEntrySecurityObserver }
       : {}),

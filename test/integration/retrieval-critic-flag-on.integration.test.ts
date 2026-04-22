@@ -60,7 +60,10 @@ import type { QueryPlanV1 } from '../../src/domain/query/model/query-plan.js';
 import type {
   NormalizedConstraint,
   ConstraintBundle,
+  CanonicalEntityId,
 } from '../../src/domain/shared/types/index.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 // ─── Fixture builders ───────────────────────────────────────────────────────
 
@@ -112,13 +115,19 @@ function mkRetrievalInput(): HybridRetrievalInput {
 }
 
 function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
-  const base = {
-    entityId: id,
-    retrievalTrace: {},
+  const entityId: CanonicalEntityId = createEntityId(id);
+  return makeHybridCandidate({
+    entityId,
+    ...(priceUsd !== undefined ? { priceUsd } : {}),
+    retrievalTrace: {
+      retrievalProfile: 'retrieval-critic-it',
+      lexicalQueriesUsed: [],
+      semanticQueriesUsed: [],
+      filtersApplied: [],
+      candidateSources: [],
+    },
     matchedConstraints: [],
-  } as unknown as HybridCandidate;
-  if (priceUsd === undefined) return base;
-  return { ...base, priceUsd } as HybridCandidate;
+  });
 }
 
 /**

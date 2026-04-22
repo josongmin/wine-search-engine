@@ -58,6 +58,19 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches[0]?.lookupStrategy).toContain('index_lexical_exact');
   });
 
+  it('matches latin entity prefixes through the dedicated prefix substrate', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc();
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    const matches = await matcher.findMatches('opu');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+    expect(matches[0]?.lookupStrategy).toContain('index_prefix_exact');
+  });
+
   it('matches Korean noisy-recall aliases via transliterated exactness', async () => {
     const searchIndex = new InMemorySearchIndex();
     const doc = makeDoc();
@@ -84,6 +97,22 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches[0]?.lookupStrategy).toContain('index_transliterated_exact');
   });
 
+  it.each(['오푸스', '오퍼스'])(
+    'matches completed Korean entity prefixes through cross-script prefix substrate (%s)',
+    async (query) => {
+      const searchIndex = new InMemorySearchIndex();
+      const doc = makeDoc();
+      await searchIndex.upsertDocument(doc);
+
+      const matcher = new SearchIndexAliasMatcher(searchIndex);
+      const matches = await matcher.findMatches(query);
+
+      expect(matches.length).toBeGreaterThan(0);
+      expect(matches[0]?.entityIds).toContain(doc.entityId);
+      expect(matches[0]?.lookupStrategy).toContain('index_transliterated_exact');
+    },
+  );
+
   it('matches IME-incomplete Korean prefixes through curated exception prefix romanization', async () => {
     const searchIndex = new InMemorySearchIndex();
     const doc = makeDoc();
@@ -91,6 +120,19 @@ describe('SearchIndexAliasMatcher', () => {
 
     const matcher = new SearchIndexAliasMatcher(searchIndex);
     const matches = await matcher.findMatches('오푸스ㅇ');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+    expect(matches[0]?.lookupStrategy).toContain('index_transliterated_fuzzy');
+  });
+
+  it('matches completed multi-syllable Korean prefixes through curated exception prefix romanization', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc();
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    const matches = await matcher.findMatches('오푸');
 
     expect(matches.length).toBeGreaterThan(0);
     expect(matches[0]?.entityIds).toContain(doc.entityId);

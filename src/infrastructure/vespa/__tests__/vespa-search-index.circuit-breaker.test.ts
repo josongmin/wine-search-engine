@@ -12,7 +12,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VespaSearchIndex } from '../vespa-search-index.js';
-import { VespaClient } from '../vespa-client.js';
+import { VespaClient, VespaHttpError } from '../vespa-client.js';
 import { globalCircuitBreakerRegistry } from '../../../observability/circuit-breaker-registry.js';
 
 function newClient(): VespaClient {
@@ -97,6 +97,27 @@ describe('batchFetchBySummary routes through circuit breaker (Bug 2 regression)'
     const snapshot = globalCircuitBreakerRegistry.snapshot();
     const breaker = snapshot.find((s) => s.name === 'vespa-search');
     expect(breaker?.metrics.failureCount).toBeGreaterThan(0);
+  });
+
+  it('does not increment circuit breaker failure count for Vespa 4xx client errors', async () => {
+    const client = {
+      query: vi.fn().mockRejectedValue(
+        new VespaHttpError(
+          'Vespa query failed [HTTP 400]: invalid query parameter',
+          400,
+          false,
+          true,
+        ),
+      ),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+
+    await expect(index.sparseSearch(['opus'], [], 5)).rejects.toThrow(/invalid query parameter/);
+
+    const snapshot = globalCircuitBreakerRegistry.snapshot();
+    const breaker = snapshot.find((s) => s.name === 'vespa-search');
+    expect(breaker?.metrics.failureCount).toBe(0);
   });
 });
 

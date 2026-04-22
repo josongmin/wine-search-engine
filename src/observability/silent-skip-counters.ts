@@ -39,6 +39,7 @@ export type SilentSkipKind =
   | 'ltr_inference_component_score_absent_attribute_alignment'
   | 'ltr_inference_component_score_absent_preference_alignment'
   | 'ltr_inference_component_score_absent_multilingual_score'
+  | 'ltr_inference_component_score_absent_recency'
   // Bugbash 2026-04-14 retrieval audit:
   | 'blocker_disabled_snapshot_pointer_missing'
   | 'blocker_disabled_aliases_table_missing'
@@ -56,14 +57,16 @@ export type LtrInferenceComponentScoreField =
   | 'popularity'
   | 'attributeAlignment'
   | 'preferenceAlignment'
-  | 'multilingualScore';
+  | 'multilingualScore'
+  | 'recency';
 
 export type LtrInferenceComponentScoreAbsentKind =
   | 'ltr_inference_component_score_absent_semantic'
   | 'ltr_inference_component_score_absent_popularity'
   | 'ltr_inference_component_score_absent_attribute_alignment'
   | 'ltr_inference_component_score_absent_preference_alignment'
-  | 'ltr_inference_component_score_absent_multilingual_score';
+  | 'ltr_inference_component_score_absent_multilingual_score'
+  | 'ltr_inference_component_score_absent_recency';
 
 const LTR_INFERENCE_COMPONENT_SCORE_ABSENT_KIND_BY_FIELD: Readonly<
   Record<LtrInferenceComponentScoreField, LtrInferenceComponentScoreAbsentKind>
@@ -73,6 +76,7 @@ const LTR_INFERENCE_COMPONENT_SCORE_ABSENT_KIND_BY_FIELD: Readonly<
   attributeAlignment: 'ltr_inference_component_score_absent_attribute_alignment',
   preferenceAlignment: 'ltr_inference_component_score_absent_preference_alignment',
   multilingualScore: 'ltr_inference_component_score_absent_multilingual_score',
+  recency: 'ltr_inference_component_score_absent_recency',
 };
 
 /** All known kinds — used for snapshot initialization and validation. */
@@ -96,6 +100,7 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'ltr_inference_component_score_absent_attribute_alignment',
   'ltr_inference_component_score_absent_preference_alignment',
   'ltr_inference_component_score_absent_multilingual_score',
+  'ltr_inference_component_score_absent_recency',
   'blocker_disabled_snapshot_pointer_missing',
   'blocker_disabled_aliases_table_missing',
   'blocker_snapshot_resolve_failure',

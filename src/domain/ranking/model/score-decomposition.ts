@@ -78,6 +78,12 @@ export interface ScoreDecomposition {
    * Absent when LTR was skipped or features unavailable.
    */
   readonly ltrFeatureVector?: readonly number[] | undefined;
+  /** Feature vector width corresponding to {@link ltrFeatureVector}. */
+  readonly ltrFeatureDimension?: number | undefined;
+  /** Canonical feature-name order corresponding to {@link ltrFeatureVector}. */
+  readonly ltrFeatureNameOrder?: readonly string[] | undefined;
+  /** Deterministic schema hash for the recorded LTR feature vector. */
+  readonly ltrFeatureSchemaHash?: string | undefined;
 
   // ─── Final ──────────────────────────────────────────────────────────────
 

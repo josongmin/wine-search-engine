@@ -153,14 +153,6 @@ describe('buildRankedRouteResolveResult', () => {
           entityId: createEntityId('opus-one-2018'),
           canonicalLabel: 'Opus One 2018',
           lanePresence: 'corroborated',
-          agreement: {
-            corroborated: true,
-            disagreement: false,
-            entityOnly: false,
-            generalOnly: false,
-          },
-          exactnessTier: 'exact',
-          entityPosteriorScore: 0.93,
           identityProvenance: {
             source: 'entity_resolver',
             entityId: createEntityId('opus-one-2018'),
@@ -230,14 +222,6 @@ describe('buildRankedRouteResolveResult', () => {
           entityId: createEntityId('opus-one-2018'),
           canonicalLabel: 'Opus One 2018',
           lanePresence: 'corroborated',
-          agreement: {
-            corroborated: true,
-            disagreement: false,
-            entityOnly: false,
-            generalOnly: false,
-          },
-          exactnessTier: 'exact',
-          entityPosteriorScore: 0.93,
           identityProvenance: {
             source: 'entity_resolver',
             entityId: createEntityId('opus-one-2018'),

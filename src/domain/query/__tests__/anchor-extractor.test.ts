@@ -35,6 +35,15 @@ class ExactAliasMatcher implements AliasMatcher {
   }
 }
 
+class RecordingExactAliasMatcher extends ExactAliasMatcher {
+  readonly queries: string[] = [];
+
+  override async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+    this.queries.push(normalizedQuery);
+    return super.findMatches(normalizedQuery);
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function makeMatchResult(
@@ -84,6 +93,22 @@ describe('AnchorExtractor', () => {
       expect(result[0]?.surfaceForm).toBe('Cabernet Sauvignon');
       expect(result[0]?.lookupVariants).toEqual(
         expect.arrayContaining(['cabernet sauvignon']),
+      );
+    });
+
+    it('"오푸" → curated Korean prefix transliteration still extracts the Opus One anchor', async () => {
+      const aliasMatcher = new ExactAliasMatcher(
+        new Map([
+          ['opus one', [makeMatchResult('Opus One', ['entity-opus-one'], 0.95)]],
+        ]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const result = await extractor.extract('오푸', normalizer.normalize('오푸'));
+      expect(result).toHaveLength(1);
+      expect(result[0]?.surfaceForm).toBe('Opus One');
+      expect(result[0]?.lookupVariants).toEqual(
+        expect.arrayContaining(['opus one']),
       );
     });
 
@@ -180,6 +205,44 @@ describe('AnchorExtractor', () => {
           expect.arrayContaining(['entity-yquem']),
         ]),
       );
+    });
+
+    it('does not merge lower-priority base token lookups once a full-query exact-like entity is already decisive', async () => {
+      const aliasMatcher = new RecordingExactAliasMatcher(
+        new Map([
+          ['샤토 라투르', [{
+            surfaceForm: '샤토 라투르',
+            normalizedForm: '샤토 라투르',
+            entityIds: [createEntityId('entity-latour')],
+            matchConfidence: 0.95,
+            lookupStrategy: 'exact',
+          }]],
+          ['샤토', [
+            {
+              surfaceForm: '샤또 라피트',
+              normalizedForm: '샤또 라피트',
+              entityIds: [createEntityId('entity-lafite')],
+              matchConfidence: 0.9,
+              lookupStrategy: 'prefix_exact',
+            },
+            {
+              surfaceForm: '샤또 무통',
+              normalizedForm: '샤또 무통',
+              entityIds: [createEntityId('entity-mouton')],
+              matchConfidence: 0.9,
+              lookupStrategy: 'prefix_exact',
+            },
+          ]],
+        ]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const anchors = await extractor.extract('샤토 라투르', normalizer.normalize('샤토 라투르'));
+
+      expect(anchors).toHaveLength(1);
+      expect(anchors[0]?.surfaceForm).toBe('샤토 라투르');
+      expect(aliasMatcher.queries).toContain('샤토 라투르');
+      expect(aliasMatcher.queries).not.toContain('샤토');
     });
   });
 

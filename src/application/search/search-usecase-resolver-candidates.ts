@@ -11,6 +11,11 @@ import type {
   EntityCandidateSource,
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import {
+  hasExactLikeLookupStrategy,
+  hasPhoneticLookupStrategy,
+  hasTranslationLookupStrategy,
+} from '../../domain/query/service/lookup-strategy-taxonomy.js';
 import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
 
 const ZERO_SIGNALS: MatchSignalSet = {
@@ -96,9 +101,12 @@ function isProducerOnlyAliasForDistinctWine(
 
 function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
   const keys = new Set<string>();
-  const identitySurfaces = Array.isArray(doc.aliasesIdentitySafe)
-    ? [doc.canonicalLabel, ...doc.aliasesIdentitySafe]
-    : [];
+  const aliases: readonly string[] = doc.aliasesIdentitySafe;
+  const label = doc.canonicalLabel;
+  const identitySurfaces: string[] = [
+    ...(typeof label === 'string' ? [label] : []),
+    ...aliases,
+  ];
 
   for (const surface of identitySurfaces) {
     if (isProducerOnlyAliasForDistinctWine(doc, surface)) {
@@ -155,10 +163,10 @@ function anchorMatchesIdentitySafeProjection(
 
 function inferAliasType(anchor: AnchorCandidate): AliasType {
   const strategies = new Set(anchor.lookupStrategies ?? []);
-  if (strategies.has('phonetic_exact') || strategies.has('phonetic_fuzzy')) {
+  if (hasPhoneticLookupStrategy(strategies)) {
     return 'phonetic';
   }
-  if (strategies.has('transliterated_exact') || strategies.has('transliterated_fuzzy')) {
+  if (hasTranslationLookupStrategy(strategies)) {
     return 'translation';
   }
   if (
@@ -177,12 +185,7 @@ function buildSignals(
   doc: RetrievalDocument,
 ): MatchSignalSet {
   const strategies = new Set(anchor.lookupStrategies ?? []);
-  const exactLike =
-    strategies.has('exact') ||
-    strategies.has('lexical_exact') ||
-    strategies.has('compact_exact') ||
-    strategies.has('transliterated_exact') ||
-    strategies.has('phonetic_exact');
+  const exactLike = hasExactLikeLookupStrategy(strategies);
   const fuzzyLike =
     strategies.has('fuzzy_char_ngram') ||
     strategies.has('transliterated_fuzzy') ||
@@ -203,10 +206,7 @@ function buildSignals(
     aliasExactMatch: exactSignalAllowed && exactLike ? anchor.confidence : 0,
     aliasFuzzyMatch: fuzzyLike ? anchor.confidence : 0,
     aliasTypePrior: anchor.confidence,
-    phoneticMatch:
-      strategies.has('phonetic_exact') || strategies.has('phonetic_fuzzy')
-        ? anchor.confidence
-        : 0,
+    phoneticMatch: hasPhoneticLookupStrategy(strategies) ? anchor.confidence : 0,
     editDistanceScore: fuzzyLike ? anchor.confidence * FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR : 0,
   };
 }

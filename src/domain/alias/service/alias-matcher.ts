@@ -101,6 +101,7 @@ export function normalizeForMatch(input: string): string {
   return input
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFC')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();

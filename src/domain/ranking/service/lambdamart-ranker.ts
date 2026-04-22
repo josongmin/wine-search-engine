@@ -56,25 +56,33 @@ const UINT32_TO_UNIT_INTERVAL_DIVISOR = 0x100000000;
 const FiniteWeightsSchema = z.array(z.number().finite()).length(LTR_FEATURE_DIMENSION);
 
 /**
- * E2-T2: Validates loaded model weights and falls back to uniform weights on failure.
- * Returns { weights, usedFallback } so callers can log + report.
+ * E2-T2: Validates loaded model weights and rejects corrupted models at the
+ * inference boundary instead of serving synthetic fallback scores.
  */
-export function validateAndNormalizeWeights(
+export function assertValidWeightsOrThrow(
   rawWeights: readonly number[],
-): { weights: readonly number[]; usedFallback: boolean } {
+  queryClass: string,
+): readonly number[] {
   const parsed = FiniteWeightsSchema.safeParse(rawWeights);
   if (!parsed.success) {
-    bootstrapLogger.warn(
-      { reason: parsed.error.message, rawLength: rawWeights.length, expectedLength: LTR_FEATURE_DIMENSION },
-      '[LambdaMART] Loaded weights failed validation — falling back to uniform weights',
+    throw new Error(
+      `LambdaMART invalid weights for queryClass '${queryClass}': ${parsed.error.message}; `
+      + `rawLength=${rawWeights.length}, expectedLength=${LTR_FEATURE_DIMENSION}`,
     );
-    const fallback = Array.from(
-      { length: LTR_FEATURE_DIMENSION },
-      () => LTR_UNIFORM_FEATURE_WEIGHT,
-    );
-    return { weights: fallback, usedFallback: true };
   }
-  return { weights: parsed.data, usedFallback: false };
+  return parsed.data;
+}
+
+function assertValidBiasOrThrow(
+  rawBias: number,
+  queryClass: string,
+): number {
+  if (!Number.isFinite(rawBias)) {
+    throw new Error(
+      `LambdaMART invalid bias for queryClass '${queryClass}': ${String(rawBias)}`,
+    );
+  }
+  return rawBias;
 }
 
 /**
@@ -101,6 +109,12 @@ export function assertFeatureParityOrThrow(
   queryClass: string,
   log: { warn: (ctx: Record<string, unknown>, msg: string) => void } = bootstrapLogger,
 ): void {
+  if (modelHash.length === 0) {
+    throw new Error(
+      `LambdaMART feature schema missing for queryClass '${queryClass}'; current=${currentHash}`,
+    );
+  }
+
   if (modelHash === currentHash) {
     return;
   }
@@ -384,8 +398,7 @@ export function trainLambdaMARTModel(
  * Scores a document's ranking using learned weights.
  * Inference path: clamp the score to [0,1] for downstream consumers.
  *
- * E2-T2: Validates weights via FiniteWeightsSchema — any NaN/Infinity weight
- * triggers fallback to uniform weights before scoring.
+ * E2-T2: Rejects invalid loaded model parameters instead of serving fallback scores.
  * E2-T3: finalScore is clamped to [0, 1] via clamp01().
  */
 export function scoreDocument(
@@ -397,17 +410,8 @@ export function scoreDocument(
     LTR_FEATURE_SCHEMA_HASH,
     weights.queryClass,
   );
-  const { weights: safeWeights } = validateAndNormalizeWeights(weights.weights);
-  // Guard bias: FiniteWeightsSchema only validates the weights array, not bias.
-  // A NaN/Infinity bias from a corrupted DB row would set score = bias before
-  // the feature loop runs, corrupting all LambdaMART scores silently.
-  const safeBias = Number.isFinite(weights.bias) ? weights.bias : LAMBDAMART_INITIAL_BIAS;
-  if (!Number.isFinite(weights.bias)) {
-    bootstrapLogger.warn(
-      { bias: weights.bias, queryClass: weights.queryClass },
-      '[LambdaMART] non-finite bias in loaded model — falling back to LAMBDAMART_INITIAL_BIAS',
-    );
-  }
+  const safeWeights = assertValidWeightsOrThrow(weights.weights, weights.queryClass);
+  const safeBias = assertValidBiasOrThrow(weights.bias, weights.queryClass);
   const raw = scoreFeaturesRaw(features, safeWeights, safeBias);
   return clamp01(raw);
 }

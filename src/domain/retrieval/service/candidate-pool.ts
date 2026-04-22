@@ -830,7 +830,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         beforeFusion: {
           sparse: sparseHits.length,
           dense: denseHits.length,
-          anchor: anchorHits?.length ?? 0,
+          anchor: anchorHits.length,
         },
         afterFusion: countAfterFusion,
         afterHardFilter: countAfterHardFilter,
@@ -879,7 +879,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         sparse_hits: sparseHits.length,
         learned_sparse_hits: learnedSparseHits.length,
         dense_hits: denseHits.length,
-        anchor_hits: anchorHits?.length ?? 0,
+        anchor_hits: anchorHits.length,
         skipped_phases: skippedPhases,
         final_candidates: assembled.candidates.length,
       },
@@ -1341,10 +1341,9 @@ function hybridCandidateToEnvelope(
   const channels = toCandidateChannels(candidate);
   const channelScores = [];
 
-  // Bugbash 2026-04-09 (Group C): per-channel raw scores must NOT fall
-  // back to retrievalFusionScore. That field is a fusion total (RRF) in
-  // some code paths and a raw BM25 score in others, and substituting it
-  // for a missing per-channel raw corrupts downstream LTR features.
+  // Bugbash 2026-04-09 (Group C): per-channel raw scores must never be
+  // fabricated from any fused score. Missing per-channel raw means missing
+  // evidence, not "reuse the fusion total".
   // Contract: when a per-channel rank is present but the matching raw is
   // missing, we log a warning and SKIP that channel entry rather than
   // fabricating an incorrect rawScore.

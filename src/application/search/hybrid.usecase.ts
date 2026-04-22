@@ -62,6 +62,7 @@ interface HybridUseCaseDeps {
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly judgeTimeoutMs?: number | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   readonly cacheService?: SearchResponseCachePort | undefined;
   readonly cacheLookupRuntimeState?: CacheLookupRuntimeState | undefined;
@@ -118,6 +119,7 @@ export class HybridUseCase {
         querySanitizer: this.deps.querySanitizer,
         injectionJudge: this.deps.injectionJudge,
         judgeFailureMode: this.deps.judgeFailureMode,
+        judgeTimeoutMs: this.deps.judgeTimeoutMs,
         queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
       },
       queryPlanner: this.deps.queryPlanner,

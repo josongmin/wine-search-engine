@@ -646,31 +646,15 @@ export function annotateCandidateConstraintEvidence(
     }
   }
 
-  // Use Object.assign on a fresh object to avoid destructuring + spreading
-  // the full HybridCandidate (~40 fields). The result shares property
-  // references with the original (safe: all fields are readonly primitives,
-  // readonly arrays, or readonly objects).
-  const result = Object.assign(
-    Object.create(null) as HybridCandidate,
-    candidate,
-    { matchedConstraints: [...matched] },
-  );
-  if (unmetHardSet.size > 0) {
-    (result as { unmetHardConstraints: readonly string[] }).unmetHardConstraints = [...unmetHardSet];
-  } else {
-    delete (result as { unmetHardConstraints?: readonly string[] }).unmetHardConstraints;
-  }
-  if (matchedAtomRefs !== undefined) {
-    (result as { matchedAtomRefs: readonly string[] }).matchedAtomRefs = matchedAtomRefs;
-  } else {
-    delete (result as { matchedAtomRefs?: readonly string[] }).matchedAtomRefs;
-  }
-  if (unmetAtomRefs !== undefined) {
-    (result as { unmetAtomRefs: readonly string[] }).unmetAtomRefs = unmetAtomRefs;
-  } else {
-    delete (result as { unmetAtomRefs?: readonly string[] }).unmetAtomRefs;
-  }
-  return result;
+  return {
+    ...candidate,
+    matchedConstraints: [...matched],
+    ...(unmetHardSet.size > 0
+      ? { unmetHardConstraints: [...unmetHardSet] }
+      : {}),
+    ...(matchedAtomRefs !== undefined ? { matchedAtomRefs } : {}),
+    ...(unmetAtomRefs !== undefined ? { unmetAtomRefs } : {}),
+  };
 }
 
 export function annotateCandidateConstraintEvidenceBatch(

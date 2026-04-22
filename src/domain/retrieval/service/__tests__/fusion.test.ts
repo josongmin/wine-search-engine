@@ -32,7 +32,7 @@ describe('FusionService', () => {
     expect(new Set(ids).size).toBe(3);
   });
 
-  it('sorts results by descending retrievalFusionScore', () => {
+  it('sorts results by descending fusionRrfTotal', () => {
     // wine-1 appears in both passes (rank 1 each) → higher fused score
     // wine-2 appears only in sparse (rank 2)
     const sparse = [sparseHit('wine-1', 1), sparseHit('wine-2', 2)];

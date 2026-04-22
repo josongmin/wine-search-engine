@@ -101,6 +101,43 @@ describe('SmartAliasMatcher — SOTA++ Enhancements', () => {
       expect(results[0]!.lookupStrategy).toContain('transliterated_exact');
     });
 
+    it('should match incomplete Hangul IME prefixes through curated Korean exception surfaces', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Opus One', entityId, 0.95);
+
+      const results = await matcher.findMatches('오푸스ㅇ');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.lookupStrategy).toContain('hangul_ime_completion');
+      expect(results[0]!.lookupStrategy).toContain('transliterated_fuzzy');
+      expect(results[0]!.matchConfidence).toBe(0.95);
+    });
+
+    it('should match latin partial prefixes through prefix substrate', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Opus One', entityId, 0.95);
+
+      const results = await matcher.findMatches('opu');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.lookupStrategy).toContain('prefix_exact');
+      expect(results[0]!.matchConfidence).toBeCloseTo(0.855);
+    });
+
+    it('should match short Korean partial prefixes through the curated prefix substrate', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Opus One', entityId, 0.95);
+
+      const results = await matcher.findMatches('오푸');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.lookupStrategy).toContain('prefix_exact');
+      expect(results[0]!.matchConfidence).toBeGreaterThan(0.84);
+    });
+
     it('should match phonetic near-miss aliases via phonetic compact exactness', async () => {
       const matcher = new InMemoryAliasMatcher();
       const entityId = createEntityId();
@@ -111,6 +148,15 @@ describe('SmartAliasMatcher — SOTA++ Enhancements', () => {
       expect(results[0]!.entityIds).toContain(entityId);
       expect(results[0]!.lookupStrategy).toContain('phonetic_exact');
       expect(results[0]!.matchConfidence).toBeGreaterThan(0.8);
+    });
+
+    it('should not treat second-token fragments as exact-like prefixes', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Opus One', entityId, 0.95);
+
+      const results = await matcher.findMatches('one');
+      expect(results).toEqual([]);
     });
   });
 

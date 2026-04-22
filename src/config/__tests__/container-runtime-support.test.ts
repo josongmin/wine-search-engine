@@ -152,7 +152,7 @@ describe('buildRuntimeSupportServices', () => {
     await expect(buildRuntimeSupportServices(config, {})).rejects.toBeDefined();
   });
 
-  it('loads LTR models from local runtime artifact when PG is unavailable', async () => {
+  it('keeps runtime LTR artifact disabled even when a local file is configured', async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), 'runtime-ltr-support-'));
     const modelPath = path.join(tempDir, 'runtime-ltr-models.json');
     const artifact = {
@@ -176,14 +176,29 @@ describe('buildRuntimeSupportServices', () => {
 
     const services = await buildRuntimeSupportServices(config, {});
 
-    expect(services.ltrModels).toBeDefined();
-    expect(services.ltrModels?.size).toBe(1);
-    expect(services.ltrModels?.get('red_wine')).toBeDefined();
+    expect(services.ltrModels).toBeUndefined();
+    expect(services.runtimeReadiness.runtimeLtrArtifact).toEqual(
+      expect.objectContaining({
+        configured: true,
+        loaded: false,
+        issue: 'disabled',
+      }),
+    );
     expect(services.runtimeReadiness.ltrModels.effective).toEqual(
       expect.objectContaining({
-        source: 'runtime_artifact',
-        loaded: true,
-        modelCount: 1,
+        source: 'none',
+        loaded: false,
+        modelCount: 0,
+        issue: 'disabled',
+        required: false,
+      }),
+    );
+    expect(services.runtimeReadiness.ltrModels.artifact).toEqual(
+      expect.objectContaining({
+        configured: false,
+        loaded: false,
+        selected: false,
+        issue: 'disabled',
       }),
     );
     await rm(tempDir, { recursive: true, force: true });
@@ -204,7 +219,7 @@ describe('buildRuntimeSupportServices', () => {
       expect.objectContaining({
         configured: true,
         loaded: false,
-        issue: 'missing_or_invalid',
+        issue: 'disabled',
       }),
     );
     expect(services.ltrModels).toBeUndefined();
@@ -228,7 +243,7 @@ describe('buildRuntimeSupportServices', () => {
     );
   });
 
-  it('falls back to local runtime artifact when PG returns zero models', async () => {
+  it('does not query PG or select runtime artifacts while LTR serving is disabled', async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), 'runtime-ltr-support-'));
     const modelPath = path.join(tempDir, 'runtime-ltr-models.json');
     const artifact = {
@@ -256,16 +271,29 @@ describe('buildRuntimeSupportServices', () => {
 
     const services = await buildRuntimeSupportServices(config, { pool });
 
-    expect(services.ltrModels).toBeDefined();
-    expect(services.ltrModels?.size).toBe(1);
-    expect(services.ltrModels?.get('red_wine')).toBeDefined();
-    expect(services.runtimeReadiness.ltrModels.effective.source).toBe('runtime_artifact');
-    expect(services.runtimeReadiness.ltrModels.artifact.selected).toBe(true);
-    expect(pool.query).toHaveBeenCalled();
+    expect(services.ltrModels).toBeUndefined();
+    expect(services.runtimeReadiness.ltrModels.effective).toEqual(
+      expect.objectContaining({
+        source: 'none',
+        loaded: false,
+        modelCount: 0,
+        issue: 'disabled',
+        required: false,
+      }),
+    );
+    expect(services.runtimeReadiness.ltrModels.artifact.selected).toBe(false);
+    expect(services.runtimeReadiness.ltrModels.registry).toEqual(
+      expect.objectContaining({
+        configured: false,
+        loaded: false,
+        issue: 'disabled',
+      }),
+    );
+    expect(pool.query).not.toHaveBeenCalled();
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it('binds PG LTR registry loading to the active serving snapshot pointer', async () => {
+  it('skips snapshot-bound registry lookup entirely while LTR serving is disabled', async () => {
     const activeSnapshotId = 'search-snapshot:v1:active-serving';
     const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
       if (sql.includes('active_search_snapshot')) {
@@ -307,22 +335,23 @@ describe('buildRuntimeSupportServices', () => {
 
     const services = await buildRuntimeSupportServices(config, { pool });
 
-    expect(services.ltrModels?.get('semantic_preference')).toBeDefined();
+    expect(services.ltrModels).toBeUndefined();
     expect(services.runtimeReadiness.ltrModels.registry).toEqual(
       expect.objectContaining({
-        configured: true,
-        loaded: true,
-        searchSnapshotId: activeSnapshotId,
-        modelCount: 1,
+        configured: false,
+        loaded: false,
+        issue: 'disabled',
       }),
     );
     expect(services.runtimeReadiness.ltrModels.effective).toEqual(
       expect.objectContaining({
-        source: 'registry',
-        loaded: true,
-        searchSnapshotId: activeSnapshotId,
-        modelCount: 1,
+        source: 'none',
+        loaded: false,
+        modelCount: 0,
+        issue: 'disabled',
+        required: false,
       }),
     );
+    expect(query).not.toHaveBeenCalled();
   });
 });

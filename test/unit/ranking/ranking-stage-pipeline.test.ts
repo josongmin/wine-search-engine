@@ -17,6 +17,7 @@ import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled
 import type { ConstraintBundle, EvidenceItem } from '../../../src/domain/shared/types/index.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import { RANKING_STAGES } from '../../../src/domain/ranking/model/ranking-stage.js';
+import { makeHybridCandidate } from '../../support/hybrid-candidate-test-factory.js';
 
 function makeComponentScores(overrides?: Partial<ComponentScores>): ComponentScores {
   return {
@@ -34,11 +35,9 @@ function makeComponentScores(overrides?: Partial<ComponentScores>): ComponentSco
 }
 
 function makeCandidate(id: string): HybridCandidate {
-  return {
+  return makeHybridCandidate({
     entityId: createEntityId(id),
-    retrievalFusionScore: 0.5,
     fusionRrfTotal: 0.5,
-    matchedConstraints: [],
     unmetHardConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'default',
@@ -47,7 +46,7 @@ function makeCandidate(id: string): HybridCandidate {
       filtersApplied: [],
       candidateSources: [],
     },
-  } as unknown as HybridCandidate;
+  });
 }
 
 function makeCandidates(count: number, prefix = 'wine'): HybridCandidate[] {

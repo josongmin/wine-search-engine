@@ -30,6 +30,8 @@ import type { CandidatePoolPort } from '../../src/application/search/port/search
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../src/domain/retrieval/model/retrieval-input.js';
 import type { QueryRewriter, RewriteResult } from '../../src/domain/retrieval/service/query-rewriter.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 describe('CRITIC_RETRY_MAX type-level lock', () => {
   it('CRITIC_RETRY_MAX === 3', () => {
@@ -38,7 +40,9 @@ describe('CRITIC_RETRY_MAX type-level lock', () => {
 });
 
 function mkCandidate(id: string): HybridCandidate {
-  return { entityId: id as never, retrievalTraces: [] } as unknown as HybridCandidate;
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
+  });
 }
 
 const STUB_INPUT = {

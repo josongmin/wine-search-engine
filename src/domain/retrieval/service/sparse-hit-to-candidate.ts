@@ -49,9 +49,10 @@ export function sparseHitToCandidate(
     // intentionally absent: these candidates were never fused, so
     // fabricating a value would violate the semantic split contract
     // (fusionRrfTotal ≡ RRF total, not BM25 raw).
-    // retrievalFusionScore omitted — field is optional and deprecated;
-    // consumers fall back to sparseRawScore via candidate-pool mapping.
+    // No fused-score field is written here. Downstream consumers must read
+    // sparseRawScore for browse/compare candidates.
     sparseRawScore: hit.score,
+    identityExactnessTier: 'none',
     matchedConstraints: [],
     retrievalTrace: trace,
   };

@@ -1,7 +1,7 @@
 /**
  * E2 Epic tasks — tests for:
  *   E2-T1: conformal-config SSoT module
- *   E2-T2: LTR weights Zod validation on load (NaN/Infinity → uniform fallback)
+ *   E2-T2: LTR weights validation rejects corrupted live models
  *   E2-T3: finalScore clamp after weighted sum
  *   E2-T4: default weights sum to 1.0
  *   E2-T5: feature-parity-hash serve-time mismatch warning
@@ -15,7 +15,7 @@ import {
 } from '../../shared/config/conformal-config.js';
 import {
   scoreDocument,
-  validateAndNormalizeWeights,
+  assertValidWeightsOrThrow,
   DEFAULT_HEURISTIC_WEIGHTS,
   LAMBDAMART_FEATURE_DIMENSION,
   LTR_FEATURE_SCHEMA_HASH,
@@ -74,58 +74,57 @@ function makeQueryClassWeights(weights: readonly number[]): QueryClassWeights {
   };
 }
 
-// ── E2-T2: LTR weights Zod validation — NaN/Infinity → uniform fallback ─────
+// ── E2-T2: LTR weights validation — corrupted live models reject ─────────────
 
-describe('E2-T2: validateAndNormalizeWeights — NaN/Infinity fallback', () => {
-  it('weights with NaN → falls back to uniform weights', () => {
+describe('E2-T2: assertValidWeightsOrThrow — corrupted models reject', () => {
+  it('weights with NaN → throws', () => {
     const badWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
       index === 0 ? Number.NaN : 0.5,
     );
-    const result = validateAndNormalizeWeights(badWeights);
-    expect(result.usedFallback).toBe(true);
-    expect(result.weights).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
-    for (const w of result.weights) {
-      expect(w).toBeCloseTo(1 / LAMBDAMART_FEATURE_DIMENSION, 10);
-    }
+    expect(() => assertValidWeightsOrThrow(badWeights, 'test')).toThrow(/invalid weights/u);
   });
 
-  it('weights with Infinity → falls back to uniform weights', () => {
+  it('weights with Infinity → throws', () => {
     const badWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
       index === 0 ? Number.POSITIVE_INFINITY : 0.25,
     );
-    const result = validateAndNormalizeWeights(badWeights);
-    expect(result.usedFallback).toBe(true);
+    expect(() => assertValidWeightsOrThrow(badWeights, 'test')).toThrow(/invalid weights/u);
   });
 
-  it('weights with -Infinity → falls back to uniform weights', () => {
+  it('weights with -Infinity → throws', () => {
     const badWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
       index === 0 ? Number.NEGATIVE_INFINITY : 0.5,
     );
-    const result = validateAndNormalizeWeights(badWeights);
-    expect(result.usedFallback).toBe(true);
+    expect(() => assertValidWeightsOrThrow(badWeights, 'test')).toThrow(/invalid weights/u);
   });
 
-  it('empty array → falls back to uniform weights', () => {
-    const result = validateAndNormalizeWeights([]);
-    expect(result.usedFallback).toBe(true);
+  it('empty array → throws', () => {
+    expect(() => assertValidWeightsOrThrow([], 'test')).toThrow(/invalid weights/u);
   });
 
-  it('valid finite weights → used as-is (no fallback)', () => {
+  it('valid finite weights → returned as-is', () => {
     const goodWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 0.5);
-    const result = validateAndNormalizeWeights(goodWeights);
-    expect(result.usedFallback).toBe(false);
-    expect(result.weights).toEqual(goodWeights);
+    expect(assertValidWeightsOrThrow(goodWeights, 'test')).toEqual(goodWeights);
   });
 
-  it('scoreDocument uses uniform fallback when weights contain NaN', () => {
+  it('scoreDocument rejects corrupted weights instead of serving fallback scores', () => {
     const badModel = makeQueryClassWeights(
       Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
         index === 0 ? Number.NaN : 0.5,
       ),
     );
-    // Should not throw, returns finite score
-    const score = scoreDocument(ZERO_FEATURES, badModel);
-    expect(Number.isFinite(score)).toBe(true);
+    expect(() => scoreDocument(ZERO_FEATURES, badModel)).toThrow(/invalid weights/u);
+  });
+
+  it('scoreDocument rejects corrupted bias instead of serving fallback scores', () => {
+    const badModel: QueryClassWeights = {
+      ...makeQueryClassWeights(
+        Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 0.5),
+      ),
+      bias: Number.NaN,
+    };
+
+    expect(() => scoreDocument(ZERO_FEATURES, badModel)).toThrow(/invalid bias/u);
   });
 });
 

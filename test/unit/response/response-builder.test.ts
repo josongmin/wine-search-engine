@@ -288,6 +288,121 @@ describe('ResponseBuilder', () => {
 
       expect(response.clarification).toEqual(clarification);
     });
+
+    it('deduplicates identical clarification candidates and aligns structured options to visible candidates', () => {
+      const clarification: ClarificationPayload = {
+        reason: 'Multiple wines matched',
+        candidates: [
+          {
+            entityId: createEntityId('wine-001'),
+            label: '2019 Opus One Overture',
+            distinguishingFeatures: ['Napa Valley'],
+          },
+          {
+            entityId: createEntityId('wine-002'),
+            label: '2019 Opus One Overture',
+            distinguishingFeatures: ['Napa Valley'],
+          },
+          {
+            entityId: createEntityId('wine-003'),
+            label: 'Opus One 2018',
+            distinguishingFeatures: [],
+          },
+        ],
+        suggestionType: 'disambiguation',
+        structuredPayload: {
+          kind: 'anchor_disambiguation',
+          question: '어떤 후보를 찾으시나요?',
+          options: ['2019 Opus One Overture', '2019 Opus One Overture', 'Opus One 2018'],
+        },
+      };
+
+      const response = builder.build(makeBaseParams({ clarification }));
+
+      expect(response.clarification?.candidates.map((candidate) => candidate.label)).toEqual([
+        '2019 Opus One Overture',
+        'Opus One 2018',
+      ]);
+      expect(response.clarification?.structuredPayload?.options).toEqual([
+        '2019 Opus One Overture',
+        'Opus One 2018',
+      ]);
+      expect(response.clarification?.structuredPayload?.optionEntities?.map((candidate) => candidate.entityId)).toEqual([
+        createEntityId('wine-001'),
+        createEntityId('wine-003'),
+      ]);
+    });
+
+    it('preserves same-label clarification candidates when distinguishing features differ', () => {
+      const clarification: ClarificationPayload = {
+        reason: 'Multiple wines matched',
+        candidates: [
+          {
+            entityId: createEntityId('wine-001'),
+            label: 'Opus One',
+            distinguishingFeatures: ['2018', 'Napa Valley'],
+          },
+          {
+            entityId: createEntityId('wine-002'),
+            label: 'Opus One',
+            distinguishingFeatures: ['2019', 'Napa Valley'],
+          },
+        ],
+        suggestionType: 'disambiguation',
+        structuredPayload: {
+          kind: 'anchor_disambiguation',
+          question: '어떤 후보를 찾으시나요?',
+          options: ['Opus One'],
+        },
+      };
+
+      const response = builder.build(makeBaseParams({ clarification }));
+
+      expect(response.clarification?.candidates).toHaveLength(2);
+      expect(response.clarification?.structuredPayload?.options).toEqual([
+        'Opus One',
+        'Opus One',
+      ]);
+      expect(response.clarification?.structuredPayload?.optionEntities?.map((candidate) => candidate.entityId)).toEqual([
+        createEntityId('wine-001'),
+        createEntityId('wine-002'),
+      ]);
+    });
+  });
+
+  describe('result deduplication', () => {
+    it('deduplicates display-identical results at the response boundary', () => {
+      const evidence = [makeEvidenceItem()];
+      const primary = makeResultItem(evidence);
+      const duplicate = {
+        ...makeResultItem(evidence),
+        entity: {
+          ...makeResultItem(evidence).entity,
+          entityId: createEntityId('wine-duplicate'),
+        },
+        relevanceScore: 0.83,
+      };
+      const distinct = {
+        ...makeResultItem(evidence),
+        entity: {
+          entityId: createEntityId('wine-002'),
+          canonicalLabel: 'Opus One 2019',
+          type: 'wine',
+        },
+        relevanceScore: 0.87,
+      };
+
+      const response = builder.build(
+        makeBaseParams({
+          results: [primary, duplicate, distinct],
+        }),
+      );
+
+      expect(response.results.map((result) => result.entity.canonicalLabel)).toEqual([
+        'Opus One 2018',
+        'Opus One 2019',
+      ]);
+    });
   });
 
   describe('meta.version', () => {
@@ -640,7 +755,14 @@ describe('ResponseBuilder', () => {
     it('results array contains all provided result items', () => {
       const items = [
         makeResultItem([makeEvidenceItem()]),
-        makeResultItem([makeEvidenceItem()]),
+        {
+          ...makeResultItem([makeEvidenceItem()]),
+          entity: {
+            entityId: createEntityId('wine-002'),
+            canonicalLabel: 'Opus One 2019',
+            type: 'wine',
+          },
+        },
       ];
       const params = makeBaseParams({ results: items });
 

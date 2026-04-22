@@ -45,7 +45,7 @@ function makeCandidate(entityId: string, label: string): HybridCandidate {
     entityId,
     canonicalLabel: label,
     producer: 'Opus One',
-    retrievalFusionScore: 0.9,
+    fusionRrfTotal: 0.9,
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'producer_browse',

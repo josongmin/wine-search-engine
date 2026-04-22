@@ -9,6 +9,14 @@ import {
   buildAliasLookupPlan,
   isPhoneticAliasSurfaceCompatible,
 } from '../../domain/query/service/alias-lookup-plan.js';
+import {
+  buildAliasPrefixTerms,
+  isEligiblePrefixQuery,
+} from '../../domain/query/service/alias-prefix-terms.js';
+import {
+  resolveAliasMatchConfidence,
+  type AliasMatchConfidenceStrategy,
+} from '../../domain/query/service/alias-match-confidence.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
@@ -41,14 +49,7 @@ interface PgAliasRecord {
   readonly confidence: number;
 }
 
-type AliasStrategy =
-  | 'exact'
-  | 'lexical_exact'
-  | 'compact_exact'
-  | 'transliterated_exact'
-  | 'phonetic_exact'
-  | 'transliterated_fuzzy'
-  | 'hangul_ime_completion';
+type AliasStrategy = AliasMatchConfidenceStrategy;
 
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 
@@ -83,6 +84,10 @@ function tokenizeForLookup(value: string): readonly string[] {
   return buildNormalizedQueryViews(value).punctuationStripped
     .split(/\s+/)
     .filter(Boolean);
+}
+
+function normalizeStoredAliasValue(value: string): string {
+  return buildNormalizedQueryViews(value).strict;
 }
 
 function phoneticCompactForLookup(value: string): string {
@@ -250,12 +255,18 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   private readonly wholeTokenIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly compactIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly phoneticIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  private readonly prefixIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly hangulCompletionPrefixIndex = new Map<string, readonly HangulCompletionAliasRecord[]>();
+  private readonly prefixTermsByAliasId = new Map<string, readonly string[]>();
 
   constructor(
     aliases: readonly SnapshotAliasRecord[],
   ) {
-    for (const alias of aliases) {
+    for (const rawAlias of aliases) {
+      const alias: IndexedAliasRecord = {
+        ...rawAlias,
+        normalizedValue: normalizeStoredAliasValue(rawAlias.normalizedValue),
+      };
       this.addToIndex(this.exactIndex, alias.normalizedValue, alias);
       for (const token of tokenizeForLookup(alias.normalizedValue)) {
         this.addToIndex(this.wholeTokenIndex, token, alias);
@@ -269,6 +280,14 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
       if (phoneticValue.length > 0) {
         this.addToIndex(this.phoneticIndex, phoneticValue, alias);
+      }
+
+      const prefixTerms = buildAliasPrefixTerms([alias.value, alias.normalizedValue]);
+      this.prefixTermsByAliasId.set(alias.aliasId, prefixTerms);
+      for (const prefixTerm of prefixTerms) {
+        for (const prefix of this.enumeratePrefixes(prefixTerm)) {
+          this.addToIndex(this.prefixIndex, prefix, alias);
+        }
       }
 
       for (const surface of this.buildHangulCompletionSurfaces(alias)) {
@@ -304,11 +323,16 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       compactList: compactTokens,
       transliteratedList: transliteratedTokens,
       phoneticList: phoneticTokens,
+      views,
     } = lookupPlan;
     const exactSet = new Set(tokens);
     const compactSet = new Set(compactTokens);
     const transliteratedSet = new Set(transliteratedTokens);
     const phoneticSet = new Set(phoneticTokens);
+    const prefixTokens = buildAliasPrefixTerms([views.strict]).filter((token) => isEligiblePrefixQuery(token));
+    const transliteratedPrefixTokens = views.transliterated !== undefined
+      ? buildAliasPrefixTerms([views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
+      : [];
     const candidateAliases = new Map<string, IndexedAliasRecord>();
     const grouped = new Map<string, GroupedAliasMatch>();
 
@@ -335,27 +359,44 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       }
     }
 
+    for (const token of [...prefixTokens, ...transliteratedPrefixTokens]) {
+      for (const alias of this.prefixIndex.get(token) ?? []) {
+        candidateAliases.set(alias.aliasId, alias);
+      }
+    }
+
     const hangulCompletionMatches = this.findHangulCompletionAliases(tokens);
 
     for (const alias of candidateAliases.values()) {
       const compactValue = compactForLookup(alias.normalizedValue);
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
+      const prefixTerms = this.prefixTermsByAliasId.get(alias.aliasId) ?? [];
       const hasWholeTokenMatch =
         tokens.some((token) => (
           token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH
           && !token.includes(' ')
           && tokenizeForLookup(alias.normalizedValue).includes(token)
         ));
+      const hasTransliteratedPrefixMatch = transliteratedPrefixTokens.some((token) =>
+        prefixTerms.some((term) => term.startsWith(token))
+      );
+      const hasPrefixMatch = prefixTokens.some((token) =>
+        prefixTerms.some((term) => term.startsWith(token))
+      );
       const strategy: AliasStrategy | null =
         transliteratedSet.has(alias.normalizedValue) || transliteratedSet.has(compactValue)
           ? 'transliterated_exact'
-          : compactSet.has(compactValue)
-            ? 'compact_exact'
-            : hasWholeTokenMatch
-              ? 'lexical_exact'
-              : exactSet.has(alias.normalizedValue)
-                ? 'exact'
-                : phoneticSet.has(phoneticValue)
+        : exactSet.has(alias.normalizedValue)
+          ? 'exact'
+        : compactSet.has(compactValue)
+          ? 'compact_exact'
+        : hasWholeTokenMatch
+          ? 'lexical_exact'
+        : hasTransliteratedPrefixMatch
+          ? 'transliterated_prefix'
+        : hasPrefixMatch
+          ? 'prefix_exact'
+        : phoneticSet.has(phoneticValue)
                   ? isPhoneticAliasSurfaceCompatible(trimmed, alias.value)
                     ? 'phonetic_exact'
                     : null
@@ -409,6 +450,18 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     this.hangulCompletionPrefixIndex.set(prefix, [...existing, record]);
   }
 
+  private enumeratePrefixes(term: string): readonly string[] {
+    const prefixes = new Set<string>();
+    for (let length = 1; length <= term.length; length += 1) {
+      const prefix = term.slice(0, length).trim();
+      if (!isEligiblePrefixQuery(prefix)) {
+        continue;
+      }
+      prefixes.add(prefix);
+    }
+    return [...prefixes];
+  }
+
   private buildHangulCompletionSurfaces(alias: IndexedAliasRecord): readonly string[] {
     const surfaces = new Set<string>();
     for (const value of [alias.value, alias.normalizedValue]) {
@@ -441,9 +494,6 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     };
 
     for (let prefixLength = 1; prefixLength < key.key.length; prefixLength += 1) {
-      if (key.syllableBoundaryOffsets.has(prefixLength)) {
-        continue;
-      }
       this.addUniqueHangulCompletionPrefix(key.key.slice(0, prefixLength), record);
     }
   }
@@ -466,9 +516,6 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         if (!record.jamoKey.startsWith(key.key)) {
           continue;
         }
-        if (record.syllableBoundaryOffsets.has(key.key.length) && !key.containsStandaloneJamo) {
-          continue;
-        }
         matches.set(`${record.alias.aliasId}\u0000${record.jamoKey}`, record);
       }
     }
@@ -482,12 +529,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   ): void {
     const key = `${alias.normalizedValue}\u0000${alias.value}`;
     const existing = grouped.get(key);
+    const matchConfidence = resolveAliasMatchConfidence(alias.confidencePrior, strategy);
     if (existing === undefined) {
       grouped.set(key, {
         surfaceForm: alias.value,
         normalizedForm: alias.normalizedValue,
         entityIds: new Set([alias.entityId]),
-        matchConfidence: alias.confidencePrior,
+        matchConfidence,
         strategies: new Set([strategy]),
       });
       return;
@@ -495,8 +543,8 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
 
     existing.entityIds.add(alias.entityId);
     existing.strategies.add(strategy);
-    if (alias.confidencePrior > existing.matchConfidence) {
-      existing.matchConfidence = alias.confidencePrior;
+    if (matchConfidence > existing.matchConfidence) {
+      existing.matchConfidence = matchConfidence;
     }
   }
 }

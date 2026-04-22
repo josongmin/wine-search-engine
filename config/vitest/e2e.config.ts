@@ -21,6 +21,7 @@ export default defineConfig({
       'test/e2e/v2-routes.contract.test.ts',
       'test/e2e/response-invariants.test.ts',
       'test/e2e/realistic-scenarios.test.ts',
+      'test/e2e/core-korean-iconic-entities.test.ts',
       'test/e2e/edge-cases.input.test.ts',
       'test/e2e/edge-cases.protocol.test.ts',
       'test/e2e/hard-scenarios.test.ts',

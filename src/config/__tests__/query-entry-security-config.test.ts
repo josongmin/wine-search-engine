@@ -2,6 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { parseEnv } from '../env.js';
 
 describe('query entry security config', () => {
+  it('defaults the Layer 2 judge timeout to the provider transport timeout budget', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+    });
+
+    expect(config.queryEntrySecurity.judgeTimeoutMs).toBe(config.openai.injectionHttpTimeoutMs);
+  });
+
+  it('allows an explicit Layer 2 judge timeout override', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      INJECTION_JUDGE_TIMEOUT_MS: '12000',
+    });
+
+    expect(config.queryEntrySecurity.judgeTimeoutMs).toBe(12_000);
+  });
+
   it('defaults injection judge failures to fail_closed', () => {
     const config = parseEnv({
       NODE_ENV: 'test',

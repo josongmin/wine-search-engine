@@ -10,9 +10,10 @@ import { ComparisonTable } from '@/features/comparison';
 import { FeedbackButtons } from '@/features/feedback';
 import { FloatingSearchBar } from './floating-search-bar';
 
-function MetaBar({ resultCount, decisionStatus, executionMode, queryMs }: {
+function MetaBar({ resultCount, decisionStatus, ambiguousLabel, executionMode, queryMs }: {
   resultCount: number;
   decisionStatus: string;
+  ambiguousLabel?: string;
   executionMode?: string;
   queryMs?: number;
 }) {
@@ -28,7 +29,7 @@ function MetaBar({ resultCount, decisionStatus, executionMode, queryMs }: {
       )}
       {decisionStatus === 'ambiguous' && (
         <span className="rounded-full border border-amber-300/60 bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300">
-          복수 해석
+          {ambiguousLabel ?? '복수 해석'}
         </span>
       )}
       {executionMode === 'heuristic' && (
@@ -87,6 +88,10 @@ function ResultsContent() {
   if (data.query_type !== 'search') return null;
 
   const isComparison = data.result_type === 'comparison';
+  const ambiguousLabel = data.engine_decision.decision_status === 'ambiguous'
+    && (data.clarification?.suggestion_type === 'disambiguation' || data.results.length > 0)
+    ? '비슷한 후보'
+    : undefined;
 
   if (isComparison && data.results.length < 2) {
     return (
@@ -105,6 +110,7 @@ function ResultsContent() {
       <MetaBar
         resultCount={data.results.length}
         decisionStatus={data.engine_decision.decision_status}
+        ambiguousLabel={ambiguousLabel}
         executionMode={data.engine_decision.execution_mode}
         queryMs={data.meta?.query_time_ms}
       />

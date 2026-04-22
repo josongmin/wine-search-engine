@@ -18,47 +18,15 @@ import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../../shared/types/index.js';
 import type { CanonicalEntityId } from '../../../shared/types/index.js';
 import { recipientProfileEvidenceAxes } from '../../../query/service/recipient-situation-profile.js';
+import { makeHybridCandidate } from '../../../../../test/support/hybrid-candidate-test-factory.js';
 
 // Minimal HybridCandidate factory — only sets the fields under test.
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
-  return {
+  return makeHybridCandidate({
     entityId: 'wine-001' as CanonicalEntityId,
-    matchedConstraints: [],
-    retrievalFusionScore: 0.5,
-    // geography
-    country: undefined,
-    region: undefined,
-    appellation: undefined,
-    // type
-    wineType: undefined,
-    style: undefined,
-    closure: undefined,
-    // variety
-    grapePrimary: undefined,
-    grapes: undefined,
-    // numeric
-    vintageYear: undefined,
-    priceUsd: undefined,
-    alcoholPct: undefined,
-    criticScoreNormalized: undefined,
-    producerPrestige: undefined,
-    body: undefined,
-    sweetness: undefined,
-    acidity: undefined,
-    tannin: undefined,
-    finishLength: undefined,
-    // other
-    priceBand: undefined,
-    pairing: undefined,
-    occasion: undefined,
-    classification: undefined,
-    certifications: undefined,
-    soilType: undefined,
-    producerType: undefined,
-    drinkingWindowStart: undefined,
-    drinkingWindowEnd: undefined,
+    fusionRrfTotal: 0.5,
     ...overrides,
-  } as unknown as HybridCandidate;
+  });
 }
 
 function makeConstraint(

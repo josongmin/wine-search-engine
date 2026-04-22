@@ -23,6 +23,8 @@ import type { QueryPlanV1 } from '../../src/domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { RankedResult } from '../../src/domain/ranking/model/ranked-result.js';
 import type { ProvenancePolicy } from '../../src/domain/query/model/engine-execution-contract.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 const BUNDLE: ConstraintBundle = {
   hard: [
@@ -62,13 +64,13 @@ const POLICY: ProvenancePolicy = {
 };
 
 function makeCandidate(matched: readonly string[]): HybridCandidate {
-  return {
-    entityId: 'e1' as HybridCandidate['entityId'],
+  return makeHybridCandidate({
+    entityId: createEntityId('e1'),
     publicEntityId: 'e1',
     baseScore: 1,
     retrievalProvenance: { channels: [] },
     matchedConstraints: matched,
-  } as HybridCandidate;
+  });
 }
 
 function makeRanked(matched: readonly string[], unmet: readonly string[]): RankedResult {

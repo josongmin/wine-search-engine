@@ -9,12 +9,14 @@ import { resolveRequiredAttributes } from '../../domain/query/service/graph-requ
 import type {
   DualLanePresence,
   DualLaneArtifact,
+  EntityLaneCandidateArtifact,
 } from '../../domain/retrieval/model/dual-lane-artifact.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
 } from '../../observability/graph-path-telemetry.js';
 import {
+  type AmbiguitySummary,
   type DecisionInput,
   type DecisionInputCriticRewrite,
   type EvidenceSummary,
@@ -24,6 +26,11 @@ import {
 } from '../../domain/decision/model/decision-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
+import {
+  extractSingleTokenNormalizedQuery,
+  resolveAmbiguousBranchLabel,
+  shouldApplyCanonicalFamilyBranchPrior,
+} from '../../domain/ranking/service/ambiguous-branch.js';
 import type { EvidenceItem, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
 
@@ -46,6 +53,7 @@ interface BuildSearchDecisionInputParams {
     readonly constraintGraph?: ConstraintGraph | undefined;
     readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
     readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
+    readonly winnerIdentityArtifact?: EntityLaneCandidateArtifact | undefined;
   };
   readonly honestyContract?: {
     readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
@@ -62,45 +70,148 @@ function isPositiveEvidenceItem(item: EvidenceItem): boolean {
   return item.contribution.startsWith('+');
 }
 
+function hasWinnerAlignedIdentityResolveTopEntity(
+  identityResolveResult: EntityResolveResult | null | undefined,
+  winnerEntityId: string,
+): boolean {
+  if (identityResolveResult == null) {
+    return true;
+  }
+
+  return identityResolveResult.topEntity?.entityId === winnerEntityId;
+}
+
+function isWinnerAlignedEntityLaneArtifact(
+  artifact: EntityLaneCandidateArtifact | undefined,
+  winnerEntityId: string,
+): artifact is EntityLaneCandidateArtifact {
+  return artifact !== undefined
+    && artifact.entityId === winnerEntityId
+    && artifact.identityProvenance.entityId === winnerEntityId
+    && artifact.candidate.entityId === winnerEntityId
+    && artifact.resolvedCandidate.entityId === winnerEntityId;
+}
+
+function isWinnerAlignedDualLaneArtifact(
+  artifact: DualLaneArtifact | undefined,
+  winnerEntityId: string,
+): artifact is DualLaneArtifact & { readonly identityProvenance: NonNullable<DualLaneArtifact['identityProvenance']> } {
+  if (
+    artifact === undefined
+    || artifact.entityId !== winnerEntityId
+    || artifact.fusedCandidate.entityId !== winnerEntityId
+    || artifact.identityProvenance?.entityId !== winnerEntityId
+  ) {
+    return false;
+  }
+
+  if (
+    artifact.entityLane !== undefined
+    && !isWinnerAlignedEntityLaneArtifact(artifact.entityLane, winnerEntityId)
+  ) {
+    return false;
+  }
+
+  return artifact.generalLane === undefined
+    || (
+      artifact.generalLane.entityId === winnerEntityId
+      && artifact.generalLane.candidate.entityId === winnerEntityId
+    );
+}
+
 function buildWinnerIdentityEvidence(params: {
   readonly resolveResult: EntityResolveResult;
   readonly identityResolveResult?: EntityResolveResult | null | undefined;
   readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
+  readonly winnerIdentityArtifact?: EntityLaneCandidateArtifact | undefined;
 }): NonNullable<EvidenceSummary['identityEvidence']> {
   const resolveTopEntity = params.resolveResult.topEntity;
-  const winnerIdentityProvenance =
-    resolveTopEntity !== undefined
-    && params.winnerDualLaneArtifact?.entityId === resolveTopEntity.entityId
-    && params.winnerDualLaneArtifact.identityProvenance?.entityId === resolveTopEntity.entityId
-      ? params.winnerDualLaneArtifact.identityProvenance
+  const winnerEntityId = resolveTopEntity?.entityId;
+  const winnerInIdentityResolveResult =
+    winnerEntityId !== undefined
+    && hasWinnerAlignedIdentityResolveTopEntity(params.identityResolveResult, winnerEntityId);
+  const winnerDualLaneArtifact =
+    winnerEntityId !== undefined
+    && winnerInIdentityResolveResult
+    && isWinnerAlignedDualLaneArtifact(params.winnerDualLaneArtifact, winnerEntityId)
+      ? params.winnerDualLaneArtifact
       : undefined;
-  const winnerIdentityArtifact =
-    winnerIdentityProvenance !== undefined
-      ? {
-          evidenceRefs: winnerIdentityProvenance.evidenceRefs,
-        }
-      : resolveTopEntity !== undefined
-      ? params.identityResolveResult?.candidates.find(
-          (candidate) => candidate.entityId === resolveTopEntity.entityId,
-        )
+  const winnerIdentityLaneArtifact =
+    winnerDualLaneArtifact === undefined
+    && winnerEntityId !== undefined
+    && winnerInIdentityResolveResult
+    && isWinnerAlignedEntityLaneArtifact(params.winnerIdentityArtifact, winnerEntityId)
+      ? params.winnerIdentityArtifact
       : undefined;
-  const identityEvidenceRefCount = winnerIdentityArtifact?.evidenceRefs.length ?? 0;
-  const winnerIdentityArtifactPresent = winnerIdentityArtifact !== undefined;
+  const winnerIdentityArtifactPresent =
+    winnerDualLaneArtifact !== undefined || winnerIdentityLaneArtifact !== undefined;
+  const identityEvidenceRefCount =
+    winnerDualLaneArtifact?.identityProvenance.evidenceRefs.length
+    ?? winnerIdentityLaneArtifact?.identityProvenance.evidenceRefs.length
+    ?? 0;
   const lanePresence: DualLanePresence | undefined =
-    winnerIdentityProvenance !== undefined ? params.winnerDualLaneArtifact?.lanePresence : undefined;
+    winnerDualLaneArtifact?.lanePresence ?? winnerIdentityLaneArtifact?.candidate.lanePresence;
   const exactnessTier =
-    winnerIdentityProvenance?.exactnessTier ??
-    (winnerIdentityArtifactPresent ? params.winnerDualLaneArtifact?.exactnessTier : undefined) ??
-    'none';
+    winnerDualLaneArtifact?.identityProvenance.exactnessTier
+    ?? winnerIdentityLaneArtifact?.identityProvenance.exactnessTier
+    ?? 'none';
 
   return {
     source: 'identity_artifact',
     resolveTopEntityPresent: resolveTopEntity !== undefined,
     winnerIdentityArtifactPresent,
-    winnerIdentityArtifactMatchesResolveResult: winnerIdentityArtifactPresent,
+    winnerIdentityArtifactMatchesResolveResult:
+      winnerIdentityArtifactPresent && winnerInIdentityResolveResult,
     exactnessTier,
     identityEvidenceRefCount,
     ...(lanePresence !== undefined ? { lanePresence } : {}),
+  };
+}
+
+function buildRankingBranchGroups(
+  plan: QueryPlanV1,
+): readonly { label: string; matchValues: readonly string[] }[] {
+  return plan.expansions.ambiguousEntityHints?.flatMap((hint) =>
+    hint.explorationBranches.map((branch) => ({
+      label: branch.label,
+      matchValues: branch.matchValues,
+    })),
+  ) ?? [];
+}
+
+function buildRankingAmbiguitySummary(
+  plan: QueryPlanV1,
+  rankedResults: readonly RankedResult[] | undefined,
+): AmbiguitySummary | undefined {
+  if (rankedResults === undefined || rankedResults.length < 2) {
+    return undefined;
+  }
+  if (!shouldApplyCanonicalFamilyBranchPrior(plan.queryClass)) {
+    return undefined;
+  }
+  if (extractSingleTokenNormalizedQuery(plan.normalizedQuery) === undefined) {
+    return undefined;
+  }
+
+  const representedBranches = rankedResults
+    .slice(0, 3)
+    .map((result) => resolveAmbiguousBranchLabel(result, buildRankingBranchGroups(plan)))
+    .filter((label): label is string => label !== undefined);
+  const uniqueBranches = unique(representedBranches);
+  if (uniqueBranches.length < 2) {
+    return undefined;
+  }
+
+  const topTwoDifferentBranches =
+    representedBranches[0] !== undefined &&
+    representedBranches[1] !== undefined &&
+    representedBranches[0] !== representedBranches[1];
+
+  return {
+    types: ['ranking_family_branch_collision'],
+    severity: topTwoDifferentBranches ? 'high' : 'medium',
+    sources: ['ranking'],
+    decisionEffect: topTwoDifferentBranches ? 'force_clarify' : 'raise_threshold',
   };
 }
 
@@ -133,6 +244,7 @@ export function buildSearchDecisionInput(
     resolveResult,
     identityResolveResult,
     winnerDualLaneArtifact: executionContext?.winnerDualLaneArtifact,
+    winnerIdentityArtifact: executionContext?.winnerIdentityArtifact,
   });
   const identityEvidenceRefCount = identityEvidence.identityEvidenceRefCount;
 
@@ -330,6 +442,7 @@ export function buildSearchDecisionInput(
         : []),
     ],
   } as const;
+  const ambiguitySummary = buildRankingAmbiguitySummary(plan, rankedResults);
 
   return {
     queryPlan: plan,
@@ -357,6 +470,7 @@ export function buildSearchDecisionInput(
       ? { blockingRequested: honestyContract.blockingRequested }
       : {}),
     ...(rankingSignals !== undefined ? { rankingSignals } : {}),
+    ...(ambiguitySummary !== undefined ? { ambiguitySummary } : {}),
     evidenceSummary,
     ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
     conformalSetSize: resolveResult.conformalSetSize,

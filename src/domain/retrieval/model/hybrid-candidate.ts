@@ -8,15 +8,12 @@ import type {
 import type { RetrievalTrace } from './retrieval-trace.js';
 
 /**
- * A single candidate produced by the hybrid retrieval pipeline.
+ * Shared payload for all candidate topology variants.
  *
  * The canonical fused retrieval score is {@link fusionRrfTotal}. It is a
  * retrieval-stage ranking signal, never a calibrated decision confidence.
- *
- * {@link retrievalFusionScore} remains only as a legacy fixture/adapter field
- * for old tests and snapshots. Runtime consumers must not read it.
  */
-export interface HybridCandidate {
+export interface HybridCandidateBase {
   /** Entity identifier for this candidate. */
   readonly entityId: CanonicalEntityId;
 
@@ -172,20 +169,6 @@ export interface HybridCandidate {
   readonly anchorRawScore?: number | undefined;
 
   /**
-   * Fused retrieval score from RRF across all contributing passes.
-   * This is a retrieval-stage ranking signal — NOT decision_confidence.
-   *
-   * @deprecated This field is semantically overloaded: FusionService stores
-   * the RRF total here, but Browse/Compare/similar retrievers store the raw
-   * BM25 score here (they bypass fusion). Downstream consumers cannot tell
-   * which semantic applies.
-   *
-   * Runtime code must not read this field. For fused retrieval ranking,
-   * use {@link fusionRrfTotal}. For sparse BM25, use {@link sparseRawScore}.
-   */
-  readonly retrievalFusionScore?: number | undefined;
-
-  /**
    * RRF total score (sum of weighted reciprocal rank contributions across
    * channels). Distinct from per-channel raw scores. Set ONLY by
    * FusionService.fuse() — non-fusion retrievers (Browse, Compare,
@@ -195,30 +178,6 @@ export interface HybridCandidate {
 
   /** ADR-007 upstream source lineage (propagated to HTTP when present). */
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
-
-  /**
-   * Calibrated resolver posterior preserved when the entity lane surfaced
-   * this candidate.
-   */
-  readonly entityPosteriorScore?: number | undefined;
-
-  /**
-   * Entity-lane exactness tier preserved through dual-lane fusion.
-   *
-   * `none` means no entity identity provenance exists for this candidate.
-   */
-  readonly identityExactnessTier?: IdentityExactnessTier | undefined;
-
-  /**
-   * Dual-lane presence classification. Absent on legacy single-lane outputs.
-   */
-  readonly lanePresence?: DualLanePresence | undefined;
-
-  /** True when entity + general lanes both surfaced this entity. */
-  readonly laneCorroborated?: boolean | undefined;
-
-  /** True when exactly one lane surfaced this entity. */
-  readonly laneDisagreement?: boolean | undefined;
 
   /** Constraint attribute names matched by this candidate. */
   readonly matchedConstraints: readonly string[];
@@ -250,3 +209,50 @@ export interface HybridCandidate {
   /** Canonical retrieval provenance preserved for downstream ranking/eval. */
   readonly retrievalProvenance?: CandidateProvenance | undefined;
 }
+
+/**
+ * Single-lane general retrieval candidate with no identity-lane provenance.
+ *
+ * This is the only valid shape when topology is absent.
+ */
+export interface GeneralLaneOnlyHybridCandidate extends HybridCandidateBase {
+  readonly entityPosteriorScore?: undefined;
+  readonly identityExactnessTier: 'none';
+  readonly lanePresence?: undefined;
+}
+
+/**
+ * Explicit general-only dual-lane result.
+ *
+ * Topology is present, but identity evidence is still forbidden.
+ */
+export interface GeneralOnlyHybridCandidate extends HybridCandidateBase {
+  readonly entityPosteriorScore?: undefined;
+  readonly identityExactnessTier: 'none';
+  readonly lanePresence: 'general_only';
+}
+
+/**
+ * Entity-lane-bearing candidate surfaced by entity-only or corroborated paths.
+ */
+export interface IdentityLaneHybridCandidate extends HybridCandidateBase {
+  /**
+   * Calibrated resolver posterior preserved when the entity lane surfaced
+   * this candidate.
+   */
+  readonly entityPosteriorScore?: number | undefined;
+
+  /**
+   * Entity-lane exactness tier preserved through dual-lane fusion.
+   *
+   * `none` remains a valid sentinel when the upstream identity artifact did
+   * not mint exact/alias evidence, but the topology still stays explicit.
+   */
+  readonly identityExactnessTier: IdentityExactnessTier;
+  readonly lanePresence: Exclude<DualLanePresence, 'general_only'>;
+}
+
+export type HybridCandidate =
+  | GeneralLaneOnlyHybridCandidate
+  | GeneralOnlyHybridCandidate
+  | IdentityLaneHybridCandidate;

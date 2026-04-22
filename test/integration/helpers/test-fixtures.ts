@@ -388,7 +388,7 @@ export function toHybridCandidate(
   retrievalProfile = 'test-mixed-neighborhood',
 ): HybridCandidate {
   const anchorRank = Math.max(1, rank);
-  const retrievalFusionScore = Math.max(0.01, 0.25 - (anchorRank - 1) * 0.02);
+  const fusionRrfTotal = Math.max(0.01, 0.25 - (anchorRank - 1) * 0.02);
 
   return {
     entityId: doc.entityId,
@@ -407,8 +407,7 @@ export function toHybridCandidate(
     sparseRank: anchorRank,
     denseRank: anchorRank,
     anchorRank,
-    retrievalFusionScore,
-    fusionRrfTotal: retrievalFusionScore,
+    fusionRrfTotal,
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile,

@@ -165,11 +165,11 @@ describe('buildSearchDecisionInput', () => {
       effectiveRoute: 'hybrid',
     });
 
-    expect(hasIdentityEvidence(input.evidenceSummary)).toBe(true);
+    expect(hasIdentityEvidence(input.evidenceSummary)).toBe(false);
     expect(hasExactMatchCandidate(input.evidenceSummary)).toBe(false);
   });
 
-  it('prefers dual-lane artifact exactness over query-level lookup strategy when fused winner is not identity top1', () => {
+  it('does not mint dual-lane identity evidence when the fused winner is absent from identity top1', () => {
     const resolveResult = makeResolveResult('entity-winner');
     const identityResolveResult = makeIdentityResolveResult(
       'entity-other',
@@ -180,13 +180,6 @@ describe('buildSearchDecisionInput', () => {
       entityId: createEntityId('entity-winner'),
       canonicalLabel: 'entity-winner',
       lanePresence: 'entity_only',
-      agreement: {
-        corroborated: false,
-        disagreement: true,
-        entityOnly: true,
-        generalOnly: false,
-      },
-      exactnessTier: 'alias_exact',
       identityProvenance: {
         source: 'entity_resolver',
         entityId: createEntityId('entity-winner'),
@@ -228,10 +221,11 @@ describe('buildSearchDecisionInput', () => {
       },
     });
 
-    expect(input.evidenceSummary?.identityEvidence?.lanePresence).toBe('entity_only');
-    expect(input.evidenceSummary?.identityEvidence?.exactnessTier).toBe('alias_exact');
-    expect(hasIdentityEvidence(input.evidenceSummary)).toBe(true);
-    expect(hasExactMatchCandidate(input.evidenceSummary)).toBe(true);
+    expect(input.evidenceSummary?.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(input.evidenceSummary?.identityEvidence?.lanePresence).toBeUndefined();
+    expect(input.evidenceSummary?.identityEvidence?.exactnessTier).toBe('none');
+    expect(hasIdentityEvidence(input.evidenceSummary)).toBe(false);
+    expect(hasExactMatchCandidate(input.evidenceSummary)).toBe(false);
   });
 
   it('does not mint identity evidence from a dual-lane artifact that is misaligned with the fused winner', () => {
@@ -239,13 +233,6 @@ describe('buildSearchDecisionInput', () => {
       entityId: createEntityId('entity-other'),
       canonicalLabel: 'entity-other',
       lanePresence: 'entity_only',
-      agreement: {
-        corroborated: false,
-        disagreement: true,
-        entityOnly: true,
-        generalOnly: false,
-      },
-      exactnessTier: 'alias_exact',
       identityProvenance: {
         source: 'entity_resolver',
         entityId: createEntityId('entity-other'),

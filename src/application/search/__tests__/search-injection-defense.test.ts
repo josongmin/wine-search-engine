@@ -55,6 +55,7 @@ describe('SearchUseCase with Injection Defense', () => {
       allowCompiledFallback: true,
       querySanitizer: sanitizer,
       injectionJudge: mockInjectionJudge as InjectionJudgePort | undefined,
+      judgeTimeoutMs: 45_000,
       queryPlanner: {
         plan: vi.fn(async (query: string) => makeMinimalPlan(query)),
       } as any,

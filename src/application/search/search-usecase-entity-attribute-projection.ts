@@ -1,13 +1,71 @@
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
-import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
+import type {
+  HybridCandidate,
+  HybridCandidateBase,
+} from '../../domain/retrieval/model/hybrid-candidate.js';
 
 type HintValue = string | number | readonly string[];
+type HintCandidateField =
+  | 'producer'
+  | 'region'
+  | 'appellation'
+  | 'country'
+  | 'grapePrimary'
+  | 'grapes'
+  | 'style'
+  | 'closure'
+  | 'priceBand'
+  | 'pairing'
+  | 'occasion'
+  | 'vintageYear'
+  | 'body'
+  | 'tannin'
+  | 'acidity'
+  | 'sweetness'
+  | 'finishLength'
+  | 'wineType'
+  | 'classification'
+  | 'alcoholPct'
+  | 'priceUsd'
+  | 'producerPrestige'
+  | 'criticScoreNormalized'
+  | 'certifications'
+  | 'soilType'
+  | 'producerType'
+  | 'grapeFamily'
+  | 'flavorProfiles'
+  | 'drinkingWindowStart'
+  | 'drinkingWindowEnd'
+  | 'drinkingWindowModelVersion';
+type MutableHintProjection = {
+  -readonly [K in HintCandidateField]?: HybridCandidateBase[K];
+};
+type StringHintCandidateField = {
+  [K in HintCandidateField]:
+    MutableHintProjection[K] extends string | undefined ? K : never;
+}[HintCandidateField];
+type NumberHintCandidateField = {
+  [K in HintCandidateField]:
+    MutableHintProjection[K] extends number | undefined ? K : never;
+}[HintCandidateField];
+type StringArrayHintCandidateField = {
+  [K in HintCandidateField]:
+    MutableHintProjection[K] extends readonly string[] | undefined ? K : never;
+}[HintCandidateField];
+
+function assignHintValue<K extends HintCandidateField>(
+  candidate: MutableHintProjection,
+  field: K,
+  value: NonNullable<MutableHintProjection[K]>,
+): void {
+  candidate[field] = value;
+}
 
 interface HintProjector {
   readonly hintKey: string;
   readonly fromDocument: (doc: RetrievalDocument) => HintValue | undefined;
   readonly applyToSyntheticCandidate: (
-    candidate: Record<string, unknown>,
+    candidate: MutableHintProjection,
     value: unknown,
   ) => void;
 }
@@ -15,7 +73,7 @@ interface HintProjector {
 function stringHint(
   hintKey: string,
   fromDocument: (doc: RetrievalDocument) => string | undefined,
-  candidateField: string,
+  candidateField: StringHintCandidateField,
 ): HintProjector {
   return {
     hintKey,
@@ -25,7 +83,7 @@ function stringHint(
     },
     applyToSyntheticCandidate: (candidate, value) => {
       if (typeof value === 'string' && value.length > 0) {
-        candidate[candidateField] = value;
+        assignHintValue(candidate, candidateField, value);
       }
     },
   };
@@ -34,7 +92,7 @@ function stringHint(
 function numberHint(
   hintKey: string,
   fromDocument: (doc: RetrievalDocument) => number | undefined,
-  candidateField: string,
+  candidateField: NumberHintCandidateField,
 ): HintProjector {
   return {
     hintKey,
@@ -44,7 +102,7 @@ function numberHint(
     },
     applyToSyntheticCandidate: (candidate, value) => {
       if (typeof value === 'number' && Number.isFinite(value)) {
-        candidate[candidateField] = value;
+        assignHintValue(candidate, candidateField, value);
       }
     },
   };
@@ -53,7 +111,7 @@ function numberHint(
 function stringArrayHint(
   hintKey: string,
   fromDocument: (doc: RetrievalDocument) => readonly string[] | undefined,
-  candidateField: string,
+  candidateField: StringArrayHintCandidateField,
 ): HintProjector {
   return {
     hintKey,
@@ -65,7 +123,7 @@ function stringArrayHint(
     },
     applyToSyntheticCandidate: (candidate, value) => {
       if (Array.isArray(value) && value.every((entry) => typeof entry === 'string') && value.length > 0) {
-        candidate[candidateField] = value;
+        assignHintValue(candidate, candidateField, value);
       }
     },
   };
@@ -137,7 +195,7 @@ export function applyAttributeHintsToSyntheticHybridCandidate(
     return candidate;
   }
 
-  const projected: Record<string, unknown> = { ...candidate };
+  const projected: MutableHintProjection = {};
   for (const projector of ENTITY_ATTRIBUTE_HINT_PROJECTORS) {
     const value = hints[projector.hintKey];
     if (value !== undefined && value !== null) {
@@ -145,5 +203,7 @@ export function applyAttributeHintsToSyntheticHybridCandidate(
     }
   }
 
-  return projected as unknown as HybridCandidate;
+  return Object.keys(projected).length > 0
+    ? { ...candidate, ...projected }
+    : candidate;
 }

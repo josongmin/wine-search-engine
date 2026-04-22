@@ -21,17 +21,20 @@ import type {
   SubqueryNode,
 } from '../../src/domain/query/model/constraint-graph.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 function mkCandidate(id: string, price: number, score: number): HybridCandidate & {
   readonly price: number;
   readonly score: number;
 } {
   return {
-    entityId: id as never,
-    retrievalTraces: [],
+    ...makeHybridCandidate({
+      entityId: createEntityId(id),
+    }),
     price,
     score,
-  } as unknown as HybridCandidate & { readonly price: number; readonly score: number };
+  };
 }
 
 function mkHybridGraph(subqueryIds: readonly string[], sharedBudget?: {
@@ -326,12 +329,12 @@ describe('BundleSelector shared-budget semantics (ADR-013)', () => {
     const graph = mkHybridGraph(['row1', 'row2']);
     const pools = new Map<string, readonly HybridCandidate[]>([
       ['row1', [
-        mkCandidate('shared', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
-        mkCandidate('other', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
+        mkCandidate('shared', 0, 0),
+        mkCandidate('other', 0, 0),
       ]],
       ['row2', [
-        mkCandidate('shared', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
-        mkCandidate('other', 0, 0) as HybridCandidate & { readonly scoreKey?: string },
+        mkCandidate('shared', 0, 0),
+        mkCandidate('other', 0, 0),
       ]],
     ]);
     const opts: BundleSelectorOptions = {

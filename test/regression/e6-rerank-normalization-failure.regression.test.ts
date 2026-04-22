@@ -47,7 +47,7 @@ function makeCandidate(entityId: string): HybridCandidate {
   return {
     entityId,
     canonicalLabel: `Wine ${entityId}`,
-    retrievalFusionScore: 0.5,
+    fusionRrfTotal: 0.5,
     matchedConstraints: [],
     retrievalTrace: {
       candidateSources: [],

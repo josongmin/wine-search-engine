@@ -172,6 +172,7 @@ export class RankingStagePipeline {
     if (this.policy !== undefined) {
       const policyContext: PolicyContext = {
         queryClass: input.queryPlan.queryClass,
+        normalizedQuery: input.queryPlan.normalizedQuery,
         effectiveRetrievalMode: input.compiled.execution.effectiveRetrievalMode,
         // compiled-first: use compiled execution contract when available (E3-U1)
         effectiveRoute: input.compiled.execution.effectiveRoute,

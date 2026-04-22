@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   trainLambdaMARTModel,
   LAMBDAMART_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
 } from '../service/lambdamart-ranker.js';
 import type { LambdaMARTExample } from '../service/lambdamart-ranker.js';
 
@@ -68,6 +69,7 @@ describe('trainLambdaMARTModel', () => {
     expect(result1.weights).toEqual(result2.weights);
     expect(result1.bias).toBe(result2.bias);
     expect(result1.ndcg5ValidationScore).toBe(result2.ndcg5ValidationScore);
+    expect(result1.featureSchemaHash).toBe(LTR_FEATURE_SCHEMA_HASH);
   });
 
   it('produces different weights for different query classes (class-specific seeding)', () => {
@@ -88,6 +90,7 @@ describe('trainLambdaMARTModel', () => {
 
     expect(result.trainingExampleCount).toBe(0);
     expect(result.weights).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
+    expect(result.featureSchemaHash).toBe(LTR_FEATURE_SCHEMA_HASH);
     for (const w of result.weights) {
       expect(w).toBeCloseTo(1 / LAMBDAMART_FEATURE_DIMENSION, 10);
     }

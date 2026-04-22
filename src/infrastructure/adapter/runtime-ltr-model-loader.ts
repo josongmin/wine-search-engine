@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
-  LTR_FEATURE_DIMENSION,
+  LAMBDAMART_FEATURE_DIMENSION,
   LTR_FEATURE_SCHEMA_HASH,
 } from '../../domain/ranking/service/lambdamart-ranker.js';
 const MAX_INVALID_ENTRY_INDICES_TO_LOG = 8;
@@ -13,12 +13,10 @@ const MAX_LTR_MODELS_FROM_FILE = 128;
 const NumberArrayOfFiniteLengthSchema = z.array(z.number().finite());
 
 const RuntimeLtrModelEntrySchema = z.object({
-  queryClass: z.string().min(1).optional(),
-  query_class: z.string().min(1).optional(),
+  queryClass: z.string().min(1),
   weights: NumberArrayOfFiniteLengthSchema,
   bias: z.number().finite(),
-  featureSchemaHash: z.string().min(1).optional(),
-  feature_schema_hash: z.string().min(1).optional(),
+  featureSchemaHash: z.string().min(1),
   trainingExampleCount: z.number().int().nonnegative(),
   ndcg5ValidationScore: z.number().finite(),
   trainedAt: z.union([
@@ -70,23 +68,17 @@ function mapToModel(entry: unknown): QueryClassWeights | undefined {
     return undefined;
   }
 
-  const queryClass = parsed.data.queryClass ?? parsed.data.query_class;
-  if (typeof queryClass !== 'string' || queryClass.length === 0) {
+  if (parsed.data.weights.length !== LAMBDAMART_FEATURE_DIMENSION) {
     return undefined;
   }
 
-  if (parsed.data.weights.length !== LTR_FEATURE_DIMENSION) {
-    return undefined;
-  }
-
-  const featureSchemaHash = parsed.data.featureSchemaHash ?? parsed.data.feature_schema_hash;
-  if (typeof featureSchemaHash !== 'string' || featureSchemaHash !== LTR_FEATURE_SCHEMA_HASH) {
+  if (parsed.data.featureSchemaHash !== LTR_FEATURE_SCHEMA_HASH) {
     return undefined;
   }
 
   return {
-    queryClass,
-    featureSchemaHash,
+    queryClass: parsed.data.queryClass,
+    featureSchemaHash: parsed.data.featureSchemaHash,
     weights: parsed.data.weights,
     bias: parsed.data.bias,
     trainingExampleCount: parsed.data.trainingExampleCount,

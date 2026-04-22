@@ -93,6 +93,10 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
       operationId: 'entity.resolve',
       'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
     }));
+    expect(document.paths['/v1/entity/autocomplete']?.post).toEqual(expect.objectContaining({
+      operationId: 'entity.autocomplete',
+      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
+    }));
     expect(document.paths['/v1/watchlist']?.post?.responses['201']).toEqual(expect.objectContaining({
       content: {
         'application/json': {

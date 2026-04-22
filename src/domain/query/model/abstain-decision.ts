@@ -7,6 +7,7 @@
  */
 
 import type { ConstraintRelation } from '../service/constraint-reasoner.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 // ─── AbstainReason ────────────────────────────────────────────────────────────
 
@@ -124,6 +125,12 @@ export interface StructuredClarifyPayload {
   readonly options?: readonly string[] | undefined;
 
   /**
+   * Entity-preserving clarification options for UI/API consumers that need
+   * stable machine identity instead of label-only round trips.
+   */
+  readonly optionEntities?: readonly StructuredClarifyOptionEntity[] | undefined;
+
+  /**
    * The two conflicting constraint attributes (present for constraint_conflict).
    * E.g. `['sweetness', 'dryness']`.
    */
@@ -134,6 +141,12 @@ export interface StructuredClarifyPayload {
    * (present for budget_gap).
    */
   readonly gapDescription?: string | undefined;
+}
+
+export interface StructuredClarifyOptionEntity {
+  readonly entityId: CanonicalEntityId;
+  readonly label: string;
+  readonly distinguishingFeatures?: readonly string[] | undefined;
 }
 
 // ─── ChannelDegradationSummary ────────────────────────────────────────────────

@@ -74,6 +74,10 @@ describe('HTTP contract OpenAPI bridge', () => {
       operationId: 'entity.resolve',
       'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
     }));
+    expect(document.paths['/v1/entity/autocomplete']?.post).toEqual(expect.objectContaining({
+      operationId: 'entity.autocomplete',
+      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
+    }));
     expect(
       document.paths['/v1/search/replay']?.post?.requestBody?.content['application/json'].schema,
     ).toEqual(

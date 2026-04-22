@@ -5,6 +5,7 @@ import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.
 import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
 import type { ResolverCandidate } from '../../../../src/domain/resolver/model/resolved-candidate.js';
 import type { RankedResult } from '../../../../src/domain/ranking/model/ranked-result.js';
+import type { EntityLaneCandidateArtifact } from '../../../../src/domain/retrieval/model/dual-lane-artifact.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 
 function minimalPlan(route: QueryPlanV1['route']): QueryPlanV1 {
@@ -94,6 +95,37 @@ function makeRankedResult(overrides: Partial<RankedResult> = {}): RankedResult {
 }
 
 describe('buildSearchDecisionInput', () => {
+  it('elevates single-token family branch splits into ranking ambiguity summary', () => {
+    const input = buildSearchDecisionInput({
+      plan: {
+        ...minimalPlan('hybrid'),
+        rawQuery: 'opus',
+        normalizedQuery: 'opus',
+        queryClass: 'short_entity',
+      },
+      resolveResult: makeResolverResult(),
+      rankedResults: [
+        makeRankedResult({
+          entityId: createEntityId('overture-2019'),
+          canonicalLabel: '2019 Opus One Overture',
+          rank: 1,
+        }),
+        makeRankedResult({
+          entityId: createEntityId('opus-2018'),
+          canonicalLabel: 'Opus One 2018',
+          rank: 2,
+        }),
+      ],
+    });
+
+    expect(input.ambiguitySummary).toEqual({
+      types: ['ranking_family_branch_collision'],
+      severity: 'high',
+      sources: ['ranking'],
+      decisionEffect: 'force_clarify',
+    });
+  });
+
   it('fails anchor evidence when mixed route is missing explicit anchor resolution context', () => {
     const eid = createEntityId();
     const plan = makeAnchoredPlan('mixed', eid);
@@ -535,12 +567,12 @@ describe('buildSearchDecisionInput', () => {
       rankedResults,
     });
 
-    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
-    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
     expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
-      true,
+      false,
     );
-    expect(input.evidenceSummary.identityEvidence?.identityEvidenceRefCount).toBe(1);
+    expect(input.evidenceSummary.identityEvidence?.identityEvidenceRefCount).toBe(0);
     expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
   });
 
@@ -599,13 +631,6 @@ describe('buildSearchDecisionInput', () => {
           entityId: eid,
           canonicalLabel: 'Artifact Exact Wine',
           lanePresence: 'entity_only',
-          agreement: {
-            corroborated: false,
-            disagreement: true,
-            entityOnly: true,
-            generalOnly: false,
-          },
-          exactnessTier: 'exact',
           identityProvenance: {
             source: 'entity_resolver',
             entityId: eid,
@@ -641,6 +666,455 @@ describe('buildSearchDecisionInput', () => {
     expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
     expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
     expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('exact');
+  });
+
+  it('accepts entity-only winner identity artifact as the exactness SSOT', () => {
+    const eid = createEntityId('entity-only-exact');
+    const plan = minimalPlan('entity');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Entity Only Wine', calibratedScore: 0.99 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Entity Only Wine',
+        calibratedScore: 0.99,
+        rank: 1,
+        evidenceRefs: ['alias:entity-only'],
+      }],
+      decisionTrace: makeDecisionTrace({
+        queryClass: 'short_entity',
+        top1CalibratedScore: 0.99,
+        top2CalibratedScore: 0.1,
+        calibratedGap: 0.89,
+        decisionConfidenceC: 0.99,
+      }),
+    });
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: eid,
+      candidate: {
+        entityId: eid,
+        canonicalLabel: 'Entity Only Wine',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.99,
+        identityExactnessTier: 'exact',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: resolverResult.candidates[0]!,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: eid,
+        exactnessTier: 'exact',
+        calibratedScore: 0.99,
+        resolverRank: 1,
+        canonicalLabel: 'Entity Only Wine',
+        evidenceRefs: ['identity:entity-only'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Entity Only Wine' })],
+      effectiveRoute: 'entity',
+      executionContext: {
+        effectiveRetrievalMode: 'entity_lookup',
+        retrievalKind: 'entity_lookup',
+        winnerIdentityArtifact,
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.lanePresence).toBe('entity_only');
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('exact');
+  });
+
+  it('accepts winner-aligned artifacts even when identityResolveResult is omitted', () => {
+    const eid = createEntityId('artifact-only-ssot');
+    const plan = minimalPlan('entity');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Artifact Only Wine', calibratedScore: 0.98 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Artifact Only Wine',
+        calibratedScore: 0.98,
+        rank: 1,
+        evidenceRefs: ['identity:artifact-only'],
+      }],
+    });
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: eid,
+      candidate: {
+        entityId: eid,
+        canonicalLabel: 'Artifact Only Wine',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.98,
+        identityExactnessTier: 'alias_exact',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: resolverResult.candidates[0]!,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: eid,
+        exactnessTier: 'alias_exact',
+        calibratedScore: 0.98,
+        resolverRank: 1,
+        canonicalLabel: 'Artifact Only Wine',
+        evidenceRefs: ['identity:artifact-only'],
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Artifact Only Wine' })],
+      effectiveRoute: 'entity',
+      executionContext: {
+        effectiveRetrievalMode: 'entity_lookup',
+        retrievalKind: 'entity_lookup',
+        winnerIdentityArtifact,
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      true,
+    );
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('alias_exact');
+  });
+
+  it('does not recover exactness from winner identity artifact candidate fields when provenance exactness is none', () => {
+    const eid = createEntityId('entity-only-candidate-exactness');
+    const plan = minimalPlan('entity');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Entity Artifact Wine', calibratedScore: 0.97 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Entity Artifact Wine',
+        calibratedScore: 0.97,
+        rank: 1,
+        evidenceRefs: ['alias:entity-artifact'],
+      }],
+    });
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: eid,
+      candidate: {
+        entityId: eid,
+        canonicalLabel: 'Entity Artifact Wine',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.97,
+        identityExactnessTier: 'alias_exact',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: resolverResult.candidates[0]!,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: eid,
+        exactnessTier: 'none',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'Entity Artifact Wine',
+        evidenceRefs: ['identity:entity-artifact'],
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Entity Artifact Wine' })],
+      effectiveRoute: 'entity',
+      executionContext: {
+        effectiveRetrievalMode: 'entity_lookup',
+        retrievalKind: 'entity_lookup',
+        winnerIdentityArtifact,
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.lanePresence).toBe('entity_only');
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
+  });
+
+  it('uses winner-aligned provenance exactness over duplicated dual-lane artifact fields', () => {
+    const eid = createEntityId('provenance-ssot');
+    const plan = minimalPlan('hybrid');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Provenance Wine', calibratedScore: 0.98 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Provenance Wine',
+        calibratedScore: 0.98,
+        rank: 1,
+        evidenceRefs: ['identity:provenance'],
+      }],
+    });
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Provenance Wine' })],
+      executionContext: {
+        winnerDualLaneArtifact: {
+          entityId: eid,
+          canonicalLabel: 'Provenance Wine',
+          lanePresence: 'corroborated',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: eid,
+            exactnessTier: 'alias_exact',
+            calibratedScore: 0.98,
+            resolverRank: 1,
+            canonicalLabel: 'Provenance Wine',
+            evidenceRefs: ['identity:provenance'],
+            sourceSignals: {
+              canonicalExactMatch: 0,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 1,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 0,
+            },
+          },
+          fusedCandidate: {
+            entityId: eid,
+            canonicalLabel: 'Provenance Wine',
+            matchedConstraints: [],
+            identityExactnessTier: 'exact',
+            lanePresence: 'corroborated',
+            retrievalTrace: {
+              retrievalProfile: 'test',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+          },
+        },
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('alias_exact');
+    expect(input.evidenceSummary.identityEvidence?.lanePresence).toBe('corroborated');
+  });
+
+  it('keeps dual-lane fused artifact exactness authoritative when entity-lane artifact disagrees', () => {
+    const eid = createEntityId('dual-lane-ssot');
+    const plan = minimalPlan('hybrid');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Dual Lane Wine', calibratedScore: 0.98 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Dual Lane Wine',
+        calibratedScore: 0.98,
+        rank: 1,
+        evidenceRefs: ['identity:dual-lane'],
+      }],
+    });
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: eid,
+      candidate: {
+        entityId: eid,
+        canonicalLabel: 'Dual Lane Wine',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.98,
+        identityExactnessTier: 'alias_fuzzy',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: resolverResult.candidates[0]!,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: eid,
+        exactnessTier: 'alias_fuzzy',
+        calibratedScore: 0.98,
+        resolverRank: 1,
+        canonicalLabel: 'Dual Lane Wine',
+        evidenceRefs: ['identity:entity-lane'],
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 1,
+          editDistanceScore: 0.5,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Dual Lane Wine' })],
+      executionContext: {
+        winnerDualLaneArtifact: {
+          entityId: eid,
+          canonicalLabel: 'Dual Lane Wine',
+          lanePresence: 'corroborated',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: eid,
+            exactnessTier: 'alias_exact',
+            calibratedScore: 0.98,
+            resolverRank: 1,
+            canonicalLabel: 'Dual Lane Wine',
+            evidenceRefs: ['identity:dual-lane'],
+            sourceSignals: {
+              canonicalExactMatch: 0,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 1,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 0,
+            },
+          },
+          fusedCandidate: {
+            entityId: eid,
+            canonicalLabel: 'Dual Lane Wine',
+            matchedConstraints: [],
+            identityExactnessTier: 'alias_exact',
+            lanePresence: 'corroborated',
+            retrievalTrace: {
+              retrievalProfile: 'dual_lane_fusion',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+          },
+        },
+        winnerIdentityArtifact,
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.lanePresence).toBe('corroborated');
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('alias_exact');
+  });
+
+  it('rejects an outer-aligned identity artifact whose nested payload points at a different entity', () => {
+    const eid = createEntityId('winner');
+    const otherId = createEntityId('other');
+    const plan = minimalPlan('entity');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Winner Wine', calibratedScore: 0.97 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Winner Wine',
+        calibratedScore: 0.97,
+        rank: 1,
+        evidenceRefs: ['identity:winner'],
+      }],
+    });
+    const misalignedArtifact: EntityLaneCandidateArtifact = {
+      entityId: eid,
+      candidate: {
+        entityId: otherId,
+        canonicalLabel: 'Other Wine',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.97,
+        identityExactnessTier: 'exact',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: {
+        ...resolverResult.candidates[0]!,
+        entityId: otherId,
+      },
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: eid,
+        exactnessTier: 'exact',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'Winner Wine',
+        evidenceRefs: ['identity:winner'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Winner Wine' })],
+      effectiveRoute: 'entity',
+      executionContext: {
+        effectiveRetrievalMode: 'entity_lookup',
+        retrievalKind: 'entity_lookup',
+        winnerIdentityArtifact: misalignedArtifact,
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      false,
+    );
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
   });
 
   it('does not mint identity evidence for synthetic ranked routes without ranked corroboration', () => {
@@ -841,13 +1315,6 @@ describe('buildSearchDecisionInput', () => {
           entityId: eid,
           canonicalLabel: 'Opus One 2021',
           lanePresence: 'corroborated',
-          agreement: {
-            corroborated: true,
-            disagreement: false,
-            entityOnly: false,
-            generalOnly: false,
-          },
-          exactnessTier: 'exact',
           identityProvenance: {
             source: 'entity_resolver',
             entityId: eid,

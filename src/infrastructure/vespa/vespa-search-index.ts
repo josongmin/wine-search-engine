@@ -20,7 +20,7 @@ import type {
   DenseHit,
   RetrievalHitSummary,
 } from '../../domain/retrieval/port/search-index.port.js';
-import { type VespaClient } from './vespa-client.js';
+import { type VespaClient, VespaHttpError } from './vespa-client.js';
 import {
   createCircuitBreaker,
   type CircuitBreaker,
@@ -43,6 +43,8 @@ import {
 import {
   normalizeRetrievalHitSummary,
 } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { isEligiblePrefixQuery } from '../../domain/query/service/alias-prefix-terms.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -76,6 +78,15 @@ const MAX_BULK_FETCH_IDS = 5000;
  * Results from multiple batches are concatenated in call order.
  */
 const FETCH_SUMMARY_BATCH_SIZE = 200;
+const ALIAS_PREFIX_TERMS_FIELD = 'alias_prefix_terms';
+
+interface VespaSearchIndexSchemaCapabilities {
+  readonly aliasPrefixTerms: boolean;
+}
+
+const DEFAULT_VESPA_SEARCH_INDEX_SCHEMA_CAPABILITIES: VespaSearchIndexSchemaCapabilities = {
+  aliasPrefixTerms: true,
+};
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -254,6 +265,7 @@ function extractMatchedFields(fields: Record<string, unknown>): readonly string[
       'search_text_en',
       'aliases_identity_safe',
       'aliases_noisy_recall',
+      'alias_prefix_terms',
       'producer',
       'appellation',
       'grape_primary',
@@ -369,14 +381,23 @@ function getEntityIdForLog(hit: VespaHit): string {
  */
 export class VespaSearchIndex implements SearchIndexPort {
   private readonly circuitBreaker: CircuitBreaker;
+  private readonly schemaCapabilities: { aliasPrefixTerms: boolean };
+  private hasLoggedAliasPrefixTermsDowngrade = false;
 
-  constructor(private readonly client: VespaClient) {
+  constructor(
+    private readonly client: VespaClient,
+    capabilities: Partial<VespaSearchIndexSchemaCapabilities> = {},
+  ) {
     this.circuitBreaker = createCircuitBreaker({
       name: VESPA_SEARCH_BREAKER_NAME,
       failureThreshold: VESPA_SEARCH_FAILURE_THRESHOLD,
       recoveryTimeoutMs: VESPA_SEARCH_RECOVERY_TIMEOUT_MS,
       halfOpenMaxAttempts: VESPA_SEARCH_HALF_OPEN_MAX,
     });
+    this.schemaCapabilities = {
+      ...DEFAULT_VESPA_SEARCH_INDEX_SCHEMA_CAPABILITIES,
+      ...capabilities,
+    };
     globalCircuitBreakerRegistry.register(VESPA_SEARCH_BREAKER_NAME, this.circuitBreaker);
   }
 
@@ -399,7 +420,110 @@ export class VespaSearchIndex implements SearchIndexPort {
     if (this.circuitBreaker.state === 'OPEN') {
       throw new CircuitBreakerOpenError(VESPA_SEARCH_BREAKER_NAME);
     }
-    return this.circuitBreaker.execute(() => this.client.query(yql, params, signal, requestId));
+    let clientError: VespaHttpError | undefined;
+    const result = await this.circuitBreaker.execute(async () => {
+      try {
+        return await this.client.query(yql, params, signal, requestId);
+      } catch (err) {
+        if (err instanceof VespaHttpError && err.isClientError && !err.isRateLimited) {
+          clientError = err;
+          return null;
+        }
+        throw err;
+      }
+    });
+    if (clientError !== undefined) {
+      throw clientError;
+    }
+    if (result === null) {
+      throw new Error('queryUnderBreaker invariant violated: Vespa client error swallowed without classification');
+    }
+    return result;
+  }
+
+  private static isMissingSchemaFieldError(error: unknown, field: string): error is VespaHttpError {
+    return error instanceof VespaHttpError
+      && error.isClientError
+      && error.message.includes(`Field '${field}' does not exist.`);
+  }
+
+  private disableAliasPrefixTermsCapability(error: VespaHttpError): void {
+    if (!this.schemaCapabilities.aliasPrefixTerms) {
+      return;
+    }
+    this.schemaCapabilities.aliasPrefixTerms = false;
+    if (this.hasLoggedAliasPrefixTermsDowngrade) {
+      return;
+    }
+    this.hasLoggedAliasPrefixTermsDowngrade = true;
+    bootstrapLogger.warn(
+      {
+        field: ALIAS_PREFIX_TERMS_FIELD,
+        statusCode: error.statusCode,
+      },
+      '[VespaSearchIndex] Remote Vespa schema is missing alias_prefix_terms; disabling prefix substrate clauses for this process',
+    );
+  }
+
+  private buildSparseSearchRequest(
+    queries: readonly string[],
+    effectiveFilters: readonly string[],
+    hits: number,
+    rankProfile: string,
+    useAliasPrefixTerms: boolean,
+  ): {
+    readonly yql: string;
+    readonly queryParams: Record<string, unknown>;
+    readonly usedAliasPrefixTerms: boolean;
+  } {
+    const filterClause = buildSparseFilters(effectiveFilters);
+    const normalizedPrefixQueries = queries.map((query) => buildNormalizedQueryViews(query).strict);
+    const eligiblePrefixQueries = normalizedPrefixQueries.map((normalizedQuery) =>
+      useAliasPrefixTerms && isEligiblePrefixQuery(normalizedQuery),
+    );
+
+    const queryClauses = queries.map(
+      (_, i) =>
+        `(userInput(@query${i})` +
+        ` OR canonical_label contains phrase(@query${i})` +
+        ` OR aliases_identity_safe contains phrase(@query${i})` +
+        ` OR aliases_noisy_recall contains phrase(@query${i})` +
+        (eligiblePrefixQueries[i] === true
+          ? ` OR ${ALIAS_PREFIX_TERMS_FIELD} contains ({prefix:true}@query${i}_prefix)`
+          : '') +
+        ` OR search_text_ko contains phrase(@query${i})` +
+        ` OR search_text_en contains phrase(@query${i})` +
+        ` OR producer contains phrase(@query${i}))`,
+    );
+
+    const queryUnion =
+      queryClauses.length === 1
+        ? queryClauses[0]!
+        : `(${queryClauses.join(' OR ')})`;
+
+    const yql =
+      `select * from ${SCHEMA} where ` +
+      `${queryUnion} AND availability = true` +
+      filterClause +
+      ` limit ${hits}`;
+
+    const queryParams: Record<string, unknown> = {
+      'ranking.profile': rankProfile,
+      'presentation.summary': 'hit_summary',
+      ...buildStructuredQueryFeatureParams(queries, effectiveFilters),
+    };
+    for (let i = 0; i < queries.length; i++) {
+      queryParams[`query${i}`] = queries[i];
+      if (eligiblePrefixQueries[i] === true) {
+        queryParams[`query${i}_prefix`] = normalizedPrefixQueries[i];
+      }
+    }
+
+    return {
+      yql,
+      queryParams,
+      usedAliasPrefixTerms: eligiblePrefixQueries.some((eligible) => eligible),
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -432,7 +556,6 @@ export class VespaSearchIndex implements SearchIndexPort {
     // `limit NaN` is invalid YQL.
     const hits = sanitizeYqlIntLimit(limit ?? DEFAULT_SPARSE_LIMIT, DEFAULT_SPARSE_LIMIT);
     const effectiveFilters = filters ?? [];
-    const filterClause = buildSparseFilters(effectiveFilters);
 
     // Guard: empty queries array would produce `where () AND ...` which is
     // invalid Vespa YQL syntax and causes a 400 parse error on the Vespa side.
@@ -440,51 +563,44 @@ export class VespaSearchIndex implements SearchIndexPort {
       return [];
     }
 
-    // Per-query clause:
-    //   userInput(@queryN)                             — general multi-term match via WAND
-    //   canonical_label contains phrase(@queryN)        — exact phrase for full wine names
-    //   aliases_identity_safe contains phrase(@queryN)  — exact phrase for identity aliases
-    //   aliases_noisy_recall contains phrase(@queryN)   — exact phrase for broad recall aliases
-    //   search_text_ko contains phrase(@queryN)         — Korean tasting notes / descriptions
-    //   search_text_en contains phrase(@queryN)         — English tasting notes / doc2query
-    //   producer contains phrase(@queryN)               — producer name exact match
-    //
-    // The OR of phrase operators ensures Korean queries like "샤토 마고" and
-    // semantic queries matching doc2query text are found even when the WAND
-    // tokeniser splits differently.
-    const queryClauses = queries.map(
-      (_, i) =>
-        `(userInput(@query${i})` +
-        ` OR canonical_label contains phrase(@query${i})` +
-        ` OR aliases_identity_safe contains phrase(@query${i})` +
-        ` OR aliases_noisy_recall contains phrase(@query${i})` +
-        ` OR search_text_ko contains phrase(@query${i})` +
-        ` OR search_text_en contains phrase(@query${i})` +
-        ` OR producer contains phrase(@query${i}))`,
+    let sparseRequest = this.buildSparseSearchRequest(
+      queries,
+      effectiveFilters,
+      hits,
+      rankProfile,
+      this.schemaCapabilities.aliasPrefixTerms,
     );
-
-    const queryUnion =
-      queryClauses.length === 1
-        ? queryClauses[0]!
-        : `(${queryClauses.join(' OR ')})`;
-
-    const yql =
-      `select * from ${SCHEMA} where ` +
-      `${queryUnion} AND availability = true` +
-      filterClause +
-      ` limit ${hits}`;
-
-    // Build query parameters — one @queryN binding per query string.
-    const queryParams: Record<string, unknown> = {
-      'ranking.profile': rankProfile,
-      'presentation.summary': 'hit_summary',
-      ...buildStructuredQueryFeatureParams(queries, effectiveFilters),
-    };
-    for (let i = 0; i < queries.length; i++) {
-      queryParams[`query${i}`] = queries[i];
+    let response: VespaQueryResponse;
+    try {
+      response = await this.queryUnderBreaker(
+        sparseRequest.yql,
+        sparseRequest.queryParams,
+        undefined,
+        requestId,
+      );
+    } catch (error) {
+      if (
+        sparseRequest.usedAliasPrefixTerms
+        && VespaSearchIndex.isMissingSchemaFieldError(error, ALIAS_PREFIX_TERMS_FIELD)
+      ) {
+        this.disableAliasPrefixTermsCapability(error);
+        sparseRequest = this.buildSparseSearchRequest(
+          queries,
+          effectiveFilters,
+          hits,
+          rankProfile,
+          false,
+        );
+        response = await this.queryUnderBreaker(
+          sparseRequest.yql,
+          sparseRequest.queryParams,
+          undefined,
+          requestId,
+        );
+      } else {
+        throw error;
+      }
     }
-
-    const response = await this.queryUnderBreaker(yql, queryParams, undefined, requestId);
     const children = response.root.children ?? [];
 
     return children.map((hit, index) => {

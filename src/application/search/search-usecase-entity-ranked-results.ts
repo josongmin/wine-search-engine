@@ -157,8 +157,6 @@ export function liftResolvedEntityCandidateToHybridCandidate(
       entityPosteriorScore: identityProvenance.calibratedScore,
       identityExactnessTier: identityProvenance.exactnessTier,
       lanePresence: 'entity_only',
-      laneCorroborated: false,
-      laneDisagreement: true,
       ...(rawCandidate?.sourceRecordRefs !== undefined && rawCandidate.sourceRecordRefs.length > 0
         ? { sourceRecordRefs: rawCandidate.sourceRecordRefs }
         : {}),
@@ -393,8 +391,6 @@ export function liftEntityResolveResultToLaneArtifacts(
         entityPosteriorScore: identityProvenance.calibratedScore,
         identityExactnessTier: identityProvenance.exactnessTier,
         lanePresence: 'entity_only',
-        laneCorroborated: false,
-        laneDisagreement: true,
       },
       resolvedCandidate,
       ...(rawCandidate !== undefined ? { rawCandidate } : {}),

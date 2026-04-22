@@ -133,6 +133,15 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Noisy-recall aliases — broader recall, lower precision. */
   readonly aliasesNoisyRecall: readonly string[];
 
+  /**
+   * Prefix-search substrate for entity identity lookup.
+   *
+   * Stored as normalized attribute terms so runtime can resolve partial Latin
+   * and Hangul entity prefixes (for example `opu`, `오푸스`, `오퍼스`) through
+   * a dedicated prefix field instead of overloading BM25 text fields.
+   */
+  readonly aliasPrefixTerms?: readonly string[] | undefined;
+
   /** Producer / winery name. */
   readonly producer: string;
 

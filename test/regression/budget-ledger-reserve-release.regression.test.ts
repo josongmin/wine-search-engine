@@ -19,19 +19,14 @@ import {
 } from '../../src/observability/budget-ledger-counters.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../src/domain/shared/constants.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { makeHybridCandidate } from '../support/hybrid-candidate-test-factory.js';
 
 function mkCandidate(id: string, priceUsd?: number): HybridCandidate {
-  // Cast via `unknown` because HybridCandidate has many required
-  // annotator-only fields that the ledger neither reads nor mutates.
-  // The ledger only touches `entityId` and `priceUsd`, so a narrow
-  // partial is safe here and keeps test fixtures minimal.
-  const base = {
-    entityId: id,
-    retrievalTrace: {},
-    matchedConstraints: [],
-  } as unknown as HybridCandidate;
-  if (priceUsd === undefined) return base;
-  return { ...base, priceUsd } as HybridCandidate;
+  return makeHybridCandidate({
+    entityId: createEntityId(id),
+    ...(priceUsd !== undefined ? { priceUsd } : {}),
+  });
 }
 
 describe('InMemoryBudgetLedger (ADR-013 Phase 1c.x)', () => {

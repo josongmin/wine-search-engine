@@ -22,6 +22,8 @@ export interface AmbiguousBranchPolicyGroup {
 export interface PolicyContext {
   /** Query class used for this search (e.g. "semantic_preference"). */
   readonly queryClass: string;
+  /** Normalized query string for lexical policy rules. */
+  readonly normalizedQuery?: string;
   /**
    * Explicit execution-contract retrieval mode.
    * Recommendation-style ranking rules should prefer this over queryClass

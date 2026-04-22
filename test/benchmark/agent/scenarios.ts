@@ -1,6 +1,11 @@
 /**
  * Agent benchmark scenarios — exploratory / nightly coverage corpus.
  *
+ * Human-readable listing of every scenario (id, tier, description, query):
+ *   test/benchmark/agent/AGENT_SCENARIOS.md
+ * Regenerate after edits:
+ *   pnpm run bench:agent:export-scenarios-md
+ *
  * ADR-005 Workstream F: AGENT_SCENARIOS is NOT the release-gate source for
  * agent correctness. Release gates use fixture-native runners:
  *   - pnpm run bench:agent:fixtures:tool-use

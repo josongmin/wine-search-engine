@@ -552,7 +552,7 @@ export class SignalComputer {
    * model's numeric support.
    */
   computeEntityPosterior(candidate: HybridCandidate): number | undefined {
-    if (candidate.lanePresence === 'general_only') {
+    if (candidate.lanePresence === undefined || candidate.lanePresence === 'general_only') {
       return undefined;
     }
     if (candidate.entityPosteriorScore === undefined) {
@@ -565,10 +565,10 @@ export class SignalComputer {
    * Returns the canonical identity exactness tier carried by the entity lane.
    */
   computeIdentityExactnessTier(candidate: HybridCandidate): IdentityExactnessTier {
-    if (candidate.lanePresence === 'general_only') {
+    if (candidate.lanePresence === undefined || candidate.lanePresence === 'general_only') {
       return 'none';
     }
-    return candidate.identityExactnessTier ?? 'none';
+    return candidate.identityExactnessTier;
   }
 
   /**

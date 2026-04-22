@@ -3,14 +3,18 @@ import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-q
 import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
-import type { StructuredClarifyPayload, TypedAbstainDecision } from '../../domain/query/model/abstain-decision.js';
+import type {
+  StructuredClarifyPayload,
+  StructuredClarifyOptionEntity,
+  TypedAbstainDecision,
+} from '../../domain/query/model/abstain-decision.js';
 import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
-import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { buildDisplayIdentitySignature } from '../../domain/response/service/display-identity.js';
 
 const ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS = 4;
 const ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS = 3;
@@ -21,47 +25,119 @@ function deriveDecisionEvidenceItems(
   return rankedResults?.[0]?.evidenceItems ?? [];
 }
 
-function extractAmbiguousShortFormToken(plan: QueryPlanV1): string | undefined {
-  if (plan.queryClass !== 'ambiguous_short_form') {
-    return undefined;
-  }
-  const tokens = buildNormalizedQueryViews(plan.normalizedQuery).punctuationStripped
-    .split(/\s+/)
-    .filter(Boolean);
-  if (tokens.length !== 1) {
-    return undefined;
-  }
-  return tokens[0];
-}
+const AUTHORITATIVE_IDENTITY_MATCH_TYPES = new Set<ResultItem['match']['matchType']>([
+  'exact',
+  'alias_exact',
+  'alias_fuzzy',
+]);
 
-function rankedResultMatchesAmbiguousShortFormToken(
-  result: RankedResult,
-  token: string,
-): boolean {
-  const candidateSurfaces = [
-    result.canonicalLabel,
-    ...(typeof result.producer === 'string' ? [result.producer] : []),
-  ];
-
-  return candidateSurfaces.some((surface) => (
-    buildNormalizedQueryViews(surface).punctuationStripped
-      .split(/\s+/)
-      .filter(Boolean)
-      .includes(token)
-  ));
-}
-
-function filterAmbiguousShortFormRankedResults(
+function filterAmbiguousShortFormPresentation(
   plan: QueryPlanV1,
   rankedResults: readonly RankedResult[],
+  results: readonly ResultItem[],
 ): readonly RankedResult[] {
-  const token = extractAmbiguousShortFormToken(plan);
-  if (token === undefined) {
+  if (plan.queryClass !== 'ambiguous_short_form') {
+    return rankedResults;
+  }
+  if (results.length === 0) {
     return rankedResults;
   }
 
-  const filtered = rankedResults.filter((result) => rankedResultMatchesAmbiguousShortFormToken(result, token));
-  return filtered.length > 0 ? filtered : rankedResults;
+  const supportedEntityIds = new Set(
+    results
+      .filter((result) => AUTHORITATIVE_IDENTITY_MATCH_TYPES.has(result.match.matchType))
+      .map((result) => result.entity.entityId),
+  );
+  if (supportedEntityIds.size === 0) {
+    return [];
+  }
+
+  return rankedResults.filter((result) => supportedEntityIds.has(result.entityId));
+}
+
+function dedupeRankedResultsByDisplayIdentity(
+  rankedResults: readonly RankedResult[],
+): readonly RankedResult[] {
+  const deduped = new Map<string, RankedResult>();
+  for (const result of rankedResults) {
+    const signature = buildDisplayIdentitySignature({
+      canonicalLabel: result.canonicalLabel,
+      producer: result.producer,
+      region: result.region,
+      country: result.country,
+      vintage: result.vintageYear,
+      type: result.wineType,
+    });
+    const existing = deduped.get(signature);
+    if (existing === undefined || result.finalScore > existing.finalScore) {
+      deduped.set(signature, result);
+    }
+  }
+  return [...deduped.values()].sort((left, right) => left.rank - right.rank);
+}
+
+function dedupeResultItemsByEntityId(
+  results: readonly ResultItem[],
+): readonly ResultItem[] {
+  const deduped = new Map<string, ResultItem>();
+  for (const result of results) {
+    const key = String(result.entity.entityId);
+    const existing = deduped.get(key);
+    if (existing === undefined || result.relevanceScore > existing.relevanceScore) {
+      deduped.set(key, result);
+    }
+  }
+  return [...deduped.values()];
+}
+
+function buildClarificationDistinguishingFeatures(
+  result: RankedResult,
+  candidates: readonly RankedResult[],
+): readonly string[] {
+  const features: string[] = [];
+  const distinctVintageCount = new Set(
+    candidates
+      .map((candidate) => candidate.vintageYear)
+      .filter((value): value is number => value !== undefined),
+  ).size;
+  const distinctRegionCount = new Set(
+    candidates
+      .map((candidate) => candidate.region)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ).size;
+  const distinctWineTypeCount = new Set(
+    candidates
+      .map((candidate) => candidate.wineType)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ).size;
+  const distinctClassificationCount = new Set(
+    candidates
+      .map((candidate) => candidate.classification)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ).size;
+
+  if (
+    result.vintageYear !== undefined &&
+    distinctVintageCount > 1 &&
+    !result.canonicalLabel.includes(String(result.vintageYear))
+  ) {
+    features.push(String(result.vintageYear));
+  }
+  if (typeof result.region === 'string' && result.region.length > 0 && distinctRegionCount > 1) {
+    features.push(result.region);
+  }
+  if (typeof result.wineType === 'string' && result.wineType.length > 0 && distinctWineTypeCount > 1) {
+    features.push(result.wineType);
+  }
+  if (
+    typeof result.classification === 'string' &&
+    result.classification.length > 0 &&
+    distinctClassificationCount > 1
+  ) {
+    features.push(result.classification);
+  }
+
+  return features;
 }
 
 function shouldFailClosedIdentityClarification(
@@ -134,7 +210,21 @@ function buildStructuredClarifyPayload(
         question: topLabels.length > 0
           ? '결과가 모호합니다. 어떤 후보를 찾으시나요?'
           : '결과가 모호합니다. 조건을 더 구체적으로 알려주세요.',
-        ...(topLabels.length > 0 ? { options: topLabels } : {}),
+        ...(topLabels.length > 0
+          ? {
+              options: topLabels,
+              optionEntities: rankedResults
+                .slice(0, 3)
+                .map((result): StructuredClarifyOptionEntity => ({
+                  entityId: result.entityId,
+                  label: result.canonicalLabel,
+                  distinguishingFeatures: buildClarificationDistinguishingFeatures(
+                    result,
+                    rankedResults.slice(0, 3),
+                  ),
+                })),
+            }
+          : {}),
       };
   }
 }
@@ -264,9 +354,13 @@ export function buildEntropyAbstainResponseParams(options: {
     rankedResults,
     retrievalProvenanceSlices,
   } = options;
-  const presentationRankedResults = filterAmbiguousShortFormRankedResults(plan, rankedResults);
+  const presentationRankedResults = dedupeRankedResultsByDisplayIdentity(
+    filterAmbiguousShortFormPresentation(plan, rankedResults, results),
+  );
   const presentationEntityIds = new Set(presentationRankedResults.map((result) => result.entityId));
-  const presentationResults = results.filter((result) => presentationEntityIds.has(result.entity.entityId));
+  const presentationResults = dedupeResultItemsByEntityId(
+    results.filter((result) => presentationEntityIds.has(result.entity.entityId)),
+  );
   const failClosedIdentityClarification = shouldFailClosedIdentityClarification(plan, abstainDecision);
 
   const decisionOutput: DecisionOutput = {
@@ -342,7 +436,10 @@ export function buildEntropyAbstainResponseParams(options: {
         : presentationRankedResults.slice(0, 3).map((r) => ({
           entityId: r.entityId,
           label: r.canonicalLabel,
-          distinguishingFeatures: [],
+          distinguishingFeatures: buildClarificationDistinguishingFeatures(
+            r,
+            presentationRankedResults.slice(0, 3),
+          ),
         })),
       suggestionType: 'disambiguation',
     },

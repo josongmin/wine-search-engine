@@ -14,46 +14,18 @@ import { ConstraintFilter } from '../constraint-filter.js';
 import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import type { NormalizedConstraint } from '../../../shared/types/index.js';
 import type { CanonicalEntityId } from '../../../shared/types/index.js';
+import { makeHybridCandidate } from '../../../../../test/support/hybrid-candidate-test-factory.js';
 
 function makeCandidate(
   overrides: Partial<HybridCandidate> & { id?: string } = {},
 ): HybridCandidate {
   const { id = 'wine-001', ...rest } = overrides;
-  return {
+  return makeHybridCandidate({
     entityId: id as CanonicalEntityId,
-    matchedConstraints: [],
     unmetHardConstraints: [],
-    retrievalFusionScore: 0.5,
-    country: undefined,
-    region: undefined,
-    appellation: undefined,
-    wineType: undefined,
-    style: undefined,
-    grapePrimary: undefined,
-    grapes: undefined,
-    vintageYear: undefined,
-    priceUsd: undefined,
-    alcoholPct: undefined,
-    criticScoreNormalized: undefined,
-    producerPrestige: undefined,
-    body: undefined,
-    sweetness: undefined,
-    acidity: undefined,
-    tannin: undefined,
-    finishLength: undefined,
-    priceBand: undefined,
-    pairing: undefined,
-    occasion: undefined,
-    classification: undefined,
-    certifications: undefined,
-    soilType: undefined,
-    producerType: undefined,
-    drinkingWindowStart: undefined,
-    drinkingWindowEnd: undefined,
-    sparseRank: undefined,
-    anchorRank: undefined,
+    fusionRrfTotal: 0.5,
     ...rest,
-  } as unknown as HybridCandidate;
+  });
 }
 
 function makeConstraint(attribute = 'wine_type'): NormalizedConstraint {
@@ -119,7 +91,7 @@ describe('ConstraintFilter — protected candidates (BUG regression: was dropped
     // 10 compliant >= floor → would normally drop non-compliant, but protectedRank1 must survive
     const result = filter.applyHardFilters([...compliant, protectedRank1], CONSTRAINTS);
     expect(result).toHaveLength(11);
-    expect(result.some((c) => (c as HybridCandidate & { entityId: string }).entityId === 'rank1-violator')).toBe(true);
+    expect(result.some((c) => c.entityId === ('rank1-violator' as CanonicalEntityId))).toBe(true);
   });
 
   it('anchorRank defined candidate is NEVER dropped even when compliant pool ≥ floor', () => {
@@ -133,7 +105,7 @@ describe('ConstraintFilter — protected candidates (BUG regression: was dropped
     });
     const result = filter.applyHardFilters([...compliant, protectedAnchor], CONSTRAINTS);
     expect(result).toHaveLength(11);
-    expect(result.some((c) => (c as HybridCandidate & { entityId: string }).entityId === 'anchor-violator')).toBe(true);
+    expect(result.some((c) => c.entityId === ('anchor-violator' as CanonicalEntityId))).toBe(true);
   });
 
   it('non-protected non-compliant candidate IS dropped when floor met', () => {
@@ -148,7 +120,7 @@ describe('ConstraintFilter — protected candidates (BUG regression: was dropped
     });
     const result = filter.applyHardFilters([...compliant, unprotected], CONSTRAINTS);
     expect(result).toHaveLength(10);
-    expect(result.some((c) => (c as HybridCandidate & { entityId: string }).entityId === 'unprotected-violator')).toBe(false);
+    expect(result.some((c) => c.entityId === ('unprotected-violator' as CanonicalEntityId))).toBe(false);
   });
 
   it('sparseRank=2 (not 1) non-compliant candidate IS dropped when floor met', () => {
@@ -162,7 +134,7 @@ describe('ConstraintFilter — protected candidates (BUG regression: was dropped
     });
     const result = filter.applyHardFilters([...compliant, rank2Violator], CONSTRAINTS);
     expect(result).toHaveLength(10);
-    expect(result.some((c) => (c as HybridCandidate & { entityId: string }).entityId === 'rank2-violator')).toBe(false);
+    expect(result.some((c) => c.entityId === ('rank2-violator' as CanonicalEntityId))).toBe(false);
   });
 });
 

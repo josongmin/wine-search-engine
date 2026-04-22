@@ -12,6 +12,7 @@ import {
   SearchRequestSchema,
 } from '../schemas/search-request.schema.js';
 import {
+  AutocompleteResponseSchema,
   ComparisonSearchResponseSchema,
   DrinkingWindowSchema,
   ErrorResponseSchema,
@@ -471,6 +472,26 @@ export const ResolveRouteContract = defineRouteContract({
   ],
   responses: {
     [HTTP_STATUS_OK]: ResolveResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
+  },
+});
+
+export const AutocompleteRouteContract = defineRouteContract({
+  operationId: 'entity.autocomplete',
+  body: ResolveRequestSchema,
+  capabilities: [
+    'security',
+    'planner',
+    'SAT',
+    'resolver_only',
+  ],
+  responses: {
+    [HTTP_STATUS_OK]: AutocompleteResponseSchema,
     [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
     [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,

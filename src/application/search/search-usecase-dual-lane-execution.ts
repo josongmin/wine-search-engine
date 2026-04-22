@@ -14,6 +14,7 @@ import {
   liftEntityResolveResultToLaneArtifacts,
 } from './search-usecase-entity-ranked-results.js';
 import type {
+  DualLaneRouteResult,
   SearchExecutionLaneArtifacts,
   SearchRouteExecutionResult,
 } from './search-usecase-route-dispatch.js';
@@ -22,7 +23,7 @@ import {
   resolveEntityRouteForPlan,
   resolveEntityRouteForPlanExecution,
   type HybridRankedRoutePipelineDeps,
-  type HybridRouteRetrievalExecutionArtifacts,
+  type DualLaneRouteExecutionArtifacts,
   type HybridRouteRetrievalExecutor,
 } from './search-usecase-hybrid-ranking-pipeline.js';
 import {
@@ -40,12 +41,20 @@ export interface SearchUseCaseDualLaneExecutionResult {
 
 export interface DualLaneHybridRouteExecutionResult {
   readonly dualLaneExecution: SearchUseCaseDualLaneExecutionResult;
-  readonly routeExecution: SearchRouteExecutionResult;
+  readonly routeExecution: DualLaneRouteResult;
 }
 
 interface DualLaneRouteExecutionAttempt {
+  readonly attemptId: string;
   readonly dualLaneExecution: SearchUseCaseDualLaneExecutionResult;
-  readonly routeExecutionArtifacts: HybridRouteRetrievalExecutionArtifacts;
+  readonly routeExecutionArtifacts: DualLaneRouteExecutionArtifacts;
+}
+
+let dualLaneExecutionAttemptSequence = 0;
+
+function nextDualLaneExecutionAttemptId(): string {
+  dualLaneExecutionAttemptSequence += 1;
+  return `dual-lane-attempt-${dualLaneExecutionAttemptSequence}`;
 }
 
 function assertDualLaneExecutionContract(
@@ -99,14 +108,29 @@ function buildRouteExecutionArtifacts(
 function buildDualLaneRouteExecutionAttempt(
   dualLaneExecution: SearchUseCaseDualLaneExecutionResult,
 ): DualLaneRouteExecutionAttempt {
+  const attemptId = nextDualLaneExecutionAttemptId();
   return {
+    attemptId,
     dualLaneExecution,
     routeExecutionArtifacts: {
+      attemptId,
       executionTopology: dualLaneExecution.executionTopology,
       identityResolveResult: dualLaneExecution.identityResolveResult,
       laneArtifacts: buildRouteExecutionArtifacts(dualLaneExecution.laneArtifacts),
     },
   };
+}
+
+function assertDualLaneRouteExecutionResult(
+  routeExecution: SearchRouteExecutionResult,
+): DualLaneRouteResult {
+  if (routeExecution.executionTopology !== 'dual_lane') {
+    throw new Error(
+      `Dual-lane execution invariant violated: expected dual_lane route execution, received ${routeExecution.executionTopology}`,
+    );
+  }
+
+  return routeExecution;
 }
 
 export async function executeDualLaneSearch(
@@ -229,8 +253,9 @@ export async function executeDualLaneHybridRoute(
     retrievalExecutor,
   );
 
+  const dualLaneRouteExecution = assertDualLaneRouteExecutionResult(routeExecution);
   const selectedAttempt = attempts.find(
-    (attempt) => attempt.routeExecutionArtifacts.laneArtifacts === routeExecution.laneArtifacts,
+    (attempt) => attempt.attemptId === dualLaneRouteExecution.dualLaneExecutionAttemptId,
   );
   if (selectedAttempt === undefined) {
     throw new Error('Dual-lane execution invariant violated: selected retrieval attempt missing');
@@ -238,6 +263,6 @@ export async function executeDualLaneHybridRoute(
 
   return {
     dualLaneExecution: selectedAttempt.dualLaneExecution,
-    routeExecution,
+    routeExecution: dualLaneRouteExecution,
   };
 }

@@ -21,6 +21,7 @@ import { registerBatchSearchRoute } from './routes/batch-search.route.js';
 import { registerReplayRoute } from './routes/replay.route.js';
 import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
+import { registerAutocompleteRoute } from './routes/autocomplete.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import {
   registerHealthRoutes,
@@ -375,6 +376,9 @@ export async function createServer(
   registerReplayRoute(app, deps);
   registerInterpretRoute(app, deps);
   registerResolveRoute(app, deps);
+  if (deps.autocompleteUseCase !== undefined) {
+    registerAutocompleteRoute(app, { autocompleteUseCase: deps.autocompleteUseCase });
+  }
   registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);

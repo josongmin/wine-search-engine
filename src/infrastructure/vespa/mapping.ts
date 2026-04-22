@@ -420,6 +420,9 @@ export function toVespaFields(
     entity_type: doc.entityType,
     aliases_identity_safe: [...doc.aliasesIdentitySafe],
     aliases_noisy_recall: [...doc.aliasesNoisyRecall],
+    ...(doc.aliasPrefixTerms !== undefined && doc.aliasPrefixTerms.length > 0
+      ? { alias_prefix_terms: [...doc.aliasPrefixTerms] }
+      : {}),
     grapes: [...doc.grapes],
     semantic_summary: doc.semanticSummary,
     availability: doc.availability,
@@ -565,6 +568,9 @@ export function fromVespaFields(
     canonicalLabel,
     aliasesIdentitySafe: getOptionalStringArray(fields, 'aliases_identity_safe') ?? [],
     aliasesNoisyRecall: getOptionalStringArray(fields, 'aliases_noisy_recall') ?? [],
+    ...(getOptionalStringArray(fields, 'alias_prefix_terms') !== undefined
+      ? { aliasPrefixTerms: getOptionalStringArray(fields, 'alias_prefix_terms') }
+      : {}),
     producer: getRequiredString(fields, 'producer'),
     region: getRequiredString(fields, 'region'),
     grapes: getOptionalStringArray(fields, 'grapes') ?? [],

@@ -22,6 +22,7 @@ import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
+import { abortError } from '../../domain/shared/cooperative-abort.js';
 import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
@@ -46,6 +47,7 @@ const STRUCTURED_SET_RETRIEVAL_FILTER_ATTRIBUTES = new Set([
 ]);
 const STRUCTURED_RECOMMENDATION_DEFAULT_MAX_CANDIDATES = 20;
 const STRUCTURED_RECOMMENDATION_DEFAULT_RERANK_LIMIT = 20;
+const PRE_ROUTE_ABORTED = Symbol('pre_route_aborted');
 
 type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
@@ -634,22 +636,30 @@ export async function runSearchPreRoutePhase(
       }
       return result;
     });
+    const preRouteCore: Promise<SearchPreRoutePhaseResult | typeof PRE_ROUTE_ABORTED> =
+      runPreRouteCore(securityCheck.sanitizedQuery, plannerAbortSignal)
+      .catch((err: unknown) => {
+        // Security fail-closed aborts the planner/speculative pre-route work.
+        // Those downstream branches may ignore cancellation and reject later;
+        // once aborted, convert any late failure into a sentinel so the request
+        // can return POLICY_BLOCKED immediately without leaking an
+        // unhandledRejection from the abandoned speculative work.
+        if (plannerAbortSignal.aborted) {
+          return PRE_ROUTE_ABORTED;
+        }
+        throw err;
+      });
 
-    const [preRouteOutcome, securityOutcome] = await Promise.allSettled([
-      runPreRouteCore(securityCheck.sanitizedQuery, plannerAbortSignal),
-      securityLayer,
-    ]);
+    const securityOutcome = await securityLayer;
+    if (securityOutcome.rejection !== undefined) {
+      throw new PolicyBlockedError(undefined, securityOutcome.rejection);
+    }
 
-    if (securityOutcome.status === 'fulfilled' && securityOutcome.value.rejection !== undefined) {
-      throw new PolicyBlockedError(undefined, securityOutcome.value.rejection);
+    const preRouteOutcome = await preRouteCore;
+    if (preRouteOutcome === PRE_ROUTE_ABORTED) {
+      throw abortError('Pre-route execution aborted');
     }
-    if (securityOutcome.status === 'rejected') {
-      throw securityOutcome.reason;
-    }
-    if (preRouteOutcome.status === 'fulfilled') {
-      return preRouteOutcome.value;
-    }
-    throw preRouteOutcome.reason;
+    return preRouteOutcome;
   } finally {
     ctx.stageTimer?.end('pre_route.security_gate');
   }

@@ -26,7 +26,7 @@ function makeTrace(): RetrievalTrace {
 function makeHybridCandidate(entityId: string): HybridCandidate {
   return {
     entityId: createEntityId(entityId),
-    retrievalFusionScore: 0.5,
+    fusionRrfTotal: 0.5,
     matchedConstraints: [],
     retrievalTrace: makeTrace(),
   };
@@ -139,7 +139,7 @@ describe('CandidateProvenance', () => {
     expect(envelope.entityId).toBe(entityId);
     expect(envelope.provenance).toBe(provenance);
     expect(envelope.legacyCandidate).toBe(legacy);
-    expect(envelope.legacyCandidate.retrievalFusionScore).toBe(0.5);
+    expect(envelope.legacyCandidate.fusionRrfTotal).toBe(0.5);
   });
 
   it('protected candidates have a protectedInclusionReason', () => {
