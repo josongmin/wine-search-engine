@@ -9,6 +9,10 @@ import type {
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
+import type {
+  DualLanePresence,
+  IdentityExactnessTier,
+} from '../../retrieval/model/dual-lane-artifact.js';
 
 /**
  * Summary of ambiguity signals aggregated from multiple pipeline stages.
@@ -41,57 +45,30 @@ export interface EvidenceSummary {
   readonly identityEvidencePresent: boolean;
 
   /**
-   * Richer identity evidence details for ranked and resolver-backed routes.
-   *
-   * This stays optional so older tests/callers that only provide the coarse
-   * booleans remain valid.
+   * Winner-aligned identity artifact projection used by exact/identity gates.
    */
   readonly identityEvidence?: {
-    /** Canonical source that supplied the identity trail. */
-    readonly source?: 'resolver' | 'ranked_synthetic' | undefined;
+    /** Canonical source that supplied the identity artifact trail. */
+    readonly source: 'identity_artifact';
 
-    /** Resolver emitted a topEntity reference. */
-    readonly topEntityPresent: boolean;
+    /** Fused resolve winner exists. */
+    readonly resolveTopEntityPresent: boolean;
 
-    /** Resolver emitted a ranked top candidate aligned with topEntity. */
-    readonly resolverTopCandidateMatchesTopEntity: boolean;
+    /** Identity lane emitted an artifact for the winning entity. */
+    readonly winnerIdentityArtifactPresent: boolean;
 
-    /** Count of resolver evidence refs for the top candidate identity trail. */
-    readonly resolverEvidenceRefCount: number;
+    /** Identity artifact agrees with the fused resolve winner. */
+    readonly winnerIdentityArtifactMatchesResolveResult: boolean;
 
-    /**
-     * Whether the resolver output was synthesized from ranked-route results
-     * rather than emitted by the entity resolver.
-     */
-    readonly syntheticRankedRoute?: boolean | undefined;
+    /** Dual-lane presence for the winner-aligned identity artifact. */
+    readonly lanePresence?: DualLanePresence | undefined;
 
-    /** Whether a ranked top result was available for the same decision. */
-    readonly rankedTopResultPresent?: boolean | undefined;
+    /** Identity exactness preserved from the identity lane artifact SSOT. */
+    readonly exactnessTier: IdentityExactnessTier;
 
-    /** Whether the ranked top result agreed with the resolver-selected entity. */
-    readonly rankedTopResultMatchesTopEntity?: boolean | undefined;
+    /** Count of identity-artifact evidence refs for the winning identity trail. */
+    readonly identityEvidenceRefCount: number;
 
-    /** Count of ranked evidence items carried by the top ranked result. */
-    readonly rankedEvidenceItemCount?: number | undefined;
-
-    /**
-     * Count of positive ranked corroboration items aligned with the resolver's
-     * chosen entity. This is trace/debug detail and does not mint identity on
-     * its own.
-     */
-    readonly rankedCorroborationItemCount?: number | undefined;
-
-    /** Ranked evidence types that corroborated the resolver-selected entity. */
-    readonly rankedCorroborationTypes?: readonly string[] | undefined;
-
-    /**
-     * Whether the resolver top candidate satisfies exact-match expectations.
-     *
-     * When present, this is the canonical exact-match signal for ranked
-     * routes. It should be derived from the richer identity evidence trail,
-     * not from score thresholds.
-     */
-    readonly exactMatchCandidatePresent?: boolean | undefined;
   };
 
   /** Whether constraint evidence (filter satisfaction) is present. */
@@ -198,20 +175,12 @@ export interface DecisionProvenanceContract {
  * so ranked-route drift cannot silently mark identity evidence as present.
  */
 export function hasIdentityEvidence(summary?: EvidenceSummary): boolean {
-  if (summary?.identityEvidence !== undefined) {
-    const detail = summary.identityEvidence;
-    if (detail.source === 'ranked_synthetic') {
-      return hasSyntheticRankedIdentityTrail(detail);
-    }
-
-    if (!hasResolverIdentityTrail(detail)) {
-      return false;
-    }
-
-    return !rankedResultContradictsResolver(detail);
+  const detail = summary?.identityEvidence;
+  if (detail === undefined) {
+    return false;
   }
 
-  return summary?.identityEvidencePresent === true;
+  return hasWinnerIdentityArtifact(detail);
 }
 
 /**
@@ -227,27 +196,11 @@ export function hasExactMatchCandidate(summary?: EvidenceSummary): boolean {
     return false;
   }
 
-  if (detail.exactMatchCandidatePresent !== undefined) {
-    if (detail.source === 'ranked_synthetic') {
-      return detail.exactMatchCandidatePresent && hasSyntheticRankedIdentityTrail(detail);
-    }
-
-    return (
-      detail.exactMatchCandidatePresent &&
-      hasResolverIdentityTrail(detail) &&
-      !rankedResultContradictsResolver(detail)
-    );
-  }
-
-  if (detail.source === 'ranked_synthetic') {
+  if (!hasWinnerIdentityArtifact(detail)) {
     return false;
   }
 
-  if (!hasResolverIdentityTrail(detail)) {
-    return false;
-  }
-
-  return !rankedResultContradictsResolver(detail);
+  return detail.exactnessTier === 'exact' || detail.exactnessTier === 'alias_exact';
 }
 
 /**
@@ -295,37 +248,18 @@ export function hasAnchorEvidence(summary?: EvidenceSummary): boolean {
   return summary?.anchorEvidencePresent === true;
 }
 
-function hasResolverIdentityTrail(
+function hasWinnerIdentityArtifact(
   detail: NonNullable<EvidenceSummary['identityEvidence']>,
 ): boolean {
-  if (!detail.topEntityPresent || !detail.resolverTopCandidateMatchesTopEntity) {
+  if (
+    !detail.resolveTopEntityPresent ||
+    !detail.winnerIdentityArtifactPresent ||
+    !detail.winnerIdentityArtifactMatchesResolveResult
+  ) {
     return false;
   }
 
-  if (detail.syntheticRankedRoute === true) {
-    return true;
-  }
-
-  return (
-    detail.resolverEvidenceRefCount > 0
-  );
-}
-
-function rankedResultContradictsResolver(
-  detail: NonNullable<EvidenceSummary['identityEvidence']>,
-): boolean {
-  return detail.rankedTopResultPresent === true && detail.rankedTopResultMatchesTopEntity !== true;
-}
-
-function hasSyntheticRankedIdentityTrail(
-  detail: NonNullable<EvidenceSummary['identityEvidence']>,
-): boolean {
-  return (
-    detail.topEntityPresent &&
-    detail.rankedTopResultPresent === true &&
-    detail.rankedTopResultMatchesTopEntity === true &&
-    (detail.rankedCorroborationItemCount ?? 0) > 0
-  );
+  return detail.identityEvidenceRefCount > 0;
 }
 
 /**
@@ -366,8 +300,20 @@ export interface DecisionInput {
     | 'mixed_similarity'
     | undefined;
 
-  /** The resolver's result including its suggested status. */
-  readonly resolverResult: EntityResolveResult;
+  /**
+   * The fused resolve result that drives numeric gating and final candidate
+   * selection.
+   */
+  readonly resolveResult: EntityResolveResult;
+
+  /**
+   * Identity-only resolve artifact used for identity/exact evidence checks.
+   *
+   * This is intentionally separate from {@link resolveResult}; ranked/fused
+   * execution may select a winner without carrying entity-resolver identity
+   * provenance.
+   */
+  readonly identityResolveResult: EntityResolveResult | undefined;
 
   /** Optional ranking signals from the scoring stage. */
   readonly rankingSignals?: SignalSet;

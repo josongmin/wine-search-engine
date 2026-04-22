@@ -45,6 +45,19 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches[0]?.lookupStrategy).toContain('index_exact');
   });
 
+  it('matches whole-token short lexical entity forms against multi-token canonical labels', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc();
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    const matches = await matcher.findMatches('opus');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+    expect(matches[0]?.lookupStrategy).toContain('index_lexical_exact');
+  });
+
   it('matches Korean noisy-recall aliases via transliterated exactness', async () => {
     const searchIndex = new InMemorySearchIndex();
     const doc = makeDoc();
@@ -69,6 +82,32 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches.length).toBeGreaterThan(0);
     expect(matches[0]?.entityIds).toContain(doc.entityId);
     expect(matches[0]?.lookupStrategy).toContain('index_transliterated_exact');
+  });
+
+  it('matches IME-incomplete Korean prefixes through curated exception prefix romanization', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc();
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    const matches = await matcher.findMatches('오푸스ㅇ');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+    expect(matches[0]?.lookupStrategy).toContain('index_transliterated_fuzzy');
+  });
+
+  it('matches IME-incomplete Korean typo prefixes through typo-corrected exception prefix romanization', async () => {
+    const searchIndex = new InMemorySearchIndex();
+    const doc = makeDoc();
+    await searchIndex.upsertDocument(doc);
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex);
+    const matches = await matcher.findMatches('오퍼스ㅇ');
+
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]?.entityIds).toContain(doc.entityId);
+    expect(matches[0]?.lookupStrategy).toContain('index_transliterated_fuzzy');
   });
 
   it('anchors entity phrases embedded in metadata questions', async () => {

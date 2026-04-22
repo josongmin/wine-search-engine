@@ -55,7 +55,7 @@ describe('Planner RFC-019 semantic compiler path', () => {
         expect.objectContaining({ attribute: 'region', value: 'Champagne' }),
       ]),
     );
-    expect(plan.constraints.soft).toEqual(
+    expect(plan.constraints.inferred).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ attribute: 'country', value: 'France' }),
       ]),

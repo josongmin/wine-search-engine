@@ -304,20 +304,20 @@ pnpm run eval:noisy:validate
 **목적:** Agent의 답변 품질, 제약 조건 만족도, faithfulness 측정  
 **외부 서비스:** 실제 LLM (Anthropic/OpenAI) ✅ | 실제 검색 스택 ✅
 
-**릴리즈 게이트(픽스처 레포):** `pnpm run bench:agent:fixtures` — `AGENT_SCENARIOS`와 별개.
+**릴리즈 게이트(픽스처 레포):** `pnpm run bench:agent` (= `pnpm run bench:agent:fixtures`) — production `/v1/agent` HTTP entrypoint parity. 실행 전 `pnpm run bench:agent:preflight`로 live target이 AgentRequestSchema를 강제하는 agent-enabled 서버인지 확인한다. `AGENT_SCENARIOS`와 별개.
 
 **탐색용(`test/benchmark/agent/scenarios.ts`):**
 
 ```bash
-pnpm run benchmark:quick       # --profile quick: 20개, judge off
-pnpm run benchmark:standard    # 80개, judge off (--no-judge)
+pnpm run benchmark:exploratory:quick       # --profile quick: 20개, judge off
+pnpm run benchmark:exploratory:standard    # 80개, judge off (--no-judge)
 pnpm run benchmark:messy       # live noisy-entity eval + messy-search agent 레인 (dev server 필요)
 pnpm run benchmark:messy:entity # live noisy-entity eval: typo / abbreviation / mixed-language entity 복원
-pnpm run benchmark:messy:agent  # messy-search agent profile: gift / mood / colloquial / code-switch 질의
-pnpm run bench:run             # 80개, judge on (표준 프로파일 + judge)
-pnpm run benchmark:nightly     # nightly 프로파일, judge on·3 samples (매우 김)
-pnpm run bench:agent           # --profile 없음 → 코퍼스 전체, judge on (비용 큼; 보통은 위 프로파일 사용)
-pnpm run bench:agent -- --profile quick   # CLI 플래그 전달 시 이 형태(직접 tsx 호출 스크립트)
+pnpm run benchmark:exploratory:messy-agent # messy-search agent profile: gift / mood / colloquial / code-switch 질의
+pnpm run bench:run                         # exploratory standard alias
+pnpm run benchmark:exploratory:nightly     # nightly 프로파일, judge on·3 samples (매우 김)
+pnpm run bench:agent:exploratory           # in-process exploratory/ablation full corpus
+pnpm run bench:agent:inprocess             # explicit in-process runner alias
 ```
 
 `pnpm run eval:fixtures:verify` / `pnpm run test:verification:fixtures:governance` / `pnpm run test:verification:fixtures` — **셋 다 동일**(픽스처 레포 구조·FixtureLoader·스위트 계약 검증).

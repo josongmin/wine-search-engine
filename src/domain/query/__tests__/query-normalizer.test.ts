@@ -92,6 +92,43 @@ describe('QueryNormalizer', () => {
     expect(views.lookupVariants).toContain('cabernet sauvignon');
   });
 
+  it('recovers bare Korean Opus short form while retaining the generic component view', () => {
+    const views = normalizer.normalize('오푸스');
+
+    expect(views.transliterated).toBe('opus one');
+    expect(views.semanticVariants).toEqual(
+      expect.arrayContaining(['opus one', 'opus']),
+    );
+    expect(views.lookupVariants).toEqual(
+      expect.arrayContaining(['opus one', 'opus']),
+    );
+  });
+
+  it('recovers alternate Korean Opus short form spelling while retaining the generic component view', () => {
+    const views = normalizer.normalize('오퍼스');
+
+    expect(views.transliterated).toBe('opus one');
+    expect(views.semanticVariants).toEqual(
+      expect.arrayContaining(['opus one', 'opus']),
+    );
+    expect(views.lookupVariants).toEqual(
+      expect.arrayContaining(['opus one', 'opus']),
+    );
+  });
+
+  it('keeps compact Korean Opus One forms on the exact transliteration path', () => {
+    const views = normalizer.normalize('오푸스원');
+
+    expect(views.punctuationStripped).toBe('오푸스원');
+    expect(views.transliterated).toBe('opus one');
+    expect(views.semanticVariants).toEqual(
+      expect.arrayContaining(['오푸스원', 'opus one']),
+    );
+    expect(views.lookupVariants).toEqual(
+      expect.arrayContaining(['오푸스원', 'opus one', 'opusone']),
+    );
+  });
+
   it('keeps price-like tokens intact while stripping vintages', () => {
     const views = normalizer.normalize('10만원 이하 오푸스원 19');
 

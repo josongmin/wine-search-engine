@@ -20,7 +20,7 @@ const DRINKABILITY_KEYWORDS: readonly RegExp[] = [
  * and "얼마예요" because these are common exact-entity queries. */
 const ENTITY_METADATA_KEYWORDS: readonly RegExp[] = [
   /(?<!\p{L})(?<!\p{N})(?:price|cost|worth|release(?:d)?|availability|available|in\s+stock)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:가격|시세|출시|출시\s*여부|나왔어|나왔나|나왔는지|재고|구할\s*수\s*있|살\s*수\s*있)(?=$|[^\p{L}\p{N}])/u,
+  /(?:^|[^\p{L}\p{N}])(?:가격|시세|출시|출시\s*여부|나왔어|나왔나|나왔냐|나왔는지|재고|구할\s*수\s*있|살\s*수\s*있)(?=$|[^\p{L}\p{N}])/u,
   /(?:^|[^\p{L}\p{N}])(?:얼마(?:야|예요|에요|지|인지)?)(?=$|[^\p{L}\p{N}]|[?？!！])/u,
   ...DRINKABILITY_KEYWORDS,
 ] as const;
@@ -42,8 +42,8 @@ const EXACT_ENTITY_METADATA_SUFFIX_PATTERNS: readonly RegExp[] = [
   /(?:\s*(?:if\s+you\s+do\s+not\s+have\s+hard\s+evidence,\s*say\s+you\s+do\s+not\s+know|if\s+there(?:'s| is)\s+no\s+hard\s+evidence,\s*say\s+you\s+do\s+not\s+know|if\s+you\s+don't\s+have\s+hard\s+evidence,\s*say\s+you\s+don't\s+know|if\s+unknown,\s*say\s+so))[?？!！]*$/iu,
   /(?:\s*(?:released?\s+yet|release(?:d)?(?:\s+status)?|availability|available|in\s+stock))[?？!！]*(?:\s*(?:if\s+you\s+do\s+not\s+have\s+hard\s+evidence,\s*say\s+you\s+do\s+not\s+know|if\s+there(?:'s| is)\s+no\s+hard\s+evidence,\s*say\s+you\s+do\s+not\s+know|if\s+you\s+don't\s+have\s+hard\s+evidence,\s*say\s+you\s+don't\s+know))?[?？!！]*$/iu,
   /(?:\s*(?:release(?:d)?|availability|available)\s*(?:있(?:나|어|나요)?|됐(?:나|어|나요)?))[?？!！]*(?:(?:\s*(?:확실한\s*근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)|근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)))?)[?？!！]*$/iu,
-  /(?:\s*(?:출시(?:했|됐)?(?:어|나|는지)?|출시\s*여부|나왔(?:어|나|는지)?|재고\s*있(?:어|나)?|구할\s*수\s*있(?:어|나)?|살\s*수\s*있(?:어|나)?))(?:\s*(?:확실한\s*근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)|근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)))?[?？!！]*$/u,
-  /(?:\s*(?:출시(?:했|됐)?(?:어|나|는지)?|출시\s*여부|나왔(?:어|나|는지)?|재고\s*있(?:어|나)?|구할\s*수\s*있(?:어|나)?|살\s*수\s*있(?:어|나)?))[?？!！]*$/u,
+  /(?:\s*(?:출시(?:했|됐)?(?:어|나|냐|는지)?|출시\s*여부|나왔(?:어|나|냐|는지)?|재고\s*있(?:어|나)?|구할\s*수\s*있(?:어|나)?|살\s*수\s*있(?:어|나)?))(?:\s*(?:확실한\s*근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)|근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)))?[?？!！]*$/u,
+  /(?:\s*(?:출시(?:했|됐)?(?:어|나|냐|는지)?|출시\s*여부|나왔(?:어|나|냐|는지)?|재고\s*있(?:어|나)?|구할\s*수\s*있(?:어|나)?|살\s*수\s*있(?:어|나)?))[?？!！]*$/u,
 ] as const;
 
 /** Direct-lookup tails that should collapse back to the bare entity anchor. */

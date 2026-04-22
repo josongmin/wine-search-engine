@@ -28,6 +28,7 @@ import { isTopologyIntentGateOpen } from './constraint-topology-planner.js';
 import { mergeTopologyIntoTrivial } from './merge-topology-into-trivial.js';
 import { DeterministicTopologyDetector } from './deterministic-topology-detector.js';
 import type { QueryDecompositionHint } from '../model/query-decomposition.js';
+import { extractAllPairingConstraints, type PairingTag } from './pairing-extractor.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
@@ -89,6 +90,10 @@ const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 const CONSTRAINT_REASONER = new ConstraintReasoner();
 /** Wave F1: single shared deterministic detector — stateless, safe to reuse. */
 const DETERMINISTIC_TOPOLOGY_DETECTOR = new DeterministicTopologyDetector();
+const PAIRING_OBJECTIVE_MAPPING_VERSION = 'pairing-objective-v1.0';
+const PAIRING_OBJECTIVE_CONFIDENCE = 0.9;
+const SPICY_FOOD_STYLE_VALUES = ['off_dry', 'sweet'] as const;
+const WHITE_FISH_WINE_TYPE_VALUES = ['white', 'sparkling', 'rosé'] as const;
 
 function foldOntologyKey(value: string): string {
   return value
@@ -265,6 +270,7 @@ export class ConstraintCompiler {
 
     const resolvedEntities: ResolvedEntity[] = [];
     const ambiguousEntityHints: AmbiguousEntityHint[] = [];
+    let promotedResolvedEntityConstraintCount = 0;
     for (const { span, resolved } of resolvedNonOverlap) {
       if (resolved.kind === 'ambiguous_hint') {
         if (isShieldedByCoveredSpan(span, coveredSpans)) {
@@ -280,6 +286,7 @@ export class ConstraintCompiler {
       if (!canPromoteResolvedEntityToConstraint(resolved.entity)) {
         continue;
       }
+      promotedResolvedEntityConstraintCount += 1;
       const constraint = {
         attribute: resolved.entity.entityType,
         operator: '=' as const,
@@ -322,6 +329,7 @@ export class ConstraintCompiler {
         ontologyExpanded,
         { impliedWineType: inferComparisonImpliedWineType(ontologyExpanded, normalizedQuery) },
       );
+      finalBundle = applyPairingObjectiveInference(finalBundle, normalizedQuery);
       baseBundle = tier6Bundle;
     } else {
       baseBundle = { hard, soft, inferred: [] };
@@ -330,6 +338,7 @@ export class ConstraintCompiler {
         expanded,
         { impliedWineType: inferComparisonImpliedWineType(expanded, normalizedQuery) },
       );
+      finalBundle = applyPairingObjectiveInference(finalBundle, normalizedQuery);
     }
 
     // E2-T2: Run ConstraintReasoner after Tier 6 (Wave 2 design: Tier 6 → Reasoner →
@@ -344,6 +353,7 @@ export class ConstraintCompiler {
       spans,
       matched,
       resolvedEntityCount: resolvedEntities.length,
+      promotedResolvedEntityConstraintCount,
       finalBundle: effectiveBundle,
       ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
       compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
@@ -465,6 +475,74 @@ function constraintKey(constraint: NormalizedConstraint): string {
   return `${constraint.attribute}|${constraint.operator}|${canonicalJsonStringify(constraint.value)}`;
 }
 
+function applyPairingObjectiveInference(
+  bundle: ConstraintBundle,
+  normalizedQuery: string,
+): ConstraintBundle {
+  const inferred = inferPairingObjectiveConstraints(normalizedQuery);
+  if (inferred.length === 0) {
+    return bundle;
+  }
+
+  const existing = new Set<string>([
+    ...bundle.hard.map(constraintKey),
+    ...bundle.soft.map(constraintKey),
+    ...bundle.inferred.map(constraintKey),
+  ]);
+  const mergedInferred: NormalizedConstraint[] = [...bundle.inferred];
+  for (const constraint of inferred) {
+    const key = constraintKey(constraint);
+    if (existing.has(key)) {
+      continue;
+    }
+    existing.add(key);
+    mergedInferred.push(constraint);
+  }
+
+  return {
+    hard: bundle.hard,
+    soft: bundle.soft,
+    inferred: mergedInferred,
+  };
+}
+
+function inferPairingObjectiveConstraints(normalizedQuery: string): readonly NormalizedConstraint[] {
+  const constraints: NormalizedConstraint[] = [];
+  for (const tag of extractAllPairingConstraints(normalizedQuery)) {
+    const inferred = pairingTagToObjectiveConstraint(tag);
+    if (inferred !== null) {
+      constraints.push(inferred);
+    }
+  }
+  return constraints;
+}
+
+function pairingTagToObjectiveConstraint(tag: PairingTag): NormalizedConstraint | null {
+  if (tag === 'spicy_food') {
+    return {
+      attribute: 'style',
+      operator: 'in',
+      value: SPICY_FOOD_STYLE_VALUES,
+      source_phrase: `pairing_objective(${tag})`,
+      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+    };
+  }
+
+  if (tag === 'white_fish') {
+    return {
+      attribute: 'wine_type',
+      operator: 'in',
+      value: WHITE_FISH_WINE_TYPE_VALUES,
+      source_phrase: `pairing_objective(${tag})`,
+      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+    };
+  }
+
+  return null;
+}
+
 /**
  * Merges a ConstraintBundle into the running hard/soft lists, deduplicating by
  * constraint key.
@@ -572,6 +650,7 @@ function buildConstraintExtractionTrace(args: {
   readonly spans: readonly Span[];
   readonly matched: readonly NormalizedConstraint[];
   readonly resolvedEntityCount: number;
+  readonly promotedResolvedEntityConstraintCount: number;
   readonly finalBundle: ConstraintBundle;
   readonly ontologyAddedCount: number;
   readonly compositionalAddedCount: number;
@@ -584,6 +663,7 @@ function buildConstraintExtractionTrace(args: {
     spans,
     matched,
     resolvedEntityCount,
+    promotedResolvedEntityConstraintCount,
     finalBundle,
     ontologyAddedCount,
     compositionalAddedCount,
@@ -609,7 +689,7 @@ function buildConstraintExtractionTrace(args: {
     candidateSpanCount: spans.length,
     resolvedEntityCount,
     directHardConstraintCount: matched.filter((constraint) =>
-      !SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)).length + resolvedEntityCount,
+      !SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)).length + promotedResolvedEntityConstraintCount,
     ontologyExpandedConstraintCount: ontologyAddedCount,
     compositionalInferenceCount: compositionalAddedCount,
     phrasesByTier: {

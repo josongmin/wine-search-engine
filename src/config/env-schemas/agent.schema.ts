@@ -20,7 +20,7 @@ const DEFAULT_AGENT_TIMEOUT_MS = 30_000;
 const DEFAULT_AGENT_PER_STEP_TIMEOUT_MS = 10_000;
 
 export const AgentEnvSchema = z.object({
-  /** Enable agentic multi-step search (requires OPENAI_API_KEY). */
+  /** Enable agentic multi-step search (requires OPENAI_API_KEY or OPENAI_API_KEYS). */
   AGENT_ENABLED: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')

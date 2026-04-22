@@ -1,6 +1,6 @@
 {
   "version": "ontology-snapshot-v1.0",
-  "generatedAt": "2026-04-16T16:49:56.126Z",
+  "generatedAt": "2026-04-22T11:03:12.310Z",
   "nodes": [
     {
       "id": "appellation:barbaresco",
@@ -311,6 +311,7 @@
       "aliases": [
         "Moscatel",
         "Moscato",
+        "Moscato Bianco",
         "Muscat",
         "Muscat Blanc"
       ],
@@ -1961,6 +1962,7 @@
       "aliases": [
         "Moscatel",
         "Moscato",
+        "Moscato Bianco",
         "Muscat",
         "Muscat Blanc"
       ]
@@ -3498,6 +3500,7 @@
     "primitivo": "zinfandel",
     "zinfandel": "zinfandel",
     "moscato": "muscat",
+    "moscato bianco": "muscat",
     "muscat": "muscat",
     "muscat blanc": "muscat",
     "moscatel": "muscat",

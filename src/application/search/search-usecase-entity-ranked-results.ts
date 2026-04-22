@@ -6,6 +6,7 @@ import { WineAttributeEncoders } from '../../domain/ranking/service/wine-attribu
 import { projectHybridCandidateToRankedResultAttributes } from '../../domain/ranking/service/ranked-result-attribute-projection.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
+import type { EntityLaneCandidateArtifact, IdentityExactnessTier, IdentityLaneProvenance } from '../../domain/retrieval/model/dual-lane-artifact.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import { annotateCandidateConstraintEvidenceBatch } from '../../domain/retrieval/service/candidate-constraint-evidence.js';
@@ -22,25 +23,9 @@ const MATCH_TYPE_EXACT = 'exact';
 const MATCH_TYPE_ALIAS_EXACT = 'alias_exact';
 const MATCH_TYPE_ALIAS_FUZZY = 'alias_fuzzy';
 
-/**
- * Lexical contribution for exact canonical match (highest confidence
- * entity route signal — the canonical label matched exactly).
- */
 const LEXICAL_CONTRIBUTION_EXACT = 1;
-
-/**
- * Lexical contribution for alias exact match (strong, but canonical is stronger).
- */
 const LEXICAL_CONTRIBUTION_ALIAS_EXACT = 0.9;
-
-/**
- * Lexical contribution for alias fuzzy match (weaker signal).
- */
 const LEXICAL_CONTRIBUTION_ALIAS_FUZZY = 0.7;
-
-/**
- * Lexical contribution when no alias provenance is available (fallback).
- */
 const LEXICAL_CONTRIBUTION_UNKNOWN = 0;
 
 const log = bootstrapLogger.child({ component: ENTITY_ROUTE_RANKED_RESULTS_COMPONENT });
@@ -49,16 +34,8 @@ function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
 }
 
-/**
- * T-E4-03: Derive lexical contribution from alias match type.
- *
- * The entity route has no BM25 lexical channel — this maps the alias
- * resolution signal type to the [0,1] lexical contribution scale so
- * that `mapRankedResultsToResultItems.deriveLexicalScore` works without
- * special-casing.
- */
 function deriveLexicalContributionFromAliasType(
-  aliasMatchType: string | undefined,
+  aliasMatchType: IdentityExactnessTier,
 ): number {
   switch (aliasMatchType) {
     case MATCH_TYPE_EXACT: return LEXICAL_CONTRIBUTION_EXACT;
@@ -68,18 +45,9 @@ function deriveLexicalContributionFromAliasType(
   }
 }
 
-/**
- * T-E4-03: Build entity-route-native score decomposition.
- *
- * The entity route bypasses the heuristic ranker entirely — scores come
- * from the resolver's calibrated posterior. We project the calibrated score
- * into the ScoreDecomposition contract so downstream consumers
- * (`scoreDecomposition.lexicalContribution` for matchType derivation)
- * work uniformly across routes.
- */
 function buildEntityRouteScoreDecomposition(
   calibratedScore: number,
-  aliasMatchType: string | undefined,
+  aliasMatchType: IdentityExactnessTier,
 ): ScoreDecomposition {
   const lexicalContribution = deriveLexicalContributionFromAliasType(aliasMatchType);
 
@@ -96,9 +64,83 @@ function buildEntityRouteScoreDecomposition(
   };
 }
 
-function buildSyntheticHybridCandidate(
+function buildIdentityProvenanceSignalSnapshot(
+  rawCandidate: ResolverCandidate | undefined,
+): IdentityLaneProvenance['sourceSignals'] {
+  return {
+    canonicalExactMatch: rawCandidate?.sourceSignals.canonicalExactMatch ?? 0,
+    canonicalNormalizedMatch: rawCandidate?.sourceSignals.canonicalNormalizedMatch ?? 0,
+    aliasExactMatch: rawCandidate?.sourceSignals.aliasExactMatch ?? 0,
+    aliasFuzzyMatch: rawCandidate?.sourceSignals.aliasFuzzyMatch ?? 0,
+    editDistanceScore: rawCandidate?.sourceSignals.editDistanceScore ?? 0,
+  };
+}
+
+export function resolveIdentityExactnessTier(
+  rawCandidate: ResolverCandidate | undefined,
+): IdentityExactnessTier {
+  const aliasSignals = rawCandidate?.sourceSignals;
+  if (aliasSignals?.canonicalExactMatch === 1) {
+    return MATCH_TYPE_EXACT;
+  }
+  if ((aliasSignals?.aliasExactMatch ?? 0) > 0) {
+    return MATCH_TYPE_ALIAS_EXACT;
+  }
+  if ((aliasSignals?.aliasFuzzyMatch ?? 0) > 0 || (aliasSignals?.editDistanceScore ?? 0) > 0) {
+    return MATCH_TYPE_ALIAS_FUZZY;
+  }
+  return 'none';
+}
+
+function findStrongestAliasMatch(
+  rawCandidate: ResolverCandidate | undefined,
+): IdentityLaneProvenance['strongestAliasMatch'] {
+  const strongestAliasMatch = rawCandidate?.aliasMatches.reduce<typeof rawCandidate.aliasMatches[number] | undefined>(
+    (best, candidate) =>
+      best === undefined || candidate.matchScore > best.matchScore ? candidate : best,
+    undefined,
+  );
+
+  return strongestAliasMatch !== undefined
+    ? {
+        aliasValue: strongestAliasMatch.aliasValue,
+        aliasType: strongestAliasMatch.aliasType,
+        matchScore: strongestAliasMatch.matchScore,
+      }
+    : undefined;
+}
+
+export function buildIdentityLaneProvenance(
   resolvedCandidate: EntityResolveResult['candidates'][number],
   rawCandidate: ResolverCandidate | undefined,
+): IdentityLaneProvenance {
+  const strongestAliasMatch = findStrongestAliasMatch(rawCandidate);
+
+  return {
+    source: 'entity_resolver',
+    entityId: resolvedCandidate.entityId,
+    exactnessTier: resolveIdentityExactnessTier(rawCandidate),
+    calibratedScore: resolvedCandidate.calibratedScore,
+    resolverRank: resolvedCandidate.rank,
+    canonicalLabel: resolvedCandidate.canonicalLabel,
+    evidenceRefs: resolvedCandidate.evidenceRefs,
+    sourceSignals: buildIdentityProvenanceSignalSnapshot(rawCandidate),
+    ...(strongestAliasMatch !== undefined ? { strongestAliasMatch } : {}),
+    ...(rawCandidate?.sources !== undefined && rawCandidate.sources.length > 0
+      ? { candidateSources: rawCandidate.sources }
+      : rawCandidate?.source !== undefined
+        ? { candidateSources: [rawCandidate.source] }
+        : {}),
+    ...(rawCandidate?.sourceRecordRefs !== undefined && rawCandidate.sourceRecordRefs.length > 0
+      ? { sourceRecordRefs: rawCandidate.sourceRecordRefs }
+      : {}),
+  };
+}
+
+export function liftResolvedEntityCandidateToHybridCandidate(
+  resolvedCandidate: EntityResolveResult['candidates'][number],
+  rawCandidate: ResolverCandidate | undefined,
+  identityProvenance: IdentityLaneProvenance,
 ): HybridCandidate {
   return applyAttributeHintsToSyntheticHybridCandidate(
     {
@@ -112,6 +154,11 @@ function buildSyntheticHybridCandidate(
         filtersApplied: [],
         candidateSources: [IDENTITY_EVIDENCE_SOURCE],
       },
+      entityPosteriorScore: identityProvenance.calibratedScore,
+      identityExactnessTier: identityProvenance.exactnessTier,
+      lanePresence: 'entity_only',
+      laneCorroborated: false,
+      laneDisagreement: true,
       ...(rawCandidate?.sourceRecordRefs !== undefined && rawCandidate.sourceRecordRefs.length > 0
         ? { sourceRecordRefs: rawCandidate.sourceRecordRefs }
         : {}),
@@ -157,43 +204,29 @@ function buildConstraintEvidenceItems(
 }
 
 function buildEntityRouteEvidenceItems(
-  resolvedCandidate: EntityResolveResult['candidates'][number],
+  identityProvenance: IdentityLaneProvenance,
   plan: QueryPlanV1,
-  rawCandidate: ResolverCandidate | undefined,
   matchedSet: ReadonlySet<string>,
   unmetHardConstraints: readonly string[],
 ): readonly EvidenceItem[] {
-  const aliasSignals = rawCandidate?.sourceSignals;
-  const aliasMatchType =
-    aliasSignals?.canonicalExactMatch === 1
-      ? MATCH_TYPE_EXACT
-      : (aliasSignals?.aliasExactMatch ?? 0) > 0
-          ? MATCH_TYPE_ALIAS_EXACT
-          : (aliasSignals?.aliasFuzzyMatch ?? 0) > 0 || (aliasSignals?.editDistanceScore ?? 0) > 0
-              ? MATCH_TYPE_ALIAS_FUZZY
-              : undefined;
-  const strongestAliasMatch = rawCandidate?.aliasMatches.reduce<typeof rawCandidate.aliasMatches[number] | undefined>(
-    (best, candidate) =>
-      best === undefined || candidate.matchScore > best.matchScore ? candidate : best,
-    undefined,
-  );
-
   return [
     {
       type: 'identity',
       source: IDENTITY_EVIDENCE_SOURCE,
-      contribution: `+${resolvedCandidate.calibratedScore.toFixed(2)}`,
+      contribution: `+${identityProvenance.calibratedScore.toFixed(2)}`,
       strength: 'high',
-      provenance: `Entity resolved via alias match (${String(resolvedCandidate.entityId)})`,
-      ...(aliasMatchType !== undefined || strongestAliasMatch !== undefined
+      provenance: `Entity resolved via alias match (${String(identityProvenance.entityId)})`,
+      ...(identityProvenance.exactnessTier !== 'none' || identityProvenance.strongestAliasMatch !== undefined
         ? {
             metadata: {
-              ...(aliasMatchType !== undefined ? { matchType: aliasMatchType } : {}),
-              ...(strongestAliasMatch !== undefined
+              ...(identityProvenance.exactnessTier !== 'none'
+                ? { matchType: identityProvenance.exactnessTier }
+                : {}),
+              ...(identityProvenance.strongestAliasMatch !== undefined
                 ? {
-                    matchedAlias: strongestAliasMatch.aliasValue,
-                    aliasType: strongestAliasMatch.aliasType,
-                    aliasScore: strongestAliasMatch.matchScore,
+                    matchedAlias: identityProvenance.strongestAliasMatch.aliasValue,
+                    aliasType: identityProvenance.strongestAliasMatch.aliasType,
+                    aliasScore: identityProvenance.strongestAliasMatch.matchScore,
                   }
                 : {}),
             },
@@ -263,9 +296,9 @@ function logTopConstraintProjectionGap(
   unmetHardConstraints: readonly string[],
 ): void {
   if (
-    resolvedCandidate.rank !== 1 ||
-    plan.constraints.hard.length === 0 ||
-    unmetHardConstraints.length === 0
+    resolvedCandidate.rank !== 1
+    || plan.constraints.hard.length === 0
+    || unmetHardConstraints.length === 0
   ) {
     return;
   }
@@ -287,11 +320,11 @@ function logTopConstraintProjectionGap(
   );
 }
 
-export function buildEntityRouteRankedResults(
+export function liftEntityResolveResultToLaneArtifacts(
   plan: QueryPlanV1,
   resolveResult: EntityResolveResult,
   resolverCandidates: readonly ResolverCandidate[],
-): readonly RankedResult[] {
+): readonly EntityLaneCandidateArtifact[] {
   if (resolveResult.candidates.length === 0) {
     return [];
   }
@@ -299,29 +332,27 @@ export function buildEntityRouteRankedResults(
   const resolverCandidateById = new Map(
     resolverCandidates.map((candidate) => [String(candidate.entityId), candidate] as const),
   );
-
-  // T-E4-03: Pre-compute alias match types per candidate for native provenance.
-  const aliasMatchTypeById = new Map<string, string | undefined>();
-  for (const resolvedCandidate of resolveResult.candidates) {
-    const rawCandidate = resolverCandidateById.get(String(resolvedCandidate.entityId));
-    const aliasSignals = rawCandidate?.sourceSignals;
-    const aliasMatchType =
-      aliasSignals?.canonicalExactMatch === 1
-        ? MATCH_TYPE_EXACT
-        : (aliasSignals?.aliasExactMatch ?? 0) > 0
-            ? MATCH_TYPE_ALIAS_EXACT
-            : (aliasSignals?.aliasFuzzyMatch ?? 0) > 0 || (aliasSignals?.editDistanceScore ?? 0) > 0
-                ? MATCH_TYPE_ALIAS_FUZZY
-                : undefined;
-    aliasMatchTypeById.set(String(resolvedCandidate.entityId), aliasMatchType);
-  }
-
-  const syntheticCandidates = resolveResult.candidates.map((resolvedCandidate) =>
-    buildSyntheticHybridCandidate(
-      resolvedCandidate,
-      resolverCandidateById.get(String(resolvedCandidate.entityId)),
-    ),
+  const identityProvenanceById = new Map(
+    resolveResult.candidates.map((resolvedCandidate) => {
+      const rawCandidate = resolverCandidateById.get(String(resolvedCandidate.entityId));
+      return [
+        String(resolvedCandidate.entityId),
+        buildIdentityLaneProvenance(resolvedCandidate, rawCandidate),
+      ] as const;
+    }),
   );
+  const syntheticCandidates = resolveResult.candidates.map((resolvedCandidate) => {
+    const rawCandidate = resolverCandidateById.get(String(resolvedCandidate.entityId));
+    const identityProvenance = identityProvenanceById.get(String(resolvedCandidate.entityId));
+    if (identityProvenance === undefined) {
+      throw invariantError('identity provenance missing for resolved entity');
+    }
+    return liftResolvedEntityCandidateToHybridCandidate(
+      resolvedCandidate,
+      rawCandidate,
+      identityProvenance,
+    );
+  });
   const annotatedCandidates = annotateCandidateConstraintEvidenceBatch(
     syntheticCandidates,
     plan.constraints,
@@ -332,9 +363,6 @@ export function buildEntityRouteRankedResults(
   assertUniqueEntityIds(annotatedEntityIds, 'annotated_candidates');
   const annotatedCandidateById = new Map(
     annotatedCandidates.map((candidate) => [String(candidate.entityId), candidate] as const),
-  );
-  const inferredConstraintAttributes = unique(
-    plan.constraints.inferred.map((constraint) => constraint.attribute),
   );
 
   return resolveResult.candidates.map((resolvedCandidate) => {
@@ -349,47 +377,94 @@ export function buildEntityRouteRankedResults(
       );
       throw invariantError('resolved entity is missing from annotated synthetic candidates');
     }
+
+    const rawCandidate = resolverCandidateById.get(String(resolvedCandidate.entityId));
+    const identityProvenance = identityProvenanceById.get(String(resolvedCandidate.entityId));
+    if (identityProvenance === undefined) {
+      throw invariantError('identity provenance missing for annotated entity');
+    }
     const matchedSet = new Set(annotatedCandidate.matchedConstraints);
     const unmetHardConstraints = annotatedCandidate.unmetHardConstraints ?? [];
-    const hardConstraintPass =
-      unmetHardConstraints.length === 0 &&
-      plan.constraints.hard.every((constraint) => matchedSet.has(constraint.attribute));
-    const rawCandidate = resolverCandidateById.get(String(resolvedCandidate.entityId));
-
-    logTopConstraintProjectionGap(
-      plan,
-      resolvedCandidate,
-      rawCandidate,
-      annotatedCandidate.matchedConstraints,
-      unmetHardConstraints,
-    );
-
-    // T-E4-03: Build entity-route-native score decomposition from alias match type.
-    const entityAliasMatchType = aliasMatchTypeById.get(String(resolvedCandidate.entityId));
-    const scoreDecomposition = buildEntityRouteScoreDecomposition(
-      resolvedCandidate.calibratedScore,
-      entityAliasMatchType,
-    );
 
     return {
       entityId: resolvedCandidate.entityId,
-      canonicalLabel: resolvedCandidate.canonicalLabel,
-      finalScore: resolvedCandidate.calibratedScore,
-      rank: resolvedCandidate.rank,
-      componentScores: buildComponentScores(resolvedCandidate.calibratedScore, hardConstraintPass),
+      candidate: {
+        ...annotatedCandidate,
+        entityPosteriorScore: identityProvenance.calibratedScore,
+        identityExactnessTier: identityProvenance.exactnessTier,
+        lanePresence: 'entity_only',
+        laneCorroborated: false,
+        laneDisagreement: true,
+      },
+      resolvedCandidate,
+      ...(rawCandidate !== undefined ? { rawCandidate } : {}),
+      identityProvenance,
       evidenceItems: buildEntityRouteEvidenceItems(
-        resolvedCandidate,
+        identityProvenance,
         plan,
-        rawCandidate,
         matchedSet,
         unmetHardConstraints,
       ),
-      matchedConstraints: annotatedCandidate.matchedConstraints,
+    };
+  });
+}
+
+export function buildEntityRouteRankedResults(
+  plan: QueryPlanV1,
+  resolveResult: EntityResolveResult,
+  resolverCandidates: readonly ResolverCandidate[],
+): readonly RankedResult[] {
+  const entityLaneArtifacts = liftEntityResolveResultToLaneArtifacts(
+    plan,
+    resolveResult,
+    resolverCandidates,
+  );
+
+  if (entityLaneArtifacts.length === 0) {
+    return [];
+  }
+
+  const inferredConstraintAttributes = unique(
+    plan.constraints.inferred.map((constraint) => constraint.attribute),
+  );
+
+  return entityLaneArtifacts.map((artifact) => {
+    const unmetHardConstraints = artifact.candidate.unmetHardConstraints ?? [];
+    const hardConstraintPass =
+      unmetHardConstraints.length === 0
+      && plan.constraints.hard.every((constraint) =>
+        artifact.candidate.matchedConstraints.includes(constraint.attribute),
+      );
+
+    logTopConstraintProjectionGap(
+      plan,
+      artifact.resolvedCandidate,
+      artifact.rawCandidate,
+      artifact.candidate.matchedConstraints,
+      unmetHardConstraints,
+    );
+
+    const scoreDecomposition = buildEntityRouteScoreDecomposition(
+      artifact.resolvedCandidate.calibratedScore,
+      artifact.identityProvenance.exactnessTier,
+    );
+
+    return {
+      entityId: artifact.resolvedCandidate.entityId,
+      canonicalLabel: artifact.resolvedCandidate.canonicalLabel,
+      finalScore: artifact.resolvedCandidate.calibratedScore,
+      rank: artifact.resolvedCandidate.rank,
+      componentScores: buildComponentScores(
+        artifact.resolvedCandidate.calibratedScore,
+        hardConstraintPass,
+      ),
+      evidenceItems: artifact.evidenceItems,
+      matchedConstraints: artifact.candidate.matchedConstraints,
       unmetConstraints: [...unmetHardConstraints],
       inferredConstraints: inferredConstraintAttributes,
       scoreDecomposition,
       ...projectHybridCandidateToRankedResultAttributes(
-        annotatedCandidate,
+        artifact.candidate,
         WineAttributeEncoders,
       ),
     };

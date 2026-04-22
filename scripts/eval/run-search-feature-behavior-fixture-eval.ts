@@ -104,6 +104,7 @@ interface CaseResult {
 export interface SearchFeatureBehaviorFixtureReport {
   readonly benchmark: 'search-feature-behavior-fixture';
   readonly suite_id: 'search_feature_behavior';
+  readonly execution_lane: BenchmarkExecutionLane;
   readonly query_count: number;
   readonly top3_accuracy: number;
   readonly constraint_compliance_rate: number;
@@ -383,6 +384,7 @@ function evaluateCase(
 
 export function buildSearchFeatureBehaviorReport(
   results: readonly CaseResult[],
+  executionLane: BenchmarkExecutionLane = 'trusted_benchmark',
 ): SearchFeatureBehaviorFixtureReport {
   const count = results.length;
   const failures = results
@@ -405,6 +407,7 @@ export function buildSearchFeatureBehaviorReport(
   return {
     benchmark: 'search-feature-behavior-fixture',
     suite_id: SUITE_ID,
+    execution_lane: executionLane,
     query_count: count,
     top3_accuracy: top3Accuracy,
     constraint_compliance_rate: constraintComplianceRate,
@@ -486,7 +489,7 @@ export async function main(): Promise<void> {
     return evaluateCase(benchmarkCase, response);
   });
 
-  const report = buildSearchFeatureBehaviorReport(results);
+  const report = buildSearchFeatureBehaviorReport(results, args.executionLane);
 
   await fs.writeFile(args.output, JSON.stringify(report, null, 2), 'utf8');
   process.stderr.write(`[sfb-fixture-eval] wrote ${args.output}\n`);

@@ -20,6 +20,12 @@ function newService(): OpenAiEmbeddingService {
   });
 }
 
+function embeddingBody(values: readonly number[]): string {
+  return JSON.stringify({
+    data: [{ object: 'embedding', index: 0, embedding: values }],
+  });
+}
+
 async function embedIgnoringError(svc: OpenAiEmbeddingService): Promise<unknown> {
   try {
     return await svc.embed('test');
@@ -43,11 +49,52 @@ describe('OpenAiEmbeddingService circuit breaker', () => {
     expect(names).toContain('openai-embedding');
   });
 
+  it('registers per-key embedding breakers for pooled credentials', () => {
+    new OpenAiEmbeddingService({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeys: ['sk-a', 'sk-b'],
+      model: 'text-embedding-3-large',
+      httpTimeoutMs: 60_000,
+    });
+
+    const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
+    expect(names).toContain('openai-embedding:key-1');
+    expect(names).toContain('openai-embedding:key-2');
+  });
+
   it('starts in CLOSED state', () => {
     newService();
     const snapshot = globalCircuitBreakerRegistry.snapshot();
     const breaker = snapshot.find((s) => s.name === 'openai-embedding');
     expect(breaker?.state).toBe('CLOSED');
+  });
+
+  it('rotates to the next pooled key on 429', async () => {
+    const seenAuthorizations: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        const authorization = (init?.headers as Record<string, string> | undefined)?.['Authorization'];
+        if (authorization !== undefined) seenAuthorizations.push(authorization);
+        if (seenAuthorizations.length === 1) {
+          return new Response('rate limited', { status: 429 });
+        }
+        return new Response(embeddingBody([0.1, 0.2]), { status: 200 });
+      }),
+    );
+
+    const svc = new OpenAiEmbeddingService({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeys: ['sk-a', 'sk-b'],
+      model: 'text-embedding-3-large',
+      httpTimeoutMs: 60_000,
+      dimensions: 2,
+    });
+
+    const result = await svc.embed('test');
+
+    expect(result).toEqual([0.1, 0.2]);
+    expect(seenAuthorizations).toEqual(['Bearer sk-a', 'Bearer sk-b']);
   });
 
   it('opens after configured consecutive 5xx failures and fast-fails next call', async () => {

@@ -1,9 +1,4 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import {
-  createCircuitBreaker,
-  type CircuitBreaker,
-} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 import type {
   LLMInjectionClassifierOptions,
   LLMInjectionClassifierPort,
@@ -18,6 +13,13 @@ import {
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
 import { runUnderLlmBreaker } from '../ai/llm-circuit-breaker-classifier.js';
+import {
+  createOpenAiKeyPool,
+  isOpenAiKeyPoolRotatableError,
+  openAiKeyPoolExhaustedError,
+  orderedOpenAiKeySlots,
+  type OpenAiKeySlot,
+} from '../ai/openai-key-pool.js';
 import {
   INJECTION_CLASSIFIER_SYSTEM_PROMPT,
   normalizeClassifierJsonText,
@@ -44,7 +46,8 @@ const OPENAI_INJECTION_RETRY_CONFIG: RetryConfig = {
 
 interface OpenAiInjectionClassifierOptions {
   readonly baseUrl: string;
-  readonly apiKey: string;
+  readonly apiKey?: string | undefined;
+  readonly apiKeys?: readonly string[] | undefined;
   readonly model?: string | undefined;
   readonly httpTimeoutMs?: number | undefined;
 }
@@ -85,35 +88,28 @@ function tokenLimitKey(model: string): 'max_completion_tokens' | 'max_tokens' {
 
 export class OpenAiLLMInjectionClassifier implements LLMInjectionClassifierPort {
   private readonly endpoint: string;
-  private readonly apiKey: string;
+  private readonly keySlots: readonly OpenAiKeySlot[];
   private readonly model: string;
   private readonly httpTimeoutMs: number;
-  private readonly circuitBreaker: CircuitBreaker;
+  private nextSlotIndex = 0;
 
   constructor(options: OpenAiInjectionClassifierOptions) {
-    if (!options.apiKey || options.apiKey.trim().length === 0) {
-      throw new Error('OpenAiLLMInjectionClassifier: apiKey is required');
-    }
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/chat/completions`;
-    this.apiKey = options.apiKey;
-    this.model = options.model ?? DEFAULT_OPENAI_INJECTION_MODEL;
-    this.httpTimeoutMs = options.httpTimeoutMs ?? DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS;
-    this.circuitBreaker = createCircuitBreaker({
-      name: OPENAI_INJECTION_BREAKER_NAME,
+    this.keySlots = createOpenAiKeyPool({
+      baseBreakerName: OPENAI_INJECTION_BREAKER_NAME,
+      apiKey: options.apiKey,
+      apiKeys: options.apiKeys,
       failureThreshold: OPENAI_INJECTION_BREAKER_FAILURE_THRESHOLD,
       recoveryTimeoutMs: OPENAI_INJECTION_BREAKER_RECOVERY_TIMEOUT_MS,
       halfOpenMaxAttempts: OPENAI_INJECTION_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
     });
-    globalCircuitBreakerRegistry.register(OPENAI_INJECTION_BREAKER_NAME, this.circuitBreaker);
+    this.model = options.model ?? DEFAULT_OPENAI_INJECTION_MODEL;
+    this.httpTimeoutMs = options.httpTimeoutMs ?? DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS;
   }
 
   async classify(query: string, options?: LLMInjectionClassifierOptions): Promise<boolean> {
     try {
-      return await runUnderLlmBreaker(
-        this.circuitBreaker,
-        OPENAI_INJECTION_BREAKER_NAME,
-        () => this.classifyOnce(query, options),
-      );
+      return await this.classifyWithKeyPool(query, options);
     } catch (err) {
       bootstrapLogger.warn(
         { err: err instanceof Error ? err.message : String(err) },
@@ -123,8 +119,38 @@ export class OpenAiLLMInjectionClassifier implements LLMInjectionClassifierPort 
     }
   }
 
+  private async classifyWithKeyPool(
+    query: string,
+    options?: LLMInjectionClassifierOptions,
+  ): Promise<boolean> {
+    const slots = this.nextOrderedSlots();
+    const errors: unknown[] = [];
+
+    for (const slot of slots) {
+      try {
+        return await runUnderLlmBreaker(slot.circuitBreaker, slot.breakerName, () =>
+          this.classifyOnce(query, slot.apiKey, options),
+        );
+      } catch (err) {
+        errors.push(err);
+        if (this.keySlots.length === 1 || !isOpenAiKeyPoolRotatableError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    throw openAiKeyPoolExhaustedError('OpenAI injection classifier', this.keySlots.length, errors);
+  }
+
+  private nextOrderedSlots(): readonly OpenAiKeySlot[] {
+    const startIndex = this.nextSlotIndex;
+    this.nextSlotIndex = (this.nextSlotIndex + 1) % this.keySlots.length;
+    return orderedOpenAiKeySlots(this.keySlots, startIndex);
+  }
+
   private async classifyOnce(
     query: string,
+    apiKey: string,
     options?: LLMInjectionClassifierOptions,
   ): Promise<boolean> {
     const body: Record<string, unknown> = {
@@ -146,7 +172,7 @@ export class OpenAiLLMInjectionClassifier implements LLMInjectionClassifierPort 
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${this.apiKey}`,
+                Authorization: `Bearer ${apiKey}`,
               },
               body: JSON.stringify(body),
             },

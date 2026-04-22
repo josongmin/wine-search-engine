@@ -13,6 +13,23 @@ import {
 describe('EvidenceGate', () => {
   const gate = new EvidenceGate();
 
+  function makeIdentityEvidenceSummary(
+    overrides: Partial<NonNullable<EvidenceSummary['identityEvidence']>> = {},
+  ): EvidenceSummary {
+    return {
+      identityEvidencePresent: true,
+      identityEvidence: {
+        source: 'identity_artifact',
+        resolveTopEntityPresent: true,
+        winnerIdentityArtifactPresent: true,
+        winnerIdentityArtifactMatchesResolveResult: true,
+        exactnessTier: 'exact',
+        identityEvidenceRefCount: 1,
+        ...overrides,
+      },
+    };
+  }
+
   function makeContract(
     evidence: EvidenceSummary | undefined,
     overrides: Partial<DecisionProvenanceContract['policy']> = {},
@@ -50,29 +67,21 @@ describe('EvidenceGate', () => {
 
   describe('resolved + identity evidence present → passes', () => {
     it('returns passed=true when identity evidence is present', () => {
-      const evidence: EvidenceSummary = { identityEvidencePresent: true };
+      const evidence = makeIdentityEvidenceSummary();
       const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(true);
     });
 
     it('does not set downgradeTo when passed', () => {
-      const evidence: EvidenceSummary = { identityEvidencePresent: true };
+      const evidence = makeIdentityEvidenceSummary();
       const result = gate.check('resolved', makeContract(evidence));
       expect(result.downgradeTo).toBeUndefined();
     });
 
     it('passes when ranked evidence agrees with resolver identity even without ranked evidence items', () => {
-      const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
-        identityEvidence: {
-          topEntityPresent: true,
-          resolverTopCandidateMatchesTopEntity: true,
-          resolverEvidenceRefCount: 1,
-          rankedTopResultPresent: true,
-          rankedTopResultMatchesTopEntity: true,
-          rankedEvidenceItemCount: 0,
-        },
-      };
+      const evidence = makeIdentityEvidenceSummary({
+        exactnessTier: 'alias_exact',
+      });
       const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(true);
     });
@@ -100,17 +109,9 @@ describe('EvidenceGate', () => {
     });
 
     it('fails when richer identity evidence shows ranked/resolver mismatch', () => {
-      const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
-        identityEvidence: {
-          topEntityPresent: true,
-          resolverTopCandidateMatchesTopEntity: true,
-          resolverEvidenceRefCount: 1,
-          rankedTopResultPresent: true,
-          rankedTopResultMatchesTopEntity: false,
-          rankedEvidenceItemCount: 2,
-        },
-      };
+      const evidence = makeIdentityEvidenceSummary({
+        winnerIdentityArtifactMatchesResolveResult: false,
+      });
       const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
@@ -120,7 +121,7 @@ describe('EvidenceGate', () => {
   describe('resolved + constraint evidence for constrained query → passes', () => {
     it('passes when constraints present and constraint evidence present', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         constraintEvidencePresent: true,
       };
       const result = gate.check(
@@ -132,7 +133,7 @@ describe('EvidenceGate', () => {
 
     it('fails when constraints present but constraint evidence is missing', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         constraintEvidencePresent: false,
       };
       const result = gate.check(
@@ -144,10 +145,7 @@ describe('EvidenceGate', () => {
     });
 
     it('fails when constraints present but constraintEvidencePresent is undefined', () => {
-      const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
-        // constraintEvidencePresent: not set
-      };
+      const evidence: EvidenceSummary = makeIdentityEvidenceSummary();
       const result = gate.check(
         'resolved',
         makeContract(evidence, { requireConstraintEvidence: true }),
@@ -157,7 +155,7 @@ describe('EvidenceGate', () => {
 
     it('passes when constraint evidence is not required regardless of constraint evidence', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         constraintEvidencePresent: false,
       };
       const result = gate.check('resolved', makeContract(evidence));
@@ -195,7 +193,7 @@ describe('EvidenceGate', () => {
   describe('anchor evidence checks', () => {
     it('fails when anchor present but no anchor evidence', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         anchorEvidencePresent: false,
       };
       const result = gate.check(
@@ -208,7 +206,7 @@ describe('EvidenceGate', () => {
 
     it('passes when anchor present and anchor evidence present', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         anchorEvidencePresent: true,
       };
       const result = gate.check(
@@ -220,7 +218,7 @@ describe('EvidenceGate', () => {
 
     it('fails when richer anchor evidence shows no ranked anchor signal', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         anchorEvidencePresent: true,
         anchorEvidence: {
           topEntityPresent: true,
@@ -239,7 +237,7 @@ describe('EvidenceGate', () => {
 
     it('fails when mixed-route anchor resolution is missing even if ranked anchor signal exists', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         anchorEvidencePresent: true,
         anchorResolution: {
           anchorEntityPresent: false,
@@ -261,7 +259,7 @@ describe('EvidenceGate', () => {
 
     it('passes when anchor evidence is not required regardless of anchor evidence', () => {
       const evidence: EvidenceSummary = {
-        identityEvidencePresent: true,
+        ...makeIdentityEvidenceSummary(),
         anchorEvidencePresent: false,
       };
       const result = gate.check('resolved', makeContract(evidence));

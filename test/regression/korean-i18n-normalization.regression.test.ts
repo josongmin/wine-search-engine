@@ -36,6 +36,11 @@ describe('Korean/i18n normalization regressions', () => {
       expect(correctKoreanWineTypos('오퍼스원')).toBe('오푸스원');
     });
 
+    it('does not rewrite semantic chat slang inside Korean eojeols', () => {
+      expect(correctKoreanWineTypos('와인 ㄱㅊ은거 하나만')).toBe('와인 ㄱㅊ은거 하나만');
+      expect(correctKoreanWineTypos('와알못인데 레드 하나 ㄱㅊ은걸로')).toBe('와알못인데 레드 하나 ㄱㅊ은걸로');
+    });
+
     it('QueryNormalizer applies typo correction before transliteration lookup', () => {
       const views = normalizer.normalize('보졸레누보');
       expect(views.punctuationStripped).toBe('보졸레 누보');

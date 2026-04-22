@@ -8,6 +8,7 @@ import {
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 
 interface CandidateRow {
   entity_id: string;
@@ -19,6 +20,30 @@ interface CandidateRow {
  */
 export function escapeLikePattern(input: string): string {
   return input.replace(/[%_\\]/g, '\\$&');
+}
+
+function uniqueNonEmpty(values: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function buildBlockingLookupVariants(query: string, normalizedQuery: string): readonly string[] {
+  const rawViews = buildNormalizedQueryViews(query);
+  const normalizedViews = buildNormalizedQueryViews(normalizedQuery);
+  return uniqueNonEmpty([
+    normalizedQuery,
+    ...rawViews.lookupVariants,
+    ...normalizedViews.lookupVariants,
+  ]);
 }
 
 export class PgBlockingAdapter implements BlockingPort {
@@ -61,20 +86,22 @@ export class PgBlockingAdapter implements BlockingPort {
       });
       throw err;
     }
+    const lookupVariants = buildBlockingLookupVariants(query, normalizedQuery);
+    const prefixPatterns = lookupVariants.map((variant) => `${escapeLikePattern(variant)}%`);
     let result: { rows: CandidateRow[] };
     try {
       result = await this.pool.query<CandidateRow>(
         `WITH exact_match AS (
           SELECT entity_id, 1 AS priority
           FROM aliases
-          WHERE normalized_value = $1
+          WHERE normalized_value = ANY($1::text[])
             AND search_snapshot_id = $5
             AND is_suppressed = FALSE
         ),
         prefix_match AS (
           SELECT entity_id, 2 AS priority
           FROM aliases
-          WHERE normalized_value LIKE $2
+          WHERE normalized_value LIKE ANY($2::text[])
             AND search_snapshot_id = $5
             AND is_suppressed = FALSE
             AND entity_id NOT IN (SELECT entity_id FROM exact_match)
@@ -105,8 +132,8 @@ export class PgBlockingAdapter implements BlockingPort {
         ORDER BY best_priority ASC
         LIMIT $4`,
         [
-          normalizedQuery,
-          `${escapeLikePattern(normalizedQuery)}%`,
+          lookupVariants,
+          prefixPatterns,
           `%${escapeLikePattern(query)}%`,
           limit,
           activeSnapshotId,

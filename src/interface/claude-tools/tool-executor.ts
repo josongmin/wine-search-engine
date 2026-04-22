@@ -133,6 +133,9 @@ function buildSearchToolStructuredFilters(input: SearchToolInput): readonly Norm
   for (const region of input.exclude_regions ?? []) {
     pushSearchToolStructuredFilter(filters, 'region', 'exclude', region, region);
   }
+  for (const wineType of input.exclude_wine_types ?? []) {
+    pushSearchToolStructuredFilter(filters, 'wine_type', 'exclude', wineType, wineType);
+  }
   if (input.wine_type !== undefined) {
     pushSearchToolStructuredFilter(filters, 'wine_type', '=', input.wine_type, input.wine_type);
   }
@@ -247,6 +250,7 @@ function buildCompareToolRequestContext(input: CompareToolInput): {
     query: sharedInput.query_a,
     ...(sharedInput.exclude_grapes !== undefined ? { exclude_grapes: sharedInput.exclude_grapes } : {}),
     ...(sharedInput.exclude_regions !== undefined ? { exclude_regions: sharedInput.exclude_regions } : {}),
+    ...(sharedInput.exclude_wine_types !== undefined ? { exclude_wine_types: sharedInput.exclude_wine_types } : {}),
     ...(sharedInput.min_price_krw !== undefined ? { min_price_krw: sharedInput.min_price_krw } : {}),
     ...(sharedInput.max_price_krw !== undefined ? { max_price_krw: sharedInput.max_price_krw } : {}),
     ...(sharedInput.max_alcohol_pct !== undefined ? { max_alcohol_pct: sharedInput.max_alcohol_pct } : {}),

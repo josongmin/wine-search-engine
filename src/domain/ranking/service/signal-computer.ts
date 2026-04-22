@@ -1,6 +1,10 @@
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import type {
+  DualLanePresence,
+  IdentityExactnessTier,
+} from '../../retrieval/model/dual-lane-artifact.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
@@ -539,6 +543,39 @@ export class SignalComputer {
       return clamp01(candidate.criticScoreNormalized);
     }
     return undefined;
+  }
+
+  /**
+   * Preserves the calibrated entity-lane posterior when present.
+   *
+   * The value is already calibrated upstream; ranking only clamps it into the
+   * model's numeric support.
+   */
+  computeEntityPosterior(candidate: HybridCandidate): number | undefined {
+    if (candidate.lanePresence === 'general_only') {
+      return undefined;
+    }
+    if (candidate.entityPosteriorScore === undefined) {
+      return undefined;
+    }
+    return clamp01(candidate.entityPosteriorScore);
+  }
+
+  /**
+   * Returns the canonical identity exactness tier carried by the entity lane.
+   */
+  computeIdentityExactnessTier(candidate: HybridCandidate): IdentityExactnessTier {
+    if (candidate.lanePresence === 'general_only') {
+      return 'none';
+    }
+    return candidate.identityExactnessTier ?? 'none';
+  }
+
+  /**
+   * Returns the canonical dual-lane presence classification when available.
+   */
+  computeLanePresence(candidate: HybridCandidate): DualLanePresence | undefined {
+    return candidate.lanePresence;
   }
 
   /**

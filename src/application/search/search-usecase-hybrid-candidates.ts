@@ -569,7 +569,7 @@ function buildTypedRecommendationRetrievalInput(
 }
 
 function candidateDiscoveryScore(candidate: HybridCandidate): number {
-  return candidate.fusionRrfTotal ?? candidate.retrievalFusionScore ?? 0;
+  return candidate.fusionRrfTotal ?? 0;
 }
 
 interface BranchCandidateSet {
@@ -777,8 +777,8 @@ async function retrieveAmbiguousEntityBranchCandidates(
         ),
         ...optionalBranchDegradation,
       ],
-      criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
-      criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
+      criticRewrites: branchResults.flatMap((result) => result.criticRewrites),
+      criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted),
     };
   }
 
@@ -798,8 +798,8 @@ async function retrieveAmbiguousEntityBranchCandidates(
           `retrieval_degraded:${signal.component}:${signal.reason}`,
         ) ?? []),
     ],
-    criticRewrites: branchResults.flatMap((result) => result.criticRewrites ?? []),
-    criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted ?? false),
+    criticRewrites: branchResults.flatMap((result) => result.criticRewrites),
+    criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted),
   };
 }
 
@@ -907,7 +907,7 @@ function buildDenseSafeSemanticViews(
     return [];
   }
 
-  if ((views.semanticVariants?.length ?? 0) > 0) {
+  if (views.semanticVariants.length > 0) {
     return views.semanticVariants;
   }
 
@@ -1605,13 +1605,9 @@ export async function retrieveHybridCandidatesForPlan(
  * feasibility is solved inside the exact assignment stage.
  */
 const DEFAULT_BUNDLE_SCORER: BundleCellScorer = ({ candidate }) =>
-  // ADR-013 / RFC-012 candidate score migration: prefer fusionRrfTotal
-  // (the post-fusion canonical score). Fall back to the deprecated
-  // retrievalFusionScore field for compatibility with retrievers that
-  // have not yet migrated. Returning 0 keeps the cell assignable but
-  // de-prioritised when both fields are absent.
-  // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback per CLAUDE.md rule 31
-  candidate.fusionRrfTotal ?? candidate.retrievalFusionScore ?? 0;
+  // Bundle scoring reads only the canonical fusion score substrate.
+  // Non-fusion candidates contribute 0 here by contract.
+  candidate.fusionRrfTotal ?? 0;
 
 const DEFAULT_BUNDLE_PRICER: BundleCellPricer = ({ candidate, resource }) => {
   if (resource === 'price_total') {

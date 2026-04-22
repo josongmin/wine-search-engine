@@ -1,0 +1,1 @@
+export const AGENT_FIXTURE_ANSWER_QUALITY_DEFAULT_JUDGE_MODEL = 'gpt-5.4-mini';

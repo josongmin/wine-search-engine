@@ -100,4 +100,36 @@ describe('OpenAiLLMInjectionClassifier', () => {
 
     await expect(classifier.classify('find wine')).rejects.toThrow('HTTP 401');
   });
+
+  it('rotates across OPENAI_API_KEYS on key-level failures', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        text: async () => 'bad key',
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [
+            { message: { content: JSON.stringify({ is_injection: false }) } },
+          ],
+        }),
+      } as Response);
+
+    const classifier = new OpenAiLLMInjectionClassifier({
+      apiKeys: ['sk-bad', 'sk-good'],
+      baseUrl: 'https://api.openai.com/v1',
+    });
+
+    await expect(classifier.classify('find wine')).resolves.toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toEqual(
+      expect.objectContaining({ Authorization: 'Bearer sk-bad' }),
+    );
+    expect(vi.mocked(fetch).mock.calls[1]?.[1]?.headers).toEqual(
+      expect.objectContaining({ Authorization: 'Bearer sk-good' }),
+    );
+  });
 });

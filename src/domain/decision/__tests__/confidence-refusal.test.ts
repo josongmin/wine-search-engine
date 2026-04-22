@@ -159,7 +159,7 @@ function makeProvenanceContract(
     readonly queryPlan?: QueryPlanV1 | undefined;
     readonly evidenceSummary?: DecisionInput['evidenceSummary'] | undefined;
     readonly provenancePolicy?: DecisionInput['provenanceContract']['policy'] | undefined;
-    readonly resolverResult?: EntityResolveResult | undefined;
+    readonly resolveResult?: EntityResolveResult | undefined;
   } = {},
 ): DecisionInput['provenanceContract'] {
   const queryPlan = input.queryPlan ?? makeQueryPlan();
@@ -176,7 +176,7 @@ function makeProvenanceContract(
       identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
       constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
       anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
-      topEntityPresent: input.resolverResult?.topEntity !== undefined,
+      topEntityPresent: input.resolveResult?.topEntity !== undefined,
       rankedTopResultPresent: false,
       matchedConstraintAttributes: [],
       unmetConstraintAttributes: [],
@@ -198,15 +198,15 @@ function makeProvenanceContract(
 
 function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
   const queryPlan = overrides.queryPlan ?? makeQueryPlan();
-  const resolverResult = overrides.resolverResult ?? makeResolverResult(0.9, 0.3);
-  const evidenceSummary = overrides.evidenceSummary ?? {
-    identityEvidencePresent: true,
-  };
+  const resolveResult = overrides.resolveResult ?? makeResolverResult(0.9, 0.3);
+  const evidenceSummary = overrides.evidenceSummary ?? makeStrongIdentityEvidence();
   return {
     queryPlan,
-    effectiveRoute: 'hybrid',
-    effectiveRetrievalMode: 'hybrid',
-    resolverResult,
+    effectiveRoute: queryPlan.route,
+    effectiveRetrievalMode: queryPlan.retrievalMode as DecisionInput['effectiveRetrievalMode'],
+    resolveResult,
+    identityResolveResult:
+      'identityResolveResult' in overrides ? overrides.identityResolveResult : resolveResult,
     policy: {
       requireExact: false,
       allowApproximate: true,
@@ -229,9 +229,35 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
       queryPlan,
       evidenceSummary,
       provenancePolicy: overrides.provenanceContract?.policy,
-      resolverResult,
+      resolveResult,
     }),
     ...overrides,
+  };
+}
+
+function makeStrongIdentityEvidence(
+  overrides: Partial<NonNullable<DecisionInput['evidenceSummary']>> & {
+    readonly identityEvidence?: Partial<
+      NonNullable<NonNullable<DecisionInput['evidenceSummary']>['identityEvidence']>
+    >;
+  } = {},
+) {
+  const { identityEvidence: identityEvidenceOverrides, ...summaryOverrides } = overrides;
+  const identityEvidence = {
+    source: 'identity_artifact' as const,
+    resolveTopEntityPresent: true,
+    winnerIdentityArtifactPresent: true,
+    winnerIdentityArtifactMatchesResolveResult: true,
+    lanePresence: 'corroborated' as const,
+    exactnessTier: 'exact' as const,
+    identityEvidenceRefCount: 1,
+    ...(identityEvidenceOverrides ?? {}),
+  };
+
+  return {
+    identityEvidencePresent: true,
+    ...summaryOverrides,
+    identityEvidence,
   };
 }
 
@@ -241,7 +267,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
 
     it('admits resolved decisions when no policy is provided', () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.1, 0.3),
+        resolveResult: makeResolverResult(0.1, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true);
@@ -249,7 +275,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
 
     it('low-confidence decisions are NOT refused without policy', () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.05, 0.3),
+        resolveResult: makeResolverResult(0.05, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true);
@@ -267,7 +293,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       ['refuses C just below threshold', 0.449, false],
     ])('%s', (_label, C, admitted) => {
       const input = makeInput({
-        resolverResult: makeResolverResult(C, 0.3),
+        resolveResult: makeResolverResult(C, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(admitted);
@@ -278,7 +304,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
 
     it('includes traceRef in rejection result', () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.3, 0.3),
+        resolveResult: makeResolverResult(0.3, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
@@ -325,7 +351,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
         },
         conformalSetSize: 1,
       };
-      const input = makeInput({ resolverResult: result_no_c as EntityResolveResult });
+      const input = makeInput({ resolveResult: result_no_c as EntityResolveResult });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true); // Defaults to 1.0, which is >= 0.45
     });
@@ -366,19 +392,15 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
               inferred: [],
             },
           },
-          evidenceSummary: {
-            identityEvidencePresent: true,
-          },
+          evidenceSummary: makeStrongIdentityEvidence(),
           provenancePolicy: {
             requireIdentitySeal: true,
             requireConstraintEvidence: false,
             requireAnchorEvidence: false,
           },
-          resolverResult: makeResolverResult(0.9, 0.3),
+          resolveResult: makeResolverResult(0.9, 0.3),
         }),
-        evidenceSummary: {
-          identityEvidencePresent: true,
-        },
+        evidenceSummary: makeStrongIdentityEvidence(),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true);
@@ -386,7 +408,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
 
     it('other failures take precedence (no identity evidence)', () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.3, 0.3), // C < 0.45
+        resolveResult: makeResolverResult(0.3, 0.3), // C < 0.45
         evidenceSummary: {
           identityEvidencePresent: false,
         },
@@ -404,10 +426,8 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
 
     it('confidence refusal is checked after other gates pass', () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.3, 0.3), // C < 0.45
-        evidenceSummary: {
-          identityEvidencePresent: true,
-        },
+        resolveResult: makeResolverResult(0.3, 0.3), // C < 0.45
+        evidenceSummary: makeStrongIdentityEvidence(),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
@@ -418,18 +438,12 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
 
     it('richer identity evidence mismatch is rejected before confidence refusal', () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.9, 0.3),
-        evidenceSummary: {
-          identityEvidencePresent: true,
+        resolveResult: makeResolverResult(0.9, 0.3),
+        evidenceSummary: makeStrongIdentityEvidence({
           identityEvidence: {
-            topEntityPresent: true,
-            resolverTopCandidateMatchesTopEntity: true,
-            resolverEvidenceRefCount: 1,
-            rankedTopResultPresent: true,
-            rankedTopResultMatchesTopEntity: false,
-            rankedEvidenceItemCount: 2,
+            winnerIdentityArtifactMatchesResolveResult: false,
           },
-        },
+        }),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
@@ -447,7 +461,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       const policy = new ConfidenceRefusalPolicy(threshold);
       const gate = new AdmissionGate(policy);
       const input = makeInput({
-        resolverResult: makeResolverResult(C, 0.3),
+        resolveResult: makeResolverResult(C, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(admitted);
@@ -458,13 +472,13 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       const gate = new AdmissionGate(policy);
 
       const admit = makeInput({
-        resolverResult: makeResolverResult(0.5, 0.3),
+        resolveResult: makeResolverResult(0.5, 0.3),
       });
       const admitResult = gate.check(admit, TEST_SNAPSHOT);
       expect(admitResult.admitted).toBe(true);
 
       const refuse = makeInput({
-        resolverResult: makeResolverResult(0.49, 0.3),
+        resolveResult: makeResolverResult(0.49, 0.3),
       });
       const refuseResult = gate.check(refuse, TEST_SNAPSHOT);
       expect(refuseResult.admitted).toBe(false);
@@ -493,7 +507,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
         conformalSetSize: 1,
       };
       const input = makeInput({
-        resolverResult: result_no_entity as EntityResolveResult,
+        resolveResult: result_no_entity as EntityResolveResult,
       });
       const result = gate.check(input, TEST_SNAPSHOT);
       // Should fail due to identity check, not confidence
@@ -515,9 +529,9 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
         } as const,
       };
       const input = makeInput({
-        resolverResult: makeResolverResult(0.3, 0.3),
+        resolveResult: makeResolverResult(0.3, 0.3),
         evidenceSummary: {
-          identityEvidencePresent: true,
+          ...makeStrongIdentityEvidence(),
           anchorEvidencePresent: true,
         },
         queryPlan: queryPlanWithAnchor,

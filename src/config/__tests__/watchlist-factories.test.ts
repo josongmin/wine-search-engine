@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WatchlistPublisherPort } from '../../infrastructure/watchlist/redis-watchlist-publisher.js';
 import type { WatchlistSubscriberPort } from '../../infrastructure/watchlist/redis-watchlist-subscriber.js';
+import { SearchSnapshotAliasMatcher } from '../../infrastructure/adapter/search-snapshot-alias-matcher.js';
 import { buildCoreAdapterServices } from '../container-adapters.js';
 import { buildWatchlistContainerServices } from '../container-watchlist.js';
 import { parseEnv } from '../env.js';
@@ -35,9 +36,17 @@ describe('watchlist runtime factories', () => {
       publishUpdate: vi.fn(async () => {}),
     }));
 
-    await Promise.resolve(buildCoreAdapterServices(config, {
-      createWatchlistPublisher: publisherFactory,
-    }));
+    const loadSpy = vi
+      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
+      .mockResolvedValue(undefined);
+
+    try {
+      await Promise.resolve(buildCoreAdapterServices(config, {
+        createWatchlistPublisher: publisherFactory,
+      }));
+    } finally {
+      loadSpy.mockRestore();
+    }
 
     expect(publisherFactory).toHaveBeenCalledTimes(1);
   });
@@ -89,7 +98,7 @@ describe('watchlist runtime factories', () => {
       NODE_ENV: 'production',
       WATCHLIST_ENABLED: 'true',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
-      ANTHROPIC_API_KEY: 'sk-ant-test',
+      OPENAI_API_KEY: 'sk-test',
     });
 
     expect(() => buildWatchlistContainerServices(config, {

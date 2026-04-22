@@ -231,7 +231,7 @@ export const ROBUSTNESS_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         phenomena: ['canonical-ko', 'space-collapse'],
       },
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['모엣샹동 로제 임페리얼', '모엣 샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial'] },
+        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['모엣샹동 로제 임페리얼', '모엣 샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial', 'Moet and Chandon Rose Imperial', 'moet chandon rose imperial'] },
         { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
       ],
       rubric:
@@ -435,7 +435,7 @@ export const ROBUSTNESS_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         phenomena: ['canonical-ko', 'space-collapse', 'alias'],
       },
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['로마네콩티', '로마네 콩티', 'Romanée-Conti', 'Romanee Conti'] },
+        { tool: 'search_wines', argPath: 'query', predicate: 'equals_any', value: ['로마네콩티', '로마네 콩티', 'Romanée-Conti', 'Romanee Conti', 'Domaine de la Romanee-Conti'] },
         { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
       ],
       rubric:

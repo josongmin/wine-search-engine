@@ -42,7 +42,7 @@ import {
 } from '../domain/query/service/decomposition-detector.js';
 
 export interface Container extends LearningContainerServices {
-  /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
+  /** OpenAI-compatible chat when an OpenAI credential or credential pool is set. */
   readonly chatLlm?: ChatLlmPort;
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
@@ -82,11 +82,11 @@ export async function createContainer(
   const watchlist = buildWatchlistContainerServices(config, runtime);
   const learning = buildLearningContainerServices(runtime);
   // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
-  // and OPENAI_API_KEY is unset (see config/env.ts). If we somehow reach here
+  // and no OpenAI credential is set (see config/env.ts). If we somehow reach here
   // without a chatLlm, fail loudly rather than silently 404 the agent route.
   if (config.agent.enabled && core.chatLlm === undefined) {
     throw new Error(
-      'AGENT_ENABLED=true but no ChatLlm was constructed — check OPENAI_API_KEY and chatLlm wiring',
+      'AGENT_ENABLED=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS and chatLlm wiring',
     );
   }
 

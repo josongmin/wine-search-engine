@@ -105,7 +105,11 @@ describe('buildSearchDecisionInput', () => {
         decisionConfidenceC: 0.9,
       }),
     });
-    const input = buildSearchDecisionInput(plan, resolverResult, []);
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults: [],
+    });
     expect(input.evidenceSummary.anchorResolution).toEqual({
       anchorEntityPresent: false,
     });
@@ -124,7 +128,12 @@ describe('buildSearchDecisionInput', () => {
       }),
     });
 
-    const input = buildSearchDecisionInput(plan, resolverResult, [], 'mixed');
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults: [],
+      effectiveRoute: 'mixed',
+    });
     expect(input.effectiveRoute).toBe('mixed');
     expect(input.evidenceSummary.anchorResolution).toEqual({
       anchorEntityPresent: false,
@@ -134,17 +143,16 @@ describe('buildSearchDecisionInput', () => {
   });
 
   it('carries effectiveRetrievalMode when compiled execution mode is provided', () => {
-    const input = buildSearchDecisionInput(
-      minimalPlan('hybrid'),
-      makeResolverResult(),
-      [],
-      'hybrid',
-      undefined,
-      {
+    const input = buildSearchDecisionInput({
+      plan: minimalPlan('hybrid'),
+      resolveResult: makeResolverResult(),
+      rankedResults: [],
+      effectiveRoute: 'hybrid',
+      executionContext: {
         effectiveRetrievalMode: 'recommendation',
         retrievalKind: 'generic_hybrid',
       },
-    );
+    });
 
     expect(input.effectiveRoute).toBe('hybrid');
     expect(input.effectiveRetrievalMode).toBe('recommendation');
@@ -202,19 +210,19 @@ describe('buildSearchDecisionInput', () => {
       }],
     })];
 
-    const input = buildSearchDecisionInput(
+    const input = buildSearchDecisionInput({
       plan,
-      resolverResult,
+      resolveResult: resolverResult,
       rankedResults,
-      'mixed',
-      {
+      effectiveRoute: 'mixed',
+      decisionContext: {
         mixedAnchor: {
           entityId: anchorId,
           canonicalLabel: 'Opus One 2021',
           confidence: 0.97,
         },
       },
-    );
+    });
 
     expect(input.evidenceSummary.anchorResolution).toEqual({
       anchorEntityPresent: true,
@@ -231,7 +239,10 @@ describe('buildSearchDecisionInput', () => {
       decisionTrace: makeDecisionTrace(),
       conformalSetSize: 0,
     });
-    const input = buildSearchDecisionInput(plan, resolverResult, undefined);
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+    });
     expect(input.rankingSignals).toBeUndefined();
   });
 
@@ -303,7 +314,13 @@ describe('buildSearchDecisionInput', () => {
       } satisfies ResolverCandidate],
     );
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'entity');
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults,
+      effectiveRoute: 'entity',
+      identityResolveResult: resolverResult,
+    });
 
     expect(input.evidenceSummary.constraintEvidencePresent).toBe(true);
     expect(input.evidenceSummary.constraintEvidence?.matchedRequiredAttributes).toEqual([
@@ -344,7 +361,12 @@ describe('buildSearchDecisionInput', () => {
       },
     })];
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'hybrid');
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+    });
 
     expect(input.evidenceSummary.constraintEvidencePresent).toBe(true);
     expect(input.provenanceContract.observed.constraintEvidenceSatisfied).toBe(true);
@@ -361,18 +383,15 @@ describe('buildSearchDecisionInput', () => {
       }),
     });
 
-    const input = buildSearchDecisionInput(
+    const input = buildSearchDecisionInput({
       plan,
-      resolverResult,
-      undefined,
-      'hybrid',
-      undefined,
-      undefined,
-      {
+      resolveResult: resolverResult,
+      effectiveRoute: 'hybrid',
+      honestyContract: {
         executionMode: 'degraded',
         routeHealthy: false,
       },
-    );
+    });
 
     expect(input.executionMode).toBe('degraded');
     expect(input.routeHealthy).toBe(false);
@@ -422,25 +441,29 @@ describe('buildSearchDecisionInput', () => {
       }],
     })];
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults);
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults,
+    });
 
     expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
-    expect(input.evidenceSummary.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(false);
-    expect(input.evidenceSummary.identityEvidence?.rankedCorroborationTypes).toBeUndefined();
-    expect(input.evidenceSummary.identityEvidence?.exactMatchCandidatePresent).toBeUndefined();
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      false,
+    );
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
   });
 
   it('derives admission context from compiled provenance policy', () => {
     const plan = minimalPlan('entity');
     const resolverResult = makeResolverResult();
 
-    const input = buildSearchDecisionInput(
+    const input = buildSearchDecisionInput({
       plan,
-      resolverResult,
-      undefined,
-      'entity',
-      undefined,
-      {
+      resolveResult: resolverResult,
+      effectiveRoute: 'entity',
+      executionContext: {
         effectiveRetrievalMode: 'entity_lookup',
         retrievalKind: 'entity_lookup',
         provenancePolicy: {
@@ -449,7 +472,7 @@ describe('buildSearchDecisionInput', () => {
           requireAnchorEvidence: false,
         },
       },
-    );
+    });
 
     expect(input.effectiveRetrievalMode).toBe('entity_lookup');
     expect(input.retrievalKind).toBe('entity_lookup');
@@ -460,7 +483,7 @@ describe('buildSearchDecisionInput', () => {
     });
   });
 
-  it('keeps exact-match identity on aligned ranked routes even when ranked evidence items are empty', () => {
+  it('does not recover exactness from query-level lookup strategy when the winner lacks an exact identity artifact', () => {
     const eid = createEntityId('entity-exact');
     const plan = minimalPlan('hybrid');
     const resolverResult = makeResolverResult({
@@ -497,12 +520,127 @@ describe('buildSearchDecisionInput', () => {
       evidenceItems: [],
     })];
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults);
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: {
+        ...resolverResult,
+        decisionTrace: makeDecisionTrace({
+          ...resolverResult.decisionTrace,
+          queryProvenance: {
+            anchorLookupStrategies: ['exact'],
+          },
+        }),
+      },
+      rankedResults,
+    });
 
     expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
-    expect(input.evidenceSummary.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(true);
-    expect(input.evidenceSummary.identityEvidence?.rankedEvidenceItemCount).toBe(0);
-    expect(input.evidenceSummary.identityEvidence?.exactMatchCandidatePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      true,
+    );
+    expect(input.evidenceSummary.identityEvidence?.identityEvidenceRefCount).toBe(1);
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
+  });
+
+  it('prefers winner-aligned identity artifact exactness over query-level exact lookup strategy', () => {
+    const eid = createEntityId('entity-artifact-exact');
+    const plan = minimalPlan('hybrid');
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Artifact Exact Wine', calibratedScore: 0.995 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Artifact Exact Wine',
+        calibratedScore: 0.995,
+        rank: 1,
+        evidenceRefs: ['alias:artifact-exact'],
+      }],
+      decisionTrace: makeDecisionTrace({
+        top1CalibratedScore: 0.995,
+        top2CalibratedScore: 0.2,
+        calibratedGap: 0.795,
+        decisionConfidenceC: 0.995,
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
+      entityId: eid,
+      canonicalLabel: 'Artifact Exact Wine',
+      finalScore: 0.95,
+      componentScores: {
+        entityIntegrity: 1,
+        semantic: 0,
+        hardConstraintPass: true,
+        softConstraint: 0,
+        attributeAlignment: 0,
+        preferenceAlignment: 0,
+        popularity: 0,
+        availability: 0,
+        uncertaintyPenalty: 0,
+      },
+      evidenceItems: [],
+    })];
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: {
+        ...resolverResult,
+        decisionTrace: makeDecisionTrace({
+          ...resolverResult.decisionTrace,
+          queryProvenance: {
+            anchorLookupStrategies: ['exact'],
+          },
+        }),
+      },
+      rankedResults,
+      executionContext: {
+        winnerDualLaneArtifact: {
+          entityId: eid,
+          canonicalLabel: 'Artifact Exact Wine',
+          lanePresence: 'entity_only',
+          agreement: {
+            corroborated: false,
+            disagreement: true,
+            entityOnly: true,
+            generalOnly: false,
+          },
+          exactnessTier: 'exact',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: eid,
+            exactnessTier: 'exact',
+            calibratedScore: 0.995,
+            resolverRank: 1,
+            canonicalLabel: 'Artifact Exact Wine',
+            evidenceRefs: ['identity:artifact-exact'],
+            sourceSignals: {
+              canonicalExactMatch: 1,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 0,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 0,
+            },
+          },
+          fusedCandidate: {
+            entityId: eid,
+            canonicalLabel: 'Artifact Exact Wine',
+            matchedConstraints: [],
+            retrievalTrace: {
+              retrievalProfile: 'test',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+          },
+        },
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('exact');
   });
 
   it('does not mint identity evidence for synthetic ranked routes without ranked corroboration', () => {
@@ -543,9 +681,16 @@ describe('buildSearchDecisionInput', () => {
       evidenceItems: [],
     })];
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'hybrid');
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+    });
 
-    expect(input.evidenceSummary.identityEvidence?.source).toBe('ranked_synthetic');
+    expect(input.evidenceSummary.identityEvidence?.source).toBe('identity_artifact');
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
     expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
   });
 
@@ -592,11 +737,16 @@ describe('buildSearchDecisionInput', () => {
       }],
     })];
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'hybrid');
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+    });
 
-    expect(input.evidenceSummary.identityEvidence?.source).toBe('ranked_synthetic');
-    expect(input.evidenceSummary.identityEvidence?.rankedEvidenceItemCount).toBe(1);
-    expect(input.evidenceSummary.identityEvidence?.rankedCorroborationItemCount).toBeUndefined();
+    expect(input.evidenceSummary.identityEvidence?.source).toBe('identity_artifact');
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.identityEvidenceRefCount).toBe(0);
     expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
   });
 
@@ -665,11 +815,68 @@ describe('buildSearchDecisionInput', () => {
       inferredConstraints: ['appellation'],
     })];
 
-    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'mixed', {
-      mixedAnchor: {
-        entityId: eid,
-        canonicalLabel: 'Opus One 2021',
-        confidence: 0.95,
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: {
+        ...resolverResult,
+        decisionTrace: makeDecisionTrace({
+          ...resolverResult.decisionTrace,
+          queryProvenance: {
+            anchorLookupStrategies: ['exact'],
+          },
+        }),
+      },
+      rankedResults,
+      effectiveRoute: 'mixed',
+      decisionContext: {
+        mixedAnchor: {
+          entityId: eid,
+          canonicalLabel: 'Opus One 2021',
+          confidence: 0.95,
+        },
+      },
+      executionContext: {
+        winnerDualLaneArtifact: {
+          entityId: eid,
+          canonicalLabel: 'Opus One 2021',
+          lanePresence: 'corroborated',
+          agreement: {
+            corroborated: true,
+            disagreement: false,
+            entityOnly: false,
+            generalOnly: false,
+          },
+          exactnessTier: 'exact',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: eid,
+            exactnessTier: 'exact',
+            calibratedScore: 0.95,
+            resolverRank: 1,
+            canonicalLabel: 'Opus One 2021',
+            evidenceRefs: ['identity:exact'],
+            sourceSignals: {
+              canonicalExactMatch: 1,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 0,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 0,
+            },
+          },
+          fusedCandidate: {
+            entityId: eid,
+            canonicalLabel: 'Opus One 2021',
+            matchedConstraints: ['country'],
+            retrievalTrace: {
+              retrievalProfile: 'test',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+          },
+        },
       },
     });
 
@@ -687,9 +894,8 @@ describe('buildSearchDecisionInput', () => {
     });
     expect(input.evidenceSummary.anchorEvidence?.rankedSignalPresent).toBe(true);
     expect(input.evidenceSummary.anchorEvidence?.rankedSignalItemCount).toBe(1);
-    expect(input.evidenceSummary.identityEvidence?.rankedCorroborationTypes).toEqual([
-      'anchor_similarity',
-    ]);
-    expect(input.evidenceSummary.identityEvidence?.exactMatchCandidatePresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
+    expect(input.evidenceSummary.identityEvidence?.lanePresence).toBe('corroborated');
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('exact');
   });
 });

@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "preinstall": "node ../scripts/enforce-pnpm-install.mjs",
-    "dev": "bash ../scripts/build/link-external-artifacts.sh && next dev",
-    "build": "bash ../scripts/build/link-external-artifacts.sh && next build",
+    "dev": "bash ../scripts/build/link-external-artifacts.sh && next dev --webpack",
+    "build": "bash ../scripts/build/link-external-artifacts.sh && next build --webpack",
     "start": "next start",
     "lint": "eslint src/",
     "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run",

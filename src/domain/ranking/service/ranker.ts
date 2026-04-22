@@ -2,6 +2,10 @@ import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js'
 import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
+import type {
+  DualLanePresence,
+  IdentityExactnessTier,
+} from '../../retrieval/model/dual-lane-artifact.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import { PROVENANCE_QUERY_VIEWS, type ProvenanceQueryView } from '../../retrieval/model/provenance.js';
@@ -32,7 +36,11 @@ import { WineAttributeEncoders } from './wine-attribute-encoder.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { evaluateRerankGate } from './rerank-gate.js';
 import { LTRRanker } from './ltr-ranker.js';
-import { extractLTRFeatures } from './ltr-feature-extractor.js';
+import {
+  extractLTRFeatures,
+  rankingFeaturesToVector,
+  LTR_FEATURE_DIMENSION,
+} from './ltr-feature-extractor.js';
 import { MS_PER_DAY } from '../../shared/utils/time-units.js';
 import {
   projectHybridCandidateToRankedResultAttributes,
@@ -194,6 +202,9 @@ export interface ScoredEntry {
   readonly priceUsd?: number | undefined;
 
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
+  readonly entityPosteriorScore?: number | undefined;
+  readonly identityExactnessTier: IdentityExactnessTier;
+  readonly lanePresence?: DualLanePresence | undefined;
 }
 
 const MODEL_STALENESS_THRESHOLD_DAYS = 30;
@@ -202,7 +213,7 @@ const MODEL_STALENESS_THRESHOLD_DAYS = 30;
 const MILLISECONDS_PER_DAY = MS_PER_DAY;
 
 /** LambdaMART weight vector length (must match {@link extractLTRFeatures} output). */
-const LTR_MODEL_FEATURE_DIMENSION = 8;
+const LTR_MODEL_FEATURE_DIMENSION = LTR_FEATURE_DIMENSION;
 
 /** Entity IDs captured after primary sort for funnel rerank telemetry. */
 const PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT = 5;
@@ -249,8 +260,14 @@ const NON_PENALTY_WEIGHT_FIELDS = [
 ] as const;
 
 function buildObservedLtrInferenceScoreComponents(
-  componentScores: ComponentScores,
+  input: {
+    readonly componentScores: ComponentScores;
+    readonly entityPosteriorScore?: number | undefined;
+    readonly identityExactnessTier: IdentityExactnessTier;
+    readonly lanePresence?: DualLanePresence | undefined;
+  },
 ): LTRScoreComponents {
+  const { componentScores } = input;
   const semantic =
     componentScores.semantic !== undefined
       ? { semantic: componentScores.semantic }
@@ -278,6 +295,35 @@ function buildObservedLtrInferenceScoreComponents(
     ...attributeAlignment,
     ...preferenceAlignment,
     ...multilingualScore,
+    ...(input.entityPosteriorScore !== undefined
+      ? { entityPosterior: input.entityPosteriorScore }
+      : {}),
+    identityExactnessTier: input.identityExactnessTier,
+    ...(input.lanePresence !== undefined
+      ? { lanePresence: input.lanePresence }
+      : {}),
+  };
+}
+
+function buildObservedLtrInferenceArtifact(
+  input: {
+    readonly componentScores: ComponentScores;
+    readonly entityPosteriorScore?: number | undefined;
+    readonly identityExactnessTier: IdentityExactnessTier;
+    readonly lanePresence?: DualLanePresence | undefined;
+  },
+): {
+  readonly scoreComponents: LTRScoreComponents;
+  readonly features: ReturnType<typeof extractLTRFeatures>;
+  readonly vector: readonly number[];
+} {
+  const scoreComponents = buildObservedLtrInferenceScoreComponents(input);
+  const features = extractLTRFeatures(scoreComponents);
+
+  return {
+    scoreComponents,
+    features,
+    vector: rankingFeaturesToVector(features),
   };
 }
 
@@ -424,6 +470,13 @@ function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
   ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
+  ltrFeatureInputsByEntityId: ReadonlyMap<
+    string,
+    {
+      readonly features: ReturnType<typeof extractLTRFeatures>;
+      readonly vector: readonly number[];
+    }
+  >,
 ): { results: RankedResult[]; skipReason: LtrRerankSkipReason; modelId?: string; ltrSaturated?: boolean } {
   const ltrModel = ltrModels?.get(queryClass);
   if (!ltrModel) {
@@ -466,29 +519,21 @@ function applyLearnedLtrRerank(
   // using heuristic scores and ranks from the pre-LTR ordering.
   // We first run LTR to get proposed ranks, then apply safety checks.
   //
-  // ltrFeatureVectorMap: entity → ordered feature vector (8 values, same order
-  // as scoreFeaturesRaw in lambdamart-ranker.ts) so ScoreDecomposition can
+  // ltrFeatureVectorMap: entity → ordered feature vector (LTR schema order) so ScoreDecomposition can
   // carry the raw input for debugging / drift analysis.
   const ltrFeatureVectorMap = new Map<string, readonly number[]>();
   const rankableDocuments = rankedResults.map((doc, idx) => {
-    const features = extractLTRFeatures(
-      buildObservedLtrInferenceScoreComponents(doc.componentScores),
-    );
-    // Store as ordered vector matching lambdamart-ranker scoreFeaturesRaw order
-    ltrFeatureVectorMap.set(String(doc.entityId), [
-      features.bm25Score,
-      features.semanticScore,
-      features.popularityScore,
-      features.recencyScore,
-      features.classMatchScore,
-      features.attributeMatchScore,
-      features.diversityScore,
-      features.multilingualScore,
-    ]);
+    const featureInput = ltrFeatureInputsByEntityId.get(String(doc.entityId));
+    if (featureInput === undefined) {
+      throw new Error(
+        `Ranker invariant violated: missing LTR feature input for entity '${String(doc.entityId)}'`,
+      );
+    }
+    ltrFeatureVectorMap.set(String(doc.entityId), featureInput.vector);
     return {
       entityId: doc.entityId,
       retrievalScore: doc.finalScore,
-      features,
+      features: featureInput.features,
       originalRank: idx + 1,
     };
   });
@@ -895,6 +940,9 @@ export class Ranker {
           queryContainsHangul,
           constraintGraph,
         );
+        const entityPosteriorScore = this.signalComputer.computeEntityPosterior(candidate);
+        const identityExactnessTier = this.signalComputer.computeIdentityExactnessTier(candidate);
+        const lanePresence = this.signalComputer.computeLanePresence(candidate);
         const constraintState = buildConstraintState(candidate, queryConstraintCtx, constraintGraph);
 
       // Step 3: Aggregate signals into final score.
@@ -951,6 +999,9 @@ export class Ranker {
           ...(constraintState.unmetAtomRefs !== undefined
             ? { unmetAtomRefs: constraintState.unmetAtomRefs }
             : {}),
+          ...(entityPosteriorScore !== undefined ? { entityPosteriorScore } : {}),
+          identityExactnessTier,
+          ...(lanePresence !== undefined ? { lanePresence } : {}),
           componentScores,
           finalScore,
         });
@@ -1008,6 +1059,20 @@ export class Ranker {
     // T5.6: Capture top-5 entity IDs after primary sort, before any reranking.
     // RankingStagePipeline reads this snapshot to compute rerankChangedTopK.
     localPreRerankTop5 = viable.slice(0, PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT).map((e) => String(e.entityId));
+    const ltrFeatureInputsByEntityId = new Map(
+      viable.map((entry) => {
+        const artifact = buildObservedLtrInferenceArtifact({
+          componentScores: entry.componentScores,
+          entityPosteriorScore: entry.entityPosteriorScore,
+          identityExactnessTier: entry.identityExactnessTier,
+          lanePresence: entry.lanePresence,
+        });
+        return [
+          String(entry.entityId),
+          artifact,
+        ] as const;
+      }),
+    );
 
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
@@ -1076,7 +1141,7 @@ export class Ranker {
               localRerankExecuted = true;
               localRerankDecisionCode = 'applied';
               localRuntimeSignal = rerankOutcome.runtimeSignal ?? { rerankerStatus: 'executed' };
-              localRerankModelId = this.reranker?.modelId;
+              localRerankModelId = this.reranker.modelId;
               remoteRerankApplied = true;
             }
           } catch (err) {
@@ -1180,7 +1245,12 @@ export class Ranker {
       const listCtx = buildRerankSafetyListContext(safetyDescriptors);
 
       // Run LTR rerank to get proposed ordering
-      const ltrOutcome = applyLearnedLtrRerank(results, queryPlan.queryClass, this.ltrModels);
+      const ltrOutcome = applyLearnedLtrRerank(
+        results,
+        queryPlan.queryClass,
+        this.ltrModels,
+        ltrFeatureInputsByEntityId,
+      );
       localRerankInputCount = localRerankInputCount ?? safetyDescriptors.length;
       localRerankOutputCount = localRerankOutputCount ?? ltrOutcome.results.length;
       if (ltrOutcome.ltrSaturated === true) {

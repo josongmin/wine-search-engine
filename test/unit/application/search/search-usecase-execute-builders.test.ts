@@ -245,6 +245,135 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
     ]);
   });
 
+  it('fails closed for identity-seal ambiguous short-form clarifications', () => {
+    const plan = {
+      ...makePlan(),
+      rawQuery: 'opus',
+      normalizedQuery: 'opus',
+      intent: 'entity_fuzzy',
+      queryClass: 'ambiguous_short_form',
+      admission_context: {
+        requires_identity_seal: true,
+        requires_constraint_evidence: false,
+        requires_anchor_evidence: false,
+      },
+    } as QueryPlanV1;
+    const compiled = {
+      ...makeCompiled(),
+      execution: {
+        ...makeCompiled().execution,
+        provenancePolicy: {
+          requireIdentitySeal: true,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    } as CompiledWineQuery;
+    const rankedResults = [
+      makeRankedResult('Generic Top Label A', 1),
+      makeRankedResult('Generic Top Label B', 2),
+      makeRankedResult('Generic Top Label C', 3),
+    ];
+    const results = [
+      { entity: { entity_id: rankedResults[0]!.entityId, label: rankedResults[0]!.canonicalLabel } },
+      { entity: { entity_id: rankedResults[1]!.entityId, label: rankedResults[1]!.canonicalLabel } },
+      { entity: { entity_id: rankedResults[2]!.entityId, label: rankedResults[2]!.canonicalLabel } },
+    ] as never;
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled,
+      snapshot: makeSnapshot(),
+      requestId: 'req-opus',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'entity_resolution',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'low_confidence',
+        detail: 'ambiguous short-form entity requires clarification',
+        recoverableBy: 'clarify',
+        entropy: 0.99,
+      },
+      entropy: 0.99,
+      results,
+      rankedResults,
+    });
+
+    expect(params.results).toEqual([]);
+    expect(params.clarification.candidates).toEqual([]);
+    expect(params.clarification.structuredPayload).toEqual({
+      kind: 'preference_gap',
+      question: '결과가 모호합니다. 조건을 더 구체적으로 알려주세요.',
+    });
+  });
+
+  it('filters ambiguous short-form presentation to lexical-token-consistent candidates', () => {
+    const plan = {
+      ...makePlan(),
+      rawQuery: 'opus',
+      normalizedQuery: 'opus',
+      intent: 'semantic_discovery',
+      queryClass: 'ambiguous_short_form',
+    } as QueryPlanV1;
+    const rankedResults = [
+      {
+        ...makeRankedResult('2019 Opus One Overture', 1),
+        producer: 'Opus One',
+      },
+      {
+        ...makeRankedResult('Opus One 2018', 2),
+        producer: 'Opus One',
+      },
+      {
+        ...makeRankedResult('2023 Domaines Ott Rose de Provence', 3),
+        producer: 'Domaines Ott',
+      },
+    ] as RankedResult[];
+    const results = rankedResults.map((ranked) => ({
+      entity: {
+        entityId: ranked.entityId,
+        canonicalLabel: ranked.canonicalLabel,
+      },
+    })) as never;
+
+    const params = buildEntropyAbstainResponseParams({
+      plan,
+      compiled: makeCompiled(),
+      snapshot: makeSnapshot(),
+      requestId: 'req-opus-filter',
+      startTime: Date.now(),
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'entity_resolution',
+      abstainDecision: {
+        shouldAbstain: true,
+        reason: 'low_confidence',
+        detail: 'ambiguous short-form entity requires clarification',
+        recoverableBy: 'clarify',
+        entropy: 0.99,
+      },
+      entropy: 0.99,
+      results,
+      rankedResults,
+    });
+
+    expect(params.results.map((result) => result.entity.canonicalLabel)).toEqual([
+      '2019 Opus One Overture',
+      'Opus One 2018',
+    ]);
+    expect(params.clarification.candidates.map((candidate) => candidate.label)).toEqual([
+      '2019 Opus One Overture',
+      'Opus One 2018',
+    ]);
+    expect(params.clarification.structuredPayload).toEqual({
+      kind: 'anchor_disambiguation',
+      question: '결과가 모호합니다. 어떤 후보를 찾으시나요?',
+      options: ['2019 Opus One Overture', 'Opus One 2018'],
+    });
+  });
+
   it('prefers compiler-authored clarify payload over ambiguity-hint-derived clarification', () => {
     const plan = {
       ...makePlan(),

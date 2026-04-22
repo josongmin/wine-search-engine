@@ -83,6 +83,7 @@ interface CaseLoadResult {
 export interface PerformanceLoadFixtureReport {
   readonly benchmark: 'performance-load-fixture';
   readonly suite_id: 'performance_load';
+  readonly execution_lane: BenchmarkExecutionLane;
   readonly query_count: number;
   readonly achieved_rps: number;
   readonly error_rate: number;
@@ -300,6 +301,7 @@ function evaluateCase(benchmarkCase: LoadCase, outcomes: readonly RequestOutcome
 
 export function buildPerformanceLoadReport(
   results: readonly CaseLoadResult[],
+  executionLane: BenchmarkExecutionLane = 'trusted_benchmark',
 ): PerformanceLoadFixtureReport {
   const count = results.length;
   const passCount = results.filter((r) => r.pass).length;
@@ -335,6 +337,7 @@ export function buildPerformanceLoadReport(
   return {
     benchmark: 'performance-load-fixture',
     suite_id: SUITE_ID,
+    execution_lane: executionLane,
     query_count: count,
     achieved_rps: aggregateRps,
     error_rate: aggregateErrorRate,
@@ -421,7 +424,7 @@ async function run(): Promise<void> {
     caseResults.push(evaluateCase(benchmarkCase, outcomes));
   }
 
-  const report = buildPerformanceLoadReport(caseResults);
+  const report = buildPerformanceLoadReport(caseResults, args.executionLane);
 
   await fs.writeFile(args.output, JSON.stringify(report, null, 2), 'utf8');
   process.stderr.write(`[perf-load-fixture-eval] wrote ${args.output}\n`);

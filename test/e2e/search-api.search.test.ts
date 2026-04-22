@@ -90,7 +90,7 @@ describe('POST /v1/search — happy paths', () => {
     const body = parseSearchResponse(res);
     expect(body.meta.audit_extension?.execution_trace).toMatchObject({
       effective_route: 'entity',
-      retrieval_mode_source: 'planner',
+      retrieval_mode_source: 'api_override',
       effective_retrieval_mode: 'entity_lookup',
       retrieval_kind: 'entity_lookup',
       sparse_executed: false,
@@ -134,6 +134,66 @@ describe('POST /v1/search — happy paths', () => {
       },
     });
     expect(body.meta.audit_extension?.resolver_provenance_trace).toBeUndefined();
+  });
+
+  it('keeps /v1/search auto on the dual-lane live path for hybrid execution', async () => {
+    const res = await postSearch({
+      query: '풀바디 레드 와인',
+      options: { mode: 'auto', explain: true, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res);
+    expect(body.meta.audit_extension?.execution_trace).toMatchObject({
+      effective_route: 'hybrid',
+      retrieval_mode_source: 'planner',
+      execution_topology: 'dual_lane',
+    });
+    expect(body.engine_decision.execution_topology).toBe('dual_lane');
+    expect(body.meta.execution_contract?.execution_topology).toBe('dual_lane');
+    expect(body.meta.execution_contract?.lane_trace?.identity?.participated).toBe(true);
+    expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(true);
+  });
+
+  it('keeps /v1/search/hybrid on the general-only contract', async () => {
+    const res = await postJson(
+      server.app,
+      '/v1/search/hybrid',
+      { query: '풀바디 레드 와인', options: { explain: true, clarification: false } },
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res);
+    expect(body.meta.audit_extension?.execution_trace).toMatchObject({
+      effective_route: 'hybrid',
+      retrieval_mode_source: 'api_override',
+      execution_topology: 'general_only',
+    });
+    expect(body.engine_decision.execution_topology).toBe('general_only');
+    expect(body.meta.execution_contract?.execution_topology).toBe('general_only');
+    expect(body.meta.execution_contract?.lane_trace?.identity?.participated).toBe(false);
+    expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(true);
+  });
+
+  it('keeps /v1/search/lookup on the entity-only contract', async () => {
+    const res = await postJson(
+      server.app,
+      '/v1/search/lookup',
+      { query: 'Opus One 2018', options: { explain: true } },
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res);
+    expect(body.meta.audit_extension?.execution_trace).toMatchObject({
+      effective_route: 'entity',
+      retrieval_mode_source: 'api_override',
+      execution_topology: 'entity_only',
+      retrieval_kind: 'entity_lookup',
+    });
+    expect(body.engine_decision.execution_topology).toBe('entity_only');
+    expect(body.meta.execution_contract?.execution_topology).toBe('entity_only');
+    expect(body.meta.execution_contract?.lane_trace?.identity?.participated).toBe(true);
+    expect(body.meta.execution_contract?.lane_trace?.general?.participated).toBe(false);
   });
 
   it('explain=false keeps decision keys present', async () => {

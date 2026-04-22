@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { buildRankedRouteResolveResult } from '../../../../src/application/search/search-usecase-ranked-route-resolve.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { RankedResult } from '../../../../src/domain/ranking/model/ranked-result.js';
+import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import type {
+  DualLaneArtifact,
+  EntityLaneCandidateArtifact,
+  GeneralLaneCandidateArtifact,
+} from '../../../../src/domain/retrieval/model/dual-lane-artifact.js';
+import type { SearchExecutionLaneArtifacts } from '../../../../src/application/search/search-usecase-route-dispatch.js';
 
 function makePlan(): QueryPlanV1 {
   return {
@@ -53,8 +60,48 @@ function makeRankedResult(
   };
 }
 
+function makeIdentityResolveResult(
+  entityId: string,
+  canonicalLabel: string,
+  calibratedScore: number,
+): EntityResolveResult {
+  return {
+    status: 'resolved',
+    decisionConfidenceC: calibratedScore,
+    topEntity: {
+      entityId: createEntityId(entityId),
+      canonicalLabel,
+      calibratedScore,
+    },
+    candidates: [
+      {
+        entityId: createEntityId(entityId),
+        canonicalLabel,
+        calibratedScore,
+        rank: 1,
+        evidenceRefs: ['identity:1'],
+      },
+    ],
+    decisionTrace: {
+      queryClass: 'semantic_preference',
+      top1CalibratedScore: calibratedScore,
+      top2CalibratedScore: 0.1,
+      calibratedGap: calibratedScore - 0.1,
+      decisionConfidenceC: calibratedScore,
+      ambiguityDetected: false,
+      ambiguityTypes: [],
+      appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+      outcomeReasonCodes: ['IDENTITY_ROUTE'],
+      queryProvenance: {
+        anchorLookupStrategies: ['exact'],
+      },
+    },
+    conformalSetSize: 1,
+  };
+}
+
 describe('buildRankedRouteResolveResult', () => {
-  it('uses candidate-set confidence for recommendation-style ranked routes', () => {
+  it('keeps ranked-route recommendation confidence on the live top-1 posterior', () => {
     const rankedResults: RankedResult[] = [
       makeRankedResult('romanee-conti-2019', 'Romanee-Conti 2019', 0.3122959942365978),
       makeRankedResult('moet-brut', 'Moet Brut', 0.3121726279785977),
@@ -63,12 +110,13 @@ describe('buildRankedRouteResolveResult', () => {
 
     const result = buildRankedRouteResolveResult(makePlan(), rankedResults, {
       outcomeReasonCode: 'HYBRID_ROUTE',
+      executionTopology: 'general_only',
       effectiveRetrievalMode: 'recommendation',
     });
 
     expect(result.decisionTrace.top1CalibratedScore).toBeCloseTo(0.3122959942365978, 10);
-    expect(result.decisionTrace.decisionConfidenceC).toBeGreaterThan(0.35);
-    expect(result.conformalSetSize).toBe(1);
+    expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.3122959942365978, 10);
+    expect(result.conformalSetSize).toBe(3);
   });
 
   it('keeps top-1 confidence semantics for entity-style ranked routes', () => {
@@ -79,10 +127,164 @@ describe('buildRankedRouteResolveResult', () => {
 
     const result = buildRankedRouteResolveResult(makePlan(), rankedResults, {
       outcomeReasonCode: 'HYBRID_ROUTE',
+      executionTopology: 'general_only',
       effectiveRetrievalMode: 'entity_lookup',
     });
 
     expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.72, 10);
     expect(result.conformalSetSize).toBeGreaterThanOrEqual(1);
+  });
+
+  it('uses corroborated identity posterior at the ranked-route calibrator seam', () => {
+    const rankedResults: RankedResult[] = [
+      makeRankedResult('opus-one-2018', 'Opus One 2018', 0.72),
+      makeRankedResult('sassicaia-2018', 'Sassicaia 2018', 0.31),
+    ];
+    const identityResolveResult = makeIdentityResolveResult('opus-one-2018', 'Opus One 2018', 0.93);
+    const laneArtifacts: SearchExecutionLaneArtifacts<
+      EntityLaneCandidateArtifact,
+      GeneralLaneCandidateArtifact,
+      DualLaneArtifact
+    > = {
+      identity: [],
+      general: [],
+      fused: [
+        {
+          entityId: createEntityId('opus-one-2018'),
+          canonicalLabel: 'Opus One 2018',
+          lanePresence: 'corroborated',
+          agreement: {
+            corroborated: true,
+            disagreement: false,
+            entityOnly: false,
+            generalOnly: false,
+          },
+          exactnessTier: 'exact',
+          entityPosteriorScore: 0.93,
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: createEntityId('opus-one-2018'),
+            exactnessTier: 'exact',
+            calibratedScore: 0.93,
+            resolverRank: 1,
+            canonicalLabel: 'Opus One 2018',
+            evidenceRefs: ['identity:1'],
+            sourceSignals: {
+              canonicalExactMatch: 1,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 0,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 1,
+            },
+          },
+          fusedCandidate: {
+            entityId: createEntityId('opus-one-2018'),
+            canonicalLabel: 'Opus One 2018',
+            retrievalTrace: {
+              retrievalProfile: 'dual_lane_fusion',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+            matchedConstraints: [],
+            evidenceItems: [],
+          },
+        },
+      ],
+    };
+
+    const result = buildRankedRouteResolveResult(makePlan(), rankedResults, {
+      outcomeReasonCode: 'HYBRID_ROUTE',
+      executionTopology: 'dual_lane',
+      effectiveRetrievalMode: 'entity_lookup',
+      dualLaneCalibration: {
+        identityResolveResult,
+        laneArtifacts,
+      },
+    });
+
+    expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.93, 10);
+    expect(result.topEntity?.calibratedScore).toBeCloseTo(0.93, 10);
+    expect(result.candidates[0]?.calibratedScore).toBeCloseTo(0.93, 10);
+    expect(result.decisionTrace.outcomeReasonCodes).toContain(
+      'DUAL_LANE_CORROBORATED_IDENTITY_CALIBRATED',
+    );
+  });
+
+  it('refuses dual-lane calibration when the ranked route contract is general_only', () => {
+    const rankedResults: RankedResult[] = [
+      makeRankedResult('opus-one-2018', 'Opus One 2018', 0.72),
+      makeRankedResult('sassicaia-2018', 'Sassicaia 2018', 0.31),
+    ];
+    const identityResolveResult = makeIdentityResolveResult('opus-one-2018', 'Opus One 2018', 0.93);
+    const laneArtifacts: SearchExecutionLaneArtifacts<
+      EntityLaneCandidateArtifact,
+      GeneralLaneCandidateArtifact,
+      DualLaneArtifact
+    > = {
+      identity: [],
+      general: [],
+      fused: [
+        {
+          entityId: createEntityId('opus-one-2018'),
+          canonicalLabel: 'Opus One 2018',
+          lanePresence: 'corroborated',
+          agreement: {
+            corroborated: true,
+            disagreement: false,
+            entityOnly: false,
+            generalOnly: false,
+          },
+          exactnessTier: 'exact',
+          entityPosteriorScore: 0.93,
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: createEntityId('opus-one-2018'),
+            exactnessTier: 'exact',
+            calibratedScore: 0.93,
+            resolverRank: 1,
+            canonicalLabel: 'Opus One 2018',
+            evidenceRefs: ['identity:1'],
+            sourceSignals: {
+              canonicalExactMatch: 1,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 0,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 1,
+            },
+          },
+          fusedCandidate: {
+            entityId: createEntityId('opus-one-2018'),
+            canonicalLabel: 'Opus One 2018',
+            retrievalTrace: {
+              retrievalProfile: 'dual_lane_fusion',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+            matchedConstraints: [],
+            evidenceItems: [],
+          },
+        },
+      ],
+    };
+
+    const result = buildRankedRouteResolveResult(makePlan(), rankedResults, {
+      outcomeReasonCode: 'HYBRID_ROUTE',
+      executionTopology: 'general_only',
+      effectiveRetrievalMode: 'entity_lookup',
+      dualLaneCalibration: {
+        identityResolveResult,
+        laneArtifacts,
+      },
+    } as never);
+
+    expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.72, 10);
+    expect(result.topEntity?.calibratedScore).toBeCloseTo(0.72, 10);
+    expect(result.decisionTrace.outcomeReasonCodes).not.toContain(
+      'DUAL_LANE_CORROBORATED_IDENTITY_CALIBRATED',
+    );
   });
 });

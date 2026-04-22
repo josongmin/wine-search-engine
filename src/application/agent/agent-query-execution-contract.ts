@@ -14,6 +14,7 @@ import { isDirectEntityResolution, resolveEntity } from '../../domain/attribute/
 import { extractSearchConstraints } from '../../domain/query/service/search-constraint-extractor.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
 import type { ToolOutcome } from './tool-outcome.js';
+import type { AgentSemanticContract } from './agent-semantic-contract.js';
 
 const QUERY_NORMALIZER = new QueryNormalizer();
 const EXACT_METADATA_ALLOWED_SEARCH_KEYS = new Set(['query', 'limit', 'retrieval_mode']);
@@ -36,6 +37,8 @@ export interface AgentQueryExecutionContract {
   } | undefined;
   readonly searchDefaults?: AgentSearchDefaults | undefined;
   readonly requiredParallelSearches?: readonly AgentSearchSlot[] | undefined;
+  readonly semanticContract?: AgentSemanticContract | undefined;
+  readonly resultLimit?: number | undefined;
 }
 
 export interface AgentSearchDefaults {
@@ -92,13 +95,14 @@ function queryNeedsDrinkabilityCheck(query: string, normalized: string): boolean
   if (detectDecomposition(query).decomposed) {
     return true;
   }
-  return false;
+  return hasCurrentDrinkabilityIntent(normalized) || hasImmediateDrinkabilityIntent(normalized);
 }
 
 function queryHasTemporalReleaseSignal(normalized: string): boolean {
   const hasTemporalCue = /(?:^|[^\p{L}\p{N}])(?:올해|올해꺼|이번\s*해|current\s+year|latest|most\s+recent)(?=$|[^\p{L}\p{N}])/iu.test(normalized);
-  const hasReleaseCue = /(?:^|[^\p{L}\p{N}])(?:출시|출시\s*여부|나왔어|나왔나|나왔는지|release(?:d)?|availability|available)(?=$|[^\p{L}\p{N}])/iu.test(normalized);
-  return hasTemporalCue && hasReleaseCue;
+  const hasReleaseCue = /(?:^|[^\p{L}\p{N}])(?:출시|출시\s*여부|나왔어|나왔나|나왔냐|나왔는지|release(?:d)?|availability|available)(?=$|[^\p{L}\p{N}])/iu.test(normalized);
+  const hasSeasonalReleaseConcept = /(?:^|[^\p{L}\p{N}])(?:beaujolais\s+nouveau|보졸레\s*누보)(?=$|[^\p{L}\p{N}])/iu.test(normalized);
+  return hasReleaseCue && (hasTemporalCue || hasSeasonalReleaseConcept);
 }
 
 const NON_EXACT_ENTITY_LOOKUP_INTENT_RE =
@@ -134,8 +138,8 @@ function getNonExactEntityLookupQuery(query: string): string | undefined {
 
 const TEMPORAL_RELEASE_SUFFIX_PATTERNS: readonly RegExp[] = [
   /(?:\s*(?:확실한\s*근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)|근거\s*없으면\s*(?:추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘)|추정하지\s*말고\s*말해줘|모른다고(?:만)?\s*해줘))[?？!！]*$/u,
-  /(?:\s*(?:올해(?:꺼)?|이번\s*해|current\s+year|latest|most\s+recent)\s*(?:나왔(?:어|나|는지)?|출시(?:됐|했)?(?:어|나|는지)?|출시\s*여부|release(?:d)?|availability|available))[?？!！]*$/iu,
-  /(?:\s*(?:나왔(?:어|나|는지)?|출시(?:됐|했)?(?:어|나|는지)?|출시\s*여부|release(?:d)?|availability|available))[?？!！]*$/iu,
+  /(?:\s*(?:올해(?:꺼)?|이번\s*해|current\s+year|latest|most\s+recent)\s*(?:나왔(?:어|나|냐|는지)?|출시(?:됐|했)?(?:어|나|냐|는지)?|출시\s*여부|release(?:d)?|availability|available))[?？!！]*$/iu,
+  /(?:\s*(?:나왔(?:어|나|냐|는지)?|출시(?:됐|했)?(?:어|나|냐|는지)?|출시\s*여부|release(?:d)?|availability|available))[?？!！]*$/iu,
   /(?:\s*(?:올해(?:꺼)?|이번\s*해|current\s+year|latest|most\s+recent))[?？!！]*$/iu,
 ] as const;
 
@@ -150,6 +154,9 @@ function stripTemporalReleaseSuffix(rawQuery: string): string {
 function queryRequiresGroundedWineSearch(query: string, normalized: string): boolean {
   if (isSpecificSkuLikeQuery(query) || isExactMetadataEntityLookupCandidate(query)) {
     return false;
+  }
+  if (queryHasDirectAppellationSpan(query)) {
+    return true;
   }
   const hasDecantingGuidanceKeyword = /(?:디캔팅|디켄팅|decant(?:ing)?)/iu.test(normalized);
   const hasGenericWineTarget = /(?:와인|wine)/iu.test(normalized);
@@ -211,6 +218,15 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
   if (/(?:선물|gift)/iu.test(normalized)) {
     addUnique(occasion, 'gift');
     giftSuitabilityMin = 0.65;
+  }
+  if (/(?:힐링|위로|편안|휴식|relax(?:ing|ation)?|comfort(?:ing)?|healing)/iu.test(normalized)) {
+    addUnique(occasion, 'healing');
+    addUnique(styles, 'approachable');
+    beginnerSuitabilityMin = Math.max(beginnerSuitabilityMin ?? 0, 0.65);
+  }
+  if (/(?:괜찮은?|무난한?|실패\s*없는|대중적인?|decent|crowd[-\s]?pleasing|safe\s+pick)/iu.test(normalized)) {
+    addUnique(styles, 'crowd_pleasing');
+    popularityMin = Math.max(popularityMin ?? 0, 0.5);
   }
   if (/(?:온라인\s*와인\s*시음회|온라인\s*시음회|online\s+tasting|virtual\s+tasting|참가자\s*모두|모두가\s*살\s*수|widely\s+available|accessible\s+to\s+all)/iu.test(normalized)) {
     addUnique(styles, 'approachable');
@@ -518,6 +534,10 @@ export function buildAgentQueryExecutionContract(query: string): AgentQueryExecu
   const searchDefaults = buildSearchDefaults(query, normalized);
   const requiredParallelSearches = buildRequiredParallelSearches(normalized);
   const totalBudgetKrw = extractExplicitTotalBudgetKrw(query, normalized);
+  const requiresGroundedWineSearch =
+    queryRequiresGroundedWineSearch(query, normalized)
+    || hasTemporalReleaseSignal
+    || hasExactEntityLookupSignal;
   return {
     requiresDrinkabilityCheck: queryNeedsDrinkabilityCheck(query, normalized),
     hasEntityMetadataSignal: hasEntityMetadataKeyword(normalized) || hasExactEntityLookupSignal,
@@ -537,7 +557,7 @@ export function buildAgentQueryExecutionContract(query: string): AgentQueryExecu
     ...(exactMetadataTargetVintage !== undefined
       ? { exactMetadataTargetVintage }
       : {}),
-    ...(queryRequiresGroundedWineSearch(query, normalized) ? { requiresGroundedWineSearch: true } : {}),
+    ...(requiresGroundedWineSearch ? { requiresGroundedWineSearch: true } : {}),
     ...(totalBudgetKrw !== undefined ? { totalBudgetKrw } : {}),
     ...(foodPairing !== undefined
       ? {

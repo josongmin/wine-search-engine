@@ -18,7 +18,10 @@ import { bootstrapLogger } from './bootstrap-logger.js';
  */
 interface StartupPreflightConfig {
   readonly vespa?: { readonly url?: string | undefined } | undefined;
-  readonly openai?: { readonly apiKey?: string | undefined } | undefined;
+  readonly openai?: {
+    readonly apiKey?: string | undefined;
+    readonly apiKeys?: readonly string[] | undefined;
+  } | undefined;
   readonly cohere?: { readonly apiKey?: string | undefined } | undefined;
 }
 
@@ -40,10 +43,12 @@ export function warnStartupMisconfigurations(config: StartupPreflightConfig): vo
     );
   }
 
-  const hasOpenAiKey = config.openai?.apiKey != null && config.openai.apiKey !== '';
+  const hasOpenAiKey =
+    (config.openai?.apiKey != null && config.openai.apiKey !== '') ||
+    (config.openai?.apiKeys?.some((key) => key.trim().length > 0) ?? false);
   if (!hasOpenAiKey) {
     bootstrapLogger.warn(
-      'No embedding source configured — dense retrieval degraded (set OPENAI_API_KEY)',
+      'No embedding source configured — dense retrieval degraded (set OPENAI_API_KEY or OPENAI_API_KEYS)',
     );
   }
 

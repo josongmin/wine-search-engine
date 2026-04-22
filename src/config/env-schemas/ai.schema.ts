@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 /**
- * LLM / chat model providers (OpenAI, Anthropic) and the security-layer
- * judge/interpreter flags gated on those keys.
+ * LLM / chat model providers and the security-layer judge/interpreter flags
+ * gated on those keys. Runtime chat and the default Layer 2 injection judge
+ * are OpenAI-compatible.
  */
 
 /** OpenAI-compatible client read timeout (chat/completions can be slow). */
@@ -18,6 +19,8 @@ export const AiEnvSchema = z.object({
   // and produces `Authorization: Bearer ` (empty token) → 401 from OpenAI, masking
   // the misconfiguration as a service failure instead of a config error.
   OPENAI_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  /** Optional comma/newline-separated OpenAI-compatible credential pool. */
+  OPENAI_API_KEYS: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
   /** Must include `/v1` for official API, e.g. `https://api.openai.com/v1` */
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
@@ -39,7 +42,7 @@ export const AiEnvSchema = z.object({
   /**
    * Embedding model for dense retrieval via OpenAI-compatible API.
    * Defaults to text-embedding-3-small — the most cost-effective option.
-   * When OPENAI_API_KEY is set, this model is used automatically.
+   * When an OpenAI key or key pool is set, this model is used automatically.
    * Set to a different model (e.g. text-embedding-3-large) for higher quality.
    */
   OPENAI_EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
@@ -48,7 +51,7 @@ export const AiEnvSchema = z.object({
     .int()
     .positive()
     .default(DEFAULT_OPENAI_HTTP_TIMEOUT_MS),
-  /** Enable LLM-backed query constraint extraction (requires OPENAI_API_KEY). */
+  /** Enable LLM-backed query constraint extraction (requires OPENAI_API_KEY or OPENAI_API_KEYS). */
   LLM_QUERY_INTERPRETER: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
@@ -60,13 +63,13 @@ export const AiEnvSchema = z.object({
     .positive()
     .default(DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS),
 
-  // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
+  // Anthropic API (legacy explicit provider only; OpenAI is the default security judge).
   // z.preprocess: coerce "" → undefined (same rationale as OPENAI_API_KEY above).
   ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
   /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
   ANTHROPIC_INJECTION_MODEL: z.string().min(1).optional(),
   /** Provider for Layer 2 prompt-injection classification. */
-  LLM_INJECTION_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
+  LLM_INJECTION_PROVIDER: z.enum(['anthropic', 'openai']).default('openai'),
   /**
    * Allow LLM injection judge failures to bypass Layer 2 blocking.
    *

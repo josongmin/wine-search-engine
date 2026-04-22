@@ -6,6 +6,7 @@ import { PolicyBlockedError } from '../../../../src/domain/shared/error/policy-b
 import { CircuitBreakerOpenError } from '../../../../src/domain/shared/error/circuit-breaker-open-error.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 import { buildPlannerSystemMessage, buildSynthesisSystemMessage } from '../../../../src/application/agent/agent-prompt.js';
+import { AGENT_SEMANTIC_CONTRACT_PROMPT_VERSION } from '../../../../src/application/agent/agent-semantic-contract.js';
 
 function makeSearchResponse(): SearchResponseV1 {
   return {
@@ -145,6 +146,79 @@ describe('AgentOrchestrator', () => {
     expect(systemMessages[0]?.content).toBe(buildPlannerSystemMessage().content);
     expect(systemMessages[1]?.content).toBe(buildSynthesisSystemMessage().content);
     expect(systemMessages[2]?.content).toBe(buildSynthesisSystemMessage().content);
+  });
+
+  it('compiles chat-slang meaning before planning and enforces the semantic contract at tool execution', async () => {
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          promptVersion: AGENT_SEMANTIC_CONTRACT_PROMPT_VERSION,
+          preservedSurface: '와인 ㄱㅊ은거 하나만',
+          intent: 'recommendation',
+          confidence: 0.9,
+          inferredPreferences: [
+            { axis: 'style', value: 'crowd_pleasing', source: 'ㄱㅊ', confidence: 0.86 },
+            { axis: 'popularity_min', value: 0.5, source: 'ㄱㅊ', confidence: 0.82 },
+          ],
+          obligations: ['grounded_search_required', 'claim_evidence_required', 'recommend_exactly_one'],
+          forbidden: ['surface_rewrite', 'answer_without_grounding'],
+          resultLimit: 1,
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'planner omitted structured slang semantics; execution contract must still enforce them',
+          action: { tool: 'search_wines', input: { query: '와인 ㄱㅊ은거 하나만' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'grounded answer',
+          answer: '검색 결과 기준으로 Opus One 2018을 추천드립니다.',
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const searchExecute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: searchExecute,
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 2 });
+    const result = await orchestrator.execute('와인 ㄱㅊ은거 하나만', 'req-semantic-contract-e2e');
+
+    expect(result.terminationReason).toBe('answer');
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(complete.mock.calls[0]?.[0].messages[0].content).toContain('SemanticContractCompiler');
+    expect(complete.mock.calls[1]?.[0].messages[0].content).toBe(buildPlannerSystemMessage().content);
+    expect(searchExecute).toHaveBeenCalledTimes(1);
+    const searchRequest = searchExecute.mock.calls[0]?.[0] as {
+      readonly query?: string;
+      readonly limit?: number;
+      readonly preferences?: readonly unknown[];
+    };
+    expect(searchRequest.query).toBe('와인 ㄱㅊ은거 하나만');
+    expect(searchRequest.query).not.toContain('괜찮은은거');
+    expect(searchRequest.limit).toBe(1);
+    expect(searchRequest.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute: 'style',
+        operator: 'in',
+        value: ['crowd_pleasing'],
+      }),
+      expect.objectContaining({
+        attribute: 'popularity_score',
+        operator: '>=',
+        value: 0.5,
+      }),
+    ]));
   });
 
   it('treats a planner answer as terminal without invoking synthesis', async () => {
@@ -785,7 +859,14 @@ describe('AgentOrchestrator', () => {
     expect(result.answer).toContain('오퍼스 원 2018');
     expect(searchExecute).toHaveBeenCalledTimes(1);
     expect(searchExecute).toHaveBeenCalledWith(
-      { query: 'opus one', limit: 1 },
+      expect.objectContaining({
+        query: 'opus one',
+        limit: 1,
+        options: expect.objectContaining({ mode: 'hybrid' }),
+        preferences: expect.arrayContaining([
+          expect.objectContaining({ attribute: 'drinking_window', operator: '=' }),
+        ]),
+      }),
       'req-exact-drinkability-step0',
       expect.any(Object),
     );

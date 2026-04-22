@@ -122,7 +122,7 @@ describe('DecomposedSearchUseCase', () => {
         sessionContext: { sessionId: 'session-1', previousEntities: ['entity-1'] },
         queryBudget: { maxLatencyMs: 900, maxCandidates: 50, rerankLimit: 20 },
         filters: [{ attribute: 'country', operator: '=', value: 'United States' }],
-        options: { mode: 'auto', explain: false, clarification: false },
+        options: { mode: 'entity', explain: false, clarification: false },
       },
       'req-compare-a',
       undefined,
@@ -135,7 +135,7 @@ describe('DecomposedSearchUseCase', () => {
         sessionContext: { sessionId: 'session-1', previousEntities: ['entity-1'] },
         queryBudget: { maxLatencyMs: 900, maxCandidates: 50, rerankLimit: 20 },
         filters: [{ attribute: 'country', operator: '=', value: 'United States' }],
-        options: { mode: 'auto', explain: false, clarification: false },
+        options: { mode: 'entity', explain: false, clarification: false },
       },
       'req-compare-b',
       undefined,
@@ -597,6 +597,103 @@ describe('DecomposedSearchUseCase', () => {
     expect(response.entities[1].topResult?.entity.entityId).toBe('brunello-docg-1');
     expect(response.entities[0].resultCount).toBe(1);
     expect(response.entities[1].resultCount).toBe(1);
+  });
+
+  it('matches appellation concept legs against producer-projected labels when the response omits appellation', async () => {
+    const searchUseCase: SearchExecutorPort = {
+      execute: vi.fn()
+        .mockResolvedValueOnce({
+          queryType: 'search',
+          results: [
+            {
+              entity: {
+                entityId: 'opus-one-2018',
+                canonicalLabel: 'Opus One 2018',
+                producer: 'Opus One Winery',
+                type: 'wine',
+              },
+              match: { matchType: 'hybrid', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+              relevanceScore: 0.9,
+              constraints: { matched: [], unmet: [], inferred: [] },
+              uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+              evidenceItems: [],
+            },
+          ],
+          engineDecision: {
+            decisionStatus: 'resolved',
+          },
+          meta: {
+            queryTimeMs: 5,
+            route: 'hybrid',
+            version: '1',
+            engine_schema_version: 'search_response_v1',
+          },
+        } as never)
+        .mockResolvedValueOnce({
+          queryType: 'search',
+          results: [
+            {
+              entity: {
+                entityId: 'chateau-margaux-2015',
+                canonicalLabel: 'Château Margaux 2015',
+                producer: 'Château Margaux',
+                type: 'wine',
+              },
+              match: { matchType: 'hybrid', scoreComponents: { lexical: 1, semantic: 1, attribute: 1, popularity: 1, preferenceAlignment: 1 } },
+              relevanceScore: 0.89,
+              constraints: { matched: [], unmet: [], inferred: [] },
+              uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+              evidenceItems: [],
+            },
+          ],
+          engineDecision: {
+            decisionStatus: 'resolved',
+          },
+          meta: {
+            queryTimeMs: 6,
+            route: 'hybrid',
+            version: '1',
+            engine_schema_version: 'search_response_v1',
+          },
+        } as never),
+    };
+
+    const useCase = new DecomposedSearchUseCase(searchUseCase);
+    const comparisonLegs: ComparisonDecompositionLegs = [
+      {
+        rawQuery: 'Opus One',
+        retrievalQuery: 'Opus One wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        conceptEntityType: 'appellation',
+        canonicalConcept: 'Opus One',
+      },
+      {
+        rawQuery: 'Château Margaux',
+        retrievalQuery: 'Château Margaux wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        conceptEntityType: 'appellation',
+        canonicalConcept: 'Château Margaux',
+      },
+    ];
+
+    const response = await useCase.execute(
+      ['Opus One', 'Château Margaux'],
+      comparisonLegs,
+      'compare',
+      'Opus One vs Château Margaux',
+      'req-producer-projected-appellation',
+      100,
+    );
+
+    expect(response.entities[0].topResult?.entity.entityId).toBe('opus-one-2018');
+    expect(response.entities[1].topResult?.entity.entityId).toBe('chateau-margaux-2015');
+    expect(response.entities[0].resolutionStatus).toBe('resolved');
+    expect(response.entities[1].resolutionStatus).toBe('resolved');
+    expect(response.overallStatus).toBe('resolved');
   });
 
   it('fails closed when concept comparison results do not satisfy the declared concept', async () => {

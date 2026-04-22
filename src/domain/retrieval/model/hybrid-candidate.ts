@@ -1,41 +1,20 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from './candidate-envelope.js';
+import type {
+  DualLanePresence,
+  IdentityExactnessTier,
+} from './dual-lane-artifact.js';
 import type { RetrievalTrace } from './retrieval-trace.js';
 
 /**
  * A single candidate produced by the hybrid retrieval pipeline.
  *
- * The {@link retrievalFusionScore} is a retrieval-stage ranking signal
- * derived from Reciprocal Rank Fusion (RRF). It is **never** a calibrated
- * decision confidence — that value is computed downstream by the Decision domain.
+ * The canonical fused retrieval score is {@link fusionRrfTotal}. It is a
+ * retrieval-stage ranking signal, never a calibrated decision confidence.
  *
- * ──────────────────────────────────────────────────────────────────────
- * Score semantic split (bugbash 2026-04-09, Group C)
- * ──────────────────────────────────────────────────────────────────────
- * Historically {@link retrievalFusionScore} was overloaded with two
- * different semantics depending on the producer:
- *   - Browse / Compare / similar retrievers stuffed the raw BM25 score
- *     into it, because they bypass fusion.
- *   - FusionService put the RRF total into it.
- *
- * Downstream LTR feature extraction then could not tell whether the
- * field was a BM25 raw score or an RRF total — this was the #1
- * contributor to LTR feature pollution.
- *
- * Migration plan:
- *   1. (this change) Add {@link fusionRrfTotal} — populated ONLY by
- *      FusionService.fuse(). Per-channel raw scores continue to live in
- *      {@link sparseRawScore}, {@link denseRawScore}, etc.
- *   2. Migrate read sites (signal-computer, ltr-features, mixed-solver,
- *      candidate-pool envelope mapping) to prefer fusionRrfTotal /
- *      sparseRawScore explicitly.
- *   3. Stop writing {@link retrievalFusionScore} from non-fusion
- *      retrievers (Browse / Compare / similar) — they should leave it
- *      undefined and populate sparseRawScore instead.
- *   4. Remove {@link retrievalFusionScore} once all read sites are
- *      migrated.
- * ──────────────────────────────────────────────────────────────────────
+ * {@link retrievalFusionScore} remains only as a legacy fixture/adapter field
+ * for old tests and snapshots. Runtime consumers must not read it.
  */
 export interface HybridCandidate {
   /** Entity identifier for this candidate. */
@@ -201,10 +180,8 @@ export interface HybridCandidate {
    * BM25 score here (they bypass fusion). Downstream consumers cannot tell
    * which semantic applies.
    *
-   * For RRF total, prefer {@link fusionRrfTotal}. For BM25 raw score,
-   * prefer {@link sparseRawScore}. Migration step 3 (2026-04-12): field made
-   * optional — new producers omit it. Remove entirely once all read sites
-   * are cleaned up (candidate-pool.ts, mixed-solver.ts).
+   * Runtime code must not read this field. For fused retrieval ranking,
+   * use {@link fusionRrfTotal}. For sparse BM25, use {@link sparseRawScore}.
    */
   readonly retrievalFusionScore?: number | undefined;
 
@@ -218,6 +195,30 @@ export interface HybridCandidate {
 
   /** ADR-007 upstream source lineage (propagated to HTTP when present). */
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
+
+  /**
+   * Calibrated resolver posterior preserved when the entity lane surfaced
+   * this candidate.
+   */
+  readonly entityPosteriorScore?: number | undefined;
+
+  /**
+   * Entity-lane exactness tier preserved through dual-lane fusion.
+   *
+   * `none` means no entity identity provenance exists for this candidate.
+   */
+  readonly identityExactnessTier?: IdentityExactnessTier | undefined;
+
+  /**
+   * Dual-lane presence classification. Absent on legacy single-lane outputs.
+   */
+  readonly lanePresence?: DualLanePresence | undefined;
+
+  /** True when entity + general lanes both surfaced this entity. */
+  readonly laneCorroborated?: boolean | undefined;
+
+  /** True when exactly one lane surfaced this entity. */
+  readonly laneDisagreement?: boolean | undefined;
 
   /** Constraint attribute names matched by this candidate. */
   readonly matchedConstraints: readonly string[];

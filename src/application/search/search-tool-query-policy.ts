@@ -3,6 +3,7 @@ import { buildSearchToolStyleQueryTerms } from './search-tool-contract.js';
 interface SearchToolSoftClauseInput {
   readonly exclude_grapes?: readonly string[] | undefined;
   readonly exclude_regions?: readonly string[] | undefined;
+  readonly exclude_wine_types?: readonly string[] | undefined;
   readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;
   readonly max_alcohol_pct?: number | undefined;
@@ -58,6 +59,9 @@ export function buildSearchToolSoftClauses(
   }
   for (const region of input.exclude_regions ?? []) {
     clauses.push(`not ${region}`);
+  }
+  for (const wineType of input.exclude_wine_types ?? []) {
+    clauses.push(`not ${wineType}`);
   }
   clauses.push(...buildSearchToolPriceClauses(input));
   if (input.max_alcohol_pct !== undefined) {

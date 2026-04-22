@@ -1,7 +1,12 @@
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
-import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
+import type {
+  ExecutionLaneTrace,
+  ExecutionRetrievalMode,
+  ExecutionTopology,
+} from '../../domain/query/model/engine-execution-contract.js';
 import type { FunnelMetrics } from '../../domain/ranking/model/ranking-stage.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
@@ -27,8 +32,43 @@ export interface SearchRouteDecisionContext {
   } | undefined;
 }
 
-export interface SearchRouteExecutionResult {
-  readonly resolveResult: EntityResolveResult;
+export interface SearchExecutionLaneArtifactRef {
+  readonly entityId: CanonicalEntityId;
+  readonly canonicalLabel?: string | undefined;
+}
+
+export interface SearchExecutionLaneArtifacts<
+  TIdentityArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+  TGeneralArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+  TFusedArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+> {
+  readonly identity: readonly TIdentityArtifact[];
+  readonly general: readonly TGeneralArtifact[];
+  readonly fused: readonly TFusedArtifact[];
+}
+
+export interface SearchExecutionResolveSet<
+  TIdentityResolveResult extends EntityResolveResult | null = EntityResolveResult | null,
+> {
+  readonly identityResolveResult: TIdentityResolveResult;
+  readonly fusedResolveResult: EntityResolveResult;
+}
+
+export interface SearchRouteExecutionResultBase<
+  TExecutionTopology extends ExecutionTopology = ExecutionTopology,
+  TIdentityResolveResult extends EntityResolveResult | null = EntityResolveResult | null,
+  TIdentityArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+  TGeneralArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+  TFusedArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+> extends SearchExecutionResolveSet<TIdentityResolveResult> {
+  readonly executedCompiled: CompiledWineQuery;
+  readonly executionTopology: TExecutionTopology;
+  readonly laneArtifacts: SearchExecutionLaneArtifacts<
+    TIdentityArtifact,
+    TGeneralArtifact,
+    TFusedArtifact
+  >;
+  readonly laneTrace: ExecutionLaneTrace;
   readonly rankedResults: readonly RankedResult[];
   readonly effectiveRetrievalMode: ExecutionRetrievalMode;
   readonly retrievalKind: SearchRouteRetrievalKind;
@@ -56,20 +96,56 @@ export interface SearchRouteExecutionResult {
   readonly criticRetriesExhausted?: boolean | undefined;
 }
 
+export type SearchRouteExecutionResult = SearchRouteExecutionResultBase;
+
 /**
  * Minimal entity route result — wraps EntityResolveResult with optional TA5 calibration.
  */
-export interface EntityRouteResult {
-  readonly resolveResult: EntityResolveResult;
-  /** Entity route synthetic ranked results built from resolver output + entity docs. */
-  readonly rankedResults: readonly RankedResult[];
-  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
-  readonly retrievalKind: SearchRouteRetrievalKind;
-  readonly sparseExecuted: boolean;
-  readonly specializedRouteExecuted: SpecializedRouteName | null;
-  readonly usedCompiledExecution: boolean;
-  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
-  readonly correctiveRetryCalibration?: number | undefined;
+export type EntityRouteResult = SearchRouteExecutionResultBase<
+  'entity_only',
+  EntityResolveResult
+>;
+
+export function buildEmptySearchExecutionLaneArtifacts<
+  TIdentityArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+  TGeneralArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+  TFusedArtifact extends SearchExecutionLaneArtifactRef = SearchExecutionLaneArtifactRef,
+>(): SearchExecutionLaneArtifacts<TIdentityArtifact, TGeneralArtifact, TFusedArtifact> {
+  return {
+    identity: [],
+    general: [],
+    fused: [],
+  };
+}
+
+export function buildSearchExecutionLaneTrace(params: {
+  readonly executionTopology: ExecutionTopology;
+  readonly identityResolveResult: EntityResolveResult | null;
+  readonly fusedResolveResult: EntityResolveResult;
+  readonly laneArtifacts: SearchExecutionLaneArtifacts;
+}): ExecutionLaneTrace {
+  const { executionTopology, identityResolveResult, fusedResolveResult, laneArtifacts } = params;
+  const identityParticipated =
+    executionTopology === 'entity_only' || executionTopology === 'dual_lane';
+  const generalParticipated =
+    executionTopology === 'general_only' || executionTopology === 'dual_lane';
+
+  return {
+    identity: {
+      participated: identityParticipated,
+      artifactCount: laneArtifacts.identity.length,
+      ...(identityResolveResult !== null ? { resolveStatus: identityResolveResult.status } : {}),
+    },
+    general: {
+      participated: generalParticipated,
+      artifactCount: laneArtifacts.general.length,
+    },
+    fused: {
+      participated: true,
+      artifactCount: laneArtifacts.fused.length,
+      resolveStatus: fusedResolveResult.status,
+    },
+  };
 }
 
 /**
@@ -90,41 +166,25 @@ export async function dispatchSearchRouteExecution(
   switch (effectiveRoute) {
     case 'entity': {
       const entityRoute = await actions.executeEntity();
-      const {
-        resolveResult,
-        correctiveRetryCalibration,
-        effectiveRetrievalMode,
-        retrievalKind,
-        sparseExecuted,
-        specializedRouteExecuted,
-        usedCompiledExecution,
-      } = entityRoute;
       const rankedResults = entityRoute.rankedResults;
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_ENTITY_COMPLETE,
-          resolve_status: resolveResult.status,
+          resolve_status: entityRoute.fusedResolveResult.status,
           ranked_count: rankedResults.length,
         },
         'pipeline dispatch entity complete',
       );
       return {
-        resolveResult,
-        rankedResults,
-        effectiveRetrievalMode,
-        retrievalKind,
-        sparseExecuted,
-        specializedRouteExecuted,
-        usedCompiledExecution,
-        ...(resolveResult.degradation?.reasons.length
+        ...entityRoute,
+        ...(entityRoute.fusedResolveResult.degradation?.reasons.length
           ? {
               routeDegradation: {
                 executionMode: 'degraded',
-                degradationReasons: [...resolveResult.degradation.reasons],
+                degradationReasons: [...entityRoute.fusedResolveResult.degradation.reasons],
               },
             }
           : {}),
-        ...(correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration } : {}),
       };
     }
     case 'hybrid': {
@@ -132,7 +192,7 @@ export async function dispatchSearchRouteExecution(
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_HYBRID_COMPLETE,
-          resolve_status: hybridResult.resolveResult.status,
+          resolve_status: hybridResult.fusedResolveResult.status,
           ranked_count: hybridResult.rankedResults.length,
         },
         'pipeline dispatch hybrid complete',
@@ -144,7 +204,7 @@ export async function dispatchSearchRouteExecution(
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_MIXED_COMPLETE,
-          resolve_status: mixedResult.resolveResult.status,
+          resolve_status: mixedResult.fusedResolveResult.status,
           ranked_count: mixedResult.rankedResults.length,
         },
         'pipeline dispatch mixed complete',

@@ -44,6 +44,7 @@ import {
   SEARCH_TOOL_DESCRIPTION,
   SEARCH_TOOL_EXCLUDE_GRAPES_DESCRIPTION,
   SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
+  SEARCH_TOOL_EXCLUDE_WINE_TYPES_DESCRIPTION,
   SEARCH_TOOL_LIMIT_DESCRIPTION,
   SEARCH_TOOL_OCCASION_DESCRIPTION,
   SEARCH_TOOL_GIFT_SUITABILITY_MIN_DESCRIPTION,
@@ -132,6 +133,7 @@ const ClaudeToolStringArrayPropertySchema = z.object({
   type: z.literal('array'),
   items: z.object({
     type: z.literal('string'),
+    enum: z.array(z.string().min(1)).min(1).optional(),
   }).strict(),
   description: z.string().min(1),
   maxItems: z.number().int().positive().optional(),
@@ -274,6 +276,15 @@ export const WINE_SEARCH_TOOLS = [
           type: 'array',
           items: { type: 'string' },
           description: SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
+          maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+        },
+        exclude_wine_types: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: [...SEARCH_TOOL_WINE_TYPES],
+          },
+          description: SEARCH_TOOL_EXCLUDE_WINE_TYPES_DESCRIPTION,
           maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
         },
         min_price_krw: {
@@ -523,6 +534,15 @@ export const WINE_SEARCH_TOOLS = [
           type: 'array',
           items: { type: 'string' },
           description: SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION,
+          maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
+        },
+        exclude_wine_types: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: [...SEARCH_TOOL_WINE_TYPES],
+          },
+          description: SEARCH_TOOL_EXCLUDE_WINE_TYPES_DESCRIPTION,
           maxItems: SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
         },
         min_price_krw: {

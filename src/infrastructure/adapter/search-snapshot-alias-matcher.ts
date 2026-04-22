@@ -5,7 +5,13 @@ import type {
   AliasMatchResult,
   AliasMatcher,
 } from '../../domain/query/service/anchor-extractor.js';
+import {
+  buildAliasLookupPlan,
+  isPhoneticAliasSurfaceCompatible,
+} from '../../domain/query/service/alias-lookup-plan.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { Transliterator } from '../../domain/alias/service/transliterator.js';
+import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
@@ -37,9 +43,14 @@ interface PgAliasRecord {
 
 type AliasStrategy =
   | 'exact'
+  | 'lexical_exact'
   | 'compact_exact'
   | 'transliterated_exact'
-  | 'phonetic_exact';
+  | 'phonetic_exact'
+  | 'transliterated_fuzzy'
+  | 'hangul_ime_completion';
+
+const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 
 const LATIN_VOWEL_RE = /[aeiouy]/g;
 const SnapshotAliasRecordSchema = z.object({
@@ -66,6 +77,12 @@ const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
 
 function compactForLookup(value: string): string {
   return value.replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function tokenizeForLookup(value: string): readonly string[] {
+  return buildNormalizedQueryViews(value).punctuationStripped
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 function phoneticCompactForLookup(value: string): string {
@@ -120,62 +137,13 @@ function trimDedupedQueries(queries: readonly string[]): readonly string[] {
   return ordered;
 }
 
-function buildLookupTokens(query: string): {
-  readonly tokens: readonly string[];
-  readonly compactTokens: readonly string[];
-  readonly transliteratedTokens: readonly string[];
-  readonly phoneticTokens: readonly string[];
-} {
-  const views = buildNormalizedQueryViews(query);
-  const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
-  const tokens = new Set<string>();
-  const compactTokens = new Set<string>();
-  const transliteratedTokens = new Set<string>();
-  const phoneticTokens = new Set<string>();
-
-  for (const value of views.lookupVariants) {
-    if (value.length > 0) {
-      tokens.add(value);
-      if (value !== views.compact) {
-        compactTokens.add(compactForLookup(value));
-      }
-    }
-  }
-  if (views.compact.length > 0) {
-    compactTokens.add(views.compact);
-  }
-  if (views.transliterated !== undefined && views.transliterated.length > 0) {
-    transliteratedTokens.add(views.transliterated);
-    transliteratedTokens.add(compactForLookup(views.transliterated));
-  }
-  if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {
-    phoneticTokens.add(views.phoneticCompact);
-  }
-  for (const word of words) {
-    if (word.length >= 2) {
-      tokens.add(word);
-      compactTokens.add(word.replace(/\s+/g, ''));
-    }
-  }
-  for (let i = 0; i < words.length - 1; i += 1) {
-    const left = words[i];
-    const right = words[i + 1];
-    if (left !== undefined && right !== undefined) {
-      const bigram = `${left} ${right}`;
-      tokens.add(bigram);
-      compactTokens.add(bigram.replace(/\s+/g, ''));
-    }
-  }
-
-  return {
-    tokens: [...tokens],
-    compactTokens: [...compactTokens].filter((token) => token.length > 0),
-    transliteratedTokens: [...transliteratedTokens].filter((token) => token.length > 0),
-    phoneticTokens: [...phoneticTokens].filter((token) => token.length > 0),
-  };
-}
-
 type IndexedAliasRecord = SnapshotAliasRecord;
+
+interface HangulCompletionAliasRecord {
+  readonly alias: IndexedAliasRecord;
+  readonly jamoKey: string;
+  readonly syllableBoundaryOffsets: ReadonlySet<number>;
+}
 
 interface GroupedAliasMatch {
   readonly surfaceForm: string;
@@ -279,14 +247,19 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   }
 
   private readonly exactIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  private readonly wholeTokenIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly compactIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly phoneticIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  private readonly hangulCompletionPrefixIndex = new Map<string, readonly HangulCompletionAliasRecord[]>();
 
   constructor(
     aliases: readonly SnapshotAliasRecord[],
   ) {
     for (const alias of aliases) {
       this.addToIndex(this.exactIndex, alias.normalizedValue, alias);
+      for (const token of tokenizeForLookup(alias.normalizedValue)) {
+        this.addToIndex(this.wholeTokenIndex, token, alias);
+      }
 
       const compactValue = compactForLookup(alias.normalizedValue);
       if (compactValue.length > 0) {
@@ -296,6 +269,10 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
       if (phoneticValue.length > 0) {
         this.addToIndex(this.phoneticIndex, phoneticValue, alias);
+      }
+
+      for (const surface of this.buildHangulCompletionSurfaces(alias)) {
+        this.addHangulCompletionSurface(alias, surface);
       }
     }
   }
@@ -321,12 +298,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       return [];
     }
 
+    const lookupPlan = buildAliasLookupPlan(trimmed);
     const {
-      tokens,
-      compactTokens,
-      transliteratedTokens,
-      phoneticTokens,
-    } = buildLookupTokens(trimmed);
+      tokenList: tokens,
+      compactList: compactTokens,
+      transliteratedList: transliteratedTokens,
+      phoneticList: phoneticTokens,
+    } = lookupPlan;
     const exactSet = new Set(tokens);
     const compactSet = new Set(compactTokens);
     const transliteratedSet = new Set(transliteratedTokens);
@@ -337,6 +315,11 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     for (const token of tokens) {
       for (const alias of this.exactIndex.get(token) ?? []) {
         candidateAliases.set(alias.aliasId, alias);
+      }
+      if (token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH && !token.includes(' ')) {
+        for (const alias of this.wholeTokenIndex.get(token) ?? []) {
+          candidateAliases.set(alias.aliasId, alias);
+        }
       }
     }
 
@@ -352,22 +335,39 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       }
     }
 
+    const hangulCompletionMatches = this.findHangulCompletionAliases(tokens);
+
     for (const alias of candidateAliases.values()) {
       const compactValue = compactForLookup(alias.normalizedValue);
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
+      const hasWholeTokenMatch =
+        tokens.some((token) => (
+          token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH
+          && !token.includes(' ')
+          && tokenizeForLookup(alias.normalizedValue).includes(token)
+        ));
       const strategy: AliasStrategy | null =
         transliteratedSet.has(alias.normalizedValue) || transliteratedSet.has(compactValue)
           ? 'transliterated_exact'
           : compactSet.has(compactValue)
             ? 'compact_exact'
-            : exactSet.has(alias.normalizedValue)
-              ? 'exact'
-              : phoneticSet.has(phoneticValue)
-                ? 'phonetic_exact'
-                : null;
+            : hasWholeTokenMatch
+              ? 'lexical_exact'
+              : exactSet.has(alias.normalizedValue)
+                ? 'exact'
+                : phoneticSet.has(phoneticValue)
+                  ? isPhoneticAliasSurfaceCompatible(trimmed, alias.value)
+                    ? 'phonetic_exact'
+                    : null
+                  : null;
       if (strategy !== null) {
         this.upsertGrouped(grouped, alias, strategy);
       }
+    }
+
+    for (const match of hangulCompletionMatches) {
+      this.upsertGrouped(grouped, match.alias, 'transliterated_fuzzy');
+      this.upsertGrouped(grouped, match.alias, 'hangul_ime_completion');
     }
 
     return [...grouped.values()]
@@ -392,6 +392,87 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       return;
     }
     index.set(key, [...existing, alias]);
+  }
+
+  private addUniqueHangulCompletionPrefix(
+    prefix: string,
+    record: HangulCompletionAliasRecord,
+  ): void {
+    const existing = this.hangulCompletionPrefixIndex.get(prefix);
+    if (existing === undefined) {
+      this.hangulCompletionPrefixIndex.set(prefix, [record]);
+      return;
+    }
+    if (existing.some((item) => item.alias.aliasId === record.alias.aliasId && item.jamoKey === record.jamoKey)) {
+      return;
+    }
+    this.hangulCompletionPrefixIndex.set(prefix, [...existing, record]);
+  }
+
+  private buildHangulCompletionSurfaces(alias: IndexedAliasRecord): readonly string[] {
+    const surfaces = new Set<string>();
+    for (const value of [alias.value, alias.normalizedValue]) {
+      const key = buildHangulJamoKey(value);
+      if (key.containsHangul && key.key.length > 0) {
+        surfaces.add(value);
+      }
+
+      const exceptionSurface = Transliterator.koreanExceptionSurfaceForLatinTerm(value);
+      if (exceptionSurface !== undefined) {
+        surfaces.add(exceptionSurface);
+      }
+    }
+    return [...surfaces];
+  }
+
+  private addHangulCompletionSurface(
+    alias: IndexedAliasRecord,
+    surface: string,
+  ): void {
+    const key = buildHangulJamoKey(surface);
+    if (!key.containsHangul || key.key.length === 0) {
+      return;
+    }
+
+    const record: HangulCompletionAliasRecord = {
+      alias,
+      jamoKey: key.key,
+      syllableBoundaryOffsets: key.syllableBoundaryOffsets,
+    };
+
+    for (let prefixLength = 1; prefixLength < key.key.length; prefixLength += 1) {
+      if (key.syllableBoundaryOffsets.has(prefixLength)) {
+        continue;
+      }
+      this.addUniqueHangulCompletionPrefix(key.key.slice(0, prefixLength), record);
+    }
+  }
+
+  private findHangulCompletionAliases(
+    tokens: readonly string[],
+  ): readonly HangulCompletionAliasRecord[] {
+    const matches = new Map<string, HangulCompletionAliasRecord>();
+    for (const token of tokens) {
+      const key = buildHangulJamoKey(token);
+      if (
+        !key.containsHangul ||
+        key.key.length === 0 ||
+        key.syllableCount < 2
+      ) {
+        continue;
+      }
+
+      for (const record of this.hangulCompletionPrefixIndex.get(key.key) ?? []) {
+        if (!record.jamoKey.startsWith(key.key)) {
+          continue;
+        }
+        if (record.syllableBoundaryOffsets.has(key.key.length) && !key.containsStandaloneJamo) {
+          continue;
+        }
+        matches.set(`${record.alias.aliasId}\u0000${record.jamoKey}`, record);
+      }
+    }
+    return [...matches.values()];
   }
 
   private upsertGrouped(

@@ -85,4 +85,19 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
     const embeddingWarn = warnCalls.find((msg) => msg.includes('embedding'));
     expect(embeddingWarn).toBeUndefined();
   });
+
+  it('does not log embedding warning when openai.apiKeys is present', () => {
+    const warnSpy = vi.spyOn(bootstrapLogger, 'warn');
+
+    warnStartupMisconfigurations({
+      vespa: { url: 'http://vespa:8080' },
+      embedding: { url: undefined },
+      openai: { apiKeys: ['sk-a', 'sk-b'] },
+      cohere: { apiKey: 'co-test' },
+    });
+
+    const warnCalls = warnSpy.mock.calls.map((c) => String(c[0]));
+    const embeddingWarn = warnCalls.find((msg) => msg.includes('embedding'));
+    expect(embeddingWarn).toBeUndefined();
+  });
 });

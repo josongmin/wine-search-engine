@@ -283,6 +283,7 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
         expect.objectContaining({ attribute: 'appellation', value: 'Château Margaux' }),
       ]),
     );
+    expect(result.constraintExtraction?.directHardConstraintCount).toBe(0);
   });
 
   it('exact wine alias shields overlapping bare appellation subspans', async () => {
@@ -479,6 +480,51 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
           attribute: 'grape_primary',
           operator: '=',
           value: 'Pinot Gris',
+        }),
+      ]),
+    );
+  });
+
+  it('infers off-dry or sweet style objective from spicy food pairing intent', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('매운 떡볶이랑 먹을 수 있는 와인 있어?');
+
+    expect(result.bundle.inferred).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'style',
+          operator: 'in',
+          value: ['off_dry', 'sweet'],
+        }),
+      ]),
+    );
+  });
+
+  it('infers white/sparkling/rosé objective from raw fish pairing intent', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('회 먹을 건데 와인 추천해줘');
+
+    expect(result.bundle.inferred).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'wine_type',
+          operator: 'in',
+          value: ['white', 'sparkling', 'rosé'],
+        }),
+      ]),
+    );
+  });
+
+  it('extracts explicit USD ceiling as max_price_krw through the compiler path', async () => {
+    const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
+    const result = await compiler.compile('best Bordeaux under 100 dollars');
+
+    expect(result.bundle.soft).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attribute: 'max_price_krw',
+          operator: '<=',
+          value: 135_000,
         }),
       ]),
     );

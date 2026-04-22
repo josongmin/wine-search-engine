@@ -8,8 +8,7 @@
  * Example:
  *   input:  hard [{region: 'Pauillac'}]
  *   output: hard [{region: 'Pauillac'}]
- *           soft [{country: 'France'}, {region: 'Bordeaux'}]
- *           inferred [{region: 'Haut-Médoc'}, {region: 'Médoc'}]
+ *           inferred [{region: 'Haut-Médoc'}, {region: 'Médoc'}, {region: 'Bordeaux'}, {country: 'France'}]
  *
  * Design constraints (RFC-004 §3.1):
  *   - Deterministic (no LLM)
@@ -30,15 +29,12 @@ import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 /** Version identifier embedded in generated constraints for replay parity. */
 const ONTOLOGY_EXPANSION_VERSION = 'ontology-v1.0';
 
-/** Confidence discount applied to soft expansions (vs the originating hard constraint). */
-const ONTOLOGY_SOFT_CONFIDENCE = 0.85;
-
 /** Confidence discount applied to inferred expansions (weakest tier). */
 const ONTOLOGY_INFERRED_CONFIDENCE = 0.7;
 
 /**
  * Country-only words that can appear as the last element of a region hierarchy.
- * These promote from "soft region" to "hard country" during expansion.
+ * These are emitted as inferred country constraints during expansion.
  *
  * The hierarchy arrays in wine-ontology.ts always end in a country name, so we
  * detect it structurally rather than maintaining a separate country list here.
@@ -81,9 +77,10 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
   };
 
   // ── Region hierarchy expansion ─────────────────────────────────
-  // A hard `region=Pauillac` generates soft constraints for each ancestor in
-  // the chain. The topmost ancestor (country) is promoted to `country=France`
-  // as a soft constraint because country detection is trustworthy.
+  // A hard `region=Pauillac` generates inferred constraints for each ancestor
+  // in the chain. These are true ontology entailments, not user-stated soft
+  // preferences; downstream can use them as contextual boosts without polluting
+  // the explicit slot layer.
   for (const hard of bundle.hard) {
     if (hard.attribute !== 'region' || hard.operator !== '=' || typeof hard.value !== 'string') {
       continue;
@@ -95,12 +92,12 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
       const ancestor = ancestors[i]!;
       const isCountry = i === ancestors.length - 1 && KNOWN_COUNTRY_ROOTS.has(ancestor);
       if (isCountry) {
-        pushIfNew(newSoft, {
+        pushIfNew(newInferred, {
           attribute: 'country',
           operator: '=',
           value: wineTitleCase(ancestor),
           source_phrase: `ontology(${hard.value}→${ancestor})`,
-          confidence: hard.confidence * ONTOLOGY_SOFT_CONFIDENCE,
+          confidence: hard.confidence * ONTOLOGY_INFERRED_CONFIDENCE,
           mapping_version: ONTOLOGY_EXPANSION_VERSION,
         });
       } else {
@@ -132,12 +129,12 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
     for (let i = 0; i < ancestors.length; i++) {
       const ancestor = ancestors[i]!;
       const isCountry = i === ancestors.length - 1 && KNOWN_COUNTRY_ROOTS.has(ancestor);
-      pushIfNew(isCountry ? newSoft : newInferred, {
+      pushIfNew(newInferred, {
         attribute: isCountry ? 'country' : 'region',
         operator: '=',
         value: wineTitleCase(ancestor),
         source_phrase: `ontology(appellation:${hard.value}→${ancestor})`,
-        confidence: hard.confidence * (isCountry ? ONTOLOGY_SOFT_CONFIDENCE : ONTOLOGY_INFERRED_CONFIDENCE),
+        confidence: hard.confidence * ONTOLOGY_INFERRED_CONFIDENCE,
         mapping_version: ONTOLOGY_EXPANSION_VERSION,
       });
     }
@@ -155,4 +152,3 @@ function keyOf(c: NormalizedConstraint): string {
   // ({min,max} vs {max,min}) produce the same dedup key. (Bugbash Round 18)
   return `${c.attribute}|${c.operator}|${canonicalJsonStringify(c.value)}`;
 }
-

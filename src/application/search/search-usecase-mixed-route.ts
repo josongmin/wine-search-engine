@@ -4,7 +4,11 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
+import {
+  buildEmptySearchExecutionLaneArtifacts,
+  buildSearchExecutionLaneTrace,
+  type SearchRouteExecutionResult,
+} from './search-usecase-route-dispatch.js';
 import { buildRankedRouteResolveResult } from './search-usecase-ranked-route-resolve.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 
@@ -19,6 +23,7 @@ export function buildMixedRouteResolveResult(
 ): EntityResolveResult {
   return buildRankedRouteResolveResult(plan, rankedResults, {
     outcomeReasonCode: 'MIXED_ROUTE',
+    executionTopology: 'general_only',
     ...(effectiveRetrievalMode !== undefined ? { effectiveRetrievalMode } : {}),
     topEntity: rankedResults[0] === undefined
       ? undefined
@@ -39,13 +44,25 @@ export function mixedQueryResultToSearchRouteExecution(
   compiled: CompiledWineQuery,
 ): SearchRouteExecutionResult {
   const rankedResults = mixedResult.rankedResults;
+  const fusedResolveResult = buildMixedRouteResolveResult(
+    plan,
+    rankedResults,
+    mixedResult,
+    compiled.execution.effectiveRetrievalMode,
+  );
+  const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
   return {
-    resolveResult: buildMixedRouteResolveResult(
-      plan,
-      rankedResults,
-      mixedResult,
-      compiled.execution.effectiveRetrievalMode,
-    ),
+    executedCompiled: compiled,
+    executionTopology: 'general_only',
+    identityResolveResult: null,
+    fusedResolveResult,
+    laneArtifacts,
+    laneTrace: buildSearchExecutionLaneTrace({
+      executionTopology: 'general_only',
+      identityResolveResult: null,
+      fusedResolveResult,
+      laneArtifacts,
+    }),
     rankedResults,
     effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
     retrievalKind: 'mixed_similarity',
@@ -76,7 +93,7 @@ export function buildFailedMixedRouteExecution(
   reason: MixedFallbackReason,
   compiled: CompiledWineQuery,
 ): SearchRouteExecutionResult {
-  const resolveResult: EntityResolveResult = {
+  const fusedResolveResult: EntityResolveResult = {
     status: 'failed',
     candidates: [],
     decisionTrace: {
@@ -93,16 +110,27 @@ export function buildFailedMixedRouteExecution(
     degradation: { reasons: [reason] },
     conformalSetSize: 1,
   };
+  const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
 
   return {
-    resolveResult,
+    executedCompiled: compiled,
+    executionTopology: 'general_only',
+    identityResolveResult: null,
+    fusedResolveResult,
+    laneArtifacts,
+    laneTrace: buildSearchExecutionLaneTrace({
+      executionTopology: 'general_only',
+      identityResolveResult: null,
+      fusedResolveResult,
+      laneArtifacts,
+    }),
     rankedResults: [],
     effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
     retrievalKind: 'mixed_similarity',
     sparseExecuted: false,
     specializedRouteExecuted: null,
     usedCompiledExecution: true,
-  routeDegradation: {
+    routeDegradation: {
       executionMode: 'degraded',
       degradationReasons: [reason],
     },

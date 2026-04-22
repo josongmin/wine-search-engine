@@ -1,6 +1,10 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
-import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
+import type {
+  ExecutionLaneTrace,
+  ExecutionRetrievalMode,
+  ExecutionTopology,
+} from '../../domain/query/model/engine-execution-contract.js';
 import type { AuditExtension, PolicyOutcome } from '../../domain/audit/model/audit-extension.js';
 import type { CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
@@ -14,9 +18,15 @@ import type { TypedAbstainDecision } from '../../domain/query/model/abstain-deci
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { DecisionEnginePort, ResponseBuilderPort } from './port/search-pipeline-deps.port.js';
+import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
-import type { SearchRouteRetrievalKind } from './search-usecase-route-dispatch.js';
+import type {
+  SearchExecutionLaneArtifacts,
+  SearchExecutionLaneArtifactRef,
+  SearchRouteRetrievalKind,
+} from './search-usecase-route-dispatch.js';
+import type { DualLaneArtifact } from '../../domain/retrieval/model/dual-lane-artifact.js';
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
@@ -69,6 +79,83 @@ import { classifyShortfallLayer } from '../../domain/shared/types/provenance-sho
 const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
 const retrievalProfileService = new RetrievalProfileService();
 const RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT = 3;
+
+export function selectDisplayRankedResultsForDecision(
+  rankedResults: readonly RankedResult[],
+  decisionOutput: DecisionOutput,
+  retrievalKind: SearchRouteRetrievalKind | undefined,
+): readonly RankedResult[] {
+  if (
+    decisionOutput.decisionStatus !== 'resolved' ||
+    retrievalKind !== 'entity_lookup' ||
+    rankedResults.length <= 1
+  ) {
+    return rankedResults;
+  }
+
+  const selectedEntityId = decisionOutput.selectedEntity?.entityId ?? decisionOutput.chosenEntityId;
+  if (selectedEntityId === undefined) {
+    return rankedResults.slice(0, 1);
+  }
+
+  const selected = rankedResults.find((result) => result.entityId === selectedEntityId);
+  return selected !== undefined ? [selected] : rankedResults.slice(0, 1);
+}
+
+function isDualLaneArtifact(
+  artifact: SearchExecutionLaneArtifactRef,
+): artifact is DualLaneArtifact {
+  return (
+    'lanePresence' in artifact &&
+    'exactnessTier' in artifact &&
+    'fusedCandidate' in artifact
+  );
+}
+
+function findWinnerDualLaneArtifact(
+  resolveResult: EntityResolveResult,
+  fusedArtifacts: SearchExecutionLaneArtifacts['fused'],
+): DualLaneArtifact | undefined {
+  const winnerEntityId = resolveResult.topEntity?.entityId;
+  if (winnerEntityId === undefined) {
+    return undefined;
+  }
+
+  return fusedArtifacts.find(
+    (artifact): artifact is DualLaneArtifact =>
+      isDualLaneArtifact(artifact) && artifact.entityId === winnerEntityId,
+  );
+}
+
+function resolveWinnerAlignedDualLaneArtifact(params: {
+  readonly executionTopology: ExecutionTopology;
+  readonly identityResolveResult: EntityResolveResult | null;
+  readonly resolveResult: EntityResolveResult;
+  readonly fusedArtifacts: SearchExecutionLaneArtifacts['fused'];
+}): DualLaneArtifact | undefined {
+  if (
+    params.executionTopology !== 'dual_lane'
+    || params.identityResolveResult === null
+  ) {
+    return undefined;
+  }
+
+  const winnerDualLaneArtifact = findWinnerDualLaneArtifact(
+    params.resolveResult,
+    params.fusedArtifacts,
+  );
+  const winnerEntityId = params.resolveResult.topEntity?.entityId;
+  if (
+    winnerDualLaneArtifact === undefined
+    || winnerEntityId === undefined
+    || winnerDualLaneArtifact.entityId !== winnerEntityId
+    || winnerDualLaneArtifact.identityProvenance?.entityId !== winnerEntityId
+  ) {
+    return undefined;
+  }
+
+  return winnerDualLaneArtifact;
+}
 
 /**
  * Derives AuditExtension from planner/ranking runtime state and optional
@@ -222,6 +309,8 @@ function buildExecutionAuditTrace(
   effectiveRoute: QueryRoute,
   retrievalModeSource: 'planner' | 'api_override',
   routeExecutionFacts: {
+    readonly executionTopology: ExecutionTopology;
+    readonly laneTrace: ExecutionLaneTrace;
     readonly effectiveRetrievalMode: ExecutionRetrievalMode;
     readonly retrievalKind: SearchRouteRetrievalKind;
     readonly sparseExecuted: boolean;
@@ -240,6 +329,7 @@ function buildExecutionAuditTrace(
 
   return {
     effective_route: effectiveRoute,
+    execution_topology: routeExecutionFacts.executionTopology,
     retrieval_mode_source: retrievalModeSource,
     effective_retrieval_mode: routeExecutionFacts.effectiveRetrievalMode,
     retrieval_kind: routeExecutionFacts.retrievalKind,
@@ -258,6 +348,7 @@ function buildExecutionAuditTrace(
       require_constraint_evidence: provenancePolicy.requireConstraintEvidence,
       require_anchor_evidence: provenancePolicy.requireAnchorEvidence,
     },
+    lane_trace: routeExecutionFacts.laneTrace,
     ...(provenanceClosure !== undefined
       ? { provenance_closure: provenanceClosure }
       : {}),
@@ -442,9 +533,9 @@ function buildDeterminismFingerprintParams(
 }
 
 function buildResolverProvenanceTrace(
-  resolveResult: EntityResolveResult,
+  fusedResolveResult: EntityResolveResult,
 ): AuditExtension['resolver_provenance_trace'] {
-  const provenance = resolveResult.decisionTrace.queryProvenance;
+  const provenance = fusedResolveResult.decisionTrace.queryProvenance;
   if (provenance === undefined) {
     return undefined;
   }
@@ -477,11 +568,11 @@ function mergeRouteDegradation(
   snapshot: DecisionSnapshot,
   effectiveRoute: QueryRoute,
   routeDegradation?: RankingDegradationSignal,
-  resolveResult?: EntityResolveResult,
+  fusedResolveResult?: EntityResolveResult,
 ): RankingDegradationSignal | undefined {
   const reasons = new Set([
     ...(routeDegradation?.degradationReasons ?? []),
-    ...(resolveResult?.degradation?.reasons ?? []),
+    ...(fusedResolveResult?.degradation?.reasons ?? []),
   ]);
   if (snapshot.feature_flags['killSwitchLearning'] === true) {
     reasons.add('learning_kill_switch');
@@ -513,6 +604,7 @@ interface SearchPostRouteExecutionContext {
   readonly requestId: string;
   readonly startTime: number;
   readonly resolveResult: EntityResolveResult;
+  readonly identityResolveResult: EntityResolveResult | null;
   readonly rankedResults: readonly RankedResult[];
   readonly decisionContext?: SearchRouteDecisionContext | undefined;
   readonly effectiveRoute: QueryRoute;
@@ -527,6 +619,9 @@ interface SearchPostRouteExecutionContext {
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  readonly executionTopology: ExecutionTopology;
+  readonly laneTrace: ExecutionLaneTrace;
+  readonly laneArtifacts: SearchExecutionLaneArtifacts;
   /** Route-execution facts propagated from dispatch/ranking. */
   readonly effectiveRetrievalMode: ExecutionRetrievalMode;
   readonly retrievalKind: SearchRouteRetrievalKind;
@@ -572,6 +667,7 @@ export interface RankedRouteDecisionPhaseContext {
    */
   readonly nowYear?: number | undefined;
   readonly resolveResult: EntityResolveResult;
+  readonly identityResolveResult: EntityResolveResult | null;
   /**
    * Visible ranked results (after caller-specified limit). Used for the
    * `results` array shipped to the client.
@@ -598,6 +694,9 @@ export interface RankedRouteDecisionPhaseContext {
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  readonly executionTopology: ExecutionTopology;
+  readonly laneTrace: ExecutionLaneTrace;
+  readonly laneArtifacts: SearchExecutionLaneArtifacts;
   readonly effectiveRetrievalMode: ExecutionRetrievalMode;
   readonly retrievalKind: SearchRouteRetrievalKind;
   readonly sparseExecuted: boolean;
@@ -626,6 +725,8 @@ export interface RankedRouteDecisionPhaseContext {
 function assertSearchRouteExecutionFacts(
   ctx: SearchPostRouteExecutionContext,
 ): {
+  readonly executionTopology: ExecutionTopology;
+  readonly laneTrace: ExecutionLaneTrace;
   readonly effectiveRetrievalMode: ExecutionRetrievalMode;
   readonly retrievalKind: SearchRouteRetrievalKind;
   readonly sparseExecuted: boolean;
@@ -633,6 +734,8 @@ function assertSearchRouteExecutionFacts(
   readonly usedCompiledExecution: boolean;
 } {
   return {
+    executionTopology: ctx.executionTopology,
+    laneTrace: ctx.laneTrace,
     effectiveRetrievalMode: ctx.effectiveRetrievalMode,
     retrievalKind: ctx.retrievalKind,
     sparseExecuted: ctx.sparseExecuted,
@@ -691,6 +794,8 @@ function toAdmissionHonestyContract(
 
 function buildResponseExecutionContract(
   routeExecutionFacts: {
+    readonly executionTopology: ExecutionTopology;
+    readonly laneTrace: ExecutionLaneTrace;
     readonly effectiveRetrievalMode: ExecutionRetrievalMode;
     readonly retrievalKind: SearchRouteRetrievalKind;
     readonly sparseExecuted: boolean;
@@ -701,11 +806,13 @@ function buildResponseExecutionContract(
   admissionClosure?: AdmissionClosureSummary,
 ): NonNullable<ResponseBuilderPort['build'] extends (params: infer T) => unknown ? T : never>['executionContract'] {
   return {
+    executionTopology: routeExecutionFacts.executionTopology,
     effectiveRetrievalMode: routeExecutionFacts.effectiveRetrievalMode,
     retrievalKind: routeExecutionFacts.retrievalKind,
     sparseExecuted: routeExecutionFacts.sparseExecuted,
     specializedRouteExecuted: routeExecutionFacts.specializedRouteExecuted,
     usedCompiledExecution: routeExecutionFacts.usedCompiledExecution,
+    laneTrace: routeExecutionFacts.laneTrace,
     ...(rankingMetadata?.provenanceClosure !== undefined
       ? { provenanceClosure: rankingMetadata.provenanceClosure }
       : {}),
@@ -738,16 +845,24 @@ export async function runRankedRouteDecisionPhase(
     ctx.routeDegradation,
     ctx.resolveResult,
   );
-  const decisionInputBase = buildSearchDecisionInput(
-    ctx.plan,
-    ctx.resolveResult,
-    ctx.rankedResults,
-    ctx.effectiveRoute,
-    ctx.decisionContext,
-    {
+  const winnerDualLaneArtifact = resolveWinnerAlignedDualLaneArtifact({
+    executionTopology: ctx.executionTopology,
+    identityResolveResult: ctx.identityResolveResult,
+    resolveResult: ctx.resolveResult,
+    fusedArtifacts: ctx.laneArtifacts.fused,
+  });
+  const decisionInputBase = buildSearchDecisionInput({
+    plan: ctx.plan,
+    resolveResult: ctx.resolveResult,
+    identityResolveResult: ctx.identityResolveResult ?? undefined,
+    rankedResults: ctx.rankedResults,
+    effectiveRoute: ctx.effectiveRoute,
+    decisionContext: ctx.decisionContext,
+    executionContext: {
       effectiveRetrievalMode: ctx.effectiveRetrievalMode,
       retrievalKind: ctx.retrievalKind,
       provenancePolicy: ctx.compiled.execution.provenancePolicy,
+      ...(winnerDualLaneArtifact !== undefined ? { winnerDualLaneArtifact } : {}),
       ...(ctx.compiled.constraintGraph !== undefined
         ? { constraintGraph: ctx.compiled.constraintGraph }
         : {}),
@@ -755,8 +870,8 @@ export async function runRankedRouteDecisionPhase(
         ? { criticRewrites: ctx.criticRewrites }
         : {}),
     },
-    toAdmissionHonestyContract(mergedRouteDegradation),
-  );
+    honestyContract: toAdmissionHonestyContract(mergedRouteDegradation),
+  });
   // Propagate LTR saturation to decision engine so it can bypass
   // conformal prediction gating (calibrated on LTR, meaningless for heuristic).
   const decisionInput = ctx.rankingMetadata?.ltrSaturated === true
@@ -798,8 +913,13 @@ export async function runRankedRouteDecisionPhase(
   const sensoryPriors =
     extractSensoryPriorsFromRetrievalPlan(ctx.compiled.query.retrievalPlan)
     ?? extractSensoryPriorsFromConstraints(ctx.plan.constraints);
-  const results = await mapRankedResultsToResultItems(
+  const displayRankedResults = selectDisplayRankedResultsForDecision(
     ctx.rankedResults,
+    decisionOutput,
+    ctx.retrievalKind,
+  );
+  const results = await mapRankedResultsToResultItems(
+    displayRankedResults,
     ctx.drinkingWindow,
     resolveTargetYear(ctx),
     sensoryPriors,
@@ -851,6 +971,8 @@ export async function runRankedRouteDecisionPhase(
       ctx.effectiveRoute,
       ctx.retrievalModeSource ?? 'planner',
       {
+        executionTopology: ctx.executionTopology,
+        laneTrace: ctx.laneTrace,
         effectiveRetrievalMode: ctx.effectiveRetrievalMode,
         retrievalKind: ctx.retrievalKind,
         sparseExecuted: ctx.sparseExecuted,
@@ -894,6 +1016,8 @@ export async function runRankedRouteDecisionPhase(
         : {}),
       executionContract: buildResponseExecutionContract(
         {
+          executionTopology: ctx.executionTopology,
+          laneTrace: ctx.laneTrace,
           effectiveRetrievalMode: ctx.effectiveRetrievalMode,
           retrievalKind: ctx.retrievalKind,
           sparseExecuted: ctx.sparseExecuted,
@@ -1121,16 +1245,24 @@ export async function runSearchPostRoutePhase(
     )
       ? buildSearchCounterfactuals(ctx.resolveResult, ctx.rankedResults, { abstainContext: true })
       : [];
-    const abstainDecisionInput = buildSearchDecisionInput(
-      ctx.plan,
-      ctx.resolveResult,
-      limitedRankedResults,
-      ctx.effectiveRoute,
-      ctx.decisionContext,
-      {
+    const winnerDualLaneArtifact = resolveWinnerAlignedDualLaneArtifact({
+      executionTopology: ctx.executionTopology,
+      identityResolveResult: ctx.identityResolveResult,
+      resolveResult: ctx.resolveResult,
+      fusedArtifacts: ctx.laneArtifacts.fused,
+    });
+    const abstainDecisionInput = buildSearchDecisionInput({
+      plan: ctx.plan,
+      resolveResult: ctx.resolveResult,
+      identityResolveResult: ctx.identityResolveResult ?? undefined,
+      rankedResults: limitedRankedResults,
+      effectiveRoute: ctx.effectiveRoute,
+      decisionContext: ctx.decisionContext,
+      executionContext: {
         effectiveRetrievalMode: ctx.effectiveRetrievalMode,
         retrievalKind: ctx.retrievalKind,
         provenancePolicy: ctx.compiled.execution.provenancePolicy,
+        ...(winnerDualLaneArtifact !== undefined ? { winnerDualLaneArtifact } : {}),
         ...(ctx.compiled.constraintGraph !== undefined
           ? { constraintGraph: ctx.compiled.constraintGraph }
           : {}),
@@ -1138,8 +1270,8 @@ export async function runSearchPostRoutePhase(
           ? { criticRewrites: ctx.criticRewrites }
           : {}),
       },
-      toAdmissionHonestyContract(mergedRouteDegradation),
-    );
+      honestyContract: toAdmissionHonestyContract(mergedRouteDegradation),
+    });
     const abstainAdmissionClosure = evaluateAdmissionClosure(abstainDecisionInput, snapshot);
     try {
       // buildEntropyAbstainResponseParams includes compiled (required) — do not spread
@@ -1236,6 +1368,7 @@ export async function runSearchPostRoutePhase(
       requestId: ctx.requestId,
       startTime: ctx.startTime,
       resolveResult: ctx.resolveResult,
+      identityResolveResult: ctx.identityResolveResult,
       rankedResults: limitedRankedResults,
       fullRankedResults: ctx.rankedResults,
       decisionContext: ctx.decisionContext,
@@ -1250,6 +1383,9 @@ export async function runSearchPostRoutePhase(
       routeDegradation: mergedRouteDegradation,
       ...(ctx.rankingMetadata !== undefined ? { rankingMetadata: ctx.rankingMetadata } : {}),
       specializedRouteObservability: ctx.specializedRouteObservability,
+      executionTopology: ctx.executionTopology,
+      laneTrace: ctx.laneTrace,
+      laneArtifacts: ctx.laneArtifacts,
       effectiveRetrievalMode: ctx.effectiveRetrievalMode,
       retrievalKind: ctx.retrievalKind,
       sparseExecuted: ctx.sparseExecuted,

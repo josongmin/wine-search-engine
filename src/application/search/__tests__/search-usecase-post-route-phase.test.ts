@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runSearchPostRoutePhase } from '../search-usecase-post-route-phase.js';
+import {
+  runSearchPostRoutePhase,
+  selectDisplayRankedResultsForDecision,
+} from '../search-usecase-post-route-phase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { CompiledWineQuery } from '../../../domain/query/model/compiled-wine-query.js';
@@ -46,6 +49,12 @@ const SPECIALIZED_HYBRID_EXECUTION_FACTS = {
   usedCompiledExecution: false,
 } as const;
 
+const EMPTY_LANE_ARTIFACTS = {
+  identity: [],
+  general: [],
+  fused: [],
+} as const;
+
 const minimalResolveResult: EntityResolveResult = {
   status: 'ambiguous',
   candidates: [],
@@ -64,6 +73,44 @@ const minimalResolveResult: EntityResolveResult = {
 };
 
 describe('runSearchPostRoutePhase', () => {
+  it('limits resolved entity-lookup display results to the selected identity', () => {
+    const rankedResults = [
+      { entityId: 'wine-top', canonicalLabel: 'Château Margaux', finalScore: 1 },
+      { entityId: 'wine-tail', canonicalLabel: 'Pavillon Rouge du Château Margaux', finalScore: 0.2 },
+    ] as unknown as readonly RankedResult[];
+
+    const selected = selectDisplayRankedResultsForDecision(
+      rankedResults,
+      {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        decisionConfidence: 1,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        selectedEntity: {
+          entityId: 'wine-top' as never,
+          canonicalLabel: 'Château Margaux',
+          identity_signature: 'sig',
+          snapshot_ref: 'snapshot',
+        },
+        signalSet: {},
+        evidenceItems: [],
+        decisionTraceRef: 'trace',
+        decisionSnapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1',
+          threshold_profile_id: 'default',
+          planner_version: '1',
+          feature_flags: {},
+        },
+        decisionTrace: {} as never,
+      },
+      'entity_lookup',
+    );
+
+    expect(selected).toEqual([rankedResults[0]]);
+  });
+
   it('stores entropy-abstain responses in the cache', async () => {
     const response: SearchResponseV1 = {
       queryType: 'search',
@@ -122,8 +169,10 @@ describe('runSearchPostRoutePhase', () => {
       requestId: 'req-1',
       startTime: Date.now(),
       resolveResult: minimalResolveResult,
+      identityResolveResult: null,
       rankedResults: [],
       effectiveRoute: 'hybrid',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
       ...GENERIC_HYBRID_EXECUTION_FACTS,
       plannerSuggestedMode: 'attribute_search',
       retrievalModeSource: 'planner',
@@ -321,6 +370,30 @@ describe('runSearchPostRoutePhase', () => {
           outcomeReasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
         },
       },
+      identityResolveResult: {
+        ...minimalResolveResult,
+        status: 'resolved',
+        decisionConfidenceC: 0.97,
+        topEntity: {
+          entityId: 'wine-1',
+          canonicalLabel: '2014 Kalaris Merlot',
+          calibratedScore: 0.97,
+        },
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: '2014 Kalaris Merlot',
+          calibratedScore: 0.97,
+          rank: 1,
+          evidenceRefs: ['Kalaris Merlot'],
+        }],
+        decisionTrace: {
+          ...minimalResolveResult.decisionTrace,
+          top1CalibratedScore: 0.97,
+          calibratedGap: 0.97,
+          decisionConfidenceC: 0.97,
+          outcomeReasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
+        },
+      },
       rankedResults: [{
         entityId: 'wine-1',
         canonicalLabel: '2014 Kalaris Merlot',
@@ -349,6 +422,7 @@ describe('runSearchPostRoutePhase', () => {
         inferredConstraints: [],
       }],
       effectiveRoute: 'entity',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
       ...ENTITY_ROUTE_EXECUTION_FACTS,
       plannerSuggestedMode: 'entity_lookup',
       retrievalModeSource: 'planner',
@@ -523,6 +597,7 @@ describe('runSearchPostRoutePhase', () => {
           outcomeReasonCodes: ['HYBRID_ROUTE'],
         },
       },
+      identityResolveResult: null,
       rankedResults: [{
         entityId: 'wine-specialized',
         canonicalLabel: 'Region Browse Wine',
@@ -545,6 +620,7 @@ describe('runSearchPostRoutePhase', () => {
         evidenceItems: [],
       }] as RankedResult[],
       effectiveRoute: 'hybrid',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
       ...SPECIALIZED_HYBRID_EXECUTION_FACTS,
       specializedRouteObservability: {
         specializedRouteRequested: 'region_browse',
@@ -753,6 +829,30 @@ describe('runSearchPostRoutePhase', () => {
           outcomeReasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
         },
       },
+      identityResolveResult: {
+        ...minimalResolveResult,
+        status: 'resolved',
+        decisionConfidenceC: 0.99,
+        topEntity: {
+          entityId: 'wine-1',
+          canonicalLabel: '2014 Kalaris Merlot',
+          calibratedScore: 0.99,
+        },
+        candidates: [{
+          entityId: 'wine-1',
+          canonicalLabel: '2014 Kalaris Merlot',
+          calibratedScore: 0.99,
+          rank: 1,
+          evidenceRefs: ['Kalaris Merlot'],
+        }],
+        decisionTrace: {
+          ...minimalResolveResult.decisionTrace,
+          top1CalibratedScore: 0.99,
+          calibratedGap: 0.99,
+          decisionConfidenceC: 0.99,
+          outcomeReasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
+        },
+      },
       rankedResults: [{
         entityId: 'wine-1',
         canonicalLabel: '2014 Kalaris Merlot',
@@ -790,6 +890,7 @@ describe('runSearchPostRoutePhase', () => {
         inferredConstraints: [],
       }],
       effectiveRoute: 'entity',
+      laneArtifacts: EMPTY_LANE_ARTIFACTS,
       ...ENTITY_ROUTE_EXECUTION_FACTS,
       plannerSuggestedMode: 'entity_lookup',
       retrievalModeSource: 'planner',

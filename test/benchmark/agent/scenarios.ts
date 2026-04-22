@@ -160,12 +160,10 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'appellation', operator: '=', value: 'Barolo' },
           { attribute: 'appellation', operator: '=', value: 'Barbaresco' },
         ],
-        // Ontology expansion: appellation → country (soft tier).
-        soft: [
-          { attribute: 'country', operator: '=', value: 'Italy' },
-        ],
-        // Compositional inference: barolo/barbaresco → Nebbiolo + structure.
+        soft: [],
+        // Ontology/compositional inference: appellation → country; barolo/barbaresco → Nebbiolo + structure.
         inferred: [
+          { attribute: 'country', operator: '=', value: 'Italy' },
           { attribute: 'grape_primary', operator: '=', value: 'Nebbiolo' },
           { attribute: 'tannin', operator: '>=', value: 0.65 },
           { attribute: 'acidity', operator: '>=', value: 0.6 },
@@ -354,10 +352,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'appellation', operator: '=', value: 'Barolo' },
           { attribute: 'appellation', operator: '=', value: 'Brunello di Montalcino' },
         ],
-        soft: [
-          { attribute: 'country', operator: '=', value: 'Italy' },
-        ],
         inferred: [
+          { attribute: 'country', operator: '=', value: 'Italy' },
           { attribute: 'grape_primary', operator: '=', value: 'Nebbiolo' },
           { attribute: 'grape_primary', operator: '=', value: 'Sangiovese' },
         ],

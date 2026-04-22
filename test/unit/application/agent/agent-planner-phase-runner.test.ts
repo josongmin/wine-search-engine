@@ -158,6 +158,33 @@ describe('AgentPlannerPhaseRunner', () => {
     }));
   });
 
+  it('routes curated Korean exact-entity aliases without spending an LLM planner call', async () => {
+    const complete = vi.fn();
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: { complete } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '무통',
+      'req-curated-korean-exact-alias',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(complete).not.toHaveBeenCalled();
+    expect(result?.inputTokens).toBe(0);
+    expect(result?.outputTokens).toBe(0);
+    expect(result?.parsed.action).toEqual({
+      tool: 'search_wines',
+      input: {
+        query: 'Château Mouton Rothschild',
+        retrieval_mode: 'entity',
+      },
+    });
+  });
+
   it('uses compact continuation planner prompt after tool history exists', async () => {
     const complete = vi.fn().mockResolvedValue({
       text: JSON.stringify({ thought: 'answer', answer: '검색 결과 기준으로 답합니다.' }),
@@ -225,6 +252,40 @@ describe('AgentPlannerPhaseRunner', () => {
       query: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로',
       styles: ['approachable', 'crowd_pleasing'],
     }));
+  });
+
+  it('preserves anchored parallel search slots for Korean mixed requests', async () => {
+    const runner = new AgentPlannerPhaseRunner({
+      chatLlm: {
+        complete: vi.fn().mockResolvedValue({
+          text: JSON.stringify({
+            thought: '병렬 검색',
+            actions: [
+              { tool: 'search_wines', input: { query: 'Barolo' } },
+              { tool: 'search_wines', input: { query: 'Burgundy' } },
+              { tool: 'get_food_pairings', input: { food: 'lamb' } },
+            ],
+          }),
+          model: 'test-model',
+          finishReason: 'stop',
+        }),
+      } as unknown as ChatLlmPort,
+    });
+
+    const result = await runner.run(
+      '바롤로, 버건디, 양고기 페어링 동시에 알려줘',
+      'req-korean-parallel-anchors',
+      DEFAULT_AGENT_CONFIG,
+      createAgentExecutionState(),
+      3,
+      false,
+    );
+
+    expect(result?.parsed.actions).toEqual([
+      { tool: 'search_wines', input: { query: 'Barolo' } },
+      { tool: 'search_wines', input: { query: 'Burgundy' } },
+      { tool: 'get_food_pairings', input: { food: 'lamb' } },
+    ]);
   });
 
   it('drops mixed retrieval overrides for anchorless recommendation queries', async () => {

@@ -3,6 +3,7 @@ import type {
   AliasMatchResult,
   AliasMatcher,
 } from '../../domain/query/service/anchor-extractor.js';
+import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { parseSpans } from '../../domain/attribute/service/span-parser.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
@@ -15,9 +16,12 @@ const SEARCH_INDEX_ALIAS_LIMIT = 24;
 const log = bootstrapLogger.child({ component: 'SearchIndexAliasMatcher' });
 
 const EXACT_MULTIPLIER = 1.0;
+const LEXICAL_EXACT_MULTIPLIER = 1.0;
 const COMPACT_MULTIPLIER = 0.93;
 const TRANSLITERATED_MULTIPLIER = 0.91;
+const TRANSLITERATED_FUZZY_MULTIPLIER = 0.89;
 const PHONETIC_MULTIPLIER = 0.88;
+const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 
 const FIELD_CONFIDENCE = {
   canonical_label: 0.97,
@@ -27,7 +31,13 @@ const FIELD_CONFIDENCE = {
 } as const;
 
 type AliasFieldName = keyof typeof FIELD_CONFIDENCE;
-type AliasStrategy = 'exact' | 'compact_exact' | 'transliterated_exact' | 'phonetic_exact';
+type AliasStrategy =
+  | 'exact'
+  | 'lexical_exact'
+  | 'compact_exact'
+  | 'transliterated_exact'
+  | 'transliterated_fuzzy'
+  | 'phonetic_exact';
 
 interface CandidateSurface {
   readonly field: AliasFieldName;
@@ -50,11 +60,18 @@ function containsWholePhrase(haystack: string, needle: string): boolean {
   return normalizedHaystack.includes(normalizedNeedle);
 }
 
+function tokenizeForLookup(value: string): readonly string[] {
+  return buildNormalizedQueryViews(value).punctuationStripped
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 function classifyMatch(query: string, candidate: string): ClassifiedMatch | null {
   const queryViews = buildNormalizedQueryViews(query);
   const candidateViews = buildNormalizedQueryViews(candidate);
   const queryVintage = queryViews.vintageStripped;
   const candidateVintage = candidateViews.vintageStripped;
+  const imeRomanizedPrefix = Transliterator.romanizeWineTermPrefix(query);
 
   const queryTransliterated = queryViews.transliterated;
   const candidateTransliterated = candidateViews.transliterated;
@@ -74,6 +91,22 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
     return {
       strategy: 'transliterated_exact',
       multiplier: TRANSLITERATED_MULTIPLIER,
+      normalizedForm: candidateViews.strict,
+    };
+  }
+
+  if (
+    imeRomanizedPrefix !== undefined &&
+    (
+      imeRomanizedPrefix === candidateViews.strict ||
+      imeRomanizedPrefix === candidateVintage ||
+      compact(imeRomanizedPrefix) === candidateViews.compact ||
+      imeRomanizedPrefix === candidateTransliterated
+    )
+  ) {
+    return {
+      strategy: 'transliterated_fuzzy',
+      multiplier: TRANSLITERATED_FUZZY_MULTIPLIER,
       normalizedForm: candidateViews.strict,
     };
   }
@@ -123,6 +156,20 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
     };
   }
 
+  const queryTokens = tokenizeForLookup(queryVintage);
+  if (
+    queryTokens.length === 1 &&
+    queryTokens[0] !== undefined &&
+    queryTokens[0].length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH &&
+    tokenizeForLookup(candidateVintage).includes(queryTokens[0])
+  ) {
+    return {
+      strategy: 'lexical_exact',
+      multiplier: LEXICAL_EXACT_MULTIPLIER,
+      normalizedForm: candidateViews.strict,
+    };
+  }
+
   if (
     queryViews.phoneticCompact !== undefined &&
     candidateViews.phoneticCompact !== undefined &&
@@ -140,6 +187,7 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
 
 function buildSearchQueries(query: string): readonly string[] {
   const queryViews = buildNormalizedQueryViews(query);
+  const imeRomanizedPrefix = Transliterator.romanizeWineTermPrefix(query);
   const ordered: string[] = [];
   const seen = new Set<string>();
   const add = (value: string): void => {
@@ -156,6 +204,7 @@ function buildSearchQueries(query: string): readonly string[] {
     queryViews.punctuationStripped,
     queryViews.vintageStripped,
     ...(queryViews.transliterated !== undefined ? [queryViews.transliterated] : []),
+    ...(imeRomanizedPrefix !== undefined ? [imeRomanizedPrefix] : []),
   ].filter((value, index, array) => value.length > 0 && array.indexOf(value) === index);
 
   for (const baseQuery of baseQueries) {

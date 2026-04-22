@@ -326,6 +326,45 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
         anchors: [],
       }),
     };
+    const responseBuilder = {
+      build: vi.fn().mockImplementation(({ requestId, queryTimeMs, route }) => ({
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route,
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: 'trace',
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1.0.0',
+            threshold_profile_id: 'default',
+            planner_version: '1.0.0',
+            feature_flags: {},
+          },
+          failure_reason: 'NO_RESULTS',
+        },
+        results: [],
+        meta: {
+          requestId,
+          queryTimeMs,
+          route,
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1.0.0',
+            threshold_profile_id: 'default',
+            planner_version: '1.0.0',
+            feature_flags: {},
+          },
+          response_hash: 'hash',
+        },
+      })),
+    };
     const useCase = new HybridUseCase({
       allowCompiledFallback: true,
       queryPlanner: queryPlanner as never,
@@ -350,50 +389,34 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
           failure_reason: 'NO_RESULTS',
         }),
       } as never,
-      responseBuilder: {
-        build: vi.fn().mockImplementation(({ requestId, queryTimeMs, route }) => ({
-          queryType: 'search',
-          engineDecision: {
-            decisionStatus: 'failed',
-            nextAction: 'fail',
-            route,
-            decisionConfidence: 0,
-            confidenceSemantics: 'calibrated_decision_confidence',
-            decisionTraceRef: 'trace',
-            decisionSnapshot: {
-              model_versions: {},
-              index_versions: {},
-              policy_rule_version: '1.0.0',
-              threshold_profile_id: 'default',
-              planner_version: '1.0.0',
-              feature_flags: {},
-            },
-            failure_reason: 'NO_RESULTS',
-          },
-          results: [],
-          meta: {
-            requestId,
-            queryTimeMs,
-            route,
-            version: '1.0.0',
-            engine_schema_version: 'search_response_v1',
-            decisionSnapshot: {
-              model_versions: {},
-              index_versions: {},
-              policy_rule_version: '1.0.0',
-              threshold_profile_id: 'default',
-              planner_version: '1.0.0',
-              feature_flags: {},
-            },
-            response_hash: 'hash',
-          },
-        })),
-      } as never,
+      responseBuilder: responseBuilder as never,
       querySanitizer: sanitizer,
     });
 
     await useCase.execute({ query: '  Chateau Margaux 2015  ' }, 'req-1');
     expect(queryPlanner.plan).toHaveBeenCalledWith('Chateau Margaux 2015', expect.any(Object));
+    expect(responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compiled: expect.objectContaining({
+          execution: expect.objectContaining({
+            effectiveRoute: 'hybrid',
+            executionTopology: 'general_only',
+            routeSource: 'api_override',
+          }),
+        }),
+        executionContract: expect.objectContaining({
+          executionTopology: 'general_only',
+          laneTrace: expect.objectContaining({
+            identity: expect.objectContaining({
+              participated: false,
+            }),
+            general: expect.objectContaining({
+              participated: true,
+            }),
+          }),
+        }),
+      }),
+    );
 
     await expect(
       useCase.execute({ query: "'; DROP TABLE wines; --" }, 'req-2'),

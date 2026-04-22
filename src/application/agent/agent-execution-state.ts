@@ -7,6 +7,7 @@ import type { SynthesisContext, ToolOutcome } from './tool-outcome.js';
 export type AgentPlannerDirective =
   | { readonly kind: 'relax_constraints_retry' }
   | { readonly kind: 'pending_drinkability_check'; readonly entityIds: readonly string[] }
+  | { readonly kind: 'required_tool'; readonly tool: string; readonly instruction: string }
   | { readonly kind: 'grounded_search_required'; readonly instruction: string };
 
 export interface AgentExecutionState {

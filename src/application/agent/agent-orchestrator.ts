@@ -35,6 +35,10 @@ import { AgentToolExecutionPhase } from './agent-tool-execution-phase.js';
 import { AgentResultFinalizer } from './agent-result-finalizer.js';
 import { AgentRunLoop } from './agent-run-loop.js';
 import { AgentTerminalRoutingPolicy } from './agent-terminal-routing-policy.js';
+import {
+  AgentSemanticContractCompiler,
+  mergeAgentSemanticContract,
+} from './agent-semantic-contract.js';
 
 interface AgentOrchestratorDeps {
   readonly chatLlm: ChatLlmPort;
@@ -53,6 +57,7 @@ export class AgentOrchestrator {
   private readonly resultFinalizer: AgentResultFinalizer;
   private readonly runLoop: AgentRunLoop;
   private readonly terminalRoutingPolicy: AgentTerminalRoutingPolicy;
+  private readonly semanticContractCompiler: AgentSemanticContractCompiler;
 
   constructor(
     private readonly deps: AgentOrchestratorDeps,
@@ -60,6 +65,7 @@ export class AgentOrchestrator {
   ) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...config };
     this.answerRecoveryPolicy = new AgentAnswerRecoveryPolicy({ toolDeps: deps.toolDeps });
+    this.semanticContractCompiler = new AgentSemanticContractCompiler(deps.chatLlm);
     this.plannerPhaseRunner = new AgentPlannerPhaseRunner({ chatLlm: deps.chatLlm });
     this.observationSynthesisRunner = new AgentObservationSynthesisRunner({ chatLlm: deps.chatLlm });
     this.contractExecutionPhase = new AgentContractExecutionPhase({ toolDeps: deps.toolDeps });
@@ -93,7 +99,7 @@ export class AgentOrchestrator {
 
     const {
       effectiveConfig,
-      queryExecutionContract,
+      queryExecutionContract: deterministicQueryExecutionContract,
       budget,
       state,
     } = buildAgentExecutionContext({
@@ -102,6 +108,16 @@ export class AgentOrchestrator {
       baseConfig: this.config,
       overrides,
     });
+    const semanticContract = await this.semanticContractCompiler.compileIfNeeded({
+      query,
+      requestId,
+      deterministicContract: deterministicQueryExecutionContract,
+      timeoutMs: effectiveConfig.perStepTimeoutMs,
+      abortSignal,
+    });
+    const queryExecutionContract = semanticContract !== undefined
+      ? mergeAgentSemanticContract(deterministicQueryExecutionContract, semanticContract)
+      : deterministicQueryExecutionContract;
 
     await this.runLoop.run({
       query,

@@ -141,7 +141,7 @@ function makeProvenanceContract(
     readonly queryPlan?: QueryPlanV1 | undefined;
     readonly evidenceSummary?: DecisionInput['evidenceSummary'] | undefined;
     readonly provenancePolicy?: DecisionInput['provenanceContract']['policy'] | undefined;
-    readonly resolverResult?: EntityResolveResult | undefined;
+    readonly resolveResult?: EntityResolveResult | undefined;
   } = {},
 ): DecisionInput['provenanceContract'] {
   const queryPlan = input.queryPlan ?? makeQueryPlan();
@@ -158,7 +158,7 @@ function makeProvenanceContract(
       identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
       constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
       anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
-      topEntityPresent: input.resolverResult?.topEntity !== undefined,
+      topEntityPresent: input.resolveResult?.topEntity !== undefined,
       rankedTopResultPresent: false,
       matchedConstraintAttributes: [],
       unmetConstraintAttributes: [],
@@ -180,15 +180,13 @@ function makeProvenanceContract(
 
 function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
   const queryPlan = overrides.queryPlan ?? makeQueryPlan();
-  const resolverResult = overrides.resolverResult ?? makeResolverResult(0.9, 0.3);
-  const evidenceSummary = overrides.evidenceSummary ?? {
-    identityEvidencePresent: true,
-    constraintEvidencePresent: false,
-    anchorEvidencePresent: false,
-  };
+  const resolveResult = overrides.resolveResult ?? makeResolverResult(0.9, 0.3);
+  const evidenceSummary = overrides.evidenceSummary ?? makeStrongIdentityEvidence();
   return {
     queryPlan,
-    resolverResult,
+    resolveResult,
+    identityResolveResult:
+      'identityResolveResult' in overrides ? overrides.identityResolveResult : resolveResult,
     effectiveRoute: overrides.effectiveRoute ?? queryPlan.route,
     effectiveRetrievalMode: overrides.effectiveRetrievalMode ?? queryPlan.retrievalMode,
     policy: {
@@ -213,18 +211,37 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
       queryPlan,
       evidenceSummary,
       provenancePolicy: overrides.provenanceContract?.policy,
-      resolverResult,
+      resolveResult,
     }),
     ...overrides,
   };
 }
 
-function makeStrongIdentityEvidence(overrides: NonNullable<DecisionInput['evidenceSummary']> = {}) {
+function makeStrongIdentityEvidence(
+  overrides: Partial<NonNullable<DecisionInput['evidenceSummary']>> & {
+    readonly identityEvidence?: Partial<
+      NonNullable<NonNullable<DecisionInput['evidenceSummary']>['identityEvidence']>
+    >;
+  } = {},
+) {
+  const { identityEvidence: identityEvidenceOverrides, ...summaryOverrides } = overrides;
+  const identityEvidence = {
+    source: 'identity_artifact' as const,
+    resolveTopEntityPresent: true,
+    winnerIdentityArtifactPresent: true,
+    winnerIdentityArtifactMatchesResolveResult: true,
+    lanePresence: 'corroborated' as const,
+    exactnessTier: 'exact' as const,
+    identityEvidenceRefCount: 1,
+    ...(identityEvidenceOverrides ?? {}),
+  };
+
   return {
     identityEvidencePresent: true,
     constraintEvidencePresent: false,
     anchorEvidencePresent: false,
-    ...overrides,
+    ...summaryOverrides,
+    identityEvidence,
   };
 }
 
@@ -247,7 +264,7 @@ function makeResolvedDecisionInput(
   overrides: Partial<DecisionInput> = {},
 ): DecisionInput {
   return makeInput({
-    resolverResult: makeResolverResult(0.85, 0.20, false),
+    resolveResult: makeResolverResult(0.85, 0.20, false),
     evidenceSummary: makeStrongIdentityEvidence(),
     ...overrides,
   });
@@ -310,16 +327,16 @@ describe('DecisionEngine', () => {
       ['resolves exactly at threshold boundary (C=0.50, gap=0.03)', 0.50, 0.03],
     ])('%s', async (_label, C, gap) => {
       const output = await expectDecisionStatus({
-        resolverResult: makeResolverResult(C, gap, false),
-        evidenceSummary: { identityEvidencePresent: true },
+        resolveResult: makeResolverResult(C, gap, false),
+        evidenceSummary: makeStrongIdentityEvidence(),
       }, 'resolved');
       expect(output.decisionStatus).toBe('resolved');
     });
 
     it('resolved includes selectedEntity and chosenEntityId', async () => {
       const output = await expectDecisionStatus({
-        resolverResult: makeResolverResult(0.85, 0.20, false),
-        evidenceSummary: { identityEvidencePresent: true },
+        resolveResult: makeResolverResult(0.85, 0.20, false),
+        evidenceSummary: makeStrongIdentityEvidence(),
       }, 'resolved');
       expect(output.selectedEntity).toBeDefined();
       expect(output.chosenEntityId).toBeDefined();
@@ -331,8 +348,8 @@ describe('DecisionEngine', () => {
         effectiveRoute: 'hybrid',
         effectiveRetrievalMode: 'recommendation',
         retrievalKind: 'specialized_hybrid',
-        resolverResult: makeResolverResult(0.9, 0.3, false),
-        evidenceSummary: { identityEvidencePresent: true },
+        resolveResult: makeResolverResult(0.9, 0.3, false),
+        evidenceSummary: makeStrongIdentityEvidence(),
       }, 'resolved');
 
       expect(output.decisionTrace.inputs).toEqual(
@@ -354,16 +371,16 @@ describe('DecisionEngine', () => {
       ['ambiguous when gap < T_gap even though C passes', 0.85, 0.01, false],
     ])('%s', async (_label, C, gap, ambiguityDetected) => {
       await expectDecisionStatus({
-        resolverResult: makeResolverResult(C, gap, ambiguityDetected),
-        evidenceSummary: { identityEvidencePresent: true },
+        resolveResult: makeResolverResult(C, gap, ambiguityDetected),
+        evidenceSummary: makeStrongIdentityEvidence(),
       }, 'ambiguous');
     });
 
     it('ambiguous when conformalSetSize >= 2', async () => {
       const output = await expectDecisionStatus({
-        resolverResult: makeResolverResult(0.85, 0.20, false),
+        resolveResult: makeResolverResult(0.85, 0.20, false),
         conformalSetSize: 2,
-        evidenceSummary: { identityEvidencePresent: true },
+        evidenceSummary: makeStrongIdentityEvidence(),
       }, 'ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('CONFORMAL_SET_AMBIGUOUS');
     });
@@ -375,22 +392,26 @@ describe('DecisionEngine', () => {
           rawQuery: 'romane conti',
           normalizedQuery: 'romane conti',
         },
-        resolverResult: makeResolverResult(0.85, 0.20, false, {
+        resolveResult: makeResolverResult(0.85, 0.20, false, {
           anchorLookupStrategies: ['fuzzy_char_ngram'],
           anchorLookupVariants: ['romane conti'],
         }),
-        evidenceSummary: { identityEvidencePresent: true },
+        evidenceSummary: makeStrongIdentityEvidence({
+          identityEvidence: {
+            exactnessTier: 'alias_fuzzy',
+          },
+        }),
       }, 'ambiguous');
       expect(output.nextAction).toBe('clarify');
       expect(output.decisionTrace.rulesApplied).toContain('NOISY_SHORT_QUERY_GUARD');
-      expect(output.decisionTrace.rulesApplied).toContain('NOISY_LOOKUP_STRATEGY_DETECTED');
+      expect(output.decisionTrace.rulesApplied).toContain('NOISY_ALIAS_FUZZY_IDENTITY_DETECTED');
     });
   });
 
   describe('failed status', () => {
     it('failed when C < T_resolve with fallbackMode=fail', async () => {
       const output = await expectDecisionStatus({
-        resolverResult: makeResolverResult(0.3, 0.20, false),
+        resolveResult: makeResolverResult(0.3, 0.20, false),
         policy: {
           requireExact: false,
           allowApproximate: true,
@@ -398,7 +419,7 @@ describe('DecisionEngine', () => {
           fallbackMode: 'fail',
           policyReasonCodes: [],
         },
-        evidenceSummary: { identityEvidencePresent: true },
+        evidenceSummary: makeStrongIdentityEvidence(),
       }, 'failed');
       expect(output.nextAction).toBe('fail');
     });
@@ -552,11 +573,15 @@ describe('DecisionEngine', () => {
           rawQuery: 'romane conti',
           normalizedQuery: 'romane conti',
         },
-        resolverResult: makeResolverResult(0.93, 0.20, false, {
+        resolveResult: makeResolverResult(0.93, 0.20, false, {
           anchorLookupStrategies: ['transliterated_fuzzy'],
           anchorLookupVariants: ['romanee conti'],
         }),
-        evidenceSummary: { identityEvidencePresent: true },
+        evidenceSummary: makeStrongIdentityEvidence({
+          identityEvidence: {
+            exactnessTier: 'alias_fuzzy',
+          },
+        }),
       }, 'resolved');
       expect(output.decisionTrace.rulesApplied).toContain(
         'NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE',
@@ -569,7 +594,7 @@ describe('DecisionEngine', () => {
       [
         'resolved without identity evidence',
         makeInput({
-          resolverResult: makeResolverResult(0.85, 0.20, false),
+          resolveResult: makeResolverResult(0.85, 0.20, false),
           evidenceSummary: {
             identityEvidencePresent: false,
           },
@@ -580,7 +605,7 @@ describe('DecisionEngine', () => {
         'resolved with missing evidenceSummary',
         (() => {
           const full = makeInput({
-            resolverResult: makeResolverResult(0.85, 0.20, false),
+            resolveResult: makeResolverResult(0.85, 0.20, false),
           });
           const { evidenceSummary: _omit, provenanceContract: _omitContract, ...input } = full;
           void _omit;
@@ -592,18 +617,12 @@ describe('DecisionEngine', () => {
       [
         'resolved with coarse identity flag but ranked/resolver mismatch',
         makeInput({
-          resolverResult: makeResolverResult(0.85, 0.20, false),
-          evidenceSummary: {
-            identityEvidencePresent: true,
+          resolveResult: makeResolverResult(0.85, 0.20, false),
+          evidenceSummary: makeStrongIdentityEvidence({
             identityEvidence: {
-              topEntityPresent: true,
-              resolverTopCandidateMatchesTopEntity: true,
-              resolverEvidenceRefCount: 1,
-              rankedTopResultPresent: true,
-              rankedTopResultMatchesTopEntity: false,
-              rankedEvidenceItemCount: 2,
+              winnerIdentityArtifactMatchesResolveResult: false,
             },
-          },
+          }),
         }),
         true,
       ],
@@ -617,7 +636,7 @@ describe('DecisionEngine', () => {
 
     it('resolved with constraints but no constraint evidence → downgraded', async () => {
       const output = await expectDecisionStatus({
-        resolverResult: makeResolverResult(0.85, 0.20, false),
+        resolveResult: makeResolverResult(0.85, 0.20, false),
         queryPlan: {
           ...makeQueryPlan(),
           constraints: {
@@ -627,7 +646,7 @@ describe('DecisionEngine', () => {
           },
         },
         evidenceSummary: {
-          identityEvidencePresent: true,
+          ...makeStrongIdentityEvidence(),
           constraintEvidencePresent: false,
         },
       }, 'ambiguous');
@@ -637,7 +656,7 @@ describe('DecisionEngine', () => {
     it('resolved with anchor but no anchor evidence → downgraded', async () => {
       const anchorEntityId = createEntityId('entity-mageau');
       await expectDecisionStatus({
-        resolverResult: makeResolverResult(0.85, 0.20, false),
+        resolveResult: makeResolverResult(0.85, 0.20, false),
         queryPlan: {
           ...makeQueryPlan(),
           route: 'mixed',
@@ -650,7 +669,7 @@ describe('DecisionEngine', () => {
           }],
         },
         evidenceSummary: {
-          identityEvidencePresent: true,
+          ...makeStrongIdentityEvidence(),
           anchorEvidencePresent: false,
         },
       }, 'ambiguous');
@@ -661,7 +680,7 @@ describe('DecisionEngine', () => {
     it('requireClarification=true → force ambiguous even if numerics pass', async () => {
       const output = await engine.decide(
         makeInput({
-          resolverResult: makeResolverResult(0.95, 0.40, false),
+          resolveResult: makeResolverResult(0.95, 0.40, false),
           policy: makeClarifyPolicy({
             requireClarification: true,
             clarificationBias: 0,
@@ -678,7 +697,7 @@ describe('DecisionEngine', () => {
     it('uncertainty.decisionEffect=force_clarify → resolves with bias (soft gate)', async () => {
       const output = await engine.decide(
         makeInput({
-          resolverResult: makeResolverResult(0.95, 0.40, false),
+          resolveResult: makeResolverResult(0.95, 0.40, false),
           uncertainty: {
             overall: 0.8,
             ambiguityDetected: true,
@@ -701,17 +720,14 @@ describe('DecisionEngine', () => {
 
     it('requireExact=true and no exact evidence → downgrade to ambiguous even with a strong score', async () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.995, 0.20, false),
+        resolveResult: makeResolverResult(0.995, 0.20, false),
         policy: makeClarifyPolicy({
           requireExact: true,
           allowApproximate: false,
         }),
         evidenceSummary: makeStrongIdentityEvidence({
           identityEvidence: {
-            topEntityPresent: true,
-            resolverTopCandidateMatchesTopEntity: true,
-            resolverEvidenceRefCount: 1,
-            exactMatchCandidatePresent: false,
+            exactnessTier: 'alias_fuzzy',
           },
         }),
       });
@@ -722,28 +738,23 @@ describe('DecisionEngine', () => {
 
     it.each([
       [
-        'requireExact=true and ranked evidence agrees with resolver identity → resolves',
-        3,
+        'requireExact=true and exact identity artifact exists → resolves',
+        'exact',
       ],
       [
-        'requireExact=true does not require ranked evidence item count when ranked identity agrees',
-        0,
+        'requireExact=true and alias-exact identity artifact exists → resolves',
+        'alias_exact',
       ],
-    ])('%s', async (_label, rankedEvidenceItemCount) => {
+    ])('%s', async (_label, exactnessTier) => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.995, 0.20, false),
+        resolveResult: makeResolverResult(0.995, 0.20, false),
         policy: makeClarifyPolicy({
           requireExact: true,
           allowApproximate: false,
         }),
         evidenceSummary: makeStrongIdentityEvidence({
           identityEvidence: {
-            topEntityPresent: true,
-            resolverTopCandidateMatchesTopEntity: true,
-            resolverEvidenceRefCount: 1,
-            rankedTopResultPresent: true,
-            rankedTopResultMatchesTopEntity: true,
-            rankedEvidenceItemCount,
+            exactnessTier,
           },
         }),
       });
@@ -754,7 +765,7 @@ describe('DecisionEngine', () => {
 
     it('allowApproximate=false switches nextAction from hybrid_search to clarify', async () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.3, 0.20, false),
+        resolveResult: makeResolverResult(0.3, 0.20, false),
         policy: makeClarifyPolicy({
           allowApproximate: false,
           fallbackMode: 'hybrid',
@@ -802,8 +813,8 @@ describe('DecisionEngine', () => {
       };
 
       const input = makeInput({
-        resolverResult: wrongResolverResult,
-        evidenceSummary: { identityEvidencePresent: true },
+        resolveResult: wrongResolverResult,
+        evidenceSummary: makeStrongIdentityEvidence(),
       });
       const output = await engine.decide(input, TEST_SNAPSHOT);
       // Engine resolves — it is not responsible for semantic correctness
@@ -841,7 +852,7 @@ describe('DecisionEngine', () => {
 
     it.each([
       ['resolved trace mirrors output', makeResolvedDecisionInput()],
-      ['ambiguous trace mirrors output', makeInput({ resolverResult: makeResolverResult(0.5, 0.20, false), evidenceSummary: makeStrongIdentityEvidence() })],
+      ['ambiguous trace mirrors output', makeInput({ resolveResult: makeResolverResult(0.5, 0.20, false), evidenceSummary: makeStrongIdentityEvidence() })],
     ])('%s', async (_label, scenario) => {
       const output = await decideWithEngine(engine, scenario);
       expect(output.decisionTrace.decisionStatus).toBe(output.decisionStatus);
@@ -852,7 +863,7 @@ describe('DecisionEngine', () => {
       const C = 0.88;
       const gap = 0.22;
       const input = makeResolvedDecisionInput({
-        resolverResult: makeResolverResult(C, gap, false),
+        resolveResult: makeResolverResult(C, gap, false),
       });
       const output = await decideWithEngine(engine, input);
       expect(output.decisionTrace.signals.decisionConfidence).toBe(C);
@@ -873,14 +884,14 @@ describe('DecisionEngine', () => {
   describe('ambiguity summary policy pre-processing', () => {
     it('ambiguitySummary.decisionEffect=force_clarify → ambiguous immediately', async () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.95, 0.40, false),
+        resolveResult: makeResolverResult(0.95, 0.40, false),
         ambiguitySummary: {
           types: ['name_collision'],
           severity: 'high',
           sources: ['resolver'],
           decisionEffect: 'force_clarify',
         },
-        evidenceSummary: { identityEvidencePresent: true },
+        evidenceSummary: makeStrongIdentityEvidence(),
       });
       const output = await engine.decide(input, TEST_SNAPSHOT);
       expect(output.decisionStatus).toBe('ambiguous');
@@ -896,7 +907,8 @@ describe('DecisionEngine', () => {
           queryPlan: makeQueryPlan('ambiguous_short_form'),
           effectiveRoute: 'entity',
           effectiveRetrievalMode: 'entity_lookup',
-          resolverResult: makeResolverResult(0.40, 0.20, false),
+          resolveResult: makeResolverResult(0.40, 0.20, false),
+          identityResolveResult: makeResolverResult(0.40, 0.20, false),
           policy: makeClarifyPolicy(),
           uncertainty: {
             overall: 0.2,
@@ -915,7 +927,7 @@ describe('DecisionEngine', () => {
       [
         'short_entity class resolves with C=0.80 and gap=0.20',
         makeInput({
-          resolverResult: makeResolverResult(0.80, 0.20, false),
+          resolveResult: makeResolverResult(0.80, 0.20, false),
           evidenceSummary: makeStrongIdentityEvidence(),
         }),
         'resolved',

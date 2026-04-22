@@ -403,6 +403,14 @@ export async function mapRankedResultsToResultItems(
         ...(r.tannin !== undefined ? { tannin: r.tannin } : {}),
         ...(r.acidity !== undefined ? { acidity: r.acidity } : {}),
         ...(r.sweetness !== undefined ? { sweetness: r.sweetness } : {}),
+        ...(r.finishLength !== undefined ? { finishLength: r.finishLength } : {}),
+        ...(r.flavorProfiles !== undefined && r.flavorProfiles.length > 0
+          ? { flavorProfiles: r.flavorProfiles }
+          : {}),
+        ...(r.semanticSummary !== undefined && r.semanticSummary.length > 0
+          ? { semanticSummary: r.semanticSummary }
+          : {}),
+        ...(r.availability !== undefined ? { availability: r.availability } : {}),
       },
       relevanceScore: r.finalScore,
       match: {

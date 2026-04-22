@@ -129,12 +129,12 @@ export async function buildQueryPlanner(
   }
 
   // Defense-in-depth: env validation already throws when LLM_QUERY_INTERPRETER
-  // is true and OPENAI_API_KEY is unset (see config/env.ts). If we reach this
+  // is true and no OpenAI credential is set (see config/env.ts). If we reach this
   // point with the flag enabled but no chatLlm, fail loudly rather than
   // silently falling back to the rule-only mapper.
   if (llmQueryInterpreter === true && chatLlm === undefined) {
     throw new Error(
-      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY and chatLlm wiring',
+      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS and chatLlm wiring',
     );
   }
   const nlMapper = llmQueryInterpreter && chatLlm !== undefined

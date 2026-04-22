@@ -745,6 +745,7 @@ exploratory/nightly coverage corpus.
     - `benchmark:exploratory:quick`
     - `benchmark:exploratory:standard`
     - `benchmark:exploratory:nightly`
+    - `benchmark:exploratory:messy-agent`
     - `benchmark:exploratory:retrieval`
   - legacy short names may remain only as compatibility aliases and MUST NOT be documented as canonical
 
@@ -771,6 +772,9 @@ At minimum, the engine repo MUST expose:
 - `test:verification:fixtures:governance` ✓ (alias of `eval:fixtures:verify`, explicit name)
 - `bench:agent:fixtures:tool-use` ✓ (exists)
 - `bench:agent:fixtures:answer-quality` ✓ (exists)
+- `bench:agent:preflight` ✓ (live `/v1/agent` route + request-contract enforcement preflight)
+- `bench:agent:fixtures` ✓ (HTTP `/v1/agent` fixture rollup)
+- `bench:agent` ✓ (alias of `bench:agent:fixtures`; production HTTP parity lane)
 - `eval:perf:latency:fixtures` ✓ (added — Workstream B)
 - `eval:perf:load:fixtures` ✓ (added — Workstream C)
 

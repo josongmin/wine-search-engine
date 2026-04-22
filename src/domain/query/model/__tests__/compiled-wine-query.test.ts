@@ -3,7 +3,7 @@ import type { CompiledWineQuery } from '../compiled-wine-query.js';
 import type {
   EngineExecutionContract,
   ExecutionBudget,
-  ExecutionRoute,
+  ExecutionTopology,
   ExecutionRetrievalMode,
   ProvenancePolicy,
 } from '../engine-execution-contract.js';
@@ -35,8 +35,9 @@ function makeEngineExecutionContract(
   overrides?: Partial<EngineExecutionContract>,
 ): EngineExecutionContract {
   return {
-    route: 'hybrid',
-    retrievalMode: 'attribute_search',
+    effectiveRoute: 'hybrid',
+    executionTopology: 'general_only',
+    effectiveRetrievalMode: 'attribute_search',
     budget: makeExecutionBudget(),
     provenancePolicy: makeProvenancePolicy(),
     routeSource: 'planner',
@@ -95,7 +96,7 @@ describe('CompiledWineQuery', () => {
   it('constructs a valid CompiledWineQuery at runtime', () => {
     const compiled = makeCompiledWineQuery();
     expect(compiled.query.rawQuery).toBe('nice red wine under 30');
-    expect(compiled.execution.route).toBe('hybrid');
+    expect(compiled.execution.effectiveRoute).toBe('hybrid');
     expect(compiled.execution.routeSource).toBe('planner');
   });
 });
@@ -106,18 +107,27 @@ describe('CompiledWineQuery', () => {
 
 describe('EngineExecutionContract', () => {
   it('has all required fields', () => {
-    expectTypeOf<EngineExecutionContract>().toHaveProperty('route');
-    expectTypeOf<EngineExecutionContract>().toHaveProperty('retrievalMode');
+    expectTypeOf<EngineExecutionContract>().toHaveProperty('effectiveRoute');
+    expectTypeOf<EngineExecutionContract>().toHaveProperty('executionTopology');
+    expectTypeOf<EngineExecutionContract>().toHaveProperty('effectiveRetrievalMode');
     expectTypeOf<EngineExecutionContract>().toHaveProperty('budget');
     expectTypeOf<EngineExecutionContract>().toHaveProperty('provenancePolicy');
     expectTypeOf<EngineExecutionContract>().toHaveProperty('routeSource');
   });
 
-  it('accepts all valid ExecutionRoute values', () => {
-    const routes: ExecutionRoute[] = ['entity', 'hybrid', 'mixed'];
+  it('accepts all valid effectiveRoute values', () => {
+    const routes: CompiledWineQuery['execution']['effectiveRoute'][] = ['entity', 'hybrid', 'mixed'];
     for (const route of routes) {
-      const contract = makeEngineExecutionContract({ route });
-      expect(contract.route).toBe(route);
+      const contract = makeEngineExecutionContract({ effectiveRoute: route });
+      expect(contract.effectiveRoute).toBe(route);
+    }
+  });
+
+  it('accepts all valid executionTopology values', () => {
+    const topologies: ExecutionTopology[] = ['entity_only', 'general_only', 'dual_lane'];
+    for (const executionTopology of topologies) {
+      const contract = makeEngineExecutionContract({ executionTopology });
+      expect(contract.executionTopology).toBe(executionTopology);
     }
   });
 
@@ -135,8 +145,8 @@ describe('EngineExecutionContract', () => {
       'no_match_detection',
     ];
     for (const mode of modes) {
-      const contract = makeEngineExecutionContract({ retrievalMode: mode });
-      expect(contract.retrievalMode).toBe(mode);
+      const contract = makeEngineExecutionContract({ effectiveRetrievalMode: mode });
+      expect(contract.effectiveRetrievalMode).toBe(mode);
     }
   });
 
@@ -166,15 +176,10 @@ describe('ExecutionBudget', () => {
     expect(budget.enablePrecisionRerank).toBe(true);
   });
 
-  it('allows maxLatencyMs to be omitted (optional field)', () => {
+  it('keeps maxLatencyMs absent when omitted', () => {
     const budget = makeExecutionBudget();
     // maxLatencyMs is optional — should be absent, not undefined
     expect('maxLatencyMs' in budget).toBe(false);
-  });
-
-  it('accepts maxLatencyMs when provided', () => {
-    const budget = makeExecutionBudget({ maxLatencyMs: 300 });
-    expect(budget.maxLatencyMs).toBe(300);
   });
 });
 

@@ -158,7 +158,7 @@ function makeProvenanceContract(
     readonly queryPlan?: QueryPlanV1 | undefined;
     readonly evidenceSummary?: DecisionInput['evidenceSummary'] | undefined;
     readonly provenancePolicy?: DecisionInput['provenanceContract']['policy'] | undefined;
-    readonly resolverResult?: EntityResolveResult | undefined;
+    readonly resolveResult?: EntityResolveResult | undefined;
   } = {},
 ): DecisionInput['provenanceContract'] {
   const queryPlan = input.queryPlan ?? makeQueryPlan();
@@ -175,7 +175,7 @@ function makeProvenanceContract(
       identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
       constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
       anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
-      topEntityPresent: input.resolverResult?.topEntity !== undefined,
+      topEntityPresent: input.resolveResult?.topEntity !== undefined,
       rankedTopResultPresent: false,
       matchedConstraintAttributes: [],
       unmetConstraintAttributes: [],
@@ -198,9 +198,17 @@ function makeProvenanceContract(
 // ── Base DecisionInput factory ────────────────────────────────────────────────
 function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
   const queryPlan = overrides?.queryPlan ?? makeQueryPlan();
-  const resolverResult = overrides?.resolverResult ?? makeResolverResult();
+  const resolveResult = overrides?.resolveResult ?? makeResolverResult();
   const evidenceSummary = overrides?.evidenceSummary ?? {
     identityEvidencePresent: true,
+    identityEvidence: {
+      source: 'identity_artifact' as const,
+      resolveTopEntityPresent: true,
+      winnerIdentityArtifactPresent: true,
+      winnerIdentityArtifactMatchesResolveResult: true,
+      exactnessTier: 'exact' as const,
+      identityEvidenceRefCount: 1,
+    },
     constraintEvidencePresent: true,
     anchorEvidencePresent: false,
   };
@@ -208,7 +216,7 @@ function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
     queryPlan,
     effectiveRoute: 'hybrid',
     effectiveRetrievalMode: 'hybrid',
-    resolverResult,
+    resolveResult,
     policy: makePolicy(),
     uncertainty: makeUncertainty(),
     evidenceSummary,
@@ -216,10 +224,10 @@ function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
       queryPlan,
       evidenceSummary,
       provenancePolicy: overrides?.provenanceContract?.policy,
-      resolverResult,
+      resolveResult,
     }),
-    ...(resolverResult.conformalSetSize !== undefined
-      ? { conformalSetSize: resolverResult.conformalSetSize }
+    ...(resolveResult.conformalSetSize !== undefined
+      ? { conformalSetSize: resolveResult.conformalSetSize }
       : {}),
     ...overrides,
   };
@@ -239,7 +247,7 @@ describe('DecisionEngine', () => {
 
   it('C >= T_resolve AND gap >= T_gap AND no ambiguity → resolved', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.80, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.80, gap: 0.20, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('resolved');
@@ -250,7 +258,7 @@ describe('DecisionEngine', () => {
     // short_entity from DEFAULT_THRESHOLD_PROFILE: resolveTau=0.45, gapTau=0.02
     // C=0.40 < 0.45, gap=0.03 >= 0.02, no ambiguity, conformal=1 → Gate 3 with fallbackMode='fail'
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -260,7 +268,7 @@ describe('DecisionEngine', () => {
   it('T_fail <= C < T_resolve with conformal set size >= 2 → ambiguous', async () => {
     // C below resolveTau=0.45 but conformal set indicates ambiguity
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.40, gap: 0.05, ambiguityDetected: true }),
+      resolveResult: makeResolverResult({ C: 0.40, gap: 0.05, ambiguityDetected: true }),
       conformalSetSize: 2,
     });
     const output = await engine.decide(input, snapshot);
@@ -271,7 +279,7 @@ describe('DecisionEngine', () => {
     // Wave 3: short_entity: resolveTau=0.45, dynamic gapTau=0.03
     // To test gap failure, use gap < 0.03
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.50, gap: 0.01, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.50, gap: 0.01, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
@@ -288,7 +296,7 @@ describe('DecisionEngine', () => {
       }),
       effectiveRoute: 'hybrid',
       effectiveRetrievalMode: 'recommendation',
-      resolverResult: makeResolverResult({
+      resolveResult: makeResolverResult({
         C: 0.52,
         gap: 0.0001,
         ambiguityDetected: true,
@@ -297,6 +305,14 @@ describe('DecisionEngine', () => {
       policy: makePolicy({ allowApproximate: true }),
       evidenceSummary: {
         identityEvidencePresent: true,
+        identityEvidence: {
+          source: 'identity_artifact',
+          resolveTopEntityPresent: true,
+          winnerIdentityArtifactPresent: true,
+          winnerIdentityArtifactMatchesResolveResult: true,
+          exactnessTier: 'alias_exact',
+          identityEvidenceRefCount: 1,
+        },
       },
     });
     const output = await engine.decide(input, snapshot);
@@ -307,7 +323,7 @@ describe('DecisionEngine', () => {
 
   it('C >= T_resolve, gap >= T_gap, but NO identity evidence → downgrade to ambiguous', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.80, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.80, gap: 0.20, ambiguityDetected: false }),
       evidenceSummary: {
         identityEvidencePresent: false, // no identity evidence
       },
@@ -316,9 +332,35 @@ describe('DecisionEngine', () => {
     expect(output.decisionStatus).toBe('ambiguous');
   });
 
+  it('requireExact=true downgrades when winner identity evidence is approximate', async () => {
+    const input = makeDecisionInput({
+      resolveResult: makeResolverResult({ C: 0.92, gap: 0.20, ambiguityDetected: false }),
+      policy: makePolicy({ requireExact: true, allowApproximate: false }),
+      evidenceSummary: {
+        identityEvidencePresent: true,
+        identityEvidence: {
+          source: 'identity_artifact',
+          resolveTopEntityPresent: true,
+          winnerIdentityArtifactPresent: true,
+          winnerIdentityArtifactMatchesResolveResult: true,
+          exactnessTier: 'alias_fuzzy',
+          identityEvidenceRefCount: 1,
+        },
+        constraintEvidencePresent: true,
+        anchorEvidencePresent: false,
+      },
+    });
+
+    const output = await engine.decide(input, snapshot);
+
+    expect(output.decisionStatus).toBe('ambiguous');
+    expect(output.nextAction).toBe('clarify');
+    expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_DOWNGRADE');
+  });
+
   it('policy requireClarification=true → ambiguous even if numerics pass', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.95, gap: 0.30, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.95, gap: 0.30, ambiguityDetected: false }),
       policy: makePolicy({ requireClarification: true, clarificationBias: 0 }),
     });
     const output = await engine.decide(input, snapshot);
@@ -352,7 +394,7 @@ describe('DecisionEngine', () => {
 
   it('nextAction=return_result when resolved', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('resolved');
@@ -361,7 +403,7 @@ describe('DecisionEngine', () => {
 
   it('nextAction=clarify when ambiguous with requireClarification=true', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
       policy: makePolicy({ requireClarification: true, clarificationBias: 0 }),
     });
     const output = await engine.decide(input, snapshot);
@@ -373,7 +415,7 @@ describe('DecisionEngine', () => {
     // short_entity: resolveTau=0.45, gapTau=0.02
     // C=0.40 < 0.45, gap=0.03 >= 0.02, no ambiguity → Gate 3 → hybrid_search
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'hybrid', allowApproximate: true }),
     });
     const output = await engine.decide(input, snapshot);
@@ -384,7 +426,7 @@ describe('DecisionEngine', () => {
     // Gate 3: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2 → fallbackMode='fail'
     // short_entity: resolveTau=0.45, gapTau=0.02
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -394,7 +436,7 @@ describe('DecisionEngine', () => {
 
   it('DecisionTrace contains signals from resolver', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionTrace.signals.decisionConfidence).toBe(0.85);
@@ -423,7 +465,7 @@ describe('DecisionEngine', () => {
 
   it('resolved output includes selectedEntity and chosenEntityId', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('resolved');
@@ -434,7 +476,7 @@ describe('DecisionEngine', () => {
 
   it('ambiguous output does NOT include selectedEntity', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
+      resolveResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
       policy: makePolicy({ requireClarification: true, clarificationBias: 0 }),
     });
     const output = await engine.decide(input, snapshot);
@@ -446,7 +488,7 @@ describe('DecisionEngine', () => {
     // SOTA++: force_clarify is a soft bias, not a hard gate. C=0.95 with
     // bias 0.10 → effective resolveTau = 0.55. 0.95 >= 0.55 → resolved.
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.95, gap: 0.30 }),
+      resolveResult: makeResolverResult({ C: 0.95, gap: 0.30 }),
       uncertainty: makeUncertainty({ decisionEffect: 'force_clarify' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -455,7 +497,7 @@ describe('DecisionEngine', () => {
 
   it('uncertainty decisionEffect=block_resolve short-circuits to failed', async () => {
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.95, gap: 0.30 }),
+      resolveResult: makeResolverResult({ C: 0.95, gap: 0.30 }),
       uncertainty: makeUncertainty({ decisionEffect: 'block_resolve' }),
     });
     const output = await engine.decide(input, snapshot);

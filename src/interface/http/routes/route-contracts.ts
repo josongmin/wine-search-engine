@@ -277,6 +277,7 @@ const ClaudeToolManifestResponsePropertySchema = z.object({
   maximum: z.number().finite().optional(),
   items: z.object({
     type: z.literal('string'),
+    enum: z.array(z.string().min(1)).min(1).optional(),
   }).strict().optional(),
   max_items: z.number().int().positive().optional(),
 }).strict();

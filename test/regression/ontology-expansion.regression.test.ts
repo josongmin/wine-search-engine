@@ -18,31 +18,31 @@ function emptyBundle(hard: NormalizedConstraint[]): ConstraintBundle {
 }
 
 describe('RFC-019 regression: ontology expansion', () => {
-  it('region=Bordeaux expands to soft country=France', () => {
+  it('region=Bordeaux expands to inferred country=France', () => {
     const bundle = emptyBundle([hardConstraint('region', 'Bordeaux')]);
     const expanded = expandWithOntology(bundle);
 
     expect(expanded.hard).toEqual(bundle.hard);
-    const countrySoft = expanded.soft.find(
+    const countryInferred = expanded.inferred.find(
       (c) => c.attribute === 'country' && c.value === 'France',
     );
-    expect(countrySoft).toBeDefined();
+    expect(countryInferred).toBeDefined();
     // Strengthen: verify operator and that confidence is present
-    expect(countrySoft!.operator).toBe('=');
-    expect(countrySoft!.confidence).toBeGreaterThan(0);
+    expect(countryInferred!.operator).toBe('=');
+    expect(countryInferred!.confidence).toBeGreaterThan(0);
   });
 
-  it('region=Burgundy expands to soft country=France', () => {
+  it('region=Burgundy expands to inferred country=France', () => {
     const bundle = emptyBundle([hardConstraint('region', 'Burgundy')]);
     const expanded = expandWithOntology(bundle);
 
-    const countrySoft = expanded.soft.find(
+    const countryInferred = expanded.inferred.find(
       (c) => c.attribute === 'country' && c.value === 'France',
     );
-    expect(countrySoft).toBeDefined();
+    expect(countryInferred).toBeDefined();
     // Strengthen: verify operator and that confidence is present
-    expect(countrySoft!.operator).toBe('=');
-    expect(countrySoft!.confidence).toBeGreaterThan(0);
+    expect(countryInferred!.operator).toBe('=');
+    expect(countryInferred!.confidence).toBeGreaterThan(0);
   });
 
   it('no expansion for unknown region', () => {

@@ -16,6 +16,7 @@ import { KRW_PER_MAN_WON, KRW_PER_USD_APPROXIMATE } from '../../shared/constants
 import { containsHangul } from '../../shared/utils/hangul.js';
 import { Transliterator } from '../../alias/service/transliterator.js';
 import { resolveEntity } from '../../attribute/service/entity-resolver.js';
+import { CURATED_ENTITY_ALIAS_CATALOG } from '../../attribute/service/entity-alias-catalog.js';
 import type { ExtractedClaim, ClaimCategory, WineField } from '../model/claim.js';
 import {
   GRAPE_ALIASES as GRAPE_ALIAS_MAP,
@@ -190,7 +191,7 @@ const KOREAN_IDENTITY_MAX_TOKENS = 4;
 /** Korean-only phrase segments to scan for curated wine-name matches. */
 const KOREAN_IDENTITY_SEGMENT_RE = /[\uAC00-\uD7A3]+(?:\s+[\uAC00-\uD7A3]+)*/gu;
 /** Latin-script candidate spans for wine labels / producers. */
-const LATIN_IDENTITY_RE = /(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]*\.?|[A-Z]{2,})(?:\s+(?:(?:d[eu]s?|d'|de|del|du|des|la|le|les|y|of|and|van|von|di)\s+)?(?:[A-Z][a-zA-Z'\u00C0-\u017F-]*\.?|[A-Z]{2,}|\d{1,4}))*(?=$|[\s,;:.)/])/gu;
+const LATIN_IDENTITY_RE = /(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]*\.?|[A-Z]{2,})(?:\s+(?:(?:d[eu]s?|d'|de|del|du|des|la|le|les|y|of|and|van|von|di)|(?:[A-Z][a-zA-Z'\u00C0-\u017F-]*\.?|[A-Z]{2,}|\d{1,4})))*(?:\s*\([A-Z][^)]+\))?(?=$|[\s,;:.)/]|[\uAC00-\uD7A3])/gu;
 /** Accent-folded geography surfaces derived from deterministic ontology sources only. */
 const STRUCTURED_GEOGRAPHY_SURFACES: ReadonlySet<string> = (() => {
   const surfaces = new Set<string>();
@@ -206,6 +207,23 @@ const STRUCTURED_GEOGRAPHY_SURFACES: ReadonlySet<string> = (() => {
   for (const [region, ancestors] of GENERATED_REGION_PARENTS) {
     register(region);
     for (const ancestor of ancestors) register(ancestor);
+  }
+
+  return surfaces;
+})();
+
+const CURATED_WINE_LABEL_SURFACES: ReadonlySet<string> = (() => {
+  const surfaces = new Set<string>();
+  const register = (surface: string): void => {
+    const normalized = normalizeStructuredEntityKey(surface);
+    if (normalized.length > 0) surfaces.add(normalized);
+  };
+
+  for (const entry of CURATED_ENTITY_ALIAS_CATALOG) {
+    if (entry.mappedAttribute !== 'appellation') continue;
+    if (STRUCTURED_GEOGRAPHY_SURFACES.has(normalizeStructuredEntityKey(entry.canonicalValue))) continue;
+    register(entry.surface);
+    register(entry.canonicalValue);
   }
 
   return surfaces;
@@ -280,16 +298,141 @@ export function extractClaims(
 ): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
   const currentYear = options?.currentYear ?? new Date().getFullYear();
+  const claimText = maskClarificationExampleClauses(
+    maskClarificationExampleLines(
+      maskClarificationExampleParentheticals(stripMarkdownEmphasis(answer)),
+    ),
+  );
+  const factualClaimText = maskNonFactualExactLookupSentences(claimText);
+  const identityClaimText = maskPairingValueSpans(factualClaimText);
+  const identityClaims = extractIdentityClaims(identityClaimText);
+  const regionClaimText = maskIdentityClaimSpans(identityClaimText, identityClaims);
 
-  claims.push(...extractRegionClaims(answer));
-  claims.push(...extractIdentityClaims(answer));
-  claims.push(...extractVintageClaims(answer, currentYear));
-  claims.push(...extractPriceClaims(answer));
-  claims.push(...extractGrapeClaims(answer));
-  claims.push(...extractWineTypeClaims(answer));
-  claims.push(...extractSemanticClaims(answer));
+  claims.push(...extractRegionClaims(regionClaimText));
+  claims.push(...identityClaims);
+  claims.push(...extractVintageClaims(factualClaimText, currentYear));
+  claims.push(...extractPriceClaims(factualClaimText));
+  claims.push(...extractGrapeClaims(factualClaimText));
+  claims.push(...extractWineTypeClaims(factualClaimText));
+  claims.push(...extractSemanticClaims(factualClaimText));
 
   return deduplicateClaims(claims);
+}
+
+function stripMarkdownEmphasis(text: string): string {
+  return text
+    .replace(/\*\*([^*\n]+)\*\*/gu, '$1')
+    .replace(/__([^_\n]+)__/gu, '$1');
+}
+
+function maskClarificationExampleParentheticals(text: string): string {
+  return text.replace(/\((?:예|예시|e\.g\.|for example)\s*:[^)]*\)/giu, (match) =>
+    ' '.repeat(match.length),
+  );
+}
+
+function maskClarificationExampleLines(text: string): string {
+  return text.replace(
+    /(?:^|[.!?。\n]\s*)((?:예|예시|e\.g\.|for example)\s*:[^.!?。\n]*)/giu,
+    (match, example: string) => match.replace(example, maskIdentitySegment(example)),
+  );
+}
+
+function maskClarificationExampleClauses(text: string): string {
+  const withoutLabelExamples = text.replace(
+    /(?:^|[.!?。\n]\s*)([^.!?。\n]{1,80}?\s+같은\s+정확한\s+라벨(?:이나|을|명|로)?)/gu,
+    (match, clause: string) => match.replace(clause, maskIdentitySegment(clause)),
+  );
+  return withoutLabelExamples.replace(
+    /(?:예를\s*(?:들어|들면)|예컨대|예시(?:로)?|for example|e\.g\.)\s*[:：]?[^\n.!?。]*(?:\n\s*[-*•]\s*[^\n]*)*/giu,
+    (example: string) => maskIdentitySegment(example),
+  );
+}
+
+function maskPairingValueSpans(text: string): string {
+  return text.replace(
+    /((?:페어링\s*태그(?:로는|는)?|페어링|pairing\s*tags?|pairing)\s*(?:[:：]|로는|는)?\s*)[^.!?。\n]+/giu,
+    (match, prefix: string) => `${prefix}${maskIdentitySegment(match.slice(prefix.length))}`,
+  );
+}
+
+const NON_FACTUAL_EXACT_LOOKUP_SENTENCE_RE =
+  /(?:확인|확정|검증)[^\n.!?。]{0,40}(?:되지\s*않|안\s*되|불가|없)|(?:단일(?:한)?\s*정확한|하나의\s*정확한)[^\n.!?。]{0,40}(?:아니|없|확인되지|확정되지)|(?:표면\s*표현|지역\/카테고리|뜻하는)[^\n.!?。]{0,50}가능성|(?:not|cannot|can't)\s+(?:confirm|verify)|no\s+single\s+exact/iu;
+
+function maskNonFactualExactLookupSentences(text: string): string {
+  const sentenceRe = /[^.!?。\n]+(?:[.!?。]+|\n+|$)/gu;
+  return text.replace(sentenceRe, (sentence) =>
+    NON_FACTUAL_EXACT_LOOKUP_SENTENCE_RE.test(sentence)
+      ? maskIdentitySegment(sentence)
+      : sentence,
+  );
+}
+
+function maskIdentityClaimSpans(
+  text: string,
+  identityClaims: readonly ExtractedClaim[],
+): string {
+  if (identityClaims.length === 0) return text;
+
+  const ranges = collectIdentityClaimRanges(text, identityClaims);
+  if (ranges.length === 0) return text;
+
+  let cursor = 0;
+  let masked = '';
+  for (const range of ranges) {
+    masked += text.slice(cursor, range.start);
+    masked += maskIdentitySegment(text.slice(range.start, range.end));
+    cursor = range.end;
+  }
+  masked += text.slice(cursor);
+  return masked;
+}
+
+function maskIdentitySegment(segment: string): string {
+  return segment.replace(/(?:1[6-9]\d{2}|20\d{2})|[^\n]/gu, (match) => {
+    if (/^(?:1[6-9]\d{2}|20\d{2})$/u.test(match)) return match;
+    return ' '.repeat(match.length);
+  });
+}
+
+function collectIdentityClaimRanges(
+  text: string,
+  identityClaims: readonly ExtractedClaim[],
+): readonly { readonly start: number; readonly end: number }[] {
+  const ranges: Array<{ readonly start: number; readonly end: number }> = [];
+
+  for (const claim of identityClaims) {
+    const surfaces = new Set([claim.sourceText, claim.value].filter((surface) => surface.length >= 2));
+    for (const surface of surfaces) {
+      let cursor = 0;
+      while (cursor < text.length) {
+        const start = text.indexOf(surface, cursor);
+        if (start < 0) break;
+        ranges.push({ start, end: start + surface.length });
+        cursor = start + Math.max(surface.length, 1);
+      }
+    }
+  }
+
+  return mergeRanges(ranges);
+}
+
+function mergeRanges(
+  ranges: readonly { readonly start: number; readonly end: number }[],
+): readonly { readonly start: number; readonly end: number }[] {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: Array<{ start: number; end: number }> = [];
+
+  for (const range of sorted) {
+    const previous = merged.at(-1);
+    if (previous === undefined || range.start > previous.end) {
+      merged.push({ start: range.start, end: range.end });
+      continue;
+    }
+    previous.end = Math.max(previous.end, range.end);
+  }
+
+  return merged;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,7 +449,7 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
     for (const match of text.matchAll(LATIN_IDENTITY_RE)) {
       const name = match[0];
       if (name === undefined) continue;
-      const trimmed = name.trim();
+      const trimmed = normalizeLatinIdentitySurface(name);
       if (trimmed.length < 3) continue;
       if (isPairingListContext(text, match.index ?? 0)) continue;
       const lowered = trimmed.toLowerCase().normalize('NFKC');
@@ -331,6 +474,13 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
   }
 
   return claims;
+}
+
+function normalizeLatinIdentitySurface(surface: string): string {
+  return surface
+    .trim()
+    .replace(/[.。]+$/u, '')
+    .trim();
 }
 
 function tokenizeLatinIdentityCandidate(value: string): readonly string[] {
@@ -561,7 +711,7 @@ function isAggregatePriceContext(text: string, start: number, end: number): bool
 
 function extractRegionClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
-  const normalized = correctKoreanWineTypos(text).toLowerCase().normalize('NFKC');
+  const normalized = correctKoreanWineTypos(maskUserInputContrastRegionContext(text)).toLowerCase().normalize('NFKC');
 
   // Sort by length descending so multi-word regions match before substrings
   const sortedRegions = [...new Map([...KNOWN_REGIONS, ...REGION_ALIASES]).entries()].sort((a, b) => b[0].length - a[0].length);
@@ -582,6 +732,13 @@ function extractRegionClaims(text: string): ExtractedClaim[] {
   }
 
   return claims;
+}
+
+function maskUserInputContrastRegionContext(text: string): string {
+  return text.replace(
+    /[^.!?。\n]*(?:입력|질문|요청|쿼리|원문)[^.!?。\n]*(?:있었지만|있지만|언급|맥락)[^.!?。\n]*/gu,
+    (segment) => segment.replace(/[^\n]/gu, ' '),
+  );
 }
 
 function extractGrapeClaims(text: string): ExtractedClaim[] {
@@ -636,6 +793,7 @@ function extractSemanticClaims(text: string): ExtractedClaim[] {
 
   for (const sentence of sentences) {
     const trimmed = sentence.trim();
+    if (isServiceOfferSentence(trimmed)) continue;
     if (COMPARATIVE_INDICATORS_RE.test(trimmed)) {
       claims.push(makeClaim('comparative_claim', 'general_opinion', trimmed, trimmed));
       continue;
@@ -653,6 +811,11 @@ function extractSemanticClaims(text: string): ExtractedClaim[] {
   }
 
   return claims;
+}
+
+function isServiceOfferSentence(sentence: string): boolean {
+  return /(?:원하시면|필요하시면|추가로|더\s+원하면|if\s+you\s+(?:want|need))/iu.test(sentence)
+    && /(?:확인|알려|도와|이어|드릴|해드릴|can\s+(?:check|help|provide))/iu.test(sentence);
 }
 
 function classifySemanticFields(sentence: string): WineField[] {
@@ -701,6 +864,7 @@ function deduplicateClaims(claims: ExtractedClaim[]): ExtractedClaim[] {
 }
 
 function isStructuredEntitySurface(surface: string): boolean {
+  if (isCuratedWineLabelSurface(surface)) return false;
   if (STRUCTURED_GEOGRAPHY_SURFACES.has(normalizeStructuredEntityKey(surface))) return true;
   if (resolveStructuredEntity(surface)) return true;
 
@@ -722,8 +886,17 @@ function isStructuredEntitySurface(surface: string): boolean {
   return false;
 }
 
+function isCuratedWineLabelSurface(surface: string): boolean {
+  if (CURATED_WINE_LABEL_SURFACES.has(normalizeStructuredEntityKey(surface))) return true;
+  return Transliterator.romanizeWineTerm(surface) !== undefined;
+}
+
 function resolveStructuredEntity(surface: string): boolean {
-  return resolveEntity(surface, { preferEntityOverStyle: true }) !== null;
+  const resolved = resolveEntity(surface, { preferEntityOverStyle: true });
+  if (resolved === null) return false;
+  if (resolved.entityType !== 'appellation') return true;
+  return STRUCTURED_GEOGRAPHY_SURFACES.has(normalizeStructuredEntityKey(resolved.canonicalValue))
+    || STRUCTURED_GEOGRAPHY_SURFACES.has(normalizeStructuredEntityKey(surface));
 }
 
 function stripLatinDiacritics(surface: string): string {

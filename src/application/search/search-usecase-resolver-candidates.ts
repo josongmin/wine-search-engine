@@ -10,6 +10,7 @@ import type {
   EntityCandidateGeneratorInput,
   EntityCandidateSource,
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
 
 const ZERO_SIGNALS: MatchSignalSet = {
@@ -33,6 +34,125 @@ const ZERO_SIGNALS: MatchSignalSet = {
  *  the additional ambiguity inherent in fuzzy matching. */
 const FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR = 0.8;
 
+function normalizeIdentitySurface(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function identitySurfaceKeys(value: string): readonly string[] {
+  const views = buildNormalizedQueryViews(value);
+  const surfaces = [
+    views.vintageStripped,
+    ...views.lookupVariants,
+  ];
+  return [...new Set(
+    surfaces
+      .map(normalizeIdentitySurface)
+      .filter((key) => key.length > 0),
+  )];
+}
+
+function stripParenthetical(value: string): string {
+  return value.replace(/\([^)]*\)/gu, ' ');
+}
+
+function coreIdentityKey(value: string): string {
+  return normalizeIdentitySurface(buildNormalizedQueryViews(stripParenthetical(value)).vintageStripped);
+}
+
+function removeAllOccurrences(value: string, needle: string): string {
+  if (needle.length === 0) {
+    return value;
+  }
+  return value
+    .split(needle)
+    .join(' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function isProducerOnlyAliasForDistinctWine(
+  doc: RetrievalDocument,
+  identitySurface: string,
+): boolean {
+  if (doc.entityType !== 'wine' || typeof doc.producer !== 'string' || doc.producer.trim().length === 0) {
+    return false;
+  }
+
+  const producerKey = coreIdentityKey(doc.producer);
+  const aliasKey = coreIdentityKey(identitySurface);
+  if (producerKey.length === 0 || aliasKey !== producerKey) {
+    return false;
+  }
+
+  const canonicalKey = coreIdentityKey(doc.canonicalLabel);
+  return removeAllOccurrences(canonicalKey, producerKey).length > 0;
+}
+
+function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
+  const keys = new Set<string>();
+  const identitySurfaces = Array.isArray(doc.aliasesIdentitySafe)
+    ? [doc.canonicalLabel, ...doc.aliasesIdentitySafe]
+    : [];
+
+  for (const surface of identitySurfaces) {
+    if (isProducerOnlyAliasForDistinctWine(doc, surface)) {
+      continue;
+    }
+    for (const key of identitySurfaceKeys(surface)) {
+      keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function collectAnchorIdentityKeys(
+  normalizedQuery: string,
+  anchor: AnchorCandidate,
+): ReadonlySet<string> {
+  const keys = new Set<string>();
+  const anchorSurfaces = [
+    normalizedQuery,
+    anchor.surfaceForm,
+    anchor.normalizedForm,
+    ...(anchor.lookupVariants ?? []),
+  ];
+
+  for (const surface of anchorSurfaces) {
+    for (const key of identitySurfaceKeys(surface)) {
+      keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function anchorMatchesIdentitySafeProjection(
+  normalizedQuery: string,
+  anchor: AnchorCandidate,
+  doc: RetrievalDocument,
+): boolean | undefined {
+  const identityKeys = collectIdentitySafeKeys(doc);
+  if (identityKeys.size === 0) {
+    return undefined;
+  }
+
+  const anchorKeys = collectAnchorIdentityKeys(normalizedQuery, anchor);
+  for (const key of anchorKeys) {
+    if (identityKeys.has(key)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function inferAliasType(anchor: AnchorCandidate): AliasType {
   const strategies = new Set(anchor.lookupStrategies ?? []);
   if (strategies.has('phonetic_exact') || strategies.has('phonetic_fuzzy')) {
@@ -51,7 +171,11 @@ function inferAliasType(anchor: AnchorCandidate): AliasType {
   return 'canonical';
 }
 
-function buildSignals(normalizedQuery: string, anchor: AnchorCandidate): MatchSignalSet {
+function buildSignals(
+  normalizedQuery: string,
+  anchor: AnchorCandidate,
+  doc: RetrievalDocument,
+): MatchSignalSet {
   const strategies = new Set(anchor.lookupStrategies ?? []);
   const exactLike =
     strategies.has('exact') ||
@@ -66,11 +190,17 @@ function buildSignals(normalizedQuery: string, anchor: AnchorCandidate): MatchSi
     strategies.has('substring') ||
     strategies.has('smart_document');
 
+  const identitySafeMatch = exactLike
+    ? anchorMatchesIdentitySafeProjection(normalizedQuery, anchor, doc)
+    : undefined;
+  const exactSignalAllowed = identitySafeMatch !== false;
+  const identityNormalizedMatch = identitySafeMatch === false ? 0 : anchor.confidence;
+
   return {
     ...ZERO_SIGNALS,
-    canonicalExactMatch: exactLike && normalizedQuery === anchor.normalizedForm ? 1 : 0,
-    canonicalNormalizedMatch: anchor.confidence,
-    aliasExactMatch: exactLike ? anchor.confidence : 0,
+    canonicalExactMatch: exactSignalAllowed && exactLike && normalizedQuery === anchor.normalizedForm ? 1 : 0,
+    canonicalNormalizedMatch: identityNormalizedMatch,
+    aliasExactMatch: exactSignalAllowed && exactLike ? anchor.confidence : 0,
     aliasFuzzyMatch: fuzzyLike ? anchor.confidence : 0,
     aliasTypePrior: anchor.confidence,
     phoneticMatch:
@@ -227,7 +357,7 @@ export async function buildResolverCandidatesFromGenerator(
         aliasType: inferAliasType(anchor),
         matchScore: anchor.confidence,
       } as const;
-      const incomingSignals = buildSignals(input.normalizedQuery, anchor);
+      const incomingSignals = buildSignals(input.normalizedQuery, anchor, doc);
       const existing = candidatesById.get(key);
       if (existing === undefined) {
         candidatesById.set(key, {

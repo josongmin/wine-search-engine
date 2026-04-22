@@ -17,6 +17,8 @@ import {
   scoreDocument,
   validateAndNormalizeWeights,
   DEFAULT_HEURISTIC_WEIGHTS,
+  LAMBDAMART_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
   type RankingFeatures,
   type QueryClassWeights,
 } from '../service/lambdamart-ranker.js';
@@ -51,12 +53,19 @@ const ZERO_FEATURES: RankingFeatures = {
   attributeMatchScore: 0,
   diversityScore: 0,
   multilingualScore: 0,
+  entityPosteriorScore: 0,
+  identityExactnessTierScore: 0,
+  laneCorroborationScore: 0,
+  laneDisagreementScore: 0,
+  entityOnlyIndicator: 0,
+  generalOnlyIndicator: 0,
 };
 
 
 function makeQueryClassWeights(weights: readonly number[]): QueryClassWeights {
   return {
     queryClass: 'test',
+    featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
     weights,
     bias: 0,
     trainingExampleCount: 10,
@@ -69,24 +78,29 @@ function makeQueryClassWeights(weights: readonly number[]): QueryClassWeights {
 
 describe('E2-T2: validateAndNormalizeWeights — NaN/Infinity fallback', () => {
   it('weights with NaN → falls back to uniform weights', () => {
-    const badWeights = [NaN, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    const badWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
+      index === 0 ? Number.NaN : 0.5,
+    );
     const result = validateAndNormalizeWeights(badWeights);
     expect(result.usedFallback).toBe(true);
-    expect(result.weights).toHaveLength(8);
-    // All uniform: 1/8 = 0.125
+    expect(result.weights).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
     for (const w of result.weights) {
-      expect(w).toBeCloseTo(0.125, 10);
+      expect(w).toBeCloseTo(1 / LAMBDAMART_FEATURE_DIMENSION, 10);
     }
   });
 
   it('weights with Infinity → falls back to uniform weights', () => {
-    const badWeights = [Infinity, 0.3, 0.2, 0.1, 0.1, 0.1, 0.05, 0.05];
+    const badWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
+      index === 0 ? Number.POSITIVE_INFINITY : 0.25,
+    );
     const result = validateAndNormalizeWeights(badWeights);
     expect(result.usedFallback).toBe(true);
   });
 
   it('weights with -Infinity → falls back to uniform weights', () => {
-    const badWeights = [-Infinity, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    const badWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
+      index === 0 ? Number.NEGATIVE_INFINITY : 0.5,
+    );
     const result = validateAndNormalizeWeights(badWeights);
     expect(result.usedFallback).toBe(true);
   });
@@ -97,14 +111,18 @@ describe('E2-T2: validateAndNormalizeWeights — NaN/Infinity fallback', () => {
   });
 
   it('valid finite weights → used as-is (no fallback)', () => {
-    const goodWeights = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    const goodWeights = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 0.5);
     const result = validateAndNormalizeWeights(goodWeights);
     expect(result.usedFallback).toBe(false);
     expect(result.weights).toEqual(goodWeights);
   });
 
   it('scoreDocument uses uniform fallback when weights contain NaN', () => {
-    const badModel = makeQueryClassWeights([NaN, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    const badModel = makeQueryClassWeights(
+      Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
+        index === 0 ? Number.NaN : 0.5,
+      ),
+    );
     // Should not throw, returns finite score
     const score = scoreDocument(ZERO_FEATURES, badModel);
     expect(Number.isFinite(score)).toBe(true);
@@ -125,10 +143,17 @@ describe('E2-T3: scoreDocument clamps finalScore to [0, 1]', () => {
       attributeMatchScore: 1,
       diversityScore: 1,
       multilingualScore: 1,
+      entityPosteriorScore: 1,
+      identityExactnessTierScore: 1,
+      laneCorroborationScore: 1,
+      laneDisagreementScore: 1,
+      entityOnlyIndicator: 1,
+      generalOnlyIndicator: 1,
     };
     const highBiasModel: QueryClassWeights = {
       queryClass: 'test',
-      weights: [1, 1, 1, 1, 1, 1, 1, 1],
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+      weights: Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 1),
       bias: 5,
       trainingExampleCount: 1,
       ndcg5ValidationScore: 0,
@@ -141,7 +166,8 @@ describe('E2-T3: scoreDocument clamps finalScore to [0, 1]', () => {
   it('weightedSum < 0 → finalScore = 0.0', () => {
     const negBiasModel: QueryClassWeights = {
       queryClass: 'test',
-      weights: [-1, -1, -1, -1, -1, -1, -1, -1],
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+      weights: Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => -1),
       bias: -5,
       trainingExampleCount: 1,
       ndcg5ValidationScore: 0,
@@ -155,7 +181,8 @@ describe('E2-T3: scoreDocument clamps finalScore to [0, 1]', () => {
   it('weightedSum = 0.5 → finalScore = 0.5 (within bounds, no clamping)', () => {
     const neutralModel: QueryClassWeights = {
       queryClass: 'test',
-      weights: [0, 0, 0, 0, 0, 0, 0, 0],
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+      weights: Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 0),
       bias: 0.5,
       trainingExampleCount: 1,
       ndcg5ValidationScore: 0,
@@ -174,8 +201,8 @@ describe('E2-T4: DEFAULT_HEURISTIC_WEIGHTS sum to 1.0', () => {
     expect(Math.abs(sum - 1.0)).toBeLessThan(1e-9);
   });
 
-  it('DEFAULT_HEURISTIC_WEIGHTS has exactly 8 elements (one per feature)', () => {
-    expect(DEFAULT_HEURISTIC_WEIGHTS).toHaveLength(8);
+  it('DEFAULT_HEURISTIC_WEIGHTS has exactly one weight per live feature', () => {
+    expect(DEFAULT_HEURISTIC_WEIGHTS).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
   });
 });
 
@@ -198,20 +225,34 @@ describe('E2-T5: checkFeatureParityAndWarn logs warning on hash mismatch', () =>
     expect(ctx).toMatchObject({ modelHash: 'old-hash-123', currentHash: 'new-hash-456' });
     expect(msg).toContain('mismatch');
   });
+
+  it('scoreDocument rejects stale featureSchemaHash instead of serving skewed scores', () => {
+    const staleModel: QueryClassWeights = {
+      queryClass: 'test',
+      featureSchemaHash: 'stale-hash-v1',
+      weights: Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 0),
+      bias: 0.5,
+      trainingExampleCount: 1,
+      ndcg5ValidationScore: 0,
+      trainedAt: new Date(),
+    };
+
+    expect(() => scoreDocument(ZERO_FEATURES, staleModel)).toThrow(/feature schema mismatch/u);
+  });
 });
 
 // ── E2-T6: featureNames index bound check ───────────────────────────────────
 
 describe('E2-T6: trainLambdaMARTModel — featureNames out-of-bounds throws', () => {
-  // The function enforces LAMBDAMART_FEATURE_DIMENSION == 8 at all j in [0,8).
+  // The function enforces the live LambdaMART feature dimension at every in-range index.
   // There is no way to trigger the out-of-bounds via the public API without
   // bypassing the featureNames-length invariant. We test the guard via the
   // exported throwOnUndefinedFeatureName utility.
   it('throwOnUndefinedFeatureName with in-range index → does not throw', async () => {
     const { throwOnUndefinedFeatureName } = await import('../service/lambdamart-ranker.js');
-    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const names = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) => `f${index}`);
     expect(() => throwOnUndefinedFeatureName(names, 0)).not.toThrow();
-    expect(() => throwOnUndefinedFeatureName(names, 7)).not.toThrow();
+    expect(() => throwOnUndefinedFeatureName(names, LAMBDAMART_FEATURE_DIMENSION - 1)).not.toThrow();
   });
 
   it('throwOnUndefinedFeatureName with out-of-range index → throws with clear message', async () => {

@@ -46,6 +46,8 @@ const RANGE_MATCH_DEGRADATION = 0.5;
 const LABEL_CONTAINMENT_RATIO_MIN = 0.3;
 /** Label containment: score floor for claim-in-evidence match. */
 const LABEL_CONTAINMENT_FORWARD_FLOOR = 0.7;
+/** Label containment: full entailment when only catalog decorations differ. */
+const LABEL_CONTAINMENT_FULL_ENTAILMENT_RATIO = 0.85;
 /** Label containment: score floor for evidence-in-claim match (weaker signal). */
 const LABEL_CONTAINMENT_REVERSE_FLOOR = 0.6;
 const LABEL_TOKEN_SUBSEQUENCE_FLOOR = 0.72;
@@ -365,6 +367,13 @@ function matchFieldValue(
     case 'country':
     case 'appellation': {
       const evStr = typeof evidenceNorm === 'string' ? evidenceNorm : evidenceNorm[0] ?? '';
+      const pathSegments = evStr
+        .split('/')
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0);
+      if (pathSegments.includes(claimNorm)) {
+        return { type: 'exact_match', score: 1.0, details: `path segment exact: "${claimNorm}"` };
+      }
       // Forward (claim more specific than evidence): evidence does NOT entail claim
       // → weaker score (partial entailment at best). E.g. claim "Pauillac", evidence "Bordeaux".
       const depth = regionHierarchyDepth(claimNorm, evStr);
@@ -507,6 +516,15 @@ function matchFieldValue(
         };
       }
 
+      const evidenceWithoutLeadingVintage = evStr.replace(/^(?:19|20)\d{2}\s+/u, '').trim();
+      if (evidenceWithoutLeadingVintage === claimForMatch) {
+        return {
+          type: 'normalized_match',
+          score: 1.0,
+          details: `claim "${claimForMatch}" matches evidence "${evStr}" after stripping leading vintage decoration`,
+        };
+      }
+
       // Substring containment for partial label matches (Latin-to-Latin path).
       // A claim like "Opus One" (8 chars) inside evidence "opus one 2015" (13 chars)
       // is a strong signal that the wine is correctly referenced even if the
@@ -516,7 +534,9 @@ function matchFieldValue(
         if (ratio >= LABEL_CONTAINMENT_RATIO_MIN) {
           return {
             type: 'normalized_match',
-            score: Math.max(LABEL_CONTAINMENT_FORWARD_FLOOR, ratio),
+            score: ratio >= LABEL_CONTAINMENT_FULL_ENTAILMENT_RATIO
+              ? ENTAILED_THRESHOLD
+              : Math.max(LABEL_CONTAINMENT_FORWARD_FLOOR, ratio),
             details: `claim "${claimForMatch}" contained in evidence "${evStr}"`,
           };
         }

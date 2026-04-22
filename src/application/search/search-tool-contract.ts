@@ -58,6 +58,8 @@ export const SEARCH_TOOL_EXCLUDE_GRAPES_DESCRIPTION =
   'Optional grape varieties to exclude via exact index-level NOT filters.';
 export const SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION =
   'Optional countries or regions to exclude via exact index-level NOT filters.';
+export const SEARCH_TOOL_EXCLUDE_WINE_TYPES_DESCRIPTION =
+  'Optional wine types to exclude via exact index-level NOT filters (e.g. ["red"] for "레드 말고").';
 export const SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION =
   'Optional minimum price in KRW (e.g. 10000 for 1만원 하한). Use together with max_price_krw for price ranges.';
 export const SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION =
@@ -141,16 +143,28 @@ export const COMPARE_WINES_QUERY_B_DESCRIPTION =
 const SEARCH_TOOL_PLACEHOLDER_PATTERN =
   /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
 
-const SEARCH_TOOL_STYLE_EXAMPLES = [
+export const SEARCH_TOOL_STYLE_HINT_VALUES = [
   'dry',
   'sweet',
+  'off_dry',
   'oaked',
   'light',
   'chillable',
   'screw_cap',
   'approachable',
   'crowd_pleasing',
+  'presentation_forward',
+  'ageworthy',
+  'cellaring',
+  'cellarworthy',
 ] as const;
+const SEARCH_TOOL_STYLE_EXAMPLES = SEARCH_TOOL_STYLE_HINT_VALUES.filter((value) =>
+  value !== 'off_dry'
+  && value !== 'presentation_forward'
+  && value !== 'ageworthy'
+  && value !== 'cellaring'
+  && value !== 'cellarworthy'
+);
 const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing', 'sweet'] as const;
 const SEARCH_TOOL_SWEETNESS_DRY_MAX = 0.2;
 const SEARCH_TOOL_SWEETNESS_SWEET_MIN = 0.5;
@@ -241,6 +255,7 @@ export function buildSearchToolFieldShape(
         : retrievalModeSchema,
     exclude_grapes: z.array(z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
     exclude_regions: z.array(z.string().trim().min(1).max(SEARCH_TOOL_FILTER_TEXT_MAX_LEN)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
+    exclude_wine_types: z.array(z.enum(SEARCH_TOOL_WINE_TYPES)).max(SEARCH_TOOL_MAX_EXCLUDE_FILTERS).optional(),
     min_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     max_alcohol_pct: coerceFiniteNumber.pipe(z.number().positive().max(100)).optional(),
@@ -353,7 +368,7 @@ export function buildSearchWinesPromptContractLines(
   usd50ApproxKrw: number,
 ): readonly string[] {
   return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, min_price_krw?, max_price_krw?, max_alcohol_pct?, grape_primary?, wine_type?, country?, region?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, producer_prestige_min?, popularity_min?, recipient_profile?, sweetness_min?, sweetness_max?, acidity_min?, acidity_max?, tannin_max?, drinking_window?, drinking_window_target_year?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
+    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, exclude_wine_types?, min_price_krw?, max_price_krw?, max_alcohol_pct?, grape_primary?, wine_type?, country?, region?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, producer_prestige_min?, popularity_min?, recipient_profile?, sweetness_min?, sweetness_max?, acidity_min?, acidity_max?, tannin_max?, drinking_window?, drinking_window_target_year?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
     `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
     '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
     '  - grape_primary: canonical grape name for explicit varietal requests ("까쇼"→"Cabernet Sauvignon", "피노 누아"→"Pinot Noir")',
@@ -384,6 +399,7 @@ export function buildSearchWinesPromptContractLines(
     '  - max_alcohol_pct: ABV ceiling for low-alcohol requests ("도수 낮은" → 12); retrieval treats it as a preference, then post-result policy removes only verified over-ceiling wines and keeps unknown-ABV candidates as unverified',
     '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
     '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',
+    '  - exclude_wine_types: wine types to exclude, e.g. ["red"] for "레드 말고" — applied as Vespa NOT filter',
     '  - want_diversity: true when user wants varied options ("다양하게", "각각", "종류별로", "different styles")',
   ];
 }

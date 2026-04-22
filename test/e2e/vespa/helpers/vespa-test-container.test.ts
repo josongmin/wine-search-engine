@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+} from '../../../../src/domain/ranking/service/lambdamart-ranker.js';
 
 let searchUseCaseDeps: unknown;
 let hybridUseCaseDeps: unknown;
@@ -44,7 +48,8 @@ vi.mock('../../../../src/infrastructure/adapter/pg-ltr-model-registry.js', () =>
           'known_item',
           {
             queryClass: 'known_item',
-            weights: [1, 0, 0, 0, 0, 0, 0, 0],
+            featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+            weights: Array.from({ length: LTR_FEATURE_DIMENSION }, (_, index) => (index === 0 ? 1 : 0)),
             bias: 0,
             trainingExampleCount: 1,
             ndcg5ValidationScore: 1,

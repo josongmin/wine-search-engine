@@ -23,27 +23,27 @@ describe('query entry security config', () => {
     const config = parseEnv({
       NODE_ENV: 'production',
       PG_PASSWORD: 'secret',
-      ANTHROPIC_API_KEY: 'sk-ant-test',
+      OPENAI_API_KEY: 'sk-test',
     });
 
     expect(config.queryEntrySecurity.judgeFailureMode).toBe('fail_closed');
   });
 
-  it('selects Anthropic injection provider by default', () => {
+  it('selects OpenAI injection provider by default', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
-    });
-
-    expect(config.queryEntrySecurity.injectionProvider).toBe('anthropic');
-  });
-
-  it('allows OpenAI injection provider to be selected explicitly', () => {
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      LLM_INJECTION_PROVIDER: 'openai',
-      OPENAI_API_KEY: 'sk-test',
     });
 
     expect(config.queryEntrySecurity.injectionProvider).toBe('openai');
+  });
+
+  it('allows Anthropic injection provider to be selected explicitly for legacy deployments', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LLM_INJECTION_PROVIDER: 'anthropic',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
+    });
+
+    expect(config.queryEntrySecurity.injectionProvider).toBe('anthropic');
   });
 });

@@ -30,7 +30,9 @@ import type { QueryRoute } from '../../query/model/query-route.js';
 import type { AdmissionClosureSummary } from '../../decision/model/decision-input.js';
 import type {
   ExecutionProvenanceClosure,
+  ExecutionLaneTrace,
   ExecutionRetrievalMode,
+  ExecutionTopology,
 } from '../../query/model/engine-execution-contract.js';
 import type { AbstainReason } from '../../query/model/abstain-decision.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
@@ -124,6 +126,7 @@ export interface ResponseBuildParams {
 
   /** Stable execution-contract projection for response meta. */
   readonly executionContract?: {
+    readonly executionTopology?: ExecutionTopology | undefined;
     readonly effectiveRetrievalMode: ExecutionRetrievalMode;
     readonly retrievalKind:
       | 'entity_lookup'
@@ -133,6 +136,7 @@ export interface ResponseBuildParams {
     readonly sparseExecuted: boolean;
     readonly specializedRouteExecuted?: SpecializedRouteObservability['specializedRouteExecuted'] | undefined;
     readonly usedCompiledExecution: boolean;
+    readonly laneTrace?: ExecutionLaneTrace | undefined;
     readonly provenanceClosure?: ExecutionProvenanceClosure | undefined;
     readonly admissionClosure?: AdmissionClosureSummary | undefined;
   } | undefined;
@@ -184,6 +188,10 @@ export class ResponseBuilder {
     const validatedResults = this.enforceEvidence(params.results);
     const enrichedResults = this.enrichResults(validatedResults);
     const contract = this.resolveContract(params, enrichedResults);
+    const executionTopology =
+      params.executionContract?.executionTopology ?? params.compiled.execution.executionTopology;
+    const laneTrace = params.executionContract?.laneTrace;
+    const auditExtension = this.buildAuditExtension(params.auditExtension, executionTopology, laneTrace);
     const engineDecision = this.mapDecision(
       params.decisionOutput,
       params.route,
@@ -191,6 +199,8 @@ export class ResponseBuilder {
       params.retrievalModeSource,
       params.plannerSuggestedMode,
       params.requestId,
+      executionTopology,
+      laneTrace,
     );
 
     // Compute a deterministic response hash for the determinism gate
@@ -250,6 +260,8 @@ export class ResponseBuilder {
               params.retrievalModeSource ?? params.compiled.execution.routeSource,
               params.plannerSuggestedMode,
               params.compiled,
+              executionTopology,
+              laneTrace,
             ),
           }
         : {}),
@@ -262,7 +274,7 @@ export class ResponseBuilder {
             ),
           }
         : {}),
-      ...(params.auditExtension !== undefined ? { auditExtension: params.auditExtension } : {}),
+      ...(auditExtension !== undefined ? { auditExtension } : {}),
     };
 
     // Extract LLM envelope fields (Epic 9)
@@ -313,6 +325,8 @@ export class ResponseBuilder {
     retrievalModeSource?: 'planner' | 'api_override',
     plannerSuggestedMode?: ExecutionRetrievalMode,
     requestId?: string,
+    executionTopology?: ExecutionTopology,
+    laneTrace?: ExecutionLaneTrace,
   ): EngineDecision {
     return {
       decisionStatus: output.decisionStatus,
@@ -337,6 +351,8 @@ export class ResponseBuilder {
         : {}),
       ...(retrievalModeSource !== undefined ? { retrievalModeSource } : {}),
       ...(plannerSuggestedMode !== undefined ? { plannerSuggestedMode } : {}),
+      ...(executionTopology !== undefined ? { executionTopology } : {}),
+      ...(laneTrace !== undefined ? { laneTrace } : {}),
     };
   }
 
@@ -382,8 +398,11 @@ export class ResponseBuilder {
     retrievalModeSource: NonNullable<ResponseBuildParams['retrievalModeSource']>,
     plannerSuggestedMode: ExecutionRetrievalMode | undefined,
     compiled: CompiledWineQuery,
+    executionTopology: ExecutionTopology,
+    laneTrace: ExecutionLaneTrace | undefined,
   ): ExecutionContractMeta {
     return {
+      executionTopology,
       effectiveRetrievalMode: executionContract.effectiveRetrievalMode,
       retrievalModeSource,
       plannerSuggestedMode: plannerSuggestedMode ?? executionContract.effectiveRetrievalMode,
@@ -395,12 +414,37 @@ export class ResponseBuilder {
       usedCompiledExecution: executionContract.usedCompiledExecution,
       budget: compiled.execution.budget,
       provenancePolicy: compiled.execution.provenancePolicy,
+      ...(laneTrace !== undefined ? { laneTrace } : {}),
       ...(executionContract.provenanceClosure !== undefined
         ? { provenanceClosure: executionContract.provenanceClosure }
         : {}),
       ...(executionContract.admissionClosure !== undefined
         ? { admissionClosure: executionContract.admissionClosure }
         : {}),
+    };
+  }
+
+  private buildAuditExtension(
+    auditExtension: AuditExtension | undefined,
+    executionTopology: ExecutionTopology,
+    laneTrace: ExecutionLaneTrace | undefined,
+  ): AuditExtension | undefined {
+    if (auditExtension === undefined) {
+      return undefined;
+    }
+
+    const executionTrace = auditExtension.execution_trace;
+    if (executionTrace === undefined) {
+      return auditExtension;
+    }
+
+    return {
+      ...auditExtension,
+      execution_trace: {
+        ...executionTrace,
+        execution_topology: executionTopology,
+        ...(laneTrace !== undefined ? { lane_trace: laneTrace } : {}),
+      },
     };
   }
 

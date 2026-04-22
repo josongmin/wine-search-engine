@@ -10,7 +10,11 @@ import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid
 import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../src/domain/query/model/compiled-wine-query.js';
 import type { ConstraintBundle, EvidenceItem, NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
-import type { QueryClassWeights } from '../../../src/domain/ranking/service/lambdamart-ranker.js';
+import {
+  LAMBDAMART_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+  type QueryClassWeights,
+} from '../../../src/domain/ranking/service/lambdamart-ranker.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import {
   resolveChannelAwareWeights,
@@ -239,6 +243,13 @@ const STUB_EVIDENCE: EvidenceItem = {
 function makeSignalComputer(scores: ComponentScores): SignalComputer {
   return {
     computeAll: vi.fn().mockReturnValue(scores),
+    computeEntityPosterior: vi.fn((candidate: HybridCandidate) =>
+      candidate.lanePresence === 'general_only' ? undefined : candidate.entityPosteriorScore,
+    ),
+    computeIdentityExactnessTier: vi.fn((candidate: HybridCandidate) =>
+      candidate.lanePresence === 'general_only' ? 'none' : (candidate.identityExactnessTier ?? 'none'),
+    ),
+    computeLanePresence: vi.fn((candidate: HybridCandidate) => candidate.lanePresence),
   } as unknown as SignalComputer;
 }
 
@@ -247,6 +258,13 @@ function makeSignalComputerByEntity(scoresByEntityId: Readonly<Record<string, Co
     computeAll: vi.fn((candidate: HybridCandidate) => {
       return scoresByEntityId[String(candidate.entityId)] ?? makeComponentScores();
     }),
+    computeEntityPosterior: vi.fn((candidate: HybridCandidate) =>
+      candidate.lanePresence === 'general_only' ? undefined : candidate.entityPosteriorScore,
+    ),
+    computeIdentityExactnessTier: vi.fn((candidate: HybridCandidate) =>
+      candidate.lanePresence === 'general_only' ? 'none' : (candidate.identityExactnessTier ?? 'none'),
+    ),
+    computeLanePresence: vi.fn((candidate: HybridCandidate) => candidate.lanePresence),
   } as unknown as SignalComputer;
 }
 
@@ -322,6 +340,7 @@ function makeLtrModel(
 ): QueryClassWeights {
   return {
     queryClass: 'semantic_preference',
+    featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
     weights,
     bias: 0.5,
     trainingExampleCount: 10,
@@ -351,11 +370,15 @@ function makeRichCandidate(id = 'wine-rich'): HybridCandidate {
 }
 
 function makeUniformSemanticPreferenceLtrModel(): QueryClassWeights {
-  return makeLtrModel([0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125]);
+  return makeLtrModel(
+    Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 1 / LAMBDAMART_FEATURE_DIMENSION),
+  );
 }
 
 function makeBm25DominantLtrModel(): QueryClassWeights {
-  return makeLtrModel([1.0, 0, 0, 0, 0, 0, 0, 0]);
+  return makeLtrModel(
+    Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) => (index === 0 ? 1.0 : 0.0)),
+  );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -941,6 +964,74 @@ describe('Ranker', () => {
       expect(results).toHaveLength(3);
     });
 
+    it('projects dual-lane ranking features into the LTR inference vector', async () => {
+      const candidates = [
+        makeCandidateWithOverrides('wine-dual-top', {
+          entityPosteriorScore: 0.97,
+          identityExactnessTier: 'exact',
+          lanePresence: 'corroborated',
+        }),
+        makeCandidateWithOverrides('wine-dual-tail', {
+          entityPosteriorScore: 0.99,
+          identityExactnessTier: 'exact',
+          lanePresence: 'general_only',
+        }),
+      ];
+      const aggregatorScores = [0.8, 0.7];
+      const entityPosteriorWeightIndex = 8;
+      const ltrModels = new Map([
+        [
+          'semantic_preference',
+          makeLtrModel(
+            Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, (_, index) =>
+              index === entityPosteriorWeightIndex ? 1 : 0,
+            ),
+          ),
+        ],
+      ]);
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });
+
+      const { results, metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(metadata.rerankExecuted).toBe(true);
+      const top = results.find((result) => String(result.entityId) === 'wine-dual-top');
+      expect(top?.scoreDecomposition?.ltrFeatureVector).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
+      expect(top?.scoreDecomposition?.ltrFeatureVector).toEqual([
+        0.0,
+        0.5,
+        0.3,
+        0.0,
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        0.97,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+      ]);
+
+      const tail = results.find((result) => String(result.entityId) === 'wine-dual-tail');
+      expect(tail?.scoreDecomposition?.ltrFeatureVector).toEqual([
+        0.0,
+        0.5,
+        0.3,
+        0.0,
+        0.5,
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+      ]);
+    });
+
     it('no_model_for_query_class is reported when no LTR model is registered', async () => {
       const candidates = makeCandidates(1, 'wine-no-model');
       const ltrModels = new Map([
@@ -984,7 +1075,7 @@ describe('Ranker', () => {
       const ltrModels = new Map([
         [
           'semantic_preference',
-          makeLtrModel([1, 1, 1, 1, 1, 1, 1]),
+          makeLtrModel(Array.from({ length: LAMBDAMART_FEATURE_DIMENSION - 1 }, () => 1)),
         ],
       ]);
       const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });

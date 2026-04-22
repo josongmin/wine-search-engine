@@ -223,6 +223,36 @@ describe('verifyDeterministic — Korean↔Latin cross-script matching', () => {
     expect(result.matchType).toBe('normalized_match');
   });
 
+  it('treats catalog labels missing only leading vintage decoration as fully entailed', () => {
+    const claim = makeClaim('canonical_label', 'Château Margaux Château Margaux (Premier Grand Cru Classé)', 'identity_claim');
+    const evidence: EvidenceRecord[] = [{
+      canonical_label: '2022 Château Margaux Château Margaux (Premier Grand Cru Classé)',
+      entity_id: 'wine-margaux',
+    }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('entailed');
+    expect(result.matchType).toBe('normalized_match');
+  });
+
+  it('treats labels missing only a leading vintage as fully entailed', () => {
+    const claim = makeClaim('canonical_label', 'Penfolds Grange', 'identity_claim');
+    const evidence: EvidenceRecord[] = [{ canonical_label: '2019 Penfolds Grange', entity_id: 'wine-grange' }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('entailed');
+    expect(result.matchType).toBe('normalized_match');
+  });
+
+  it('treats slash-delimited region path segments as exact structured evidence', () => {
+    const claim = makeClaim('region', 'Bordeaux', 'core_structured_claim');
+    const evidence: EvidenceRecord[] = [{
+      region: 'France / Pomerol / France / Bordeaux / Libournais / Pomerol',
+      entity_id: 'wine-petrus',
+    }];
+    const result = verifyDeterministic(claim, evidence);
+    expect(result.verdict).toBe('entailed');
+    expect(result.matchType).toBe('exact_match');
+  });
+
   it('Latin-only EXACT match still returns entailed', () => {
     // Exact-match path bypasses containment entirely — regression guard.
     const claim = makeClaim('canonical_label', 'Opus One', 'identity_claim');

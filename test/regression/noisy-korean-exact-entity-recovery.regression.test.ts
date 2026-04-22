@@ -11,11 +11,19 @@ import { describe, expect, it } from 'vitest';
 import { createTestContainer } from '../integration/helpers/test-container.js';
 
 const CHATEAU_MARGAUX_ID = 'chateau-margaux-2015';
+const OPUS_ONE_ID = 'opus-one-2018';
 
 const NOISY_KOREAN_QUERIES = [
   '마고 샤또',
   '샤또 마고',
   '샤또마고1996',
+] as const;
+
+const NOISY_KOREAN_OPUS_QUERIES = [
+  '오푸스원',
+  '오퍼스 원',
+  '오푸스ㅇ',
+  '오퍼스ㅇ',
 ] as const;
 
 describe('Noisy Korean exact entity recovery', () => {
@@ -28,6 +36,16 @@ describe('Noisy Korean exact entity recovery', () => {
     expect(result.topEntity?.entityId).toBe(CHATEAU_MARGAUX_ID);
     expect(result.candidates.map((candidate) => String(candidate.entityId))).toContain(
       CHATEAU_MARGAUX_ID,
+    );
+  });
+
+  it.each(NOISY_KOREAN_OPUS_QUERIES)('resolves %s to opus-one-2018', async (query) => {
+    const result = await parts.container.resolveUseCase.execute({ query });
+
+    expect(result.status).toBe('resolved');
+    expect(result.topEntity?.entityId).toBe(OPUS_ONE_ID);
+    expect(result.candidates.map((candidate) => String(candidate.entityId))).toContain(
+      OPUS_ONE_ID,
     );
   });
 });

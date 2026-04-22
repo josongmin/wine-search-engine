@@ -451,4 +451,4 @@ surface is normalization, noise stripping, and contamination detection.
 | 런타임 리트리버 | **제외** → [`retriever-pipeline.md`](./retriever-pipeline.md) |
 | `vivino:bronze` / `etl:transliteration` | §2 |
 | bootstrap/ETL 스크립트 현재 상태 (`bootstrap:smoke`, `vivino:bronze`, `etl:transliteration`) | §2 |
-| **의도적 제외** | `find-domain-orphans.ts`, `export-http-contract-manifest.ts`, `export-http-openapi-bridge.ts`, `verify-anthropic-wiring.ts`, `dev/test-search-direct.ts` |
+| **의도적 제외** | `find-domain-orphans.ts`, `export-http-contract-manifest.ts`, `export-http-openapi-bridge.ts`, `verify-openai-injection-wiring.ts`, `verify-anthropic-wiring.ts`, `dev/test-search-direct.ts` |

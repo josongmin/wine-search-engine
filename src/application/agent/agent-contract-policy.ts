@@ -11,6 +11,14 @@ export class AgentContractPolicy {
     };
   }
 
+  buildRequiredToolDirective(tool: 'get_food_pairings'): AgentPlannerDirective {
+    return {
+      kind: 'required_tool',
+      tool,
+      instruction: `This request requires ${tool} before answering. Call ${tool} first and answer only from the returned evidence.`,
+    };
+  }
+
   getPendingDrinkabilityEntityIds(
     queryExecutionContract: AgentQueryExecutionContract,
     state: AgentExecutionState,

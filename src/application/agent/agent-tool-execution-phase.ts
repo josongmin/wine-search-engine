@@ -253,6 +253,28 @@ function isUnresolvedDrinkabilityCheck(call: BatchToolCall): boolean {
     );
 }
 
+function hasExecutedTool(state: AgentExecutionState, tool: string): boolean {
+  return state.steps.some((step) =>
+    step.action?.tool === tool ||
+    step.actionPairs?.some((pair) => pair.action.tool === tool) === true);
+}
+
+function hasToolOutcome(state: AgentExecutionState, tool: string): boolean {
+  return state.toolOutcomes.some((outcome) => outcome.tool === tool);
+}
+
+function requiresSearchAfterFoodPairing(
+  queryExecutionContract: AgentQueryExecutionContract,
+): boolean {
+  if (queryExecutionContract.requiredTool !== 'get_food_pairings') {
+    return false;
+  }
+  const defaults = queryExecutionContract.searchDefaults;
+  return queryExecutionContract.totalBudgetKrw !== undefined
+    || defaults?.min_price_krw !== undefined
+    || defaults?.max_price_krw !== undefined;
+}
+
 function buildDrinkingWindowProjectionFromResultItem(
   item: ResultItem | null | undefined,
 ): RetrievalDrinkingWindowProjection | undefined {
@@ -474,6 +496,25 @@ export class AgentToolExecutionPhase {
           state.pendingPlannerDirective = this.contractPolicy.buildGroundedSearchDirective();
           return false;
         }
+        if (
+          queryExecutionContract.requiredTool !== undefined &&
+          !hasToolOutcome(state, queryExecutionContract.requiredTool)
+        ) {
+          state.reasoningFailureDetected = true;
+          state.pendingPlannerDirective = this.contractPolicy.buildRequiredToolDirective(
+            queryExecutionContract.requiredTool,
+          );
+          return false;
+        }
+        if (
+          requiresSearchAfterFoodPairing(queryExecutionContract) &&
+          hasToolOutcome(state, 'get_food_pairings') &&
+          !hasToolOutcome(state, 'search_wines')
+        ) {
+          state.reasoningFailureDetected = true;
+          state.pendingPlannerDirective = this.contractPolicy.buildGroundedSearchDirective();
+          return false;
+        }
         if (pendingDrinkabilityEntityIds.length > 0) {
           state.pendingPlannerDirective = this.contractPolicy.buildPendingDrinkabilityDirective(pendingDrinkabilityEntityIds);
           return false;
@@ -505,11 +546,17 @@ export class AgentToolExecutionPhase {
     }
 
     if (parsed.action !== undefined) {
-      const expandedCalls = this.policy.resolveSingleCallExpansion({
-        tool: parsed.action.tool,
-        input: parsed.action.input,
-        queryExecutionContract,
-      });
+      const expandedCalls = (
+        parsed.action.tool === 'search_wines'
+        && queryExecutionContract.requiredTool === 'get_food_pairings'
+        && hasExecutedTool(state, 'get_food_pairings')
+      )
+        ? undefined
+        : this.policy.resolveSingleCallExpansion({
+            tool: parsed.action.tool,
+            input: parsed.action.input,
+            queryExecutionContract,
+          });
       if (expandedCalls !== undefined) {
         return await this.runParallelBatch(
           requestId,

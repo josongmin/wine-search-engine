@@ -235,4 +235,41 @@ describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithComp
 
     vi.useRealTimers();
   });
+
+  it('promotes planner entity route to hybrid recommendation when structured set filters are present', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({
+        route: 'entity',
+        retrievalMode: 'entity_lookup',
+        constraints: { hard: [], soft: [], inferred: [] },
+      })),
+    };
+
+    const ctx = makeBaseContext({
+      request: {
+        query: 'Bordeaux wine',
+        filters: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Bordeaux',
+            source_phrase: 'Bordeaux',
+            confidence: 1,
+            mapping_version: 'test',
+          },
+        ],
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(result.plan.route).toBe('hybrid');
+    expect(result.plan.retrievalMode).toBe('recommendation');
+    expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
+    expect(result.compiled.execution.effectiveRetrievalMode).toBe('recommendation');
+    expect(result.compiled.execution.budget.enablePrecisionRerank).toBe(true);
+  });
 });

@@ -128,7 +128,7 @@ describe('AgentAnswerRecoveryPolicy', () => {
 
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        query: '선물용 와인, not Merlot, not France, 1~5만원, approachable, crowd pleasing, sweet',
+        query: '선물용 와인, not Merlot, not France, 1~5만원, sweet',
         limit: 3,
         options: { mode: 'hybrid', explain: false, clarification: false },
         filters: expect.arrayContaining([

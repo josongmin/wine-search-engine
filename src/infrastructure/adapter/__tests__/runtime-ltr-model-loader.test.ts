@@ -3,19 +3,29 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { loadRuntimeLtrModels } from '../runtime-ltr-model-loader.js';
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+} from '../../../domain/ranking/service/lambdamart-ranker.js';
+
+function makeWeights(seed: number): number[] {
+  return Array.from({ length: LTR_FEATURE_DIMENSION }, (_, index) => Number(((seed + index) / 100).toFixed(2)));
+}
 
 const makeValidArtifact = () => ({
   queryClassModels: {
     red_wine: {
-      weights: [0.25, 0.12, -0.08, 0.07, 0.13, 0.02, 0.15, 0.18],
+      weights: makeWeights(1),
       bias: 0.5,
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
       trainingExampleCount: 420,
       ndcg5ValidationScore: 0.91,
       trainedAt: '2026-04-01T00:00:00.000Z',
     },
     white_wine: {
-      weights: [0.15, 0.22, 0.01, -0.08, 0.05, 0.12, 0.18, 0.17],
+      weights: makeWeights(20),
       bias: 0.1,
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
       trainingExampleCount: 99,
       ndcg5ValidationScore: 0.75,
       trainedAt: '2026-04-01T00:00:00.000Z',
@@ -48,16 +58,17 @@ describe('loadRuntimeLtrModels', () => {
 
     expect(models).toBeDefined();
     expect(models?.size).toBe(2);
-    expect(models?.get('red_wine')?.weights).toHaveLength(8);
-    expect(models?.get('white_wine')?.weights[0]).toBe(0.15);
+    expect(models?.get('red_wine')?.weights).toHaveLength(LTR_FEATURE_DIMENSION);
+    expect(models?.get('white_wine')?.weights[0]).toBe(0.2);
   });
 
   it('loads models from array-form artifact', async () => {
     const filePath = await writeArtifact([
       {
         queryClass: 'sparkling_wine',
-        weights: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        weights: makeWeights(30),
         bias: 0.9,
+        featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 77,
         ndcg5ValidationScore: 0.64,
         trainedAt: '2026-04-02T00:00:00Z',
@@ -76,16 +87,18 @@ describe('loadRuntimeLtrModels', () => {
     const filePath = await writeArtifact([
       {
         query_class: 'dup_class',
-        weights: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        weights: makeWeights(40),
         bias: 0.01,
+        feature_schema_hash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 7,
         ndcg5ValidationScore: 0.5,
         trainedAt: '2026-04-01T00:00:00Z',
       },
       {
         queryClass: 'dup_class',
-        weights: [0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
+        weights: makeWeights(50),
         bias: 0.02,
+        featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 8,
         ndcg5ValidationScore: 0.51,
         trainedAt: '2026-04-01T00:00:00Z',
@@ -100,8 +113,9 @@ describe('loadRuntimeLtrModels', () => {
       },
       {
         query_class: 'valid_after_bad',
-        weights: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+        weights: makeWeights(60),
         bias: 0.03,
+        feature_schema_hash: LTR_FEATURE_SCHEMA_HASH,
         trainingExampleCount: 9,
         ndcg5ValidationScore: 0.61,
         trainedAt: '2026-04-01T00:00:00Z',
@@ -139,6 +153,26 @@ describe('loadRuntimeLtrModels', () => {
         queryClass: 'short_dim',
         weights: [0.1, 0.2],
         bias: 0.01,
+        featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+        trainingExampleCount: 1,
+        ndcg5ValidationScore: 0.4,
+        trainedAt: '2026-04-01T00:00:00Z',
+      },
+    ]);
+    tempDirs.add(path.dirname(filePath));
+
+    const models = await loadRuntimeLtrModels(filePath);
+
+    expect(models).toBeUndefined();
+  });
+
+  it('drops entries whose feature schema hash does not match the live schema', async () => {
+    const filePath = await writeArtifact([
+      {
+        queryClass: 'stale_model',
+        weights: makeWeights(70),
+        bias: 0.01,
+        featureSchemaHash: 'stale-schema-v1',
         trainingExampleCount: 1,
         ndcg5ValidationScore: 0.4,
         trainedAt: '2026-04-01T00:00:00Z',

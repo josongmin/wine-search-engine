@@ -1031,6 +1031,8 @@ export interface BenchmarkReport {
    */
   readonly baselineVersion: typeof BASELINE_VERSION_CURRENT;
   readonly timestamp: string;
+  readonly transport: 'inprocess';
+  readonly execution_lane: 'exploratory_ablation';
   readonly model: string;
   readonly judgeModel: string | null;
   readonly judgeSamples: number;
@@ -1212,14 +1214,18 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       process.exit(1);
     }
   } else {
-    if (config.openai.apiKey === undefined) {
-      console.error('ERROR: OPENAI_API_KEY required. Set in .env or environment.');
+    if (config.openai.apiKeys.length === 0) {
+      console.error('ERROR: OPENAI_API_KEY or OPENAI_API_KEYS required. Set in .env or environment.');
       process.exit(1);
     }
   }
 
   // Judge always uses OpenAI (cost-effective GPT-mini) regardless of agent model
   const judgeModelId = args.enableJudge ? (args.judgeModel ?? 'gpt-5.4-mini') : null;
+  if (judgeModelId !== null && config.openai.apiKeys.length === 0) {
+    console.error('ERROR: OPENAI_API_KEY or OPENAI_API_KEYS required when judge is enabled.');
+    process.exit(1);
+  }
 
   const chatLlm: ChatLlmPort = isAnthropicModel
     ? new AnthropicChatLlm({
@@ -1230,8 +1236,8 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       })
     : new OpenAiChatLlm({
         baseUrl: config.openai.baseUrl,
-        // apiKey is guaranteed non-undefined here — we process.exit(1) above if absent
-        apiKey: config.openai.apiKey as string,
+        // apiKeys is guaranteed non-empty here — we process.exit(1) above if absent
+        apiKeys: config.openai.apiKeys,
         defaultModel: modelId,
         httpTimeoutMs: config.openai.httpTimeoutMs,
       });
@@ -1239,7 +1245,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   const judgeLlm: ChatLlmPort | null = judgeModelId !== null
     ? new OpenAiChatLlm({
         baseUrl: config.openai.baseUrl,
-        apiKey: config.openai.apiKey ?? '',
+        apiKeys: config.openai.apiKeys,
         defaultModel: judgeModelId,
         httpTimeoutMs: config.openai.httpTimeoutMs,
       })
@@ -1381,7 +1387,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           if (hasJudgeMaterial(scenario.expectation)) {
             judgeAttemptCount++;
             judgePromises.push(
-              judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples).then((r) => {
+              judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples, { observations }).then((r) => {
                 if (r.score !== null) judgeScore = r.score;
                 if (r.rationale.length > 0) judgeReasoning = r.rationale;
                 if (r.failed) judgeFailCount++;
@@ -1452,6 +1458,13 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             );
           }
           await Promise.all(judgePromises);
+          if (
+            claimDiagnostics !== undefined
+            && claimDiagnostics.deterministicCoverage >= 0.95
+            && claimDiagnostics.llmCallCount === 0
+          ) {
+            faithScore = claimDiagnostics.faithfulnessScoreAll;
+          }
         }
 
         let constraintMetrics: ConstraintExtractionMetricsInput | undefined;
@@ -1731,6 +1744,8 @@ function buildReport(
   return {
     baselineVersion: BASELINE_VERSION_CURRENT,
     timestamp: new Date().toISOString(),
+    transport: 'inprocess',
+    execution_lane: 'exploratory_ablation',
     model,
     judgeModel,
     judgeSamples: args.judgeSamples,
@@ -2224,11 +2239,16 @@ async function main(): Promise<void> {
     // Cost: ~1 LLM call ($0.001) at the very end — negligible vs judge cost.
     let insightLlm: ChatLlmPort | undefined;
     try {
-      const openaiKey = process.env['OPENAI_API_KEY'];
-      if (openaiKey !== undefined && openaiKey.length > 0) {
+      const openAiKeys = [
+        process.env['OPENAI_API_KEY'],
+        ...(process.env['OPENAI_API_KEYS']?.split(/[,\n]+/) ?? []),
+      ]
+        .map((key) => key?.trim())
+        .filter((key): key is string => key !== undefined && key.length > 0);
+      if (openAiKeys.length > 0) {
         insightLlm = new OpenAiChatLlm({
           baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
-          apiKey: openaiKey,
+          apiKeys: openAiKeys,
           defaultModel: 'gpt-5.4-mini',
           httpTimeoutMs: 30_000,
         });

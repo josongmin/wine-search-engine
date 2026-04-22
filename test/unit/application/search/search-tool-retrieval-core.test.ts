@@ -39,14 +39,14 @@ describe('buildSearchToolRetrievalCoreQuery', () => {
     expect(query).toBe('opus one');
   });
 
-  it('suppresses duplicated structured entity semantics for budgeted region recommendations', () => {
+  it('preserves structured geography anchors for budgeted region recommendations', () => {
     const query = buildSearchToolRetrievalCoreQuery({
       query: 'best Bordeaux under 100 dollars',
       region: 'Bordeaux',
       max_price_krw: 135_000,
     });
 
-    expect(query).toBe('wine');
+    expect(query).toBe('Bordeaux wine');
   });
 
   it('retains non-duplicative structured type semantics when geography anchors are suppressed', () => {

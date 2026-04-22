@@ -1,4 +1,5 @@
 import type { QueryRoute } from './query-route.js';
+import type { DecisionStatus } from '../../shared/types/index.js';
 
 /**
  * ExecutionRetrievalMode — the effective retrieval mode for engine execution.
@@ -17,6 +18,28 @@ export type ExecutionRetrievalMode =
   | 'recommendation'
   | 'similar_items'
   | 'no_match_detection';
+
+/**
+ * ExecutionTopology — the lane topology the engine contract authorizes.
+ *
+ * This is orthogonal to `effectiveRoute`:
+ * - `entity_only`  → only the identity lane executes
+ * - `general_only` → only the general retrieval lane executes
+ * - `dual_lane`    → identity + general lanes execute and fuse downstream
+ */
+export type ExecutionTopology = 'entity_only' | 'general_only' | 'dual_lane';
+
+export interface ExecutionLaneTraceEntry {
+  readonly participated: boolean;
+  readonly artifactCount: number;
+  readonly resolveStatus?: DecisionStatus | undefined;
+}
+
+export interface ExecutionLaneTrace {
+  readonly identity: ExecutionLaneTraceEntry;
+  readonly general: ExecutionLaneTraceEntry;
+  readonly fused: ExecutionLaneTraceEntry;
+}
 
 /**
  * ExecutionBudget — resource constraints for a single query execution.
@@ -100,6 +123,9 @@ export interface ExecutionProvenanceClosure {
 export interface EngineExecutionContract {
   /** Effective routing target, after override resolution. */
   readonly effectiveRoute: QueryRoute;
+
+  /** Authorized execution topology for this request. */
+  readonly executionTopology: ExecutionTopology;
 
   /** Effective retrieval mode, after override resolution. */
   readonly effectiveRetrievalMode: ExecutionRetrievalMode;

@@ -113,8 +113,9 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
     };
     const out = mixedQueryResultToSearchRouteExecution(plan, mixedResult, minimalCompiled());
     expect(out.rankedResults).toHaveLength(1);
-    expect(out.resolveResult.decisionConfidenceC).toBe(0.64);
-    expect(out.resolveResult.topEntity).toEqual({
+    expect(out.identityResolveResult).toBeNull();
+    expect(out.fusedResolveResult.decisionConfidenceC).toBe(0.64);
+    expect(out.fusedResolveResult.topEntity).toEqual({
       entityId: resultEid,
       canonicalLabel: 'Result Wine',
       calibratedScore: 0.64,
@@ -129,9 +130,9 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
       degradationReasons: ['mixed_similar_retrieval_fallback'],
     });
     expect(out.fallbackReason).toBe('mixed_similar_retrieval_fallback');
-    expect(out.resolveResult.decisionTrace.outcomeReasonCodes).toContain('MIXED_ROUTE');
-    expect(out.resolveResult.decisionTrace.top2CalibratedScore).toBeUndefined();
-    expect(out.resolveResult.decisionTrace.calibratedGap).toBeUndefined();
+    expect(out.fusedResolveResult.decisionTrace.outcomeReasonCodes).toContain('MIXED_ROUTE');
+    expect(out.fusedResolveResult.decisionTrace.top2CalibratedScore).toBeUndefined();
+    expect(out.fusedResolveResult.decisionTrace.calibratedGap).toBeUndefined();
   });
 
   it('keeps the mixed fallback taxonomy stable', () => {
@@ -159,9 +160,10 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
       degradationReasons: ['mixed_anchor_resolution_failed'],
     });
     expect(out.fallbackReason).toBe('mixed_anchor_resolution_failed');
-    expect(out.resolveResult.status).toBe('failed');
-    expect(out.resolveResult.degradation?.reasons).toEqual(['mixed_anchor_resolution_failed']);
-    expect(out.resolveResult.decisionTrace.top2CalibratedScore).toBeUndefined();
-    expect(out.resolveResult.decisionTrace.calibratedGap).toBeUndefined();
+    expect(out.identityResolveResult).toBeNull();
+    expect(out.fusedResolveResult.status).toBe('failed');
+    expect(out.fusedResolveResult.degradation?.reasons).toEqual(['mixed_anchor_resolution_failed']);
+    expect(out.fusedResolveResult.decisionTrace.top2CalibratedScore).toBeUndefined();
+    expect(out.fusedResolveResult.decisionTrace.calibratedGap).toBeUndefined();
   });
 });

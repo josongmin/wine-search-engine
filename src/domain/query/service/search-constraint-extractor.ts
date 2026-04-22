@@ -425,6 +425,37 @@ function extractForeignCurrencyPrice(
     }
   }
 
+  // Priority B1 — prefix upper bound with symbol: "under $100", "below €30".
+  const fxUnderPrefixSymbolMatch =
+    /(?:under|below|up\s+to|less\s+than|no\s+more\s+than)\s*([$€£₩])(\d+(?:\.\d+)?)(?=$|[^\p{L}\p{N}])/iu.exec(qn);
+  if (
+    fxUnderPrefixSymbolMatch !== null &&
+    fxUnderPrefixSymbolMatch[1] !== undefined &&
+    fxUnderPrefixSymbolMatch[2] !== undefined
+  ) {
+    const underAmt = parseFloat(fxUnderPrefixSymbolMatch[2]);
+    if (!Number.isFinite(underAmt)) return {};
+    const krw = foreignCurrencyToKrw(fxUnderPrefixSymbolMatch[1], underAmt);
+    if (krw !== null) return { maxPriceKrw: krw };
+  }
+
+  // Priority B2 — explicit USD words: "under 100 dollars", "100 USD or less".
+  const usdWordUnderPrefixMatch =
+    /(?:under|below|up\s+to|less\s+than|no\s+more\s+than)\s+(\d+(?:\.\d+)?)\s*(?:usd|u\.s\.\s*dollars?|us\s*dollars?|dollars?)(?=$|[^\p{L}\p{N}])/iu.exec(qn);
+  if (usdWordUnderPrefixMatch?.[1] !== undefined) {
+    const underAmt = parseFloat(usdWordUnderPrefixMatch[1]);
+    if (!Number.isFinite(underAmt)) return {};
+    return { maxPriceKrw: Math.round(underAmt * KRW_PER_USD_APPROXIMATE) };
+  }
+
+  const usdWordUnderSuffixMatch =
+    /(\d+(?:\.\d+)?)\s*(?:usd|u\.s\.\s*dollars?|us\s*dollars?|dollars?)\s*(?:or\s+less|and\s+under|or\s+under|under|below|max(?:imum)?)/iu.exec(qn);
+  if (usdWordUnderSuffixMatch?.[1] !== undefined) {
+    const underAmt = parseFloat(usdWordUnderSuffixMatch[1]);
+    if (!Number.isFinite(underAmt)) return {};
+    return { maxPriceKrw: Math.round(underAmt * KRW_PER_USD_APPROXIMATE) };
+  }
+
   // Priority B — foreign-currency upper bound: "$100 이하/이내/미만" or "$100 under/below"
   const fxUnderMatch =
     /([$€£₩])(\d+(?:\.\d+)?)\s*(?:이하|이내|미만|under|below|or less)/iu.exec(qn);

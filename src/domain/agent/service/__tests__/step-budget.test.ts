@@ -3,7 +3,7 @@ import { StepBudget } from '../step-budget.js';
 import { DEFAULT_AGENT_CONFIG } from '../../model/agent-config.js';
 
 describe('StepBudget.recordParallelBatch', () => {
-  it('rejects an oversized batch without consuming step budget', () => {
+  it('counts a parallel batch as one reasoning step', () => {
     const budget = new StepBudget({
       ...DEFAULT_AGENT_CONFIG,
       maxSteps: 1,
@@ -14,11 +14,11 @@ describe('StepBudget.recordParallelBatch', () => {
       { tool: 'search_wines', input: { query: 'Burgundy' } },
     ], { skipNearDuplicate: true });
 
-    expect(check).toEqual({ allowed: false, reason: 'max_steps' });
-    expect(budget.getStepCount()).toBe(0);
+    expect(check).toEqual({ allowed: true });
+    expect(budget.getStepCount()).toBe(1);
 
     const singleCheck = budget.recordStep('search_wines', { query: 'Barolo' });
-    expect(singleCheck).toEqual({ allowed: true });
+    expect(singleCheck).toEqual({ allowed: false, reason: 'max_steps' });
     expect(budget.getStepCount()).toBe(1);
   });
 

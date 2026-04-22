@@ -118,19 +118,40 @@ describe('AmbiguityClassifier', () => {
           entityType: 'wine',
           canonicalLabel: 'Wine A',
           aliasMatches: [{ aliasValue: 'shared-alias', aliasType: 'canonical', matchScore: 1.0 }],
-          sourceSignals: makeSignals(),
+          sourceSignals: makeSignals({ aliasExactMatch: 1 }),
         },
         {
           entityId: 'wine-2' as any,
           entityType: 'wine',
           canonicalLabel: 'Wine B',
           aliasMatches: [{ aliasValue: 'shared-alias', aliasType: 'canonical', matchScore: 1.0 }],
-          sourceSignals: makeSignals(),
+          sourceSignals: makeSignals({ aliasExactMatch: 1 }),
         },
       ];
       const state = classifier.classify(candidates, 'short_entity');
       expect(state.detected).toBe(true);
       expect(state.types).toContain('alias_collision');
+    });
+
+    it('does not detect alias_collision for candidates without exact identity support', () => {
+      const candidates: ResolverCandidate[] = [
+        {
+          entityId: 'wine-1' as any,
+          entityType: 'wine',
+          canonicalLabel: 'Château Margaux',
+          aliasMatches: [{ aliasValue: '샤또 마고', aliasType: 'translation', matchScore: 0.97 }],
+          sourceSignals: makeSignals({ aliasExactMatch: 0.97 }),
+        },
+        {
+          entityId: 'wine-2' as any,
+          entityType: 'wine',
+          canonicalLabel: 'Pavillon Rouge du Château Margaux',
+          aliasMatches: [{ aliasValue: '샤또 마고', aliasType: 'translation', matchScore: 0.97 }],
+          sourceSignals: makeSignals(),
+        },
+      ];
+      const state = classifier.classify(candidates, 'short_entity');
+      expect(state.types).not.toContain('alias_collision');
     });
 
     it('does not detect alias_collision when aliases are unique', () => {
@@ -182,7 +203,7 @@ describe('AmbiguityClassifier', () => {
           entityType: 'wine',
           canonicalLabel: 'Opus One',
           aliasMatches: [{ aliasValue: 'opus-one', aliasType: 'canonical', matchScore: 1.0 }],
-          sourceSignals: makeSignals(),
+          sourceSignals: makeSignals({ aliasExactMatch: 1 }),
           attributeHints: { vintage: 2018 },
         },
         {
@@ -190,7 +211,7 @@ describe('AmbiguityClassifier', () => {
           entityType: 'wine',
           canonicalLabel: 'Opus One',
           aliasMatches: [{ aliasValue: 'opus-one', aliasType: 'canonical', matchScore: 1.0 }],
-          sourceSignals: makeSignals(),
+          sourceSignals: makeSignals({ aliasExactMatch: 1 }),
           attributeHints: { vintage: 2019 },
         },
       ];

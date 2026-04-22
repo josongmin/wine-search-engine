@@ -6,6 +6,10 @@ import type {
 } from '../../domain/query/model/engine-execution-contract.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
+import type {
+  DualLanePresence,
+  DualLaneArtifact,
+} from '../../domain/retrieval/model/dual-lane-artifact.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
@@ -23,6 +27,33 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EvidenceItem, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
 
+interface BuildSearchDecisionInputParams {
+  readonly plan: QueryPlanV1;
+  readonly resolveResult: EntityResolveResult;
+  readonly identityResolveResult?: EntityResolveResult | null | undefined;
+  readonly rankedResults?: readonly RankedResult[];
+  readonly effectiveRoute?: QueryRoute | undefined;
+  readonly decisionContext?: SearchRouteDecisionContext | undefined;
+  readonly executionContext?: {
+    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+    readonly retrievalKind?:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity'
+      | undefined;
+    readonly provenancePolicy?: ProvenancePolicy | undefined;
+    readonly constraintGraph?: ConstraintGraph | undefined;
+    readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+    readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
+  };
+  readonly honestyContract?: {
+    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
+    readonly routeHealthy?: boolean | undefined;
+    readonly blockingRequested?: boolean | undefined;
+  };
+}
+
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
 }
@@ -31,10 +62,46 @@ function isPositiveEvidenceItem(item: EvidenceItem): boolean {
   return item.contribution.startsWith('+');
 }
 
-function isSyntheticRankedRouteResolve(result: EntityResolveResult): boolean {
-  return result.decisionTrace.outcomeReasonCodes.some(
-    (code) => code === 'HYBRID_ROUTE' || code === 'MIXED_ROUTE',
-  );
+function buildWinnerIdentityEvidence(params: {
+  readonly resolveResult: EntityResolveResult;
+  readonly identityResolveResult?: EntityResolveResult | null | undefined;
+  readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
+}): NonNullable<EvidenceSummary['identityEvidence']> {
+  const resolveTopEntity = params.resolveResult.topEntity;
+  const winnerIdentityProvenance =
+    resolveTopEntity !== undefined
+    && params.winnerDualLaneArtifact?.entityId === resolveTopEntity.entityId
+    && params.winnerDualLaneArtifact.identityProvenance?.entityId === resolveTopEntity.entityId
+      ? params.winnerDualLaneArtifact.identityProvenance
+      : undefined;
+  const winnerIdentityArtifact =
+    winnerIdentityProvenance !== undefined
+      ? {
+          evidenceRefs: winnerIdentityProvenance.evidenceRefs,
+        }
+      : resolveTopEntity !== undefined
+      ? params.identityResolveResult?.candidates.find(
+          (candidate) => candidate.entityId === resolveTopEntity.entityId,
+        )
+      : undefined;
+  const identityEvidenceRefCount = winnerIdentityArtifact?.evidenceRefs.length ?? 0;
+  const winnerIdentityArtifactPresent = winnerIdentityArtifact !== undefined;
+  const lanePresence: DualLanePresence | undefined =
+    winnerIdentityProvenance !== undefined ? params.winnerDualLaneArtifact?.lanePresence : undefined;
+  const exactnessTier =
+    winnerIdentityProvenance?.exactnessTier ??
+    (winnerIdentityArtifactPresent ? params.winnerDualLaneArtifact?.exactnessTier : undefined) ??
+    'none';
+
+  return {
+    source: 'identity_artifact',
+    resolveTopEntityPresent: resolveTopEntity !== undefined,
+    winnerIdentityArtifactPresent,
+    winnerIdentityArtifactMatchesResolveResult: winnerIdentityArtifactPresent,
+    exactnessTier,
+    identityEvidenceRefCount,
+    ...(lanePresence !== undefined ? { lanePresence } : {}),
+  };
 }
 
 /**
@@ -48,46 +115,26 @@ function isSyntheticRankedRouteResolve(result: EntityResolveResult): boolean {
  * already-calibrated resolver output and must not re-calibrate or adjust scores.
  */
 export function buildSearchDecisionInput(
-  plan: QueryPlanV1,
-  resolverResult: EntityResolveResult,
-  rankedResults?: readonly RankedResult[],
-  effectiveRoute: QueryRoute = plan.route,
-  decisionContext?: SearchRouteDecisionContext,
-  executionContext?: {
-    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
-    readonly retrievalKind?:
-      | 'entity_lookup'
-      | 'generic_hybrid'
-      | 'specialized_hybrid'
-      | 'mixed_similarity'
-      | undefined;
-    readonly provenancePolicy?: ProvenancePolicy | undefined;
-    /**
-     * ADR-011 Phase 1b.3a: when the planner emitted a ConstraintGraph
-     * (`compiled.constraintGraph`), callers pass it through here so the
-     * decision-input's matched/unmet computation follows the same AND / OR
-     * / XOR group semantics as the provenance-closure reader. Absent in
-     * the flat/rollback path — computation falls back byte-identical to
-     * the pre-Phase-1b.3a behaviour.
-     */
-    readonly constraintGraph?: ConstraintGraph | undefined;
-    /**
-     * ADR-015 Axis 2: executor-internal critic rewrites observed for
-     * this request. Empty / undefined when the critic loop did not
-     * engage (default off via `RETRIEVAL_EXECUTOR_CRITIC=false`).
-     */
-    readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
-  },
-  honestyContract?: {
-    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
-    readonly routeHealthy?: boolean | undefined;
-    readonly blockingRequested?: boolean | undefined;
-  },
+  params: BuildSearchDecisionInputParams,
 ): DecisionInput {
+  const {
+    plan,
+    resolveResult,
+    identityResolveResult,
+    rankedResults,
+    effectiveRoute = plan.route,
+    decisionContext,
+    executionContext,
+    honestyContract,
+  } = params;
   const topResult = rankedResults?.[0];
-  const topEntity = resolverResult.topEntity;
-  const resolverTopCandidate = resolverResult.candidates[0];
-  const syntheticRankedRoute = isSyntheticRankedRouteResolve(resolverResult);
+  const topEntity = resolveResult.topEntity;
+  const identityEvidence = buildWinnerIdentityEvidence({
+    resolveResult,
+    identityResolveResult,
+    winnerDualLaneArtifact: executionContext?.winnerDualLaneArtifact,
+  });
+  const identityEvidenceRefCount = identityEvidence.identityEvidenceRefCount;
 
   const rankingSignals: SignalSet | undefined =
     topResult !== undefined
@@ -111,32 +158,10 @@ export function buildSearchDecisionInput(
         }
       : undefined;
 
-  const resolverTopCandidateMatchesTopEntity =
-    resolverTopCandidate !== undefined &&
-    topEntity !== undefined &&
-    resolverTopCandidate.entityId === topEntity.entityId;
-  const resolverEvidenceRefCount =
-    resolverTopCandidateMatchesTopEntity ? resolverTopCandidate.evidenceRefs.length : 0;
   const rankedTopResultMatchesTopEntity =
     topResult !== undefined &&
     topEntity !== undefined &&
     topResult.entityId === topEntity.entityId;
-  const rankedCorroborationItems =
-    topResult !== undefined && rankedTopResultMatchesTopEntity
-      ? topResult.evidenceItems.filter(isPositiveEvidenceItem)
-      : [];
-  const rankedCorroborationTypes =
-    rankedCorroborationItems.length > 0
-      ? unique(rankedCorroborationItems.map((item) => item.type))
-      : [];
-  const resolverIdentityTrailPresent =
-    resolverTopCandidateMatchesTopEntity &&
-    (syntheticRankedRoute || resolverEvidenceRefCount > 0);
-  const exactMatchCandidatePresent =
-    resolverIdentityTrailPresent &&
-    (topResult === undefined
-      ? true
-      : rankedTopResultMatchesTopEntity);
   // ADR-011 Phase 1b.3a: when a ConstraintGraph is threaded through
   // `executionContext.constraintGraph`, matched/unmet attributes are resolved
   // via the shared helper under AND / OR / XOR group semantics so
@@ -193,26 +218,6 @@ export function buildSearchDecisionInput(
     anchorSignalItems.length > 0
       ? unique(anchorSignalItems.map((item) => item.type))
       : [];
-
-  const identityEvidence: NonNullable<EvidenceSummary['identityEvidence']> = {
-    ...(syntheticRankedRoute ? { source: 'ranked_synthetic' as const } : {}),
-    topEntityPresent: topEntity !== undefined,
-    resolverTopCandidateMatchesTopEntity,
-    resolverEvidenceRefCount,
-    ...(syntheticRankedRoute ? { syntheticRankedRoute: true } : {}),
-    ...(topResult !== undefined ? { rankedTopResultPresent: true } : {}),
-    ...(topResult !== undefined && topEntity !== undefined
-      ? { rankedTopResultMatchesTopEntity }
-      : {}),
-    ...(topResult !== undefined ? { rankedEvidenceItemCount: topResult.evidenceItems.length } : {}),
-    ...(rankedCorroborationTypes.length > 0
-      ? {
-          rankedCorroborationItemCount: rankedCorroborationItems.length,
-          rankedCorroborationTypes,
-        }
-      : {}),
-    ...(exactMatchCandidatePresent ? { exactMatchCandidatePresent: true } : {}),
-  };
 
   const constraintEvidence =
     topResult !== undefined
@@ -280,13 +285,11 @@ export function buildSearchDecisionInput(
     ...(constraintEvidence !== undefined ? { constraintEvidence } : {}),
     ...(anchorResolution !== undefined ? { anchorResolution } : {}),
     ...(anchorEvidence !== undefined ? { anchorEvidence } : {}),
-    ...((resolverEvidenceRefCount > 0 || topResult !== undefined)
+    ...((identityEvidenceRefCount > 0 || topResult !== undefined)
       ? {
           evidenceRefCount:
-            resolverEvidenceRefCount +
-            (topResult !== undefined && rankedTopResultMatchesTopEntity
-              ? topResult.evidenceItems.length
-              : 0),
+            identityEvidenceRefCount +
+            (topResult !== undefined ? topResult.evidenceItems.length : 0),
         }
       : {}),
   };
@@ -337,7 +340,10 @@ export function buildSearchDecisionInput(
     ...(executionContext?.retrievalKind !== undefined
       ? { retrievalKind: executionContext.retrievalKind }
       : {}),
-    resolverResult,
+    resolveResult,
+    ...(identityResolveResult != null
+      ? { identityResolveResult }
+      : { identityResolveResult: undefined }),
     policy: plan.policy,
     uncertainty: plan.uncertainty,
     provenanceContract,
@@ -353,7 +359,7 @@ export function buildSearchDecisionInput(
     ...(rankingSignals !== undefined ? { rankingSignals } : {}),
     evidenceSummary,
     ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
-    conformalSetSize: resolverResult.conformalSetSize,
+    conformalSetSize: resolveResult.conformalSetSize,
     ...(executionContext?.criticRewrites !== undefined
       && executionContext.criticRewrites.length > 0
       ? { criticRewrites: executionContext.criticRewrites }

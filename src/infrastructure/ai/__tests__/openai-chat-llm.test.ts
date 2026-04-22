@@ -90,6 +90,33 @@ describe('OpenAiChatLlm', () => {
       expect(callCount).toBe(2);
     });
 
+    it('rotates to the next pooled key on 429 without waiting for single-key backoff', async () => {
+      const seenAuthorizations: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+          const authorization = (init?.headers as Record<string, string> | undefined)?.['Authorization'];
+          if (authorization !== undefined) seenAuthorizations.push(authorization);
+          if (seenAuthorizations.length === 1) {
+            return new Response('rate limited', { status: 429 });
+          }
+          return new Response(successBody('pooled key worked'), { status: 200 });
+        }),
+      );
+
+      const llm = new OpenAiChatLlm({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKeys: ['sk-a', 'sk-b'],
+        defaultModel: 'gpt-4o-mini',
+        httpTimeoutMs: 5000,
+      });
+
+      const result = await llm.complete({ messages: [{ role: 'user', content: 'hi' }] });
+
+      expect(result.text).toBe('pooled key worked');
+      expect(seenAuthorizations).toEqual(['Bearer sk-a', 'Bearer sk-b']);
+    });
+
     it('respects Retry-After header on 429', async () => {
       vi.useFakeTimers();
       // Pin Math.random to 0 for deterministic timing: jitter = 0, delay = exactly retryAfterMs.

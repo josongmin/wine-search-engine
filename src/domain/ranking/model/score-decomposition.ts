@@ -74,7 +74,7 @@ export interface ScoreDecomposition {
   readonly rerankDeltaNormalized?: number | undefined;
 
   /**
-   * Raw LTR feature vector (LAMBDAMART_FEATURE_DIMENSION = 8 values).
+   * Raw LTR feature vector (LAMBDAMART_FEATURE_DIMENSION values).
    * Absent when LTR was skipped or features unavailable.
    */
   readonly ltrFeatureVector?: readonly number[] | undefined;

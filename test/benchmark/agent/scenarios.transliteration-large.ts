@@ -300,8 +300,11 @@ function buildPositiveScenario(row: PositiveExactLookupRow, index: number): Agen
       ],
       rubric:
         `Must treat "${query}" as an exact Korean transliteration lookup for ${canonicalEn}. `
+        + `Accepted aliases include: ${[...new Set([query, canonicalKo, canonicalEn, ...acceptedAliases])].join(', ')}. `
+        + 'Any accepted Korean or English alias spelling satisfies alias anchoring; do not require a different canonical Korean spelling literal when the answer uses the user spelling or the evidence canonical form. '
+        + 'Noise suffixes such as vintage, country, region, type, and grape terms need not be repeated in the final answer once the base exact entity is confirmed. '
         + 'Alias, spacing, vintage, country, region, type, and grape noise may be normalized only when the exact entity remains unambiguous. '
-        + 'If live evidence cannot confirm the exact entity, the answer must abstain honestly instead of drifting to category or nearby-brand results.',
+        + 'If evidence confirms the exact entity, the answer should identify it directly. If live evidence cannot confirm the exact entity, the answer must abstain honestly instead of drifting to category or nearby-brand results.',
     },
   };
 }

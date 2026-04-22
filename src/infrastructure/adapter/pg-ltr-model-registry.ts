@@ -131,6 +131,13 @@ function parseLtrBias(raw: number, registryId: string): number {
   return bias;
 }
 
+function assertFeatureSchemaHash(raw: unknown, registryId: string): string {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`LTR model ${registryId} is missing feature schema hash`);
+  }
+  return raw;
+}
+
 /**
  * PostgreSQL-backed LTR model registry with versioning.
  *
@@ -160,6 +167,12 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     weights: QueryClassWeights,
     metadata: LtrModelSaveMetadata,
   ): Promise<void> {
+    if (weights.featureSchemaHash !== metadata.featureSchemaHash) {
+      throw new Error(
+        `LTR model ${queryClass} feature schema mismatch: weights=${weights.featureSchemaHash}, metadata=${metadata.featureSchemaHash}`,
+      );
+    }
+
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -253,6 +266,7 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
 
     return {
       queryClass: row.query_class,
+      featureSchemaHash: assertFeatureSchemaHash(row.feature_schema_hash, row.registry_id),
       weights: parseLtrWeights(row.weights, row.registry_id),
       bias: parseLtrBias(row.bias, row.registry_id),
       trainingExampleCount: row.training_example_count,
@@ -274,6 +288,7 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     for (const row of result.rows) {
       models.set(row.query_class, {
         queryClass: row.query_class,
+        featureSchemaHash: assertFeatureSchemaHash(row.feature_schema_hash, row.registry_id),
         weights: parseLtrWeights(row.weights, row.registry_id),
         bias: parseLtrBias(row.bias, row.registry_id),
         trainingExampleCount: row.training_example_count,

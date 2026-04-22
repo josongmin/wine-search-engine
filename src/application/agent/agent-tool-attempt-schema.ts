@@ -21,12 +21,31 @@ const AttemptSingleOrStringArraySchema = z.preprocess(
   AttemptStringArraySchema,
 );
 
+function normalizeToolAttemptInput(rawInput: unknown): Record<string, unknown> {
+  if (!isRecord(rawInput)) {
+    return {};
+  }
+  const style = rawInput['style'];
+  if (!Array.isArray(style)) {
+    return rawInput;
+  }
+  const styleValues = style.filter((value): value is string =>
+    typeof value === 'string' && value.trim().length > 0);
+  const existingStyles = Array.isArray(rawInput['styles'])
+    ? rawInput['styles'].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const { style: _style, ...rest } = rawInput;
+  const styles = [...new Set([...styleValues, ...existingStyles])];
+  return styles.length > 0 ? { ...rest, styles } : rest;
+}
+
 export const SearchToolAttemptInputSchema = z.object({
   query: AttemptStringSchema.optional(),
   limit: AttemptNumberSchema.optional(),
   retrieval_mode: AttemptStringSchema.optional(),
   exclude_grapes: AttemptStringArraySchema.optional(),
   exclude_regions: AttemptStringArraySchema.optional(),
+  exclude_wine_types: AttemptStringArraySchema.optional(),
   min_price_krw: AttemptNumberSchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
   max_alcohol_pct: AttemptNumberSchema.optional(),
@@ -78,6 +97,7 @@ export const CompareWinesAttemptInputSchema = z.object({
   query_b: AttemptStringSchema.optional(),
   exclude_grapes: AttemptStringArraySchema.optional(),
   exclude_regions: AttemptStringArraySchema.optional(),
+  exclude_wine_types: AttemptStringArraySchema.optional(),
   min_price_krw: AttemptNumberSchema.optional(),
   max_price_krw: AttemptNumberSchema.optional(),
   max_alcohol_pct: AttemptNumberSchema.optional(),
@@ -178,7 +198,7 @@ function normalizeRawAttemptInput(
   rawInput: unknown,
 ): Record<string, unknown> {
   if (isRecord(rawInput)) {
-    return rawInput;
+    return normalizeToolAttemptInput(rawInput);
   }
   if (typeof rawInput === 'string' && rawInput.length > 0 && tool === 'search_wines') {
     return { query: rawInput };

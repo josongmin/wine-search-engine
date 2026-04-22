@@ -6,7 +6,6 @@ import {
 import { WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
   extractSearchConstraints,
-  krwToUsd,
 } from './search-constraint-extractor.js';
 import { normalizeQueryPredicates } from './korean-predicate-variants.js';
 
@@ -35,6 +34,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   const soft: ConstraintBundle['soft'][number][] = [];
   const q = normalizedQuery;
   const predicateNormalizedQuery = normalizeQueryPredicates(q);
+  const searchConstraints = extractSearchConstraints(q);
   const mv = RULE_BASED_CONSTRAINT_MAPPING_VERSION;
 
   for (const [pattern, value] of WINE_TYPE_RULES) {
@@ -89,7 +89,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     /(?<![\p{L}\p{N}])under\s+\$?(\d+)(?![\p{L}\p{N}])/iu.exec(q) ??
     /(\d+)\s*(?:달러|dollar)\s*이하/iu.exec(q) ??
     /(\d+)\s*만원\s*(?:이하|미만|대)/iu.exec(q);
-  if (priceUnder?.[1] !== undefined) {
+  if (priceUnder?.[1] !== undefined && searchConstraints.maxPriceKrw === undefined) {
     const priceValue = parseInt(priceUnder[1], DECIMAL_RADIX);
     // Guard: parseInt can return NaN on malformed capture group (edge case with regex backtracking).
     // NaN would propagate into band comparison (always false) and corrupt soft constraints. (CLAUDE.md rule 28)
@@ -287,8 +287,6 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   // "without X", "no X", etc.) for grape, country, region, and style.
   // These are emitted as hard `exclude` constraints so downstream filter
   // injection can produce Vespa NOT-clauses.
-  const searchConstraints = extractSearchConstraints(q);
-
   for (const grape of searchConstraints.excludeGrapes ?? []) {
     hard.push({
       attribute: 'grape_primary',
@@ -348,7 +346,6 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   // not hard requirements — a wine at 51,000₩ should not be excluded when
   // the user asked for "5만원 이하").
   if (searchConstraints.maxPriceKrw !== undefined) {
-    const maxUsd = krwToUsd(searchConstraints.maxPriceKrw);
     soft.push({
       attribute: 'max_price_krw',
       operator: '<=',
@@ -357,32 +354,15 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       confidence: 0.85,
       mapping_version: mv,
     });
-    soft.push({
-      attribute: 'price_usd',
-      operator: '<=',
-      value: maxUsd,
-      source_phrase: `${searchConstraints.maxPriceKrw / KRW_PER_MAN_WON}만원 이하`,
-      confidence: 0.82,
-      mapping_version: mv,
-    });
   }
 
   if (searchConstraints.minPriceKrw !== undefined) {
-    const minUsd = krwToUsd(searchConstraints.minPriceKrw);
     soft.push({
       attribute: 'min_price_krw',
       operator: '>=',
       value: searchConstraints.minPriceKrw,
       source_phrase: `${searchConstraints.minPriceKrw / KRW_PER_MAN_WON}만원 이상`,
       confidence: 0.85,
-      mapping_version: mv,
-    });
-    soft.push({
-      attribute: 'price_usd',
-      operator: '>=',
-      value: minUsd,
-      source_phrase: `${searchConstraints.minPriceKrw / KRW_PER_MAN_WON}만원 이상`,
-      confidence: 0.82,
       mapping_version: mv,
     });
   }

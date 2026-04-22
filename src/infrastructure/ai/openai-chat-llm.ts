@@ -3,11 +3,6 @@
  * Implements {@link ChatLlmPort}; compatible with OpenAI-compatible proxies (LiteLLM, Azure path-style base URLs).
  */
 
-import {
-  createCircuitBreaker,
-  type CircuitBreaker,
-} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
@@ -24,6 +19,13 @@ import {
 } from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
+import {
+  createOpenAiKeyPool,
+  isOpenAiKeyPoolRotatableError,
+  openAiKeyPoolExhaustedError,
+  orderedOpenAiKeySlots,
+  type OpenAiKeySlot,
+} from './openai-key-pool.js';
 
 const OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS = 240;
 
@@ -43,10 +45,16 @@ const OPENAI_RETRY_CONFIG: RetryConfig = {
   label: 'OpenAI chat',
 };
 
+const OPENAI_POOL_RETRY_CONFIG: RetryConfig = {
+  ...OPENAI_RETRY_CONFIG,
+  maxAttempts: 1,
+};
+
 interface OpenAiChatLlmOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
   readonly baseUrl: string;
-  readonly apiKey: string;
+  readonly apiKey?: string | undefined;
+  readonly apiKeys?: readonly string[] | undefined;
   readonly defaultModel: string;
   readonly httpTimeoutMs: number;
 }
@@ -109,40 +117,71 @@ function isChatCompletionsResponse(v: unknown): v is ChatCompletionsResponse {
 
 export class OpenAiChatLlm implements ChatLlmPort {
   private readonly endpoint: string;
-  private readonly apiKey: string;
+  private readonly keySlots: readonly OpenAiKeySlot[];
   private readonly defaultModel: string;
   private readonly httpTimeoutMs: number;
-  private readonly circuitBreaker: CircuitBreaker;
+  private nextSlotIndex = 0;
 
   constructor(options: OpenAiChatLlmOptions) {
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/chat/completions`;
-    this.apiKey = options.apiKey;
-    this.defaultModel = options.defaultModel;
-    this.httpTimeoutMs = options.httpTimeoutMs;
-    this.circuitBreaker = createCircuitBreaker({
-      name: OPENAI_CHAT_BREAKER_NAME,
+    this.keySlots = createOpenAiKeyPool({
+      baseBreakerName: OPENAI_CHAT_BREAKER_NAME,
+      apiKey: options.apiKey,
+      apiKeys: options.apiKeys,
       failureThreshold: OPENAI_CHAT_BREAKER_FAILURE_THRESHOLD,
       recoveryTimeoutMs: OPENAI_CHAT_BREAKER_RECOVERY_TIMEOUT_MS,
       halfOpenMaxAttempts: OPENAI_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
     });
-    globalCircuitBreakerRegistry.register(OPENAI_CHAT_BREAKER_NAME, this.circuitBreaker);
+    this.defaultModel = options.defaultModel;
+    this.httpTimeoutMs = options.httpTimeoutMs;
   }
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
     const model = request.model ?? this.defaultModel;
     return withGenAiSpan(
       { system: 'openai', requestModel: model, operation: 'chat' },
-      (recordResponse) =>
-        runUnderLlmBreaker(this.circuitBreaker, OPENAI_CHAT_BREAKER_NAME, () =>
-          this.completeInner(request, model, recordResponse),
-        ),
+      (recordResponse) => this.completeWithKeyPool(request, model, recordResponse),
     );
+  }
+
+  private async completeWithKeyPool(
+    request: ChatCompletionRequest,
+    model: string,
+    recordResponse: (resp: GenAiResponseAttributes) => void,
+  ): Promise<ChatCompletionResult> {
+    const slots = this.nextOrderedSlots();
+    const errors: unknown[] = [];
+    const retryConfig =
+      this.keySlots.length === 1 ? OPENAI_RETRY_CONFIG : OPENAI_POOL_RETRY_CONFIG;
+
+    for (const slot of slots) {
+      try {
+        return await runUnderLlmBreaker(slot.circuitBreaker, slot.breakerName, () =>
+          this.completeInner(request, model, recordResponse, slot.apiKey, retryConfig),
+        );
+      } catch (err) {
+        errors.push(err);
+        if (this.keySlots.length === 1 || !isOpenAiKeyPoolRotatableError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    throw openAiKeyPoolExhaustedError('OpenAI chat', this.keySlots.length, errors);
+  }
+
+  private nextOrderedSlots(): readonly OpenAiKeySlot[] {
+    const startIndex = this.nextSlotIndex;
+    this.nextSlotIndex = (this.nextSlotIndex + 1) % this.keySlots.length;
+    return orderedOpenAiKeySlots(this.keySlots, startIndex);
   }
 
   private async completeInner(
     request: ChatCompletionRequest,
     model: string,
     recordResponse: (resp: GenAiResponseAttributes) => void,
+    apiKey: string,
+    retryConfig: RetryConfig,
   ): Promise<ChatCompletionResult> {
     const body: Record<string, unknown> = {
       model,
@@ -177,7 +216,7 @@ export class OpenAiChatLlm implements ChatLlmPort {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${this.apiKey}`,
+                Authorization: `Bearer ${apiKey}`,
               },
               body: JSON.stringify(body),
             },
@@ -260,7 +299,7 @@ export class OpenAiChatLlm implements ChatLlmPort {
           } satisfies ChatCompletionResult,
         };
       },
-      OPENAI_RETRY_CONFIG,
+      retryConfig,
       request.abortSignal,
     );
   }

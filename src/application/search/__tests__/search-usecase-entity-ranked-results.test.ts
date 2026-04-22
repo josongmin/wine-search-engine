@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildEntityRouteRankedResults } from '../search-usecase-entity-ranked-results.js';
+import {
+  buildEntityRouteRankedResults,
+  liftEntityResolveResultToLaneArtifacts,
+} from '../search-usecase-entity-ranked-results.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { ResolverCandidate } from '../../../domain/resolver/model/resolved-candidate.js';
@@ -404,6 +407,63 @@ describe('buildEntityRouteRankedResults', () => {
 
     expect(rankedResults).toHaveLength(1);
     expect(rankedResults[0]?.rank).toBe(7);
+  });
+
+  it('lifts resolver output into entity-lane artifacts with preserved exactness provenance', () => {
+    const artifacts = liftEntityResolveResultToLaneArtifacts(
+      makePlan(),
+      makeResolveResult(),
+      [{
+        entityId: ENTITY_ID,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [{ aliasValue: 'Kalaris Merlot', aliasType: 'canonical', matchScore: 0.95 }],
+        attributeHints: {
+          grape_primary: 'Merlot',
+        },
+        sourceRecordRefs: [{ sourceSystem: 'vivino-silver', sourceRecordId: 'wine-kalaris' }],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]?.identityProvenance).toMatchObject({
+      source: 'entity_resolver',
+      entityId: ENTITY_ID,
+      exactnessTier: 'exact',
+      calibratedScore: 0.97,
+      strongestAliasMatch: {
+        aliasValue: 'Kalaris Merlot',
+        aliasType: 'canonical',
+        matchScore: 0.95,
+      },
+    });
+    expect(artifacts[0]?.candidate).toMatchObject({
+      entityPosteriorScore: 0.97,
+      identityExactnessTier: 'exact',
+      lanePresence: 'entity_only',
+      laneCorroborated: false,
+      laneDisagreement: true,
+    });
+    expect(artifacts[0]?.evidenceItems[0]?.metadata).toMatchObject({
+      matchType: 'exact',
+      matchedAlias: 'Kalaris Merlot',
+    });
   });
 
   it('throws when resolver output contains duplicate entity IDs', () => {

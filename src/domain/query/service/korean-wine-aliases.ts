@@ -1,10 +1,15 @@
 /**
- * Korean wine typo/slang → canonical form mapping.
+ * Korean wine surface typo / entity-slang → canonical form mapping.
  *
  * Used by the Planner to correct common Korean misspellings and
  * abbreviations before anchor extraction and search.
  *
  * Format: [typo/slang, canonical form]
+ *
+ * This table is intentionally limited to lexical entity surfaces. Do not add
+ * semantic chat slang such as "ㄱㅊ": those are preference meanings and must
+ * flow through planner/LLM semantic interpretation as typed constraints, not
+ * query-string mutation.
  */
 const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Map([
   // Typos (common misspellings)
@@ -18,7 +23,7 @@ const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Map([
   ['사시까이아', '사시카이아'],
   ['쌔시까이아', '사시카이아'],
 
-  // Abbreviations (slang)
+  // Entity / variety abbreviations
   ['까쇼', '카베르네 소비뇽'],
   ['까소', '카베르네 소비뇽'],
   ['쇼비', '소비뇽 블랑'],

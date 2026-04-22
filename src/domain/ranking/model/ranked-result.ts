@@ -257,6 +257,18 @@ export interface RankedResult {
   /** Price in USD (approximate, from Vivino or other data source). */
   readonly priceUsd?: number | undefined;
 
+  /** Finish length ([0,1] normalized). */
+  readonly finishLength?: number | undefined;
+
+  /** Flavor descriptor tags (e.g. "blackcurrant", "cedar"). */
+  readonly flavorProfiles?: readonly string[] | undefined;
+
+  /** LLM-authored semantic summary for display. */
+  readonly semanticSummary?: string | undefined;
+
+  /** Catalog availability flag for display (distinct from componentScores.availability ranking signal). */
+  readonly availability?: boolean | undefined;
+
   /** ADR-007 upstream source lineage (HTTP `EntitySummary.sourceRecordRefs`). */
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 

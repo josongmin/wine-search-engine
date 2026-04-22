@@ -1,5 +1,5 @@
 import type { HttpRouteContract } from './route-contracts.js';
-import { AgentRouteContract } from './agent.route.js';
+import { AgentRouteContract } from './agent.contract.js';
 import { AgentBenchmarkScenariosRouteContract } from './agent-benchmark-scenarios.route.js';
 import {
   AgentMetricsRouteContract,

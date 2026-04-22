@@ -26,14 +26,9 @@ web:
 _kill port:
     @lsof -ti :{{port}} | xargs kill -9 2>/dev/null || true
 
-# Backend + frontend together (kills existing processes on 3000/4000 first)
+# Backend + web: free :4000 and :3000, then start API (PORT=4000, rest from root `.env`) + Next (`NEXT_PUBLIC_API_URL=http://localhost:4000`). Ctrl+C clears both ports. For the Docker *test* stack (PG 5433, …) use `just up` + `just api` instead.
 full:
-    @echo "Clearing ports 4000 and 3000..."
-    @just _kill 4000
-    @just _kill 3000
-    @sleep 1
-    @echo "Starting backend (4000) + frontend (3000)..."
-    @env {{_test_env}} npx tsx watch --ignore './src/interface/http/routes/register-contract-route.ts' src/main.ts & cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev
+    @bash scripts/dev/run-fullstack.sh
 
 # ── Docker infra ─────────────────────────────────────────────────────────────
 

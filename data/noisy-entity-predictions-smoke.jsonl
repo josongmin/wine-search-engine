@@ -98,3 +98,5 @@
 {"benchmark_id":"neb-098","ranked_entities":[{"entity_id":"romanee-conti-2015","provenance_stage":"phonetic","provenance_source":"rule:phonetic_french_v1"}],"decision_status":"resolved"}
 {"benchmark_id":"neb-099","ranked_entities":[{"entity_id":"moet-brut"}],"decision_status":"ambiguous"}
 {"benchmark_id":"neb-100","ranked_entities":[{"entity_id":"barolo-giacomo"}],"decision_status":"ambiguous"}
+{"benchmark_id":"neb-101","ranked_entities":[{"entity_id":"opus-one-2018","provenance_stage":"transliteration","provenance_source":"rule:transliteration_ko_v1"}],"decision_status":"resolved"}
+{"benchmark_id":"neb-102","ranked_entities":[{"entity_id":"opus-one-2018","provenance_stage":"transliteration","provenance_source":"rule:transliteration_ko_v1"}],"decision_status":"resolved"}

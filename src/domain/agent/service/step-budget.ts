@@ -122,7 +122,7 @@ export class StepBudget {
     calls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
     options?: { readonly skipNearDuplicate?: boolean },
   ): BudgetCheck {
-    if (this.stepCount + calls.length > this.config.maxSteps) {
+    if (this.stepCount + 1 > this.config.maxSteps) {
       return { allowed: false, reason: 'max_steps' };
     }
 
@@ -140,7 +140,7 @@ export class StepBudget {
       }
     }
 
-    this.stepCount = candidate.stepCount;
+    this.stepCount = this.stepCount + 1;
     replaceSetContents(this.seenActions, candidate.seenActions);
     replaceMapContents(this.perToolCallCounts, candidate.perToolCallCounts);
     replaceMapContents(this.perToolNormalizedQueries, candidate.perToolNormalizedQueries);

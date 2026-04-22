@@ -348,6 +348,27 @@ describe('AnchorExtractor', () => {
       expect(singleLookup).not.toHaveBeenCalled();
     });
 
+    it('does not emit phonetic compact acronyms as direct alias lookup queries for lexical latin input', async () => {
+      const batchLookup = vi.fn(async (queries: readonly string[]) => {
+        const result = new Map<string, readonly AliasMatchResult[]>();
+        for (const query of queries) {
+          result.set(query, []);
+        }
+        return result;
+      });
+      const extractor = new AnchorExtractor({
+        findMatches: vi.fn(async () => []),
+        findMatchesBatch: batchLookup,
+      });
+
+      await extractor.extract('opus', normalizer.normalize('opus'));
+
+      expect(batchLookup).toHaveBeenCalledTimes(1);
+      const queried = batchLookup.mock.calls[0]?.[0] ?? [];
+      expect(queried).toContain('opus');
+      expect(queried).not.toContain('ps');
+    });
+
     it('resolves multiple fuzzy terms with batch lookup when available', async () => {
       const batchLookup = vi.fn(async (queries: readonly string[]) => {
         const result = new Map<string, readonly AliasMatchResult[]>();
@@ -429,6 +450,31 @@ describe('AnchorExtractor', () => {
       );
       expect(transliteratedAnchors[0]?.lookupStrategies).toEqual(
         expect.arrayContaining(['transliterated_fuzzy']),
+      );
+    });
+
+    it('normalizes search-index lookup strategy prefixes into canonical domain strategy labels', async () => {
+      const aliasMatcher: AliasMatcher = {
+        async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+          if (normalizedQuery === '오푸스ㅇ') {
+            return [{
+              ...makeMatchResult('Opus One', ['entity-opus-one-2018'], 0.9),
+              lookupStrategy: 'index_transliterated_fuzzy',
+            }];
+          }
+          return [];
+        },
+      };
+
+      const extractor = new AnchorExtractor(aliasMatcher);
+      const anchors = await extractor.extract('오푸스ㅇ', normalizer.normalize('오푸스ㅇ'));
+
+      expect(anchors).toHaveLength(1);
+      expect(anchors[0]?.lookupStrategies).toEqual(
+        expect.arrayContaining(['transliterated_fuzzy']),
+      );
+      expect(anchors[0]?.lookupStrategies).not.toEqual(
+        expect.arrayContaining(['index_transliterated_fuzzy']),
       );
     });
   });

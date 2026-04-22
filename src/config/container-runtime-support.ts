@@ -17,7 +17,7 @@ import { RedisCircuitBreakerWrapper } from '../infrastructure/db/redis-circuit-b
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
 import { loadRuntimeLtrModels } from '../infrastructure/adapter/runtime-ltr-model-loader.js';
-import { getCurrentFeatureSchemaHash } from '../domain/ranking/service/feature-parity-hash.js';
+import { LTR_FEATURE_SCHEMA_HASH } from '../domain/ranking/service/lambdamart-ranker.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import { DeterministicDrinkingWindowPredictor } from '../infrastructure/ml/deterministic-drinking-window-predictor.js';
@@ -187,10 +187,11 @@ export async function buildRuntimeSupportServices(
       : new InMemoryJudgmentCacheAdapter();
     const provider = config.queryEntrySecurity.injectionProvider;
 
-    if (provider === 'openai' && config.openai.apiKey !== undefined) {
+    const openAiInjectionApiKey = config.openai.apiKeys[0];
+    if (provider === 'openai' && openAiInjectionApiKey !== undefined) {
       injectionJudge = new LLMInjectionJudge(
         new OpenAiLLMInjectionClassifier({
-          apiKey: config.openai.apiKey,
+          apiKeys: config.openai.apiKeys,
           baseUrl: config.openai.baseUrl,
           model: config.openai.injectionModel,
           httpTimeoutMs: config.openai.injectionHttpTimeoutMs,
@@ -292,20 +293,25 @@ export async function buildRuntimeSupportServices(
         if (ltrModels.size > 0) {
           ltrEffectiveSource = 'registry';
           ltrRegistryIssue = undefined;
-          // E2-T5 (BUG-12): Log serve-time feature schema hash and per-model
-          // weight dimension so operators can detect train/serve skew. A full
-          // per-model hash check requires featureSchemaHash persisted in
-          // QueryClassWeights (DB migration pending); until then, weight-vector
-          // length mismatch is the earliest detectable signal of schema drift.
-          const currentHash = getCurrentFeatureSchemaHash();
+          for (const [queryClass, model] of ltrModels.entries()) {
+            if (model.featureSchemaHash !== LTR_FEATURE_SCHEMA_HASH) {
+              throw new Error(
+                `LTR model ${queryClass} feature schema mismatch at startup: model=${model.featureSchemaHash}, current=${LTR_FEATURE_SCHEMA_HASH}`,
+              );
+            }
+          }
           bootstrapLogger.info(
-            { ltrModelCount: ltrModels.size, featureSchemaHash: currentHash, searchSnapshotId: ltrRegistrySearchSnapshotId },
+            {
+              ltrModelCount: ltrModels.size,
+              featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+              searchSnapshotId: ltrRegistrySearchSnapshotId,
+            },
             '[Container] Loaded LTR models from registry',
           );
           for (const [queryClass, model] of ltrModels.entries()) {
             const weightDim = model.weights.length;
             bootstrapLogger.info(
-              { queryClass, weightDim, featureSchemaHash: currentHash },
+              { queryClass, weightDim, featureSchemaHash: model.featureSchemaHash },
               '[Container] LTR model weight dimension at serve time',
             );
           }

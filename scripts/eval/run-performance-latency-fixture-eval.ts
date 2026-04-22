@@ -77,6 +77,7 @@ interface CaseLatencyResult {
 export interface PerformanceLatencyFixtureReport {
   readonly benchmark: 'performance-latency-fixture';
   readonly suite_id: 'performance_latency';
+  readonly execution_lane: BenchmarkExecutionLane;
   readonly query_count: number;
   readonly slo_pass_rate: number;
   readonly latency_summary: {
@@ -264,6 +265,7 @@ function percentile(sortedAsc: readonly number[], p: number): number {
 
 export function buildPerformanceLatencyReport(
   results: readonly CaseLatencyResult[],
+  executionLane: BenchmarkExecutionLane = 'trusted_benchmark',
 ): PerformanceLatencyFixtureReport {
   const count = results.length;
   const durations = results.map((r) => r.duration_ms).sort((a, b) => a - b);
@@ -283,6 +285,7 @@ export function buildPerformanceLatencyReport(
   return {
     benchmark: 'performance-latency-fixture',
     suite_id: SUITE_ID,
+    execution_lane: executionLane,
     query_count: count,
     slo_pass_rate: count === 0 ? 0 : sloPassCount / count,
     latency_summary: {
@@ -365,7 +368,7 @@ async function run(): Promise<void> {
     return evaluateCase(benchmarkCase, durationMs);
   });
 
-  const report = buildPerformanceLatencyReport(caseResults);
+  const report = buildPerformanceLatencyReport(caseResults, args.executionLane);
 
   await fs.writeFile(args.output, JSON.stringify(report, null, 2), 'utf8');
   process.stderr.write(`[perf-latency-fixture-eval] wrote ${args.output}\n`);

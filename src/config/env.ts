@@ -13,7 +13,7 @@ import { VespaEnvSchema } from './env-schemas/vespa.schema.js';
 
 /** sysexits.h EX_CONFIG — invalid configuration at startup. */
 const SYSEXITS_EX_CONFIG = 78;
-/** Default Anthropic model when ANTHROPIC_INJECTION_MODEL is unset. */
+/** Legacy Anthropic injection model when LLM_INJECTION_PROVIDER=anthropic. */
 const DEFAULT_ANTHROPIC_INJECTION_MODEL = 'claude-haiku-4-5-20251001';
 
 /**
@@ -40,24 +40,55 @@ const envSchema = CoreEnvSchema
 
 type EnvVars = z.infer<typeof envSchema>;
 
+function snapshotExplicitProcessEnv(): ReadonlyMap<string, string> {
+  return new Map(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
+function restoreExplicitProcessEnv(snapshot: ReadonlyMap<string, string>): void {
+  for (const [key, value] of snapshot) {
+    process.env[key] = value;
+  }
+}
+
+function parseOpenAiApiKeyPool(
+  apiKey: string | undefined,
+  apiKeys: string | undefined,
+): readonly string[] {
+  const deduped = new Set<string>();
+  const ordered: string[] = [];
+  for (const key of [apiKey, ...(apiKeys?.split(/[,\n]+/) ?? [])]) {
+    const trimmed = key?.trim();
+    if (trimmed === undefined || trimmed.length === 0 || deduped.has(trimmed)) {
+      continue;
+    }
+    deduped.add(trimmed);
+    ordered.push(trimmed);
+  }
+  return ordered;
+}
+
 function buildConfig(parsed: EnvVars) {
   const watchlistEnabled = parsed.WATCHLIST_ENABLED ?? parsed.WEBHOOK_SECRET !== undefined;
+  const openAiApiKeys = parseOpenAiApiKeyPool(parsed.OPENAI_API_KEY, parsed.OPENAI_API_KEYS);
+  const hasOpenAiApiKey = openAiApiKeys.length > 0;
 
   if (watchlistEnabled && parsed.WEBHOOK_SECRET === undefined) {
     throw new Error('WATCHLIST_ENABLED requires WEBHOOK_SECRET to be set');
   }
 
-  if (parsed.AGENT_ENABLED && parsed.OPENAI_API_KEY === undefined) {
+  if (parsed.AGENT_ENABLED && !hasOpenAiApiKey) {
     throw new Error(
-      'AGENT_ENABLED=true requires OPENAI_API_KEY to be set. ' +
-        'Set OPENAI_API_KEY or unset AGENT_ENABLED — silently disabling the agent route (POST /v1/agent/*) is not allowed.',
+      'AGENT_ENABLED=true requires OPENAI_API_KEY or OPENAI_API_KEYS to be set. ' +
+        'Set an OpenAI credential or unset AGENT_ENABLED — silently disabling the agent route (POST /v1/agent/*) is not allowed.',
     );
   }
 
-  if (parsed.LLM_QUERY_INTERPRETER && parsed.OPENAI_API_KEY === undefined) {
+  if (parsed.LLM_QUERY_INTERPRETER && !hasOpenAiApiKey) {
     throw new Error(
-      'LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY to be set. ' +
-        'Set OPENAI_API_KEY or unset LLM_QUERY_INTERPRETER — silently falling back to the rule-only NLMapper is not allowed.',
+      'LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY or OPENAI_API_KEYS to be set. ' +
+        'Set an OpenAI credential or unset LLM_QUERY_INTERPRETER — silently falling back to the rule-only NLMapper is not allowed.',
     );
   }
 
@@ -79,12 +110,12 @@ function buildConfig(parsed: EnvVars) {
     parsed.NODE_ENV === 'production'
     && (
       (parsed.LLM_INJECTION_PROVIDER === 'anthropic' && parsed.ANTHROPIC_API_KEY === undefined) ||
-      (parsed.LLM_INJECTION_PROVIDER === 'openai' && parsed.OPENAI_API_KEY === undefined)
+      (parsed.LLM_INJECTION_PROVIDER === 'openai' && !hasOpenAiApiKey)
     )
     && !parsed.KILL_SWITCH_INJECTION_JUDGE
   ) {
     throw new Error(
-      `Production startup requires a ${parsed.LLM_INJECTION_PROVIDER} API key (Layer 2 prompt-injection defense). ` +
+      `Production startup requires an ${parsed.LLM_INJECTION_PROVIDER} API key (Layer 2 prompt-injection defense). ` +
         'To intentionally disable Layer 2, set KILL_SWITCH_INJECTION_JUDGE=true with explicit approval. ' +
         'Silently disabling Layer 2 by omitting the API key is not allowed.',
     );
@@ -177,7 +208,8 @@ function buildConfig(parsed: EnvVars) {
 
     /** OpenAI API settings (optional chat + optional embeddings override). */
     openai: {
-      apiKey: parsed.OPENAI_API_KEY,
+      apiKey: openAiApiKeys[0],
+      apiKeys: openAiApiKeys,
       baseUrl: parsed.OPENAI_BASE_URL,
       chatModel: parsed.OPENAI_CHAT_MODEL,
       injectionModel: parsed.OPENAI_INJECTION_MODEL ?? parsed.OPENAI_CHAT_MODEL,
@@ -262,11 +294,15 @@ export function loadConfig(options?: {
   readonly loadDotenv?: boolean;
 }): Config {
   if (options?.loadDotenv ?? true) {
-    // Base secrets from `.env`, then `.env.local` overrides (standard local-dev pattern).
+    const explicitProcessEnv = snapshotExplicitProcessEnv();
+    // Base secrets from `.env`, then `.env.local` overrides those file values.
+    // Shell/process env remains highest precedence so `PORT=4000 pnpm run dev`
+    // and `just full` cannot be silently overwritten by a local dotenv file.
     // Previously `.env.local` was loaded first with `override: false`, so a stray empty
     // `DATABASE_URL=` in `.env.local` blocked `DATABASE_URL` from `.env`.
     dotenv.config({ path: '.env', override: false });
     dotenv.config({ path: '.env.local', override: true });
+    restoreExplicitProcessEnv(explicitProcessEnv);
   }
 
   return parseEnv(options?.env ?? process.env);

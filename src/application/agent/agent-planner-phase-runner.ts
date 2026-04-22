@@ -28,6 +28,10 @@ import {
   isSpecificSkuLikeQuery,
 } from './agent-query-execution-contract.js';
 import { parseSpans } from '../../domain/attribute/service/span-parser.js';
+import {
+  isDirectEntityResolution,
+  resolveEntity,
+} from '../../domain/attribute/service/entity-resolver.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import {
   hasComparisonMarkers,
@@ -60,6 +64,9 @@ function renderPlannerDirective(directive: AgentPlannerDirective | undefined): s
   }
   if (directive.kind === 'pending_drinkability_check') {
     return `[DRINKABILITY_PENDING] Before answering, call check_drinking_window for ${directive.entityIds.map((id) => `"${id}"`).join(', ')} using the literal entity_id from the latest search/comparison result.`;
+  }
+  if (directive.kind === 'required_tool') {
+    return `[REQUIRED_TOOL:${directive.tool}] ${directive.instruction}`;
   }
   return `[SEARCH_REQUIRED] ${directive.instruction}`;
 }
@@ -111,7 +118,10 @@ function enforceSearchQueryLanguageAnchor(
     return parsed;
   }
 
-  const enforceActionInput = (input: Record<string, unknown>): Record<string, unknown> => {
+  const enforceActionInput = (
+    input: Record<string, unknown>,
+    options?: { readonly preserveAnchoredPlannerQuery?: boolean },
+  ): Record<string, unknown> => {
     const query = typeof input['query'] === 'string' ? input['query'].trim() : undefined;
     if (query === undefined || query.length === 0) {
       return input;
@@ -120,6 +130,9 @@ function enforceSearchQueryLanguageAnchor(
       return input;
     }
     if (isExactMetadataEntityLookupCandidate(query)) {
+      return input;
+    }
+    if (options?.preserveAnchoredPlannerQuery === true && queryHasAnchorSurface(query)) {
       return input;
     }
     return { ...input, query: originalTrimmed };
@@ -136,11 +149,18 @@ function enforceSearchQueryLanguageAnchor(
   }
 
   if (parsed.actions !== undefined) {
+    const searchActionCount = parsed.actions.filter((action) => action.tool === 'search_wines').length;
     return {
       ...parsed,
       actions: parsed.actions.map((action) =>
         action.tool === 'search_wines'
-          ? { ...action, input: enforceActionInput(action.input) }
+          ? {
+              ...action,
+              input: enforceActionInput(
+                action.input,
+                { preserveAnchoredPlannerQuery: searchActionCount > 1 },
+              ),
+            }
           : action
       ),
     };
@@ -305,7 +325,16 @@ function queryHasAnchorSurface(query: string): boolean {
     return true;
   }
 
+  const directResolution = resolveEntity(query, { preferEntityOverStyle: true });
+  if (isDirectEntityResolution(directResolution)) {
+    return true;
+  }
+
   return parseSpans(query).some((span) => {
+    const resolvedSpan = resolveEntity(span.text, { preferEntityOverStyle: true });
+    if (isDirectEntityResolution(resolvedSpan)) {
+      return true;
+    }
     if (isSpecificSkuLikeQuery(span.text)) {
       return true;
     }
@@ -367,6 +396,43 @@ function resolvePlannerMaxOutputTokens(isLastStep: boolean): number {
     : PLANNER_MAX_OUTPUT_TOKENS_DEFAULT;
 }
 
+function resolveInitialCuratedExactEntitySearch(
+  query: string,
+  state: AgentExecutionState,
+): LlmAction | undefined {
+  const trimmed = query.trim();
+  if (
+    state.steps.length > 0
+    || state.pendingPlannerDirective !== undefined
+    || trimmed.length === 0
+    || !containsHangul(trimmed)
+    || hasComparisonMarkers(trimmed)
+    || hasKoreanMixedQueryMarkers(trimmed)
+  ) {
+    return undefined;
+  }
+
+  const resolved = resolveEntity(trimmed, { preferEntityOverStyle: true });
+  if (
+    !isDirectEntityResolution(resolved)
+    || resolved.entityType !== 'appellation'
+    || resolved.provenance !== 'region_parents'
+  ) {
+    return undefined;
+  }
+
+  return {
+    thought: 'Curated Korean exact-entity alias resolved deterministically; search the canonical entity first.',
+    action: {
+      tool: 'search_wines',
+      input: {
+        query: resolved.canonicalValue,
+        retrieval_mode: 'entity',
+      },
+    },
+  };
+}
+
 export class AgentPlannerPhaseRunner {
   private readonly resultPolicy = new AgentPlannerPhaseResultPolicy();
 
@@ -382,6 +448,22 @@ export class AgentPlannerPhaseRunner {
     abortSignal?: AbortSignal,
   ): Promise<PlannerPhaseResult | null> {
     const stepStartMs = Date.now();
+    if (abortSignal?.aborted) {
+      this.resultPolicy.applyPreflightAbort(state);
+      return null;
+    }
+
+    const deterministicInitialAction = resolveInitialCuratedExactEntitySearch(query, state);
+    if (deterministicInitialAction !== undefined) {
+      return {
+        stepStartMs,
+        parsed: deterministicInitialAction,
+        inputTokens: 0,
+        outputTokens: 0,
+        wasTruncated: false,
+      };
+    }
+
     const messages = buildPlannerLoopMessages(
       query,
       state.steps,
@@ -391,11 +473,6 @@ export class AgentPlannerPhaseRunner {
       effectiveConfig.maxContextChars,
     );
     state.pendingPlannerDirective = undefined;
-
-    if (abortSignal?.aborted) {
-      this.resultPolicy.applyPreflightAbort(state);
-      return null;
-    }
 
     const stepAbortController = new AbortController();
     const propagateAbort = (): void => { stepAbortController.abort(); };

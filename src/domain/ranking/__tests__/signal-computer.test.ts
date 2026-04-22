@@ -69,6 +69,38 @@ describe('SignalComputer SOTA++ signals', () => {
     });
   });
 
+  // ── dual-lane identity substrate ───────────────────────────────────────────
+  describe('dual-lane ranking signals', () => {
+    it('preserves calibrated entity posterior when present', () => {
+      expect(computer.computeEntityPosterior(makeCandidate({ entityPosteriorScore: 0.97 }))).toBeCloseTo(0.97);
+    });
+
+    it('returns undefined entity posterior when the candidate has no identity lane', () => {
+      expect(computer.computeEntityPosterior(makeCandidate())).toBeUndefined();
+    });
+
+    it('returns canonical identity exactness tier with none as the absence sentinel', () => {
+      expect(computer.computeIdentityExactnessTier(makeCandidate({ identityExactnessTier: 'alias_fuzzy' }))).toBe('alias_fuzzy');
+      expect(computer.computeIdentityExactnessTier(makeCandidate())).toBe('none');
+    });
+
+    it('returns the topology-aware lane presence when present', () => {
+      expect(computer.computeLanePresence(makeCandidate({ lanePresence: 'corroborated' }))).toBe('corroborated');
+      expect(computer.computeLanePresence(makeCandidate())).toBeUndefined();
+    });
+
+    it('suppresses identity-lane substrate when topology is general_only', () => {
+      const malformedGeneralOnly = makeCandidate({
+        lanePresence: 'general_only',
+        entityPosteriorScore: 0.99,
+        identityExactnessTier: 'exact',
+      });
+
+      expect(computer.computeEntityPosterior(malformedGeneralOnly)).toBeUndefined();
+      expect(computer.computeIdentityExactnessTier(malformedGeneralOnly)).toBe('none');
+    });
+  });
+
   // ── computeMultilingualScore ─────────────────────────────────────────────────
   describe('computeMultilingualScore', () => {
     it('returns 0 when query has no Hangul regardless of candidate searchTextKo', () => {

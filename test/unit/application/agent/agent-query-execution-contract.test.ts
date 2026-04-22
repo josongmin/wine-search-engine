@@ -30,6 +30,7 @@ describe('agent query execution contract', () => {
     expect(buildAgentQueryExecutionContract('보졸레누보 올해꺼 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘')).toMatchObject({
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
+      requiresGroundedWineSearch: true,
       hasTemporalReleaseSignal: true,
       temporalReleaseQuery: '보졸레누보',
       temporalReleaseConceptQuery: true,
@@ -37,13 +38,23 @@ describe('agent query execution contract', () => {
     expect(buildAgentQueryExecutionContract('보졸레 누보 올해 나왔는지 근거 없으면 모른다고만 해줘')).toMatchObject({
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
+      requiresGroundedWineSearch: true,
       hasTemporalReleaseSignal: true,
       temporalReleaseQuery: '보졸레 누보',
+      temporalReleaseConceptQuery: true,
+    });
+    expect(buildAgentQueryExecutionContract('보졸레누보 나왔냐')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: true,
+      requiresGroundedWineSearch: true,
+      hasTemporalReleaseSignal: true,
+      temporalReleaseQuery: '보졸레누보',
       temporalReleaseConceptQuery: true,
     });
     expect(buildAgentQueryExecutionContract('알마비바 2026 빈티지 나왔는지 확실한 근거 없으면 추정하지 말고 말해줘')).toMatchObject({
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: true,
+      requiresGroundedWineSearch: true,
       exactMetadataEntityQuery: '알마비바 2026 빈티지',
       exactMetadataTargetVintage: 2026,
     });
@@ -85,6 +96,11 @@ describe('agent query execution contract', () => {
     expect(buildAgentQueryExecutionContract('힐링되는 와인 한 잔 추천해줘')).toEqual({
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: false,
+      searchDefaults: {
+        styles: ['approachable'],
+        occasion: ['healing'],
+        beginner_suitability_min: 0.65,
+      },
     });
   });
 
@@ -93,6 +109,17 @@ describe('agent query execution contract', () => {
       requiresDrinkabilityCheck: false,
       hasEntityMetadataSignal: false,
       requiresGroundedWineSearch: true,
+    });
+  });
+
+  it('requires grounded search for Korean exact label spans with region suffix noise', () => {
+    expect(buildAgentQueryExecutionContract('샤또 마고 보르도')).toMatchObject({
+      requiresDrinkabilityCheck: false,
+      hasEntityMetadataSignal: false,
+      requiresGroundedWineSearch: true,
+      searchDefaults: {
+        region: 'Bordeaux',
+      },
     });
   });
 
@@ -136,7 +163,7 @@ describe('agent query execution contract', () => {
 
   it('builds typed search defaults for explicit situational semantics', () => {
     expect(buildAgentQueryExecutionContract('이탈리아 레드 중에 평점 좋고 지금 마실 수 있는 거')).toMatchObject({
-      requiresDrinkabilityCheck: false,
+      requiresDrinkabilityCheck: true,
       hasEntityMetadataSignal: true,
       searchDefaults: {
         drinking_window: 'now',
@@ -151,12 +178,21 @@ describe('agent query execution contract', () => {
     });
     expect(buildAgentQueryExecutionContract('와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로')).toMatchObject({
       searchDefaults: {
-        styles: ['approachable', 'crowd_pleasing'],
         occasion: ['gift'],
         gift_suitability_min: 0.7,
         beginner_suitability_min: 0.65,
+        popularity_min: 0.5,
       },
     });
+    expect(buildAgentQueryExecutionContract('와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로').searchDefaults?.styles)
+      .toEqual(expect.arrayContaining(['approachable', 'crowd_pleasing']));
+    expect(buildAgentQueryExecutionContract('와인 괜찮은 거 하나만')).toMatchObject({
+      searchDefaults: {
+        styles: ['crowd_pleasing'],
+        popularity_min: 0.5,
+      },
+    });
+    expect(buildAgentQueryExecutionContract('와인 ㄱㅊ은거 하나만').searchDefaults).toBeUndefined();
     expect(buildAgentQueryExecutionContract('와인 입문자 선물용, 달달하면서 도수 낮은 거, 예쁜 라벨이면 좋겠다')).toMatchObject({
       searchDefaults: {
         occasion: ['gift'],
@@ -241,7 +277,7 @@ describe('agent query execution contract', () => {
       },
     });
     expect(buildAgentQueryExecutionContract('2015년산 중에 지금 바로 마셔야 하는 거 있어?')).toMatchObject({
-      requiresDrinkabilityCheck: false,
+      requiresDrinkabilityCheck: true,
       hasEntityMetadataSignal: false,
       searchDefaults: {
         drinking_window: 'now',

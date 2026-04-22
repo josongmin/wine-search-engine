@@ -40,8 +40,10 @@
 import type { PolicyDecisionRecord } from '../../query/model/policy-decision-record.js';
 import type { QueryRoute } from '../../query/model/query-route.js';
 import type {
+  ExecutionLaneTrace,
   ExecutionProvenanceClosure,
   ExecutionRetrievalMode,
+  ExecutionTopology,
 } from '../../query/model/engine-execution-contract.js';
 import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
 import type { ConstraintRelation } from '../../query/service/constraint-reasoner.js';
@@ -88,6 +90,7 @@ export interface AuditExtension {
    */
   readonly execution_trace?: {
     readonly effective_route: QueryRoute;
+    readonly execution_topology?: ExecutionTopology | undefined;
     readonly retrieval_mode_source?: 'planner' | 'api_override' | undefined;
     readonly effective_retrieval_mode?: ExecutionRetrievalMode | undefined;
     readonly retrieval_kind?:
@@ -109,6 +112,7 @@ export interface AuditExtension {
       readonly require_constraint_evidence: boolean;
       readonly require_anchor_evidence: boolean;
     } | undefined;
+    readonly lane_trace?: ExecutionLaneTrace | undefined;
     readonly provenance_closure?: ExecutionProvenanceClosure | undefined;
   } | undefined;
 

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+} from '../../../../src/domain/ranking/service/lambdamart-ranker.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 
 function createPlan(
@@ -242,7 +246,8 @@ function createCompareRetrieverResult(entityId: string) {
 function createKnownItemLtrModel() {
   return {
     queryClass: 'known_item' as const,
-    weights: [0, 0, 1, 0, 0, 0, 0, 0],
+    featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+    weights: Array.from({ length: LTR_FEATURE_DIMENSION }, (_, index) => (index === 2 ? 1 : 0)),
     bias: 0,
     trainingExampleCount: 1,
     ndcg5ValidationScore: 1,
@@ -492,35 +497,41 @@ describe('HybridUseCase', () => {
       comparisonIntent: 'compare',
       originalQuery: 'Opus One vs Screaming Eagle',
     });
-    expect(decomposedSearch.execute).toHaveBeenCalledWith(
-      ['Opus One', 'Screaming Eagle'],
-      [
-        expect.objectContaining({
-          rawQuery: 'Opus One',
-          retrievalQuery: 'Opus One',
-          mode: 'entity',
-          retrievalMode: 'auto',
-          evidenceSource: 'entity_default',
-        }),
-        expect.objectContaining({
-          rawQuery: 'Screaming Eagle',
-          retrievalQuery: 'Screaming Eagle',
-          mode: 'entity',
-          retrievalMode: 'auto',
-          evidenceSource: 'entity_default',
-        }),
-      ],
-      'compare',
-      'Opus One vs Screaming Eagle',
-      'req-hybrid-compare',
-      expect.any(Number),
-      {
-        context: { locale: 'en-US', currency: 'USD' },
-        sessionContext: { sessionId: 'session-2', previousEntities: [expect.any(String)] },
-        queryBudget: { maxLatencyMs: 700, maxCandidates: 10, rerankLimit: 5 },
-      },
-      { abortSignal: expect.any(AbortSignal) },
-    );
+    expect(decomposedSearch.execute).toHaveBeenCalledTimes(1);
+    const [
+      subQueries,
+      comparisonLegs,
+      comparisonIntent,
+      originalQuery,
+      requestId,
+      requestStartTimeMs,
+      forwardedRequest,
+      executionOptions,
+    ] = decomposedSearch.execute.mock.calls[0] ?? [];
+    expect(subQueries).toEqual(['Opus One', 'Screaming Eagle']);
+    expect(comparisonLegs).toHaveLength(2);
+    expect(comparisonLegs).toEqual([
+      expect.objectContaining({
+        rawQuery: 'Opus One',
+      }),
+      expect.objectContaining({
+        rawQuery: 'Screaming Eagle',
+        retrievalQuery: 'Screaming Eagle',
+        mode: 'entity',
+        retrievalMode: 'auto',
+        evidenceSource: 'entity_default',
+      }),
+    ]);
+    expect(comparisonIntent).toBe('compare');
+    expect(originalQuery).toBe('Opus One vs Screaming Eagle');
+    expect(requestId).toBe('req-hybrid-compare');
+    expect(requestStartTimeMs).toEqual(expect.any(Number));
+    expect(forwardedRequest).toEqual({
+      context: { locale: 'en-US', currency: 'USD' },
+      sessionContext: { sessionId: 'session-2', previousEntities: [expect.any(String)] },
+      queryBudget: { maxLatencyMs: 700, maxCandidates: 10, rerankLimit: 5 },
+    });
+    expect(executionOptions).toEqual({ abortSignal: expect.any(AbortSignal) });
     expect(queryPlanner.plan).not.toHaveBeenCalled();
   });
 
@@ -708,11 +719,9 @@ describe('HybridUseCase', () => {
     const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
     const responseParams = responseBuilder.build.mock.calls[0]?.[0];
 
-    expect(decisionInput?.resolverResult.topEntity?.entityId).toBe(firstEntityId);
-    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(true);
-    expect(decisionInput?.evidenceSummary?.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(
-      true,
-    );
+    expect(decisionInput?.resolveResult.topEntity?.entityId).toBe(firstEntityId);
+    expect(decisionInput?.identityResolveResult ?? null).toBeNull();
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(false);
     expect(decisionInput?.evidenceItems).toEqual([
       {
         type: 'alpha',

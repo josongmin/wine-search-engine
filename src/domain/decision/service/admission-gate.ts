@@ -51,7 +51,7 @@ export function evaluateAdmissionClosure(
   snapshot: DecisionSnapshot,
 ): AdmissionClosureSummary {
   const admissionContext = deriveAdmissionContext(input);
-  const topEntity = input.resolverResult.topEntity;
+  const topEntity = input.resolveResult.topEntity;
   const identitySealSatisfied =
     topEntity !== undefined &&
     String(topEntity.entityId).trim().length > 0 &&
@@ -143,7 +143,7 @@ export class AdmissionGate {
     // The resolved top entity must be present and its entityId must be a
     // non-empty string.  An absent topEntity while the engine believes the
     // decision is resolved is an internal inconsistency.
-    const topEntity = input.resolverResult.topEntity;
+    const topEntity = input.resolveResult.topEntity;
     if (topEntity === undefined) {
       return this.reject('IDENTITY_REFERENCE_MISSING', input, snapshot);
     }
@@ -218,14 +218,14 @@ export class AdmissionGate {
     // The policy is OPTIONAL: if not provided, this check is skipped entirely
     // (backward compatible).
     if (this.confidenceRefusalPolicy !== undefined) {
-      const C = input.resolverResult.decisionTrace.decisionConfidenceC;
+      const C = input.resolveResult.decisionTrace.decisionConfidenceC;
       if (this.confidenceRefusalPolicy.shouldRefuse(C)) {
         return this.reject('CONFIDENCE_BELOW_THRESHOLD', input, snapshot);
       }
     }
 
     const policyOutcome = decideAdmission({
-      confidence: input.resolverResult.decisionTrace.decisionConfidenceC,
+      confidence: input.resolveResult.decisionTrace.decisionConfidenceC,
       evidenceSufficient: input.provenanceContract.observed.identityEvidenceSatisfied,
       ambiguityHigh: input.ambiguitySummary?.severity === 'high',
       routeHealthy: input.routeHealthy ?? true,

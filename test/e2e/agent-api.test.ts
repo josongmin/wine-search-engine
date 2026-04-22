@@ -14,6 +14,7 @@ import { createServer } from '../../src/interface/http/server.js';
 import { AgentOrchestrator } from '../../src/application/agent/agent-orchestrator.js';
 import type { ChatLlmPort, ChatCompletionRequest, ChatCompletionResult } from '../../src/domain/ai/port/chat-llm.port.js';
 import { postJson } from './helpers/http-transport.js';
+import { AgentResponseSchema, type AgentResponseBody } from '../../src/interface/http/schemas/agent.schema.js';
 
 // ---------------------------------------------------------------------------
 // Scripted LLM mock — returns pre-defined responses in sequence
@@ -65,32 +66,8 @@ function agentPost(server: FastifyInstance, body: unknown) {
   return postJson(server, '/v1/agent', body);
 }
 
-function parseAgentResponse(res: { json(): unknown }) {
-  return res.json() as {
-    query_type: string;
-    answer: string;
-    steps: Array<{
-      index: number;
-      thought: string;
-      // Sequential
-      action?: { tool: string; input: Record<string, unknown> };
-      observation?: string;
-      // Parallel batch
-      actions?: Array<{ tool: string; input: Record<string, unknown> }>;
-      observations?: string[];
-      answer?: string;
-      duration_ms: number;
-      token_count: { input: number; output: number };
-    }>;
-    meta: {
-      request_id: string;
-      total_duration_ms: number;
-      tool_call_count: number;
-      termination_reason: string;
-      fallback_applied: boolean;
-      total_tokens: { input: number; output: number };
-    };
-  };
+function parseAgentResponse(res: { json(): unknown }): AgentResponseBody {
+  return AgentResponseSchema.parse(res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +112,7 @@ describe('POST /v1/agent — Tier 1: Single-shot', () => {
     const body = parseAgentResponse(res);
     expect(body.meta.tool_call_count).toBe(0);
     expect(body.meta.termination_reason).toBe('answer');
-    expect(body.answer).toContain('wine');
+    expect(body.answer).toMatch(/와인|wine/iu);
   });
 });
 

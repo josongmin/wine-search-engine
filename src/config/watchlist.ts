@@ -15,8 +15,15 @@ export function getWatchlistWebhookSecret(config: Config): string {
 export function expectsRedisAtStartup(config: Config): boolean {
   // No Redis URL configured → skip connection attempt entirely.
   if (config.redis.url === undefined) return false;
+  const provider = config.queryEntrySecurity.injectionProvider;
+  const injectionJudgeNeedsRedis =
+    !config.killSwitch.injectionJudge
+    && (
+      (provider === 'openai' && config.openai.apiKeys.length > 0)
+      || (provider === 'anthropic' && config.anthropic.apiKey !== undefined)
+    );
   return !config.killSwitch.queryCache
-    || (config.anthropic.apiKey !== undefined && !config.killSwitch.injectionJudge)
+    || injectionJudgeNeedsRedis
     || isWatchlistEnabled(config);
 }
 

@@ -37,6 +37,13 @@ const STRUCTURED_SET_RETRIEVAL_PREFERENCE_ATTRIBUTES = new Set([
   'producer_prestige',
   'style',
 ]);
+const STRUCTURED_SET_RETRIEVAL_FILTER_ATTRIBUTES = new Set([
+  'appellation',
+  'country',
+  'grape_primary',
+  'region',
+  'wine_type',
+]);
 const STRUCTURED_RECOMMENDATION_DEFAULT_MAX_CANDIDATES = 20;
 const STRUCTURED_RECOMMENDATION_DEFAULT_RERANK_LIMIT = 20;
 
@@ -150,6 +157,15 @@ function requestHasStructuredSetRetrievalPreference(
   );
 }
 
+function requestHasStructuredSetRetrievalFilter(
+  request: SearchRequest,
+): boolean {
+  return (request.filters ?? []).some((constraint) =>
+    constraint.operator === '='
+    && STRUCTURED_SET_RETRIEVAL_FILTER_ATTRIBUTES.has(constraint.attribute),
+  );
+}
+
 function applyStructuredSetRetrievalContext(
   plan: QueryPlanV1,
   compiled: CompiledWineQuery,
@@ -158,7 +174,10 @@ function applyStructuredSetRetrievalContext(
   if (
     compiled.execution.routeSource !== 'planner'
     || compiled.execution.effectiveRoute !== 'entity'
-    || !requestHasStructuredSetRetrievalPreference(request)
+    || (
+      !requestHasStructuredSetRetrievalPreference(request)
+      && !requestHasStructuredSetRetrievalFilter(request)
+    )
   ) {
     return { plan, compiled };
   }

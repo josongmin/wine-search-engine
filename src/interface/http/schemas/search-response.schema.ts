@@ -30,9 +30,11 @@ import {
   MAX_AUDIT_SOURCE_BREAKDOWN_ENTITY_IDS,
   MAX_CLARIFICATION_CANDIDATES,
   MAX_ENTITY_SUMMARY_CERTIFICATIONS,
+  MAX_ENTITY_SUMMARY_FLAVOR_PROFILES,
   MAX_ENTITY_SUMMARY_GRAPES,
   MAX_ENTITY_SUMMARY_OCCASIONS,
   MAX_ENTITY_SUMMARY_PAIRING_TAGS,
+  MAX_ENTITY_SUMMARY_SEMANTIC_SUMMARY_CHARS,
   MAX_ERROR_ENVELOPE_CODE_CHARS,
   MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS,
   MAX_ERROR_ENVELOPE_MESSAGE_CHARS,
@@ -132,6 +134,13 @@ export const EntitySummarySchema = z.object({
   tannin: z.number().finite().min(0).max(1).optional(),
   acidity: z.number().finite().min(0).max(1).optional(),
   sweetness: z.number().finite().min(0).max(1).optional(),
+  finish_length: z.number().finite().min(0).max(1).optional(),
+  flavor_profiles: z
+    .array(z.string().min(1))
+    .max(MAX_ENTITY_SUMMARY_FLAVOR_PROFILES)
+    .optional(),
+  semantic_summary: z.string().min(1).max(MAX_ENTITY_SUMMARY_SEMANTIC_SUMMARY_CHARS).optional(),
+  availability: z.boolean().optional(),
   source_record_refs: z
     .array(SourceRecordRefWireSchema)
     .max(MAX_SOURCE_RECORD_REFS_PER_ENTITY)
@@ -252,6 +261,24 @@ export const EngineDecisionSchema = z.object({
   abstain_reason: z.enum(['no_match', 'low_confidence', 'semantic_conflict', 'insufficient_evidence']).optional(),
   retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
   planner_suggested_mode: z.enum(RETRIEVAL_MODES).optional(),
+  execution_topology: z.enum(['entity_only', 'general_only', 'dual_lane']).optional(),
+  lane_trace: z.object({
+    identity: z.object({
+      participated: z.boolean(),
+      artifact_count: z.number().int().nonnegative(),
+      resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
+    }).strict(),
+    general: z.object({
+      participated: z.boolean(),
+      artifact_count: z.number().int().nonnegative(),
+      resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
+    }).strict(),
+    fused: z.object({
+      participated: z.boolean(),
+      artifact_count: z.number().int().nonnegative(),
+      resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
+    }).strict(),
+  }).strict().optional(),
 }).strict();
 
 export const ParsedConstraintsExternSchema = z.object({
@@ -406,6 +433,24 @@ const ExecutionProvenanceClosureWireSchema = z.object({
     'anchor_evidence',
   ])).max(3),
   satisfied: z.boolean(),
+}).strict();
+
+const ExecutionTopologyWireSchema = z.enum([
+  'entity_only',
+  'general_only',
+  'dual_lane',
+]);
+
+const ExecutionLaneTraceEntryWireSchema = z.object({
+  participated: z.boolean(),
+  artifact_count: z.number().int().nonnegative(),
+  resolve_status: z.enum(['resolved', 'ambiguous', 'failed']).optional(),
+}).strict();
+
+const ExecutionLaneTraceWireSchema = z.object({
+  identity: ExecutionLaneTraceEntryWireSchema,
+  general: ExecutionLaneTraceEntryWireSchema,
+  fused: ExecutionLaneTraceEntryWireSchema,
 }).strict();
 
 const InterpretPolicySchema = z.object({
@@ -679,6 +724,7 @@ export const AuditExtensionSchema = z.object({
    */
   execution_trace: z.object({
     effective_route: z.enum(QUERY_ROUTES),
+    execution_topology: ExecutionTopologyWireSchema.optional(),
     retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
     effective_retrieval_mode: z.string().optional(),
     retrieval_kind: z.enum([
@@ -696,6 +742,7 @@ export const AuditExtensionSchema = z.object({
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),
     provenance_policy: ProvenancePolicyWireSchema.optional(),
+    lane_trace: ExecutionLaneTraceWireSchema.optional(),
     provenance_closure: ExecutionProvenanceClosureWireSchema.optional(),
   }).strict().optional(),
 
@@ -816,6 +863,7 @@ export const SearchResponseMetaSchema = z.object({
     .nullable()
     .optional(),
   execution_contract: z.object({
+    execution_topology: ExecutionTopologyWireSchema.optional(),
     effective_retrieval_mode: z.enum(RETRIEVAL_MODES),
     retrieval_mode_source: z.enum(['planner', 'api_override']),
     planner_suggested_mode: z.enum(RETRIEVAL_MODES),
@@ -837,6 +885,7 @@ export const SearchResponseMetaSchema = z.object({
       enable_precision_rerank: z.boolean(),
     }).strict().optional(),
     provenance_policy: ProvenancePolicyWireSchema.optional(),
+    lane_trace: ExecutionLaneTraceWireSchema.optional(),
     provenance_closure: ExecutionProvenanceClosureWireSchema.optional(),
     admission_closure: z.object({
       required: z.object({

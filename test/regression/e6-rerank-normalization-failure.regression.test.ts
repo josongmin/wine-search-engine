@@ -102,6 +102,9 @@ function makeRankingInput(
 function makeRankerWithReranker(reranker: RerankerPort): Ranker {
   const signalComputer = {
     computeAll: vi.fn().mockReturnValue(NEUTRAL_COMPONENT_SCORES),
+    computeEntityPosterior: vi.fn().mockReturnValue(undefined),
+    computeIdentityExactnessTier: vi.fn().mockReturnValue('none'),
+    computeLanePresence: vi.fn().mockReturnValue(undefined),
   } as unknown as SignalComputer;
 
   const scoreAggregator = {

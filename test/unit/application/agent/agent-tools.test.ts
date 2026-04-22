@@ -70,6 +70,7 @@ describe('executeAgentTool', () => {
         query: '레드 와인 추천',
         exclude_grapes: ['Merlot', 'Cabernet Sauvignon'],
         exclude_regions: ['France'],
+        exclude_wine_types: ['red'],
         max_price_krw: 50_000,
       },
       deps,
@@ -81,8 +82,12 @@ describe('executeAgentTool', () => {
     expect(request?.query).toContain('not Merlot');
     expect(request?.query).toContain('not Cabernet Sauvignon');
     expect(request?.query).toContain('not France');
+    expect(request?.query).toContain('not red');
     expect(request?.query).not.toContain('under 50000 KRW');
     expect(request?.query).not.toContain('not from France');
+    expect(request?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'wine_type', operator: 'exclude', value: 'red' }),
+    ]));
 
     const parsed = extractSearchConstraints(request!.query);
     expect(parsed.maxPriceKrw).toBe(50_000);
@@ -925,6 +930,88 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('PAIRING_STYLE_GUIDANCE: For spicy food');
   });
 
+  it('closes pairing macro evidence when typed objective axes match', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Gruner Veltliner 2022',
+            type: 'wine',
+            wineType: 'white',
+            style: 'medium white',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: ['wine_type', 'style'], unmet: ['pairing'], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'get_food_pairings',
+      {
+        food: '회',
+        color: 'white',
+        styles: ['fresh', 'crisp', 'light'],
+        pairing_tags: ['white_fish'],
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('"matched_constraints":["wine_type","style","pairing"]');
+    expect(result.observation).not.toContain('"unmet_constraints":["pairing"]');
+    expect(result.rawResult).toMatchObject({
+      results: [
+        expect.objectContaining({
+          constraints: expect.objectContaining({
+            matched: ['wine_type', 'style', 'pairing'],
+            unmet: [],
+          }),
+        }),
+      ],
+    });
+  });
+
+  it('closes spicy-food pairing evidence from sweet/off-dry heat-balance axes', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Oremus Tokaji 2021',
+            type: 'wine',
+            wineType: 'dessert',
+            style: 'sweet',
+            sweetness: 0.8,
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: ['wine_type', 'sweetness', 'style'], unmet: ['pairing'], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'get_food_pairings',
+      {
+        food: '매운 떡볶이',
+        styles: ['off_dry', 'sweet'],
+        pairing_tags: ['spicy_food'],
+      },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).toContain('"matched_constraints":["wine_type","sweetness","style","pairing"]');
+    expect(result.observation).not.toContain('"unmet_constraints":["pairing"]');
+  });
+
   it('rejects placeholder food values for get_food_pairings', async () => {
     const result = await executeAgentTool(
       'get_food_pairings',
@@ -1387,7 +1474,7 @@ describe('executeAgentTool', () => {
     expect(request?.filters).toBeUndefined();
   });
 
-  it('suppresses duplicated structured entity clauses when typed filters already cover recommendation anchors', async () => {
+  it('preserves structured geography anchors while suppressing duplicated soft clauses', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),
     );
@@ -1404,9 +1491,36 @@ describe('executeAgentTool', () => {
     );
 
     const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
-    expect(request?.query).toBe('wine');
-    expect(request?.query).not.toContain('bordeaux');
+    expect(request?.query).toBe('Bordeaux wine');
     expect(request?.query).not.toContain('135000원 이하');
+  });
+
+  it('promotes search_wines entity mode to hybrid when structured set filters are present', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '보졸레누보',
+        retrieval_mode: 'entity',
+        wine_type: 'red',
+        country: 'France',
+        region: 'Beaujolais',
+        vintage_min: 2025,
+        vintage_max: 2025,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1) ?? [];
+    expect(request?.options?.mode).toBe('hybrid');
+    expect(request?.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'region', operator: '=', value: 'Beaujolais' }),
+      expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'red' }),
+    ]));
   });
 
   it('retains wine type semantics when typed geography filters suppress duplicated lexical anchors', async () => {
@@ -1845,7 +1959,7 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('GROUNDING_JSON:');
   });
 
-  it('marks resolved exact-name collisions as unconfirmed when labels violate the exact lookup contract', async () => {
+  it('accepts producer-level identity evidence for curated exact-label lookups', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([
         {
@@ -1853,6 +1967,91 @@ describe('executeAgentTool', () => {
             entityId: 'wine-1',
             canonicalLabel: '2012 Château Pétrus Saute-Loup Reserve de la Famille Pomerol',
             producer: 'Château Pétrus',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '페트뤼스', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('EXACT_LOOKUP_CONFIRMED');
+    expect(result.observation).toContain('target=Pétrus');
+    expect(result.observation).toContain('producer: Château Pétrus');
+  });
+
+  it('withholds multiple producer-level matches for curated exact lookups without a canonical label hit', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'ornellaia-1994',
+            canonicalLabel: '1994 Ornellaia Bolgheri Superiore',
+            producer: 'Ornellaia',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: {
+            entityId: 'ornellaia-serre-nuove-2010',
+            canonicalLabel: '2010 Ornellaia Le Serre Nuove',
+            producer: 'Ornellaia',
+            type: 'wine',
+          },
+          relevanceScore: 0.88,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '오르넬라이아', retrieval_mode: 'entity' }, deps, 'req-123', {
+      toolCallId: 'tool-req-123-s0',
+    });
+    expect(result.observation).toContain('EXACT_LOOKUP_NEGATIVE');
+    expect(result.observation).toContain('Exact-label contract target=Ornellaia');
+    expect(result.observation).toContain('observed_count=2');
+    expect(result.observation).not.toContain('1994 Ornellaia Bolgheri Superiore');
+    expect(result.observation).not.toContain('2010 Ornellaia Le Serre Nuove');
+    expect(result.evidenceFrame?.structuredOutput).toMatchObject({
+      kind: 'search_result_set',
+      resultSet: [],
+      resultCount: 0,
+    });
+  });
+
+  it('marks resolved exact-name collisions as unconfirmed when no identity field matches the exact target', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: '2012 Château Pétrus Saute-Loup Reserve de la Famille Pomerol',
+            producer: 'Saute-Loup',
             type: 'wine',
           },
           relevanceScore: 0.9,
@@ -1906,6 +2105,101 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('Pétrus 2016');
   });
 
+  it('accepts repeated grand-vin producer labels with vintage and classification metadata', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'chateau-margaux-2022',
+            canonicalLabel: '2022 Château Margaux Château Margaux (Premier Grand Cru Classé)',
+            producer: 'Château Margaux',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '샤토 마고', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('EXACT_LOOKUP_CONFIRMED');
+    expect(result.observation).toContain('target=Château Margaux');
+    expect(result.observation).toContain('Do not restate query suffix-noise');
+    expect(result.observation).toContain('2022 Château Margaux Château Margaux');
+  });
+
+  it('blocks broad price-positioning claims from single exact-lookup prices', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'chateau-margaux-2022',
+            canonicalLabel: '2022 Château Margaux Château Margaux (Premier Grand Cru Classé)',
+            producer: 'Château Margaux',
+            type: 'wine',
+            priceRange: '$638',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '샤또마고 ㄹㅇ 비싼편임?', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).toContain('PRICE_POSITIONING_INSUFFICIENT_CONTEXT');
+    expect(result.observation).toContain('broader price positioning is not confirmed');
+    expect(result.observation).toContain('"price_usd":638');
+  });
+
+  it('accepts Korean Opus One typo aliases as the same exact-label contract target', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'opus-one-2018',
+            canonicalLabel: 'Opus One 2018',
+            producer: 'Opus One Winery',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        retrievalMode: 'entity_lookup',
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '오퍼스원', retrieval_mode: 'entity' }, deps, 'req-123');
+    expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).toContain('Opus One 2018');
+  });
+
   it('marks curated brand-family surfaces as non-exact even when search returns concrete wines', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([
@@ -1931,11 +2225,18 @@ describe('executeAgentTool', () => {
       }),
     );
 
-    const result = await executeAgentTool('search_wines', { query: '모엣' }, deps, 'req-123');
+    const result = await executeAgentTool('search_wines', { query: '모엣' }, deps, 'req-123', {
+      toolCallId: 'tool-req-123-s0',
+    });
     expect(result.observation).toContain('RESOLUTION_NOT_CONFIRMED');
     expect(result.observation).toContain('brand family, not a single cuvee');
     expect(result.observation).toContain('do not state any candidate as the confirmed exact match');
     expect(result.observation).not.toContain('Moet & Chandon Brut Imperial');
+    expect(result.evidenceFrame?.structuredOutput).toMatchObject({
+      kind: 'search_result_set',
+      resultSet: [],
+      resultCount: 0,
+    });
   });
 
   it('marks non-exact intent around a known label as unconfirmed exact lookup evidence', async () => {
@@ -2076,6 +2377,43 @@ describe('executeAgentTool', () => {
 
     expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
     expect(result.observation).not.toContain('Ask a targeted clarification');
+    expect(result.observation).toContain('GROUNDING_JSON:');
+  });
+
+  it('does not apply exact-match uncertainty guard to single-result recommendations', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Candidate A',
+            type: 'wine',
+          },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ], {
+        resultType: 'single_entity',
+        engineDecision: {
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+        },
+      }),
+    );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      { query: '와인 ㄱㅊ은거 하나만', limit: 1, retrieval_mode: 'auto' },
+      deps,
+      'req-123',
+    );
+
+    expect(result.observation).not.toContain('RESOLUTION_NOT_CONFIRMED');
+    expect(result.observation).not.toContain('EXACT_LOOKUP_NEGATIVE');
+    expect(result.observation).toContain('Candidate A');
     expect(result.observation).toContain('GROUNDING_JSON:');
   });
 

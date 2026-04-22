@@ -5,6 +5,14 @@ import { tmpdir } from 'node:os';
 import { buildRuntimeSupportServices } from '../container-runtime-support.js';
 import { parseEnv } from '../env.js';
 import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+} from '../../domain/ranking/service/lambdamart-ranker.js';
+
+function makeWeights(seed: number): number[] {
+  return Array.from({ length: LTR_FEATURE_DIMENSION }, (_, index) => Number(((seed + index) / 100).toFixed(2)));
+}
 
 describe('buildRuntimeSupportServices', () => {
   beforeEach(() => {
@@ -39,15 +47,31 @@ describe('buildRuntimeSupportServices', () => {
     expect(names).not.toContain('redis');
   });
 
-  it('initializes injection judge with in-memory cache when Redis is unavailable', async () => {
+  it('initializes default OpenAI injection judge with in-memory cache when Redis is unavailable', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
+      OPENAI_API_KEY: 'sk-test',
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.injectionJudge).toBeDefined();
+    const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
+    expect(names).toContain('openai-injection-classifier');
+  });
+
+  it('initializes Anthropic injection judge only when selected explicitly', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LLM_INJECTION_PROVIDER: 'anthropic',
       ANTHROPIC_API_KEY: 'sk-test',
     });
 
     const services = await buildRuntimeSupportServices(config, {});
 
     expect(services.injectionJudge).toBeDefined();
+    const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
+    expect(names).toContain('anthropic-injection-classifier');
   });
 
   it('initializes OpenAI injection judge when OpenAI provider is selected', async () => {
@@ -64,6 +88,21 @@ describe('buildRuntimeSupportServices', () => {
     const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
     expect(names).toContain('openai-injection-classifier');
   });
+
+  it('initializes OpenAI injection judge from OPENAI_API_KEYS when legacy key is absent', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LLM_INJECTION_PROVIDER: 'openai',
+      OPENAI_API_KEYS: 'sk-a,sk-b',
+      OPENAI_CHAT_MODEL: 'gpt-5.4-mini',
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.injectionJudge).toBeDefined();
+    expect(config.openai.apiKey).toBe('sk-a');
+  });
+
 
   it('creates a deterministic drinking-window predictor when no ONNX override is configured', async () => {
     const config = parseEnv({
@@ -119,8 +158,9 @@ describe('buildRuntimeSupportServices', () => {
     const artifact = {
       queryClassModels: {
         red_wine: {
-          weights: [0.2, 0.1, -0.05, 0.2, 0.15, 0.03, 0.08, 0.27],
+          weights: makeWeights(10),
           bias: 0.12,
+          featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
           trainingExampleCount: 33,
           ndcg5ValidationScore: 0.72,
           trainedAt: '2026-04-01T00:00:00.000Z',
@@ -195,8 +235,9 @@ describe('buildRuntimeSupportServices', () => {
       queryClassModels: {
         red_wine: {
           queryClass: 'ignored',
-          weights: [0.11, 0.22, 0.33, 0.44, 0.55, 0.66, 0.77, 0.88],
+          weights: makeWeights(30),
           bias: 0.2,
+          featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
           trainingExampleCount: 12,
           ndcg5ValidationScore: 0.7,
           trainedAt: '2026-04-01T00:00:00Z',

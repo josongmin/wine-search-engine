@@ -41,6 +41,10 @@ type RankedResultAttributeProjection = Pick<
   | 'occasion'
   | 'priceBand'
   | 'priceUsd'
+  | 'finishLength'
+  | 'flavorProfiles'
+  | 'semanticSummary'
+  | 'availability'
   | 'sourceRecordRefs'
 >;
 
@@ -75,6 +79,10 @@ interface RankedResultAttributeSource {
   readonly occasion?: readonly string[] | undefined;
   readonly priceBand?: string | undefined;
   readonly priceUsd?: number | undefined;
+  readonly finishLength?: number | undefined;
+  readonly flavorProfiles?: readonly string[] | undefined;
+  readonly semanticSummary?: string | undefined;
+  readonly availability?: boolean | undefined;
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 }
 
@@ -145,6 +153,10 @@ function buildRankedResultProjection(
     ...(source.occasion !== undefined ? { occasion: source.occasion } : {}),
     ...(source.priceBand !== undefined ? { priceBand: source.priceBand } : {}),
     ...(source.priceUsd !== undefined ? { priceUsd: source.priceUsd } : {}),
+    ...(source.finishLength !== undefined ? { finishLength: source.finishLength } : {}),
+    ...(source.flavorProfiles !== undefined ? { flavorProfiles: source.flavorProfiles } : {}),
+    ...(source.semanticSummary !== undefined ? { semanticSummary: source.semanticSummary } : {}),
+    ...(source.availability !== undefined ? { availability: source.availability } : {}),
     ...(source.sourceRecordRefs !== undefined && source.sourceRecordRefs.length > 0
       ? { sourceRecordRefs: source.sourceRecordRefs }
       : {}),
@@ -192,6 +204,10 @@ export function projectHybridCandidateToRankedResultAttributes(
     occasion: candidate.occasion,
     priceBand: candidate.priceBand,
     priceUsd: candidate.priceUsd,
+    finishLength: candidate.finishLength,
+    flavorProfiles: candidate.flavorProfiles,
+    semanticSummary: candidate.semanticSummary,
+    availability: candidate.availability,
     sourceRecordRefs: candidate.sourceRecordRefs,
   });
 }

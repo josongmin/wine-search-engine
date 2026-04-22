@@ -123,6 +123,24 @@ describe('PgAliasMatcher', () => {
     expect(pool.queries).toHaveLength(1);
   });
 
+  it('does not admit uppercase acronym aliases for lexical latin phonetic projections', async () => {
+    const pool = new MockPool([
+      [
+        {
+          entity_id: 'entity-paolo-scavino',
+          surface_form: 'PS',
+          normalized_value: 'ps',
+          confidence: 0.6,
+        },
+      ],
+      [],
+    ]);
+    const matcher = new PgAliasMatcher(pool as never);
+
+    await expect(matcher.findMatches('opus')).resolves.toEqual([]);
+    expect(pool.queries).toHaveLength(1);
+  });
+
   it('falls back to compact char-level fuzzy recall for near-miss noisy aliases', async () => {
     const pool = new MockPool([
       [],

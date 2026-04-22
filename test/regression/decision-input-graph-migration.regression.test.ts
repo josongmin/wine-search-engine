@@ -97,14 +97,25 @@ describe('buildSearchDecisionInput — trivial graph parity with flat', () => {
 
   it('all matched: graph path === flat path (matched + unmet)', () => {
     const ranked = [makeRanked(['wine_type', 'region'], [])];
-    const flat = buildSearchDecisionInput(
-      plan, resolveResult, ranked, 'hybrid', undefined,
-      { provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false } },
-    );
-    const withGraph = buildSearchDecisionInput(
-      plan, resolveResult, ranked, 'hybrid', undefined,
-      { provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false }, constraintGraph: graph },
-    );
+    const flat = buildSearchDecisionInput({
+      plan,
+      resolveResult,
+      rankedResults: ranked,
+      effectiveRoute: 'hybrid',
+      executionContext: {
+        provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+      },
+    });
+    const withGraph = buildSearchDecisionInput({
+      plan,
+      resolveResult,
+      rankedResults: ranked,
+      effectiveRoute: 'hybrid',
+      executionContext: {
+        provenancePolicy: { requireIdentitySeal: false, requireConstraintEvidence: false, requireAnchorEvidence: false },
+        constraintGraph: graph,
+      },
+    });
     expect([...(withGraph.evidenceSummary.constraintEvidence?.matchedRequiredAttributes ?? [])].sort()).toEqual(
       [...(flat.evidenceSummary.constraintEvidence?.matchedRequiredAttributes ?? [])].sort(),
     );
@@ -115,10 +126,14 @@ describe('buildSearchDecisionInput — trivial graph parity with flat', () => {
 
   it('partial match: graph === flat (one region slot unmet)', () => {
     const ranked = [makeRanked(['wine_type'], ['region'])];
-    const flat = buildSearchDecisionInput(plan, resolveResult, ranked, 'hybrid');
-    const withGraph = buildSearchDecisionInput(
-      plan, resolveResult, ranked, 'hybrid', undefined, { constraintGraph: graph },
-    );
+    const flat = buildSearchDecisionInput({ plan, resolveResult, rankedResults: ranked, effectiveRoute: 'hybrid' });
+    const withGraph = buildSearchDecisionInput({
+      plan,
+      resolveResult,
+      rankedResults: ranked,
+      effectiveRoute: 'hybrid',
+      executionContext: { constraintGraph: graph },
+    });
     expect([...(withGraph.evidenceSummary.constraintEvidence?.matchedRequiredAttributes ?? [])].sort()).toEqual(
       [...(flat.evidenceSummary.constraintEvidence?.matchedRequiredAttributes ?? [])].sort(),
     );
@@ -128,10 +143,14 @@ describe('buildSearchDecisionInput — trivial graph parity with flat', () => {
   });
 
   it('no rankedResults: graph path falls back to flat (no graph computation without a topResult)', () => {
-    const flat = buildSearchDecisionInput(plan, resolveResult, [], 'hybrid');
-    const withGraph = buildSearchDecisionInput(
-      plan, resolveResult, [], 'hybrid', undefined, { constraintGraph: graph },
-    );
+    const flat = buildSearchDecisionInput({ plan, resolveResult, rankedResults: [], effectiveRoute: 'hybrid' });
+    const withGraph = buildSearchDecisionInput({
+      plan,
+      resolveResult,
+      rankedResults: [],
+      effectiveRoute: 'hybrid',
+      executionContext: { constraintGraph: graph },
+    });
     // Both return `constraintEvidence: undefined` when topResult is absent.
     expect(withGraph.evidenceSummary.constraintEvidence).toEqual(flat.evidenceSummary.constraintEvidence);
   });
@@ -155,10 +174,13 @@ describe('buildSearchDecisionInput — graph-aware XOR/OR semantics', () => {
       globalBudgets: {},
     };
     const ranked = [makeRanked(['wine_type_red'], [])];
-    const input = buildSearchDecisionInput(
-      plan, resolveResult, ranked, 'hybrid', undefined,
-      { constraintGraph: graph },
-    );
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult,
+      rankedResults: ranked,
+      effectiveRoute: 'hybrid',
+      executionContext: { constraintGraph: graph },
+    });
     expect([...(input.evidenceSummary.constraintEvidence?.matchedRequiredAttributes ?? [])]).toEqual(['wine_type_red']);
     expect(input.evidenceSummary.constraintEvidence?.unmetRequiredAttributes ?? []).toEqual([]);
   });
@@ -177,10 +199,13 @@ describe('buildSearchDecisionInput — graph-aware XOR/OR semantics', () => {
       globalBudgets: {},
     };
     const ranked = [makeRanked(['region_bordeaux'], [])];
-    const input = buildSearchDecisionInput(
-      plan, resolveResult, ranked, 'hybrid', undefined,
-      { constraintGraph: graph },
-    );
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult,
+      rankedResults: ranked,
+      effectiveRoute: 'hybrid',
+      executionContext: { constraintGraph: graph },
+    });
     expect(input.evidenceSummary.constraintEvidence?.matchedRequiredAttributes).toEqual(['region_bordeaux']);
     expect(input.evidenceSummary.constraintEvidence?.unmetRequiredAttributes ?? []).toEqual([]);
   });

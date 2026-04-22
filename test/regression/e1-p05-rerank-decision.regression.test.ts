@@ -5,7 +5,7 @@
  *
  *  1. no_model_for_query_class — ltrModels Map has no entry for the queryClass
  *  2. empty_candidates         — ltrModels present but candidate list is empty
- *  3. feature_dimension_mismatch — model weight vector length ≠ 8 (LTR_MODEL_FEATURE_DIMENSION)
+ *  3. feature_dimension_mismatch — model weight vector length ≠ 14 (LTR_MODEL_FEATURE_DIMENSION)
  *  4. gate_blocked             — gate evaluation returns shouldRerank=false
  *  5. applied                  — LTR ran normally; applied=true, modelId set
  *
@@ -17,7 +17,11 @@ import { Ranker } from '../../src/domain/ranking/service/ranker.js';
 import { SignalComputer } from '../../src/domain/ranking/service/signal-computer.js';
 import { ScoreAggregator } from '../../src/domain/ranking/service/score-aggregator.js';
 import { EvidenceMapper } from '../../src/domain/ranking/service/evidence-mapper.js';
-import type { QueryClassWeights } from '../../src/domain/ranking/service/lambdamart-ranker.js';
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+  type QueryClassWeights,
+} from '../../src/domain/ranking/service/lambdamart-ranker.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../src/domain/ranking/model/ranking-input.js';
 import type { CompiledWineQuery } from '../../src/domain/query/model/compiled-wine-query.js';
@@ -105,11 +109,12 @@ function makeRankingInput(
   };
 }
 
-/** Builds a valid QueryClassWeights model with the correct 8-feature weight vector. */
+/** Builds a valid QueryClassWeights model with the current 14-feature weight vector. */
 function makeValidLtrModel(queryClass: string): QueryClassWeights {
   return {
     queryClass,
-    weights: Array(8).fill(0.125) as number[],
+    featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
+    weights: Array(LTR_FEATURE_DIMENSION).fill(1 / LTR_FEATURE_DIMENSION) as number[],
     bias: 0,
     trainingExampleCount: 100,
     ndcg5ValidationScore: 0.8,
@@ -121,6 +126,9 @@ function makeValidLtrModel(queryClass: string): QueryClassWeights {
 function makeRanker(ltrModels?: ReadonlyMap<string, QueryClassWeights>): Ranker {
   const signalComputer = {
     computeAll: vi.fn().mockReturnValue(NEUTRAL_COMPONENT_SCORES),
+    computeEntityPosterior: vi.fn().mockReturnValue(undefined),
+    computeIdentityExactnessTier: vi.fn().mockReturnValue('none'),
+    computeLanePresence: vi.fn().mockReturnValue(undefined),
   } as unknown as SignalComputer;
 
   const scoreAggregator = {
@@ -186,11 +194,12 @@ describe('E1-P0-5 RerankDecision: empty_candidates', () => {
 // ─── Test 3: feature_dimension_mismatch ───────────────────────────────────────
 
 describe('E1-P0-5 RerankDecision: feature_dimension_mismatch', () => {
-  it('returns decision=feature_dimension_mismatch when model weights length ≠ 8', async () => {
+  it('returns decision=feature_dimension_mismatch when model weights length ≠ 14', async () => {
     const queryClass = 'semantic_preference';
     // Wrong dimension: 5 weights instead of 8
     const badModel: QueryClassWeights = {
       queryClass,
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
       weights: [0.2, 0.2, 0.2, 0.2, 0.2],
       bias: 0,
       trainingExampleCount: 10,

@@ -134,6 +134,9 @@ export class AmbiguityClassifier {
   private detectAliasCollision(candidates: readonly ResolverCandidate[]): boolean {
     const aliasToEntities = new Map<string, Set<string>>();
     for (const candidate of candidates.slice(0, AMBIGUITY_ALIAS_COLLISION_SCAN_K)) {
+      if (!this.hasIdentityExactSupport(candidate)) {
+        continue;
+      }
       for (const aliasMatch of candidate.aliasMatches) {
         const entities = aliasToEntities.get(aliasMatch.aliasValue) ?? new Set<string>();
         entities.add(candidate.entityId);
@@ -146,6 +149,10 @@ export class AmbiguityClassifier {
       }
     }
     return false;
+  }
+
+  private hasIdentityExactSupport(candidate: ResolverCandidate): boolean {
+    return candidate.sourceSignals.canonicalExactMatch > 0 || candidate.sourceSignals.aliasExactMatch > 0;
   }
 
   /**

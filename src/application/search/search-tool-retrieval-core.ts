@@ -97,6 +97,16 @@ function hasStructuredGeographyFilter(input: SearchToolRetrievalCoreInput): bool
     || input.appellation !== undefined;
 }
 
+function collectStructuredRetrievalAnchors(input: SearchToolRetrievalCoreInput): readonly string[] {
+  return [
+    input.appellation,
+    input.region,
+    input.country,
+    input.grape_primary,
+    wineTypeToSemanticTerm(input.wine_type),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
 function shouldSuppressStructuredEntityLexicalDuplication(
   input: SearchToolRetrievalCoreInput,
   options: {
@@ -503,7 +513,10 @@ export function buildSearchToolRetrievalCoreQuery(
 
   if (semanticTerms.length === 0) {
     if (suppressStructuredEntityLexicalDuplication) {
-      return 'wine';
+      const structuredAnchors = collectStructuredRetrievalAnchors(input);
+      return structuredAnchors.length > 0
+        ? [...structuredAnchors, 'wine'].join(' ')
+        : 'wine';
     }
     return normalizedQuery;
   }

@@ -35,6 +35,12 @@ export class UnexpectedDecomposedResponseError extends DomainError {
 export class DecomposedSearchUseCase {
   constructor(private readonly searchUseCase: SearchExecutorPort) {}
 
+  private resolveLegExecutionMode(
+    leg: ComparisonDecompositionLegs[number],
+  ): 'auto' | 'entity' | 'hybrid' | 'mixed' {
+    return leg.mode === 'entity' ? 'entity' : leg.retrievalMode;
+  }
+
   private normalizeConceptValue(value: string | undefined): string | undefined {
     const normalized = value?.normalize('NFKC').trim().toLowerCase();
     return normalized !== undefined && normalized.length > 0 ? normalized : undefined;
@@ -70,6 +76,15 @@ export class DecomposedSearchUseCase {
       .filter((part): part is string => part !== undefined);
   }
 
+  private resultMatchesAppellationProjection(
+    result: SearchResponseV1['results'][number],
+    canonicalConcept: string,
+  ): boolean {
+    return this.geographyContains(result.entity.appellation, canonicalConcept)
+      || this.geographyContains(result.entity.producer, canonicalConcept)
+      || this.geographyContains(result.entity.canonicalLabel, canonicalConcept);
+  }
+
   private resultMatchesConcept(
     result: SearchResponseV1['results'][number],
     conceptEntityType: NonNullable<ComparisonEntity['conceptEntityType']>,
@@ -87,7 +102,7 @@ export class DecomposedSearchUseCase {
         return this.splitRegionPath(result.entity.region).includes(canonical)
           || this.geographyContains(result.entity.region, canonicalConcept);
       case 'appellation':
-        return this.geographyContains(result.entity.appellation, canonicalConcept);
+        return this.resultMatchesAppellationProjection(result, canonicalConcept);
       case 'grape_primary':
         return (result.entity.grapes ?? [])
           .map((grape) => this.normalizeConceptValue(grape))
@@ -127,7 +142,7 @@ export class DecomposedSearchUseCase {
         if (target === undefined) {
           return false;
         }
-        const includes = this.geographyContains(entity.appellation, target);
+        const includes = this.resultMatchesAppellationProjection(result, target);
         return constraint.operator === 'exclude' ? !includes : includes;
       }
       case 'grape_primary': {
@@ -313,7 +328,7 @@ export class DecomposedSearchUseCase {
           options: {
             explain: parentContext?.explain ?? false,
             clarification: false,
-            mode: comparisonLegs[0].retrievalMode,
+            mode: this.resolveLegExecutionMode(comparisonLegs[0]),
           },
         },
         `${requestId}-a`,
@@ -344,7 +359,7 @@ export class DecomposedSearchUseCase {
           options: {
             explain: parentContext?.explain ?? false,
             clarification: false,
-            mode: comparisonLegs[1].retrievalMode,
+            mode: this.resolveLegExecutionMode(comparisonLegs[1]),
           },
         },
         `${requestId}-b`,

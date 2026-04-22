@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   extractLTRFeatures,
   extractExtendedLTRFeatures,
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_NAME_ORDER,
+  LTR_FEATURE_SCHEMA_HASH,
+  rankingFeaturesToVector,
   type LTRScoreComponents,
 } from '../service/ltr-feature-extractor.js';
 
@@ -12,6 +16,9 @@ describe('extractLTRFeatures', () => {
       popularity: 0.6,
       attributeAlignment: 0.7,
       preferenceAlignment: 0.45,
+      entityPosterior: 0.91,
+      identityExactnessTier: 'alias_exact',
+      lanePresence: 'entity_only',
     };
 
     const features = extractLTRFeatures(scores);
@@ -30,6 +37,12 @@ describe('extractLTRFeatures', () => {
     // signal-computer explicit 0 for non-Korean queries. The prior 0.5 sentinel caused
     // train-serve skew: non-Korean production queries emit 0, but training data saw 0.5.
     expect(features.multilingualScore).toBe(0.0);
+    expect(features.entityPosteriorScore).toBe(0.91);
+    expect(features.identityExactnessTierScore).toBeCloseTo(2 / 3, 10);
+    expect(features.laneCorroborationScore).toBe(0.0);
+    expect(features.laneDisagreementScore).toBe(1.0);
+    expect(features.entityOnlyIndicator).toBe(1.0);
+    expect(features.generalOnlyIndicator).toBe(0.0);
   });
 
   it('handles zero scores without producing NaN', () => {
@@ -65,7 +78,7 @@ describe('extractLTRFeatures', () => {
     expect(features.classMatchScore).toBe(1.0);
   });
 
-  it('returns exactly 8 feature fields', () => {
+  it('returns the full dual-lane-aware feature schema in canonical order', () => {
     const scores: LTRScoreComponents = {
       semantic: 0.5,
       popularity: 0.5,
@@ -76,15 +89,45 @@ describe('extractLTRFeatures', () => {
     const features = extractLTRFeatures(scores);
     const keys = Object.keys(features);
 
-    expect(keys).toHaveLength(8);
-    expect(keys).toContain('bm25Score');
-    expect(keys).toContain('semanticScore');
-    expect(keys).toContain('popularityScore');
-    expect(keys).toContain('recencyScore');
-    expect(keys).toContain('classMatchScore');
-    expect(keys).toContain('attributeMatchScore');
-    expect(keys).toContain('diversityScore');
-    expect(keys).toContain('multilingualScore');
+    expect(keys).toHaveLength(LTR_FEATURE_DIMENSION);
+    expect(keys).toEqual([...LTR_FEATURE_NAME_ORDER]);
+  });
+
+  it('vectorizes features with the extractor-defined order', () => {
+    const features = extractLTRFeatures({
+      semantic: 0.8,
+      popularity: 0.7,
+      attributeAlignment: 0.6,
+      preferenceAlignment: 0.5,
+      entityPosterior: 0.95,
+      identityExactnessTier: 'exact',
+      lanePresence: 'corroborated',
+    });
+
+    const vector = rankingFeaturesToVector(features);
+
+    expect(vector).toHaveLength(LTR_FEATURE_DIMENSION);
+    expect(vector).toEqual([
+      0.0,
+      0.8,
+      0.7,
+      0.0,
+      0.5,
+      0.6,
+      0.0,
+      0.0,
+      0.95,
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+    ]);
+  });
+
+  it('publishes a deterministic schema hash for the canonical feature order', () => {
+    expect(LTR_FEATURE_SCHEMA_HASH).toHaveLength(16);
+    expect(LTR_FEATURE_SCHEMA_HASH).toMatch(/^[0-9a-f]{16}$/u);
   });
 
   it('inference and training produce identical features from same scores', () => {
@@ -109,7 +152,7 @@ describe('extractLTRFeatures', () => {
 // criticScore와 producerPrestige의 default 처리가 비대칭 (0.0 vs 0.5).
 // 잘못된 default는 train-serve skew를 유발한다.
 describe('extractExtendedLTRFeatures (BUG-13)', () => {
-  it('includes all 8 base features plus criticScoreFeature, producerPrestigeFeature, and 4 target-type 1-hot fields', () => {
+  it('includes all base dual-lane features plus criticScoreFeature, producerPrestigeFeature, and 4 target-type 1-hot fields', () => {
     const scores: LTRScoreComponents = {
       semantic: 0.8,
       popularity: 0.5,
@@ -119,8 +162,7 @@ describe('extractExtendedLTRFeatures (BUG-13)', () => {
       producerPrestige: 0.7,
     };
     const features = extractExtendedLTRFeatures(scores);
-    // 8 base + criticScoreFeature + producerPrestigeFeature + 4 target-type 1-hot = 14
-    expect(Object.keys(features)).toHaveLength(14);
+    expect(Object.keys(features)).toHaveLength(LTR_FEATURE_DIMENSION + 6);
     expect(features.criticScoreFeature).toBe(0.9);
     expect(features.producerPrestigeFeature).toBe(0.7);
     // No targetType supplied → all 1-hot zeros

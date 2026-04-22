@@ -19,6 +19,23 @@ describe('buildHealthRouteOptions', () => {
     expect(health.readiness?.watchlist_runtime).toBeUndefined();
   });
 
+  it('marks redis as required for the default OpenAI injection judge cache when configured', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      REDIS_URL: 'redis://localhost:6379',
+      KILL_SWITCH_QUERY_CACHE: 'true',
+      KILL_SWITCH_INJECTION_JUDGE: 'false',
+      OPENAI_API_KEY: 'sk-test',
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    expect(config.queryEntrySecurity.injectionProvider).toBe('openai');
+    expect(health.readiness?.redis).toBeDefined();
+    expect(health.readiness?.redis?.required).toBe(true);
+    expect(health.readiness?.watchlist_runtime).toBeUndefined();
+  });
+
   it('marks redis as required when watchlist delivery is enabled', () => {
     const config = parseEnv({
       NODE_ENV: 'test',

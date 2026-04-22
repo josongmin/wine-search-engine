@@ -3,7 +3,9 @@ import type { CanonicalEntityId, DecisionSnapshot } from '../../shared/types/ind
 import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type { AdmissionClosureSummary } from '../../decision/model/decision-input.js';
 import type {
+  ExecutionLaneTrace,
   ExecutionBudget,
+  ExecutionTopology,
   MissingProvenanceObligation,
   ExecutionProvenanceClosure,
   ExecutionRetrievalMode,
@@ -58,6 +60,7 @@ export interface CounterfactualReject {
 }
 
 export interface ExecutionContractMeta {
+  readonly executionTopology?: ExecutionTopology | undefined;
   readonly effectiveRetrievalMode: ExecutionRetrievalMode;
   readonly retrievalModeSource: 'planner' | 'api_override';
   readonly plannerSuggestedMode: ExecutionRetrievalMode;
@@ -71,6 +74,7 @@ export interface ExecutionContractMeta {
   readonly usedCompiledExecution: boolean;
   readonly budget?: ExecutionBudget | undefined;
   readonly provenancePolicy?: ProvenancePolicy | undefined;
+  readonly laneTrace?: ExecutionLaneTrace | undefined;
   readonly provenanceClosure?: ExecutionProvenanceClosure | undefined;
   readonly admissionClosure?: AdmissionClosureSummary | undefined;
 }

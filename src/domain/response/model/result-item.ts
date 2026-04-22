@@ -83,6 +83,18 @@ export interface EntitySummary {
   /** Sweetness (1–5 ordinal scale). */
   readonly sweetness?: number | undefined;
 
+  /** Finish length ([0,1] normalized). */
+  readonly finishLength?: number | undefined;
+
+  /** Flavor descriptor tags (e.g. "blackcurrant", "cedar", "tobacco"). */
+  readonly flavorProfiles?: readonly string[] | undefined;
+
+  /** LLM-authored semantic summary for display. */
+  readonly semanticSummary?: string | undefined;
+
+  /** Catalog availability flag (true = currently in stock). */
+  readonly availability?: boolean | undefined;
+
   /** Vintage year, when applicable. */
   readonly vintage?: number | undefined;
 

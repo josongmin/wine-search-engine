@@ -58,6 +58,8 @@ const KOREAN_TRANSLITERATION_RULES: readonly [RegExp, string][] = [
   [/모엣\s*샹동/gu, 'moet chandon'],
   [/오퍼스\s*원/gu, 'opus one'],
   [/오푸스\s*원/gu, 'opus one'],
+  [/오퍼스/gu, 'opus one'],
+  [/오푸스/gu, 'opus one'],
   [/로마네\s*콩티/gu, 'romanee conti'],
   [/로마네\s*콩티\s*드/gu, 'romanee conti'],
 ] as const;

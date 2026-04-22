@@ -9,6 +9,11 @@ import { AnthropicChatLlm } from '../../src/infrastructure/ai/anthropic-chat-llm
 import type { ChatLlmPort } from '../../src/domain/ai/port/chat-llm.port.js';
 import type { AgentBenchmarkScenario } from '../../test/benchmark/agent/scenario.js';
 import { judgeAnswerN, type JudgeResult } from '../../test/benchmark/agent/judge.js';
+import {
+  AgentRequestSchema,
+  AgentResponseSchema,
+  type AgentResponseBody,
+} from '../../src/interface/http/schemas/agent.schema.js';
 
 export interface AgentFixtureExpectedTool {
   readonly tool: string;
@@ -157,19 +162,124 @@ export function normalizeAgentFixtureCase(raw: unknown): AgentFixtureCase {
   };
 }
 
-interface AgentStepLike {
-  readonly action?: { readonly tool: string; readonly input: Record<string, unknown> } | undefined;
-  readonly actions?: readonly { readonly tool: string; readonly input: Record<string, unknown> }[] | undefined;
+type AgentStepLike = AgentResponseBody['steps'][number];
+
+export class AgentApiContractError extends Error {
+  constructor(
+    readonly phase: 'request' | 'response',
+    message: string,
+  ) {
+    super(`${phase} contract violation: ${message}`);
+    this.name = 'AgentApiContractError';
+  }
 }
 
-interface AgentResponseLike {
-  readonly answer: string;
-  readonly steps: readonly AgentStepLike[];
-  readonly meta: {
-    readonly total_duration_ms: number;
-    readonly tool_call_count: number;
-    readonly termination_reason: string;
-  };
+export class AgentApiTransportError extends Error {
+  constructor(message: string) {
+    super(`HTTP transport failure: ${message}`);
+    this.name = 'AgentApiTransportError';
+  }
+}
+
+export class AgentApiPreflightError extends Error {
+  constructor(
+    readonly kind: 'unreachable' | 'route_not_registered' | 'request_contract_not_enforced' | 'unexpected_status',
+    message: string,
+  ) {
+    super(`Agent HTTP preflight failed: ${message}`);
+    this.name = 'AgentApiPreflightError';
+  }
+}
+
+export type AgentApiFailureKind =
+  | 'http_transport_failure'
+  | 'request_contract_violation'
+  | 'response_contract_violation'
+  | 'unexpected_failure';
+
+export interface AgentApiFailureClassification {
+  readonly kind: AgentApiFailureKind;
+  readonly message: string;
+}
+
+function formatZodIssues(issues: readonly { readonly path: readonly (string | number)[]; readonly message: string }[]): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>';
+      return `${path}: ${issue.message}`;
+    })
+    .join('; ');
+}
+
+function isAgentApiContractError(err: unknown): err is AgentApiContractError {
+  return err instanceof AgentApiContractError;
+}
+
+function normalizeAgentApiUrl(apiUrl: string): string {
+  return apiUrl.replace(/^http:\/\/localhost(?=[:/]|$)/u, 'http://127.0.0.1').replace(/\/+$/u, '');
+}
+
+export function classifyAgentApiFailure(err: unknown): AgentApiFailureClassification {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof AgentApiContractError) {
+    return {
+      kind: err.phase === 'request' ? 'request_contract_violation' : 'response_contract_violation',
+      message,
+    };
+  }
+  if (err instanceof AgentApiTransportError) {
+    return { kind: 'http_transport_failure', message };
+  }
+  return { kind: 'unexpected_failure', message };
+}
+
+export async function assertAgentHttpEntrypointReady(
+  apiUrl: string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const normalizedApiUrl = normalizeAgentApiUrl(apiUrl);
+  let response: Response;
+  try {
+    response = await fetch(`${normalizedApiUrl}/v1/agent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        connection: 'close',
+      },
+      body: JSON.stringify({ query: '' }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new AgentApiPreflightError(
+      'unreachable',
+      `could not reach ${normalizedApiUrl}/v1/agent (${message}). Set SEARCH_API_URL or --api-url to the agent-enabled API process.`,
+    );
+  }
+
+  const body = await response.text().catch(() => '(unreadable)');
+  if (response.status === 400) {
+    return;
+  }
+
+  if (response.status === 404) {
+    throw new AgentApiPreflightError(
+      'route_not_registered',
+      `POST /v1/agent returned 404 from ${normalizedApiUrl}. This target is not running the production agent HTTP entrypoint. Start the API with AGENT_ENABLED=true and OPENAI_API_KEY/OPENAI_API_KEYS, or pass --api-url/SEARCH_API_URL for the agent-enabled server. Body: ${body.slice(0, 400)}`,
+    );
+  }
+
+  if (response.ok) {
+    throw new AgentApiPreflightError(
+      'request_contract_not_enforced',
+      `POST /v1/agent accepted an invalid empty query with HTTP ${response.status}. The target is not enforcing AgentRequestSchema. Body: ${body.slice(0, 400)}`,
+    );
+  }
+
+  throw new AgentApiPreflightError(
+    'unexpected_status',
+    `POST /v1/agent returned HTTP ${response.status} from ${normalizedApiUrl}; expected HTTP 400 for the invalid-contract probe. Body: ${body.slice(0, 400)}`,
+  );
 }
 
 export async function callAgentApi(
@@ -177,8 +287,17 @@ export async function callAgentApi(
   query: string,
   maxSteps?: number,
   timeoutMs = 90_000,
-): Promise<AgentResponseLike> {
-  const normalizedApiUrl = apiUrl.replace(/^http:\/\/localhost(?=[:/]|$)/u, 'http://127.0.0.1');
+): Promise<AgentResponseBody> {
+  const normalizedApiUrl = normalizeAgentApiUrl(apiUrl);
+  const requestBody = {
+    query,
+    ...(maxSteps !== undefined ? { options: { max_steps: maxSteps } } : {}),
+  };
+  const parsedRequest = AgentRequestSchema.safeParse(requestBody);
+  if (!parsedRequest.success) {
+    throw new AgentApiContractError('request', formatZodIssues(parsedRequest.error.issues));
+  }
+
   const maxTransportAttempts = 5;
   let lastTransportError: unknown;
   for (let attempt = 1; attempt <= maxTransportAttempts; attempt++) {
@@ -189,21 +308,33 @@ export async function callAgentApi(
           'content-type': 'application/json',
           connection: 'close',
         },
-        body: JSON.stringify({
-          query,
-          ...(maxSteps !== undefined ? { options: { max_steps: maxSteps } } : {}),
-        }),
+        body: JSON.stringify(parsedRequest.data),
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) {
         const body = await response.text().catch(() => '(unreadable)');
-        throw new Error(`HTTP ${response.status} from /v1/agent: ${body.slice(0, 400)}`);
+        throw new AgentApiTransportError(`HTTP ${response.status} from /v1/agent: ${body.slice(0, 400)}`);
       }
 
-      const payload = await response.json() as AgentResponseLike;
+      let rawPayload: unknown;
+      try {
+        rawPayload = await response.json();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new AgentApiContractError('response', `invalid JSON from /v1/agent: ${message}`);
+      }
+
+      const parsedResponse = AgentResponseSchema.safeParse(rawPayload);
+      if (!parsedResponse.success) {
+        throw new AgentApiContractError('response', formatZodIssues(parsedResponse.error.issues));
+      }
+
       lastTransportError = undefined;
-      return payload;
+      return parsedResponse.data;
     } catch (err) {
+      if (isAgentApiContractError(err)) {
+        throw err;
+      }
       lastTransportError = err;
       if (attempt < maxTransportAttempts) {
         await delay(400 * attempt);
@@ -212,7 +343,7 @@ export async function callAgentApi(
   }
 
   const message = lastTransportError instanceof Error ? lastTransportError.message : String(lastTransportError);
-  throw new Error(`Fetch failed for /v1/agent query "${query.slice(0, 120)}": ${message}`);
+  throw new AgentApiTransportError(`fetch failed for /v1/agent query "${query.slice(0, 120)}": ${message}`);
 }
 
 export function collectToolCalls(steps: readonly AgentStepLike[]): readonly {
@@ -291,6 +422,7 @@ export function evaluateAnswerPatterns(
 export interface JudgeLlmConfig {
   readonly openai: {
     readonly apiKey: string | undefined;
+    readonly apiKeys?: readonly string[] | undefined;
     readonly baseUrl: string;
     readonly chatModel: string;
     readonly httpTimeoutMs: number;
@@ -313,12 +445,18 @@ export function createJudgeLlmFromConfig(config: JudgeLlmConfig, modelId?: strin
     });
   }
 
-  if (config.openai.apiKey === undefined) {
-    throw new Error('OPENAI_API_KEY required for OpenAI fixture judge models.');
+  const openAiApiKeys =
+    config.openai.apiKeys !== undefined && config.openai.apiKeys.length > 0
+      ? config.openai.apiKeys
+      : config.openai.apiKey !== undefined
+        ? [config.openai.apiKey]
+        : [];
+  if (openAiApiKeys.length === 0) {
+    throw new Error('OPENAI_API_KEY or OPENAI_API_KEYS required for OpenAI fixture judge models.');
   }
 
   return new OpenAiChatLlm({
-    apiKey: config.openai.apiKey,
+    apiKeys: openAiApiKeys,
     baseUrl: config.openai.baseUrl,
     defaultModel: judgeModelId,
     httpTimeoutMs: config.openai.httpTimeoutMs,

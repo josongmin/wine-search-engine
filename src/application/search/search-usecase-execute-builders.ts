@@ -10,6 +10,7 @@ import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-
 import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 
 const ENTROPY_SNAPSHOT_REASON_FRACTION_DIGITS = 4;
 const ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS = 3;
@@ -18,6 +19,65 @@ function deriveDecisionEvidenceItems(
   rankedResults?: readonly RankedResult[],
 ): readonly EvidenceItem[] {
   return rankedResults?.[0]?.evidenceItems ?? [];
+}
+
+function extractAmbiguousShortFormToken(plan: QueryPlanV1): string | undefined {
+  if (plan.queryClass !== 'ambiguous_short_form') {
+    return undefined;
+  }
+  const tokens = buildNormalizedQueryViews(plan.normalizedQuery).punctuationStripped
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length !== 1) {
+    return undefined;
+  }
+  return tokens[0];
+}
+
+function rankedResultMatchesAmbiguousShortFormToken(
+  result: RankedResult,
+  token: string,
+): boolean {
+  const candidateSurfaces = [
+    result.canonicalLabel,
+    ...(typeof result.producer === 'string' ? [result.producer] : []),
+  ];
+
+  return candidateSurfaces.some((surface) => (
+    buildNormalizedQueryViews(surface).punctuationStripped
+      .split(/\s+/)
+      .filter(Boolean)
+      .includes(token)
+  ));
+}
+
+function filterAmbiguousShortFormRankedResults(
+  plan: QueryPlanV1,
+  rankedResults: readonly RankedResult[],
+): readonly RankedResult[] {
+  const token = extractAmbiguousShortFormToken(plan);
+  if (token === undefined) {
+    return rankedResults;
+  }
+
+  const filtered = rankedResults.filter((result) => rankedResultMatchesAmbiguousShortFormToken(result, token));
+  return filtered.length > 0 ? filtered : rankedResults;
+}
+
+function shouldFailClosedIdentityClarification(
+  plan: QueryPlanV1,
+  abstainDecision: TypedAbstainDecision,
+): boolean {
+  if (abstainDecision.reason !== 'low_confidence') {
+    return false;
+  }
+  if (plan.queryClass !== 'ambiguous_short_form') {
+    return false;
+  }
+  if (plan.admission_context?.requires_identity_seal === true) {
+    return true;
+  }
+  return plan.intent === 'entity_exact' || plan.intent === 'entity_fuzzy';
 }
 
 function buildStructuredClarifyPayload(
@@ -32,10 +92,12 @@ function buildStructuredClarifyPayload(
     return abstainDecision.clarifyPayload;
   }
 
-  const topLabels = rankedResults
-    .slice(0, 3)
-    .map((result) => result.canonicalLabel)
-    .filter((label) => label.trim().length > 0);
+  const topLabels = shouldFailClosedIdentityClarification(plan, abstainDecision)
+    ? []
+    : rankedResults
+      .slice(0, 3)
+      .map((result) => result.canonicalLabel)
+      .filter((label) => label.trim().length > 0);
   const topAmbiguousEntityHint = plan.expansions.ambiguousEntityHints?.[0];
   const compilerClarifyQuestion = plan.expansions.ambiguityIntentInterpretation?.branchSelections
     .map((selection) => selection.clarifyQuestion)
@@ -202,6 +264,10 @@ export function buildEntropyAbstainResponseParams(options: {
     rankedResults,
     retrievalProvenanceSlices,
   } = options;
+  const presentationRankedResults = filterAmbiguousShortFormRankedResults(plan, rankedResults);
+  const presentationEntityIds = new Set(presentationRankedResults.map((result) => result.entityId));
+  const presentationResults = results.filter((result) => presentationEntityIds.has(result.entity.entityId));
+  const failClosedIdentityClarification = shouldFailClosedIdentityClarification(plan, abstainDecision);
 
   const decisionOutput: DecisionOutput = {
     decisionStatus: 'ambiguous',
@@ -218,7 +284,7 @@ export function buildEntropyAbstainResponseParams(options: {
       availability_score: 0,
       uncertainty_penalty: 0,
     },
-    evidenceItems: deriveDecisionEvidenceItems(rankedResults),
+    evidenceItems: deriveDecisionEvidenceItems(presentationRankedResults),
     decisionTraceRef: buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot,
@@ -263,19 +329,21 @@ export function buildEntropyAbstainResponseParams(options: {
     compiled,
     decisionOutput,
     abstainReason: abstainDecision.reason,
-    results,
+    results: failClosedIdentityClarification ? [] : presentationResults,
     clarification: {
       reason: `Query is ambiguous (entropy=${
         Number.isFinite(entropy)
           ? entropy.toFixed(ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS)
           : 'unknown'
       }). Please refine your search.`,
-      structuredPayload: buildStructuredClarifyPayload(plan, abstainDecision, rankedResults),
-      candidates: rankedResults.slice(0, 3).map((r) => ({
-        entityId: r.entityId,
-        label: r.canonicalLabel,
-        distinguishingFeatures: [],
-      })),
+      structuredPayload: buildStructuredClarifyPayload(plan, abstainDecision, presentationRankedResults),
+      candidates: failClosedIdentityClarification
+        ? []
+        : presentationRankedResults.slice(0, 3).map((r) => ({
+          entityId: r.entityId,
+          label: r.canonicalLabel,
+          distinguishingFeatures: [],
+        })),
       suggestionType: 'disambiguation',
     },
     requestId,

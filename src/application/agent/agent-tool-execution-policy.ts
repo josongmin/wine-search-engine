@@ -77,22 +77,39 @@ interface ResolveParallelBatchInput {
   readonly queryExecutionContract: AgentQueryExecutionContract;
 }
 
+interface NormalizeSearchExecutionOptions {
+  readonly preservePlannerQuery?: boolean;
+}
+
+function omitRecordKeys(
+  input: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const omitted = new Set(keys);
+  return Object.fromEntries(
+    Object.entries(input).filter(([key]) => !omitted.has(key)),
+  );
+}
+
 function normalizeSearchInput(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
+  options?: NormalizeSearchExecutionOptions,
 ): Record<string, unknown> {
   let next: Record<string, unknown> = { ...input };
-  if (
-    typeof queryExecutionContract.nonExactEntityLookupQuery === 'string'
-    && queryExecutionContract.nonExactEntityLookupQuery.trim().length > 0
-  ) {
-    next['query'] = queryExecutionContract.nonExactEntityLookupQuery.trim();
-  } else if (
-    queryExecutionContract.hasEntityMetadataSignal
-    && typeof queryExecutionContract.exactMetadataEntityQuery === 'string'
-    && queryExecutionContract.exactMetadataEntityQuery.trim().length > 0
-  ) {
-    next['query'] = queryExecutionContract.exactMetadataEntityQuery.trim();
+  if (options?.preservePlannerQuery !== true) {
+    if (
+      typeof queryExecutionContract.nonExactEntityLookupQuery === 'string'
+      && queryExecutionContract.nonExactEntityLookupQuery.trim().length > 0
+    ) {
+      next['query'] = queryExecutionContract.nonExactEntityLookupQuery.trim();
+    } else if (
+      queryExecutionContract.hasEntityMetadataSignal
+      && typeof queryExecutionContract.exactMetadataEntityQuery === 'string'
+      && queryExecutionContract.exactMetadataEntityQuery.trim().length > 0
+    ) {
+      next['query'] = queryExecutionContract.exactMetadataEntityQuery.trim();
+    }
   }
   let query = typeof next['query'] === 'string' ? next['query'] : undefined;
 
@@ -197,6 +214,51 @@ function normalizeExactLookupAliasSurface(value: string): string {
     .replace(/[^a-z0-9가-힣]+/gu, '');
 }
 
+function isAsciiSafeExactLookupSearchSurface(value: string): boolean {
+  return /^[\x20-\x7E]+$/u.test(value) && !/[&]/u.test(value);
+}
+
+function canonicalValueToAsciiExactLookupSearchSurface(canonicalValue: string): string | undefined {
+  if (canonicalValue.includes('&')) {
+    return undefined;
+  }
+  const surface = canonicalValue
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .normalize('NFKC')
+    .replace(/&/gu, 'and');
+  return surface.length > 0 && isAsciiSafeExactLookupSearchSurface(surface)
+    ? surface
+    : undefined;
+}
+
+function chooseCuratedExactLookupSearchSurface(canonicalValue: string): string {
+  const canonicalSurface = canonicalValueToAsciiExactLookupSearchSurface(canonicalValue);
+  if (canonicalSurface !== undefined) {
+    return canonicalSurface;
+  }
+
+  const aliases = CURATED_ENTITY_ALIAS_CATALOG
+    .filter((alias) =>
+      alias.mappedAttribute === 'appellation'
+      && alias.resolutionMode === 'direct'
+      && alias.canonicalValue === canonicalValue,
+    )
+    .map((alias) => alias.surface.trim())
+    .filter((surface) => surface.length > 0)
+    .sort((a, b) => {
+      const aSafe = isAsciiSafeExactLookupSearchSurface(a) ? 1 : 0;
+      const bSafe = isAsciiSafeExactLookupSearchSurface(b) ? 1 : 0;
+      if (aSafe !== bSafe) return bSafe - aSafe;
+      const aLatin = /[a-z]/iu.test(a) ? 1 : 0;
+      const bLatin = /[a-z]/iu.test(b) ? 1 : 0;
+      if (aLatin !== bLatin) return bLatin - aLatin;
+      return a.length - b.length;
+    });
+  return aliases[0] ?? canonicalValue;
+}
+
 function extractCuratedExactLookupAnchor(query: string): string | undefined {
   const normalizedQuery = normalizeExactLookupAliasSurface(query);
   if (normalizedQuery.length === 0) {
@@ -209,6 +271,7 @@ function extractCuratedExactLookupAnchor(query: string): string | undefined {
     )
     .map((alias) => ({
       surface: alias.surface,
+      canonicalValue: alias.canonicalValue,
       normalizedSurface: normalizeExactLookupAliasSurface(alias.surface),
     }))
     .filter((alias) =>
@@ -216,7 +279,8 @@ function extractCuratedExactLookupAnchor(query: string): string | undefined {
       && normalizedQuery.includes(alias.normalizedSurface),
     )
     .sort((a, b) => b.normalizedSurface.length - a.normalizedSurface.length);
-  return matches[0]?.surface;
+  const match = matches[0];
+  return match === undefined ? undefined : chooseCuratedExactLookupSearchSurface(match.canonicalValue);
 }
 
 function normalizeExactLookupEntitySearchInput(
@@ -240,11 +304,10 @@ function normalizeExactLookupEntitySearchInput(
   if (anchor === undefined) {
     return input;
   }
-  const normalized: Record<string, unknown> = { ...input, query: anchor };
-  for (const key of EXACT_LOOKUP_OVERCONSTRAINT_KEYS) {
-    delete normalized[key];
-  }
-  return normalized;
+  return omitRecordKeys(
+    { ...input, query: anchor },
+    EXACT_LOOKUP_OVERCONSTRAINT_KEYS,
+  );
 }
 
 function shouldForceEntityRetrievalMode(
@@ -473,6 +536,16 @@ function applySearchDefaults(
   return next;
 }
 
+function applySemanticResultLimit(
+  input: Record<string, unknown>,
+  queryExecutionContract: AgentQueryExecutionContract,
+): Record<string, unknown> {
+  if (queryExecutionContract.resultLimit === undefined || input['limit'] !== undefined) {
+    return input;
+  }
+  return { ...input, limit: queryExecutionContract.resultLimit };
+}
+
 function normalizeTopLevelRegionAppellation(input: Record<string, unknown>): Record<string, unknown> {
   const appellation = input['appellation'];
   if (typeof appellation !== 'string') {
@@ -499,6 +572,16 @@ function normalizeNegatedWineTypeSearchAnchor(input: Record<string, unknown>): R
   if (typeof query !== 'string' || typeof wineType !== 'string') {
     return input;
   }
+  const existingExclusions = collectStringArray(input['exclude_wine_types']);
+  const hasRedNegation =
+    /(?:레드\s*(?:말고|빼고|제외하고)|red\s*(?:excluded?|except|not|no)|not\s+red|no\s+red)/iu.test(query);
+  const hasWhiteNegation =
+    /(?:화이트\s*(?:말고|빼고|제외하고)|white\s*(?:excluded?|except|not|no)|not\s+white|no\s+white)/iu.test(query);
+  const excludeWineTypes = wineType === 'white' && hasRedNegation
+    ? uniqueStrings([...existingExclusions, 'red'])
+    : wineType === 'red' && hasWhiteNegation
+      ? uniqueStrings([...existingExclusions, 'white'])
+      : existingExclusions;
   const normalizedQuery = wineType === 'white'
     ? query
         .replace(/(?:레드\s*(?:말고|빼고|제외하고)|red\s*(?:excluded?|except|not|no))/giu, ' ')
@@ -509,7 +592,10 @@ function normalizeNegatedWineTypeSearchAnchor(input: Record<string, unknown>): R
           .replace(/(?:not\s+white|no\s+white)/giu, ' ')
       : query;
   const compact = normalizedQuery.replace(/\s+/gu, ' ').trim();
-  return compact.length > 0 && compact !== query ? { ...input, query: compact } : input;
+  const withExclusions = excludeWineTypes.length > 0
+    ? { ...input, exclude_wine_types: excludeWineTypes }
+    : input;
+  return compact.length > 0 && compact !== query ? { ...withExclusions, query: compact } : withExclusions;
 }
 
 function normalizeAccessibleOnlineTastingSearch(input: Record<string, unknown>): Record<string, unknown> {
@@ -587,7 +673,7 @@ function normalizeSupportedSituationOverrides(
     'tannin_max',
   ] as const) {
     if (defaults[key] === undefined) {
-      delete next[key];
+      next = omitRecordKeys(next, [key]);
       continue;
     }
     next[key] = defaults[key];
@@ -659,7 +745,7 @@ function buildSlotQueryAnchor(query: string, wineType: string): string {
       : query;
   const compact = withoutOppositeColor
     .replace(/(?:반반|both\s+colors?)/giu, ' ')
-    .replace(/[\/,+&]+/gu, ' ')
+    .replace(/[/,+&]+/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
   return compact.length > 0 ? compact : query;
@@ -831,8 +917,6 @@ function resolveFoodPairingToolCall(
     tool: 'get_food_pairings',
     input: {
       food,
-      ...(input['max_price_krw'] !== undefined ? { max_price_krw: input['max_price_krw'] } : {}),
-      ...(input['max_price'] !== undefined ? { max_price: input['max_price'] } : {}),
       ...(color !== undefined ? { color } : {}),
       ...(styles.length > 0 ? { styles } : {}),
       ...(pairingTags !== undefined && pairingTags.length > 0 ? { pairing_tags: [...pairingTags] } : {}),
@@ -937,8 +1021,9 @@ function buildBudgetPairingExpansion(
 function normalizeSearchExecutionInput(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
+  options?: NormalizeSearchExecutionOptions,
 ): Record<string, unknown> {
-  const normalizedInput = normalizeSearchInput(input, queryExecutionContract);
+  const normalizedInput = normalizeSearchInput(input, queryExecutionContract, options);
   const withoutVerificationFields = stripSearchDrinkabilityVerificationFields(
     normalizedInput,
     queryExecutionContract,
@@ -951,7 +1036,11 @@ function normalizeSearchExecutionInput(
     withoutDrinkabilityQueryObjective,
     queryExecutionContract,
   );
-  const withNormalizedAppellation = normalizeTopLevelRegionAppellation(withSearchDefaults);
+  const withSemanticLimit = applySemanticResultLimit(
+    withSearchDefaults,
+    queryExecutionContract,
+  );
+  const withNormalizedAppellation = normalizeTopLevelRegionAppellation(withSemanticLimit);
   const withoutNegatedWineTypeNoise = normalizeNegatedWineTypeSearchAnchor(withNormalizedAppellation);
   const withCellaringSemanticsNormalized = normalizeCellaringSearchSemantics(withoutNegatedWineTypeNoise);
   const withSupportedSituationOverrides = normalizeSupportedSituationOverrides(
@@ -1015,16 +1104,19 @@ function canonicalizeCompareSideQuery(rawQuery: unknown): string | undefined {
 
   const tokens = trimmed.split(/\s+/u);
   let changed = false;
-  const rewritten = tokens.map((token) => {
+  const rewrittenTokens: string[] = [];
+  for (const token of tokens) {
     const romanized = Transliterator.romanizeWineTerm(token);
     if (romanized === undefined || romanized.trim().length === 0) {
-      return token;
+      rewrittenTokens.push(token);
+      continue;
     }
     changed = true;
-    return romanized.trim();
-  }).join(' ').trim();
+    rewrittenTokens.push(romanized.trim());
+  }
+  const rewritten = rewrittenTokens.join(' ').trim();
 
-  return changed && rewritten.length > 0 ? rewritten : undefined;
+  return changed ? rewritten : undefined;
 }
 
 function inferExactSideVintage(query: unknown): number | undefined {
@@ -1093,7 +1185,7 @@ function stripOverconstrainedExactCompareSide(
     return input;
   }
 
-  const next = { ...input };
+  const keysToStrip: string[] = [];
   for (const key of [
     side === 'a' ? 'country_a' : 'country_b',
     side === 'a' ? 'region_a' : 'region_b',
@@ -1101,15 +1193,15 @@ function stripOverconstrainedExactCompareSide(
     side === 'a' ? 'grape_primary_a' : 'grape_primary_b',
     side === 'a' ? 'wine_type_a' : 'wine_type_b',
   ] as const) {
-    const value = next[key];
+    const value = input[key];
     if (typeof value !== 'string') {
       continue;
     }
     if (!sideFieldLexicallyMentioned(query, value)) {
-      delete next[key];
+      keysToStrip.push(key);
     }
   }
-  return next;
+  return keysToStrip.length > 0 ? omitRecordKeys(input, keysToStrip) : input;
 }
 
 function normalizeCompareExecutionInput(
@@ -1206,7 +1298,11 @@ export class AgentToolExecutionPolicy {
       if (call.tool === 'search_wines') {
         return {
           ...call,
-          input: normalizeSearchExecutionInput(call.input, input.queryExecutionContract),
+          input: normalizeSearchExecutionInput(
+            call.input,
+            input.queryExecutionContract,
+            { preservePlannerQuery: typeof call.input['query'] === 'string' && call.input['query'].trim().length > 0 },
+          ),
         };
       }
       return call;

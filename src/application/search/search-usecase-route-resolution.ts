@@ -1,7 +1,10 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
-import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
+import type {
+  ExecutionRetrievalMode,
+  ExecutionTopology,
+} from '../../domain/query/model/engine-execution-contract.js';
 import type { SearchRequest } from './search-request.dto.js';
 
 /**
@@ -26,6 +29,44 @@ interface SearchRouteResolutionContext {
   readonly plannerSuggestedMode: ExecutionRetrievalMode;
 }
 
+function resolveApiOverrideMode(
+  request: SearchRequest,
+): 'entity' | 'hybrid' | 'mixed' | undefined {
+  if (request.retrieval_mode !== undefined && request.retrieval_mode !== 'auto') {
+    return request.retrieval_mode;
+  }
+
+  const optionMode = request.options?.mode;
+  if (optionMode !== undefined && optionMode !== 'auto') {
+    return optionMode;
+  }
+
+  return undefined;
+}
+
+export function resolveExecutionTopologyFromRequestSurface(
+  compiled: CompiledWineQuery,
+  request: SearchRequest,
+): ExecutionTopology {
+  const apiOverrideMode = resolveApiOverrideMode(request);
+  if (apiOverrideMode !== undefined) {
+    return apiOverrideMode === 'entity' ? 'entity_only' : 'general_only';
+  }
+
+  switch (compiled.execution.effectiveRoute) {
+    case 'entity':
+      return 'entity_only';
+    case 'hybrid':
+      return 'dual_lane';
+    case 'mixed':
+      return 'general_only';
+    default: {
+      const _exhaustive: never = compiled.execution.effectiveRoute;
+      throw new Error(`Unhandled effective route for execution topology: ${String(_exhaustive)}`);
+    }
+  }
+}
+
 /**
  * Combines top-level `retrieval_mode` override with compiled execution contract and request options.
  *
@@ -39,10 +80,7 @@ export function buildSearchRouteResolutionContext(
   request: SearchRequest,
   compiled: CompiledWineQuery,
 ): SearchRouteResolutionContext {
-  const apiOverrideMode =
-    request.retrieval_mode !== undefined && request.retrieval_mode !== 'auto'
-      ? request.retrieval_mode
-      : undefined;
+  const apiOverrideMode = resolveApiOverrideMode(request);
   const effectiveRoute =
     apiOverrideMode ?? resolveRouteFromPlanAndOptionMode(plan, compiled, request.options?.mode);
   const retrievalModeSource: 'planner' | 'api_override' =

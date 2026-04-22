@@ -94,6 +94,48 @@ describe('Unicode and special character queries', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it.each(['오푸스ㅇ', '오퍼스ㅇ'])(
+    'incomplete Hangul IME entity prefix resolves through POST /v1/search (%s)',
+    async (query) => {
+      const res = await post('/v1/search', { query });
+      expect(res.statusCode).toBe(200);
+
+      const body = parseSearchResponse(res);
+      expect(body.engine_decision.decision_status).toBe('resolved');
+      expect(body.results[0]?.entity.entity_id).toBe('opus-one-2018');
+    },
+  );
+
+  it('latin short-form Opus does not leak uppercase acronym alias collisions through POST /v1/search', async () => {
+    const res = await post('/v1/search', {
+      query: 'opus',
+      options: { mode: 'auto', clarification: true },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const body = parseSearchResponse(res);
+    expect(body.results.length).toBeGreaterThan(0);
+    expect(body.results[0]?.entity.canonical_label.toLowerCase()).toContain('opus');
+    expect(
+      body.results.every((result) => {
+        const surfaces = [
+          result.entity.canonical_label,
+          result.entity.producer,
+        ].filter((value): value is string => typeof value === 'string');
+        return surfaces.some((value) => value.toLowerCase().includes('opus'));
+      }),
+    ).toBe(true);
+    expect(body.results.some((result) => result.match.matched_alias === 'PS')).toBe(false);
+    expect(
+      body.clarification?.candidates.some((candidate) => /paolo scavino|poderi sanguineto|psagot|podere sapaio/i.test(candidate.label))
+        ?? false,
+    ).toBe(false);
+    expect(
+      body.clarification?.candidates.every((candidate) => candidate.label.toLowerCase().includes('opus'))
+        ?? true,
+    ).toBe(true);
+  });
+
   it('combining diacritical characters (NFD form) — NFC normalization handles it', async () => {
     const nfdQuery = 'Chateau\u0300 Margaux';
     const res = await post('/v1/search', { query: nfdQuery });

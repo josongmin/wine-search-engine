@@ -33,8 +33,9 @@ describe('agent system prompt contract', () => {
   it('keeps generic mood wording out of the drinkability contract and routes gift intent through learned facets', () => {
     const prompt = buildSystemMessage().content;
 
-    expect(prompt).toContain('ONLY treat these as drinkability checks when the query targets a specific wine or an explicit comparison pair');
-    expect(prompt).toContain('Generic recommendation wording such as "우울할 때 마시기 좋은 와인", "힐링되는 와인", "선물하기 좋은 와인" is NOT a drinkability query');
+    expect(prompt).toContain('Treat explicit current-drinkability requests as requiring search first and then check_drinking_window');
+    expect(prompt).toContain('Generic mood/occasion wording such as "우울할 때 마시기 좋은 와인", "힐링되는 와인", "선물하기 좋은 와인" is NOT a drinkability query');
+    expect(prompt).toContain('route it to recommendation search, not check_drinking_window');
     expect(prompt).toContain('Gift/non-expert/safe recommendation intent should preserve the original lexical anchor');
     expect(prompt).toContain('use structured occasion / gift_suitability_min / beginner_suitability_min fields');
     expect(prompt).toContain('Do NOT invent label aesthetics, packaging, or luxury prestige proxies');

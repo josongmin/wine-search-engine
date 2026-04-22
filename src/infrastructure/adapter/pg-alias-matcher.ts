@@ -1,7 +1,10 @@
 import type { Pool } from 'pg';
 import type { AliasMatcher, AliasMatchResult } from '../../domain/query/service/anchor-extractor.js';
+import {
+  buildAliasLookupPlan,
+  isPhoneticAliasSurfaceCompatible,
+} from '../../domain/query/service/alias-lookup-plan.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
-import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 import {
@@ -138,6 +141,7 @@ interface BatchFuzzyLookupPayload {
 }
 
 interface MatchPlan {
+  readonly views: ReturnType<typeof buildAliasLookupPlan>['views'];
   readonly tokenList: readonly string[];
   readonly compactList: readonly string[];
   readonly transliteratedList: readonly string[];
@@ -157,16 +161,19 @@ function escapeLikePattern(input: string): string {
   return input.replace(/[%_\\]/g, '\\$&');
 }
 
-function resolveExactLookupStrategy(plan: MatchPlan, normalizedValue: string): string {
+function resolveExactLookupStrategy(
+  plan: MatchPlan,
+  row: Pick<AliasRow, 'normalized_value' | 'surface_form'>,
+): string | undefined {
   const transliteratedSet = new Set(plan.transliteratedList);
   const compactSet = new Set(plan.compactList);
   const phoneticSet = new Set(plan.phoneticList);
   const exactSet = new Set(plan.tokenList);
 
-  const normalizedLower = normalizedValue.toLowerCase();
-  const compactValue = compactForLookup(normalizedValue);
+  const normalizedLower = row.normalized_value.toLowerCase();
+  const compactValue = compactForLookup(row.normalized_value);
   const compactLower = compactForLookup(normalizedLower);
-  const phoneticValue = phoneticCompactForLookup(normalizedValue);
+  const phoneticValue = phoneticCompactForLookup(row.normalized_value);
 
   if (transliteratedSet.has(normalizedLower) || transliteratedSet.has(compactLower)) {
     return 'transliterated_exact';
@@ -174,11 +181,13 @@ function resolveExactLookupStrategy(plan: MatchPlan, normalizedValue: string): s
   if (compactSet.has(compactValue)) {
     return 'compact_exact';
   }
-  if (exactSet.has(normalizedValue)) {
+  if (exactSet.has(row.normalized_value)) {
     return 'exact';
   }
   if (phoneticSet.has(phoneticValue)) {
-    return 'phonetic_exact';
+    return isPhoneticAliasSurfaceCompatible(plan.views.punctuationStripped, row.surface_form)
+      ? 'phonetic_exact'
+      : undefined;
   }
   return 'lexical_exact';
 }
@@ -252,7 +261,7 @@ function editDistance(a: string, b: string): number {
 
 function groupRows<TRow extends AliasRow>(
   rows: readonly TRow[],
-  lookupStrategy: string | ((row: TRow) => string) = 'exact',
+  lookupStrategy: string | ((row: TRow) => string | undefined) = 'exact',
 ): readonly AliasMatchResult[] {
   const byNorm = new Map<
     string,
@@ -260,9 +269,12 @@ function groupRows<TRow extends AliasRow>(
   >();
 
   for (const row of rows) {
-    const existing = byNorm.get(row.normalized_value);
     const strategyForRow =
       typeof lookupStrategy === 'function' ? lookupStrategy(row) : lookupStrategy;
+    if (strategyForRow === undefined) {
+      continue;
+    }
+    const existing = byNorm.get(row.normalized_value);
     if (existing == null) {
       byNorm.set(row.normalized_value, {
         surfaceForm: row.surface_form,
@@ -465,7 +477,7 @@ export class PgAliasMatcher implements AliasMatcher {
         if (plan === undefined || rows.length === 0) {
           continue;
         }
-        const grouped = groupRows(rows, (row) => resolveExactLookupStrategy(plan, row.normalized_value));
+        const grouped = groupRows(rows, (row) => resolveExactLookupStrategy(plan, row));
         if (grouped.length > 0) {
           exactRowsByQueryId.set(queryId, grouped);
         }
@@ -590,53 +602,8 @@ export class PgAliasMatcher implements AliasMatcher {
   }
 
   private buildMatchPlan(normalizedQuery: string): MatchPlan | null {
-    const views = buildNormalizedQueryViews(normalizedQuery);
-
-    // Build candidate lookup tokens: full phrase + individual words + bigrams.
-    const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
-    const tokens = new Set<string>();
-    const compactTokens = new Set<string>();
-    const transliteratedTokens = new Set<string>();
-    const phoneticTokens = new Set<string>();
-
-    for (const value of views.lookupVariants) {
-      if (value.length > 0) {
-        tokens.add(value);
-        if (value !== views.compact) {
-          compactTokens.add(value.replace(/[^\p{L}\p{N}]+/gu, ''));
-        }
-      }
-    }
-    if (views.compact.length > 0) {
-      compactTokens.add(views.compact);
-    }
-    if (views.transliterated !== undefined && views.transliterated.length > 0) {
-      transliteratedTokens.add(views.transliterated);
-      transliteratedTokens.add(compactForLookup(views.transliterated));
-    }
-    if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {
-      phoneticTokens.add(views.phoneticCompact);
-    }
-    for (const w of words) {
-      if (w.length >= 2) {
-        tokens.add(w);
-        compactTokens.add(w.replace(/\s+/g, ''));
-      }
-    }
-    for (let i = 0; i < words.length - 1; i++) {
-      const w0 = words[i];
-      const w1 = words[i + 1];
-      if (w0 !== undefined && w1 !== undefined) {
-        const bigram = `${w0} ${w1}`;
-        tokens.add(bigram);
-        compactTokens.add(bigram.replace(/\s+/g, ''));
-      }
-    }
-
-    const tokenList = Array.from(tokens);
-    const compactList = Array.from(compactTokens).filter((token) => token.length > 0);
-    const transliteratedList = Array.from(transliteratedTokens).filter((token) => token.length > 0);
-    const phoneticList = Array.from(phoneticTokens).filter((token) => token.length > 0);
+    const lookupPlan = buildAliasLookupPlan(normalizedQuery);
+    const { views, tokenList, compactList, transliteratedList, phoneticList } = lookupPlan;
 
     const fuzzyVariants = Array.from(
       new Map<string, QueryVariantCandidate>(
@@ -670,6 +637,7 @@ export class PgAliasMatcher implements AliasMatcher {
     }
 
     return {
+      views,
       tokenList,
       compactList,
       transliteratedList,

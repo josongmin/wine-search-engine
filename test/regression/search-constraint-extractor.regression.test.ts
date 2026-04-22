@@ -38,6 +38,27 @@ describe('krwToUsd', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Explicit foreign-currency ceilings
+// ---------------------------------------------------------------------------
+
+describe('extractSearchConstraints — explicit USD ceilings', () => {
+  it('extracts maxPriceKrw from "under 100 dollars"', () => {
+    const constraints = extractSearchConstraints('best Bordeaux under 100 dollars');
+    expect(constraints.maxPriceKrw).toBe(135_000);
+  });
+
+  it('extracts maxPriceKrw from "under $100"', () => {
+    const constraints = extractSearchConstraints('best Bordeaux under $100');
+    expect(constraints.maxPriceKrw).toBe(135_000);
+  });
+
+  it('extracts maxPriceKrw from suffix USD phrasing', () => {
+    const constraints = extractSearchConstraints('Bordeaux 100 USD or less');
+    expect(constraints.maxPriceKrw).toBe(135_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // extractSearchConstraints — grape exclusion
 // ---------------------------------------------------------------------------
 
@@ -355,7 +376,7 @@ describe('end-to-end: Korean exclusion query → YQL NOT filter', () => {
   it('soft price constraint from 5만원 이하 is included in bundle', () => {
     const bundle = extractRuleBasedConstraints('5만원 이하 화이트 와인');
     const priceConstraint = bundle.soft.find(
-      (c) => c.attribute === 'price_usd' && c.operator === '<=',
+      (c) => c.attribute === 'max_price_krw' && c.operator === '<=',
     );
     expect(priceConstraint).toBeDefined();
     expect(typeof priceConstraint?.value).toBe('number');

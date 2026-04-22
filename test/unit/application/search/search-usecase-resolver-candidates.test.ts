@@ -122,6 +122,59 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.aliasMatches).toHaveLength(2);
   });
 
+  it('keeps exact identity signal only for candidates whose identity-safe projection matches the anchor', async () => {
+    const grandVinId = createEntityId('chateau-margaux-grand-vin');
+    const secondWineId = createEntityId('pavillon-rouge-du-chateau-margaux');
+    const docs = new Map<CanonicalEntityId, RetrievalDocument>([
+      [grandVinId, {
+        entityId: grandVinId,
+        entityType: 'wine',
+        canonicalLabel: '2022 Château Margaux Château Margaux (Premier Grand Cru Classé)',
+        producer: 'Château Margaux',
+        aliasesIdentitySafe: ['Château Margaux', 'Château Margaux 2022'],
+      } as unknown as RetrievalDocument],
+      [secondWineId, {
+        entityId: secondWineId,
+        entityType: 'wine',
+        canonicalLabel: '1982 Château Margaux Pavillon Rouge du Château Margaux',
+        producer: 'Château Margaux',
+        aliasesIdentitySafe: [
+          'Château Margaux',
+          'Château Margaux 1982',
+          'Pavillon Rouge du Château Margaux',
+          'Pavillon Rouge du Château Margaux 1982',
+        ],
+      } as unknown as RetrievalDocument],
+    ]);
+    const lookup = makeBatchLookup(async (id) => docs.get(id) ?? null);
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '샤또 마고',
+        normalizedQuery: '샤또 마고',
+        anchors: [
+          {
+            surfaceForm: '샤또 마고',
+            normalizedForm: '샤또 마고',
+            candidateEntityIds: [grandVinId, secondWineId],
+            lookupVariants: ['chateau margaux'],
+            lookupStrategies: ['transliterated_exact'],
+            confidence: 0.97,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    const grandVin = candidates.find((candidate) => candidate.entityId === grandVinId);
+    const secondWine = candidates.find((candidate) => candidate.entityId === secondWineId);
+
+    expect(grandVin?.sourceSignals.aliasExactMatch).toBeCloseTo(0.97);
+    expect(secondWine?.sourceSignals.aliasExactMatch).toBe(0);
+    expect(secondWine?.sourceSignals.canonicalNormalizedMatch).toBe(0);
+  });
+
   it('uses batch getDocuments as the sole production hydration path', async () => {
     const entityId = createEntityId('opus-one-2018');
     const getDocuments = vi.fn().mockResolvedValue(

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildSearchRouteResolutionContext,
+  resolveExecutionTopologyFromRequestSurface,
   resolveRouteFromPlanAndOptionMode,
 } from '../../../../src/application/search/search-usecase-route-resolution.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
@@ -44,6 +45,12 @@ function minimalCompiled(
     },
     execution: {
       effectiveRoute,
+      executionTopology:
+        effectiveRoute === 'entity'
+          ? 'entity_only'
+          : effectiveRoute === 'hybrid'
+          ? 'general_only'
+          : 'general_only',
       effectiveRetrievalMode,
       routeSource: 'planner',
       budget: { maxCandidates: 10, enablePrecisionRerank: true },
@@ -102,6 +109,23 @@ describe('buildSearchRouteResolutionContext', () => {
     expect(ctx.plannerSuggestedMode).toBe('attribute_search');
   });
 
+  it('treats explicit options.mode as api override for route resolution', () => {
+    const plan = minimalPlan('entity', 'attribute_search');
+    const compiled = minimalCompiled('entity', 'attribute_search');
+    const request: SearchRequest = {
+      query: 'x',
+      options: {
+        mode: 'hybrid',
+        explain: false,
+        clarification: false,
+      },
+    };
+    const ctx = buildSearchRouteResolutionContext(plan, request, compiled);
+    expect(ctx.effectiveRoute).toBe('hybrid');
+    expect(ctx.retrievalModeSource).toBe('api_override');
+    expect(ctx.apiOverrideMode).toBe('hybrid');
+  });
+
   it('keeps plannerSuggestedMode on retrieval mode even when route and mode differ', () => {
     const plan = minimalPlan('entity', 'semantic_hybrid');
     const compiled = minimalCompiled('entity', 'attribute_search');
@@ -111,5 +135,41 @@ describe('buildSearchRouteResolutionContext', () => {
     const ctx = buildSearchRouteResolutionContext(plan, request, compiled);
     expect(ctx.effectiveRoute).toBe('entity');
     expect(ctx.plannerSuggestedMode).toBe('attribute_search');
+  });
+});
+
+describe('resolveExecutionTopologyFromRequestSurface', () => {
+  it('promotes planner-selected hybrid auto mode to dual_lane', () => {
+    const compiled = minimalCompiled('hybrid', 'attribute_search');
+    const request: SearchRequest = { query: 'x' };
+    expect(resolveExecutionTopologyFromRequestSurface(compiled, request)).toBe('dual_lane');
+  });
+
+  it('keeps explicit hybrid surface requests on general_only', () => {
+    const compiled = minimalCompiled('hybrid', 'attribute_search');
+    const request: SearchRequest = {
+      query: 'x',
+      options: {
+        mode: 'hybrid',
+        explain: false,
+        clarification: false,
+      },
+    };
+    expect(resolveExecutionTopologyFromRequestSurface(compiled, request)).toBe('general_only');
+  });
+
+  it('keeps explicit entity surface requests on entity_only', () => {
+    const compiled = minimalCompiled('hybrid', 'attribute_search');
+    const request: SearchRequest = {
+      query: 'x',
+      retrieval_mode: 'entity',
+    };
+    expect(resolveExecutionTopologyFromRequestSurface(compiled, request)).toBe('entity_only');
+  });
+
+  it('promotes compare_candidates hybrid auto requests to dual_lane', () => {
+    const compiled = minimalCompiled('hybrid', 'compare_candidates');
+    const request: SearchRequest = { query: 'x' };
+    expect(resolveExecutionTopologyFromRequestSurface(compiled, request)).toBe('dual_lane');
   });
 });

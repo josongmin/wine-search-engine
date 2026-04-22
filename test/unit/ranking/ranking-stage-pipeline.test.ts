@@ -124,6 +124,9 @@ const STUB_EVIDENCE: EvidenceItem = {
 function makeSignalComputer(scores: ComponentScores): SignalComputer {
   return {
     computeAll: vi.fn().mockReturnValue(scores),
+    computeEntityPosterior: vi.fn().mockReturnValue(undefined),
+    computeIdentityExactnessTier: vi.fn().mockReturnValue('none'),
+    computeLanePresence: vi.fn().mockReturnValue(undefined),
   } as unknown as SignalComputer;
 }
 

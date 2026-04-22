@@ -1,7 +1,11 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import type { FailureReason } from '../../decision/model/failure-reason.js';
 import type { AbstainReason } from '../../query/model/abstain-decision.js';
-import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
+import type {
+  ExecutionLaneTrace,
+  ExecutionRetrievalMode,
+  ExecutionTopology,
+} from '../../query/model/engine-execution-contract.js';
 import type { QueryRoute } from '../../query/model/query-route.js';
 
 /**
@@ -84,5 +88,11 @@ export interface EngineDecision {
    * API-level override was applied.
    */
   readonly plannerSuggestedMode?: ExecutionRetrievalMode | undefined;
+
+  /** Execution topology compiled for this decision. */
+  readonly executionTopology?: ExecutionTopology | undefined;
+
+  /** Lane-level participation and resolve trace for this decision. */
+  readonly laneTrace?: ExecutionLaneTrace | undefined;
 
 }

@@ -67,6 +67,12 @@ export const MAX_ENTITY_SUMMARY_OCCASIONS = 20;
 /** Entity summary: max certifications per result. */
 export const MAX_ENTITY_SUMMARY_CERTIFICATIONS = 20;
 
+/** Entity summary: max flavor descriptor tags per result. */
+export const MAX_ENTITY_SUMMARY_FLAVOR_PROFILES = 20;
+
+/** Entity summary: max chars for LLM-generated semantic summary (single-paragraph cap). */
+export const MAX_ENTITY_SUMMARY_SEMANTIC_SUMMARY_CHARS = 1024;
+
 
 /**
  * Bounded relevance_score magnitude: avoids NaN/Infinity and absurd floats

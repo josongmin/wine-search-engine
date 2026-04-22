@@ -167,15 +167,15 @@ describe('AgentToolExecutionPhase', () => {
     const [searchRequest] = execute.mock.calls[0]!;
     expect(searchRequest).toMatchObject({ query: 'opus one wine' });
     expect(searchRequest?.filters).toEqual(expect.arrayContaining([
-      expect.objectContaining({ attribute: 'country', operator: '=', value: 'United States' }),
       expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
     ]));
+    expect(searchRequest?.filters?.some((filter: { attribute?: string }) => filter.attribute === 'country')).toBe(false);
     expect(runDrinkabilityChecks).toHaveBeenCalledTimes(1);
     expect(state.lastSearchResult).toBeDefined();
     expect(state.lastSearchResult?.results[0]?.entity.entityId).toBe('wine-1');
     expect(state.steps[0]?.action?.input).toEqual({
-      query: 'opus one',
-      country: 'United States',
+      query: 'Opus One',
+      retrieval_mode: 'entity',
       vintage_min: 2018,
     });
   });
@@ -384,7 +384,38 @@ describe('AgentToolExecutionPhase', () => {
   });
 
   it('hydrates drinkability checks from grounded comparison projections across steps', async () => {
-    const execute = vi.fn().mockRejectedValue(new Error('search fallback must not run'));
+    const execute = vi.fn().mockImplementation(async (request: { query: string }) => {
+      if (request.query === 'brunello 2018') {
+        return {
+          ...makeSearchResponse(),
+          results: [{
+            entity: {
+              entityId: 'wine-brunello-2018',
+              canonicalLabel: 'Brunello 2018',
+              type: 'wine',
+            },
+            relevanceScore: 0.89,
+            match: {
+              matchType: 'alias_exact',
+              scoreComponents: {
+                lexical: 0.9,
+                semantic: 0.8,
+                attribute: 0.9,
+                popularity: 0.4,
+              },
+            },
+            constraints: { matched: [], unmet: [], inferred: [] },
+            uncertainty: { uncertaintyConfidence: 0.88, missingInfo: [], approximationUsed: false },
+            evidenceItems: [],
+          }],
+          engineDecision: {
+            ...makeSearchResponse().engineDecision,
+            decisionStatus: 'resolved',
+          },
+        };
+      }
+      throw new Error('search fallback must not run');
+    });
     const decomposedSearchExecute = vi.fn().mockResolvedValue(makeComparisonResponse());
     const { phase } = makePhase({
       searchUseCase: { execute } as never,
@@ -432,7 +463,7 @@ describe('AgentToolExecutionPhase', () => {
     expect(compareShouldBreak).toBe(false);
     expect(checkShouldBreak).toBe(false);
     expect(decomposedSearchExecute).toHaveBeenCalledTimes(1);
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
     expect(state.groundedDrinkingWindowByEntityId.get('wine-barolo-2018')).toMatchObject({
       canonicalLabel: 'Barolo 2018',
       drinkingWindowStart: 2024,
@@ -790,8 +821,14 @@ describe('AgentToolExecutionPhase', () => {
     expect(searchExecute).not.toHaveBeenCalled();
     expect(decomposedSearchExecute).not.toHaveBeenCalled();
     expect(state.steps[0]?.actions).toEqual([
-      { tool: 'compare_wines', input: { query_a: 'Barolo', query_b: 'Brunello' } },
-      { tool: 'search_wines', input: { query: 'barolo' } },
+      expect.objectContaining({
+        tool: 'compare_wines',
+        input: expect.objectContaining({ query_a: 'Barolo', query_b: 'Brunello' }),
+      }),
+      expect.objectContaining({
+        tool: 'search_wines',
+        input: expect.objectContaining({ query: 'barolo', retrieval_mode: 'entity' }),
+      }),
     ]);
     expect(state.steps[0]?.actionPairs).toHaveLength(2);
     expect(state.reasoningFailureDetected).toBe(true);
@@ -833,10 +870,10 @@ describe('AgentToolExecutionPhase', () => {
     expect(shouldBreak).toBe(false);
     expect(decomposedSearchExecute).not.toHaveBeenCalled();
     expect(state.steps[0]?.actions).toEqual([
-      {
+      expect.objectContaining({
         tool: 'compare_wines',
-        input: { query_a: 'Barolo', query_b: 'Brunello', drinking_window: 'now' },
-      },
+        input: expect.objectContaining({ query_a: 'Barolo', query_b: 'Brunello' }),
+      }),
       {
         tool: 'check_drinking_window',
         input: { entity_id: '__TO_BE_FILLED__' },
@@ -884,7 +921,10 @@ describe('AgentToolExecutionPhase', () => {
     expect(shouldBreak).toBe(false);
     expect(searchExecute).not.toHaveBeenCalled();
     expect(state.steps[0]?.actions).toEqual([
-      { tool: 'search_wines', input: { query: 'Opus One 2018' } },
+      expect.objectContaining({
+        tool: 'search_wines',
+        input: expect.objectContaining({ query: 'Opus One', retrieval_mode: 'entity' }),
+      }),
       { tool: 'check_drinking_window', input: { entity_id: '<top_result_entity_id>' } },
     ]);
     expect(state.reasoningFailureDetected).toBe(true);

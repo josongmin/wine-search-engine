@@ -13,7 +13,7 @@ describe('AgentToolExecutionPolicy', () => {
     });
 
     expect(resolved).toEqual({
-      query: 'opus one',
+      query: 'Opus One',
       vintage_min: 2018,
       retrieval_mode: 'entity',
     });
@@ -33,14 +33,14 @@ describe('AgentToolExecutionPolicy', () => {
     expect(resolved[0]).toEqual({
       tool: 'search_wines',
       input: {
-        query: 'opus one',
+        query: 'Opus One',
         retrieval_mode: 'entity',
       },
     });
     expect(resolved[1]).toEqual({ tool: 'check_drinking_window', input: { entity_id: 'wine-1' } });
   });
 
-  it('collapses Korean exact-label suffix noise to the curated entity anchor', () => {
+  it('collapses Korean exact-label suffix noise to the canonical exact entity anchor', () => {
     const policy = new AgentToolExecutionPolicy();
 
     const resolved = policy.resolveSingleTool({
@@ -57,7 +57,7 @@ describe('AgentToolExecutionPolicy', () => {
     });
 
     expect(resolved).toEqual({
-      query: '샤또 마고',
+      query: 'Chateau Margaux',
       retrieval_mode: 'entity',
     });
   });
@@ -79,7 +79,7 @@ describe('AgentToolExecutionPolicy', () => {
     });
 
     expect(resolved).toEqual({
-      query: '샤또 페트루스',
+      query: 'Petrus',
       retrieval_mode: 'entity',
       vintage_min: 2016,
       vintage_max: 2016,
@@ -284,7 +284,7 @@ describe('AgentToolExecutionPolicy', () => {
     });
 
     expect(resolved).toEqual({
-      query: '사씨카이아',
+      query: 'Sassicaia',
       retrieval_mode: 'entity',
     });
   });
@@ -419,7 +419,7 @@ describe('AgentToolExecutionPolicy', () => {
     });
 
     expect(resolved).toEqual({
-      query: '모엣샹동 로제 임페리얼',
+      query: 'moet chandon rose imperial',
       retrieval_mode: 'entity',
     });
   });
@@ -664,6 +664,31 @@ describe('AgentToolExecutionPolicy', () => {
     ]);
   });
 
+  it('preserves parallel search query identity when the route contract has a global entity anchor', () => {
+    const policy = new AgentToolExecutionPolicy();
+
+    const resolved = policy.resolveParallelBatch({
+      calls: [
+        { tool: 'search_wines', input: { query: 'Barolo' } },
+        { tool: 'search_wines', input: { query: 'Burgundy' } },
+        { tool: 'get_food_pairings', input: { food: 'lamb' } },
+      ],
+      queryExecutionContract: {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: true,
+        exactMetadataEntityQuery: 'wine',
+        requiredTool: 'get_food_pairings',
+        foodPairing: { food: 'lamb', pairingTags: ['lamb'] },
+      },
+    });
+
+    expect(resolved).toEqual([
+      { tool: 'search_wines', input: { query: 'Barolo', retrieval_mode: 'entity', limit: 1 } },
+      { tool: 'search_wines', input: { query: 'Burgundy', retrieval_mode: 'entity', limit: 1 } },
+      { tool: 'get_food_pairings', input: { food: 'lamb', pairing_tags: ['lamb'] } },
+    ]);
+  });
+
   it('enriches spicy food-pairing contracts with typed pairing objective fields', () => {
     const policy = new AgentToolExecutionPolicy();
 
@@ -857,6 +882,7 @@ describe('AgentToolExecutionPolicy', () => {
     expect(resolved).toEqual({
       query: '화이트로 ㄱ',
       wine_type: 'white',
+      exclude_wine_types: ['red'],
       want_diversity: true,
     });
   });
@@ -1351,7 +1377,7 @@ describe('AgentToolExecutionPolicy', () => {
       queryExecutionContract: { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: true },
     });
 
-    expect(resolved).toEqual({ query: '오푸스 원', retrieval_mode: 'entity', limit: 1 });
+    expect(resolved).toEqual({ query: 'Opus One', retrieval_mode: 'entity', limit: 1 });
   });
 
   it('injects refinement hint only once when no-match observations appear with enough remaining steps', () => {

@@ -3,8 +3,10 @@ import type {
   EngineExecutionContract,
   ExecutionBudget,
   ExecutionRetrievalMode,
+  ExecutionTopology,
   ProvenancePolicy,
 } from '../model/engine-execution-contract.js';
+import type { QueryRoute } from '../model/query-route.js';
 import type { QueryPlanV2 } from '../model/query-plan.js';
 import { planV2ToUnderstandingSnapshot as toQueryUnderstandingSnapshot } from '../model/query-plan.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
@@ -50,6 +52,24 @@ const DEFAULT_BUDGETS: Record<ExecutionRetrievalMode, ExecutionBudget> = {
   similar_items:      { maxCandidates: 20,  rerankLimit: 0,  enablePrecisionRerank: false },
   no_match_detection: { maxCandidates: 5,   rerankLimit: 0,  enablePrecisionRerank: false },
 } as const;
+
+function deriveExecutionTopology(
+  effectiveRoute: QueryRoute,
+  routeSource: 'planner' | 'api_override',
+): ExecutionTopology {
+  switch (effectiveRoute) {
+    case 'entity':
+      return 'entity_only';
+    case 'hybrid':
+      return routeSource === 'api_override' ? 'general_only' : 'dual_lane';
+    case 'mixed':
+      return 'general_only';
+    default: {
+      const _exhaustive: never = effectiveRoute;
+      throw new Error(`Unhandled execution topology route: ${String(_exhaustive)}`);
+    }
+  }
+}
 
 /**
  * Retrieval modes that force the effective route to 'hybrid' regardless of
@@ -173,6 +193,7 @@ export class ExecutionCompiler {
     // 6. Assemble EngineExecutionContract.
     const execution: EngineExecutionContract = {
       effectiveRoute,
+      executionTopology: deriveExecutionTopology(effectiveRoute, routeSource),
       effectiveRetrievalMode,
       routeSource,
       budget,

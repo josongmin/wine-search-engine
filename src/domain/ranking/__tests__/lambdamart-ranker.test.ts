@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { trainLambdaMARTModel } from '../service/lambdamart-ranker.js';
+import {
+  trainLambdaMARTModel,
+  LAMBDAMART_FEATURE_DIMENSION,
+} from '../service/lambdamart-ranker.js';
 import type { LambdaMARTExample } from '../service/lambdamart-ranker.js';
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
@@ -13,6 +16,12 @@ const FEATURES_A = {
   attributeMatchScore: 0.4,
   diversityScore: 0.3,
   multilingualScore: 0.2,
+  entityPosteriorScore: 0.95,
+  identityExactnessTierScore: 1.0,
+  laneCorroborationScore: 1.0,
+  laneDisagreementScore: 0.0,
+  entityOnlyIndicator: 0.0,
+  generalOnlyIndicator: 0.0,
 } as const;
 
 const FEATURES_B = {
@@ -24,6 +33,12 @@ const FEATURES_B = {
   attributeMatchScore: 0.7,
   diversityScore: 0.8,
   multilingualScore: 0.9,
+  entityPosteriorScore: 0.1,
+  identityExactnessTierScore: 0.0,
+  laneCorroborationScore: 0.0,
+  laneDisagreementScore: 1.0,
+  entityOnlyIndicator: 0.0,
+  generalOnlyIndicator: 1.0,
 } as const;
 
 function makeExamples(queryClass: string, count: number): LambdaMARTExample[] {
@@ -72,9 +87,9 @@ describe('trainLambdaMARTModel', () => {
     const result = trainLambdaMARTModel([], 'missing_class');
 
     expect(result.trainingExampleCount).toBe(0);
-    expect(result.weights).toHaveLength(8);
+    expect(result.weights).toHaveLength(LAMBDAMART_FEATURE_DIMENSION);
     for (const w of result.weights) {
-      expect(w).toBe(0.125);
+      expect(w).toBeCloseTo(1 / LAMBDAMART_FEATURE_DIMENSION, 10);
     }
   });
 });

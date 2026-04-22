@@ -2,12 +2,10 @@ import fs from 'node:fs/promises';
 import { z } from 'zod';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-
-/**
- * Canonical LambdaMART feature width used by ranking runtime.
- * Keep this in sync with `LAMBDAMART_FEATURE_DIMENSION`.
- */
-const LTR_FEATURE_DIMENSION = 8;
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_SCHEMA_HASH,
+} from '../../domain/ranking/service/lambdamart-ranker.js';
 const MAX_INVALID_ENTRY_INDICES_TO_LOG = 8;
 
 const MAX_LTR_MODELS_FROM_FILE = 128;
@@ -19,6 +17,8 @@ const RuntimeLtrModelEntrySchema = z.object({
   query_class: z.string().min(1).optional(),
   weights: NumberArrayOfFiniteLengthSchema,
   bias: z.number().finite(),
+  featureSchemaHash: z.string().min(1).optional(),
+  feature_schema_hash: z.string().min(1).optional(),
   trainingExampleCount: z.number().int().nonnegative(),
   ndcg5ValidationScore: z.number().finite(),
   trainedAt: z.union([
@@ -79,8 +79,14 @@ function mapToModel(entry: unknown): QueryClassWeights | undefined {
     return undefined;
   }
 
+  const featureSchemaHash = parsed.data.featureSchemaHash ?? parsed.data.feature_schema_hash;
+  if (typeof featureSchemaHash !== 'string' || featureSchemaHash !== LTR_FEATURE_SCHEMA_HASH) {
+    return undefined;
+  }
+
   return {
     queryClass,
+    featureSchemaHash,
     weights: parsed.data.weights,
     bias: parsed.data.bias,
     trainingExampleCount: parsed.data.trainingExampleCount,

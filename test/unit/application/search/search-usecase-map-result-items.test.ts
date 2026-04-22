@@ -297,6 +297,39 @@ describe('mapRankedResultsToResultItems', () => {
     });
   });
 
+  it('projects finishLength, flavorProfiles, semanticSummary, availability when present on ranked result', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        finishLength: 0.82,
+        flavorProfiles: ['blackcurrant', 'cedar'],
+        semanticSummary: 'Concentrated Napa Cabernet with cedar finish.',
+        availability: true,
+      },
+    ], undefined, 2025);
+
+    expect(items[0]?.entity.finishLength).toBeCloseTo(0.82);
+    expect(items[0]?.entity.flavorProfiles).toEqual(['blackcurrant', 'cedar']);
+    expect(items[0]?.entity.semanticSummary).toBe('Concentrated Napa Cabernet with cedar finish.');
+    expect(items[0]?.entity.availability).toBe(true);
+  });
+
+  it('omits finishLength/flavorProfiles/semanticSummary/availability when absent or empty', async () => {
+    const items = await mapRankedResultsToResultItems([
+      {
+        ...makeRankedResult(),
+        flavorProfiles: [],
+        semanticSummary: '',
+      },
+    ], undefined, 2025);
+
+    const entity = items[0]?.entity ?? {};
+    expect(Object.prototype.hasOwnProperty.call(entity, 'finishLength')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(entity, 'flavorProfiles')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(entity, 'semanticSummary')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(entity, 'availability')).toBe(false);
+  });
+
   it('keeps legacy indexed learned drinking-window blocks projectable for compatibility', async () => {
     const items = await mapRankedResultsToResultItems([
       {

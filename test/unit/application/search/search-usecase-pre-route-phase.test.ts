@@ -629,35 +629,41 @@ describe('runSearchPreRoutePhase', () => {
     });
 
     expect(result.outcome).toBe('return');
-    expect(decomposedSearch.execute).toHaveBeenCalledWith(
-      ['Opus One', 'Screaming Eagle'],
-      [
-        expect.objectContaining({
-          rawQuery: 'Opus One',
-          retrievalQuery: 'Opus One',
-          mode: 'entity',
-          retrievalMode: 'auto',
-          evidenceSource: 'entity_default',
-        }),
-        expect.objectContaining({
-          rawQuery: 'Screaming Eagle',
-          retrievalQuery: 'Screaming Eagle',
-          mode: 'entity',
-          retrievalMode: 'auto',
-          evidenceSource: 'entity_default',
-        }),
-      ],
-      'compare',
-      'Opus One vs Screaming Eagle',
-      'r-compare',
-      123,
-      {
-        context: { locale: 'ko-KR', currency: 'KRW' },
-        sessionContext: { sessionId: 's-1', previousEntities: ['entity-1'] },
-        queryBudget: { maxLatencyMs: 800, maxCandidates: 20, rerankLimit: 10 },
-      },
-      { abortSignal: expect.any(AbortSignal) },
-    );
+    expect(decomposedSearch.execute).toHaveBeenCalledTimes(1);
+    const [
+      subQueries,
+      comparisonLegs,
+      comparisonIntent,
+      originalQuery,
+      requestId,
+      requestStartTimeMs,
+      forwardedRequest,
+      executionOptions,
+    ] = decomposedSearch.execute.mock.calls[0] ?? [];
+    expect(subQueries).toEqual(['Opus One', 'Screaming Eagle']);
+    expect(comparisonLegs).toHaveLength(2);
+    expect(comparisonLegs).toEqual([
+      expect.objectContaining({
+        rawQuery: 'Opus One',
+      }),
+      expect.objectContaining({
+        rawQuery: 'Screaming Eagle',
+        retrievalQuery: 'Screaming Eagle',
+        mode: 'entity',
+        retrievalMode: 'auto',
+        evidenceSource: 'entity_default',
+      }),
+    ]);
+    expect(comparisonIntent).toBe('compare');
+    expect(originalQuery).toBe('Opus One vs Screaming Eagle');
+    expect(requestId).toBe('r-compare');
+    expect(requestStartTimeMs).toBe(123);
+    expect(forwardedRequest).toEqual({
+      context: { locale: 'ko-KR', currency: 'KRW' },
+      sessionContext: { sessionId: 's-1', previousEntities: ['entity-1'] },
+      queryBudget: { maxLatencyMs: 800, maxCandidates: 20, rerankLimit: 10 },
+    });
+    expect(executionOptions).toEqual({ abortSignal: expect.any(AbortSignal) });
   });
 
   it('aborts decomposed search on timeout and continues with planner fallback', async () => {

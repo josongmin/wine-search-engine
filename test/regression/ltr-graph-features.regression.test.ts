@@ -24,6 +24,7 @@ import {
   LTR_FEATURE_SCHEMA_VERSION,
   getCurrentFeatureSchemaHash,
 } from '../../src/domain/ranking/service/feature-parity-hash.js';
+import { LTR_FEATURE_NAME_ORDER } from '../../src/domain/ranking/service/ltr-feature-extractor.js';
 import type { ConstraintGraph } from '../../src/domain/query/model/constraint-graph.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 
@@ -113,15 +114,14 @@ describe('Wave I3 — LTRFeatureVector graph-aware features', () => {
     expect(graphFirstIdx).toBe(legacyIdx + 1 + SITUATION_FACET_COUNT);
   });
 
-  it('schema version bumped to v3', () => {
-    expect(LTR_FEATURE_SCHEMA_VERSION).toBe('3');
+  it('runtime schema version bumped to v4 for the authoritative dual-lane vector', () => {
+    expect(LTR_FEATURE_SCHEMA_VERSION).toBe('4');
   });
 
-  it('schema hash changes between v2 (30 features) and v3 (34 features)', () => {
-    const v3Hash = getCurrentFeatureSchemaHash();
-    // v3: +4 gift/beginner suitability features (gift_suitability_score,
-    // beginner_suitability_score, gift_suitability_strong, beginner_suitability_strong).
-    expect(v3Hash).toHaveLength(16);
+  it('runtime schema hash comes from the authoritative 14-feature dual-lane vector', () => {
+    const runtimeHash = getCurrentFeatureSchemaHash();
+    expect(runtimeHash).toHaveLength(16);
+    expect(LTR_FEATURE_NAME_ORDER.length).toBe(14);
     expect(LTR_FEATURE_NAMES.length).toBe(34);
   });
 

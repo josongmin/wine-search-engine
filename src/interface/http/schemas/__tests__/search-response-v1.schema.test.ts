@@ -38,6 +38,25 @@ function makeValidV1SearchResponse() {
   };
 }
 
+function makeLaneTrace() {
+  return {
+    identity: {
+      participated: true,
+      artifact_count: 1,
+      resolve_status: 'resolved',
+    },
+    general: {
+      participated: true,
+      artifact_count: 4,
+    },
+    fused: {
+      participated: true,
+      artifact_count: 3,
+      resolve_status: 'resolved',
+    },
+  } as const;
+}
+
 describe('SearchResponseSchema', () => {
   it('accepts the canonical V1 search payload shape', () => {
     const parsed = SearchResponseSchema.safeParse(makeValidV1SearchResponse());
@@ -46,11 +65,18 @@ describe('SearchResponseSchema', () => {
   });
 
   it('accepts stable execution_contract metadata on the V1 search contract', () => {
+    const laneTrace = makeLaneTrace();
     const parsed = SearchResponseSchema.safeParse({
       ...makeValidV1SearchResponse(),
+      engine_decision: {
+        ...makeValidV1SearchResponse().engine_decision,
+        execution_topology: 'dual_lane',
+        lane_trace: laneTrace,
+      },
       meta: {
         ...makeValidV1SearchResponse().meta,
         execution_contract: {
+          execution_topology: 'dual_lane',
           effective_retrieval_mode: 'attribute_search',
           retrieval_mode_source: 'planner',
           planner_suggested_mode: 'attribute_search',
@@ -95,6 +121,7 @@ describe('SearchResponseSchema', () => {
             missing: ['identity_evidence'],
             satisfied: false,
           },
+          lane_trace: laneTrace,
           admission_closure: {
             required: {
               identity_seal: true,
@@ -471,6 +498,7 @@ describe('SearchResponseSchema', () => {
   });
 
   it('accepts typed constraint_resolution_trace and execution provenance closure inside audit_extension', () => {
+    const laneTrace = makeLaneTrace();
     const parsed = SearchResponseSchema.safeParse({
       ...makeValidV1SearchResponse(),
       meta: {
@@ -510,11 +538,13 @@ describe('SearchResponseSchema', () => {
           },
           execution_trace: {
             effective_route: 'hybrid',
+            execution_topology: 'dual_lane',
             provenance_policy: {
               require_identity_seal: false,
               require_constraint_evidence: true,
               require_anchor_evidence: false,
             },
+            lane_trace: laneTrace,
             provenance_closure: {
               policy: {
                 require_identity_seal: false,
@@ -705,5 +735,35 @@ describe('SearchResponseSchema', () => {
         { source_system: 'vivino-silver', source_record_id: 'silver-99' },
       ]);
     }
+  });
+
+  it('EntitySummarySchema accepts finishLength/flavorProfiles/semanticSummary/availability after snake conversion', () => {
+    const entity = deepKeysToSnake({
+      entityId: 'wine:test',
+      canonicalLabel: 'Test',
+      type: 'wine',
+      finishLength: 0.75,
+      flavorProfiles: ['cedar', 'tobacco'],
+      semanticSummary: 'Bold and elegant.',
+      availability: true,
+    });
+    const parsed = EntitySummarySchema.safeParse(entity);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.finish_length).toBe(0.75);
+      expect(parsed.data.flavor_profiles).toEqual(['cedar', 'tobacco']);
+      expect(parsed.data.semantic_summary).toBe('Bold and elegant.');
+      expect(parsed.data.availability).toBe(true);
+    }
+  });
+
+  it('EntitySummarySchema rejects finish_length out of [0,1] range', () => {
+    const parsed = EntitySummarySchema.safeParse({
+      entity_id: 'wine:test',
+      canonical_label: 'Test',
+      type: 'wine',
+      finish_length: 1.5,
+    });
+    expect(parsed.success).toBe(false);
   });
 });

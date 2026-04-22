@@ -170,7 +170,7 @@ describe('AgentContractExecutionPhase', () => {
     );
 
     expect(ok).toBe(false);
-    expect(state.terminationReason).toBe('max_steps');
+    expect(state.terminationReason).toBe('error');
     expect(state.steps).toHaveLength(0);
   });
 

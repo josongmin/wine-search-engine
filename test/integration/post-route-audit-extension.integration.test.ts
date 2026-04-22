@@ -23,6 +23,7 @@ import type { PolicyDecisionRecord } from '../../src/domain/query/model/policy-d
 import type { ScoreDriftRecord } from '../../src/domain/ranking/model/score-decomposition.js';
 import type { AuditExtension } from '../../src/domain/audit/model/audit-extension.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
+import { ResponseBuilder } from '../../src/domain/response/service/response-builder.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -63,8 +64,9 @@ function makeMinimalCompiled(overrides?: {
       policyRuleVersion: '1.0.0',
       thresholdProfileId: 'default',
     },
-      execution: {
+    execution: {
       effectiveRoute: 'hybrid',
+      executionTopology: 'general_only',
       effectiveRetrievalMode: 'attribute_search',
       routeSource: 'planner',
       budget: { maxCandidates: 50, rerankLimit: 0, enablePrecisionRerank: false },
@@ -97,7 +99,15 @@ function makeRankedResult(entityId: string, finalScore: number, rank: number): R
       availability: 0.9,
       uncertaintyPenalty: 0,
     },
-    evidenceItems: [],
+    evidenceItems: [
+      {
+        type: 'retrieval',
+        source: 'integration-test',
+        contribution: '1.0',
+        strength: 'high',
+        provenance: 'integration-test:evidence',
+      },
+    ],
     matchedConstraints: [],
     unmetConstraints: [],
     inferredConstraints: [],
@@ -123,13 +133,72 @@ function makeResolveResult(): EntityResolveResult {
   };
 }
 
+function makeLaneTrace() {
+  return {
+    identity: {
+      participated: true,
+      artifactCount: 1,
+      resolveStatus: 'resolved',
+    },
+    general: {
+      participated: true,
+      artifactCount: 4,
+    },
+    fused: {
+      participated: true,
+      artifactCount: 3,
+      resolveStatus: 'resolved',
+    },
+  } as const;
+}
+
 function makeStubDecisionEngine(): DecisionEnginePort {
   return {
     decide: vi.fn().mockResolvedValue({
-      decisionStatus: 'success',
-      nextAction: 'display_results',
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
       decisionConfidence: 0.95,
-      results: [],
+      confidenceSemantics: 'calibrated_decision_confidence',
+      selectedEntity: {
+        entityId: 'e-1',
+        canonicalLabel: 'Wine e-1',
+        identity_signature: 'sig-e-1',
+        snapshot_ref: 'snap-1',
+      },
+      chosenEntityId: 'e-1',
+      signalSet: {
+        route: 'hybrid',
+        retrievedCount: 1,
+        rankedCount: 1,
+      },
+      evidenceItems: [
+        {
+          type: 'decision',
+          source: 'integration-test',
+          contribution: '1.0',
+          strength: 'high',
+          provenance: 'integration-test:decision',
+        },
+      ],
+      decisionTraceRef: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      decisionSnapshot: {
+        snapshot_id: 'snap-1',
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1.0.0',
+        threshold_profile_id: 'default',
+        planner_version: '1.0.0',
+        feature_flags: {},
+        response_contract_version: 'search_response_v1',
+      },
+      decisionTrace: {
+        queryClass: 'pure_constraint',
+        top1Score: 0.95,
+        top2Score: 0.05,
+        thresholdApplied: 0.5,
+        marginApplied: 0.3,
+        finalReason: 'resolved',
+      },
     }),
   } as unknown as DecisionEnginePort;
 }
@@ -157,6 +226,13 @@ function makeStubResponseBuilder(auditCapture?: { value?: AuditExtension }): Res
   } as unknown as ResponseBuilderPort;
 }
 
+function makeRealResponseBuilder(): ResponseBuilderPort {
+  const builder = new ResponseBuilder();
+  return {
+    build: vi.fn().mockImplementation((params: Parameters<ResponseBuilder['build']>[0]) => builder.build(params)),
+  } as unknown as ResponseBuilderPort;
+}
+
 function makeBaseContext(overrides?: Partial<RankedRouteDecisionPhaseContext>): RankedRouteDecisionPhaseContext {
   const auditCapture: { value?: AuditExtension } = {};
   const ctx: RankedRouteDecisionPhaseContext = {
@@ -165,12 +241,24 @@ function makeBaseContext(overrides?: Partial<RankedRouteDecisionPhaseContext>): 
     requestId: 'req-test',
     startTime: Date.now(),
     resolveResult: makeResolveResult(),
+    identityResolveResult: null,
     rankedResults: [makeRankedResult('e-1', 0.9, 1)],
     fullRankedResults: [makeRankedResult('e-1', 0.9, 1)],
     effectiveRoute: 'hybrid',
     snapshotVersions: { modelVersions: { query_understanding: 'v1' }, indexVersions: {} },
     decisionEngine: makeStubDecisionEngine(),
     responseBuilder: makeStubResponseBuilder(auditCapture),
+    executionTopology: 'general_only',
+    laneTrace: {
+      identity: { participated: false, artifactCount: 0 },
+      general: { participated: true, artifactCount: 0 },
+      fused: { participated: true, artifactCount: 0 },
+    },
+    laneArtifacts: {
+      identity: [],
+      general: [],
+      fused: [],
+    },
     effectiveRetrievalMode: 'attribute_search',
     retrievalKind: 'generic_hybrid',
     sparseExecuted: true,
@@ -367,6 +455,243 @@ describe('Post-route AuditExtension derivation via runRankedRouteDecisionPhase',
       rerank_limit: 0,
       enable_precision_rerank: false,
     });
+  });
+
+  it('projects execution topology into final response metadata when using the real response builder', async () => {
+    const ctx = makeBaseContext({
+      responseBuilder: makeRealResponseBuilder(),
+      compiled: makeMinimalCompiled(),
+    });
+
+    const response = await runRankedRouteDecisionPhase(ctx);
+
+    expect(response.engineDecision.executionTopology).toBe('general_only');
+    expect(response.meta.executionContract?.executionTopology).toBe('general_only');
+    expect(response.meta.auditExtension?.execution_trace?.execution_topology).toBe('general_only');
+  });
+
+  it('projects lane trace from execution contract into engine decision, meta, and audit execution trace', () => {
+    const builder = new ResponseBuilder();
+    const laneTrace = makeLaneTrace();
+    const response = builder.build({
+      decisionOutput: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        decisionConfidence: 0.95,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        selectedEntity: {
+          entityId: 'e-1',
+          canonicalLabel: 'Wine e-1',
+          identity_signature: 'sig-e-1',
+          snapshot_ref: 'snap-1',
+        },
+        chosenEntityId: 'e-1',
+        signalSet: {
+          route: 'hybrid',
+          retrievedCount: 1,
+          rankedCount: 1,
+        },
+        evidenceItems: [
+          {
+            type: 'decision',
+            source: 'integration-test',
+            contribution: '1.0',
+            strength: 'high',
+            provenance: 'integration-test:decision',
+          },
+        ],
+        decisionTraceRef: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        decisionSnapshot: {
+          snapshot_id: 'snap-1',
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1.0.0',
+          threshold_profile_id: 'default',
+          planner_version: '1.0.0',
+          feature_flags: {},
+          response_contract_version: 'search_response_v1',
+        },
+        decisionTrace: {
+          queryClass: 'pure_constraint',
+          top1Score: 0.95,
+          top2Score: 0.05,
+          thresholdApplied: 0.5,
+          marginApplied: 0.3,
+          finalReason: 'resolved',
+        },
+      } as never,
+      compiled: makeMinimalCompiled(),
+      results: [
+        {
+          entity: {
+            entityId: 'e-1',
+            canonicalLabel: 'Wine e-1',
+            type: 'wine',
+          },
+          relevanceScore: 0.95,
+          match: {
+            matchType: 'exact',
+            scoreComponents: {
+              lexical: 1,
+              semantic: 0,
+              attribute: 0,
+              popularity: 0,
+            },
+          },
+          constraints: {
+            matched: [],
+            unmet: [],
+            inferred: [],
+          },
+          uncertainty: {
+            missingInfo: [],
+            approximationUsed: false,
+          },
+          evidenceItems: [
+            {
+              type: 'retrieval',
+              source: 'integration-test',
+              contribution: '1.0',
+              strength: 'high',
+              provenance: 'integration-test:evidence',
+            },
+          ],
+        },
+      ] as never,
+      auditExtension: {
+        execution_trace: {
+          effective_route: 'hybrid',
+        },
+      },
+      executionContract: {
+        executionTopology: 'dual_lane',
+        effectiveRetrievalMode: 'attribute_search',
+        retrievalKind: 'generic_hybrid',
+        sparseExecuted: true,
+        specializedRouteExecuted: null,
+        usedCompiledExecution: true,
+        laneTrace,
+      },
+      queryTimeMs: 12,
+      route: 'hybrid',
+      requestId: 'req-test',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'attribute_search',
+    });
+
+    expect(response.engineDecision.executionTopology).toBe('dual_lane');
+    expect(response.engineDecision.laneTrace).toEqual(laneTrace);
+    expect(response.meta.executionContract?.executionTopology).toBe('dual_lane');
+    expect(response.meta.executionContract?.laneTrace).toEqual(laneTrace);
+    expect(response.meta.auditExtension?.execution_trace?.execution_topology).toBe('dual_lane');
+    expect(response.meta.auditExtension?.execution_trace?.lane_trace).toEqual(laneTrace);
+  });
+
+  it('does not project lane trace into the public response from audit payload alone', () => {
+    const builder = new ResponseBuilder();
+    const laneTrace = makeLaneTrace();
+
+    const response = builder.build({
+      decisionOutput: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        decisionConfidence: 0.95,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        selectedEntity: {
+          entityId: 'e-1',
+          canonicalLabel: 'Wine e-1',
+          identity_signature: 'sig-e-1',
+          snapshot_ref: 'snap-1',
+        },
+        chosenEntityId: 'e-1',
+        signalSet: {
+          route: 'hybrid',
+          retrievedCount: 1,
+          rankedCount: 1,
+        },
+        evidenceItems: [
+          {
+            type: 'decision',
+            source: 'integration-test',
+            contribution: '1.0',
+            strength: 'high',
+            provenance: 'integration-test:decision',
+          },
+        ],
+        decisionTraceRef: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        decisionSnapshot: {
+          snapshot_id: 'snap-1',
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1.0.0',
+          threshold_profile_id: 'default',
+          planner_version: '1.0.0',
+          feature_flags: {},
+          response_contract_version: 'search_response_v1',
+        },
+        decisionTrace: {
+          queryClass: 'pure_constraint',
+          top1Score: 0.95,
+          top2Score: 0.05,
+          thresholdApplied: 0.5,
+          marginApplied: 0.3,
+          finalReason: 'resolved',
+        },
+      } as never,
+      compiled: makeMinimalCompiled(),
+      results: [
+        {
+          entity: {
+            entityId: 'e-1',
+            canonicalLabel: 'Wine e-1',
+            type: 'wine',
+          },
+          relevanceScore: 0.95,
+          match: {
+            matchType: 'exact',
+            scoreComponents: {
+              lexical: 1,
+              semantic: 0,
+              attribute: 0,
+              popularity: 0,
+            },
+          },
+          constraints: {
+            matched: [],
+            unmet: [],
+            inferred: [],
+          },
+          uncertainty: {
+            missingInfo: [],
+            approximationUsed: false,
+          },
+          evidenceItems: [
+            {
+              type: 'retrieval',
+              source: 'integration-test',
+              contribution: '1.0',
+              strength: 'high',
+              provenance: 'integration-test:evidence',
+            },
+          ],
+        },
+      ] as never,
+      auditExtension: {
+        execution_trace: {
+          effective_route: 'hybrid',
+          lane_trace: laneTrace,
+        },
+      },
+      queryTimeMs: 12,
+      route: 'hybrid',
+      requestId: 'req-test',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'attribute_search',
+    });
+
+    expect(response.engineDecision.laneTrace).toBeUndefined();
+    expect(response.meta.executionContract).toBeUndefined();
+    expect(response.meta.auditExtension?.execution_trace?.lane_trace).toEqual(laneTrace);
   });
 
   it('emits typed execution_trace.provenance_closure when ranking metadata carries compiled provenance closure', async () => {

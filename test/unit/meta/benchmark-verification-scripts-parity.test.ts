@@ -55,17 +55,30 @@ describe('benchmark / verification package scripts parity (ADR-005)', () => {
     expect(scripts['test:verification:claim']).toBe('pnpm run eval:claim:bootstrap');
   });
 
-  it('keeps exploratory agent runner scripts as direct npx tsx', () => {
-    expect(scripts['bench:agent']).toBe('npx tsx test/benchmark/agent/runner.ts');
+  it('keeps bench:agent on the HTTP fixture-native parity lane', () => {
+    expect(scripts['bench:agent:preflight']).toBe('tsx scripts/eval/preflight-agent-http-entrypoint.ts');
+    expect(scripts['bench:agent']).toBe(
+      'pnpm run bench:agent:preflight && tsx scripts/eval/run-agentic-tool-use-fixture-eval.ts && tsx scripts/eval/run-agentic-answer-quality-fixture-eval.ts',
+    );
+    expect(scripts['bench:agent']).toBe(scripts['bench:agent:fixtures']);
+    expect(scripts['test:verification:agent']).toBe(scripts['bench:agent']);
+  });
+
+  it('keeps in-process agent runner scripts explicit and exploratory-only', () => {
+    expect(scripts['bench:agent:inprocess']).toBe('npx tsx test/benchmark/agent/runner.ts');
     expect(scripts['bench:agent:exploratory']).toBe('npx tsx test/benchmark/agent/runner.ts');
-    expect(scripts['benchmark:quick']).toBe('npx tsx test/benchmark/agent/runner.ts --profile quick');
+    expect(scripts['bench:agent:tier']).toBe('pnpm run bench:agent:exploratory:tier');
+    expect(scripts['benchmark:quick']).toBe('pnpm run benchmark:exploratory:quick');
+    expect(scripts['benchmark:standard']).toBe('pnpm run benchmark:exploratory:standard');
+    expect(scripts['benchmark:nightly']).toBe('pnpm run benchmark:exploratory:nightly');
   });
 
   it('keeps messy-search composite lane wired to live noisy eval plus agent runner', () => {
-    const messyAgentRunner = 'npx tsx test/benchmark/agent/runner.ts --profile messy-search';
+    const messyAgentRunner = 'pnpm run benchmark:exploratory:messy-agent';
     const messyEntityRunner = 'node --import tsx scripts/eval/run-noisy-entity-eval.ts --output /tmp/noisy-entity-live-results.json --mode hybrid';
 
     expect(scripts['benchmark:messy:agent']).toBe(messyAgentRunner);
+    expect(scripts['benchmark:exploratory:messy-agent']).toBe('npx tsx test/benchmark/agent/runner.ts --profile messy-search');
     expect(scripts['benchmark:messy:entity']).toBe(messyEntityRunner);
     expect(scripts['benchmark:messy']).toBe(
       'pnpm run benchmark:messy:entity && pnpm run benchmark:messy:agent',

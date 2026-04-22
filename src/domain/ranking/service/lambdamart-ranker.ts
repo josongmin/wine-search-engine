@@ -25,6 +25,16 @@ import { z } from 'zod';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import { compareScoreDescending } from '../../shared/utils/stable-comparator.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import {
+  LTR_FEATURE_DIMENSION,
+  LTR_FEATURE_NAME_ORDER,
+  LTR_FEATURE_SCHEMA_HASH,
+  LTR_UNIFORM_FEATURE_WEIGHT,
+  rankingFeaturesToVector,
+  type RankingFeatures,
+} from './ltr-feature-extractor.js';
+
+export type { RankingFeatures } from './ltr-feature-extractor.js';
 
 /**
  * Deterministic pseudo-random number generator (xorshift32).
@@ -43,7 +53,7 @@ const XORSHIFT32_LEFT2 = 5;
 const UINT32_TO_UNIT_INTERVAL_DIVISOR = 0x100000000;
 
 /** E2-T2: Zod schema for loaded LTR model weights — all must be finite numbers. */
-const FiniteWeightsSchema = z.array(z.number().finite()).min(1);
+const FiniteWeightsSchema = z.array(z.number().finite()).length(LTR_FEATURE_DIMENSION);
 
 /**
  * E2-T2: Validates loaded model weights and falls back to uniform weights on failure.
@@ -55,11 +65,13 @@ export function validateAndNormalizeWeights(
   const parsed = FiniteWeightsSchema.safeParse(rawWeights);
   if (!parsed.success) {
     bootstrapLogger.warn(
-      { reason: parsed.error.message, rawLength: rawWeights.length },
+      { reason: parsed.error.message, rawLength: rawWeights.length, expectedLength: LTR_FEATURE_DIMENSION },
       '[LambdaMART] Loaded weights failed validation — falling back to uniform weights',
     );
-    const uniformWeight = rawWeights.length > 0 ? 1 / rawWeights.length : LAMBDAMART_UNIFORM_FEATURE_WEIGHT;
-    const fallback = Array.from({ length: Math.max(1, rawWeights.length) }, () => uniformWeight);
+    const fallback = Array.from(
+      { length: LTR_FEATURE_DIMENSION },
+      () => LTR_UNIFORM_FEATURE_WEIGHT,
+    );
     return { weights: fallback, usedFallback: true };
   }
   return { weights: parsed.data, usedFallback: false };
@@ -83,6 +95,22 @@ export function checkFeatureParityAndWarn(
   }
 }
 
+export function assertFeatureParityOrThrow(
+  modelHash: string,
+  currentHash: string,
+  queryClass: string,
+  log: { warn: (ctx: Record<string, unknown>, msg: string) => void } = bootstrapLogger,
+): void {
+  if (modelHash === currentHash) {
+    return;
+  }
+
+  checkFeatureParityAndWarn(modelHash, currentHash, log);
+  throw new Error(
+    `LambdaMART feature schema mismatch for queryClass '${queryClass}': model=${modelHash}, current=${currentHash}`,
+  );
+}
+
 /**
  * E2-T6: Guard for featureNames index access.
  * Throws a clear invariant error when j is out of bounds.
@@ -102,51 +130,25 @@ export function throwOnUndefinedFeatureName(
 }
 
 /**
- * E2-T4: Named weight constants for DEFAULT_HEURISTIC_WEIGHTS.
- * Domain rationale per constant below. Sum = 1.00.
+ * Default cold-start weights for the current feature schema.
+ *
+ * We intentionally use a uniform prior over the live schema dimension rather
+ * than hand-tuned feature boosts so train and serve stay aligned as the schema
+ * evolves.
  */
-/** BM25 lexical relevance — useful but less discriminative for wines than embedding. */
-const W_BM25 = 0.10;
-/** Embedding (semantic) match — primary signal for semantic queries and synonyms. */
-const W_SEMANTIC = 0.20;
-/** Producer/wine popularity — boosts well-known labels across query classes. */
-const W_POPULARITY = 0.15;
-/** Vintage recency — relevant for aged-wine and cellaring queries. */
-const W_RECENCY = 0.10;
-/** Query-class structural match — high precision for exact-entity queries. */
-const W_CLASS_MATCH = 0.15;
-/** Constraint attribute match — crucial for region/grape/style filtered search. */
-const W_ATTRIBUTE_MATCH = 0.15;
-/** Diversity penalty — suppresses near-duplicate results in candidate set. */
-const W_DIVERSITY = 0.05;
-/** Multilingual coverage — important for Korean-script and transliterated queries. */
-const W_MULTILINGUAL = 0.10;
-// Sum check: 0.10+0.20+0.15+0.10+0.15+0.15+0.05+0.10 = 1.00
+export const DEFAULT_HEURISTIC_WEIGHTS: readonly number[] = Object.freeze(
+  Array.from({ length: LTR_FEATURE_DIMENSION }, () => LTR_UNIFORM_FEATURE_WEIGHT),
+);
 
-/**
- * Default heuristic weights for 8 LambdaMART features, summing to exactly 1.0.
- * Order matches featureNames in trainLambdaMARTModel and scoreFeaturesRaw.
- */
-export const DEFAULT_HEURISTIC_WEIGHTS: readonly number[] = [
-  W_BM25,
-  W_SEMANTIC,
-  W_POPULARITY,
-  W_RECENCY,
-  W_CLASS_MATCH,
-  W_ATTRIBUTE_MATCH,
-  W_DIVERSITY,
-  W_MULTILINGUAL,
-];
-
-/** Eight ranking features → uniform prior sums to 1.0 for stable cold-start. */
-const LAMBDAMART_UNIFORM_FEATURE_WEIGHT = 0.125;
 const LAMBDAMART_INITIAL_BIAS = 0.5;
 const LAMBDAMART_MAX_TRAINING_ITERATIONS = 100;
 const LAMBDAMART_ITERATIONS_MULTIPLIER_PER_EXAMPLE = 10;
 const LAMBDAMART_BATCH_SIZE_DIVISOR = 10;
 /** String hash mix constant (djb-style; deterministic seed mixing). */
 const QUERY_CLASS_SEED_MULTIPLIER = 31;
-const LAMBDAMART_FEATURE_DIMENSION = 8;
+export const LAMBDAMART_FEATURE_DIMENSION = LTR_FEATURE_DIMENSION;
+export const LAMBDAMART_FEATURE_NAMES = LTR_FEATURE_NAME_ORDER;
+export { LTR_FEATURE_DIMENSION, LTR_FEATURE_SCHEMA_HASH };
 const LAMBDAMART_WEIGHT_CLAMP_LOW = -1;
 const LAMBDAMART_WEIGHT_CLAMP_HIGH = 1;
 const LAMBDAMART_BIAS_CLAMP_HIGH = 2;
@@ -197,30 +199,6 @@ function stableSigmoid(x: number): number {
   return ez / (1 + ez);
 }
 
-export interface RankingFeatures {
-  readonly bm25Score: number;
-  readonly semanticScore: number;
-  readonly popularityScore: number;
-  readonly recencyScore: number;
-  readonly classMatchScore: number;
-  readonly attributeMatchScore: number;
-  readonly diversityScore: number;
-  readonly multilingualScore: number;
-}
-
-/** Canonical feature name order — must match scoreFeaturesRaw and DEFAULT_HEURISTIC_WEIGHTS.
- *  Module-scope (Rule 16): value is deterministic, never changes per call. */
-const LAMBDAMART_FEATURE_NAMES: readonly (keyof RankingFeatures)[] = [
-  'bm25Score',
-  'semanticScore',
-  'popularityScore',
-  'recencyScore',
-  'classMatchScore',
-  'attributeMatchScore',
-  'diversityScore',
-  'multilingualScore',
-];
-
 /**
  * Training example for LambdaMART: a pair of documents and their labels.
  */
@@ -238,6 +216,7 @@ export interface LambdaMARTExample {
  */
 export interface QueryClassWeights {
   readonly queryClass: string;
+  readonly featureSchemaHash: string;
   readonly weights: readonly number[];
   readonly bias: number;
   readonly trainingExampleCount: number;
@@ -259,9 +238,10 @@ export function trainLambdaMARTModel(
     if (classExamples.length === 0) {
       return {
         queryClass,
+        featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
         weights: Array.from(
           { length: LAMBDAMART_FEATURE_DIMENSION },
-          () => LAMBDAMART_UNIFORM_FEATURE_WEIGHT,
+          () => LTR_UNIFORM_FEATURE_WEIGHT,
         ) as readonly number[],
         bias: LAMBDAMART_INITIAL_BIAS,
         trainingExampleCount: 0,
@@ -273,7 +253,7 @@ export function trainLambdaMARTModel(
     // Mutable copy for training
     const weights: number[] = Array.from(
       { length: LAMBDAMART_FEATURE_DIMENSION },
-      () => LAMBDAMART_UNIFORM_FEATURE_WEIGHT,
+      () => LTR_UNIFORM_FEATURE_WEIGHT,
     );
     let bias = LAMBDAMART_INITIAL_BIAS;
 
@@ -308,6 +288,8 @@ export function trainLambdaMARTModel(
         // initial saturation region.
         const score1 = scoreFeaturesRaw(example.features1, weights, bias);
         const score2 = scoreFeaturesRaw(example.features2, weights, bias);
+        const featureVector1 = rankingFeaturesToVector(example.features1);
+        const featureVector2 = rankingFeaturesToVector(example.features2);
 
         const labelDiff = example.label1 - example.label2;
         const scoreDiff = score1 - score2;
@@ -316,8 +298,8 @@ export function trainLambdaMARTModel(
         for (let j = 0; j < LAMBDAMART_FEATURE_DIMENSION; j++) {
           // E2-T6: throwOnUndefinedFeatureName guards against out-of-bounds access.
           // LAMBDAMART_FEATURE_NAMES has exactly LAMBDAMART_FEATURE_DIMENSION elements; j is always in range.
-          const fname = throwOnUndefinedFeatureName(LAMBDAMART_FEATURE_NAMES, j) as keyof RankingFeatures;
-          const featureDiff = example.features1[fname] - example.features2[fname];
+          throwOnUndefinedFeatureName(LAMBDAMART_FEATURE_NAMES, j);
+          const featureDiff = (featureVector1[j] ?? 0) - (featureVector2[j] ?? 0);
           const currentGradient = gradients[j] ?? 0;
           gradients[j] = currentGradient + lambda * featureDiff;
         }
@@ -389,6 +371,7 @@ export function trainLambdaMARTModel(
 
     return {
       queryClass,
+      featureSchemaHash: LTR_FEATURE_SCHEMA_HASH,
       weights: normalizedWeights,
       bias,
       trainingExampleCount: classExamples.length,
@@ -409,6 +392,11 @@ export function scoreDocument(
   features: RankingFeatures,
   weights: QueryClassWeights,
 ): number {
+  assertFeatureParityOrThrow(
+    weights.featureSchemaHash,
+    LTR_FEATURE_SCHEMA_HASH,
+    weights.queryClass,
+  );
   const { weights: safeWeights } = validateAndNormalizeWeights(weights.weights);
   // Guard bias: FiniteWeightsSchema only validates the weights array, not bias.
   // A NaN/Infinity bias from a corrupted DB row would set score = bias before
@@ -435,16 +423,7 @@ function scoreFeaturesRaw(
   weights: readonly number[],
   bias: number,
 ): number {
-  const featureValues = [
-    features.bm25Score,
-    features.semanticScore,
-    features.popularityScore,
-    features.recencyScore,
-    features.classMatchScore,
-    features.attributeMatchScore,
-    features.diversityScore,
-    features.multilingualScore,
-  ];
+  const featureValues = rankingFeaturesToVector(features);
 
   let score = bias;
   for (let i = 0; i < LAMBDAMART_FEATURE_DIMENSION; i++) {

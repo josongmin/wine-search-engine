@@ -366,4 +366,50 @@ describe('SearchUseCase specialized retrieval routing', () => {
       }),
     );
   });
+
+  it('rebinds generic hybrid execution onto the dual-lane contract before post-route shaping', async () => {
+    const plan = makePlan({
+      rawQuery: 'bordeaux cabernet',
+      normalizedQuery: 'bordeaux cabernet',
+      intent: 'semantic_discovery',
+      route: 'hybrid',
+      retrievalMode: 'semantic_hybrid',
+      queryClass: 'unknown',
+      anchors: [],
+    });
+    vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
+    vi.mocked(deps.candidatePool.generate).mockResolvedValue([
+      makeCandidate('wine-7', 'Generic Candidate'),
+    ]);
+
+    const useCase = new SearchUseCase(deps);
+    await useCase.execute({ query: 'bordeaux cabernet' }, 'req-dual-lane-contract');
+
+    expect(deps.entityResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(deps.candidatePool.generate).toHaveBeenCalledTimes(1);
+    expect(deps.responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compiled: expect.objectContaining({
+          execution: expect.objectContaining({
+            effectiveRoute: 'hybrid',
+            executionTopology: 'dual_lane',
+          }),
+        }),
+        executionContract: expect.objectContaining({
+          executionTopology: 'dual_lane',
+          laneTrace: expect.objectContaining({
+            identity: expect.objectContaining({
+              participated: true,
+            }),
+            general: expect.objectContaining({
+              participated: true,
+            }),
+            fused: expect.objectContaining({
+              participated: true,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
 });

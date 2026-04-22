@@ -76,6 +76,9 @@ function appendRecoverySearchClauses(
   for (const region of asStringArray(input['exclude_regions']) ?? []) {
     clauses.push(`not ${region}`);
   }
+  for (const wineType of asStringArray(input['exclude_wine_types']) ?? []) {
+    clauses.push(`not ${wineType}`);
+  }
   const minPriceKrw = asPositiveInt(input['min_price_krw']);
   const maxPriceKrw = asPositiveInt(input['max_price_krw']);
   clauses.push(
@@ -106,6 +109,9 @@ function buildRecoveryFilters(input: Record<string, unknown>): readonly Normaliz
   }
   for (const region of asStringArray(input['exclude_regions']) ?? []) {
     filters.push({ attribute: 'region', operator: 'exclude', value: region, source_phrase: region, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
+  }
+  for (const wineType of asStringArray(input['exclude_wine_types']) ?? []) {
+    filters.push({ attribute: 'wine_type', operator: 'exclude', value: wineType, source_phrase: wineType, confidence: 1.0, mapping_version: RECOVERY_FILTER_VERSION });
   }
 
   const wineType = asNonEmptyString(input['wine_type']);

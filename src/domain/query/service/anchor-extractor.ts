@@ -5,6 +5,7 @@ import type { NormalizedQueryViews } from '../model/query-views.js';
 import { parseSpans } from '../../attribute/service/span-parser.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
+import { buildAliasLookupPlan } from './alias-lookup-plan.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -84,6 +85,22 @@ const EXACT_LOOKUP_STRATEGIES = new Set([
   'transliterated_exact',
   'phonetic_exact',
 ]);
+
+function normalizeLookupStrategyPart(part: string): string {
+  return part.startsWith('index_') ? part.slice('index_'.length) : part;
+}
+
+function splitLookupStrategies(strategy: string | undefined): readonly string[] {
+  if (strategy === undefined) {
+    return [];
+  }
+  return [...new Set(
+    strategy
+      .split('+')
+      .map((part) => normalizeLookupStrategyPart(part.trim()))
+      .filter((part) => part.length > 0),
+  )];
+}
 
 interface LookupQuerySet {
   readonly baseQueries: readonly string[];
@@ -187,7 +204,7 @@ export class AnchorExtractor {
       target.push(trimmed);
     };
 
-    const primaryQueries = queryViews?.lookupVariants ?? [normalizedQuery];
+    const primaryQueries = buildAliasLookupPlan(normalizedQuery, queryViews).tokenList;
     for (const query of primaryQueries) {
       add(baseQueries, query);
     }
@@ -215,7 +232,7 @@ export class AnchorExtractor {
       candidateEntityIds: match.entityIds,
       lookupVariants: match.lookupVariants,
       ...(match.lookupStrategy !== undefined
-        ? { lookupStrategies: match.lookupStrategy.split('+') }
+        ? { lookupStrategies: splitLookupStrategies(match.lookupStrategy) }
         : {}),
       confidence: match.matchConfidence,
       source: 'alias' as const,
@@ -279,12 +296,7 @@ export class AnchorExtractor {
   }
 
   private hasExactLikeStrategy(strategy: string | undefined): boolean {
-    if (strategy === undefined) {
-      return false;
-    }
-
-    return strategy
-      .split('+')
+    return splitLookupStrategies(strategy)
       .some((part) => EXACT_LOOKUP_STRATEGIES.has(part));
   }
 

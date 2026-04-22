@@ -36,6 +36,7 @@ function makeMinimalConfig(overrides: Partial<Config['embedding']> = {}): Config
     host: '0.0.0.0',
     vespa: { url: 'http://vespa:8080' },
     openai: {},
+    cohere: {},
     embedding: { model: 'test-model', ...overrides },
     learnedMatcher: {},
     reranker: {},
@@ -66,6 +67,16 @@ describe('E5-T1: embedding readiness when no OpenAI key', () => {
   it('returns up when openai.apiKey is set (probe called, mocked as up)', async () => {
     const config = makeMinimalConfig();
     (config.openai as Record<string, unknown>)['apiKey'] = 'sk-test';
+    const options = buildHealthRouteOptions(config, makeRuntime());
+    const embeddingCheck = options.readiness['embedding'];
+    expect(embeddingCheck).toBeDefined();
+    const status = await embeddingCheck!.check();
+    expect(status).toBe('up');
+  });
+
+  it('returns up when openai.apiKeys is set without legacy apiKey', async () => {
+    const config = makeMinimalConfig();
+    (config.openai as Record<string, unknown>)['apiKeys'] = ['sk-a', 'sk-b'];
     const options = buildHealthRouteOptions(config, makeRuntime());
     const embeddingCheck = options.readiness['embedding'];
     expect(embeddingCheck).toBeDefined();

@@ -57,13 +57,13 @@ import {
 export interface CoreAdapterServices {
   readonly searchIndex: SearchIndexPort;
   readonly embeddingService: EmbeddingServicePort;
-  /** Present when `OPENAI_API_KEY` is set. */
+  /** Present when an OpenAI credential or credential pool is set. */
   readonly chatLlm?: ChatLlmPort;
   readonly reranker?: RerankerPort;
   /**
    * Doc2Query generator used by index-time ETL only.
    *
-   * Backed by the OpenAI chat LLM when `OPENAI_API_KEY` is set; otherwise
+   * Backed by the OpenAI chat LLM when an OpenAI credential is set; otherwise
    * a deterministic stub so dev / test environments can boot the
    * container without an API key.
    */
@@ -148,10 +148,10 @@ export async function buildCoreAdapterServices(
     if (config.killSwitch.denseRetrieval) {
       return new StubEmbeddingService(config.embedding.dimension);
     }
-    if (config.openai.apiKey !== undefined) {
+    if (config.openai.apiKeys.length > 0) {
       return new OpenAiEmbeddingService({
         baseUrl: config.openai.baseUrl,
-        apiKey: config.openai.apiKey,
+        apiKeys: config.openai.apiKeys,
         model: config.openai.embeddingModel,
         httpTimeoutMs: config.openai.httpTimeoutMs,
         dimensions: config.embedding.dimension,
@@ -161,16 +161,16 @@ export async function buildCoreAdapterServices(
     // Return stub so the process boots; the kill switch guard downstream
     // will degrade gracefully.
     bootstrapLogger.warn(
-      'No embedding source configured (set OPENAI_API_KEY). Dense retrieval disabled.',
+      'No embedding source configured (set OPENAI_API_KEY or OPENAI_API_KEYS). Dense retrieval disabled.',
     );
     return new StubEmbeddingService(config.embedding.dimension);
   })();
 
   const chatLlm: ChatLlmPort | undefined =
-    config.openai.apiKey !== undefined
+    config.openai.apiKeys.length > 0
       ? new OpenAiChatLlm({
           baseUrl: config.openai.baseUrl,
-          apiKey: config.openai.apiKey,
+          apiKeys: config.openai.apiKeys,
           defaultModel: config.openai.chatModel,
           httpTimeoutMs: config.openai.httpTimeoutMs,
         })

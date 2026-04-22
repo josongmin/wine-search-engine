@@ -13,9 +13,10 @@ import { extractRuleBasedConstraints } from '../rule-based-constraint-extractor.
 describe('extractRuleBasedConstraints — price "under" pattern (BUG-14)', () => {
   it('matches plain ASCII "under $50"', () => {
     const result = extractRuleBasedConstraints('under $50 red wine');
-    const priceBand = result.soft.find((c) => c.attribute === 'price_band');
-    expect(priceBand).toBeDefined();
-    expect(priceBand?.value).toBe('mid');
+    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    expect(maxPrice).toBeDefined();
+    expect(maxPrice?.value).toBe(67_500);
+    expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
   it('matches "under 30" without dollar sign', () => {
@@ -55,17 +56,17 @@ describe('extractRuleBasedConstraints — price "under" pattern (BUG-14)', () =>
 
   it('matches "under $50" followed by space then Korean', () => {
     const result = extractRuleBasedConstraints('under $50 와인');
-    const priceBand = result.soft.find((c) => c.attribute === 'price_band');
-    expect(priceBand).toBeDefined();
-    expect(priceBand?.value).toBe('mid');
+    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    expect(maxPrice).toBeDefined();
+    expect(maxPrice?.value).toBe(67_500);
+    expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
   it('does not match "under $50" when digit immediately follows (e.g. "under $505")', () => {
     const result = extractRuleBasedConstraints('under $505');
-    // 505 > 100 → luxury, but let's check it actually matches with the correct value
-    const priceBand = result.soft.find((c) => c.attribute === 'price_band');
-    // "505" → usd=505 > 100 → luxury
-    expect(priceBand?.value).toBe('luxury');
+    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    expect(maxPrice?.value).toBe(681_750);
+    expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
   // Additional boundary tests for accented Latin
@@ -164,7 +165,7 @@ describe('extractRuleBasedConstraints — sweetness "dry" pattern (SCAN4-05)', (
 
 describe('extractRuleBasedConstraints — soft constraint attributes (W2-01)', () => {
   it('price_band → classified as soft constraint', () => {
-    const result = extractRuleBasedConstraints('under $30 wine');
+    const result = extractRuleBasedConstraints('under 30 wine');
     expect(result.hard.find((c) => c.attribute === 'price_band')).toBeUndefined();
     expect(result.soft.find((c) => c.attribute === 'price_band')).toBeDefined();
   });
@@ -204,11 +205,12 @@ describe('extractRuleBasedConstraints — BUG-P1 regression: early return discar
   });
 
   it('wine_type is preserved even when query also has a valid price match', () => {
-    // "French red wine under $50" → wine_type=red, country=France preserved alongside price_band
+    // "French red wine under $50" → wine_type=red, country=France preserved alongside max_price_krw
     const result = extractRuleBasedConstraints('french red wine under $50');
     expect(result.hard.find((c) => c.attribute === 'wine_type')?.value).toBe('red');
     expect(result.hard.find((c) => c.attribute === 'country')?.value).toBe('France');
-    expect(result.soft.find((c) => c.attribute === 'price_band')).toBeDefined();
+    expect(result.soft.find((c) => c.attribute === 'max_price_krw')?.value).toBe(67_500);
+    expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 });
 
@@ -225,10 +227,11 @@ describe('extractRuleBasedConstraints — BUG-P2 currency detection from matched
   });
 
   it('만원 pattern extracts KRW price correctly', () => {
-    // "5만원 이하" → 50,000 KRW ÷ 1350 ≈ $37 → mid band
+    // "5만원 이하" → exact canonical KRW ceiling, not a coarse price band.
     const result = extractRuleBasedConstraints('5만원 이하 와인');
-    const band = result.soft.find((c) => c.attribute === 'price_band');
-    expect(band?.value).toBe('mid'); // ~$37 → mid
+    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    expect(maxPrice?.value).toBe(50_000);
+    expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
   it('달러 match is not contaminated by incidental 만원 elsewhere in query', () => {

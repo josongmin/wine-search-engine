@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   assertNoisyEntityQualityThresholds,
   evaluateNoisyEntityBenchmarkWithSearchExecutor,
@@ -12,10 +13,26 @@ import {
 import { resolveDataPath } from '../../../src/shared/utils/data-paths.js';
 
 describe('noisy entity benchmark eval', () => {
+  const repoDataDir = path.resolve(process.cwd(), 'data');
+  const previousWineDataDir = process.env['WINE_DATA_DIR'];
+
+  beforeAll(() => {
+    process.env['WINE_DATA_DIR'] = repoDataDir;
+  });
+
+  afterAll(() => {
+    if (previousWineDataDir === undefined) {
+      delete process.env['WINE_DATA_DIR'];
+      return;
+    }
+
+    process.env['WINE_DATA_DIR'] = previousWineDataDir;
+  });
+
   it('loads the benchmark artifact with the expected category coverage', async () => {
     const cases = await loadNoisyEntityBenchmark(resolveDataPath('data/noisy-entity-benchmark.jsonl'));
 
-    expect(cases).toHaveLength(100);
+    expect(cases).toHaveLength(102);
 
     const categoryCounts = new Map<string, number>();
     const languageCounts = new Map<string, number>();
@@ -29,7 +46,7 @@ describe('noisy entity benchmark eval', () => {
       ['accent_stripped', 6],
       ['whitespace_collapse_split', 8],
       ['abbreviation', 9],
-      ['transliteration', 10],
+      ['transliteration', 12],
       ['producer_label_partial', 12],
       ['vintage_partial', 8],
       ['mixed_language', 9],
@@ -39,7 +56,7 @@ describe('noisy entity benchmark eval', () => {
     ]));
 
     expect(languageCounts.get('en')).toBe(79);
-    expect(languageCounts.get('ko')).toBe(12);
+    expect(languageCounts.get('ko')).toBe(14);
     expect(languageCounts.get('mixed')).toBe(9);
   });
 
@@ -107,11 +124,11 @@ describe('noisy entity benchmark eval', () => {
 
     const report = scoreNoisyEntityBenchmark(cases, predictions);
 
-    expect(report.query_count).toBe(100);
+    expect(report.query_count).toBe(102);
     expect(report.recall_at_1).toBe(1);
     expect(report.recall_at_3).toBe(1);
     expect(report.mrr).toBe(1);
-    expect(report.provenance_checked_count).toBe(16);
+    expect(report.provenance_checked_count).toBe(18);
     expect(report.provenance_match_rate).toBe(1);
     expect(report.provenance_misses).toHaveLength(0);
     expect(report.resolution_checked_count).toBe(9);
@@ -242,7 +259,7 @@ describe('noisy entity benchmark eval', () => {
     );
 
     expect(report.source).toBe('search-executor');
-    expect(report.query_count).toBe(100);
+    expect(report.query_count).toBe(102);
     expect(report.recall_at_3).toBeGreaterThan(0);
     expect(report.resolution_checked_count).toBeGreaterThan(0);
     expect(report.by_category.transliteration).toBeDefined();

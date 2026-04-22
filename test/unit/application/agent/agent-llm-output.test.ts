@@ -119,6 +119,30 @@ describe('agent-llm-output', () => {
     });
   });
 
+  it('normalizes planner-emitted singular style arrays before strict tool validation', () => {
+    const parsed = parseLlmOutput(JSON.stringify({
+      thought: '힐링 mood search',
+      action: {
+        tool: 'search_wines',
+        input: {
+          query: '힐링되는 와인 한 잔',
+          style: ['approachable', 'crowd_pleasing'],
+        },
+      },
+    }));
+
+    expect(parsed).toEqual({
+      thought: '힐링 mood search',
+      action: {
+        tool: 'search_wines',
+        input: {
+          query: '힐링되는 와인 한 잔',
+          styles: ['approachable', 'crowd_pleasing'],
+        },
+      },
+    });
+  });
+
   it('fails closed when a known tool carries invalid typed input', () => {
     const raw = JSON.stringify({
       thought: 'bad typed input',

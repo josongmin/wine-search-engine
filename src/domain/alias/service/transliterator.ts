@@ -1,6 +1,9 @@
 import type { AliasType } from '../model/alias.js';
 import { stripVintageYears } from '../../shared/utils/vintage.js';
-import { containsHangul as sharedContainsHangul } from '../../shared/utils/hangul.js';
+import {
+  buildHangulJamoKey,
+  containsHangul as sharedContainsHangul,
+} from '../../shared/utils/hangul.js';
 
 /**
  * Result of generating a transliterated alias.
@@ -33,6 +36,13 @@ const TRANSLITERATION_COMPACT_CONFIDENCE = 0.6;
  * to Korean transliteration, plus an exception dictionary for established names.
  */
 export class Transliterator {
+  private static KO_TO_LATIN_IME_PREFIX_INDEX:
+    | ReadonlyMap<string, readonly {
+      readonly latin: string;
+      readonly jamoKey: string;
+      readonly syllableBoundaryOffsets: ReadonlySet<number>;
+    }[]>
+    | undefined;
   /**
    * French to Korean transliteration rules.
    * Ordered from longest to shortest match to ensure greedy matching.
@@ -508,6 +518,50 @@ export class Transliterator {
     return index;
   }
 
+  private static buildKoToLatinImePrefixIndex(): ReadonlyMap<string, readonly {
+    readonly latin: string;
+    readonly jamoKey: string;
+    readonly syllableBoundaryOffsets: ReadonlySet<number>;
+  }[]> {
+    const index = new Map<string, Array<{
+      readonly latin: string;
+      readonly jamoKey: string;
+      readonly syllableBoundaryOffsets: ReadonlySet<number>;
+    }>>();
+
+    for (const [latin, korean] of Transliterator.EXCEPTIONS) {
+      const normalizedKorean = Transliterator.normalizeKoreanWineKey(korean);
+      const key = buildHangulJamoKey(normalizedKorean);
+      if (!key.containsHangul || key.key.length === 0) {
+        continue;
+      }
+
+      const record = {
+        latin,
+        jamoKey: key.key,
+        syllableBoundaryOffsets: key.syllableBoundaryOffsets,
+      };
+
+      for (let prefixLength = 1; prefixLength < key.key.length; prefixLength += 1) {
+        if (key.syllableBoundaryOffsets.has(prefixLength)) {
+          continue;
+        }
+        const prefix = key.key.slice(0, prefixLength);
+        const existing = index.get(prefix);
+        if (existing === undefined) {
+          index.set(prefix, [record]);
+          continue;
+        }
+        if (existing.some((item) => item.latin === latin && item.jamoKey === key.key)) {
+          continue;
+        }
+        existing.push(record);
+      }
+    }
+
+    return index;
+  }
+
   /**
    * Look up the canonical Latin form of a Korean wine term using the curated
    * exception dictionary. Returns `undefined` when no match is found.
@@ -527,6 +581,60 @@ export class Transliterator {
     const key = Transliterator.normalizeKoreanWineKey(koreanTerm);
     if (key.length === 0) return undefined;
     return Transliterator.KO_TO_LATIN_INDEX.get(key);
+  }
+
+  /**
+   * IME-aware prefix lookup over curated Korean wine exception surfaces.
+   *
+   * Returns the canonical Latin term when the Korean input is an incomplete
+   * Hangul syllable prefix of a known exception surface, such as:
+   *   "오푸스ㅇ" -> "opus one"
+   *   "오퍼스ㅇ" -> "opus one"  (typo-corrected before lookup)
+   *
+   * Completed syllable boundaries like "오푸스" do not match here; those must
+   * continue through the normal exact transliteration path.
+   */
+  static romanizeWineTermPrefix(koreanTerm: string): string | undefined {
+    Transliterator.KO_TO_LATIN_IME_PREFIX_INDEX ??= Transliterator.buildKoToLatinImePrefixIndex();
+
+    const normalized = Transliterator.normalizeKoreanWineKey(koreanTerm);
+    if (normalized.length === 0) {
+      return undefined;
+    }
+
+    const key = buildHangulJamoKey(normalized);
+    if (!key.containsHangul || key.key.length === 0 || key.syllableCount < 2) {
+      return undefined;
+    }
+
+    for (const record of Transliterator.KO_TO_LATIN_IME_PREFIX_INDEX.get(key.key) ?? []) {
+      if (!record.jamoKey.startsWith(key.key)) {
+        continue;
+      }
+      if (record.syllableBoundaryOffsets.has(key.key.length) && !key.containsStandaloneJamo) {
+        continue;
+      }
+      return record.latin;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Returns the curated Korean exception surface for a Latin wine term.
+   *
+   * This is intentionally exception-only: query-time IME completion must be
+   * anchored to high-confidence alias vocabulary, not broad rule-generated
+   * transliterations. Vintage years and punctuation are stripped so
+   * `Opus One 2018` can still reuse the `opus one` exception surface.
+   */
+  static koreanExceptionSurfaceForLatinTerm(latinTerm: string): string | undefined {
+    const normalized = stripVintageYears(latinTerm.normalize('NFC').toLowerCase())
+      .replace(/[^\p{L}\p{N}'\s-]+/gu, ' ')
+      .replace(/[-\s]+/gu, ' ')
+      .trim();
+    if (normalized.length === 0) return undefined;
+    return Transliterator.EXCEPTIONS.get(normalized);
   }
 
   /**

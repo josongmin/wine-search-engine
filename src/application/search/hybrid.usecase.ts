@@ -138,6 +138,20 @@ export class HybridUseCase {
     }
 
     const { plan, compiled } = preRoute;
+    const hybridSurfaceCompiled: typeof compiled =
+      compiled.execution.effectiveRoute === 'hybrid'
+      && compiled.execution.executionTopology === 'general_only'
+      && compiled.execution.routeSource === 'api_override'
+        ? compiled
+        : {
+            ...compiled,
+            execution: {
+              ...compiled.execution,
+              effectiveRoute: 'hybrid',
+              executionTopology: 'general_only' as const,
+              routeSource: 'api_override' as const,
+            },
+          };
     let hybridPipelineResult: Awaited<ReturnType<typeof executeHybridRouteRankingPipeline>>;
     try {
       stageTimer.start('hybrid.retrieval_and_ranking');
@@ -152,8 +166,8 @@ export class HybridUseCase {
         (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
           entityResolver: this.deps.entityResolver,
           entityLookup: this.deps.entityLookup,
-        }, compiled),
-        compiled,
+        }, hybridSurfaceCompiled),
+        hybridSurfaceCompiled,
         {
           stageTimer,
           ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
@@ -179,7 +193,12 @@ export class HybridUseCase {
       );
     }
     const {
-      resolveResult,
+      executedCompiled,
+      executionTopology,
+      identityResolveResult,
+      fusedResolveResult: resolveResult,
+      laneTrace,
+      laneArtifacts,
       rankedResults,
       decisionContext,
       routeDegradation,
@@ -217,11 +236,12 @@ export class HybridUseCase {
 
     return runSearchPostRoutePhase({
       plan,
-      compiled,
+      compiled: executedCompiled,
       request: searchRequest,
       requestId,
       startTime,
       resolveResult,
+      identityResolveResult,
       rankedResults,
       decisionContext,
       // HybridUseCase always forces hybrid route — this is an API-level override.
@@ -235,6 +255,9 @@ export class HybridUseCase {
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
       routeDegradation,
+      executionTopology,
+      laneTrace,
+      laneArtifacts,
       effectiveRetrievalMode,
       retrievalKind,
       sparseExecuted,

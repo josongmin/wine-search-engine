@@ -380,14 +380,24 @@ export function buildHealthRouteOptions(
               required: true,
               check: async (): Promise<ReadinessStatus> => {
                 // OpenAI embedding takes priority (same logic as container-adapters.ts).
-                if (config.openai.apiKey !== undefined) {
-                  return probeJsonPostEndpoint(`${config.openai.baseUrl}/embeddings`, {
-                    model: config.openai.embeddingModel,
-                    input: '__healthcheck__',
-                  }, { Authorization: `Bearer ${config.openai.apiKey}` });
+                const openAiApiKeys =
+                  (config.openai.apiKeys?.length ?? 0) > 0
+                    ? config.openai.apiKeys
+                    : config.openai.apiKey !== undefined
+                      ? [config.openai.apiKey]
+                      : [];
+                if (openAiApiKeys.length > 0) {
+                  for (const apiKey of openAiApiKeys) {
+                    const status = await probeJsonPostEndpoint(`${config.openai.baseUrl}/embeddings`, {
+                      model: config.openai.embeddingModel,
+                      input: '__healthcheck__',
+                    }, { Authorization: `Bearer ${apiKey}` });
+                    if (status === 'up') return 'up';
+                  }
+                  return 'down';
                 }
                 // No OpenAI key → embedding unavailable; required probe must fail closed.
-                log.warn('embedding readiness: no OPENAI_API_KEY — embedding probe down');
+                log.warn('embedding readiness: no OPENAI_API_KEY/OPENAI_API_KEYS — embedding probe down');
                 return 'down';
               },
             },

@@ -11,22 +11,10 @@ import type { EvalCase } from '../../evaluation/model/eval-case.js';
 const ltrLog = bootstrapLogger.child({ component: 'LTRTrainingService' });
 import type { RankingFeatures, LambdaMARTExample, QueryClassWeights } from './lambdamart-ranker.js';
 import { trainLambdaMARTModel } from './lambdamart-ranker.js';
-import { extractLTRFeatures } from './ltr-feature-extractor.js';
-
-/** Legacy proxy: shift utility score into feature space (train/eval fallback). */
-const LEGACY_UTILITY_SCORE_SHIFT = 1.5;
-/** Legacy proxy: scale denominator for utility normalization. */
-const LEGACY_UTILITY_SCORE_SCALE = 2.5;
-/** Default outcome signal before branching (legacy eval path). */
-const LEGACY_OUTCOME_SIGNAL_DEFAULT = 0.3;
-/** Proxy feature when outcome is safe abstain. */
-const LEGACY_OUTCOME_SIGNAL_SAFE_ABSTAIN = 0.6;
-/** Proxy feature when outcome is avoidable abstain. */
-const LEGACY_OUTCOME_SIGNAL_AVOIDABLE_ABSTAIN = 0.2;
-/** Neutral BM25 / recency / diversity when absent from legacy eval. */
-const LEGACY_FEATURE_SCORE_NEUTRAL = 0.0;
-/** Mid popularity prior for legacy feature vector. */
-const LEGACY_POPULARITY_SCORE_PROXY = 0.5;
+import {
+  extractLTRFeatures,
+  LTR_FEATURE_NAME_ORDER,
+} from './ltr-feature-extractor.js';
 /** Strong degradation retains most of the label (synthetic hard negative). */
 const TRAINING_LABEL_DEGRADATION_STRONG = 0.7;
 /** Medium degradation for mid-tier negatives. */
@@ -43,44 +31,31 @@ const TRAINING_LABEL_DEGRADATION_FACTORS = [
 /**
  * Extracts ranking features from evaluation result.
  *
- * When real ComponentScores are stored from the eval pipeline, uses the
+ * Requires canonical score components from the eval pipeline and uses the
  * shared extractLTRFeatures() — the SAME function used at inference time,
  * making train-serve skew structurally impossible.
- *
- * Falls back to proxy signals for legacy eval results without stored
- * ComponentScores.
  */
-function extractFeaturesFromResult(result: EvalResult, _evalCase: EvalCase): RankingFeatures {
-  // When real ComponentScores are stored from the eval pipeline, use them directly.
-  // This is the SAME extractLTRFeatures() function used at inference time,
-  // making train-serve skew structurally impossible.
-  if (result.topResultScoreComponents !== undefined) {
-    return extractLTRFeatures(result.topResultScoreComponents);
+function extractFeaturesFromResult(result: EvalResult): RankingFeatures {
+  if (result.topResultScoreComponents === undefined) {
+    throw new Error(
+      `LTR training requires canonical topResultScoreComponents (caseId='${result.caseId}')`,
+    );
   }
 
-  // Fallback for legacy eval results without stored ComponentScores.
-  // Uses proxy signals from eval outcomes — has inherent train-serve gap.
-  const utility = (result.utilityScore + LEGACY_UTILITY_SCORE_SHIFT) / LEGACY_UTILITY_SCORE_SCALE;
-  const outcomeSignal = result.isCorrectResolve
-    ? 1.0
-    : result.isSafeAbstain
-      ? LEGACY_OUTCOME_SIGNAL_SAFE_ABSTAIN
-      : result.isAvoidableAbstain
-        ? LEGACY_OUTCOME_SIGNAL_AVOIDABLE_ABSTAIN
-        : result.isWrongResolve
-          ? LEGACY_FEATURE_SCORE_NEUTRAL
-          : LEGACY_OUTCOME_SIGNAL_DEFAULT;
+  return extractLTRFeatures(result.topResultScoreComponents);
+}
 
-  return {
-    bm25Score: LEGACY_FEATURE_SCORE_NEUTRAL,
-    semanticScore: result.decisionConfidence,
-    popularityScore: LEGACY_POPULARITY_SCORE_PROXY,
-    recencyScore: LEGACY_FEATURE_SCORE_NEUTRAL,
-    classMatchScore: outcomeSignal,
-    attributeMatchScore: utility,
-    diversityScore: LEGACY_FEATURE_SCORE_NEUTRAL,
-    multilingualScore: LEGACY_FEATURE_SCORE_NEUTRAL,
-  };
+function scaleRankingFeatures(
+  features: RankingFeatures,
+  factor: number,
+): RankingFeatures {
+  return LTR_FEATURE_NAME_ORDER.reduce<RankingFeatures>(
+    (scaled, featureName) => ({
+      ...scaled,
+      [featureName]: features[featureName] * factor,
+    }),
+    {} as RankingFeatures,
+  );
 }
 
 /**
@@ -113,7 +88,7 @@ export function buildTrainingExamples(
     const result = resultById.get(evalCase.caseId);
     if (!result) continue;
 
-    const features = extractFeaturesFromResult(result, evalCase);
+    const features = extractFeaturesFromResult(result);
     const label = outcomeToLabel(result, evalCase);
 
     // Generate pairwise comparisons with degraded negatives at varying levels.
@@ -128,16 +103,7 @@ export function buildTrainingExamples(
           label1: label,
           features1: features,
           label2: degradedLabel,
-          features2: {
-            bm25Score: features.bm25Score * factor,
-            semanticScore: features.semanticScore * factor,
-            popularityScore: features.popularityScore * factor,
-            recencyScore: features.recencyScore * factor,
-            classMatchScore: features.classMatchScore * factor,
-            attributeMatchScore: features.attributeMatchScore * factor,
-            diversityScore: features.diversityScore * factor,
-            multilingualScore: features.multilingualScore * factor,
-          },
+          features2: scaleRankingFeatures(features, factor),
         });
       }
     }

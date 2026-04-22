@@ -34,6 +34,11 @@ describe('extractClaims', () => {
     expect(regions).toEqual(expect.arrayContaining(['Bordeaux', 'Napa Valley']));
   });
 
+  it('does not treat user-input contrast mentions as region claims', () => {
+    const claims = extractClaims('보르도 지역이라는 추가 맥락은 입력에 있었지만, 현재 결과에선 region이 France / France로만 제시되어 있습니다.');
+    expect(claims.some((c) => c.field === 'region' && c.value === 'Bordeaux')).toBe(false);
+  });
+
   it('extracts Korean grape slang alias as grape claim', () => {
     const claims = extractClaims('까쇼 추천해줘');
     expect(claims.some((c) => c.field === 'grape_primary' && c.normalizedValue === 'cabernet sauvignon')).toBe(true);
@@ -99,10 +104,36 @@ describe('extractClaims', () => {
     expect(ids).toEqual([]);
   });
 
+  it('does not extract pairing tag values as identity claims', () => {
+    const claims = extractClaims('페어링 태그로는 Cured Meat, Cheese가 확인되었습니다.');
+    const ids = claims.filter((c) => c.category === 'identity_claim').map((c) => c.value);
+    expect(ids).toEqual([]);
+    expect(claims.some((c) => c.category === 'semantic_claim' && c.field === 'pairing_rationale')).toBe(true);
+  });
+
   it('extracts vintage year', () => {
     const claims = extractClaims('Château Margaux 2015 is excellent.');
     const vintage = claims.find((c) => c.field === 'vintage_year');
     expect(vintage?.value).toBe('2015');
+  });
+
+  it('does not split appellation tokens out of exact Latin identity claims', () => {
+    const claims = extractClaims('확인된 정확한 와인은 2022 Château Margaux입니다.');
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Château Margaux')).toBe(true);
+    expect(claims.some((c) => c.field === 'region' && c.value === 'Margaux')).toBe(false);
+  });
+
+  it('masks repeated grand-vin label spans before region extraction', () => {
+    const claims = extractClaims('확인된 정확한 와인은 2022 Château Margaux Château Margaux (Premier Grand Cru Classé)입니다.');
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Château Margaux Château Margaux (Premier Grand Cru Classé)')).toBe(true);
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Premier Grand Cru Classé')).toBe(false);
+    expect(claims.some((c) => c.field === 'region' && c.value === 'Margaux')).toBe(false);
+  });
+
+  it('extracts markdown-emphasized grand-vin labels as the same identity span', () => {
+    const claims = extractClaims('네, **2022 Château Margaux Château Margaux (Premier Grand Cru Classé)**가 정확히 확인되었습니다.');
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Château Margaux Château Margaux (Premier Grand Cru Classé)')).toBe(true);
+    expect(claims.some((c) => c.category === 'identity_claim' && c.value === 'Premier Grand Cru Classé')).toBe(false);
   });
 
   it('does not extract drinking window years as vintage', () => {
@@ -191,10 +222,77 @@ describe('extractClaims', () => {
     expect(pairing).toBeDefined();
   });
 
+  it('keeps Latin wine labels with lowercase connector chains as one identity claim', () => {
+    const claims = extractClaims('2012 Château Pétrus Saute-Loup Reserve de la Famille Pomerol입니다.');
+    expect(claims.some((c) =>
+      c.category === 'identity_claim'
+      && c.value === 'Château Pétrus Saute-Loup Reserve de la Famille Pomerol'
+    )).toBe(true);
+    expect(claims.some((c) =>
+      c.category === 'identity_claim'
+      && c.value === 'Famille Pomerol'
+    )).toBe(false);
+  });
+
   it('extracts recommendation-style semantic claims', () => {
     const claims = extractClaims('Masi Amarone is recommended for a cold winter evening near the fireplace.');
     const opinion = claims.find((c) => c.category === 'semantic_claim' && c.field === 'general_opinion');
     expect(opinion).toBeDefined();
+  });
+
+  it('does not extract future service offers as wine semantic claims', () => {
+    const claims = extractClaims('원하시면 이 와인의 음용 적기나 음식 페어링도 이어서 확인해드릴게요.');
+    const semanticClaims = claims.filter((c) => c.category === 'semantic_claim');
+    expect(semanticClaims).toHaveLength(0);
+  });
+
+  it('does not extract identities or wine types from exact-lookup no-confirmation sentences', () => {
+    const claims = extractClaims('현재 증거로는 모엣 로제가 단일한 정확한 와인 엔티티로 확인되지 않습니다. 정확한 라벨이나 조건을 알려주세요.');
+    expect(claims.filter((c) => c.category === 'identity_claim')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'wine_type')).toHaveLength(0);
+  });
+
+  it('does not extract wine types from exact-lookup surface-explanation sentences', () => {
+    const claims = extractClaims('보르게리(볼게리) 지역의 레드 와인을 뜻하는 표면 표현일 가능성이 있어요.');
+    expect(claims.filter((c) => c.category === 'identity_claim')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'wine_type')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'region')).toHaveLength(0);
+  });
+
+  it('does not extract clarification example parentheticals as factual claims', () => {
+    const claims = extractClaims('정확한 라벨명이나 병기된 표기(예: Moët & Chandon Rosé Impérial, 연도/버전/용량 등)를 알려주세요.');
+    expect(claims.filter((c) => c.category === 'identity_claim')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'wine_type')).toHaveLength(0);
+  });
+
+  it('does not extract clarification example clauses as factual claims', () => {
+    const claims = extractClaims('모엣 샹동 로제 브뤼 같은 정확한 라벨이나, 원하시는 스타일/빈티지/용도를 알려주세요.');
+    expect(claims.filter((c) => c.category === 'identity_claim')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'wine_type')).toHaveLength(0);
+  });
+
+  it('does not extract clarification example lines as factual claims', () => {
+    const claims = extractClaims('정확한 라벨이나 조건을 알려주세요. 예: 생산자명, 빈티지, 볼게리 내 특정 와인명, 또는 카베르네 소비뇽/메를로 같은 품종 조건.');
+    expect(claims.filter((c) => c.category === 'identity_claim')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'grape_primary')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'region')).toHaveLength(0);
+  });
+
+  it('does not extract inline clarification examples as factual wine attributes', () => {
+    const claims = extractClaims('정확한 라벨을 알려주시거나, 예를 들어 산지/빈티지/레드·화이트/등급 같은 조건을 함께 주시면 다시 확인해드릴게요.');
+    expect(claims.filter((c) => c.field === 'wine_type')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'region')).toHaveLength(0);
+  });
+
+  it('does not extract multi-line clarification examples as factual claims', () => {
+    const claims = extractClaims([
+      '현재 증거만으로는 라피트(Château Lafite Rothschild)가 단일한 정확한 와인 엔티티로 확인되지 않았습니다.',
+      '정확히 원하시는 라벨을 알려주시겠어요? 예를 들면:',
+      '- Château Lafite Rothschild의 연도(vintage)',
+      '- Pauillac / Bordeaux 같은 지역 또는 등급',
+    ].join('\n'));
+    expect(claims.filter((c) => c.category === 'identity_claim')).toHaveLength(0);
+    expect(claims.filter((c) => c.field === 'region')).toHaveLength(0);
   });
 
   it('extracts comparative claims from explicit more-than statements', () => {

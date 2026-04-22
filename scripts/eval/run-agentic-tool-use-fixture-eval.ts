@@ -7,7 +7,9 @@ import fs from 'node:fs/promises';
 
 import { loadFixtureCases, loadFixtureThresholds, readNumericThreshold } from './external-fixture-benchmark.js';
 import {
+  assertAgentHttpEntrypointReady,
   callAgentApi,
+  classifyAgentApiFailure,
   collectToolCalls,
   evaluateAnswerPatterns,
   evaluateExpectedToolSequence,
@@ -37,11 +39,16 @@ interface ToolUseCaseResult {
   readonly forbiddenPatternViolation: boolean;
   readonly durationMs: number;
   readonly toolCalls: readonly string[];
+  readonly failure_kind?: string;
+  readonly failure_message?: string;
 }
 
 interface ToolUseFixtureReport {
   readonly benchmark: 'agentic-tool-use-fixture';
   readonly suite_id: 'agentic_tool_use';
+  readonly transport: 'http';
+  readonly endpoint: '/v1/agent';
+  readonly operation_id: 'agent.execute';
   readonly query_count: number;
   readonly tool_selection_accuracy: number;
   readonly step_budget_compliance: number;
@@ -96,6 +103,9 @@ export function buildToolUseFixtureReport(
   return {
     benchmark: 'agentic-tool-use-fixture',
     suite_id: SUITE_ID,
+    transport: 'http',
+    endpoint: '/v1/agent',
+    operation_id: 'agent.execute',
     query_count: count,
     tool_selection_accuracy: count === 0 ? 0 : results.filter((item) => item.toolSelectionPass).length / count,
     step_budget_compliance: count === 0 ? 0 : results.filter((item) => item.stepBudgetPass).length / count,
@@ -137,12 +147,31 @@ async function assertThresholds(report: ToolUseFixtureReport): Promise<void> {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  await assertAgentHttpEntrypointReady(args.apiUrl, Math.min(args.timeoutMs, 10_000));
   const rawCases = await loadFixtureCases([SUITE_ID]);
   const cases = rawCases.map(normalizeAgentFixtureCase);
   const results: ToolUseCaseResult[] = [];
 
   for (const benchmarkCase of cases) {
-    const response = await callAgentApi(args.apiUrl, benchmarkCase.query, benchmarkCase.max_steps, args.timeoutMs);
+    const response = await callAgentApi(args.apiUrl, benchmarkCase.query, benchmarkCase.max_steps, args.timeoutMs).catch((err: unknown) => {
+      const failure = classifyAgentApiFailure(err);
+      results.push({
+        id: benchmarkCase.id,
+        pass: false,
+        toolSelectionPass: false,
+        stepBudgetPass: false,
+        patternCoveragePass: false,
+        forbiddenPatternViolation: false,
+        durationMs: 0,
+        toolCalls: [],
+        failure_kind: failure.kind,
+        failure_message: failure.message,
+      });
+      return undefined;
+    });
+    if (response === undefined) {
+      continue;
+    }
     const toolCalls = collectToolCalls(response.steps);
     const toolSelectionPass = evaluateExpectedToolSequence(toolCalls, benchmarkCase.expected_tools ?? []);
     const stepBudgetPass = benchmarkCase.max_steps === undefined

@@ -11,8 +11,20 @@ import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker.port.js';
 import { AbstainPolicy } from '../../../../src/domain/query/service/abstain-policy.js';
 import { buildDeterminismFingerprint } from '../../../../src/domain/shared/utils/determinism-fingerprint.js';
+import type { DualLaneArtifact } from '../../../../src/domain/retrieval/model/dual-lane-artifact.js';
 
 const GENERIC_HYBRID_EXECUTION_FACTS = {
+  executionTopology: 'general_only',
+  laneTrace: {
+    identity: { participated: false, artifactCount: 0 },
+    general: { participated: true, artifactCount: 0 },
+    fused: { participated: true, artifactCount: 0 },
+  },
+  laneArtifacts: {
+    identity: [],
+    general: [],
+    fused: [],
+  },
   effectiveRetrievalMode: 'attribute_search',
   retrievalKind: 'generic_hybrid',
   sparseExecuted: true,
@@ -468,6 +480,9 @@ describe('runSearchPostRoutePhase', () => {
         } as never,
         rankedResults,
         effectiveRoute: 'hybrid',
+        executionTopology: 'general_only',
+        laneTrace: GENERIC_HYBRID_EXECUTION_FACTS.laneTrace,
+        laneArtifacts: GENERIC_HYBRID_EXECUTION_FACTS.laneArtifacts,
         effectiveRetrievalMode: 'recommendation',
         retrievalKind: 'generic_hybrid',
         sparseExecuted: true,
@@ -750,7 +765,7 @@ describe('runSearchPostRoutePhase', () => {
     const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
     const responseParams = responseBuilder.build.mock.calls[0]?.[0];
     expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(false);
-    expect(decisionInput?.evidenceSummary?.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
       false,
     );
     expect(responseParams?.retrievalModeSource).toBe('planner');
@@ -798,6 +813,9 @@ describe('runSearchPostRoutePhase', () => {
       resolveResult: makeResolveResult(),
       rankedResults,
       effectiveRoute: 'hybrid',
+      executionTopology: 'general_only',
+      laneTrace: GENERIC_HYBRID_EXECUTION_FACTS.laneTrace,
+      laneArtifacts: GENERIC_HYBRID_EXECUTION_FACTS.laneArtifacts,
       effectiveRetrievalMode: 'recommendation',
       retrievalKind: 'generic_hybrid',
       sparseExecuted: true,
@@ -818,6 +836,240 @@ describe('runSearchPostRoutePhase', () => {
 
     expect(decisionInput?.effectiveRetrievalMode).toBe('recommendation');
     expect(responseParams?.compiled?.execution.effectiveRetrievalMode).toBe('recommendation');
+  });
+
+  it('does not mint winner dual-lane evidence on general_only post-route paths even with contaminated fused artifacts', async () => {
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const winnerEntityId = createEntityId('entity-ranked');
+    const rankedResults = [makeRankedResult({ entityId: winnerEntityId })] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(makeDecisionOutput()) };
+    const responseBuilder = makeResponseBuilder();
+    const contaminatedWinnerArtifact: DualLaneArtifact = {
+      entityId: winnerEntityId,
+      canonicalLabel: 'Ranked Wine',
+      lanePresence: 'corroborated',
+      agreement: {
+        corroborated: true,
+        disagreement: false,
+        entityOnly: false,
+        generalOnly: false,
+      },
+      exactnessTier: 'exact',
+      entityPosteriorScore: 0.97,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'exact',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'Ranked Wine',
+        evidenceRefs: ['identity:1'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 1,
+        },
+      },
+      fusedCandidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Ranked Wine',
+        matchedConstraints: [],
+        evidenceItems: [],
+        retrievalTrace: {
+          retrievalProfile: 'dual_lane_fusion',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan,
+      compiled: makeTestCompiled(),
+      request,
+      requestId: 'r-general-only-contaminated',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult({
+        topEntity: {
+          entityId: winnerEntityId,
+          canonicalLabel: 'Ranked Wine',
+          calibratedScore: 0.91,
+        },
+        candidates: [{
+          entityId: winnerEntityId,
+          canonicalLabel: 'Ranked Wine',
+          calibratedScore: 0.91,
+          rank: 1,
+          evidenceRefs: [],
+        }],
+      }),
+      identityResolveResult: null,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      executionTopology: 'general_only',
+      laneTrace: GENERIC_HYBRID_EXECUTION_FACTS.laneTrace,
+      laneArtifacts: {
+        identity: [],
+        general: [],
+        fused: [contaminatedWinnerArtifact],
+      },
+      effectiveRetrievalMode: 'attribute_search',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(false);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      false,
+    );
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.lanePresence).toBeUndefined();
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('none');
+  });
+
+  it('uses identity and fused resolve together on dual-lane post-route paths', async () => {
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const winnerEntityId = createEntityId('entity-ranked');
+    const rankedResults = [makeRankedResult({ entityId: winnerEntityId })] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(makeDecisionOutput()) };
+    const responseBuilder = makeResponseBuilder();
+    const identityResolveResult = makeResolveResult({
+      topEntity: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Ranked Wine',
+        calibratedScore: 0.97,
+      },
+      candidates: [{
+        entityId: winnerEntityId,
+        canonicalLabel: 'Ranked Wine',
+        calibratedScore: 0.97,
+        rank: 1,
+        evidenceRefs: ['identity:1'],
+      }],
+    });
+    const corroboratedWinnerArtifact: DualLaneArtifact = {
+      entityId: winnerEntityId,
+      canonicalLabel: 'Ranked Wine',
+      lanePresence: 'corroborated',
+      agreement: {
+        corroborated: true,
+        disagreement: false,
+        entityOnly: false,
+        generalOnly: false,
+      },
+      exactnessTier: 'exact',
+      entityPosteriorScore: 0.97,
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: winnerEntityId,
+        exactnessTier: 'exact',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'Ranked Wine',
+        evidenceRefs: ['identity:1'],
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 0,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 1,
+        },
+      },
+      fusedCandidate: {
+        entityId: winnerEntityId,
+        canonicalLabel: 'Ranked Wine',
+        matchedConstraints: [],
+        evidenceItems: [],
+        retrievalTrace: {
+          retrievalProfile: 'dual_lane_fusion',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: [],
+        },
+      },
+    };
+
+    await runSearchPostRoutePhase({
+      plan,
+      compiled: {
+        ...makeTestCompiled(),
+        execution: {
+          ...makeTestCompiled().execution,
+          executionTopology: 'dual_lane',
+        },
+      },
+      request,
+      requestId: 'r-dual-lane-post-route',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult({
+        topEntity: {
+          entityId: winnerEntityId,
+          canonicalLabel: 'Ranked Wine',
+          calibratedScore: 0.91,
+        },
+        candidates: [{
+          entityId: winnerEntityId,
+          canonicalLabel: 'Ranked Wine',
+          calibratedScore: 0.91,
+          rank: 1,
+          evidenceRefs: [],
+        }],
+      }),
+      identityResolveResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      executionTopology: 'dual_lane',
+      laneTrace: {
+        identity: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+        general: { participated: true, artifactCount: 0 },
+        fused: { participated: true, artifactCount: 1, resolveStatus: 'resolved' },
+      },
+      laneArtifacts: {
+        identity: [],
+        general: [],
+        fused: [corroboratedWinnerArtifact],
+      },
+      effectiveRetrievalMode: 'attribute_search',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    expect(decisionInput?.identityResolveResult?.topEntity?.entityId).toBe(winnerEntityId);
+    expect(decisionInput?.resolveResult?.topEntity?.entityId).toBe(winnerEntityId);
+    expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(true);
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.winnerIdentityArtifactMatchesResolveResult).toBe(
+      true,
+    );
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.lanePresence).toBe('corroborated');
+    expect(decisionInput?.evidenceSummary?.identityEvidence?.exactnessTier).toBe('exact');
   });
 
   it('keeps the shared ranked-route decision phase aligned with the main post-route response shape', async () => {
@@ -921,13 +1173,14 @@ describe('runSearchPostRoutePhase', () => {
       requestId: 'req-fingerprint-a',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
-      rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
-      fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
-      effectiveRoute: 'hybrid',
-      snapshotVersions,
-      decisionEngine: decisionEngine as never,
-      responseBuilder: responseBuilder as never,
-    });
+    rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+    fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+    effectiveRoute: 'hybrid',
+    ...GENERIC_HYBRID_EXECUTION_FACTS,
+    snapshotVersions,
+    decisionEngine: decisionEngine as never,
+    responseBuilder: responseBuilder as never,
+  });
 
     await runRankedRouteDecisionPhase({
       plan: { ...minimalPlan(), rawQuery: '샤또 마고', normalizedQuery: 'chateau margaux' },
@@ -935,13 +1188,14 @@ describe('runSearchPostRoutePhase', () => {
       requestId: 'req-fingerprint-b',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
-      rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
-      fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
-      effectiveRoute: 'hybrid',
-      snapshotVersions,
-      decisionEngine: decisionEngine as never,
-      responseBuilder: responseBuilder as never,
-    });
+    rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+    fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+    effectiveRoute: 'hybrid',
+    ...GENERIC_HYBRID_EXECUTION_FACTS,
+    snapshotVersions,
+    decisionEngine: decisionEngine as never,
+    responseBuilder: responseBuilder as never,
+  });
 
     const firstParams = responseBuilder.build.mock.calls[0]?.[0] as {
       determinismFingerprintParams?: Parameters<typeof buildDeterminismFingerprint>[0];
@@ -999,6 +1253,7 @@ describe('runSearchPostRoutePhase', () => {
         makeRankedResult({ entityId: createEntityId('wine:3'), rank: 3, finalScore: 0.7 }),
       ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       effectiveRoute: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
       rankingMetadata,
       decisionEngine: makeDecisionEngine() as never,
       responseBuilder: responseBuilder as never,
@@ -1057,6 +1312,9 @@ describe('runSearchPostRoutePhase', () => {
         makeRankedResult({ entityId: createEntityId('wine:2') }),
       ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       effectiveRoute: 'hybrid',
+      executionTopology: 'general_only',
+      laneTrace: GENERIC_HYBRID_EXECUTION_FACTS.laneTrace,
+      laneArtifacts: GENERIC_HYBRID_EXECUTION_FACTS.laneArtifacts,
       retrievalModeSource: 'planner',
       plannerSuggestedMode: 'recommendation',
       effectiveRetrievalMode: 'recommendation',
@@ -1131,6 +1389,7 @@ describe('runSearchPostRoutePhase', () => {
 
     expect(auditExtension?.execution_trace).toEqual({
       effective_route: 'hybrid',
+      execution_topology: 'general_only',
       retrieval_mode_source: 'planner',
       effective_retrieval_mode: 'recommendation',
       retrieval_kind: 'generic_hybrid',
@@ -1147,6 +1406,7 @@ describe('runSearchPostRoutePhase', () => {
         require_constraint_evidence: true,
         require_anchor_evidence: false,
       },
+      lane_trace: GENERIC_HYBRID_EXECUTION_FACTS.laneTrace,
       provenance_closure: {
         policy: {
           requireIdentitySeal: false,
@@ -1218,6 +1478,7 @@ describe('runSearchPostRoutePhase', () => {
       rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       effectiveRoute: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
       rankingMetadata,
       decisionEngine: makeDecisionEngine() as never,
       responseBuilder: responseBuilder as never,
@@ -1333,6 +1594,7 @@ describe('runSearchPostRoutePhase', () => {
       rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       effectiveRoute: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
       decisionEngine: makeDecisionEngine() as never,
       responseBuilder: responseBuilder as never,
     });
@@ -1512,6 +1774,9 @@ describe('runSearchPostRoutePhase', () => {
         resolveResult: makeResolveResult(),
         rankedResults,
         effectiveRoute: 'hybrid',
+        executionTopology: 'general_only',
+        laneTrace: GENERIC_HYBRID_EXECUTION_FACTS.laneTrace,
+        laneArtifacts: GENERIC_HYBRID_EXECUTION_FACTS.laneArtifacts,
         effectiveRetrievalMode: 'recommendation',
         retrievalKind: 'generic_hybrid',
         sparseExecuted: true,
@@ -1589,6 +1854,7 @@ describe('runSearchPostRoutePhase', () => {
         rankedResults,
         fullRankedResults: rankedResults,
         effectiveRoute: 'hybrid',
+        ...GENERIC_HYBRID_EXECUTION_FACTS,
         decisionEngine: {
           decide: vi.fn().mockRejectedValue(new Error('decision exploded')),
         } as never,
@@ -1663,6 +1929,7 @@ describe('runSearchPostRoutePhase', () => {
         }),
       ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       effectiveRoute: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
       decisionEngine: makeDecisionEngine() as never,
       responseBuilder: responseBuilder as never,
       includeCounterfactuals: false,

@@ -98,3 +98,5 @@
 {"benchmark_id":"neb-098","query":"conti burgundy","expected_entity_id":"romanee-conti-2015","category":"phonetic","language":"en","difficulty":"hard","expected_provenance_stage":"phonetic","expected_provenance_source":"rule:phonetic_french_v1"}
 {"benchmark_id":"neb-099","query":"moet","expected_entity_id":"moet-brut","category":"noisy_short_form","language":"en","difficulty":"hard","expected_resolution":"ambiguous"}
 {"benchmark_id":"neb-100","query":"barolo","expected_entity_id":"barolo-giacomo","category":"noisy_short_form","language":"en","difficulty":"hard","expected_resolution":"ambiguous"}
+{"benchmark_id":"neb-101","query":"오푸스ㅇ","expected_entity_id":"opus-one-2018","category":"transliteration","language":"ko","difficulty":"hard","expected_provenance_stage":"transliteration","expected_provenance_source":"rule:transliteration_ko_v1"}
+{"benchmark_id":"neb-102","query":"오퍼스ㅇ","expected_entity_id":"opus-one-2018","category":"transliteration","language":"ko","difficulty":"hard","expected_provenance_stage":"transliteration","expected_provenance_source":"rule:transliteration_ko_v1"}

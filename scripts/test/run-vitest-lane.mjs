@@ -26,6 +26,9 @@ const forwardedCliArgs = [];
 
 for (let i = 0; i < rawArgs.length; i += 1) {
   const arg = rawArgs[i];
+  if (arg === '--') {
+    continue;
+  }
   if (arg === '--empty-exit-code') {
     emptyExitCode = Number(rawArgs[i + 1] ?? '');
     i += 1;

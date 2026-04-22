@@ -118,6 +118,7 @@ describe('ExecutionCompiler', () => {
     });
     const result = compiler.compile({ plan });
     expect(result.execution.effectiveRoute).toBe('hybrid');
+    expect(result.execution.executionTopology).toBe('dual_lane');
   });
 
   // 3d. recommendation mode forces route to 'hybrid'
@@ -128,6 +129,18 @@ describe('ExecutionCompiler', () => {
     });
     const result = compiler.compile({ plan });
     expect(result.execution.effectiveRoute).toBe('hybrid');
+    expect(result.execution.executionTopology).toBe('dual_lane');
+  });
+
+  it('keeps explicit hybrid API override on general_only topology', () => {
+    const plan = makeMinimalPlan({
+      suggestedRoute: 'entity',
+      suggestedRetrievalMode: 'attribute_search',
+    });
+    const result = compiler.compile({ plan, apiRouteOverride: 'hybrid' });
+    expect(result.execution.effectiveRoute).toBe('hybrid');
+    expect(result.execution.routeSource).toBe('api_override');
+    expect(result.execution.executionTopology).toBe('general_only');
   });
 
   // 4. compare_candidates enables precision rerank in budget

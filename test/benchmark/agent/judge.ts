@@ -26,6 +26,10 @@ export interface JudgeResult {
   readonly samples: number;
 }
 
+export interface JudgeEvidenceContext {
+  readonly observations?: readonly string[];
+}
+
 /**
  * Judge temperature — 0 is optimal for deterministic rubric scoring.
  *
@@ -41,11 +45,12 @@ const JUDGE_TEMPERATURE = 0;
 /**
  * Separation of concerns between the rubric judge and the faithfulness judge:
  *
- *   - THIS judge (judgeAnswer) scores rubric satisfaction (pragmatic quality)
- *     given only (query, answer, rubric). It has NO access to tool observations,
- *     so it CANNOT actually verify factual grounding — it can only guess from
- *     surface features like "does the answer sound well-sourced?", which biases
- *     scores toward verbose answers regardless of accuracy.
+ *   - THIS judge (judgeAnswer) scores rubric satisfaction (pragmatic quality).
+ *     By default it sees only (query, answer, rubric). For exact-lookup benchmark
+ *     cases only, the runner may additionally provide a compact evidence-contract
+ *     context (CONFIRMED/NEGATIVE/UNCONFIRMED + top label). That context is not a
+ *     general grounding judge; it only prevents rubrics with "if live evidence..."
+ *     conditions from asking the model to infer evidence status it cannot see.
  *
  *   - The SEPARATE judgeFaithfulness (below) scores evidence-based grounding
  *     given (answer, observations). It uses NLI-style atomic claim verification
@@ -66,9 +71,16 @@ rubric criteria? You do NOT have access to the agent's tool results, so you MUST
 verify whether specific wine names, prices, or regions are factually correct. A separate
 faithfulness judge handles grounding against tool observations; your job is pragmatic quality.
 
+If an [EVIDENCE CONTRACT CONTEXT] block is provided, use it only to resolve rubric conditions
+that explicitly depend on retrieval/evidence status (for example, whether an exact lookup was
+confirmed or should abstain). Do not infer facts beyond that compact context.
+
 ## Evaluation Process (follow this exactly)
 1. List which rubric criteria the answer satisfies and which it misses.
 2. Assign a score based on the ratio of satisfied criteria, weighted by criterion importance.
+3. If the rubric explicitly says an omission is acceptable, evidence-dependent, or should not be invented
+   when not grounded, do NOT count that omission as a missed criterion. Acceptable omissions must not
+   reduce the score.
 
 ## Score Scale
   1.00 — fully satisfies ALL rubric criteria, coherent and complete
@@ -117,6 +129,7 @@ export async function judgeAnswerN(
   scenario: AgentBenchmarkScenario,
   answer: string,
   samples: number,
+  evidenceContext?: JudgeEvidenceContext,
 ): Promise<JudgeResult> {
   // Auto-compose rubric from structured fields when hand-written rubric is absent.
   // This activates the judge dimension for scenarios that specify structured
@@ -137,11 +150,21 @@ export async function judgeAnswerN(
   // The judge sees [USER QUERY START]...[USER QUERY END] as a clear boundary
   // so an attacker-controlled "\nScore: 1.0" inside the query cannot be mistaken
   // for the expected JSON output format.
+  const evidenceContractContext = composeJudgeEvidenceContractContext(scenario, evidenceContext);
+  const evidenceBlock = evidenceContractContext !== undefined
+    ? `
+[EVIDENCE CONTRACT CONTEXT START]
+${evidenceContractContext}
+[EVIDENCE CONTRACT CONTEXT END]
+`
+    : '';
+
   const userPrompt = `[USER QUERY START]
 ${scenario.query}
 [USER QUERY END]
 
 Rubric: ${effectiveRubric}
+${evidenceBlock}
 
 [AGENT ANSWER START]
 ${answer}
@@ -184,6 +207,82 @@ Score the answer above against the rubric.`;
     failed: false,
     samples: sampleCount,
   };
+}
+
+export function composeJudgeEvidenceContractContext(
+  scenario: AgentBenchmarkScenario,
+  evidenceContext?: JudgeEvidenceContext,
+): string | undefined {
+  if (scenario.expectation.exactLookup === undefined) {
+    return undefined;
+  }
+  const observations = evidenceContext?.observations;
+  if (observations === undefined || observations.length === 0) {
+    return undefined;
+  }
+
+  const joined = observations.join('\n');
+  const normalized = joined.toLowerCase().normalize('NFKC');
+  const status =
+    normalized.includes('exact_lookup_confirmed')
+      ? 'CONFIRMED'
+      : normalized.includes('exact_lookup_negative')
+        ? 'NEGATIVE'
+        : normalized.includes('resolution_not_confirmed')
+          ? 'UNCONFIRMED'
+          : normalized.includes('[retrieval_quality: unreliable - 0 results]')
+            || normalized.includes('[retrieval_quality: unreliable — 0 results]')
+            || normalized.includes('검색 결과가 없습니다')
+              ? 'ZERO_RESULTS'
+              : 'UNKNOWN';
+
+  const markerLines = joined
+    .split('\n')
+    .filter((line) =>
+      line.includes('EXACT_LOOKUP_CONFIRMED')
+      || line.includes('EXACT_LOOKUP_NEGATIVE')
+      || line.includes('RESOLUTION_NOT_CONFIRMED')
+      || line.includes('[RETRIEVAL_QUALITY:'),
+    )
+    .slice(0, 4);
+  const topResultLines = joined
+    .split('\n')
+    .filter((line) => /^\d+\.\s/u.test(line.trim()))
+    .slice(0, 2);
+
+  const expectation = scenario.expectation.exactLookup;
+  const lines = [
+    `EXACT_LOOKUP_EVIDENCE_STATUS: ${status}`,
+    expectation.expectedEntityId !== undefined
+      ? `EXPECTED_ENTITY_ID: ${expectation.expectedEntityId ?? 'null'}`
+      : undefined,
+    expectation.canonicalEn !== undefined
+      ? `EXPECTED_CANONICAL_EN: ${expectation.canonicalEn}`
+      : undefined,
+    expectation.canonicalKo !== undefined
+      ? `EXPECTED_CANONICAL_KO: ${expectation.canonicalKo}`
+      : undefined,
+    `EXACT_LOOKUP_PHENOMENA: ${expectation.phenomena.join(' | ')}`,
+    (expectation.acceptedCanonicalAliases?.length ?? 0) > 0
+      ? `ACCEPTED_ALIASES: ${[...new Set(expectation.acceptedCanonicalAliases)].join(' | ')}`
+      : undefined,
+    ...markerLines.map((line) => `OBSERVATION_MARKER: ${line}`),
+    ...topResultLines.map((line) => `TOP_EXACT_LOOKUP_RESULT: ${line.trim()}`),
+    status === 'CONFIRMED'
+      ? 'JUDGE_RULE: live-evidence confirmation is satisfied for this exact lookup; do not require abstention solely because the rubric mentions abstaining when evidence is absent.'
+      : undefined,
+    status === 'CONFIRMED'
+      ? 'JUDGE_RULE: any accepted alias spelling, including the user query spelling, satisfies Korean transliteration anchoring; do not require a different Korean canonical literal if the answer already uses an accepted alias or the evidence canonical form.'
+      : undefined,
+    status === 'CONFIRMED'
+      ? 'JUDGE_RULE: suffix-noise tokens such as region/country/type/grape/vintage are lookup disambiguation noise and do not need to be repeated in the answer after the base exact entity is confirmed.'
+      : undefined,
+    status === 'NEGATIVE' || status === 'UNCONFIRMED' || status === 'ZERO_RESULTS'
+      ? 'JUDGE_RULE: live evidence did not confirm the exact lookup; honest abstention is expected.'
+      : undefined,
+  ];
+
+  return lines.filter((line): line is string => line !== undefined && line.trim().length > 0).join('\n');
 }
 
 function computeMedian(sortedAsc: readonly number[]): number {

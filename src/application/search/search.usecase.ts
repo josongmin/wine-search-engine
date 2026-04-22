@@ -16,8 +16,13 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
-import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
-import type { SearchRouteExecutionResult, EntityRouteResult } from './search-usecase-route-dispatch.js';
+import {
+  buildEmptySearchExecutionLaneArtifacts,
+  buildSearchExecutionLaneTrace,
+  dispatchSearchRouteExecution,
+  type SearchRouteExecutionResult,
+  type EntityRouteResult,
+} from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import type {
   SearchExecutionOptions,
@@ -40,17 +45,18 @@ import type {
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
 import {
-  executeHybridRouteRankingPipeline,
-  resolveEntityRouteForPlan,
-} from './search-usecase-hybrid-ranking-pipeline.js';
-import {
   buildMixedRouteResolveResult,
   buildFailedMixedRouteExecution,
   mixedQueryResultToSearchRouteExecution,
 } from './search-usecase-mixed-route.js';
 import { buildSearchRouteResolutionContext } from './search-usecase-route-resolution.js';
+import { resolveExecutionTopologyFromRequestSurface } from './search-usecase-route-resolution.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
+import {
+  executeHybridRouteRankingPipeline,
+  resolveEntityRouteForPlan,
+} from './search-usecase-hybrid-ranking-pipeline.js';
 import {
   shouldTriggerCorrectiveRetry,
   resolveCorrectiveRetryOutcome,
@@ -65,6 +71,7 @@ import {
 } from './search-usecase-eval-provenance.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { executeDualLaneHybridRoute } from './search-usecase-dual-lane-execution.js';
 
 export type { SearchRequest } from './search-request.dto.js';
 
@@ -311,6 +318,25 @@ export class SearchUseCase {
       plannerSuggestedMode,
       retrievalModeSource,
     } = buildSearchRouteResolutionContext(plan, request, compiled);
+    const surfaceExecutionTopology = resolveExecutionTopologyFromRequestSurface(compiled, request);
+    const routeSource =
+      retrievalModeSource === 'api_override'
+        ? 'api_override'
+        : compiled.execution.routeSource;
+    const surfaceCompiled =
+      compiled.execution.effectiveRoute === effectiveRoute
+      && compiled.execution.executionTopology === surfaceExecutionTopology
+      && compiled.execution.routeSource === routeSource
+        ? compiled
+        : {
+            ...compiled,
+            execution: {
+              ...compiled.execution,
+              effectiveRoute,
+              executionTopology: surfaceExecutionTopology,
+              routeSource,
+            },
+          };
     const routeRequestContext: RequestExecutionContext = {
       ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
       ...(options?.debugRequest === true ? { debugRequest: true } : {}),
@@ -327,6 +353,7 @@ export class SearchUseCase {
         step: 'search.route_resolution',
         query_class: plan.queryClass,
         effective_route: effectiveRoute,
+        execution_topology: surfaceCompiled.execution.executionTopology,
         compiled_retrieval_mode: compiled.execution.effectiveRetrievalMode,
         planner_suggested_mode: plannerSuggestedMode,
         retrieval_mode_source: retrievalModeSource,
@@ -337,7 +364,12 @@ export class SearchUseCase {
     // Step 3: Execute based on route
     stageTimer?.start('search.route_execution');
     const {
-      resolveResult,
+      executedCompiled,
+      executionTopology,
+      identityResolveResult,
+      fusedResolveResult: resolveResult,
+      laneTrace,
+      laneArtifacts,
       rankedResults,
       decisionContext,
       routeDegradation,
@@ -357,17 +389,17 @@ export class SearchUseCase {
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
-        executeEntity: () => this.executeEntityRoute(plan, compiled),
+        executeEntity: () => this.executeEntityRoute(plan, surfaceCompiled),
         executeHybrid: () => this.executeHybridRoute(
           plan,
-          compiled,
+          surfaceCompiled,
           routeRequestContext,
         ),
         executeMixed: async () => {
           try {
-            const mixedResult = await this.deps.mixedSolver.solve(plan, compiled);
+            const mixedResult = await this.deps.mixedSolver.solve(plan, surfaceCompiled);
             if (mixedResult.rankedResults.length === 0 && plan.constraints.hard.length > 0) {
-              const fallbackExecution = buildMixedConstraintFallbackExecution(plan, compiled);
+              const fallbackExecution = buildMixedConstraintFallbackExecution(plan, surfaceCompiled);
               const hybridFallback = await this.executeHybridRoute(
                 fallbackExecution.plan,
                 fallbackExecution.compiled,
@@ -394,11 +426,12 @@ export class SearchUseCase {
     stageTimer?.start('search.post_route');
     const response = await runSearchPostRoutePhase({
       plan,
-      compiled,
+      compiled: executedCompiled,
       request,
       requestId,
       startTime,
       resolveResult,
+      identityResolveResult,
       rankedResults,
       decisionContext,
       effectiveRoute,
@@ -412,6 +445,9 @@ export class SearchUseCase {
       cacheService: this.deps.cacheService,
       routeDegradation,
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
+      executionTopology,
+      laneTrace,
+      laneArtifacts,
       effectiveRetrievalMode,
       retrievalKind,
       sparseExecuted,
@@ -529,6 +565,7 @@ export class SearchUseCase {
 
     if (!triggerRetry) {
       const rankedResults = buildEntityRouteRankedResults(plan, firstResult, candidateEntities);
+      const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
       const topRankedResult = rankedResults[0];
       pipelineDebug(
         {
@@ -553,7 +590,17 @@ export class SearchUseCase {
         'pipeline entity-only route',
       );
       return {
-        resolveResult: firstResult,
+        executionTopology: 'entity_only',
+        executedCompiled: compiled,
+        identityResolveResult: firstResult,
+        fusedResolveResult: firstResult,
+        laneArtifacts,
+        laneTrace: buildSearchExecutionLaneTrace({
+          executionTopology: 'entity_only',
+          identityResolveResult: firstResult,
+          fusedResolveResult: firstResult,
+          laneArtifacts,
+        }),
         rankedResults,
         effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
         usedCompiledExecution: true,
@@ -643,6 +690,7 @@ export class SearchUseCase {
     // clarify/fail routing in the decision layer (post-route phase).
     const resolved = retryResult;
     const rankedResults = buildEntityRouteRankedResults(plan, resolved, retryCandidateEntities);
+    const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
     const topRankedResult = rankedResults[0];
 
     pipelineDebug(
@@ -673,7 +721,17 @@ export class SearchUseCase {
     );
 
     return {
-      resolveResult: resolved,
+      executionTopology: 'entity_only',
+      executedCompiled: compiled,
+      identityResolveResult: resolved,
+      fusedResolveResult: resolved,
+      laneArtifacts,
+      laneTrace: buildSearchExecutionLaneTrace({
+        executionTopology: 'entity_only',
+        identityResolveResult: resolved,
+        fusedResolveResult: resolved,
+        laneArtifacts,
+      }),
       rankedResults,
       effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
       usedCompiledExecution: true,
@@ -746,10 +804,13 @@ export class SearchUseCase {
   /**
    * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
    *
+   * `/v1/search` auto mode promotes planner-selected hybrid execution onto the
+   * dual-lane topology, while explicit hybrid surfaces stay general-only.
+   *
    * The resolveEntity callback uses resolveEntityRouteForPlan (single-pass, no
-   * TA3 retry loop) — anchor resolution in the hybrid route only needs to find
-   * the pivot entity for compare_candidates, not perform full exact recovery.
-   * TA3 corrective retry is intentionally limited to the entity-only route.
+   * TA3 retry loop) because hybrid anchor resolution only needs the pivot
+   * entity for retrieval-side orchestration, not full exact-recovery retry.
+   * TA3 corrective retry remains entity-only.
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
@@ -757,24 +818,52 @@ export class SearchUseCase {
     requestContext?: RequestExecutionContext,
     anchorEntityId?: CanonicalEntityId,
   ): Promise<SearchRouteExecutionResult> {
-    const entityResolutionDeps = {
+    const hybridRouteDeps = {
+      candidatePool: this.deps.candidatePool,
+      browseRetriever: this.deps.browseRetriever,
+      compareRetriever: this.deps.compareRetriever,
       entityResolver: this.deps.entityResolver,
       entityLookup: this.deps.entityLookup,
       blocker: this.deps.blocker,
-    };
-    return executeHybridRouteRankingPipeline(
-      plan,
-      {
-        candidatePool: this.deps.candidatePool,
-        browseRetriever: this.deps.browseRetriever,
-        compareRetriever: this.deps.compareRetriever,
-        ranker: this.deps.ranker,
-      },
-      (p) => resolveEntityRouteForPlan(p, entityResolutionDeps, compiled),
-      compiled,
-      requestContext,
-      anchorEntityId,
-    );
+      ranker: this.deps.ranker,
+    } as const;
+
+    switch (compiled.execution.executionTopology) {
+      case 'dual_lane': {
+        const { routeExecution } = await executeDualLaneHybridRoute(
+          plan,
+          hybridRouteDeps,
+          compiled,
+          requestContext,
+          anchorEntityId,
+        );
+        return routeExecution;
+      }
+      case 'general_only': {
+        return executeHybridRouteRankingPipeline(
+          plan,
+          hybridRouteDeps,
+          (resolverPlan) => resolveEntityRouteForPlan(
+            resolverPlan,
+            {
+              entityResolver: this.deps.entityResolver,
+              entityLookup: this.deps.entityLookup,
+              blocker: this.deps.blocker,
+            },
+            compiled,
+          ),
+          compiled,
+          requestContext,
+          anchorEntityId,
+        );
+      }
+      case 'entity_only':
+        throw new Error('Hybrid route cannot execute with executionTopology=entity_only');
+      default: {
+        const _exhaustive: never = compiled.execution.executionTopology;
+        throw new Error(`Unhandled hybrid execution topology: ${String(_exhaustive)}`);
+      }
+    }
   }
 }
 
@@ -805,6 +894,11 @@ function buildMixedHybridFallbackExecution(
   const filteredRankedResults = hybridFallback.rankedResults.filter(
     (result) => result.entityId !== mixedResult.anchor.entityId,
   );
+  const fusedResolveResult = buildMixedRouteResolveResult(
+    plan,
+    filteredRankedResults,
+    mixedResult,
+  );
   const degradationReasons = new Set<string>([
     ...(mixedResult.routeDegradation?.degradationReasons ?? []),
     ...(hybridFallback.routeDegradation?.degradationReasons ?? []),
@@ -813,7 +907,13 @@ function buildMixedHybridFallbackExecution(
 
   return {
     ...hybridFallback,
-    resolveResult: buildMixedRouteResolveResult(plan, filteredRankedResults, mixedResult),
+    fusedResolveResult,
+    laneTrace: buildSearchExecutionLaneTrace({
+      executionTopology: hybridFallback.executionTopology,
+      identityResolveResult: hybridFallback.identityResolveResult,
+      fusedResolveResult,
+      laneArtifacts: hybridFallback.laneArtifacts,
+    }),
     rankedResults: filteredRankedResults,
     decisionContext: {
       ...(hybridFallback.decisionContext ?? {}),
@@ -874,6 +974,7 @@ function buildMixedConstraintFallbackExecution(
       execution: {
         ...compiled.execution,
         effectiveRoute: 'hybrid',
+        executionTopology: 'general_only',
         effectiveRetrievalMode: 'constraint_filter',
         provenancePolicy: {
           ...compiled.execution.provenancePolicy,

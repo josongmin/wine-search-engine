@@ -64,9 +64,22 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 40_000,
       maxTotalTokens: 7_000,
       answerMustMatch: ['(pétrus|petrus|페트뤼스)'],
+      exactLookup: {
+        locale: 'ko-KR',
+        domain: 'wine',
+        canonicalKo: '샤또 페트뤼스',
+        canonicalEn: 'Pétrus',
+        acceptedCanonicalAliases: ['Petrus', 'Château Pétrus', 'Chateau Petrus', '페트뤼스'],
+        matchPolicy: 'exact_entity',
+        allowAliasMatch: true,
+        allowSpaceNormalization: true,
+        allowVariantTransliteration: true,
+        phenomena: ['transliteration-variant', 'headless-brand'],
+      },
       rubric:
-        'Must resolve 페트뤼스 to Pétrus (Pomerol, Bordeaux). '
-        + 'Should mention Merlot dominance and prestige.',
+        'Must resolve 페트뤼스 to Pétrus. Pomerol/Bordeaux context is satisfied by either English labels or Korean phrasing such as 보르도/포므롤 계열. '
+        + 'High price, critic score, or producer prestige fields are sufficient evidence for prestige context; do not require an unsupported standalone prestige claim. '
+        + 'If grounded grape evidence is present, mention Merlot dominance; otherwise do not invent grape composition.',
       expectedToolArgs: [
         { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['페트뤼스', 'Pétrus', 'Petrus'] },
         { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
@@ -203,7 +216,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'If grounded evidence exists, provide Champagne context and tasting profile. '
         + 'If the live corpus cannot confirm the exact SKU, the agent must abstain honestly instead of broadening to unrelated rosé results or inventing metadata.',
       expectedToolArgs: [
-        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['모엣샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial'] },
+        { tool: 'search_wines', argPath: 'query', predicate: 'contains_any', value: ['모엣샹동 로제 임페리얼', 'Moët & Chandon Rosé Impérial', 'Moet Chandon Rose Imperial', 'Moet and Chandon Rose Imperial'] },
         { tool: 'search_wines', argPath: 'retrieval_mode', predicate: 'equals', value: 'entity' },
       ],
     },

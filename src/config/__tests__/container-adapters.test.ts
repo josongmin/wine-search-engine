@@ -12,7 +12,7 @@ describe('buildCoreAdapterServices', () => {
     const config = parseEnv({
       NODE_ENV: 'production',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
-      ANTHROPIC_API_KEY: 'sk-ant-test',
+      OPENAI_API_KEY: 'sk-test',
     });
 
     await expect(buildCoreAdapterServices(config, {})).rejects.toThrowError(/PostgreSQL-backed adapters/);
@@ -24,7 +24,15 @@ describe('buildCoreAdapterServices', () => {
       WEBHOOK_SECRET: 'watchlist-secret-1234',
     });
 
-    await expect(buildCoreAdapterServices(config, {})).resolves.toBeDefined();
+    const loadSpy = vi
+      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
+      .mockResolvedValue(undefined);
+
+    try {
+      await expect(buildCoreAdapterServices(config, {})).resolves.toBeDefined();
+    } finally {
+      loadSpy.mockRestore();
+    }
   });
 
   it('wires CohereReranker when COHERE_API_KEY is set', async () => {
@@ -35,9 +43,17 @@ describe('buildCoreAdapterServices', () => {
       COHERE_RERANK_MODEL: 'rerank-v4.0-pro',
     });
 
-    const adapters = await buildCoreAdapterServices(config, {});
+    const loadSpy = vi
+      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
+      .mockResolvedValue(undefined);
 
-    expect(adapters.reranker).toBeInstanceOf(CachedReranker);
+    try {
+      const adapters = await buildCoreAdapterServices(config, {});
+
+      expect(adapters.reranker).toBeInstanceOf(CachedReranker);
+    } finally {
+      loadSpy.mockRestore();
+    }
   });
 
   it('leaves reranker undefined when COHERE_API_KEY is not set', async () => {
@@ -46,9 +62,17 @@ describe('buildCoreAdapterServices', () => {
       WEBHOOK_SECRET: 'watchlist-secret-1234',
     });
 
-    const adapters = await buildCoreAdapterServices(config, {});
+    const loadSpy = vi
+      .spyOn(SearchSnapshotAliasMatcher, 'loadFromRuntimeState')
+      .mockResolvedValue(undefined);
 
-    expect(adapters.reranker).toBeUndefined();
+    try {
+      const adapters = await buildCoreAdapterServices(config, {});
+
+      expect(adapters.reranker).toBeUndefined();
+    } finally {
+      loadSpy.mockRestore();
+    }
   });
 
   it('prefers in-memory search-snapshot alias matcher when PG is unavailable', async () => {

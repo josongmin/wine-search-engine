@@ -7,7 +7,9 @@ import fs from 'node:fs/promises';
 
 import { loadFixtureCases, loadFixtureThresholds, readNumericThreshold } from './external-fixture-benchmark.js';
 import {
+  assertAgentHttpEntrypointReady,
   callAgentApi,
+  classifyAgentApiFailure,
   createJudgeLlm,
   evaluateAnswerPatterns,
   judgeFixtureAnswer,
@@ -17,10 +19,10 @@ import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { bootstrapBenchmarkLedgerPersistence } from './benchmark-ledger-bootstrap.js';
+import { AGENT_FIXTURE_ANSWER_QUALITY_DEFAULT_JUDGE_MODEL } from './agent-fixture-judge-config.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/agentic-answer-quality-fixture-eval-results.json');
 const SUITE_ID = 'agentic_answer_quality';
-const DEFAULT_JUDGE_MODEL = 'gpt-5.4-mini';
 const JUDGE_PASS_SCORE = 0.75;
 
 interface CliArgs {
@@ -40,11 +42,16 @@ interface AnswerQualityCaseResult {
   readonly forbiddenPatternViolation: boolean;
   readonly judgeScore: number | null;
   readonly durationMs: number;
+  readonly failure_kind?: string;
+  readonly failure_message?: string;
 }
 
 interface AnswerQualityFixtureReport {
   readonly benchmark: 'agentic-answer-quality-fixture';
   readonly suite_id: 'agentic_answer_quality';
+  readonly transport: 'http';
+  readonly endpoint: '/v1/agent';
+  readonly operation_id: 'agent.execute';
   readonly query_count: number;
   readonly rubric_pass_rate: number;
   readonly pattern_coverage_rate: number;
@@ -60,7 +67,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://127.0.0.1:3000';
   let timeoutMs = 90_000;
-  let judgeModel = DEFAULT_JUDGE_MODEL;
+  let judgeModel = AGENT_FIXTURE_ANSWER_QUALITY_DEFAULT_JUDGE_MODEL;
   let judgeSamples = 3;
   let useThresholds = true;
 
@@ -95,6 +102,9 @@ export function buildAnswerQualityFixtureReport(
   return {
     benchmark: 'agentic-answer-quality-fixture',
     suite_id: SUITE_ID,
+    transport: 'http',
+    endpoint: '/v1/agent',
+    operation_id: 'agent.execute',
     query_count: count,
     rubric_pass_rate: count === 0 ? 0 : results.filter((item) => item.rubricPass).length / count,
     pattern_coverage_rate: count === 0 ? 0 : results.filter((item) => item.patternCoveragePass).length / count,
@@ -146,13 +156,31 @@ async function assertThresholds(report: AnswerQualityFixtureReport): Promise<voi
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  await assertAgentHttpEntrypointReady(args.apiUrl, Math.min(args.timeoutMs, 10_000));
   const rawCases = await loadFixtureCases([SUITE_ID]);
   const cases = rawCases.map(normalizeAgentFixtureCase);
   const judgeLlm = createJudgeLlm(args.judgeModel);
   const results: AnswerQualityCaseResult[] = [];
 
   for (const benchmarkCase of cases) {
-    const response = await callAgentApi(args.apiUrl, benchmarkCase.query, benchmarkCase.max_steps, args.timeoutMs);
+    const response = await callAgentApi(args.apiUrl, benchmarkCase.query, benchmarkCase.max_steps, args.timeoutMs).catch((err: unknown) => {
+      const failure = classifyAgentApiFailure(err);
+      results.push({
+        id: benchmarkCase.id,
+        pass: false,
+        rubricPass: false,
+        patternCoveragePass: false,
+        forbiddenPatternViolation: false,
+        judgeScore: null,
+        durationMs: 0,
+        failure_kind: failure.kind,
+        failure_message: failure.message,
+      });
+      return undefined;
+    });
+    if (response === undefined) {
+      continue;
+    }
     const answerPatterns = evaluateAnswerPatterns(
       response.answer,
       benchmarkCase.answer_must_match,

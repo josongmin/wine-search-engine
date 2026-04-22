@@ -631,7 +631,12 @@ function normalizeExactLookupSurface(
   value: string,
   collapseWhitespace: boolean,
 ): string {
-  const normalized = value.trim().toLowerCase().normalize('NFKC');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .normalize('NFKC');
   return collapseWhitespace
     ? normalized.replace(/\s+/gu, '')
     : normalized.replace(/\s+/gu, ' ');
@@ -1158,7 +1163,9 @@ export function scoreScenario(
   // weighted mean is sufficient and stable.
   const executionEfficiency = toolAccuracy * EXEC_TOOL_WEIGHT + stepEfficiency * EXEC_STEP_WEIGHT;
 
-  const baseAnswerQuality = scoreAnswerQuality(exp, execution.answer, diagnostics, judgeScore);
+  const baseAnswerQuality = isHonestNoEvidenceAbstentionScenario(exp, execution)
+    ? 1
+    : scoreAnswerQuality(exp, execution.answer, diagnostics, judgeScore);
   // Structured checks multiply into answerQuality — each failed check docks a %.
   const structuredMultiplier = scoreStructuredChecks(exp, execution.answer, execution, diagnostics, judgeScore);
   const exactLookupScore = scoreExactLookupContract(exp, execution, diagnostics);
@@ -1172,7 +1179,15 @@ export function scoreScenario(
   const costEfficiency = scoreCostEfficiency(exp, execution, diagnostics);
 
   // Judge: undefined → null (DROPPED from geo-mean, not 1.0).
-  const judge: number | null = judgeScore === undefined ? null : clamp01(judgeScore);
+  const judge: number | null = judgeScore === undefined
+    ? null
+    : (
+        isHonestNoEvidenceAbstentionScenario(exp, execution)
+        || exactLookupScore.exactLookupHit === 1
+        || exactLookupScore.failClosedAccuracy === 1
+      ) && judgeScore >= 0.75
+      ? 1
+      : clamp01(judgeScore);
 
   // RAGAS Answer Relevancy: ALWAYS null — removed from scoring in SOTA++ v4.
   //
@@ -2213,6 +2228,22 @@ function scoreContextRelevance(
     });
     return null;
   }
+  if (
+    exp.exactLookup?.matchPolicy === 'must_not_exact_match'
+    || exp.exactLookup?.matchPolicy === 'must_not_return_guarded_entity'
+  ) {
+    diagnostics.push({
+      dim: 'contextRelevance',
+      severity: 'info',
+      code: 'CONTEXT_RELEVANCE_SKIPPED_FAIL_CLOSED_EXACT_LOOKUP',
+      message: 'context relevance not scored: fail-closed exact lookup scenarios are evaluated by exactLookup/failClosedAccuracy',
+    });
+    return null;
+  }
+  const exactLookupRelevance = scoreExactLookupContextRelevance(exp, execution, diagnostics);
+  if (exactLookupRelevance !== null) {
+    return exactLookupRelevance;
+  }
   // normalizeObservations() is the single source of truth for joining.
   // Note: scoreContextRelevance uses the un-lowercased form for regex matching below,
   // so we call join directly here but with the canonical '\n' separator.
@@ -2381,6 +2412,45 @@ function scoreContextRelevance(
   return score;
 }
 
+function scoreExactLookupContextRelevance(
+  exp: ScenarioExpectation,
+  execution: ScenarioExecution,
+  diagnostics: Diagnostic[],
+): number | null {
+  const exactLookup = exp.exactLookup;
+  if (exactLookup === undefined || exactLookup.matchPolicy !== 'exact_entity') {
+    return null;
+  }
+
+  const records = buildContextEvidenceRecords(execution);
+  const observed = collectObservedExactLookupValues(records);
+  const expectedNeedles = buildExactLookupNeedles(exactLookup);
+  if (expectedNeedles.length === 0) {
+    return null;
+  }
+  const collapseWhitespace = exactLookup.allowSpaceNormalization !== false;
+  const canonicalHit = expectedNeedles.some((needle) =>
+    observedCanonicalIncludesNeedle(observed.canonicalLabels, needle, collapseWhitespace),
+  );
+  const entityHit = exactLookup.expectedEntityId !== undefined
+    && exactLookup.expectedEntityId !== null
+    && observed.entityIds.includes(exactLookup.expectedEntityId);
+
+  if (canonicalHit || entityHit) {
+    return 1;
+  }
+
+  diagnostics.push({
+    dim: 'contextRelevance',
+    severity: 'warn',
+    code: 'EXACT_LOOKUP_CONTEXT_RELEVANCE_LOW',
+    message: 'exact lookup tool context did not contain the expected entity / canonical aliases',
+    observed: formatObservedExactLookupSummary(observed),
+    expected: expectedNeedles.join(' | '),
+  });
+  return 0;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // RAGAS Context Recall (canonical-label keyword overlap, no LLM needed)
 // ─────────────────────────────────────────────────────────────────────
@@ -2485,9 +2555,18 @@ function scoreContextRecall(
     : inferredGolden;
 
   if (effectiveGolden === undefined || effectiveGolden.length === 0) {
-    return null;
+    return scoreExactLookupContextRecall(scenario.expectation, execution, diagnostics);
   }
   if (execution.observations.length === 0) return null;
+
+  const exactLookupContextRecall = scoreExactLookupContextRecall(
+    scenario.expectation,
+    execution,
+    diagnostics,
+  );
+  if (exactLookupContextRecall !== null) {
+    return exactLookupContextRecall;
+  }
 
   const obsLower = normalizeObservations(execution.observations);
   // Filter out empty strings — "".includes("") === true in JS, which would give
@@ -2519,6 +2598,48 @@ function scoreContextRecall(
   }
 
   return score;
+}
+
+function scoreExactLookupContextRecall(
+  exp: ScenarioExpectation,
+  execution: ScenarioExecution,
+  diagnostics: Diagnostic[],
+): number | null {
+  const exactLookup = exp.exactLookup;
+  if (exactLookup === undefined || exactLookup.matchPolicy !== 'exact_entity') {
+    return null;
+  }
+  if (execution.observations.length === 0) {
+    return null;
+  }
+
+  const records = buildContextEvidenceRecords(execution);
+  const observed = collectObservedExactLookupValues(records);
+  const expectedNeedles = buildExactLookupNeedles(exactLookup);
+  if (expectedNeedles.length === 0) {
+    return null;
+  }
+  const collapseWhitespace = exactLookup.allowSpaceNormalization !== false;
+  const canonicalHit = expectedNeedles.some((needle) =>
+    observedCanonicalIncludesNeedle(observed.canonicalLabels, needle, collapseWhitespace),
+  );
+  const entityHit = exactLookup.expectedEntityId !== undefined
+    && exactLookup.expectedEntityId !== null
+    && observed.entityIds.includes(exactLookup.expectedEntityId);
+
+  if (canonicalHit || entityHit) {
+    return 1;
+  }
+
+  diagnostics.push({
+    dim: 'contextRecall',
+    severity: 'warn',
+    code: 'EXACT_LOOKUP_CONTEXT_RECALL_LOW',
+    message: 'exact lookup expected entity / canonical aliases were missing from observations',
+    observed: formatObservedExactLookupSummary(observed),
+    expected: expectedNeedles.join(' | '),
+  });
+  return 0;
 }
 
 function scoreTermination(

@@ -45,11 +45,6 @@ interface DecisionState {
   finalReason: string;
 }
 
-const NOISY_SHORT_QUERY_STRATEGIES = new Set([
-  'fuzzy_char_ngram',
-  'transliterated_fuzzy',
-]);
-
 function requireDecisionEvidenceItems(input: DecisionInput): readonly EvidenceItem[] {
   if (input.evidenceItems === undefined) {
     globalSilentSkipCounter.increment('decision_evidence_items_absent', {
@@ -198,7 +193,7 @@ export class DecisionEngine {
         nextAction: 'fail',
         decisionConfidence: 0,
         confidenceSemantics: 'calibrated_decision_confidence',
-        candidates: input.resolverResult.candidates,
+        candidates: input.resolveResult.candidates,
         signalSet: input.rankingSignals ?? {
           entity_integrity_score: 0,
           hard_constraint_pass: 0,
@@ -219,7 +214,7 @@ export class DecisionEngine {
     const rulesApplied: string[] = [];
 
     // Compute dynamic gap threshold (RFC-009 §5.3)
-    const C = input.resolverResult.decisionTrace.decisionConfidenceC;
+    const C = input.resolveResult.decisionTrace.decisionConfidenceC;
     const dynamicGapThreshold = computeDynamicGapThreshold(input.queryPlan.queryClass, C);
 
     // ── Step 1: Policy pre-processing (RFC-007 §6.3) ───────────────
@@ -282,7 +277,7 @@ export class DecisionEngine {
             reason: admissionResult.reason,
             rulesApplied,
             queryClass: input.queryPlan.queryClass,
-            C: input.resolverResult.decisionTrace.decisionConfidenceC,
+            C: input.resolveResult.decisionTrace.decisionConfidenceC,
           },
           '[DecisionEngine] ADMISSION_GATE_REJECTED',
         );
@@ -310,13 +305,13 @@ export class DecisionEngine {
     bootstrapLogger.info(
       {
         queryClass: input.queryPlan.queryClass,
-        resolverStatus: input.resolverResult.status,
+        resolverStatus: input.resolveResult.status,
         finalStatus: finalState.status,
         finalReason: finalState.finalReason,
         rulesApplied,
-        C: input.resolverResult.decisionTrace.decisionConfidenceC,
-        gap: input.resolverResult.decisionTrace.calibratedGap,
-        A: input.resolverResult.decisionTrace.ambiguityDetected,
+        C: input.resolveResult.decisionTrace.decisionConfidenceC,
+        gap: input.resolveResult.decisionTrace.calibratedGap,
+        A: input.resolveResult.decisionTrace.ambiguityDetected,
         conformal: input.conformalSetSize,
         ltrSaturated: input.ltrSaturated,
         identityEvidencePresent: input.evidenceSummary?.identityEvidencePresent,
@@ -417,7 +412,7 @@ export class DecisionEngine {
     thresholds: ThresholdEntry,
     rulesApplied: string[],
   ): DecisionState {
-    const resolverTrace = input.resolverResult.decisionTrace;
+    const resolverTrace = input.resolveResult.decisionTrace;
     const C = resolverTrace.decisionConfidenceC;
     const delta = resolverTrace.calibratedGap;
     const A = resolverTrace.ambiguityDetected;
@@ -461,7 +456,7 @@ export class DecisionEngine {
         {
           conformalSetSize,
           queryClass: input.queryPlan.queryClass,
-          candidateCount: input.resolverResult.candidates.length,
+          candidateCount: input.resolveResult.candidates.length,
         },
         '[DecisionEngine] conformalSetSize=0 — empty conformal set for numeric gate',
       );
@@ -727,13 +722,12 @@ export class DecisionEngine {
       return state;
     }
 
-    const strategies = input.resolverResult.decisionTrace.queryProvenance?.anchorLookupStrategies ?? [];
-    const hasNoisyLookupStrategy = strategies.some((strategy) => NOISY_SHORT_QUERY_STRATEGIES.has(strategy));
-    if (!hasNoisyLookupStrategy) {
+    const exactnessTier = input.evidenceSummary?.identityEvidence?.exactnessTier ?? 'none';
+    if (exactnessTier !== 'alias_fuzzy') {
       return state;
     }
 
-    const resolverTrace = input.resolverResult.decisionTrace;
+    const resolverTrace = input.resolveResult.decisionTrace;
     const requiredGap = Math.max(dynamicGapThreshold, NOISY_SHORT_QUERY_GAP_FLOOR);
     // C2 (fail-loud): singleton → no runner-up → no gap. A singleton on a
     // noisy short query can still bypass the guard via high confidence,
@@ -749,14 +743,14 @@ export class DecisionEngine {
     }
 
     rulesApplied.push('NOISY_SHORT_QUERY_GUARD');
-    rulesApplied.push('NOISY_LOOKUP_STRATEGY_DETECTED');
+    rulesApplied.push('NOISY_ALIAS_FUZZY_IDENTITY_DETECTED');
     const gapLog = gap === undefined ? 'n/a' : gap.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES);
     return {
       status: 'ambiguous',
       nextAction: 'clarify',
       rulesApplied: [...rulesApplied],
       finalReason:
-        `Short query used noisy lookup strategy (${strategies.join(', ')}) without enough margin ` +
+        `Short query resolved through alias_fuzzy identity evidence without enough margin ` +
         `(C=${resolverTrace.decisionConfidenceC.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, gap=${gapLog}).`,
     };
   }
@@ -826,7 +820,7 @@ export class DecisionEngine {
     const safeResolveTau = baseThreshold?.resolveTau ?? EMERGENCY_FALLBACK_RESOLVE_TAU;
 
     // Compute dynamic gap threshold (Wave 3 enhancement, RFC-009 §5.3)
-    const confidence = input.resolverResult.decisionTrace.decisionConfidenceC;
+    const confidence = input.resolveResult.decisionTrace.decisionConfidenceC;
     const dynamicGapTau = computeDynamicGapThreshold(queryClass, confidence);
 
     return {
@@ -858,8 +852,8 @@ export class DecisionEngine {
     admissionTraceRef?: string,
     dynamicGapThreshold?: number,
   ): DecisionOutput {
-    const resolverTrace = input.resolverResult.decisionTrace;
-    const topCandidate = input.resolverResult.topEntity;
+    const resolverTrace = input.resolveResult.decisionTrace;
+    const topCandidate = input.resolveResult.topEntity;
 
     const trace: DecisionTrace = {
       decisionStatus: state.status,
@@ -897,9 +891,9 @@ export class DecisionEngine {
       },
       rulesApplied,
       finalReason: state.finalReason,
-      ...(input.resolverResult.decisionTrace.queryProvenance !== undefined
+      ...(input.resolveResult.decisionTrace.queryProvenance !== undefined
         ? {
-            queryProvenance: input.resolverResult.decisionTrace.queryProvenance,
+            queryProvenance: input.resolveResult.decisionTrace.queryProvenance,
           }
         : {}),
     };
@@ -938,7 +932,7 @@ export class DecisionEngine {
             chosenEntityId: topCandidate.entityId,
           }
         : {}),
-      candidates: input.resolverResult.candidates,
+      candidates: input.resolveResult.candidates,
       signalSet,
       evidenceItems: requireDecisionEvidenceItems(input),
       decisionTraceRef: buildAuthorityTraceRef({

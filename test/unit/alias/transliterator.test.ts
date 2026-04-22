@@ -43,6 +43,12 @@ describe('Transliterator', () => {
       const result = t.transliterate('opus one', 'en');
       expect(result).toBe('오푸스원');
     });
+
+    it('romanizes IME-incomplete Korean prefixes through the curated exception dictionary', () => {
+      expect(Transliterator.romanizeWineTermPrefix('오푸스ㅇ')).toBe('opus one');
+      expect(Transliterator.romanizeWineTermPrefix('오퍼스ㅇ')).toBe('opus one');
+      expect(Transliterator.romanizeWineTermPrefix('오푸스')).toBeUndefined();
+    });
   });
 
   describe('generateAliases', () => {

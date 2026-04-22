@@ -11,6 +11,7 @@ interface SearchToolNegationInput {
   readonly query: string;
   readonly exclude_grapes?: readonly string[] | undefined;
   readonly exclude_regions?: readonly string[] | undefined;
+  readonly exclude_wine_types?: readonly string[] | undefined;
 }
 
 interface SearchToolBudgetFilterResult {
@@ -58,6 +59,7 @@ export function collectSearchToolNegationTerms(
         ...extractSearchToolNegationTerms(input.query),
         ...(input.exclude_grapes ?? []).map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0),
         ...(input.exclude_regions ?? []).map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0),
+        ...(input.exclude_wine_types ?? []).map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0),
       ],
     ),
   ];
@@ -87,6 +89,9 @@ export function applySearchToolNegationResultPolicy(
       if (typeof value === 'string' && value.length > 0) {
         parts.push(value.toLowerCase());
       }
+    }
+    if (typeof entity.wineType === 'string' && entity.wineType.length > 0) {
+      parts.push(entity.wineType.toLowerCase());
     }
     const check = parts.join(' ');
     return !negRegs.some((re) => re.test(check));
