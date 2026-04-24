@@ -146,7 +146,11 @@ function buildGeneralOnlyRouteExecutionFacts(
         identityResolutionExecution.resolverCandidates,
       );
   const laneArtifacts = {
-    ...buildEmptySearchExecutionLaneArtifacts<EntityLaneCandidateArtifact>(),
+    ...buildEmptySearchExecutionLaneArtifacts<
+      EntityLaneCandidateArtifact,
+      GeneralLaneCandidateArtifact,
+      DualLaneArtifact
+    >(),
     identity: identityArtifacts,
   };
   const identityResolveResult = identityResolutionExecution?.resolveResult ?? null;
@@ -543,7 +547,11 @@ export async function runHybridRankingPipeline(
   const generalOnlyIdentityArtifacts = generalOnlyIdentityExecution === undefined
     ? undefined
     : {
-        ...buildEmptySearchExecutionLaneArtifacts<EntityLaneCandidateArtifact>(),
+        ...buildEmptySearchExecutionLaneArtifacts<
+          EntityLaneCandidateArtifact,
+          GeneralLaneCandidateArtifact,
+          DualLaneArtifact
+        >(),
         identity: liftEntityResolveResultToLaneArtifacts(
           plan,
           generalOnlyIdentityExecution.resolveResult,
