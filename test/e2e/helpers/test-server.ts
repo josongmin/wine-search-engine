@@ -22,9 +22,16 @@ export interface TestServer {
   readonly app: FastifyInstance;
 }
 
+export interface TestAmbiguousSurface {
+  readonly term: string;
+  readonly types: readonly string[];
+  readonly severity: 'low' | 'medium' | 'high';
+}
+
 interface TestServerOptions {
   readonly containerOptions?: TestContainerOptions;
   readonly serverOptions?: Pick<ServerOptions, 'rateLimitMax' | 'trustProxy'>;
+  readonly ambiguousSurfaces?: readonly TestAmbiguousSurface[];
 }
 
 type FixtureDoc = RetrievalDocument;
@@ -184,7 +191,12 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
   // createTestContainer already seeds aliases, search docs, blocking ids,
   // and runtime-shaped fixture documents. Only the ambiguity marker and
   // mixed harness enrichment happen here.
-  parts.ambiguityDict.setAmbiguous('마고', ['region', 'entity'], 'medium');
+  const ambiguousSurfaces = options.ambiguousSurfaces ?? [
+    { term: '마고', types: ['region', 'entity'], severity: 'medium' } as const,
+  ];
+  for (const surface of ambiguousSurfaces) {
+    parts.ambiguityDict.setAmbiguous(surface.term, [...surface.types], surface.severity);
+  }
 
   // Seed the mixed-query harness against the materialized fixture docs so
   // containerOptions like stripCachedDrinkingWindow remain effective in E2E.

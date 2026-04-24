@@ -95,6 +95,18 @@ describe('Search Pipeline Integration', () => {
       expect(ids).toContain(OPUS_ONE_ID);
     });
 
+    it('keeps "오푸" resolved as Opus One even under hybrid override', async () => {
+      const response = await parts.container.searchUseCase.execute(
+        makeRequest('오푸', { options: { mode: 'hybrid', explain: false, clarification: true } }),
+        'req-test-2d',
+      );
+
+      expect(response.meta.requestId).toBe('req-test-2d');
+      expect(response.meta.route).toBe('hybrid');
+      expect(response.engineDecision.decisionStatus).toBe('resolved');
+      expect(response.results[0]?.entity.entityId).toBe(OPUS_ONE_ID);
+    });
+
     it('resolves "Château Margaux" to Château Margaux 2015', async () => {
       const response = await parts.container.searchUseCase.execute(
         makeRequest('Château Margaux', { options: { mode: 'entity', explain: false, clarification: false } }),

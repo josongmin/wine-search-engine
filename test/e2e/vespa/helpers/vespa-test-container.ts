@@ -65,6 +65,10 @@ import { PgCalibrationStore } from '../../../../src/infrastructure/adapter/pg-ca
 import { PgThresholdStore } from '../../../../src/infrastructure/adapter/pg-threshold-store.js';
 import { PgLtrModelRegistry } from '../../../../src/infrastructure/adapter/pg-ltr-model-registry.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../../../src/domain/query/model/threshold-profile.js';
+import {
+  FallbackAmbiguityDictionary,
+  StaticAmbiguityDictionary,
+} from '../../../../src/domain/query/service/static-ambiguity-dictionary.js';
 import { InMemoryWatchlistStore } from '../../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
 import type { QueryClassWeights } from '../../../../src/domain/ranking/index.js';
 import {
@@ -175,6 +179,10 @@ export async function createVespaTestContainer(
   }
 
   const ambiguityDict = pool ? new PgAmbiguityDictionary(pool) : new InMemoryAmbiguityDictionary();
+  const plannerAmbiguityDict = new FallbackAmbiguityDictionary(
+    ambiguityDict,
+    new StaticAmbiguityDictionary(),
+  );
   const blockingAdapter = pool ? new PgBlockingAdapter(pool) : new InMemoryBlockingAdapter();
   const calibrationStore = pool ? new PgCalibrationStore(pool) : new InMemoryCalibrationStore();
   const embeddingService = options.mlServiceBaseUrl !== undefined
@@ -205,7 +213,7 @@ export async function createVespaTestContainer(
   const nlMapper = new NLMapper(noOpMappingTable);
   const queryPlanner = new PlannerV1Adapter(
     new Planner(
-      ambiguityDict,
+      plannerAmbiguityDict,
       anchorExtractor,
       expansionBuilder,
       nlMapper,

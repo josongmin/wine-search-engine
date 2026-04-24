@@ -50,7 +50,7 @@ import { buildBundleFromAtoms } from './constraint-reasoner.js';
 import { buildRetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 import {
-  AmbiguityIntentCompiler,
+  type AmbiguityIntentCompiler,
   type AmbiguityIntentCompilerInput,
 } from './ambiguity-intent-compiler.js';
 import type {
@@ -97,6 +97,8 @@ const UNCERTAINTY_OVERALL_WEIGHT_CONSTRAINT = 0.3;
 const UNCERTAINTY_AMBIGUITY_OVERALL_BUMP = 0.15;
 /** Overall uncertainty at or above this triggers raise_threshold decision effect. */
 const UNCERTAINTY_RAISE_THRESHOLD_OVERALL = 0.6;
+/** Exact ambiguity-dictionary surface marker preserved for decision hard gates. */
+const KNOWN_AMBIGUOUS_SURFACE_TYPE = 'known_ambiguous_surface';
 
 // Vintage detection delegates to the vintage SSoT
 // (`@domain/shared/utils/vintage`).
@@ -128,24 +130,25 @@ const KOREAN_NOT_MARKER_PATTERN = '\\s*(?:말고|대신)\\s*';
 const ENGLISH_NOT_MARKER_PATTERN = '(?<!\\p{L})(?<!\\p{N})instead\\s+of\\s+';
 
 const EMPTY_FALLBACK_MAPPER: NLMapper = {
-  mapPhrase: async () => null,
-  mapConstraints: async (phrases: readonly string[]) => ({
-    constraints: [],
-    constraintExtraction: {
-      candidatePhraseCount: phrases.length,
-      ruleTableHitCount: 0,
-      llmHitCount: 0,
-      llmSkippedCount: 0,
-      fallbackTriggered: true,
-      source: 'fallback',
-      llmLatencyMs: null,
-      phraseCacheHits: 0,
-      phraseCacheNegativeSkipped: 0,
-      phraseCacheMisses: 0,
-      missedPhrases: [],
-      fallbackReason: 'nlmapper_exception',
-    },
-  }),
+  mapPhrase: () => Promise.resolve(null),
+  mapConstraints: (phrases: readonly string[]) =>
+    Promise.resolve({
+      constraints: [],
+      constraintExtraction: {
+        candidatePhraseCount: phrases.length,
+        ruleTableHitCount: 0,
+        llmHitCount: 0,
+        llmSkippedCount: 0,
+        fallbackTriggered: true,
+        source: 'fallback',
+        llmLatencyMs: null,
+        phraseCacheHits: 0,
+        phraseCacheNegativeSkipped: 0,
+        phraseCacheMisses: 0,
+        missedPhrases: [],
+        fallbackReason: 'nlmapper_exception',
+      },
+    }),
 } as unknown as NLMapper;
 
 /**
@@ -1140,6 +1143,23 @@ export class Planner {
       ambiguityQuerySurface !== undefined && ambiguityQuerySurface.trim().length > 0
         ? ambiguityQuerySurface
         : normalizedQuery;
+    const fullQueryInfo =
+      await this.ambiguityDict.getAmbiguityInfo(uncertaintyQuerySurface);
+    if (fullQueryInfo !== null) {
+      ambiguityTypes.add(KNOWN_AMBIGUOUS_SURFACE_TYPE);
+      for (const type of fullQueryInfo.types) {
+        ambiguityTypes.add(type);
+      }
+      // Escalate severity: high always wins; medium wins unless already high.
+      const currentSeverity: string = ambiguitySeverity;
+      if (
+        fullQueryInfo.severity === 'high' ||
+        (fullQueryInfo.severity === 'medium' && currentSeverity !== 'high')
+      ) {
+        ambiguitySeverity = fullQueryInfo.severity;
+      }
+    }
+
     const convergedExactEntityLookup =
       intent === 'entity_exact'
       && queryClass === 'short_entity'
@@ -1149,7 +1169,7 @@ export class Planner {
       && anchors[0].confidence >= EXACT_ANCHOR_CONFIDENCE
       && anchors[0].candidateEntityIds.length === 1;
 
-    if (convergedExactEntityLookup) {
+    if (convergedExactEntityLookup && fullQueryInfo === null) {
       const overall = Math.min(
         1.0,
         Math.max(
@@ -1170,23 +1190,6 @@ export class Planner {
         anchorConfidence,
         constraintConfidence,
       };
-    }
-
-    // Check whether the full normalized query is a known ambiguous form.
-    const fullQueryInfo =
-      await this.ambiguityDict.getAmbiguityInfo(uncertaintyQuerySurface);
-    if (fullQueryInfo !== null) {
-      for (const type of fullQueryInfo.types) {
-        ambiguityTypes.add(type);
-      }
-      // Escalate severity: high always wins; medium wins unless already high.
-      const currentSeverity: string = ambiguitySeverity;
-      if (
-        fullQueryInfo.severity === 'high' ||
-        (fullQueryInfo.severity === 'medium' && currentSeverity !== 'high')
-      ) {
-        ambiguitySeverity = fullQueryInfo.severity;
-      }
     }
 
     for (const anchor of anchors) {

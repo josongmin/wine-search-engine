@@ -20,7 +20,7 @@ export function buildHybridRouteResolveResult(
   options: {
     readonly executionTopology: 'general_only' | 'dual_lane';
     readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
-    readonly dualLaneCalibration?: {
+    readonly identityCalibration?: {
       readonly identityResolveResult: EntityResolveResult;
       readonly laneArtifacts: SearchExecutionLaneArtifacts<
         EntityLaneCandidateArtifact,
@@ -46,8 +46,8 @@ export function buildHybridRouteResolveResult(
       ? { effectiveRetrievalMode: options.effectiveRetrievalMode }
       : {}),
     ...(topEntity !== undefined ? { topEntity } : {}),
-    ...(options.dualLaneCalibration !== undefined
-      ? { dualLaneCalibration: options.dualLaneCalibration }
+    ...(options.identityCalibration !== undefined
+      ? { identityCalibration: options.identityCalibration }
       : {}),
   });
 }

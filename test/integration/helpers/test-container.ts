@@ -62,6 +62,10 @@ import {
 } from './in-memory-adapters.js';
 import { PlannerV1Adapter } from '../../../src/config/planner-v1-adapter.js';
 import {
+  FallbackAmbiguityDictionary,
+  StaticAmbiguityDictionary,
+} from '../../../src/domain/query/service/static-ambiguity-dictionary.js';
+import {
   MIXED_NEIGHBORHOOD_FIXTURES,
   TEST_ALIASES,
   TEST_DOCUMENTS,
@@ -183,9 +187,13 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     getCurrentVersion: async () => 'v1',
   };
   const nlMapper = new NLMapper(noOpMappingTable);
+  const plannerAmbiguityDict = new FallbackAmbiguityDictionary(
+    ambiguityDict,
+    new StaticAmbiguityDictionary(),
+  );
   // T1.2: wrap concrete Planner (returns QueryPlanV2) in V1 adapter for backward compat.
   const queryPlanner = new PlannerV1Adapter(
-    new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper),
+    new Planner(plannerAmbiguityDict, anchorExtractor, expansionBuilder, nlMapper),
   );
 
   // Domain services — entity resolution

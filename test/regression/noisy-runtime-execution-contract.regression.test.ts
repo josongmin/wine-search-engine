@@ -102,27 +102,50 @@ describe('Noisy runtime execution contract', () => {
     expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_ambiguous');
   });
 
-  it('hybrid override on exact-looking noisy query stays general-only and cannot mint exact identity evidence', async () => {
+  it('hybrid override on short Korean prefix query preserves identity evidence and resolves', async () => {
     const response = await parts.container.searchUseCase.execute(
       {
-        query: '샤또 마고',
+        query: '오푸',
         options: { mode: 'hybrid', explain: true, clarification: false },
       },
       'noisy-runtime-general-only-downgrade',
     );
 
-    expect(response.results[0]?.entity.entityId).toBe('chateau-margaux-2015');
+    expect(response.results[0]?.entity.entityId).toBe('opus-one-2018');
+    expect(response.engineDecision.decisionStatus).toBe('resolved');
+    expectExecutionContractProjection(response, {
+      route: 'hybrid',
+      topology: 'general_only',
+    });
+    expect(response.engineDecision.laneTrace).toMatchObject({
+      identity: { participated: true, resolveStatus: 'resolved' },
+      general: { participated: true },
+      fused: { participated: true, resolveStatus: 'resolved' },
+    });
+    expect(response.engineDecision.laneTrace?.identity.artifactCount).toBeGreaterThan(0);
+    expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_resolved');
+  });
+
+  it('hybrid override on bare noisy short form withholds identity seal and stays ambiguous', async () => {
+    const response = await parts.container.searchUseCase.execute(
+      {
+        query: 'opus',
+        options: { mode: 'hybrid', explain: true, clarification: false },
+      },
+      'noisy-runtime-general-only-bare-short-form',
+    );
+
+    expect(response.results[0]?.entity.entityId).toBe('opus-one-2018');
     expect(response.engineDecision.decisionStatus).toBe('ambiguous');
     expectExecutionContractProjection(response, {
       route: 'hybrid',
       topology: 'general_only',
     });
     expect(response.engineDecision.laneTrace).toMatchObject({
-      identity: { participated: false, artifactCount: 0 },
+      identity: { participated: true },
       general: { participated: true },
-      fused: { participated: true, resolveStatus: 'resolved' },
+      fused: { participated: true },
     });
-    expect(response.engineDecision.laneTrace?.general.artifactCount).toBeGreaterThanOrEqual(0);
     expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_ambiguous');
   });
 });

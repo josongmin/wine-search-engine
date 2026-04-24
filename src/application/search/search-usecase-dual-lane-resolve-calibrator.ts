@@ -36,6 +36,23 @@ function shouldBypassDualLaneCalibration(
   return effectiveRetrievalMode !== undefined && NON_IDENTITY_CALIBRATION_MODES.has(effectiveRetrievalMode);
 }
 
+function findAlignedIdentityArtifact(
+  winnerEntityId: string,
+  laneArtifacts: SearchExecutionLaneArtifacts<
+    EntityLaneCandidateArtifact,
+    GeneralLaneCandidateArtifact,
+    DualLaneArtifact
+  >,
+): EntityLaneCandidateArtifact | undefined {
+  return laneArtifacts.identity.find(
+    (artifact) =>
+      artifact.entityId === winnerEntityId
+      && artifact.identityProvenance.entityId === winnerEntityId
+      && artifact.resolvedCandidate.entityId === winnerEntityId
+      && artifact.candidate.entityId === winnerEntityId,
+  );
+}
+
 export class DualLaneResolveCalibrator {
   calibrate(input: DualLaneResolveCalibrationInput): EntityResolveResult {
     if (shouldBypassDualLaneCalibration(input.effectiveRetrievalMode)) {
@@ -53,7 +70,23 @@ export class DualLaneResolveCalibrator {
         artifact.lanePresence === 'corroborated' &&
         artifact.identityProvenance !== undefined,
     );
-    if (corroboratedWinnerArtifact === undefined) {
+    const alignedIdentityArtifact = findAlignedIdentityArtifact(
+      winnerEntityId,
+      input.laneArtifacts,
+    );
+    const calibratedIdentityArtifact =
+      corroboratedWinnerArtifact?.identityProvenance
+      ?? alignedIdentityArtifact?.identityProvenance;
+    if (calibratedIdentityArtifact === undefined || calibratedIdentityArtifact.exactnessTier === 'none') {
+      return input.fusedResolveResult;
+    }
+
+    const corroboratedIdentityCalibration =
+      corroboratedWinnerArtifact?.identityProvenance !== undefined;
+    if (
+      !corroboratedIdentityCalibration
+      && calibratedIdentityArtifact.exactnessTier === 'alias_fuzzy'
+    ) {
       return input.fusedResolveResult;
     }
 

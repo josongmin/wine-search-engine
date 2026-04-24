@@ -190,7 +190,7 @@ describe('buildRankedRouteResolveResult', () => {
       outcomeReasonCode: 'HYBRID_ROUTE',
       executionTopology: 'dual_lane',
       effectiveRetrievalMode: 'entity_lookup',
-      dualLaneCalibration: {
+      identityCalibration: {
         identityResolveResult,
         laneArtifacts,
       },
@@ -204,7 +204,7 @@ describe('buildRankedRouteResolveResult', () => {
     );
   });
 
-  it('refuses dual-lane calibration when the ranked route contract is general_only', () => {
+  it('allows exact identity calibration on general_only ranked routes when sidecar identity evidence is provided', () => {
     const rankedResults: RankedResult[] = [
       makeRankedResult('opus-one-2018', 'Opus One 2018', 0.72),
       makeRankedResult('sassicaia-2018', 'Sassicaia 2018', 0.31),
@@ -259,15 +259,87 @@ describe('buildRankedRouteResolveResult', () => {
       outcomeReasonCode: 'HYBRID_ROUTE',
       executionTopology: 'general_only',
       effectiveRetrievalMode: 'entity_lookup',
-      dualLaneCalibration: {
+      identityCalibration: {
         identityResolveResult,
         laneArtifacts,
       },
     } as never);
 
-    expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.72, 10);
-    expect(result.topEntity?.calibratedScore).toBeCloseTo(0.72, 10);
-    expect(result.decisionTrace.outcomeReasonCodes).not.toContain(
+    expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.93, 10);
+    expect(result.topEntity?.calibratedScore).toBeCloseTo(0.93, 10);
+    expect(result.decisionTrace.outcomeReasonCodes).toContain(
+      'DUAL_LANE_CORROBORATED_IDENTITY_CALIBRATED',
+    );
+  });
+
+  it('allows dual-lane corroboration to calibrate alias_fuzzy identity evidence', () => {
+    const rankedResults: RankedResult[] = [
+      makeRankedResult('chateau-margaux-2015', 'Chateau Margaux 2015', 0.49),
+      makeRankedResult('opus-one-2018', 'Opus One 2018', 0.48),
+    ];
+    const identityResolveResult = makeIdentityResolveResult(
+      'chateau-margaux-2015',
+      'Chateau Margaux 2015',
+      0.94,
+    );
+    const laneArtifacts: SearchExecutionLaneArtifacts<
+      EntityLaneCandidateArtifact,
+      GeneralLaneCandidateArtifact,
+      DualLaneArtifact
+    > = {
+      identity: [],
+      general: [],
+      fused: [
+        {
+          entityId: createEntityId('chateau-margaux-2015'),
+          canonicalLabel: 'Chateau Margaux 2015',
+          lanePresence: 'corroborated',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: createEntityId('chateau-margaux-2015'),
+            exactnessTier: 'alias_fuzzy',
+            calibratedScore: 0.94,
+            resolverRank: 1,
+            canonicalLabel: 'Chateau Margaux 2015',
+            evidenceRefs: ['identity:1'],
+            sourceSignals: {
+              canonicalExactMatch: 0,
+              canonicalNormalizedMatch: 0,
+              aliasExactMatch: 0,
+              aliasFuzzyMatch: 0.94,
+              editDistanceScore: 0.75,
+            },
+          },
+          fusedCandidate: {
+            entityId: createEntityId('chateau-margaux-2015'),
+            canonicalLabel: 'Chateau Margaux 2015',
+            retrievalTrace: {
+              retrievalProfile: 'dual_lane_fusion',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+            matchedConstraints: [],
+            evidenceItems: [],
+          },
+        },
+      ],
+    };
+
+    const result = buildRankedRouteResolveResult(makePlan(), rankedResults, {
+      outcomeReasonCode: 'HYBRID_ROUTE',
+      executionTopology: 'dual_lane',
+      effectiveRetrievalMode: 'attribute_search',
+      identityCalibration: {
+        identityResolveResult,
+        laneArtifacts,
+      },
+    });
+
+    expect(result.decisionTrace.decisionConfidenceC).toBeCloseTo(0.94, 10);
+    expect(result.topEntity?.calibratedScore).toBeCloseTo(0.94, 10);
+    expect(result.decisionTrace.outcomeReasonCodes).toContain(
       'DUAL_LANE_CORROBORATED_IDENTITY_CALIBRATED',
     );
   });

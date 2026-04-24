@@ -36,6 +36,7 @@ import {
   type SearchRouteExecutionResult,
 } from './search-usecase-route-dispatch.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
+import { liftEntityResolveResultToLaneArtifacts } from './search-usecase-entity-ranked-results.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { buildRelaxationLadder } from '../../domain/query/service/constraint-relaxation.js';
@@ -126,7 +127,9 @@ function buildDualLaneRouteExecutionFacts(
 }
 
 function buildGeneralOnlyRouteExecutionFacts(
+  plan: QueryPlanV1,
   fusedResolveResult: EntityResolveResult,
+  identityResolutionExecution?: EntityRoutePlanResolutionExecution,
 ): Pick<
   GeneralOnlyRouteResult,
   'executionTopology'
@@ -135,15 +138,26 @@ function buildGeneralOnlyRouteExecutionFacts(
   | 'laneArtifacts'
   | 'laneTrace'
   > {
-  const laneArtifacts = buildEmptySearchExecutionLaneArtifacts();
+  const identityArtifacts = identityResolutionExecution === undefined
+    ? []
+    : liftEntityResolveResultToLaneArtifacts(
+        plan,
+        identityResolutionExecution.resolveResult,
+        identityResolutionExecution.resolverCandidates,
+      );
+  const laneArtifacts = {
+    ...buildEmptySearchExecutionLaneArtifacts<EntityLaneCandidateArtifact>(),
+    identity: identityArtifacts,
+  };
+  const identityResolveResult = identityResolutionExecution?.resolveResult ?? null;
   return {
     executionTopology: 'general_only',
-    identityResolveResult: null,
+    identityResolveResult,
     fusedResolveResult,
     laneArtifacts,
     laneTrace: buildSearchExecutionLaneTrace({
       executionTopology: 'general_only',
-      identityResolveResult: null,
+      identityResolveResult,
       fusedResolveResult,
       laneArtifacts,
     }),
@@ -463,6 +477,7 @@ export async function runHybridRankingPipeline(
   retrievalPlanOverride?: ReturnType<typeof buildRetrievalPlan>,
   requestContext?: RequestExecutionContext,
   executionArtifacts?: DualLaneRouteExecutionArtifacts,
+  generalOnlyIdentityExecution?: EntityRoutePlanResolutionExecution,
 ): Promise<GeneralOnlyRouteResult | DualLaneRouteResult> {
   const retrievalPlan = retrievalPlanOverride ?? compiled.query.retrievalPlan;
   const rankingInput: RankingInput = {
@@ -525,6 +540,16 @@ export async function runHybridRankingPipeline(
   );
 
   const executionContract = bindHybridRankingExecutionContract(compiled, executionArtifacts);
+  const generalOnlyIdentityArtifacts = generalOnlyIdentityExecution === undefined
+    ? undefined
+    : {
+        ...buildEmptySearchExecutionLaneArtifacts<EntityLaneCandidateArtifact>(),
+        identity: liftEntityResolveResultToLaneArtifacts(
+          plan,
+          generalOnlyIdentityExecution.resolveResult,
+          generalOnlyIdentityExecution.resolverCandidates,
+        ),
+      };
   const fusedResolveResult: EntityResolveResult = buildHybridRouteResolveResult(
     plan,
     rankedResults,
@@ -533,12 +558,19 @@ export async function runHybridRankingPipeline(
       effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
       ...(executionContract.executionArtifacts !== undefined
         ? {
-            dualLaneCalibration: {
+            identityCalibration: {
               identityResolveResult: executionContract.executionArtifacts.identityResolveResult,
               laneArtifacts: executionContract.executionArtifacts.laneArtifacts,
             },
           }
-        : {}),
+        : generalOnlyIdentityArtifacts !== undefined
+          ? {
+              identityCalibration: {
+                identityResolveResult: generalOnlyIdentityExecution!.resolveResult,
+                laneArtifacts: generalOnlyIdentityArtifacts,
+              },
+            }
+          : {}),
     },
   );
   const executionFacts = buildHybridExecutionFacts({
@@ -564,13 +596,22 @@ export async function runHybridRankingPipeline(
   }
   return {
     executedCompiled: compiled,
-    ...buildGeneralOnlyRouteExecutionFacts(fusedResolveResult),
+    ...buildGeneralOnlyRouteExecutionFacts(plan, fusedResolveResult, generalOnlyIdentityExecution),
     rankedResults,
     ...executionFacts,
     ...(rankerDegradation !== undefined ? { routeDegradation: rankerDegradation } : {}),
     ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
     rankingMetadata: enrichedRankingMetadata,
   };
+}
+
+function shouldBootstrapGeneralOnlyIdentityExecution(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+): boolean {
+  return compiled.execution.executionTopology === 'general_only'
+    && compiled.execution.provenancePolicy.requireIdentitySeal
+    && plan.anchors.length > 0;
 }
 
 /**
@@ -612,7 +653,7 @@ function resolveRemainingLatencyBudgetMs(
 
 export async function executeHybridRouteRankingPipeline(
   plan: QueryPlanV1,
-  deps: HybridRankingRouteDeps,
+  deps: HybridRankedRoutePipelineDeps,
   resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
   compiled: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
@@ -622,6 +663,13 @@ export async function executeHybridRouteRankingPipeline(
   if (compiled.execution.executionTopology === 'entity_only') {
     throw new Error('Hybrid route ranking pipeline cannot execute with executionTopology=entity_only');
   }
+
+  const generalOnlyIdentityExecution = shouldBootstrapGeneralOnlyIdentityExecution(plan, compiled)
+    && deps.entityResolver !== undefined
+    ? await resolveEntityRouteForPlanExecution(plan, deps, compiled)
+    : undefined;
+  const effectiveAnchorEntityId =
+    anchorEntityId ?? generalOnlyIdentityExecution?.resolveResult.topEntity?.entityId;
 
   const executeRetrieval: HybridRouteRetrievalExecutor =
     retrievalExecutor
@@ -644,7 +692,7 @@ export async function executeHybridRouteRankingPipeline(
     plan,
     compiled,
     requestContext,
-    anchorEntityId,
+    effectiveAnchorEntityId,
   );
   stageTimer?.end('hybrid.retrieval');
 
@@ -658,6 +706,7 @@ export async function executeHybridRouteRankingPipeline(
     undefined,
     requestContext,
     retrieval.executionArtifacts,
+    generalOnlyIdentityExecution,
   );
   stageTimer?.end('hybrid.ranking');
 
@@ -713,22 +762,23 @@ export async function executeHybridRouteRankingPipeline(
       // the same execution contract (route/mode/budget/provenance policy) while
       // ensuring retrieval filters and boosts reflect the relaxed constraint set.
       const relaxedCompiled = buildRelaxedCompiledQuery(compiled, relaxedPlan);
-      const relaxedRetrieval = await executeRetrieval(
-        relaxedPlan,
+        const relaxedRetrieval = await executeRetrieval(
+          relaxedPlan,
+          relaxedCompiled,
+          requestContext,
+          effectiveAnchorEntityId,
+        );
+        const relaxedRanked = await runHybridRankingPipeline(
+          relaxedPlan,
+          relaxedRetrieval.candidates,
+          deps.ranker,
         relaxedCompiled,
-        requestContext,
-        anchorEntityId,
-      );
-      const relaxedRanked = await runHybridRankingPipeline(
-        relaxedPlan,
-        relaxedRetrieval.candidates,
-        deps.ranker,
-        relaxedCompiled,
-        relaxedRetrieval.retrievalProvenanceCoverage,
-        undefined,
-        requestContext,
-        relaxedRetrieval.executionArtifacts,
-      );
+          relaxedRetrieval.retrievalProvenanceCoverage,
+          undefined,
+          requestContext,
+          relaxedRetrieval.executionArtifacts,
+          generalOnlyIdentityExecution,
+        );
 
       if (relaxedRanked.rankedResults.length > 0) {
         stageTimer?.end('hybrid.constraint_relaxation');

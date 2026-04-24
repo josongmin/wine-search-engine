@@ -75,6 +75,9 @@ export interface ResolvedEntity {
     | 'wine_type_aliases'
     | 'region_parents'
     | 'country_derived'
+    | 'gold_catalog'
+    | 'seed_catalog'
+    | 'silver_catalog'
     | 'nl_mapper_defaults'
     | 'fuzzy_fallback';
 }

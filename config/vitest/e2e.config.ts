@@ -22,6 +22,8 @@ export default defineConfig({
       'test/e2e/response-invariants.test.ts',
       'test/e2e/realistic-scenarios.test.ts',
       'test/e2e/core-korean-iconic-entities.test.ts',
+      'test/e2e/core-korean-iconic-ambiguity.test.ts',
+      'test/e2e/core-korean-iconic-release-gate.test.ts',
       'test/e2e/edge-cases.input.test.ts',
       'test/e2e/edge-cases.protocol.test.ts',
       'test/e2e/hard-scenarios.test.ts',

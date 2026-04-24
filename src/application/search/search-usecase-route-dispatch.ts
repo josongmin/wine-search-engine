@@ -104,8 +104,7 @@ export type EntityRouteResult = SearchRouteExecutionResultBase<
 };
 
 export type GeneralOnlyRouteResult = SearchRouteExecutionResultBase<
-  'general_only',
-  null
+  'general_only'
 > & {
   readonly dualLaneExecutionAttemptId?: never;
 };
@@ -142,7 +141,9 @@ export function buildSearchExecutionLaneTrace(params: {
 }): ExecutionLaneTrace {
   const { executionTopology, identityResolveResult, fusedResolveResult, laneArtifacts } = params;
   const identityParticipated =
-    executionTopology === 'entity_only' || executionTopology === 'dual_lane';
+    identityResolveResult !== null
+    || executionTopology === 'entity_only'
+    || executionTopology === 'dual_lane';
   const generalParticipated =
     executionTopology === 'general_only' || executionTopology === 'dual_lane';
   const fusedParticipated = executionTopology !== 'entity_only';

@@ -234,10 +234,7 @@ function resolveWinnerAlignedIdentityArtifact(params: {
   readonly resolveResult: EntityResolveResult;
   readonly identityArtifacts: SearchExecutionLaneArtifacts['identity'];
 }): EntityLaneCandidateArtifact | undefined {
-  if (
-    params.executionTopology === 'general_only'
-    || params.identityResolveResult === null
-  ) {
+  if (params.identityResolveResult === null) {
     return undefined;
   }
 

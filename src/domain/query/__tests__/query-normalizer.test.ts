@@ -104,6 +104,18 @@ describe('QueryNormalizer', () => {
     );
   });
 
+  it('recovers compact Korean Opus typo prefix into the explicit opus one view', () => {
+    const views = normalizer.normalize('오푸');
+
+    expect(views.transliterated).toBe('opus one');
+    expect(views.semanticVariants).toEqual(
+      expect.arrayContaining(['오푸', 'opus one']),
+    );
+    expect(views.lookupVariants).toEqual(
+      expect.arrayContaining(['오푸', 'opus one']),
+    );
+  });
+
   it('recovers alternate Korean Opus short form spelling while retaining the generic component view', () => {
     const views = normalizer.normalize('오퍼스');
 

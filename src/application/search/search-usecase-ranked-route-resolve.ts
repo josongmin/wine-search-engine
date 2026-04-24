@@ -18,6 +18,14 @@ interface RankedRouteResolveOptionsBase {
   readonly outcomeReasonCode: 'HYBRID_ROUTE' | 'MIXED_ROUTE';
   readonly topEntity?: EntityResolveResult['topEntity'];
   readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+  readonly identityCalibration?: {
+    readonly identityResolveResult: EntityResolveResult;
+    readonly laneArtifacts: SearchExecutionLaneArtifacts<
+      EntityLaneCandidateArtifact,
+      GeneralLaneCandidateArtifact,
+      DualLaneArtifact
+    >;
+  } | undefined;
 }
 
 interface GeneralOnlyRankedRouteResolveOptions extends RankedRouteResolveOptionsBase {
@@ -26,14 +34,6 @@ interface GeneralOnlyRankedRouteResolveOptions extends RankedRouteResolveOptions
 
 interface DualLaneRankedRouteResolveOptions extends RankedRouteResolveOptionsBase {
   readonly executionTopology: 'dual_lane';
-  readonly dualLaneCalibration?: {
-    readonly identityResolveResult: EntityResolveResult;
-    readonly laneArtifacts: SearchExecutionLaneArtifacts<
-      EntityLaneCandidateArtifact,
-      GeneralLaneCandidateArtifact,
-      DualLaneArtifact
-    >;
-  } | undefined;
 }
 
 type RankedRouteResolveOptions =
@@ -104,18 +104,15 @@ export function buildRankedRouteResolveResult(
     conformalSetSize: computeConformalSetSize(top1Score, DEFAULT_ALPHA, rankedResults.length),
   };
 
-  if (
-    options.executionTopology !== 'dual_lane'
-    || options.dualLaneCalibration === undefined
-  ) {
+  if (options.identityCalibration === undefined) {
     return fusedResolveResult;
   }
 
   return DUAL_LANE_RESOLVE_CALIBRATOR.calibrate({
     rankedResults,
     fusedResolveResult,
-    identityResolveResult: options.dualLaneCalibration.identityResolveResult,
+    identityResolveResult: options.identityCalibration.identityResolveResult,
     effectiveRetrievalMode: options.effectiveRetrievalMode,
-    laneArtifacts: options.dualLaneCalibration.laneArtifacts,
+    laneArtifacts: options.identityCalibration.laneArtifacts,
   });
 }

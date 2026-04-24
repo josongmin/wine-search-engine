@@ -4,6 +4,7 @@
  * Owns interpret, resolve, replay, and hybrid endpoint coverage.
  */
 
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import {
@@ -22,11 +23,32 @@ import {
 } from './helpers/http-transport.js';
 import { fetchReplaySnapshot, makeReplaySnapshot } from './helpers/replay-snapshot.js';
 import { decodeAuthorityTraceRefDetailed } from '../../src/domain/decision/service/id-schema-decoder.js';
+import {
+  loadAutocompleteBenchmark,
+  type AutocompleteBenchmarkCase,
+} from '../../scripts/eval/run-autocomplete-eval.js';
 
 let server: TestServer;
+let autocompleteBenchmarkCases: readonly AutocompleteBenchmarkCase[] = [];
+
+function autocompleteContextForLanguage(
+  language: AutocompleteBenchmarkCase['language'],
+): { readonly locale: string; readonly currency: string } {
+  switch (language) {
+    case 'ko':
+    case 'mixed':
+      return { locale: 'ko-KR', currency: 'KRW' };
+    case 'en':
+    default:
+      return { locale: 'en-US', currency: 'USD' };
+  }
+}
 
 beforeAll(async () => {
   server = await createTestServer();
+  autocompleteBenchmarkCases = await loadAutocompleteBenchmark(
+    path.resolve(process.cwd(), 'data/autocomplete-benchmark.jsonl'),
+  );
 });
 
 afterAll(async () => {
@@ -236,6 +258,79 @@ describe('POST /v1/entity/autocomplete', () => {
     expect(res.statusCode).toBe(200);
     const body = parseAutocompleteResponse(res);
     expect(body.status).toBeDefined();
+  });
+
+  it('benchmark positive cases keep the expected entity at top-1', async () => {
+    const misses: string[] = [];
+
+    for (const benchmarkCase of autocompleteBenchmarkCases) {
+      if (benchmarkCase.category === 'ambiguous_short') {
+        continue;
+      }
+
+      const res = await postAutocomplete({
+        query: benchmarkCase.query,
+        context: autocompleteContextForLanguage(benchmarkCase.language),
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = parseAutocompleteResponse(res);
+      const topSuggestion = body.suggestions[0];
+      const topEntityId = topSuggestion?.entity.entity_id ?? null;
+
+      expect(body.suggestions.length).toBeGreaterThan(0);
+      expect(body.authority_trace_ref).toBe(body.decision_trace_ref);
+
+      const suggestionEntityIds = body.suggestions.map((suggestion) => suggestion.entity.entity_id);
+      const suggestionRanks = body.suggestions.map((suggestion) => suggestion.rank);
+      expect(new Set(suggestionEntityIds).size).toBe(suggestionEntityIds.length);
+      expect(suggestionRanks).toEqual(
+        Array.from({ length: suggestionRanks.length }, (_unused, index) => index + 1),
+      );
+
+      if (topEntityId !== benchmarkCase.expected_entity_id) {
+        misses.push(
+          `${benchmarkCase.benchmark_id}:${benchmarkCase.query}:expected=${benchmarkCase.expected_entity_id}:actual=${topEntityId ?? 'null'}`,
+        );
+      }
+    }
+
+    expect(misses).toEqual([]);
+  });
+
+  it('ambiguous short-form query keeps the canonical target visible without hard-resolving', async () => {
+    const res = await postAutocomplete({
+      query: '마고',
+      context: autocompleteContextForLanguage('ko'),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseAutocompleteResponse(res);
+    expect(body.status).not.toBe('resolved');
+    expect(
+      body.suggestions.slice(0, 5).some((suggestion) => suggestion.entity.entity_id === 'chateau-margaux-2015'),
+    ).toBe(true);
+  });
+
+  it('echoes X-Request-Id and keeps autocomplete authority/runtime correlation aligned', async () => {
+    const clientRequestId = 'autocomplete-e2e-correlation-001';
+    const res = await postJson(
+      server.app,
+      '/v1/entity/autocomplete',
+      { query: '오푸스', context: autocompleteContextForLanguage('ko') },
+      { 'x-request-id': clientRequestId },
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(getHeader(res, 'x-request-id')).toBe(clientRequestId);
+
+    const body = parseAutocompleteResponse(res);
+    expect(body.request_id).toBe(clientRequestId);
+    expect(body.decision_trace_ref).toBeTruthy();
+    expect(body.authority_trace_ref).toBe(body.decision_trace_ref);
+    expect(decodeAuthorityTraceRefDetailed(body.authority_trace_ref)).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
   });
 
   it.each([

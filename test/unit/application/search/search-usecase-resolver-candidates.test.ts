@@ -210,7 +210,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.97);
   });
 
-  it('treats latin prefix identity artifacts as exact-like alias evidence', async () => {
+  it('does not mint exact identity evidence from latin bare prefixes without a query-attested safe alias', async () => {
     const entityId = createEntityId('opus-one-2018');
     const lookup = makeBatchLookup(async () => ({
       entityId,
@@ -222,14 +222,14 @@ describe('buildResolverCandidatesFromGenerator', () => {
 
     const candidates = await buildResolverCandidatesFromGenerator(
       {
-        rawQuery: 'opu',
-        normalizedQuery: 'opu',
+        rawQuery: 'opus',
+        normalizedQuery: 'opus',
         anchors: [
           {
             surfaceForm: 'Opus One',
             normalizedForm: 'opus one',
             candidateEntityIds: [entityId],
-            lookupVariants: ['opu'],
+            lookupVariants: ['opus'],
             lookupStrategies: ['prefix_exact'],
             confidence: 0.95,
             source: 'alias',
@@ -247,9 +247,9 @@ describe('buildResolverCandidatesFromGenerator', () => {
         matchScore: 0.95,
       }),
     ]);
-    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBe(0);
-    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBe(0);
   });
 
   it('treats transliterated prefix identity artifacts as exact-like translation evidence', async () => {
@@ -292,6 +292,75 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBe(0);
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
+  });
+
+  it('lets compact Korean prefix typos recover explicit opus one identity evidence through query-derived normalization', async () => {
+    const entityId = createEntityId('opus-one-2018');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: 'Opus One 2018',
+      producer: 'Opus One',
+      aliasesIdentitySafe: ['Opus One', '오푸스원'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: '오푸',
+        normalizedQuery: '오푸',
+        anchors: [
+          {
+            surfaceForm: 'Opus One',
+            normalizedForm: 'opus one',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['오푸'],
+            lookupStrategies: ['prefix_exact'],
+            confidence: 0.95,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
+  });
+
+  it('does not treat vintage-bearing safe aliases as bare-label identity seals unless the bare form is explicit', async () => {
+    const entityId = createEntityId('sassicaia-2018');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: 'Sassicaia 2018',
+      producer: 'Tenuta San Guido',
+      aliasesIdentitySafe: ['Sassicaia 2018', 'sassicaia 2018'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: 'sassicaia',
+        normalizedQuery: 'sassicaia',
+        anchors: [
+          {
+            surfaceForm: 'Sassicaia',
+            normalizedForm: 'sassicaia',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['sassicaia'],
+            lookupStrategies: ['exact'],
+            confidence: 0.95,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBe(0);
   });
 
   it('uses batch getDocuments as the sole production hydration path', async () => {

@@ -718,6 +718,31 @@ describe('DecisionEngine', () => {
       expect(output.decisionStatus).toBe('resolved');
     });
 
+    it('known exact ambiguous surface → forces clarify even when identity evidence is strong', async () => {
+      const output = await engine.decide(
+        makeInput({
+          queryPlan: makeQueryPlan('ambiguous_short_form'),
+          resolveResult: makeResolverResult(0.95, 0.40, false),
+          uncertainty: {
+            overall: 0.8,
+            ambiguityDetected: true,
+            ambiguityTypes: ['known_ambiguous_surface', 'producer', 'entity'],
+            ambiguitySeverity: 'high',
+            decisionEffect: 'force_clarify',
+            parserConfidence: 0.5,
+            anchorConfidence: 0.9,
+            constraintConfidence: 0.5,
+          },
+          evidenceSummary: makeStrongIdentityEvidence(),
+        }),
+        TEST_SNAPSHOT,
+      );
+
+      expect(output.decisionTrace.rulesApplied).toContain('KNOWN_AMBIGUOUS_SURFACE_FORCE_CLARIFY');
+      expect(output.decisionStatus).toBe('ambiguous');
+      expect(output.nextAction).toBe('clarify');
+    });
+
     it('requireExact=true and no exact evidence → downgrade to ambiguous even with a strong score', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.995, 0.20, false),

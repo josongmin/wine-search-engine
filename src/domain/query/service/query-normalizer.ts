@@ -56,6 +56,7 @@ const KOREAN_TRANSLITERATION_RULES: readonly [RegExp, string][] = [
   [/보졸레\s*누보/gu, 'beaujolais nouveau'],
   [/모에\s*샹동/gu, 'moet chandon'],
   [/모엣\s*샹동/gu, 'moet chandon'],
+  [/(^|[^\p{L}\p{N}])오푸(?=$|[^\p{L}\p{N}])/gu, '$1opus one'],
   [/오퍼스\s*원/gu, 'opus one'],
   [/오푸스\s*원/gu, 'opus one'],
   [/오퍼스/gu, 'opus one'],

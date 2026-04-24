@@ -47,6 +47,10 @@ import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher
 import type { RerankerPort } from '../domain/ranking/port/reranker.port.js';
 import type { Doc2QueryGeneratorPort } from '../domain/retrieval/port/doc2query-generator.port.js';
 import {
+  FallbackAmbiguityDictionary,
+  StaticAmbiguityDictionary,
+} from '../domain/query/service/static-ambiguity-dictionary.js';
+import {
   StubAmbiguityDictionary,
   StubBlockingPort,
   StubCalibrationStore,
@@ -224,7 +228,10 @@ export async function buildCoreAdapterServices(
       : {}),
     blockingPort: pool ? new PgBlockingAdapter(pool) : new StubBlockingPort(),
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
-    ambiguityDict: pool ? new PgAmbiguityDictionary(pool) : new StubAmbiguityDictionary(),
+    ambiguityDict: new FallbackAmbiguityDictionary(
+      pool ? new PgAmbiguityDictionary(pool) : new StubAmbiguityDictionary(),
+      new StaticAmbiguityDictionary(),
+    ),
     thresholdStore: pool ? new PgThresholdStore(pool) : new StubThresholdStore(),
     aliasMatcher: ((): AliasMatcher => {
       const indexAliasMatcher = new SearchIndexAliasMatcher(searchIndex);

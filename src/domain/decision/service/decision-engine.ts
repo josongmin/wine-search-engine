@@ -58,6 +58,7 @@ function requireDecisionEvidenceItems(input: DecisionInput): readonly EvidenceIt
 const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
+const KNOWN_AMBIGUOUS_SURFACE_TYPE = 'known_ambiguous_surface';
 
 /** Decimal places for C/gap floats embedded in decision trace strings. */
 const DECISION_TRACE_FLOAT_DECIMAL_PLACES = 4;
@@ -355,6 +356,20 @@ export class DecisionEngine {
     }
 
     // Uncertainty-driven overrides.
+    if (
+      input.uncertainty.decisionEffect === 'force_clarify' &&
+      input.uncertainty.ambiguitySeverity === 'high' &&
+      input.uncertainty.ambiguityTypes.includes(KNOWN_AMBIGUOUS_SURFACE_TYPE)
+    ) {
+      rulesApplied.push('KNOWN_AMBIGUOUS_SURFACE_FORCE_CLARIFY');
+      return {
+        status: 'ambiguous',
+        nextAction: 'clarify',
+        rulesApplied: [...rulesApplied],
+        finalReason: 'Known exact ambiguous surface forces clarification; decision short-circuited to AMBIGUOUS.',
+      };
+    }
+
     // SOTA++ change: force_clarify is no longer a hard gate. High-severity
     // ambiguity from the planner often reflects candidate pool composition
     // (107 hybrid results) rather than genuine query uncertainty. Convert

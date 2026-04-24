@@ -1,0 +1,15 @@
+{"benchmark_id":"autocomplete-opus-latin-prefix-1","query":"opu","expected_entity_id":"opus-one-2018","category":"latin_prefix","language":"en","difficulty":"easy"}
+{"benchmark_id":"autocomplete-opus-latin-prefix-2","query":"opus","expected_entity_id":"opus-one-2018","category":"latin_prefix","language":"en","difficulty":"easy"}
+{"benchmark_id":"autocomplete-opus-hangul-prefix-1","query":"오푸","expected_entity_id":"opus-one-2018","category":"hangul_prefix","language":"ko","difficulty":"easy"}
+{"benchmark_id":"autocomplete-opus-hangul-prefix-2","query":"오푸스","expected_entity_id":"opus-one-2018","category":"hangul_prefix","language":"ko","difficulty":"easy"}
+{"benchmark_id":"autocomplete-opus-ime-1","query":"오푸스ㅇ","expected_entity_id":"opus-one-2018","category":"hangul_ime","language":"ko","difficulty":"medium"}
+{"benchmark_id":"autocomplete-margaux-latin-prefix-1","query":"chateau marg","expected_entity_id":"chateau-margaux-2015","category":"latin_prefix","language":"en","difficulty":"easy"}
+{"benchmark_id":"autocomplete-margaux-hangul-prefix-1","query":"샤토 마","expected_entity_id":"chateau-margaux-2015","category":"hangul_prefix","language":"ko","difficulty":"easy"}
+{"benchmark_id":"autocomplete-margaux-short-ambiguous-1","query":"마고","expected_entity_id":"chateau-margaux-2015","category":"ambiguous_short","language":"ko","difficulty":"hard","expected_status":"ambiguous"}
+{"benchmark_id":"autocomplete-drc-acronym-1","query":"drc","expected_entity_id":"romanee-conti-2019","category":"acronym","language":"en","difficulty":"hard"}
+{"benchmark_id":"autocomplete-romanee-diacriticless-1","query":"romanee","expected_entity_id":"romanee-conti-2019","category":"diacriticless","language":"en","difficulty":"medium"}
+{"benchmark_id":"autocomplete-sassicaia-hangul-prefix-1","query":"사시","expected_entity_id":"sassicaia-2018","category":"hangul_prefix","language":"ko","difficulty":"easy"}
+{"benchmark_id":"autocomplete-penfolds-latin-prefix-1","query":"pen","expected_entity_id":"penfolds-grange-2017","category":"latin_prefix","language":"en","difficulty":"easy"}
+{"benchmark_id":"autocomplete-cloudy-hangul-prefix-1","query":"클라우디","expected_entity_id":"cloudy-bay-2022","category":"hangul_prefix","language":"ko","difficulty":"easy"}
+{"benchmark_id":"autocomplete-moet-hangul-short-1","query":"모엣","expected_entity_id":"moet-brut","category":"hangul_prefix","language":"ko","difficulty":"medium"}
+{"benchmark_id":"autocomplete-masi-hangul-prefix-1","query":"마시 아","expected_entity_id":"masi-amarone","category":"hangul_prefix","language":"ko","difficulty":"medium"}

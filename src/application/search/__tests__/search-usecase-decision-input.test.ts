@@ -8,7 +8,10 @@ import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
-import type { DualLaneArtifact } from '../../../domain/retrieval/model/dual-lane-artifact.js';
+import type {
+  DualLaneArtifact,
+  EntityLaneCandidateArtifact,
+} from '../../../domain/retrieval/model/dual-lane-artifact.js';
 
 function makePlan(): QueryPlanV1 {
   return {
@@ -283,5 +286,84 @@ describe('buildSearchDecisionInput', () => {
     expect(input.evidenceSummary?.identityEvidence?.exactnessTier).toBe('none');
     expect(hasIdentityEvidence(input.evidenceSummary)).toBe(false);
     expect(hasExactMatchCandidate(input.evidenceSummary)).toBe(false);
+  });
+
+  it('recovers identity evidence from an aligned general-only identity artifact', () => {
+    const winnerIdentityArtifact: EntityLaneCandidateArtifact = {
+      entityId: createEntityId('entity-winner'),
+      candidate: {
+        entityId: createEntityId('entity-winner'),
+        canonicalLabel: 'entity-winner',
+        matchedConstraints: [],
+        retrievalTrace: {
+          retrievalProfile: 'entity_route_synthetic',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['entity_resolver'],
+        },
+        entityPosteriorScore: 0.97,
+        identityExactnessTier: 'alias_exact',
+        lanePresence: 'entity_only',
+      },
+      resolvedCandidate: {
+        entityId: createEntityId('entity-winner'),
+        canonicalLabel: 'entity-winner',
+        calibratedScore: 0.97,
+        rank: 1,
+        evidenceRefs: ['alias:entity-winner'],
+      },
+      identityProvenance: {
+        source: 'entity_resolver',
+        entityId: createEntityId('entity-winner'),
+        exactnessTier: 'alias_exact',
+        calibratedScore: 0.97,
+        resolverRank: 1,
+        canonicalLabel: 'entity-winner',
+        evidenceRefs: ['alias:entity-winner'],
+        sourceSignals: {
+          canonicalExactMatch: 0,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          editDistanceScore: 0,
+        },
+      },
+      evidenceItems: [],
+    };
+
+    const input = buildSearchDecisionInput({
+      plan: makePlan(),
+      resolveResult: makeResolveResult('entity-winner'),
+      identityResolveResult: makeIdentityResolveResult(
+        'entity-winner',
+        ['entity-winner'],
+        ['exact'],
+      ),
+      rankedResults: [makeRankedTop('entity-winner')],
+      effectiveRoute: 'hybrid',
+      executionContext: {
+        winnerIdentityArtifact,
+      },
+    });
+
+    expect(input.evidenceSummary?.identityEvidence?.winnerIdentityArtifactPresent).toBe(true);
+    expect(input.evidenceSummary?.identityEvidence?.exactnessTier).toBe('alias_exact');
+    expect(hasIdentityEvidence(input.evidenceSummary)).toBe(true);
+    expect(hasExactMatchCandidate(input.evidenceSummary)).toBe(true);
+  });
+
+  it('does not derive ranking ambiguity from canonical-label fallback without explicit branches', () => {
+    const input = buildSearchDecisionInput({
+      plan: makePlan(),
+      resolveResult: makeResolveResult('entity-winner'),
+      rankedResults: [
+        makeRankedTop('entity-winner'),
+        makeRankedTop('entity-other'),
+      ],
+      effectiveRoute: 'hybrid',
+    });
+
+    expect(input.ambiguitySummary).toBeUndefined();
   });
 });

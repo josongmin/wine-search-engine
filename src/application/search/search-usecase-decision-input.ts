@@ -192,10 +192,14 @@ function buildRankingAmbiguitySummary(
   if (extractSingleTokenNormalizedQuery(plan.normalizedQuery) === undefined) {
     return undefined;
   }
+  const branchGroups = buildRankingBranchGroups(plan);
+  if (branchGroups.length === 0) {
+    return undefined;
+  }
 
   const representedBranches = rankedResults
     .slice(0, 3)
-    .map((result) => resolveAmbiguousBranchLabel(result, buildRankingBranchGroups(plan)))
+    .map((result) => resolveAmbiguousBranchLabel(result, branchGroups))
     .filter((label): label is string => label !== undefined);
   const uniqueBranches = unique(representedBranches);
   if (uniqueBranches.length < 2) {

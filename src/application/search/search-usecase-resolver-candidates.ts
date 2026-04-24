@@ -62,6 +62,26 @@ function identitySurfaceKeys(value: string): readonly string[] {
   )];
 }
 
+function explicitIdentitySurfaceKeys(value: string): readonly string[] {
+  const views = buildNormalizedQueryViews(value);
+  const surfaces = [
+    views.strict,
+    views.accentless,
+    views.collapsedWhitespace,
+    views.punctuationStripped,
+    views.compact,
+    views.vintageCanonicalized,
+    views.transliterated,
+  ];
+
+  return [...new Set(
+    surfaces
+      .filter((surface): surface is string => typeof surface === 'string' && surface.length > 0)
+      .map(normalizeIdentitySurface)
+      .filter((key) => key.length > 0),
+  )];
+}
+
 function stripParenthetical(value: string): string {
   return value.replace(/\([^)]*\)/gu, ' ');
 }
@@ -124,6 +144,26 @@ function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
     if (isProducerOnlyAliasForDistinctWine(doc, surface)) {
       continue;
     }
+    for (const key of explicitIdentitySurfaceKeys(surface)) {
+      keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function collectQueryIdentityKeys(
+  rawQuery: string,
+  normalizedQuery: string,
+): ReadonlySet<string> {
+  const keys = new Set<string>();
+  const querySurfaces = [
+    rawQuery,
+    normalizedQuery,
+    ...buildNormalizedQueryViews(rawQuery).lookupVariants,
+  ];
+
+  for (const surface of querySurfaces) {
     for (const key of identitySurfaceKeys(surface)) {
       keys.add(key);
     }
@@ -132,13 +172,32 @@ function collectIdentitySafeKeys(doc: RetrievalDocument): ReadonlySet<string> {
   return keys;
 }
 
-function collectAnchorIdentityKeys(
-  normalizedQuery: string,
+function shouldProjectAnchorIdentityKeys(
+  rawQuery: string,
+  anchor: AnchorCandidate,
+): boolean {
+  const strategies = new Set(anchor.lookupStrategies ?? []);
+  if (strategies.has('hangul_ime_completion') || hasTranslationLookupStrategy(strategies)) {
+    return true;
+  }
+
+  if (!strategies.has('prefix_exact')) {
+    return false;
+  }
+
+  const views = buildNormalizedQueryViews(rawQuery);
+  const tokenCount = views.vintageCanonicalized.trim().length === 0
+    ? 0
+    : views.vintageCanonicalized.trim().split(/\s+/u).length;
+
+  return views.vintageCanonicalized !== views.vintageStripped && tokenCount >= 2;
+}
+
+function collectAnchorProjectedIdentityKeys(
   anchor: AnchorCandidate,
 ): ReadonlySet<string> {
   const keys = new Set<string>();
   const anchorSurfaces = [
-    normalizedQuery,
     anchor.surfaceForm,
     anchor.normalizedForm,
     ...(anchor.lookupVariants ?? []),
@@ -154,6 +213,7 @@ function collectAnchorIdentityKeys(
 }
 
 function anchorMatchesIdentitySafeProjection(
+  rawQuery: string,
   normalizedQuery: string,
   anchor: AnchorCandidate,
   doc: RetrievalDocument,
@@ -163,7 +223,12 @@ function anchorMatchesIdentitySafeProjection(
     return undefined;
   }
 
-  const anchorKeys = collectAnchorIdentityKeys(normalizedQuery, anchor);
+  const anchorKeys = new Set(collectQueryIdentityKeys(rawQuery, normalizedQuery));
+  if (shouldProjectAnchorIdentityKeys(rawQuery, anchor)) {
+    for (const key of collectAnchorProjectedIdentityKeys(anchor)) {
+      anchorKeys.add(key);
+    }
+  }
   for (const key of anchorKeys) {
     if (identityKeys.has(key)) {
       return true;
@@ -192,6 +257,7 @@ function inferAliasType(anchor: AnchorCandidate): AliasType {
 }
 
 function buildSignals(
+  rawQuery: string,
   normalizedQuery: string,
   anchor: AnchorCandidate,
   doc: RetrievalDocument,
@@ -206,7 +272,7 @@ function buildSignals(
     strategies.has('smart_document');
 
   const identitySafeMatch = exactLike
-    ? anchorMatchesIdentitySafeProjection(normalizedQuery, anchor, doc)
+    ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)
     : undefined;
   const exactSignalAllowed = identitySafeMatch !== false;
   const identityNormalizedMatch = identitySafeMatch === false ? 0 : anchor.confidence;
@@ -369,7 +435,7 @@ export async function buildResolverCandidatesFromGenerator(
         aliasType: inferAliasType(anchor),
         matchScore: anchor.confidence,
       } as const;
-      const incomingSignals = buildSignals(input.normalizedQuery, anchor, doc);
+      const incomingSignals = buildSignals(input.rawQuery, input.normalizedQuery, anchor, doc);
       const existing = candidatesById.get(key);
       if (existing === undefined) {
         candidatesById.set(key, {
