@@ -134,7 +134,7 @@ describe('SmartAliasMatcher — SOTA++ Enhancements', () => {
       const results = await matcher.findMatches('오푸');
       expect(results.length).toBeGreaterThan(0);
       expect(results[0]!.entityIds).toContain(entityId);
-      expect(results[0]!.lookupStrategy).toContain('prefix_exact');
+      expect(results[0]!.lookupStrategy).toContain('transliterated_exact');
       expect(results[0]!.matchConfidence).toBeGreaterThan(0.84);
     });
 

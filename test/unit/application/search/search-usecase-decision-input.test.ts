@@ -102,17 +102,59 @@ describe('buildSearchDecisionInput', () => {
         rawQuery: 'opus',
         normalizedQuery: 'opus',
         queryClass: 'short_entity',
+        expansions: {
+          lexical: [],
+          semantic: [],
+          ambiguousEntityHints: [{
+            surface: 'opus',
+            entityType: 'grape_primary',
+            retrievalConstraint: {
+              attribute: 'grape_family',
+              operator: '=',
+              value: 'Bordeaux Blend',
+            },
+            lexicalExpansions: [],
+            semanticExpansions: [],
+            clarifyOptions: ['Overture', 'Opus One'],
+            explorationBranches: [
+              {
+                label: 'Overture',
+                softConstraint: {
+                  attribute: 'grape_primary',
+                  operator: '=',
+                  value: 'Merlot',
+                },
+                matchValues: ['merlot'],
+                lexicalExpansions: [],
+                semanticExpansions: [],
+              },
+              {
+                label: 'Opus One',
+                softConstraint: {
+                  attribute: 'grape_primary',
+                  operator: '=',
+                  value: 'Cabernet Sauvignon',
+                },
+                matchValues: ['cabernet sauvignon'],
+                lexicalExpansions: [],
+                semanticExpansions: [],
+              },
+            ],
+          }],
+        },
       },
       resolveResult: makeResolverResult(),
       rankedResults: [
         makeRankedResult({
           entityId: createEntityId('overture-2019'),
           canonicalLabel: '2019 Opus One Overture',
+          grapePrimary: 'Merlot',
           rank: 1,
         }),
         makeRankedResult({
           entityId: createEntityId('opus-2018'),
           canonicalLabel: 'Opus One 2018',
+          grapePrimary: 'Cabernet Sauvignon',
           rank: 2,
         }),
       ],

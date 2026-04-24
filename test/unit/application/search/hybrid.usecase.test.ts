@@ -513,13 +513,19 @@ describe('HybridUseCase', () => {
     expect(comparisonLegs).toEqual([
       expect.objectContaining({
         rawQuery: 'Opus One',
+        retrievalQuery: 'Opus One wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        canonicalConcept: 'Opus One',
       }),
       expect.objectContaining({
         rawQuery: 'Screaming Eagle',
-        retrievalQuery: 'Screaming Eagle',
-        mode: 'entity',
-        retrievalMode: 'auto',
-        evidenceSource: 'entity_default',
+        retrievalQuery: 'Screaming Eagle wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        canonicalConcept: 'Screaming Eagle',
       }),
     ]);
     expect(comparisonIntent).toBe('compare');

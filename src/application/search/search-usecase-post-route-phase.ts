@@ -10,6 +10,7 @@ import type { CandidateDropRecord } from '../../domain/retrieval/model/candidate
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
+import type { ResolvedCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
@@ -140,10 +141,19 @@ function isEntityLaneArtifact(
 }
 
 function hasWinnerAlignedIdentityResolveCandidate(
-  identityResolveResult: EntityResolveResult,
+  identityResolveResult: EntityResolveResult | null | undefined,
   winnerEntityId: string,
 ): boolean {
-  return identityResolveResult.candidates.some((candidate) => candidate.entityId === winnerEntityId);
+  if (identityResolveResult == null) {
+    return false;
+  }
+  const { candidates } = identityResolveResult;
+  if (!Array.isArray(candidates)) {
+    return false;
+  }
+  return candidates.some(
+    (candidate: ResolvedCandidate) => candidate.entityId === winnerEntityId,
+  );
 }
 
 function isWinnerAlignedEntityLaneArtifact(

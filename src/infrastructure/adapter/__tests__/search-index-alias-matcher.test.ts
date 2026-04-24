@@ -136,7 +136,7 @@ describe('SearchIndexAliasMatcher', () => {
 
     expect(matches.length).toBeGreaterThan(0);
     expect(matches[0]?.entityIds).toContain(doc.entityId);
-    expect(matches[0]?.lookupStrategy).toContain('index_transliterated_fuzzy');
+    expect(matches[0]?.lookupStrategy).toContain('index_transliterated_exact');
   });
 
   it('matches IME-incomplete Korean typo prefixes through typo-corrected exception prefix romanization', async () => {

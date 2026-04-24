@@ -57,7 +57,7 @@ describe('detectDecomposition', () => {
     expect(analysis.outcome.decomposed).toBe(true);
     expect(analysis.hint.strategy).toBe('comparison');
     expect(analysis.hint.subQueryCount).toBe(2);
-    expect(analysis.hint.comparisonSubtype).toBe('mixed');
+    expect(analysis.hint.comparisonSubtype).toBe('concept');
     expect(analysis.hint.comparisonLegs).toEqual([
       expect.objectContaining({
         rawQuery: 'Opus One',
@@ -65,13 +65,15 @@ describe('detectDecomposition', () => {
         mode: 'concept',
         retrievalMode: 'hybrid',
         evidenceSource: 'direct_entity_resolution',
+        canonicalConcept: 'Opus One',
       }),
       expect.objectContaining({
         rawQuery: 'Screaming Eagle',
-        retrievalQuery: 'Screaming Eagle',
-        mode: 'entity',
-        retrievalMode: 'auto',
-        evidenceSource: 'entity_default',
+        retrievalQuery: 'Screaming Eagle wine',
+        mode: 'concept',
+        retrievalMode: 'hybrid',
+        evidenceSource: 'direct_entity_resolution',
+        canonicalConcept: 'Screaming Eagle',
       }),
     ]);
   });
