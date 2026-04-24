@@ -247,7 +247,7 @@ export async function deployVespaApplicationPackage(args: {
   );
 }
 
-function buildStagingPath(activePath: string, snapshotId: string): string {
+function _buildStagingPath(activePath: string, snapshotId: string): string {
   const ext = path.extname(activePath);
   const base = ext.length > 0 ? activePath.slice(0, -ext.length) : activePath;
   return `${base}.${snapshotId}.staging${ext}`;

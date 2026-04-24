@@ -46,7 +46,10 @@ async function main(): Promise<void> {
   let totalExpectedInferred = 0;
 
   for (const scenario of withExpected) {
-    const expected = scenario.expectation.expectedConstraints!;
+    const expected = scenario.expectation.expectedConstraints;
+    if (expected === undefined) {
+      continue;
+    }
     const extraction = await runConstraintExtraction(scenario.query);
     const scr = scoreSemanticConstraintRecall(
       extraction.bundle,
@@ -77,9 +80,6 @@ async function main(): Promise<void> {
     totalMissedHard += hardMissed;
     totalMissedSoft += softMissed;
     totalMissedInferred += inferredMissed;
-
-    const brief = (cs: readonly { attribute: string; operator: string; value: unknown }[]) =>
-      cs.map((c) => `${c.attribute}${c.operator}${JSON.stringify(c.value)}`);
 
     results.push({
       id: scenario.id,

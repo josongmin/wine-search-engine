@@ -12,17 +12,13 @@
 import 'dotenv/config';
 
 import { AGENT_SCENARIOS } from '../test/benchmark/agent/scenarios.js';
-import {
-  scoreSemanticConstraintRecall,
-  scoreSlotF1,
-} from '../test/benchmark/agent/constraint-metrics.js';
+import { scoreSemanticConstraintRecall } from '../test/benchmark/agent/constraint-metrics.js';
 import { NLMapper } from '../src/domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../src/domain/attribute/service/llm-nl-mapper.js';
 import { OpenAiChatLlm } from '../src/infrastructure/ai/openai-chat-llm.js';
 import { ConstraintCompiler } from '../src/domain/query/service/constraint-compiler.js';
 import { QueryNormalizer } from '../src/domain/query/service/query-normalizer.js';
 import { correctKoreanWineTypos } from '../src/domain/query/service/korean-wine-aliases.js';
-import { parseSpans } from '../src/domain/attribute/service/span-parser.js';
 import type { MappingTablePort } from '../src/domain/attribute/port/mapping-table.port.js';
 import type { ConstraintBundle } from '../src/domain/shared/types/index.js';
 import type { ConstraintGraph } from '../src/domain/query/model/constraint-graph.js';
@@ -81,7 +77,10 @@ async function main(): Promise<void> {
   let llmImproved = 0;
 
   for (const scenario of withExpected) {
-    const expected = scenario.expectation.expectedConstraints!;
+    const expected = scenario.expectation.expectedConstraints;
+    if (expected === undefined) {
+      continue;
+    }
 
     // Rule-only extraction
     const ruleResult = await extractWithMapper(scenario.query, ruleOnlyMapper);
