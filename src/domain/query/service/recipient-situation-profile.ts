@@ -238,3 +238,230 @@ export function recipientProfileEvidenceAxes(
       return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Query-string classifier (maturity 2 -> 3)
+//
+// Lightweight, deterministic recipient-situation classifier over the raw user
+// query. Complements the candidate-based axis voting above by surfacing a
+// top-profile + confidence + runner-up tuple at NLU time, before retrieval
+// runs. No randomness, no locale-dependent string ops, no \b on non-ASCII.
+// ---------------------------------------------------------------------------
+
+export interface RecipientProfileScore {
+  readonly profile: RecipientProfileValue;
+  readonly confidence: number;
+}
+
+export interface RecipientProfileClassification {
+  readonly profile?: RecipientProfileValue;
+  readonly confidence: number;
+  readonly runnerUp?: RecipientProfileScore;
+}
+
+// Confidence threshold below which we treat the top profile as "no signal".
+// 1 evidence hit / ~5 max evidence = 0.2 floor; we require >= ~2 hits worth of
+// evidence (or one very strong hit) to surface a profile.
+const QUERY_PROFILE_CONFIDENCE_FLOOR = 0.2;
+
+// Per-profile signal vocabularies. Korean tokens are matched as raw substrings
+// (no \b - CLAUDE.md rule 8). English tokens are matched after lowercasing.
+// Each entry contributes 1 evidence point per distinct hit.
+const PARENTS_FIRST_TIME_QUERY_SIGNALS: readonly string[] = [
+  // Korean - parent terms
+  '부모님',
+  '부모',
+  '엄마',
+  '어머니',
+  '아빠',
+  '아버지',
+  '어른',
+  // Korean - first-time / gentle drinking
+  '처음',
+  '입문',
+  '달달',
+  '달콤',
+  '가벼운',
+  '순한',
+  // English - parent + first-time terms
+  'parent',
+  'parents',
+  'mom',
+  'mother',
+  'dad',
+  'father',
+  'first time',
+  'first-time',
+  'beginner',
+  'introductory',
+  'sweet',
+  'light',
+  'moscato',
+  'muscat',
+  'fruit forward',
+  'fruit-forward',
+  'low tannin',
+];
+
+const SENIOR_COLLEAGUE_GIFT_QUERY_SIGNALS: readonly string[] = [
+  // Korean - senior / formal gift
+  '상사',
+  '직장',
+  '윗사람',
+  '회식',
+  '접대',
+  '선물',
+  '고급',
+  '격식',
+  '예우',
+  // English - senior / prestige / gift
+  'boss',
+  'senior',
+  'supervisor',
+  'colleague',
+  'manager',
+  'executive',
+  'gift',
+  'present',
+  'prestige',
+  'prestigious',
+  'formal',
+  'celebration',
+  'special occasion',
+  'champagne',
+  'bordeaux',
+  'napa',
+  'tuscany',
+];
+
+const UNKNOWN_PREFERENCE_RECIPIENT_QUERY_SIGNALS: readonly string[] = [
+  // Korean - unknown taste / crowd-pleasing
+  '모르는',
+  '모르겠',
+  '취향',
+  '무난',
+  '대중적',
+  '누구나',
+  '안전한',
+  // English - unknown preference / crowd-pleaser
+  "don't know",
+  'dont know',
+  'do not know',
+  'not sure',
+  'unsure',
+  'unknown taste',
+  'unknown preference',
+  'crowd pleasing',
+  'crowd-pleasing',
+  'crowd pleaser',
+  'safe',
+  'universal',
+  'easy drinking',
+  'pinot grigio',
+  'pinot gris',
+  'prosecco',
+  'cava',
+  'merlot',
+  'pinot noir',
+];
+
+const QUERY_PROFILE_SIGNAL_MAP: Readonly<Record<RecipientProfileValue, readonly string[]>> = {
+  parents_first_time: PARENTS_FIRST_TIME_QUERY_SIGNALS,
+  senior_colleague_gift: SENIOR_COLLEAGUE_GIFT_QUERY_SIGNALS,
+  unknown_preference_recipient: UNKNOWN_PREFERENCE_RECIPIENT_QUERY_SIGNALS,
+};
+
+// Per-profile saturation point: number of distinct signal hits at which we
+// treat the evidence as "full confidence (1.0)". Calibrated so a query with
+// ~3 strong cues saturates; smaller dictionaries don't get penalized for
+// being short.
+const QUERY_PROFILE_SATURATION = 3;
+
+function normalizeQueryForClassification(query: string): string {
+  return query.toLowerCase().normalize('NFC');
+}
+
+function countDistinctSignalHits(normalizedQuery: string, signals: readonly string[]): number {
+  if (normalizedQuery.length === 0) {
+    return 0;
+  }
+  const seen = new Set<string>();
+  for (const signal of signals) {
+    const needle = signal.toLowerCase();
+    if (needle.length === 0) {
+      continue;
+    }
+    if (normalizedQuery.includes(needle) && !seen.has(needle)) {
+      seen.add(needle);
+    }
+  }
+  return seen.size;
+}
+
+function scoreFromHits(hits: number): number {
+  if (hits <= 0) {
+    return 0;
+  }
+  return Math.min(1, hits / QUERY_PROFILE_SATURATION);
+}
+
+/**
+ * Classify a raw user query into a recipient-situation profile.
+ *
+ * Deterministic: no Math.random, no locale-dependent ops, no \b on non-ASCII.
+ * Ties broken by canonical RECIPIENT_PROFILE_VALUES order (parents_first_time
+ * > senior_colleague_gift > unknown_preference_recipient).
+ *
+ * Confidence is in [0, 1]; profile is omitted when confidence falls below
+ * QUERY_PROFILE_CONFIDENCE_FLOOR. runnerUp is the second-highest scoring
+ * profile when it has any evidence at all.
+ */
+export function classifyRecipientSituationProfile(query: string): RecipientProfileClassification {
+  const normalized = normalizeQueryForClassification(query.trim());
+
+  // Score every profile in canonical order so ties are deterministic.
+  const scores: readonly RecipientProfileScore[] = RECIPIENT_PROFILE_VALUES.map((profile) => ({
+    profile,
+    confidence: scoreFromHits(countDistinctSignalHits(normalized, QUERY_PROFILE_SIGNAL_MAP[profile])),
+  }));
+
+  // Find top score with deterministic tie-break (first wins -> canonical order).
+  let topIdx = 0;
+  for (let i = 1; i < scores.length; i += 1) {
+    const current = scores[i];
+    const best = scores[topIdx];
+    if (current === undefined || best === undefined) {
+      continue;
+    }
+    if (current.confidence > best.confidence) {
+      topIdx = i;
+    }
+  }
+
+  const top = scores[topIdx];
+  if (top === undefined || top.confidence < QUERY_PROFILE_CONFIDENCE_FLOOR) {
+    return { confidence: 0 };
+  }
+
+  // Runner-up: highest-scoring profile that is not the top one and has
+  // strictly positive evidence. Deterministic tie-break via canonical order.
+  let runnerUp: RecipientProfileScore | undefined;
+  for (let i = 0; i < scores.length; i += 1) {
+    if (i === topIdx) {
+      continue;
+    }
+    const candidate = scores[i];
+    if (candidate === undefined || candidate.confidence <= 0) {
+      continue;
+    }
+    if (runnerUp === undefined || candidate.confidence > runnerUp.confidence) {
+      runnerUp = candidate;
+    }
+  }
+
+  return {
+    profile: top.profile,
+    confidence: top.confidence,
+    ...(runnerUp !== undefined ? { runnerUp } : {}),
+  };
+}

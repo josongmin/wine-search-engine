@@ -1,0 +1,54 @@
+id: nlu.entity-resolver
+name: Entity Resolver (Conformal + Platt + Decision Engine)
+category: nlu
+summary: |
+  Query 내 wine 엔티티 후보 resolution. resolver domain + calibration (conformal-prediction,
+  Platt scaling, AURC/ECE) + decision engine (admission-gate, confidence-refusal,
+  evidence-gate, selective predictor). 70% coverage 보장 conformal set + abstention 결정.
+
+maturity: 3
+maturity_rationale: |
+  Calibration + decision 통합된 selective prediction system. ambiguity-classifier로 1:1/
+  1:N/N:1/N:N 패턴 분류 후 calibrated 결정. 그러나 calibration curve를 production gold
+  label과 cross-validate 시스템 부재, threshold optimizer가 sparse.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by anchor-extraction + agent.semantic-contract)"
+
+key_files:
+  - src/domain/resolver/service/ambiguity-classifier.ts
+  - src/domain/resolver/service/learned-matcher-features.ts
+  - src/domain/resolver/service/calibrator.ts
+  - src/domain/calibration/service/conformal-prediction.ts
+  - src/domain/calibration/service/platt-scaling.ts
+  - src/domain/decision/service/decision-engine.ts
+  - src/domain/decision/service/confidence-refusal.ts
+  - src/domain/decision/service/evidence-gate.ts
+  - src/domain/decision/service/admission-gate.ts
+
+tests: {}
+
+depends_on:
+  - korean-i18n.curated-alias-catalog
+  - nlu.query-normalizer
+
+related_rfcs: []
+
+known_limitations:
+  - "Calibration curve가 prod gold label과 cross-validate 안 됨"
+  - "Threshold optimizer test coverage 미흡"
+  - "Selective prediction abstention 정책 미문서화"
+
+next_steps:
+  - "Production label로 calibration re-fit"
+  - "Threshold tuning 자동화"
+
+tags:
+  - entity-resolution
+  - calibration
+  - selective-prediction

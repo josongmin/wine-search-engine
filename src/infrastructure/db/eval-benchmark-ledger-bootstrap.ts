@@ -1,4 +1,4 @@
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 export interface PgQueryable {
   query: <T = unknown>(text: string, values?: readonly unknown[]) => Promise<{

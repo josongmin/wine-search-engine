@@ -1,0 +1,39 @@
+id: infra.pino-logger
+name: Pino Logger + Error Serializer
+category: infra
+summary: |
+  Pino 기반 structured logger + 보안 강화 err serializer (SQL params, connection
+  string, auth header, user query 등 PII/secret strip). 모든 backend 서비스가 사용.
+
+maturity: 4
+maturity_rationale: |
+  Production-grade serializer. CLAUDE.md에 사용 강제 명시. 그러나 PII detection이
+  pattern-based (ML 없음), 신규 secret pattern 시 코드 변경 필요.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (모든 backend 로그)"
+
+key_files:
+  - src/domain/shared/bootstrap-logger.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "PII detection pattern-based"
+
+next_steps:
+  - "PII detection 학습 기반 추가"
+
+tags:
+  - logging
+  - security
+  - pii-strip

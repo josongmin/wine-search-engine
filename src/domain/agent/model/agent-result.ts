@@ -4,7 +4,7 @@
 
 import type { AgentStep, AgentTerminationReason } from './agent-step.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
-import type { SynthesisContext, ToolOutcome } from '../../../application/agent/tool-outcome.js';
+import type { SynthesisContext, ToolOutcome } from '../../../domain/agent/model/tool-outcome.js';
 import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type { ToolCallEvidenceFrame } from './tool-call-evidence-frame.js';
 

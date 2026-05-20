@@ -1,0 +1,53 @@
+id: infra.watchlist-stack
+name: Watchlist Infrastructure Stack (PG + Redis + SSRF Guard)
+category: infra
+summary: |
+  Watchlist 저장 + pub/sub + 안전성. PG store + poison store (실패 큐) + Redis publisher/
+  subscriber + SSRF guard + watchlist-aware search index 통합.
+
+maturity: 3
+maturity_rationale: |
+  6개 컴포넌트 통합, integration test (pg-watchlist-store) 보유. 그러나 delivery
+  reliability 메트릭 부재, poison queue 처리 정책 단순.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (watchlist endpoint backend)"
+
+key_files:
+  - src/infrastructure/watchlist/pg-watchlist-store.ts
+  - src/infrastructure/watchlist/pg-watchlist-poison-store.ts
+  - src/infrastructure/watchlist/redis-watchlist-publisher.ts
+  - src/infrastructure/watchlist/redis-watchlist-subscriber.ts
+  - src/infrastructure/watchlist/ssrf-guard.ts
+  - src/infrastructure/watchlist/watchlist-aware-search-index.ts
+
+tests:
+  unit:
+    - src/__tests__/pg-watchlist-store.test.ts
+    - src/__tests__/redis-watchlist-publisher.test.ts
+    - src/__tests__/watchlist-aware-search-index.test.ts
+    - src/__tests__/watchlist-delivery-runtime.test.ts
+
+depends_on:
+  - infra.postgresql
+  - infra.redis
+
+related_rfcs: []
+
+known_limitations:
+  - "Delivery reliability metric 없음"
+  - "Poison queue 처리 정책 단순"
+
+next_steps:
+  - "Delivery SLA monitoring"
+  - "Poison auto-retry with exponential backoff"
+
+tags:
+  - watchlist
+  - pub-sub
+  - resilience

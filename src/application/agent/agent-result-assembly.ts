@@ -1,7 +1,7 @@
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
 import type { StepBudget } from '../../domain/agent/service/step-budget.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
-import { buildSynthesisContext } from './tool-outcome.js';
+import { buildSynthesisContext } from '../../domain/agent/model/tool-outcome.js';
 
 export interface AgentResultMetrics {
   readonly toolCallCount: number;

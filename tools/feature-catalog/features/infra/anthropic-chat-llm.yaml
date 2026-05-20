@@ -1,0 +1,44 @@
+id: infra.anthropic-chat-llm
+name: Anthropic Claude Chat LLM Adapter
+category: infra
+summary: |
+  Anthropic SDK 래핑 (chat completion + tool use + streaming + token count + model 선택).
+  agent orchestrator + synthesis + LLM injection classifier의 백엔드.
+
+maturity: 3
+maturity_rationale: |
+  최신 Claude 모델 지원, tool_use contract 통합, 2026 breaking change 없음. 그러나
+  prompt caching 미적용 (multi-turn redundant token), batch API 미지원, dedicated unit
+  test sparse. 4가 되려면 prompt caching + 비용 최적화 측정 필요.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (LLM backend)"
+
+key_files:
+  - src/infrastructure/ai/anthropic-chat-llm.ts
+  - src/infrastructure/ai/anthropic-transport-error.ts
+
+tests: {}
+
+depends_on:
+  - infra.chat-llm-port
+
+related_rfcs: []
+
+known_limitations:
+  - "Prompt caching 미적용"
+  - "Batch API 미지원"
+
+next_steps:
+  - "Prompt caching 통합 (system prompt + tool defs)"
+  - "Batch API 지원"
+
+tags:
+  - infrastructure
+  - llm
+  - anthropic

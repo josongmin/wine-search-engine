@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { getPgPool } from './pg-pool.js';
 
 export async function runMigrations(): Promise<void> {

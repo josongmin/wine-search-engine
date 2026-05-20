@@ -1,0 +1,44 @@
+id: tools.watchlist
+name: Watchlist Endpoints
+category: tools
+summary: |
+  사용자 watchlist 추가/제거/조회. POST/DELETE /v1/watchlist 등. freshness + notification
+  policy + PG store 통합. watchlist 단위 backfill 검색.
+
+maturity: 3
+maturity_rationale: |
+  HTTP routes + application/watchlist/ + domain/watchlist/ + integration test 보유.
+  PG-watchlist-store 작동. 그러나 notification delivery / freshness SLA 부재.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: /v1/watchlist (CRUD)"
+
+key_files:
+  - src/interface/http/routes/watchlist.route.ts
+  - src/application/watchlist
+
+tests:
+  unit:
+    - test/integration/watchlist/pg-watchlist-store.integration.test.ts
+
+depends_on:
+  - infra.postgresql
+
+related_rfcs: []
+
+known_limitations:
+  - "Notification delivery 없음"
+  - "Freshness SLA 없음"
+
+next_steps:
+  - "Notification fan-out"
+  - "Freshness 모니터링"
+
+tags:
+  - watchlist
+  - user-state

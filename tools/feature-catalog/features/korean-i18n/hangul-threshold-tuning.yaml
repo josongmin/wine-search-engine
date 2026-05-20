@@ -1,0 +1,47 @@
+id: korean-i18n.hangul-threshold-tuning
+name: Hangul Adaptive Similarity Thresholds
+category: korean-i18n
+summary: |
+  Agent loop detection을 위한 trigram Jaccard 3-tier 임계값. short(<10자)=0.6,
+  Hangul-dominant(>50%)=0.92, ASCII-dominant=0.85. "30만원 이하 레드" vs
+  "50만원 이하 레드" 같은 정당한 constraint relaxation을 차단하지 않으면서
+  진짜 중복을 잡는 도메인 calibration.
+
+maturity: 3
+maturity_rationale: |
+  step-budget.ts에 통합, inline 주석으로 calibration 근거 명시. Korean price-relaxation
+  케이스 false-positive 방지 검증. 그러나 sample size 작고 production query log
+  large-scale 검증 미흡, online adaptation 없음. 4가 되려면 production log 기반 분포
+  검증 + 신뢰구간 산출 필요.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (agent step budget)"
+
+key_files:
+  - src/domain/agent/service/step-budget.ts
+
+tests: {}
+
+depends_on:
+  - agent.step-budget-loop-detection
+
+related_rfcs: []
+
+known_limitations:
+  - "Threshold hand-tuned (small sample)"
+  - "Online adaptation 없음"
+  - "Dialect별 변형 (북한/남한) 미구분"
+
+next_steps:
+  - "Production query log 기반 분포 검증"
+  - "사용자 신호 기반 online tuning"
+
+tags:
+  - korean-i18n
+  - loop-detection
+  - production-tuned

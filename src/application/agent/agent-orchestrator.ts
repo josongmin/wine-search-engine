@@ -113,6 +113,7 @@ export class AgentOrchestrator {
       requestId,
       deterministicContract: deterministicQueryExecutionContract,
       timeoutMs: effectiveConfig.perStepTimeoutMs,
+      state,
       abortSignal,
     });
     const queryExecutionContract = semanticContract !== undefined

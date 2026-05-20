@@ -1,0 +1,40 @@
+id: infra.structured-llm-port
+name: Structured LLM Port
+category: infra
+summary: |
+  Schema-driven LLM 출력 추상화. JSON schema 강제, property validation. constraint
+  extraction / judgment / reasoning 등 structured task용. Claude structured output +
+  OpenAI JSON schema 어댑터.
+
+maturity: 3
+maturity_rationale: |
+  Interface는 잘 정의되어 있고 일부 use case에서 사용 (constraint extraction eval).
+  그러나 agent orchestrator는 아직 사용 안 함 — PtE 마이그레이션에서 활용 예정.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (domain port)"
+
+key_files:
+  - src/domain/ai/port/structured-llm.port.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Agent 영역 미사용 (PtE 마이그레이션 대기)"
+
+next_steps:
+  - "Agent QueryAnalyzer / Synthesis가 사용"
+
+tags:
+  - architecture
+  - port
+  - structured-output

@@ -44,7 +44,7 @@ import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
 import { accumulateEvidence } from './evidence-accumulator.js';
 import { applyRelativeFilter } from './relative-filter-policy.js';
 import { combineSemanticEmbeddings } from './semantic-embedding-combiner.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import type { CacheService } from '../../performance/index.js';
 import type {
   RetrievalDegradationObserver,
@@ -52,8 +52,8 @@ import type {
   RetrievalDegradationSignal,
 } from '../port/retrieval-degradation-observer.port.js';
 import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
-import { pipelineDebug } from '../../../observability/request-pipeline-debug.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
+import { pipelineDebug } from '../../../domain/observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
 
 /** Default anchor confidence when plan omits explicit score (neutral). */

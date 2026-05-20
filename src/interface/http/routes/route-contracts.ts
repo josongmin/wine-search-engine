@@ -335,7 +335,7 @@ const RetrievalDegradationMetricsResponseSchema = z.object({
     degradation_rate: z.number().finite().min(0),
     alerts: z.array(z.string()).max(RETRIEVAL_DEGRADATION_ALERTS_MAX),
   }).strict(),
-  /** Silent skip counters from src/observability/silent-skip-counters.ts. */
+  /** Silent skip counters from src/domain/observability/silent-skip-counters.ts. */
   silent_skips: z.record(z.number().int().nonnegative()).refine(
     (rec) => Object.keys(rec).length <= RETRIEVAL_DEGRADATION_COMPONENTS_MAX,
     { message: `silent_skips must not exceed ${RETRIEVAL_DEGRADATION_COMPONENTS_MAX} keys` },

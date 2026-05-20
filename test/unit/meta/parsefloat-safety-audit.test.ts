@@ -46,7 +46,7 @@ const ALLOWLIST: readonly string[] = [
   'domain/ingestion/service/field-normalizer.ts',
   'domain/mixed/service/constraint-overlay.ts',
   'domain/resolver/service/resolver.ts',
-  'domain/response/service/machine-response-builder-v2.ts',
+  'interface/http/response-builders/machine-response-builder-v2.ts',
   'infrastructure/adapter/pg-gold-set-store.ts',
   'infrastructure/watchlist/webhook-delivery.ts',
   'interface/http/routes/http-route-contract-catalog.ts',

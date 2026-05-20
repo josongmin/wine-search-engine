@@ -25,7 +25,7 @@ import {
 } from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 import {
   decideResponseCachePolicy,

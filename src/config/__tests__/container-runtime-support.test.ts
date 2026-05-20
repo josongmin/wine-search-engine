@@ -4,7 +4,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { tmpdir } from 'node:os';
 import { buildRuntimeSupportServices } from '../container-runtime-support.js';
 import { parseEnv } from '../env.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
 import {
   LTR_FEATURE_DIMENSION,
   LTR_FEATURE_SCHEMA_HASH,

@@ -12,7 +12,7 @@ import {
   FoodPairingAttemptInputSchema,
   SearchToolAttemptInputSchema,
 } from '../../claude-tools/tool-schemas.js';
-import { MAX_UNKNOWN_TOOL_INPUT_KEYS } from '../../../application/agent/agent-tool-attempt-schema.js';
+import { MAX_UNKNOWN_TOOL_INPUT_KEYS } from '../../../domain/agent/model/agent-tool-attempt-schema.js';
 
 export const AgentRequestSchema = z.object({
   query: z.string().min(1).max(MAX_AGENT_HTTP_QUERY_CHARS),

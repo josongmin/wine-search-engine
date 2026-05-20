@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Blocker } from '../../../src/domain/resolver/service/blocker.js';
 import type { BlockingPort } from '../../../src/domain/resolver/port/blocking.port.js';
-import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../src/domain/observability/silent-skip-counters.js';
 
 describe('Blocker observability', () => {
   beforeEach(() => {

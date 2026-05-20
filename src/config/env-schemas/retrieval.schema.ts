@@ -6,7 +6,7 @@ import {
 import {
   EMBEDDING_MODEL as EMBEDDING_MODEL_DEFAULT,
   EMBEDDING_DIMENSION as EMBEDDING_DIMENSION_DEFAULT,
-} from '../../shared/constants/embedding.js';
+} from '../../domain/shared/constants/embedding.js';
 
 /**
  * Retrieval-side external services: embedding, Cohere reranker,
@@ -27,7 +27,7 @@ const MAX_EMBEDDING_DIMENSION = 8192;
 export const RetrievalEnvSchema = z.object({
   // Embedding model label (telemetry / debug). Actual model is set by OPENAI_EMBEDDING_MODEL.
   EMBEDDING_MODEL: z.string().min(1).default(EMBEDDING_MODEL_DEFAULT),
-  /** Expected embedding vector dimension. Defaults to SSoT in shared/constants/embedding.ts. */
+  /** Expected embedding vector dimension. Defaults to SSoT in domain/shared/constants/embedding.ts. */
   EMBEDDING_DIMENSION: z.coerce.number().int().positive().max(MAX_EMBEDDING_DIMENSION).default(EMBEDDING_DIMENSION_DEFAULT),
   /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
   EMBEDDING_HTTP_TIMEOUT_MS: z.coerce

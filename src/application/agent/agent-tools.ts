@@ -11,13 +11,13 @@
 
 import { z } from 'zod';
 import { coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
 import type {
   DecomposedSearchExecutionOptions,
   DecomposedSearchParentContext,
 } from '../search/port/search-route-usecases.port.js';
-import { createStageTimer } from '../../observability/stage-timer.js';
+import { createStageTimer } from '../../domain/shared/stage-timer.js';
 import {
   buildCompareToolFieldShape,
   buildSearchToolStructuredPreferences,
@@ -87,8 +87,9 @@ import {
   shouldRunTypedWineDiversityDiscovery,
   withWineTypeFilter,
 } from '../search/search-tool-diversity.js';
-import { isKnownAgentToolName } from './agent-tool-attempt-schema.js';
+import { isKnownAgentToolName } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 import { isAccessibleOnlineTastingQuery } from './agent-situational-query-policy.js';
+import { closeFoodPairingMacroEvidence } from '../search/food-pairing-macro-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -1315,126 +1316,13 @@ function normalizeSearchToolRetrievalMode(
   return retrievalMode;
 }
 
-interface PairingEvidenceClosureInput {
-  readonly color?: z.infer<typeof FoodPairingInputSchema>['color'] | undefined;
-  readonly styles?: readonly string[] | undefined;
-  readonly pairing_tags?: readonly string[] | undefined;
-  readonly sweetness_target?: number | undefined;
-  readonly acidity_min?: number | undefined;
-  readonly tannin_max?: number | undefined;
-}
-
-function normalizeEvidenceToken(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[_\s-]+/gu, '_');
-}
-
-function hasNormalizedOverlap(
-  left: readonly string[] | undefined,
-  right: readonly string[] | undefined,
-): boolean {
-  if (left === undefined || right === undefined || left.length === 0 || right.length === 0) {
-    return false;
-  }
-  const rightSet = new Set(right.map(normalizeEvidenceToken));
-  return left.some((value) => rightSet.has(normalizeEvidenceToken(value)));
-}
-
-function itemHasStyleObjectiveEvidence(
-  item: SearchResponseV1['results'][number],
-  styles: readonly string[] | undefined,
-): boolean {
-  if (styles === undefined || styles.length === 0) {
-    return false;
-  }
-  if (item.constraints.matched.includes('style')) {
-    return true;
-  }
-  const itemStyle = item.entity.style;
-  if (itemStyle === undefined) {
-    return false;
-  }
-  const normalizedStyle = normalizeEvidenceToken(itemStyle);
-  return styles.some((style) => normalizedStyle.includes(normalizeEvidenceToken(style)));
-}
-
-function collectFoodPairingMacroEvidenceAxes(
-  item: SearchResponseV1['results'][number],
-  input: PairingEvidenceClosureInput,
-): readonly string[] {
-  const axes: string[] = [];
-  const pairingTags = input.pairing_tags?.map(normalizeEvidenceToken) ?? [];
-  const hasSpicyFoodObjective = pairingTags.includes('spicy_food');
-  if (hasNormalizedOverlap(item.entity.pairingTags, input.pairing_tags)) {
-    axes.push('pairing_tags');
-  }
-  if (
-    input.color !== undefined
-    && input.color !== 'both'
-    && item.constraints.matched.includes('wine_type')
-  ) {
-    axes.push('wine_type');
-  }
-  if (itemHasStyleObjectiveEvidence(item, input.styles)) {
-    axes.push('style');
-  }
-  if (input.sweetness_target !== undefined && item.constraints.matched.includes('sweetness')) {
-    axes.push('sweetness');
-  }
-  if (
-    hasSpicyFoodObjective
-    && input.styles?.some((style) => {
-      const normalized = normalizeEvidenceToken(style);
-      return normalized === 'sweet' || normalized === 'off_dry';
-    }) === true
-    && item.constraints.matched.includes('sweetness')
-  ) {
-    axes.push('spicy_heat_balance');
-  }
-  if (input.acidity_min !== undefined && item.constraints.matched.includes('acidity')) {
-    axes.push('acidity');
-  }
-  if (input.tannin_max !== undefined && item.constraints.matched.includes('tannin')) {
-    axes.push('tannin');
-  }
-  return [...new Set(axes)];
-}
-
-function closeFoodPairingMacroEvidence(
-  response: SearchResponseV1,
-  input: PairingEvidenceClosureInput,
-): SearchResponseV1 {
-  if (input.pairing_tags === undefined || input.pairing_tags.length === 0) {
-    return response;
-  }
-
-  const results = response.results.map((item) => {
-    if (
-      item.constraints.matched.includes('pairing')
-      || !item.constraints.unmet.includes('pairing')
-    ) {
-      return item;
-    }
-    const macroEvidenceAxes = collectFoodPairingMacroEvidenceAxes(item, input);
-    if (macroEvidenceAxes.length < 2 && !macroEvidenceAxes.includes('pairing_tags')) {
-      return item;
-    }
-    return {
-      ...item,
-      constraints: {
-        ...item.constraints,
-        matched: [...new Set([...item.constraints.matched, 'pairing'])],
-        unmet: item.constraints.unmet.filter((attribute) => attribute !== 'pairing'),
-      },
-    };
-  });
-
-  return { ...response, results };
-}
+// Food-pairing macro-evidence closure (PairingEvidenceClosureInput +
+// collectFoodPairingMacroEvidenceAxes + closeFoodPairingMacroEvidence) is
+// owned by the SSoT module
+// `src/application/search/food-pairing-macro-evidence.ts` and imported at
+// the top of this file. The `FoodPairingUseCase` shares the same helper so
+// the two routes (legacy agent tool branch + new use case) never drift on
+// the lift-pairing-constraint rule (CLAUDE.md rule 25/30).
 
 async function executeAgentToolInner(
   toolName: string,

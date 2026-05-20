@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "../../.tsbuildcache/domain",
+    "tsBuildInfoFile": "../../.tsbuildcache/domain/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["./**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "shared",
+    "**/__tests__/**",
+    "**/*.test.ts"
+  ],
+  "references": [
+    { "path": "./shared" }
+  ]
+}

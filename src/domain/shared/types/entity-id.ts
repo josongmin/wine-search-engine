@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { isSourceRecordStylePublicEntityId } from '../../../shared/constants/public-entity-id-namespace.js';
+import { isSourceRecordStylePublicEntityId } from '../constants/public-entity-id-namespace.js';
 
 declare const CanonicalEntityIdBrand: unique symbol;
 

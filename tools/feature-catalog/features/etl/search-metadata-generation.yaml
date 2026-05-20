@@ -1,0 +1,43 @@
+id: etl.search-metadata-generation
+name: Search Metadata Generation (Doc2Query + Retrieval Mode Tagging)
+category: etl
+summary: |
+  생성된 doc queries + retrieval-mode tagging + 추가 pairings inference로 search snapshot
+  메타데이터 enrich. corpus 단위 한 번 실행, runtime 검색 신호 향상.
+
+maturity: 2
+maturity_rationale: |
+  3-스크립트 파이프라인 (generate-doc-queries / tag-queries-retrieval-mode / generate-pairings)
+  운영. nightly 실행. 그러나 생성 quality 측정 안 됨, retrieval-mode tagging recall
+  unknown.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI"
+
+key_files:
+  - scripts/etl/generate-doc-queries.ts
+  - scripts/etl/tag-queries-retrieval-mode.ts
+
+tests: {}
+
+depends_on:
+  - infra.anthropic-chat-llm
+
+related_rfcs: []
+
+known_limitations:
+  - "Doc2Query quality 측정 없음"
+  - "Retrieval-mode tagging recall 미측정"
+
+next_steps:
+  - "Doc2Query quality eval"
+  - "Tag recall benchmark"
+
+tags:
+  - metadata
+  - doc2query

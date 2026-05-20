@@ -1,0 +1,40 @@
+id: tools.web-comparison-widget
+name: Web Wine Comparison Widget
+category: tools
+summary: |
+  두 wine 비교 UI. 양 side 후보 + attribute 비교 테이블. /v1/search 또는 agent
+  compare_wines 호출.
+
+maturity: 2
+maturity_rationale: |
+  Widget 존재. 그러나 attribute 비교 시각화 단순, comparison-aware fallback 미흡.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Web (comparison overlay)"
+
+key_files:
+  - web/src/features/comparison
+
+tests: {}
+
+depends_on:
+  - retrieval.comparison-retrieval
+
+related_rfcs: []
+
+known_limitations:
+  - "Attribute 시각화 단순"
+  - "Empty side fallback UX 부족"
+
+next_steps:
+  - "Attribute chart"
+  - "Empty side guidance"
+
+tags:
+  - frontend
+  - comparison

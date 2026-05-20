@@ -1,0 +1,47 @@
+id: etl.entity-identity-and-aliases
+name: Entity Identity & Multilingual Aliases ETL
+category: etl
+summary: |
+  Canonical entity identity 결정 (snapshot-entity-identity), transliteration alias 생성
+  (generate-transliteration-aliases), NL mapping 생성 (generate-nl-mappings), canonical
+  entity graph ingest (ingest-canonical-entity-graph).
+
+maturity: 2
+maturity_rationale: |
+  4-step 파이프라인 모두 작동, monthly 실행. 그러나 자동화된 통합 gate 없음 — 각 단계
+  수동 실행. cross-language alias 일관성 검증 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:transliteration / etl:doc-queries 등"
+
+key_files:
+  - scripts/etl/snapshot-entity-identity.ts
+  - scripts/etl/generate-transliteration-aliases.ts
+  - scripts/etl/generate-nl-mappings.ts
+  - scripts/etl/ingest-canonical-entity-graph.ts
+
+tests: {}
+
+depends_on:
+  - korean-i18n.transliterator
+  - korean-i18n.curated-alias-catalog
+
+related_rfcs: []
+
+known_limitations:
+  - "통합 gate 없음 (각 단계 수동)"
+  - "Cross-language 일관성 검증 없음"
+
+next_steps:
+  - "End-to-end pipeline orchestrator"
+  - "Cross-language consistency check"
+
+tags:
+  - entity-identity
+  - aliases
+  - data-pipeline

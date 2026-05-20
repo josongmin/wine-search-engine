@@ -28,7 +28,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { acquireLock, backupFile } from './etl-utils.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 

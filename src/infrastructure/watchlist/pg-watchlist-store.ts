@@ -8,7 +8,7 @@ import type {
   WatchlistStoragePort,
   TransactionalWatchlistStore,
 } from '../../domain/watchlist/port/watchlist-repository.port.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 /** Minimal query interface shared by Pool and PoolClient. */
 interface QueryExecutor {

@@ -1,0 +1,46 @@
+id: nlu.topology-pattern-lexicon
+name: Query Topology Pattern Lexicon
+category: nlu
+summary: |
+  Multi-constraint query 형태 ("red wine under 50K" → wine_type=red + price_max=50K)를
+  결정적 graph로 컴파일하기 위한 40+ template lexicon. constraint-topology-planner의
+  입력. rule-based.
+
+maturity: 3
+maturity_rationale: |
+  431 lines, 40+ template로 흔한 query shape 커버. regression 게이트 (topology-planner
+  flag-on integration). 그러나 정적 inventory, parameterization 없음 ("under 50K" 문자
+  hardcoded), overlap precedence 미정의.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (constraint-topology-planner 입력)"
+
+key_files:
+  - src/domain/query/service/topology-pattern-lexicon.ts
+
+tests: {}
+
+depends_on:
+  - nlu.search-constraint-extraction
+
+related_rfcs:
+  - docs/RFC-004.md
+
+known_limitations:
+  - "Pattern parameterization 없음 (template 변수)"
+  - "Overlap precedence 미정의"
+  - "Coverage 측정 안 됨"
+
+next_steps:
+  - "CFG / dependency-based 패턴 문법 형식화"
+  - "Production query 로그 기반 pattern 자동 발견"
+
+tags:
+  - constraint-graph
+  - topology
+  - pattern-matching

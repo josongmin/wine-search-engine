@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildHealthRouteOptions } from '../readiness.js';
 import { parseEnv } from '../env.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 
 describe('buildHealthRouteOptions', () => {
   it('marks redis as required when startup features need it, even without watchlist delivery', () => {

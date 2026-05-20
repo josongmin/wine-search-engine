@@ -36,7 +36,7 @@ import {
   LLM_ALLOWED_ATTRIBUTES,
   type LlmConstraintItem,
 } from '../model/llm-constraint-schema.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { abortError, throwIfAborted } from '../../shared/cooperative-abort.js';
 import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../shared/utils/time-units.js';
 import { resolveEntity } from './entity-resolver.js';

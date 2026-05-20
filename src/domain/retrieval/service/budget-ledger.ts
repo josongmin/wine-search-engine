@@ -35,7 +35,7 @@ import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import {
   globalBudgetLedgerCounter,
   type BudgetLedgerCounter,
-} from '../../../observability/budget-ledger-counters.js';
+} from '../../../domain/observability/budget-ledger-counters.js';
 
 /**
  * Snapshot of a single reservation. Readonly by construction — callers

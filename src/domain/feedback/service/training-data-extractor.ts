@@ -38,7 +38,7 @@ interface ExtractTrainingDataOptions {
   readonly now?: () => number;
 }
 
-// clamp01: imported from @shared/utils/clamp (SSoT).
+// clamp01: imported from @domain/shared/utils/clamp (SSoT).
 
 /**
  * Extract (query, entityId) training examples from feedback events.

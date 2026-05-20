@@ -16,7 +16,7 @@ import {
 import {
   createBudgetLedgerCounter,
   globalBudgetLedgerCounter,
-} from '../../src/observability/budget-ledger-counters.js';
+} from '../../src/domain/observability/budget-ledger-counters.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../src/domain/shared/constants.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';

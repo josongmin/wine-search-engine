@@ -19,7 +19,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   OFFLINE_EVAL_SILVER_CORPUS,
   requireFixtureCorpusPath,

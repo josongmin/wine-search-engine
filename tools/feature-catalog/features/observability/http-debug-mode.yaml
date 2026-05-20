@@ -1,0 +1,45 @@
+id: observability.http-debug-mode
+name: HTTP Debug Mode + Pipeline Trace
+category: observability
+summary: |
+  X-Debug-Key 헤더 + HTTP_DEBUG_SECRET 환경변수로 활성화되는 디버그 모드.
+  AsyncLocalStorage 기반 request-scoped context로 pipeline_debug trace 출력
+  (step 이름, latency, intermediate 결과: tokens, hits, LLM 입력 등).
+
+maturity: 4
+maturity_rationale: |
+  프로덕션 troubleshooting 인프라로 안정. AsyncLocalStorage 컨텍스트가 미들웨어/서비스
+  레이어 전체에서 신뢰성 있게 작동. 그러나 단일 HTTP 요청 단위 — cross-request session
+  debugging 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: X-Debug-Key header + X-Debug-Active response header"
+
+key_files:
+  - src/domain/observability/request-pipeline-debug.ts
+  - src/interface/http/middleware/http-debug-mode.ts
+  - .ai/debug-mode.md
+  - .ai/llm-debugging-playbook.md
+
+tests: {}
+
+depends_on:
+  - observability.pipeline-debug-steps
+
+related_rfcs: []
+
+known_limitations:
+  - "Cross-request session debugging 없음 (multi-turn agent 분석 어려움)"
+
+next_steps:
+  - "Session-level debug context (multi-turn agent)"
+
+tags:
+  - debug
+  - troubleshooting
+  - production-tooling

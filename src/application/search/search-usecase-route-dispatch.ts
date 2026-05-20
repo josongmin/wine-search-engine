@@ -1,5 +1,5 @@
-import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type {

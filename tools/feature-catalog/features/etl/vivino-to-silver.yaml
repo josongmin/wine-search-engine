@@ -1,0 +1,44 @@
+id: etl.vivino-to-silver
+name: Vivino Bronze → Silver ETL
+category: etl
+summary: |
+  Vivino wine_pdp_snapshot bronze 데이터를 normalized SilverWineRecord NDJSON으로 변환.
+  RFC-002 idempotency (dedup key), FX normalize (USD equiv), popularity percentile,
+  price band 분류.
+
+maturity: 3
+maturity_rationale: |
+  Production 운영 중, periodic 실행. 그러나 FX rate hardcoded (real-time sync 없음),
+  dedup key가 brand variant 일부 누락 가능, SLA 없음.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:silver"
+
+key_files:
+  - scripts/etl/vivino-to-silver.ts
+
+tests: {}
+
+depends_on:
+  - infra.postgresql
+
+related_rfcs:
+  - docs/RFC-002.md
+
+known_limitations:
+  - "FX rate hardcoded"
+  - "Dedup key가 brand variant 일부 미캐치"
+  - "SLA 없음"
+
+next_steps:
+  - "FX feed 자동화"
+  - "Fuzzy brand-variant dedup"
+
+tags:
+  - data-pipeline
+  - bronze-to-silver

@@ -22,7 +22,7 @@ import {
   type SubqueryRetriever,
 } from '../../src/application/search/search-usecase-graph-executor.js';
 import { BundleSelectorImpl } from '../../src/domain/retrieval/service/bundle-selector.js';
-import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
+import { globalBundleSelectorCounter } from '../../src/domain/observability/bundle-selector-counters.js';
 import type {
   ConstraintGraph,
   SubqueryNode,

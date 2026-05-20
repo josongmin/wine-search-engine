@@ -1,0 +1,52 @@
+id: korean-i18n.alias-generation-pipeline
+name: Korean Alias Generation Pipeline (3-Tier Scripts)
+category: korean-i18n
+summary: |
+  Gold / seeded / silver tier 한국어 entity alias catalog의 생성 스크립트.
+  scripts/generate-{gold,seeded,silver}-korean-entity-alias-catalog.ts. ETL의 etl:aliases
+  / etl:korean-aliases와 결합되어 catalog 파일을 산출 → runtime substrate publish.
+
+maturity: 3
+maturity_rationale: |
+  3 tier 모두 스크립트 + runtime catalog regression 게이트로 보증. silver tier가
+  LLM-derived라 deterministic 아님 (model version pin 필요), gold/seeded는 결정적.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI"
+
+key_files:
+  - scripts/generate-gold-korean-entity-alias-catalog.ts
+  - scripts/generate-seeded-korean-entity-alias-catalog.ts
+  - scripts/generate-silver-korean-entity-alias-catalog.ts
+  - scripts/etl/generate-korean-aliases.ts
+
+tests:
+  regression:
+    - test/regression/gold-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/seeded-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/silver-korean-entity-alias-catalog.regression.test.ts
+
+depends_on:
+  - korean-i18n.transliterator
+  - korean-i18n.curated-alias-catalog
+
+related_rfcs:
+  - docs/RFC-003.md
+
+known_limitations:
+  - "Silver tier non-deterministic (LLM)"
+  - "Model version pinning 정책 부재"
+
+next_steps:
+  - "Model version pin"
+  - "Silver tier feedback loop"
+
+tags:
+  - korean-i18n
+  - alias-generation
+  - 3-tier

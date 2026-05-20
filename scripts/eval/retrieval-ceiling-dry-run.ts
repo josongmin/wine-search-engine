@@ -32,7 +32,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 
 import {
   analyzeScenarioRetrieval,

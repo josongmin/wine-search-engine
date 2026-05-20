@@ -1,0 +1,46 @@
+id: security.llm-injection-classifier
+name: LLM Injection Classifier (Anthropic + OpenAI)
+category: security
+summary: |
+  Query sanitizer에 의해 ambiguous하게 flag된 쿼리에 대한 LLM 2차 필터. intent
+  (legitimate vs injection)을 semantic 수준에서 판단. dual-vendor (Anthropic +
+  OpenAI) 어댑터로 vendor lock-in 방지.
+
+maturity: 3
+maturity_rationale: |
+  Functional. Anthropic + OpenAI 두 어댑터 운영. 그러나 LLM judge 자체가 prompt injection
+  대상이 될 수 있고, 추가 latency (~200ms), high-volume 공격 시 rate limit 우려.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (sanitizer 2차 필터)"
+
+key_files:
+  - src/infrastructure/adapter/anthropic-llm-injection-classifier.ts
+  - src/infrastructure/adapter/openai-llm-injection-classifier.ts
+
+tests: {}
+
+depends_on:
+  - security.query-sanitizer
+  - infra.anthropic-chat-llm
+
+related_rfcs: []
+
+known_limitations:
+  - "LLM judge 자체가 prompt injection 대상"
+  - "+200ms latency"
+  - "Real-time SLA 어려움"
+
+next_steps:
+  - "Confidence threshold"
+  - "반복 공격 caching"
+
+tags:
+  - security
+  - llm-based
+  - injection-detection

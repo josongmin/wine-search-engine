@@ -4,10 +4,10 @@ import type { CacheReadRuntimeState } from '../../domain/cache/cache-policy.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { SearchRequest } from './search-request.dto.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'CacheLookup' });
 

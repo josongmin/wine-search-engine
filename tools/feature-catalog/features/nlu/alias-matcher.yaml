@@ -1,0 +1,60 @@
+id: nlu.alias-matcher
+name: Alias Matcher (Fuzzy + Exact)
+category: nlu
+summary: |
+  Alias catalog와 query span 사이의 매칭. Cached alias matcher (in-mem cache) + fuzzy
+  match + exact match + metaphone fallback. anchor-extraction의 backend.
+
+maturity: 4
+maturity_rationale: |
+  cached-alias-matcher (infra) + alias-match-confidence + alias-lookup-plan (domain)
+  통합 완료. Cache layer는 명시적 LRU eviction cap (`ALIAS_CACHE_DEFAULT_MAX_ENTRIES =
+  25_000`, named module-scope const) + single-flight in-flight dedupe + `getStats()`
+  observability surface (`{hits, misses, evictions, size}`) + `clear()` API를 노출.
+  Strategy priority (`exact > compact_exact > phonetic_exact > transliterated_fuzzy`)는
+  inner matcher가 결정하고 cache는 ordering을 byte-identical하게 보존하는 transparent
+  memoizer임을 regression suite로 잠금. 한글/NFC·NFD/Korean+English mixed/empty/garbage
+  경계 케이스 모두 cover. Production wired via `src/config/container-adapters.ts`.
+
+  남은 한계: strategy 자체의 priority 가중치는 여전히 hardcoded
+  (`alias-match-confidence.ts`의 `STRATEGY_CONFIDENCE_MULTIPLIER`); offline label로부터
+  learned ranking은 다음 maturity bump의 과제.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/infrastructure/adapter/cached-alias-matcher.ts
+  - src/domain/query/service/alias-lookup-plan.ts
+  - src/domain/query/service/alias-match-confidence.ts
+
+tests:
+  regression:
+    - test/regression/alias-matcher-priority-cache.regression.test.ts
+  unit:
+    - test/unit/alias/alias-matcher.test.ts
+
+depends_on:
+  - korean-i18n.curated-alias-catalog
+
+related_rfcs:
+  - docs/RFC-003.md
+
+known_limitations:
+  - "Strategy confidence multipliers는 hardcoded — offline label로부터 learned weighting 미도입"
+  - "Eviction 정책은 LRU 단일; LFU / popularity-aware 미지원"
+
+next_steps:
+  - "Offline label로부터 strategy-weight learned ranking"
+  - "Cache stats를 Prometheus exporter로 노출 (`{hits, misses, evictions, size}`)"
+  - "LFU eviction 옵션 (hot alias 보존)"
+
+tags:
+  - alias-matching
+  - fuzzy
+  - cached

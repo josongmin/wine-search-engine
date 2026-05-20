@@ -11,7 +11,7 @@ import {
   inferDrinkingWindowEvidenceLevel,
   isProjectableDrinkingWindowModelVersion,
 } from './drinking-window-confidence.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
 import type { MatchDetail } from '../../domain/response/model/result-item.js';

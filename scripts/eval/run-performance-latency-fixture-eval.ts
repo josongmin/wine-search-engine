@@ -23,7 +23,7 @@ import {
   loadFixtureThresholds,
   readNumericThreshold,
 } from './external-fixture-benchmark.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   buildBenchmarkRequestHeaders,
   resolveBenchmarkSearchEndpoint,

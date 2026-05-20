@@ -11,7 +11,7 @@ import type {
 import { QUERY_CLASSES, isQueryClass } from '../../shared/types/query-class.js';
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import { abortError, throwIfAborted } from '../../shared/cooperative-abort.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'AmbiguityIntentCompiler' });
 

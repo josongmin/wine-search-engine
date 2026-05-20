@@ -1,0 +1,54 @@
+id: agent.feedback-and-learning
+name: Feedback Processing & Learning Pipeline
+category: agent
+summary: |
+  사용자 시그널 (CTR, dwell, abandonment) 수집 + position debias + TTL enforce →
+  judgment 변환 + alias-proposer + promotion-gate. LTR 재학습용 데이터 + auto-rollback
+  결정.
+
+maturity: 2
+maturity_rationale: |
+  Domain layer 코드 존재 (feedback + learning module). 그러나 production wiring 부분적,
+  online quality monitor가 metric만 emit, auto-rollback이 실제 deploy에 연결 안 됨.
+  사용자 ↔ 학습 closed loop 미완성.
+
+status: experimental
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/feedback"
+  - "Internal learning loop"
+
+key_files:
+  - src/domain/feedback/service/online-quality-monitor.ts
+  - src/domain/feedback/service/position-debias.ts
+  - src/domain/feedback/service/training-data-extractor.ts
+  - src/domain/feedback/service/auto-rollback-decision.ts
+  - src/domain/learning/service/feedback-processor.ts
+  - src/domain/learning/service/alias-proposer.ts
+  - src/domain/learning/service/promotion-gate.ts
+  - src/domain/learning/service/feedback-ttl-enforcer.ts
+
+tests: {}
+
+depends_on:
+  - tools.feedback
+  - retrieval.ltr-ranker
+
+related_rfcs: []
+
+known_limitations:
+  - "Production wiring 미완 (online quality monitor만 emit)"
+  - "Auto-rollback이 deploy에 연결 안 됨"
+  - "Closed-loop A/B 부재"
+
+next_steps:
+  - "Production wiring 완성"
+  - "Auto-rollback ↔ deploy 통합"
+
+tags:
+  - feedback
+  - learning
+  - experimental

@@ -15,8 +15,8 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   cacheBreakerOpen,
   cacheHit,
@@ -28,8 +28,8 @@ import {
   writeOk,
   type CacheGetResult,
   type CacheWriteResult,
-} from './cache-result.js';
-import { globalSilentSkipCounter as silentSkipCounter } from '../../observability/silent-skip-counters.js';
+} from '../../domain/performance/port/cache-result.js';
+import { globalSilentSkipCounter as silentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'RedisCircuitBreakerWrapper' });
 

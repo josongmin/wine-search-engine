@@ -3,7 +3,7 @@ import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { CandidateAttributePort } from '../../domain/mixed/service/mixed-solver.js';
 import type { SimilarityCandidate } from '../../domain/mixed/service/similarity-scorer.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const attrLog = bootstrapLogger.child({ component: 'VespaCandidateAttributes' });
 

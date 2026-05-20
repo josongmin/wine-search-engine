@@ -1,0 +1,47 @@
+id: infra.redis
+name: Redis Cache Client + Circuit Breaker
+category: infra
+summary: |
+  redis npm 패키지 기반 client (getRedisClient async). cache miss를 graceful하게
+  primary source로 fallback. key pattern delete 지원. circuit breaker wrapper로
+  Redis 장애 cascade 방지.
+
+maturity: 4
+maturity_rationale: |
+  단순하지만 효과적. query/entity cache로 사용, circuit breaker로 Redis 장애 격리됨.
+  silent data loss 사고 없음. unit test (redis-client.circuit-breaker) 보유.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (cache layer)"
+
+key_files:
+  - src/infrastructure/db/redis-client.ts
+  - src/infrastructure/db/redis-circuit-breaker-wrapper.ts
+  - src/infrastructure/db/redis-delete-by-pattern.ts
+
+tests:
+  unit:
+    - src/infrastructure/db/__tests__/redis-client.circuit-breaker.test.ts
+
+depends_on:
+  - observability.circuit-breaker-registry
+
+related_rfcs: []
+
+known_limitations:
+  - "TTL 관리 정형화 없음"
+  - "Redis Cluster 미지원"
+
+next_steps:
+  - "TTL-based eviction"
+  - "Redis Cluster"
+
+tags:
+  - infrastructure
+  - caching
+  - resilience

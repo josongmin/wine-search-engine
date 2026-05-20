@@ -1,0 +1,44 @@
+id: eval.noisy-entity-eval
+name: Noisy Entity Recognition Eval
+category: eval
+summary: |
+  Typo / 음성 인식 오류 / partial query 등 noisy 입력에 대한 entity recognition
+  robustness 평가. Recall@1/3, MRR per language/category. 카테고리/언어별 gate.
+
+maturity: 3
+maturity_rationale: |
+  Dedicated eval script + check baseline + benchmark:messy:entity 통합. CI gate
+  (test:verification:noisy)에 wired. min-recall/resolution-match-rate 정확한
+  pass/fail. baseline 데이터 partial.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm benchmark:messy:entity / test:verification:noisy"
+
+key_files:
+  - scripts/eval/run-noisy-entity-eval.ts
+  - scripts/eval/check-noisy-entity-baseline.ts
+
+tests: {}
+
+depends_on:
+  - nlu.entity-resolver
+  - korean-i18n.curated-alias-catalog
+
+related_rfcs: []
+
+known_limitations:
+  - "Noisy fixture 규모 제한적"
+  - "음성 인식 오류 패턴 제한적"
+
+next_steps:
+  - "Noisy fixture 확장 (production 로그 기반)"
+
+tags:
+  - robustness
+  - entity-recognition
+  - ci-gate

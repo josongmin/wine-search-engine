@@ -2,7 +2,7 @@ import type { AgentStep, AgentTerminationReason } from '../../domain/agent/model
 import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-evidence-frame.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { RetrievalDrinkingWindowProjection } from '../../domain/retrieval/model/retrieval-document.js';
-import type { SynthesisContext, ToolOutcome } from './tool-outcome.js';
+import type { SynthesisContext, ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
 
 export type AgentPlannerDirective =
   | { readonly kind: 'relax_constraints_retry' }

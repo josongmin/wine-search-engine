@@ -14,7 +14,7 @@ import { projectToHumanResponse } from './search-human-projection.js';
 import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
 import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
 import { HTTP_STATUS_OK } from '../constants.js';
-import { createStageTimer } from '../../../observability/stage-timer.js';
+import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
 /**
  * POST /v1/search — main search endpoint.

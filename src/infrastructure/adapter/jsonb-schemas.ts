@@ -13,7 +13,7 @@ import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
 import type { Relations } from '../../domain/entity/model/relations.js';
 import type { EntityAttributes } from '../../domain/entity/model/attributes.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 // ---------------------------------------------------------------------------
 // CorruptedJsonbError — loud failure for JSONB validation

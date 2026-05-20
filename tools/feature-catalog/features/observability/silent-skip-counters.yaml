@@ -1,0 +1,56 @@
+id: observability.silent-skip-counters
+name: Silent Skip Counters
+category: observability
+summary: |
+  Silent skip (schema corruption으로 dropped hit, low-confidence ranking suppress 등)을
+  reason enum (schema_fail / low_confidence / ...)별 카운트. request 단위 emit + 시계열
+  bucket aggregation (per-reason ring of fixed-width time buckets) + 구조적 threshold
+  alert hook까지 노출.
+
+maturity: 4
+maturity_rationale: |
+  Request-scoped counter (`createSilentSkipCounter`) 외에 reason-keyed time-bucket
+  ring (`createTimeBucketedSilentSkipCounters`)을 추가하여 시계열 집계가 가능해짐.
+  Injectable clock으로 결정론적 테스트, `checkThreshold(kind, threshold)`로 구조적
+  alert 판정 (transport는 caller가 wire). 아직 production transport (Prometheus/Slack
+  등)에는 직접 연결되어 있지 않아 5는 아님.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (telemetry emission)"
+  - "Internal (time-series aggregation + threshold verdict)"
+
+key_files:
+  - src/domain/observability/silent-skip-counters.ts
+
+tests:
+  unit:
+    - src/domain/observability/__tests__/silent-skip-counters.test.ts
+  regression:
+    - test/regression/silent-skip-kinds-runtime-plane-migration.regression.test.ts
+    - test/regression/silent-skip-counters-time-series.regression.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "일부 silent path 미추적"
+  - "Threshold verdict는 구조적 (tripped/observed/threshold) — 실제 alert transport
+     (Prometheus/Slack/PagerDuty) wiring은 아직 caller 책임"
+  - "Percentile 계산 (p95/p99)은 아직 미지원 — 현재는 window 내 총합 기반"
+
+next_steps:
+  - "전 silent path 커버"
+  - "Alert transport wiring (Prometheus push / Slack hook)"
+  - "Percentile/rate 기반 advanced threshold (현재는 absolute count only)"
+
+tags:
+  - observability
+  - anomaly-detection
+  - ssot
+  - time-series

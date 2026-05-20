@@ -1,0 +1,43 @@
+id: eval.performance-eval
+name: Performance & Load Fixture Eval
+category: eval
+summary: |
+  Latency SLA + load test + throughput regression fixture eval. p50/p95/p99 latency
+  + concurrency 별 throughput + SLA 위반 감지.
+
+maturity: 3
+maturity_rationale: |
+  2-스크립트 운영. Fixture-driven, deterministic. 그러나 production traffic shape
+  반영 부족, SLA threshold가 hardcoded.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm run scripts/eval/run-performance-*"
+
+key_files:
+  - scripts/eval/run-performance-latency-fixture-eval.ts
+  - scripts/eval/run-performance-load-fixture-eval.ts
+
+tests: {}
+
+depends_on:
+  - retrieval.hybrid-search
+
+related_rfcs: []
+
+known_limitations:
+  - "Production traffic shape 반영 부족"
+  - "SLA threshold hardcoded"
+
+next_steps:
+  - "Production trace replay"
+  - "Dynamic SLA threshold"
+
+tags:
+  - performance
+  - latency
+  - load-test

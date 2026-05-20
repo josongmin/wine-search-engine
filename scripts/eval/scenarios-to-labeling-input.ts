@@ -28,7 +28,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { bootstrapLogger } from '../../src/config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../src/domain/shared/bootstrap-logger.js';
 import type { AgentBenchmarkScenario } from '../../test/benchmark/agent/scenario.js';
 import {
   RELEVANCE_LABELING_INPUT_CORPUS,

@@ -1,0 +1,48 @@
+id: eval.hard-negatives-and-labels
+name: Hard Negatives Mining & Label Generation
+category: eval
+summary: |
+  Hard negative mining (mine-hard-negatives), silver label 생성 (generate-silver-labels),
+  golden query 생성 (generate-golden-queries), baseline regression assertion
+  (assert-baseline-regression), train/val/test split build. 통합 학습 데이터 파이프라인.
+
+maturity: 3
+maturity_rationale: |
+  5-script 파이프라인 운영. CI gate (assert-baseline-regression). 그러나 hard negative
+  품질 메트릭 없음, silver label generation의 quality consistency 미측정.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI"
+
+key_files:
+  - scripts/eval/mine-hard-negatives.ts
+  - scripts/eval/generate-silver-labels.ts
+  - scripts/eval/generate-golden-queries.ts
+  - scripts/eval/assert-baseline-regression.ts
+  - scripts/eval/build-splits.ts
+
+tests: {}
+
+depends_on:
+  - eval.offline-eval-runner
+
+related_rfcs:
+  - docs/RFC-017.md
+
+known_limitations:
+  - "Hard negative 품질 메트릭 없음"
+  - "Silver label consistency 미측정"
+
+next_steps:
+  - "Quality metric on hard negatives"
+  - "Silver label cross-validation"
+
+tags:
+  - hard-negatives
+  - label-generation
+  - training-data

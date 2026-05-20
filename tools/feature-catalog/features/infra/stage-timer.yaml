@@ -1,0 +1,39 @@
+id: infra.stage-timer
+name: Stage Timer (Pipeline Latency Instrumentation)
+category: infra
+summary: |
+  Pipeline stage별 latency 측정 utility. pipelineTrace + circular-latency-buffer +
+  OpenTelemetry span과 함께 사용. async stack frame 보존.
+
+maturity: 4
+maturity_rationale: |
+  견고하게 사용 중. cooperative-abort + request-execution-context와 결합. unit
+  test 보유. 모든 critical path가 instrument됨.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/shared/stage-timer.ts
+  - src/domain/shared/cooperative-abort.ts
+  - src/domain/shared/request-execution-context.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations: []
+
+next_steps: []
+
+tags:
+  - latency
+  - instrumentation
+  - utility

@@ -1,0 +1,103 @@
+/**
+ * SearchUseCaseAdapter — adapts the production
+ * `SearchUseCase` to the `SearchUseCasePort` consumed by the
+ * Plan-then-Execute `ExecutionRunner`.
+ *
+ * The adapter is intentionally a structural translator:
+ *  - it maps `SearchUseCaseInput` (the wine-search-analysis-driven slice
+ *    of {@link SearchRequest}) into a `SearchRequest`,
+ *  - it threads `requestId` and `abortSignal` through to the use case,
+ *  - it asserts the underlying response is a `SearchResponseV1` (the
+ *    runner's port type) and surfaces a typed error otherwise.
+ *
+ * No business logic lives here — every behaviour either comes from
+ * `SearchUseCaseInputSchema` (input validation already happened upstream)
+ * or from {@link SearchUseCase} (the real pipeline).
+ */
+
+import type { SearchExecutionOptions } from '../../search/port/search-executor.port.js';
+import type { SearchRequest } from '../../search/search-request.dto.js';
+import type { SearchUseCase } from '../../search/search.usecase.js';
+import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
+import { DomainError } from '../../../domain/shared/error/domain-error.js';
+import type {
+  SearchUseCaseInput,
+} from '../execution-plan-schemas.js';
+import type {
+  SearchUseCasePort,
+} from '../execution-runner.js';
+
+export interface SearchUseCaseAdapterContext {
+  readonly requestId: string;
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
+/** Thrown when the underlying `SearchUseCase` returns a comparison response
+ *  for what the runner expects to be a single-search call. */
+export class UnexpectedSearchAdapterResponseError extends DomainError {
+  constructor(observedQueryType: string) {
+    super(
+      'UNEXPECTED_SEARCH_ADAPTER_RESPONSE',
+      `SearchUseCaseAdapter expected queryType='search' but received '${observedQueryType}'.`,
+    );
+    this.name = 'UnexpectedSearchAdapterResponseError';
+  }
+}
+
+export class SearchUseCaseAdapter implements SearchUseCasePort {
+  constructor(private readonly useCase: SearchUseCase) {}
+
+  async execute(
+    input: SearchUseCaseInput,
+    requestId: string,
+    options?: { readonly abortSignal?: AbortSignal | undefined },
+  ): Promise<SearchResponseV1> {
+    const request = mapSearchUseCaseInputToSearchRequest(input);
+    const useCaseOptions: SearchExecutionOptions = {
+      requestId,
+      ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+    };
+    const response = await this.useCase.execute(request, requestId, useCaseOptions);
+    if (response.queryType !== 'search') {
+      throw new UnexpectedSearchAdapterResponseError(response.queryType);
+    }
+    return response;
+  }
+}
+
+/**
+ * Pure mapping from the analysis-driven `SearchUseCaseInput` shape to the
+ * application `SearchRequest`. Lives at module scope (not on the class) so
+ * it can be exercised directly in unit tests without instantiating a
+ * use case stub.
+ *
+ * Optional fields are spread-merged so `exactOptionalPropertyTypes` keeps
+ * the request shape clean (no `undefined`-valued keys).
+ */
+export function mapSearchUseCaseInputToSearchRequest(
+  input: SearchUseCaseInput,
+): SearchRequest {
+  return {
+    query: input.query,
+    ...(input.filters !== undefined && input.filters.length > 0
+      ? { filters: input.filters }
+      : {}),
+    ...(input.preferences !== undefined && input.preferences.length > 0
+      ? { preferences: input.preferences }
+      : {}),
+    ...(input.mode !== undefined
+      ? {
+          options: {
+            mode: input.mode,
+            explain: false,
+            clarification: false,
+          },
+          retrieval_mode: input.mode,
+        }
+      : {}),
+    ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    ...(input.representativeConcept !== undefined
+      ? { representativeConcept: input.representativeConcept }
+      : {}),
+  };
+}

@@ -1,10 +1,6 @@
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
-import type {
-  DualLanePresence,
-  IdentityExactnessTier,
-} from '../../retrieval/model/dual-lane-artifact.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
@@ -12,6 +8,7 @@ import type { ComponentScores } from '../model/ranked-result.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import { evaluateGraphHardGate } from './graph-hard-gate.js';
 import { computeGraphSoftWeight } from './graph-soft-weight.js';
+import { isConstraintGraphEmitEnabled } from '../../query/service/constraint-graph-flags.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
@@ -182,13 +179,12 @@ export class SignalComputer {
     matchedSet?: ReadonlySet<string>,
     graph?: ConstraintGraph  ,
   ): boolean {
-    // Wave G2: unified graph-path telemetry.
     recordGraphPathDecision({
       reader: 'ranker_hard_gate',
       outcome: classifyGraphPresence({
         graphPresent: graph !== undefined,
-        ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+        graphOrigin: graph?.origin,
+        graphEmitFlagOn: isConstraintGraphEmitEnabled(),
       }),
     });
     // ADR-014 Phase 1b.3b: when a ConstraintGraph is present, the hard gate
@@ -243,13 +239,12 @@ export class SignalComputer {
     precomputedMatchedSet?: ReadonlySet<string>,
     graph?: ConstraintGraph  ,
   ): number {
-    // Wave G2: unified graph-path telemetry.
     recordGraphPathDecision({
       reader: 'ranker_soft_weight',
       outcome: classifyGraphPresence({
         graphPresent: graph !== undefined,
-        ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-        graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+        graphOrigin: graph?.origin,
+        graphEmitFlagOn: isConstraintGraphEmitEnabled(),
       }),
     });
     const softConstraints = constraints.soft;
@@ -409,10 +404,6 @@ export class SignalComputer {
    * @returns Popularity score in [0, 1], intentionally small.
    */
   computePopularity(candidate: HybridCandidate): number | undefined {
-    if (candidate.popularityScore !== undefined) {
-      return clamp01(candidate.popularityScore);
-    }
-
     // Sparse rank serves as a proxy: lower rank = more popular/relevant
     const sparseRank = candidate.sparseRank;
     if (sparseRank === undefined) {
@@ -426,18 +417,15 @@ export class SignalComputer {
   /**
    * Computes availability signal.
    *
-   * Penalizes candidates that are unavailable when the retrieval summary
-   * propagated the catalog availability flag. Preserve missingness when
-   * the underlying retrieval path does not expose availability.
+   * Penalizes candidates that are unavailable. Since the current
+   * HybridCandidate model doesn't carry availability data. Preserve
+   * missingness until the infrastructure wires a real availability field.
    *
-   * @param candidate - The hybrid candidate to evaluate.
+   * @param _candidate - The hybrid candidate to evaluate.
    * @returns Availability score in [0, 1], or undefined when unavailable.
    */
-  computeAvailability(candidate: HybridCandidate): number | undefined {
-    if (candidate.availability === undefined) {
-      return undefined;
-    }
-    return candidate.availability ? 1 : 0;
+  computeAvailability(_candidate: HybridCandidate): number | undefined {
+    return undefined;
   }
 
   /**
@@ -546,39 +534,6 @@ export class SignalComputer {
   }
 
   /**
-   * Preserves the calibrated entity-lane posterior when present.
-   *
-   * The value is already calibrated upstream; ranking only clamps it into the
-   * model's numeric support.
-   */
-  computeEntityPosterior(candidate: HybridCandidate): number | undefined {
-    if (candidate.lanePresence === undefined || candidate.lanePresence === 'general_only') {
-      return undefined;
-    }
-    if (candidate.entityPosteriorScore === undefined) {
-      return undefined;
-    }
-    return clamp01(candidate.entityPosteriorScore);
-  }
-
-  /**
-   * Returns the canonical identity exactness tier carried by the entity lane.
-   */
-  computeIdentityExactnessTier(candidate: HybridCandidate): IdentityExactnessTier {
-    if (candidate.lanePresence === undefined || candidate.lanePresence === 'general_only') {
-      return 'none';
-    }
-    return candidate.identityExactnessTier;
-  }
-
-  /**
-   * Returns the canonical dual-lane presence classification when available.
-   */
-  computeLanePresence(candidate: HybridCandidate): DualLanePresence | undefined {
-    return candidate.lanePresence;
-  }
-
-  /**
    * Computes multilingual match signal.
    *
    * Returns 1.0 when the query contains Hangul AND the candidate has Korean
@@ -598,26 +553,6 @@ export class SignalComputer {
     // Only boost candidates that actually have Korean text/aliases indexed.
     // Returning 1 unconditionally over-rewarded all wines on Korean queries.
     return candidate.searchTextKo !== undefined && candidate.searchTextKo.length > 0 ? 1 : 0;
-  }
-
-  /**
-   * Computes gift suitability signal from the learned facet score.
-   * Returns the raw score from the Track C gift suitability classifier.
-   * Only meaningful when the query has gift intent — the weight system
-   * ensures this signal is 0-weighted for non-gift queries.
-   */
-  computeGiftSuitability(candidate: HybridCandidate): number {
-    // giftSuitabilityScore is already in [0, 1] from the ETL normalizer.
-    // Absent score → 0 (no signal, not penalized).
-    return candidate.giftSuitabilityScore ?? 0;
-  }
-
-  /**
-   * Computes beginner suitability signal from the learned facet score.
-   * Returns the raw score from the Track C beginner suitability classifier.
-   */
-  computeBeginnerSuitability(candidate: HybridCandidate): number {
-    return candidate.beginnerSuitabilityScore ?? 0;
   }
 
   /**
@@ -673,8 +608,6 @@ export class SignalComputer {
       ...(recency !== undefined ? { recency } : {}),
       ...(criticScore !== undefined ? { criticScore } : {}),
       multilingualScore: this.computeMultilingualScore(candidate, queryContainsHangul),
-      giftSuitability: this.computeGiftSuitability(candidate),
-      beginnerSuitability: this.computeBeginnerSuitability(candidate),
     };
   }
 

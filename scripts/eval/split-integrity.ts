@@ -6,7 +6,7 @@
 import fs from 'node:fs/promises';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 
 export const DEFAULT_SPLIT_PATHS = {
   train: resolveDataPath('data/splits/train.jsonl'),

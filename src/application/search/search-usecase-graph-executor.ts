@@ -6,11 +6,11 @@
  * trivial graphs pass through byte-identically.
  *
  * **Engagement rule (precise):**
- *  - If `BUNDLE_SELECTOR_ENABLED === 'false'` → pass-through (flag-off
+ *  - If `BUNDLE_SELECTOR_ENABLED !== 'true'` → pass-through (flag-off
  *    rollback is byte-identical).
  *  - If `graph === undefined` → pass-through.
- *  - If `graph.origin === 'deterministic_from_atoms'` → pass-through
- *    (trivial graph; no cross-subquery structure).
+ *  - If `graph.origin !== 'hybrid'` → pass-through (trivial + planner-only
+ *    graphs do not carry cross-subquery structure today).
  *  - If `subqueryNodes.length <= 1` → pass-through (no assignment to do).
  *  - Otherwise → per-subquery retrieval → `chooseAssignment` →
  *    `BundleRankedResult[]`-ready assignment payload.
@@ -30,14 +30,9 @@ import type { CandidatePoolPort } from './port/search-pipeline-deps.port.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type {
-  CandidateDropRecord,
-  RrfFusionTrace,
-} from '../../domain/retrieval/model/candidate-envelope.js';
-import type {
   ConstraintGraph,
   SubqueryNode,
 } from '../../domain/query/model/constraint-graph.js';
-import { getSubqueryObligation } from '../../domain/query/model/constraint-graph.js';
 import type {
   BundleSelector,
   BundleSelectorOptions,
@@ -49,30 +44,20 @@ import {
   type CriticDecision,
 } from '../../domain/retrieval/service/retrieval-critic.js';
 import type {
-  RetrievalDegradationCode,
-  RetrievalDegradationSignal,
-} from '../../domain/retrieval/port/retrieval-degradation-observer.port.js';
-import type {
   QueryRewriter,
   RewriteTrace,
 } from '../../domain/retrieval/service/query-rewriter.js';
 import type { BudgetLedger } from '../../domain/retrieval/service/budget-ledger.js';
 import { BudgetViolationError } from '../../domain/retrieval/service/budget-ledger.js';
-import {
-  computeGraphCoverage,
-  type GraphCoverageSignals,
-} from '../../domain/query/service/compute-graph-coverage.js';
+import { computeGraphCoverage } from '../../domain/query/service/compute-graph-coverage.js';
 import { globalBundleSelectorCounter } from '../../observability/bundle-selector-counters.js';
+import { globalRetrievalCriticCounter } from '../../observability/retrieval-critic-counters.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
 } from '../../observability/graph-path-telemetry.js';
-import { globalRetrievalCriticCounter } from '../../observability/retrieval-critic-counters.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
-import {
-  executeRetrievalBranches,
-  formatRetrievalBranchFailureReasons,
-} from './retrieval-branch-execution.js';
 
 export interface GraphExecutorDeps {
   readonly candidatePool: CandidatePoolPort;
@@ -111,18 +96,11 @@ export interface GraphExecutorDeps {
 }
 
 export interface SubqueryRetriever {
-  /**
-   * CandidatePoolPort does not yet advertise per-call isolation at the
-   * type level. Retrievers that wrap a single shared CandidatePool
-   * instance should conservatively leave this as `'shared_mutable'`
-   * unless the underlying implementation guarantees concurrent safety.
-   */
-  readonly stateIsolation?: 'shared_mutable' | 'isolated';
   retrieve(
     base: HybridRetrievalInput,
     subquery: SubqueryNode,
     graph: ConstraintGraph,
-  ): Promise<readonly HybridCandidate[] | SubqueryRetrievalResult>;
+  ): Promise<readonly HybridCandidate[]>;
 }
 
 export interface GraphExecutorOptions extends BundleSelectorOptions {
@@ -148,31 +126,6 @@ export interface GraphExecutorOptions extends BundleSelectorOptions {
 
 export type GraphExecutionMode = 'passthrough' | 'bundle' | 'fail_closed';
 
-export interface GraphRetrievalTelemetry {
-  readonly degradationCodes: readonly RetrievalDegradationCode[];
-  readonly degradationSignals: readonly RetrievalDegradationSignal[];
-  readonly fusionTrace?: RrfFusionTrace | undefined;
-  readonly dropLog?: readonly CandidateDropRecord[] | undefined;
-}
-
-export interface RetrievalExecutionResult {
-  readonly candidates: readonly HybridCandidate[];
-  readonly telemetry: GraphRetrievalTelemetry;
-}
-
-export interface SubqueryRetrievalResult {
-  readonly candidates: readonly HybridCandidate[];
-  readonly telemetry: GraphRetrievalTelemetry;
-}
-
-interface SubqueryRetrievalExecutionResult {
-  readonly status: 'ok' | 'fail_closed';
-  readonly graph: ConstraintGraph;
-  readonly pools: ReadonlyMap<string, readonly HybridCandidate[]>;
-  readonly telemetry: GraphRetrievalTelemetry;
-  readonly degradationReasons: readonly string[];
-}
-
 export interface GraphExecutionResult {
   readonly mode: GraphExecutionMode;
   /**
@@ -180,13 +133,11 @@ export interface GraphExecutionResult {
    * - `passthrough`: equal to `candidatePool.execute(input)`.
    * - `bundle`: union of the winning assignment candidates (one per
    *   subquery), preserving the subquery order.
-   * - `fail_closed`: empty list; fail-closed reason is surfaced via
-   *   `assignmentSolution.degradationReasons` when assignment ran, or
-   *   `executionDegradationReasons` when the executor failed earlier.
+   * - `fail_closed`: empty list; `assignmentSolution.degradationReasons`
+   *   holds the fail-closed reason.
    */
   readonly candidates: readonly HybridCandidate[];
   readonly assignmentSolution?: AssignmentSolution | undefined;
-  readonly retrievalTelemetry?: GraphRetrievalTelemetry | undefined;
   /**
    * ADR-015 Axis 2: trace of critic-driven rewrites performed inside
    * this execution. Present (possibly empty) only when the
@@ -207,65 +158,27 @@ export interface GraphExecutionResult {
    * merge these with their own `routeDegradation`.
    */
   readonly criticDegradationReasons?: readonly string[] | undefined;
-  readonly executionDegradationReasons?: readonly string[] | undefined;
 }
 
 /**
  * ADR-015 Axis 2: feature flag for the executor-internal critic retry
  * loop. Checked once per call — flipping the flag mid-flight cannot
- * produce a partial-loop state.
- *
- * Wave J2: default-on. The critic is deterministic-first — satisfied
- * graph coverage short-circuits immediately, while graphless requests
- * may still retry on typed degradation codes (`no_matches`,
- * `sparse_pool`). The loop remains bounded by `CRITIC_RETRY_MAX`.
- * Rollback via `RETRIEVAL_EXECUTOR_CRITIC=false`.
- *
- * Tests that pin the byte-identity of the one-shot/relaxation path
- * (e.g. the hybrid-ranking-pipeline relaxation test) set the flag
- * explicitly to `'false'` in `beforeEach` so the default-on flip
- * does not alter their call-count contracts.
+ * produce a partial-loop state. Default off.
  */
-function isRetrievalCriticEnabled(
+export function isRetrievalCriticEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env['RETRIEVAL_EXECUTOR_CRITIC'] !== 'false';
-}
-
-function resolveRemainingLatencyBudgetMs(
-  input: HybridRetrievalInput,
-  nowMs: number = Date.now(),
-): number | undefined {
-  const maxLatencyMs = input.queryPlan.queryBudget?.maxLatencyMs;
-  const requestStartTimeMs = input.requestContext?.requestStartTimeMs;
-  if (
-    maxLatencyMs === undefined
-    || !Number.isFinite(maxLatencyMs)
-    || requestStartTimeMs === undefined
-    || !Number.isFinite(requestStartTimeMs)
-  ) {
-    return undefined;
-  }
-
-  return maxLatencyMs - Math.max(0, nowMs - requestStartTimeMs);
+  return env['RETRIEVAL_EXECUTOR_CRITIC'] === 'true';
 }
 
 function extractSubqueryNodes(graph: ConstraintGraph): readonly SubqueryNode[] {
   return graph.nodes.filter((n): n is SubqueryNode => n.kind === 'subquery');
 }
 
-/**
- * Wave J1: BundleSelector is default-on once Wave F1 (deterministic
- * topology detector) and Wave H (shares_budget edges) landed. The
- * selector is a gated pass-through for trivial / single-subquery
- * graphs (`shouldEngageBundlePath` returns false), so flipping the
- * default only changes behaviour when a graph actually carries ≥2
- * subquery nodes. Rollback via `BUNDLE_SELECTOR_ENABLED=false`.
- */
-function isBundleSelectorEnabled(
+export function isBundleSelectorEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env['BUNDLE_SELECTOR_ENABLED'] !== 'false';
+  return env['BUNDLE_SELECTOR_ENABLED'] === 'true';
 }
 
 /**
@@ -279,11 +192,7 @@ export function shouldEngageBundlePath(
 ): boolean {
   if (!isBundleSelectorEnabled(env)) return false;
   if (graph === undefined) return false;
-  // The trivial atom graph never carries multi-subquery topology, so it must
-  // remain on the passthrough path. In contrast, merged deterministic / LLM
-  // topology graphs are emitted as `planner_emitted` or `hybrid` and SHOULD
-  // engage the bundle path when they carry >1 subquery nodes.
-  if (graph.origin === 'deterministic_from_atoms') return false;
+  if (graph.origin !== 'hybrid') return false;
   const subqueryCount = extractSubqueryNodes(graph).length;
   return subqueryCount > 1;
 }
@@ -291,21 +200,23 @@ export function shouldEngageBundlePath(
 /**
  * Inputs the executor-internal critic consults to decide whether to
  * retry. Supplied per-call by the caller (hybrid-candidates wiring)
- * because `computeGraphCoverage` needs graph-native satisfaction
- * signals derived from the execution result — matched slot refs,
- * winning subquery ids, and budget usage are not available on the
+ * because `computeGraphCoverage` needs the `satisfiedAttributes` set
+ * which is derived from candidate annotator output — not from the
  * retrieval input alone.
  */
 export interface CriticSignalProbe {
-  /** Graph-aware satisfaction signals derived from the latest result. */
-  readonly coverageSignalsFor: (
-    result: GraphExecutionResult,
-  ) => GraphCoverageSignals;
+  /** Attributes the pipeline currently considers satisfied by the
+   *  returned candidate pool. Used as the input to
+   *  `computeGraphCoverage(graph, satisfiedAttributes)`. */
+  readonly satisfiedAttributesFor: (
+    candidates: readonly HybridCandidate[],
+  ) => ReadonlySet<string>;
   /** Retrieval-internal degradation reasons surfaced by the candidate
-   *  pool. These are structured categories, not free-form log strings. */
-  readonly degradationCodesFor: (
-    result: GraphExecutionResult,
-  ) => readonly RetrievalDegradationCode[];
+   *  pool (e.g. `'sparse_pool'`, `'no_matches'`). Used verbatim in the
+   *  critic decision table. */
+  readonly degradationReasonsFor: (
+    candidates: readonly HybridCandidate[],
+  ) => readonly string[];
 }
 
 /**
@@ -328,17 +239,6 @@ export async function executeGraphAware(
   opts: GraphExecutorOptions,
   criticProbe?: CriticSignalProbe,
 ): Promise<GraphExecutionResult> {
-  // Wave I2: emit unified graph-path telemetry for the graph-executor
-  // reader. Recorded once per public invocation so retries inside the
-  // critic loop do not double-count.
-  recordGraphPathDecision({
-    reader: 'graph_executor',
-    outcome: classifyGraphPresence({
-      graphPresent: graph !== undefined,
-      ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
-    }),
-  });
   const rewriter = deps.queryRewriter;
   if (
     !isRetrievalCriticEnabled()
@@ -365,35 +265,16 @@ export async function executeGraphAware(
   // the cap is evaluated BEFORE the retrieval call so we never
   // execute a (CRITIC_RETRY_MAX+1)-th retrieval.
   for (let retryCount = 0; retryCount < CRITIC_RETRY_MAX; retryCount += 1) {
-    const remainingLatencyBudgetMs = resolveRemainingLatencyBudgetMs(currentInput);
-    if (remainingLatencyBudgetMs !== undefined && remainingLatencyBudgetMs <= 0) {
-      pipelineDebug(
-        {
-          step: 'retrieval.critic.budget_exhausted',
-          iterations: rewriteTraces.length,
-        },
-        'pipeline critic retry budget exhausted',
-      );
-      return {
-        ...lastResult,
-        criticRewrites: rewriteTraces,
-        criticDegradationReasons: [
-          ...(lastResult.criticDegradationReasons ?? []),
-          'critic_retry_budget_exhausted',
-        ],
-      };
-    }
-
     const decision: CriticDecision = decideRetry({
       graph,
       coverage:
         graph !== undefined
           ? computeGraphCoverage(
               graph,
-              criticProbe.coverageSignalsFor(lastResult),
+              criticProbe.satisfiedAttributesFor(lastResult.candidates),
             )
           : undefined,
-      degradationCodes: criticProbe.degradationCodesFor(lastResult),
+      degradationReasons: criticProbe.degradationReasonsFor(lastResult.candidates),
       retryCount,
     });
 
@@ -476,13 +357,17 @@ async function runRetrievalOnce(
   deps: GraphExecutorDeps,
   opts: GraphExecutorOptions,
 ): Promise<GraphExecutionResult> {
+  recordGraphPathDecision({
+    reader: 'graph_executor',
+    outcome: classifyGraphPresence({
+      graphPresent: graph !== undefined,
+      graphOrigin: graph?.origin,
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
+    }),
+  });
   if (!shouldEngageBundlePath(graph)) {
     const flat = await runRootRetrieval(deps.candidatePool, input);
-    return {
-      mode: 'passthrough',
-      candidates: flat.candidates,
-      retrievalTelemetry: flat.telemetry,
-    };
+    return { mode: 'passthrough', candidates: flat };
   }
 
   // Narrowed by `shouldEngageBundlePath`.
@@ -498,36 +383,25 @@ async function runRetrievalOnce(
     'pipeline bundle selector engage',
   );
 
-  // Per-subquery retrieval. The executor snapshots telemetry
-  // immediately after each call and aggregates it into the result so
-  // downstream readers do not consult shared mutable candidate-pool
-  // getters after fan-out.
-  const subqueryExecution = await executeSubqueryRetrievals(
-    input,
-    engagedGraph,
-    subqueries,
-    deps,
-  );
-  if (subqueryExecution.status === 'fail_closed') {
-    pipelineDebug(
-      {
-        step: 'retrieval.bundle_selector.subquery_fail_closed',
-        reasons: [...subqueryExecution.degradationReasons],
-      },
-      'pipeline bundle selector subquery fail closed',
+  // Per-subquery retrieval. When no adapter is wired we degrade to a
+  // single root retrieval for all subqueries — this is a temporary
+  // passthrough that preserves behaviour; downstream PRs will swap in
+  // a real subquery-scoped retriever.
+  const pools = new Map<string, readonly HybridCandidate[]>();
+  if (deps.subqueryRetriever !== undefined) {
+    const retriever = deps.subqueryRetriever;
+    await Promise.all(
+      subqueries.map(async (sq) => {
+        const pool = await retriever.retrieve(input, sq, engagedGraph);
+        pools.set(sq.nodeId, pool);
+      }),
     );
-    return {
-      mode: 'fail_closed',
-      candidates: [],
-      retrievalTelemetry: subqueryExecution.telemetry,
-      executionDegradationReasons: subqueryExecution.degradationReasons,
-    };
+  } else {
+    const fallback = await runRootRetrieval(deps.candidatePool, input);
+    for (const sq of subqueries) pools.set(sq.nodeId, fallback);
   }
-  const effectiveGraph = subqueryExecution.graph;
-  const pools = subqueryExecution.pools;
-  const retrievalTelemetry = subqueryExecution.telemetry;
 
-  const solution = deps.bundleSelector.chooseAssignment(effectiveGraph, pools, opts);
+  const solution = deps.bundleSelector.chooseAssignment(engagedGraph, pools, opts);
 
   if (solution.degradationReasons.length > 0) {
     for (const reason of solution.degradationReasons) {
@@ -544,10 +418,6 @@ async function runRetrievalOnce(
       mode: 'fail_closed',
       candidates: [],
       assignmentSolution: solution,
-      retrievalTelemetry,
-      ...(subqueryExecution.degradationReasons.length > 0
-        ? { executionDegradationReasons: subqueryExecution.degradationReasons }
-        : {}),
     };
   }
 
@@ -571,30 +441,27 @@ async function runRetrievalOnce(
     const reservedIds = new Set<string>();
     try {
       for (const a of solution.assignments) {
-        const reservationKey = `${a.subqueryId}:${a.candidate.entityId}`;
         if (ledger !== undefined) {
           ledger.reserve(a.subqueryId, a.candidate);
-          reservedIds.add(reservationKey);
         }
         if (callback !== undefined) {
           callback({ subqueryId: a.subqueryId, candidate: a.candidate });
-          if (ledger === undefined) {
-            reservedIds.add(reservationKey);
-          }
         }
+        reservedIds.add(`${a.subqueryId}:${a.candidate.entityId}`);
       }
     } catch (err) {
-      // Roll back any reservations we already committed on this
-      // assignment so the ledger state always matches the executor's
-      // reported outcome, even when the legacy callback throws.
-      if (ledger !== undefined) {
-        for (const a of solution.assignments) {
-          if (reservedIds.has(`${a.subqueryId}:${a.candidate.entityId}`)) {
-            ledger.release(a.subqueryId);
+      if (err instanceof BudgetViolationError) {
+        // Roll back any reservations we already committed on this
+        // assignment so the ledger state matches the fail-closed
+        // result. Pre-flight release keeps the ledger consistent with
+        // the executor's reported outcome.
+        if (ledger !== undefined) {
+          for (const a of solution.assignments) {
+            if (reservedIds.has(`${a.subqueryId}:${a.candidate.entityId}`)) {
+              ledger.release(a.subqueryId);
+            }
           }
         }
-      }
-      if (err instanceof BudgetViolationError) {
         pipelineDebug(
           {
             step: 'retrieval.bundle_selector.budget_violation',
@@ -614,7 +481,6 @@ async function runRetrievalOnce(
             bundleScore: 0,
             degradationReasons: ['bundle_selector_fail_closed:budget_infeasible'],
           },
-          retrievalTelemetry,
         };
       }
       throw err;
@@ -636,337 +502,17 @@ async function runRetrievalOnce(
     mode: 'bundle',
     candidates,
     assignmentSolution: solution,
-    retrievalTelemetry,
-    ...(subqueryExecution.degradationReasons.length > 0
-      ? { executionDegradationReasons: subqueryExecution.degradationReasons }
-      : {}),
   };
 }
 
 async function runRootRetrieval(
   candidatePool: CandidatePoolPort,
   input: HybridRetrievalInput,
-): Promise<RetrievalExecutionResult> {
-  return executeCandidatePoolRetrieval(candidatePool, input);
-}
-
-export async function executeCandidatePoolRetrieval(
-  candidatePool: CandidatePoolPort,
-  input: HybridRetrievalInput,
-): Promise<RetrievalExecutionResult> {
-  const invoke = candidatePool.execute !== undefined
-    ? candidatePool.execute.bind(candidatePool) as (payload: HybridRetrievalInput) => Promise<unknown>
-    : candidatePool.generate.bind(candidatePool) as (payload: HybridRetrievalInput) => Promise<unknown>;
-  return normalizeRetrievalExecutionResult(await invoke(input));
-}
-
-function normalizeRetrievalExecutionResult(
-  result: unknown,
-): RetrievalExecutionResult {
-  if (Array.isArray(result)) {
-    return {
-      candidates: result,
-      telemetry: normalizeGraphRetrievalTelemetry(result),
-    };
+): Promise<readonly HybridCandidate[]> {
+  if (candidatePool.execute !== undefined) {
+    return candidatePool.execute(input);
   }
-  if (hasCandidateArray(result)) {
-    return {
-      candidates: result.candidates,
-      telemetry: normalizeGraphRetrievalTelemetry(result),
-    };
-  }
-  throw new TypeError('CandidatePool execute/generate must return HybridCandidate[] or RetrievalExecutionResult');
-}
-
-function hasCandidateArray(
-  value: unknown,
-): value is { readonly candidates: readonly HybridCandidate[] } {
-  return typeof value === 'object'
-    && value !== null
-    && 'candidates' in value
-    && Array.isArray(value.candidates);
-}
-
-function emptyGraphRetrievalTelemetry(): GraphRetrievalTelemetry {
-  return {
-    degradationCodes: [],
-    degradationSignals: [],
-  };
-}
-
-function normalizeGraphRetrievalTelemetry(
-  source: unknown,
-): GraphRetrievalTelemetry {
-  if (typeof source !== 'object' || source === null) {
-    return emptyGraphRetrievalTelemetry();
-  }
-  const root = source as {
-    degradation?: { codes?: readonly RetrievalDegradationCode[]; signals?: readonly RetrievalDegradationSignal[] } | undefined;
-    degradationCodes?: readonly RetrievalDegradationCode[] | undefined;
-    degradationSignals?: readonly RetrievalDegradationSignal[] | undefined;
-    fusionTrace?: RrfFusionTrace | undefined;
-    dropLog?: readonly CandidateDropRecord[] | undefined;
-    telemetry?: unknown;
-  };
-  const nested = typeof root.telemetry === 'object' && root.telemetry !== null
-    ? root.telemetry as {
-        degradationCodes?: readonly RetrievalDegradationCode[] | undefined;
-        degradationSignals?: readonly RetrievalDegradationSignal[] | undefined;
-        fusionTrace?: RrfFusionTrace | undefined;
-        dropLog?: readonly CandidateDropRecord[] | undefined;
-      }
-    : undefined;
-  const degradationCodes = Array.isArray(root.degradationCodes)
-    ? [...root.degradationCodes]
-    : Array.isArray(root.degradation?.codes)
-    ? [...root.degradation.codes]
-    : Array.isArray(nested?.degradationCodes)
-    ? [...nested.degradationCodes]
-    : [];
-  const degradationSignals = Array.isArray(root.degradationSignals)
-    ? [...root.degradationSignals]
-    : Array.isArray(root.degradation?.signals)
-    ? [...root.degradation.signals]
-    : Array.isArray(nested?.degradationSignals)
-    ? [...nested.degradationSignals]
-    : [];
-  const fusionTrace = root.fusionTrace ?? nested?.fusionTrace;
-  const dropLog = Array.isArray(root.dropLog)
-    ? [...root.dropLog]
-    : Array.isArray(nested?.dropLog)
-    ? [...nested.dropLog]
-    : undefined;
-  return {
-    degradationCodes,
-    degradationSignals,
-    ...(fusionTrace !== undefined ? { fusionTrace } : {}),
-    ...(dropLog !== undefined ? { dropLog } : {}),
-  };
-}
-
-function mergeGraphRetrievalTelemetry(
-  parts: readonly GraphRetrievalTelemetry[],
-): GraphRetrievalTelemetry {
-  const degradationCodes = new Set<RetrievalDegradationCode>();
-  const degradationSignals: RetrievalDegradationSignal[] = [];
-  const dropLog: CandidateDropRecord[] = [];
-  let fusionTrace: RrfFusionTrace | undefined;
-
-  for (const part of parts) {
-    for (const code of part.degradationCodes) degradationCodes.add(code);
-    degradationSignals.push(...part.degradationSignals);
-    if (part.dropLog !== undefined) dropLog.push(...part.dropLog);
-    if (parts.length === 1 && part.fusionTrace !== undefined) {
-      fusionTrace = part.fusionTrace;
-    }
-  }
-
-  return {
-    degradationCodes: [...degradationCodes],
-    degradationSignals,
-    ...(fusionTrace !== undefined ? { fusionTrace } : {}),
-    ...(dropLog.length > 0 ? { dropLog } : {}),
-  };
-}
-
-function normalizeSubqueryRetrievalResult(
-  result: readonly HybridCandidate[] | SubqueryRetrievalResult | undefined,
-): SubqueryRetrievalResult {
-  if (!isSubqueryRetrievalResult(result)) {
-    return {
-      candidates: result ?? [],
-      telemetry: {
-        degradationCodes: [],
-        degradationSignals: [],
-      },
-    };
-  }
-  return result;
-}
-
-function isSubqueryRetrievalResult(
-  result: readonly HybridCandidate[] | SubqueryRetrievalResult | undefined,
-): result is SubqueryRetrievalResult {
-  return result !== undefined && !Array.isArray(result);
-}
-
-function projectGraphForAvailableSubqueries(
-  graph: ConstraintGraph,
-  availableSubqueryIds: ReadonlySet<string>,
-): ConstraintGraph {
-  const removedIds = new Set<string>();
-  for (const node of graph.nodes) {
-    if (node.kind === 'subquery' && !availableSubqueryIds.has(node.nodeId)) {
-      removedIds.add(node.nodeId);
-    }
-  }
-  if (removedIds.size === 0) {
-    return graph;
-  }
-  return {
-    ...graph,
-    nodes: graph.nodes.flatMap((node) => {
-      if (removedIds.has(node.nodeId)) {
-        return [];
-      }
-      if (
-        (node.kind === 'group_and' || node.kind === 'group_or' || node.kind === 'group_xor')
-        && node.children.some((child) => removedIds.has(child))
-      ) {
-        return [{
-          ...node,
-          children: node.children.filter((child) => !removedIds.has(child)),
-        }];
-      }
-      return [node];
-    }),
-    edges: graph.edges.filter((edge) => !removedIds.has(edge.from) && !removedIds.has(edge.to)),
-  };
-}
-
-async function executeSubqueryRetrievals(
-  input: HybridRetrievalInput,
-  graph: ConstraintGraph,
-  subqueries: readonly SubqueryNode[],
-  deps: GraphExecutorDeps,
-): Promise<SubqueryRetrievalExecutionResult> {
-  if (deps.subqueryRetriever === undefined) {
-    const fallback = await runRootRetrieval(deps.candidatePool, input);
-    const pools = new Map<string, readonly HybridCandidate[]>();
-    for (const sq of subqueries) {
-      pools.set(sq.nodeId, fallback.candidates);
-    }
-    return {
-      status: 'ok',
-      graph,
-      pools,
-      telemetry: fallback.telemetry,
-      degradationReasons: [],
-    };
-  }
-
-  const retriever = deps.subqueryRetriever;
-  if (retriever.stateIsolation === 'isolated') {
-    const branchExecution = await executeRetrievalBranches(
-      subqueries.map((sq) => ({
-        key: sq.nodeId,
-        obligation: getSubqueryObligation(sq),
-        execute: async () => normalizeSubqueryRetrievalResult(
-          await retriever.retrieve(input, sq, graph),
-        ),
-      })),
-    );
-    const pools = new Map<string, readonly HybridCandidate[]>();
-    const telemetryParts: GraphRetrievalTelemetry[] = [];
-    const optionalEmptyReasons: string[] = [];
-    for (const success of branchExecution.successes) {
-      const subquery = subqueries.find((sq) => sq.nodeId === success.key);
-      const obligation = subquery !== undefined ? getSubqueryObligation(subquery) : 'required';
-      if (obligation === 'optional' && success.result.candidates.length === 0) {
-        optionalEmptyReasons.push(`retrieval_branch_degraded:graph_subquery:${success.key}`);
-        continue;
-      }
-      pools.set(success.key, success.result.candidates);
-      telemetryParts.push(success.result.telemetry);
-    }
-    const effectiveGraph = projectGraphForAvailableSubqueries(
-      graph,
-      new Set(branchExecution.successes.map((success) => success.key)),
-    );
-    if (branchExecution.status === 'fail_closed') {
-      return {
-        status: 'fail_closed',
-        graph: effectiveGraph,
-        pools,
-        telemetry: mergeGraphRetrievalTelemetry(telemetryParts),
-        degradationReasons: [
-          ...formatRetrievalBranchFailureReasons(
-            'graph_subquery',
-            branchExecution.requiredFailures,
-            'fail_closed',
-          ),
-          ...formatRetrievalBranchFailureReasons(
-            'graph_subquery',
-            branchExecution.optionalFailures,
-            'degraded',
-          ),
-          ...optionalEmptyReasons,
-        ],
-      };
-    }
-    return {
-      status: 'ok',
-      graph: effectiveGraph,
-      pools,
-      telemetry: mergeGraphRetrievalTelemetry(telemetryParts),
-      degradationReasons: [
-        ...formatRetrievalBranchFailureReasons(
-          'graph_subquery',
-          branchExecution.optionalFailures,
-          'degraded',
-        ),
-        ...optionalEmptyReasons,
-      ],
-    };
-  }
-
-  const pools = new Map<string, readonly HybridCandidate[]>();
-  const telemetryParts: GraphRetrievalTelemetry[] = [];
-  const optionalFailures: Array<{ key: string; error: unknown }> = [];
-  const optionalEmptyReasons: string[] = [];
-  for (const sq of subqueries) {
-    try {
-      const result = normalizeSubqueryRetrievalResult(
-        await retriever.retrieve(input, sq, graph),
-      );
-      if (getSubqueryObligation(sq) === 'optional' && result.candidates.length === 0) {
-        optionalEmptyReasons.push(`retrieval_branch_degraded:graph_subquery:${sq.nodeId}`);
-        continue;
-      }
-      pools.set(sq.nodeId, result.candidates);
-      telemetryParts.push(result.telemetry);
-    } catch (error) {
-      if (getSubqueryObligation(sq) === 'optional') {
-        optionalFailures.push({ key: sq.nodeId, error });
-        continue;
-      }
-      return {
-        status: 'fail_closed',
-        graph: projectGraphForAvailableSubqueries(graph, new Set(pools.keys())),
-        pools,
-        telemetry: mergeGraphRetrievalTelemetry(telemetryParts),
-        degradationReasons: formatRetrievalBranchFailureReasons(
-          'graph_subquery',
-          [{
-            key: sq.nodeId,
-            obligation: 'required',
-            error,
-            errorMessage: error instanceof Error ? error.message : String(error),
-          }],
-          'fail_closed',
-        ),
-      };
-    }
-  }
-  return {
-    status: 'ok',
-    graph: projectGraphForAvailableSubqueries(graph, new Set(pools.keys())),
-    pools,
-    telemetry: mergeGraphRetrievalTelemetry(telemetryParts),
-    degradationReasons: [
-      ...formatRetrievalBranchFailureReasons(
-        'graph_subquery',
-        optionalFailures.map((failure) => ({
-          key: failure.key,
-          obligation: 'optional' as const,
-          error: failure.error,
-          errorMessage: failure.error instanceof Error ? failure.error.message : String(failure.error),
-        })),
-        'degraded',
-      ),
-      ...optionalEmptyReasons,
-    ],
-  };
+  return candidatePool.generate(input);
 }
 
 /**

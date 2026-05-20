@@ -25,7 +25,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { ALL_SUITE_IDS, CASE_PREFIX_TO_SUITE, SUITE_ID_TO_DIR, type SuiteId } from './suite-registry.js';
 
 export type { SuiteId } from './suite-registry.js';

@@ -1,0 +1,41 @@
+id: infra.readiness-probes
+name: Readiness Probes & Snapshot Health
+category: infra
+summary: |
+  External 종속성 (PG / Redis / Vespa / LLM / embedding) readiness check + search
+  snapshot readiness reader + snapshot health metadata reader. GET /ready의 백엔드.
+
+maturity: 4
+maturity_rationale: |
+  Production-grade probes, 모든 critical dep 점검. snapshot health reader가
+  active snapshot 메타 자동 fetch. 그러나 latency budget per probe 미정의.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: /ready"
+
+key_files:
+  - src/infrastructure/health/readiness-probes.ts
+  - src/infrastructure/health/search-snapshot-readiness.ts
+  - src/infrastructure/health/snapshot-health-reader.ts
+
+tests: {}
+
+depends_on:
+  - observability.http-readiness
+
+related_rfcs: []
+
+known_limitations:
+  - "Per-probe latency budget 없음"
+
+next_steps:
+  - "Latency SLA per probe"
+
+tags:
+  - health
+  - readiness

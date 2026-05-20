@@ -33,16 +33,15 @@ import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
 import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
-import { AmbiguityIntentCompiler } from '../domain/query/service/ambiguity-intent-compiler.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import { ConstraintTopologyPlanner } from '../domain/query/service/constraint-topology-planner.js';
-import { validateFeatureFlagsAtStartup } from './feature-flag-coherence.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
 import type { RuntimeSupportServices } from './container-runtime-support.js';
 import { bootstrapLogger } from './bootstrap-logger.js';
+import { validateFeatureFlagsAtStartup } from './feature-flag-coherence.js';
 import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
@@ -83,10 +82,12 @@ export async function buildQueryPlanner(
   llmQueryInterpreterTimeoutMs?: number,
   phraseCache?: PhraseCachePort,
 ): Promise<Planner> {
-  // Wave G1 (ADR-018): refuse to start if the feature-flag snapshot is
-  // incoherent (e.g. BUNDLE_SELECTOR_ENABLED=true without
-  // CONSTRAINT_GRAPH_EMIT). Idempotent across calls via the per-env
-  // cache in `feature-flag-coherence.ts`.
+  // ADR-018 Wave F3: reject incoherent feature flag combinations BEFORE
+  // constructing any planner dependencies. A mis-configured container
+  // MUST refuse to start — see docs/adr/018-feature-flag-coherence.md
+  // for the full rule set and rationale. The validator is cached per
+  // process via validateFeatureFlagsAtStartup, so repeated builder
+  // invocations in tests do not re-read env.
   validateFeatureFlagsAtStartup();
 
   let fuzzyMatcher: FuzzyMatcherPort | undefined;
@@ -129,42 +130,24 @@ export async function buildQueryPlanner(
   }
 
   // Defense-in-depth: env validation already throws when LLM_QUERY_INTERPRETER
-  // is true and no OpenAI credential is set (see config/env.ts). If we reach this
+  // is true and OPENAI_API_KEY is unset (see config/env.ts). If we reach this
   // point with the flag enabled but no chatLlm, fail loudly rather than
   // silently falling back to the rule-only mapper.
   if (llmQueryInterpreter === true && chatLlm === undefined) {
     throw new Error(
-      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY/OPENAI_API_KEYS and chatLlm wiring',
+      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY and chatLlm wiring',
     );
   }
   const nlMapper = llmQueryInterpreter && chatLlm !== undefined
     ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
-  // ADR-012 Phase 1b.2 + Wave I4: auto-instantiate the
-  // ConstraintTopologyPlanner whenever a ChatLlmPort is available.
-  //
-  // Container-vs-compiler gate separation:
-  //   - The container gate (here) controls *construction*: the planner
-  //     instance must exist for the compiler to ever invoke it.
-  //   - The compiler gate (constraint-compiler.ts
-  //     `isConstraintGraphTopologyLlmEnabled()`) controls *invocation*
-  //     per-request by re-reading `CONSTRAINT_GRAPH_TOPOLOGY_LLM` on
-  //     every `compile()` call.
-  //
-  // Pre-I4 the container also pre-read the env flag at boot, so flipping
-  // `CONSTRAINT_GRAPH_TOPOLOGY_LLM=true` at runtime on an already-booted
-  // process was a no-op (the planner was `undefined` and could not be
-  // constructed without a restart). Auto-instantiating here lets the
-  // runtime flip actually take effect, with no cost when the flag stays
-  // off: the compiler's per-request check still skips the planner call.
+  // ADR-012 Phase 1b.2: wire optional ConstraintTopologyPlanner when a
+  // ChatLlmPort is available AND the env flag is on. When unavailable,
+  // ConstraintCompiler falls through to the deterministic trivial graph.
   const topologyPlanner =
-    chatLlm !== undefined
+    chatLlm !== undefined && process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true'
       ? new ConstraintTopologyPlanner(chatLlm)
-      : undefined;
-  const ambiguityIntentCompiler =
-    chatLlm !== undefined
-      ? new AmbiguityIntentCompiler(chatLlm)
       : undefined;
 
   return new Planner(
@@ -174,7 +157,6 @@ export async function buildQueryPlanner(
     nlMapper,
     fuzzyMatcher,
     topologyPlanner,
-    ambiguityIntentCompiler,
   );
 }
 
@@ -266,18 +248,10 @@ export function buildRanker(
   config: Config,
   support?: RuntimeSupportServices,
 ): Ranker {
-  const ltrEffective = support?.runtimeReadiness.ltrModels.effective;
   if (support?.ltrModels === undefined) {
-    const logLevel = ltrEffective?.issue === 'disabled' ? 'info' : 'warn';
-    bootstrapLogger[logLevel](
-      { ltrEffective },
-      '[Ranker] ltrModels not configured — LTR reranking disabled for all query classes',
-    );
+    bootstrapLogger.warn('[Ranker] ltrModels not configured — LTR reranking disabled for all query classes');
   } else if (support.ltrModels.size === 0) {
-    bootstrapLogger.warn(
-      { ltrEffective },
-      '[Ranker] ltrModels is an empty Map — LTR reranking will be skipped for all query classes',
-    );
+    bootstrapLogger.warn('[Ranker] ltrModels is an empty Map — LTR reranking will be skipped for all query classes');
   }
 
   return new Ranker(
@@ -302,9 +276,18 @@ export function buildDecisionEngine(
   adapters: CoreAdapterServices,
   config: Config,
 ): DecisionEngine {
-  const { threshold } = config.confidenceRefusal;
-  const confidenceRefusalPolicy =
-    threshold !== undefined ? new ConfidenceRefusalPolicy(threshold) : undefined;
+  // Epic 17.3: ConfidenceRefusalPolicy is on by default. The threshold is
+  // sourced from env (CONFIDENCE_REFUSAL_THRESHOLD), which carries the
+  // AURC-calibrated 0.45 default when the operator hasn't overridden it.
+  // The policy is always instantiated so the AdmissionGate's confidence-floor
+  // check (§e) never silently no-ops — pre-fix wiring made the policy
+  // conditional on the env being explicitly set, which left prod with the
+  // hallucination guard disabled until someone remembered to flip the flag.
+  // To effectively disable, set CONFIDENCE_REFUSAL_THRESHOLD=0 (NaN is still
+  // refused since it's treated as zero confidence).
+  const confidenceRefusalPolicy = new ConfidenceRefusalPolicy(
+    config.confidenceRefusal.threshold,
+  );
 
   return new DecisionEngine(adapters.thresholdStore, confidenceRefusalPolicy);
 }

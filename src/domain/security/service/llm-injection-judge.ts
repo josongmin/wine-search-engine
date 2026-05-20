@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
 import type { InjectionJudgeOptions, InjectionJudgePort } from '../port/injection-judge.port.js';
 import { SECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../shared/utils/time-units.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
 

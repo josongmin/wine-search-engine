@@ -14,6 +14,11 @@ export {
   type NormalizedConstraint,
   type ConstraintBundle,
 } from './constraint-bundle.js';
+export {
+  NormalizedConstraintSchema,
+  NORMALIZED_CONSTRAINT_MAX_STRING_CHARS,
+  NORMALIZED_CONSTRAINT_MAX_VALUE_LIST,
+} from './constraint-bundle-schema.js';
 export { type EvidenceStrength, type EvidenceItem } from './evidence-item.js';
 export {
   type ConstraintAtom,

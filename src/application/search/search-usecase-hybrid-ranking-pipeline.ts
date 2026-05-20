@@ -19,8 +19,8 @@ import type {
   EntityResolverPort,
   RankingPort,
 } from './port/search-pipeline-deps.port.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
-import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
 import {
   retrieveHybridCandidatesForPlan,

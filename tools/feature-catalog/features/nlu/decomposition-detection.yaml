@@ -1,0 +1,61 @@
+id: nlu.decomposition-detection
+name: Query Decomposition Detection ("A vs B")
+category: nlu
+summary: |
+  "X vs Y" / "compare X and Y" / "X와 Y", "X랑 Y 비교" 류 비교 쿼리 감지 후 leg pair로
+  분리. subtype 분류 (entity_pair / region_contrast / price_contrast 등).
+  decomposed-search-adapter가 단일 SearchUseCase 재사용.
+
+maturity: 4
+maturity_rationale: |
+  Pattern 기반 detection + decomposed adapter. E6-U3 lock으로 overengineering 방지.
+  test/regression/decomposition-detection.regression.test.ts (35 cases) 가
+  English/Korean comparison 패턴, subtype 분류 (entity/concept/mixed),
+  negative false-positive (와 connector / "compared to" 산문 / 단일 와인),
+  implicit comparative 미감지 boundary, 3-way greedy split, 특수문자 entity
+  (Château d'Yquem), Korean particle variants (와/과·랑/이랑/하고), 결정성
+  (5회 반복 동일 결과)을 모두 잠금. "X or Y which is better" 류 false
+  positive (right leg 가 "Y which is" 까지 흡수) 발견 후 regex tightening
+  으로 수정 — cue 종결을 `(?:\s|\?|$)` 로 확장 (영/한 패턴 동일 적용).
+  여전히 surface 패턴 매칭이라 implicit multi-way comparison
+  ("like X but cheaper") · 수동태 "compared to" · "between … and …" ·
+  cross-leg merging 은 미구현 (regression test 가 boundary 로 명시).
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by retrieval.comparison-retrieval)"
+
+key_files:
+  - src/domain/query/service/decomposition-detector.ts
+  - src/domain/query/model/query-decomposition.ts
+  - src/application/search/decomposed-search-adapter.ts
+
+tests:
+  regression:
+    - test/regression/decomposition-detection.regression.test.ts
+  unit:
+    - src/domain/query/service/__tests__/decomposition-detector.test.ts
+
+depends_on:
+  - nlu.anchor-extraction
+  - nlu.query-normalizer
+
+related_rfcs: []
+
+known_limitations:
+  - "Implicit multi-way comparison 미감지"
+  - "Cross-leg result merging 없음"
+  - "Decomposition fallback 정책 미정형 (단일 검색 회귀 조건)"
+
+next_steps:
+  - "AST 기반 dependency parse detection"
+  - "Cross-leg merge ranking"
+
+tags:
+  - comparison
+  - decomposition
+  - pattern-matching

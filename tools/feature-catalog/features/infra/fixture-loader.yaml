@@ -1,0 +1,39 @@
+id: infra.fixture-loader
+name: Fixture Loader & Suite Registry
+category: infra
+summary: |
+  Eval / regression / replay fixture를 디렉터리 단위로 로드하고 suite로 등록.
+  fixture 파일 발견 + Zod 검증 + suite 메타데이터.
+
+maturity: 3
+maturity_rationale: |
+  Functional, fixture-eval suite 백엔드. 그러나 fixture schema migration 정책 없음
+  (스키마 변경 시 모든 fixture 일괄 갱신 필요).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/infrastructure/fixture/fixture-loader.ts
+  - src/infrastructure/fixture/suite-registry.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Fixture schema migration 정책 없음"
+
+next_steps:
+  - "Fixture versioning + auto-migration"
+
+tags:
+  - fixture
+  - eval-infra

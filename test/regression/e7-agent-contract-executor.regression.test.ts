@@ -41,7 +41,7 @@ import {
   type FallbackPolicy,
   type PlanStep,
   type SynthesisContext,
-} from '../../src/application/agent/tool-outcome.js';
+} from '../../src/domain/agent/model/tool-outcome.js';
 import {
   TOOL_BATCH_POLICY,
   evaluateBatchPolicy,

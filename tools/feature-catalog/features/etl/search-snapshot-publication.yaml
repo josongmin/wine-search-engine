@@ -1,0 +1,44 @@
+id: etl.search-snapshot-publication
+name: Search Snapshot Publication & Indexing
+category: etl
+summary: |
+  Snapshot readiness 검증 + 아티팩트 저장소 publish + Vespa indexing 트리거. multi-step
+  state machine (ready → indexing → live → finalized) + 사전 점검 + rollback 절차.
+
+maturity: 3
+maturity_rationale: |
+  State machine + 사전 점검 완비. 매 데이터 갱신마다 사용, 데이터 손실 사고 없음.
+  그러나 Vespa indexing 실패 시 자동 rollback 없음 (수동 개입 필요).
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:publish-search-snapshot, pnpm etl:index"
+
+key_files:
+  - scripts/etl/publish-search-snapshot.ts
+  - scripts/etl/index-to-vespa.ts
+
+tests: {}
+
+depends_on:
+  - etl.search-snapshot-build
+  - infra.vespa-cloud
+
+related_rfcs: []
+
+known_limitations:
+  - "Vespa indexing 실패 시 자동 rollback 없음"
+  - "Batch indexing SLA 없음"
+
+next_steps:
+  - "Auto-rollback on SLA 위반"
+  - "Streaming incremental indexing"
+
+tags:
+  - publication
+  - state-machine
+  - rollback

@@ -52,8 +52,8 @@ import {
 } from '../../src/application/search/search-usecase-graph-executor.js';
 import { BundleSelectorImpl } from '../../src/domain/retrieval/service/bundle-selector.js';
 import { InMemoryBudgetLedger } from '../../src/domain/retrieval/service/budget-ledger.js';
-import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
-import { globalBudgetLedgerCounter } from '../../src/observability/budget-ledger-counters.js';
+import { globalBundleSelectorCounter } from '../../src/domain/observability/bundle-selector-counters.js';
+import { globalBudgetLedgerCounter } from '../../src/domain/observability/budget-ledger-counters.js';
 import type {
   ConstraintGraph,
   SubqueryNode,

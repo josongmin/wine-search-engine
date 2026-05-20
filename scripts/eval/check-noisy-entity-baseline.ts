@@ -15,7 +15,7 @@ import {
   loadNoisyEntityPredictions,
   scoreNoisyEntityBenchmark,
 } from './run-noisy-entity-eval.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 
 const DEFAULT_PREDICTIONS = resolveDataPath('data/noisy-entity-predictions-smoke.jsonl');
 const DEFAULT_BASELINE = resolveDataPath('data/noisy-entity-baseline.json');

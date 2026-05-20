@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { linkEvalTrainingReleaseToRuntimeState } from '../../../scripts/eval/run-eval-and-train-ltr.ts';
 import { loadSearchSnapshotRuntimeState } from '../../../src/infrastructure/health/search-snapshot-readiness.js';
-import { hashText } from '../../../src/shared/utils/stable-json.js';
+import { hashText } from '../../../src/domain/shared/utils/stable-json.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'eval-training-runtime-provenance-'));

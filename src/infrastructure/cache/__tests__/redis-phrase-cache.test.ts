@@ -213,7 +213,7 @@ describe('RedisPhraseCache', () => {
 
       const stats = await cache.getStats();
 
-      expect(stats).toEqual({ hits: 42, misses: 17 });
+      expect(stats).toEqual({ hits: 42, misses: 17, sets: 0 });
     });
 
     it('returns zeros when counters are absent', async () => {
@@ -222,7 +222,7 @@ describe('RedisPhraseCache', () => {
 
       const stats = await cache.getStats();
 
-      expect(stats).toEqual({ hits: 0, misses: 0 });
+      expect(stats).toEqual({ hits: 0, misses: 0, sets: 0 });
     });
 
     it('returns zeros on Redis error', async () => {
@@ -231,7 +231,7 @@ describe('RedisPhraseCache', () => {
 
       const stats = await cache.getStats();
 
-      expect(stats).toEqual({ hits: 0, misses: 0 });
+      expect(stats).toEqual({ hits: 0, misses: 0, sets: 0 });
     });
   });
 });

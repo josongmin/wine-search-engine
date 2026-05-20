@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import type {
   AgentQueryExecutionContract,
@@ -12,6 +12,8 @@ import {
 import {
   RECIPIENT_PROFILE_VALUES,
 } from '../../domain/query/service/recipient-situation-profile.js';
+import { estimateTokenCount } from './agent-llm-output.js';
+import type { AgentExecutionState } from './agent-execution-state.js';
 
 const log = bootstrapLogger.child({ component: 'AgentSemanticContractCompiler' });
 
@@ -336,11 +338,22 @@ export class AgentSemanticContractCompiler {
     readonly requestId: string;
     readonly deterministicContract: AgentQueryExecutionContract;
     readonly timeoutMs: number;
+    /**
+     * Shared execution state. Tokens spent on the semantic-contract LLM call
+     * are accumulated here so that the agent's `maxTotalTokens` guard
+     * (agent-run-loop.ts) accounts for this preamble call. Without this
+     * accumulation the budget can be exceeded by the contract call's tokens
+     * before the planner loop even begins.
+     */
+    readonly state: AgentExecutionState;
     readonly abortSignal?: AbortSignal | undefined;
   }): Promise<AgentSemanticContract | undefined> {
     if (!shouldCompileSemanticContract(input.query)) {
       return undefined;
     }
+
+    const systemPrompt = buildSystemPrompt();
+    const userPrompt = buildUserPrompt(input.query, input.deterministicContract);
 
     const controller = new AbortController();
     const propagateAbort = (): void => { controller.abort(); };
@@ -350,8 +363,8 @@ export class AgentSemanticContractCompiler {
       const result = await Promise.race([
         this.chatLlm.complete({
           messages: [
-            { role: 'system', content: buildSystemPrompt() },
-            { role: 'user', content: buildUserPrompt(input.query, input.deterministicContract) },
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
           ],
           temperature: 0,
           maxOutputTokens: SEMANTIC_CONTRACT_MAX_OUTPUT_TOKENS,
@@ -365,6 +378,11 @@ export class AgentSemanticContractCompiler {
           }, input.timeoutMs);
         }),
       ]);
+      // Account for tokens regardless of whether the response parses — the
+      // LLM call already consumed budget. Reuse the planner's estimator so
+      // the budget accounting stays consistent across both call sites.
+      input.state.totalInputTokens += estimateTokenCount(systemPrompt) + estimateTokenCount(userPrompt);
+      input.state.totalOutputTokens += estimateTokenCount(result.text);
       const parsed = parseSemanticContract(result.text);
       if (parsed === undefined || parsed.preservedSurface !== input.query) {
         log.warn(

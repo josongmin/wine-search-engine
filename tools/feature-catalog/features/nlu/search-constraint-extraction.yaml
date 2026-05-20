@@ -1,0 +1,49 @@
+id: nlu.search-constraint-extraction
+name: Search Constraint Extraction
+category: nlu
+summary: |
+  LLM 없는 결정적 constraint 추출. price (KRW/USD, adaptive band ±10%), vintage range,
+  wine type, region, grape exclusion. SearchConstraints 구조로 YQL NOT filter + numeric
+  range injection 가능.
+
+maturity: 4
+maturity_rationale: |
+  Regression 게이트 (search-constraint-extractor) + benchmark constraint-metrics 통합.
+  KRW band ±10%는 calibrated. 그러나 KRW↔USD rate hardcoded, negation regex가 복합
+  구절에 edge case (e.g. "Cabernet but not too tannic") 존재.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by semantic-contract + tool-input normalizer)"
+
+key_files:
+  - src/domain/query/service/search-constraint-extractor.ts
+
+tests:
+  regression:
+    - test/regression/search-constraint-extractor.regression.test.ts
+
+depends_on:
+  - nlu.query-normalizer
+
+related_rfcs:
+  - docs/RFC-004.md
+
+known_limitations:
+  - "KRW↔USD rate hardcoded"
+  - "Negation 복합 구문 edge case"
+  - "Exclusion scope ambiguity (primary grape vs any)"
+
+next_steps:
+  - "FX rate 외부 주입"
+  - "Phrase-level negation parsing"
+  - "Confidence score per extraction"
+
+tags:
+  - constraint-extraction
+  - deterministic
+  - zero-llm-cost

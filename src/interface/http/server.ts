@@ -33,11 +33,12 @@ import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerAgentRoute } from './routes/agent.route.js';
 import { registerAgentBenchmarkScenariosRoute } from './routes/agent-benchmark-scenarios.route.js';
+import { registerWineSearchRoute } from './routes/wine-search.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
 import { getAuthenticatedSubject, configureAuthenticatedSubjectTrust } from './authenticated-subject.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 import {
@@ -384,6 +385,15 @@ export async function createServer(
   registerFeedbackRoute(app, deps);
   if (deps.agentOrchestrator !== undefined) {
     registerAgentRoute(app, { agentOrchestrator: deps.agentOrchestrator });
+  }
+  if (deps.wineSearch !== undefined) {
+    // Plan-then-Execute `/v1/wine-search` — registered only when the
+    // composition root produced a wineSearch slice (WINE_SEARCH_ENABLED=true
+    // and Anthropic credential available). Strangler-fig coexistence with
+    // the legacy `/v1/agent/*` surface above.
+    registerWineSearchRoute(app, {
+      wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
+    });
   }
   registerAgentBenchmarkScenariosRoute(app, { enabled: enableAgentBenchmarkUi });
   registerOpenApiRoute(app);

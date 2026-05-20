@@ -6,7 +6,7 @@
  */
 
 import type { z } from 'zod';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
 import { DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
@@ -22,8 +22,8 @@ import type { DrinkingWindowBlock } from '../../domain/response/model/result-ite
 import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
-import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
-import { buildMachineResponseV2 } from '../../domain/response/service/machine-response-builder-v2.js';
+import type { SearchResponseV2Machine } from '../../interface/http/schemas/search-response-v2.schema.js';
+import { buildMachineResponseV2 } from '../../interface/http/response-builders/machine-response-builder-v2.js';
 import {
   buildFoodPairingStructuredFilters,
   buildFoodPairingStructuredPreferences,

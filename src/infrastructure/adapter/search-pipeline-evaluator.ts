@@ -17,7 +17,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const EVAL_REQUEST_ID_NANOID_LENGTH = 12;
 import { DomainError } from '../../domain/shared/error/domain-error.js';

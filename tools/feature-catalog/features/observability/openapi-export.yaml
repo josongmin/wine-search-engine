@@ -1,0 +1,43 @@
+id: observability.openapi-export
+name: OpenAPI 3.1 Auto-Generation & Export
+category: observability
+summary: |
+  GET /openapi.json — route contract catalog로부터 OpenAPI 3.1 spec 자동 생성.
+  외부 SDK + 클라이언트 도구 통합용. verify:http-contracts CI 게이트.
+
+maturity: 4
+maturity_rationale: |
+  Route contract와 1:1 parity 보장 (CI gate). Bridge export script (contracts:http) + spec
+  생성기. consumer 도구 (Postman / OpenAPI codegen) 사용 가능.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: GET /openapi.json"
+  - "CLI: pnpm contracts:http"
+
+key_files:
+  - src/interface/http/routes/openapi.route.ts
+  - src/interface/http/routes/http-route-contract-openapi.ts
+
+tests: {}
+
+depends_on:
+  - observability.http-contract-catalog
+
+related_rfcs:
+  - docs/RFC-014.md
+
+known_limitations:
+  - "OpenAPI 3.1 fully supported but tooling은 3.0 위주"
+
+next_steps:
+  - "3.0 fallback export"
+
+tags:
+  - api
+  - openapi
+  - tooling

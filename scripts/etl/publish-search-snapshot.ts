@@ -24,9 +24,9 @@ import { verifySearchSnapshotReadiness } from './verify-search-snapshot-readines
 import { verifyRuntimeGoldCatalogCoverage } from './verify-runtime-gold-catalog-coverage.js';
 import { resolveDefaultFixtureRepoRoot } from './snapshot-entity-identity.js';
 import { atomicWriteFile } from './etl-utils.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
-import { hashStableJson } from '../../src/shared/utils/stable-json.js';
+import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
 import {
   parseManifest,
   type AliasSnapshotRecord,

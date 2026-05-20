@@ -1,0 +1,40 @@
+id: infra.db-migrations
+name: PostgreSQL Migration Runner
+category: infra
+summary: |
+  Custom SQL migration runner (Flyway 미사용). migrations/ 디렉터리에서 .sql 파일 순차
+  실행 + 적용 ledger 관리. 로컬 docker → target RDS 마이그레이션 스크립트 포함.
+
+maturity: 3
+maturity_rationale: |
+  작동 안정, eval-benchmark-ledger-bootstrap test 보유. 그러나 down migration 정책
+  없음, dry-run 모드 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm migrate:local-docker / db:copy:local-to-rds"
+
+key_files:
+  - src/infrastructure/db/migrate.ts
+
+tests: {}
+
+depends_on:
+  - infra.postgresql
+
+related_rfcs: []
+
+known_limitations:
+  - "Down migration 정책 없음"
+  - "Dry-run 없음"
+
+next_steps:
+  - "Dry-run / preview 모드"
+
+tags:
+  - migration
+  - schema-management

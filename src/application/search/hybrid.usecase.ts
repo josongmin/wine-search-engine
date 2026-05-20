@@ -3,7 +3,7 @@ import type { SearchResponseV1 } from '../../domain/response/model/search-respon
 import type { SnapshotVersions } from './search.usecase.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
@@ -33,10 +33,10 @@ import type { SearchRequest } from './search-request.dto.js';
 import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
-import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
-import { createStageTimer } from '../../observability/stage-timer.js';
+import { createStageTimer } from '../../domain/shared/stage-timer.js';
 /**
  * Dependencies injected into the HybridUseCase.
  */

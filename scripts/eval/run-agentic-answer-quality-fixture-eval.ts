@@ -15,7 +15,7 @@ import {
   judgeFixtureAnswer,
   normalizeAgentFixtureCase,
 } from './agent-fixture-runner-common.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
 import { bootstrapBenchmarkLedgerPersistence } from './benchmark-ledger-bootstrap.js';

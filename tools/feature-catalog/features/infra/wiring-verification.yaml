@@ -1,0 +1,44 @@
+id: infra.wiring-verification
+name: External Wiring Verification (CI Gates)
+category: infra
+summary: |
+  CI에서 LLM (Anthropic + OpenAI injection) wiring + drinking-window ONNX model
+  유효성 + OpenAI injection classifier wiring을 사전 검증하는 verify 스크립트 모음.
+  Deploy 전 외부 의존성 핸드셰이크 보증.
+
+maturity: 4
+maturity_rationale: |
+  CI gate로 운영, deploy 전 안정성 확인. semgrep + 보안 패턴 체크와 함께 verify:security-local
+  / check:ci 게이트에 포함.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm verify:anthropic-wiring / verify:openai-injection-wiring / verify:drinking-window-model"
+
+key_files:
+  - scripts/verify-anthropic-wiring.ts
+  - scripts/verify-openai-injection-wiring.ts
+  - scripts/verify-drinking-window-model.ts
+
+tests: {}
+
+depends_on:
+  - infra.anthropic-chat-llm
+  - infra.openai-chat-llm
+  - retrieval.drinking-window-prediction
+
+related_rfcs: []
+
+known_limitations:
+  - "각 verify가 별개 스크립트 — 통합 entry 없음"
+
+next_steps:
+  - "verify:all 단일 entry"
+
+tags:
+  - ci-gate
+  - production-readiness

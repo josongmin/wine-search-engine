@@ -11,7 +11,7 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { parseNdjson } from './ndjson.js';
 import { normalizePairingsBatch } from './generate-pairings.js';

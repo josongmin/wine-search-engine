@@ -32,7 +32,7 @@ import {
   MixedRouteDegradationError,
   type MixedFallbackReason,
 } from '../model/mixed-degradation.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { annotateCandidateConstraintEvidenceBatch } from '../../retrieval/service/candidate-constraint-evidence.js';
 export type {
   AnchorResolverPort,

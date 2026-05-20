@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   LAMBDAMART_FEATURE_DIMENSION,
   LTR_FEATURE_SCHEMA_HASH,

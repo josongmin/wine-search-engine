@@ -1,0 +1,40 @@
+id: tools.internal-benchmark-routes
+name: Internal Benchmark Routes
+category: tools
+summary: |
+  내부 도구용 endpoint: /v1/agent-benchmark-scenarios (bench scenario 목록 export) +
+  /v1/internal-benchmark (단발 bench 실행). 외부 노출 차단, 디버그/CI용.
+
+maturity: 3
+maturity_rationale: |
+  HTTP route 와이어링 완료, bench harness가 사용. 그러나 access control이 ad-hoc
+  (header 기반).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: /v1/agent-benchmark-scenarios, /v1/internal-benchmark"
+
+key_files:
+  - src/interface/http/routes/agent-benchmark-scenarios.route.ts
+  - src/interface/http/routes/internal-benchmark.route.ts
+
+tests: {}
+
+depends_on:
+  - eval.benchmark-scenarios
+
+related_rfcs: []
+
+known_limitations:
+  - "Access control ad-hoc"
+
+next_steps:
+  - "Formal RBAC for internal routes"
+
+tags:
+  - internal
+  - benchmark

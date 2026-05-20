@@ -1,0 +1,42 @@
+id: infra.openai-chat-llm
+name: OpenAI Chat LLM Adapter
+category: infra
+summary: |
+  OpenAI Chat Completion API 어댑터 (structured output / JSON mode 지원). Anthropic
+  외 대안 + structured output 핫스왑 + LLM injection classifier OpenAI 변종.
+
+maturity: 3
+maturity_rationale: |
+  Adapter + circuit breaker test 보유. 그러나 production agent backend는 Anthropic
+  사용 중 — OpenAI는 fallback / 일부 use case (injection classifier).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/infrastructure/ai/openai-chat-llm.ts
+  - src/infrastructure/ai/openai-json.ts
+
+tests: {}
+
+depends_on:
+  - infra.chat-llm-port
+  - infra.openai-key-pool
+
+related_rfcs: []
+
+known_limitations:
+  - "Production agent backend가 아닌 fallback"
+
+next_steps:
+  - "Structured LLM port 통합으로 흡수"
+
+tags:
+  - llm
+  - openai
+  - fallback

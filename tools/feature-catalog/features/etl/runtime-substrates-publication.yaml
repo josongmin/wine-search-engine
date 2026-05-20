@@ -1,0 +1,44 @@
+id: etl.runtime-substrates-publication
+name: Runtime Substrates Publication
+category: etl
+summary: |
+  파생 index (alias / NL mapping / ambiguity registry / drinking-window rule)를 runtime
+  cache/CDN으로 publish. 버전 관리 + cache invalidation 포함.
+
+maturity: 2
+maturity_rationale: |
+  Substrate distribution 안정. 그러나 cache freshness SLA 없음, CDN 수동 invalidation
+  사용 중.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:publish-runtime-substrates"
+
+key_files:
+  - scripts/etl/publish-runtime-substrates.ts
+  - scripts/etl/build-ambiguity-registry.ts
+
+tests: {}
+
+depends_on:
+  - etl.korean-aliases-generation
+  - etl.doc-queries-generation
+
+related_rfcs: []
+
+known_limitations:
+  - "Cache 수동 invalidation"
+  - "TTL-based refresh 없음"
+
+next_steps:
+  - "Atomic cache version update"
+  - "TTL-based refresh"
+
+tags:
+  - publication
+  - cache
+  - runtime-assets

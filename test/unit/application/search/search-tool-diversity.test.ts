@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStageTimer } from '../../../../src/observability/stage-timer.js';
+import { createStageTimer } from '../../../../src/domain/shared/stage-timer.js';
 import type { SearchExecutorPort, SearchExecutorResult } from '../../../../src/application/search/port/search-executor.port.js';
 import { executeSearchWithTypedWineDiversityDiscovery } from '../../../../src/application/search/search-tool-diversity.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';

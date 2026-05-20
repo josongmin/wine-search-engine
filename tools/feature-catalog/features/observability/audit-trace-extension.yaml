@@ -1,0 +1,49 @@
+id: observability.audit-trace-extension
+name: Audit Trace Extension (fallback_trace SSoT)
+category: observability
+summary: |
+  Agent / search 응답에 부착되는 audit extension shape의 SSoT 정의. fallback_trace
+  (layer/reason), failedSynthesisAttempts, fallback_search_used 등 stable 외부 계약.
+  bench harness + audit consumer가 직접 파싱.
+
+maturity: 5
+maturity_rationale: |
+  @stability stable 표기, 외부 consumer 직접 의존. AuditExtensionEnvelopeSchema
+  (.strict() top-level) + AUDIT_EXTENSION_SCHEMA_VERSIONS append-only enum +
+  CURRENT_AUDIT_EXTENSION_SCHEMA_VERSION default fallback로 v1/v2 migration
+  policy 확립. property-based regression(fast-check 100 runs)으로 schema
+  strictness / round-trip / fallback_trace enum / version negotiation /
+  Korean 보존 검증.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP response: meta.fallback_trace, audit_extension"
+  - "Domain SSoT: AuditExtensionEnvelopeSchema (strict, versioned)"
+
+key_files:
+  - src/domain/audit/model/audit-extension.ts
+
+tests:
+  regression:
+    - test/regression/audit-trace-extension-properties.regression.test.ts
+    - test/regression/audit-extension-boundary.regression.test.ts
+    - test/regression/e8-audit-record.regression.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "v2 envelope shape는 예약 슬롯만 존재; 실제 v2 fields는 추후 RFC로 정의."
+
+next_steps:
+  - "v2 field set 결정 + producer migration 가이드 작성"
+
+tags:
+  - audit
+  - external-contract
+  - ssot

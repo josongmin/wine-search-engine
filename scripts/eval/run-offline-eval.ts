@@ -63,7 +63,7 @@ import {
   inferResolvedEntityType,
 } from './entity-type.js';
 import { verifyDefaultGoldenSplits } from './split-integrity.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { FixtureLoader } from '../../src/infrastructure/fixture/fixture-loader.js';
 import {
   OFFLINE_EVAL_SILVER_CORPUS,

@@ -15,7 +15,7 @@ import type { ProposalStore } from '../domain/learning/port/proposal-store.port.
 import type { RuntimeHandles } from './runtime-handles.js';
 import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { readPgSqlState } from '../infrastructure/db/pg-sqlstate.js';
-import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 
 export interface LearningContainerServices {
   readonly feedbackStore: FeedbackStore | null;

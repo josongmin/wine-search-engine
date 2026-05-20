@@ -11,7 +11,7 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
 import { enrichWineCertificationsBatch } from './enrich-certifications.js';
 import { atomicWriteFileSync, appendDeadLetter, backupFile } from './etl-utils.js';

@@ -24,7 +24,7 @@
 import { z } from 'zod';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import { compareScoreDescending } from '../../shared/utils/stable-comparator.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import {
   LTR_FEATURE_DIMENSION,
   LTR_FEATURE_NAME_ORDER,

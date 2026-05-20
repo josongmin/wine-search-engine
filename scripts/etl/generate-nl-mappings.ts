@@ -9,7 +9,7 @@
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import type { NLMapping } from '../../src/domain/attribute/model/nl-mapping.js';
 
 const DEFAULT_INPUT_PATH = resolve(process.cwd(), 'data/entity-ontology.json');

@@ -2,11 +2,11 @@ import type { SearchExecutorPort, SearchExecutorResult } from './port/search-exe
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
-import type { StageTimer } from '../../observability/stage-timer.js';
+import type { StageTimer } from '../../domain/shared/stage-timer.js';
 import { WINE_TYPE_DETECTION_PATTERNS, type WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 import type { CorpusCardinalityCache } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
 import { CORPUS_LIMITED_THRESHOLD } from '../../domain/retrieval/service/corpus-cardinality-cache.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 export const SEARCH_TOOL_DIVERSITY_MIN_LIMIT = 5;
 export const SEARCH_TOOL_DIVERSITY_WINE_TYPES = ['white', 'sparkling', 'red'] as const satisfies readonly WineTypeValue[];

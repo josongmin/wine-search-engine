@@ -1,0 +1,44 @@
+id: etl.silver-validation
+name: Silver Record Validation + Artifact Contract
+category: etl
+summary: |
+  SilverWineRecord NDJSON schema 검증 + artifact contract 강제. 필수 field, type enum,
+  numeric bound (price/alcohol/rating), date format. 잘못된 ~5-10 records per 10K 캐치
+  후 fail-fast.
+
+maturity: 3
+maturity_rationale: |
+  Validate-silver + artifact-contract 결합. integration test 운영 (test/integration/etl).
+  Pre-indexing gate로 안정. 그러나 schema versioning 부재 — 마이그레이션 시 backward
+  compat 정책 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:validate"
+
+key_files:
+  - scripts/etl/validate-silver.ts
+  - scripts/etl/artifact-contract.ts
+
+tests: {}
+
+depends_on:
+  - etl.vivino-to-silver
+
+related_rfcs: []
+
+known_limitations:
+  - "Schema versioning 부재"
+
+next_steps:
+  - "Schema 버전 (v1, v2) 도입"
+  - "Backward compat 정책"
+
+tags:
+  - data-quality
+  - schema-validation
+  - ci-gate

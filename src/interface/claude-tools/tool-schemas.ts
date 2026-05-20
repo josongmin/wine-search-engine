@@ -91,7 +91,7 @@ export {
   DrinkingWindowAttemptInputSchema,
   FoodPairingAttemptInputSchema,
   SearchToolAttemptInputSchema,
-} from '../../application/agent/agent-tool-attempt-schema.js';
+} from '../../domain/agent/model/agent-tool-attempt-schema.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,

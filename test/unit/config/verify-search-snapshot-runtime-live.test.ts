@@ -8,8 +8,8 @@ import {
   verifySearchSnapshotRuntimeStateLive,
   type LoadedSearchSnapshotRuntimeState,
 } from '../../../src/infrastructure/health/search-snapshot-readiness.js';
-import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../../src/shared/constants/search-snapshot.js';
-import { hashStableJson, hashText, stableJsonStringify } from '../../../src/shared/utils/stable-json.js';
+import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../../src/domain/shared/constants/search-snapshot.js';
+import { hashStableJson, hashText, stableJsonStringify } from '../../../src/domain/shared/utils/stable-json.js';
 
 function hashRuntimeNlMappings(payload: unknown): string {
   return hashText(`${stableJsonStringify(payload)}\n`);

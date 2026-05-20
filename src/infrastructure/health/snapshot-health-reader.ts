@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'snapshot-health-reader' });
 

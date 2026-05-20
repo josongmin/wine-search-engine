@@ -1,0 +1,51 @@
+id: retrieval.comparison-retrieval
+name: Comparison Retrieval (Parallel Dual-Leg)
+category: retrieval
+summary: |
+  두 wine 비교 시나리오에서 query_a / query_b 두 leg를 병렬 hybrid retrieval로 실행하고
+  결과를 per-side로 머지. shared-constraints로 양쪽 leg에 공통 필터 적용.
+
+maturity: 3
+maturity_rationale: |
+  프로덕션 와이어링 완료, compare_wines agent tool로 노출. parallel execution 및
+  constraint isolation regression 게이트 보유. 그러나 cross-leg balance scoring /
+  comparison-aware reranking 부재로 단순 "2개 검색의 합집합" 수준.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: compare_wines"
+  - "HTTP: POST /v1/search (decomposed)"
+
+key_files:
+  - src/domain/retrieval/service/compare-retriever.ts
+  - src/application/search/compare-tool-shared-constraints.ts
+  - src/application/search/decomposed-search-adapter.ts
+
+tests:
+  regression:
+    - test/regression/agent-parallel-tools.regression.test.ts
+    - test/regression/agent-tools-inner-surface-contract.regression.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - nlu.decomposition-detection
+
+related_rfcs:
+  - docs/RFC-010.md
+
+known_limitations:
+  - "Cross-leg balance scoring 없음 — 한쪽 leg 매칭 0이어도 silently 진행"
+  - "Comparison-aware diversity / reranking 부재"
+
+next_steps:
+  - "Pairwise balance score 도입 (양쪽 leg 결과 분포 패널티)"
+  - "Side-aware reranking (e.g. 사용자 비교 의도에 맞춘 attribute 부각)"
+
+tags:
+  - parallel-execution
+  - agent-tool
+  - comparison

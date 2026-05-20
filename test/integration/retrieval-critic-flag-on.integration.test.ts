@@ -45,9 +45,9 @@ import {
 import { createQueryRewriter } from '../../src/domain/retrieval/service/query-rewriter.js';
 import { BundleSelectorImpl } from '../../src/domain/retrieval/service/bundle-selector.js';
 import { InMemoryBudgetLedger } from '../../src/domain/retrieval/service/budget-ledger.js';
-import { globalRetrievalCriticCounter } from '../../src/observability/retrieval-critic-counters.js';
-import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
-import { globalBudgetLedgerCounter } from '../../src/observability/budget-ledger-counters.js';
+import { globalRetrievalCriticCounter } from '../../src/domain/observability/retrieval-critic-counters.js';
+import { globalBundleSelectorCounter } from '../../src/domain/observability/bundle-selector-counters.js';
+import { globalBudgetLedgerCounter } from '../../src/domain/observability/budget-ledger-counters.js';
 import { buildToolCallEvidenceFrame } from '../../src/domain/agent/service/build-tool-call-evidence-frame.js';
 import type { CandidatePoolPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';

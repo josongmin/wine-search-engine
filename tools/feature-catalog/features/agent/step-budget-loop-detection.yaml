@@ -1,0 +1,45 @@
+id: agent.step-budget-loop-detection
+name: Step Budget + Loop Detection (SOTA Korean Jaccard)
+category: agent
+summary: |
+  Agent loop을 가두기 위한 SOTA budget tracker. (1) exact-match dedup by canonical JSON
+  key, (2) 3-tier trigram Jaccard near-duplicate (Korean 0.92 / ASCII 0.85 / short 0.6),
+  (3) per-tool adaptive cap = max(3, ceil(maxSteps × 0.6)). Dry-run pattern + atomic
+  parallel batch commit + anti-padding allowlist + SHA-256 depth-limit sentinel.
+
+maturity: 5
+maturity_rationale: |
+  Domain best-in-class. Jaccard threshold가 Korean price-relaxation 케이스
+  ("30만원 vs 50만원")에 대해 경험적으로 calibrated. Per-tool cap formula 정당화 inline
+  documented. 22K LOC test로 모든 edge case + 적대적 입력 (zip-bomb, padding) 커버.
+  Immutable / replay-stable / atomic-commit pattern.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by react-orchestrator)"
+
+key_files:
+  - src/domain/agent/service/step-budget.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-016.md
+
+known_limitations: []
+
+next_steps:
+  - "Production loop pattern monitoring"
+  - "Hangul dominance ratio (0.5) production-scale 재검증"
+
+tags:
+  - loop-detection
+  - korean-native
+  - sota
+  - deterministic

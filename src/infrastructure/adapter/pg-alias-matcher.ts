@@ -5,13 +5,18 @@ import {
   isPhoneticAliasSurfaceCompatible,
 } from '../../domain/query/service/alias-lookup-plan.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 import {
   ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,
   isActiveSnapshotSubstrateBootstrapAllowed,
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
+import {
+  damerauLevenshteinOsa,
+  editDistanceSimilarity,
+  jaroWinklerSimilarity,
+} from '../../domain/alias/service/edit-distance.js';
 
 const ALIASES_TABLE_PRESENCE_CACHE_TTL_MS = 10_000;
 const ALIASES_TABLE_MISSING_CACHE_TTL_MS = 10_000;
@@ -192,6 +197,27 @@ function resolveExactLookupStrategy(
   return 'lexical_exact';
 }
 
+/**
+ * Aggregates the four string-similarity signals into a single best score
+ * per query variant. The four signals capture orthogonal error modes:
+ *  - Damerau-Levenshtein (OSA) similarity → catches single-edit typos
+ *    including adjacent transpositions ("Sasicaia" ↔ "Sassicaia"); strictly
+ *    ≥ vanilla Levenshtein similarity for any input.
+ *  - Jaro-Winkler → rewards prefix agreement, the dominant pattern for
+ *    user-typed entity names that share a common producer prefix
+ *    (e.g. Bordeaux "Château …" cluster).
+ *  - Trigram (3-gram) Jaccard overlap → catches local substring agreement
+ *    when ordering / casing differs.
+ *  - Bigram (2-gram) Jaccard overlap → catches very short surfaces where
+ *    trigram coverage collapses.
+ *
+ * Surviving the threshold gate requires either the OSA edit distance to
+ * be within {@link COMPACT_FUZZY_DISTANCE_RATIO} of length OR an n-gram
+ * overlap to clear its dedicated floor. The reported similarity is the
+ * max of the four, so the matcher reports the *strongest* signal — which
+ * is the right semantic for fuzzy alias lookup (any one of these being
+ * strong indicates a plausible match).
+ */
 function bestFuzzySimilarity(
   queryVariants: readonly QueryVariantCandidate[],
   candidateCompact: string,
@@ -202,61 +228,27 @@ function bestFuzzySimilarity(
     const queryCompact = queryVariant.value;
     const maxLen = Math.max(queryCompact.length, candidateCompact.length);
     const maxDistance = Math.max(1, Math.floor(maxLen * COMPACT_FUZZY_DISTANCE_RATIO));
-    const distance = editDistance(queryCompact, candidateCompact);
+    const damerauDistance = damerauLevenshteinOsa(queryCompact, candidateCompact);
     const trigramOverlap = charNgramOverlap(queryCompact, candidateCompact);
     const bigramOverlap = charNgramOverlap(queryCompact, candidateCompact, 2);
 
     if (
-      distance > maxDistance &&
+      damerauDistance > maxDistance &&
       trigramOverlap < MIN_CHAR_NGRAM_OVERLAP &&
       bigramOverlap < MIN_BIGRAM_OVERLAP
     ) {
       continue;
     }
 
-    const editSimilarity = 1 - distance / maxLen;
-    const similarity = Math.max(editSimilarity, trigramOverlap, bigramOverlap);
+    const damerauSimilarity = editDistanceSimilarity(queryCompact, candidateCompact, damerauDistance);
+    const jaroWinkler = jaroWinklerSimilarity(queryCompact, candidateCompact);
+    const similarity = Math.max(damerauSimilarity, jaroWinkler, trigramOverlap, bigramOverlap);
     if (best === null || similarity > best.similarity) {
       best = { similarity, strategy: queryVariant.strategy };
     }
   }
 
   return best;
-}
-
-function editDistance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-
-  let prev = new Array<number>(n + 1);
-  let curr = new Array<number>(n + 1);
-
-  for (let j = 0; j <= n; j++) {
-    prev[j] = j;
-  }
-
-  for (let i = 1; i <= m; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      const del = prev[j];
-      const ins = curr[j - 1];
-      const sub = prev[j - 1];
-      if (del === undefined || ins === undefined || sub === undefined) {
-        throw new Error('levenshtein: internal row undefined');
-      }
-      curr[j] = Math.min(del + 1, ins + 1, sub + cost);
-    }
-    [prev, curr] = [curr, prev];
-  }
-
-  const distance = prev[n];
-  if (distance === undefined) {
-    throw new Error('levenshtein: result undefined');
-  }
-  return distance;
 }
 
 function groupRows<TRow extends AliasRow>(

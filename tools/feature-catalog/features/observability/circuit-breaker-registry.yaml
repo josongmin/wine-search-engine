@@ -1,0 +1,52 @@
+id: observability.circuit-breaker-registry
+name: Circuit Breaker Registry
+category: observability
+summary: |
+  외부 의존성(Vespa, Redis, LLM API)에 대한 circuit breaker 중앙 등록부. state
+  (closed/open/half-open), failure count, last-trip timestamp 추적. graceful
+  degradation 보장.
+
+maturity: 5
+maturity_rationale: |
+  Simple but effective pattern. Vespa / Redis / LLM 모두 wired, cascading failure 방지
+  검증됨. fallback path well-tested. Prometheus-friendly snapshot export
+  (`getRegistrySnapshot()`) 추가됨 — flat `{name, state, failures, last_trip_ms?}`
+  shape, lowercase + kebab-case state labels (`closed` / `open` / `half-open`).
+  State machine은 property-based regression suite로 검증
+  (`test/regression/circuit-breaker-registry-properties.regression.test.ts`):
+  CLOSED→OPEN/threshold, cooldown invariant (deterministic clock via fake timers),
+  half-open probe success closes / failure reopens with extended cooldown,
+  counter monotonicity, multi-breaker registry isolation. State persistence
+  (restart 시 reset)는 의도된 디자인 — in-process breaker는 redeploy 시
+  re-evaluate 하는 것이 안전.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/observability/circuit-breaker-registry.ts
+
+tests:
+  regression:
+    - test/regression/circuit-breaker-registry-properties.regression.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "State persistence 없음 (restart 시 초기화) — 의도된 in-process 디자인"
+
+next_steps:
+  - "Wire `getRegistrySnapshot()` into `/metrics/degradation` Prom gauge exporter"
+  - "Optional: Redis-backed state persistence for warm restarts"
+
+tags:
+  - resilience
+  - circuit-breaker
+  - ssot

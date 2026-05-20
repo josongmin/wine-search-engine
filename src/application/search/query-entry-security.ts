@@ -4,7 +4,7 @@ import type { QueryEntrySecurityObserver } from '../../domain/security/port/secu
 import {
   PolicyBlockedError,
 } from '../../domain/shared/error/policy-blocked.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 
 type QueryEntrySecurityLayer = 'LAYER_1_BLOCKED' | 'LAYER_2_BLOCKED';

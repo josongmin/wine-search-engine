@@ -1,0 +1,46 @@
+id: observability.security-metrics
+name: Query Entry Security Metrics
+category: observability
+summary: |
+  Query sanitizer + admission gate에서 차단된 query를 reason (homoglyph / injection /
+  rate-limit / oversized) 별 카운트. 보안 anomaly 모니터링용.
+
+maturity: 4
+maturity_rationale: |
+  Cumulative reason-keyed counter + time-bucketed ring (per-reason `Uint32Array`
+  with injectable clock) + structural `checkThreshold({tripped, observed,
+  threshold})` alert hook + Prometheus-friendly snapshot export
+  `{reason, count_60s, count_300s}`. Pattern mirrors silent-skip-counters
+  wave-1 (maturity 4). Alert dispatch (Slack/PD/etc.) remains external —
+  this module is structural only.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal telemetry"
+
+key_files:
+  - src/infrastructure/observability/query-entry-security-metrics.ts
+
+tests:
+  regression:
+    - test/regression/security-metrics-time-series.regression.test.ts
+
+depends_on:
+  - security.query-sanitizer
+
+related_rfcs: []
+
+known_limitations:
+  - "Alert dispatch (Slack/PagerDuty/etc.) wiring is external to this module"
+
+next_steps:
+  - "Wire `checkThreshold` verdicts into the alerting transport"
+  - "Expose `snapshot()` rows through the metrics HTTP surface"
+
+tags:
+  - security
+  - observability

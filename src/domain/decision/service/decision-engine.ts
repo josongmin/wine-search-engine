@@ -29,9 +29,9 @@ import { AdmissionGate } from './admission-gate.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { buildAuthorityTraceRef } from './authority-trace.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import type { EvidenceItem } from '../../shared/types/evidence-item.js';
 
 /**

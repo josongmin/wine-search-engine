@@ -1,4 +1,4 @@
-import { normalizeForMatch } from '../../src/domain/alias/service/alias-matcher.js';
+import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
 import type { EnrichedSilverRecord } from './types.js';
 import { inferTransliterationSourceLang } from './transliteration-helpers.js';

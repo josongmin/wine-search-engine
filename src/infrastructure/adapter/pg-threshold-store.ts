@@ -12,7 +12,7 @@
 import type { Pool } from 'pg';
 import type { ThresholdStore } from '../../domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../domain/query/model/threshold-profile.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'PgThresholdStore' });
 

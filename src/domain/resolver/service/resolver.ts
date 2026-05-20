@@ -1,5 +1,5 @@
 import type { DecisionStatus, NextAction, QueryClass } from '../../shared/types/index.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
 import type { NormalizedQueryViews } from '../../query/model/query-views.js';

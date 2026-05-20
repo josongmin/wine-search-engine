@@ -2,12 +2,13 @@ import type { AgentPlannerDirective } from './agent-execution-state.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentQueryExecutionContract } from './agent-query-execution-contract.js';
 import { extractPendingDrinkabilityEntityIds } from './agent-query-execution-contract.js';
+import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
 
 export class AgentContractPolicy {
   buildGroundedSearchDirective(): AgentPlannerDirective {
     return {
       kind: 'grounded_search_required',
-      instruction: 'This request still requires a grounded wine search before answering. Call search_wines first and answer only from the returned evidence.',
+      instruction: AGENT_DIRECTIVE_COPY.english.groundedSearch,
     };
   }
 
@@ -15,7 +16,7 @@ export class AgentContractPolicy {
     return {
       kind: 'required_tool',
       tool,
-      instruction: `This request requires ${tool} before answering. Call ${tool} first and answer only from the returned evidence.`,
+      instruction: AGENT_DIRECTIVE_COPY.english.requiredTool(tool),
     };
   }
 

@@ -38,7 +38,7 @@ import { isProvenanceChannel } from '../../domain/retrieval/model/provenance.js'
 import { preferCanonicalRetrievalChannelLabels } from '../../domain/retrieval/model/retrieval-channel.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'eval_provenance' });
 

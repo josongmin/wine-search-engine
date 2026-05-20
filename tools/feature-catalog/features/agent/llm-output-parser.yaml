@@ -1,0 +1,49 @@
+id: agent.llm-output-parser
+name: LLM Output Parser (JSON Tool Call Extraction)
+category: agent
+summary: |
+  Agent LLM 텍스트 출력에서 action/answer 추출. 5가지 recovery path (standard / bare /
+  embedded / partial-batch / fallback) + input repair (unknown-key strip, malformed JSON
+  re-wrap) + defect/repair metadata 기록.
+
+maturity: 3
+maturity_rationale: |
+  Functional하고 regression 게이트 있음 (prompt-contract). 그러나 795 lines manual JSON
+  파싱은 modern LLM API의 native tool_use blocks로 대체 가능한 technical debt. recovery
+  path 5개의 우선순위 정형 명세 부재.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by react-planner)"
+
+key_files:
+  - src/application/agent/agent-llm-output.ts
+  - src/domain/agent/model/agent-tool-attempt-schema.ts
+
+tests:
+  regression:
+    - test/regression/agent-prompt-contract.regression.test.ts
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-007.md
+
+known_limitations:
+  - "Manual JSON 파싱 — native tool_use 대체 가능"
+  - "Recovery path 우선순위 정형 명세 없음"
+  - "defect/repair metadata가 response size 증가시킴"
+
+next_steps:
+  - "Provider native tool_use blocks 마이그레이션"
+  - "agent-llm-output.ts 전체 삭제 (~795 lines)"
+
+tags:
+  - llm-interface
+  - json-parsing
+  - technical-debt
+  - deletion-candidate

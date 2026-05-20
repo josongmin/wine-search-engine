@@ -31,13 +31,18 @@ describe('DeterministicDrinkingWindowPredictor', () => {
   it('returns a structural deterministic window anchored to vintage', () => {
     const predictor = new DeterministicDrinkingWindowPredictor();
 
-    expect(predictor.predict(input)).toEqual({
+    const prediction = predictor.predict(input);
+    expect(prediction).toMatchObject({
       drinkingWindowStart: 2021,
       drinkingWindowEnd: 2032,
       peakYear: 2026,
       confidence: 'low',
       modelVersion: `deterministic:${STRUCTURAL_DRINKING_WINDOW_FORMULA_VERSION}`,
     });
+    // Maturity-3 contract: numeric confidenceScore is emitted in [0, 1] and
+    // aligned with the legacy 'low' band (< CONFIDENCE_MEDIUM_THRESHOLD = 0.5).
+    expect(prediction.confidenceScore).toBeGreaterThanOrEqual(0);
+    expect(prediction.confidenceScore).toBeLessThan(0.5);
   });
 });
 

@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import type { CalibrationStore, CalibrationParams } from '../../domain/resolver/port/calibration-store.port.js';
 import type { QueryClass } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'PgCalibrationStore' });
 

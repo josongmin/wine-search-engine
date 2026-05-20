@@ -1,0 +1,43 @@
+id: infra.reranker
+name: Cohere Reranker (+ Cached Wrapper)
+category: infra
+summary: |
+  Cohere rerank API 어댑터 + cached-reranker로 동일 query/doc 조합 cache. retrieval
+  candidate pool 위 후처리 reranking 후보 (현재 hybrid score blend만 사용 중).
+
+maturity: 2
+maturity_rationale: |
+  어댑터 코드 존재, cache wrapper 있음. 그러나 hybrid retrieval pipeline에 wired되지
+  않음 (POC 단계). 프로덕션 적용 미진행.
+
+status: experimental
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (POC)"
+
+key_files:
+  - src/infrastructure/ai/cohere-reranker.ts
+  - src/infrastructure/ai/cached-reranker.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Production retrieval pipeline 미wired"
+  - "A/B 테스트 결과 없음"
+  - "Cost/latency budget 미수립"
+
+next_steps:
+  - "Dual-lane fusion 뒤에 rerank stage 추가 (feature flag)"
+  - "A/B 테스트로 quality 검증"
+
+tags:
+  - reranking
+  - experimental
+  - poc

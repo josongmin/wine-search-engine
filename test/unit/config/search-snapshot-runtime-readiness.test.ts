@@ -29,7 +29,7 @@ import {
   canonicalizeEntityRuntimeRows,
   probeSearchSnapshotRuntimeState,
 } from '../../../src/infrastructure/health/search-snapshot-readiness.js';
-import { hashStableJson, hashText, stableJsonStringify } from '../../../src/shared/utils/stable-json.js';
+import { hashStableJson, hashText, stableJsonStringify } from '../../../src/domain/shared/utils/stable-json.js';
 
 function hashRuntimeNlMappings(payload: unknown): string {
   return hashText(`${stableJsonStringify(payload)}\n`);

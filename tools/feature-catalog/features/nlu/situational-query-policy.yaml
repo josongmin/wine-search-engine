@@ -1,0 +1,54 @@
+id: nlu.situational-query-policy
+name: Situational Query Policy (OOD + Online Tasting Filter)
+category: nlu
+summary: |
+  특수 케이스 early-exit classifier. (1) phrase-level online tasting query
+  (hard-block, context-modifier required); (2) OOD alcohol query (spirits/
+  beer/cocktail — redirect with pairing-intent preservation when applicable);
+  (3) unsupported external info (weather). 매칭 시 situational directive 반환,
+  아니면 pass-through.
+
+maturity: 3
+maturity_rationale: |
+  Phrase-level parsing 적용 — "tasting notes" / "시음 노트" false-positive
+  제거 (audit-identified bug fixed). Online-tasting hit requires BOTH a
+  tasting token AND a live/online context modifier (online, virtual, live,
+  session, 실시간, 온라인, 시음회). OOD alcohol redirect는 pairing intent를
+  보존 — "beer that pairs with steak" → redirect가 steak 페어링 제안을
+  유지함. Cocktail이 OOD alcohol 어휘에 추가됨. Empty/whitespace 입력 안전
+  처리. 18-case Unicode-safe regression suite (Korean + English + mixed).
+  여전히 keyword-based이지만 phrase-level precision과 intent preservation
+  으로 productionizable 수준.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by react-orchestrator admission, synthesis-runner, answer-recovery-policy, agent-tool-execution-policy)"
+
+key_files:
+  - src/application/agent/agent-situational-query-policy.ts
+
+tests:
+  regression:
+    - test/regression/situational-query-policy-precision.regression.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Pairing context extraction은 verbatim residue 기반 — sentence parsing 아님"
+  - "Confidence score 미제공 (binary classification)"
+  - "Context modifier vocabulary는 hard-coded (online/virtual/live/session/실시간/온라인/시음회)"
+
+next_steps:
+  - "LLM-backed intent classifier (situational vs lexical) with calibrated confidence"
+  - "Pairing dish entity extraction via NER instead of residue heuristic"
+  - "Expand OOD vocabulary coverage (mead, perry, fortified non-wine, etc.)"
+
+tags:
+  - ood-filtering
+  - early-exit

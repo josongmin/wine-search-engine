@@ -1,0 +1,45 @@
+id: nlu.static-ambiguity-dictionary
+name: Static Ambiguity Dictionary
+category: nlu
+summary: |
+  와인 도메인 빈번 ambiguity (Riesling=wine type vs grape, Bordeaux=region vs style,
+  Champagne=sparkling vs region-of-origin) 정적 참조. planner intent detection에서
+  disambiguation hint 제공.
+
+maturity: 3
+maturity_rationale: |
+  Compact (~118 lines), 50+ entry 수작업 curated. planner-intent-detection이 사용.
+  그러나 정적이라 신규 ambiguity는 코드 변경 필요. frequency weighting / context-aware
+  ranking / 임베딩 fallback 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/query/service/static-ambiguity-dictionary.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-003.md
+
+known_limitations:
+  - "정적 (코드 변경 필요)"
+  - "Frequency weighting 없음"
+  - "Context-aware ranking 없음"
+
+next_steps:
+  - "Versioned data file (YAML)로 분리"
+  - "Embedding 기반 confidence fallback"
+
+tags:
+  - disambiguation
+  - reference
+  - static-data

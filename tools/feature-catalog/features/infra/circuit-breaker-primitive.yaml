@@ -1,0 +1,38 @@
+id: infra.circuit-breaker-primitive
+name: Circuit Breaker Primitive
+category: infra
+summary: |
+  Domain shared/circuit-breaker — open/closed/half-open 상태 + threshold + cooldown.
+  observability.circuit-breaker-registry가 이 primitive를 등록 관리.
+
+maturity: 4
+maturity_rationale: |
+  단순 잘 검증된 pattern, observability registry와 결합되어 다수 종속성에 wired.
+  Unit test 보유. State persistence는 없음 (in-memory only).
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/shared/circuit-breaker
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "In-memory만 (restart 시 reset)"
+
+next_steps:
+  - "Redis-backed state"
+
+tags:
+  - resilience
+  - primitive

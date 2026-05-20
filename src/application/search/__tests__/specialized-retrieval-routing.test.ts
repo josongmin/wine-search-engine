@@ -6,7 +6,7 @@ import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-can
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import { MixedRouteDegradationError } from '../../../domain/mixed/model/mixed-degradation.js';
-import { createStageTimer } from '../../../observability/stage-timer.js';
+import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
 function makePlan(overrides: Partial<QueryPlanV1>): QueryPlanV1 {
   return {

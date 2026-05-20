@@ -81,12 +81,27 @@ export interface DrinkingWindowInput {
 
 /**
  * Drinking-window prediction output.
+ *
+ * The legacy enum `confidence` is retained for backward compatibility with
+ * downstream surfaces. `confidenceScore` is the numeric confidence bound
+ * (∈ [0, 1]) introduced for maturity-3 — required so callers can do better
+ * than the three coarse buckets when ranking or filtering. The enum and the
+ * score MUST stay aligned via the thresholds documented in
+ * `structural-drinking-window-formula.ts`:
+ *   score >= CONFIDENCE_HIGH_THRESHOLD (0.75) -> 'high'
+ *   score >= CONFIDENCE_MEDIUM_THRESHOLD (0.5) -> 'medium'
+ *   else -> 'low'
+ *
+ * Adapters that cannot produce a continuous score (legacy ONNX path) MUST
+ * map their enum confidence back to the midpoint of the corresponding band.
  */
 export interface DrinkingWindowPrediction {
   readonly drinkingWindowStart: number;
   readonly drinkingWindowEnd: number;
   readonly peakYear: number;
   readonly confidence: 'high' | 'medium' | 'low';
+  /** Numeric confidence bound in [0, 1]. See class doc for enum alignment. */
+  readonly confidenceScore: number;
   readonly modelVersion: string;
 }
 

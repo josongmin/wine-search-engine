@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, normalize, resolve } from 'node:path';
 import { z } from 'zod';
 
-import { normalizeForMatch } from '../../src/domain/alias/service/alias-matcher.js';
+import { normalizeForMatch } from '../../src/domain/alias/service/normalize.js';
 import {
   computeIdentitySignature,
   normalizeCanonicalLabelForIdentity,
@@ -22,7 +22,7 @@ import {
   type CanonicalEntityId,
   type SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import type { EntitySnapshotRecord } from './search-snapshot-schema.js';
 
 /** Fields sufficient for ADR-007 wine canonical id (gold overlay + identity signature). */
@@ -35,7 +35,7 @@ export type WineSnapshotIdentityRow = Pick<
 import { hashText } from './search-snapshot-schema.js';
 import {
   isSourceRecordStylePublicEntityId,
-} from '../../src/shared/constants/public-entity-id-namespace.js';
+} from '../../src/domain/shared/constants/public-entity-id-namespace.js';
 
 /** Prefix for snapshot entity ids when no benchmark gold row matches (ADR-007). */
 export const SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX = 'wine-ce-' as const;

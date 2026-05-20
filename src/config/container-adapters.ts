@@ -28,7 +28,7 @@ import { WatchlistAwareSearchIndex } from '../infrastructure/watchlist/watchlist
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { isWatchlistEnabled } from './watchlist.js';
-import { bootstrapLogger } from './bootstrap-logger.js';
+import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';

@@ -8,7 +8,7 @@ import {
   normalizeExactMetadataSearchInput,
 } from '../../../../src/application/agent/agent-query-execution-contract.js';
 import type { AgentStep } from '../../../../src/domain/agent/model/agent-step.js';
-import type { ToolOutcome } from '../../../../src/application/agent/tool-outcome.js';
+import type { ToolOutcome } from '../../../../src/domain/agent/model/tool-outcome.js';
 
 describe('agent query execution contract', () => {
   it('classifies drinkability and entity-metadata signals from normalized Korean queries', () => {

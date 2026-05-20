@@ -1,22 +1,24 @@
+import { z } from 'zod';
 import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { CIRCUIT_BREAKER_OPEN_CODE } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   buildSynthesisSystemMessage,
   buildUserMessage,
 } from './agent-prompt.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
-import type { ToolOutcome } from './tool-outcome.js';
+import type { ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
 import {
   estimateTokenCount,
   isValidLlmResult,
   parseLlmJsonObject,
   type LlmResult,
 } from './agent-llm-output.js';
+import { transitionTerminationReason } from '../../domain/agent/service/termination-state-machine.js';
 
 const defaultLog = bootstrapLogger.child({ component: 'AgentObservationSynthesisRunner' });
 const SYNTHESIS_TIMEOUT_MS = 12_000;
@@ -87,33 +89,98 @@ interface ObservationSynthesisMessages {
 
 const GROUNDING_JSON_MARKER = 'GROUNDING_JSON: ';
 
-function compactObservationForSynthesis(observation: string): string {
+/**
+ * Fence schema for the GROUNDING_JSON payload embedded in tool observations.
+ *
+ * Why this fence exists: agent observation strings end with a synthetic
+ * `GROUNDING_JSON: {…}` envelope produced by `agent-tools.ts`. The synthesis
+ * prompt builder previously forwarded that envelope verbatim. If the embedded
+ * JSON was malformed (truncated by an observation cap, mutated by a buggy
+ * upstream pass, or shaped wrong by a future tool), the LLM would hallucinate
+ * against corrupted ground truth. The fence parses + validates the payload
+ * shape before the frame is admitted to the synthesis prompt; failures cause
+ * the frame to be dropped with a structured logger warning.
+ *
+ * `.passthrough()` is used because the wine entries carry many optional
+ * domain fields (price_krw_approx, claimable_attributes, profile_evidence …)
+ * and we don't want the fence to false-positive on legitimate new fields.
+ */
+const GroundingJsonWineSchema = z.object({}).passthrough();
+const GroundingJsonPayloadSchema = z.object({
+  wines: z.array(GroundingJsonWineSchema),
+}).passthrough();
+
+type GroundingFenceWarn = (
+  ctx: { readonly requestId: string; readonly stepIndex: number; readonly tool: string; readonly reason: string },
+) => void;
+
+function extractGroundingForSynthesis(
+  observation: string,
+  ctx: { readonly requestId: string; readonly stepIndex: number; readonly tool: string },
+  onMalformed: GroundingFenceWarn,
+): string | undefined {
   const groundingIndex = observation.lastIndexOf(GROUNDING_JSON_MARKER);
   if (groundingIndex < 0) {
     return observation;
   }
   const groundingOnly = observation.slice(groundingIndex).trim();
-  return groundingOnly.length > 0 ? groundingOnly : observation;
+  if (groundingOnly.length === 0) {
+    return observation;
+  }
+  const rawJson = groundingOnly.slice(GROUNDING_JSON_MARKER.length).trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (err) {
+    onMalformed({ ...ctx, reason: `JSON.parse failed: ${(err as Error).message}` });
+    return undefined;
+  }
+  const validation = GroundingJsonPayloadSchema.safeParse(parsed);
+  if (!validation.success) {
+    onMalformed({ ...ctx, reason: `schema validation failed: ${validation.error.issues[0]?.message ?? 'unknown'}` });
+    return undefined;
+  }
+  return groundingOnly;
 }
 
-function buildObservationOnlyMessages(steps: readonly AgentStep[]): readonly ChatMessage[] {
+function buildObservationOnlyMessages(
+  steps: readonly AgentStep[],
+  ctx: { readonly requestId: string },
+  onMalformed: GroundingFenceWarn,
+): readonly ChatMessage[] {
   const messages: ChatMessage[] = [];
 
   for (const step of steps) {
     if (step.actionPairs !== undefined) {
       for (const pair of step.actionPairs) {
+        const compact = extractGroundingForSynthesis(
+          pair.observation,
+          { requestId: ctx.requestId, stepIndex: step.index, tool: pair.action.tool },
+          onMalformed,
+        );
+        if (compact === undefined) {
+          continue;
+        }
         messages.push({
           role: 'user',
-          content: `[Tool Result: ${pair.action.tool}]\n${compactObservationForSynthesis(pair.observation)}`,
+          content: `[Tool Result: ${pair.action.tool}]\n${compact}`,
         });
       }
       continue;
     }
 
     if (step.action !== undefined && step.observation !== undefined && step.observation.length > 0) {
+      const compact = extractGroundingForSynthesis(
+        step.observation,
+        { requestId: ctx.requestId, stepIndex: step.index, tool: step.action.tool },
+        onMalformed,
+      );
+      if (compact === undefined) {
+        continue;
+      }
       messages.push({
         role: 'user',
-        content: `[Tool Result: ${step.action.tool}]\n${compactObservationForSynthesis(step.observation)}`,
+        content: `[Tool Result: ${step.action.tool}]\n${compact}`,
       });
     }
   }
@@ -126,6 +193,7 @@ function buildObservationSynthesisMessages(
   steps: readonly AgentStep[],
   toolOutcomes: readonly ToolOutcome[],
   requestId: string,
+  onMalformedGrounding: GroundingFenceWarn,
 ): ObservationSynthesisMessages {
   const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
   const nonSuccessToolOutcomes = toolOutcomes.filter((outcome) =>
@@ -154,7 +222,7 @@ function buildObservationSynthesisMessages(
     messages: [
       buildSynthesisSystemMessage(),
       buildUserMessage(query),
-      ...buildObservationOnlyMessages(steps),
+      ...buildObservationOnlyMessages(steps, { requestId }, onMalformedGrounding),
       ...(typedOutcomeMessage !== undefined ? [typedOutcomeMessage] : []),
       {
         role: 'user',
@@ -201,14 +269,26 @@ export class AgentObservationSynthesisRunner {
       state.answer = buildNoMatchSynthesisAnswer(query);
       state.failedSynthesisAttempts += 1;
       state.reasoningFailureDetected = true;
-      state.terminationReason = 'fallback';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'fallback');
       state.fallbackApplied = true;
       state.fallbackLayer = 'layer3';
       this.logger.warn({ requestId, obsSteps: obsSteps.length }, 'all search outcomes were empty or failed — short-circuiting synthesis to no-match response');
       return;
     }
 
-    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, obsSteps, state.toolOutcomes, requestId);
+    const onMalformedGrounding: GroundingFenceWarn = (ctx) => {
+      this.logger.warn(
+        {
+          requestId: ctx.requestId,
+          stepIndex: ctx.stepIndex,
+          tool: ctx.tool,
+          malformedGrounding: true,
+          reason: ctx.reason,
+        },
+        'grounding JSON failed validation — dropping frame from synthesis prompt',
+      );
+    };
+    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, obsSteps, state.toolOutcomes, requestId, onMalformedGrounding);
     const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
       if (abortSignal?.aborted) return undefined;
       const synthAbort = new AbortController();
@@ -270,7 +350,7 @@ export class AgentObservationSynthesisRunner {
       if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
         state.llmCircuitOpen = true;
       } else if (isAbortError(synthErr1)) {
-        state.terminationReason = 'aborted';
+        state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
       }
       shouldRetrySynthesis = false;
       this.logger.error(
@@ -295,7 +375,7 @@ export class AgentObservationSynthesisRunner {
         if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
           state.llmCircuitOpen = true;
         } else if (isAbortError(synthErr2)) {
-          state.terminationReason = 'aborted';
+          state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
         }
         this.logger.error({ err: synthErr2, requestId }, 'synthesis retry attempt 2 failed — proceeding to fallback search');
       }
@@ -305,7 +385,7 @@ export class AgentObservationSynthesisRunner {
     }
     if (synthAnswer !== undefined) {
       state.answer = synthAnswer;
-      state.terminationReason = 'answer';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
       this.logger.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
     }
   }

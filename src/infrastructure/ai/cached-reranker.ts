@@ -8,7 +8,7 @@ import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import { createEntityId, isCanonicalPublicEntityId } from '../../domain/shared/types/index.js';
 import { RedisCache } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'CachedReranker' });
 

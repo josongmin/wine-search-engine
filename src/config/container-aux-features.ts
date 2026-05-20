@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { bootstrapLogger } from './bootstrap-logger.js';
+import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { WineToolExecutor } from '../interface/claude-tools/tool-executor.js';
 import { AdaptiveToolExecutor } from '../interface/claude-tools/adaptive-tool-executor.js';
 import { EvalRunner } from '../domain/evaluation/service/eval-runner.js';

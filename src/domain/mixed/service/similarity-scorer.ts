@@ -332,4 +332,4 @@ export class SimilarityScorer {
   }
 }
 
-// clamp01: imported from @shared/utils/clamp (SSoT).
+// clamp01: imported from @domain/shared/utils/clamp (SSoT).

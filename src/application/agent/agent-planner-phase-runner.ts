@@ -1,6 +1,6 @@
 import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   buildPlannerContinuationSystemMessage,
   buildPlannerSystemMessage,
@@ -17,7 +17,7 @@ import {
   type LlmResult,
   type LlmAction,
 } from './agent-llm-output.js';
-import type { AgentToolAttempt } from './agent-tool-attempt-schema.js';
+import type { AgentToolAttempt } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 import {
   AGENT_LLM_STEP_TIMEOUT_MESSAGE,
   AgentPlannerPhaseResultPolicy,

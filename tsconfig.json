@@ -1,42 +1,24 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2024",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2024"],
-    "outDir": "dist",
+    "composite": true,
+    "emitDeclarationOnly": true,
     "rootDir": "src",
-    "strict": true,
-    "exactOptionalPropertyTypes": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitOverride": true,
-    "forceConsistentCasingInFileNames": true,
-    "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo",
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "paths": {
-      "@shared/*": ["./src/domain/shared/*"],
-      "@domain/*": ["./src/domain/*"],
-      "@app/*": ["./src/application/*"],
-      "@infra/*": ["./src/infrastructure/*"],
-      "@interface/*": ["./src/interface/*"],
-      "@config/*": ["./src/config/*"]
-    },
-    "skipLibCheck": true
+    "outDir": ".tsbuildcache/root",
+    "tsBuildInfoFile": ".tsbuildcache/root/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": [
     "node_modules",
     "dist",
     "test",
+    "src/domain/**",
     "src/**/__tests__/**",
     "src/__tests__/**",
     "**/*.test.ts"
+  ],
+  "references": [
+    { "path": "./src/domain/shared" },
+    { "path": "./src/domain" }
   ]
 }

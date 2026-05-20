@@ -1,0 +1,50 @@
+id: retrieval.mixed-retrieval-mode
+name: Mixed Retrieval Mode (Anchor + Filter Hybrid)
+category: retrieval
+summary: |
+  기준 wine에 anchor하고 dense similarity + structured filter를 동시 적용하는 mode.
+  "이거랑 비슷한", "스타일이 비슷한" 류 쿼리에 사용. retrieval_mode='mixed'로 라우팅.
+
+maturity: 3
+maturity_rationale: |
+  Vespa similar-retrieval 인프라 작동, candidate-pool에 통합. 기본 anchor + ANN 시나리오는
+  안정. 그러나 anchor decay / cross-anchor dedup / 전용 similarity 스코어링 부재로 4점은
+  못 됨.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: search_wines (retrieval_mode=mixed)"
+  - "HTTP: POST /v1/search (retrieval_mode=mixed)"
+
+key_files:
+  - src/infrastructure/vespa/vespa-similar-retrieval.ts
+  - src/domain/retrieval/service/candidate-pool.ts
+  - src/domain/query/model/retrieval-mode.ts
+
+tests:
+  regression:
+    - test/regression/nested-condition-hints.regression.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - nlu.anchor-extraction
+
+related_rfcs:
+  - docs/RFC-012.md
+
+known_limitations:
+  - "Anchor decay / 시간 가중치 부재"
+  - "Anchor-aware diversity penalty 부재 — anchor 자체가 top1로 자주 반환됨"
+
+next_steps:
+  - "Anchor 제외 옵션 (e.g. 'X 제외하고 비슷한 거')"
+  - "전용 similarity 스코어링 프로필 (현재 hybrid fusion 가중치 재사용)"
+
+tags:
+  - vespa-similar
+  - anchor-based
+  - hybrid

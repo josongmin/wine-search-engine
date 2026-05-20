@@ -1,0 +1,57 @@
+id: agent.react-planner
+name: Agent Planner Phase (LLM Call + JSON Parsing)
+category: agent
+summary: |
+  Agent loop의 LLM 호출 단계. system prompt (semantic contract + tool 정의) + 누적
+  observation으로 thought + action/answer 출력 받고 5가지 recovery path로 파싱.
+  Promise.race 타임아웃 + abort propagation.
+
+maturity: 3
+maturity_rationale: |
+  Functional이고 regression 게이트 있음. 그러나 agent-llm-output.ts (795 lines)의 manual
+  JSON 파싱은 native tool use가 표준인 modern LLM API 환경에서 technical debt. plannerDefect
+  / plannerRepair 매커니즘이 cognitive load 증가.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (called from react-orchestrator)"
+
+key_files:
+  - src/application/agent/agent-planner-phase-runner.ts
+  - src/application/agent/agent-llm-output.ts
+  - src/application/agent/agent-prompt.ts
+  - src/application/agent/agent-planner-phase-result-policy.ts
+
+tests:
+  unit:
+    - test/unit/application/agent/agent-planner-phase-result-policy.test.ts
+  regression:
+    - test/regression/agent-prompt-contract.regression.test.ts
+    - test/regression/agent-runner-profile.regression.test.ts
+
+depends_on:
+  - agent.semantic-contract-compiler
+  - agent.llm-output-parser
+  - infra.chat-llm-port
+
+related_rfcs:
+  - docs/RFC-007.md
+
+known_limitations:
+  - "agent-llm-output.ts 795 lines manual JSON 파싱 (native tool use로 대체 가능)"
+  - "plannerDefect/Repair discriminated union 복잡도"
+  - "Repair heuristic 경험적 (정형 규명 없음)"
+
+next_steps:
+  - "Anthropic native tool_use blocks로 마이그레이션"
+  - "agent-llm-output.ts 삭제"
+
+tags:
+  - llm-interface
+  - json-parsing
+  - technical-debt
+  - migration-candidate

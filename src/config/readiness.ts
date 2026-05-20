@@ -24,8 +24,8 @@ import type {
   HealthRouteOptions,
   ReadinessStatus,
 } from '../interface/http/routes/health.route.js';
-import { bootstrapLogger } from './bootstrap-logger.js';
-import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
+import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 import { isRuntimeSupportedDrinkingWindowModelVersion } from '../application/search/drinking-window-confidence.js';
 import { isLtrServingEnabled } from './ltr-serving-mode.js';
 

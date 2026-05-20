@@ -1,0 +1,50 @@
+id: eval.benchmark-scenarios
+name: Agent Benchmark Scenarios (Coverage + Adversarial + Robustness)
+category: eval
+summary: |
+  18K+ lines 시나리오 라이브러리. coverage (도메인 단위), bundle (composite),
+  adversarial (injection / prompt attack), robustness (perturbation), transliteration-large
+  (Korean ↔ Latin). v3 contract (tool expectation + LLM rubric + token budget +
+  attack type + grounding guard).
+
+maturity: 4
+maturity_rationale: |
+  v3 contract migration 완료 (goldenEntityIds → goldenKeywords 등 breaking). 다차원
+  weight + adversarial injection detection + constraint-extraction eval. 149+
+  scenario-specific regression test. authoring DSL 부재로 5는 못 됨.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Bench runner consumes"
+
+key_files:
+  - test/benchmark/agent/scenarios.ts
+  - test/benchmark/agent/scenarios.bundle.ts
+  - test/benchmark/agent/scenarios.coverage.ts
+  - test/benchmark/agent/scenarios.adversarial.ts
+  - test/benchmark/agent/scenarios.robustness.ts
+  - test/benchmark/agent/scenarios.transliteration-large.ts
+
+tests:
+  bench: []
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-007.md
+
+known_limitations:
+  - "TSX 안에 inline DSL — author contribution 진입장벽"
+  - "Scenario 자체의 versioning 없음"
+
+next_steps:
+  - "External DSL 추출 (YAML/JSON)"
+
+tags:
+  - benchmark
+  - adversarial
+  - constraint-extraction

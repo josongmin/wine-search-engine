@@ -1,0 +1,66 @@
+id: retrieval.drinking-window-prediction
+name: Drinking Window Prediction
+category: retrieval
+summary: |
+  vintage / wine_type / producer signal로 최적 음용 시기 범위(begin/end year)를 추정.
+  deterministic 구조식 (formula-based)과 ML 예측기 (drinking-window-predictor)
+  이중 구현. 검색 결과 카드 + check_drinking_window tool에 노출. 출력은
+  begin/end/peak 외에 enum confidence 와 numeric confidenceScore (∈ [0, 1]) 양쪽을
+  포함하여 다운스트림 랭킹/필터링이 coarse 3-bucket 이상으로 동작할 수 있다.
+
+maturity: 3
+maturity_rationale: |
+  프로덕션 와이어링 완료 (deterministic + ONNX dual 구현), 구조식 단위 테스트
+  + 헝리스틱 제거 regression + 신규 dedicated regression suite (11 케이스)
+  세 층으로 invariant 가 잠겨 있음. regression 은 style-aware shape (young
+  Bordeaux / drink-now Glera / vintage Champagne), Korean alias entity
+  ('오푸스 원'), vintage boundary (current year + 1900), determinism (5회 반복),
+  fortified/producer-prestige tail, 그리고 numeric confidenceScore 의 [0, 1]
+  bound 와 enum confidence 와의 threshold 정합성을 모두 커버한다. ONNX 경로는
+  calibrated probabilistic head 가 없어 medium-band midpoint 를 상수로 노출하며,
+  deterministic 경로는 구조식 confidenceScore 를 그대로 전달한다.
+  남은 제약: critic / cellar 데이터 기반 cross-validation, retraining cadence/SLA
+  는 여전히 미정 — 정확도 ground-truth 셋업은 별도 트랙으로 분리되어 있다.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: check_drinking_window"
+  - "Search result card field"
+
+key_files:
+  - src/infrastructure/ml/deterministic-drinking-window-predictor.ts
+  - src/infrastructure/ml/drinking-window-predictor.ts
+  - src/infrastructure/ml/structural-drinking-window-formula.ts
+  - src/application/drinking-window/drinking-window.usecase.ts
+  - src/domain/drinking-window/model/drinking-window-deterministic-input-v2.ts
+  - src/domain/drinking-window/port/drinking-window-predictor.port.ts
+
+tests:
+  regression:
+    - test/regression/heuristic-drinking-window-removal.regression.test.ts
+    - test/regression/drinking-window-prediction.regression.test.ts
+  unit:
+    - src/infrastructure/ml/__tests__/deterministic-drinking-window-predictor.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Critic / cellar 데이터 cross-validation 부재 — 정확도 ground truth 미정량"
+  - "ONNX 경로는 calibrated confidence 가 없어 medium-band 상수 (0.625) 를 사용"
+  - "Producer/regional fine-grained calibration 미적용"
+
+next_steps:
+  - "Critic 데이터 기반 정확도 평가 셋업 (현 regression 은 invariant lock; ground-truth eval 은 별도)"
+  - "ONNX 모델 calibration head 추가 → numeric confidenceScore 를 모델 자체에서 산출"
+  - "Cellar auction 가격 곡선 기반 ML 재학습"
+
+tags:
+  - ml-model
+  - deterministic-fallback
+  - has-confidence-bound

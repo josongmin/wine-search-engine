@@ -4,7 +4,7 @@
  * Epic 4: LambdaMART learning-to-rank training pipeline
  */
 
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import type { EvalResult } from '../../evaluation/model/eval-result.js';
 import type { EvalCase } from '../../evaluation/model/eval-case.js';
 

@@ -1,0 +1,42 @@
+id: etl.doc-queries-generation
+name: Synthetic Doc Queries Generation
+category: etl
+summary: |
+  Wine document (desc, pairing, note 등) 필드를 Claude로 합성 query 생성. golden query
+  set 다양성 + ranking 학습용 augmentation.
+
+maturity: 2
+maturity_rationale: |
+  Claude 기반, model version 고정 시 결정적. 생성 결과 length/content 검증. 그러나
+  ground-truth 없음, synthetic query가 실제 사용자 intent 분포를 반영하지 않을 수
+  있음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:doc-queries"
+
+key_files:
+  - scripts/etl/generate-doc-queries.ts
+
+tests: {}
+
+depends_on:
+  - infra.anthropic-chat-llm
+
+related_rfcs: []
+
+known_limitations:
+  - "Long-tail user intent 미커버"
+  - "사용자 빈도 기반 가중치 없음"
+
+next_steps:
+  - "예상 popularity로 weighting"
+  - "Online eval 통합"
+
+tags:
+  - query-augmentation
+  - synthetic-data

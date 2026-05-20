@@ -13,7 +13,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VespaSearchIndex } from '../vespa-search-index.js';
 import { VespaClient, VespaHttpError } from '../vespa-client.js';
-import { globalCircuitBreakerRegistry } from '../../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../../domain/observability/circuit-breaker-registry.js';
 
 function newClient(): VespaClient {
   return new VespaClient('http://localhost:8080', 'test-ns', 'wine', {

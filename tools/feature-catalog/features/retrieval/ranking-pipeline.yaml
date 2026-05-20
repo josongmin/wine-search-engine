@@ -1,0 +1,48 @@
+id: retrieval.ranking-pipeline
+name: Multi-Stage Ranking Pipeline (Heuristic + LTR + Policy)
+category: retrieval
+summary: |
+  Hybrid 후 candidate 집합에 적용하는 ranking 파이프라인. heuristic → LTR rerank → policy
+  application → diversity enforcement. signal computation (BM25/semantic/popularity) +
+  score aggregation + evidence mapping + rerank safety + diversity 단계 포함.
+
+maturity: 3
+maturity_rationale: |
+  src/domain/ranking/ 광범위 구현 (15+ service file). default-ranking-policy + funnel-metrics
+  + rerank-blend + evidence-mapper + lambdamart-ranker 통합. ranking 단위 테스트 디렉터리
+  존재. 그러나 LTR이 hybrid 결정에 fully integrate 안 됨 (다음 단계).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (post-retrieval ranking stage)"
+
+key_files:
+  - src/domain/ranking/service/ranking-stage-pipeline.ts
+  - src/domain/ranking/service/ranker.ts
+  - src/domain/ranking/service/default-ranking-policy.ts
+  - src/domain/ranking/service/evidence-mapper.ts
+  - src/domain/ranking/service/rerank-blend.ts
+  - src/domain/ranking/service/funnel-metrics.ts
+
+tests: {}
+
+depends_on:
+  - retrieval.hybrid-search
+
+related_rfcs: []
+
+known_limitations:
+  - "LTR이 hybrid 결정에 fully integrate 안 됨"
+  - "Rerank safety / hard gate가 inline (분리 필요)"
+
+next_steps:
+  - "LTR 통합 + A/B 게이트"
+  - "Diversity / freshness 가중치 튜닝"
+
+tags:
+  - ranking
+  - core-pipeline

@@ -7,11 +7,11 @@
 
 import fs from 'node:fs';
 import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { formatErrorDiagnostics } from '../../domain/shared/utils/error-diagnostics.js';
 import { canonicalizeRequestIdForHeader } from '../../domain/shared/utils/request-id.js';
-import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { VespaQueryResponseSchema } from './vespa-response.schema.js';
 import {
   VESPA_SEARCH_TIMEOUT_MS,

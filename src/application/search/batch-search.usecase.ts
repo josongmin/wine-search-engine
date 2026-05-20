@@ -14,7 +14,7 @@ import type {
 } from './batch-search.dto.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 
 /**
  * Semaphore-based concurrency limiter.

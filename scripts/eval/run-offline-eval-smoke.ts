@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { createTestServer, closeTestServer } from '../../test/e2e/helpers/test-server.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 
 interface Args {

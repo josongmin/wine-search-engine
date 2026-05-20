@@ -1,0 +1,55 @@
+id: agent.tool-execution-phase
+name: Tool Execution Phase (Batch + Sequential + Drinkability Follow-up)
+category: agent
+summary: |
+  Planner 결정에 따라 tool을 실행. parallel batch (tool-batch-policy 검증) / single /
+  drinkability follow-up 분기. refinement hint 주입, evidence frame 태깅,
+  budget 기록.
+
+maturity: 3
+maturity_rationale: |
+  Unit test 1개 + regression 3개로 정합성 일부 보장. 그러나
+  agent-tool-execution-policy.ts (1329 lines)에 14-단 sanitize chain이 포함되어
+  분리/축소 필요. drinkability follow-up이 phase 내부에 묻혀 있음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (called from react-orchestrator)"
+
+key_files:
+  - src/application/agent/agent-tool-execution-phase.ts
+  - src/application/agent/agent-tool-execution-policy.ts
+  - src/application/agent/agent-tool-execution-result-policy.ts
+
+tests:
+  unit:
+    - test/unit/application/agent/agent-tool-execution-phase.test.ts
+  regression:
+    - test/regression/agent-parallel-tools.regression.test.ts
+    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+    - test/regression/agent-tools-inner-surface-contract.regression.test.ts
+
+depends_on:
+  - agent.tool-batch-policy
+  - agent.semantic-contract-compiler
+
+related_rfcs:
+  - docs/RFC-016.md
+
+known_limitations:
+  - "Policy 모듈 1329 lines — overweight"
+  - "Drinkability follow-up이 phase에 임베드 (분리 필요)"
+  - "Tool result synthesis가 tool-specific observation 파싱에 결합"
+
+next_steps:
+  - "Policy를 lookup-strategy-selector / overconstraint-detector / normalize 로 분리"
+  - "Drinkability follow-up을 explicit post-tool handler로 추출"
+
+tags:
+  - tool-execution
+  - batch-orchestration
+  - refactor-candidate

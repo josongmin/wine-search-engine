@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { loadConfig } from '../../src/config/env.js';
-import { createStageTimer } from '../../src/observability/stage-timer.js';
+import { createStageTimer } from '../../src/domain/shared/stage-timer.js';
 
 async function main() {
   try {

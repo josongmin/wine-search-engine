@@ -3,8 +3,8 @@ import type { SearchRequest } from '../search/search-request.dto.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import { containsHangul } from '../../domain/shared/utils/hangul.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import type { SynthesisContext } from './tool-outcome.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import type { SynthesisContext } from '../../domain/agent/model/tool-outcome.js';
 import type { AgentToolDeps } from './agent-tools.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
@@ -23,6 +23,7 @@ import {
   isWineOutOfDomainAlcoholQuery,
 } from './agent-situational-query-policy.js';
 import { buildAgentQueryExecutionContract } from './agent-query-execution-contract.js';
+import { transitionTerminationReason } from '../../domain/agent/service/termination-state-machine.js';
 
 const defaultLog = bootstrapLogger.child({ component: 'AgentAnswerRecoveryPolicy' });
 
@@ -267,7 +268,7 @@ function applyFallbackAnswer(
   state.answer = answer;
   state.fallbackApplied = true;
   state.fallbackLayer = layer;
-  state.terminationReason = terminationReason;
+  state.terminationReason = transitionTerminationReason(state.terminationReason, terminationReason);
   return answer;
 }
 
@@ -362,7 +363,7 @@ export class AgentAnswerRecoveryPolicy {
         }
       } catch (err) {
         if (isAbortError(err)) {
-          state.terminationReason = 'aborted';
+          state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
         } else {
           this.logger.error({ err, requestId }, 'agent fallback search failed');
         }

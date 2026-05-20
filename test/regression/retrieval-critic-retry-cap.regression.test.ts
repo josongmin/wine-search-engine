@@ -24,7 +24,7 @@ import {
   type GraphExecutorOptions,
 } from '../../src/application/search/search-usecase-graph-executor.js';
 import { BundleSelectorImpl } from '../../src/domain/retrieval/service/bundle-selector.js';
-import { globalRetrievalCriticCounter } from '../../src/observability/retrieval-critic-counters.js';
+import { globalRetrievalCriticCounter } from '../../src/domain/observability/retrieval-critic-counters.js';
 import type { ConstraintGraph } from '../../src/domain/query/model/constraint-graph.js';
 import type { CandidatePoolPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 import type { HybridCandidate } from '../../src/domain/retrieval/model/hybrid-candidate.js';

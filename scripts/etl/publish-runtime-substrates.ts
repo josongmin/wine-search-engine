@@ -17,8 +17,8 @@ import {
   hashStableJson,
   parseManifest,
 } from './search-snapshot-schema.js';
-import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/shared/constants/search-snapshot.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
 import { pgTableHasColumn } from '../../src/infrastructure/db/pg-schema-capabilities.js';
 

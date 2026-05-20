@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const FILE_PATH = fileURLToPath(
-  new URL('../../src/observability/silent-skip-counters.ts', import.meta.url),
+  new URL('../../src/domain/observability/silent-skip-counters.ts', import.meta.url),
 );
 
 const REQUIRED_KINDS = [

@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import { parseNdjson } from './ndjson.js';
 import { loadGoldCanonicalLookup, resolveDefaultFixtureRepoRoot } from './snapshot-entity-identity.js';
-import { isSourceRecordStylePublicEntityId } from '../../src/shared/constants/public-entity-id-namespace.js';
+import { isSourceRecordStylePublicEntityId } from '../../src/domain/shared/constants/public-entity-id-namespace.js';
 
 const TargetMapSchema = z
   .object({

@@ -1,0 +1,44 @@
+id: eval.ltr-training
+name: Learning-to-Rank Training Pipeline
+category: eval
+summary: |
+  Offline eval query에 대해 pointwise LTR ranker 학습 후 ONNX 모델 export. weak label은
+  Claude 기반 semantic relevance judgment. 학습 파이프라인 작동, Vespa serving 통합은
+  POC 단계.
+
+maturity: 2
+maturity_rationale: |
+  Pipeline 코드는 존재 + 학습/export 동작. 그러나 Vespa serving 통합 미완 (production
+  ranking에 미적용), retraining cadence SLA 없음. Weak label 품질 검증 없음.
+
+status: experimental
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI (offline)"
+
+key_files:
+  - scripts/eval/run-eval-and-train-ltr.ts
+
+tests: {}
+
+depends_on:
+  - eval.offline-eval-runner
+
+related_rfcs: []
+
+known_limitations:
+  - "Vespa serving 통합 미완"
+  - "Retraining SLA 없음"
+  - "Weak label 품질 검증 없음"
+
+next_steps:
+  - "Vespa serving stack 통합"
+  - "Retraining cadence 셋업 (weekly/monthly)"
+
+tags:
+  - ml-training
+  - ranking
+  - experimental

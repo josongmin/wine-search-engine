@@ -3,7 +3,7 @@ import { ExecutionCompiler } from '../execution-compiler.js';
 import type { QueryPlanV2 } from '../../model/query-plan.js';
 import type { RetrievalMode } from '../../model/retrieval-mode.js';
 import type { QueryRoute } from '../../model/query-route.js';
-import { bootstrapLogger } from '../../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../../domain/shared/bootstrap-logger.js';
 
 afterEach(() => {
   vi.restoreAllMocks();

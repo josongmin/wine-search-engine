@@ -101,7 +101,7 @@
     "check:related": "pnpm run test:related",
     "check:smart": "node scripts/test/check-smart.mjs",
     "check:staged": "node scripts/test/check-smart.mjs --staged",
-    "typecheck": "pnpm run artifacts:link && tsc --noEmit --pretty false",
+    "typecheck": "pnpm run artifacts:link && tsc --build --pretty false",
     "typecheck:etl": "pnpm run artifacts:link && tsc --noEmit --pretty false -p tsconfig.etl.json",
     "domain:orphans": "tsx scripts/find-domain-orphans.ts",
     "feedback:prune-ttl": "tsx scripts/prune-feedback-ttl.ts",
@@ -187,7 +187,12 @@
     "git:prepush:smart": "node scripts/test/prepush-smart.mjs",
     "git:prepush:quick": "pnpm run typecheck && pnpm run typecheck:etl && pnpm run test:unit",
     "git:prepush:heavy": "pnpm run typecheck && pnpm run typecheck:etl && pnpm run test:unit && pnpm run verify:http-contracts && pnpm run test:verification:noisy && pnpm run test:heavy",
-    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"REDIS_URL=redis://localhost:6379 PORT=4000 pnpm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev\""
+    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"REDIS_URL=redis://localhost:6379 PORT=4000 pnpm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev\"",
+    "catalog:build": "tsx tools/feature-catalog/bin/catalog.ts build",
+    "catalog:validate": "tsx tools/feature-catalog/bin/catalog.ts validate",
+    "catalog:stats": "tsx tools/feature-catalog/bin/catalog.ts stats",
+    "catalog:show": "tsx tools/feature-catalog/bin/catalog.ts show",
+    "catalog:roadmap": "tsx tools/feature-catalog/bin/catalog.ts roadmap"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -226,6 +231,7 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.58.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "yaml": "^2.8.3"
   }
 }

@@ -15,7 +15,7 @@ import type { ResolveResponse } from './resolve-response.dto.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
-import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import type { SnapshotVersions } from './search.usecase.js';

@@ -6,7 +6,7 @@ import type { ComparisonEntity, ComparisonSearchResponse } from '../../domain/re
 import { toolCallIdForStep } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import type { StepBudget } from '../../domain/agent/service/step-budget.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { PlannerPhaseResult } from './agent-planner-phase-runner.js';
 import type { AgentToolDeps, AgentToolResult } from './agent-tools.js';
@@ -15,7 +15,7 @@ import {
   executeAgentTool,
   executeAgentToolsBatch,
 } from './agent-tools.js';
-import { isKnownAgentToolName, KNOWN_AGENT_TOOL_NAMES_DISPLAY } from './agent-tool-attempt-schema.js';
+import { isKnownAgentToolName, KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 import { truncateObservation } from './agent-prompt.js';
 import { evaluateBatchPolicy } from './tool-batch-policy.js';
 import { AgentContractPolicy } from './agent-contract-policy.js';
@@ -29,6 +29,7 @@ import {
   withTimeout,
 } from './agent-tool-execution-support.js';
 import { AgentToolExecutionResultPolicy } from './agent-tool-execution-result-policy.js';
+import { transitionTerminationReason } from '../../domain/agent/service/termination-state-machine.js';
 
 const log = bootstrapLogger.child({ component: 'AgentToolExecutionPhase' });
 
@@ -478,7 +479,7 @@ export class AgentToolExecutionPhase {
       });
 
       if (state.plannerDefectAttempts > 2) {
-        state.terminationReason = 'error';
+        state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
         return true;
       }
       return false;
@@ -488,6 +489,13 @@ export class AgentToolExecutionPhase {
       const trimmedAnswer = parsed.answer.trim();
       if (trimmedAnswer.length > 0) {
         if (state.pendingRefinementRetry) {
+          // Reset the flag immediately so a subsequent planner answer cannot
+          // re-enter this branch (zombie loop). Per CLAUDE.md rule 19/20,
+          // mutate the gating flag BEFORE any further control flow so the
+          // loop cannot iterate with corrupted state. The directive itself
+          // survives via state.pendingPlannerDirective and is consumed once
+          // by the next planner-phase call.
+          state.pendingRefinementRetry = false;
           state.pendingPlannerDirective = { kind: 'relax_constraints_retry' };
           return false;
         }
@@ -527,7 +535,7 @@ export class AgentToolExecutionPhase {
           tokenCount: { input: inputTokens, output: outputTokens },
         });
         state.answer = trimmedAnswer;
-        state.terminationReason = 'answer';
+        state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
         return true;
       }
     }
@@ -637,7 +645,7 @@ export class AgentToolExecutionPhase {
 
     if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
       state.reasoningFailureDetected = true;
-      state.terminationReason = 'error';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
       const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
       const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
       this.resultPolicy.recordBatchStep({
@@ -662,7 +670,7 @@ export class AgentToolExecutionPhase {
       state.reasoningFailureDetected = true;
       state.unknownToolAttempts++;
       if (state.unknownToolAttempts > 2) {
-        state.terminationReason = 'error';
+        state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
         return true;
       }
       const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}`;
@@ -749,7 +757,10 @@ export class AgentToolExecutionPhase {
     const batchCheck = budget.recordParallelBatch(effectiveBatchCalls, { skipNearDuplicate: true });
     if (!batchCheck.allowed) {
       const batchReason = (batchCheck as { readonly reason?: string }).reason;
-      state.terminationReason = (batchReason as AgentTerminationReason | undefined) ?? 'loop_detected';
+      state.terminationReason = transitionTerminationReason(
+        state.terminationReason,
+        (batchReason as AgentTerminationReason | undefined) ?? 'loop_detected',
+      );
       return true;
     }
 
@@ -923,7 +934,10 @@ export class AgentToolExecutionPhase {
 
     const loopCheck = budget.recordStep(effectiveTool, effectiveInput);
     if (!loopCheck.allowed) {
-      state.terminationReason = loopCheck.reason ?? 'loop_detected';
+      state.terminationReason = transitionTerminationReason(
+        state.terminationReason,
+        loopCheck.reason ?? 'loop_detected',
+      );
       return true;
     }
 

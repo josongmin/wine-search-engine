@@ -1,0 +1,41 @@
+id: infra.chat-llm-port
+name: Chat LLM Port (Domain Interface)
+category: infra
+summary: |
+  LLM chat 추상화 인터페이스. complete(messages, ...) → ChatCompletionResult. domain ↔
+  infrastructure 분리. Anthropic / OpenAI 어댑터가 구현.
+
+maturity: 3
+maturity_rationale: |
+  Stable contract, breaking change 없음. 그러나 tool_use / response_format / structured
+  output 미지원 — agent의 manual JSON 파싱 의존성을 만드는 근본 원인. PtE 마이그레이션을
+  위해 StructuredLlmPort 신설 필요.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (domain port)"
+
+key_files:
+  - src/domain/ai/port/chat-llm.port.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Native tool_use 미지원 (text completion만)"
+  - "response_format/structured output 미지원"
+
+next_steps:
+  - "StructuredLlmPort 확장 (PtE 아키텍처 prerequisite)"
+
+tags:
+  - architecture
+  - port
+  - migration-candidate

@@ -1,0 +1,49 @@
+id: retrieval.hybrid-search
+name: Hybrid Search (BM25 + Dense + Entity)
+category: retrieval
+summary: |
+  Vespa 기반 BM25/ANN/Entity 융합 검색. retrieval_mode로 entity/hybrid/mixed/
+  dense/sparse 모드 선택. 한국어 query에 대해 Hangul threshold 적용 +
+  entity boost. 단발 검색 핫패스.
+
+maturity: 3
+maturity_rationale: |
+  프로덕션 트래픽에서 안정 동작. golden-set + regression test 커버 완료.
+  Korean Jaccard tuning + entity boost + curated alias catalog 적용.
+  Late-interaction reranker(ColBERT) 또는 LTR 미도입 상태라 5(SOTA++)는
+  아님. 그 외 영역 (recall, latency, observability)은 모두 production grade.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/search"
+  - "Agent tool: search_wines"
+
+key_files:
+  - src/application/search/search.usecase.ts
+  - src/infrastructure/vespa/vespa-client.ts
+  - src/domain/retrieval/service/retrieval-plan-builder.ts
+
+tests:
+  e2e:
+    - test/e2e/golden-set.test.ts
+
+related_rfcs:
+  - docs/RFC-014.md
+
+known_limitations:
+  - "Reranker 없음 (현재 BM25 + ANN score blend만)"
+  - "Long-tail 한국어 별칭 일부 미스 (catalog gap)"
+
+next_steps:
+  - "ColBERT-style late interaction 도입 검토"
+  - "LTR 재도입 (track-c step3 결과 활용)"
+
+tags:
+  - hot-path
+  - korean-i18n
+  - vespa

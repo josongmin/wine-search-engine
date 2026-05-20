@@ -1,0 +1,41 @@
+id: etl.bronze-data-connector
+name: Vivino Bronze Data Connector
+category: etl
+summary: |
+  Vivino API에서 wine_pdp_snapshot 데이터 fetch + bronze NDJSON 저장. periodic refresh
+  오케스트레이션. silver ETL의 입력.
+
+maturity: 2
+maturity_rationale: |
+  Functional이지만 manual 실행 위주. retry / backoff / rate-limit 정책 단순. snapshot
+  freshness SLA 없음.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm vivino:bronze"
+
+key_files:
+  - tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Retry / backoff 단순"
+  - "Snapshot freshness SLA 없음"
+  - "Schedule 자동화 없음"
+
+next_steps:
+  - "Cron 자동화"
+  - "Freshness 모니터링"
+
+tags:
+  - data-ingestion
+  - external-api

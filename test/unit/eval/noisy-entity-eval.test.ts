@@ -10,7 +10,7 @@ import {
   validateNoisyEntityBenchmark,
   type NoisyEntityBenchmarkCase,
 } from '../../../scripts/eval/run-noisy-entity-eval.ts';
-import { resolveDataPath } from '../../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../../src/domain/shared/utils/data-paths.js';
 
 describe('noisy entity benchmark eval', () => {
   const repoDataDir = path.resolve(process.cwd(), 'data');

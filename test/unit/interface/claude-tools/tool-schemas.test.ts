@@ -22,7 +22,7 @@ import {
   SearchToolAttemptInputSchema,
   WINE_SEARCH_TOOLS,
 } from '../../../../src/interface/claude-tools/tool-schemas.js';
-import { KNOWN_AGENT_TOOL_NAMES } from '../../../../src/application/agent/agent-tool-attempt-schema.js';
+import { KNOWN_AGENT_TOOL_NAMES } from '../../../../src/domain/agent/model/agent-tool-attempt-schema.js';
 import {
   buildCompareToolFieldShape,
   buildFoodPairingFieldShape,

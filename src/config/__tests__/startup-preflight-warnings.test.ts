@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { warnStartupMisconfigurations } from '../startup-preflight.js';
-import { bootstrapLogger } from '../bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 describe('warnStartupMisconfigurations (E3-T7)', () => {
   afterEach(() => {

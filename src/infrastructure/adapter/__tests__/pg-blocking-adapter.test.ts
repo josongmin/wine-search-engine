@@ -39,4 +39,61 @@ describe('PgBlockingAdapter', () => {
       expect.arrayContaining(['샤토 마고', 'chateau margaux', 'chateaumargaux']),
     );
   });
+
+  describe('phase 4 — pg_trgm fuzzy match', () => {
+    function makeMockedPool() {
+      const query = vi.fn()
+        .mockResolvedValueOnce({
+          rows: [{
+            active_snapshot_id: 'search-snapshot:test',
+            previous_snapshot_id: null,
+            content_hash: 'hash',
+            promoted_at: new Date(),
+          }],
+        })
+        .mockResolvedValueOnce({
+          rows: [{ entity_id: 'wine-sassicaia' }],
+        });
+      const pool = { query };
+      return { pool, query };
+    }
+
+    it('threads the normalized query, similarity threshold, and trigram cap into the alias-lookup SQL params', async () => {
+      const { pool, query } = makeMockedPool();
+      const adapter = new PgBlockingAdapter(pool as never);
+
+      // Typo case: caller types "Sasicaia" → blocker should still find the
+      // canonical "Sassicaia" via the trigram fuzzy phase.
+      await adapter.block('Sasicaia', 'sasicaia');
+
+      const aliasQueryArgs = query.mock.calls[1];
+      const sqlText = aliasQueryArgs?.[0] as string;
+      const params = aliasQueryArgs?.[1] as readonly unknown[];
+
+      // SQL phase 4 must be present and join the union.
+      expect(sqlText).toMatch(/trigram_fuzzy_match/);
+      expect(sqlText).toMatch(/similarity\(normalized_value/);
+      // Pre-existing phases preserved.
+      expect(sqlText).toMatch(/exact_match/);
+      expect(sqlText).toMatch(/prefix_match/);
+      expect(sqlText).toMatch(/ilike_match/);
+
+      // $6 = normalized query string fed into similarity().
+      expect(params[5]).toBe('sasicaia');
+      // $7 = fuzzy similarity threshold (numeric in [0, 1]).
+      expect(typeof params[6]).toBe('number');
+      expect(params[6]).toBeGreaterThan(0);
+      expect(params[6]).toBeLessThanOrEqual(1);
+      // $8 = trigram phase cap (positive integer).
+      expect(typeof params[7]).toBe('number');
+      expect(params[7]).toBeGreaterThan(0);
+      expect(Number.isInteger(params[7])).toBe(true);
+    });
+
+    it('returns the union of all four phases (e.g. trigram_fuzzy_match contributes recall the substring phases miss)', async () => {
+      const { pool } = makeMockedPool();
+      const adapter = new PgBlockingAdapter(pool as never);
+      await expect(adapter.block('Sasicaia', 'sasicaia')).resolves.toEqual(['wine-sassicaia']);
+    });
+  });
 });

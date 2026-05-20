@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import type { MappingTablePort } from '../../domain/attribute/port/mapping-table.port.js';
 import type { NLMapping } from '../../domain/attribute/model/nl-mapping.js';
-import { resolveDataPath } from '../../shared/utils/data-paths.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { resolveDataPath } from '../../domain/shared/utils/data-paths.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 /**
  * Zod schema for validating individual NL mapping entries read from JSON.

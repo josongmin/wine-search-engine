@@ -6,17 +6,12 @@ import type {
 } from '../../domain/query/model/engine-execution-contract.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
-import type {
-  DualLanePresence,
-  DualLaneArtifact,
-  EntityLaneCandidateArtifact,
-} from '../../domain/retrieval/model/dual-lane-artifact.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
 } from '../../observability/graph-path-telemetry.js';
 import {
-  type AmbiguitySummary,
   type DecisionInput,
   type DecisionInputCriticRewrite,
   type EvidenceSummary,
@@ -26,41 +21,8 @@ import {
 } from '../../domain/decision/model/decision-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
-import {
-  extractSingleTokenNormalizedQuery,
-  resolveAmbiguousBranchLabel,
-  shouldApplyCanonicalFamilyBranchPrior,
-} from '../../domain/ranking/service/ambiguous-branch.js';
 import type { EvidenceItem, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
-
-interface BuildSearchDecisionInputParams {
-  readonly plan: QueryPlanV1;
-  readonly resolveResult: EntityResolveResult;
-  readonly identityResolveResult?: EntityResolveResult | null | undefined;
-  readonly rankedResults?: readonly RankedResult[];
-  readonly effectiveRoute?: QueryRoute | undefined;
-  readonly decisionContext?: SearchRouteDecisionContext | undefined;
-  readonly executionContext?: {
-    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
-    readonly retrievalKind?:
-      | 'entity_lookup'
-      | 'generic_hybrid'
-      | 'specialized_hybrid'
-      | 'mixed_similarity'
-      | undefined;
-    readonly provenancePolicy?: ProvenancePolicy | undefined;
-    readonly constraintGraph?: ConstraintGraph | undefined;
-    readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
-    readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
-    readonly winnerIdentityArtifact?: EntityLaneCandidateArtifact | undefined;
-  };
-  readonly honestyContract?: {
-    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
-    readonly routeHealthy?: boolean | undefined;
-    readonly blockingRequested?: boolean | undefined;
-  };
-}
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
@@ -70,153 +32,10 @@ function isPositiveEvidenceItem(item: EvidenceItem): boolean {
   return item.contribution.startsWith('+');
 }
 
-function hasWinnerAlignedIdentityResolveTopEntity(
-  identityResolveResult: EntityResolveResult | null | undefined,
-  winnerEntityId: string,
-): boolean {
-  if (identityResolveResult == null) {
-    return true;
-  }
-
-  return identityResolveResult.topEntity?.entityId === winnerEntityId;
-}
-
-function isWinnerAlignedEntityLaneArtifact(
-  artifact: EntityLaneCandidateArtifact | undefined,
-  winnerEntityId: string,
-): artifact is EntityLaneCandidateArtifact {
-  return artifact !== undefined
-    && artifact.entityId === winnerEntityId
-    && artifact.identityProvenance.entityId === winnerEntityId
-    && artifact.candidate.entityId === winnerEntityId
-    && artifact.resolvedCandidate.entityId === winnerEntityId;
-}
-
-function isWinnerAlignedDualLaneArtifact(
-  artifact: DualLaneArtifact | undefined,
-  winnerEntityId: string,
-): artifact is DualLaneArtifact & { readonly identityProvenance: NonNullable<DualLaneArtifact['identityProvenance']> } {
-  if (
-    artifact === undefined
-    || artifact.entityId !== winnerEntityId
-    || artifact.fusedCandidate.entityId !== winnerEntityId
-    || artifact.identityProvenance?.entityId !== winnerEntityId
-  ) {
-    return false;
-  }
-
-  if (
-    artifact.entityLane !== undefined
-    && !isWinnerAlignedEntityLaneArtifact(artifact.entityLane, winnerEntityId)
-  ) {
-    return false;
-  }
-
-  return artifact.generalLane === undefined
-    || (
-      artifact.generalLane.entityId === winnerEntityId
-      && artifact.generalLane.candidate.entityId === winnerEntityId
-    );
-}
-
-function buildWinnerIdentityEvidence(params: {
-  readonly resolveResult: EntityResolveResult;
-  readonly identityResolveResult?: EntityResolveResult | null | undefined;
-  readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
-  readonly winnerIdentityArtifact?: EntityLaneCandidateArtifact | undefined;
-}): NonNullable<EvidenceSummary['identityEvidence']> {
-  const resolveTopEntity = params.resolveResult.topEntity;
-  const winnerEntityId = resolveTopEntity?.entityId;
-  const winnerInIdentityResolveResult =
-    winnerEntityId !== undefined
-    && hasWinnerAlignedIdentityResolveTopEntity(params.identityResolveResult, winnerEntityId);
-  const winnerDualLaneArtifact =
-    winnerEntityId !== undefined
-    && winnerInIdentityResolveResult
-    && isWinnerAlignedDualLaneArtifact(params.winnerDualLaneArtifact, winnerEntityId)
-      ? params.winnerDualLaneArtifact
-      : undefined;
-  const winnerIdentityLaneArtifact =
-    winnerDualLaneArtifact === undefined
-    && winnerEntityId !== undefined
-    && winnerInIdentityResolveResult
-    && isWinnerAlignedEntityLaneArtifact(params.winnerIdentityArtifact, winnerEntityId)
-      ? params.winnerIdentityArtifact
-      : undefined;
-  const winnerIdentityArtifactPresent =
-    winnerDualLaneArtifact !== undefined || winnerIdentityLaneArtifact !== undefined;
-  const identityEvidenceRefCount =
-    winnerDualLaneArtifact?.identityProvenance.evidenceRefs.length
-    ?? winnerIdentityLaneArtifact?.identityProvenance.evidenceRefs.length
-    ?? 0;
-  const lanePresence: DualLanePresence | undefined =
-    winnerDualLaneArtifact?.lanePresence ?? winnerIdentityLaneArtifact?.candidate.lanePresence;
-  const exactnessTier =
-    winnerDualLaneArtifact?.identityProvenance.exactnessTier
-    ?? winnerIdentityLaneArtifact?.identityProvenance.exactnessTier
-    ?? 'none';
-
-  return {
-    source: 'identity_artifact',
-    resolveTopEntityPresent: resolveTopEntity !== undefined,
-    winnerIdentityArtifactPresent,
-    winnerIdentityArtifactMatchesResolveResult:
-      winnerIdentityArtifactPresent && winnerInIdentityResolveResult,
-    exactnessTier,
-    identityEvidenceRefCount,
-    ...(lanePresence !== undefined ? { lanePresence } : {}),
-  };
-}
-
-function buildRankingBranchGroups(
-  plan: QueryPlanV1,
-): readonly { label: string; matchValues: readonly string[] }[] {
-  return plan.expansions.ambiguousEntityHints?.flatMap((hint) =>
-    hint.explorationBranches.map((branch) => ({
-      label: branch.label,
-      matchValues: branch.matchValues,
-    })),
-  ) ?? [];
-}
-
-function buildRankingAmbiguitySummary(
-  plan: QueryPlanV1,
-  rankedResults: readonly RankedResult[] | undefined,
-): AmbiguitySummary | undefined {
-  if (rankedResults === undefined || rankedResults.length < 2) {
-    return undefined;
-  }
-  if (!shouldApplyCanonicalFamilyBranchPrior(plan.queryClass)) {
-    return undefined;
-  }
-  if (extractSingleTokenNormalizedQuery(plan.normalizedQuery) === undefined) {
-    return undefined;
-  }
-  const branchGroups = buildRankingBranchGroups(plan);
-  if (branchGroups.length === 0) {
-    return undefined;
-  }
-
-  const representedBranches = rankedResults
-    .slice(0, 3)
-    .map((result) => resolveAmbiguousBranchLabel(result, branchGroups))
-    .filter((label): label is string => label !== undefined);
-  const uniqueBranches = unique(representedBranches);
-  if (uniqueBranches.length < 2) {
-    return undefined;
-  }
-
-  const topTwoDifferentBranches =
-    representedBranches[0] !== undefined &&
-    representedBranches[1] !== undefined &&
-    representedBranches[0] !== representedBranches[1];
-
-  return {
-    types: ['ranking_family_branch_collision'],
-    severity: topTwoDifferentBranches ? 'high' : 'medium',
-    sources: ['ranking'],
-    decisionEffect: topTwoDifferentBranches ? 'force_clarify' : 'raise_threshold',
-  };
+function isSyntheticRankedRouteResolve(result: EntityResolveResult): boolean {
+  return result.decisionTrace.outcomeReasonCodes.some(
+    (code) => code === 'HYBRID_ROUTE' || code === 'MIXED_ROUTE',
+  );
 }
 
 /**
@@ -230,27 +49,46 @@ function buildRankingAmbiguitySummary(
  * already-calibrated resolver output and must not re-calibrate or adjust scores.
  */
 export function buildSearchDecisionInput(
-  params: BuildSearchDecisionInputParams,
+  plan: QueryPlanV1,
+  resolverResult: EntityResolveResult,
+  rankedResults?: readonly RankedResult[],
+  effectiveRoute: QueryRoute = plan.route,
+  decisionContext?: SearchRouteDecisionContext,
+  executionContext?: {
+    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+    readonly retrievalKind?:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity'
+      | undefined;
+    readonly provenancePolicy?: ProvenancePolicy | undefined;
+    /**
+     * ADR-011 Phase 1b.3a: when the planner emitted a ConstraintGraph
+     * (`compiled.constraintGraph`), callers pass it through here so the
+     * decision-input's matched/unmet computation follows the same AND / OR
+     * / XOR group semantics as the provenance-closure reader. Absent in
+     * the flat/rollback path — computation falls back byte-identical to
+     * the pre-Phase-1b.3a behaviour.
+     */
+    readonly constraintGraph?: ConstraintGraph | undefined;
+    /**
+     * ADR-015 Axis 2: executor-internal critic rewrites observed for
+     * this request. Empty / undefined when the critic loop did not
+     * engage (default off via `RETRIEVAL_EXECUTOR_CRITIC=false`).
+     */
+    readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+  },
+  honestyContract?: {
+    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
+    readonly routeHealthy?: boolean | undefined;
+    readonly blockingRequested?: boolean | undefined;
+  },
 ): DecisionInput {
-  const {
-    plan,
-    resolveResult,
-    identityResolveResult,
-    rankedResults,
-    effectiveRoute = plan.route,
-    decisionContext,
-    executionContext,
-    honestyContract,
-  } = params;
   const topResult = rankedResults?.[0];
-  const topEntity = resolveResult.topEntity;
-  const identityEvidence = buildWinnerIdentityEvidence({
-    resolveResult,
-    identityResolveResult,
-    winnerDualLaneArtifact: executionContext?.winnerDualLaneArtifact,
-    winnerIdentityArtifact: executionContext?.winnerIdentityArtifact,
-  });
-  const identityEvidenceRefCount = identityEvidence.identityEvidenceRefCount;
+  const topEntity = resolverResult.topEntity;
+  const resolverTopCandidate = resolverResult.candidates[0];
+  const syntheticRankedRoute = isSyntheticRankedRouteResolve(resolverResult);
 
   const rankingSignals: SignalSet | undefined =
     topResult !== undefined
@@ -274,10 +112,32 @@ export function buildSearchDecisionInput(
         }
       : undefined;
 
+  const resolverTopCandidateMatchesTopEntity =
+    resolverTopCandidate !== undefined &&
+    topEntity !== undefined &&
+    resolverTopCandidate.entityId === topEntity.entityId;
+  const resolverEvidenceRefCount =
+    resolverTopCandidateMatchesTopEntity ? resolverTopCandidate.evidenceRefs.length : 0;
   const rankedTopResultMatchesTopEntity =
     topResult !== undefined &&
     topEntity !== undefined &&
     topResult.entityId === topEntity.entityId;
+  const rankedCorroborationItems =
+    topResult !== undefined && rankedTopResultMatchesTopEntity
+      ? topResult.evidenceItems.filter(isPositiveEvidenceItem)
+      : [];
+  const rankedCorroborationTypes =
+    rankedCorroborationItems.length > 0
+      ? unique(rankedCorroborationItems.map((item) => item.type))
+      : [];
+  const resolverIdentityTrailPresent =
+    resolverTopCandidateMatchesTopEntity &&
+    (syntheticRankedRoute || resolverEvidenceRefCount > 0);
+  const exactMatchCandidatePresent =
+    resolverIdentityTrailPresent &&
+    (topResult === undefined
+      ? true
+      : rankedTopResultMatchesTopEntity);
   // ADR-011 Phase 1b.3a: when a ConstraintGraph is threaded through
   // `executionContext.constraintGraph`, matched/unmet attributes are resolved
   // via the shared helper under AND / OR / XOR group semantics so
@@ -287,13 +147,12 @@ export function buildSearchDecisionInput(
     plan.constraints.hard.map((constraint) => constraint.attribute),
   );
   const constraintGraph = executionContext?.constraintGraph;
-  // Wave G2: emit unified graph-path telemetry for the decision reader.
   recordGraphPathDecision({
     reader: 'decision_input',
     outcome: classifyGraphPresence({
       graphPresent: constraintGraph !== undefined,
-      ...(constraintGraph !== undefined ? { graphOrigin: constraintGraph.origin } : {}),
-      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      graphOrigin: constraintGraph?.origin,
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
     }),
   });
   const graphResolution =
@@ -334,6 +193,26 @@ export function buildSearchDecisionInput(
     anchorSignalItems.length > 0
       ? unique(anchorSignalItems.map((item) => item.type))
       : [];
+
+  const identityEvidence: NonNullable<EvidenceSummary['identityEvidence']> = {
+    ...(syntheticRankedRoute ? { source: 'ranked_synthetic' as const } : {}),
+    topEntityPresent: topEntity !== undefined,
+    resolverTopCandidateMatchesTopEntity,
+    resolverEvidenceRefCount,
+    ...(syntheticRankedRoute ? { syntheticRankedRoute: true } : {}),
+    ...(topResult !== undefined ? { rankedTopResultPresent: true } : {}),
+    ...(topResult !== undefined && topEntity !== undefined
+      ? { rankedTopResultMatchesTopEntity }
+      : {}),
+    ...(topResult !== undefined ? { rankedEvidenceItemCount: topResult.evidenceItems.length } : {}),
+    ...(rankedCorroborationTypes.length > 0
+      ? {
+          rankedCorroborationItemCount: rankedCorroborationItems.length,
+          rankedCorroborationTypes,
+        }
+      : {}),
+    ...(exactMatchCandidatePresent ? { exactMatchCandidatePresent: true } : {}),
+  };
 
   const constraintEvidence =
     topResult !== undefined
@@ -401,11 +280,13 @@ export function buildSearchDecisionInput(
     ...(constraintEvidence !== undefined ? { constraintEvidence } : {}),
     ...(anchorResolution !== undefined ? { anchorResolution } : {}),
     ...(anchorEvidence !== undefined ? { anchorEvidence } : {}),
-    ...((identityEvidenceRefCount > 0 || topResult !== undefined)
+    ...((resolverEvidenceRefCount > 0 || topResult !== undefined)
       ? {
           evidenceRefCount:
-            identityEvidenceRefCount +
-            (topResult !== undefined ? topResult.evidenceItems.length : 0),
+            resolverEvidenceRefCount +
+            (topResult !== undefined && rankedTopResultMatchesTopEntity
+              ? topResult.evidenceItems.length
+              : 0),
         }
       : {}),
   };
@@ -446,7 +327,6 @@ export function buildSearchDecisionInput(
         : []),
     ],
   } as const;
-  const ambiguitySummary = buildRankingAmbiguitySummary(plan, rankedResults);
 
   return {
     queryPlan: plan,
@@ -457,10 +337,7 @@ export function buildSearchDecisionInput(
     ...(executionContext?.retrievalKind !== undefined
       ? { retrievalKind: executionContext.retrievalKind }
       : {}),
-    resolveResult,
-    ...(identityResolveResult != null
-      ? { identityResolveResult }
-      : { identityResolveResult: undefined }),
+    resolverResult,
     policy: plan.policy,
     uncertainty: plan.uncertainty,
     provenanceContract,
@@ -474,10 +351,9 @@ export function buildSearchDecisionInput(
       ? { blockingRequested: honestyContract.blockingRequested }
       : {}),
     ...(rankingSignals !== undefined ? { rankingSignals } : {}),
-    ...(ambiguitySummary !== undefined ? { ambiguitySummary } : {}),
     evidenceSummary,
     ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
-    conformalSetSize: resolveResult.conformalSetSize,
+    conformalSetSize: resolverResult.conformalSetSize,
     ...(executionContext?.criticRewrites !== undefined
       && executionContext.criticRewrites.length > 0
       ? { criticRewrites: executionContext.criticRewrites }

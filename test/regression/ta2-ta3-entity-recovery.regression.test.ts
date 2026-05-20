@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   shouldTriggerCorrectiveRetry,
   resolveCorrectiveRetryOutcome,
+  alignRetryResultStatusToOutcome,
   computeCorrectiveRetryCalibration,
 } from '../../src/application/search/search-usecase-corrective-retry.js';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
@@ -591,6 +592,63 @@ describe('resolveCorrectiveRetryOutcome (TA3-2)', () => {
   it('missing confidence: clarify after retry rather than accepting synthetic certainty', () => {
     const result = makeResolveResult({ status: 'failed', decisionConfidenceC: undefined });
     expect(resolveCorrectiveRetryOutcome(result)).toBe('clarify');
+  });
+});
+
+// ─── TA3-2: alignRetryResultStatusToOutcome ──────────────────────────────────
+//
+// Guards the entity_lookup contract: the corrective-retry exit decision must
+// be reflected in the EntityResolveResult.status passed to the decision
+// engine, so a 'fail'/'clarify' outcome never reaches admission as 'resolved'.
+
+describe('alignRetryResultStatusToOutcome (TA3-2 outcome propagation)', () => {
+  it("passthrough on outcome='accept' (resolver already in agreement)", () => {
+    const retry = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
+    const aligned = alignRetryResultStatusToOutcome(retry, 'accept');
+    expect(aligned).toBe(retry);
+  });
+
+  it("status drift on 'fail': resolver said 'resolved' but outcome forced 'fail' → downgrade to 'failed'", () => {
+    const retry = makeResolveResult({
+      status: 'resolved',
+      decisionConfidenceC: 0.9,
+      recommendedNextAction: 'fail',
+    });
+    const aligned = alignRetryResultStatusToOutcome(retry, 'fail');
+    expect(aligned.status).toBe('failed');
+    expect(aligned.decisionConfidenceC).toBe(0.9);
+    expect(aligned.recommendedNextAction).toBe('fail');
+  });
+
+  it("status drift on 'clarify': resolver said 'resolved' but outcome forced 'clarify' → downgrade to 'ambiguous'", () => {
+    const retry = makeResolveResult({
+      status: 'resolved',
+      decisionConfidenceC: 0.4,
+    });
+    const aligned = alignRetryResultStatusToOutcome(retry, 'clarify');
+    expect(aligned.status).toBe('ambiguous');
+  });
+
+  it("'fail' outcome with already-failed status: preserved verbatim (no churn)", () => {
+    const retry = makeResolveResult({ status: 'failed', recommendedNextAction: 'fail' });
+    const aligned = alignRetryResultStatusToOutcome(retry, 'fail');
+    expect(aligned).toBe(retry);
+  });
+
+  it("'clarify' outcome preserves an explicit 'failed' status (no upgrade from failed to ambiguous)", () => {
+    const retry = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.3 });
+    const aligned = alignRetryResultStatusToOutcome(retry, 'clarify');
+    expect(aligned.status).toBe('failed');
+  });
+
+  it("'clarify' outcome preserves an existing 'ambiguous' status", () => {
+    const retry = makeResolveResult({
+      status: 'ambiguous',
+      ambiguity: { types: ['homonym'], severity: 'medium', explanationCodes: [] },
+    });
+    const aligned = alignRetryResultStatusToOutcome(retry, 'clarify');
+    expect(aligned.status).toBe('ambiguous');
+    expect(aligned.ambiguity).toBe(retry.ambiguity);
   });
 });
 

@@ -3,7 +3,7 @@ import type { AgentResult } from '../../domain/agent/model/agent-result.js';
 import { StepBudget } from '../../domain/agent/service/step-budget.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   createAgentExecutionState,
   type AgentExecutionState,

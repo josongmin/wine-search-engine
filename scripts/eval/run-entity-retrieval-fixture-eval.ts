@@ -29,7 +29,7 @@ import {
   type NoisyEntityDecisionStatus,
   type RankedEntity,
 } from './run-noisy-entity-eval.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   runLiveBenchmarkPreflight,
   type BenchmarkExecutionLane,

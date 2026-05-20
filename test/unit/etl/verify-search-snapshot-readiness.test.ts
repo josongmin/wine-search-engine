@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
-} from '../../../src/shared/constants/search-snapshot.js';
+} from '../../../src/domain/shared/constants/search-snapshot.js';
 
 const {
   mockVerifySearchSnapshotRuntimeStateLive,

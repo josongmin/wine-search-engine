@@ -3,7 +3,7 @@ import type { AgentToolCallPair } from '../../domain/agent/model/agent-step.js';
 import type { ToolCallEvidenceFrame } from '../../domain/agent/model/tool-call-evidence-frame.js';
 import { toolCallIdForStep } from '../../domain/agent/service/build-tool-call-evidence-frame.js';
 import type { StepBudget } from '../../domain/agent/service/step-budget.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentToolDeps, AgentToolResult } from './agent-tools.js';
 import { executeAgentToolsBatch } from './agent-tools.js';

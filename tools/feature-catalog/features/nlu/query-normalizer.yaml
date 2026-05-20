@@ -1,0 +1,45 @@
+id: nlu.query-normalizer
+name: Query Normalizer (Multi-View)
+category: nlu
+summary: |
+  5 normalized view 생성: (1) NFKC + lowercase + punctuation strip, (2) Korean josa 제거,
+  (3) phonetic normalize (sch→ch, ph→f, eaux→o), (4) Korean transliteration view
+  (샤또 마고 → chateau margaux), (5) compact form. Vintage canonicalization 포함.
+
+maturity: 4
+maturity_rationale: |
+  357 lines, NFKC + accent strip + Unicode homoglyph + Korean josa 12+ particle 정확
+  처리 + 16개 transliteration pattern 적용. Planner / policy-compiler / exact-entity-metadata
+  테스트로 광범위 커버. Determinism 검증된 regression 있음.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (모든 NLU 모듈 입력 전처리)"
+
+key_files:
+  - src/domain/query/service/query-normalizer.ts
+  - src/domain/query/model/query-views.ts
+
+tests: {}
+
+depends_on:
+  - korean-i18n.transliterator
+
+related_rfcs:
+  - docs/RFC-004.md
+
+known_limitations:
+  - "Transliteration rule 16개 hardcoded (learned 모델 없음)"
+  - "자연어 연도 (\"two thousand eighteen\") 미파싱"
+
+next_steps:
+  - "Edit-distance + frequency 기반 learned transliteration"
+
+tags:
+  - query-normalization
+  - korean-native
+  - multilingual

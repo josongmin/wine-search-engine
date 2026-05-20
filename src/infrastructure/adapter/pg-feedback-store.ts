@@ -8,7 +8,7 @@ import type { FeedbackSignal, FeedbackType } from '../../domain/learning/model/f
 import type { CanonicalEntityId, QueryClass } from '../../domain/shared/types/index.js';
 import { createCanonicalEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { parseDecisionSnapshotJsonb } from './jsonb-schemas.js';
 
 const feedbackLog = bootstrapLogger.child({ component: 'PgFeedbackStore' });

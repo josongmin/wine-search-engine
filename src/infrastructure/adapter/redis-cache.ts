@@ -1,8 +1,8 @@
 import type { ZodType } from 'zod';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
 import type { RedisClient } from '../db/redis-client.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 
 const log = bootstrapLogger.child({ component: 'RedisCache' });
 

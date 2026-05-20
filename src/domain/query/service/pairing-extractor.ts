@@ -7,7 +7,15 @@
  *
  * Taxonomy based on common food-wine pairings across protein, vegetarian,
  * context, and occasion categories.
+ *
+ * Maturity 3 (2026-05): supports phrase-level negation/exclusion. Foods
+ * appearing inside a negation scope ("without seafood", "해산물 빼고",
+ * "스테이크는 좋은데 새우는 안 좋아하는") are removed from the positive
+ * pairing list and surfaced via `extractPairingConstraintsWithExclusions`'s
+ * `excluded` channel.
  */
+
+import { normalizeKoreanNegation } from './korean-negation-normalizer.js';
 
 export const PAIRING_TAXONOMY = [
   // Proteins
@@ -81,8 +89,8 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
 
   // Shellfish
   shellfish: [
-    /(?<!\p{L})(?<!\p{N})(?:shrimp|prawn|lobster|crab|oyster|mussel|clam|scallop)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:새우|랍스터|게|굴|홍합|조개|가리비)(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:shrimp|prawn|lobster|crab|oyster|mussel|clam|scallop|seafood|shellfish)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:새우|랍스터|게|굴|홍합|조개|가리비|해산물)(?:는|은|이|가|을|를|랑|이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // White fish
@@ -155,24 +163,147 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   ],
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Negation / exclusion scope detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Maximum character window scanned around a food match to decide whether the
+ * match is inside a negation scope. Picked so multi-token phrases like
+ * "but not lobster" (left-side English) or "새우는 안 좋아하는" (right-side
+ * Korean) fit, while distant unrelated text does not.
+ */
+const NEGATION_WINDOW_CHARS = 40;
+
+/**
+ * English negation triggers that scope the food noun that follows them.
+ * Order matters: longer multi-word forms first so "but not" wins over "no".
+ *
+ * Uses an explicit Unicode-aware left boundary `(?:^|[^\p{L}\p{N}])` instead of
+ * `\b` (CLAUDE.md rule 8) so the regex remains correct if upstream callers
+ * ever pass mixed-script text into the negation scanner. Triggers themselves
+ * are ASCII; the trailing `\s+$` anchors the scan to the character window
+ * immediately preceding a food match.
+ */
+const ENGLISH_NEGATION_LEFT_RE =
+  /(?:^|[^\p{L}\p{N}])(?:but\s+not|but\s+no|without|except(?:ing)?|excluding|minus|hold\s+the|no)\s+$/iu;
+
+/**
+ * Korean negation/exclusion markers that scope the food noun preceding them.
+ * Covers postpositional negation ("없이", "빼고", "말고"), copula-prefixed
+ * negation ("X은/는 안 좋아…", "X 싫어…") and dislike verbs.
+ *
+ * Unicode-safe: only Hangul code points, no `\b` (rule 8).
+ */
+const KOREAN_NEGATION_RIGHT_RE =
+  /^\s*(?:없이|빼고|말고|제외|안\s*\S+|싫어\S*|싫은|싫고|안돼|안\s*돼)/u;
+
+/**
+ * True if `food` match at [start, end) is inside a negation scope.
+ * Bidirectional: scans up to NEGATION_WINDOW_CHARS to the left (English-style
+ * pre-marker) and to the right (Korean-style post-marker).
+ */
+function isInsideNegationScope(query: string, start: number, end: number): boolean {
+  const leftStart = Math.max(0, start - NEGATION_WINDOW_CHARS);
+  const leftContext = query.slice(leftStart, start);
+  if (ENGLISH_NEGATION_LEFT_RE.test(leftContext)) {
+    return true;
+  }
+  const rightEnd = Math.min(query.length, end + NEGATION_WINDOW_CHARS);
+  const rightContext = query.slice(end, rightEnd);
+  if (KOREAN_NEGATION_RIGHT_RE.test(rightContext)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Wraps each per-tag pattern into a global, sticky-capable form so we can
+ * enumerate every match position rather than just `.test()`-ing existence.
+ */
+function withGlobalFlag(re: RegExp): RegExp {
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  return new RegExp(re.source, flags);
+}
+
+interface PairingMatch {
+  tag: PairingTag;
+  start: number;
+  end: number;
+}
+
+function findAllMatchesForTag(query: string, tag: PairingTag): PairingMatch[] {
+  const patterns = PAIRING_PATTERNS[tag];
+  const out: PairingMatch[] = [];
+  for (const base of patterns) {
+    const re = withGlobalFlag(base);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(query)) !== null) {
+      out.push({ tag, start: m.index, end: m.index + m[0].length });
+      if (m[0].length === 0) {
+        re.lastIndex += 1;
+      }
+    }
+  }
+  return out;
+}
+
+export interface PairingExtraction {
+  /** Foods the query positively asks for. Order matches PAIRING_TAXONOMY. */
+  included: PairingTag[];
+  /** Foods explicitly negated/excluded. Order matches PAIRING_TAXONOMY. */
+  excluded: PairingTag[];
+}
+
+/**
+ * Negation-aware extraction. Each pairing tag is classified as `included`,
+ * `excluded`, or absent based on whether its surface form sits inside a
+ * negation scope. A tag with at least one positive match is always included
+ * (even if other occurrences are negated) so "steak and steak but not lobster"
+ * still returns beef as positive.
+ */
+export function extractPairingConstraintsWithExclusions(query: string): PairingExtraction {
+  if (typeof query !== 'string' || query.length === 0) {
+    return { included: [], excluded: [] };
+  }
+  // Normalize Korean predicative negation ("안 좋아하는" stays — it is a
+  // dislike verb, not the predicative copula — but "아닌"/"않고" become 말고).
+  const normalized = normalizeKoreanNegation(query);
+
+  const included: PairingTag[] = [];
+  const excluded: PairingTag[] = [];
+  for (const tag of PAIRING_TAXONOMY) {
+    const matches = findAllMatchesForTag(normalized, tag);
+    if (matches.length === 0) continue;
+    let hasPositive = false;
+    let hasNegative = false;
+    for (const m of matches) {
+      if (isInsideNegationScope(normalized, m.start, m.end)) {
+        hasNegative = true;
+      } else {
+        hasPositive = true;
+      }
+    }
+    if (hasPositive) {
+      included.push(tag);
+    } else if (hasNegative) {
+      excluded.push(tag);
+    }
+  }
+  return { included, excluded };
+}
+
 /**
  * Extracts all matching pairing tags from a query.
  * Useful for queries like "wines for beef and mushrooms".
  *
+ * Negation-aware: foods inside a negation scope ("without seafood",
+ * "해산물 빼고") are NOT returned. To also see the excluded set, use
+ * {@link extractPairingConstraintsWithExclusions}.
+ *
  * @param query - Normalized query string
- * @returns Array of all matching PairingTags
+ * @returns Array of PairingTags the query positively asks for
  */
 export function extractAllPairingConstraints(query: string): PairingTag[] {
-  const matches: PairingTag[] = [];
-  const seen = new Set<PairingTag>();
-
-  for (const tag of PAIRING_TAXONOMY) {
-    const patterns = PAIRING_PATTERNS[tag];
-    if (!seen.has(tag) && patterns.some((p) => p.test(query))) {
-      matches.push(tag);
-      seen.add(tag);
-    }
-  }
-
-  return matches;
+  return extractPairingConstraintsWithExclusions(query).included;
 }

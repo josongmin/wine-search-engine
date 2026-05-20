@@ -7,6 +7,7 @@ import {
   mergeAgentSemanticContract,
 } from '../../../../src/application/agent/agent-semantic-contract.js';
 import { AgentToolExecutionPolicy } from '../../../../src/application/agent/agent-tool-execution-policy.js';
+import { createAgentExecutionState } from '../../../../src/application/agent/agent-execution-state.js';
 
 function semanticContractJson(query: string): string {
   return JSON.stringify({
@@ -39,6 +40,7 @@ describe('AgentSemanticContractCompiler', () => {
       requestId: 'req-semantic-contract',
       deterministicContract: buildAgentQueryExecutionContract(query),
       timeoutMs: 1_000,
+      state: createAgentExecutionState(),
     });
 
     expect(complete).toHaveBeenCalledTimes(1);
@@ -61,6 +63,7 @@ describe('AgentSemanticContractCompiler', () => {
       requestId: 'req-semantic-skip',
       deterministicContract: buildAgentQueryExecutionContract('opus one'),
       timeoutMs: 1_000,
+      state: createAgentExecutionState(),
     });
 
     expect(semanticContract).toBeUndefined();
@@ -82,6 +85,7 @@ describe('AgentSemanticContractCompiler', () => {
       requestId: 'req-semantic-merge',
       deterministicContract,
       timeoutMs: 1_000,
+      state: createAgentExecutionState(),
     });
     if (semanticContract === undefined) {
       throw new Error('expected semantic contract');

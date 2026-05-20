@@ -350,7 +350,7 @@ function constraintToSparseFilterTokens(
     // hardConstraintsToSparseFilterTokens in production. Cases removed to prevent the
     // footgun where a direct call silently generates a hard filter that collapses recall.
     // drinking_window is also SOFT — same reasoning, case removed below.
-    // Ref: SOFT_CONSTRAINT_ATTRIBUTES in src/domain/shared/constants/constraint-attributes.ts
+    // Ref: SOFT_CONSTRAINT_ATTRIBUTES in src/shared/constants/constraint-attributes.ts
 
     case 'price':
     case 'price_usd': {

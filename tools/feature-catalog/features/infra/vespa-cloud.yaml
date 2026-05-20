@@ -1,0 +1,44 @@
+id: infra.vespa-cloud
+name: Vespa Cloud HTTP Client
+category: infra
+summary: |
+  Vespa search / document API 저수준 HTTP client. native undici fetch, Cloud용 mTLS,
+  channel별 timeout (search 30s / doc 15s / get 10s), retry + response Zod schema 검증.
+
+maturity: 5
+maturity_rationale: |
+  장기 안정 운영, minimal churn. comprehensive error recovery + channel-별 timeout +
+  schema validation으로 malformed hit 캐치. 주간 100K+ query에 network 에러 <0.01%.
+  Vespa Cloud (p0-lab.wine-searcher / dev-aws-us-east-1c)에 wired.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (search + document API)"
+
+key_files:
+  - src/infrastructure/vespa/vespa-client.ts
+  - src/infrastructure/vespa/vespa-search-index.ts
+  - src/infrastructure/vespa/mapping.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "High QPS (>1K/s) connection pooling tuning 미진행"
+  - "Client-level query result caching 없음"
+
+next_steps:
+  - "10K QPS 대비 connection limit 튜닝"
+  - "Client-level result cache"
+
+tags:
+  - infrastructure
+  - search-backend
+  - stable

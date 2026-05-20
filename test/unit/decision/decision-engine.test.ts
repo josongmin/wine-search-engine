@@ -14,7 +14,7 @@ import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js'
 import type { EntityResolveResult } from '../../../src/domain/resolver/model/resolve-result.js';
 import type { QueryPolicy } from '../../../src/domain/query/model/query-policy.js';
 import type { QueryUncertainty } from '../../../src/domain/query/model/query-uncertainty.js';
-import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../src/domain/observability/silent-skip-counters.js';
 
 // ── Stub: ThresholdStore returning DEFAULT_THRESHOLD_PROFILE ──────────────────
 class StubThresholdStore implements ThresholdStore {

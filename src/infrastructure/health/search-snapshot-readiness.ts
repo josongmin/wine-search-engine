@@ -3,16 +3,16 @@ import fsSync from 'node:fs';
 import type { Pool } from 'pg';
 import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { z } from 'zod';
-import { resolveDataPath } from '../../shared/utils/data-paths.js';
-import { hashStableJson, hashText, stableJsonStringify } from '../../shared/utils/stable-json.js';
-import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../shared/constants/search-snapshot.js';
+import { resolveDataPath } from '../../domain/shared/utils/data-paths.js';
+import { hashStableJson, hashText, stableJsonStringify } from '../../domain/shared/utils/stable-json.js';
+import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../domain/shared/constants/search-snapshot.js';
 import type { ReadinessStatus } from '../../interface/http/routes/health.route.js';
 import { getCurrentFeatureSchemaHash } from '../../domain/ranking/service/feature-parity-hash.js';
 import { pgTableHasColumn } from '../db/pg-schema-capabilities.js';
 import {
   SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
   SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
-} from '../../shared/constants/public-entity-id-namespace.js';
+} from '../../domain/shared/constants/public-entity-id-namespace.js';
 
 const VespaCountResponseSchema = z.object({
   root: z.object({

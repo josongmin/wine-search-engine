@@ -1,0 +1,39 @@
+id: observability.http-readiness
+name: HTTP Readiness Probes
+category: observability
+summary: |
+  GET /ready 엔드포인트 + structured readiness check (PG, Redis, Vespa, LLM, embedding,
+  reranker 종속성 상태). 컨테이너 healthcheck + 로드밸런서 readiness gate.
+
+maturity: 4
+maturity_rationale: |
+  Production-grade endpoint, 모든 critical 종속성 점검. http-route-contract-openapi
+  test로 contract 보장. circuit breaker 통합.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: GET /ready"
+
+key_files:
+  - src/interface/http/routes/health.route.ts
+
+tests: {}
+
+depends_on:
+  - observability.circuit-breaker-registry
+
+related_rfcs: []
+
+known_limitations:
+  - "Probe latency budget 미정의"
+
+next_steps:
+  - "Per-dependency latency SLA"
+
+tags:
+  - health
+  - production-ops

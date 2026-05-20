@@ -6,14 +6,14 @@
  */
 
 import { createClient } from 'redis';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 import {
   parseWatchlistChangeEvent,
   type WatchlistChangeEvent,
 } from '../../domain/watchlist/model/watchlist-entry.js';
 import type { RedisConfig } from '../db/redis-client.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 
 /**
  * Handler signature for watchlist change notifications.

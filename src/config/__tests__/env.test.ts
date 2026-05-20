@@ -80,6 +80,31 @@ describe('parseEnv invariants', () => {
     expect(config.agent.enabled).toBe(false);
   });
 
+  describe('confidence-refusal threshold (Epic 17.3)', () => {
+    it('defaults to AURC-calibrated 0.45 when CONFIDENCE_REFUSAL_THRESHOLD is unset (hallucination guard ON by default)', () => {
+      const config = parseEnv({});
+      expect(config.confidenceRefusal.threshold).toBe(0.45);
+    });
+
+    it('honours an explicit override in [0, 1]', () => {
+      const config = parseEnv({ CONFIDENCE_REFUSAL_THRESHOLD: '0.6' });
+      expect(config.confidenceRefusal.threshold).toBeCloseTo(0.6);
+    });
+
+    it('allows threshold=0 as the effective-disable signal (any positive C admits, NaN still refused downstream)', () => {
+      const config = parseEnv({ CONFIDENCE_REFUSAL_THRESHOLD: '0' });
+      expect(config.confidenceRefusal.threshold).toBe(0);
+    });
+
+    it('rejects out-of-range thresholds (> 1)', () => {
+      expect(() => parseEnv({ CONFIDENCE_REFUSAL_THRESHOLD: '1.5' })).toThrow();
+    });
+
+    it('rejects negative thresholds', () => {
+      expect(() => parseEnv({ CONFIDENCE_REFUSAL_THRESHOLD: '-0.1' })).toThrow();
+    });
+  });
+
   it('LLM_QUERY_INTERPRETER=true without OPENAI_API_KEY throws actionable error', () => {
     expect(() => parseEnv({ LLM_QUERY_INTERPRETER: 'true' })).toThrowError(
       /LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY/,

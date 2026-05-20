@@ -11,7 +11,7 @@ import {
   type RedisConfig,
 } from '../db/redis-client.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB;

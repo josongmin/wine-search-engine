@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { EMBEDDING_DIMENSION, EMBEDDING_MODEL } from '../../../src/shared/constants/embedding.js';
+import { EMBEDDING_DIMENSION, EMBEDDING_MODEL } from '../../../src/domain/shared/constants/embedding.js';
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..', '..');
 

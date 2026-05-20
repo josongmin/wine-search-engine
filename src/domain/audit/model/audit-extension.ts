@@ -37,6 +37,7 @@
  * No parallel audit envelope — this is attached to SearchResponseMeta.audit_extension.
  */
 
+import { z } from 'zod';
 import type { PolicyDecisionRecord } from '../../query/model/policy-decision-record.js';
 import type { QueryRoute } from '../../query/model/query-route.js';
 import type {
@@ -249,3 +250,90 @@ export interface AuditExtension {
     readonly fallbackSearchUsed: boolean;
   } | undefined;
 }
+
+// ─── Versioned envelope (SSoT) ───────────────────────────────────────────────
+//
+// Migration policy
+// ----------------
+// `schema_version` is the *single* dimension along which the audit envelope
+// evolves. Consumers (bench harness, audit replay tools, external analytics)
+// MUST branch on `schema_version` instead of structural sniffing.
+//
+//   - v1 (current): stable fields documented in `AuditExtension` above.
+//   - v2 (reserved): future shape changes that break v1 consumers.
+//
+// Backward-compat contract:
+//   * Inputs missing `schema_version` are interpreted as v1 and the parser
+//     fills in the current version on parse. This keeps all pre-versioning
+//     producers (existing route handlers, bench fixtures) wire-compatible.
+//   * The envelope is `.strict()` at the top level: unknown keys are rejected
+//     to prevent silent payload drift. Forward-compat fields MUST be added by
+//     bumping `schema_version` and extending the schema explicitly.
+//   * `AUDIT_EXTENSION_SCHEMA_VERSIONS` is append-only. Removing a version is
+//     a breaking change that requires coordinated consumer migration.
+//
+// This versioned envelope is intentionally narrower than the full
+// `AuditExtension` HTTP wire schema (`search-response.schema.ts`) — it owns
+// the *stable* fallback_trace contract that bench harness + audit consumers
+// parse directly. The HTTP wire schema can keep its passthrough envelope for
+// debug-gated fields without violating this SSoT.
+
+/** Append-only list of supported audit-extension schema versions. */
+export const AUDIT_EXTENSION_SCHEMA_VERSIONS = ['1', '2'] as const;
+
+export type AuditExtensionSchemaVersion = (typeof AUDIT_EXTENSION_SCHEMA_VERSIONS)[number];
+
+/** Current emitted schema version. Producers MUST emit this value. */
+export const CURRENT_AUDIT_EXTENSION_SCHEMA_VERSION: AuditExtensionSchemaVersion = '1';
+
+/** Defensive bounds — keep payloads small and prevent log-injection abuse. */
+const FALLBACK_TRACE_MAX_FAILED_SYNTHESIS_ATTEMPTS = 32;
+const ENVELOPE_MAX_REQUEST_ID_LENGTH = 256;
+const ENVELOPE_MAX_DETERMINISM_FINGERPRINT_LENGTH = 128;
+const ENVELOPE_MAX_MESSAGE_LENGTH = 4096;
+
+/**
+ * Stable fallback_trace shape (SSoT) — snake_case wire form.
+ * Mirrors the `AuditExtension.fallback_trace` semantics but uses the wire
+ * field names that bench harness + HTTP consumers parse directly.
+ */
+export const FallbackTraceWireSchema = z
+  .object({
+    fallback_applied: z.enum(['layer2', 'layer3', 'layer4']).nullable(),
+    reasoning_failure: z.boolean(),
+    failed_synthesis_attempts: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(FALLBACK_TRACE_MAX_FAILED_SYNTHESIS_ATTEMPTS),
+    fallback_search_used: z.boolean(),
+  })
+  .strict();
+
+export type FallbackTraceWire = z.infer<typeof FallbackTraceWireSchema>;
+
+/**
+ * Versioned audit-extension envelope (SSoT).
+ *
+ * Strict at the top level: unknown keys are rejected so producers cannot
+ * silently introduce drift. Use `schema_version` to evolve the shape.
+ */
+export const AuditExtensionEnvelopeSchema = z
+  .object({
+    schema_version: z
+      .enum(AUDIT_EXTENSION_SCHEMA_VERSIONS)
+      .default(CURRENT_AUDIT_EXTENSION_SCHEMA_VERSION),
+    request_id: z.string().min(1).max(ENVELOPE_MAX_REQUEST_ID_LENGTH).optional(),
+    fallback_trace: FallbackTraceWireSchema.optional(),
+    corrective_retry_calibrated_confidence: z.number().finite().min(0).max(1).optional(),
+    determinism_fingerprint: z
+      .string()
+      .min(1)
+      .max(ENVELOPE_MAX_DETERMINISM_FINGERPRINT_LENGTH)
+      .optional(),
+    message: z.string().max(ENVELOPE_MAX_MESSAGE_LENGTH).optional(),
+  })
+  .strict();
+
+export type AuditExtensionEnvelope = z.infer<typeof AuditExtensionEnvelopeSchema>;
+

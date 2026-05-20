@@ -18,7 +18,7 @@ import {
   type SearchSnapshotManifest,
 } from './search-snapshot-schema.js';
 import { resolveAliasClaimsAndBuildAmbiguityRegistry } from './build-ambiguity-registry.js';
-import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/shared/constants/search-snapshot.js';
+import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/domain/shared/constants/search-snapshot.js';
 import { buildAliasArtifact } from './build-alias-artifact.js';
 import {
   loadActiveSourceEntityContinuity,
@@ -33,9 +33,9 @@ import type {
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
-} from '../../src/shared/constants/source-systems.js';
+} from '../../src/domain/shared/constants/source-systems.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { loadRequiredFixtureTargetIds } from './verify-runtime-gold-catalog-coverage.js';
 import { hasHangul } from './build-alias-artifact.js';
 import {

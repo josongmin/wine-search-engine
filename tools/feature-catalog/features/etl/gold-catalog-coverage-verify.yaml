@@ -1,0 +1,41 @@
+id: etl.gold-catalog-coverage-verify
+name: Gold Catalog Coverage Verify
+category: etl
+summary: |
+  Golden query ground-truth 엔티티가 published search snapshot에 모두 존재하는지 검증.
+  데이터 손실 / catalog mismatch를 promotion 전에 차단. CI gate.
+
+maturity: 4
+maturity_rationale: |
+  단순 set intersection 로직, catalog regression을 안정적으로 캐치. pre-publication
+  gate로 운영. attribute-level coverage 검사는 아직 미적용.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:verify-gold-catalog-coverage"
+
+key_files:
+  - scripts/etl/verify-gold-catalog-coverage.ts
+
+tests: {}
+
+depends_on:
+  - eval.golden-set
+  - etl.search-snapshot-build
+
+related_rfcs: []
+
+known_limitations:
+  - "엔티티 존재만 검사 — attribute completeness 미검사"
+
+next_steps:
+  - "Attribute-level coverage 확장 (e.g. 모든 와인에 price_band 존재 등)"
+
+tags:
+  - data-quality
+  - coverage
+  - ci-gate

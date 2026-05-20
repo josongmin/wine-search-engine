@@ -23,8 +23,8 @@ import {
   applySituationIntentWeightOverlay,
 } from '../../../src/domain/ranking/model/scoring-weights.js';
 import { getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
-import { globalSilentSkipCounter } from '../../../src/observability/silent-skip-counters.js';
-import { createStageTimer } from '../../../src/observability/stage-timer.js';
+import { globalSilentSkipCounter } from '../../../src/domain/observability/silent-skip-counters.js';
+import { createStageTimer } from '../../../src/domain/shared/stage-timer.js';
 import { makeHybridCandidate } from '../../support/hybrid-candidate-test-factory.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

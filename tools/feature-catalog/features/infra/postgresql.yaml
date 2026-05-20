@@ -1,0 +1,43 @@
+id: infra.postgresql
+name: PostgreSQL Client & Repositories
+category: infra
+summary: |
+  pg.Pool 기반 connection pool (default 10), entity/alias/watchlist repository, Flyway
+  마이그레이션, health check + circuit breaker. snapshot resolver (active 버전 추적)
+  포함.
+
+maturity: 4
+maturity_rationale: |
+  Production-grade. pool 튜닝 문서화, migration 안정. 데이터 corruption 사고 없음.
+  repo가 type-safe query builder 제공. 그러나 query 캐싱 없음.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (모든 stateful 도메인 데이터 액세스)"
+
+key_files:
+  - src/infrastructure/db/pg-pool.ts
+  - src/infrastructure/db/active-snapshot-resolver.ts
+  - src/infrastructure/db/migrate.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Query 결과 cache 없음"
+  - "Warm-up query 필요"
+
+next_steps:
+  - "Prepared statement caching"
+  - "Query 결과 cache"
+
+tags:
+  - infrastructure
+  - persistence

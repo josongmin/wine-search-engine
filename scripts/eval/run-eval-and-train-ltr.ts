@@ -28,8 +28,8 @@ import {
   loadSearchSnapshotRuntimeState,
 } from '../../src/infrastructure/health/search-snapshot-readiness.js';
 import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
-import { hashText } from '../../src/shared/utils/stable-json.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
+import { hashText } from '../../src/domain/shared/utils/stable-json.js';
 import {
   evaluateNoisyEntityBenchmarkWithSearchExecutor,
   getNoisyEntityQualityViolations,

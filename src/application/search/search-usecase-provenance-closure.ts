@@ -9,6 +9,7 @@ import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candid
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
@@ -16,20 +17,6 @@ import {
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
-}
-
-/** Wave G2: shared outcome-derivation so each reader stays one-liner. */
-function recordGraphPath(
-  reader: 'provenance_closure' | 'decision_input' | 'ranker_hard_gate'
-    | 'ranker_soft_weight' | 'pre_rank_coverage' | 'graph_executor' | 'bundle_selector',
-  graph: ConstraintGraph | undefined,
-): void {
-  const outcome = classifyGraphPresence({
-    graphPresent: graph !== undefined,
-    ...(graph !== undefined ? { graphOrigin: graph.origin } : {}),
-    graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
-  });
-  recordGraphPathDecision({ reader, outcome });
 }
 
 /**
@@ -47,7 +34,14 @@ export function buildHybridCandidateCoverageStage(
   policy: ProvenancePolicy,
   graph?: ConstraintGraph,
 ): ProvenanceCoverageStage {
-  recordGraphPath('provenance_closure', graph);
+  recordGraphPathDecision({
+    reader: 'provenance_closure',
+    outcome: classifyGraphPresence({
+      graphPresent: graph !== undefined,
+      graphOrigin: graph?.origin,
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
+    }),
+  });
   const satisfied = candidates.flatMap((candidate) => candidate.matchedConstraints);
   const resolution = resolveRequiredAttributes({
     plan,
@@ -86,7 +80,14 @@ export function buildRankedResultCoverageStage(
   policy: ProvenancePolicy,
   graph?: ConstraintGraph,
 ): ProvenanceCoverageStage {
-  recordGraphPath('provenance_closure', graph);
+  recordGraphPathDecision({
+    reader: 'provenance_closure',
+    outcome: classifyGraphPresence({
+      graphPresent: graph !== undefined,
+      graphOrigin: graph?.origin,
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
+    }),
+  });
   const topResult = rankedResults[0];
   const satisfied = topResult === undefined ? [] : topResult.matchedConstraints;
   const resolution = resolveRequiredAttributes({

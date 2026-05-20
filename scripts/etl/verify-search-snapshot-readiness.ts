@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   loadSearchSnapshotRuntimeState,
   verifySearchSnapshotRuntimeStateLive,
@@ -14,7 +14,7 @@ import {
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
-} from '../../src/shared/constants/search-snapshot.js';
+} from '../../src/domain/shared/constants/search-snapshot.js';
 
 const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 

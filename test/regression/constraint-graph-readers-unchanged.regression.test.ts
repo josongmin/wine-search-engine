@@ -110,7 +110,7 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/query\/service\/deterministic-topology-detector\.ts$/,
   /src\/domain\/query\/service\/topology-pattern-lexicon\.ts$/,
   // Wave F4: unified graph-path-decision telemetry across 6 readers.
-  /src\/observability\/graph-path-telemetry\.ts$/,
+  /src\/domain\/observability\/graph-path-telemetry\.ts$/,
   // Phase 1b.3b (ADR-014 PR5): ranker + retrieval annotator graph-native.
   /src\/domain\/query\/service\/graph-tier-projection\.ts$/,
   /src\/domain\/query\/service\/graph-slot-constraints\.ts$/,
@@ -131,7 +131,7 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/retrieval\/service\/bundle-selector\.ts$/,
   /src\/domain\/response\/model\/bundle-ranked-result\.ts$/,
   /src\/application\/search\/search-usecase-graph-executor\.ts$/,
-  /src\/observability\/bundle-selector-counters\.ts$/,
+  /src\/domain\/observability\/bundle-selector-counters\.ts$/,
   // Machine V2 tool sidecar seam.
   /src\/interface\/claude-tools\/tool-executor\.ts$/,
   // Docs / tests / benchmarks remain globally allowed.
@@ -147,7 +147,7 @@ function listTsFiles(dir: string, out: string[] = []): string[] {
     const s = statSync(abs);
     if (s.isDirectory()) {
       listTsFiles(abs, out);
-    } else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) {
+    } else if (name.endsWith('.ts') && !name.endsWith('.test.ts') && !name.endsWith('.d.ts')) {
       out.push(abs);
     }
   }

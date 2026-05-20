@@ -12,7 +12,7 @@ import { connectRedisClient } from './infrastructure/db/redis-client.js';
 import { getTracer, initTelemetry } from './infrastructure/telemetry/tracer.js';
 import { RedisWatchlistPublisher } from './infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber } from './infrastructure/watchlist/redis-watchlist-subscriber.js';
-import { bootstrapLogger } from './config/bootstrap-logger.js';
+import { bootstrapLogger } from './domain/shared/bootstrap-logger.js';
 import { logKillSwitchPolicyAtStartup } from './config/kill-switch-policy.js';
 
 /**

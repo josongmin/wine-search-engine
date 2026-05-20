@@ -1,0 +1,52 @@
+id: korean-i18n.korean-keyword-vocabulary
+name: Korean Wine Keyword Vocabulary & NL Mapper
+category: korean-i18n
+summary: |
+  와인 도메인 한국어 키워드 사전 (단맛/바디/타닌 표현, 음용 의도 표현, 페어링
+  marker). nl-mapper에서 attribute 매핑, agent tools에서 intent 라우팅, query
+  normalizer에서 정규화 신호로 사용.
+
+maturity: 3
+maturity_rationale: |
+  nl-mapper.ts + topology-pattern-lexicon에 통합, agent intent regex
+  (NON_EXACT_LOOKUP_INTENT_RE 등)에 wired. coverage / precision 체계적 평가는 없음 —
+  ad-hoc 추가 패턴. 사용자 피드백 루프 부재.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (agent intent + nl mapper)"
+
+key_files:
+  - src/domain/attribute/service/nl-mapper.ts
+  - src/domain/query/service/topology-pattern-lexicon.ts
+
+tests:
+  regression:
+    - test/regression/korean-i18n-normalization.regression.test.ts
+
+depends_on:
+  - nlu.search-constraint-extraction
+  - korean-i18n.transliterator
+
+related_rfcs:
+  - docs/RFC-003.md
+  - docs/RFC-017.md
+
+known_limitations:
+  - "Keyword 수집 ad-hoc"
+  - "Intent 분류 신뢰도 점수 없음"
+  - "사용자 신호 feedback loop 부재"
+
+next_steps:
+  - "Production query 빈도 분석"
+  - "Intent taxonomy 정형화"
+  - "Active learning 도입"
+
+tags:
+  - korean-i18n
+  - nlp-pipeline
+  - soft-filter

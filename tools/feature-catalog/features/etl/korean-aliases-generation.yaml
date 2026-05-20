@@ -1,0 +1,43 @@
+id: etl.korean-aliases-generation
+name: Korean Aliases Generation
+category: etl
+summary: |
+  Wine brand / region에 대한 한국어 transliteration alias 생성. rule-based core (IPA →
+  hangul) + LLM fallback (브랜드명 위주). 검색에서 Korean query matching 향상.
+
+maturity: 3
+maturity_rationale: |
+  Rule-based core (transliterator 활용) + LLM polish. unit test 있음. coverage ~85% (흔한
+  브랜드). 그러나 LLM fallback non-deterministic, native speaker validation 없음.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:korean-aliases"
+
+key_files:
+  - scripts/etl/generate-korean-aliases.ts
+
+tests: {}
+
+depends_on:
+  - korean-i18n.transliterator
+  - infra.anthropic-chat-llm
+
+related_rfcs:
+  - docs/RFC-003.md
+
+known_limitations:
+  - "LLM fallback 비결정성"
+  - "Native speaker validation 없음"
+
+next_steps:
+  - "Korean user study"
+  - "Onboarding 통합"
+
+tags:
+  - korean-localization
+  - alias-generation

@@ -9,7 +9,7 @@
  * before the HTTP server starts accepting connections.
  */
 
-import { bootstrapLogger } from './bootstrap-logger.js';
+import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 
 /**
  * Minimal config surface needed for pre-flight checks.

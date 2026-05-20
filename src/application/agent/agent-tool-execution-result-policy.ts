@@ -1,6 +1,7 @@
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
+import { transitionTerminationReason } from '../../domain/agent/service/termination-state-machine.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
   buildObservationPairs,
@@ -8,7 +9,7 @@ import {
   formatPolicyBlockedObservation,
   type TimeoutErrorLike,
 } from './agent-tool-execution-support.js';
-import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from './agent-tool-attempt-schema.js';
+import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 
 interface ToolCall {
   readonly tool: string;
@@ -162,7 +163,7 @@ export class AgentToolExecutionResultPolicy {
     state.reasoningFailureDetected = true;
     state.unknownToolAttempts += 1;
     if (state.unknownToolAttempts > 2) {
-      state.terminationReason = 'error';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
       return true;
     }
     this.recordSingleToolStep({
@@ -190,7 +191,7 @@ export class AgentToolExecutionResultPolicy {
     state.reasoningFailureDetected = true;
     state.unknownToolAttempts += 1;
     if (state.unknownToolAttempts > 2) {
-      state.terminationReason = 'error';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
       return true;
     }
     this.recordBatchStep({
@@ -211,7 +212,7 @@ export class AgentToolExecutionResultPolicy {
 
     if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
       state.timeoutStats.tool += 1;
-      state.terminationReason = 'timeout';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'timeout');
       this.recordSingleToolStep({
         ...input,
         observation: this.applyObservationContext(
@@ -227,7 +228,7 @@ export class AgentToolExecutionResultPolicy {
     }
 
     if (isAbortError(err)) {
-      state.terminationReason = 'aborted';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
       this.recordSingleToolStep({
         ...input,
         observation: this.applyObservationContext(
@@ -244,7 +245,7 @@ export class AgentToolExecutionResultPolicy {
 
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
       state.policyBlocked = true;
-      state.terminationReason = 'blocked';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
       this.recordSingleToolStep({
         ...input,
         observation: this.applyObservationContext(
@@ -273,7 +274,7 @@ export class AgentToolExecutionResultPolicy {
     const { err, state, observationContext } = input;
 
     if (isAbortError(err)) {
-      state.terminationReason = 'aborted';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
       this.recordBatchStep({
         ...input,
         observation: this.applyObservationContext(
@@ -290,7 +291,7 @@ export class AgentToolExecutionResultPolicy {
     if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
       state.reasoningFailureDetected = true;
       state.timeoutStats.parallelBatch += 1;
-      state.terminationReason = 'timeout';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'timeout');
       this.recordBatchStep({
         ...input,
         observation: this.applyObservationContext(
@@ -306,7 +307,7 @@ export class AgentToolExecutionResultPolicy {
 
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
       state.policyBlocked = true;
-      state.terminationReason = 'blocked';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
       this.recordBatchStep({
         ...input,
         observation: this.applyObservationContext(
@@ -321,7 +322,7 @@ export class AgentToolExecutionResultPolicy {
     }
 
     state.reasoningFailureDetected = true;
-    state.terminationReason = 'error';
+    state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
     return false;
   }
 

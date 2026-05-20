@@ -1,5 +1,5 @@
 import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execution-observer.port.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import type { AgentResultMetrics } from './agent-result-assembly.js';
 

@@ -16,12 +16,12 @@ import {
 } from '../constants.js';
 import { getAgentExecutionMetricsCollector } from '../../../infrastructure/observability/agent-execution-metrics.js';
 import { getRetrievalDegradationCollector } from '../../../infrastructure/observability/retrieval-degradation-metrics.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
-import { globalCircuitBreakerRegistry } from '../../../observability/circuit-breaker-registry.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
+import { globalCircuitBreakerRegistry } from '../../../domain/observability/circuit-breaker-registry.js';
 import { getRequestId } from '../request-id.js';
 import { buildSearchErrorResponse } from '../errors/error-response.js';
 import { headerKeysEqualConstantTime } from '../middleware/http-debug-mode.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 
 /**
  * Extracts the `X-Debug-Key` header (handling Fastify's `string | string[]`

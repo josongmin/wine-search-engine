@@ -4,7 +4,7 @@ import type { EvalResultStore, EvalResultFilter } from '../../domain/evaluation/
 import type { EvalResult } from '../../domain/evaluation/model/eval-result.js';
 import { createCanonicalEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { parseDecisionSnapshotJsonb, parseEvidenceItemsJsonb } from './jsonb-schemas.js';
 function toDecisionStatus(value: string): DecisionStatus {
   if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;

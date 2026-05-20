@@ -1,0 +1,53 @@
+id: tools.decomposed-search
+name: Decomposed Search Endpoint
+category: tools
+summary: |
+  Comparison 쿼리를 두 leg parallel search로 분해 실행하는 endpoint (HTTP / agent
+  adapter 둘 다). decomposition-detector → SearchUseCase 2회 호출 → 결합.
+
+maturity: 3
+maturity_rationale: |
+  Use case + decomposed-search-adapter (agent 측) 외에 use case 전용 regression
+  스위트 (test/regression/decomposed-search.regression.test.ts, 11개 case) 가
+  영문/한글/혼합 leg, 빈 leg, 양쪽 빈 leg, Promise.allSettled 기반 parallel
+  실행, 공통 filter/budget 전파, 한쪽 leg 실패시 surviving leg 정상 종료,
+  AbortSignal 사전 차단 및 sub-search 옵션 전파, 결정론(5회 반복 동일 결과)을
+  잠근다. 단, 비교 전용 ranking / cross-leg merging 은 여전히 부재로
+  maturity 4로의 상향은 cross-leg merge 도입을 차단한다.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal use case (HTTP은 search route 안에서 분기)"
+  - "Agent tool compare_wines 기반"
+
+key_files:
+  - src/application/search/decomposed-search.usecase.ts
+  - src/application/search/decomposed-search-adapter.ts
+
+tests:
+  regression:
+    - test/regression/decomposed-search.regression.test.ts
+  unit:
+    - test/unit/application/search/decomposed-search.usecase.test.ts
+
+depends_on:
+  - nlu.decomposition-detection
+  - retrieval.comparison-retrieval
+
+related_rfcs:
+  - docs/RFC-010.md
+
+known_limitations:
+  - "Cross-leg ranking 부재"
+  - "Side-aware diversity penalty 미적용"
+
+next_steps:
+  - "Cross-leg merge ranking"
+
+tags:
+  - comparison
+  - decomposition

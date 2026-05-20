@@ -1,0 +1,42 @@
+id: observability.agent-execution-metrics
+name: Agent Execution Metrics
+category: observability
+summary: |
+  Agent step 단위 metric (tool call 횟수, token spend, latency) + 외부 노출 채널. evidence
+  frame과 결합되어 agent trace 분석 + quality dashboard 가능.
+
+maturity: 4
+maturity_rationale: |
+  Agent orchestrator와 deep 통합, structured + queryable. quality dashboard에 사용됨.
+  그러나 evidence frame 저장 비용 scaling 우려, retention SLA 없음.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal telemetry sink"
+
+key_files:
+  - src/infrastructure/observability/agent-execution-metrics.ts
+
+tests: {}
+
+depends_on:
+  - agent.evidence-frames
+
+related_rfcs: []
+
+known_limitations:
+  - "Evidence frame 저장 비용 scaling 우려"
+  - "Retention SLA 없음"
+
+next_steps:
+  - "Sampling strategy"
+  - "Evidence frame 압축"
+
+tags:
+  - agent
+  - observability
+  - tracing

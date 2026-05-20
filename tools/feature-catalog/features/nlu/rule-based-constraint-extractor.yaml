@@ -1,0 +1,47 @@
+id: nlu.rule-based-constraint-extractor
+name: Rule-Based Negation Constraint Extractor
+category: nlu
+summary: |
+  한국어 부정 particle (안/못 + verb → NOT constraint) + 영어 negation (not/no/never)
+  정규화 + 50+ exclusion rule로 attribute 도메인 mapping (e.g. "no high tannin" →
+  tannin_max < 3). Pure lexical, composable.
+
+maturity: 3
+maturity_rationale: |
+  Korean negation normalizer + rule inventory 잘 정리. constraint-graph 테스트로 간접
+  커버. 그러나 rule weighting / confidence scoring 부재, scope ambiguity (e.g. "not too
+  sweet"의 정확한 threshold) 명세 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by constraint extraction)"
+
+key_files:
+  - src/domain/query/service/rule-based-constraint-extractor.ts
+  - src/domain/query/service/korean-negation-normalizer.ts
+
+tests: {}
+
+depends_on:
+  - nlu.query-normalizer
+
+related_rfcs:
+  - docs/RFC-004.md
+
+known_limitations:
+  - "Rule 50+ hardcoded — learning 없음"
+  - "Negation scope ambiguity (\"not too X\"의 quantile cutoff 명세 없음)"
+  - "Positive constraint 상호작용 문서화 부재"
+
+next_steps:
+  - "Scope mapping 정형화"
+  - "Offline error analysis 기반 rule 확장"
+
+tags:
+  - negation
+  - rule-based
+  - korean-native

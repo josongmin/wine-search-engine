@@ -11,7 +11,7 @@ import { ResolveUseCase } from '../resolve.usecase.js';
 import { HybridUseCase } from '../hybrid.usecase.js';
 import { QueryEntrySecurityGate } from '../query-entry-security.js';
 import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 
 describe('public query entry use cases enforce Layer 1 security consistently', () => {
   const sanitizer = new QuerySanitizer();

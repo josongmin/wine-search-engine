@@ -9,7 +9,7 @@ import type {
 import type { QueryRoute } from '../model/query-route.js';
 import type { QueryPlanV2 } from '../model/query-plan.js';
 import { planV2ToUnderstandingSnapshot as toQueryUnderstandingSnapshot } from '../model/query-plan.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 
 /**
  * Input to the ExecutionCompiler.

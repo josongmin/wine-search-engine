@@ -15,7 +15,7 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import type { PoolConfig } from 'pg';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { createSourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 import { atomicWriteFile } from './etl-utils.js';
 import type {

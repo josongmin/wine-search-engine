@@ -1,23 +1,18 @@
 /**
- * E7: TOOL_BATCH_POLICY — typed graph replacing validateParallelBatchPolicy().
+ * E7: TOOL_BATCH_POLICY — typed declarative graph for agent tool batching.
  *
- * The old function expressed batch constraints as code flow (if/else chains).
- * Adding a new tool required modifying function logic, risking regression.
- *
- * This module expresses the same constraints as a declarative data structure:
+ * Batch constraints are expressed as a declarative data structure:
  *  - canRunWith:    tools that may share a parallel batch with this tool
  *  - mustRunAlone:  if true, the tool cannot share a batch with ANY other tool
  *  - maxPerBatch:   maximum concurrent invocations of this tool in one batch
  *
- * Adding a new tool = adding a new entry to TOOL_BATCH_POLICY.
- * No code flow changes required.
- *
- * The existing validateParallelBatchPolicy() function in agent-orchestrator.ts
- * REMAINS in place for backward compatibility. evaluateBatchPolicy() in this
- * module is the E7 typed replacement — consumers can migrate to it incrementally.
+ * Adding a new tool = adding a new entry to TOOL_BATCH_POLICY. No code flow
+ * changes required. The legacy if/else-based validateParallelBatchPolicy()
+ * has been fully retired; evaluateBatchPolicy() below is the single source of
+ * truth, called from agent-tool-execution-phase.ts.
  */
 
-import type { AgentToolName } from './tool-outcome.js';
+import type { AgentToolName } from '../../domain/agent/model/tool-outcome.js';
 
 // ─── BatchPolicyEntry ─────────────────────────────────────────────────────────
 
@@ -47,7 +42,7 @@ export interface BatchPolicyEntry {
 /**
  * Declarative batch policy graph for all known agent tools.
  *
- * Invariants encoded here (previously in validateParallelBatchPolicy code flow):
+ * Invariants encoded here:
  *  - compare_wines:        must run alone (returns a full comparison payload;
  *                          mixing with other tools creates ambiguous synthesis)
  *  - check_drinking_window: can batch with itself (up to 4 parallel checks),
@@ -88,8 +83,7 @@ export const TOOL_BATCH_POLICY: Readonly<Record<AgentToolName, BatchPolicyEntry>
  * Returns { allowed: true } when the batch is valid, or
  * { allowed: false, reason: string, violatingTools: AgentToolName[] } when not.
  *
- * This is a pure replacement for the ad-hoc if/else chains in
- * validateParallelBatchPolicy() — same logic, data-driven.
+ * Pure, declarative replacement for the retired ad-hoc if/else chains.
  */
 export function evaluateBatchPolicy(
   calls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
@@ -105,9 +99,18 @@ export function evaluateBatchPolicy(
 
   const toolNames = calls.map((c) => c.tool);
 
-  // Helper: safe lookup that treats unknown tool names as undefined (cast via unknown).
-  const getPolicy = (name: string): BatchPolicyEntry | undefined =>
-    (TOOL_BATCH_POLICY as Record<string, BatchPolicyEntry | undefined>)[name];
+  // Helper: safe lookup that treats unknown tool names as undefined.
+  //
+  // We MUST guard with Object.hasOwn — a bare bracket lookup would return
+  // values inherited from Object.prototype (e.g. `toString`, `hasOwnProperty`),
+  // which are functions, not BatchPolicyEntry objects. That would (a) bypass
+  // the unknown-tool rejection and (b) crash later when reading `canRunWith`.
+  // This was caught by the property-based unknown-tool test (counterexample:
+  // tool name `"toString"`).
+  const getPolicy = (name: string): BatchPolicyEntry | undefined => {
+    if (!Object.hasOwn(TOOL_BATCH_POLICY, name)) return undefined;
+    return (TOOL_BATCH_POLICY as Record<string, BatchPolicyEntry>)[name];
+  };
 
   // Check mustRunAlone — if any tool requires solo execution and batch has >1 call
   for (const name of toolNames) {

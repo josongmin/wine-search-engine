@@ -1,0 +1,41 @@
+id: eval.split-integrity
+name: Split Integrity Validator
+category: eval
+summary: |
+  train/val/test split의 leakage 검증. 동일 query가 multiple split에 등장 / ground-truth
+  label 불일치 등 감지. LTR / offline eval 실행 전 pre-flight gate.
+
+maturity: 4
+maturity_rationale: |
+  Overlap detection (query hashing + set intersection). pre-flight gate로 안정 운영.
+  RFC-017 §2.5 준수. 그러나 query 단위 dedup만 — entity 동의어 그룹 단위 leakage 미검사
+  (e.g. "Opus One" ≡ "Opus One 2018").
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pre-flight gate before eval/LTR"
+
+key_files:
+  - scripts/eval/run-offline-eval.ts
+
+tests: {}
+
+depends_on:
+  - eval.offline-eval-runner
+
+related_rfcs:
+  - docs/RFC-017.md
+
+known_limitations:
+  - "Entity 동의어 단위 leakage 미검사"
+
+next_steps:
+  - "Entity-synonym group 확장 (e.g. Opus One variants)"
+
+tags:
+  - data-quality
+  - leakage-detection

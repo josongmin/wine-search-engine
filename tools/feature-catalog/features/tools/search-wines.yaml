@@ -1,0 +1,54 @@
+id: tools.search-wines
+name: search_wines Agent Tool
+category: tools
+summary: |
+  Agent의 핵심 검색 tool. Zod-validated 입력 (query, wine_type, price/vintage range,
+  region/appellation, style, retrieval_mode 등) → hybrid retrieval use case 래핑.
+  Observation 요약 + raw 구조 결과 + evidence frame 동시 emit.
+
+maturity: 4
+maturity_rationale: |
+  agent-tools.ts (3K lines) 내 핵심. 5+ regression 게이트 (inner-surface-contract,
+  evidence-frame-emission, parallel-tools, prompt-contract, runner-profile).
+  Observation truncation / diversity flag / exact-lookup heuristic 모두 wired.
+  Streaming 미지원이라 5는 못 됨.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: search_wines"
+
+key_files:
+  - src/application/agent/agent-tools.ts
+  - src/domain/agent/model/agent-tool-attempt-schema.ts
+
+tests:
+  regression:
+    - test/regression/agent-tools-inner-surface-contract.regression.test.ts
+    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+    - test/regression/agent-parallel-tools.regression.test.ts
+    - test/regression/agent-prompt-contract.regression.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - agent.tool-execution-phase
+  - agent.evidence-frames
+
+related_rfcs:
+  - docs/RFC-016.md
+
+known_limitations:
+  - "Observation 2000자 truncate — long-tail 결과 손실 가능"
+  - "Streaming observation 미지원"
+  - "Exact-lookup intent heuristic false-negative 케이스"
+
+next_steps:
+  - "Streaming observation 포맷"
+  - "Exact-lookup intent 학습 기반 분류"
+
+tags:
+  - hot-path
+  - agent-tool

@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   OFFLINE_EVAL_SILVER_CORPUS,
   requireFixtureCorpusPath,

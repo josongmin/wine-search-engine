@@ -10,9 +10,10 @@ import type { InjectionJudgePort } from '../../domain/security/port/injection-ju
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
+import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
-import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
@@ -59,6 +60,7 @@ import {
 import {
   shouldTriggerCorrectiveRetry,
   resolveCorrectiveRetryOutcome,
+  alignRetryResultStatusToOutcome,
   computeCorrectiveRetryCalibration,
 } from './search-usecase-corrective-retry.js';
 import {
@@ -694,9 +696,10 @@ export class SearchUseCase {
     // Only populated for 'accept' outcomes; undefined for clarify/fail.
     const retryCalibratedConfidence = computeCorrectiveRetryCalibration(retryResult, outcome);
 
-    // Use retry result regardless of outcome — the outcome tag is for future
-    // clarify/fail routing in the decision layer (post-route phase).
-    const resolved = retryResult;
+    // TA3-2 outcome propagation: force retryResult.status alignment with the
+    // corrective retry outcome before downstream consumers see it. See
+    // alignRetryResultStatusToOutcome for rationale.
+    const resolved: EntityResolveResult = alignRetryResultStatusToOutcome(retryResult, outcome);
     const rankedResults = buildEntityRouteRankedResults(plan, resolved, retryCandidateEntities);
     const laneArtifacts = {
       identity: liftEntityResolveResultToLaneArtifacts(plan, resolved, retryCandidateEntities),

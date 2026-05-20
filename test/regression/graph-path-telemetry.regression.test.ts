@@ -17,7 +17,7 @@ import {
   type GraphPathDecision,
   type GraphPathOutcome,
   type GraphPathReader,
-} from '../../src/observability/graph-path-telemetry.js';
+} from '../../src/domain/observability/graph-path-telemetry.js';
 
 describe('graph-path-telemetry — recorder + snapshot', () => {
   beforeEach(() => {

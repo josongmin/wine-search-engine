@@ -21,7 +21,7 @@ import {
   writeBreakerOpen,
   writeInfraError,
   writeOk,
-} from '../../src/infrastructure/db/cache-result.js';
+} from '../../src/domain/performance/port/cache-result.js';
 
 describe('Wave 2 / CacheGetResult discriminant', () => {
   it('hit carries value', () => {

@@ -7,7 +7,7 @@
 
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type {
   RetrievalDocument,
   RetrievalDrinkingWindowProjection,
@@ -25,7 +25,7 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import type { VespaHit, VespaQueryResponse } from './vespa-client.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';

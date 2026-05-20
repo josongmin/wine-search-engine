@@ -1,0 +1,47 @@
+id: nlu.constraint-topology-planner
+name: Constraint Topology Planner
+category: nlu
+summary: |
+  Multi-constraint query를 결정적 graph로 컴파일 (constraint atom → DAG). topology-pattern-lexicon
+  template과 결합해 execution topology 결정. redundant index scan 최소화 + 일관된 ranking
+  hint.
+
+maturity: 3
+maturity_rationale: |
+  topology-planner regression 게이트 (flag-on integration test) 운영. 정적 lexicon 기반
+  으로 안정. 그러나 pattern parameterization 부족, overlap precedence 미정의, coverage
+  측정 안 됨.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/query/service/constraint-topology-planner.ts
+
+tests: {}
+
+depends_on:
+  - nlu.topology-pattern-lexicon
+  - nlu.search-constraint-extraction
+
+related_rfcs:
+  - docs/RFC-004.md
+
+known_limitations:
+  - "Pattern parameterization 없음"
+  - "Overlap precedence 미정의"
+  - "Coverage 측정 안 됨"
+
+next_steps:
+  - "Pattern grammar (CFG) 정형화"
+  - "Production query 로그로 coverage 측정"
+
+tags:
+  - constraint-graph
+  - topology
+  - planning

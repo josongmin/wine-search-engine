@@ -24,7 +24,7 @@ import {
   loadGoldCanonicalLookup,
   resolveDefaultFixtureRepoRoot,
 } from './snapshot-entity-identity.js';
-import { isSourceRecordStylePublicEntityId } from '../../src/shared/constants/public-entity-id-namespace.js';
+import { isSourceRecordStylePublicEntityId } from '../../src/domain/shared/constants/public-entity-id-namespace.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { loadConfig } from '../../src/config/env.js';
 

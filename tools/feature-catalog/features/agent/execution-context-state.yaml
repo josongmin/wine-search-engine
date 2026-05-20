@@ -1,0 +1,64 @@
+id: agent.execution-context-state
+name: Agent Execution Context & State
+category: agent
+summary: |
+  Agent 요청 단위의 immutable context (query, constraint, semantic contract, budget)
+  + per-step mutable state (steps, toolOutcomes, evidence frames, terminationReason).
+  admitAgentRequest gate가 sanitization + budget 적용. Termination 전이는 중앙
+  TerminationStateMachine (`transitionTerminationReason`) 한 곳에서 정의되는 우선순위
+  격자(aborted > blocked > error > loop_detected > budget > timeout > fallback > answer > max_steps)
+  로 흐름. 모든 application/agent 및 application/wine-search 작성 사이트는 직접
+  대입 대신 이 transition 함수를 호출.
+
+maturity: 4
+maturity_rationale: |
+  Termination 전이가 단일 SSoT 모듈(`src/domain/agent/service/termination-state-machine.ts`)
+  로 중앙화. 전 40개 write site가 직접 대입이 아니라 `transitionTerminationReason`을
+  통해서만 상태를 변경하므로 last-writer-wins 회귀 가능성이 제거됨. 우선순위 테이블은
+  rationale 주석과 함께 모듈-스코프 const로 노출. 두 개의 회귀 스위트(legacy 페어와이즈
+  + 신규 precedence/idempotence/terminal property 테스트)가 우선순위 격자, 흡수 상태
+  ('aborted'), monotone non-downgrade, undefined sentinel, 81 페어 명시 winner를 고정.
+  남은 작업: state 24-field god-object 분해와 per-step admission gate (level 5).
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/application/agent/agent-execution-context.ts
+  - src/application/agent/agent-execution-state.ts
+  - src/application/agent/agent-run-loop-termination-policy.ts
+  - src/domain/agent/service/termination-state-machine.ts
+
+tests:
+  regression:
+    - test/regression/agent-termination-state-machine.regression.test.ts
+    - test/regression/agent-termination-state-machine-precedence.regression.test.ts
+
+depends_on:
+  - security.query-sanitizer
+
+related_rfcs:
+  - docs/RFC-016.md
+
+known_limitations:
+  - "State 24-field god-object (immutable per-step snapshot 미분해)"
+  - "Per-step admission gate 없음 (pre-loop one-shot)"
+
+next_steps:
+  - "AgentExecutionState를 per-step immutable snapshot 시퀀스로 분해 (현재 24-field god-object)"
+  - "Per-step admission gate 도입: 단계마다 budget/policy/preflight 재평가 (현재는 loop 진입 시 1회)"
+  - |
+    Migration 완료 검증 보강: ESLint 룰 또는 grep-gate를 추가해
+    `state.terminationReason = <literal>` 직접 대입을 금지하고 반드시
+    `transitionTerminationReason(...)`만 사용하도록 enforce. 현재는 관행으로만
+    적용되며, 신규 모듈이 우회할 가능성이 있음.
+
+tags:
+  - state-machine
+  - context
+  - refactor-candidate

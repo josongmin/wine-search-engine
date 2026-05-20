@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { parseNdjson } from '../etl/ndjson.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { resolveCliDataPathArg } from './cli-data-path.js';
 import type { AutocompleteUseCasePort } from '../../src/application/search/port/search-route-usecases.port.js';
 

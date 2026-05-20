@@ -1,0 +1,64 @@
+id: agent.react-orchestrator
+name: ReAct Orchestrator
+category: agent
+summary: |
+  Agent의 main loop. planner phase (LLM call + JSON parsing) + tool execution phase
+  (parallel batch + single + drinkability follow-up) + observation synthesis + answer
+  recovery 4-layer 조율. 종료 정책 (max steps, timeout, answer, loop_detected, budget,
+  blocked, aborted).
+
+maturity: 4
+maturity_rationale: |
+  Unit + regression + e2e 커버리지 견고. semantic-contract token accounting / zombie-loop
+  방지 / termination state machine 모두 회귀 게이트. 그러나 14-단 sanitize 파이프라인 +
+  40-site 분산 FSM 구조로 신규 변경 surface 크고 (post-audit) PtE 마이그레이션 권장 상태.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/agent"
+
+key_files:
+  - src/application/agent/agent-orchestrator.ts
+  - src/application/agent/agent-run-loop.ts
+  - src/application/agent/agent-run-loop-termination-policy.ts
+
+tests:
+  unit:
+    - test/unit/application/agent/agent-orchestrator.test.ts
+    - test/unit/application/agent/agent-run-loop.test.ts
+    - test/unit/application/agent/agent-run-loop-termination-policy.test.ts
+  regression:
+    - test/regression/agent-termination-state-machine.regression.test.ts
+    - test/regression/agent-semantic-contract-token-accounting.regression.test.ts
+    - test/regression/agent-refinement-retry-no-zombie-loop.regression.test.ts
+  e2e:
+    - test/e2e/agent-api.test.ts
+
+depends_on:
+  - agent.react-planner
+  - agent.tool-execution-phase
+  - agent.observation-synthesis
+  - agent.answer-recovery-policy
+  - agent.semantic-contract-compiler
+
+related_rfcs:
+  - docs/RFC-016.md
+
+known_limitations:
+  - "14-단 sanitize 파이프라인 비대 (LLM 결정 후처리)"
+  - "40-site 분산 termination FSM (중앙 transition table 없음)"
+  - "Side-channel `pendingPlannerDirective`로 LLM puppet"
+
+next_steps:
+  - "PtE (Plan-then-Execute) 아키텍처로 마이그레이션"
+  - "TerminationStateMachine 중앙화"
+  - "Sanitize → Analyzer 출력 schema로 흡수"
+
+tags:
+  - core-loop
+  - state-machine
+  - migration-candidate

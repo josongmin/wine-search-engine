@@ -33,7 +33,7 @@ import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator, RankComputationError } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
 import { WineAttributeEncoders } from './wine-attribute-encoder.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { evaluateRerankGate } from './rerank-gate.js';
 import { LTRRanker } from './ltr-ranker.js';
 import {
@@ -58,7 +58,7 @@ import type { LTRScoreComponents } from './ltr-feature-extractor.js';
 import {
   incrementLtrInferenceComponentScoreAbsent,
   type LtrInferenceComponentScoreField,
-} from '../../../observability/silent-skip-counters.js';
+} from '../../../domain/observability/silent-skip-counters.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.

@@ -3,12 +3,12 @@ import { z } from 'zod';
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
-} from '../../src/shared/constants/search-snapshot.js';
+} from '../../src/domain/shared/constants/search-snapshot.js';
 import {
   hashStableJson,
   hashText,
   stableJsonStringify,
-} from '../../src/shared/utils/stable-json.js';
+} from '../../src/domain/shared/utils/stable-json.js';
 
 export interface AliasSnapshotRecord {
   readonly aliasId: string;

@@ -1,4 +1,4 @@
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { RankedResult, ComponentScores } from '../../domain/ranking/model/ranked-result.js';
 import type { ScoreDecomposition } from '../../domain/ranking/model/score-decomposition.js';

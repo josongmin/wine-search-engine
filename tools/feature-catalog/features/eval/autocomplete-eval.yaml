@@ -1,0 +1,40 @@
+id: eval.autocomplete-eval
+name: Autocomplete (Typeahead) Eval
+category: eval
+summary: |
+  Prefix completion rate + suggestion 관련도 (NDCG) + 사용자 만족도 (proxy)에 대한
+  autocomplete eval. 카테고리/언어별 slice.
+
+maturity: 2
+maturity_rationale: |
+  Dedicated script 존재, 실행 가능. 그러나 fixture 규모 limited, satisfaction proxy
+  metric 미수립 (실제 click 데이터 없음).
+
+status: experimental
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm run scripts/eval/run-autocomplete-eval"
+
+key_files:
+  - scripts/eval/run-autocomplete-eval.ts
+
+tests: {}
+
+depends_on:
+  - tools.autocomplete
+
+related_rfcs: []
+
+known_limitations:
+  - "Fixture 규모 limited"
+  - "Satisfaction proxy 미수립"
+
+next_steps:
+  - "Production click 시그널 통합"
+
+tags:
+  - autocomplete
+  - typeahead

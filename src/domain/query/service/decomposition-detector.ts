@@ -74,11 +74,17 @@ const COMPARISON_PATTERNS: ReadonlyArray<RegExp> = [
   // Korean: "X 와 Y", "X 랑 Y", "X 하고 Y"
   /(.+?)\s+(?:와|과|랑|하고|이랑)\s+(.+?)\s+(?:중|비교|비교하면|뭐가|어떤|차이|어느)(?:\?|$)/u,
 
-  // English: "X or Y which is better"
-  /(.+?)\s+or\s+(.+?)\s+(?:which|better|choice)(?:\?|$)/i,
+  // English: "X or Y which is better", "X or Y better choice"
+  // Allow trailing content after the cue (e.g. "which is better") by anchoring
+  // the cue end on whitespace OR `?` OR end-of-string. Without `\s` the second
+  // capture group greedily absorbs words between Y and the cue, e.g.
+  // "Screaming Eagle which is" for "X or Y which is better".
+  /(.+?)\s+or\s+(.+?)\s+(?:which|better|choice)(?:\s|\?|$)/i,
 
-  // Korean: "X 또는 Y 어느"
-  /(.+?)\s+(?:또는|아니면)\s+(.+?)\s+(?:어느|뭐|어떤)(?:\?|$)/u,
+  // Korean: "X 또는 Y 어느", "X 또는 Y 어느 게 좋아"
+  // Same rationale as the English "or" pattern above: allow trailing content
+  // after the cue word so "어느 게 좋아" still anchors on "어느".
+  /(.+?)\s+(?:또는|아니면)\s+(.+?)\s+(?:어느|뭐|어떤)(?:\s|\?|$)/u,
 ];
 
 const CONCEPT_COMPARE_ENTITY_TYPES = new Set([

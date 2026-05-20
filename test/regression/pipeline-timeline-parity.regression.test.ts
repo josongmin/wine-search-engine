@@ -16,7 +16,7 @@ import {
   PIPELINE_STAGE_ORDER,
   PIPELINE_STAGE_STEPS,
   type PipelineDebugStepId,
-} from '../../src/observability/pipeline-debug-steps.js';
+} from '../../src/domain/observability/pipeline-debug-steps.js';
 
 /** All step IDs declared in PipelineDebugStep. */
 const ALL_STEP_IDS: readonly PipelineDebugStepId[] = Object.values(PipelineDebugStep);

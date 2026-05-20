@@ -31,10 +31,14 @@ export const FeaturesEnvSchema = z.object({
   WEBHOOK_SECRET: z.string().min(ENV_WEBHOOK_SECRET_MIN_LEN).optional(),
 
   /** Confidence refusal threshold for hallucination prevention (Epic 17.3).
-   * When set (in range [0, 1]), enables confidence-based refusal in AdmissionGate.
-   * Default: unset (confidence check disabled, backward compatible).
-   * Recommended: 0.45 (AURC-calibrated operating point). */
-  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().finite().min(0).max(1).optional(),
+   * The AdmissionGate refuses resolved decisions whose calibrated
+   * confidence C falls below this floor.
+   * Default: 0.45 (AURC-calibrated operating point — refusal recall ≥ 0.90,
+   * false-refusal rate ≤ 0.05 against the wrong_top1 eval slice).
+   * Set to 0 to allow any positive-confidence decision (NaN is still refused
+   * — the hallucination guard treats non-finite C as zero confidence).
+   */
+  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().finite().min(0).max(1).default(0.45),
 
   /** Optional path to a runtime LTR model file for PG-less / bootstrap startup.
    * When unset, learned LTR is skipped unless registry data is available from PG.

@@ -1,4 +1,4 @@
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type {
   RetrievalDocument,

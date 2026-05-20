@@ -33,7 +33,7 @@ import type {
 } from '../../domain/retrieval/model/dual-lane-artifact.js';
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { ConstraintReasoner } from '../../domain/query/service/constraint-reasoner.js';
 import type { ConstraintReasonerOutput } from '../../domain/query/service/constraint-reasoner.js';
@@ -70,8 +70,8 @@ import { RetrievalProfileService } from '../../domain/retrieval/service/retrieva
 import { retrievalPlanVersion } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { getModeWeights, MODE_WEIGHT_OVERLAY_MAP } from '../../domain/ranking/model/mode-weights.js';
 import { RANKING_POLICY_VERSION } from '../../domain/ranking/service/ranker.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
-import { logSearchEvent } from '../../observability/log-search-event.js';
+import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { logSearchEvent } from '../../domain/observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import {
@@ -84,26 +84,42 @@ const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
 const retrievalProfileService = new RetrievalProfileService();
 const RECOMMENDATION_DRINKING_WINDOW_PREDICTION_LIMIT = 3;
 
+/**
+ * entity_lookup contract: a lookup caller asked for a single authoritative
+ * wine. The decisionStatus field is the authoritative correctness signal —
+ * when admission rejects (failed) or ambiguity stands (ambiguous), the top-1
+ * result is still the closest candidate the engine found, and exposing it
+ * with the appropriate status lets the caller act on the closest miss.
+ * Returning multiple results would violate the lookup contract.
+ *
+ * Behaviour:
+ *  - non entity_lookup kinds → unchanged (full rankedResults).
+ *  - empty rankedResults → unchanged (return empty).
+ *  - resolved → prefer decisionOutput.selectedEntity / chosenEntityId match,
+ *    fall back to rankedResults[0].
+ *  - ambiguous / failed → top-1 (closest miss). selectedEntity is absent on
+ *    non-resolved decisions per RFC-007 §3.
+ */
 export function selectDisplayRankedResultsForDecision(
   rankedResults: readonly RankedResult[],
   decisionOutput: DecisionOutput,
   retrievalKind: SearchRouteRetrievalKind | undefined,
 ): readonly RankedResult[] {
-  if (
-    decisionOutput.decisionStatus !== 'resolved' ||
-    retrievalKind !== 'entity_lookup' ||
-    rankedResults.length <= 1
-  ) {
+  if (retrievalKind !== 'entity_lookup' || rankedResults.length === 0) {
     return rankedResults;
   }
 
-  const selectedEntityId = decisionOutput.selectedEntity?.entityId ?? decisionOutput.chosenEntityId;
-  if (selectedEntityId === undefined) {
-    return rankedResults.slice(0, 1);
+  if (decisionOutput.decisionStatus === 'resolved') {
+    const selectedEntityId =
+      decisionOutput.selectedEntity?.entityId ?? decisionOutput.chosenEntityId;
+    if (selectedEntityId !== undefined) {
+      const selected = rankedResults.find((result) => result.entityId === selectedEntityId);
+      if (selected !== undefined) {
+        return [selected];
+      }
+    }
   }
-
-  const selected = rankedResults.find((result) => result.entityId === selectedEntityId);
-  return selected !== undefined ? [selected] : rankedResults.slice(0, 1);
+  return rankedResults.slice(0, 1);
 }
 
 function isDualLaneArtifact(
@@ -1320,7 +1336,33 @@ export async function runSearchPostRoutePhase(
 
   let response: SearchResponseV1;
 
-  if (abstainDecision !== false) {
+  // entity_lookup contract: when the caller passes options.clarification=false
+  // (forced by toLookupRequest for /v1/search/lookup), suppress the
+  // entropy-abstain deflection branch and route through the normal ranked
+  // decision path. The abstain decision is still emitted in auditExtension
+  // so the trace is honest, but the response carries top-1 + appropriate
+  // decisionStatus instead of a clarification payload — matching the
+  // documented lookup intent ("direct answer, not a 'did you mean?'").
+  // Requires at least one ranked result so the response is not vacuous.
+  const honorClarificationOptOut =
+    ctx.retrievalKind === 'entity_lookup'
+    && ctx.request.options?.clarification === false
+    && ctx.rankedResults.length > 0;
+
+  if (abstainDecision !== false && honorClarificationOptOut) {
+    pipelineDebug(
+      {
+        step: 'post_route.entropy_abstain_bypassed',
+        effective_route: ctx.effectiveRoute,
+        abstain_reason: abstainDecision.reason,
+        retrieval_kind: ctx.retrievalKind,
+        ranked_count: ctx.rankedResults.length,
+      },
+      'pipeline entity_lookup clarification opt-out — abstain bypass',
+    );
+  }
+
+  if (abstainDecision !== false && !honorClarificationOptOut) {
     const abstainEntropy = abstainDecision.entropy;
     pipelineDebug(
       {

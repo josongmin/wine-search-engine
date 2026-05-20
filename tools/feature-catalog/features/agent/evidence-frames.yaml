@@ -1,0 +1,63 @@
+id: agent.evidence-frames
+name: Tool Call Evidence Frames (ADR-009)
+category: agent
+summary: |
+  Tool invocation의 input / observation / structured output / timestamp를 structured
+  evidence carrier로 emit. ADR-009 Phase 0 적용. bench harness + audit + evaluator가
+  step record 안 거치고 직접 소비.
+
+maturity: 5
+maturity_rationale: |
+  Zod schema strict + immutable + 6개 regression file (emission + result-contract +
+  builder + schema + v1↔v1.1 migration + closure-invariant). Closure-invariant 파일은
+  fast-check 100-run property 6종 (shape determinism, timestamp monotonicity, toolCallId
+  uniqueness, JSON round-trip, size bound < 100KB, schema strictness) + 한국어/Latin
+  validator 회귀 7종. `evidence-closure-validator` 가 synthesis answer 의 entity-shaped
+  token (Hangul/CJK 포함) 이 frame 의 observationSnapshot/structuredOutput 에 닫혀
+  있는지 기계적으로 검증. ADR-009 bench/audit consumer 가 동일 shape 에 의존.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "AgentResult.evidenceFrames (HTTP response)"
+  - "Bench / audit consumers"
+
+key_files:
+  - src/domain/agent/model/tool-call-evidence-frame.ts
+  - src/domain/agent/service/build-tool-call-evidence-frame.ts
+  - src/domain/agent/service/evidence-closure-validator.ts
+
+tests:
+  regression:
+    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+    - test/regression/agent-result-evidence-frames-contract.regression.test.ts
+    - test/regression/build-tool-call-evidence-frame.regression.test.ts
+    - test/regression/tool-call-evidence-frame-schema.regression.test.ts
+    - test/regression/tool-call-evidence-frame-v1-to-v1-1-migration.regression.test.ts
+    - test/regression/evidence-frame-closure-invariant.regression.test.ts
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-009.md
+  - docs/RFC-016.md
+
+known_limitations:
+  - "Closure validator v1 은 substring 휴리스틱 — semantic entailment (LLM-based) 미흡"
+  - "Tool I/O size: observationSnapshot 만 Zod max(2200), structuredOutput 페이로드 미bound"
+  - "Re-execution 시 evidence merge 의미 미정의"
+  - "Closure validator 가 production critic loop 에 wired 되어 있지 않음 (validator는 import-ready)"
+
+next_steps:
+  - "Closure validator → retrieval-critic / answer-synthesizer 에 wire (현재 export 만)"
+  - "Tool I/O structured payload size bound (Zod max on resultSet length)"
+  - "Closure validator semantic mode (entity alias catalog 활용)"
+
+tags:
+  - evidence
+  - traceability
+  - audit
+  - external-contract

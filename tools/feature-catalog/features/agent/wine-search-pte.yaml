@@ -1,0 +1,58 @@
+id: agent.wine-search-pte
+name: Wine Search PtE Orchestrator (Plan-then-Execute, NEW)
+category: agent
+summary: |
+  ReAct 대체를 위한 Plan-then-Execute 오케스트레이터. query-analyzer → deterministic-router →
+  execution-runner → synthesis-runner 4단 파이프라인. wine-search-schemas + execution-plan-schemas
+  + synthesis-schemas로 각 단계 IO를 Zod-validated. fallback templates 포함.
+
+maturity: 2
+maturity_rationale: |
+  스캐폴드 완성 (7개 모듈), __tests__ 존재. 그러나 ReAct 대비 production traffic
+  아직 안 받음 (실험적). shadow mode / A/B 검증 미수립. 18K bench scenario에 대한
+  parity 미입증.
+
+status: experimental
+since: 2026-04
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (대체 orchestrator — flag-gated)"
+
+key_files:
+  - src/application/wine-search/query-analyzer.ts
+  - src/application/wine-search/deterministic-router.ts
+  - src/application/wine-search/execution-runner.ts
+  - src/application/wine-search/execution-plan-schemas.ts
+  - src/application/wine-search/synthesis-runner.ts
+  - src/application/wine-search/synthesis-schemas.ts
+  - src/application/wine-search/synthesis-fallback-templates.ts
+  - src/application/wine-search/wine-search-schemas.ts
+
+tests: {}
+
+depends_on:
+  - infra.structured-llm-port
+  - nlu.search-constraint-extraction
+  - nlu.decomposition-detection
+  - nlu.anchor-extraction
+  - retrieval.hybrid-search
+
+related_rfcs: []
+
+known_limitations:
+  - "Production traffic 안 받음"
+  - "ReAct parity 미입증 (bench scenario)"
+  - "Shadow mode / A/B 인프라 미수립"
+
+next_steps:
+  - "Shadow mode 위에서 18K scenario parity 검증"
+  - "1% → 10% → 50% rollout"
+  - "ReAct cutover (legacy 삭제)"
+
+tags:
+  - orchestration
+  - pte
+  - experimental
+  - migration-target

@@ -13,6 +13,7 @@ import type { AgentOrchestrator } from '../../../application/agent/agent-orchest
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from '../../../config/container-tool-contracts.js';
 import type { FeedbackStore } from '../../../domain/learning/port/feedback-store.port.js';
+import type { WineSearchContainerServices } from '../../../config/container.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
@@ -72,4 +73,10 @@ export interface HttpServerDeps
   readonly evalRunner: EvalRunnerContract | null;
   /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort is available. */
   readonly agentOrchestrator?: AgentOrchestrator | undefined;
+  /**
+   * Plan-then-Execute wine-search slice — present when
+   * `WINE_SEARCH_ENABLED=true` and an Anthropic credential is configured.
+   * When `undefined`, the `/v1/wine-search` route is not registered.
+   */
+  readonly wineSearch?: WineSearchContainerServices | undefined;
 }

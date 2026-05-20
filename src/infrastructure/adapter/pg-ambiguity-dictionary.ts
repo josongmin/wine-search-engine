@@ -1,6 +1,6 @@
 import type { Pool, QueryResultRow } from 'pg';
 import type { AmbiguityDictionary } from '../../domain/query/port/ambiguity-dictionary.port.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 import {
   ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,

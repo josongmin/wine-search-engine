@@ -1,0 +1,50 @@
+id: tools.get-food-pairings
+name: get_food_pairings Agent Tool
+category: tools
+summary: |
+  음식 → 와인 페어링 추천 tool. 음식 텍스트, cuisine, 식사 종류 + 와인 선호도
+  (style, price band, region) 입력. food-pairing-tool-policy로 filter/preference
+  구성 후 hybrid retrieval, structured pairing confidence 반환.
+
+maturity: 2
+maturity_rationale: |
+  agent-tools.ts FoodPairingInputSchema + food-pairing-tool-policy 와이어링 완료.
+  Schema validation + 기본 retrieval. 그러나 wine↔food embedding alignment /
+  pairing confidence calibration / cuisine-specific weight 부재.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: get_food_pairings"
+
+key_files:
+  - src/application/agent/agent-tools.ts
+  - src/application/search/food-pairing-tool-policy.ts
+  - src/application/search/search-tool-query-policy.ts
+
+tests:
+  regression:
+    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - nlu.pairing-extraction
+
+related_rfcs: []
+
+known_limitations:
+  - "Wine↔food embedding alignment 부재 (attribute 기반 soft filter만)"
+  - "Pairing confidence uncalibrated"
+  - "Cuisine 별 가중치 미적용"
+
+next_steps:
+  - "Food↔wine pairing 임베딩 학습"
+  - "Critic pairing reference 통합"
+
+tags:
+  - agent-tool
+  - food-pairing
+  - soft-filter

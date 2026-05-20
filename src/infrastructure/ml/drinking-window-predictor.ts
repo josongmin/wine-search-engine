@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 import path from 'node:path';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
 /**
  * Epic 15, Step 15.3: Drinking Window Predictor (ONNX Runtime)
@@ -69,12 +69,19 @@ export interface DrinkingWindowInput {
 
 /**
  * Drinking window prediction result.
+ *
+ * `confidenceScore` is the numeric counterpart to the enum `confidence`
+ * (maturity-3 contract). The ONNX path lacks a calibrated probabilistic
+ * head, so it emits the medium-band midpoint — see ONNX_CONFIDENCE_MIDPOINT
+ * in predictWithOnnx.
  */
 export interface DrinkingWindowPrediction {
   readonly drinkingWindowStart: number;   // year (drinking_window_start)
   readonly drinkingWindowEnd: number;     // year (drinking_window_end)
   readonly peakYear: number;              // estimated peak year (optional)
   readonly confidence: 'high' | 'medium' | 'low';
+  /** Numeric confidence bound in [0, 1]; aligned with the enum confidence. */
+  readonly confidenceScore: number;
   readonly modelVersion: string;
 }
 
@@ -243,11 +250,17 @@ export class DrinkingWindowPredictor {
       drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
     );
 
+    // Rule 15: ONNX model emits no calibrated probability — surface the
+    // medium-band midpoint so numeric consumers stay finite and aligned
+    // with the legacy enum value. ONNX_CONFIDENCE_MIDPOINT = midpoint of
+    // [CONFIDENCE_MEDIUM_THRESHOLD, CONFIDENCE_HIGH_THRESHOLD) = (0.5+0.75)/2.
+    const ONNX_CONFIDENCE_MIDPOINT = 0.625;
     return {
       drinkingWindowStart,
       drinkingWindowEnd,
       peakYear,
       confidence: 'medium',
+      confidenceScore: ONNX_CONFIDENCE_MIDPOINT,
       modelVersion: this.modelVersion,
     };
   }

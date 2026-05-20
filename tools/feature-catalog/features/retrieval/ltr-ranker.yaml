@@ -1,0 +1,53 @@
+id: retrieval.ltr-ranker
+name: Learning-to-Rank Ranker (LambdaMART)
+category: retrieval
+summary: |
+  Runtime LTR ranker. ltr-feature-extractor가 candidate별 수치 feature 산출, lambdamart-ranker가
+  trained 모델로 점수, ltr-training-service가 학습 오케스트레이션 (eval-and-train-ltr 스크립트
+  부분). graph-hard-gate / graph-soft-weight로 constraint preservation.
+
+maturity: 2
+maturity_rationale: |
+  Feature extractor + LambdaMART ranker + training service 모두 존재 + 테스트 디렉터리.
+  그러나 production serving에 fully wired 안 됨 (POC 단계). retraining cadence SLA
+  미수립.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (POC — ranking pipeline 내부)"
+
+key_files:
+  - src/domain/ranking/service/ltr-feature-extractor.ts
+  - src/domain/ranking/service/ltr-ranker.ts
+  - src/domain/ranking/service/ltr-training-service.ts
+  - src/domain/ranking/service/lambdamart-ranker.ts
+  - src/domain/ranking/service/graph-hard-gate.ts
+  - src/domain/ranking/service/graph-soft-weight.ts
+  - src/domain/ranking/training.ts
+
+tests: {}
+
+depends_on:
+  - retrieval.ranking-pipeline
+  - eval.ltr-training
+
+related_rfcs: []
+
+known_limitations:
+  - "Production serving 미완"
+  - "Retraining cadence SLA 없음"
+  - "Online quality feedback loop 없음"
+
+next_steps:
+  - "Vespa serving stack 통합"
+  - "Weekly retraining cron"
+  - "Online quality monitor"
+
+tags:
+  - ranking
+  - ltr
+  - experimental

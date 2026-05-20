@@ -21,7 +21,7 @@ import { buildNormalizedQueryViews } from '../../domain/query/service/query-norm
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,

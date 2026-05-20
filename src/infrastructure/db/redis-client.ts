@@ -1,5 +1,5 @@
 import { createClient } from 'redis';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 
 /** Connected client instance from {@link createClient} (generic-safe for exactOptionalPropertyTypes). */

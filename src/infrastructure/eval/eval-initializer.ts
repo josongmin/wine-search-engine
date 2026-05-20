@@ -5,7 +5,7 @@
  * RFC-009: Complete evaluation framework integration.
  */
 
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 import type { QueryClass } from '../../domain/shared/types/index.js';
 

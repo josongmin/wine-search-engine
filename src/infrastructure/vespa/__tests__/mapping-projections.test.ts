@@ -16,7 +16,7 @@ import {
   parseFeatureSummary,
   toVespaFields,
 } from '../mapping.js';
-import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../shared/constants/source-systems.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../domain/shared/constants/source-systems.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

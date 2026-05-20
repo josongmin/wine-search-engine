@@ -1,0 +1,45 @@
+id: eval.user-journeys
+name: User Journey E2E Tests
+category: eval
+summary: |
+  Multi-step 대화형 시나리오 e2e. entity lookup → recommendation → constraint refinement →
+  comparison. tool sequencing + grounding + multi-turn coherence 검증. claude-tools API
+  사용.
+
+maturity: 4
+maturity_rationale: |
+  ~20 journey scenario로 end-to-end agentic behavior 검증. nightly 실행. tool 순서 +
+  constraint 추출 검증. 그러나 LLM judge 대신 hardcoded assertion이라 production model
+  drift 미감지.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Nightly CI"
+
+key_files: []
+
+tests:
+  e2e:
+    - test/e2e/user-journeys.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - agent.react-orchestrator
+  - infra.anthropic-chat-llm
+
+related_rfcs: []
+
+known_limitations:
+  - "Hardcoded scenario — LLM drift 미감지"
+
+next_steps:
+  - "LLM-judge assertion migration"
+
+tags:
+  - agentic
+  - multi-turn
+  - production-eval-coverage

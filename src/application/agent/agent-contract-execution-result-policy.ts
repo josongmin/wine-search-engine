@@ -2,6 +2,7 @@ import type { AgentTerminationReason } from '../../domain/agent/model/agent-step
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
+import { transitionTerminationReason } from '../../domain/agent/service/termination-state-machine.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
 import {
   buildObservationPairs,
@@ -26,14 +27,17 @@ interface ApplyContractExecutionFailureInput {
 
 export class AgentContractExecutionResultPolicy {
   applyBudgetReservationFailure(state: AgentExecutionState, reason?: string): void {
-    state.terminationReason = (reason as AgentTerminationReason | undefined) ?? 'max_steps';
+    state.terminationReason = transitionTerminationReason(
+      state.terminationReason,
+      (reason as AgentTerminationReason | undefined) ?? 'max_steps',
+    );
   }
 
   applyFailure(input: ApplyContractExecutionFailureInput): boolean {
     const { err, requestId, stepIndex, checkCalls, durationMs, state } = input;
 
     if (isAbortError(err)) {
-      state.terminationReason = 'aborted';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
       this.recordFailureStep({
         requestId,
         stepIndex,
@@ -50,7 +54,7 @@ export class AgentContractExecutionResultPolicy {
 
     if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
       state.timeoutStats.parallelBatch += 1;
-      state.terminationReason = 'timeout';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'timeout');
       this.recordFailureStep({
         requestId,
         stepIndex,
@@ -67,7 +71,7 @@ export class AgentContractExecutionResultPolicy {
 
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
       state.policyBlocked = true;
-      state.terminationReason = 'blocked';
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
       this.recordFailureStep({
         requestId,
         stepIndex,
@@ -83,7 +87,7 @@ export class AgentContractExecutionResultPolicy {
     }
 
     state.reasoningFailureDetected = true;
-    state.terminationReason = 'error';
+    state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
     return false;
   }
 

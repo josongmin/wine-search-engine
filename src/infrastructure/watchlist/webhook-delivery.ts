@@ -7,7 +7,7 @@
 
 import { createHmac, randomUUID } from 'crypto';
 import { promises as dnsPromises } from 'node:dns';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 import { isPrivateOrReservedIp } from './ssrf-guard.js';
 

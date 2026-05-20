@@ -1,0 +1,42 @@
+id: retrieval.cache-policy
+name: Retrieval Cache Policy
+category: retrieval
+summary: |
+  Search 결과 caching 정책. 어떤 쿼리를 caching할지 (eligibility), TTL, invalidation.
+  embedding cache + phrase cache + query cache의 정책 layer.
+
+maturity: 2
+maturity_rationale: |
+  cache-policy 결정 로직 + eligibility 분류기 존재 + 2 regression 일부. 그러나 cache-hit
+  분포 통계 없음, invalidation 전략 ad-hoc, observability metric 미수립. 3이 되려면 hit
+  분포 dashboard + invalidation 정형화 필요.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/cache/cache-policy.ts
+
+tests: {}
+
+depends_on:
+  - infra.redis-cache-layer
+
+related_rfcs: []
+
+known_limitations:
+  - "Hit 분포 통계 없음"
+  - "Invalidation 정책 ad-hoc"
+
+next_steps:
+  - "Cache hit 분포 dashboard"
+  - "Invalidation 정형화"
+
+tags:
+  - caching
+  - performance

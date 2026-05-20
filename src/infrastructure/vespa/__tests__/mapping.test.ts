@@ -10,8 +10,8 @@ import {
   parseHitSummary,
   toRetrievalHitProjection,
 } from '../mapping.js';
-import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../shared/constants/source-systems.js';
-import { stableJsonStringify } from '../../../shared/utils/stable-json.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../domain/shared/constants/source-systems.js';
+import { stableJsonStringify } from '../../../domain/shared/utils/stable-json.js';
 
 function makeDocument(overrides: Partial<RetrievalDocument> = {}): RetrievalDocument {
   return {

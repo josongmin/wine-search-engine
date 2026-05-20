@@ -23,7 +23,7 @@
 import 'dotenv/config';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
-import { bootstrapLogger } from '../../src/config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../src/domain/shared/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'reap-snapshots' });
 

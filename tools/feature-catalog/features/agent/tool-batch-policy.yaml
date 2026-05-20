@@ -1,0 +1,53 @@
+id: agent.tool-batch-policy
+name: Tool Batch Policy (Typed Graph)
+category: agent
+summary: |
+  Parallel batch 유효성을 데이터 기반으로 검증. tool마다 canRunWith[], mustRunAlone,
+  maxPerBatch 선언. search+search/pairing 허용, compare는 alone, drinkability는 자신과만
+  4-parallel. ad-hoc if/else를 대체한 E7 리팩터.
+
+maturity: 5
+maturity_rationale: |
+  Declarative 정책 + e7-agent-contract-executor + agent-parallel-tools regression 게이트.
+  새 tool 추가가 데이터 한 줄. SOTA++ 업그레이드:
+   (a) tool-batch-policy-properties.regression.test.ts 추가 — fast-check 100 runs로
+       canRunWith symmetry, mustRunAlone, maxPerBatch, unknown-tool rejection,
+       empty/single-call invariant을 invariant 형태로 검증.
+   (b) legacy validateParallelBatchPolicy() 잔존 코멘트 정리, evaluateBatchPolicy()
+       단일 path 확정 (agent-tool-execution-phase.ts 한 곳에서만 호출).
+   (c) Property test가 prototype-pollution-class 버그를 발견하여 fix:
+       unknown tool name "toString" 등이 Object.prototype 멤버로 새 들어가
+       canRunWith.includes() crash → Object.hasOwn 가드 추가.
+
+status: active
+since: 2025-11
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by tool-execution-phase)"
+
+key_files:
+  - src/application/agent/tool-batch-policy.ts
+
+tests:
+  regression:
+    - test/regression/agent-parallel-tools.regression.test.ts
+    - test/regression/e7-agent-contract-executor.regression.test.ts
+    - test/regression/tool-batch-policy-properties.regression.test.ts
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-016.md
+
+known_limitations:
+  - "maxPerBatch static (query complexity 미반영)"
+
+next_steps:
+  - "Adaptive maxPerBatch (query 복잡도/latency budget 기반)"
+
+tags:
+  - batch-policy
+  - declarative
+  - parallel

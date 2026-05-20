@@ -4,7 +4,7 @@ import {
   isPotentialVintageToken,
 } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;

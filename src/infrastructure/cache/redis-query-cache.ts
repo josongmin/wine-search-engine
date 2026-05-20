@@ -9,21 +9,22 @@
  */
 
 import { z } from 'zod';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js';
 import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
 import { RedisCache } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 import {
   cacheHit,
   cacheMiss,
   cacheCorruptEntry,
   cacheInfraError,
   type CacheGetResult,
-} from '../db/cache-result.js';
+} from '../../domain/performance/port/cache-result.js';
+import { CACHE_TTL_SECONDS } from './cache-ttl-config.js';
 
 /**
  * Lightweight Zod schema for cached SearchResponseV1 structural validation.
@@ -47,6 +48,7 @@ const SearchResponseCacheSchema = z.object({
 
 const STATS_KEY_HITS = 'cache:stats:query:hits';
 const STATS_KEY_MISSES = 'cache:stats:query:misses';
+const STATS_KEY_SETS = 'cache:stats:query:sets';
 
 /**
  * Redis query cache: Store complete search responses.
@@ -150,8 +152,11 @@ export class RedisQueryCache implements QueryCachePort {
   async set(
     cacheKey: QueryCacheKey,
     response: SearchResponseV1,
-    ttlSeconds: number,
+    ttlSeconds?: number,
   ): Promise<void> {
+    // Default TTL (E1: infra.redis-cache-layer 3→4) — when caller omits TTL,
+    // use the documented per-cache default from the SSoT config.
+    const effectiveTtl = ttlSeconds ?? CACHE_TTL_SECONDS.QUERY;
     try {
       // Write-time Zod validation (E5-T11): prevents cache-poison loops where an
       // oversized or malformed value is written unvalidated, then rejected on read,
@@ -161,9 +166,13 @@ export class RedisQueryCache implements QueryCachePort {
         response,
         SearchResponseCacheSchema,
         'RedisQueryCache',
-        ttlSeconds,
+        effectiveTtl,
       );
-      if (!written) {
+      if (written) {
+        void Promise.resolve(this.cache.redis.incr(STATS_KEY_SETS)).catch(() => {
+          /* best-effort; counter drift is acceptable */
+        });
+      } else {
         log.warn({ key: cacheKey.redisKey }, 'query cache write skipped: shape validation failed');
       }
     } catch (error) {
@@ -192,18 +201,22 @@ export class RedisQueryCache implements QueryCachePort {
   async getStats(): Promise<{
     readonly hits: number;
     readonly misses: number;
+    readonly sets: number;
     readonly size: number;
     readonly entriesCount: number;
   }> {
     const redis = this.cache.redis;
     try {
-      // Get hit/miss counters
+      // Get hit/miss/sets counters
       const hitsStr = await redis.get(STATS_KEY_HITS);
       const missesStr = await redis.get(STATS_KEY_MISSES);
+      const setsStr = await redis.get(STATS_KEY_SETS);
       const hitsRaw = hitsStr ? parseInt(hitsStr, 10) : NaN;
       const missesRaw = missesStr ? parseInt(missesStr, 10) : NaN;
+      const setsRaw = setsStr ? parseInt(setsStr, 10) : NaN;
       const hits = Number.isFinite(hitsRaw) ? hitsRaw : 0;
       const misses = Number.isFinite(missesRaw) ? missesRaw : 0;
+      const sets = Number.isFinite(setsRaw) ? setsRaw : 0;
 
       // Count entries with pattern scan. Stats counters live under
       // `cache:stats:query:*`, not `query:*`, so the SCAN naturally excludes
@@ -242,6 +255,7 @@ export class RedisQueryCache implements QueryCachePort {
       return {
         hits,
         misses,
+        sets,
         size: usedMemory,
         entriesCount,
       };
@@ -254,7 +268,7 @@ export class RedisQueryCache implements QueryCachePort {
         errorClass: error instanceof Error ? error.constructor.name : 'unknown',
       });
       log.error({ err: error }, 'stats error (infra_error; returning zero as fallback — verify via metrics)');
-      return { hits: 0, misses: 0, size: 0, entriesCount: 0 };
+      return { hits: 0, misses: 0, sets: 0, size: 0, entriesCount: 0 };
     }
   }
 

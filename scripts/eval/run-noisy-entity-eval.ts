@@ -20,7 +20,7 @@ import fs from 'node:fs/promises';
 import { z } from 'zod';
 import type { SearchExecutorPort } from '../../src/application/search/port/search-executor.port.js';
 import { parseNdjson } from '../etl/ndjson.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import {
   ENTITY_RETRIEVAL_SUITE_IDS,
   loadEntityRetrievalFixtureCases,

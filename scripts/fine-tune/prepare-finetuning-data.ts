@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import { getWineDataDir } from '../../src/shared/utils/data-paths.js';
+import { getWineDataDir } from '../../src/domain/shared/utils/data-paths.js';
 import {
   OFFLINE_EVAL_SILVER_CORPUS,
   requireFixtureCorpusPath,

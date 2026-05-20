@@ -3,7 +3,7 @@ import {
   SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
   SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
   isSourceRecordStylePublicEntityId,
-} from '../../../src/shared/constants/public-entity-id-namespace.js';
+} from '../../../src/domain/shared/constants/public-entity-id-namespace.js';
 
 describe('public-entity-id-namespace (ADR-007)', () => {
   it('defines a Postgres LIKE pattern consistent with the source-record prefix', () => {

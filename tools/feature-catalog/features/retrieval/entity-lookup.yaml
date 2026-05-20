@@ -1,0 +1,55 @@
+id: retrieval.entity-lookup
+name: Entity Retrieval (Deterministic Lookup)
+category: retrieval
+summary: |
+  Curated entity 카탈로그를 기반으로 query를 canonical entity로 결정적으로 해석하고
+  retrieval_mode='entity' 단발 lookup으로 직행하는 경로. 한국어 별칭 catalog (3-tier:
+  gold/seeded/silver)에 매칭되면 LLM 없이 처리.
+
+maturity: 4
+maturity_rationale: |
+  프로덕션 와이어링 완료 (`cascade-router`가 query를 적절한 retrieval mode로 라우팅).
+  3-tier alias catalog regression 게이트 운영 중. 카탈로그 누락에 따른 long-tail 미스가
+  남아 있어 5는 아님.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: search_wines (retrieval_mode=entity)"
+  - "HTTP: POST /v1/search (retrieval_mode=entity)"
+
+key_files:
+  - src/domain/query/model/retrieval-mode.ts
+  - src/domain/retrieval/service/cascade-router.ts
+  - src/domain/attribute/service/entity-alias-catalog.ts
+
+tests:
+  regression:
+    - test/regression/gold-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/seeded-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/silver-korean-entity-alias-catalog.regression.test.ts
+
+depends_on:
+  - korean-i18n.curated-alias-catalog
+  - nlu.anchor-extraction
+
+related_rfcs:
+  - docs/RFC-005.md
+  - docs/RFC-017.md
+
+known_limitations:
+  - "Gold catalog manual curation 필요 — 신규 와이너리 신속 반영 불가"
+  - "Cross-language alias expansion 미흡 (e.g. 'Moët' ↔ '모엣')"
+
+next_steps:
+  - "Gold catalog 자동 갱신 파이프라인 (Korean wine 이커머스 데이터 활용)"
+  - "Producer/vintage disambiguation hint 추가"
+
+tags:
+  - korean-i18n
+  - deterministic
+  - catalog-driven
+  - hot-path

@@ -229,7 +229,7 @@ const CURATED_WINE_LABEL_SURFACES: ReadonlySet<string> = (() => {
   return surfaces;
 })();
 
-/** Hangul (Korean) syllable range check. Delegates to @shared/utils/hangul (SSoT). */
+/** Hangul (Korean) syllable range check. Delegates to @domain/shared/utils/hangul (SSoT). */
 const isHangul = containsHangul;
 
 /** Unicode-aware word containment check.

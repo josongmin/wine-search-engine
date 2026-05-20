@@ -9,14 +9,14 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
 import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
-import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 
 const COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;

@@ -1,0 +1,38 @@
+id: observability.circular-latency-buffer
+name: Circular Latency Buffer
+category: observability
+summary: |
+  in-memory ring buffer로 최근 N건 latency 보관. p50/p95/p99 계산용. 메모리 bound +
+  recent-window 분석. tracer/gen-ai-tracing과 별개의 lightweight 측정 path.
+
+maturity: 3
+maturity_rationale: |
+  단순 ring buffer, 작동 안정. 그러나 multi-process aggregation 없음 (각 worker별
+  독립).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/infrastructure/observability/circular-latency-buffer.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Multi-process aggregation 없음"
+
+next_steps:
+  - "Worker-aggregate (Redis-backed)"
+
+tags:
+  - latency
+  - in-memory

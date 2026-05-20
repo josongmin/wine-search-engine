@@ -8,7 +8,7 @@ import { getRequestId } from '../request-id.js';
 import { buildSearchErrorResponse, sendSearchErrorResponse } from '../errors/error-response.js';
 import { HTTP_STATUS_FORBIDDEN, HTTP_STATUS_OK } from '../constants.js';
 import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
-import { createStageTimer } from '../../../observability/stage-timer.js';
+import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
 function denyBenchmarkLane(request: FastifyRequest, reply: FastifyReply): void {
   const body = buildSearchErrorResponse(

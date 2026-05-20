@@ -1,5 +1,5 @@
 import type { Config } from './env.js';
-import { bootstrapLogger } from './bootstrap-logger.js';
+import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { QuerySanitizer } from '../domain/security/service/query-sanitizer.js';
 import { LLMInjectionJudge } from '../domain/security/service/llm-injection-judge.js';

@@ -1,0 +1,61 @@
+id: nlu.anchor-extraction
+name: Anchor Extraction (Entity Anchoring)
+category: nlu
+summary: |
+  Query 내 wine name / region / producer / grape entity anchor 검출. fuzzy alias matching
+  + canister 기반 lookup plan + confidence ranking. Korean mixed-query marker
+  ("같은", "비슷한", "보다") + 영문 comparison marker ("vs", "compared to") 처리,
+  phrase-level idiom/temporal anti-pattern guard 포함.
+
+maturity: 4
+maturity_rationale: |
+  Alias matcher 추상화 + unit test + planner 통합 + dedicated regression suite
+  (`anchor-extraction-marker-precision.regression.test.ts`, 17 case). Phrase-level
+  idiom guard (`KOREAN_MARKER_IDIOM_ANTIPATTERNS`)로 "어제와 같은 와인" 같은
+  temporal false-positive와 "가솔린처럼 가볍다" 같은 simile idiom false-positive를
+  marker 단계에서 차단. determinism, Unicode (Hangul jamo, accented Latin,
+  emoji) hygiene까지 잠금. 아직 미진: lookup strategy ranking (exact > fuzzy >
+  metaphone) hardcoded, multi-anchor priority 결정론은 confidence + surface form
+  tiebreaker로만 보장 (rank-learned 아님).
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/domain/query/service/anchor-extractor.ts
+  - src/domain/query/service/alias-lookup-plan.ts
+  - src/domain/query/service/alias-match-confidence.ts
+
+tests:
+  regression:
+    - test/regression/anchor-extraction-marker-precision.regression.test.ts
+  unit:
+    - src/domain/query/__tests__/anchor-extractor.test.ts
+    - src/domain/query/service/__tests__/relative-query-extractor.test.ts
+
+depends_on:
+  - nlu.query-normalizer
+  - korean-i18n.curated-alias-catalog
+
+related_rfcs:
+  - docs/RFC-005.md
+
+known_limitations:
+  - "Lookup strategy ranking hardcoded (exact > fuzzy > metaphone)"
+  - "Multi-anchor priority는 confidence + surface tiebreaker 기반 — learned ranker 아님"
+  - "Idiom anti-pattern list는 enumerated (audit-driven, not exhaustive)"
+
+next_steps:
+  - "Lookup strategy ranking 학습화 (LTR/contextual)"
+  - "Idiom anti-pattern 자동 마이닝 (corpus-driven)"
+  - "Multi-anchor priority 결정용 contextual reranker"
+
+tags:
+  - entity-resolution
+  - fuzzy-matching
+  - anchor-detection

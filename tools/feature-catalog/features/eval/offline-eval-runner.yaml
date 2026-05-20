@@ -1,0 +1,46 @@
+id: eval.offline-eval-runner
+name: Offline Evaluation Runner
+category: eval
+summary: |
+  Golden query를 입력으로 search/ranking 파이프라인 실행 → NDCG/MRR/Recall/
+  Decision-Utility/AURC/ECE 계산. scenario / language / entity-type slicing. release
+  gate verdict (pass/fail) 출력. JSON 결과 산출.
+
+maturity: 4
+maturity_rationale: |
+  Split-integrity 검증 (RFC-017 §2.5) + per-mode metric (hybrid/BM25/semantic). nightly
+  + pre-deployment gate. 그러나 online A/B framework 없음, golden label ~500 queries
+  한정.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm eval / eval:offline:*"
+
+key_files:
+  - scripts/eval/run-offline-eval.ts
+
+tests: {}
+
+depends_on:
+  - retrieval.hybrid-search
+  - infra.vespa-cloud
+
+related_rfcs:
+  - docs/RFC-017.md
+
+known_limitations:
+  - "Golden label ~500 queries 한정"
+  - "Online A/B framework 없음"
+
+next_steps:
+  - "Online A/B bucketing"
+  - "Golden set 자동 refresh"
+
+tags:
+  - quality-gate
+  - release-gate
+  - metric-computation

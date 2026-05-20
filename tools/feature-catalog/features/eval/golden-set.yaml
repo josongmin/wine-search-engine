@@ -1,0 +1,45 @@
+id: eval.golden-set
+name: Golden Set E2E Quality Tests
+category: eval
+summary: |
+  Iconic wine reference (Opus One, Sassicaia, 한국 사용 빈도 높은 와인)로 exact-entity
+  retrieval + semantic quality + ranking 회귀 게이트. top-k containment 어설션,
+  순서 over-fitting 없음, 매 커밋마다 e2e 실행.
+
+maturity: 5
+maturity_rationale: |
+  Domain best-in-class quality gate. canonical entity_id 표준화 (ADR-007) 기반. flakiness
+  없는 안정 e2e. 영어/한국어 양쪽 커버. top-k containment + monotonicity score로 ranking
+  과적합 방지. 매 커밋마다 실행되며 회귀 즉시 감지.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CI gate"
+
+key_files: []
+
+tests:
+  e2e:
+    - test/e2e/golden-set.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - infra.vespa-cloud
+
+related_rfcs:
+  - docs/RFC-007.md
+
+known_limitations:
+  - "Iconic ~20 와인 한정 — long-tail 커버리지 부족"
+
+next_steps:
+  - "Wine family (Burgundy / Bordeaux 등)로 breadth 확장"
+
+tags:
+  - quality-gate
+  - top-k-retention
+  - production-eval-coverage

@@ -13,7 +13,7 @@ vi.mock('../../../src/infrastructure/health/readiness-probes.js', () => ({
   probeJsonPostEndpoint: vi.fn().mockResolvedValue('up'),
 }));
 
-vi.mock('../../../src/config/bootstrap-logger.js', () => ({
+vi.mock('../../../src/domain/shared/bootstrap-logger.js', () => ({
   bootstrapLogger: {
     child: () => ({
       warn: vi.fn(),

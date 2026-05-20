@@ -5,14 +5,14 @@ import type { InjectionJudgePort } from '../../domain/security/port/injection-ju
 import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { InterpretRequest } from './interpret-request.dto.js';
-import type { InterpretResponseV2 } from '../../domain/response/model/result-item-v2.js';
+import type { InterpretResponseV2 } from '../../interface/http/schemas/search-response-v2.schema.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { buildInterpretResponseV2 } from './interpret-explain-adapter-v2.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
-import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 

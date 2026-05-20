@@ -7,7 +7,7 @@
  *   the same fusionScore, the iteration-order winner depended on which
  *   retrieval channel arrived first — order-sensitive output.
  *
- * Fix: switch to `pickMaxByScore` from `@shared/utils/stable-comparator.ts`
+ * Fix: switch to `pickMaxByScore` from `@domain/shared/utils/stable-comparator.ts`
  *   with `fusionProfile` (assembly) / `entityId` (accumulator) as the
  *   stable secondary key.
  *

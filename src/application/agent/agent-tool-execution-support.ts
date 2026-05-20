@@ -1,8 +1,8 @@
 import type { AgentToolCallPair } from '../../domain/agent/model/agent-step.js';
 import type { DomainError } from '../../domain/shared/error/domain-error.js';
 import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
-import type { ExpectedOutputSchema, ToolOutcome, ToolOutcomeKind } from './tool-outcome.js';
-import { isAgentToolName } from './tool-outcome.js';
+import type { ExpectedOutputSchema, ToolOutcome, ToolOutcomeKind } from '../../domain/agent/model/tool-outcome.js';
+import { isAgentToolName } from '../../domain/agent/model/tool-outcome.js';
 
 const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
 const DEFAULT_SEARCH_TOOL_TIMEOUT_MS = 18_000;

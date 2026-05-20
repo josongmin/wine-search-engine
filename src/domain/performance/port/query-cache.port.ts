@@ -10,7 +10,7 @@
 
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { QueryCacheKey } from '../model/cache-key.js';
-import type { CacheGetResult } from '../../../infrastructure/db/cache-result.js';
+import type { CacheGetResult } from '../../../domain/performance/port/cache-result.js';
 
 /**
  * Query cache port: Store and retrieve complete search responses.
@@ -52,13 +52,14 @@ export interface QueryCachePort {
    *
    * @param cacheKey - Deterministic cache key
    * @param response - Response to cache
-   * @param ttlSeconds - Time-to-live in seconds (after which entry expires)
+   * @param ttlSeconds - Time-to-live in seconds; defaults to
+   *   {@link CACHE_TTL_SECONDS.QUERY} when omitted (E1: TTL SSoT)
    * @returns Promise resolves when cache write completes
    */
   set(
     cacheKey: QueryCacheKey,
     response: SearchResponseV1,
-    ttlSeconds: number,
+    ttlSeconds?: number,
   ): Promise<void>;
 
   /**
@@ -83,11 +84,15 @@ export interface QueryCachePort {
   /**
    * Get current cache statistics.
    *
-   * @returns Hit/miss counts, size info, eviction stats
+   * @returns Hit/miss/sets counts, size info, eviction stats. `sets` was
+   *   added in the E1 telemetry-hook bump (infra.redis-cache-layer maturity
+   *   3 → 4) so operators can compute write-amplification and hit-rate
+   *   independently.
    */
   getStats(): Promise<{
     readonly hits: number;
     readonly misses: number;
+    readonly sets: number;
     readonly size: number; // bytes
     readonly entriesCount: number;
   }>;

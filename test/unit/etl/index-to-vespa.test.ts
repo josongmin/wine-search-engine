@@ -15,8 +15,8 @@ import { toVespaFields } from '../../../src/infrastructure/vespa/mapping.js';
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
-} from '../../../src/shared/constants/source-systems.js';
-import { stableJsonStringify } from '../../../src/shared/utils/stable-json.js';
+} from '../../../src/domain/shared/constants/source-systems.js';
+import { stableJsonStringify } from '../../../src/domain/shared/utils/stable-json.js';
 import {
   LEARNED_SPARSE_EVAL_KEY,
   LEARNED_SPARSE_FIELD_KEY,

@@ -96,7 +96,7 @@ function detectLanguageMix(query: string): LanguageMix {
   return hangul > 0 && latin > 0 ? 'mixed' : 'monolingual';
 }
 
-// clamp01: imported from @shared/utils/clamp (SSoT).
+// clamp01: imported from @domain/shared/utils/clamp (SSoT).
 
 /**
  * Estimate query difficulty from deterministic priors.

@@ -1,0 +1,39 @@
+id: tools.web-backend-health
+name: Web Backend Health Indicator
+category: tools
+summary: |
+  /ready endpoint poll → frontend에 backend 상태 표시. degraded mode 알림 + 사용자
+  안내.
+
+maturity: 3
+maturity_rationale: |
+  Health poll + status indicator widget. 그러나 시각화 minimal, degraded sub-system
+  세분 안 됨.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Web (footer / header indicator)"
+
+key_files:
+  - web/src/features/backend-health
+
+tests: {}
+
+depends_on:
+  - observability.http-readiness
+
+related_rfcs: []
+
+known_limitations:
+  - "Degraded subsystem 세분 표시 없음"
+
+next_steps:
+  - "Per-subsystem badges"
+
+tags:
+  - frontend
+  - health

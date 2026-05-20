@@ -23,6 +23,9 @@ export interface PhraseCachePort {
    * Store LLM constraint items for a phrase. Empty arrays are valid and
    * represent negative cache entries (the LLM returned no constraints).
    * Failures must not throw — implementations should swallow and log.
+   *
+   * `ttlSeconds` is optional; when omitted, implementations should fall back
+   * to `CACHE_TTL_SECONDS.PHRASE` from the cache-ttl-config SSoT (E1).
    */
-  set(phrase: string, items: LlmConstraintItem[], ttlSeconds: number): Promise<void>;
+  set(phrase: string, items: LlmConstraintItem[], ttlSeconds?: number): Promise<void>;
 }

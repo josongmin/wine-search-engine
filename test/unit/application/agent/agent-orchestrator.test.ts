@@ -63,6 +63,11 @@ function makeSearchResponse(): SearchResponseV1 {
 }
 
 describe('AgentOrchestrator', () => {
+  // terminationReason carries the HIGHEST-SEVERITY reason encountered (per
+  // TerminationStateMachine priority table); recovery is signaled by
+  // fallbackApplied / fallbackTrace.fallbackApplied ('layer2'|'layer3'|'layer4').
+  // Hard failures (error/timeout/loop_detected/...) correctly dominate the
+  // softer 'fallback'/'answer' a recovery layer might write afterward.
   it('handles malformed LLM step payload by failing closed to fallback', async () => {
     const chatLlm: ChatLlmPort = {
       complete: vi.fn().mockResolvedValue(undefined as unknown as { text: string; model: string; finishReason: string }),
@@ -77,7 +82,8 @@ describe('AgentOrchestrator', () => {
     const result = await orchestrator.execute('opus one', 'req-malformed-step');
 
     expect(result.fallbackApplied).toBe(true);
-    expect(result.terminationReason).toBe('fallback');
+    expect(result.terminationReason).toBe('error');
+    expect(result.fallbackTrace?.fallbackApplied).toBe('layer2');
     expect(result.answer).toContain('Opus One 2018');
     expect(result.steps).toHaveLength(0);
   });
@@ -109,7 +115,7 @@ describe('AgentOrchestrator', () => {
     const result = await orchestrator.execute('opus one', 'req-malformed-synth');
 
     expect(result.fallbackApplied).toBe(true);
-    expect(result.terminationReason).toBe('answer');
+    expect(result.terminationReason).toBe('error');
     expect(result.answer).toContain('Search result summary:');
     expect(result.toolCallCount).toBe(1);
     expect(searchExecute).toHaveBeenCalledTimes(1);
@@ -338,7 +344,7 @@ describe('AgentOrchestrator', () => {
       const result = await runPromise;
 
       expect(result.fallbackApplied).toBe(true);
-      expect(result.terminationReason).toBe('fallback');
+      expect(result.terminationReason).toBe('timeout');
       expect(result.answer).toContain('Opus One 2018');
       expect(result.fallbackTrace).toEqual({
         fallbackApplied: 'layer2',
@@ -404,7 +410,7 @@ describe('AgentOrchestrator', () => {
     const result = await orchestrator.execute('opus one', 'req-synth-tool-call');
 
     expect(result.fallbackApplied).toBe(true);
-    expect(result.terminationReason).toBe('answer');
+    expect(result.terminationReason).toBe('error');
     expect(result.answer).toContain('Search result summary:');
     expect(result.fallbackTrace).toMatchObject({
       fallbackApplied: 'layer3',
@@ -446,7 +452,8 @@ describe('AgentOrchestrator', () => {
     const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 2 });
     const result = await orchestrator.execute('병렬로 많이 돌려', 'req-batch-cap');
 
-    expect(result.terminationReason).toBe('fallback');
+    expect(result.terminationReason).toBe('error');
+    expect(result.fallbackApplied).toBe(true);
     expect(result.toolCallCount).toBe(4);
     expect(result.steps[0]?.actionPairs).toHaveLength(4);
     expect(result.steps[0]?.actionPairs?.every((pair) => pair.observation.includes('Batch too large'))).toBe(true);
@@ -592,7 +599,7 @@ describe('AgentOrchestrator', () => {
       await vi.advanceTimersByTimeAsync(20);
       const result = await runPromise;
 
-      expect(result.terminationReason).toBe('fallback');
+      expect(result.terminationReason).toBe('timeout');
       expect(result.fallbackApplied).toBe(true);
       expect(result.steps[0]?.observation).toContain('[TIMEOUT]');
     } finally {
@@ -638,7 +645,7 @@ describe('AgentOrchestrator', () => {
       await vi.advanceTimersByTimeAsync(100);
     const result = await runPromise;
 
-    expect(result.terminationReason).toBe('fallback');
+    expect(result.terminationReason).toBe('timeout');
     expect(result.fallbackApplied).toBe(true);
       expect(result.answer).toContain('No matching wine was found under the provided constraints');
     } finally {
@@ -741,7 +748,8 @@ describe('AgentOrchestrator', () => {
     );
     const result = await orchestrator.execute('opus one', 'req-789');
 
-    expect(result.terminationReason).toBe('answer');
+    expect(result.terminationReason).toBe('loop_detected');
+    expect(result.fallbackApplied).toBe(true);
     expect(result.answer).toContain('Search result summary:');
   });
 
@@ -765,9 +773,12 @@ describe('AgentOrchestrator', () => {
     expect(complete).toHaveBeenCalledTimes(1);
     // Layer 2 fallback (single-shot search) supplied the answer.
     expect(result.fallbackApplied).toBe(true);
+    expect(result.fallbackTrace?.fallbackApplied).toBe('layer2');
     expect(result.answer).toContain('Opus One 2018');
-    // Termination is the Layer-2 outcome, not 'error'.
-    expect(result.terminationReason).toBe('fallback');
+    // Hard 'error' from the breaker open dominates the softer Layer-2 'fallback'
+    // write per TerminationStateMachine priority; canonical recovery signal is
+    // fallbackApplied=true + fallbackTrace.fallbackApplied='layer2'.
+    expect(result.terminationReason).toBe('error');
   });
 
   it('skips synthesis attempt 2 when attempt 1 pushed totals past maxTotalTokens', async () => {

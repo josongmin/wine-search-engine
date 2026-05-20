@@ -1,0 +1,57 @@
+id: agent.semantic-contract-compiler
+name: Semantic Contract Compiler (Pre-loop Intent Analysis)
+category: agent
+summary: |
+  Loop 전 LLM 호출로 query의 intent (recommendation / exact_lookup / food_pairing /
+  comparison / knowledge / off_domain) + preference axis + confidence를 Zod-validated
+  contract으로 산출. tool 선택 + observation synthesis 가이드.
+
+maturity: 4
+maturity_rationale: |
+  Zod schema (max 768 tokens) + 2 regression 게이트: (1) token accounting invariant —
+  LLM이 budget을 소비한 모든 호출에 대해 state.totalInputTokens/totalOutputTokens
+  누적, (2) validation fence invariant — malformed JSON / unknown intent enum /
+  preservedSurface mutation / empty response 모든 케이스에서 compileIfNeeded는
+  partial object가 아니라 정확히 `undefined`를 반환 (한국어 + ASCII bypass 양쪽 검증).
+  intent/axis enum 타이트, fence가 token accounting 직후에 결정적 실행 (RFC-016
+  admission invariant 충족). 5가 되려면 confidence calibration (gold abstention
+  라벨 대비) + multi-intent 표현 필요.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (pre-loop in react-orchestrator)"
+
+key_files:
+  - src/application/agent/agent-semantic-contract.ts
+  - src/application/agent/agent-query-execution-contract.ts
+
+tests:
+  regression:
+    - test/regression/agent-semantic-contract-token-accounting.regression.test.ts
+    - test/regression/agent-semantic-contract-validation-fence.regression.test.ts
+
+depends_on:
+  - infra.chat-llm-port
+  - nlu.recipient-situation-profile
+  - nlu.pairing-extraction
+
+related_rfcs:
+  - docs/RFC-016.md
+  - docs/RFC-009.md
+
+known_limitations:
+  - "Confidence calibration 없음 (gold abstention 라벨 대비)"
+  - "Multi-intent 모델링 없음 (recommendation + pairing 동시 케이스)"
+
+next_steps:
+  - "Confidence calibration"
+  - "Multi-intent 표현 도입"
+
+tags:
+  - intent-detection
+  - schema-driven
+  - token-aware

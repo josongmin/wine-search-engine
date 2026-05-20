@@ -13,7 +13,7 @@ import { parseSpans } from '../../domain/attribute/service/span-parser.js';
 import { isDirectEntityResolution, resolveEntity } from '../../domain/attribute/service/entity-resolver.js';
 import { extractSearchConstraints } from '../../domain/query/service/search-constraint-extractor.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
-import type { ToolOutcome } from './tool-outcome.js';
+import type { ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
 import type { AgentSemanticContract } from './agent-semantic-contract.js';
 
 const QUERY_NORMALIZER = new QueryNormalizer();

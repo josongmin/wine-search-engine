@@ -34,13 +34,14 @@ export interface EmbeddingCachePort {
    *
    * @param cacheKey - Deterministic embedding cache key
    * @param embedding - Dense embedding vector
-   * @param ttlSeconds - Time-to-live in seconds
+   * @param ttlSeconds - Time-to-live in seconds; defaults to
+   *   {@link CACHE_TTL_SECONDS.EMBEDDING} when omitted (E1: TTL SSoT)
    * @returns Promise resolves when cache write completes
    */
   set(
     cacheKey: EmbeddingCacheKey,
     embedding: readonly number[],
-    ttlSeconds: number,
+    ttlSeconds?: number,
   ): Promise<void>;
 
   /**
@@ -64,11 +65,14 @@ export interface EmbeddingCachePort {
   /**
    * Get current cache statistics.
    *
-   * @returns Hit/miss counts, size info
+   * @returns Hit/miss/sets counts, size info. `sets` was added in the
+   *   E1 telemetry-hook bump (infra.redis-cache-layer maturity 3 → 4) so
+   *   operators can compute write-amplification and hit-rate independently.
    */
   getStats(): Promise<{
     readonly hits: number;
     readonly misses: number;
+    readonly sets: number;
     readonly size: number; // bytes
     readonly entriesCount: number;
   }>;

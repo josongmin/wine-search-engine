@@ -11,7 +11,7 @@
 
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import {
   RELEVANCE_THRESHOLD_GRADE,
   type RelevanceGrade,

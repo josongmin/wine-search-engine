@@ -1,0 +1,50 @@
+id: etl.track-c-enrichment
+name: Track C Enrichment Pipeline (Critic / Certifications / Pairings)
+category: etl
+summary: |
+  Silver record 위에 7-step 순차 enrichment 적용 — critic-proxy, certifications,
+  pairings, occasion, drinking-window, gift-suitability, beginner-suitability. step1/2/3
+  포함. advisory file lock + per-step validation + backup-before-write.
+
+maturity: 3
+maturity_rationale: |
+  견고한 error handling (file lock, record-count + field validation). monthly 실행, audit
+  trail 생성. 그러나 LLM-dependent step에 deterministic output 보장 없음 (Claude variance),
+  step rollback 부재.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm etl:track-c"
+
+key_files:
+  - scripts/etl/run-track-c.ts
+  - scripts/etl/run-track-c-step1.ts
+  - scripts/etl/run-track-c-step2.ts
+  - scripts/etl/run-track-c-step3.ts
+
+tests: {}
+
+depends_on:
+  - etl.vivino-to-silver
+  - infra.anthropic-chat-llm
+
+related_rfcs: []
+
+known_limitations:
+  - "LLM step 비결정성 (re-run 시 결과 달라질 수 있음)"
+  - "Step rollback 없음"
+  - "LLM cost/latency SLA 없음"
+
+next_steps:
+  - "LLM 결과 caching by entity"
+  - "Step-level rollback"
+  - "Pin model version"
+
+tags:
+  - enrichment
+  - multi-step
+  - llm-driven

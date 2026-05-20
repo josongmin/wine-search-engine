@@ -26,8 +26,8 @@ import { BundleSelectorImpl } from '../../src/domain/retrieval/service/bundle-se
 import {
   InMemoryBudgetLedger,
 } from '../../src/domain/retrieval/service/budget-ledger.js';
-import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
-import { globalBudgetLedgerCounter } from '../../src/observability/budget-ledger-counters.js';
+import { globalBundleSelectorCounter } from '../../src/domain/observability/bundle-selector-counters.js';
+import { globalBudgetLedgerCounter } from '../../src/domain/observability/budget-ledger-counters.js';
 import type {
   ConstraintGraph,
   SubqueryNode,

@@ -16,7 +16,7 @@ import { buildNormalizedQueryViews } from '../../domain/query/service/query-norm
 import { parseSpans } from '../../domain/attribute/service/span-parser.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { SparseHit } from '../../domain/retrieval/port/search-index.port.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import { VespaNetworkError } from '../vespa/vespa-client.js';
 

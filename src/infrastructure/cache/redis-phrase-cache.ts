@@ -21,7 +21,7 @@
  * preserving correctness at the cost of an extra call.
  */
 
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { PhraseCachePort } from '../../domain/attribute/port/phrase-cache.port.js';
 import type { LlmConstraintItem } from '../../domain/attribute/model/llm-constraint-schema.js';
 import { LlmConstraintResponseSchema } from '../../domain/attribute/model/llm-constraint-schema.js';
@@ -29,12 +29,14 @@ import { RedisCache } from '../adapter/redis-cache.js';
 import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
 import { HOURS_PER_DAY, SECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../domain/shared/utils/time-units.js';
+import { CACHE_TTL_SECONDS } from './cache-ttl-config.js';
 
 const log = bootstrapLogger.child({ component: 'RedisPhraseCache' });
 
 const REDIS_KEY_PREFIX = 'phrase:';
 const STATS_KEY_HITS = 'cache:stats:phrase:hits';
 const STATS_KEY_MISSES = 'cache:stats:phrase:misses';
+const STATS_KEY_SETS = 'cache:stats:phrase:sets';
 
 /** Minimum TTL — Redis rejects EX <= 0; we silently clamp to keep callers safe. */
 const PHRASE_CACHE_MIN_TTL_SECONDS = 1;
@@ -69,41 +71,56 @@ export class RedisPhraseCache implements PhraseCachePort {
   async set(
     phrase: string,
     items: LlmConstraintItem[],
-    ttlSeconds: number,
+    ttlSeconds?: number,
   ): Promise<void> {
-    const safeTtl = clampTtl(ttlSeconds);
+    // Default TTL (E1: infra.redis-cache-layer 3→4) — when caller omits TTL,
+    // use the documented per-cache default from the SSoT config.
+    const requestedTtl = ttlSeconds ?? CACHE_TTL_SECONDS.PHRASE;
+    const safeTtl = clampTtl(requestedTtl);
     try {
-      await this.cache.setValidated(
+      const written = await this.cache.setValidated(
         REDIS_KEY_PREFIX + phrase,
         items,
         LlmConstraintResponseSchema,
         'RedisPhraseCache',
         safeTtl,
       );
+      if (written) {
+        void Promise.resolve(this.cache.redis.incr(STATS_KEY_SETS)).catch(() => {
+          /* best-effort; counter drift is acceptable */
+        });
+      }
     } catch (err) {
       log.warn({ err, phrase }, 'phrase cache write error; ignoring');
     }
   }
 
   /**
-   * Operator-facing hit/miss counters.
+   * Operator-facing hit/miss/sets counters.
+   *
+   * `sets` was added in the E1 telemetry-hook bump (infra.redis-cache-layer
+   * maturity 3 → 4) so operators can compute write-amplification and
+   * hit-rate independently.
    */
-  async getStats(): Promise<{ hits: number; misses: number }> {
+  async getStats(): Promise<{ hits: number; misses: number; sets: number }> {
     try {
       const redis = this.cache.redis;
-      const [hitsRaw, missesRaw] = await Promise.all([
+      const [hitsRaw, missesRaw, setsRaw] = await Promise.all([
         redis.get(STATS_KEY_HITS),
         redis.get(STATS_KEY_MISSES),
+        redis.get(STATS_KEY_SETS),
       ]);
       const hitsInt = hitsRaw === null ? NaN : Number.parseInt(hitsRaw, 10);
       const missesInt = missesRaw === null ? NaN : Number.parseInt(missesRaw, 10);
+      const setsInt = setsRaw === null ? NaN : Number.parseInt(setsRaw, 10);
       return {
         hits: Number.isFinite(hitsInt) ? hitsInt : 0,
         misses: Number.isFinite(missesInt) ? missesInt : 0,
+        sets: Number.isFinite(setsInt) ? setsInt : 0,
       };
     } catch (err) {
       log.warn({ err }, 'phrase cache stats read error');
-      return { hits: 0, misses: 0 };
+      return { hits: 0, misses: 0, sets: 0 };
     }
   }
 }

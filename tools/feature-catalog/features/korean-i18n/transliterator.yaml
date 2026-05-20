@@ -1,0 +1,49 @@
+id: korean-i18n.transliterator
+name: Hangul ↔ Latin Transliterator
+category: korean-i18n
+summary: |
+  FR/IT/ES/EN ↔ 한글 음역 엔진. 799 lines rule-based. 예외 사전 + 음운 규칙 + confidence
+  tier (0.95 exception / 0.75 rule / 0.6 compact). alias 생성 파이프라인 + entity
+  resolver fallback에 모두 사용.
+
+maturity: 4
+maturity_rationale: |
+  RFC-003 §4.5 구현. ordered rule set (FR/IT/ES/EN→KO) + exception catalog. transliteration
+  benchmark scenario로 회귀 모니터링. exception dict는 hand-curated이고 native-speaker
+  validation 부재로 5는 못 됨.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "ETL alias generation (offline)"
+  - "Runtime entity resolution fallback"
+
+key_files:
+  - src/domain/alias/service/transliterator.ts
+  - scripts/etl/transliteration-helpers.ts
+
+tests:
+  bench:
+    - test/benchmark/agent/scenarios.transliteration-large.ts
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-003.md
+
+known_limitations:
+  - "Exception dictionary 신규 producer 누락"
+  - "Phonetic alignment scoring 없음"
+  - "Native speaker validation 없음"
+
+next_steps:
+  - "Korean 와인 e-commerce 데이터로 exception 확장"
+  - "Crowd-sourced calibration"
+
+tags:
+  - korean-i18n
+  - rule-based
+  - production-eval-coverage

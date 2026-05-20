@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "../../../.tsbuildcache/shared",
+    "tsBuildInfoFile": "../../../.tsbuildcache/shared/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["./**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "**/__tests__/**",
+    "**/*.test.ts"
+  ]
+}

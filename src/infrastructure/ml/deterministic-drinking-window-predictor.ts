@@ -55,11 +55,19 @@ export class DeterministicDrinkingWindowPredictor implements DrinkingWindowPredi
           drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
         );
 
+    // Rule 15: numeric fallback documents the contract — when the formula
+    // omits a confidenceScore we fall back to the midpoint of the medium
+    // band so downstream numeric consumers can still rank wines without
+    // collapsing to NaN. CONFIDENCE_FALLBACK_MEDIUM = midpoint of [0.5, 0.75).
+    const CONFIDENCE_FALLBACK_MEDIUM = 0.625;
+    const confidenceScore = evaluated.confidenceScore ?? CONFIDENCE_FALLBACK_MEDIUM;
+
     return {
       drinkingWindowStart,
       drinkingWindowEnd,
       peakYear,
       confidence: evaluated.confidence,
+      confidenceScore,
       modelVersion: this.modelVersion,
     };
   }

@@ -1,0 +1,56 @@
+id: tools.lookup
+name: Lookup Endpoint (Direct Entity Fetch)
+category: tools
+summary: |
+  POST /v1/search/lookup — entity-only (exact match) 검색. detail page,
+  evidence 확장, agent grounding 용. retrieval_mode은 항상 'entity'로
+  강제되며 caller 가 override 할 수 없다.
+
+maturity: 3
+maturity_rationale: |
+  HTTP route 와이어링 + 12-test regression suite 완료 (`test/integration/http/routes/lookup.route.test.ts`).
+  핵심 invariants 명세 + 검증:
+    - retrieval_mode 강제 'entity' (override 차단)
+    - "not found" semantics: 404 가 아닌 200 + empty results + failure_reason
+      (multi-vintage variant 응답 명세를 단일 entity 경로로 통일)
+    - Korean alias query (NFC) 통과, NFC/NFD form-preserving
+      (route 단에서 collapse 하지 않고 entity-identity layer 로 위임)
+    - missing/empty/oversized query → 400 + RFC-014 VALIDATION_ERROR envelope
+    - MAX_QUERY_LENGTH 경계값 (just-inside / just-outside)
+    - comparison response leak → 400 INVALID_REQUEST envelope
+    - requestId thread-through (use case ↔ meta)
+    - special chars 보존, AbortSignal 전파
+  잔여: cross-language entity_id alias 풀 확장은 retrieval.entity-lookup 책임.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/search/lookup"
+
+key_files:
+  - src/interface/http/routes/lookup.route.ts
+  - src/interface/http/routes/search-request-mappers.ts
+  - src/interface/http/schemas/search-request.schema.ts
+
+tests:
+  integration:
+    - test/integration/http/routes/lookup.route.test.ts
+
+depends_on:
+  - retrieval.entity-lookup
+
+related_rfcs: []
+
+known_limitations:
+  - "Multi-vintage variant 그룹핑은 entity-lookup 단계 (downstream) 책임 — route 는 단일 SearchResponseV1 만 반환하고 vintage 선택 파라미터는 노출하지 않는다."
+  - "Cross-language entity_id alias 풀 확장 미흡 (retrieval.entity-lookup 영역)"
+
+next_steps:
+  - "downstream entity-lookup 의 multi-vintage 그룹핑 결과를 result_type='wine_set' 으로 포장하는 contract 검증 추가"
+
+tags:
+  - lookup
+  - detail-fetch

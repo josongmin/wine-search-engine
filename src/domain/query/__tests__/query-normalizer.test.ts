@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { QueryNormalizer } from '../service/query-normalizer.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 
 describe('QueryNormalizer', () => {
   const normalizer = new QueryNormalizer();

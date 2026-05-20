@@ -1,0 +1,41 @@
+id: security.fastify-middleware-stack
+name: Fastify Security Middleware (Helmet / CORS / Rate-Limit)
+category: security
+summary: |
+  Fastify 표준 보안 플러그인 스택. @fastify/helmet (CSP, X-Frame-Options),
+  @fastify/cors (configurable origin), @fastify/rate-limit (per-IP bucket).
+  모든 라우트에 적용.
+
+maturity: 4
+maturity_rationale: |
+  Upstream library 사용, minimal customization. 알려진 우회 없음. rate-limit bucket
+  env-var 튜닝 가능. CORS origin list hardcoded.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "All HTTP routes (server-level)"
+
+key_files:
+  - src/interface/http/server.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "CORS origin list hardcoded"
+  - "Webhook 요청 서명 없음"
+
+next_steps:
+  - "CORS / rate-limit env-var 외부화"
+  - "Request signing (webhook용)"
+
+tags:
+  - security
+  - http-hardening

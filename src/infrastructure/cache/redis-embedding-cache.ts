@@ -14,14 +14,15 @@
  */
 
 import { z } from 'zod';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { EmbeddingCacheKey } from '../../domain/performance/model/cache-key.js';
 import type { EmbeddingCachePort } from '../../domain/performance/port/embedding-cache.port.js';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
 import { RedisCache } from '../adapter/redis-cache.js';
 import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
+import { CACHE_TTL_SECONDS } from './cache-ttl-config.js';
 
 const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
 
@@ -37,6 +38,7 @@ const EmbeddingVectorSchema = z.array(z.number().finite()).min(1).max(MAX_EMBEDD
 
 const STATS_KEY_HITS = 'cache:stats:embedding:hits';
 const STATS_KEY_MISSES = 'cache:stats:embedding:misses';
+const STATS_KEY_SETS = 'cache:stats:embedding:sets';
 
 const EMBEDDING_STATS: GetValidatedStatsOptions = {
   statsKeyHits: STATS_KEY_HITS,
@@ -72,8 +74,11 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
   async set(
     cacheKey: EmbeddingCacheKey,
     rawEmbedding: readonly number[],
-    ttlSeconds: number,
+    ttlSeconds?: number,
   ): Promise<void> {
+    // Default TTL (E1: infra.redis-cache-layer 3→4) — when caller omits TTL,
+    // use the documented per-cache default from the SSoT config.
+    const effectiveTtl = ttlSeconds ?? CACHE_TTL_SECONDS.EMBEDDING;
     try {
       // Coerce to plain Array before JSON.stringify — ML backends often
       // return Float32Array whose JSON representation is {"0":...} (an
@@ -87,9 +92,14 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
         embedding,
         EmbeddingVectorSchema,
         'RedisEmbeddingCache',
-        ttlSeconds,
+        effectiveTtl,
       );
-      if (!written) {
+      if (written) {
+        // Best-effort sets-counter increment (telemetry hook).
+        void Promise.resolve(this.cache.redis.incr(STATS_KEY_SETS)).catch(() => {
+          /* best-effort; counter drift is acceptable */
+        });
+      } else {
         globalSilentSkipCounter.increment('cache_write_failure', {
           surface: 'embedding',
           errorClass: 'shape_validation',
@@ -134,18 +144,22 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
   async getStats(): Promise<{
     readonly hits: number;
     readonly misses: number;
+    readonly sets: number;
     readonly size: number;
     readonly entriesCount: number;
   }> {
     const redis = this.cache.redis;
     try {
-      // Get hit/miss counters
+      // Get hit/miss/sets counters
       const hitsStr = await redis.get(STATS_KEY_HITS);
       const missesStr = await redis.get(STATS_KEY_MISSES);
+      const setsStr = await redis.get(STATS_KEY_SETS);
       const hitsRaw = hitsStr ? parseInt(hitsStr, 10) : NaN;
       const missesRaw = missesStr ? parseInt(missesStr, 10) : NaN;
+      const setsRaw = setsStr ? parseInt(setsStr, 10) : NaN;
       const hits = Number.isFinite(hitsRaw) ? hitsRaw : 0;
       const misses = Number.isFinite(missesRaw) ? missesRaw : 0;
+      const sets = Number.isFinite(setsRaw) ? setsRaw : 0;
 
       // Count entries and compute size
       let entriesCount = 0;
@@ -174,12 +188,13 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       return {
         hits,
         misses,
+        sets,
         size: cursorSize,
         entriesCount,
       };
     } catch (error) {
       log.error({ err: error }, 'stats error');
-      return { hits: 0, misses: 0, size: 0, entriesCount: 0 };
+      return { hits: 0, misses: 0, sets: 0, size: 0, entriesCount: 0 };
     }
   }
 

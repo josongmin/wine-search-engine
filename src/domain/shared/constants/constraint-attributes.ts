@@ -85,3 +85,42 @@ export const GEOGRAPHY_ATTRIBUTES: ReadonlySet<string> = new Set([
   'region',
   'appellation',
 ]);
+
+/**
+ * Constraint attribute names that signal price / budget intent.
+ *
+ * SSoT — import from here. Do NOT redefine in:
+ *   - src/application/wine-search/deterministic-router.ts
+ *   - src/application/wine-search/tool-input-normalizer.ts
+ *   - any other consumer
+ *
+ * Rule 30: domain constants used in 2+ files belong in a shared module.
+ *
+ * The router uses this set to detect price intent (route-time decisions),
+ * the tool-input normalizer uses it as a marker set that mirrors the
+ * router-side declaration so per-slot price-narrowing stays in sync.
+ */
+export const PRICE_CONSTRAINT_ATTRIBUTE_NAMES: ReadonlySet<string> = new Set([
+  'price_krw',
+  'price_usd',
+  'max_price_krw',
+  'min_price_krw',
+  'max_price_usd',
+  'min_price_usd',
+  'price',
+  'budget',
+]);
+
+/**
+ * Default search limit applied when `hasEntityMetadataSignal=true`, i.e. the
+ * analyzer flags the query as a "specific named wine" lookup (e.g.
+ * "Opus One 2018"). Narrowing to a single result avoids drowning the entity
+ * resolver in distractors.
+ *
+ * SSoT — see `src/application/agent/agent-tool-execution-policy.ts:201-203`
+ * which sets `limit: 1` for the same code path. Both the deterministic router
+ * and the tool-input normalizer must agree on this bound.
+ *
+ * Rule 30: cross-module numeric constants belong in a shared module.
+ */
+export const EXACT_METADATA_SEARCH_LIMIT = 1;

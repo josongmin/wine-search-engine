@@ -10,7 +10,7 @@ import {
 } from '../../../../src/domain/retrieval/service/browse-diversity.js';
 import type { SparseHit } from '../../../../src/domain/retrieval/port/search-index.port.js';
 import { createEntityId } from '../../../../src/domain/shared/types/entity-id.js';
-import { globalSilentSkipCounter } from '../../../../src/observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../../src/domain/observability/silent-skip-counters.js';
 
 function hit(
   id: string,

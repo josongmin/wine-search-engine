@@ -1,4 +1,4 @@
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 
 export const ETL_ARTIFACT_FILES = {
   silver: resolveDataPath('data/silver.ndjson'),

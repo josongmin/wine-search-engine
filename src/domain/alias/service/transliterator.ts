@@ -634,7 +634,7 @@ export class Transliterator {
   /**
    * Test whether a string contains any Hangul (한글) syllables. Used by the
    * verifier to decide whether to attempt reverse romanization before comparing
-   * against Latin-only evidence. Delegates to @shared/utils/hangul (SSoT).
+   * against Latin-only evidence. Delegates to @domain/shared/utils/hangul (SSoT).
    */
   static containsHangul(s: string): boolean {
     return sharedContainsHangul(s);

@@ -1,6 +1,6 @@
 import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 import type { AgentExecutionState } from './agent-execution-state.js';
-import type { ToolOutcome } from './tool-outcome.js';
+import type { ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
 
 const GROUNDING_OUTCOME_KINDS = new Set<ToolOutcome['kind']>([
   'success',

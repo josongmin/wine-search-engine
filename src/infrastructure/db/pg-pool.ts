@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 
 type PgPoolConfig = typeof config.pg;

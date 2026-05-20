@@ -1,0 +1,50 @@
+{
+  "typescript.tsserver.maxTsServerMemory": 3072,
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.disableAutomaticTypeAcquisition": true,
+
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "typescript.workspaceSymbols.scope": "currentProject",
+  "typescript.preferences.autoImportFileExcludePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.next/**"
+  ],
+
+  "typescript.tsserver.watchOptions": {
+    "watchFile": "useFsEvents",
+    "watchDirectory": "useFsEvents",
+    "fallbackPolling": "dynamicPriority",
+    "excludeDirectories": ["**/node_modules", "**/dist", "**/coverage", "**/.next"]
+  },
+
+  "typescript.tsserver.useSyntaxServer": "auto",
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "typescript.suggest.completeFunctionCalls": false,
+  "typescript.surveys.enabled": false,
+  "typescript.preferences.importModuleSpecifier": "non-relative",
+  "typescript.preferences.useAliasesForRenames": false,
+
+  "editor.semanticHighlighting.enabled": true,
+  "editor.formatOnSave": false,
+
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/coverage/**": true,
+    "**/.tsbuildinfo": true,
+    "**/*.tsbuildinfo": true,
+    "**/.next/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true,
+    "**/*.tsbuildinfo": true,
+    "**/pnpm-lock.yaml": true,
+    "**/.next": true
+  }
+}

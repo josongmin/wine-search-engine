@@ -1,0 +1,43 @@
+id: tools.web-agent-lab
+name: Web Agent Lab (Debug UI)
+category: tools
+summary: |
+  Agent 응답 디버깅용 UI. /v1/agent 호출 + step trace 시각화 + tool call evidence
+  frame 표시 + termination reason / fallback 상태 확인.
+
+maturity: 3
+maturity_rationale: |
+  Internal debug 용도, 개발자 도구. raw JSON debug 패널 + step viewer. 그러나 production
+  release 용도 아님 (개발자 전용).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Web: /agent-lab"
+
+key_files:
+  - web/src/app/agent-lab/page.tsx
+  - web/src/features/agent-lab
+
+tests: {}
+
+depends_on:
+  - agent.react-orchestrator
+  - agent.evidence-frames
+
+related_rfcs: []
+
+known_limitations:
+  - "Production 사용자 미공개"
+  - "Step trace 시각화 단순"
+
+next_steps:
+  - "Trace 시각화 enhancement"
+
+tags:
+  - frontend
+  - debug
+  - internal

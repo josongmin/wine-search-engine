@@ -1,0 +1,51 @@
+id: korean-i18n.curated-alias-catalog
+name: Curated Entity Alias Catalog (Gold/Seeded/Silver)
+category: korean-i18n
+summary: |
+  Wine 엔티티(country/region/appellation/grape/producer)의 한국어 별칭을 3-tier
+  (gold=hand-curated / seeded=transliteration / silver=ML)로 운영. provenance 추적 +
+  direct vs context_required 해석 모드 분리.
+
+maturity: 4
+maturity_rationale: |
+  3-tier 모두에 dedicated regression 게이트 (gold/seeded/silver). entity-alias-catalog.ts
+  + 별도 generation script per tier. ambiguity hint 시스템과 통합. producer/vintage
+  disambiguation hint 부재로 5는 못 됨.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Runtime substrate (Redis cache)"
+  - "Agent tool reference"
+
+key_files:
+  - src/domain/attribute/service/entity-alias-catalog.ts
+
+tests:
+  regression:
+    - test/regression/gold-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/seeded-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/silver-korean-entity-alias-catalog.regression.test.ts
+
+depends_on:
+  - korean-i18n.transliterator
+
+related_rfcs:
+  - docs/RFC-003.md
+
+known_limitations:
+  - "Gold catalog manual update 필요"
+  - "Silver tier feedback loop 부재"
+  - "Producer 변형군 (e.g. Moët family) clustering 없음"
+
+next_steps:
+  - "Gold 자동 갱신 (e-commerce 피드)"
+  - "Producer variant clustering"
+
+tags:
+  - korean-i18n
+  - catalog-driven
+  - production-eval-coverage

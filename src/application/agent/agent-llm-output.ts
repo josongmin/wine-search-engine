@@ -1,10 +1,10 @@
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   isKnownAgentToolName,
   parseKnownAgentToolAttemptInputWithRepair,
   parseUnknownAgentToolAttemptInput,
   type AgentToolAttempt,
-} from './agent-tool-attempt-schema.js';
+} from '../../domain/agent/model/agent-tool-attempt-schema.js';
 
 const log = bootstrapLogger.child({ component: 'AgentLlmOutput' });
 const LOG_PREVIEW_CHARS = 200;

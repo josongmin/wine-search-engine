@@ -1,0 +1,71 @@
+id: nlu.relative-query-extractor
+name: Relative Query Extractor
+category: nlu
+summary: |
+  "like X" / "similar to X" / "more X than Y" / "X보다 ~한" 류 relative comparison
+  추출. anchor entity + bounded delta heuristic으로 변환 (e.g. "less tannic than
+  Opus One" → impliedAxis=tannin, delta=RELATIVE_DELTA_LESS=-0.2). Korean
+  particle 보다 / 처럼 / 같이 / 같은 / 비슷한 + English less/more comparatives
+  지원. Intensifier ("much", "훨씬") 시 delta promotion (±0.2 → ±0.5).
+
+maturity: 3
+maturity_rationale: |
+  Delta heuristic은 명시적 named module-scope constants
+  (`RELATIVE_DELTA_LESS = -0.2`, `RELATIVE_DELTA_MORE = +0.2`,
+  `RELATIVE_DELTA_MUCH_LESS = -0.5`, `RELATIVE_DELTA_MUCH_MORE = +0.5`,
+  `RELATIVE_DELTA_SIMILAR = 0`)로 추출되어 CLAUDE.md test discipline rule 15
+  (magic number 금지) 준수. 5-bucket axis discretisation 기반으로 1/5 = 0.2
+  rationale 코드 주석에 명시. ±1 extremes는 의도적으로 회피 (downstream
+  score를 zero out 하지 않기 위해).
+
+  Tannin/fruit axis (`less_tannic_than`, `more_tannic_than`,
+  `less_fruity_than`, `more_fruity_than`) 신규 operator 추가, 기존 price /
+  body / sweetness axis와 동일 패턴으로 통합.
+
+  Anchor resolver-agnostic: surface form만 캡처하고 entity 검증은 downstream
+  entity-resolver에 위임 ("Made Up Wine" 같은 unrecognised anchor도 surface
+  반환하여 resolver가 fallback 결정). Multi-dimensional 쿼리("less tannic
+  but more fruity than X")는 first-match-wins으로 conflate 회피.
+
+  여전히 학습된 delta가 아닌 휴리스틱이므로 maturity 4 (learned)에는 미달.
+  Next step: offline label 기반 delta 학습 + dependency parsing.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by anchor-extraction + retrieval.mixed-mode)"
+
+key_files:
+  - src/domain/query/service/relative-query-extractor.ts
+  - src/domain/query/model/relative-query.ts
+
+tests:
+  unit:
+    - src/domain/query/service/__tests__/relative-query-extractor.test.ts
+  regression:
+    - test/regression/relative-query-extractor.regression.test.ts
+
+depends_on:
+  - nlu.anchor-extraction
+  - nlu.entity-resolver
+
+related_rfcs:
+  - docs/RFC-005.md
+
+known_limitations:
+  - "Delta는 학습이 아닌 휴리스틱 (5-bucket 1/5 rationale, ±0.2/±0.5 tier)"
+  - "Multi-dimensional 쿼리는 first-match-wins (conflate 회피)"
+  - "Negation interaction (\"not less tannic\")은 sign-flip 금지 invariant만 보장, 의미 해석은 downstream"
+
+next_steps:
+  - "Offline label 기반 delta heuristic 학습 (maturity 4 진입 조건)"
+  - "Dependency parsing 도입 → multi-dimensional 쿼리 분해"
+  - "Negation handling을 의미 수준에서 처리"
+
+tags:
+  - relative-query
+  - anchor-conditioning
+  - bounded-delta-heuristic

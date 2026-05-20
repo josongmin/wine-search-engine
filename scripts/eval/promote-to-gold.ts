@@ -24,7 +24,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { bootstrapLogger } from '../../src/config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../src/domain/shared/bootstrap-logger.js';
 import { loadRelevanceJudgments } from '../../src/domain/evaluation/service/relevance-judgment-loader.js';
 import type { RelevanceJudgment } from '../../src/domain/evaluation/model/relevance-judgment.js';
 

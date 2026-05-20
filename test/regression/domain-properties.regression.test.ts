@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { editDistance } from '../../src/domain/alias/service/alias-matcher.js';
+import { levenshteinDistance as editDistance } from '../../src/domain/alias/service/edit-distance.js';
 import { canonicalJsonStringify } from '../../src/domain/shared/utils/canonical-json.js';
 import { ScoreAggregator } from '../../src/domain/ranking/service/score-aggregator.js';
 

@@ -1,0 +1,43 @@
+id: observability.opentelemetry-tracing
+name: OpenTelemetry Tracing (HTTP + Gen-AI)
+category: observability
+summary: |
+  @opentelemetry/sdk-node 기반 distributed tracing. HTTP request span + LLM call span
+  (gen-ai-tracing — input/output token, model name, latency). external observability
+  backend (Honeycomb/Datadog) 연동 가능.
+
+maturity: 3
+maturity_rationale: |
+  OTel SDK 통합, gen-ai semantic convention 적용. 그러나 sampling 정책 미수립,
+  production backend 미연결 (collector 설정 환경별).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (OTel collector export)"
+
+key_files:
+  - src/infrastructure/telemetry/tracer.ts
+  - src/infrastructure/telemetry/gen-ai-tracing.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Production collector 미설정"
+  - "Sampling 정책 단순 (1.0)"
+
+next_steps:
+  - "Collector + backend wire"
+  - "Adaptive sampling"
+
+tags:
+  - tracing
+  - opentelemetry
+  - gen-ai

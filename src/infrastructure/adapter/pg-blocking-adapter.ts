@@ -1,13 +1,13 @@
 import type { Pool } from 'pg';
 import type { BlockingPort } from '../../domain/resolver/port/blocking.port.js';
 import { createCanonicalEntityId, type EntityId } from '../../domain/shared/types/index.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 import {
   isActiveSnapshotSubstrateBootstrapAllowed,
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
-import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 
 interface CandidateRow {
@@ -49,6 +49,26 @@ function buildBlockingLookupVariants(query: string, normalizedQuery: string): re
 export class PgBlockingAdapter implements BlockingPort {
   private static readonly DEFAULT_LIMIT = 50;
 
+  /**
+   * Minimum `pg_trgm.similarity()` score for a row to qualify in the fuzzy
+   * trigram phase (phase 4). The pg_trgm extension's similarity() returns a
+   * Jaccard-style score on shared trigrams. 0.4 is conservative relative to
+   * PG's default `pg_trgm.similarity_threshold` (0.3) — empirically it
+   * recalls real typos / morphological variants (Sasicaia↔Sassicaia,
+   * 샤또↔샤토) while excluding incidental short-token coincidences.
+   *
+   * @see migrations/001_initial_schema.sql — pg_trgm extension + GIN indexes.
+   */
+  private static readonly TRIGRAM_FUZZY_THRESHOLD = 0.4;
+
+  /**
+   * Cap on rows returned from the fuzzy trigram phase. Bounds tail-latency
+   * on fat alias tables where a frequent token would otherwise return many
+   * low-similarity rows. The outer LIMIT then truncates the unioned set if
+   * needed.
+   */
+  private static readonly TRIGRAM_FUZZY_LIMIT = 50;
+
   constructor(private readonly pool: Pool) {}
 
   async block(
@@ -58,8 +78,11 @@ export class PgBlockingAdapter implements BlockingPort {
   ): Promise<readonly EntityId[]> {
     // Strategy 1: exact normalized_value match (highest recall, fastest)
     // Strategy 2: prefix match on normalized_value
-    // Strategy 3: ILIKE fallback on surface_form using the raw query
-    // All three unioned, deduplicated, ordered by priority.
+    // Strategy 3: ILIKE substring fallback on surface_form / normalized_value
+    // Strategy 4: pg_trgm fuzzy match on normalized_value — catches typos
+    //             and morphological variants the substring matches miss
+    //             (e.g. Sasicaia → Sassicaia, 샤또 → 샤토).
+    // All four unioned, deduplicated, ordered by priority.
     let activeSnapshotId: string;
     try {
       ({ activeSnapshotId } = await resolveActiveSnapshot(this.pool));
@@ -115,12 +138,31 @@ export class PgBlockingAdapter implements BlockingPort {
             AND entity_id NOT IN (SELECT entity_id FROM exact_match)
             AND entity_id NOT IN (SELECT entity_id FROM prefix_match)
         ),
+        trigram_fuzzy_match AS (
+          -- pg_trgm fuzzy: \`% \` operator triggers GIN-index lookup (uses
+          -- session pg_trgm.similarity_threshold), explicit similarity() >=
+          -- $7 is the deterministic post-filter. ORDER BY similarity DESC
+          -- prefers the best matches when LIMIT bites.
+          SELECT entity_id, 4 AS priority
+          FROM aliases
+          WHERE normalized_value % $6
+            AND similarity(normalized_value, $6) >= $7
+            AND search_snapshot_id = $5
+            AND is_suppressed = FALSE
+            AND entity_id NOT IN (SELECT entity_id FROM exact_match)
+            AND entity_id NOT IN (SELECT entity_id FROM prefix_match)
+            AND entity_id NOT IN (SELECT entity_id FROM ilike_match)
+          ORDER BY similarity(normalized_value, $6) DESC
+          LIMIT $8
+        ),
         all_candidates AS (
           SELECT entity_id, priority FROM exact_match
           UNION ALL
           SELECT entity_id, priority FROM prefix_match
           UNION ALL
           SELECT entity_id, priority FROM ilike_match
+          UNION ALL
+          SELECT entity_id, priority FROM trigram_fuzzy_match
         ),
         ranked AS (
           SELECT entity_id, MIN(priority) AS best_priority
@@ -137,6 +179,9 @@ export class PgBlockingAdapter implements BlockingPort {
           `%${escapeLikePattern(query)}%`,
           limit,
           activeSnapshotId,
+          normalizedQuery,
+          PgBlockingAdapter.TRIGRAM_FUZZY_THRESHOLD,
+          PgBlockingAdapter.TRIGRAM_FUZZY_LIMIT,
         ],
       );
     } catch (err: unknown) {

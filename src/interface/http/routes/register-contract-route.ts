@@ -1,6 +1,6 @@
 import type { FastifyInstance, RouteHandlerMethod } from 'fastify';
 import '../fastify-augmentations.js';
-import { runWithRequestPipelineDebug } from '../../../observability/request-pipeline-debug.js';
+import { runWithRequestPipelineDebug } from '../../../domain/observability/request-pipeline-debug.js';
 import { toFiniteInteger } from '../../../domain/shared/utils/safe-number.js';
 import type { HttpRouteContract } from './route-contracts.js';
 import {

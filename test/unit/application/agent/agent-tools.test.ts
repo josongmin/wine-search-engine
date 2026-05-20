@@ -4,7 +4,7 @@ import { stripSideSpecificCompareSharedConstraints } from '../../../../src/appli
 import { extractSearchConstraints } from '../../../../src/domain/query/service/search-constraint-extractor.js';
 import type { SearchExecutorPort } from '../../../../src/application/search/port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
-import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../../src/shared/constants/source-systems.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../../src/domain/shared/constants/source-systems.js';
 
 function makeSearchResponse(
   results: SearchResponseV1['results'],

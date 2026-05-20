@@ -8,7 +8,7 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 import { RedisCircuitBreakerWrapper } from '../redis-circuit-breaker-wrapper.js';
-import { globalCircuitBreakerRegistry } from '../../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../../domain/observability/circuit-breaker-registry.js';
 
 function makeFakeClient(overrides: Partial<{
   get: () => Promise<string | null>;

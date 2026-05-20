@@ -7,7 +7,7 @@ import { buildConstraintContradictionExitParams } from '../../../../src/applicat
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
-import { globalSilentSkipCounter } from '../../../../src/observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../../src/domain/observability/silent-skip-counters.js';
 
 afterEach(() => {
   globalSilentSkipCounter.reset();

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
+import { globalBundleSelectorCounter } from '../../src/domain/observability/bundle-selector-counters.js';
 
 describe('bundle-selector counters', () => {
   beforeEach(() => {

@@ -26,7 +26,7 @@ import {
   krwToUsd,
 } from '../../domain/query/service/search-constraint-extractor.js';
 import { parseSourceRecordRefsFromVespa } from '../../domain/entity/model/source-record-ref.js';
-import { stableJsonStringify } from '../../shared/utils/stable-json.js';
+import { stableJsonStringify } from '../../domain/shared/utils/stable-json.js';
 
 /** Decimal radix for parseInt on external filter tokens. */
 const DECIMAL_RADIX = 10;

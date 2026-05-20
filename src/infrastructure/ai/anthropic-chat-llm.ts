@@ -13,7 +13,7 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
-import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,

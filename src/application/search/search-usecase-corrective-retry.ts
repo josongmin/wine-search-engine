@@ -132,6 +132,41 @@ export function resolveCorrectiveRetryOutcome(
 }
 
 /**
+ * TA3-2 outcome propagation: forces retry result `status` to align with the
+ * corrective-retry exit decision before downstream consumers (decision engine,
+ * post-route phase) read it.
+ *
+ * The resolver may emit `status: 'resolved'` alongside `recommendedNextAction:
+ * 'fail'` or low decision confidence — in that drift case
+ * {@link resolveCorrectiveRetryOutcome} returns 'fail' / 'clarify' but the raw
+ * status still says 'resolved'. Without alignment, the decision engine could
+ * admit a candidate the retry loop concluded was unfit. The admission gate
+ * catches identity / hard-constraint cases on its own, but status drift caused
+ * inconsistent decision_status reporting on the entity_lookup contract.
+ *
+ * Behaviour:
+ *  - outcome 'accept'  → pass through (resolved by definition).
+ *  - outcome 'fail'    → status downgraded to 'failed' when it wasn't already.
+ *  - outcome 'clarify' → status downgraded from 'resolved' to 'ambiguous';
+ *                        an existing 'failed' / 'ambiguous' status is preserved.
+ */
+export function alignRetryResultStatusToOutcome(
+  retryResult: EntityResolveResult,
+  outcome: 'accept' | 'clarify' | 'fail',
+): EntityResolveResult {
+  if (outcome === 'accept') {
+    return retryResult;
+  }
+  if (outcome === 'fail' && retryResult.status !== 'failed') {
+    return { ...retryResult, status: 'failed' };
+  }
+  if (outcome === 'clarify' && retryResult.status === 'resolved') {
+    return { ...retryResult, status: 'ambiguous' };
+  }
+  return retryResult;
+}
+
+/**
  * TA5: Calibration base score assigned to a resolved retry result.
  *
  * At rank 1 (best possible), confidence converges to 0.9.

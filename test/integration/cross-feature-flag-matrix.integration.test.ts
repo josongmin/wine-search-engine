@@ -68,12 +68,12 @@ import { InMemoryBudgetLedger } from '../../src/domain/retrieval/service/budget-
 import { CRITIC_RETRY_MAX } from '../../src/domain/retrieval/service/retrieval-critic.js';
 import {
   buildMachineResponseV2,
-} from '../../src/domain/response/service/machine-response-builder-v2.js';
+} from '../../src/interface/http/response-builders/machine-response-builder-v2.js';
 
 // Counters — resetting guarantees cross-combo independence.
-import { globalBundleSelectorCounter } from '../../src/observability/bundle-selector-counters.js';
-import { globalBudgetLedgerCounter } from '../../src/observability/budget-ledger-counters.js';
-import { globalRetrievalCriticCounter } from '../../src/observability/retrieval-critic-counters.js';
+import { globalBundleSelectorCounter } from '../../src/domain/observability/bundle-selector-counters.js';
+import { globalBudgetLedgerCounter } from '../../src/domain/observability/budget-ledger-counters.js';
+import { globalRetrievalCriticCounter } from '../../src/domain/observability/retrieval-critic-counters.js';
 
 // Types from the ports/models we touch
 import type { NLMapper } from '../../src/domain/attribute/service/nl-mapper.js';

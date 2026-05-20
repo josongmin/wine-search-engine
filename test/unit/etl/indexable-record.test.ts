@@ -5,7 +5,7 @@ import {
   validateIndexableRecord,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { silverGoldMatchKey } from '../../../scripts/etl/snapshot-entity-identity.js';
-import { SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG } from '../../../src/shared/constants/source-systems.js';
+import { SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG } from '../../../src/domain/shared/constants/source-systems.js';
 
 function makeEnrichedRecord(
   overrides: Partial<EnrichedSilverRecord> = {},

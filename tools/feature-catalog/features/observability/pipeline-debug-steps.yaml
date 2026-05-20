@@ -1,0 +1,42 @@
+id: observability.pipeline-debug-steps
+name: Pipeline Debug Step Enum (SSoT)
+category: observability
+summary: |
+  파이프라인 step 이름의 canonical enum (search-tokenize, query-inject, vespa-search,
+  ranking-rerank, llm-call 등). pipelineTrace() 호출이 이 enum만 emit하도록 강제 →
+  debug 로그 일관성 + queryable. SSoT 정책에 따라 모든 step 이름 단일 출처.
+
+maturity: 4
+maturity_rationale: |
+  종합적 step 커버리지, 코드베이스 전반에서 일관적으로 사용. .ai/pipeline-debug-steps.md
+  index 보유. 2026년 breaking change 없음. append-only 유지 정책.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (pipeline_debug emit)"
+
+key_files:
+  - src/domain/observability/pipeline-debug-steps.ts
+  - .ai/pipeline-debug-steps.md
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Enum append-only — 미사용 step 제거가 coordinate 필요"
+
+next_steps:
+  - "미사용 step에 deprecation warn"
+  - "Auto-generate docs from enum"
+
+tags:
+  - observability
+  - standardization
+  - ssot

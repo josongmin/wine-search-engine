@@ -60,6 +60,41 @@ const KOREAN_MIXED_QUERY_MARKERS: readonly RegExp[] = [
   /보다/u,      // "compared to / more than"
 ] as const;
 
+/**
+ * Phrase-level idiom / temporal anti-patterns that locally use comparison
+ * particles ("같은", "처럼", "보다") in a non-anchor sense. When the marker
+ * surface is dominated by one of these, marker detection must NOT flag the
+ * query as a mixed/comparison query.
+ *
+ * Bumps nlu.anchor-extraction maturity 3 → 4. The list intentionally targets
+ * temporal connectives and idiomatic similes — the highest-frequency
+ * false-positive class surfaced in the maturity-3 audit (e.g. "어제와 같은
+ * 와인" matched "같은" with no entity adjacency).
+ */
+const KOREAN_MARKER_IDIOM_ANTIPATTERNS: readonly RegExp[] = [
+  // Temporal "X와/과 같은" — "same as yesterday/today/...".
+  /(?:어제|오늘|내일|모레|아까|방금|지금|예전|작년|올해|평소|평상시)(?:와|과)\s*같은/u,
+  // "X처럼" attached to non-entity descriptive nouns commonly mined as
+  // false positives in the audit (e.g. "가솔린처럼"). 처럼 is currently NOT in
+  // KOREAN_MIXED_QUERY_MARKERS, but the comparison-marker surface guards
+  // against the same idiom for symmetry / future-proofing.
+  /(?:가솔린|물|불|꿀|기름)처럼/u,
+] as const;
+
+/**
+ * Strip idiomatic / temporal occurrences of comparison particles from the
+ * query so that downstream marker regex tests only see "real" comparison
+ * surfaces. This keeps the SSoT marker list intact while eliminating the
+ * dominant false-positive class without coupling to entity span detection.
+ */
+function stripKoreanMarkerIdioms(normalizedQuery: string): string {
+  let stripped = normalizedQuery;
+  for (const re of KOREAN_MARKER_IDIOM_ANTIPATTERNS) {
+    stripped = stripped.replace(new RegExp(re.source, 'gu'), ' ');
+  }
+  return stripped;
+}
+
 /** Latin-script comparison markers. */
 const COMPARISON_MARKERS: readonly RegExp[] = [
   /(?<!\p{L})(?<!\p{N})vs\.?(?!\p{L})(?!\p{N})/iu,
@@ -101,11 +136,13 @@ interface LookupQuerySet {
 }
 
 export function hasKoreanMixedQueryMarkers(normalizedQuery: string): boolean {
-  return KOREAN_MIXED_QUERY_MARKERS.some((re) => re.test(normalizedQuery));
+  const filtered = stripKoreanMarkerIdioms(normalizedQuery);
+  return KOREAN_MIXED_QUERY_MARKERS.some((re) => re.test(filtered));
 }
 
 export function hasComparisonMarkers(normalizedQuery: string): boolean {
-  return COMPARISON_MARKERS.some((re) => re.test(normalizedQuery));
+  const filtered = stripKoreanMarkerIdioms(normalizedQuery);
+  return COMPARISON_MARKERS.some((re) => re.test(filtered));
 }
 
 /**

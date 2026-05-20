@@ -1,0 +1,48 @@
+id: tools.web-search-ui
+name: Web Search UI (Next.js)
+category: tools
+summary: |
+  사용자 검색 UI (search-bar + clarification widget + search-results widget). Next.js
+  App Router. 백엔드 /v1/search + /v1/autocomplete + /v1/interpret 호출.
+
+maturity: 3
+maturity_rationale: |
+  app/search, app/explore route + search-bar / search-results 위젯 + clarification
+  feature 구현. 그러나 UX A/B 인프라 없음, 모바일 폼팩터 최적화 미진행.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Web: /, /search, /explore"
+
+key_files:
+  - web/src/app/page.tsx
+  - web/src/app/search/page.tsx
+  - web/src/app/explore/page.tsx
+  - web/src/features/search-bar
+  - web/src/features/clarification
+  - web/src/widgets/search-results
+
+tests: {}
+
+depends_on:
+  - tools.autocomplete
+  - tools.interpret
+
+related_rfcs: []
+
+known_limitations:
+  - "Mobile 최적화 미진행"
+  - "UX A/B 인프라 없음"
+
+next_steps:
+  - "Mobile responsive"
+  - "A/B framework"
+
+tags:
+  - frontend
+  - nextjs
+  - user-facing

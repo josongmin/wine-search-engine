@@ -1,0 +1,46 @@
+id: tools.replay
+name: Replay Endpoint
+category: tools
+summary: |
+  POST /v1/replay — 과거 쿼리 plan으로 검색 재실행. 디버깅 + bench replay fixture
+  생성 + regression 분석에 사용. fixture는 test/replay-fixtures/에 저장.
+
+maturity: 3
+maturity_rationale: |
+  Use case + route + fixture 저장 인프라 (e2e replay test) 완비. 그러나 fixture
+  schema versioning 미수립, fixture가 grow하면서 staleness 위험.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/replay"
+
+key_files:
+  - src/application/search/replay.usecase.ts
+  - src/interface/http/routes/replay.route.ts
+
+tests:
+  e2e:
+    - test/e2e/search-replay-fixtures.test.ts
+    - test/e2e/search-replay-runtime-required-fixtures.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+
+related_rfcs: []
+
+known_limitations:
+  - "Fixture schema versioning 없음"
+  - "Fixture staleness 위험"
+
+next_steps:
+  - "Fixture schema version"
+  - "Staleness 자동 감지"
+
+tags:
+  - debug
+  - regression
+  - fixtures

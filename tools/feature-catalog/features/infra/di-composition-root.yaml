@@ -1,0 +1,59 @@
+id: infra.di-composition-root
+name: DI Composition Root (Container)
+category: infra
+summary: |
+  애플리케이션의 dependency injection composition root. container.ts + 13개 sub-container
+  (core / adapters / aux-features / eval-contracts / features / learning / runtime-support /
+  search-contracts / stubs / tool-contracts / usecases / watchlist). 모든 use case
+  + adapter 와이어링.
+
+maturity: 4
+maturity_rationale: |
+  체계적으로 분할된 sub-container, 신규 wiring 추가 패턴 명확. unit test (container-watchlist
+  외). 그러나 의존성 graph가 14개 파일에 분산 — 사이클 검출 자동화 없음.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (bootstrap)"
+
+key_files:
+  - src/config/container.ts
+  - src/config/container-core.ts
+  - src/config/container-adapters.ts
+  - src/config/container-aux-features.ts
+  - src/config/container-features.ts
+  - src/config/container-usecases.ts
+  - src/config/container-search-contracts.ts
+  - src/config/container-tool-contracts.ts
+  - src/config/container-eval-contracts.ts
+  - src/config/container-learning.ts
+  - src/config/container-watchlist.ts
+  - src/config/container-runtime-support.ts
+  - src/config/container-stubs.ts
+  - src/config/container-core-builders.ts
+  - src/main.ts
+
+tests:
+  unit:
+    - src/__tests__/container-watchlist.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Dependency graph 분산 — cycle 자동 검출 없음"
+  - "Container 빌드 latency 측정 안 됨"
+
+next_steps:
+  - "Cycle 검출 CI gate"
+  - "Container 빌드 latency telemetry"
+
+tags:
+  - di
+  - composition-root
+  - bootstrap

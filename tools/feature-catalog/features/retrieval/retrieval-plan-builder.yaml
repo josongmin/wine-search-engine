@@ -1,0 +1,52 @@
+id: retrieval.retrieval-plan-builder
+name: Retrieval Plan Builder
+category: retrieval
+summary: |
+  Query intent + constraint + cold-start signal로 multi-stage retrieval 계획 구성.
+  channel 선택, soft vs hard filtering, relaxation 순서, ANN target hit 결정.
+  Query difficulty estimator + retrieval profile 입력으로 plan 산출.
+
+maturity: 3
+maturity_rationale: |
+  핵심 인프라로 hybrid retrieval executor에 wired. planner trace evidence regression 게이트
+  운영. heuristic 위주이며 cost model / online learning 부재. plan quality metric도
+  암시적 (downstream search metric으로 추정).
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/search (internal)"
+
+key_files:
+  - src/domain/retrieval/service/retrieval-plan-builder.ts
+  - src/domain/retrieval/service/query-difficulty-estimator.ts
+  - src/domain/retrieval/service/retrieval-profile.ts
+  - src/domain/retrieval/service/channel-mix-policy.ts
+
+tests:
+  regression:
+    - test/regression/retrieval-critic-decision.regression.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - nlu.search-constraint-extraction
+
+related_rfcs:
+  - docs/RFC-008.md
+
+known_limitations:
+  - "Plan builder heuristic 학습 불가능 (hard-coded)"
+  - "Plan quality metric 직접 측정 안 됨"
+  - "Cost-aware relaxation 순서 결정 부재"
+
+next_steps:
+  - "Channel mix 온라인 학습 (query profile별 적응)"
+  - "Plan quality instrumentation"
+  - "Cost-aware relaxation 시퀀스"
+
+tags:
+  - planning
+  - query-routing

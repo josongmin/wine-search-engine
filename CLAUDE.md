@@ -56,13 +56,31 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 
 ## Architecture (short)
 
-- **`src/domain/`** — Entities, policies, pure logic; ports (interfaces) for infrastructure.
+- **`src/domain/`** — Entities, policies, pure logic; ports (interfaces) for infrastructure. Includes `src/domain/shared/` (utilities, types, constants — composite leaf) and `src/domain/observability/` (logging/metrics primitives — kept inside domain because of mutual type coupling).
 - **`src/application/`** — Use cases orchestrating domain + ports.
 - **`src/infrastructure/`** — Adapters: `pg-*`, Redis, Vespa clients, etc.
-- **`src/interface/`** — Fastify routes, CLI entrypoints.
+- **`src/interface/`** — Fastify routes, CLI entrypoints. HTTP-shape response builders live under `src/interface/http/response-builders/`.
 - **`src/config/`** — Environment loading and composition root / DI-style wiring.
 
-Path aliases: `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config` (see `tsconfig.json`).
+Path aliases: `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config` (see `tsconfig.base.json`).
+
+### TypeScript Project References (composite)
+
+The repo uses TS composite projects to reduce tsserver heap pressure. Layout:
+
+- `tsconfig.base.json` — shared compilerOptions (strict, paths, exactOptionalPropertyTypes, …). Every other tsconfig extends this.
+- `tsconfig.json` — solution-style root + composite covering the rest (application/infrastructure/interface/config/main.ts). References `src/domain/shared` and `src/domain`. Used by `pnpm run typecheck` (`tsc --build`).
+- `tsconfig.build.json` — production single-tree dist/ build entry. Extends `tsconfig.base.json` directly; NOT composite. Drives `pnpm run build`.
+- `src/domain/shared/tsconfig.json` — composite leaf (no refs).
+- `src/domain/tsconfig.json` — composite; references shared; excludes `shared/` from its own include.
+- `tsconfig.etl.json`, `tsconfig.eslint.json` — separate non-composite configs (ESLint catch-all, ETL typecheck) — unchanged.
+
+Composite tsconfigs emit `.d.ts` to `.tsbuildcache/<name>/` (gitignored). dist/ stays single-tree (production runtime unchanged).
+
+**Layer rules to keep composite valid (DAG)**:
+- `src/domain/shared/**` is the leaf — must not import anything outside itself.
+- `src/domain/**` (incl. observability/) must not import from `application`, `infrastructure`, `interface`, or top-level `config`.
+- Cycles between composite projects fail `tsc --build` with TS6202.
 
 ## Quality bar
 
@@ -171,6 +189,20 @@ These patterns are caught at lint time — no need to review manually:
 - Magic numbers in src/ → no-magic-numbers
 - `console.*` in src/ → no-console
 - `field !== 0` / `field === 0` on `body`, `sweetness`, `tannin`, `acidity`, `finishLength`, `criticScoreNormalized`, `drinkingWindowStart/End`, `producerPrestige` → use `!= null` for presence check (E1-P3-7: `=== 0` drops wines with legitimately zero values)
+
+## Feature Catalog — keep in sync
+
+레포 주요 기능(검색/RAG/NLU/i18n/ETL/Eval/Observability/...)은 [`tools/feature-catalog/features/`](tools/feature-catalog/features/) 하위 YAML로 관리하고 **maturity 1-5** 척도로 완성도를 추적한다. 빌드: `pnpm run catalog:build`. 검증: `pnpm run catalog:validate`. 상세는 [`tools/feature-catalog/README.md`](tools/feature-catalog/README.md).
+
+**비-trivial 코드 변경 시 카탈로그 동기화를 검토**한다 — 변경이 어느 feature에 해당하는지 식별하고 다음 중 해당사항을 적용:
+
+- **개선/하드닝** (테스트 추가, 엣지케이스 보강, 회귀 게이트 도입, 관측성 추가 등 → 품질 향상): 해당 YAML의 `maturity` 점수 갱신을 제안하고, `last_reviewed`를 오늘 날짜로 갱신, `maturity_rationale` 재작성, 해소된 항목을 `known_limitations`/`next_steps`에서 제거.
+- **새 기능/능력 추가** (새 use case, 새 tool, 새 RFC 범위, 새 인프라 컴포넌트): `tools/feature-catalog/features/<category>/<kebab-name>.yaml` 신규 작성을 **사용자에게 제안**한다. 카탈로그 누락 상태로 새 기능을 머지하지 말 것.
+- **deprecation/제거**: `status: deprecated`로 전환 (YAML 자체는 보존해서 "있었던 것"의 기록 유지). 완전 제거 시에만 YAML 삭제.
+- **파일 이동/리네임/삭제**: 영향 받는 모든 YAML의 `key_files` / `tests.*` / `related_rfcs` 경로 갱신. `pnpm run catalog:validate`로 참조 무결성 확인.
+- **단순 리뷰/확인**으로 변경 없이 끝낸 경우라도 의미 있는 점검이었다면 `last_reviewed` 갱신.
+
+`last_reviewed`가 180일 초과 시 lint warn — 정기적으로 (분기마다 등) 전체 훑어 stale 항목 갱신 또는 deprecate.
 
 ## Private notes
 

@@ -1,0 +1,61 @@
+id: agent.observation-synthesis
+name: Observation Synthesis Runner (Post-loop Answer Generation)
+category: agent
+summary: |
+  Loop 종료 후 tool observation들을 자연어 answer로 합성하는 LLM 호출. grounding JSON
+  optional 임베드. tool evidence grounding과 fallback 콘텐츠 재사용 모두 처리.
+
+maturity: 4
+maturity_rationale: |
+  Orchestrator integration 테스트 + evidence-frame-emission regression 게이트 위에,
+  observation 안에 임베드되는 `GROUNDING_JSON` 페이로드에 대한 Zod 검증 펜스가
+  추가됐다 (GroundingJsonPayloadSchema). 잘못된 JSON (truncated/non-object/wines
+  shape 오류) 프레임은 합성 프롬프트에 진입하기 전에 드롭되고, 구조화된 logger.warn
+  (`malformedGrounding: true`, requestId+stepIndex 포함) 이 발행된다. 9개 케이스
+  (valid grounding, 3종 malformed, Korean grounding, malformed LLM answer, empty
+  LLM answer, ToolOutcome 필드 결손, 3 valid+1 malformed 멀티프레임 결정적 순서)
+  를 다루는 regression suite 가 게이트로 추가됐다. 단위 11개 + regression 9개 합쳐
+  20/20 통과. 남은 한계: hallucination metric (answer↔frame 일치도) 부재.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (post-loop in react-orchestrator)"
+
+key_files:
+  - src/application/agent/agent-observation-synthesis-runner.ts
+  - src/application/agent/agent-grounding-observation-policy.ts
+
+tests:
+  unit:
+    - test/unit/application/agent/agent-grounding-observation-policy.test.ts
+    - test/unit/application/agent/agent-observation-synthesis-runner.test.ts
+  regression:
+    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+    - test/regression/agent-result-evidence-frames-contract.regression.test.ts
+    - test/regression/observation-synthesis-grounding-fence.regression.test.ts
+
+depends_on:
+  - infra.chat-llm-port
+  - agent.tool-execution-phase
+  - agent.evidence-frames
+
+related_rfcs:
+  - docs/RFC-007.md
+  - docs/RFC-009.md
+
+known_limitations:
+  - "Answer quality metric 부재 (evidence coverage, hallucination)"
+  - "Fence 스키마는 wines 배열 존재만 강제 — entity_id/canonical_label 의 도메인 의미는 검증하지 않음"
+
+next_steps:
+  - "Hallucination detection (answer vs frames)"
+  - "Fence 스키마 강화 (entity_id 필수, query_type enum)"
+
+tags:
+  - synthesis
+  - grounding
+  - nlg

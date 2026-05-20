@@ -8,7 +8,7 @@
  *   inferred/expanded constraints downstream and inflating the candidate
  *   penalty count.
  *
- * Fix: switch to `canonicalJsonStringify` from `@shared/utils/canonical-json.ts`,
+ * Fix: switch to `canonicalJsonStringify` from `@domain/shared/utils/canonical-json.ts`,
  *   which sorts object keys lexicographically before serialization.
  *
  * Append-only.

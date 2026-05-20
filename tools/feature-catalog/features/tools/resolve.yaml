@@ -1,0 +1,47 @@
+id: tools.resolve
+name: Resolve Endpoint (Entity Disambiguation)
+category: tools
+summary: |
+  POST /v1/resolve — 쿼리의 entity 후보를 confidence + abstention 결정과 함께 반환.
+  conformal prediction set로 70% coverage guarantee + 명시적 ambiguity hint.
+
+maturity: 3
+maturity_rationale: |
+  Use case + route + nlu.entity-resolver (calibration/decision) 통합.
+  HTTP route 레벨 regression suite (19 tests) 가 happy-path / ambiguity (no
+  top_entity) / failed (empty candidates) / Korean NFC·NFD / boundary / RFC-014
+  envelope / X-Request-Id threading / AbortSignal / unexpected-error envelope를
+  커버. Production abstention rate / coverage 모니터링 (대시보드) 은 여전히
+  미수립 — maturity 4 가 되려면 그 작업이 선결조건.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-22
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/resolve"
+
+key_files:
+  - src/application/search/resolve.usecase.ts
+  - src/interface/http/routes/resolve.route.ts
+
+tests:
+  integration:
+    - test/integration/http/routes/resolve.route.test.ts
+
+depends_on:
+  - nlu.entity-resolver
+
+related_rfcs: []
+
+known_limitations:
+  - "Abstention rate 모니터링 없음"
+  - "Coverage SLA 없음"
+
+next_steps:
+  - "Coverage / abstention dashboard"
+
+tags:
+  - entity-resolution
+  - abstention

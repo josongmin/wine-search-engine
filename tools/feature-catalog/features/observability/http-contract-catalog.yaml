@@ -1,0 +1,42 @@
+id: observability.http-contract-catalog
+name: HTTP Route Contract Catalog (SSoT)
+category: observability
+summary: |
+  16개 declared HTTP route의 method / URL / operationId / 상태 코드 / response shape
+  중앙 등록부. register-contract-route + http-route-contract-catalog. OpenAPI export +
+  http-contracts CI gate의 SSoT.
+
+maturity: 4
+maturity_rationale: |
+  Production contract gating (verify:http-contracts on prepush). register-contract-route +
+  contract-route-discipline test로 contract 일관성 보장. OpenAPI parity test 운영.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (route registration SSoT)"
+
+key_files:
+  - src/interface/http/routes/http-route-contract-catalog.ts
+  - src/interface/http/routes/register-contract-route.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs:
+  - docs/RFC-014.md
+
+known_limitations:
+  - "Schema versioning 정책 (v1/v2) 부재"
+
+next_steps:
+  - "Route versioning"
+
+tags:
+  - api
+  - contract
+  - ssot

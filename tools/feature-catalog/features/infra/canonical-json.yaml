@@ -1,0 +1,55 @@
+id: infra.canonical-json
+name: Canonical JSON Utility (SSoT)
+category: infra
+summary: |
+  Deep key sort + NaN/Infinity throw + 결정적 직렬화. agent loop-detection의 정합성
+  보장 (step-budget canonicalizeForLoopKey) + cache key 안정성. SSoT module.
+
+maturity: 5
+maturity_rationale: |
+  Step-budget의 adversarial loop detection (depth-32 + SHA-256 sentinel) 기반.
+  Critical path. Property-based test 8종 (fast-check, numRuns=100 each) +
+  Unicode/emoji/adversarial padding regression 3종 보유:
+    - 결정성 (determinism under repetition)
+    - 키 순서 불변성 (shallow + deep nested up to depth 16)
+    - NaN/Infinity throw (top-level, nested, array — all positions)
+    - 특수 문자 round-trip (\n, \t, ", \\, Hangul, accented Latin, emoji)
+    - 빈 배열 vs 빈 객체 충돌 없음 (nested 포함)
+    - -0 → 0, finite extremes (1e308, MAX_SAFE_INTEGER), JSON.stringify parity
+    - Korean string ('와인 추천') deterministic under key reorder
+    - NFC vs NFD 경계 (byte-faithful — 호출자가 .normalize('NFC') 책임)
+    - Emoji ZWJ ('👨‍👩‍👧') code point 보존
+    - 10K char padding + depth-50 nesting no-crash
+    - class instance (Date/Map/Set) reject 명시.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (shared util)"
+
+key_files:
+  - src/domain/shared/utils/canonical-json.ts
+
+tests:
+  unit:
+    - src/domain/shared/utils/__tests__/canonical-json.test.ts
+  regression:
+    - test/regression/canonical-json-properties.regression.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Unicode 정규화는 호출자 책임 — NFC '가' (U+AC00) 와 NFD '가' (U+1100 U+1161) 은 서로 다른 canonical form 으로 직렬화됨. 동등성 필요 시 호출자가 .normalize('NFC') 적용."
+
+next_steps: []
+
+tags:
+  - ssot
+  - utility
+  - deterministic
+  - property-tested

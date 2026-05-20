@@ -1,0 +1,56 @@
+id: agent.answer-recovery-policy
+name: Answer Recovery Policy (4-Layer Fallback Ladder)
+category: agent
+summary: |
+  Agent loop이 실패 또는 0결과일 때 4단 fallback. L1=loop observation synthesis,
+  L2=single-shot search w/ refined query, L3=constraint-relaxation search, L4=abstention
+  + grounding preview. OOD alcohol / unsupported external info redirect 포함.
+
+maturity: 3
+maturity_rationale: |
+  4단 진행 명확, 각 layer guard + timeout. unit test 2개 + regression 1개로 borderline.
+  fallback timeout 5초 hardcoded (query 난이도 무관), constraint relaxation 순서 hardcoded,
+  OOD detection rule-based — 학습 layer 없음. 4가 되려면 adaptive timeout + learned
+  relaxation order + observability metric 필요.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (terminal stage in react-orchestrator)"
+
+key_files:
+  - src/application/agent/agent-answer-recovery-policy.ts
+  - src/application/agent/agent-situational-query-policy.ts
+  - src/application/agent/agent-grounding-observation-policy.ts
+
+tests:
+  unit:
+    - test/unit/application/agent/agent-answer-recovery-policy.test.ts
+    - test/unit/application/agent/agent-grounding-observation-policy.test.ts
+  regression:
+    - test/regression/empty-answer-fallback.regression.test.ts
+
+depends_on:
+  - tools.search-wines
+  - nlu.query-normalizer
+  - agent.semantic-contract-compiler
+
+related_rfcs: []
+
+known_limitations:
+  - "Fallback timeout 5초 static (query difficulty 미반영)"
+  - "Constraint relaxation 순서 hardcoded"
+  - "OOD detection rule-based"
+
+next_steps:
+  - "Adaptive fallback timeout"
+  - "Constraint relaxation 순서 학습"
+  - "OOD confidence calibration"
+
+tags:
+  - fallback
+  - robustness
+  - graceful-degradation

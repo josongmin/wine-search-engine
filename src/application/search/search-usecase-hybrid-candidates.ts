@@ -1,10 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type {
-  AmbiguousEntityHint,
-  AmbiguousEntityHintBranch,
-} from '../../domain/attribute/model/ambiguous-entity-hint.js';
-import type {
   ExecutionRetrievalMode,
   ProvenanceCoverageStage,
 } from '../../domain/query/model/engine-execution-contract.js';
@@ -13,13 +9,12 @@ import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieva
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
-import type {
-  BudgetResource,
-  ConstraintGraph,
-  SlotNode,
-  SubqueryNode,
-} from '../../domain/query/model/constraint-graph.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
+import {
+  classifyGraphPresence,
+  recordGraphPathDecision,
+} from '../../observability/graph-path-telemetry.js';
 import type {
   BrowseRetrieverPort,
   CandidatePoolPort,
@@ -28,12 +23,7 @@ import type {
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { SpecializedFallbackReason } from './specialized-fallback-reason.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
-import {
-  executeRetrievalBranches,
-  formatRetrievalBranchFailureReasons,
-} from './retrieval-branch-execution.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
-import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import {
@@ -42,10 +32,8 @@ import {
 } from './search-usecase-provenance-closure.js';
 import {
   executeGraphAware,
-  executeCandidatePoolRetrieval,
   type CriticSignalProbe,
   type GraphExecutorOptions,
-  type SubqueryRetrievalResult,
 } from './search-usecase-graph-executor.js';
 import {
   BundleSelectorImpl,
@@ -58,23 +46,6 @@ import { createQueryRewriter } from '../../domain/retrieval/service/query-rewrit
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
 import type { RewriteTrace } from '../../domain/retrieval/service/query-rewriter.js';
-import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
-import {
-  classifyGraphPresence,
-  recordGraphPathDecision,
-} from '../../observability/graph-path-telemetry.js';
-import { collectApplicableSlotIdsForSubquery } from '../../domain/query/service/subquery-slot-scope.js';
-import {
-  collectConjunctivelyRequiredSlotIds,
-  projectConstraintGraphForSubquery,
-} from '../../domain/query/service/project-subquery-constraint-graph.js';
-import {
-  expandSemanticStyleRetrievalTerms,
-  resolveSemanticStyleEvidenceProfile,
-} from '../../domain/query/service/semantic-style-query-terms.js';
-import { recipientProfileToRetrievalTerms } from '../../domain/query/service/recipient-situation-profile.js';
-import type { WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
-import { SEARCH_TOOL_DIVERSITY_WINE_TYPES } from './search-tool-diversity.js';
 
 /**
  * ADR-015 Axis 2: per-call critic context surfaced from
@@ -103,7 +74,6 @@ export function projectRewritesForDecisionInput(
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
-const TYPED_RECOMMENDATION_DISCOVERY_VERSION = 'typed_recommendation_discovery_v1';
 
 export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined {
   // Tiebreak by surfaceForm for deterministic anchor selection when confidence is equal.
@@ -232,20 +202,16 @@ function buildRetrievalCoverage(
   compiled: CompiledWineQuery,
   candidates: readonly HybridCandidate[],
 ): ProvenanceCoverageStage {
-  // Wave G2: emit `pre_rank_coverage` telemetry BEFORE delegating to
-  // `buildHybridCandidateCoverageStage` (which would otherwise double-count
-  // under `provenance_closure`). The stage builder's own emission is still
-  // semantically correct — it records every call-site it was invoked from,
-  // including the ranked-result post-phase — so the two readers distinguish
-  // pre-rank (specialized + generic retrieval) vs post-rank provenance.
+  // Wave F4: pre-rank coverage is the earliest reader that sees
+  // `compiled.constraintGraph`; record a telemetry decision here so the
+  // unified counter distinguishes "retrieval ran flat" from "retrieval
+  // ran graph-aware" even before provenance-closure runs downstream.
   recordGraphPathDecision({
     reader: 'pre_rank_coverage',
     outcome: classifyGraphPresence({
       graphPresent: compiled.constraintGraph !== undefined,
-      ...(compiled.constraintGraph !== undefined
-        ? { graphOrigin: compiled.constraintGraph.origin }
-        : {}),
-      graphEmitFlagOn: process.env['CONSTRAINT_GRAPH_EMIT'] !== 'false',
+      graphOrigin: compiled.constraintGraph?.origin,
+      graphEmitFlagOn: isConstraintGraphEmitEnabled(),
     }),
   });
   // ADR-011 Phase 1b.3a: thread `compiled.constraintGraph` so specialized +
@@ -268,9 +234,7 @@ export function buildHybridRetrievalInputForPlan(
   requestContext?: RequestExecutionContext,
 ): HybridRetrievalInput {
   const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
-  const retrievalObjective = compiled?.query.retrievalObjective ?? buildRetrievalObjective(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
-  const ambiguitySoftConstraints = buildAmbiguousEntityHintSoftConstraints(plan.expansions.ambiguousEntityHints);
   // TA4: Propagate fuzzy entity hypothesis terms from the planner into the retrieval
   // input. When the planner's fuzzy matcher fires on an anchor-miss query, these terms
   // are entity hypothesis seeds that enable the entity-first dual retrieval path.
@@ -279,19 +243,11 @@ export function buildHybridRetrievalInputForPlan(
     queryPlan: plan,
     route,
     ...(compiled !== undefined ? { compiledRetrievalMode: compiled.execution.effectiveRetrievalMode } : {}),
-    ...(compiled !== undefined
-      ? { executionBudgetMaxCandidates: compiled.execution.budget.maxCandidates }
-      : {}),
-    lexicalQueries: buildPlanLexicalQueryVariants(plan, structuredQueries.lexical),
-    semanticQueries: buildPlanSemanticQueryVariants(plan, structuredQueries.semantic),
-    semanticEmbeddingQueries: buildPlanSemanticEmbeddingQueryVariants(plan, structuredQueries.semantic),
+    lexicalQueries: uniqueStrings([plan.normalizedQuery, ...structuredQueries.lexical]),
+    semanticQueries: uniqueStrings([plan.rawQuery, ...structuredQueries.semantic]),
     hardConstraints: plan.constraints.hard,
-    softConstraints: [
-      ...plan.constraints.soft,
-      ...ambiguitySoftConstraints,
-    ],
+    softConstraints: plan.constraints.soft,
     retrievalPlan,
-    retrievalObjective,
     // ADR-014 Phase 1b.3b: propagate the compiled constraint graph so
     // candidate-pool's annotator can emit per-atom slot records.
     ...(compiled?.constraintGraph !== undefined
@@ -314,136 +270,26 @@ function buildStructuredQueryExpansions(
 } {
   const lexical: string[] = [];
   const semantic: string[] = [];
-  const wineTypeContext = resolveWineTypeContextFromConstraints(plan.constraints.hard);
   for (const constraint of plan.constraints.hard) {
-    const phrases = retrievalValueToPhrases(constraint.attribute, constraint.value, wineTypeContext);
-    if (phrases.length > 0) {
-      lexical.push(...phrases);
-      if (isSemanticRetrievalExpansionAttribute(constraint.attribute)) {
-        semantic.push(...phrases);
+    const phrase = retrievalValueToPhrase(constraint.value);
+    if (phrase !== undefined) {
+      lexical.push(phrase);
+      if (constraint.attribute === 'region' || constraint.attribute === 'country' || constraint.attribute === 'appellation') {
+        semantic.push(phrase);
       }
     }
   }
   for (const boost of [...retrievalPlan.softBoosts, ...retrievalPlan.inferredBoosts]) {
-    const phrases = retrievalValueToPhrases(boost.attribute, boost.value, wineTypeContext);
-    if (phrases.length === 0) {
+    const phrase = retrievalValueToPhrase(boost.value);
+    if (phrase === undefined) {
       continue;
     }
-    lexical.push(...phrases);
-    if (isSemanticRetrievalExpansionAttribute(boost.attribute)) {
-      semantic.push(...phrases);
+    lexical.push(phrase);
+    if (boost.attribute === 'region' || boost.attribute === 'country' || boost.attribute === 'grape_family') {
+      semantic.push(phrase);
     }
-  }
-  for (const hint of plan.expansions.ambiguousEntityHints ?? []) {
-    lexical.push(...hint.lexicalExpansions);
-    semantic.push(...hint.semanticExpansions);
   }
   return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
-}
-
-function buildAmbiguousEntityHintSoftConstraints(
-  hints: readonly AmbiguousEntityHint[] | undefined,
-): readonly NormalizedConstraint[] {
-  if (hints === undefined || hints.length === 0) {
-    return [];
-  }
-
-  return hints.map((hint) => ({
-    attribute: hint.retrievalConstraint.attribute,
-    operator: hint.retrievalConstraint.operator,
-    value: hint.retrievalConstraint.value,
-    source_phrase: `ambiguous_entity_hint(${hint.surface})`,
-    confidence: 0.7,
-    mapping_version: 'ambiguous-entity-hint-v1',
-  }));
-}
-
-function isWineTypeValue(value: unknown): value is WineTypeValue {
-  return value === 'red'
-    || value === 'white'
-    || value === 'rosé'
-    || value === 'sparkling'
-    || value === 'natural'
-    || value === 'dessert'
-    || value === 'fortified'
-    || value === 'orange';
-}
-
-function resolveWineTypeContextFromConstraints(
-  constraints: readonly QueryPlanV1['constraints']['hard'][number][],
-): WineTypeValue | undefined {
-  for (const constraint of constraints) {
-    if (constraint.attribute !== 'wine_type') continue;
-    if (typeof constraint.value === 'string' && isWineTypeValue(constraint.value)) {
-      return constraint.value;
-    }
-    if (Array.isArray(constraint.value)) {
-      const matched = constraint.value.find(isWineTypeValue);
-      if (matched !== undefined) {
-        return matched;
-      }
-    }
-  }
-  return undefined;
-}
-
-function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
-  return attribute === 'region'
-    || attribute === 'country'
-    || attribute === 'appellation'
-    || attribute === 'closure'
-    || attribute === 'grape_family'
-    || attribute === 'grape_primary'
-    || attribute === 'style'
-    || attribute === 'flavor_profile'
-    || attribute === 'certification'
-    || attribute === 'pairing'
-    || attribute === 'occasion'
-    || attribute === 'recipient_profile';
-}
-
-function retrievalValueToPhrases(
-  attribute: string,
-  value: unknown,
-  wineTypeContext?: WineTypeValue,
-): readonly string[] {
-  if (
-    attribute === 'gift_suitability'
-    || attribute === 'beginner_suitability'
-    || attribute === 'drinking_window'
-  ) {
-    return [];
-  }
-
-  if (attribute === 'recipient_profile') {
-    if (typeof value === 'string') {
-      return recipientProfileToRetrievalTerms(value);
-    }
-    if (Array.isArray(value)) {
-      return [
-        ...new Set(
-          value
-            .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-            .flatMap((entry) => recipientProfileToRetrievalTerms(entry)),
-        ),
-      ];
-    }
-  }
-
-  if (attribute === 'style') {
-    if (typeof value === 'string') {
-      return expandSemanticStyleRetrievalTerms({ style: value, wineType: wineTypeContext });
-    }
-    if (Array.isArray(value)) {
-      return expandSemanticStyleRetrievalTerms({
-        styles: value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0),
-        wineType: wineTypeContext,
-      });
-    }
-  }
-
-  const phrase = retrievalValueToPhrase(value);
-  return phrase !== undefined ? [phrase] : [];
 }
 
 function retrievalValueToPhrase(value: unknown): string | undefined {
@@ -470,670 +316,8 @@ function retrievalValueToPhrase(value: unknown): string | undefined {
   return undefined;
 }
 
-function constraintValueToStrings(value: unknown): readonly string[] {
-  if (typeof value === 'string') {
-    return value.trim().length > 0 ? [value.trim()] : [];
-  }
-  if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
-  }
-  return [];
-}
-
-function hasExplicitWineTypeConstraint(
-  constraints: readonly QueryPlanV1['constraints']['hard'][number][],
-): boolean {
-  return resolveWineTypeContextFromConstraints(constraints) !== undefined;
-}
-
-function hasGiftOccasionPreference(plan: QueryPlanV1): boolean {
-  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
-    constraint.attribute === 'occasion'
-    && constraintValueToStrings(constraint.value)
-      .some((value) => value.trim().toLowerCase() === 'gift'),
-  );
-}
-
-function hasRecommendationSemanticStylePreference(plan: QueryPlanV1): boolean {
-  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
-    constraint.attribute === 'style'
-    && constraintValueToStrings(constraint.value)
-      .some((value) => resolveSemanticStyleEvidenceProfile(value.trim().toLowerCase()) !== undefined),
-  );
-}
-
-function hasClosurePreference(plan: QueryPlanV1): boolean {
-  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
-    constraint.attribute === 'closure',
-  );
-}
-
-function shouldRunTypedRecommendationDiscovery(plan: QueryPlanV1): boolean {
-  if (hasExplicitWineTypeConstraint(plan.constraints.hard)) {
-    return false;
-  }
-  return hasGiftOccasionPreference(plan) || hasRecommendationSemanticStylePreference(plan) || hasClosurePreference(plan);
-}
-
-function shouldRunAmbiguousEntityBranchExploration(plan: QueryPlanV1): boolean {
-  return plan.expansions.ambiguousEntityHints?.some((hint) => hint.explorationBranches.length > 0) ?? false;
-}
-
-function hasHybridSubqueryTopology(graph: ConstraintGraph | undefined): boolean {
-  return graph !== undefined
-    && graph.origin === 'hybrid'
-    && graph.nodes.some((node) => node.kind === 'subquery');
-}
-
-function buildTypedRecommendationPlan(
-  plan: QueryPlanV1,
-  wineType: WineTypeValue,
-): QueryPlanV1 {
-  return {
-    ...plan,
-    constraints: {
-      ...plan.constraints,
-      hard: [
-        ...plan.constraints.hard.filter((constraint) => constraint.attribute !== 'wine_type'),
-        {
-          attribute: 'wine_type',
-          operator: '=',
-          value: wineType,
-          source_phrase: wineType,
-          confidence: 1,
-          mapping_version: TYPED_RECOMMENDATION_DISCOVERY_VERSION,
-        },
-      ],
-    },
-  };
-}
-
-function buildTypedRecommendationRetrievalInput(
-  plan: QueryPlanV1,
-  compiled: CompiledWineQuery,
-  requestContext: RequestExecutionContext | undefined,
-  anchorEntityId: CanonicalEntityId | undefined,
-): HybridRetrievalInput {
-  const typedInput = buildHybridRetrievalInputForPlan(
-    plan,
-    'hybrid',
-    anchorEntityId,
-    undefined,
-    requestContext,
-  );
-  return {
-    ...typedInput,
-    compiledRetrievalMode: compiled.execution.effectiveRetrievalMode,
-    executionBudgetMaxCandidates: compiled.execution.budget.maxCandidates,
-  };
-}
-
-function candidateDiscoveryScore(candidate: HybridCandidate): number {
-  return candidate.fusionRrfTotal ?? 0;
-}
-
-interface BranchCandidateSet {
-  readonly branchLabel: string;
-  readonly candidates: readonly HybridCandidate[];
-}
-
-interface BranchCandidateRetrievalResult {
-  readonly status: 'ok' | 'fail_closed';
-  readonly candidates: readonly HybridCandidate[];
-  readonly degradationSignals: RankingDegradationSignal['degradationReasons'];
-  readonly criticRewrites: readonly RewriteTrace[];
-  readonly criticRetriesExhausted: boolean;
-}
-
-function buildAmbiguousEntityBranchPlan(
-  plan: QueryPlanV1,
-  hint: AmbiguousEntityHint,
-  branch: AmbiguousEntityHintBranch,
-): QueryPlanV1 {
-  const { ambiguousEntityHints: _omittedAmbiguousHints, ...baseExpansions } = plan.expansions;
-  return {
-    ...plan,
-    constraints: {
-      ...plan.constraints,
-      soft: uniqueConstraints([
-        ...plan.constraints.soft,
-        ...buildAmbiguousEntityHintSoftConstraints([hint]),
-        {
-          attribute: branch.softConstraint.attribute,
-          operator: branch.softConstraint.operator,
-          value: branch.softConstraint.value,
-          source_phrase: `ambiguous_entity_branch(${hint.surface}:${branch.label})`,
-          confidence: 0.78,
-          mapping_version: 'ambiguous-entity-branch-v1',
-        },
-      ]),
-    },
-    expansions: {
-      ...baseExpansions,
-      lexical: uniqueStrings([
-        ...plan.expansions.lexical,
-        ...hint.lexicalExpansions,
-        ...branch.lexicalExpansions,
-      ]),
-      semantic: uniqueStrings([
-        ...plan.expansions.semantic,
-        ...branch.semanticExpansions,
-      ]),
-    },
-  };
-}
-
-function buildAmbiguousEntityBranchRetrievalInput(
-  plan: QueryPlanV1,
-  compiled: CompiledWineQuery,
-  requestContext: RequestExecutionContext | undefined,
-  anchorEntityId: CanonicalEntityId | undefined,
-): HybridRetrievalInput {
-  const branchInput = buildHybridRetrievalInputForPlan(
-    plan,
-    'hybrid',
-    anchorEntityId,
-    undefined,
-    requestContext,
-  );
-  return {
-    ...branchInput,
-    compiledRetrievalMode: compiled.execution.effectiveRetrievalMode,
-    executionBudgetMaxCandidates: compiled.execution.budget.maxCandidates,
-  };
-}
-
-function mergeBalancedBranchCandidates(
-  branchSets: readonly BranchCandidateSet[],
-  maxCandidates: number,
-): readonly HybridCandidate[] {
-  const sortedBranchSets = branchSets.map((branchSet) => ({
-    ...branchSet,
-    candidates: [...branchSet.candidates].sort((left, right) => {
-      const diff = candidateDiscoveryScore(right) - candidateDiscoveryScore(left);
-      return diff !== 0 ? diff : String(left.entityId).localeCompare(String(right.entityId));
-    }),
-  }));
-  const cursors = sortedBranchSets.map(() => 0);
-  const seenEntityIds = new Set<string>();
-  const merged: HybridCandidate[] = [];
-
-  let progressed = true;
-  while (progressed && merged.length < maxCandidates) {
-    progressed = false;
-    for (const [branchIndex, branchSet] of sortedBranchSets.entries()) {
-      let cursor = cursors[branchIndex] ?? 0;
-      while (
-        cursor < branchSet.candidates.length
-        && seenEntityIds.has(String(branchSet.candidates[cursor]?.entityId))
-      ) {
-        cursor += 1;
-      }
-      cursors[branchIndex] = cursor;
-      const candidate = branchSet.candidates[cursor];
-      if (candidate === undefined) {
-        continue;
-      }
-      merged.push(candidate);
-      seenEntityIds.add(String(candidate.entityId));
-      cursors[branchIndex] = cursor + 1;
-      progressed = true;
-      if (merged.length >= maxCandidates) {
-        break;
-      }
-    }
-  }
-
-  return merged;
-}
-
-function uniqueConstraints(
-  constraints: readonly NormalizedConstraint[],
-): readonly NormalizedConstraint[] {
-  const seen = new Set<string>();
-  const unique: NormalizedConstraint[] = [];
-  for (const constraint of constraints) {
-    const key = [
-      constraint.attribute,
-      constraint.operator,
-      JSON.stringify(constraint.value),
-      constraint.source_phrase,
-    ].join('|');
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    unique.push(constraint);
-  }
-  return unique;
-}
-
-async function retrieveAmbiguousEntityBranchCandidates(
-  plan: QueryPlanV1,
-  ports: HybridCandidateRetrievalPorts,
-  compiled: CompiledWineQuery,
-  requestContext: RequestExecutionContext | undefined,
-  anchorEntityId: CanonicalEntityId | undefined,
-): Promise<BranchCandidateRetrievalResult> {
-  const queryRewriter = createQueryRewriter(
-    ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
-  );
-  const branchSpecs = (plan.expansions.ambiguousEntityHints ?? []).flatMap((hint) =>
-    hint.explorationBranches.map((branch) => ({ hint, branch })),
-  );
-
-  const branchExecution = await executeRetrievalBranches(
-    branchSpecs.map(({ hint, branch }) => ({
-      key: branch.label,
-      obligation: 'required' as const,
-      execute: async () => {
-        const branchPlan = buildAmbiguousEntityBranchPlan(plan, hint, branch);
-        const branchInput = buildAmbiguousEntityBranchRetrievalInput(
-          branchPlan,
-          compiled,
-          requestContext,
-          anchorEntityId,
-        );
-        const graphResult = await executeGraphAware(
-          branchInput,
-          compiled.constraintGraph,
-          {
-            candidatePool: ports.candidatePool,
-            bundleSelector: new BundleSelectorImpl(),
-            subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
-            queryRewriter,
-            budgetLedger: new InMemoryBudgetLedger(
-              deriveBudgetLedgerOptionsFromCompiled(compiled),
-            ),
-          },
-          DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
-          buildCriticSignalProbeForCompiledQuery(branchPlan, compiled),
-        );
-        return {
-          branchLabel: branch.label,
-          candidates: graphResult.candidates,
-          retrievalTelemetry: graphResult.retrievalTelemetry,
-          criticRewrites: graphResult.criticRewrites ?? [],
-          criticRetriesExhausted: graphResult.criticRetriesExhausted ?? false,
-        };
-      },
-    })),
-  );
-  const branchResults = branchExecution.successes.map((success) => success.result);
-  const optionalBranchDegradation = formatRetrievalBranchFailureReasons(
-    'ambiguous_entity',
-    branchExecution.optionalFailures,
-    'degraded',
-  );
-  if (branchExecution.status === 'fail_closed') {
-    return {
-      status: 'fail_closed',
-      candidates: [],
-      degradationSignals: [
-        ...formatRetrievalBranchFailureReasons(
-          'ambiguous_entity',
-          branchExecution.requiredFailures,
-          'fail_closed',
-        ),
-        ...optionalBranchDegradation,
-      ],
-      criticRewrites: branchResults.flatMap((result) => result.criticRewrites),
-      criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted),
-    };
-  }
-
-  return {
-    status: 'ok',
-    candidates: mergeBalancedBranchCandidates(
-      branchResults.map((result) => ({
-        branchLabel: result.branchLabel,
-        candidates: result.candidates,
-      })),
-      compiled.execution.budget.maxCandidates,
-    ),
-    degradationSignals: [
-      ...optionalBranchDegradation,
-      ...branchResults.flatMap((result) =>
-        result.retrievalTelemetry?.degradationSignals.map((signal) =>
-          `retrieval_degraded:${signal.component}:${signal.reason}`,
-        ) ?? []),
-    ],
-    criticRewrites: branchResults.flatMap((result) => result.criticRewrites),
-    criticRetriesExhausted: branchResults.some((result) => result.criticRetriesExhausted),
-  };
-}
-
-async function retrieveTypedRecommendationCandidates(
-  plan: QueryPlanV1,
-  ports: HybridCandidateRetrievalPorts,
-  compiled: CompiledWineQuery,
-  requestContext: RequestExecutionContext | undefined,
-  anchorEntityId: CanonicalEntityId | undefined,
-): Promise<BranchCandidateRetrievalResult> {
-  const queryRewriter = createQueryRewriter(
-    ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
-  );
-
-  const branchExecution = await executeRetrievalBranches(
-    SEARCH_TOOL_DIVERSITY_WINE_TYPES.map((wineType) => ({
-      key: wineType,
-      obligation: 'required' as const,
-      execute: async () => {
-        const typedPlan = buildTypedRecommendationPlan(plan, wineType);
-        const typedInput = buildTypedRecommendationRetrievalInput(
-          typedPlan,
-          compiled,
-          requestContext,
-          anchorEntityId,
-        );
-        const graphResult = await executeGraphAware(
-          typedInput,
-          compiled.constraintGraph,
-          {
-            candidatePool: ports.candidatePool,
-            bundleSelector: new BundleSelectorImpl(),
-            subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
-            queryRewriter,
-            budgetLedger: new InMemoryBudgetLedger(
-              deriveBudgetLedgerOptionsFromCompiled(compiled),
-            ),
-          },
-          DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS,
-          buildCriticSignalProbeForCompiledQuery(typedPlan, compiled),
-        );
-
-        return { wineType, graphResult };
-      },
-    })),
-  );
-  const branchResults = branchExecution.successes.map((success) => success.result);
-  const optionalBranchDegradation = formatRetrievalBranchFailureReasons(
-    'typed_recommendation',
-    branchExecution.optionalFailures,
-    'degraded',
-  );
-  if (branchExecution.status === 'fail_closed') {
-    return {
-      status: 'fail_closed',
-      candidates: [],
-      degradationSignals: [
-        ...formatRetrievalBranchFailureReasons(
-          'typed_recommendation',
-          branchExecution.requiredFailures,
-          'fail_closed',
-        ),
-        ...optionalBranchDegradation,
-      ],
-      criticRewrites: branchResults.flatMap(({ graphResult }) => graphResult.criticRewrites ?? []),
-      criticRetriesExhausted: branchResults.some(({ graphResult }) => graphResult.criticRetriesExhausted ?? false),
-    };
-  }
-
-  const branchSets: BranchCandidateSet[] = branchResults.map(({ wineType, graphResult }) => ({
-    branchLabel: wineType,
-    candidates: graphResult.candidates,
-  }));
-  return {
-    status: 'ok',
-    // Keep the discovery pool branch-balanced. Score still sorts within each
-    // wine-type branch, but the merged top-k must not collapse back into a
-    // single score-dominant pool or the gift/non-expert path regresses to the
-    // same red-heavy failure mode we are trying to prevent.
-    candidates: mergeBalancedBranchCandidates(
-      branchSets,
-      compiled.execution.budget.maxCandidates,
-    ),
-    degradationSignals: [
-      ...optionalBranchDegradation,
-      ...branchResults.flatMap(({ graphResult }) =>
-        graphResult.retrievalTelemetry?.degradationSignals.map((signal) =>
-          `retrieval_degraded:${signal.component}:${signal.reason}`,
-        ) ?? []),
-    ],
-    criticRewrites: branchResults.flatMap(({ graphResult }) => graphResult.criticRewrites ?? []),
-    criticRetriesExhausted: branchResults.some(({ graphResult }) => graphResult.criticRetriesExhausted ?? false),
-  };
-}
-
 function uniqueStrings(values: readonly string[]): readonly string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
-}
-
-function buildDenseSafeSemanticViews(
-  plan: QueryPlanV1,
-): readonly string[] {
-  const views = plan.normalizedQueryViews;
-  if (views === undefined) {
-    return [];
-  }
-
-  if (views.semanticVariants.length > 0) {
-    return views.semanticVariants;
-  }
-
-  return uniqueStrings([
-    views.raw,
-    views.accentless,
-    views.punctuationStripped,
-    views.vintageCanonicalized,
-    views.vintageStripped,
-    ...(views.transliterated !== undefined ? [views.transliterated] : []),
-    ...(views.reordered ?? []),
-  ]);
-}
-
-function buildPlanLexicalQueryVariants(
-  plan: QueryPlanV1,
-  extraTerms: readonly string[] = [],
-): readonly string[] {
-  return uniqueStrings([
-    plan.normalizedQuery,
-    ...(plan.normalizedQueryViews?.lookupVariants ?? []),
-    ...plan.expansions.lexical,
-    ...extraTerms,
-  ]);
-}
-
-function buildPlanSemanticQueryVariants(
-  plan: QueryPlanV1,
-  extraTerms: readonly string[] = [],
-): readonly string[] {
-  return uniqueStrings([
-    plan.rawQuery,
-    ...(plan.normalizedQueryViews?.transliterated !== undefined
-      ? [plan.normalizedQueryViews.transliterated]
-      : []),
-    ...plan.expansions.semantic,
-    ...extraTerms,
-  ]);
-}
-
-function buildPlanSemanticEmbeddingQueryVariants(
-  plan: QueryPlanV1,
-  extraTerms: readonly string[] = [],
-): readonly string[] {
-  return uniqueStrings([
-    plan.rawQuery,
-    ...buildDenseSafeSemanticViews(plan),
-    ...plan.expansions.semantic,
-    ...extraTerms,
-  ]);
-}
-
-function isSlotNode(node: unknown): node is SlotNode {
-  return typeof node === 'object' && node !== null && (node as { kind?: string }).kind === 'slot';
-}
-
-interface ScopedConstraintSelection {
-  readonly slotIds: ReadonlySet<string>;
-  readonly scopedGraph: ConstraintGraph;
-  readonly constraints: QueryPlanV1['constraints'];
-}
-
-function buildScopedConstraintBundleFromGraph(
-  _base: HybridRetrievalInput,
-  graph: ConstraintGraph,
-  subqueryId: string,
-): ScopedConstraintSelection | null {
-  const scopedGraph = projectConstraintGraphForSubquery(graph, subqueryId);
-  if (scopedGraph === undefined) return null;
-  const ownedSlotIds = collectApplicableSlotIdsForSubquery(graph, subqueryId);
-  const mandatorySlotIds = collectConjunctivelyRequiredSlotIds(scopedGraph);
-
-  const hard: Array<QueryPlanV1['constraints']['hard'][number]> = [];
-  const soft: Array<QueryPlanV1['constraints']['soft'][number]> = [];
-  const inferred: Array<QueryPlanV1['constraints']['inferred'][number]> = [];
-
-  for (const node of scopedGraph.nodes) {
-    if (!isSlotNode(node)) continue;
-    const projected = {
-      attribute: node.attribute,
-      operator: node.operator,
-      value: node.value,
-      confidence: node.confidence,
-      source_phrase: `graph_slot(${node.attribute})`,
-    };
-    switch (node.sourceTier) {
-      case 'hard':
-        if (mandatorySlotIds.has(node.nodeId)) {
-          hard.push(projected);
-        }
-        break;
-      case 'soft':
-        soft.push(projected);
-        break;
-      case 'inferred':
-        inferred.push(projected);
-        break;
-    }
-  }
-
-  if (scopedGraph.nodes.every((node) => !isSlotNode(node))) {
-    return null;
-  }
-
-  return {
-    slotIds: ownedSlotIds,
-    scopedGraph,
-    constraints: { hard, soft, inferred },
-  };
-}
-
-function scopeHybridRetrievalInputToSubquery(
-  base: HybridRetrievalInput,
-  subquery: SubqueryNode,
-  graph: ConstraintGraph,
-): HybridRetrievalInput {
-  const scopedSelection = buildScopedConstraintBundleFromGraph(
-    base,
-    graph,
-    subquery.nodeId,
-  );
-  if (scopedSelection === null) return base;
-  const scopedConstraints = scopedSelection.constraints;
-
-  const scopedPlan: QueryPlanV1 = {
-    ...base.queryPlan,
-    constraints: scopedConstraints,
-  };
-  const scopedRetrievalPlan = buildRetrievalPlan(scopedConstraints);
-  const expansions = buildStructuredQueryExpansions(scopedPlan, scopedRetrievalPlan);
-  const graphExpansions = buildStructuredQueryExpansionsFromGraph(
-    scopedSelection.scopedGraph,
-  );
-
-  return {
-    ...base,
-    queryPlan: scopedPlan,
-    hardConstraints: scopedConstraints.hard,
-    softConstraints: scopedConstraints.soft,
-    retrievalPlan: scopedRetrievalPlan,
-    lexicalQueries: buildPlanLexicalQueryVariants(scopedPlan, [
-      ...expansions.lexical,
-      ...graphExpansions.lexical,
-    ]),
-    semanticQueries: buildPlanSemanticQueryVariants(scopedPlan, [
-      ...expansions.semantic,
-      ...graphExpansions.semantic,
-    ]),
-    semanticEmbeddingQueries: buildPlanSemanticEmbeddingQueryVariants(scopedPlan, [
-      ...expansions.semantic,
-      ...graphExpansions.semantic,
-    ]),
-    constraintGraph: scopedSelection.scopedGraph,
-  };
-}
-
-function buildStructuredQueryExpansionsFromGraph(
-  graph: ConstraintGraph,
-): {
-  readonly lexical: readonly string[];
-  readonly semantic: readonly string[];
-} {
-  const lexical: string[] = [];
-  const semantic: string[] = [];
-  const wineTypeContext = resolveWineTypeContextFromGraph(graph);
-  for (const node of graph.nodes) {
-    if (!isSlotNode(node)) continue;
-    const phrases = retrievalValueToPhrases(node.attribute, node.value, wineTypeContext);
-    if (phrases.length === 0) continue;
-    lexical.push(...phrases);
-    if (
-      node.attribute === 'region'
-      || node.attribute === 'country'
-      || node.attribute === 'appellation'
-      || node.attribute === 'closure'
-      || node.attribute === 'grape_family'
-      || node.attribute === 'grape_primary'
-      || node.attribute === 'style'
-      || node.attribute === 'flavor_profile'
-      || node.attribute === 'certification'
-      || node.attribute === 'pairing'
-      || node.attribute === 'occasion'
-    ) {
-      semantic.push(...phrases);
-    }
-  }
-  return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
-}
-
-function resolveWineTypeContextFromGraph(graph: ConstraintGraph): WineTypeValue | undefined {
-  for (const node of graph.nodes) {
-    if (!isSlotNode(node) || node.attribute !== 'wine_type') continue;
-    if (typeof node.value === 'string' && isWineTypeValue(node.value)) {
-      return node.value;
-    }
-    if (Array.isArray(node.value)) {
-      const matched = node.value.find(isWineTypeValue);
-      if (matched !== undefined) {
-        return matched;
-      }
-    }
-  }
-  return undefined;
-}
-
-function buildProductionSubqueryRetriever(
-  candidatePool: CandidatePoolPort,
-): {
-  readonly stateIsolation: 'shared_mutable';
-  retrieve(
-    base: HybridRetrievalInput,
-    subquery: SubqueryNode,
-    graph: ConstraintGraph,
-  ): Promise<SubqueryRetrievalResult>;
-} {
-  return {
-    stateIsolation: 'shared_mutable',
-    async retrieve(base, subquery, graph) {
-      const scopedInput = scopeHybridRetrievalInputToSubquery(base, subquery, graph);
-      const retrieval = await executeCandidatePoolRetrieval(candidatePool, scopedInput);
-      return {
-        candidates: retrieval.candidates,
-        telemetry: retrieval.telemetry,
-      };
-    },
-  };
 }
 
 /**
@@ -1383,116 +567,6 @@ export async function retrieveHybridCandidatesForPlan(
     requestContext,
   );
 
-  if (
-    shouldRunAmbiguousEntityBranchExploration(plan)
-    && !hasHybridSubqueryTopology(compiled.constraintGraph)
-  ) {
-    const ambiguousBranchResult = await retrieveAmbiguousEntityBranchCandidates(
-      plan,
-      ports,
-      compiled,
-      requestContext,
-      fallbackAnchorEntityId,
-    );
-    const candidates = ambiguousBranchResult.candidates;
-    const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
-    const provenanceShortfall = buildMissingProvenanceObligations(
-      compiled.execution.provenancePolicy,
-      retrievalProvenanceCoverage,
-    );
-    const mergedDegradation = mergeRetrievalDegradation(
-      degradationReasons,
-      provenanceShortfall,
-      ambiguousBranchResult.degradationSignals,
-    );
-    const criticObservability: CriticRetrievalObservability | undefined =
-      ambiguousBranchResult.criticRewrites.length > 0 || ambiguousBranchResult.criticRetriesExhausted
-        ? {
-            rewrites: ambiguousBranchResult.criticRewrites,
-            retriesExhausted: ambiguousBranchResult.criticRetriesExhausted,
-            degradationReasons: ambiguousBranchResult.criticRetriesExhausted
-              ? ['critic_retries_exhausted']
-              : [],
-          }
-        : undefined;
-
-    return {
-      candidates,
-      effectiveRetrievalMode: effectiveMode,
-      retrievalKind: 'generic_hybrid',
-      sparseExecuted: true,
-      usedCompiledExecution,
-      retrievalProvenanceCoverage,
-      ...(mergedDegradation !== undefined ? { routeDegradation: mergedDegradation } : {}),
-      ...(requestedRoute !== null
-        ? {
-            specializedRouteObservability: {
-              specializedRouteRequested: requestedRoute,
-              specializedRouteExecuted: null,
-              fallbackApplied: degradationReasons.size > 0,
-              ...(degradationReasons.size > 0 ? { fallbackReason: [...degradationReasons][0] } : {}),
-            },
-          }
-        : {}),
-      ...(criticObservability !== undefined ? { criticObservability } : {}),
-    };
-  }
-
-  if (
-    shouldRunTypedRecommendationDiscovery(plan)
-    && !hasHybridSubqueryTopology(compiled.constraintGraph)
-  ) {
-    const typedDiscoveryResult = await retrieveTypedRecommendationCandidates(
-      plan,
-      ports,
-      compiled,
-      requestContext,
-      fallbackAnchorEntityId,
-    );
-    const candidates = typedDiscoveryResult.candidates;
-    const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
-    const provenanceShortfall = buildMissingProvenanceObligations(
-      compiled.execution.provenancePolicy,
-      retrievalProvenanceCoverage,
-    );
-    const mergedDegradation = mergeRetrievalDegradation(
-      degradationReasons,
-      provenanceShortfall,
-      typedDiscoveryResult.degradationSignals,
-    );
-    const criticObservability: CriticRetrievalObservability | undefined =
-      typedDiscoveryResult.criticRewrites.length > 0 || typedDiscoveryResult.criticRetriesExhausted
-        ? {
-            rewrites: typedDiscoveryResult.criticRewrites,
-            retriesExhausted: typedDiscoveryResult.criticRetriesExhausted,
-            degradationReasons: typedDiscoveryResult.criticRetriesExhausted
-              ? ['critic_retries_exhausted']
-              : [],
-          }
-        : undefined;
-
-    return {
-      candidates,
-      effectiveRetrievalMode: effectiveMode,
-      retrievalKind: 'generic_hybrid',
-      sparseExecuted: true,
-      usedCompiledExecution,
-      retrievalProvenanceCoverage,
-      ...(mergedDegradation !== undefined ? { routeDegradation: mergedDegradation } : {}),
-      ...(requestedRoute !== null
-        ? {
-            specializedRouteObservability: {
-              specializedRouteRequested: requestedRoute,
-              specializedRouteExecuted: null,
-              fallbackApplied: degradationReasons.size > 0,
-              ...(degradationReasons.size > 0 ? { fallbackReason: [...degradationReasons][0] } : {}),
-            },
-          }
-        : {}),
-      ...(criticObservability !== undefined ? { criticObservability } : {}),
-    };
-  }
-
   pipelineDebug({ step: 'retrieval.candidate_pool.fallback' }, 'pipeline candidate pool generate');
 
   // ADR-015 Axis 2 + ADR-013 Phase 1c: route the generic hybrid
@@ -1509,6 +583,7 @@ export async function retrieveHybridCandidatesForPlan(
   const probe = buildCriticSignalProbeForCompiledQuery(
     plan,
     compiled,
+    ports.candidatePool,
   );
   const queryRewriter = createQueryRewriter(
     ports.chatLlm !== undefined ? { chatLlm: ports.chatLlm } : {},
@@ -1530,7 +605,6 @@ export async function retrieveHybridCandidatesForPlan(
     {
       candidatePool: ports.candidatePool,
       bundleSelector: new BundleSelectorImpl(),
-      subqueryRetriever: buildProductionSubqueryRetriever(ports.candidatePool),
       queryRewriter,
       budgetLedger,
     },
@@ -1542,14 +616,10 @@ export async function retrieveHybridCandidatesForPlan(
   // Only available when candidatePool implements these methods (CandidatePoolService).
   // Specialized browse/compare paths that return early above do NOT have these traces
   // (they bypass the RRF fusion step entirely), so these are intentionally absent there.
-  const retrievalFusionTrace = graphResult.retrievalTelemetry?.fusionTrace;
-  const hardFilterDropLog = graphResult.retrievalTelemetry?.dropLog;
-  const retrievalDegradationSignals = graphResult.retrievalTelemetry?.degradationSignals ?? [];
-  const retrievalInternalReasons = [
-    ...retrievalSignalsToReasons(retrievalDegradationSignals),
-    ...(graphResult.assignmentSolution?.degradationReasons ?? []),
-    ...(graphResult.executionDegradationReasons ?? []),
-  ];
+  const retrievalFusionTrace = ports.candidatePool.getLastFusionTrace?.();
+  const hardFilterDropLog = ports.candidatePool.getLastDropLog?.();
+  const retrievalDegradationSignals = ports.candidatePool.getLastDegradationSignals?.() ?? [];
+  const retrievalInternalReasons = retrievalSignalsToReasons(retrievalDegradationSignals);
   const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
   const provenanceShortfall = buildMissingProvenanceObligations(
     compiled.execution.provenancePolicy,
@@ -1600,25 +670,21 @@ export async function retrieveHybridCandidatesForPlan(
  *
  * Scoring + pricing are conservative defaults that preserve pre-PR4
  * behaviour on the bundle path: every cell is scored by retrieval
- * fusion score (higher = better), and price uses canonical KRW
- * conversion from `HybridCandidate.priceUsd` so `shares_budget`
- * feasibility is solved inside the exact assignment stage.
+ * fusion score (higher = better), and price is `0` so shared-budget
+ * edges become inert until a downstream PR teaches the bundle path
+ * about price/popularity. The pricer **does not** read locale-dependent
+ * fields — outputs are integers from the candidate metadata.
  */
 const DEFAULT_BUNDLE_SCORER: BundleCellScorer = ({ candidate }) =>
-  // Bundle scoring reads only the canonical fusion score substrate.
-  // Non-fusion candidates contribute 0 here by contract.
-  candidate.fusionRrfTotal ?? 0;
+  // ADR-013 / RFC-012 candidate score migration: prefer fusionRrfTotal
+  // (the post-fusion canonical score). Fall back to the deprecated
+  // retrievalFusionScore field for compatibility with retrievers that
+  // have not yet migrated. Returning 0 keeps the cell assignable but
+  // de-prioritised when both fields are absent.
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback per CLAUDE.md rule 31
+  candidate.fusionRrfTotal ?? candidate.retrievalFusionScore ?? 0;
 
-const DEFAULT_BUNDLE_PRICER: BundleCellPricer = ({ candidate, resource }) => {
-  if (resource === 'price_total') {
-    const priceUsd = candidate.priceUsd;
-    return typeof priceUsd === 'number' && Number.isFinite(priceUsd) && priceUsd >= 0
-      ? Math.round(priceUsd * KRW_PER_USD_APPROXIMATE)
-      : 0;
-  }
-  if (resource === 'count') return 1;
-  return 0;
-};
+const DEFAULT_BUNDLE_PRICER: BundleCellPricer = () => 0;
 
 const DEFAULT_CRITIC_GRAPH_EXECUTOR_OPTIONS: GraphExecutorOptions = {
   scoreFor: DEFAULT_BUNDLE_SCORER,
@@ -1649,51 +715,31 @@ function deriveBudgetLedgerOptionsFromCompiled(
 /**
  * ADR-015 Axis 2: build the per-call probe the executor uses to feed
  * `decideRetry`. The probe pulls degradation signals from the candidate
- * pool's per-call accessor and computes graph-native satisfaction
- * signals from each result's matched slot refs / assignments.
+ * pool's per-call accessor and computes the satisfied-attribute set
+ * directly from each candidate's `matchedConstraints`.
  */
 function buildCriticSignalProbeForCompiledQuery(
   _plan: QueryPlanV1,
-  compiled: CompiledWineQuery,
+  _compiled: CompiledWineQuery,
+  candidatePool: CandidatePoolPort,
 ): CriticSignalProbe {
-  const graph = compiled.constraintGraph;
   return {
-    coverageSignalsFor(result) {
-      const candidates = result.candidates;
-      const satisfiedNodeIds = new Set<string>();
+    satisfiedAttributesFor(candidates) {
       const out = new Set<string>();
       for (const candidate of candidates) {
         for (const attribute of candidate.matchedConstraints) {
           out.add(attribute);
         }
-        for (const atomRef of candidate.matchedAtomRefs ?? []) {
-          satisfiedNodeIds.add(atomRef);
-        }
       }
-      if (graph !== undefined) {
-        for (const assignment of result.assignmentSolution?.assignments ?? []) {
-          const matchedAtomRefs = new Set(assignment.candidate.matchedAtomRefs ?? []);
-          const applicableSlotIds = collectApplicableSlotIdsForSubquery(
-            graph,
-            assignment.subqueryId,
-          );
-          if ([...applicableSlotIds].some((slotId) => matchedAtomRefs.has(slotId))) {
-            satisfiedNodeIds.add(assignment.subqueryId);
-          }
-        }
-      }
-      const satisfiedBudgetResources = new Set<BudgetResource>();
-      for (const usage of result.assignmentSolution?.budgetUsage ?? []) {
-        if (usage.used <= usage.max) satisfiedBudgetResources.add(usage.resource);
-      }
-      return {
-        satisfiedAttributes: out,
-        ...(satisfiedNodeIds.size > 0 ? { satisfiedNodeIds } : {}),
-        ...(satisfiedBudgetResources.size > 0 ? { satisfiedBudgetResources } : {}),
-      };
+      return out;
     },
-    degradationCodesFor(result) {
-      return result.retrievalTelemetry?.degradationCodes ?? [];
+    degradationReasonsFor() {
+      // Retrieval-internal reasons are surfaced via the per-call
+      // accessor (not the candidate stream). When the pool does not
+      // implement the accessor (e.g. test stubs), the critic sees an
+      // empty list and falls through to coverage-based decisions only.
+      const signals = candidatePool.getLastDegradationSignals?.() ?? [];
+      return signals.map((signal) => signal.reason);
     },
   };
 }

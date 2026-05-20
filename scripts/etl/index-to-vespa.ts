@@ -23,8 +23,8 @@ import type { CanonicalEntityId } from '../../src/domain/shared/types/entity-id.
 import {
   SOURCE_SYSTEM_BENCHMARK_ANCHOR_CATALOG,
   SOURCE_SYSTEM_VIVINO_SILVER,
-} from '../../src/shared/constants/source-systems.js';
-import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/shared/constants/embedding.js';
+} from '../../src/domain/shared/constants/source-systems.js';
+import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/domain/shared/constants/embedding.js';
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
@@ -36,7 +36,7 @@ import {
   resolveWineSnapshotEntity,
 } from './snapshot-entity-identity.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
-import { hashStableJson } from '../../src/shared/utils/stable-json.js';
+import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
 
 // ---------------------------------------------------------------------------
 // Constants

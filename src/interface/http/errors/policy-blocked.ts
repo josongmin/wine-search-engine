@@ -11,7 +11,7 @@ import {
 import type { ErrorResponseBody } from '../schemas/search-response.schema.js';
 import { getRequestId } from '../request-id.js';
 import { getAuthenticatedSubject } from '../authenticated-subject.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
 import { HTTP_STATUS_FORBIDDEN } from '../constants.js';
 
 const securityAuditLog = bootstrapLogger.child({ component: 'security_audit' });

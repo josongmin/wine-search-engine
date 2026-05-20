@@ -2,7 +2,7 @@ import type { SparseHit } from '../port/search-index.port.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
-import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
 
 /** BM25 multiplier weights for critic / prestige lifts (producer browse). */
 const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;

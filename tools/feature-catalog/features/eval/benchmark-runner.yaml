@@ -1,0 +1,47 @@
+id: eval.benchmark-runner
+name: Benchmark Runner & Judge
+category: eval
+summary: |
+  Scenario를 end-to-end 실행하고 tool call/answer를 LLM rubric + regex contract로 채점.
+  constraint-extraction metric, retrieval ceiling, ranking (NDCG/MRR), dimension scoring
+  + graph coverage 산출. nightly 실행, results/baseline.json regression baseline.
+
+maturity: 4
+maturity_rationale: |
+  복잡한 judge (token budget + tool order + LLM fact-check) + dimension weight + retrieval
+  analysis. baseline + diff reporter 완비. 그러나 judge rubric 수작업 tuning per scenario
+  update — drift 자동 감지 없음.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "CLI: pnpm bench:agent / benchmark:*"
+
+key_files:
+  - test/benchmark/agent/runner.ts
+  - test/benchmark/agent/scenario.ts
+
+tests:
+  bench: []
+
+depends_on:
+  - eval.benchmark-scenarios
+  - infra.anthropic-chat-llm
+
+related_rfcs: []
+
+known_limitations:
+  - "Rubric 수작업 tuning"
+  - "Rubric drift 자동 감지 없음"
+
+next_steps:
+  - "RFC 예시 기반 rubric 자동 생성"
+  - "Multi-judge consensus voting"
+
+tags:
+  - bench
+  - judge
+  - production-eval-coverage

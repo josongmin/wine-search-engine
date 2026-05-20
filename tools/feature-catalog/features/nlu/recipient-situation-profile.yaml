@@ -1,0 +1,64 @@
+id: nlu.recipient-situation-profile
+name: Recipient Situation Profile (Gift Classification)
+category: nlu
+summary: |
+  Gift / 받는 사람 상황 분류. profile: parents_first_time / senior_colleague_gift /
+  unknown_preference_recipient. 두 경로 운영: (1) candidate-side 13-axis voting
+  (wine_type, style, region, occasion, body/tannin/acidity, producer prestige 등)
+  으로 retrieval 후 필터, (2) query-side classifier (한·영 signal 사전 + saturation
+  scoring)로 NLU 시점에 profile + confidence + runner-up 산출.
+
+maturity: 3
+maturity_rationale: |
+  Maturity 3: dedicated regression suite (21 tests) + query-side classifier가
+  confidence ∈ [0,1] + runner-up profile + deterministic tie-break (canonical
+  RECIPIENT_PROFILE_VALUES 순서) 제공. Korean (부모님/엄마/상사/모르는 등) +
+  English signal coverage, 빈 query / 화이트스페이스 / no-signal 입력 모두
+  curve-aware (confidence floor 0.2 미만이면 profile undefined). 기존
+  candidate-based API (candidateMatchesRecipientProfile, recipientProfileEvidenceAxes)
+  는 backward-compatible 하게 유지 — candidate-constraint-evidence,
+  agent-semantic-contract 등 다운스트림 호출자는 무변경. Math.random 없음,
+  toLocaleString 없음, \b 비-ASCII 함정 없음.
+
+  Maturity 4 로 가려면: (a) axis weight를 offline gift-quality 라벨로 학습,
+  (b) chef / collector / health-conscious 등 profile inventory 확장,
+  (c) candidate-side axis와 query-side signal 사이 의미적 정합성 자동 검증.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal (used by semantic-contract-compiler, candidate-constraint-evidence)"
+  - "Query NLU classifier (classifyRecipientSituationProfile)"
+
+key_files:
+  - src/domain/query/service/recipient-situation-profile.ts
+
+tests:
+  regression:
+    - test/regression/recipient-situation-profile.regression.test.ts
+
+depends_on:
+  - nlu.query-normalizer
+
+related_rfcs:
+  - docs/RFC-005.md
+
+known_limitations:
+  - "Axis weight equal — 학습 없음"
+  - "Threshold (confidence floor 0.2, saturation 3) uncalibrated against gold labels"
+  - "Profile inventory 3개 — chef / collector / health-conscious 등 누락"
+  - "Query-side classifier와 candidate-side axis voting이 독립 신호 — 일관성 자동 검증 없음"
+
+next_steps:
+  - "Offline gift-quality 라벨로 axis weight + saturation 학습"
+  - "Profile inventory 확장 (chef / collector / health-conscious)"
+  - "Query-side signal 사전과 candidate-side axis 사이 cross-validation harness"
+
+tags:
+  - recipient-profile
+  - evidence-voting
+  - rule-based
+  - confidence-scoring

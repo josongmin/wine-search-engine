@@ -1,0 +1,49 @@
+id: infra.http-resilience
+name: HTTP Resilience (Timeout + Retry + Backoff)
+category: infra
+summary: |
+  External HTTP call에 timeout + exponential backoff retry 적용하는 utility. Vespa /
+  LLM / OpenAI 어댑터가 공통으로 사용. 5xx / network error 대상 idempotent retry.
+
+maturity: 5
+maturity_rationale: |
+  단순 + 견고. 모든 외부 호출에 일관 적용, unit + property-based test 보유. retry budget이
+  환경 var로 조정 가능. retry 분산 jitter는 stochastic but bounded by full-jitter envelope
+  [0, expDelay). Property tests validate: (a) backoff monotonicity in attempt number,
+  (b) jitter distribution within documented envelope across 100 seeds, (c) exact retry
+  budget honored (no off-by-one), (d) 4xx not retried / 5xx + 429 + transient net retried,
+  (e) pre-aborted signal short-circuits with 0 fn calls, (f) timeout aborts in-flight fetch,
+  (g) Retry-After header honored as strict floor, (h) concurrent calls do not share state,
+  (i) total wait bounded by sum of per-attempt caps (no infinite stacking).
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Internal"
+
+key_files:
+  - src/infrastructure/http/fetch-with-timeout.ts
+  - src/infrastructure/http/retry-with-backoff.ts
+
+tests:
+  unit:
+    - src/infrastructure/http/__tests__/retry-with-backoff.test.ts
+  regression:
+    - test/regression/http-resilience-properties.regression.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Per-host adaptive backoff 없음 (uniform)"
+
+next_steps:
+  - "Per-host adaptive backoff"
+
+tags:
+  - resilience
+  - http-utility

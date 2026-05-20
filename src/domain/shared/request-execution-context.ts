@@ -1,4 +1,4 @@
-import type { StageTimer } from '../../observability/stage-timer.js';
+import type { StageTimer } from '../../domain/shared/stage-timer.js';
 
 /**
  * Request-scoped execution knobs forwarded from HTTP (or batch parent) into

@@ -1,0 +1,48 @@
+id: tools.check-drinking-window
+name: check_drinking_window Agent Tool
+category: tools
+summary: |
+  특정 wine 엔티티의 최적 음용 시기 추정 tool. canonical entity_id + optional
+  target year 입력. drinking-window.usecase로 deterministic + ML predictor 호출,
+  structured begin/end + 신뢰도 반환.
+
+maturity: 3
+maturity_rationale: |
+  agent-tools.ts DrinkingWindowInputSchema + drinking-window.usecase 와이어링.
+  Predictor 단위 테스트 + regression 게이트. target_year 파라미터는 정의되었으나
+  실제 활용 미흡. confidence bound 부재.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: check_drinking_window"
+
+key_files:
+  - src/application/agent/agent-tools.ts
+  - src/application/drinking-window/drinking-window.usecase.ts
+
+tests:
+  regression:
+    - test/regression/heuristic-drinking-window-removal.regression.test.ts
+
+depends_on:
+  - retrieval.drinking-window-prediction
+  - agent.tool-execution-phase
+
+related_rfcs: []
+
+known_limitations:
+  - "Confidence bound 출력 없음"
+  - "target_year 파라미터 효용 제한적"
+  - "Expert validation 없음"
+
+next_steps:
+  - "Confidence interval 출력"
+  - "Critic 데이터 cross-validation"
+
+tags:
+  - agent-tool
+  - ml-model

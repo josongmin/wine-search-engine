@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAiEmbeddingService } from '../openai-embedding-service.js';
-import { globalCircuitBreakerRegistry } from '../../../observability/circuit-breaker-registry.js';
+import { globalCircuitBreakerRegistry } from '../../../domain/observability/circuit-breaker-registry.js';
 import { CircuitBreakerOpenError } from '../../../domain/shared/error/circuit-breaker-open-error.js';
 
 function newService(): OpenAiEmbeddingService {

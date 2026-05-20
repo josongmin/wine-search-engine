@@ -1,0 +1,51 @@
+id: tools.compare-wines
+name: compare_wines Agent Tool
+category: tools
+summary: |
+  두 wine 비교용 agent tool. query_a/query_b + side-specific constraint
+  (country/region/appellation/grape/vintage/wine_type per side). Parallel
+  dual-leg retrieval → side별 결과 with ranking.
+
+maturity: 3
+maturity_rationale: |
+  agent-tools.ts CompareInputSchema + compare-retriever 와이어링 완료. parallel
+  execution regression 게이트. 그러나 비교 전용 ranking / cross-side balance /
+  contrast scoring 부재로 단순 2x search 수준에 머무름.
+
+status: active
+since: 2025-09
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "Agent tool: compare_wines"
+
+key_files:
+  - src/application/agent/agent-tools.ts
+  - src/application/search/compare-tool-shared-constraints.ts
+
+tests:
+  regression:
+    - test/regression/agent-parallel-tools.regression.test.ts
+    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+
+depends_on:
+  - retrieval.comparison-retrieval
+  - agent.tool-execution-phase
+
+related_rfcs:
+  - docs/RFC-010.md
+
+known_limitations:
+  - "Side-aware reranking 부재"
+  - "Pairwise balance scoring 부재"
+  - "Contrast diversity penalty 미적용"
+
+next_steps:
+  - "Pairwise balance score"
+  - "Top contrast pair mode"
+
+tags:
+  - agent-tool
+  - comparison
+  - parallel-execution

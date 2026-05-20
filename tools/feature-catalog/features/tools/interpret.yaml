@@ -1,0 +1,59 @@
+id: tools.interpret
+name: Interpret Endpoint (Query Interpretation Trace)
+category: tools
+summary: |
+  POST /v1/search/interpret — 입력 쿼리에 대한 NLU/planner 해석 결과 노출 (intent, constraints,
+  anchors, decomposition, situational policy 결과 등). 디버깅 / 사용자 UI 트레이싱 용.
+
+maturity: 3
+maturity_rationale: |
+  HTTP route 전용 회귀 테스트 스위트 추가로 응답 형상이 고정됨 — 13 케이스가
+  Use-case port 시점에서 mock 하여 외부 NLU/LLM 호출 없이 InterpretResponseSchema
+  (V1) 와 InterpretResponseV2Schema (Accept: human+json) 양쪽의 안정성을
+  검증한다. 커버 영역: Korean/English/Mixed plain query, 구속조건 추출(가격+지역),
+  pairing intent, comparison decomposition (V2), OOD (unknown query_class),
+  RFC-014 envelope (empty / oversized / whitespace / missing-field), Unicode NFC/NFD
+  forwarding, MAX_QUERY_LENGTH boundary. Schema는 여전히 InterpretResponseSchema /
+  InterpretResponseV2Schema 가 SSoT.
+
+status: active
+since: 2025-10
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "HTTP: POST /v1/search/interpret"
+  - "HTTP: POST /v1/search/interpret (Accept: application/vnd.cuvee.human+json → V2 explain)"
+
+key_files:
+  - src/application/search/interpret.usecase.ts
+  - src/interface/http/routes/interpret.route.ts
+  - src/interface/http/schemas/search-response.schema.ts
+  - src/interface/http/schemas/search-response-v2.schema.ts
+
+tests:
+  integration:
+    - test/integration/http/routes/interpret.route.test.ts
+  unit:
+    - src/interface/http/schemas/__tests__/interpret-response.schema.test.ts
+
+depends_on:
+  - nlu.search-constraint-extraction
+  - nlu.anchor-extraction
+  - nlu.decomposition-detection
+  - agent.semantic-contract-compiler
+
+related_rfcs: []
+
+known_limitations:
+  - "Response shape는 InterpretResponseSchema(V1) 로 freeze 되었으나, 신규 planner 필드를 추가하려면 schema-side 변경이 필요"
+  - "V1 응답에는 decomposition_hint 가 노출되지 않음 — comparison 디스플레이는 V2 explain 경로(Accept: human+json) 필요"
+  - "Versioning은 Accept 헤더(content negotiation) 기반이며 별도 path versioning(/v2/search/interpret)은 별 contract"
+
+next_steps:
+  - "V1 deprecation 일정 확정 후 docs/migration/v1-v2-api-migration.md 갱신"
+  - "Response field에 mapping_version 등 신규 provenance 필드 노출 시 회귀 테스트 확장"
+
+tags:
+  - debug
+  - interpretation

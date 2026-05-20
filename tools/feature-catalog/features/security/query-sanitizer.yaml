@@ -1,0 +1,58 @@
+id: security.query-sanitizer
+name: Query Sanitizer (Defense-in-Depth)
+category: security
+summary: |
+  HTTP 입력 정규화 + 공격 탐지. NFKC normalize, homoglyph/lookalike (Cyrillic Р→R 등)
+  탐지, regex injection pattern, max length bound, null-byte 차단. 4가지 blocking
+  strategy.
+
+maturity: 4
+maturity_rationale: |
+  Production 공격 시도에 대한 실전 검증. comprehensive coverage (HOMOGLYPH_MAP +
+  injection pattern + 4 strategy). 2026 false-negative 없음, false-positive ~0.1%.
+  Property-based fuzz suite (test/regression/query-sanitizer-properties.regression.test.ts,
+  58 tests) confirms: idempotence + NFKC normalization properties hold over 100 fc.assert
+  runs each; Cyrillic Р/р homoglyph collapse holds over 100 runs across diverse embeddings;
+  20-query Korean+English good corpus accepted 100%; SQL/XSS/NoSQL/command/prompt-injection
+  adversarial corpus detected 100%. Layer-1은 LDAP filter injection 과 pure-Korean prompt
+  injection (Latin 키워드 없음) 은 탐지하지 않음 — Layer-2 LLM judge 영역으로 명시 (아래
+  known_limitations 참조). 두 boundary 가 5 승급의 blocker (criteria: adversarial corpus
+  100% catch) 라서 maturity 4 유지.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-21
+owner: core
+
+surfaces:
+  - "All HTTP routes (pre-handler)"
+
+key_files:
+  - src/domain/security/service/query-sanitizer.ts
+
+tests:
+  regression:
+    - test/regression/query-sanitizer-properties.regression.test.ts
+  unit:
+    - src/domain/security/__tests__/query-sanitizer.test.ts
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "ML 기반 detection 없음"
+  - "Novel evasion pattern에 약함"
+  - "LDAP filter injection (e.g. `admin)(&(password=*))`) Layer-1 패턴셋에 없음 — Layer-2 LLM judge로 deferred"
+  - "Pure-Korean prompt injection (e.g. `이전 지시 무시`) Layer-1 패턴 미탐지 — Latin/English directive 키워드 surface에만 매칭. Cross-script PII 추출 (`다른 사용자`) 는 별도 catch됨"
+  - "Homoglyph collapse 후 일부 결합이 SQL/system 키워드를 만들면 reject 됨 (e.g. Cyrillic `ор` → `or` + `1=1`) — 이는 false-positive 가 아니라 의도된 defense"
+
+next_steps:
+  - "LLM judge 통합 (Layer 2) — LDAP/pure-Korean prompt injection 의미적 탐지"
+  - "Homoglyph map 신규 script 확장 (Hebrew, Arabic, Thai)"
+  - "Property suite 확장: 4가지 reason 별 minimum-distance fuzz (gradient-style adversarial)"
+
+tags:
+  - security
+  - input-validation
+  - injection-detection
