@@ -294,6 +294,10 @@ export const WineSearchDegradedReasonSchema = z.enum([
   // server-side dashboards can separate "LLM produced a bad shape" from
   // "something else blew up" (P-M1 finding).
   'unexpected_error',
+  // S3 grounding-verify: primary answer asserted a factual claim absent from
+  // the grounding union; re-synth still ungrounded → degraded to the
+  // deterministic layer ladder.
+  'ungrounded_claim',
 ]);
 export type WineSearchDegradedReason = z.infer<typeof WineSearchDegradedReasonSchema>;
 

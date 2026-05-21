@@ -1413,4 +1413,78 @@ describe('AgentToolExecutionPolicy', () => {
     expect(state.pendingPlannerDirective).toEqual({ kind: 'relax_constraints_retry' });
   });
 
+  // S5 — deterministic check_drinking_window fanout.
+  describe('resolveSingleCallExpansion — check_drinking_window fanout', () => {
+    const contract = { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false } as const;
+
+    it('fans out a single under-specified check to a parallel batch over all grounded ids', () => {
+      const policy = new AgentToolExecutionPolicy();
+      const expanded = policy.resolveSingleCallExpansion({
+        tool: 'check_drinking_window',
+        input: { entity_id: '<top_result_entity_id>', target_year: 2026 },
+        queryExecutionContract: contract,
+        groundedDrinkabilityEntityIds: ['wine-a', 'wine-b', 'wine-c'],
+      });
+      expect(expanded).toEqual([
+        { tool: 'check_drinking_window', input: { target_year: 2026, entity_id: 'wine-a' } },
+        { tool: 'check_drinking_window', input: { target_year: 2026, entity_id: 'wine-b' } },
+        { tool: 'check_drinking_window', input: { target_year: 2026, entity_id: 'wine-c' } },
+      ]);
+    });
+
+    it('caps the fanout at MAX_TOOLS_PER_BATCH (4)', () => {
+      const policy = new AgentToolExecutionPolicy();
+      const expanded = policy.resolveSingleCallExpansion({
+        tool: 'check_drinking_window',
+        input: { entity_id: 'tbd' },
+        queryExecutionContract: contract,
+        groundedDrinkabilityEntityIds: ['w1', 'w2', 'w3', 'w4', 'w5', 'w6'],
+      });
+      expect(expanded).toHaveLength(4);
+    });
+
+    it('does NOT fan out when only one id is grounded', () => {
+      const policy = new AgentToolExecutionPolicy();
+      const expanded = policy.resolveSingleCallExpansion({
+        tool: 'check_drinking_window',
+        input: { entity_id: 'wine-a' },
+        queryExecutionContract: contract,
+        groundedDrinkabilityEntityIds: ['wine-a'],
+      });
+      expect(expanded).toBeUndefined();
+    });
+
+    it('respects a planner that pinned a concrete (non-placeholder) entity_id — no fanout', () => {
+      const policy = new AgentToolExecutionPolicy();
+      const expanded = policy.resolveSingleCallExpansion({
+        tool: 'check_drinking_window',
+        input: { entity_id: 'wine-a', target_year: 2026 },
+        queryExecutionContract: contract,
+        groundedDrinkabilityEntityIds: ['wine-a', 'wine-b'],
+      });
+      expect(expanded).toBeUndefined();
+    });
+
+    it('does NOT fan out without grounded ids', () => {
+      const policy = new AgentToolExecutionPolicy();
+      const expanded = policy.resolveSingleCallExpansion({
+        tool: 'check_drinking_window',
+        input: { entity_id: '__TO_BE_FILLED__' },
+        queryExecutionContract: contract,
+      });
+      expect(expanded).toBeUndefined();
+    });
+
+    it('dedupes repeated grounded ids before fanning out', () => {
+      const policy = new AgentToolExecutionPolicy();
+      const expanded = policy.resolveSingleCallExpansion({
+        tool: 'check_drinking_window',
+        input: { entity_id: '{{id}}' },
+        queryExecutionContract: contract,
+        groundedDrinkabilityEntityIds: ['wine-a', 'wine-a', 'wine-b'],
+      });
+      expect(expanded).toHaveLength(2);
+    });
+  });
+
 });

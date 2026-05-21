@@ -45,6 +45,11 @@ import {
 } from '../agent/agent-situational-query-policy.js';
 import type { WineSearchAnalysis } from './wine-search-schemas.js';
 import {
+  collectGroundingFacts,
+  verifyAnswerGrounding,
+  type GroundingFacts,
+} from './synthesis-grounding-verify.js';
+import {
   FALLBACK_TEMPLATES,
   LAYER3_OBSERVATION_SLICE_CHARS,
 } from './synthesis-fallback-templates.js';
@@ -91,6 +96,38 @@ const GROUNDING_TRUNCATION_TAIL = '\n…[grounding truncated]';
 /** First retry's clarifying preamble for validation failures. */
 const VALIDATION_RETRY_CLARIFIER =
   'Previous output failed schema validation. Re-emit valid JSON that conforms to the supplied tool schema. Do not include extra prose.';
+
+/**
+ * S3 grounding-verify: query intents for which the deterministic
+ * grounding-verify gate runs. The task scopes this to recommendation /
+ * pairing-style answers — the codebase `QueryIntent` enum names these
+ * `'search'` (general recommendation/lookup) and `'pair'` (food pairing).
+ * Comparison / drinkability / unknown intents are NOT gated (they have their
+ * own structured grounding guarantees or no recommendable-label surface).
+ */
+const GROUNDING_VERIFY_INTENTS: ReadonlySet<WineSearchAnalysis['intent']> = new Set([
+  'search',
+  'pair',
+]);
+
+/** Maximum number of ungrounded-claim surfaces named in the re-synth
+ *  directive. Bounds prompt growth on pathological answers. */
+const RESYNTH_MAX_LISTED_CLAIMS = 5;
+
+/**
+ * S3 grounding-verify: build the directive appended to the re-synth request
+ * when the primary answer asserted ungrounded claims. Names the offending
+ * surfaces and pins the model to GROUNDING_JSON-only fields.
+ */
+function buildResynthDirective(ungroundedClaims: readonly string[]): string {
+  const listed = ungroundedClaims.slice(0, RESYNTH_MAX_LISTED_CLAIMS).join(', ');
+  return (
+    'Grounding check failed: your previous answer asserted facts not present in '
+    + `the tool outcomes (ungrounded: ${listed}). Re-emit using ONLY fields in `
+    + 'GROUNDING_JSON / the provided tool outcomes. Do not name any wine, region, '
+    + 'grape, vintage, or price that is absent from the grounding.'
+  );
+}
 
 /** Maximum number of characters from an unexpected error's `name`/`message`
  *  pair that we log. Redacts long stack-trace-style messages or echoed
@@ -433,26 +470,46 @@ export class SynthesisRunner {
     let attempts = 0;
     let degradedReason: DegradedReason;
 
+    // S3 grounding-verify is gated on recommendation / pairing intents only.
+    const groundingVerifyEnabled = GROUNDING_VERIFY_INTENTS.has(input.analysis.intent);
+    let verificationAttempts = 0;
+
     if (hasGrounding) {
       const primary = await this.runPrimary(input);
       usage = addTokenUsage(usage, primary.usage);
       attempts += primary.attempts;
       if (primary.answer !== undefined) {
-        const finalAnswer = this.applySituationalNormalize(
-          input.query,
-          primary.answer.answer,
-          /* observedToolOutput */ true,
-          queryHasHangul,
-        );
-        return {
-          answer: finalAnswer,
-          layer: 'primary',
-          groundedOnToolResults: true,
-          synthesisAttempts: attempts,
-          tokenUsage: usage,
-        };
+        verificationAttempts = 1;
+        const verified = await this.applyGroundingVerify({
+          input,
+          candidate: primary.answer,
+          enabled: groundingVerifyEnabled,
+        });
+        usage = addTokenUsage(usage, verified.usage);
+        attempts += verified.extraAttempts;
+        verificationAttempts += verified.extraVerificationAttempts;
+        if (verified.answer !== undefined) {
+          const finalAnswer = this.applySituationalNormalize(
+            input.query,
+            verified.answer,
+            /* observedToolOutput */ true,
+            queryHasHangul,
+          );
+          return {
+            answer: finalAnswer,
+            layer: 'primary',
+            groundedOnToolResults: true,
+            synthesisAttempts: attempts,
+            verificationAttempts,
+            tokenUsage: usage,
+          };
+        }
+        // Re-synth still ungrounded → degrade to the deterministic layer
+        // ladder below, tagged `ungrounded_claim`.
+        degradedReason = 'ungrounded_claim';
+      } else {
+        degradedReason = primary.degradedReason ?? 'malformed_llm_output';
       }
-      degradedReason = primary.degradedReason ?? 'malformed_llm_output';
     } else {
       degradedReason = 'no_results';
     }
@@ -476,6 +533,7 @@ export class SynthesisRunner {
         layer: 'layer2',
         groundedOnToolResults: true,
         attempts,
+        verificationAttempts,
         usage,
         degradedReason,
       });
@@ -506,6 +564,7 @@ export class SynthesisRunner {
         layer: 'layer3',
         groundedOnToolResults: true,
         attempts,
+        verificationAttempts,
         usage,
         degradedReason,
       });
@@ -532,6 +591,7 @@ export class SynthesisRunner {
       layer: 'layer4',
       groundedOnToolResults: false,
       attempts,
+      verificationAttempts,
       usage,
       degradedReason,
     });
@@ -739,6 +799,7 @@ export class SynthesisRunner {
       layer: 'layer4',
       groundedOnToolResults: false,
       synthesisAttempts: 0,
+      verificationAttempts: 0,
       tokenUsage: makeZeroTokenUsage(),
       degradedReason: 'policy_blocked',
     };
@@ -749,6 +810,7 @@ export class SynthesisRunner {
     readonly layer: AnswerLayer;
     readonly groundedOnToolResults: boolean;
     readonly attempts: number;
+    readonly verificationAttempts: number;
     readonly usage: TokenUsage;
     readonly degradedReason: DegradedReason;
   }): AnswerResult {
@@ -757,9 +819,140 @@ export class SynthesisRunner {
       layer: args.layer,
       groundedOnToolResults: args.groundedOnToolResults,
       synthesisAttempts: args.attempts,
+      verificationAttempts: args.verificationAttempts,
       tokenUsage: args.usage,
       degradedReason: args.degradedReason,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // S3 grounding-verify (deterministic, no extra LLM for the verification
+  // itself — the only optional LLM call is the single re-synth).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Verify the primary `candidate` answer against the grounding union and,
+   * if an ungrounded claim is found, perform exactly ONE deterministic
+   * re-synth with a directive listing the ungrounded surfaces.
+   *
+   * Returns:
+   *  - `answer` — the answer to commit at the `primary` layer (the original
+   *    candidate when grounded, or the re-synth output when the re-synth is
+   *    itself grounded). `undefined` when both passes are ungrounded → the
+   *    caller degrades to the deterministic layer ladder.
+   *  - `extraAttempts` — extra LLM round-trips made (re-synth count).
+   *  - `extraVerificationAttempts` — extra full synthesis candidates produced
+   *    (0 or 1) so the caller can report `verificationAttempts`.
+   *  - `usage` — token usage from the re-synth, if any.
+   */
+  private async applyGroundingVerify(args: {
+    readonly input: SynthesisRunInput;
+    readonly candidate: SynthesisAnswer;
+    readonly enabled: boolean;
+  }): Promise<{
+    readonly answer: string | undefined;
+    readonly extraAttempts: number;
+    readonly extraVerificationAttempts: number;
+    readonly usage: TokenUsage;
+  }> {
+    const zero = makeZeroTokenUsage();
+    const candidateText = args.candidate.answer;
+    if (!args.enabled) {
+      return { answer: candidateText, extraAttempts: 0, extraVerificationAttempts: 0, usage: zero };
+    }
+    const facts: GroundingFacts = collectGroundingFacts(args.input.toolOutcomes);
+    const firstPass = verifyAnswerGrounding(candidateText, args.candidate.citations, facts);
+    if (firstPass.grounded) {
+      return { answer: candidateText, extraAttempts: 0, extraVerificationAttempts: 0, usage: zero };
+    }
+
+    this.logger.warn(
+      {
+        requestId: args.input.requestId,
+        ungroundedClaims: firstPass.ungroundedClaims,
+      },
+      '[synthesis] grounding-verify failed on primary answer — forcing one re-synth',
+    );
+    this.throwIfAborted(args.input.abortSignal);
+
+    // ONE re-synth pass with a directive naming the ungrounded claims.
+    const resynth = await this.runResynth(args.input, firstPass.ungroundedClaims);
+    if (resynth.answer === undefined) {
+      return {
+        answer: undefined,
+        extraAttempts: resynth.attempts,
+        extraVerificationAttempts: 0,
+        usage: resynth.usage,
+      };
+    }
+    const secondPass = verifyAnswerGrounding(resynth.answer.answer, resynth.answer.citations, facts);
+    if (secondPass.grounded) {
+      return {
+        answer: resynth.answer.answer,
+        extraAttempts: resynth.attempts,
+        extraVerificationAttempts: 1,
+        usage: resynth.usage,
+      };
+    }
+    // Still ungrounded after re-synth → degrade.
+    this.logger.warn(
+      {
+        requestId: args.input.requestId,
+        ungroundedClaims: secondPass.ungroundedClaims,
+      },
+      '[synthesis] re-synth still ungrounded — degrading to deterministic layer',
+    );
+    return {
+      answer: undefined,
+      extraAttempts: resynth.attempts,
+      extraVerificationAttempts: 1,
+      usage: resynth.usage,
+    };
+  }
+
+  /**
+   * Single deterministic re-synth pass: re-issues the synthesis request with
+   * an appended directive that lists the ungrounded claims. No internal
+   * retry — one shot. Mirrors the primary message shape so prompt-cache hits
+   * are preserved up to the directive turn.
+   */
+  private async runResynth(
+    input: SynthesisRunInput,
+    ungroundedClaims: readonly string[],
+  ): Promise<{ readonly answer?: SynthesisAnswer; readonly attempts: number; readonly usage: TokenUsage }> {
+    const grounding = serializeToolOutcomesForSynthesis(input.toolOutcomes);
+    const messages: readonly ChatMessage[] = [
+      { role: 'user', content: `User query: ${input.query}` },
+      { role: 'user', content: `Tool outcomes:\n${grounding}` },
+      { role: 'user', content: buildResynthDirective(ungroundedClaims) },
+    ];
+    let usage = makeZeroTokenUsage();
+    try {
+      const result: SynthesizeResult<SynthesisAnswer> = await this.structuredLlm.synthesize({
+        schema: SynthesisAnswerSchema,
+        systemPrompt: SYNTHESIS_SYSTEM_PROMPT,
+        enablePromptCache: true,
+        maxOutputTokens: input.maxOutputTokens,
+        perStepTimeoutMs: input.perStepTimeoutMs,
+        model: this.model,
+        messages,
+        ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
+      });
+      usage = addTokenUsage(usage, result.usage);
+      const parsed = SynthesisAnswerSchema.safeParse(result.data);
+      if (parsed.success) {
+        return { answer: parsed.data, attempts: 1, usage };
+      }
+      return { attempts: 1, usage };
+    } catch (err) {
+      if (isAbortError(err)) throw new SynthesisAbortedError();
+      const summary = summarizeUnexpectedError(err);
+      this.logger.warn(
+        { requestId: input.requestId, errName: summary.name, errMessage: summary.message },
+        '[synthesis] grounding-verify re-synth pass failed',
+      );
+      return { attempts: 1, usage };
+    }
   }
 }
 

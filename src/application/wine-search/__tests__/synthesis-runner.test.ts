@@ -611,3 +611,156 @@ describe('SynthesisRunner — invariants', () => {
     expect(resAccent.answer).toBe(FALLBACK_TEMPLATES.layer4.english);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S3 — deterministic grounding-verify
+// ---------------------------------------------------------------------------
+
+/** Search outcome that exposes a canonical_label + vintage in the structured
+ *  result so the grounding-verify union can extract label/vintage facts. */
+function makeGroundedWineOutcome(
+  label: string,
+  vintage: number,
+): ToolOutcome {
+  return {
+    stepId: 'q:0:0',
+    tool: 'search_wines',
+    kind: 'success',
+    durationMs: 12,
+    result: {
+      queryType: 'search',
+      results: [
+        { entity: { entityId: 'wine-001', canonicalLabel: label, vintage } },
+      ],
+    },
+  };
+}
+
+describe('SynthesisRunner — S3 grounding-verify', () => {
+  it('grounded answer (cites grounded label) passes on first pass with verificationAttempts=1', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      return {
+        data: { answer: 'I recommend Wine A from Bordeaux.', citations: ['Wine A'] },
+        usage: makeTokenUsage(100, 50),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('primary');
+    expect(result.synthesisAttempts).toBe(1);
+    expect(result.verificationAttempts).toBe(1);
+    expect(result.answer).toContain('Wine A');
+    expect(calls).toBe(1);
+  });
+
+  it('ungrounded label citation ("Wine B" not in grounding={Wine A}) triggers ONE re-synth → attempts=2', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      if (calls === 1) {
+        // Hallucinated recommendation: cites a wine absent from grounding.
+        return {
+          data: { answer: 'I recommend Wine B, a stunning bottle.', citations: ['Wine B'] },
+          usage: makeTokenUsage(100, 50),
+          durationMs: 5,
+        };
+      }
+      // Re-synth: now cites the grounded wine.
+      return {
+        data: { answer: 'On reflection, Wine A is the grounded pick.', citations: ['Wine A'] },
+        usage: makeTokenUsage(80, 40),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('primary');
+    expect(result.verificationAttempts).toBe(2);
+    // synthesisAttempts counts primary (1) + re-synth (1).
+    expect(result.synthesisAttempts).toBe(2);
+    expect(result.answer).toContain('Wine A');
+    expect(calls).toBe(2);
+  });
+
+  it('still-ungrounded re-synth degrades to Layer 2 with degradedReason=ungrounded_claim', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      // Both passes hallucinate the same ungrounded wine.
+      return {
+        data: { answer: 'I recommend Wine B again.', citations: ['Wine B'] },
+        usage: makeTokenUsage(90, 45),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('layer2');
+    expect(result.degradedReason).toBe('ungrounded_claim');
+    // Two full synthesis candidates were produced and grounding-checked
+    // (primary + one re-synth); both failed → degrade to Layer 2.
+    expect(result.verificationAttempts).toBe(2);
+    expect(calls).toBe(2); // primary + one re-synth
+  });
+
+  it('ungrounded vintage assertion triggers re-synth', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      if (calls === 1) {
+        // Asserts a vintage (2015) absent from grounding (2018).
+        return {
+          data: { answer: 'The 2015 vintage of Wine A is excellent.', citations: ['Wine A'] },
+          usage: makeTokenUsage(100, 50),
+          durationMs: 5,
+        };
+      }
+      return {
+        data: { answer: 'The 2018 Wine A is the grounded vintage.', citations: ['Wine A'] },
+        usage: makeTokenUsage(80, 40),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('primary');
+    expect(result.verificationAttempts).toBe(2);
+    expect(result.answer).toContain('2018');
+  });
+
+  it('faithful paraphrase that cites no specific label is NOT flagged (false-positive guard)', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      // Entity-id citation (skipped) + paraphrase prose, no ungrounded vintage.
+      return {
+        data: { answer: '부르고뉴 스타일의 와인을 추천드립니다.', citations: ['wine-001'] },
+        usage: makeTokenUsage(70, 35),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: '부르고뉴 와인 추천',
+      hangulDominant: true,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('primary');
+    expect(result.verificationAttempts).toBe(1);
+    expect(calls).toBe(1);
+  });
+});

@@ -81,7 +81,16 @@ export type DegradedReason =
    * `Error`). Distinguished from `malformed_llm_output` so operations can
    * tell schema-validation noise apart from genuine surprises.
    */
-  | 'unexpected_error';
+  | 'unexpected_error'
+  /**
+   * S3 grounding-verify: the primary synthesis answer asserted a factual
+   * wine claim (canonical label / region / grape / vintage / price) that
+   * could not be matched against the UNION of GROUNDING_JSON blocks across
+   * all tool outcomes. One re-synth attempt is made; if the re-synth answer
+   * is still ungrounded, the runner degrades to the deterministic Layer 2
+   * template and tags the result with this reason.
+   */
+  | 'ungrounded_claim';
 
 export interface AnswerResult {
   /** Non-empty answer string — invariant guaranteed by the runner's
@@ -97,6 +106,16 @@ export interface AnswerResult {
    *  0 when the runner short-circuits without calling the LLM
    *  (policy-blocked, no tool outcomes). */
   readonly synthesisAttempts: number;
+  /**
+   * S3 grounding-verify: number of full synthesis passes that produced a
+   * candidate answer which was then checked against the grounding union.
+   * `1` when the primary answer passed grounding-verify on the first pass;
+   * `2` when an ungrounded claim forced exactly one deterministic re-synth.
+   * `0` on paths that never produce an LLM-synthesized candidate
+   * (policy-blocked, no-results, or a deterministic fallback layer that was
+   * never gated by grounding-verify). Distinct from `synthesisAttempts`,
+   * which counts every LLM round-trip including schema-validation retries. */
+  readonly verificationAttempts: number;
   /** Accumulated token usage across all synthesis attempts. */
   readonly tokenUsage: TokenUsage;
   /** Optional degradation tag for observability — undefined when layer is

@@ -13,6 +13,7 @@ import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { SEARCH_TOOL_WANTS_DIVERSITY_RE } from '../search/search-tool-diversity.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
 import { CURATED_ENTITY_ALIAS_CATALOG } from '../../domain/attribute/service/entity-alias-catalog.js';
+import { MAX_TOOLS_PER_BATCH } from './agent-tool-execution-support.js';
 
 const TOP_LEVEL_REGION_VALUES = new Set([
   'alsace',
@@ -62,6 +63,43 @@ interface ResolveSingleToolInput {
   readonly tool: string;
   readonly input: Record<string, unknown>;
   readonly queryExecutionContract: AgentQueryExecutionContract;
+  /**
+   * S5 pre-fetch fanout: entity ids that are grounded in state and still
+   * pending a drinkability check. When the planner emits a single
+   * `check_drinking_window` but 2+ ids are grounded, the expansion fans out
+   * to a parallel `check_drinking_window` batch (deterministic from state).
+   */
+  readonly groundedDrinkabilityEntityIds?: readonly string[] | undefined;
+}
+
+/** S5: cap on the auto-expanded check_drinking_window fanout batch. Sourced
+ *  from `MAX_TOOLS_PER_BATCH` (SSoT — CLAUDE.md rule 30) so the fanout can
+ *  never exceed the parallel batch-policy ceiling. */
+const MAX_DRINKABILITY_FANOUT = MAX_TOOLS_PER_BATCH;
+
+/** S5: placeholder/unresolved `entity_id` surfaces a planner may emit when it
+ *  defers id resolution. Mirrors the forbidden-placeholder detection in
+ *  agent-tool-execution-phase (the phase rejects these in BATCHES; here we use
+ *  them to decide a SINGLE under-specified check is safe to fan out). The two
+ *  lists are intentionally narrow and stable; if either grows, keep them in
+ *  sync (CLAUDE.md rule 25). */
+const FANOUT_PLACEHOLDER_ENTITY_IDS = new Set([
+  '__to_be_filled__',
+  '<top_result_entity_id>',
+  '{{id}}',
+  'tbd',
+  'placeholder',
+]);
+
+function isFanoutPlaceholderEntityId(value: string): boolean {
+  const trimmed = value.trim();
+  const normalized = trimmed.toLowerCase().replace(/[\s-]+/gu, '_');
+  return (
+    FANOUT_PLACEHOLDER_ENTITY_IDS.has(trimmed.toLowerCase())
+    || (/^<[^>]+>$/u.test(trimmed)
+      && /(?:to_be_filled|fill(?:ed)?_later|top_result|placeholder|entity_id|tbd)/u.test(normalized))
+    || /^(?:to_be_filled|fill(?:ed)?_later|top_result_entity_id|placeholder|tbd)$/u.test(normalized)
+  );
 }
 
 interface ResolvedToolCall {
@@ -1018,6 +1056,68 @@ function buildBudgetPairingExpansion(
   return [pairingCall, resolvedSearch];
 }
 
+/**
+ * S5 pre-fetch fanout. When the planner emits a SINGLE
+ * `check_drinking_window` and 2+ entity ids are grounded in state and still
+ * pending a drinkability check, expand to a parallel `check_drinking_window`
+ * batch — one call per grounded id — so the loop checks all entities in one
+ * RTT instead of N sequential steps. Deterministic from state; capped at
+ * `MAX_DRINKABILITY_FANOUT`.
+ *
+ * Returns `undefined` (no expansion) when:
+ *  - the tool is not `check_drinking_window`,
+ *  - fewer than 2 distinct grounded ids are pending, or
+ *  - the planner ALREADY named a concrete grounded `entity_id` — in that case
+ *    we respect the planner's deliberate single-entity target and do NOT
+ *    fan out to its siblings. We only auto-expand the under-specified case
+ *    (entity_id absent or a forbidden placeholder) so a planner that wants
+ *    one entity keeps getting one, while a planner that defers id resolution
+ *    gets the full deterministic batch.
+ *
+ * Non-id fields of the planner input (e.g. `target_year`) are carried onto
+ * every fanned-out call so the check semantics are identical across the batch.
+ */
+function buildDrinkabilityFanoutExpansion(
+  input: ResolveSingleToolInput,
+): readonly ResolvedToolCall[] | undefined {
+  if (input.tool !== 'check_drinking_window') {
+    return undefined;
+  }
+  const groundedIds = input.groundedDrinkabilityEntityIds;
+  if (groundedIds === undefined || groundedIds.length < 2) {
+    return undefined;
+  }
+  // Respect a planner that pinned a concrete, real (non-placeholder) entity_id
+  // to one of the grounded ids — do not auto-expand to siblings.
+  const plannerEntityId = input.input['entity_id'];
+  if (
+    typeof plannerEntityId === 'string'
+    && plannerEntityId.trim().length > 0
+    && !isFanoutPlaceholderEntityId(plannerEntityId)
+  ) {
+    return undefined;
+  }
+  const distinctIds: string[] = [];
+  for (const id of groundedIds) {
+    if (typeof id === 'string' && id.trim().length > 0 && !distinctIds.includes(id)) {
+      distinctIds.push(id);
+    }
+    if (distinctIds.length >= MAX_DRINKABILITY_FANOUT) {
+      break;
+    }
+  }
+  if (distinctIds.length < 2) {
+    return undefined;
+  }
+  // Carry every non-entity_id field of the planner input onto each call so
+  // semantics (e.g. target_year) are uniform across the batch.
+  const { entity_id: _plannerEntityId, ...sharedInput } = input.input;
+  return distinctIds.map((entityId) => ({
+    tool: 'check_drinking_window',
+    input: { ...sharedInput, entity_id: entityId },
+  }));
+}
+
 function normalizeSearchExecutionInput(
   input: Record<string, unknown>,
   queryExecutionContract: AgentQueryExecutionContract,
@@ -1237,6 +1337,11 @@ export class AgentToolExecutionPolicy {
   }
 
   resolveSingleCallExpansion(input: ResolveSingleToolInput): readonly ResolvedToolCall[] | undefined {
+    const drinkabilityFanout = buildDrinkabilityFanoutExpansion(input);
+    if (drinkabilityFanout !== undefined) {
+      return drinkabilityFanout;
+    }
+
     const budgetPairingExpansion = buildBudgetPairingExpansion(
       input.input,
       input.queryExecutionContract,
