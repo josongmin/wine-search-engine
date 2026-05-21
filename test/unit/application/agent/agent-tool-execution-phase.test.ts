@@ -1143,4 +1143,43 @@ describe('AgentToolExecutionPhase', () => {
       kind: 'policy_violation',
     });
   });
+
+  // S5: parallel tool batches must execute concurrently (Promise.all), not
+  // serially. Three search_wines calls each taking ~100ms must complete the
+  // batch well under the serial sum (~300ms). We assert the recorded batch
+  // step duration is under 200ms.
+  it('executes a 3-tool parallel batch concurrently (batch wall-time < 200ms)', async () => {
+    const TOOL_DELAY_MS = 100;
+    const execute = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, TOOL_DELAY_MS));
+      return makeSearchResponse();
+    });
+    const { phase } = makePhase({ searchUseCase: { execute } as never });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 8 });
+
+    const startMs = Date.now();
+    const shouldBreak = await phase.run(
+      'req-concurrency',
+      DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'search three things in parallel',
+        actions: [
+          { tool: 'search_wines', input: { query: 'opus one' } },
+          { tool: 'search_wines', input: { query: 'sassicaia' } },
+          { tool: 'search_wines', input: { query: 'penfolds grange' } },
+        ],
+      }),
+    );
+    const elapsedMs = Date.now() - startMs;
+
+    expect(shouldBreak).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(state.toolOutcomes).toHaveLength(3);
+    // Concurrent: ~100ms, not ~300ms. Allow generous slack for CI jitter.
+    expect(elapsedMs).toBeLessThan(2 * TOOL_DELAY_MS);
+  });
 });

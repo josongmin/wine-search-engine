@@ -261,6 +261,10 @@ const DegradedReasonSchema = z.enum([
   // distinguished from `malformed_llm_output` so operations can tell
   // schema-validation noise apart from genuine surprises (P-M1 finding).
   'unexpected_error',
+  // S3 grounding-verify: primary answer asserted a factual claim absent from
+  // the grounding union; one re-synth was attempted and still ungrounded, so
+  // the runner degraded to the deterministic layer ladder.
+  'ungrounded_claim',
 ]);
 
 const PlanKindSchema = z.enum([

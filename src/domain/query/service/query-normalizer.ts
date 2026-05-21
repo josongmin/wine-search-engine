@@ -49,7 +49,14 @@ const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
 const KOREAN_JOSA_STRIP_RE =
   /([\uAC00-\uD7A3])(은|는|이|가|을|를|의|에서|에게|에|으로|로|과|와|이랑|랑|부터|까지|보다|도|님|씨)(?=$|[^\p{L}\p{N}])/gu;
 
-const stripKoreanJosa = (value: string): string =>
+/**
+ * Strip trailing Korean josa (particles) from each Hangul-anchored token.
+ * Exported as the single source of truth (CLAUDE.md rule 30) so downstream
+ * consumers — e.g. the synthesis grounding-verify claim matcher — normalize
+ * Korean surfaces identically to the query normalizer. Do NOT re-implement a
+ * private josa stripper elsewhere; import this.
+ */
+export const stripKoreanJosa = (value: string): string =>
   value.replace(KOREAN_JOSA_STRIP_RE, '$1');
 
 /**

@@ -519,12 +519,25 @@ export class AgentToolExecutionPhase {
           state.pendingPlannerDirective = this.contractPolicy.buildPendingDrinkabilityDirective(pendingDrinkabilityEntityIds);
           return false;
         }
-        // ── P0: verification-step guard ────────────────────────────────────
+        // ── S2: verification-step guard (constraint-coverage trigger) ───────
         // For queries flagged with `requiresVerificationStep` (negation /
         // comparison / multi-constraint / situation / nested-condition), the
-        // planner is not allowed to commit a final answer after a single tool
-        // call. Drop the candidate answer and replan with a directive that
-        // forces either a refined tool call or an explicit grounded answer.
+        // PRIMARY trigger is constraint coverage — NOT the intent label and
+        // NOT a fixed observation count. After at least one grounding
+        // observation we intersect the query's hard-constraint atoms against
+        // `GROUNDING_JSON.wines[].matched_constraints` across ALL returned
+        // wines (`computeUncoveredConstraints`). A constraint is covered iff
+        // ≥1 returned wine lists it; we force a verify step ONLY when
+        // `uncovered.length > 0`.
+        //
+        // This is the calibration fix: fully-covered queries (e.g. simple
+        // lookups that previously over-triggered on the intent label) add NO
+        // verify step — removing the latency tax — while multi_step queries
+        // whose FIRST step is a parallel batch (2+ outcomes, previously skipped
+        // by the `=== 1` gate) are now caught.
+        //
+        // Comparison intent stays an always-trigger special case: a single
+        // observation can never cover a two-sided compare.
         //
         // The latch (`verificationStepCompleted`) prevents an infinite loop:
         // after the planner has been pushed through one re-plan, the second
@@ -535,7 +548,7 @@ export class AgentToolExecutionPhase {
         if (
           requireVerificationStep
           && verificationRequirement !== undefined
-          && state.toolOutcomes.length === 1
+          && state.toolOutcomes.length >= 1
           && !state.verificationStepCompleted
         ) {
           const uncovered = this.contractPolicy.computeUncoveredConstraints(
@@ -592,6 +605,11 @@ export class AgentToolExecutionPhase {
             tool: parsed.action.tool,
             input: parsed.action.input,
             queryExecutionContract,
+            // S5: pending grounded drinkability ids drive the deterministic
+            // check_drinking_window fanout (single → parallel batch).
+            ...(pendingDrinkabilityEntityIds.length > 0
+              ? { groundedDrinkabilityEntityIds: pendingDrinkabilityEntityIds }
+              : {}),
           });
       if (expandedCalls !== undefined) {
         return await this.runParallelBatch(
