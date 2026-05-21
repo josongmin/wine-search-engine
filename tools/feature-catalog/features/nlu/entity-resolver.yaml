@@ -21,13 +21,25 @@ maturity_rationale: |
   전체 resolution이 예외로 죽던 문제를 boundary sanitization(NON_FINITE_RAW_SCORE_FLOOR)으로
   typed degrade; (3) computeConformalSetSize가 k=1일 때 2를 반환해
   conformalSetSize<=candidates.length 계약을 깨던 문제를 min clamp로 수정.
-  5가 아닌 4인 이유: calibration curve를 production gold label로 cross-validate하는
-  시스템이 여전히 부재하고, learned-matcher ranking의 product-level 검증(AURC/ECE on
-  prod eval set)이 미완. 이는 코드 하드닝이 아닌 제품/데이터 검증 갭이라 정직하게 4 유지.
+  2026-05-22 추가 하드닝: (4) DecisionEngine Step 2.5 calibration-trust gate —
+  hybrid/mixed ranked-route가 raw ranker finalScore를 decisionConfidenceC로 lift하면서
+  calibrationTrusted:false로 마킹할 때, 기존 numeric gate는 trust 플래그를 무시하고
+  probability-space T_resolve와 비교해 gibberish 쿼리("zzz_extremely_unknown_*")가
+  C=0.89로 resolve를 통과하는 누수가 있었음. AdmissionGate §e의 confidence-refusal
+  스킵 대칭으로 resolve 시점에서도 untrusted C는 probability가 아니므로 exact identity
+  evidence(exactnessTier∈{exact,alias_exact})를 substitute trust로 요구하도록 게이트
+  추가; (5) admission_context.requires_identity_seal을 intent×retrievalMode 함수로
+  분리 — exploratory mode(similar_items/recommendation/compare_candidates/producer_browse/
+  region_browse)에서는 답이 list-shape라 identity_seal이 구조적으로 적용 불가. planner+
+  decision-input 두 곳이 각자 require=true를 강제하던 것을 retrieval-mode-classification
+  SSoT 모듈로 통합. 5가 아닌 4인 이유: calibration curve를 production gold label로
+  cross-validate하는 시스템이 여전히 부재하고, learned-matcher ranking의 product-level
+  검증(AURC/ECE on prod eval set)이 미완. 이는 코드 하드닝이 아닌 제품/데이터 검증
+  갭이라 정직하게 4 유지.
 
 status: active
 since: 2025-10
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-22
 owner: core
 
 surfaces:
@@ -43,10 +55,12 @@ key_files:
   - src/domain/decision/service/confidence-refusal.ts
   - src/domain/decision/service/evidence-gate.ts
   - src/domain/decision/service/admission-gate.ts
+  - src/domain/query/model/retrieval-mode-classification.ts
 
 tests:
   regression:
     - test/regression/entity-resolver-properties.regression.test.ts
+    - test/regression/decision-engine-calibration-trust-gate.regression.test.ts
 
 depends_on:
   - korean-i18n.curated-alias-catalog
