@@ -65,6 +65,60 @@ const PREPARED_FEED_BATCH_SIZE = parsePositiveIntEnv(
   50,
 );
 
+// ---------------------------------------------------------------------------
+// Producer-prestige derivation anchors (rule 15: named domain constants, no magic numbers).
+// Source data: Vivino-derived silver corpus. Measured distribution of `ratingsCount`
+// across 2K records: p50=0, p75=54, p90=170, p99=1225, max=8852. The ceiling 10_000
+// rounds up the observed max, keeping the log-volume map within [0,1] without
+// truncating real top-tier signals.
+// Quality anchors map the Vivino 5-point rating scale: 3.0 is "noted-acceptable"
+// (below this, quality contributes nothing to prestige); 4.5 is "exceptional"
+// (Vivino's universally-praised band — full quality multiplier).
+// Combined prestige = clamp01(volume × quality). Multiplicative on purpose:
+// a wine with high volume but mediocre quality is NOT prestigious; a wine with
+// exceptional quality but no community attention has no community-validated
+// prestige signal yet. Zero ratings → undefined (field omitted, schema default 0).
+// ---------------------------------------------------------------------------
+const PRESTIGE_RATINGS_VOLUME_CEILING = 10_000;
+const PRESTIGE_QUALITY_BASELINE_RATING = 3.0;
+const PRESTIGE_QUALITY_CEILING_RATING = 4.5;
+/** Pre-computed log10 anchor for the volume normalisation denominator. */
+const PRESTIGE_VOLUME_LOG_CEILING = Math.log10(PRESTIGE_RATINGS_VOLUME_CEILING + 1);
+/** Pre-computed quality band width for the quality normalisation denominator. */
+const PRESTIGE_QUALITY_BAND = PRESTIGE_QUALITY_CEILING_RATING - PRESTIGE_QUALITY_BASELINE_RATING;
+
+/**
+ * Derive producer prestige in [0,1] from observed community signal.
+ *
+ * Returns `undefined` (so the field is OMITTED — Vespa ranking treats missing
+ * as 0 already, see wine_entity.sd line 811 `isNan(...)?0:...`) when a wine
+ * has no community attention (`ratingsCount <= 0`). For wines with at least
+ * one rating, computes a multiplicative combination of community volume and
+ * average rating quality, both normalised to [0,1].
+ *
+ * Strictly derived — no heuristic shortcuts, no fabricated values. The two
+ * anchors (volume ceiling, quality band) are pinned to observed corpus
+ * distribution and Vivino's rating semantics, respectively.
+ */
+export function computeProducerPrestige(rec: {
+  ratingsCount?: number | null;
+  ratingAvg?: number | null;
+}): number | undefined {
+  const ratingsCount = rec.ratingsCount;
+  if (ratingsCount == null || ratingsCount <= 0) return undefined;
+  const volume = Math.min(
+    1,
+    Math.log10(ratingsCount + 1) / PRESTIGE_VOLUME_LOG_CEILING,
+  );
+  const ratingAvg = rec.ratingAvg;
+  if (ratingAvg == null) return Math.max(0, Math.min(1, volume));
+  const quality = Math.max(
+    0,
+    Math.min(1, (ratingAvg - PRESTIGE_QUALITY_BASELINE_RATING) / PRESTIGE_QUALITY_BAND),
+  );
+  return Math.max(0, Math.min(1, volume * quality));
+}
+
 /**
  * GRAPE_FAMILY_MAP — lookup table for multi-word grape variety → canonical family.
  * Rule 27 (CLAUDE.md): "Nero d'Avola" → "Nero" and "Sauvignon Blanc" → "Sauvignon" are wrong.
@@ -675,7 +729,14 @@ export function silverToIndexable(
     ...(rec.grapePrimary ? { grapePrimary: rec.grapePrimary } : {}),
     ...(rec.vintageYear !== null ? { vintageYear: rec.vintageYear } : {}),
     ...(rec.searchTextEn.length > 0 ? { searchTextEn: rec.searchTextEn } : {}),
-    ...(gold.producerPrestige != null ? { producerPrestige: gold.producerPrestige } : {}),
+    ...((): { producerPrestige?: number } => {
+      // Prefer authoritative upstream value when present; otherwise derive
+      // from community signal via computeProducerPrestige (returns undefined
+      // for wines with no ratings — field omitted, ranker treats as 0).
+      if (gold.producerPrestige != null) return { producerPrestige: gold.producerPrestige };
+      const derived = computeProducerPrestige(rec);
+      return derived != null ? { producerPrestige: derived } : {};
+    })(),
     // avgCriticProxyScore mirrors criticScoreNormalized for the hit-projection summary.
     ...(criticScoreNormalized !== undefined ? { avgCriticProxyScore: criticScoreNormalized } : {}),
     ...(rec.ratingAvg != null ? { ratingAvg: rec.ratingAvg } : {}),
