@@ -61,22 +61,19 @@ import {
   SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION,
   type WineSnapshotIdentityRow,
 } from '../../scripts/etl/snapshot-entity-identity.js';
-import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
+import {
+  Transliterator,
+  MAX_TRANSLITERATION_ALIASES_PER_RECORD,
+} from '../../src/domain/alias/service/transliterator.js';
 import { createSourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 
 // Industry-standard property baseline (matches anchor-extraction-properties,
 // transliterator-properties, alias-matcher-properties).
 const RUNS = 100;
 
-/**
- * Upper bound on aliases emitted per record by the rule-based
- * transliterator (RFC-003 §4.5). The current emitter produces:
- *   1 × primary (translation), and
- *   ≤ 1 × compact phonetic variant (only when not an EXCEPTION hit).
- * Any future expansion (e.g. multi-romanization variants) MUST update
- * this bound deliberately — it backs `Bounded alias count` (property 4).
- */
-const MAX_TRANSLITERATION_ALIASES_PER_RECORD = 8;
+// SSoT bound imported below (transliterator module exports the constant —
+// see CLAUDE.md test discipline rule 13: bounded property must reference a
+// named domain constant, not a test-side magic number).
 
 /** Hangul syllable + Jamo Unicode ranges (for NFC tests on Korean strings). */
 const HANGUL_RE = /[가-힣ᄀ-ᇿ㄰-㆏]/u;

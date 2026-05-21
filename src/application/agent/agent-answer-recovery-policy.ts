@@ -259,6 +259,21 @@ function buildGroundingPreview(observation: string, queryHasHangul: boolean): st
     : `Search result summary: ${summary}`;
 }
 
+/**
+ * Strip the internal `GROUNDING_JSON: …` marker (and everything after it) from
+ * a raw observation slice before exposing it to the user. The marker is a
+ * synthesis-internal serialization channel; if Layer 3's typed preview path
+ * fails (empty/malformed payload), the raw-slice fallback must NOT leak the
+ * marker into the answer text. See P10 regression property.
+ */
+function stripGroundingMarkerForUser(observation: string): string {
+  const markerIndex = observation.lastIndexOf(GROUNDING_JSON_MARKER);
+  if (markerIndex < 0) {
+    return observation;
+  }
+  return observation.slice(0, markerIndex).trimEnd();
+}
+
 function applyFallbackAnswer(
   state: AgentExecutionState,
   answer: string,
@@ -321,10 +336,19 @@ export class AgentAnswerRecoveryPolicy {
   ): Promise<string> {
     let answer = state.answer;
 
+    // Layer 2 fallback search must be skipped whenever a higher-priority
+    // terminal state already exists. `policyBlocked` / `aborted` / `blocked`
+    // are all hard stops; firing a fresh search would either (a) waste a
+    // round-trip after the user already cancelled, or (b) leak a fabricated
+    // success-shaped answer past a policy block. The state-machine priorities
+    // in `transitionTerminationReason` rank these above `fallback`/`answer`,
+    // so this guard mirrors that lattice. (Property P8.)
     const shouldRunLayer2Fallback =
       !state.policyBlocked &&
       answer === '' &&
       state.terminationReason !== 'answer' &&
+      state.terminationReason !== 'aborted' &&
+      state.terminationReason !== 'blocked' &&
       !observedToolOutput &&
       !(abortSignal?.aborted);
 
@@ -377,10 +401,15 @@ export class AgentAnswerRecoveryPolicy {
       const lastObsText = getLastGroundingObservationText(state);
       if (lastObsText !== undefined) {
         const queryHasHangul = containsHangul(query);
+        // The raw-slice fallback must strip the internal GROUNDING_JSON marker
+        // — when the typed preview can't be built (empty wines / malformed
+        // payload), the user must never see the internal serialization
+        // channel. (Property P10.)
+        const userSafeObservation = stripGroundingMarkerForUser(lastObsText);
         answer = buildGroundingPreview(lastObsText, queryHasHangul)
           ?? (queryHasHangul
-            ? '검색 결과 요약: ' + lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)
-            : 'Search result summary: ' + lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS));
+            ? '검색 결과 요약: ' + userSafeObservation.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)
+            : 'Search result summary: ' + userSafeObservation.slice(0, LAYER3_OBSERVATION_SLICE_CHARS));
         answer = applyFallbackAnswer(state, answer, 'layer3', observedToolOutput ? 'answer' : 'fallback');
         this.logger.error({ requestId, hasToolObservations: observedToolOutput }, 'Layer 3 fallback: all LLM synthesis paths failed — using structured grounding preview');
       }
@@ -400,6 +429,20 @@ export class AgentAnswerRecoveryPolicy {
       this.logger.error({ requestId, query, steps: state.steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
     }
 
+    // Situational-redirect normalization (OOD alcohol / weather / exact-
+    // metadata abstention rewrite) must NOT run when a higher-priority
+    // terminal state already governs the answer:
+    //  - `policyBlocked` → the firm blocked template is the only legitimate
+    //    answer. An OOD-alcohol query like "맥주" must not silently downgrade
+    //    a policy block into a friendlier redirect. (Property P6.)
+    //  - aborted (via state OR abortSignal) → the caller already cancelled.
+    //    Fabricating a non-empty OOD/weather redirect would be a silent
+    //    success-fabrication from an error path (CLAUDE.md schema bar).
+    //    (Property P7.)
+    const isAborted = state.terminationReason === 'aborted' || abortSignal?.aborted === true;
+    if (state.policyBlocked || isAborted) {
+      return answer;
+    }
     return this.normalizeSituationalDirectAnswer(query, answer, observedToolOutput);
   }
 

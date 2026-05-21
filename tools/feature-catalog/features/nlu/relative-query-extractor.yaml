@@ -8,15 +8,19 @@ summary: |
   particle 보다 / 처럼 / 같이 / 같은 / 비슷한 + English less/more comparatives
   지원. Intensifier ("much", "훨씬") 시 delta promotion (±0.2 → ±0.5).
 
-maturity: 5
+maturity: 4
 maturity_rationale: |
-  Delta heuristic은 명시적 named module-scope constants
+  HONEST HOLD at 4: delta magnitude이 학습된 parameters가 아닌 5-bucket
+  1/5 rationale (±0.2, ±0.5 intensifier tier)에 기반한 hand-tuned
+  heuristic. CLAUDE.md / 사용자 SOTA++ directive "휴리스틱 절대 금지"
+  하에서 maturity 5는 honest call로 미달. property suite (12 invariant,
+  numRuns=100, 51 tests 합계) + named module-scope constants
   (`RELATIVE_DELTA_LESS = -0.2`, `RELATIVE_DELTA_MORE = +0.2`,
   `RELATIVE_DELTA_MUCH_LESS = -0.5`, `RELATIVE_DELTA_MUCH_MORE = +0.5`,
-  `RELATIVE_DELTA_SIMILAR = 0`)로 추출되어 CLAUDE.md test discipline rule 15
-  (magic number 금지) 준수. 5-bucket axis discretisation 기반으로 1/5 = 0.2
-  rationale 코드 주석에 명시. ±1 extremes는 의도적으로 회피 (downstream
-  score를 zero out 하지 않기 위해).
+  `RELATIVE_DELTA_SIMILAR = 0`, `MAX_RELATIVE_EXPRESSIONS = 13`)로
+  CLAUDE.md rule 15 + 16 준수 — code-quality dimension은 SOTA++지만
+  product-validation dimension (학습된 delta, multi-dimensional 분해)이
+  비어있어 정직하게 4 유지.
 
   Tannin/fruit axis (`less_tannic_than`, `more_tannic_than`,
   `less_fruity_than`, `more_fruity_than`) 신규 operator 추가, 기존 price /
@@ -27,9 +31,8 @@ maturity_rationale: |
   반환하여 resolver가 fallback 결정). Multi-dimensional 쿼리("less tannic
   but more fruity than X")는 first-match-wins으로 conflate 회피.
 
-  SOTA++ push (2026-05-21): fast-check property suite (numRuns=100, 12개
-  invariant — 합계 51 테스트) 도입으로 검증 표면 hand-picked enumerated
-  케이스에서 generated space로 확장. 검증된 invariant: P1 determinism
+  Property suite 도입 (2026-05-21): fast-check (numRuns=100, 12 invariants
+  — 합계 51 tests). 검증된 invariant: P1 determinism
   (regex `lastIndex` 누수 audit), P2/P2b/P2c anchor preservation (KR `보다`
   / similarity / EN postfix), P3 KR comparative token canonical recognition,
   P4 NFC stability (extractor 내부 `trimAnchor` NFC normalisation, NFD 입력에도
@@ -45,11 +48,8 @@ maturity_rationale: |
   `/u` flag 사용 (`\b` 금지 룰 8 준수). KR 패턴은 syllable boundary 기반.
   Bug 0건 (audit clean).
 
-  여전히 학습된 delta가 아닌 휴리스틱 magnitude이므로 maturity 4 (learned
-  parameters) 요건은 미달하지만, regression coverage / determinism /
-  Unicode hygiene / output bound / sign contract 전 영역에서 property-based
-  proof 확보 — maturity 5 (production-grade, formally verified surface
-  invariants)로 승격.
+  Bug 0건 (audit clean). Maturity 5 진입은 학습된 delta + dependency
+  parsing 도입이 선행 조건.
 
 status: active
 since: 2025-09
@@ -68,6 +68,7 @@ tests:
     - src/domain/query/service/__tests__/relative-query-extractor.test.ts
   regression:
     - test/regression/relative-query-extractor.regression.test.ts
+    - test/regression/relative-query-extractor-properties.regression.test.ts
 
 depends_on:
   - nlu.anchor-extraction

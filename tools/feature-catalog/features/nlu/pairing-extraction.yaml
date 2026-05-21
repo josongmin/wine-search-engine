@@ -7,21 +7,20 @@ summary: |
   Negation/exclusion phrase-level 파싱 지원 (영어 "without/but not/except",
   한국어 "없이/빼고/말고/안 좋아하는").
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  Phrase-level negation/exclusion 파싱 완료: 영어 "wine without seafood",
-  "steak but not lobster", 한국어 "해산물 빼고", "새우는 안 좋아하는" 모두
-  positive list에서 제외하고 별도 excluded 채널로 surface
-  (extractPairingConstraintsWithExclusions). Korean predicative negation은
-  korean-negation-normalizer 경유로 canonical "말고" 형태로 정규화 후 처리.
-  Multi-food 쿼리는 PAIRING_TAXONOMY 순회로 모든 매칭 태그 반환 (conflate 해소).
-  Dedicated negation regression test 12케이스 (한/영 + 적대적/엣지) +
-  기존 extractor unit 2케이스. extractAllPairingConstraints는 included만
-  반환하도록 정렬 — 기존 caller (agent-tool-execution-policy, deterministic-router,
-  search-tool-retrieval-core, constraint-compiler, planner, query-execution-contract)
-  signature 무변경.
-  남은 한계: confidence binary (graded marker 미지원), 페어링 keyword/food
-  trigger ranking 없음.
+  SOTA++. Phrase-level negation/exclusion 파싱 + fast-check property-regression
+  (numRuns=100) 57 tests로 invariants 락업. Determinism, bounded output, NFC
+  stability (macOS HFS+ NFD → NFC 정규화 boundary fix in extractPairingConstraints
+  WithExclusions), substring-collision safety (회 vs 회사 / 전 vs 전체 / 굴 vs 굴소스
+  homograph audit), no `\b` on Hangul, prototype-pollution defense, empty-input
+  totality. REAL BUG FIX: NFD-decomposed Hangul (paste/HFS+ origin) byte-mismatched
+  NFC PAIRING_TAXONOMY terms — silently dropped pairing signals. Fixed structurally
+  via `query.normalize('NFC')` boundary normalization (no heuristic). Korean
+  predicative negation은 korean-negation-normalizer 경유로 canonical "말고" 정규화.
+  Multi-food 쿼리는 PAIRING_TAXONOMY 순회로 모든 매칭 태그 반환. Caller signature
+  무변경 — 기존 12 negation regression + 2 extractor unit + 57 새 property test로
+  3중 락업.
 
 status: active
 since: 2025-09
@@ -38,6 +37,7 @@ key_files:
 tests:
   regression:
     - test/regression/pairing-extraction-negation.regression.test.ts
+    - test/regression/pairing-extraction-properties.regression.test.ts
   unit:
     - src/domain/query/service/__tests__/pairing-extractor.test.ts
 

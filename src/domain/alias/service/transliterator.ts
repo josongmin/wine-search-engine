@@ -31,6 +31,15 @@ const TRANSLITERATION_RULE_CONFIDENCE = 0.75;
 const TRANSLITERATION_COMPACT_CONFIDENCE = 0.6;
 
 /**
+ * Sanity upper bound on aliases emitted by `Transliterator.generateAliases`
+ * for a single (canonicalLabel, sourceLang) input. The current algorithm
+ * emits at most 2 (primary + optional compact), but this defense-in-depth
+ * cap pins a domain constant so downstream consumers + property tests can
+ * reference a single SSoT bound (CLAUDE.md test discipline rule 13 + 15).
+ */
+export const MAX_TRANSLITERATION_ALIASES_PER_RECORD = 8;
+
+/**
  * Cross-lingual transliterator for wine domain terms.
  * Implements RFC-003 §4.5 with rule-based French/Italian/Spanish/English
  * to Korean transliteration, plus an exception dictionary for established names.

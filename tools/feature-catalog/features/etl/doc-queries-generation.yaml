@@ -7,16 +7,22 @@ summary: |
   필드로 라우팅되어 원문 IDF 오염 없이 가중치 독립 튜닝 가능. Korean alias 주입으로
   romanization hallucination 차단.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   - 명명 상수 + 도메인 근거 bound: `DOC_QUERY_MIN_CHARS=3`, `DOC_QUERY_MAX_CHARS=200`,
     `DOC_QUERIES_PER_DOC=15`, `DOC_QUERIES_SCHEMA_VERSION='1'` (CLAUDE.md 규칙 15).
   - 정규화 파이프라인 (NFC + trim + 공백/대소문자 무시 canonical dedup) 으로 LLM의
     근접 중복 슬롯 emission (`Opus One Napa` vs `OPUS ONE  NAPA`) 단일 결과로 수렴.
-  - JUST inside / JUST outside bound 경계 테스트 + 한글 NFC 안정성 테스트 + 한·영 혼합
-    배치 + AbortSignal 사전 점검 + malformed LLM 출력 graceful skip 회귀 18건.
+  - 결정적 회귀 18건 (JUST inside/outside bound + 한글 NFC 안정성 + 한·영 혼합 + AbortSignal
+    사전 점검 + malformed LLM 출력 graceful skip) **+** fast-check property suite
+    15건 × `numRuns=100` (`doc-queries-generation-properties.regression.test.ts`):
+    bounded length / NFC stability / 멱등성 / 중복 permutation determinism /
+    subset invariant / Hangul-only 입력의 romanization 누출 차단 / NFD↔NFC collapse /
+    contentHash 결정성 / per-doc 예산 / AbortSignal pre-flight / fingerprint determinism.
   - 모델 + content hash + schema_version 으로 idempotent skip; rule drift 감지 가능.
-  Long-tail 사용자 의도 적용 / popularity 가중치 / online eval 통합은 추후 단계.
+  - 휴리스틱 없음: 모든 bound·상수는 도메인 근거 명명 상수이며 LLM 응답에 의존하는
+    근사/폴백 제거. 1500+ 무작위 입력 (numRuns=100 × 15 properties) 으로 stress 검증.
+  Long-tail 사용자 의도 적용 / popularity 가중치 / online eval 통합은 추후 단계 (5 진입 조건).
 
 status: active
 since: 2025-09
@@ -32,6 +38,7 @@ key_files:
 tests:
   regression:
     - test/regression/doc-queries-generation.regression.test.ts
+    - test/regression/doc-queries-generation-properties.regression.test.ts
   unit:
     - test/unit/etl/generate-doc-queries.test.ts
 

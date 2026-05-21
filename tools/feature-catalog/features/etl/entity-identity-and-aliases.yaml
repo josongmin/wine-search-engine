@@ -6,16 +6,18 @@ summary: |
   (generate-transliteration-aliases), NL mapping 생성 (generate-nl-mappings), canonical
   entity graph ingest (ingest-canonical-entity-graph).
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  4-step 파이프라인 + dedicated regression suite로 invariant 잠금:
-  identity determinism (5× 동일 입력 → 동일 출력), Korean alias bridge
-  (영문 canonical → Hangul 보유 alias, NFC 강제), cross-tier resolution
-  non-overlap (gold_overlay ↔ identity_signature 상호배타), dedup
-  (동일 canonical tuple → 동일 entityId, 서로 다른 producer → 충돌 없음),
-  빈 입력 무예외, schemaVersion versioning hook. accent variant
-  (Château vs Chateau)는 alias-layer 책임으로 명시 — identity-resolution은
-  hash-based이며 accent fold 하지 않음 (정책 boundary 테스트로 잠금).
+  SOTA++. 4-step 파이프라인 + fast-check property-regression (numRuns=100)
+  17 tests로 invariants 락업. identity determinism (5× 반복 동일성),
+  identity sensitivity (canonicalLabel/producer/vintage 변경 → 다른 hash),
+  alias closure (canonical ∈ aliases), NFC stability (Korean producers
+  through identity computation), alias dedup (case-folded NFC uniqueness),
+  bounded alias count by named MAX constant, empty-record typed error,
+  Korean producer + accented Latin (Château / Müller) coverage. accent
+  variant (Château vs Chateau)는 alias-layer 책임으로 명시 — identity-resolution
+  은 hash-based이며 accent fold 하지 않음 (정책 boundary 테스트로 잠금).
+  기존 entity-identity-snapshot regression + 17 새 property test로 2층 락업.
 
 status: active
 since: 2025-09
@@ -34,6 +36,7 @@ key_files:
 tests:
   regression:
     - test/regression/entity-identity-snapshot.regression.test.ts
+    - test/regression/entity-identity-and-aliases-properties.regression.test.ts
 
 depends_on:
   - korean-i18n.transliterator

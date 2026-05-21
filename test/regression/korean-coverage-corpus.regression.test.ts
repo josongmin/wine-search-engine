@@ -487,27 +487,33 @@ describe('Korean coverage corpus — NFC/NFD/Compat-Jamo route to same intent', 
   // anchor signal because anchor extraction runs pre-recomposition. A future
   // fix that normalizes inputs upstream of analyzer anchor matching flips
   // these cases red, prompting removal from KNOWN_UNICODE_INTENT_DRIFT.
-  it.fails.each(driftVariants.map((v) => [v.base.query, v.base.origin, v] as const))(
-    'KNOWN INTENT DRIFT — unicode %s [%s] Compat-Jamo loses anchor signal',
+  it.each(driftVariants.map((v) => [v.base.query, v.base.origin, v] as const))(
+    'unicode %s [%s] NFC/NFD/Compat-Jamo route to same intent',
     async (_query, origin, v) => {
       const [rNfc, rNfd, rCompat] = await Promise.all([
         runQuery(v.nfc),
         runQuery(v.nfd),
         runQuery(v.compatJamo),
       ]);
+      const intents = new Set([rNfc.intent, rNfd.intent, rCompat.intent]);
+      // Structural fix landed in query-analyzer (R10 — `normalizeHangul` is
+      // applied to the trimmed query BEFORE the deterministic anchor /
+      // constraint / pairing / vintage extractors run). All three encodings
+      // now collapse to the same NFC syllable stream and produce identical
+      // intent. This case used to be pinned via `it.fails()` to document
+      // the gap; the pin was removed once the structural fix made the
+      // positive assertion hold.
+      expect(intents.size, `${origin} intent drift across encodings`).toBe(1);
+      // Diagnostic finding (informational; no longer a gap). The findings
+      // table is retained for the report so a future regression that
+      // re-introduces the drift is grep-able from the test output.
       findings.push({
         kind: 'FALSE_POSITIVE',
-        category: 'unicode-variants (KNOWN drift)',
+        category: 'unicode-variants (resolved-R10)',
         origin,
         query: v.base.query,
         detail: `intents NFC=${rNfc.intent} NFD=${rNfd.intent} Compat=${rCompat.intent}`,
       });
-      const intents = new Set([rNfc.intent, rNfd.intent, rCompat.intent]);
-      // Asserted positive; `.fails` flips this so the case stays green while
-      // the drift exists. Today this assertion fails (size === 2). When the
-      // analyzer normalizes pre-extraction, the assertion will pass and
-      // `.fails` flips the case red → remove from KNOWN set.
-      expect(intents.size).toBe(1);
     },
     PER_CASE_TIMEOUT_MS,
   );
@@ -559,13 +565,16 @@ describe('Korean coverage corpus — size & provenance gates', () => {
 
 describe('Korean coverage corpus — findings audit (documented, not fixed)', () => {
   // The suite records findings via per-case pushes. `(KNOWN)` / `(KNOWN drift)`
-  // categories are pinned via `.fails()` and document the intentional gap.
-  // A failure here means a NEW finding surfaced — i.e. a previously-passing
-  // case regressed or a new corpus line uncovered a gap. The audit asserts
-  // EXACTLY: no findings outside the KNOWN sets.
-  it('no NEW findings outside the documented KNOWN sets', () => {
+  // categories are pinned via `.fails()` and document an intentional gap.
+  // `(resolved-RN)` categories are kept as informational diagnostics after
+  // a structural fix landed (the case asserts positive again, but the
+  // diagnostic stays grep-able from the report so a future regression that
+  // re-introduces the gap is visible).
+  // A failure here means a NEW finding surfaced — a previously-passing case
+  // regressed or a new corpus line uncovered an undocumented gap.
+  it('no NEW findings outside the documented KNOWN / resolved sets', () => {
     const newFindings = findings.filter(
-      (f) => !f.category.includes('KNOWN'),
+      (f) => !f.category.includes('KNOWN') && !f.category.includes('resolved-'),
     );
     if (newFindings.length > 0) {
       const table = newFindings

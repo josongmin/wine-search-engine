@@ -20,7 +20,7 @@
 import { z } from 'zod';
 import type { StructuredLlmPort } from '@domain/ai/port/structured-llm.port.js';
 import type { NormalizedConstraint } from '@shared/types/index.js';
-import { containsHangul } from '@shared/utils/hangul.js';
+import { containsHangul, normalizeHangul } from '@shared/utils/hangul.js';
 import { parseSpans, resolveOverlaps } from '@domain/attribute/service/span-parser.js';
 import {
   isDirectEntityResolution,
@@ -164,10 +164,28 @@ export class QueryAnalyzerService {
       return { kind: 'rejected', reason: 'too_long' };
     }
 
+    // ── Pipeline-input normalization (structural fix for Track E
+    //    Compat-Jamo intent-drift finding). NFKC alone leaves Hangul
+    //    Compatibility Jamo (U+3130..U+318F) decomposed into conjoining
+    //    jamo (U+1100..U+11FF). The deterministic extractors below
+    //    (anchor / constraint / pairing / drinkability / metadata
+    //    keywords) compare against NFC-encoded catalog terms, so
+    //    decomposed jamo would silently miss and the analyzer would emit
+    //    `intent=unknown` for legitimate Korean queries pasted from
+    //    macOS HFS+ or input via an IME that emits compatibility jamo.
+    //
+    //    `normalizeHangul` (SSoT in `@shared/utils/hangul.js`) folds
+    //    decomposed jamo back to syllable form so the same catalog match
+    //    path serves NFC, NFD, and Compat-Jamo inputs equivalently.
+    //    `preservedSurface` is intentionally left byte-identical — the
+    //    schema invariant + downstream HTTP echo must mirror the user
+    //    input exactly.
+    const normalized = normalizeHangul(trimmed.normalize('NFKC'));
+
     // Adaptive-budget also performs sanitizer/off-domain classification.
     // We treat `adversarial` as a hard block (refuse path); `off_domain`
     // returns a degenerate analysis with intent=unknown and budget=1.
-    const budgetClass = classifyQueryBudget(trimmed);
+    const budgetClass = classifyQueryBudget(normalized);
     if (budgetClass?.classification === 'adversarial') {
       this.logger.info(
         { requestId: input.requestId, reason: budgetClass.reason },
@@ -176,8 +194,8 @@ export class QueryAnalyzerService {
       return { kind: 'rejected', reason: 'blocked' };
     }
 
-    const hangulDominant = computeHangulDominant(trimmed);
-    const normalizedViews = buildNormalizedQueryViews(trimmed);
+    const hangulDominant = computeHangulDominant(normalized);
+    const normalizedViews = buildNormalizedQueryViews(normalized);
 
     // Run deterministic pipeline in parallel where independent. resolveEntity
     // is synchronous so a Promise.all only matters for symmetry — order
@@ -185,11 +203,11 @@ export class QueryAnalyzerService {
     const anchors = extractAnchors(normalizedViews.collapsedWhitespace);
     const constraints = extractConstraints(normalizedViews.collapsedWhitespace);
     const pairingTags = extractAllPairingConstraints(normalizedViews.collapsedWhitespace);
-    const decompositionOutcome = detectDecomposition(trimmed);
+    const decompositionOutcome = detectDecomposition(normalized);
 
     const hasDrinkability = hasDrinkabilityKeyword(normalizedViews.collapsedWhitespace);
     const hasMetadata = hasEntityMetadataKeyword(normalizedViews.collapsedWhitespace);
-    const vintageMatch = VINTAGE_YEAR_RE.exec(trimmed);
+    const vintageMatch = VINTAGE_YEAR_RE.exec(normalized);
 
     const intent = classifyIntent({
       hasDrinkability,

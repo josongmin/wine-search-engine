@@ -1,0 +1,200 @@
+{"benchmark_id":"neb-cb-001","query":"opuss one","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"double s"}
+{"benchmark_id":"neb-cb-002","query":"opus on","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"missing e"}
+{"benchmark_id":"neb-cb-003","query":"opus onee","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"extra e"}
+{"benchmark_id":"neb-cb-004","query":"opsu one","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"transposition"}
+{"benchmark_id":"neb-cb-005","query":"opsuone","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"transposition+compact"}
+{"benchmark_id":"neb-cb-006","query":"montes alpah","expected_entity_id":"montes-alpha-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"transposition end"}
+{"benchmark_id":"neb-cb-007","query":"montez alpha","expected_entity_id":"montes-alpha-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"s→z"}
+{"benchmark_id":"neb-cb-008","query":"motnes alpha","expected_entity_id":"montes-alpha-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"transposition middle"}
+{"benchmark_id":"neb-cb-009","query":"montes alfa","expected_entity_id":"montes-alpha-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"ph→f"}
+{"benchmark_id":"neb-cb-010","query":"caymis","expected_entity_id":"caymus-cabernet","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"vowel"}
+{"benchmark_id":"neb-cb-011","query":"caymuss","expected_entity_id":"caymus-cabernet","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"double s"}
+{"benchmark_id":"neb-cb-012","query":"kaymus","expected_entity_id":"caymus-cabernet","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"c→k"}
+{"benchmark_id":"neb-cb-013","query":"caymos","expected_entity_id":"caymus-cabernet","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"u→o"}
+{"benchmark_id":"neb-cb-014","query":"camyus","expected_entity_id":"caymus-cabernet","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"transposition"}
+{"benchmark_id":"neb-cb-015","query":"sasicaia","expected_entity_id":"sassicaia-2018","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"missing s"}
+{"benchmark_id":"neb-cb-016","query":"sassicaja","expected_entity_id":"sassicaia-2018","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"i→j"}
+{"benchmark_id":"neb-cb-017","query":"sasikaia","expected_entity_id":"sassicaia-2018","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"c→k"}
+{"benchmark_id":"neb-cb-018","query":"sasicaya","expected_entity_id":"sassicaia-2018","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"i→y"}
+{"benchmark_id":"neb-cb-019","query":"sassicaia","expected_entity_id":"sassicaia-2018","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"exact baseline"}
+{"benchmark_id":"neb-cb-020","query":"cloudy bey","expected_entity_id":"cloudy-bay-2022","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"a→e"}
+{"benchmark_id":"neb-cb-021","query":"cloudi bay","expected_entity_id":"cloudy-bay-2022","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"y→i"}
+{"benchmark_id":"neb-cb-022","query":"clody bay","expected_entity_id":"cloudy-bay-2022","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing u"}
+{"benchmark_id":"neb-cb-023","query":"cluody bay","expected_entity_id":"cloudy-bay-2022","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"transposition"}
+{"benchmark_id":"neb-cb-024","query":"dom perignonn","expected_entity_id":"dom-perignon","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"double n"}
+{"benchmark_id":"neb-cb-025","query":"dom perinon","expected_entity_id":"dom-perignon","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"missing g"}
+{"benchmark_id":"neb-cb-026","query":"dom perignion","expected_entity_id":"dom-perignon","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"extra i"}
+{"benchmark_id":"neb-cb-027","query":"doom perignon","expected_entity_id":"dom-perignon","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"double o"}
+{"benchmark_id":"neb-cb-028","query":"don perignon","expected_entity_id":"dom-perignon","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"m→n"}
+{"benchmark_id":"neb-cb-029","query":"veuve cliquot","expected_entity_id":"veuve-clicquot-yellow-label","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"missing c"}
+{"benchmark_id":"neb-cb-030","query":"vueve clicquot","expected_entity_id":"veuve-clicquot-yellow-label","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"transposition"}
+{"benchmark_id":"neb-cb-031","query":"veuve clicquot","expected_entity_id":"veuve-clicquot-yellow-label","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"exact baseline"}
+{"benchmark_id":"neb-cb-032","query":"penfolds grnage","expected_entity_id":"penfolds-grange-2017","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"transposition"}
+{"benchmark_id":"neb-cb-033","query":"pernfolds grange","expected_entity_id":"penfolds-grange-2017","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"extra r"}
+{"benchmark_id":"neb-cb-034","query":"penfols grange","expected_entity_id":"penfolds-grange-2017","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"missing d"}
+{"benchmark_id":"neb-cb-035","query":"silver oka","expected_entity_id":"silver-oak-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"transposition"}
+{"benchmark_id":"neb-cb-036","query":"silvr oak","expected_entity_id":"silver-oak-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing e"}
+{"benchmark_id":"neb-cb-037","query":"silver oack","expected_entity_id":"silver-oak-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"extra c"}
+{"benchmark_id":"neb-cb-038","query":"margaux","expected_entity_id":"chateau-margaux-2015","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-039","query":"margoux","expected_entity_id":"chateau-margaux-2015","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"a→o"}
+{"benchmark_id":"neb-cb-040","query":"margeaux","expected_entity_id":"chateau-margaux-2015","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"extra e"}
+{"benchmark_id":"neb-cb-041","query":"margaut","expected_entity_id":"chateau-margaux-2015","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"x→t"}
+{"benchmark_id":"neb-cb-042","query":"lafite","expected_entity_id":"chateau-lafite-rothschild-2016","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-043","query":"lafitte","expected_entity_id":"chateau-lafite-rothschild-2016","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"double t"}
+{"benchmark_id":"neb-cb-044","query":"laffite","expected_entity_id":"chateau-lafite-rothschild-2016","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"double f"}
+{"benchmark_id":"neb-cb-045","query":"latour","expected_entity_id":"chateau-latour-2016","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-046","query":"laturo","expected_entity_id":"chateau-latour-2016","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"transposition"}
+{"benchmark_id":"neb-cb-047","query":"latoure","expected_entity_id":"chateau-latour-2016","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"extra e"}
+{"benchmark_id":"neb-cb-048","query":"tignanello","expected_entity_id":"tignanello-antinori","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-049","query":"tignanelo","expected_entity_id":"tignanello-antinori","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"missing l"}
+{"benchmark_id":"neb-cb-050","query":"tigananello","expected_entity_id":"tignanello-antinori","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"extra a"}
+{"benchmark_id":"neb-cb-051","query":"solaia","expected_entity_id":"solaia-antinori","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-052","query":"solia","expected_entity_id":"solaia-antinori","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"missing a"}
+{"benchmark_id":"neb-cb-053","query":"solaja","expected_entity_id":"solaia-antinori","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"i→j"}
+{"benchmark_id":"neb-cb-054","query":"gaja","expected_entity_id":"gaja-barbaresco","category":"en_single_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-055","query":"gaya","expected_entity_id":"gaja-barbaresco","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"j→y phonetic"}
+{"benchmark_id":"neb-cb-056","query":"barbaresco","expected_entity_id":"gaja-barbaresco","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"bare appellation"}
+{"benchmark_id":"neb-cb-057","query":"barbarescco","expected_entity_id":"gaja-barbaresco","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"double c"}
+{"benchmark_id":"neb-cb-058","query":"yquem","expected_entity_id":"sauternes-2015","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"bare cuvee"}
+{"benchmark_id":"neb-cb-059","query":"yqeum","expected_entity_id":"sauternes-2015","category":"en_single_token_typo","language":"en","difficulty":"hard","notes":"transposition"}
+{"benchmark_id":"neb-cb-060","query":"jacobs creek","expected_entity_id":"jacobs-creek-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-061","query":"jacobs crek","expected_entity_id":"jacobs-creek-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"missing e"}
+{"benchmark_id":"neb-cb-062","query":"jakobs creek","expected_entity_id":"jacobs-creek-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"c→k"}
+{"benchmark_id":"neb-cb-063","query":"yellow tail","expected_entity_id":"yellow-tail-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-064","query":"yelow tail","expected_entity_id":"yellow-tail-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing l"}
+{"benchmark_id":"neb-cb-065","query":"yellow tial","expected_entity_id":"yellow-tail-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"transposition"}
+{"benchmark_id":"neb-cb-066","query":"casillero del diablo","expected_entity_id":"casillero-del-diablo-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"bare exact"}
+{"benchmark_id":"neb-cb-067","query":"casilero del diablo","expected_entity_id":"casillero-del-diablo-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"easy","notes":"missing l"}
+{"benchmark_id":"neb-cb-068","query":"casillero diablo","expected_entity_id":"casillero-del-diablo-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing del"}
+{"benchmark_id":"neb-cb-069","query":"chateau margo","expected_entity_id":"chateau-margaux-2015","category":"en_phonetic_var","language":"en","difficulty":"medium","notes":"phonetic shortening"}
+{"benchmark_id":"neb-cb-070","query":"moet shandon","expected_entity_id":"moet-brut","category":"en_phonetic_var","language":"en","difficulty":"medium","notes":"sh→ch phonetic"}
+{"benchmark_id":"neb-cb-071","query":"romane conti","expected_entity_id":"romanee-conti-2015","category":"en_phonetic_var","language":"en","difficulty":"medium","notes":"phonetic ee→e"}
+{"benchmark_id":"neb-cb-072","query":"romanay conti","expected_entity_id":"romanee-conti-2015","category":"en_phonetic_var","language":"en","difficulty":"hard","notes":"phonetic ee→ay"}
+{"benchmark_id":"neb-cb-073","query":"romanee contie","expected_entity_id":"romanee-conti-2015","category":"en_phonetic_var","language":"en","difficulty":"medium","notes":"extra e"}
+{"benchmark_id":"neb-cb-074","query":"petrus","expected_entity_id":"romanee-conti-2015","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"Pétrus는 카탈로그에 없음, 모호 처리 기대"}
+{"benchmark_id":"neb-cb-075","query":"chateau","expected_entity_id":"chateau-margaux-2015","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"generic — 5대 샤토 모두 후보"}
+{"benchmark_id":"neb-cb-076","query":"cabernet","expected_entity_id":"1865-cabernet-sauvignon","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"품종어 단독 모호"}
+{"benchmark_id":"neb-cb-077","query":"chardonnay","expected_entity_id":"kendall-jackson-chardonnay","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"품종어 단독 모호"}
+{"benchmark_id":"neb-cb-078","query":"shiraz","expected_entity_id":"yellow-tail-shiraz","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"품종어 단독 모호 — 옐로테일/제이콥스/그레인지 후보"}
+{"benchmark_id":"neb-cb-079","query":"penfolds","expected_entity_id":"penfolds-grange-2017","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"생산자 단독 — 그레인지/빈389 모호"}
+{"benchmark_id":"neb-cb-080","query":"chateau margaux","expected_entity_id":"chateau-margaux-2015","category":"en_diacritic","language":"en","difficulty":"easy","notes":"ASCII no diacritic"}
+{"benchmark_id":"neb-cb-081","query":"Château Margaux","expected_entity_id":"chateau-margaux-2015","category":"en_diacritic","language":"en","difficulty":"easy","notes":"diacritic preserved"}
+{"benchmark_id":"neb-cb-082","query":"chateau d'yquem","expected_entity_id":"sauternes-2015","category":"en_diacritic","language":"en","difficulty":"easy","notes":"apostrophe"}
+{"benchmark_id":"neb-cb-083","query":"chateau dyquem","expected_entity_id":"sauternes-2015","category":"en_diacritic","language":"en","difficulty":"medium","notes":"apostrophe dropped"}
+{"benchmark_id":"neb-cb-084","query":"romanee-conti","expected_entity_id":"romanee-conti-2015","category":"en_diacritic","language":"en","difficulty":"easy","notes":"hyphen preserved"}
+{"benchmark_id":"neb-cb-085","query":"romanee conti","expected_entity_id":"romanee-conti-2015","category":"en_diacritic","language":"en","difficulty":"easy","notes":"hyphen→space"}
+{"benchmark_id":"neb-cb-086","query":"Pétrus","expected_entity_id":"romanee-conti-2015","category":"en_diacritic","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"카탈로그 외 엔티티 + diacritic"}
+{"benchmark_id":"neb-cb-087","query":"오푸스 won","expected_entity_id":"opus-one-2018","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 producer + 영어 won(one 오타)"}
+{"benchmark_id":"neb-cb-088","query":"오퍼스 wone","expected_entity_id":"opus-one-2018","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 변형 + 영어 wone(one 오타)"}
+{"benchmark_id":"neb-cb-089","query":"샤또 magaux","expected_entity_id":"chateau-margaux-2015","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 prefix + 영어 magaux(margaux 오타)"}
+{"benchmark_id":"neb-cb-090","query":"샤토 margoux","expected_entity_id":"chateau-margaux-2015","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 a→o"}
+{"benchmark_id":"neb-cb-091","query":"케이무스 cabernet","expected_entity_id":"caymus-cabernet","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 오타(케이무스) + 영어 품종"}
+{"benchmark_id":"neb-cb-092","query":"케이머스 cabarnet","expected_entity_id":"caymus-cabernet","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 정상 + 영어 cabarnet(cabernet 오타)"}
+{"benchmark_id":"neb-cb-093","query":"옐로우 tial","expected_entity_id":"yellow-tail-shiraz","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 tial(tail 오타)"}
+{"benchmark_id":"neb-cb-094","query":"yellow 테일","expected_entity_id":"yellow-tail-shiraz","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 테일"}
+{"benchmark_id":"neb-cb-095","query":"모에 shandon","expected_entity_id":"moet-brut","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 모에 + 영어 shandon(chandon sh변형)"}
+{"benchmark_id":"neb-cb-096","query":"모엣 shandone","expected_entity_id":"moet-brut","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 변형 + 영어 오타"}
+{"benchmark_id":"neb-cb-097","query":"클라우디 bey","expected_entity_id":"cloudy-bay-2022","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 bey(bay 오타)"}
+{"benchmark_id":"neb-cb-098","query":"cloudi 베이","expected_entity_id":"cloudy-bay-2022","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 오타 + 한글 베이"}
+{"benchmark_id":"neb-cb-099","query":"돔 perignonn","expected_entity_id":"dom-perignon","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 돔 + 영어 double n"}
+{"benchmark_id":"neb-cb-100","query":"dom 페리뇽","expected_entity_id":"dom-perignon","category":"mixed_typo","language":"mixed","difficulty":"easy","notes":"영어+한글 정상 병기"}
+{"benchmark_id":"neb-cb-101","query":"가야 barbaresko","expected_entity_id":"gaja-barbaresco","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 c→k"}
+{"benchmark_id":"neb-cb-102","query":"gaya 바르바레스코","expected_entity_id":"gaja-barbaresco","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 음역 + 한글"}
+{"benchmark_id":"neb-cb-103","query":"바롤로 monfortino","expected_entity_id":"barolo-giacomo","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 cuvee"}
+{"benchmark_id":"neb-cb-104","query":"barolo 자코모","expected_entity_id":"barolo-giacomo","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 producer"}
+{"benchmark_id":"neb-cb-105","query":"솔라이아 antinori","expected_entity_id":"solaia-antinori","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 producer"}
+{"benchmark_id":"neb-cb-106","query":"solaiar 안티노리","expected_entity_id":"solaia-antinori","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"영어 오타(extra r) + 한글"}
+{"benchmark_id":"neb-cb-107","query":"penfolds 그레인쥐","expected_entity_id":"penfolds-grange-2017","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"영어 정상 + 한글 그레인쥐(그레인지 변형)"}
+{"benchmark_id":"neb-cb-108","query":"펜폴즈 grnage","expected_entity_id":"penfolds-grange-2017","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 transposition"}
+{"benchmark_id":"neb-cb-109","query":"실버 oka","expected_entity_id":"silver-oak-cabernet","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 실버 + 영어 oka 오타"}
+{"benchmark_id":"neb-cb-110","query":"silver 오크","expected_entity_id":"silver-oak-cabernet","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 오크"}
+{"benchmark_id":"neb-cb-111","query":"몬테스 alfa","expected_entity_id":"montes-alpha-cabernet","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 alfa(alpha 변형)"}
+{"benchmark_id":"neb-cb-112","query":"montes 알바","expected_entity_id":"montes-alpha-cabernet","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"영어 + 한글 알바(알파 오타)"}
+{"benchmark_id":"neb-cb-113","query":"라피트 rothschild","expected_entity_id":"chateau-lafite-rothschild-2016","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 가문"}
+{"benchmark_id":"neb-cb-114","query":"lafite 로칠드","expected_entity_id":"chateau-lafite-rothschild-2016","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 가문"}
+{"benchmark_id":"neb-cb-115","query":"무통 rothschild","expected_entity_id":"chateau-mouton-rothschild-2016","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 가문"}
+{"benchmark_id":"neb-cb-116","query":"mouton 로칠드","expected_entity_id":"chateau-mouton-rothschild-2016","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 가문"}
+{"benchmark_id":"neb-cb-117","query":"디아블로 cabarnet","expected_entity_id":"casillero-del-diablo-cabernet","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 오타"}
+{"benchmark_id":"neb-cb-118","query":"diablo 카베르네","expected_entity_id":"casillero-del-diablo-cabernet","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 품종"}
+{"benchmark_id":"neb-cb-119","query":"1865 카베르네 sauvignon","expected_entity_id":"1865-cabernet-sauvignon","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"숫자 + 한글 + 영어 품종"}
+{"benchmark_id":"neb-cb-120","query":"1865 cabernet 소비뇽","expected_entity_id":"1865-cabernet-sauvignon","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"숫자 + 영어 + 한글 품종"}
+{"benchmark_id":"neb-cb-121","query":"1865 까베르네 souvignon","expected_entity_id":"1865-cabernet-sauvignon","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"hard","notes":"숫자 + 한글 된소리 + 영어 오타(souvignon)"}
+{"benchmark_id":"neb-cb-122","query":"케이머스 napa","expected_entity_id":"caymus-cabernet","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 region"}
+{"benchmark_id":"neb-cb-123","query":"caymus 나파밸리","expected_entity_id":"caymus-cabernet","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"영어 + 한글 region full"}
+{"benchmark_id":"neb-cb-124","query":"몬테스 alpha 칠레","expected_entity_id":"montes-alpha-cabernet","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 + 한글 country"}
+{"benchmark_id":"neb-cb-125","query":"빌라엠 italy","expected_entity_id":"villa-m-rosso","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"hard","notes":"한글 + 영어 country"}
+{"benchmark_id":"neb-cb-126","query":"villa m 빌라엠","expected_entity_id":"villa-m-rosso","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"easy","notes":"영어 + 한글 병기"}
+{"benchmark_id":"neb-cb-127","query":"제이콥스 creek shiraz","expected_entity_id":"jacobs-creek-shiraz","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"한글 + 영어 + 영어 품종"}
+{"benchmark_id":"neb-cb-128","query":"오푸스원 2018","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"mixed","difficulty":"easy","notes":"한글 + 4자리 빈티지"}
+{"benchmark_id":"neb-cb-129","query":"opus one 2018","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"en","difficulty":"easy","notes":"영어 + 빈티지"}
+{"benchmark_id":"neb-cb-130","query":"오푸스원 18","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"mixed","difficulty":"medium","notes":"한글 + 2자리 빈티지"}
+{"benchmark_id":"neb-cb-131","query":"opus one 18","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"en","difficulty":"medium","notes":"영어 + 2자리 빈티지"}
+{"benchmark_id":"neb-cb-132","query":"opuss one 18","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"en","difficulty":"hard","notes":"영어 오타 + 2자리 빈티지"}
+{"benchmark_id":"neb-cb-133","query":"샤또 마고 2015년","expected_entity_id":"chateau-margaux-2015","category":"mixed_numeric","language":"ko","difficulty":"medium","notes":"한글 + 빈티지+년"}
+{"benchmark_id":"neb-cb-134","query":"chateau margaux 15","expected_entity_id":"chateau-margaux-2015","category":"mixed_numeric","language":"en","difficulty":"medium","notes":"영어 + 2자리 빈티지"}
+{"benchmark_id":"neb-cb-135","query":"lafite 2016","expected_entity_id":"chateau-lafite-rothschild-2016","category":"mixed_numeric","language":"en","difficulty":"easy","notes":"영어 + 빈티지"}
+{"benchmark_id":"neb-cb-136","query":"라피트 16","expected_entity_id":"chateau-lafite-rothschild-2016","category":"mixed_numeric","language":"ko","difficulty":"medium","notes":"한글 + 2자리 빈티지"}
+{"benchmark_id":"neb-cb-137","query":"sasicaia 18","expected_entity_id":"sassicaia-2018","category":"mixed_numeric","language":"en","difficulty":"hard","notes":"영어 오타 + 2자리 빈티지"}
+{"benchmark_id":"neb-cb-138","query":"오푸스원이요 추천","expected_entity_id":"opus-one-2018","category":"multi_noise","language":"ko","difficulty":"medium","notes":"존칭+의도어 복합"}
+{"benchmark_id":"neb-cb-139","query":"opuss one please","expected_entity_id":"opus-one-2018","category":"multi_noise","language":"en","difficulty":"hard","notes":"영어 오타 + please"}
+{"benchmark_id":"neb-cb-140","query":"caymus cab 추천해줘","expected_entity_id":"caymus-cabernet","category":"multi_noise","language":"mixed","difficulty":"hard","notes":"영어+축약+한글 의도구"}
+{"benchmark_id":"neb-cb-141","query":"몬테스알파 2019년 추천","expected_entity_id":"montes-alpha-cabernet","category":"multi_noise","language":"ko","difficulty":"medium","notes":"한글 붙여쓰기+빈티지+의도어"}
+{"benchmark_id":"neb-cb-142","query":"샤또 마고 2015 한병","expected_entity_id":"chateau-margaux-2015","category":"multi_noise","language":"ko","difficulty":"medium","notes":"한글+빈티지+수량어"}
+{"benchmark_id":"neb-cb-143","query":"penfolds grange 17년","expected_entity_id":"penfolds-grange-2017","category":"multi_noise","language":"mixed","difficulty":"hard","notes":"영어+2자리+년"}
+{"benchmark_id":"neb-cb-144","query":"오 푸 스 원 18년","expected_entity_id":"opus-one-2018","category":"multi_noise","language":"ko","difficulty":"hard","notes":"음절분할+2자리+년"}
+{"benchmark_id":"neb-cb-145","query":"클라우디 베이 2022 어때","expected_entity_id":"cloudy-bay-2022","category":"multi_noise","language":"ko","difficulty":"medium","notes":"한글+빈티지+의문어"}
+{"benchmark_id":"neb-cb-146","query":"caymus 2019 napa cab","expected_entity_id":"caymus-cabernet","category":"multi_noise","language":"en","difficulty":"medium","notes":"풀명+빈티지+region+품종축약"}
+{"benchmark_id":"neb-cb-147","query":"라뚜르 2016 보르도","expected_entity_id":"chateau-latour-2016","category":"multi_noise","language":"ko","difficulty":"hard","notes":"한글 된소리+빈티지+region"}
+{"benchmark_id":"neb-cb-148","query":"가야 바르바레스꼬 2016","expected_entity_id":"gaja-barbaresco","category":"multi_noise","language":"ko","difficulty":"hard","notes":"한글 된소리+빈티지"}
+{"benchmark_id":"neb-cb-149","query":"몬데스 alpha cabernet","expected_entity_id":"montes-alpha-cabernet","category":"multi_noise","language":"mixed","difficulty":"hard","notes":"한글 오타+영어 풀"}
+{"benchmark_id":"neb-cb-150","query":"케이무수 카베르네","expected_entity_id":"caymus-cabernet","category":"multi_noise","language":"ko","difficulty":"hard","notes":"한글 2-edit + 한글 품종"}
+{"benchmark_id":"neb-cb-151","query":"Château","expected_entity_id":"chateau-margaux-2015","category":"normalization_edge","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"diacritic+generic = 모호"}
+{"benchmark_id":"neb-cb-152","query":"chateau","expected_entity_id":"chateau-margaux-2015","category":"normalization_edge","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"NFC normalized + generic"}
+{"benchmark_id":"neb-cb-153","query":"  opus one  ","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"easy","notes":"leading/trailing whitespace"}
+{"benchmark_id":"neb-cb-154","query":"opus\tone","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"medium","notes":"tab separator"}
+{"benchmark_id":"neb-cb-155","query":"OPUS ONE","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"easy","notes":"all caps"}
+{"benchmark_id":"neb-cb-156","query":"opus  one","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"easy","notes":"double space"}
+{"benchmark_id":"neb-cb-157","query":"opus.one","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"medium","notes":"period separator"}
+{"benchmark_id":"neb-cb-158","query":"opus_one","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"medium","notes":"underscore separator"}
+{"benchmark_id":"neb-cb-159","query":"opus-one","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"easy","notes":"hyphen separator"}
+{"benchmark_id":"neb-cb-160","query":"오푸스원!","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"ko","difficulty":"easy","notes":"한글+느낌표"}
+{"benchmark_id":"neb-cb-161","query":"opus one!!!","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"easy","notes":"trailing exclamations"}
+{"benchmark_id":"neb-cb-162","query":"\"opus one\"","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"medium","notes":"surrounding quotes"}
+{"benchmark_id":"neb-cb-163","query":"(opus one)","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"medium","notes":"surrounding parens"}
+{"benchmark_id":"neb-cb-164","query":"opus 1","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"notes":"digit-as-one — 모호 허용"}
+{"benchmark_id":"neb-cb-165","query":"opus #1","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"notes":"hash+digit"}
+{"benchmark_id":"neb-cb-166","query":"opusone","expected_entity_id":"opus-one-2018","category":"normalization_edge","language":"en","difficulty":"easy","notes":"compact (no space)"}
+{"benchmark_id":"neb-cb-167","query":"chateauMargaux","expected_entity_id":"chateau-margaux-2015","category":"normalization_edge","language":"en","difficulty":"medium","notes":"camelCase compact"}
+{"benchmark_id":"neb-cb-168","query":"오 푸 스 won","expected_entity_id":"opus-one-2018","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"한글 음절분할 + 영어 won 오타"}
+{"benchmark_id":"neb-cb-169","query":"o p u s 원","expected_entity_id":"opus-one-2018","category":"mixed_typo","language":"mixed","difficulty":"hard","notes":"영어 char분할 + 한글"}
+{"benchmark_id":"neb-cb-170","query":"opss one","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing u"}
+{"benchmark_id":"neb-cb-171","query":"opusss one","expected_entity_id":"opus-one-2018","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"triple s"}
+{"benchmark_id":"neb-cb-172","query":"caymis cab","expected_entity_id":"caymus-cabernet","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"오타 + 품종축약"}
+{"benchmark_id":"neb-cb-173","query":"montes 알파 cabernet","expected_entity_id":"montes-alpha-cabernet","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"medium","notes":"3-lang 혼합"}
+{"benchmark_id":"neb-cb-174","query":"케이머스 caymus 추천","expected_entity_id":"caymus-cabernet","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"easy","notes":"중복 표기+의도"}
+{"benchmark_id":"neb-cb-175","query":"opus one 오푸스원","expected_entity_id":"opus-one-2018","category":"mixed_codeswitch_typo","language":"mixed","difficulty":"easy","notes":"풀 영문+한글 병기"}
+{"benchmark_id":"neb-cb-176","query":"DRC","expected_entity_id":"romanee-conti-2015","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"acronym"}
+{"benchmark_id":"neb-cb-177","query":"drc","expected_entity_id":"romanee-conti-2015","category":"en_single_token_typo","language":"en","difficulty":"medium","notes":"lowercase acronym"}
+{"benchmark_id":"neb-cb-178","query":"d.r.c","expected_entity_id":"romanee-conti-2015","category":"normalization_edge","language":"en","difficulty":"hard","notes":"dotted acronym"}
+{"benchmark_id":"neb-cb-179","query":"jacobs creak","expected_entity_id":"jacobs-creek-shiraz","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"e→a"}
+{"benchmark_id":"neb-cb-180","query":"jakob's creek","expected_entity_id":"jacobs-creek-shiraz","category":"en_diacritic","language":"en","difficulty":"medium","notes":"apostrophe variant"}
+{"benchmark_id":"neb-cb-181","query":"sangiovese","expected_entity_id":"tignanello-antinori","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"품종어 단독"}
+{"benchmark_id":"neb-cb-182","query":"nebbiolo","expected_entity_id":"barolo-giacomo","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"품종어 단독 — 바롤로/가야 후보"}
+{"benchmark_id":"neb-cb-183","query":"super tuscan","expected_entity_id":"sassicaia-2018","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"category — 사시카이아/티냐넬로/솔라이아"}
+{"benchmark_id":"neb-cb-184","query":"슈퍼 투스칸","expected_entity_id":"sassicaia-2018","category":"en_adversarial","language":"ko","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"한글 category — 모호"}
+{"benchmark_id":"neb-cb-185","query":"champagne","expected_entity_id":"moet-brut","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"category — 모에/돔/뵈브"}
+{"benchmark_id":"neb-cb-186","query":"champange","expected_entity_id":"moet-brut","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"category 오타+모호"}
+{"benchmark_id":"neb-cb-187","query":"barolo","expected_entity_id":"barolo-giacomo","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"notes":"region/wine — 모호"}
+{"benchmark_id":"neb-cb-188","query":"barossa","expected_entity_id":"penfolds-grange-2017","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"region 단독"}
+{"benchmark_id":"neb-cb-189","query":"napa","expected_entity_id":"opus-one-2018","category":"en_adversarial","language":"en","difficulty":"hard","expected_resolution":"ambiguous","clarify_acceptable":true,"confident_wrong_top1_forbidden":true,"notes":"region 단독 — 오푸스/케이머스/실버오크"}
+{"benchmark_id":"neb-cb-190","query":"opus 2018","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"en","difficulty":"medium","notes":"부분명+빈티지"}
+{"benchmark_id":"neb-cb-191","query":"opuss 2018","expected_entity_id":"opus-one-2018","category":"mixed_numeric","language":"en","difficulty":"hard","notes":"오타 부분명+빈티지"}
+{"benchmark_id":"neb-cb-192","query":"오푸스원 cabernet","expected_entity_id":"opus-one-2018","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"한글 풀명 + 영어 품종"}
+{"benchmark_id":"neb-cb-193","query":"opus one 카베르네","expected_entity_id":"opus-one-2018","category":"mixed_typo","language":"mixed","difficulty":"medium","notes":"영어 풀명 + 한글 품종"}
+{"benchmark_id":"neb-cb-194","query":"chateau margauxx","expected_entity_id":"chateau-margaux-2015","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"trailing extra"}
+{"benchmark_id":"neb-cb-195","query":"chateu margaux","expected_entity_id":"chateau-margaux-2015","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing a"}
+{"benchmark_id":"neb-cb-196","query":"chataeu margaux","expected_entity_id":"chateau-margaux-2015","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"chataeu transposition"}
+{"benchmark_id":"neb-cb-197","query":"chateau marqaux","expected_entity_id":"chateau-margaux-2015","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"g→q adjacent key"}
+{"benchmark_id":"neb-cb-198","query":"chateau margax","expected_entity_id":"chateau-margaux-2015","category":"en_multi_token_typo","language":"en","difficulty":"medium","notes":"missing u"}
+{"benchmark_id":"neb-cb-199","query":"chateaumargaux","expected_entity_id":"chateau-margaux-2015","category":"normalization_edge","language":"en","difficulty":"easy","notes":"compact full"}
+{"benchmark_id":"neb-cb-200","query":"샤또마고2015","expected_entity_id":"chateau-margaux-2015","category":"normalization_edge","language":"ko","difficulty":"medium","notes":"한글 compact+빈티지 무공백"}
