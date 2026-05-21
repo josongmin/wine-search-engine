@@ -69,14 +69,29 @@ function compareAnchors(a: AnchorCandidate, b: AnchorCandidate): number {
 }
 
 /**
+ * Empty / whitespace-only expansion terms have zero retrieval value and would
+ * cause sparse retrieval to OR against the universal set. The builder MUST
+ * NOT leak such terms into the bundle even when upstream feeds an empty query
+ * or an anchor with a blank `normalizedForm` (degenerate input).
+ *
+ * `isNonBlankTerm` is the single canonical predicate used by both
+ * `dedupAndCap` and `dedupAgainst` to enforce this invariant uniformly.
+ */
+function isNonBlankTerm(t: string): boolean {
+  return t.trim().length > 0;
+}
+
+/**
  * Dedup `terms` by case-folded canonical form while preserving the input
- * order. Returns at most `cap` terms.
+ * order. Returns at most `cap` terms. Blank/whitespace-only terms are
+ * filtered (see {@link isNonBlankTerm}).
  */
 function dedupAndCap(terms: readonly string[], cap: number): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const t of terms) {
     if (out.length >= cap) break;
+    if (!isNonBlankTerm(t)) continue;
     const key = t.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -87,7 +102,8 @@ function dedupAndCap(terms: readonly string[], cap: number): string[] {
 
 /**
  * Drop terms whose case-folded form already appears in `taken`. Mutates
- * `taken` with the surviving terms' keys.
+ * `taken` with the surviving terms' keys. Blank/whitespace-only terms are
+ * filtered (see {@link isNonBlankTerm}).
  */
 function dedupAgainst(
   terms: readonly string[],
@@ -97,6 +113,7 @@ function dedupAgainst(
   const out: string[] = [];
   for (const t of terms) {
     if (out.length >= remaining) break;
+    if (!isNonBlankTerm(t)) continue;
     const key = t.toLowerCase();
     if (taken.has(key)) continue;
     taken.add(key);
