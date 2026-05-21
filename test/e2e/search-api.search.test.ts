@@ -127,8 +127,14 @@ describe('POST /v1/search — happy paths', () => {
       retrieval_kind: 'mixed_similarity',
       sparse_executed: false,
       used_compiled_execution: true,
+      // similar_items is an EXPLORATORY retrieval mode (the answer is a
+      // shortlist anchored by '오푸스원', not a single identity claim) so
+      // identity_seal is structurally inapplicable. See
+      // `domain/query/model/retrieval-mode-classification.ts` for the
+      // mode→requirement SSoT (consumed by both the planner's
+      // admission_context builder and decision-engine's policy overlay).
       provenance_policy: {
-        require_identity_seal: true,
+        require_identity_seal: false,
         require_constraint_evidence: false,
         require_anchor_evidence: true,
       },

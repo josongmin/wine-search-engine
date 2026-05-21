@@ -9,6 +9,7 @@ import type { QueryPlanV2 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
 import type { RetrievalMode } from '../model/retrieval-mode.js';
+import { isExploratoryRetrievalMode } from '../model/retrieval-mode-classification.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { QueryUncertainty } from '../model/query-uncertainty.js';
@@ -582,12 +583,36 @@ export class Planner {
 
     // RFC-005 §3.1, RFC-016 §2: surface what evidence/sealing the Admission
     // Gate needs for this query so it can close the resolved boundary correctly.
+    //
+    // Identity-seal requirement is a function of (intent × retrievalMode):
+    //
+    //   - Identity-style intents that end up in an identity-style retrieval
+    //     mode (entity_lookup / entity_resolution) DO need identity seal — the
+    //     answer is a single resolved entity and the gate is closing its
+    //     identity boundary.
+    //
+    //   - The same intents under EXPLORATORY retrieval modes (similar_items,
+    //     recommendation, compare_candidates, producer_browse, region_browse)
+    //     return a LIST shaped by anchors/constraints rather than a single
+    //     identity claim. Requiring an identity seal on a list output is
+    //     structurally inapplicable: there is no winning entity whose identity
+    //     could be sealed. Concretely this drops the false-positive admission
+    //     rejection on queries like `마고 비슷한 레드` (mixed_query intent,
+    //     similar_items mode — Margaux is an anchor, the answer is a red-wine
+    //     shortlist).
+    //
+    // The exploratory-mode set lives in
+    // `domain/query/model/retrieval-mode-classification.ts` and is shared with
+    // `decision-engine.applyPolicyOverlay`'s allow-approximate gate so the
+    // two sites cannot drift (CLAUDE.md rule 30).
+    const intentRequestsIdentitySeal =
+      intent === 'entity_exact' ||
+      intent === 'entity_fuzzy' ||
+      intent === 'comparison_search' ||
+      intent === 'mixed_query';
     const admission_context = {
       requires_identity_seal:
-        intent === 'entity_exact' ||
-        intent === 'entity_fuzzy' ||
-        intent === 'comparison_search' ||
-        intent === 'mixed_query',
+        intentRequestsIdentitySeal && !isExploratoryRetrievalMode(retrievalMode),
       requires_constraint_evidence: constraints.hard.length > 0,
       requires_anchor_evidence: route === 'mixed' && allAnchors.length > 0,
     };

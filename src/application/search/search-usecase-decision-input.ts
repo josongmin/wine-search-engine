@@ -4,6 +4,7 @@ import type {
   ExecutionRetrievalMode,
   ProvenancePolicy,
 } from '../../domain/query/model/engine-execution-contract.js';
+import { isExploratoryRetrievalMode } from '../../domain/query/model/retrieval-mode-classification.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
 import type {
@@ -384,10 +385,22 @@ export function buildSearchDecisionInput(
       }
     : undefined;
 
+  // SSoT for the `effectiveRoute === 'mixed'` identity-seal default: a mixed
+  // route only needs an identity seal when the executed retrieval MODE is
+  // identity-bearing (entity_lookup / entity_resolution). Exploratory modes
+  // — similarity, recommendation, browsing — under mixed route are list-shaped
+  // by construction (`마고 비슷한 레드` = "red wines similar to Margaux"),
+  // and identity_seal makes no semantic claim there. See
+  // `domain/query/model/retrieval-mode-classification.ts` (the same set is
+  // consumed by `decision-engine.applyPolicyOverlay` for require-approximate
+  // gating, so the policy and the gate cannot drift).
+  const mixedRouteIdentityRequired =
+    effectiveRoute === 'mixed' &&
+    !isExploratoryRetrievalMode(executionContext?.effectiveRetrievalMode);
   const provenancePolicy = executionContext?.provenancePolicy ?? {
     requireIdentitySeal:
       plan.admission_context?.requires_identity_seal === true ||
-      effectiveRoute === 'mixed',
+      mixedRouteIdentityRequired,
     requireConstraintEvidence:
       plan.admission_context?.requires_constraint_evidence === true ||
       plan.constraints.hard.length > 0,

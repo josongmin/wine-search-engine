@@ -13,6 +13,7 @@ import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/
 import { isCorruptedSnapshot } from '../../shared/types/index.js';
 import { isLegacyRequireClarificationHardGate } from '../../query/model/query-policy.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
+import { isExploratoryRetrievalMode } from '../../query/model/retrieval-mode-classification.js';
 import type { QueryRoute } from '../../query/model/query-route.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
@@ -71,17 +72,6 @@ const DECISION_TRACE_FLOAT_DECIMAL_PLACES = 4;
  * not by changing this constant — this should rarely fire.
  */
 const EMERGENCY_FALLBACK_RESOLVE_TAU = 0.85;
-const EXPLORATORY_RETRIEVAL_MODES = new Set([
-  'compare_candidates',
-  'recommendation',
-  'similar_items',
-  'producer_browse',
-  'region_browse',
-]);
-
-function isExploratoryRetrievalMode(mode: string | undefined): boolean {
-  return mode !== undefined && EXPLORATORY_RETRIEVAL_MODES.has(mode);
-}
 
 function requireEffectiveRetrievalMode(input: DecisionInput): ExecutionRetrievalMode {
   if (input.effectiveRetrievalMode === undefined) {
