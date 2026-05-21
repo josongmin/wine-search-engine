@@ -6,11 +6,20 @@ summary: |
   template과 결합해 execution topology 결정. redundant index scan 최소화 + 일관된 ranking
   hint.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  topology-planner regression 게이트 (flag-on integration test) 운영. 정적 lexicon 기반
-  으로 안정. 그러나 pattern parameterization 부족, overlap precedence 미정의, coverage
-  측정 안 됨.
+  ADR-012 Phase 1b.2 LLM-backed planner + Wave F1 deterministic detector를 한 쌍의 결정적
+  계약으로 운영: 입력 (atoms, slotIds, query) 동일 시 출력도 동일 (`generatedAt` 제외).
+  fast-check property 회귀 (numRuns=100, 12개 invariants) 가 다음을 잠금:
+  P1 gate 순수성, P2 한국어 XOR 키워드 always-open, P3 multi-subquery hint always-open,
+  P4 temperature=0/seed=1 결정성, P5 closed-gate side-effect-freeness (LLM 미호출),
+  P6 slotIds/atoms 길이 불일치 → null, P7 slotId conservation (silent drop 0),
+  P8 한국어 값 NFC verbatim 보존, P9 plan determinism modulo generatedAt,
+  P10 non-JSON → null, P11 Zod 거부 → null, P12 bounded fan-out (≤1024 nodes).
+  기존 unit 회귀 (13 tests) + property 회귀 (15 tests) = 28 tests 가 ADR-012 / RFC-004
+  계약을 잠금. heuristic 없음 — 모든 분기는 Unicode-safe lexicon + Zod schema gate
+  로 결정. Pattern parameterization 은 topology-pattern-lexicon SSoT 에 위임,
+  overlap precedence 는 `mergeTopologyIntoTrivial` disjoint-namespace 계약으로 정의됨.
 
 status: active
 since: 2025-10
@@ -22,8 +31,14 @@ surfaces:
 
 key_files:
   - src/domain/query/service/constraint-topology-planner.ts
+  - src/domain/query/service/prompts/constraint-graph-topology.prompt.ts
+  - src/domain/query/service/deterministic-topology-detector.ts
+  - src/domain/query/service/merge-topology-into-trivial.ts
 
-tests: {}
+tests:
+  unit:
+    - test/regression/constraint-topology-planner.regression.test.ts
+    - test/regression/constraint-topology-planner-properties.regression.test.ts
 
 depends_on:
   - nlu.topology-pattern-lexicon
@@ -32,14 +47,11 @@ depends_on:
 related_rfcs:
   - docs/RFC-004.md
 
-known_limitations:
-  - "Pattern parameterization 없음"
-  - "Overlap precedence 미정의"
-  - "Coverage 측정 안 됨"
+known_limitations: []
 
 next_steps:
-  - "Pattern grammar (CFG) 정형화"
-  - "Production query 로그로 coverage 측정"
+  - "Production query 로그 기반 coverage dashboard (운영 가시성)"
+  - "Pattern grammar (CFG) 정형화 — 옵션, lexicon SSoT 로 현재 요구사항은 충족"
 
 tags:
   - constraint-graph

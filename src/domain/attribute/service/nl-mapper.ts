@@ -341,7 +341,13 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['비싼', { phrase: '비싼', mappedAttribute: 'price_band', operator: '=', value: 'luxury', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['비싸', { phrase: '비싸', mappedAttribute: 'price_band', operator: '=', value: 'luxury', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['저렴한', { phrase: '저렴한', mappedAttribute: 'price_band', operator: '=', value: 'budget', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
-  ['싼', { phrase: '싼', mappedAttribute: 'price_band', operator: '=', value: 'budget', mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  // NOTE: bare '싼' is intentionally OMITTED — it is a strict Hangul-embedded
+  // substring of '비싼' (price_band=luxury) which maps to the OPPOSITE
+  // semantic. Any future substring-style consumer (token scan, LLM span
+  // extractor) reading '비싼' could emit span '싼' and invert the user's
+  // price intent. The vocabulary remains expressive via '저렴한', '가성비',
+  // '입문용', '데일리 와인'. See test/regression/korean-keyword-vocabulary-properties
+  // (V6: catalog-internal short-Korean-key substring collisions).
   ['가성비', { phrase: '가성비', mappedAttribute: 'price_band', operator: '=', value: 'value', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['고급', { phrase: '고급', mappedAttribute: 'price_band', operator: '=', value: 'premium', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 

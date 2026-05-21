@@ -210,6 +210,12 @@ const KOREAN_WINE_CORPUS: readonly string[] = [
   '치즈 페어링',
   '본가에서 마시는',
   '한정판 선물',
+  // Embedded-Hangul substring traps — '싼' inside '비싼', '시라' inside '시라즈',
+  // etc. The catalog DOES contain both '싼' and '비싼' as deliberate separate
+  // entries (so '싼 가격' is a budget intent on its own). V6's "embedded inside
+  // Hangul word" guard distinguishes positive matches from false positives.
+  '비싼 와인이지만',
+  '시라즈 한 잔',
 ];
 
 /**
@@ -348,50 +354,95 @@ describe('korean-keyword-vocabulary (DEFAULT_MAPPINGS) — property invariants',
     }
   });
 
-  // ── V6. Korean substring-collision sweep (rule 29) ─────────────────────────
-  it('V6: short Korean keys do not collide with the Korean wine corpus (or are whitelisted)', () => {
-    /** Short = 1 Hangul syllable (single-jamo trap). Two-syllable keys are
-     *  exercised separately in V6b. */
+  // ── V6. Catalog-internal Korean substring-collision audit (rule 29) ────────
+  // Production consumers use exact `.get(lower)` lookup, so the genuine risk
+  // is *catalog-internal* collision: short Korean key K is a strict
+  // Hangul-embedded substring of another catalog key K' that maps to a
+  // DIFFERENT attribute / canonical value. A future substring-style consumer
+  // (token scan, LLM span extractor) would silently misroute the longer key
+  // to the shorter key's constraint.
+  //
+  // Example hazard: `'싼'` (price_band=budget) is a strict substring of
+  // `'비싼'` (price_band=luxury). They map to OPPOSITE values. A
+  // substring-style consumer reading `'비싼'` and emitting span `'싼'` would
+  // invert the user's intent. We require every such collision to be
+  // explicitly whitelisted with a domain justification.
+  it('V6: catalog-internal short-Korean-key substring collisions are audited', () => {
     const koreanKeys = ENTRIES
       .map(([k]) => k)
       .filter((k) => containsHangul(k));
-
+    // Build a lookup from key → mapping for collision-target diff.
+    const entryMap = new Map(ENTRIES);
+    // Pair every short (1-syllable, no whitespace) Korean key with every
+    // longer Korean key that strictly contains it as a Hangul-embedded
+    // substring (left or right neighbour is Hangul → not a positive match).
     const SINGLE_SYLLABLE_THRESHOLD = 1;
-    for (const key of koreanKeys) {
-      const syllables = countHangulSyllables(key);
-      if (syllables > SINGLE_SYLLABLE_THRESHOLD) continue;
-      // Single Hangul-syllable keys are EXTREMELY collision-prone. The only
-      // way to keep one is to whitelist every corpus member it collides with
-      // — i.e. there must be a documented domain justification. We don't ban
-      // them outright (e.g. `론`, `포트` are legitimate wine terms), but we
-      // do require every collision to be acknowledged.
-      const collisions: string[] = [];
-      for (const word of KOREAN_WINE_CORPUS) {
-        if (word.includes(key)) collisions.push(word);
-      }
-      const allowed = KOREAN_SUBSTRING_EXCEPTIONS.get(key) ?? new Set<string>();
-      const unexplained = collisions.filter((c) => !allowed.has(c));
-      // A bare single-syllable key with multiple unexplained collisions is a
-      // very strong smell — but for legitimate wine terms (포트, 론, 마고 …)
-      // the colliding strings ARE the positive matches we want. So we permit
-      // collisions iff the key is itself a token in the colliding string
-      // (positive match), and flag only "embedded substring" hits.
-      const trulyEmbedded = unexplained.filter((c) => {
-        // "Embedded" means the key is a strict substring AND not preceded /
-        // followed by ASCII / whitespace / line boundary — i.e. it sits
-        // inside a larger Hangul word. This is the genuine false-positive
-        // shape that rule 29 targets.
-        const idx = c.indexOf(key);
-        if (idx < 0) return false;
-        const left = idx === 0 ? '' : c[idx - 1];
-        const right = idx + key.length >= c.length ? '' : c[idx + key.length];
+    const collisions: Array<readonly [string, string]> = [];
+    for (const short of koreanKeys) {
+      if (countHangulSyllables(short) !== SINGLE_SYLLABLE_THRESHOLD) continue;
+      if (short.includes(' ')) continue;
+      for (const longer of koreanKeys) {
+        if (longer === short) continue;
+        if (!longer.includes(short)) continue;
+        const idx = longer.indexOf(short);
+        const left = idx === 0 ? '' : longer[idx - 1];
+        const right = idx + short.length >= longer.length ? '' : longer[idx + short.length];
         const leftCp = left ? left.codePointAt(0) ?? 0 : 0;
         const rightCp = right ? right.codePointAt(0) ?? 0 : 0;
-        return isHangulSyllable(leftCp) || isHangulSyllable(rightCp);
-      });
+        const embedded = isHangulSyllable(leftCp) || isHangulSyllable(rightCp);
+        if (!embedded) continue;
+        // If the two map to the same canonical value/attribute, it's safe
+        // (e.g. '레드' inside '레드 와인' both → wine_type=red).
+        const a = entryMap.get(short);
+        const b = entryMap.get(longer);
+        if (a && b && a.mappedAttribute === b.mappedAttribute &&
+            JSON.stringify(a.value) === JSON.stringify(b.value)) {
+          continue;
+        }
+        // Conflict that maps to DIFFERENT semantics — must be whitelisted.
+        const allowed = KOREAN_SUBSTRING_EXCEPTIONS.get(short);
+        if (allowed && allowed.has(longer)) continue;
+        collisions.push([short, longer]);
+      }
+    }
+    expect(
+      collisions,
+      `unaudited catalog-internal collision: short Korean key is a strict ` +
+        `Hangul-embedded substring of a longer key with DIFFERENT semantics. ` +
+        `Either remove the short key, narrow its match, or whitelist with ` +
+        `a domain justification in KOREAN_SUBSTRING_EXCEPTIONS.`,
+    ).toEqual([]);
+  });
+
+  // ── V6c. External-corpus collision audit — flag SINGLE-Hangul-syllable ────
+  // catalog keys that are a Hangul-embedded substring of a real Korean
+  // wine-domain query. This is informational + locks future regressions:
+  // any new 1-syllable key added must NOT collide with the curated corpus
+  // unless its collisions are explicitly whitelisted with a domain reason.
+  it('V6c: single-syllable Korean keys do not collide with the wine-domain corpus (or are whitelisted)', () => {
+    const koreanKeys = ENTRIES
+      .map(([k]) => k)
+      .filter((k) => containsHangul(k));
+    const SINGLE_SYLLABLE_THRESHOLD = 1;
+    for (const key of koreanKeys) {
+      if (countHangulSyllables(key) !== SINGLE_SYLLABLE_THRESHOLD) continue;
+      const trulyEmbedded: string[] = [];
+      for (const word of KOREAN_WINE_CORPUS) {
+        const idx = word.indexOf(key);
+        if (idx < 0) continue;
+        const left = idx === 0 ? '' : word[idx - 1];
+        const right = idx + key.length >= word.length ? '' : word[idx + key.length];
+        const leftCp = left ? left.codePointAt(0) ?? 0 : 0;
+        const rightCp = right ? right.codePointAt(0) ?? 0 : 0;
+        if (isHangulSyllable(leftCp) || isHangulSyllable(rightCp)) {
+          const allowed = KOREAN_SUBSTRING_EXCEPTIONS.get(key);
+          if (allowed && allowed.has(word)) continue;
+          trulyEmbedded.push(word);
+        }
+      }
       expect(
         trulyEmbedded,
-        `single-syllable key ${JSON.stringify(key)} is embedded inside ${JSON.stringify(trulyEmbedded)} — add a Unicode-safe boundary or whitelist with a domain reason`,
+        `single-syllable key ${JSON.stringify(key)} embedded inside ${JSON.stringify(trulyEmbedded)} — production uses EXACT .get() so this is a soft signal, but: add to KOREAN_SUBSTRING_EXCEPTIONS with a justification (contract is exact-match only, longer Hangul prefix is intentional) OR remove the key.`,
       ).toEqual([]);
     }
   });

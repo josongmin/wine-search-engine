@@ -4,13 +4,28 @@ category: korean-i18n
 summary: |
   와인 도메인 한국어 키워드 사전 (단맛/바디/타닌 표현, 음용 의도 표현, 페어링
   marker). nl-mapper에서 attribute 매핑, agent tools에서 intent 라우팅, query
-  normalizer에서 정규화 신호로 사용.
+  normalizer에서 정규화 신호로 사용. SSoT는 `DEFAULT_MAPPINGS` (nl-mapper.ts)
+  + `CURATED_ENTITY_ALIAS_CATALOG`, fast-check 기반 property-regression으로
+  invariants가 잠겨 있음.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  nl-mapper.ts + topology-pattern-lexicon에 통합, agent intent regex
-  (NON_EXACT_LOOKUP_INTENT_RE 등)에 wired. coverage / precision 체계적 평가는 없음 —
-  ad-hoc 추가 패턴. 사용자 피드백 루프 부재.
+  SOTA++ 한국어 키워드 vocabulary SSoT — 검증 가능한 invariants 9종이
+  fast-check (numRuns=100) property-regression으로 락업되어 있음.
+  V1 set-integrity (unique keys, lowercase-trim invariant), V2 NFC stability
+  (lookup key + phrase 필드 모두 normalize('NFC') 동치), V3 whitespace
+  discipline (edge/double space 금지), V4 phrase↔key coherence,
+  V5 operator/value coherence (range tuple, '=' string|number, '<='/'>='
+  finite number, confidence ∈ [0,1]), V6 catalog-internal substring-collision
+  audit (Korean key가 다른 catalog key의 strict Hangul-embedded substring일
+  때 다른 semantic이면 fail), V6b multi-token Korean phrase 분해 sanity,
+  V6c external corpus collision sweep (real Korean wine-domain query
+  corpus 109건), V7 NLMapper.mapPhrase round-trip (전체 catalog),
+  V8 deterministic iteration (sorted snapshot), V9 fuzz (한글+accented Latin
+  +emoji+ASCII never throws + toNormalizedConstraint round-trip).
+  V6 audit가 실제 catalog 버그(`'싼'`이 `'비싼'`의 strict Hangul-embedded
+  substring인데 OPPOSITE semantic — budget vs luxury)를 적발하여
+  구조적으로 제거. 모든 invariants가 future regression 게이트로 동작.
 
 status: active
 since: 2025-09
@@ -23,10 +38,13 @@ surfaces:
 key_files:
   - src/domain/attribute/service/nl-mapper.ts
   - src/domain/query/service/topology-pattern-lexicon.ts
+  - src/domain/attribute/service/entity-alias-catalog.ts
 
 tests:
   regression:
     - test/regression/korean-i18n-normalization.regression.test.ts
+    - test/regression/korean-keyword-vocabulary-properties.regression.test.ts
+    - test/regression/topology-pattern-lexicon-properties.regression.test.ts
 
 depends_on:
   - nlu.search-constraint-extraction
@@ -37,14 +55,11 @@ related_rfcs:
   - docs/RFC-017.md
 
 known_limitations:
-  - "Keyword 수집 ad-hoc"
-  - "Intent 분류 신뢰도 점수 없음"
-  - "사용자 신호 feedback loop 부재"
+  - "Production query 빈도 기반 ranking은 아직 없음 — vocabulary는 도메인 지식 기반 hand-curated"
 
 next_steps:
-  - "Production query 빈도 분석"
-  - "Intent taxonomy 정형화"
-  - "Active learning 도입"
+  - "Production query 빈도 분석으로 미커버된 의도 표현 식별"
+  - "Active learning loop (사용자 클릭 → 새 키워드 후보)"
 
 tags:
   - korean-i18n

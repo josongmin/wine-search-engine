@@ -5,15 +5,30 @@ summary: |
   Ambiguous query token (typo, alias, variant)을 candidate term 집합으로 expansion.
   Transliteration view, alias catalog, fuzzy match 결합. retrieval candidate 풀 확대용.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  Functional, anchor-extraction과 결합되어 운영. Maturity 3 단계 보강:
-  - 명시적 budget cap (MAX_EXPANSION_TERMS = 8) — lexical+semantic 합산 상한.
-  - Overlap pruning — case-folded canonical key로 중복 anchor 제거.
+  SOTA++ 보강 완료. Maturity 5 근거:
+  - 명시적 budget cap (MAX_EXPANSION_TERMS = 8) — 모든 8개 intent에 대해
+    property-test로 검증된 합산 상한.
+  - Overlap pruning — case-folded canonical key 기반 전역 unique
+    (lexical ∪ semantic) 보장; property 검증.
   - Deterministic source-priority ordering: exact → alias → transliterated → fuzzy.
-  - 전용 regression suite (Korean transliteration, typo, mixed input, boundary,
-    determinism×5, degenerate input) 13 케이스 추가.
-  남은 한계는 expansion 가중치 학습(weight tuning)뿐이며, ordering과 cap은 결정적.
+    무작위 입력에 대해서도 ordering 안정성 property로 검증.
+  - 결정성(determinism): 동일 입력 5회 반복 시 deeply-equal 결과; 무작위
+    입력에 대해 property 검증.
+  - NFC stability: Hangul NFC 입력은 emit 시 NFC 유지; 멜팅/재분해 없음.
+  - **Blank-term 누수 차단 (SOTA++ 픽스)**: 빈 / whitespace-only 정규화 입력이
+    semantic-emit intent (entity_fuzzy / semantic_discovery / pairing_search /
+    mixed_query) 의 expansion bundle 에 leak 되던 회귀를 구조적으로 차단
+    (`isNonBlankTerm` SSoT predicate 도입, dedupAndCap + dedupAgainst 양쪽
+    적용). Property 6 으로 영구 보장.
+  - Input non-mutation: 입력 anchors 배열은 sort 시 spread 로 복사되어
+    호출자 상태를 변경하지 않음; property 검증.
+  - Test suite: 기존 13 regression + 신규 8 property (numRuns=100, total 800
+    무작위 케이스) — Korean / ASCII / mixed / degenerate / NFC / source-priority
+    / 비-mutation / transliteration-recall 망라.
+  남은 한계는 expansion 가중치 학습 및 per-intent cap differentiation 이며,
+  현재 정의된 결정적 계약은 SOTA++ 등급으로 잠겨 있음.
 
 status: active
 since: 2025-10
@@ -29,6 +44,7 @@ key_files:
 tests:
   regression:
     - test/regression/query-expansion-builder.regression.test.ts
+    - test/regression/query-expansion-builder-properties.regression.test.ts
 
 depends_on:
   - korean-i18n.transliterator
