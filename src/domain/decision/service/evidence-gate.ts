@@ -85,6 +85,33 @@ export class EvidenceGate {
       };
     }
 
+    // Rule 0: resolved + no concrete target → downgrade.
+    //
+    // A 'resolved' decision must point to *something* — either a resolved
+    // entity (`topEntityPresent`) or a ranked search result
+    // (`rankedTopResultPresent`). When BOTH are false there is no concrete
+    // output for the user to act on, yet the calibrated C may still cross
+    // the resolve threshold (e.g. an anchor extracted from a generic token
+    // like 'wine' that the resolver could not bind to any entity, and which
+    // the policy did not require an identity seal for, leaving Rule 1's
+    // identity check vacuously satisfied via `!policy.requireIdentitySeal`).
+    // The empty-target case was previously slipping through that vacuous
+    // truth and emitting `resolved` for gibberish input.
+    //
+    // This rule runs BEFORE Rule 1 so the no-target condition is named
+    // explicitly in `rulesApplied`, distinct from the no-identity case.
+    if (
+      !provenanceContract.observed.topEntityPresent &&
+      !provenanceContract.observed.rankedTopResultPresent
+    ) {
+      return {
+        passed: false,
+        downgradeTo: 'ambiguous',
+        downgradeAction: 'clarify',
+        reason: 'EVIDENCE_GATE_NO_TARGET: resolved with no entity and no ranked result',
+      };
+    }
+
     // Rule 1: resolved + no identity evidence → downgrade
     if (!provenanceContract.observed.identityEvidenceSatisfied) {
       return {
