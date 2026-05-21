@@ -169,6 +169,10 @@ export async function createContainer(
               agentTimeoutMs: config.agent.agentTimeoutMs,
               perStepTimeoutMs: config.agent.perStepTimeoutMs,
               maxContextChars: 8_000,
+              // L1.C: fast-answer bypass toggle (default true). Saves one
+              // planner LLM RTT on simple-lookup queries by routing the
+              // grounded answer through synthesis directly.
+              fastAnswerBypassPlanner: config.agent.fastAnswerBypassPlanner,
             },
           ),
         }

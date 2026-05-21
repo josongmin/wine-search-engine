@@ -39,6 +39,18 @@ export const AgentEnvSchema = z.object({
     .default(DEFAULT_AGENT_PER_STEP_TIMEOUT_MS),
 
   /**
+   * L1.C structural latency lever: when true (default), the tool execution
+   * phase may short-circuit the run loop after a single tool call whose
+   * observation already satisfies every contract gate. Set to "false" to
+   * force the legacy path where the planner always runs a second round
+   * after the first tool call.
+   */
+  AGENT_FAST_ANSWER_BYPASS_PLANNER: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
+
+  /**
    * When true, GET /v1/agent/benchmark-scenarios returns the quick-profile scenario list.
    * When false, that route responds with 404. When unset, defaults to on in non-production.
    */

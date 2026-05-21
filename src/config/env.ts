@@ -260,6 +260,12 @@ function buildConfig(parsed: EnvVars) {
       maxSteps: parsed.AGENT_MAX_STEPS,
       agentTimeoutMs: parsed.AGENT_TIMEOUT_MS,
       perStepTimeoutMs: parsed.AGENT_PER_STEP_TIMEOUT_MS,
+      /**
+       * L1.C structural latency lever: short-circuit the run loop after one
+       * tool call when the contract is fully satisfied (route directly to
+       * synthesis instead of a second planner LLM RTT).
+       */
+      fastAnswerBypassPlanner: parsed.AGENT_FAST_ANSWER_BYPASS_PLANNER,
     },
 
     /**

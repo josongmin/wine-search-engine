@@ -142,6 +142,16 @@ export interface ScenarioExecution {
   readonly evidenceFrames?: readonly ToolCallEvidenceFrame[] | undefined;
   readonly terminationReason: TerminationReason;
   readonly totalDurationMs: number;
+  /**
+   * S1.1 measurement integrity: per-scenario wall MINUS time spent sleeping on
+   * throttle/transient-infra backoff (429/503/GOAWAY/ECONNRESET retries). This
+   * is the agent's actual work time. The latency/cost dimension scores against
+   * this, NOT `totalDurationMs`, so provider throttling never penalizes the
+   * agent. Absent for legacy callers — scoring falls back to `totalDurationMs`.
+   */
+  readonly agentWorkMs?: number | undefined;
+  /** S1.1: cumulative ms spent sleeping on throttle/transient-infra backoff. */
+  readonly throttleWaitMs?: number | undefined;
   readonly totalTokens: { input: number; output: number };
   /**
    * ADR-009 Phase 0: number of tool calls that emitted a typed evidence frame.
@@ -302,6 +312,15 @@ export interface ScenarioResult {
   readonly toolsUsed?: readonly string[];
   readonly terminationReason?: string;
   readonly totalDurationMs?: number;
+  /**
+   * S1.1: agent work time (scenario wall minus throttle/backoff wait). This is
+   * what the latency/cost dimension scores against AND what drives the bench
+   * summary's SLA gate. Omitted for skipped/errored scenarios. May equal
+   * `totalDurationMs` when no throttling occurred.
+   */
+  readonly agentWorkMs?: number;
+  /** S1.1: cumulative ms spent sleeping on throttle/transient-infra backoff. */
+  readonly throttleWaitMs?: number;
   readonly totalTokens?: { input: number; output: number };
   /**
    * ADR-009 Phase 0: count of tool calls that emitted a typed evidence frame.
@@ -1342,6 +1361,11 @@ export function scoreScenario(
     toolsUsed: execution.toolsUsed.map((t) => t.tool),
     terminationReason: execution.terminationReason,
     totalDurationMs: execution.totalDurationMs,
+    // S1.1: surface agent-work time when the runner supplied it (wall minus
+    // throttle backoff). Omit the key entirely when absent
+    // (exactOptionalPropertyTypes).
+    ...(execution.agentWorkMs != null ? { agentWorkMs: execution.agentWorkMs } : {}),
+    ...(execution.throttleWaitMs != null ? { throttleWaitMs: execution.throttleWaitMs } : {}),
     totalTokens: execution.totalTokens,
     // ADR-009 Phase 0: evidence frame count for cutover-gate aggregation.
     ...(execution.evidenceFrameCount !== undefined
@@ -2778,15 +2802,24 @@ function scoreCostEfficiency(
   const maxTokens = exp.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS;
   const totalTokens = execution.totalTokens.input + execution.totalTokens.output;
 
+  // S1.1: score latency against agent WORK time (wall minus throttle backoff),
+  // not raw orchestrator duration. `agentWorkMs` is omitted by legacy callers
+  // -> fall back to `totalDurationMs`. `!= null` (not truthiness) so a
+  // legitimate agentWorkMs of 0 is honored rather than silently replaced
+  // (CLAUDE.md rule 26).
+  const effectiveDurationMs = execution.agentWorkMs != null
+    ? execution.agentWorkMs
+    : execution.totalDurationMs;
+
   let durOvershoot = 0;
-  if (Number.isFinite(maxDuration) && execution.totalDurationMs > maxDuration) {
-    durOvershoot = (execution.totalDurationMs - maxDuration) / maxDuration;
+  if (Number.isFinite(maxDuration) && effectiveDurationMs > maxDuration) {
+    durOvershoot = (effectiveDurationMs - maxDuration) / maxDuration;
     diagnostics.push({
       dim: 'costEfficiency',
       severity: 'warn',
       code: durOvershoot >= SEVERE_OVERSHOOT_RATIO ? 'LATENCY_BUDGET_BLOWN' : 'LATENCY_BUDGET_EXCEEDED',
-      message: `duration ${execution.totalDurationMs}ms > budget ${maxDuration}ms`,
-      observed: execution.totalDurationMs,
+      message: `duration ${effectiveDurationMs}ms > budget ${maxDuration}ms`,
+      observed: effectiveDurationMs,
       expected: maxDuration,
     });
   }
