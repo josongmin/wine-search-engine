@@ -46,6 +46,49 @@ describe('InterpretResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  // Regression: the double-metaphone alias work (commit 62b654be) added an
+  // `aliasType` provenance field to AnchorCandidate. The response builder
+  // auto-snake-cases it to `alias_type`; before the wire schema accepted it,
+  // `.strict()` rejected the key and 500'd every interpret/search request that
+  // produced an anchor (Korean entity queries, alias hits, etc.).
+  it('accepts anchors carrying an alias_type provenance field', () => {
+    const parsed = InterpretResponseSchema.safeParse({
+      ...makeValidV1InterpretResponse(),
+      anchors: [
+        {
+          surface_form: 'Opus One',
+          normalized_form: 'opus one',
+          candidate_entity_ids: ['opus-one-2018'],
+          lookup_variants: ['opus one'],
+          lookup_strategies: ['exact'],
+          alias_type: 'canonical',
+          confidence: 0.96,
+          source: 'alias',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects anchors with an alias_type value outside the ALIAS_TYPES enum', () => {
+    const parsed = InterpretResponseSchema.safeParse({
+      ...makeValidV1InterpretResponse(),
+      anchors: [
+        {
+          surface_form: 'Opus One',
+          normalized_form: 'opus one',
+          candidate_entity_ids: ['opus-one-2018'],
+          alias_type: 'not_a_real_alias_type',
+          confidence: 0.96,
+          source: 'alias',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it('rejects V2 explain-only fields on the V1 interpret contract', () => {
     const parsed = InterpretResponseSchema.safeParse({
       ...makeValidV1InterpretResponse(),

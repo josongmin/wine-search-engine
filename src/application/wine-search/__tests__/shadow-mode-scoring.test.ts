@@ -31,6 +31,7 @@ import type {
   ShadowModeOrchestratorOutcome,
 } from '../shadow-mode-schemas.js';
 import type { ShadowModeRunner } from '../shadow-mode-runner.js';
+import type { LlmJudge, JudgeInput, JudgeResult } from '../llm-judge.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -449,9 +450,29 @@ describe('scoreRawResults', () => {
 // that faithfulness scoring consumes downstream.
 // ---------------------------------------------------------------------------
 
-/** Production wiring shape: `(s, e, err) => scoreScenario(s, e, undefined, undefined, err)`. */
-const realScorer: BenchScorerFn = (scenario, execution, error) =>
-  scoreScenario(scenario, execution, undefined, undefined, error);
+/**
+ * Production wiring shape — threads the composer's judge / faithfulness args
+ * into the real scoreScenario positions:
+ * `scoreScenario(scenario, execution, judgeScore, faithfulnessScore, error, undefined, judgeReasoning)`.
+ * judge/faithfulness are undefined unless a judge is wired into the composer.
+ */
+const realScorer: BenchScorerFn = (
+  scenario,
+  execution,
+  error,
+  judgeScore,
+  faithfulnessScore,
+  judgeReasoning,
+) =>
+  scoreScenario(
+    scenario,
+    execution,
+    judgeScore,
+    faithfulnessScore,
+    error,
+    undefined,
+    judgeReasoning,
+  );
 
 function makeGoldenScenario(): AgentBenchmarkScenario {
   const expectation: ScenarioExpectation = { maxSteps: 5 };
@@ -572,5 +593,112 @@ describe('projection propagates observations to ScenarioExecution', () => {
     });
     await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'req-default' });
     expect(captured).toEqual([[], []]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LlmJudge wiring → judge + faithfulness dimensions populate (real scorer)
+// ---------------------------------------------------------------------------
+
+// Reuses the `realScorer` defined above (production wiring shape) which now
+// threads judge / faithfulness args into the real scoreScenario.
+
+/** Stub judge: returns fixed scores, records each call's input. */
+function makeJudge(
+  byAnswer: Readonly<Record<string, { score: number; faithfulness: number }>>,
+  calls?: JudgeInput[],
+): LlmJudge {
+  return {
+    evaluate: async (input: JudgeInput): Promise<JudgeResult> => {
+      calls?.push(input);
+      const hit = byAnswer[input.answer];
+      if (hit === undefined) {
+        return { available: false, reason: 'unexpected', tokenUsage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 } };
+      }
+      return {
+        available: true,
+        score: hit.score,
+        faithfulness: hit.faithfulness,
+        reasoning: 'stub',
+        tokenUsage: { inputTokens: 10, outputTokens: 4, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      };
+    },
+  };
+}
+
+describe('LlmJudge wiring (real scorer)', () => {
+  it('WITHOUT judge → judge + faithfulness dims stay null', async () => {
+    const report = makeReportWithObservations(['Barolo Nebbiolo'], ['Barolo Nebbiolo']);
+    const scorer = new ShadowModeScorer({ runner: makeRunner(report), scorer: realScorer });
+    const out = await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'no-judge' });
+    expect(out.legacyScore.scores.judge).toBeNull();
+    expect(out.legacyScore.scores.faithfulness).toBeNull();
+    expect(out.wineSearchScore.scores.judge).toBeNull();
+    expect(out.wineSearchScore.scores.faithfulness).toBeNull();
+  });
+
+  it('WITH judge → judge + faithfulness dims non-null on both sides', async () => {
+    const report = makeReportWithObservations(['Barolo Nebbiolo'], ['Barolo Nebbiolo']);
+    const judge = makeJudge({ 'Barolo from Nebbiolo grapes': { score: 0.8, faithfulness: 0.7 } });
+    const scorer = new ShadowModeScorer({ runner: makeRunner(report), scorer: realScorer, judge });
+    const out = await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'with-judge' });
+    expect(out.legacyScore.scores.judge).not.toBeNull();
+    expect(out.legacyScore.scores.faithfulness).toBe(0.7);
+    expect(out.wineSearchScore.scores.judge).not.toBeNull();
+    expect(out.wineSearchScore.scores.faithfulness).toBe(0.7);
+  });
+
+  it('judge runs per-side independently — each side gets its own answer + observations', async () => {
+    const calls: JudgeInput[] = [];
+    const report = makeReport({
+      legacy: makeOutcome({ orchestrator: 'legacy_agent', answer: 'legacy answer', observations: ['legacy-obs'] }),
+      wineSearch: makeOutcome({ orchestrator: 'wine_search', answer: 'wine answer', observations: ['wine-obs'] }),
+    });
+    const judge = makeJudge(
+      { 'legacy answer': { score: 0.6, faithfulness: 0.6 }, 'wine answer': { score: 0.9, faithfulness: 0.8 } },
+      calls,
+    );
+    const scorer = new ShadowModeScorer({ runner: makeRunner(report), scorer: realScorer, judge });
+    const out = await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'per-side' });
+    expect(calls.map((c) => c.answer)).toEqual(['legacy answer', 'wine answer']);
+    expect(calls.map((c) => c.groundingObservations)).toEqual([['legacy-obs'], ['wine-obs']]);
+    expect(out.legacyScore.scores.faithfulness).toBe(0.6);
+    expect(out.wineSearchScore.scores.faithfulness).toBe(0.8);
+  });
+
+  it('judge unavailable on one side → that side stays null, other side populates', async () => {
+    const report = makeReport({
+      legacy: makeOutcome({ orchestrator: 'legacy_agent', answer: 'good', observations: ['o'] }),
+      wineSearch: makeOutcome({ orchestrator: 'wine_search', answer: 'bad', observations: ['o'] }),
+    });
+    // Only 'good' is judged; 'bad' falls through to the unavailable sentinel.
+    const judge = makeJudge({ good: { score: 0.85, faithfulness: 0.9 } });
+    const scorer = new ShadowModeScorer({ runner: makeRunner(report), scorer: realScorer, judge });
+    const out = await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'partial-judge' });
+    expect(out.legacyScore.scores.faithfulness).toBe(0.9);
+    expect(out.wineSearchScore.scores.judge).toBeNull();
+    expect(out.wineSearchScore.scores.faithfulness).toBeNull();
+  });
+
+  it('rubric is forwarded to the judge when provided', async () => {
+    const calls: JudgeInput[] = [];
+    const report = makeReportWithObservations(['o'], ['o']);
+    const judge = makeJudge({ 'Barolo from Nebbiolo grapes': { score: 0.7, faithfulness: 0.7 } }, calls);
+    const scorer = new ShadowModeScorer({ runner: makeRunner(report), scorer: realScorer, judge });
+    await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'rubric', rubric: 'must cite vintage' });
+    expect(calls.every((c) => c.rubric === 'must cite vintage')).toBe(true);
+  });
+
+  it('errored side is NOT judged (no answer to judge)', async () => {
+    const calls: JudgeInput[] = [];
+    const report = makeReport({
+      legacy: makeOutcome({ orchestrator: 'legacy_agent', status: 'error', errorMessage: 'boom' }),
+      wineSearch: makeOutcome({ orchestrator: 'wine_search', answer: 'ok', observations: ['o'] }),
+    });
+    const judge = makeJudge({ ok: { score: 0.8, faithfulness: 0.8 } }, calls);
+    const scorer = new ShadowModeScorer({ runner: makeRunner(report), scorer: realScorer, judge });
+    await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'err-side' });
+    // Only the wine-search side reached the judge.
+    expect(calls.map((c) => c.answer)).toEqual(['ok']);
   });
 });

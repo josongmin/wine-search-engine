@@ -50,6 +50,11 @@ import { AGENT_SCENARIOS } from '../../test/benchmark/agent/scenarios.js';
 import type { AgentOrchestrator } from '../../src/application/agent/agent-orchestrator.js';
 import type { WineSearchResult } from '../../src/application/wine-search/wine-search-result-schemas.js';
 import type { AgentResult } from '../../src/domain/agent/model/agent-result.js';
+import {
+  StructuredLlmJudge,
+  DEFAULT_JUDGE_MODEL,
+  type LlmJudge,
+} from '../../src/application/wine-search/llm-judge.js';
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
@@ -132,6 +137,14 @@ interface CliArgs {
    * `ANTHROPIC_API_KEY` — the driver throws an operator-facing error otherwise.
    */
   readonly compositionRoot: boolean;
+  /**
+   * When true, wire an `StructuredLlmJudge` into the scorer so the `judge` and
+   * `faithfulness` dimensions populate instead of staying null. Requires
+   * `--composition-root` (a real LLM is needed; dry-run stubs cannot judge)
+   * AND `--score`. Adds 1 judge LLM call per scenario per side (legacy +
+   * wineSearch) → up to 2 extra Anthropic calls per scenario.
+   */
+  readonly judge: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
@@ -148,6 +161,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let regressedRateCeilingPercent = DEFAULT_REGRESSED_RATE_CEILING_PERCENT;
   let observations = false;
   let compositionRoot = false;
+  let judge = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -222,6 +236,10 @@ function parseArgs(argv: readonly string[]): CliArgs {
         compositionRoot = true;
         break;
       }
+      case '--judge': {
+        judge = true;
+        break;
+      }
       case '--regressed-rate-ceiling': {
         const next = argv[++i];
         if (next !== undefined) {
@@ -257,6 +275,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
     regressedRateCeilingPercent,
     observations,
     compositionRoot,
+    judge,
     ...(scenariosPath !== undefined ? { scenariosPath } : {}),
     ...(limit !== undefined ? { limit } : {}),
     ...(summaryOutput !== undefined ? { summaryOutput } : {}),
@@ -312,6 +331,17 @@ Options:
                                 if unmet): WINE_SEARCH_ENABLED=true and ANTHROPIC_API_KEY set.
                                 This is the staging cutover-validation entrypoint — see
                                 docs/runbook-wine-search-cutover.md.
+  --judge                       Wire an LLM-as-judge into the scorer so the 'judge' and
+                                'faithfulness' dimensions populate instead of staying null
+                                (without this, 2 of 8 scorer dims are always dropped from the
+                                geo-mean, weakening the cutover gate). The judge emits an
+                                overall rubric score (→ judge dim) AND a groundedness sub-score
+                                (→ faithfulness dim) in one structured call per side.
+                                Requires --score AND --composition-root (a real LLM is needed;
+                                dry-run stubs cannot judge). Cost: 1 judge call per scenario per
+                                side → up to 2 extra Anthropic calls per scenario
+                                (model ${DEFAULT_JUDGE_MODEL}, prompt-cached system rubric).
+                                Judge failures degrade gracefully — that side's dims stay null.
   --help, -h                    Show this help
 `);
 }
@@ -610,6 +640,13 @@ export interface RunBenchOptions {
    *  JSONL output (each line gets `{ ...shadowReport, scoring: ... }`). */
   readonly scorer?: BenchScorerFn;
   /**
+   * Optional LLM-as-judge. When provided AND `scorer` is set, the composer
+   * runs it on both sides and threads judge / faithfulness scores into the
+   * scorer so those dimensions populate instead of staying null. Requires
+   * `--composition-root` at the CLI layer (a real LLM is needed).
+   */
+  readonly judge?: LlmJudge;
+  /**
    * Persist `outcome.observations` into the JSONL stream. Default false —
    * observations are large strings (Korean wine descriptions can total ~50KB
    * per scenario). They are ALWAYS available to the scorer in-memory; this
@@ -630,7 +667,11 @@ export async function runBench(opts: RunBenchOptions): Promise<BenchSummary> {
   });
   const scorer = opts.scorer === undefined
     ? undefined
-    : new ShadowModeScorer({ runner, scorer: opts.scorer });
+    : new ShadowModeScorer({
+        runner,
+        scorer: opts.scorer,
+        ...(opts.judge !== undefined ? { judge: opts.judge } : {}),
+      });
 
   // A small mutex around stream.write so JSONL lines never interleave.
   let writeChain: Promise<void> = Promise.resolve();
@@ -658,6 +699,10 @@ export async function runBench(opts: RunBenchOptions): Promise<BenchSummary> {
           scenario: scn,
           requestId: generateShadowModeRequestId(),
           timeoutMs: opts.timeoutMs,
+          // Forward the scenario rubric so the judge can apply per-scenario
+          // pass/fail criteria on top of the general wine rubric. Ignored when
+          // no judge is wired.
+          ...(scn.expectation.rubric !== undefined ? { rubric: scn.expectation.rubric } : {}),
         });
         aggregator.observe(scoringReport.shadowDiff);
         scoringAggregator.observe(String(scn.id), scoringReport);
@@ -783,9 +828,22 @@ export async function loadBenchScorer(
     );
   }
   const scoreScenario = mod.scoreScenario;
-  return (scenario, execution, error): ReturnType<BenchScorerFn> => {
+  return (scenario, execution, error, judgeScore, faithfulnessScore, judgeReasoning): ReturnType<BenchScorerFn> => {
     try {
-      const result = scoreScenario(scenario, execution, undefined, undefined, error);
+      // Positional map onto scoreScenario(scenario, execution, judgeScore,
+      // faithfulnessScore, error, steps, judgeReasoning, …). judgeScore /
+      // faithfulnessScore are undefined unless --judge wired an LlmJudge into
+      // the composer; in that case the scorer populates the judge /
+      // faithfulness dims instead of dropping them to null.
+      const result = scoreScenario(
+        scenario,
+        execution,
+        judgeScore,
+        faithfulnessScore,
+        error,
+        undefined,
+        judgeReasoning,
+      );
       logger.info(
         {
           component: 'run-shadow-mode-bench.loadBenchScorer',
@@ -822,6 +880,37 @@ export async function loadBenchScorer(
   };
 }
 
+/**
+ * Construct a `StructuredLlmJudge` backed by a dedicated
+ * `ClaudeStructuredLlmAdapter`. Dynamic-imports the config + adapter so the
+ * heavyweight modules only load when `--judge` is actually set.
+ *
+ * Caller contract: only invoked after the `--judge ⇒ --composition-root`
+ * validation, so `ANTHROPIC_API_KEY` is present (loadConfig throws otherwise).
+ */
+export async function buildJudge(logger: ShadowModeLogger = consoleLogger): Promise<LlmJudge> {
+  const [{ loadConfig }, { ClaudeStructuredLlmAdapter }] = await Promise.all([
+    import('../../src/config/env.js'),
+    import('../../src/infrastructure/ai/claude-structured-llm-adapter.js'),
+  ]);
+  const config = loadConfig();
+  if (config.anthropic.apiKey === undefined || config.anthropic.apiKey === '') {
+    throw new Error(
+      '--judge: ANTHROPIC_API_KEY is not configured — the LLM-as-judge cannot reach Anthropic. '
+      + 'Export the key before running with --judge --composition-root.',
+    );
+  }
+  const structuredLlm = new ClaudeStructuredLlmAdapter({
+    apiKey: config.anthropic.apiKey,
+    httpTimeoutMs: config.openai.httpTimeoutMs,
+  });
+  return new StructuredLlmJudge({
+    structuredLlm,
+    model: DEFAULT_JUDGE_MODEL,
+    logger,
+  });
+}
+
 async function mainCli(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const scenarios = selectScenarios(AGENT_SCENARIOS, args);
@@ -833,6 +922,23 @@ async function mainCli(): Promise<void> {
 
   if (args.dryRun && args.compositionRoot) {
     process.stderr.write('--dry-run and --composition-root are mutually exclusive\n');
+    process.exit(1);
+  }
+
+  // --judge needs a real LLM and a scorer to thread the scores into. Refuse
+  // up-front with an actionable message rather than silently no-op'ing.
+  if (args.judge && !args.compositionRoot) {
+    process.stderr.write(
+      '--judge requires --composition-root — the LLM-as-judge needs a real Anthropic backend; '
+      + 'dry-run stubs cannot judge. Re-run with --composition-root (and --score).\n',
+    );
+    process.exit(1);
+  }
+  if (args.judge && !args.score) {
+    process.stderr.write(
+      '--judge requires --score — the judge feeds the bench scorer\'s judge / faithfulness '
+      + 'dimensions, which only run when scoring is enabled. Add --score.\n',
+    );
     process.exit(1);
   }
 
@@ -872,6 +978,15 @@ async function mainCli(): Promise<void> {
 
   const scorer = args.score ? await loadBenchScorer(consoleLogger) : undefined;
 
+  // Build the LLM-as-judge when requested. Validated above to imply
+  // --composition-root + --score, so a live Anthropic credential is present
+  // (the driver's pre-flight already confirmed ANTHROPIC_API_KEY). We build a
+  // dedicated StructuredLlmPort for the judge rather than threading the
+  // container's instance through the script-only driver — the judge is a
+  // separate cheap Haiku-class call and keeping it self-contained avoids
+  // expanding the driver's public surface (additive-only scope).
+  const judge = args.judge ? await buildJudge() : undefined;
+
   let summary: BenchSummary;
   try {
     summary = await runBench({
@@ -884,6 +999,7 @@ async function mainCli(): Promise<void> {
       logger: consoleLogger,
       includeObservations: args.observations,
       ...(scorer !== undefined ? { scorer } : {}),
+      ...(judge !== undefined ? { judge } : {}),
     });
   } finally {
     if (driverShutdown !== undefined) {

@@ -17,6 +17,7 @@ import { QUERY_ROUTES } from '../../../domain/query/model/query-route.js';
 import { QUERY_CLASSES } from '../../../domain/shared/types/query-class.js';
 import { NEXT_ACTIONS } from '../../../domain/shared/types/next-action.js';
 import { RETRIEVAL_CHANNELS } from '../../../domain/retrieval/model/retrieval-channel.js';
+import { ALIAS_TYPES } from '../../../domain/alias/model/alias.js';
 import {
   AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH,
   MAX_AUDIT_BLOCKER_SEED_ENTITY_IDS,
@@ -308,6 +309,12 @@ const AnchorCandidateWireSchema = z.object({
   candidate_entity_ids: z.array(z.string().min(1)).max(MAX_RESOLVE_CANDIDATES),
   lookup_variants: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS).optional(),
   lookup_strategies: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS).optional(),
+  // Domain alias type (RFC-003 §4.3) carried through from the matched alias
+  // record(s), added by the double-metaphone alias work (commit 62b654be).
+  // The response builder auto-snake-cases AnchorCandidate.aliasType →
+  // alias_type; the wire schema must accept it or .strict() 500s the route.
+  // Sourced from the ALIAS_TYPES SSoT (rule 30) so the enum cannot drift.
+  alias_type: z.enum(ALIAS_TYPES).optional(),
   confidence: z.number().finite().min(0).max(1),
   source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']),
 }).strict();

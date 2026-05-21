@@ -45,6 +45,7 @@ import {
 } from './bench-scorer-adapter.js';
 import type { WineSearchResult } from './wine-search-result-schemas.js';
 import type { AgentResult } from '@domain/agent/model/agent-result.js';
+import type { LlmJudge } from './llm-judge.js';
 
 // ---------------------------------------------------------------------------
 // Structural mirror of the bench scorer's *result* contract
@@ -194,8 +195,14 @@ export const ShadowModeScoringVerdictSchema = z.enum([
 /**
  * Pluggable scorer signature. Mirrors `scoreScenario` from the bench scorer
  * but typed as a callable so tests can pin deterministic outputs without
- * loading the 3k-line scorer module. Production wiring passes
- * `(s, e, err) => scoreScenario(s, e, undefined, undefined, err)`.
+ * loading the 3k-line scorer module. Production wiring maps these args onto
+ * `scoreScenario(scenario, execution, judgeScore, faithfulnessScore, error,
+ * undefined, judgeReasoning)` at the script-level wire-up.
+ *
+ * `judgeScore` / `faithfulnessScore` are optional: when the composer runs an
+ * `LlmJudge` (see {@link ShadowModeScoringDeps.judge}) they carry the judge's
+ * clamped [0,1] outputs and the scorer populates the `judge` / `faithfulness`
+ * dimensions; when omitted those dims stay `null` (the historic behavior).
  *
  * The scenario / execution / result types are the structural mirrors defined
  * in this module — the real scorer's types are a strict superset, so its
@@ -205,6 +212,9 @@ export type BenchScorerFn = (
   scenario: AgentBenchmarkScenarioLike,
   execution: ScenarioExecutionLike | null,
   error?: string,
+  judgeScore?: number,
+  faithfulnessScore?: number,
+  judgeReasoning?: string,
 ) => ScenarioResultLike;
 
 export interface ShadowModeScoringDeps {
@@ -212,6 +222,18 @@ export interface ShadowModeScoringDeps {
   readonly runner: Pick<ShadowModeRunner, 'runOnce'>;
   /** Pure scorer — same signature on both sides. */
   readonly scorer: BenchScorerFn;
+  /**
+   * Optional LLM-as-judge. When present, the composer runs it independently
+   * on the legacy and wine-search answers (each with its own observations)
+   * BEFORE scoring and threads the resulting `score` → scorer `judgeScore`
+   * and `faithfulness` → scorer `faithfulnessScore`. When absent (the
+   * default), both dims stay `null` — behavior is byte-for-byte unchanged.
+   *
+   * Per-side judging is independent: a judge failure on one side leaves THAT
+   * side's judge / faithfulness dims null (graceful degradation) without
+   * affecting the other side.
+   */
+  readonly judge?: LlmJudge;
 }
 
 export interface ShadowModeScoringInput {
@@ -219,6 +241,9 @@ export interface ShadowModeScoringInput {
   /** Overrides `scenario.query` when the caller wants to score a probe
    *  variant against the same scenario expectations. Optional. */
   readonly query?: string;
+  /** Scenario-specific judge rubric (`scenario.expectation.rubric`). Forwarded
+   *  to the `LlmJudge` when one is wired. Ignored when no judge is present. */
+  readonly rubric?: string;
   readonly requestId: string;
   readonly timeoutMs?: number;
   readonly abortSignal?: AbortSignal;
@@ -254,15 +279,38 @@ export class ShadowModeScorer {
       ? undefined
       : parsedDiff.wineSearch.errorMessage ?? parsedDiff.wineSearch.status;
 
+    // Judge each side INDEPENDENTLY (its own answer + observations). A judge
+    // failure on one side degrades only that side's dims to null. Skipped
+    // entirely when no judge is wired OR the side errored (no answer to judge).
+    const query = input.query ?? input.scenario.query;
+    const legacyJudge = await this.judgeSide(
+      query,
+      legacyExecution,
+      legacyError,
+      input,
+    );
+    const wineSearchJudge = await this.judgeSide(
+      query,
+      wineSearchExecution,
+      wineSearchError,
+      input,
+    );
+
     const legacyScore = this.deps.scorer(
       input.scenario,
       legacyExecution,
       legacyError,
+      legacyJudge.judgeScore,
+      legacyJudge.faithfulnessScore,
+      legacyJudge.judgeReasoning,
     );
     const wineSearchScore = this.deps.scorer(
       input.scenario,
       wineSearchExecution,
       wineSearchError,
+      wineSearchJudge.judgeScore,
+      wineSearchJudge.faithfulnessScore,
+      wineSearchJudge.judgeReasoning,
     );
 
     const scoreDelta = computeScoreDelta(legacyScore, wineSearchScore);
@@ -274,6 +322,49 @@ export class ShadowModeScorer {
       wineSearchScore,
       scoreDelta,
       verdict,
+    };
+  }
+
+  /**
+   * Run the injected judge for one side. Returns the score triple to thread
+   * into `scoreScenario`. Each field is `undefined` (→ scorer dim stays null)
+   * when:
+   *   - no judge is wired,
+   *   - the side errored / produced no execution (no answer to judge),
+   *   - the judge reported `unavailable` (validation/timeout/refusal/…).
+   *
+   * Honest "unavailable" path: NEVER fabricates a 0 — undefined leaves the
+   * dim null so the scorer drops it from the geo-mean.
+   */
+  private async judgeSide(
+    query: string,
+    execution: ScenarioExecutionLike | null,
+    error: string | undefined,
+    input: ShadowModeScoringInput,
+  ): Promise<{
+    readonly judgeScore?: number;
+    readonly faithfulnessScore?: number;
+    readonly judgeReasoning?: string;
+  }> {
+    const judge = this.deps.judge;
+    if (judge === undefined || execution === null || error !== undefined) {
+      return {};
+    }
+    const result = await judge.evaluate({
+      query,
+      answer: execution.answer,
+      groundingObservations: execution.observations,
+      requestId: input.requestId,
+      ...(input.rubric !== undefined ? { rubric: input.rubric } : {}),
+      ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
+    });
+    if (!result.available) {
+      return {};
+    }
+    return {
+      judgeScore: result.score,
+      faithfulnessScore: result.faithfulness,
+      judgeReasoning: result.reasoning,
     };
   }
 }
