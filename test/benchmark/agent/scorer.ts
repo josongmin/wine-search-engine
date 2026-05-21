@@ -164,6 +164,19 @@ export interface ScenarioExecution {
    * Absent when no search tool call produced stageTimings.
    */
   readonly stageTimings?: Readonly<Record<string, number>> | undefined;
+  /**
+   * Planner-emitted hard constraints summed across every search tool call in
+   * the scenario. Source: `SearchResponseV1.parsedConstraints.hard.length`
+   * across all `result.toolOutcomes` whose `result` is a `SearchResponseV1`.
+   *
+   * `null` when the scenario produced no search tool outcomes (knowledge-only,
+   * blocked, or fallback paths). `0` when search ran but the planner emitted
+   * zero hard constraints — that is a real "under-filtered retrieval" signal,
+   * not missing data. The bench summary aggregates non-null values into
+   * `summary.meanHardConstraints` (consumed by the `hard_constraints_low`
+   * insight rule).
+   */
+  readonly hardConstraintCount?: number | null | undefined;
 }
 
 /**
@@ -325,6 +338,16 @@ export interface ScenarioResult {
    * to compute the cutover-gate `evidenceFrameCoverage`.
    */
   readonly evidenceFrameCount?: number;
+  /**
+   * Planner-emitted hard constraints summed across every search tool call.
+   * See {@link ScenarioExecution.hardConstraintCount} for full semantics.
+   * `null` for scenarios with no search outcomes; `0` for scenarios where
+   * search ran but the planner emitted zero hard constraints.
+   *
+   * The bench summary computes `summary.meanHardConstraints` as the arithmetic
+   * mean over scenarios with non-null values.
+   */
+  readonly hardConstraintCount?: number | null;
   readonly error?: string;
   readonly scores: ScenarioScores;
   readonly diagnostics?: readonly Diagnostic[];
@@ -1365,6 +1388,14 @@ export function scoreScenario(
     // ADR-009 Phase 0: evidence frame count for cutover-gate aggregation.
     ...(execution.evidenceFrameCount !== undefined
       ? { evidenceFrameCount: execution.evidenceFrameCount }
+      : {}),
+    // hard_constraints_low insight: per-scenario planner-emitted hard constraint
+    // sum. Pass through verbatim (including explicit `null`) so the summary
+    // aggregator can distinguish "no search ran" (null) from "search ran with
+    // zero hard constraints" (0). When the runner did not measure the field
+    // (e.g. legacy tests calling scoreScenario directly), omit the key.
+    ...(execution.hardConstraintCount !== undefined
+      ? { hardConstraintCount: execution.hardConstraintCount }
       : {}),
     scores: {
       executionEfficiency,

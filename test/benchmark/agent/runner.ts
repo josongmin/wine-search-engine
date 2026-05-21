@@ -84,6 +84,10 @@ import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
 import { printBenchmarkInsights, type BenchmarkReportSlice } from './benchmark-insight-generator.js';
+import {
+  aggregateHardConstraintsForScenario,
+  meanHardConstraintsAcrossScenarios,
+} from './hard-constraints-aggregator.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
 import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
@@ -1265,6 +1269,15 @@ export interface BenchmarkReport {
     };
     readonly byTier: Record<string, { readonly count: number; readonly avgScore: number }>;
     /**
+     * Bench-wide mean of per-scenario planner-emitted hard-constraint counts.
+     * Source: `SearchResponseV1.parsedConstraints.hard.length` summed across
+     * every search tool call within a scenario, then arithmetic-meaned over
+     * scenarios that produced at least one search outcome. Drives the
+     * `hard_constraints_low` insight rule. `0` only when no executed scenario
+     * carried a non-null hard-constraint sample.
+     */
+    readonly meanHardConstraints: number;
+    /**
      * ADR-009 Phase 0: fraction of tool calls across the run that emitted a
      * typed evidence frame. Cutover gate is >= 0.99 on two consecutive
      * nightly runs before Phase 1 (ConstraintGraph) begins.
@@ -1461,6 +1474,14 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         // duration) so provider throttling never penalizes agent latency.
         const agentWorkMs = result.totalDurationMs;
 
+        // hard_constraints_low insight: sum planner-emitted hard constraints
+        // across every search tool call in this scenario. Reads from typed
+        // ToolOutcome.result (SearchResponseV1.parsedConstraints.hard) — the
+        // canonical post-compilation hard-constraint set. Returns `null` when
+        // no search tools ran (knowledge-only / blocked), so the summary
+        // aggregator can exclude rather than bias toward zero.
+        const hardConstraintCount = aggregateHardConstraintsForScenario(result.toolOutcomes);
+
         const execution: ScenarioExecution = {
           answer: result.answer,
           stepCount: result.steps.length,
@@ -1478,6 +1499,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           ...(searchStageTimings !== undefined && Object.keys(searchStageTimings).length > 0
             ? { stageTimings: searchStageTimings }
             : {}),
+          // Always set the key (including explicit `null` for no-search
+          // scenarios) so downstream consumers can distinguish "not measured"
+          // from "measured as zero". Under exactOptionalPropertyTypes this is
+          // allowed because the field is typed as `number | null | undefined`.
+          hardConstraintCount,
         };
 
         // Map AgentStep[] → StepTrace[] for triage profiling in the result JSON.
@@ -1964,6 +1990,14 @@ function buildReport(
         totalP95: percentile(sortedTokens, 0.95),
       },
       byTier,
+      // hard_constraints_low insight: arithmetic mean of per-scenario
+      // hardConstraintCount across executed scenarios. Scenarios with `null`
+      // (no search tools ran) are excluded from the denominator so the metric
+      // measures planner filter pressure, not the rate of search-issuing
+      // scenarios. See `hard-constraints-aggregator.ts` for the full semantics.
+      meanHardConstraints: meanHardConstraintsAcrossScenarios(
+        executed.map((r) => r.hardConstraintCount),
+      ),
       // ADR-009 Phase 0 cutover metric: framed / total tool calls.
       // Scenarios that never invoked a tool (terminationReason='answer',
       // stepCount=1) contribute nothing to either numerator or denominator.
@@ -2497,7 +2531,10 @@ async function main(): Promise<void> {
       latencyP50Ms: s.latencyMs.p50,
       latencyP95Ms: s.latencyMs.p95,
       tier6SoleExtractionRate: null, // TODO: aggregate from query logs
-      meanHardConstraints: 0, // TODO: aggregate from query logs
+      // Wired from summary.meanHardConstraints — arithmetic mean over scenarios
+      // that produced ≥1 search outcome. The `hard_constraints_low` insight
+      // rule fires when this drops below 1.5 across the bench.
+      meanHardConstraints: s.meanHardConstraints,
       scrOverall: s.scrOverall ?? null,
       scrHard: s.scrHard ?? null,
       scrSoft: s.scrSoft ?? null,
