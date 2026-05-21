@@ -80,8 +80,10 @@ const PER_TOOL_CAP_RATIO = 0.6;
 const LLM_FALLBACK_MAX_OUTPUT_TOKENS = 4096;
 /** Anthropic model id used for LLM fallback. The composition root will
  *  override via the `model` field on the request when wiring. Tests inject
- *  a stub port so the literal here is only the deterministic default. */
-const LLM_FALLBACK_MODEL = 'claude-4-sonnet-latest';
+ *  a stub port so the literal here is only the deterministic default.
+ *  Format `claude-<family>-<gen>` per Anthropic Messages API spec — matches
+ *  `claude-(opus|sonnet|haiku)-N-M`. `claude-4-sonnet-latest` is rejected with HTTP 400. */
+const LLM_FALLBACK_MODEL = 'claude-sonnet-4-6';
 /** Minimum confidence to promote a resolved entity to an anchor. Below this
  *  we drop the candidate; the LLM fallback path is reserved for cases where
  *  *no* deterministic signal fires at all. */

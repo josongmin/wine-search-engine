@@ -660,15 +660,14 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     // First call is analyze (forced respond, model = analyzer fallback model),
     // last call is synthesize.
     expect(capture.requests.length).toBeGreaterThanOrEqual(2);
-    // DEVIATION: the analyzer's LLM_FALLBACK_MODEL is the legacy
-    // `claude-4-sonnet-latest` ordering (query-analyzer.ts L84), which the real
-    // Anthropic API rejects. We assert every OTHER invariant with a relaxed
-    // model pattern, and assert the deviation explicitly so it is documented
-    // rather than masked. See the dedicated "model-id deviation" test below.
-    const analyzeBody = assertWireInvariants(capture.requests[0]!, /^claude-/u);
+    // Regression guard for the model-id fix: LLM_FALLBACK_MODEL in
+    // query-analyzer.ts must conform to the Anthropic Messages API naming
+    // convention `claude-<family>-<gen>-...`. The legacy
+    // `claude-4-sonnet-latest` ordering causes HTTP 400 from the real API;
+    // this assertion would catch any re-regression to that form.
+    const analyzeBody = assertWireInvariants(capture.requests[0]!);
     expect(analyzeBody.tool_choice).toEqual({ type: 'tool', name: 'respond' });
-    expect(analyzeBody.model).toBe('claude-4-sonnet-latest');
-    expect(SPEC_MODEL_PATTERN.test(analyzeBody.model)).toBe(false);
+    expect(SPEC_MODEL_PATTERN.test(analyzeBody.model)).toBe(true);
     matchWireSnapshot('ambiguous-analyze', capture.requests[0]!);
 
     const synthBody = assertWireInvariants(capture.requests.at(-1)!);
@@ -923,17 +922,16 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     expect(sawSearchWines).toBe(true);
   });
 
-  // ── Scenario 10: PRODUCTION model-id deviation (real bug surfaced).
-  //    Three pipeline modules pin the legacy `claude-4-<family>-latest`
-  //    ordering, which the Anthropic API rejects (it expects
-  //    `claude-<family>-<gen>-...`). This test drives each module with its
-  //    PRODUCTION DEFAULT model and asserts the deviation so it is documented
-  //    and tracked, not silently masked. Severity: HIGH — every real API call
-  //    from these defaults would 400.
-  //      - query-analyzer.ts L84:        LLM_FALLBACK_MODEL = 'claude-4-sonnet-latest'
-  //      - synthesis-runner.ts L70:      DEFAULT_SYNTHESIS_MODEL = 'claude-4-sonnet-latest'
-  //      - mini-loop-schemas.ts L123:    MINI_LOOP_DEFAULT_MODEL = 'claude-4-sonnet-latest'
-  it('10. model-id deviation — pipeline default models violate the API naming convention', async () => {
+  // ── Scenario 10: PRODUCTION model-id regression guard.
+  //    Three pipeline modules previously pinned the legacy
+  //    `claude-4-<family>-latest` ordering which the Anthropic API rejects
+  //    with HTTP 400 (it expects `claude-<family>-<gen>-...`). This test
+  //    drives each module with its PRODUCTION DEFAULT model and asserts the
+  //    spec-compliant form so the fix cannot regress.
+  //      - query-analyzer.ts:        LLM_FALLBACK_MODEL    (analyzer LLM fallback)
+  //      - synthesis-runner.ts:      DEFAULT_SYNTHESIS_MODEL
+  //      - mini-loop-schemas.ts:     MINI_LOOP_DEFAULT_MODEL
+  it('10. model-id regression guard — pipeline defaults conform to API naming convention', async () => {
     // Synthesizer with its PRODUCTION default model (no override).
     const capture = buildAnthropicFetchCapture(() => respondToolUse(synthAnswer('answer')));
     vi.stubGlobal('fetch', capture.fetchMock);
@@ -963,11 +961,11 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
 
     expect(capture.requests).toHaveLength(1);
     const synth = capture.requests[0]!;
-    // Every NON-model invariant still holds.
-    const body = assertWireInvariants(synth, /^claude-/u);
+    // Every invariant (including model id) holds under the canonical spec pattern.
+    const body = assertWireInvariants(synth);
     expect(body.tool_choice).toEqual({ type: 'tool', name: 'respond' });
-    // The model is the legacy ordering and FAILS the spec pattern.
-    expect(body.model).toBe('claude-4-sonnet-latest');
-    expect(SPEC_MODEL_PATTERN.test(body.model)).toBe(false);
+    // Regression guard: model must conform to `claude-<family>-<gen>-...`.
+    expect(SPEC_MODEL_PATTERN.test(body.model)).toBe(true);
+    expect(body.model).not.toBe('claude-4-sonnet-latest');
   });
 });

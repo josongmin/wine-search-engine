@@ -79,27 +79,43 @@ describe('Noisy runtime execution contract', () => {
     expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_resolved');
   });
 
-  it('auto noisy approximate query stays ambiguous on dual-lane when identity evidence is absent', async () => {
+  it('auto single-typo Latin query resolves on the entity route via fuzzy identity recovery', async () => {
+    // SOTA KIL behaviour (Damerau fuzzy alias matcher, calibrated decision):
+    // a single clearly-resolvable typo of a known wine ("opuss one" → "opus one",
+    // edit distance 1, no competing entity within the similarity threshold) is
+    // recovered by the fuzzy identity lane, routed as a known-item lookup, and
+    // resolved. The previous contract assumed *no* fuzzy identity evidence
+    // ("…stays ambiguous on dual-lane when identity evidence is absent") —
+    // valid only while the in-memory matcher lacked a fuzzy stage; production's
+    // pg-alias-matcher has had a Damerau channel all along. With the in-memory
+    // matcher now at production parity, the premise no longer holds.
+    //
+    // The hallucination guard is still pinned by the *bare* short-form test
+    // immediately below ("opus" → ambiguous): a query that doesn't uniquely
+    // identify any single entity (bare producer name, generic term) MUST NOT
+    // confidently resolve. That's the case where the guard protects the user;
+    // a single edit-distance-1 typo with one clear target is not.
     const response = await parts.container.searchUseCase.execute(
       {
         query: 'opuss one',
         options: { mode: 'auto', explain: true, clarification: false },
       },
-      'noisy-runtime-dual-lane-ambiguous',
+      'noisy-runtime-single-typo-resolves',
     );
 
     expect(response.results[0]?.entity.entityId).toBe('opus-one-2018');
-    expect(response.engineDecision.decisionStatus).toBe('ambiguous');
+    expect(response.engineDecision.decisionStatus).toBe('resolved');
     expectExecutionContractProjection(response, {
-      route: 'hybrid',
-      topology: 'dual_lane',
+      route: 'entity',
+      topology: 'entity_only',
     });
     expect(response.engineDecision.laneTrace?.identity.participated).toBe(true);
-    expect(response.engineDecision.laneTrace?.identity.resolveStatus).toBe('failed');
-    expect(response.engineDecision.laneTrace?.general.participated).toBe(true);
-    expect(response.engineDecision.laneTrace?.general.artifactCount).toBeGreaterThan(0);
-    expect(response.engineDecision.laneTrace?.fused.resolveStatus).toBe('resolved');
-    expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_ambiguous');
+    expect(response.engineDecision.laneTrace?.identity.resolveStatus).toBe('resolved');
+    expect(response.engineDecision.laneTrace?.identity.artifactCount).toBeGreaterThan(0);
+    // Identity resolved confidently → the general lane is correctly skipped
+    // (entity-only topology). This is the SOTA routing behaviour for a
+    // confident known-item match.
+    expect(response.engineDecision.laneTrace?.general.participated).toBe(false);
   });
 
   it('hybrid override on short Korean prefix query preserves identity evidence and resolves', async () => {
