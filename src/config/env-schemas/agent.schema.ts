@@ -43,4 +43,17 @@ export const AgentEnvSchema = z.object({
    * When false, that route responds with 404. When unset, defaults to on in non-production.
    */
   ENABLE_AGENT_BENCHMARK_UI: z.enum(['true', 'false']).optional(),
+
+  /**
+   * P0 termination guard: when true (default), the planner is forced to issue a
+   * second-step verify/synthesize action for queries with hard reasoning
+   * obligations (negation, comparison, multi-constraint, situation-based,
+   * nested-condition) — even if the planner attempted to commit a final answer
+   * after the first tool outcome. Disabling this flag reverts to the legacy
+   * "one tool + answer" path. See AgentToolExecutionPhase.run for the guard.
+   */
+  AGENT_REQUIRE_VERIFICATION_STEP: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
 });

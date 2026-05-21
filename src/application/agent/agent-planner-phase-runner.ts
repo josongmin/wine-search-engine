@@ -68,6 +68,12 @@ function renderPlannerDirective(directive: AgentPlannerDirective | undefined): s
   if (directive.kind === 'required_tool') {
     return `[REQUIRED_TOOL:${directive.tool}] ${directive.instruction}`;
   }
+  if (directive.kind === 'verification_required') {
+    const uncoveredList = directive.uncoveredConstraints.length > 0
+      ? `[${directive.uncoveredConstraints.map((d) => `"${d}"`).join(', ')}]`
+      : '[none — all signaled atoms still need explicit grounding]';
+    return `[VERIFY_REQUIRED:${directive.reason}] Uncovered constraints: ${uncoveredList}. ${directive.instruction}`;
+  }
   return `[SEARCH_REQUIRED] ${directive.instruction}`;
 }
 

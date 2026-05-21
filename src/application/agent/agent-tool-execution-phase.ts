@@ -29,7 +29,6 @@ import {
   withTimeout,
 } from './agent-tool-execution-support.js';
 import { AgentToolExecutionResultPolicy } from './agent-tool-execution-result-policy.js';
-import { transitionTerminationReason } from '../../domain/agent/service/termination-state-machine.js';
 
 const log = bootstrapLogger.child({ component: 'AgentToolExecutionPhase' });
 
@@ -72,14 +71,7 @@ function normalizeForStableJson(value: unknown): unknown {
 }
 
 function stableJson(value: unknown): string {
-  // JSON.stringify returns `undefined` for top-level `undefined` / function /
-  // symbol values (lib.d.ts narrows this to `string`, which is misleading).
-  // Pre-handle those cases so the deduplication key is always a string and
-  // we never fall into a runtime `undefined === undefined` collision bucket.
-  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
-    return String(value);
-  }
-  return JSON.stringify(normalizeForStableJson(value));
+  return JSON.stringify(normalizeForStableJson(value)) ?? String(value);
 }
 
 function stableEqual(left: unknown, right: unknown): boolean {
@@ -486,7 +478,7 @@ export class AgentToolExecutionPhase {
       });
 
       if (state.plannerDefectAttempts > 2) {
-        state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
+        state.terminationReason = 'error';
         return true;
       }
       return false;
@@ -496,13 +488,6 @@ export class AgentToolExecutionPhase {
       const trimmedAnswer = parsed.answer.trim();
       if (trimmedAnswer.length > 0) {
         if (state.pendingRefinementRetry) {
-          // Reset the flag immediately so a subsequent planner answer cannot
-          // re-enter this branch (zombie loop). Per CLAUDE.md rule 19/20,
-          // mutate the gating flag BEFORE any further control flow so the
-          // loop cannot iterate with corrupted state. The directive itself
-          // survives via state.pendingPlannerDirective and is consumed once
-          // by the next planner-phase call.
-          state.pendingRefinementRetry = false;
           state.pendingPlannerDirective = { kind: 'relax_constraints_retry' };
           return false;
         }
@@ -534,6 +519,42 @@ export class AgentToolExecutionPhase {
           state.pendingPlannerDirective = this.contractPolicy.buildPendingDrinkabilityDirective(pendingDrinkabilityEntityIds);
           return false;
         }
+        // ── P0: verification-step guard ────────────────────────────────────
+        // For queries flagged with `requiresVerificationStep` (negation /
+        // comparison / multi-constraint / situation / nested-condition), the
+        // planner is not allowed to commit a final answer after a single tool
+        // call. Drop the candidate answer and replan with a directive that
+        // forces either a refined tool call or an explicit grounded answer.
+        //
+        // The latch (`verificationStepCompleted`) prevents an infinite loop:
+        // after the planner has been pushed through one re-plan, the second
+        // answer attempt is allowed even if some atoms remain uncovered. The
+        // synthesis layer is the final safety net for unanchored claims.
+        const requireVerificationStep = effectiveConfig.requireVerificationStep ?? true;
+        const verificationRequirement = queryExecutionContract.requiresVerificationStep;
+        if (
+          requireVerificationStep
+          && verificationRequirement !== undefined
+          && state.toolOutcomes.length === 1
+          && !state.verificationStepCompleted
+        ) {
+          const uncovered = this.contractPolicy.computeUncoveredConstraints(
+            verificationRequirement,
+            state.toolOutcomes,
+          );
+          if (uncovered.length > 0 || verificationRequirement.reason === 'comparison_search') {
+            state.reasoningFailureDetected = true;
+            state.pendingPlannerDirective = this.contractPolicy.buildVerificationRequiredDirective(
+              verificationRequirement,
+              uncovered,
+            );
+            // Latch BEFORE the candidate is dropped so the second-pass answer
+            // can commit even if some atoms remain uncovered (synthesis is
+            // responsible for surface verification).
+            state.verificationStepCompleted = true;
+            return false;
+          }
+        }
         state.steps.push({
           index: state.steps.length,
           thought: parsed.thought,
@@ -542,7 +563,7 @@ export class AgentToolExecutionPhase {
           tokenCount: { input: inputTokens, output: outputTokens },
         });
         state.answer = trimmedAnswer;
-        state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
+        state.terminationReason = 'answer';
         return true;
       }
     }
@@ -652,7 +673,7 @@ export class AgentToolExecutionPhase {
 
     if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
       state.reasoningFailureDetected = true;
-      state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
+      state.terminationReason = 'error';
       const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
       const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
       this.resultPolicy.recordBatchStep({
@@ -677,7 +698,7 @@ export class AgentToolExecutionPhase {
       state.reasoningFailureDetected = true;
       state.unknownToolAttempts++;
       if (state.unknownToolAttempts > 2) {
-        state.terminationReason = transitionTerminationReason(state.terminationReason, 'error');
+        state.terminationReason = 'error';
         return true;
       }
       const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}`;
@@ -764,10 +785,7 @@ export class AgentToolExecutionPhase {
     const batchCheck = budget.recordParallelBatch(effectiveBatchCalls, { skipNearDuplicate: true });
     if (!batchCheck.allowed) {
       const batchReason = (batchCheck as { readonly reason?: string }).reason;
-      state.terminationReason = transitionTerminationReason(
-        state.terminationReason,
-        (batchReason as AgentTerminationReason | undefined) ?? 'loop_detected',
-      );
+      state.terminationReason = (batchReason as AgentTerminationReason | undefined) ?? 'loop_detected';
       return true;
     }
 
@@ -941,10 +959,7 @@ export class AgentToolExecutionPhase {
 
     const loopCheck = budget.recordStep(effectiveTool, effectiveInput);
     if (!loopCheck.allowed) {
-      state.terminationReason = transitionTerminationReason(
-        state.terminationReason,
-        loopCheck.reason ?? 'loop_detected',
-      );
+      state.terminationReason = loopCheck.reason ?? 'loop_detected';
       return true;
     }
 

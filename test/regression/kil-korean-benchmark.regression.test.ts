@@ -3,7 +3,7 @@
  *
  * Companion to `kil-noisy-benchmark.regression.test.ts` (which is en-heavy).
  * This suite exercises the `/v1/search/lookup` pipeline against
- * `data/noisy-entity-benchmark-ko.jsonl` — 390 cases over a Korea-market
+ * `data/noisy-entity-benchmark-ko.jsonl` — ~370 cases over a Korea-market
  * catalog (best-sellers like 1865 / 몬테스 알파 / 카시예로 델 디아블로 plus
  * famous premium: 5대 샤토, 슈퍼투스칸, 돔페리뇽/뵈브클리코, 케이머스 …).
  * The catalog is injected via `fixtureDocuments` / `fixtureAliases`
@@ -41,30 +41,31 @@ import {
 } from '../integration/helpers/korean-wine-fixtures.js';
 
 /**
- * Overall recall floor. Measured recall@3 ≈ 0.97 on the 390-case suite.
- * The headline includes the designed-abstain `ko_ambiguous` slice (~0.48 by
- * design), which structurally caps the overall; floor at 0.88 still catches a
- * real recall regression in the recall-meaningful categories.
+ * Overall recall floor. Measured recall@3 ≈ 0.97 on the post-dedup +
+ * harder-typo suite (~370 cases). The headline includes the designed-abstain
+ * `ko_ambiguous` slice (~0.48 by design), which structurally caps the
+ * overall; floor at 0.92 sits ~5% below measured — tighter than the
+ * earlier 0.88 audit-flagged cushion that let the fuzzy gain unwind.
  */
-const KO_RECALL_AT_3_FLOOR = 0.88;
-const KO_RECALL_AT_1_FLOOR = 0.86;
+const KO_RECALL_AT_3_FLOOR = 0.92;
+const KO_RECALL_AT_1_FLOOR = 0.92;
 
 /**
- * Per-category recall@3 floors. `ko_ambiguous` is intentionally absent — it
- * measures abstention, not recall (see header). Floors sit ~8-12% below
- * measured to absorb fixture shuffles while catching real backslides.
+ * Per-category recall@3 floors. `ko_ambiguous` is intentionally absent
+ * (gated by KO_FALSE_EXACT_CEILING / KO_RESOLUTION_MATCH_FLOOR below).
+ * Floors sit ~3-7% below measured (was ~8-12%, audit flagged as no-op).
  */
 const KO_PER_CATEGORY_RECALL_AT_3_FLOORS: Readonly<Record<string, number>> = {
-  ko_spacing: 0.92, // measured 1.0
-  ko_shorthand: 0.90, // measured 1.0
-  ko_particle: 0.92, // measured 1.0
-  ko_codeswitch: 0.90, // measured 1.0
-  ko_ime_jamo: 0.90, // measured 1.0 — IME 종성/모음 잔류 복원
-  ko_loanword_variant: 0.90, // measured 1.0 — 표기 변형
-  ko_vintage: 0.92, // measured 1.0 — vintage normalizer 결합
-  ko_region_producer: 0.88, // measured 1.0
-  ko_typo: 0.85, // measured 1.0 — Hangul 자모 fuzzy 단계로 복원
-  ko_phonetic_var: 0.75, // measured 0.92 — 된소리 변형 (마꼬 등 일부 한계)
+  ko_spacing: 0.95, // measured 1.0
+  ko_shorthand: 0.95, // measured 1.0
+  ko_particle: 0.95, // measured 1.0
+  ko_codeswitch: 0.93, // measured 1.0
+  ko_ime_jamo: 0.93, // measured 1.0
+  ko_loanword_variant: 0.95, // measured 1.0
+  ko_vintage: 0.93, // measured 1.0
+  ko_region_producer: 0.93, // measured 1.0
+  ko_typo: 0.85, // measured 1.0 on single-jamo slips, harder 2-edit additions may dip
+  ko_phonetic_var: 0.80, // measured ~0.92 — 된소리 변형
 };
 
 /**

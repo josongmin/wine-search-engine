@@ -367,3 +367,18 @@ export function deriveAbbreviations(
     a.surface < b.surface ? -1 : a.surface > b.surface ? 1 : 0,
   );
 }
+
+/**
+ * Korean cognate producer-prefix stop-words (loan-word equivalents of the
+ * Latin `FIRST_WORD_STOP_WORDS` set). Used by the Korean surface-form
+ * expander to drop producer prefix tokens for V2 iconic-token variants
+ * (e.g. "샤또 마고" → "마고"). Co-located with the Latin set so the two
+ * vocabularies stay in lock-step under CLAUDE.md SSoT discipline.
+ */
+export const KOREAN_PRODUCER_STOP_WORDS: ReadonlySet<string> = new Set([
+  '샤또', '샤토', '도멘', '돔', '테누타', '카사', '비냐', '보데가', '바인구트', '메종',
+]);
+
+export function isKoreanProducerStopWord(token: string): boolean {
+  return KOREAN_PRODUCER_STOP_WORDS.has(token.normalize('NFC'));
+}

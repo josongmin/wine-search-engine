@@ -18,6 +18,13 @@ export interface AgentConfig {
   readonly toolTimeoutMs?: number | undefined;
   /** Parallel batch timeout (ms) for Promise.all tool batches. */
   readonly parallelBatchTimeoutMs?: number | undefined;
+  /**
+   * P0 termination guard: when true (default), the planner is forced to issue a
+   * second-step verify/synthesize action for queries with hard reasoning
+   * obligations identified by `AgentQueryExecutionContract.requiresVerificationStep`.
+   * When false, the legacy "one tool + answer" path is preserved.
+   */
+  readonly requireVerificationStep?: boolean | undefined;
 }
 
 /**
@@ -41,4 +48,5 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   perStepTimeoutMs: 10_000,
   maxContextChars: 8_000,
   maxTotalTokens: 50_000,
+  requireVerificationStep: true,
 } as const;
