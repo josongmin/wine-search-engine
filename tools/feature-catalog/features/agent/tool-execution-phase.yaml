@@ -6,11 +6,20 @@ summary: |
   drinkability follow-up 분기. refinement hint 주입, evidence frame 태깅,
   budget 기록.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Unit test 1개 + regression 3개로 정합성 일부 보장. 그러나
-  agent-tool-execution-policy.ts (1329 lines)에 14-단 sanitize chain이 포함되어
-  분리/축소 필요. drinkability follow-up이 phase 내부에 묻혀 있음.
+  Unit test 1개 + regression 4개 (parallel-tools, evidence-frame-emission,
+  inner-surface-contract, tool-execution-phase-properties — fast-check
+  numRuns=100)로 dispatch order / bounded fan-out / no double-issue /
+  batch isolation / terminal-state propagation / NFC preservation
+  (Korean tool inputs) / prototype-pollution rejection (`__proto__`,
+  `constructor`, `toString`, `hasOwnProperty`, `prototype`, `valueOf`,
+  `isPrototypeOf`, empty) — 7개 invariant이 property-based로 잠겨 있음.
+  MAX_TOOLS_PER_BATCH, KNOWN_AGENT_TOOL_NAMES 같은 SSoT 상수에 직접
+  엮어 magic-number drift 자동 감지. 남은 5점 차이: policy 모듈 1329 lines
+  분리/축소 (lookup-strategy-selector / overconstraint-detector /
+  normalize)와 drinkability follow-up explicit handler 추출이 끝나야
+  SOTA++ 완전체.
 
 status: active
 since: 2025-09
@@ -24,6 +33,8 @@ key_files:
   - src/application/agent/agent-tool-execution-phase.ts
   - src/application/agent/agent-tool-execution-policy.ts
   - src/application/agent/agent-tool-execution-result-policy.ts
+  - src/application/agent/agent-tool-execution-support.ts
+  - src/application/agent/tool-batch-policy.ts
 
 tests:
   unit:
@@ -32,6 +43,7 @@ tests:
     - test/regression/agent-parallel-tools.regression.test.ts
     - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
     - test/regression/agent-tools-inner-surface-contract.regression.test.ts
+    - test/regression/tool-execution-phase-properties.regression.test.ts
 
 depends_on:
   - agent.tool-batch-policy
