@@ -230,7 +230,12 @@ const HANGUL_JAMO_BLOCK_END = 0x11ff;
  * mapping in lock-step with the one source of truth for the jamo tables.
  */
 const HANGUL_L_TO_T_IDX: readonly number[] = COMPAT_INITIALS.map((choseong) => {
-  const tIdx = COMPAT_FINALS.indexOf(choseong);
+  // Widen COMPAT_FINALS to readonly string[] for the lookup: the three tense
+  // consonants ㄸ/ㅃ/ㅉ exist in COMPAT_INITIALS but NOT in COMPAT_FINALS's
+  // literal union (they never appear as a final), so `indexOf` with the
+  // narrow `as const` element type rejects them. They correctly resolve to
+  // -1 → 0 ("no final"), which is the documented intent.
+  const tIdx = (COMPAT_FINALS as readonly string[]).indexOf(choseong);
   return tIdx > 0 ? tIdx : 0;
 });
 
