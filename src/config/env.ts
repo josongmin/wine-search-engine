@@ -246,6 +246,11 @@ function buildConfig(parsed: EnvVars) {
       threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
     },
 
+    /** P0.1: TTL (days) for trusting nightly-fitted calibration params. */
+    calibration: {
+      ttlDays: parsed.CALIBRATION_TTL_DAYS,
+    },
+
     /** Drinking-window runtime policy. Defaults to deterministic; ONNX is an explicit override. */
     drinkingWindow: {
       modelDir: parsed.DRINKING_WINDOW_MODEL_DIR,

@@ -20,6 +20,16 @@ const ENV_WEBHOOK_SECRET_MIN_LEN = 16;
  */
 const DEFAULT_CONFIDENCE_REFUSAL_THRESHOLD = 0.45;
 
+/** Default TTL (days) for trusting nightly-fitted calibration parameters.
+ *  Matches `DEFAULT_CALIBRATION_TTL_DAYS` in the resolver Calibrator and
+ *  the operator-facing runbook (`docs/runbook-calibration-nightly.md`). */
+const CALIBRATION_TTL_DEFAULT_DAYS = 14;
+/** Upper bound on the operator-configurable TTL. Picked to be wider than
+ *  any sensible production value (one year) so an operator cannot
+ *  accidentally configure "never expire" while still receiving lint
+ *  failures on raw literals further down the config tree. */
+const CALIBRATION_TTL_MAX_DAYS = 365;
+
 export const FeaturesEnvSchema = z.object({
   /** Run evaluation on startup (fire-and-forget). */
   EVAL_RUN_AT_STARTUP: z
@@ -51,6 +61,20 @@ export const FeaturesEnvSchema = z.object({
     .min(0)
     .max(1)
     .default(DEFAULT_CONFIDENCE_REFUSAL_THRESHOLD),
+
+  /** P0.1: TTL (in days) for trusting nightly-fitted calibration parameters.
+   * When `calibration_params.fitted_at` is older than this many days,
+   * Calibrator emits `calibrationTrusted: false` and AdmissionGate skips the
+   * confidence-refusal policy (the hallucination guard auto-disables rather
+   * than gate-keep on stale calibration). Default 14 days (see
+   * CALIBRATION_TTL_DEFAULT_DAYS) — bounded above by
+   * CALIBRATION_TTL_MAX_DAYS so "never expire" is unreachable. */
+  CALIBRATION_TTL_DAYS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(CALIBRATION_TTL_MAX_DAYS)
+    .default(CALIBRATION_TTL_DEFAULT_DAYS),
 
   /** Optional path to a runtime LTR model file for PG-less / bootstrap startup.
    * When unset, learned LTR is skipped unless registry data is available from PG.

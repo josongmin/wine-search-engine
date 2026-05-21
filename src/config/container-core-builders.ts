@@ -202,6 +202,10 @@ export function buildEntityResolver(adapters: CoreAdapterServices, config: Confi
     new AmbiguityClassifier(),
     new Calibrator(adapters.calibrationStore, {
       requireTrainedParams: config.nodeEnv === 'production',
+      // P0.1: surface the env-driven TTL so AdmissionGate trust is gated on
+      // nightly-pipeline freshness rather than the legacy `trained_at`
+      // back-fill timestamp.
+      calibrationTtlDays: config.calibration.ttlDays,
     }),
     // Mirror the CandidatePoolService kill-switch guard: when KILL_SWITCH_LEARNING is true,
     // suppress the learned-matcher blend in the Resolver as well. Without this guard,

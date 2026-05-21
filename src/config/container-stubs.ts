@@ -3,6 +3,7 @@ import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type {
   CalibrationParams,
   CalibrationStore,
+  FreshCalibrationLoadResult,
 } from '../domain/resolver/port/calibration-store.port.js';
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../domain/query/port/threshold-store.port.js';
@@ -41,6 +42,21 @@ export class StubCalibrationStore implements CalibrationStore {
 
   save(_queryClass: QueryClass, _params: CalibrationParams): Promise<void> {
     return Promise.resolve();
+  }
+
+  /**
+   * P0.1: the stub store never carries fitted params, so trust is always
+   * withheld. Resolver paths that wire this stub will continue to compute
+   * a calibrated confidence (via the default isotonic identity in
+   * `Calibrator.loadParamsWithTrust`) but AdmissionGate's refusal policy
+   * stays disabled — matching production behaviour pre-nightly-pipeline.
+   */
+  loadIfFresh(
+    _queryClass: QueryClass,
+    _ttlDays: number,
+    _now?: Date,
+  ): Promise<FreshCalibrationLoadResult> {
+    return Promise.resolve({ trusted: false, reason: 'missing', params: null });
   }
 }
 

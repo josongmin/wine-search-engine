@@ -17,6 +17,7 @@ interface EvalResultRow {
   predicted_entity_id: string | null;
   predicted_status: string;
   decision_confidence: number;
+  top1_raw_score: number | null;
   utility_score: number;
   is_correct_resolve: boolean;
   is_wrong_resolve: boolean;
@@ -29,6 +30,15 @@ interface EvalResultRow {
 }
 
 function rowToEvalResult(row: EvalResultRow): EvalResult {
+  // top1_raw_score is NULLable (migration 021 added it; legacy rows carry NULL).
+  // Guard with Number.isFinite to refuse NaN/Infinity that could be smuggled in
+  // by a corrupted ETL backfill (CLAUDE.md schema rule on external numerics).
+  const rawScoreFromRow = row.top1_raw_score;
+  const top1RawScore: number | undefined =
+    rawScoreFromRow != null && Number.isFinite(rawScoreFromRow)
+      ? rawScoreFromRow
+      : undefined;
+
   const base = {
     caseId: row.case_id,
     predictedStatus: toDecisionStatus(row.predicted_status),
@@ -41,6 +51,7 @@ function rowToEvalResult(row: EvalResultRow): EvalResult {
     evidenceItems: parseEvidenceItemsJsonb(row.evidence_items, 'PgEvalResultStore'),
     latencyMs: row.latency_ms,
     decisionSnapshot: parseDecisionSnapshotJsonb(row.decision_snapshot, 'PgEvalResultStore'),
+    ...(top1RawScore !== undefined ? { top1RawScore } : {}),
   };
   if (row.predicted_entity_id != null) {
     return { ...base, predictedEntityId: createCanonicalEntityId(row.predicted_entity_id) };
@@ -57,19 +68,27 @@ export class PgEvalResultStore implements EvalResultStore {
       return;
     }
     const resultId = nanoid();
+    // top1RawScore is optional on EvalResult (legacy callers may omit it).
+    // Persist null rather than 0 so the calibration trace extractor can
+    // distinguish "no raw score recorded" from "raw score of zero".
+    const rawScoreParam: number | null =
+      result.top1RawScore != null && Number.isFinite(result.top1RawScore)
+        ? result.top1RawScore
+        : null;
     await this.pool.query(
       `INSERT INTO eval_results (
         result_id, case_id, predicted_entity_id, predicted_status,
-        decision_confidence, utility_score,
+        decision_confidence, top1_raw_score, utility_score,
         is_correct_resolve, is_wrong_resolve, is_safe_abstain, is_avoidable_abstain,
         evidence_items, latency_ms, decision_snapshot
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         resultId,
         result.caseId,
         result.predictedEntityId ?? null,
         result.predictedStatus,
         result.decisionConfidence,
+        rawScoreParam,
         result.utilityScore,
         result.isCorrectResolve,
         result.isWrongResolve,

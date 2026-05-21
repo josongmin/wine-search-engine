@@ -1,0 +1,230 @@
+name: Calibration Nightly (P0.1)
+# P0.1 — Nightly auto-pipeline that re-fits the resolver calibrator so
+# AdmissionGate.confidenceRefusal can be trusted (RFC-016 §3, RFC-006 §6).
+#
+# 08:00 UTC daily picks up the previous day's eval traces. Three sequential
+# jobs: extract-trace → fit-calibration → verify-trust. On failure, the
+# fourth job opens a GitHub issue with the last-fit timestamp, ECE values,
+# and sample counts so an operator can decide whether to manually re-run.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      since_days:
+        description: 'Look-back window in days for trace extraction'
+        required: false
+        default: '7'
+
+concurrency:
+  group: calibration-nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # Mirrors src/config/env-schemas/features.schema.ts default; explicit here
+  # so the verify-trust step uses the same window the pipeline targets.
+  CALIBRATION_TTL_DAYS: '14'
+  MIN_TRACE_SAMPLES: '100'
+  SINCE_DAYS: ${{ github.event.inputs.since_days || '7' }}
+  TRACE_PATH: data/calibration/trace-nightly.ndjson
+  REPORT_DIR: data/calibration-reports
+
+jobs:
+  extract-trace:
+    name: Extract calibration trace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wine_engine_calibration
+          POSTGRES_USER: wine
+          POSTGRES_PASSWORD: wine_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U wine -d wine_engine_calibration"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_calibration
+      FIXTURE_REPO_PATH: ${{ github.workspace }}/wine-engine-fixture
+    outputs:
+      trace_present: ${{ steps.emit.outputs.trace_present }}
+      trace_rows: ${{ steps.emit.outputs.trace_rows }}
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Checkout fixture repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/wine-engine-fixture
+          path: wine-engine-fixture
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply DB migrations (incl. 021 calibration pipeline)
+        run: pnpm run migrate
+      - name: Seed eval_results from fixture replay
+        # The fixture repo carries a sealed bundle of replay traces; replay
+        # them through the offline-eval runner so eval_results has rows the
+        # extractor can consume. This keeps the nightly pipeline hermetic
+        # — no dependency on live production traffic.
+        run: pnpm run eval:offline:smoke
+      - name: Extract trace NDJSON
+        id: emit
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${TRACE_PATH}")"
+          if npx tsx scripts/eval/extract-calibration-trace.ts \
+                --output "${TRACE_PATH}" \
+                --since "${SINCE_DAYS}" \
+                --min-samples "${MIN_TRACE_SAMPLES}"; then
+            rows=$(wc -l < "${TRACE_PATH}")
+            echo "trace_present=true" >> "$GITHUB_OUTPUT"
+            echo "trace_rows=${rows}" >> "$GITHUB_OUTPUT"
+          else
+            echo "trace_present=false" >> "$GITHUB_OUTPUT"
+            echo "trace_rows=0" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+      - name: Upload trace artifact
+        if: steps.emit.outputs.trace_present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-trace
+          path: ${{ env.TRACE_PATH }}
+          retention-days: 7
+
+  fit-calibration:
+    name: Fit calibration models
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [extract-trace]
+    if: needs.extract-trace.outputs.trace_present == 'true'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wine_engine_calibration
+          POSTGRES_USER: wine
+          POSTGRES_PASSWORD: wine_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U wine -d wine_engine_calibration"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_calibration
+    outputs:
+      report_path: ${{ steps.fit.outputs.report_path }}
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Apply DB migrations
+        run: pnpm run migrate
+      - name: Download trace artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: calibration-trace
+          path: ${{ env.TRACE_PATH }}
+      - name: Fit + persist
+        id: fit
+        run: |
+          set -euo pipefail
+          mkdir -p "${REPORT_DIR}"
+          npx tsx scripts/calibrate/fit-resolver-calibration.ts \
+              --input "${TRACE_PATH}" \
+              --report-dir "${REPORT_DIR}" \
+              --min-samples "${MIN_TRACE_SAMPLES}"
+          # Surface the most-recent report path for downstream jobs.
+          latest=$(ls -1t "${REPORT_DIR}"/*.json | head -n 1)
+          echo "report_path=${latest}" >> "$GITHUB_OUTPUT"
+      - name: Upload fit report
+        if: always() && steps.fit.outputs.report_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-report
+          path: ${{ steps.fit.outputs.report_path }}
+          retention-days: 30
+
+  verify-trust:
+    name: Verify AdmissionGate trust flips to true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [fit-calibration]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wine_engine_calibration
+          POSTGRES_USER: wine
+          POSTGRES_PASSWORD: wine_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U wine -d wine_engine_calibration"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_calibration
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Apply DB migrations
+        run: pnpm run migrate
+      - name: Run the calibration trust integration check
+        run: pnpm run test:integration:file -- test/integration/calibration/post-fit-trust.integration.test.ts
+
+  on-failure:
+    name: File an issue on failure
+    runs-on: ubuntu-latest
+    needs: [extract-trace, fit-calibration, verify-trust]
+    if: failure() && github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download report (if present)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: calibration-report
+          path: failed-report
+      - name: Open issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            let body = "Nightly calibration pipeline failed.\n\n";
+            body += `- run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n`;
+            body += `- trace rows reported: ${{ needs.extract-trace.outputs.trace_rows }}\n`;
+            try {
+              const files = fs.readdirSync('failed-report');
+              if (files.length > 0) {
+                const report = JSON.parse(fs.readFileSync(`failed-report/${files[0]}`, 'utf8'));
+                body += `\n## Latest report\n`;
+                body += `- fittedAt: ${report.fittedAt}\n`;
+                body += `- datasetHash: ${report.datasetHash}\n`;
+                body += `- totalSamples: ${report.totalSamples}\n`;
+                body += `- classFits:\n`;
+                for (const f of report.classFits || []) {
+                  body += `  - ${f.queryClass}: method=${f.method}, ECE ${f.eceBefore.toFixed(4)} -> ${f.eceAfter.toFixed(4)}, N=${f.sampleSize}\n`;
+                }
+              } else {
+                body += "\n(No report artifact was uploaded.)\n";
+              }
+            } catch (err) {
+              body += `\n(Could not read report: ${err.message})\n`;
+            }
+            body += "\nRefer to `docs/runbook-calibration-nightly.md` for operator steps.";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Nightly calibration pipeline failed (${new Date().toISOString().slice(0,10)})`,
+              body,
+              labels: ['p0.1-calibration', 'auto-filed', 'nightly-failure']
+            });

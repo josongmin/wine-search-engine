@@ -2,7 +2,21 @@ import type { QueryClass } from '../../shared/types/index.js';
 import { plattScaling } from '../../shared/utils/calibration.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
-import type { CalibrationStore, CalibrationParams } from '../port/calibration-store.port.js';
+import type {
+  CalibrationStore,
+  CalibrationParams,
+  FreshCalibrationLoadResult,
+} from '../port/calibration-store.port.js';
+
+/**
+ * Default TTL (in days) for nightly-fitted calibration parameters before
+ * AdmissionGate withholds trust. 14 days matches the operator runbook
+ * (`docs/runbook-calibration-nightly.md`) and gives the nightly pipeline
+ * up to two weeks of grace before the hallucination guard auto-disables.
+ *
+ * Override via `CALIBRATION_TTL_DAYS` env var (see config wiring).
+ */
+export const DEFAULT_CALIBRATION_TTL_DAYS = 14;
 
 /**
  * Default fallback calibration params used when no trained model exists.
@@ -26,6 +40,19 @@ interface CalibratorOptions {
    * silently falling back to identity calibration.
    */
   readonly requireTrainedParams?: boolean | undefined;
+  /**
+   * Freshness TTL (days) for the nightly-fitted calibration params. When
+   * `fittedAt` is older than this many days (or `null` for legacy rows),
+   * the calibrator marks `calibrationTrusted: false` on the emitted score
+   * and AdmissionGate skips the confidence-refusal policy.
+   *
+   * Defaults to {@link DEFAULT_CALIBRATION_TTL_DAYS} (14 days).
+   */
+  readonly calibrationTtlDays?: number | undefined;
+  /**
+   * Optional clock injection for tests. Defaults to `() => new Date()`.
+   */
+  readonly now?: () => Date;
 }
 
 /**
@@ -88,7 +115,7 @@ export class Calibrator {
     }
     const hasRunnerUp = rawScores.top2 !== undefined;
 
-    const params = await this.loadParams(queryClass);
+    const { params, trusted } = await this.loadParamsWithTrust(queryClass);
     // Normalize only when the default isotonic fallback is used. The gap
     // between top1 and top2 must be preserved under the same monotonic
     // transform so the calibrated gap is comparable.
@@ -112,25 +139,63 @@ export class Calibrator {
       top2CalibratedScore: top2Calibrated,
       calibratedGap,
       decisionConfidenceC: top1Calibrated,
-      calibrationTrusted: !this.isDefaultFallbackParams(params),
+      calibrationTrusted: trusted,
     };
   }
 
   /**
-   * Loads calibration parameters for the given query class, falling back
-   * to default parameters when none are available.
+   * Loads calibration parameters and resolves the AdmissionGate trust flag
+   * via the freshness-gated port method.
+   *
+   * Semantics:
+   *   - `loadIfFresh` returns `trusted: true` → use the stored params and
+   *     mark the emitted CalibratedResolutionScore as trusted.
+   *   - `loadIfFresh` returns `trusted: false` with `params != null`
+   *     (stale / never-fitted): callers still apply the stored calibration
+   *     (so resolution scores don't suddenly collapse onto identity), but
+   *     mark `trusted: false` so AdmissionGate skips the refusal policy.
+   *   - `loadIfFresh` returns `trusted: false` with `params == null`
+   *     (missing): fall back to the isotonic identity, also untrusted.
+   *     If `requireTrainedParams` is set, throw instead.
+   *
+   * This separation is load-bearing: a stale calibration is still the
+   * best-available transform for *displaying* a calibrated probability;
+   * what it cannot do is gate-keep refusals. Mixing those two concerns
+   * was the original P0.1 silent-disable bug.
    */
-  private async loadParams(queryClass: QueryClass): Promise<CalibrationParams> {
-    const stored = await this.calibrationStore.getCalibrationParams(queryClass);
-    if (stored !== null) {
-      return stored;
+  private async loadParamsWithTrust(
+    queryClass: QueryClass,
+  ): Promise<{ readonly params: CalibrationParams; readonly trusted: boolean }> {
+    const ttlDays = this.options.calibrationTtlDays ?? DEFAULT_CALIBRATION_TTL_DAYS;
+    const nowFn = this.options.now ?? (() => new Date());
+
+    let outcome: FreshCalibrationLoadResult;
+    if (typeof this.calibrationStore.loadIfFresh === 'function') {
+      outcome = await this.calibrationStore.loadIfFresh(queryClass, ttlDays, nowFn());
+    } else {
+      // Backward compat for in-memory stub stores that don't implement
+      // loadIfFresh — treat them as authoritative (trusted) when params exist.
+      const stored = await this.calibrationStore.getCalibrationParams(queryClass);
+      outcome =
+        stored !== null
+          ? { trusted: true, params: stored }
+          : { trusted: false, reason: 'missing', params: null };
     }
+
+    if (outcome.trusted) {
+      return { params: outcome.params, trusted: true };
+    }
+
+    if (outcome.params !== null) {
+      return { params: outcome.params, trusted: false };
+    }
+
     if (this.options.requireTrainedParams) {
       throw new Error(
         `Missing trained calibration params for query class "${queryClass}". Refusing fallback calibration.`,
       );
     }
-    return DEFAULT_PLATT_PARAMS;
+    return { params: DEFAULT_PLATT_PARAMS, trusted: false };
   }
 
   private isDefaultFallbackParams(params: CalibrationParams): boolean {

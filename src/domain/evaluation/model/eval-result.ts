@@ -28,6 +28,16 @@ export interface EvalResult {
   /** Calibrated decision confidence in [0, 1]. */
   readonly decisionConfidence: number;
 
+  /**
+   * Raw (pre-calibration) top-1 resolver score, if available.
+   *
+   * Persisted by `PgEvalResultStore` into `eval_results.top1_raw_score`. The
+   * nightly calibration trainer (P0.1) consumes (top1RawScore, isCorrectResolve)
+   * pairs to fit Platt / isotonic / temperature scaling. Optional because
+   * legacy rows pre-dating the column carry NULL.
+   */
+  readonly top1RawScore?: number;
+
   /** Surfaced execution contract for honesty-aware offline analysis. */
   readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
 

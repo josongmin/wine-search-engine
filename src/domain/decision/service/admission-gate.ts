@@ -227,6 +227,12 @@ export class AdmissionGate {
     // Operators see the silent-skip counter rise so the missing-calibration
     // condition is observable instead of silently neutering the guard.
     if (this.confidenceRefusalPolicy !== undefined) {
+      // P0.1 trust gate: when the calibrator emitted `calibrationTrusted: false`
+      // (identity fallback, or stale/never-fitted params per the nightly
+      // auto-pipeline TTL — see PgCalibrationStore.loadIfFresh), the calibrated
+      // confidence is not a reliable hallucination signal. Skip the refusal
+      // policy and raise the silent-skip counter so the missing-calibration
+      // condition is observable instead of silently neutering the guard.
       const trusted = input.resolveResult.decisionTrace.calibrationTrusted;
       if (!trusted) {
         globalSilentSkipCounter.increment('admission_gate_confidence_refusal_skipped_untrusted', {
