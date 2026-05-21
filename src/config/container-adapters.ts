@@ -3,6 +3,7 @@ import { PgBlockingAdapter } from '../infrastructure/adapter/pg-blocking-adapter
 import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-store.js';
 import { PgAmbiguityDictionary } from '../infrastructure/adapter/pg-ambiguity-dictionary.js';
 import { PgThresholdStore } from '../infrastructure/adapter/pg-threshold-store.js';
+import { PgRefusalThresholdStore } from '../infrastructure/adapter/pg-refusal-threshold-store.js';
 import { isAliasTableAvailable } from '../infrastructure/adapter/pg-alias-matcher.js';
 import {
   CascadingAliasMatcher,
@@ -36,6 +37,7 @@ import type { SearchIndexPort } from '../domain/retrieval/port/search-index.port
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../domain/query/port/threshold-store.port.js';
+import type { RefusalThresholdProvider } from '../domain/decision/port/refusal-threshold-provider.port.js';
 import type { AliasMatcher } from '../domain/query/service/anchor-extractor.js';
 import type { MappingTablePort } from '../domain/attribute/port/mapping-table.port.js';
 import type {
@@ -76,6 +78,12 @@ export interface CoreAdapterServices {
   readonly calibrationStore: CalibrationStore;
   readonly ambiguityDict: AmbiguityDictionary;
   readonly thresholdStore: ThresholdStore;
+  /**
+   * P0.2: per-class refusal threshold provider. Undefined when no PG pool is
+   * wired (dev/test stub mode); the runtime policy degrades to the legacy
+   * scalar fallback in that case. See `ConfidenceRefusalPolicy`.
+   */
+  readonly refusalThresholdProvider?: RefusalThresholdProvider | undefined;
   readonly aliasMatcher: AliasMatcher;
   readonly mappingTable: MappingTablePort;
   readonly anchorResolver: AnchorResolverPort;
@@ -233,6 +241,15 @@ export async function buildCoreAdapterServices(
       new StaticAmbiguityDictionary(),
     ),
     thresholdStore: pool ? new PgThresholdStore(pool) : new StubThresholdStore(),
+    ...(pool !== undefined
+      ? {
+          refusalThresholdProvider: new PgRefusalThresholdStore(pool, {
+            ...(config.confidenceRefusal.ttlSeconds !== undefined
+              ? { ttlSeconds: config.confidenceRefusal.ttlSeconds }
+              : {}),
+          }),
+        }
+      : {}),
     aliasMatcher: ((): AliasMatcher => {
       const indexAliasMatcher = new SearchIndexAliasMatcher(searchIndex);
       if (config.killSwitch.aliasOverlay) {

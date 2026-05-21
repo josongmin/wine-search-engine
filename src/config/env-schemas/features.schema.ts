@@ -1,4 +1,13 @@
 import { z } from 'zod';
+import {
+  HOURS_PER_DAY,
+  MINUTES_PER_HOUR,
+  SECONDS_PER_MINUTE,
+} from '../../domain/shared/utils/time-units.js';
+
+/** TTL maximum: one day. Beyond this fresh AURC fits would never reach the runtime. */
+const REFUSAL_THRESHOLD_TTL_MAX_SECONDS =
+  HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE;
 
 /**
  * Feature-area settings that do not belong to a single infrastructure
@@ -49,11 +58,17 @@ export const FeaturesEnvSchema = z.object({
 
   /** Confidence refusal threshold for hallucination prevention (Epic 17.3).
    * The AdmissionGate refuses resolved decisions whose calibrated
-   * confidence C falls below this floor.
+   * confidence C falls below this floor. The guard is ALWAYS on (this carries
+   * the AURC 0.45 default so prod never silently no-ops the hallucination
+   * check). Set to 0 to allow any positive-confidence decision (NaN is still
+   * refused — non-finite C is treated as zero confidence).
+   *
+   * Note (P0.2): when a PG-backed `RefusalThresholdProvider` is wired and
+   * serves per-class AURC thresholds, the policy prefers the per-class value
+   * and this scalar is forwarded as the legacy fallback / force-uniform
+   * escape hatch.
    * Default: 0.45 (AURC-calibrated operating point — refusal recall ≥ 0.90,
    * false-refusal rate ≤ 0.05 against the wrong_top1 eval slice).
-   * Set to 0 to allow any positive-confidence decision (NaN is still refused
-   * — the hallucination guard treats non-finite C as zero confidence).
    */
   CONFIDENCE_REFUSAL_THRESHOLD: z
     .coerce.number()
@@ -75,6 +90,18 @@ export const FeaturesEnvSchema = z.object({
     .min(1)
     .max(CALIBRATION_TTL_MAX_DAYS)
     .default(CALIBRATION_TTL_DEFAULT_DAYS),
+
+  /** TTL (seconds) for the in-process cache backing `PgRefusalThresholdStore`.
+   * Range [1, 86400]: the lower bound prevents pathological per-request DB
+   * traffic from a misconfigured `0`; the upper bound is one day, beyond
+   * which fresh AURC fits would never reach the runtime. Default 300s
+   * (5 min) matches the nightly fit cadence with ample headroom. */
+  REFUSAL_THRESHOLD_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(REFUSAL_THRESHOLD_TTL_MAX_SECONDS)
+    .optional(),
 
   /** Optional path to a runtime LTR model file for PG-less / bootstrap startup.
    * When unset, learned LTR is skipped unless registry data is available from PG.

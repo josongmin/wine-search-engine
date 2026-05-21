@@ -179,23 +179,23 @@ describe('regression: AdmissionGate trust gate on calibrationTrusted (P0.1)', ()
   const LOW_C = 0.2; // below the 0.45 default refusal threshold
   const HIGH_C = 0.9;
 
-  it('with policy + calibrationTrusted=true → refuses low-C decisions', () => {
+  it('with policy + calibrationTrusted=true → refuses low-C decisions', async () => {
     const gate = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
     const input = makeInput({ C: LOW_C, calibrationTrusted: true });
-    const result = gate.check(input, TEST_SNAPSHOT);
+    const result = await gate.check(input, TEST_SNAPSHOT);
     expect(result.admitted).toBe(false);
     if (!result.admitted) {
       expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');
     }
   });
 
-  it('with policy + calibrationTrusted=false → does NOT refuse (trust withheld)', () => {
+  it('with policy + calibrationTrusted=false → does NOT refuse (trust withheld)', async () => {
     // This is the P0.1 invariant: stale/never-fitted calibration must not
     // drive the hallucination guard. The decision flows through the
     // standard admission policy instead.
     const gate = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
     const input = makeInput({ C: LOW_C, calibrationTrusted: false });
-    const result = gate.check(input, TEST_SNAPSHOT);
+    const result = await gate.check(input, TEST_SNAPSHOT);
     // The standard admission policy may still reject for other reasons
     // (low C also fails policy thresholds), but the REASON must not be
     // CONFIDENCE_BELOW_THRESHOLD when the trust flag is false.
@@ -204,7 +204,7 @@ describe('regression: AdmissionGate trust gate on calibrationTrusted (P0.1)', ()
     }
   });
 
-  it('with policy + calibrationTrusted absent → treated as untrusted (does NOT refuse)', () => {
+  it('with policy + calibrationTrusted absent → treated as untrusted (does NOT refuse)', async () => {
     // `decisionTrace.calibrationTrusted` is a REQUIRED boolean in production —
     // the Calibrator always emits a verdict, so typecheck forbids omission and
     // this `undefined` is only reachable via a legacy test cast. When the trust
@@ -213,23 +213,23 @@ describe('regression: AdmissionGate trust gate on calibrationTrusted (P0.1)', ()
     // influence decisions). Mirrors the calibrationTrusted=false invariant.
     const gate = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
     const input = makeInput({ C: LOW_C, calibrationTrusted: undefined });
-    const result = gate.check(input, TEST_SNAPSHOT);
+    const result = await gate.check(input, TEST_SNAPSHOT);
     if (!result.admitted) {
       expect(result.reason).not.toBe('CONFIDENCE_BELOW_THRESHOLD');
     }
   });
 
-  it('adjacent case — high-C + calibrationTrusted=false → still admits (no false refusal)', () => {
+  it('adjacent case — high-C + calibrationTrusted=false → still admits (no false refusal)', async () => {
     const gate = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
     const input = makeInput({ C: HIGH_C, calibrationTrusted: false });
-    const result = gate.check(input, TEST_SNAPSHOT);
+    const result = await gate.check(input, TEST_SNAPSHOT);
     expect(result.admitted).toBe(true);
   });
 
-  it('adjacent case — high-C + calibrationTrusted=true → admits', () => {
+  it('adjacent case — high-C + calibrationTrusted=true → admits', async () => {
     const gate = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
     const input = makeInput({ C: HIGH_C, calibrationTrusted: true });
-    const result = gate.check(input, TEST_SNAPSHOT);
+    const result = await gate.check(input, TEST_SNAPSHOT);
     expect(result.admitted).toBe(true);
   });
 });

@@ -278,7 +278,7 @@ export class DecisionEngine {
     // Non-resolved decisions bypass the gate so that clarification/failure
     // outcomes are never blocked.
     if (finalState.status === 'resolved') {
-      const admissionResult = this.admissionGate.check(input, snapshot);
+      const admissionResult = await this.admissionGate.check(input, snapshot);
       if (!admissionResult.admitted) {
         bootstrapLogger.warn(
           {

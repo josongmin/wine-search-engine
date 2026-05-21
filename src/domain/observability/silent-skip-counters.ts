@@ -56,7 +56,17 @@ export type SilentSkipKind =
   // must be scoped to the active snapshot; when the snapshot pointer table
   // is absent (fresh DB, pre-publish) these features degrade cleanly.
   | 'learning_warmup_disabled_snapshot_pointer_missing'
-  | 'alias_checker_disabled_snapshot_pointer_missing';
+  | 'alias_checker_disabled_snapshot_pointer_missing'
+  // P0.2 AURC-derived refusal threshold: observability for the
+  // per-class lookup path. `provider_unavailable` fires when the
+  // `RefusalThresholdProvider` cannot supply thresholds (cold start,
+  // DB outage) and the policy degrades to calibration-untrusted
+  // semantics. `class_fallback` fires when the runtime query_class
+  // is missing from the table and the `general` fallback row is used.
+  // `fallback_missing` fires when even the `general` row is absent.
+  | 'refusal_threshold_provider_unavailable'
+  | 'refusal_threshold_class_fallback'
+  | 'refusal_threshold_fallback_missing';
 
 export type LtrInferenceComponentScoreField =
   | 'semantic'
@@ -115,6 +125,9 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'admission_gate_confidence_refusal_skipped_untrusted',
   'learning_warmup_disabled_snapshot_pointer_missing',
   'alias_checker_disabled_snapshot_pointer_missing',
+  'refusal_threshold_provider_unavailable',
+  'refusal_threshold_class_fallback',
+  'refusal_threshold_fallback_missing',
 ] as const;
 
 const SILENT_SKIP_KIND_SET: ReadonlySet<string> = new Set(SILENT_SKIP_KINDS);

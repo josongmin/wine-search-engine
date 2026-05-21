@@ -293,18 +293,22 @@ export function buildDecisionEngine(
   adapters: CoreAdapterServices,
   config: Config,
 ): DecisionEngine {
-  // Epic 17.3: ConfidenceRefusalPolicy is on by default. The threshold is
-  // sourced from env (CONFIDENCE_REFUSAL_THRESHOLD), which carries the
-  // AURC-calibrated 0.45 default when the operator hasn't overridden it.
-  // The policy is always instantiated so the AdmissionGate's confidence-floor
-  // check (§e) never silently no-ops — pre-fix wiring made the policy
-  // conditional on the env being explicitly set, which left prod with the
-  // hallucination guard disabled until someone remembered to flip the flag.
-  // To effectively disable, set CONFIDENCE_REFUSAL_THRESHOLD=0 (NaN is still
-  // refused since it's treated as zero confidence).
-  const confidenceRefusalPolicy = new ConfidenceRefusalPolicy(
-    config.confidenceRefusal.threshold,
-  );
+  // Epic 17.3 + P0.2: the ConfidenceRefusalPolicy is ALWAYS instantiated so
+  // the AdmissionGate's confidence floor (§e) never silently no-ops — pre-fix
+  // wiring made it conditional on the env being explicitly set, which left
+  // prod with the hallucination guard disabled until someone flipped the flag.
+  // The scalar threshold carries the AURC 0.45 default (CONFIDENCE_REFUSAL_THRESHOLD).
+  // When a PG-backed per-class provider is wired, the policy prefers the
+  // per-class AURC threshold and the scalar is forwarded as the legacy
+  // fallback / force-uniform escape hatch. To effectively disable, set
+  // CONFIDENCE_REFUSAL_THRESHOLD=0 (NaN is still refused as zero confidence).
+  const { threshold } = config.confidenceRefusal;
+  const provider = adapters.refusalThresholdProvider;
+  const confidenceRefusalPolicy =
+    provider !== undefined
+      ? new ConfidenceRefusalPolicy({ provider, legacyThreshold: threshold })
+      : new ConfidenceRefusalPolicy(threshold);
+
 
   return new DecisionEngine(adapters.thresholdStore, confidenceRefusalPolicy);
 }

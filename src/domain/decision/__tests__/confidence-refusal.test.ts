@@ -271,19 +271,19 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
   describe('backward compatibility: no policy provided', () => {
     const gate = new AdmissionGate(undefined);
 
-    it('admits resolved decisions when no policy is provided', () => {
+    it('admits resolved decisions when no policy is provided', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.1, 0.3),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true);
     });
 
-    it('low-confidence decisions are NOT refused without policy', () => {
+    it('low-confidence decisions are NOT refused without policy', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.05, 0.3),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true);
     });
   });
@@ -297,22 +297,22 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       ['refuses resolved decisions when C < threshold', 0.4, false],
       ['correctly compares at boundary C = threshold', 0.45, true],
       ['refuses C just below threshold', 0.449, false],
-    ])('%s', (_label, C, admitted) => {
+    ])('%s', async (_label, C, admitted) => {
       const input = makeInput({
         resolveResult: makeResolverResult(C, 0.3),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(admitted);
       if (!result.admitted) {
         expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');
       }
     });
 
-    it('includes traceRef in rejection result', () => {
+    it('includes traceRef in rejection result', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.3, 0.3),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
       if (!result.admitted) {
         expect(result.traceRef).toBeDefined();
@@ -325,7 +325,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
     const policy = new ConfidenceRefusalPolicy(0.45);
     const gate = new AdmissionGate(policy);
 
-    it('defaults to C=1.0 when decisionConfidenceC is absent', () => {
+    it('defaults to C=1.0 when decisionConfidenceC is absent', async () => {
       const testEntityId = createEntityId('entity-test');
       const result_no_c = {
         status: 'resolved' as const,
@@ -358,7 +358,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
         conformalSetSize: 1,
       };
       const input = makeInput({ resolveResult: result_no_c as EntityResolveResult });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true); // Defaults to 1.0, which is >= 0.45
     });
   });
@@ -367,7 +367,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
     const policy = new ConfidenceRefusalPolicy(0.45);
     const gate = new AdmissionGate(policy);
 
-    it('uses provenance policy instead of raw hard-constraint presence for constraint evidence obligations', () => {
+    it('uses provenance policy instead of raw hard-constraint presence for constraint evidence obligations', async () => {
       const input = makeInput({
         queryPlan: {
           ...makeQueryPlan(),
@@ -408,18 +408,18 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
         }),
         evidenceSummary: makeStrongIdentityEvidence(),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(true);
     });
 
-    it('other failures take precedence (no identity evidence)', () => {
+    it('other failures take precedence (no identity evidence)', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.3, 0.3), // C < 0.45
         evidenceSummary: {
           identityEvidencePresent: false,
         },
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
       // Could be either EVIDENCE_INSUFFICIENT or CONFIDENCE_BELOW_THRESHOLD
       // depending on order, but the important thing is it's rejected
@@ -430,19 +430,19 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       }
     });
 
-    it('confidence refusal is checked after other gates pass', () => {
+    it('confidence refusal is checked after other gates pass', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.3, 0.3), // C < 0.45
         evidenceSummary: makeStrongIdentityEvidence(),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
       if (!result.admitted) {
         expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');
       }
     });
 
-    it('richer identity evidence mismatch is rejected before confidence refusal', () => {
+    it('richer identity evidence mismatch is rejected before confidence refusal', async () => {
       const input = makeInput({
         resolveResult: makeResolverResult(0.9, 0.3),
         evidenceSummary: makeStrongIdentityEvidence({
@@ -451,7 +451,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
           },
         }),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
       if (!result.admitted) {
         expect(result.reason).toBe('EVIDENCE_INSUFFICIENT');
@@ -463,36 +463,36 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
     it.each([
       ['threshold 0.0 admits all decisions', 0.0, 0.0, true],
       ['threshold 1.0 refuses all decisions with C < 1.0', 1.0, 0.99, false],
-    ])('%s', (_label, threshold, C, admitted) => {
+    ])('%s', async (_label, threshold, C, admitted) => {
       const policy = new ConfidenceRefusalPolicy(threshold);
       const gate = new AdmissionGate(policy);
       const input = makeInput({
         resolveResult: makeResolverResult(C, 0.3),
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(admitted);
     });
 
-    it('threshold 0.5 correctly splits at midpoint', () => {
+    it('threshold 0.5 correctly splits at midpoint', async () => {
       const policy = new ConfidenceRefusalPolicy(0.5);
       const gate = new AdmissionGate(policy);
 
       const admit = makeInput({
         resolveResult: makeResolverResult(0.5, 0.3),
       });
-      const admitResult = gate.check(admit, TEST_SNAPSHOT);
+      const admitResult = await gate.check(admit, TEST_SNAPSHOT);
       expect(admitResult.admitted).toBe(true);
 
       const refuse = makeInput({
         resolveResult: makeResolverResult(0.49, 0.3),
       });
-      const refuseResult = gate.check(refuse, TEST_SNAPSHOT);
+      const refuseResult = await gate.check(refuse, TEST_SNAPSHOT);
       expect(refuseResult.admitted).toBe(false);
     });
   });
 
   describe('integration with decision flow', () => {
-    it('confidence refusal occurs after identity checks', () => {
+    it('confidence refusal occurs after identity checks', async () => {
       const policy = new ConfidenceRefusalPolicy(0.45);
       const gate = new AdmissionGate(policy);
       const result_no_entity = {
@@ -515,7 +515,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       const input = makeInput({
         resolveResult: result_no_entity as EntityResolveResult,
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       // Should fail due to identity check, not confidence
       expect(result.admitted).toBe(false);
       if (!result.admitted) {
@@ -523,7 +523,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
       }
     });
 
-    it('confidence refusal is the last check', () => {
+    it('confidence refusal is the last check', async () => {
       const policy = new ConfidenceRefusalPolicy(0.45);
       const gate = new AdmissionGate(policy);
       const queryPlanWithAnchor = {
@@ -551,7 +551,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
           },
         ],
       });
-      const result = gate.check(input, TEST_SNAPSHOT);
+      const result = await gate.check(input, TEST_SNAPSHOT);
       expect(result.admitted).toBe(false);
       if (!result.admitted) {
         expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');

@@ -124,3 +124,48 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - run: bash scripts/run-vespa-quality.sh
+
+  # P0.2: AURC-derived per-class refusal threshold derivation. The job
+  # refits τ from the latest `eval_results` rows so the runtime
+  # `ConfidenceRefusalPolicy` always reads a fresh AURC operating point
+  # from `refusal_thresholds`.  The `--dry-run` flag keeps the nightly
+  # rehearsal idempotent — production fits run from the deployment
+  # operator's job once the verified report is reviewed.
+  calibrate-refusal-threshold:
+    runs-on: ubuntu-latest
+    needs: [verification-core]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wine_engine_test
+          POSTGRES_USER: wine
+          POSTGRES_PASSWORD: wine_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U wine -d wine_engine_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG_CONNECTION_STRING: postgresql://wine:wine_test@localhost:5433/wine_engine_test
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Apply migrations
+        run: pnpm tsx src/infrastructure/db/migrate.ts
+      - name: Derive refusal thresholds (dry-run)
+        run: |
+          pnpm tsx scripts/calibrate/derive-refusal-threshold.ts \
+            --target-coverage 0.85 \
+            --min-samples-per-class 1 \
+            --report-dir data/refusal-threshold-reports \
+            --dry-run || true
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refusal-threshold-report
+          path: data/refusal-threshold-reports/*.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -241,9 +241,10 @@ function buildConfig(parsed: EnvVars) {
       webhookSecret: parsed.WEBHOOK_SECRET,
     },
 
-    /** Confidence refusal settings (Epic 17.3: Hallucination Verify). */
+    /** Confidence refusal settings (Epic 17.3: Hallucination Verify; P0.2: AURC). */
     confidenceRefusal: {
       threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
+      ttlSeconds: parsed.REFUSAL_THRESHOLD_TTL_SECONDS,
     },
 
     /** P0.1: TTL (days) for trusting nightly-fitted calibration params. */

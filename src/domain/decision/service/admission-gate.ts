@@ -135,7 +135,7 @@ export class AdmissionGate {
    * @returns An {@link AdmissionResult} indicating whether the decision is
    *   admitted or rejected with a specific {@link FailureReason}.
   */
-  check(input: DecisionInput, snapshot: DecisionSnapshot): AdmissionResult {
+  async check(input: DecisionInput, snapshot: DecisionSnapshot): Promise<AdmissionResult> {
     const admissionContext = deriveAdmissionContext(input);
     const admissionClosure = evaluateAdmissionClosure(input, snapshot);
 
@@ -227,12 +227,13 @@ export class AdmissionGate {
     // Operators see the silent-skip counter rise so the missing-calibration
     // condition is observable instead of silently neutering the guard.
     if (this.confidenceRefusalPolicy !== undefined) {
-      // P0.1 trust gate: when the calibrator emitted `calibrationTrusted: false`
-      // (identity fallback, or stale/never-fitted params per the nightly
-      // auto-pipeline TTL — see PgCalibrationStore.loadIfFresh), the calibrated
-      // confidence is not a reliable hallucination signal. Skip the refusal
-      // policy and raise the silent-skip counter so the missing-calibration
-      // condition is observable instead of silently neutering the guard.
+      // P0.1 trust gate (OUTER): when the calibrator emitted
+      // `calibrationTrusted: false` (identity fallback, or stale/never-fitted
+      // params per the nightly auto-pipeline TTL — see
+      // PgCalibrationStore.loadIfFresh), the calibrated confidence is not a
+      // reliable hallucination signal. Skip the refusal policy and raise the
+      // silent-skip counter so the missing-calibration condition is observable
+      // instead of silently neutering the guard.
       const trusted = input.resolveResult.decisionTrace.calibrationTrusted;
       if (!trusted) {
         globalSilentSkipCounter.increment('admission_gate_confidence_refusal_skipped_untrusted', {
@@ -240,7 +241,21 @@ export class AdmissionGate {
         });
       } else {
         const C = input.resolveResult.decisionTrace.decisionConfidenceC;
-        if (this.confidenceRefusalPolicy.shouldRefuse(C)) {
+        // P0.2 per-class threshold (INNER): when a PG-backed provider is wired
+        // the async evaluator looks up the AURC-derived threshold for the
+        // query class. Its own `calibrationTrusted` flag reflects provider
+        // availability (DB outage / cold start) so an unavailable provider
+        // degrades to "do not refuse" rather than being translated into a
+        // silent refusal. Without a provider we fall back to the global floor.
+        if (this.confidenceRefusalPolicy.hasProvider()) {
+          const evaluation = await this.confidenceRefusalPolicy.evaluate(
+            C,
+            input.queryPlan.queryClass,
+          );
+          if (evaluation.calibrationTrusted && evaluation.shouldRefuse) {
+            return this.reject('CONFIDENCE_BELOW_THRESHOLD', input, snapshot);
+          }
+        } else if (this.confidenceRefusalPolicy.shouldRefuse(C)) {
           return this.reject('CONFIDENCE_BELOW_THRESHOLD', input, snapshot);
         }
       }

@@ -210,34 +210,34 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
   const snapshot = makeSnapshot();
 
   describe('IDENTITY_REFERENCE_MISSING (a) — identity reference required for any resolved emission', () => {
-    it('rejects when resolveResult.topEntity is absent (singleton bypass cannot fabricate identity)', () => {
+    it('rejects when resolveResult.topEntity is absent (singleton bypass cannot fabricate identity)', async () => {
       const input = makeDecisionInput({
         resolveResult: makeResolveResult({ topEntityPresent: false }),
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'IDENTITY_REFERENCE_MISSING');
     });
 
-    it('rejects when topEntity.entityId is the empty string (vacuous identity ≠ valid identity)', () => {
+    it('rejects when topEntity.entityId is the empty string (vacuous identity ≠ valid identity)', async () => {
       const input = makeDecisionInput({
         resolveResult: makeResolveResult({ topEntityId: '   ' }),
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'IDENTITY_REFERENCE_MISSING');
     });
   });
 
   describe('SNAPSHOT_MISMATCH (a) — query plan was compiled against a different snapshot', () => {
-    it('rejects when snapshot.threshold_profile_id diverges from plan.thresholdProfileId', () => {
-      const result = gate.check(
+    it('rejects when snapshot.threshold_profile_id diverges from plan.thresholdProfileId', async () => {
+      const result = await gate.check(
         makeDecisionInput(),
         makeSnapshot({ threshold_profile_id: 'stale-v0' }),
       );
       expectRejectedWith(result, 'SNAPSHOT_MISMATCH');
     });
 
-    it('rejects when snapshot.planner_version diverges from plan.plannerVersion', () => {
-      const result = gate.check(
+    it('rejects when snapshot.planner_version diverges from plan.plannerVersion', async () => {
+      const result = await gate.check(
         makeDecisionInput(),
         makeSnapshot({ planner_version: '0.9.9' }),
       );
@@ -246,8 +246,8 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
   });
 
   describe('IDENTITY_SEAL_VIOLATION (a) — policy seal mismatch is reported distinctly from snapshot drift', () => {
-    it('rejects when snapshot.policy_rule_version diverges from plan.policyRuleVersion', () => {
-      const result = gate.check(
+    it('rejects when snapshot.policy_rule_version diverges from plan.policyRuleVersion', async () => {
+      const result = await gate.check(
         makeDecisionInput(),
         makeSnapshot({ policy_rule_version: '0.0.0' }),
       );
@@ -256,7 +256,7 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
   });
 
   describe('EVIDENCE_INSUFFICIENT (b/d/policy) — identity / anchor evidence missing', () => {
-    it('rejects when identity-evidence trail is unsatisfied (no identityEvidence detail + no flag)', () => {
+    it('rejects when identity-evidence trail is unsatisfied (no identityEvidence detail + no flag)', async () => {
       const evidenceSummary = makeEvidenceSummary({
         identityEvidencePresent: false,
         ...({ identityEvidence: undefined } as never),
@@ -282,11 +282,11 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: ['identity_evidence'],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'EVIDENCE_INSUFFICIENT');
     });
 
-    it('rejects when anchor evidence is required but the trail is unsatisfied (mixed-route §5)', () => {
+    it('rejects when anchor evidence is required but the trail is unsatisfied (mixed-route §5)', async () => {
       const input = makeDecisionInput({
         queryPlan: makeQueryPlan({ route: 'mixed', anchors: [{} as never] }),
         provenanceContract: {
@@ -308,11 +308,11 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: ['anchor_evidence'],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'EVIDENCE_INSUFFICIENT');
     });
 
-    it('rejects when admission policy returns clarify without high-severity ambiguity', () => {
+    it('rejects when admission policy returns clarify without high-severity ambiguity', async () => {
       const input = makeDecisionInput({
         resolveResult: makeResolveResult({ C: 0.85 }),
         evidenceSummary: makeEvidenceSummary({
@@ -338,7 +338,7 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: [],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       // ambiguity not 'high' → clarify branch routes to EVIDENCE_INSUFFICIENT,
       // NOT AMBIGUITY_BLOCKED. This invariant lets operators distinguish
       // "low confidence on weak evidence" from "high ambiguity blocked".
@@ -347,7 +347,7 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
   });
 
   describe('HARD_CONSTRAINT_VIOLATION (c) — required hard-constraint evidence absent on resolved decision', () => {
-    it('rejects when the policy requires constraint evidence but the trail is unmet (KIL vintage-mismatch case)', () => {
+    it('rejects when the policy requires constraint evidence but the trail is unmet (KIL vintage-mismatch case)', async () => {
       // KIL: "샤또마고 2016" requested, only 2015 exists. Plan has hard
       // constraint vintage=2016, but the top entity matches no required
       // attributes → constraintEvidenceSatisfied=false → reject.
@@ -378,15 +378,15 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: ['constraint_evidence'],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'HARD_CONSTRAINT_VIOLATION');
     });
 
-    it('admits when no hard constraints are required (policy.requireConstraintEvidence=false bypasses §c)', () => {
+    it('admits when no hard constraints are required (policy.requireConstraintEvidence=false bypasses §c)', async () => {
       const input = makeDecisionInput({
         // Default policy — no hard constraints → policy.requireConstraintEvidence=false.
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expect(result.admitted).toBe(true);
     });
   });
@@ -399,7 +399,7 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
      * EVIDENCE_INSUFFICIENT. The two sibling tests below cover both halves so
      * a regression that collapses the clarify-severity split is caught.
      */
-    it('admits when ambiguity severity is medium and all other invariants are satisfied (no clarify branch taken)', () => {
+    it('admits when ambiguity severity is medium and all other invariants are satisfied (no clarify branch taken)', async () => {
       const input = makeDecisionInput({
         ambiguitySummary: {
           types: ['homonym'],
@@ -425,11 +425,11 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: [],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expect(result.admitted).toBe(true);
     });
 
-    it('rejects with AMBIGUITY_BLOCKED when severity=high (clarify branch differentiates by severity over EVIDENCE_INSUFFICIENT)', () => {
+    it('rejects with AMBIGUITY_BLOCKED when severity=high (clarify branch differentiates by severity over EVIDENCE_INSUFFICIENT)', async () => {
       // Trigger sequence:
       //   1. identitySeal satisfied (identityEvidenceSatisfied=true, snapshot match)
       //   2. constraintEvidence not required, anchor not required
@@ -461,41 +461,41 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: [],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'AMBIGUITY_BLOCKED');
     });
   });
 
   describe('POLICY_BLOCKED — admission policy rejects upfront (route unhealthy / blocking on heuristic mode)', () => {
-    it('rejects when routeHealthy is explicitly false (degraded retrieval path cannot emit binding answers)', () => {
+    it('rejects when routeHealthy is explicitly false (degraded retrieval path cannot emit binding answers)', async () => {
       const input = makeDecisionInput({
         routeHealthy: false,
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'POLICY_BLOCKED');
     });
 
-    it('rejects when blocking is requested under heuristic execution mode (no fallback to advisory)', () => {
+    it('rejects when blocking is requested under heuristic execution mode (no fallback to advisory)', async () => {
       const input = makeDecisionInput({
         blockingRequested: true,
         executionMode: 'heuristic',
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expectRejectedWith(result, 'POLICY_BLOCKED');
     });
   });
 
   describe('CONFIDENCE_BELOW_THRESHOLD (e) — Epic 17.3 ConfidenceRefusalPolicy hard floor', () => {
-    it('rejects when calibrated C is below the injected refusal threshold', () => {
+    it('rejects when calibrated C is below the injected refusal threshold', async () => {
       const gateWithRefusal = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
       const input = makeDecisionInput({
         resolveResult: makeResolveResult({ C: 0.30 }),
       });
-      const result = gateWithRefusal.check(input, snapshot);
+      const result = await gateWithRefusal.check(input, snapshot);
       expectRejectedWith(result, 'CONFIDENCE_BELOW_THRESHOLD');
     });
 
-    it('refuses when C is non-finite (NaN treated as zero-confidence — hallucination guard)', () => {
+    it('refuses when C is non-finite (NaN treated as zero-confidence — hallucination guard)', async () => {
       const gateWithRefusal = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
       const resolveResult = makeResolveResult({ C: 0.85 });
       const drifted: EntityResolveResult = {
@@ -506,20 +506,20 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
         } as never,
       };
       const input = makeDecisionInput({ resolveResult: drifted });
-      const result = gateWithRefusal.check(input, snapshot);
+      const result = await gateWithRefusal.check(input, snapshot);
       expectRejectedWith(result, 'CONFIDENCE_BELOW_THRESHOLD');
     });
 
-    it('admits when ConfidenceRefusalPolicy is absent (Epic 17.3 opt-in: undefined policy bypasses §e)', () => {
+    it('admits when ConfidenceRefusalPolicy is absent (Epic 17.3 opt-in: undefined policy bypasses §e)', async () => {
       const gateNoRefusal = new AdmissionGate();  // no policy injected
       const input = makeDecisionInput({
         resolveResult: makeResolveResult({ C: 0.30 }),
       });
-      const result = gateNoRefusal.check(input, snapshot);
+      const result = await gateNoRefusal.check(input, snapshot);
       expect(result.admitted).toBe(true);
     });
 
-    it('bypasses §e when calibrationTrusted=false (raw-score refusal-floor would be noise on identity-calibration fallback)', () => {
+    it('bypasses §e when calibrationTrusted=false (raw-score refusal-floor would be noise on identity-calibration fallback)', async () => {
       // CRITICAL invariant: when no trained calibration_params exist for the
       // query class, the Calibrator returns identity (raw score → C). Applying
       // a probability threshold to a raw score is RFC-006 §6 violation, so
@@ -533,11 +533,11 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           calibrationTrusted: false,
         } as never,
       };
-      const result = gateWithRefusal.check(makeDecisionInput({ resolveResult: untrusted }), snapshot);
+      const result = await gateWithRefusal.check(makeDecisionInput({ resolveResult: untrusted }), snapshot);
       expect(result.admitted).toBe(true);
     });
 
-    it('enforces §e when calibrationTrusted=true even at C marginally below threshold', () => {
+    it('enforces §e when calibrationTrusted=true even at C marginally below threshold', async () => {
       const gateWithRefusal = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
       const resolveResult = makeResolveResult({ C: 0.449 });
       const trusted: EntityResolveResult = {
@@ -547,18 +547,18 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           calibrationTrusted: true,
         } as never,
       };
-      const result = gateWithRefusal.check(makeDecisionInput({ resolveResult: trusted }), snapshot);
+      const result = await gateWithRefusal.check(makeDecisionInput({ resolveResult: trusted }), snapshot);
       expectRejectedWith(result, 'CONFIDENCE_BELOW_THRESHOLD');
     });
   });
 
   describe('admitted — happy path', () => {
-    it('admits a well-formed resolved decision (all invariants satisfied)', () => {
-      const result = gate.check(makeDecisionInput(), snapshot);
+    it('admits a well-formed resolved decision (all invariants satisfied)', async () => {
+      const result = await gate.check(makeDecisionInput(), snapshot);
       expect(result.admitted).toBe(true);
     });
 
-    it('admits even with empty admission_context (no hard constraints, no anchors, no identity seal)', () => {
+    it('admits even with empty admission_context (no hard constraints, no anchors, no identity seal)', async () => {
       const input = makeDecisionInput({
         queryPlan: makeQueryPlan({ intent: 'discovery' }),
         provenanceContract: {
@@ -580,14 +580,14 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
           missing: [],
         },
       });
-      const result = gate.check(input, snapshot);
+      const result = await gate.check(input, snapshot);
       expect(result.admitted).toBe(true);
     });
   });
 
   describe('rejection trace ref invariants', () => {
-    it('every rejection carries a non-empty traceRef for audit correlation', () => {
-      const result = gate.check(
+    it('every rejection carries a non-empty traceRef for audit correlation', async () => {
+      const result = await gate.check(
         makeDecisionInput(),
         makeSnapshot({ threshold_profile_id: 'stale' }),
       );
@@ -598,13 +598,13 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
       }
     });
 
-    it('throws when effectiveRoute is undefined (compiled-only execution invariant)', () => {
+    it('throws when effectiveRoute is undefined (compiled-only execution invariant)', async () => {
       const input = makeDecisionInput({
         ...({ effectiveRoute: undefined } as never),
       });
-      expect(() =>
+      await expect(
         gate.check(input, makeSnapshot({ threshold_profile_id: 'stale' })),
-      ).toThrow(/effectiveRoute is required/);
+      ).rejects.toThrow(/effectiveRoute is required/);
     });
   });
 });
