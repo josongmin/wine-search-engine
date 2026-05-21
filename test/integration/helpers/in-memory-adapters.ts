@@ -51,7 +51,21 @@ import {
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
 import { buildHangulJamoKey } from '../../../src/domain/shared/utils/hangul.js';
 import { pickHigherTrustAliasType } from '../../../src/domain/alias/service/conflict-resolver.js';
+import {
+  damerauLevenshteinOsa,
+  editDistanceSimilarity,
+} from '../../../src/domain/alias/service/edit-distance.js';
 import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/service/hybrid-candidate-summary.js';
+
+/**
+ * Fuzzy-stage tuning for {@link InMemoryAliasMatcher.findFuzzyMatches}.
+ * High threshold + min length keep it to near-typos only (production parity
+ * with pg-alias-matcher's Damerau channel, without the greedy over-match that
+ * would steal from the exact-ish stages).
+ */
+const FUZZY_SIMILARITY_THRESHOLD = 0.8;
+const FUZZY_MIN_KEY_LENGTH = 4;
+const FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8;
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -674,6 +688,19 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       return substringResults;
     }
 
+    // Stage 2.5: fuzzy edit-distance recall (last resort before smart docs).
+    // Mirrors production (pg-alias-matcher) which runs a Damerau/charNgram
+    // fuzzy channel; the in-memory matcher previously lacked it, so Korean
+    // jamo-level typos ("몬데스"→"몬테스", "케이무스"→"케이머스") could not
+    // recover. Hangul-aware: compares jamo-decomposed keys so a single
+    // consonant/vowel slip is a small edit distance. Tightly gated by a high
+    // similarity threshold + min length so it never steals from the exact-ish
+    // stages above or fabricates matches for genuinely ambiguous short terms.
+    const fuzzyResults = this.findFuzzyMatches(views.punctuationStripped);
+    if (fuzzyResults.length > 0) {
+      return fuzzyResults;
+    }
+
     // Stage 3: Smart alias generation from indexed documents
     const smartMatches = this.generateSmartAliases(views.punctuationStripped);
     if (smartMatches.length > 0) {
@@ -681,6 +708,69 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     }
 
     return [];
+  }
+
+  /**
+   * Fuzzy edit-distance matcher (Stage 2.5). Returns near-typo matches only.
+   *
+   * Strategy: build a script-appropriate "fuzzy key" for the query (Hangul →
+   * jamo-decomposed string; otherwise compact Latin) and compare it against
+   * each alias's same-script fuzzy key via Damerau-Levenshtein (OSA)
+   * similarity. Cross-script pairs are skipped (jamo vs Latin is meaningless).
+   *
+   * Emits `lookupStrategy: 'fuzzy_char_ngram'` and intentionally sets NO
+   * `aliasType` — the downstream `inferAliasType` maps the fuzzy strategy to
+   * the `misspelling` tier, which is the correct match-quality semantic even
+   * when the underlying alias record is curated/canonical.
+   */
+  private findFuzzyMatches(normalizedQuery: string): AliasMatchResult[] {
+    const queryJamo = buildHangulJamoKey(normalizedQuery);
+    // Hangul-only by design. The RCA target is Korean jamo-level typos
+    // ("몬데스"→"몬테스"). Latin approximate-query behaviour is deliberately
+    // *cautious* in this pipeline — `noisy-runtime-execution-contract`
+    // pins that a noisy Latin query like "opuss one" stays ambiguous
+    // without an identity seal (Epic 17.3 hallucination guard), and
+    // production's Latin fuzzy lives in pg-alias-matcher with its own
+    // calibration. So the in-memory test matcher must not fuzzy-resolve
+    // Latin queries.
+    if (!queryJamo.containsHangul) {
+      return [];
+    }
+    const queryKey = queryJamo.key;
+    if (queryKey.length < FUZZY_MIN_KEY_LENGTH) {
+      return [];
+    }
+
+    const results: AliasMatchResult[] = [];
+    for (const [normalized, entries] of this.aliases) {
+      const aliasJamo = buildHangulJamoKey(normalized);
+      if (!aliasJamo.containsHangul) {
+        continue; // compare Hangul query only against Hangul aliases
+      }
+      const aliasKey = aliasJamo.key;
+      if (aliasKey.length < FUZZY_MIN_KEY_LENGTH) {
+        continue;
+      }
+
+      const distance = damerauLevenshteinOsa(queryKey, aliasKey);
+      const similarity = editDistanceSimilarity(queryKey, aliasKey, distance);
+      if (similarity < FUZZY_SIMILARITY_THRESHOLD) {
+        continue;
+      }
+
+      const entityIds = entries.map((entry) => entry.entityId);
+      const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      results.push({
+        surfaceForm: entries[0]?.surfaceForm ?? normalized,
+        normalizedForm: normalized,
+        entityIds,
+        matchConfidence: maxConfidence * similarity * FUZZY_MATCH_CONFIDENCE_FACTOR,
+        lookupStrategy: 'fuzzy_char_ngram',
+      });
+    }
+
+    results.sort((a, b) => b.matchConfidence - a.matchConfidence);
+    return results;
   }
 
   /**

@@ -1,0 +1,390 @@
+{"benchmark_id": "neb-ko-001", "query": "오푸스 원", "expected_entity_id": "opus-one-2018", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "띄어쓰기 변형 — 오푸스원 공백 삽입형"}
+{"benchmark_id": "neb-ko-002", "query": "샤토마고", "expected_entity_id": "chateau-margaux-2015", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "붙여쓰기 — 샤토 마고 compact"}
+{"benchmark_id": "neb-ko-003", "query": "클라우디베이", "expected_entity_id": "cloudy-bay-2022", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias 붙여쓰기형"}
+{"benchmark_id": "neb-ko-004", "query": "모에샹동", "expected_entity_id": "moet-brut", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "모에 샹동 compact"}
+{"benchmark_id": "neb-ko-005", "query": "마시아마로네", "expected_entity_id": "masi-amarone", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "마시 아마로네 compact"}
+{"benchmark_id": "neb-ko-006", "query": "펜폴즈그레인지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "펜폴즈 그레인지 compact"}
+{"benchmark_id": "neb-ko-007", "query": "바롤로자코모", "expected_entity_id": "barolo-giacomo", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "바롤로 자코모 compact"}
+{"benchmark_id": "neb-ko-008", "query": "오 푸 스 원", "expected_entity_id": "opus-one-2018", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "음절별 과분할 — 모바일 자동완성 잡음"}
+{"benchmark_id": "neb-ko-009", "query": "샤토 마 고", "expected_entity_id": "chateau-margaux-2015", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "음절 과분할"}
+{"benchmark_id": "neb-ko-010", "query": "클라우디 베이", "expected_entity_id": "cloudy-bay-2022", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias 공백형"}
+{"benchmark_id": "neb-ko-011", "query": "바롤로 자 코모", "expected_entity_id": "barolo-giacomo", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "음절 과분할"}
+{"benchmark_id": "neb-ko-012", "query": "오푸스", "expected_entity_id": "opus-one-2018", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "부분명 — 오푸스원 prefix"}
+{"benchmark_id": "neb-ko-013", "query": "클라우디", "expected_entity_id": "cloudy-bay-2022", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "클라우디베이 prefix"}
+{"benchmark_id": "neb-ko-014", "query": "그레인지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "식별 토큰만 — 펜폴즈 그레인지의 cuvee명"}
+{"benchmark_id": "neb-ko-015", "query": "아마로네", "expected_entity_id": "masi-amarone", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "식별 토큰만 — 마시 아마로네 뒷부분"}
+{"benchmark_id": "neb-ko-016", "query": "이켐", "expected_entity_id": "sauternes-2015", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "등록 alias 이켐"}
+{"benchmark_id": "neb-ko-017", "query": "바롤로", "expected_entity_id": "barolo-giacomo", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "바롤로 자코모 prefix"}
+{"benchmark_id": "neb-ko-018", "query": "사시카이아", "expected_entity_id": "sassicaia-2018", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "등록 alias 정확 일치"}
+{"benchmark_id": "neb-ko-019", "query": "펜폴즈", "expected_entity_id": "penfolds-grange-2017", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "생산자 prefix"}
+{"benchmark_id": "neb-ko-020", "query": "마시", "expected_entity_id": "masi-amarone", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "생산자 prefix 단독"}
+{"benchmark_id": "neb-ko-021", "query": "자코모", "expected_entity_id": "barolo-giacomo", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "생산자명 토큰 단독"}
+{"benchmark_id": "neb-ko-022", "query": "사시", "expected_entity_id": "sassicaia-2018", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "커뮤니티 줄임 사시"}
+{"benchmark_id": "neb-ko-023", "query": "오푸스원이요", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "존칭/조사 이요 부착"}
+{"benchmark_id": "neb-ko-024", "query": "마고는", "expected_entity_id": "chateau-margaux-2015", "category": "ko_particle", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "주제 조사 는 부착 + 모호어"}
+{"benchmark_id": "neb-ko-025", "query": "그레인지로", "expected_entity_id": "penfolds-grange-2017", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "방향 조사 로 부착"}
+{"benchmark_id": "neb-ko-026", "query": "사시카이아랑", "expected_entity_id": "sassicaia-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "공동격 조사 랑 부착"}
+{"benchmark_id": "neb-ko-027", "query": "오푸스원 추천", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어 추천 잡음"}
+{"benchmark_id": "neb-ko-028", "query": "클라우디베이 찾아줘", "expected_entity_id": "cloudy-bay-2022", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어 찾아줘 잡음"}
+{"benchmark_id": "neb-ko-029", "query": "모에샹동 좀", "expected_entity_id": "moet-brut", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "보조어 좀 잡음"}
+{"benchmark_id": "neb-ko-030", "query": "사시카이아 와인", "expected_entity_id": "sassicaia-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어 와인 접미"}
+{"benchmark_id": "neb-ko-031", "query": "오푸스원 와인", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어 와인 접미"}
+{"benchmark_id": "neb-ko-032", "query": "펜폴즈 그레인지 와인", "expected_entity_id": "penfolds-grange-2017", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어 와인 접미"}
+{"benchmark_id": "neb-ko-033", "query": "오퍼스 one", "expected_entity_id": "opus-one-2018", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "한글 표기 + 영문 토큰"}
+{"benchmark_id": "neb-ko-034", "query": "샤또 margaux", "expected_entity_id": "chateau-margaux-2015", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "한글 producer + 영문 label"}
+{"benchmark_id": "neb-ko-035", "query": "penfolds 그레인지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문 producer + 한글 cuvee"}
+{"benchmark_id": "neb-ko-036", "query": "moet 모에", "expected_entity_id": "moet-brut", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 + 한글 중복 표기"}
+{"benchmark_id": "neb-ko-037", "query": "사시카이아 tuscany", "expected_entity_id": "sassicaia-2018", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "한글 label + 영문 region"}
+{"benchmark_id": "neb-ko-038", "query": "cloudy 클라우디", "expected_entity_id": "cloudy-bay-2022", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 + 한글 중복"}
+{"benchmark_id": "neb-ko-039", "query": "barolo 바롤로", "expected_entity_id": "barolo-giacomo", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 + 한글 중복"}
+{"benchmark_id": "neb-ko-040", "query": "masi 마시", "expected_entity_id": "masi-amarone", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문 + 한글 producer"}
+{"benchmark_id": "neb-ko-041", "query": "opus 오푸스원", "expected_entity_id": "opus-one-2018", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 prefix + 한글 full"}
+{"benchmark_id": "neb-ko-042", "query": "사시카이ㅇ", "expected_entity_id": "sassicaia-2018", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성 끝글자"}
+{"benchmark_id": "neb-ko-043", "query": "클라우디베ㅇ", "expected_entity_id": "cloudy-bay-2022", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성 끝글자"}
+{"benchmark_id": "neb-ko-044", "query": "모에 샹도ㅇ", "expected_entity_id": "moet-brut", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성 — 동의 종성 미완"}
+{"benchmark_id": "neb-ko-045", "query": "펜폴ㅈ 그레인지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성 중간 토큰"}
+{"benchmark_id": "neb-ko-046", "query": "오푸스ㅇ", "expected_entity_id": "opus-one-2018", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성"}
+{"benchmark_id": "neb-ko-047", "query": "바롤로자코ㅁ", "expected_entity_id": "barolo-giacomo", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성 끝글자"}
+{"benchmark_id": "neb-ko-048", "query": "마시아마로ㄴ", "expected_entity_id": "masi-amarone", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 종성 미완성 끝글자"}
+{"benchmark_id": "neb-ko-049", "query": "오퍼스원", "expected_entity_id": "opus-one-2018", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "오퍼스 vs 오푸스 외래어 표기 변형"}
+{"benchmark_id": "neb-ko-050", "query": "샤또 마고", "expected_entity_id": "chateau-margaux-2015", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "샤또 vs 샤토 된소리 표기"}
+{"benchmark_id": "neb-ko-051", "query": "모엣 샹동", "expected_entity_id": "moet-brut", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "모엣 vs 모에 표기 변형"}
+{"benchmark_id": "neb-ko-052", "query": "펜폴스 그레인지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "펜폴스 vs 펜폴즈 유무성 표기"}
+{"benchmark_id": "neb-ko-053", "query": "사씨카이아", "expected_entity_id": "sassicaia-2018", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "사씨 vs 사시 된소리 표기"}
+{"benchmark_id": "neb-ko-054", "query": "디켐", "expected_entity_id": "sauternes-2015", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "디켐 vs 이켐 (d'Yquem 표기 변형)"}
+{"benchmark_id": "neb-ko-055", "query": "모엣샹동", "expected_entity_id": "moet-brut", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "모엣 표기 + 붙여쓰기"}
+{"benchmark_id": "neb-ko-056", "query": "펜폴즈 그랜지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_loanword_variant", "language": "ko", "difficulty": "hard", "notes": "그랜지 vs 그레인지 표기 변형"}
+{"benchmark_id": "neb-ko-057", "query": "오푸스원 2018", "expected_entity_id": "opus-one-2018", "category": "ko_vintage", "language": "ko", "difficulty": "easy", "notes": "한글 label + 4자리 빈티지"}
+{"benchmark_id": "neb-ko-058", "query": "샤토마고 2015년", "expected_entity_id": "chateau-margaux-2015", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지 + 년 접미사"}
+{"benchmark_id": "neb-ko-059", "query": "오푸스원 18", "expected_entity_id": "opus-one-2018", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "2자리 빈티지 축약"}
+{"benchmark_id": "neb-ko-060", "query": "사시카이아 18년", "expected_entity_id": "sassicaia-2018", "category": "ko_vintage", "language": "ko", "difficulty": "hard", "notes": "2자리 빈티지 + 년"}
+{"benchmark_id": "neb-ko-061", "query": "펜폴즈 그레인지 2017", "expected_entity_id": "penfolds-grange-2017", "category": "ko_vintage", "language": "ko", "difficulty": "easy", "notes": "한글 + 4자리 빈티지"}
+{"benchmark_id": "neb-ko-062", "query": "클라우디베이 2022", "expected_entity_id": "cloudy-bay-2022", "category": "ko_vintage", "language": "ko", "difficulty": "easy", "notes": "한글 + 4자리 빈티지"}
+{"benchmark_id": "neb-ko-063", "query": "클라우디베이 22", "expected_entity_id": "cloudy-bay-2022", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "2자리 빈티지"}
+{"benchmark_id": "neb-ko-064", "query": "샤토마고 15", "expected_entity_id": "chateau-margaux-2015", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "2자리 빈티지"}
+{"benchmark_id": "neb-ko-065", "query": "마꼬", "expected_entity_id": "chateau-margaux-2015", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "마꼬 vs 마고 된소리 발음 변형"}
+{"benchmark_id": "neb-ko-066", "query": "모에뜨 샹동", "expected_entity_id": "moet-brut", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "모에뜨 vs 모에 발음 변형"}
+{"benchmark_id": "neb-ko-067", "query": "사시까이아", "expected_entity_id": "sassicaia-2018", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "까이아 된소리 발음 변형"}
+{"benchmark_id": "neb-ko-068", "query": "오푸스투", "expected_entity_id": "opus-one-2018", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "notes": "근접 오답(Opus Two 연상) — 신뢰도 낮춰 abstain/clarify 기대"}
+{"benchmark_id": "neb-ko-069", "query": "샤토", "expected_entity_id": "chateau-margaux-2015", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "과도하게 일반적(모든 샤토) — 단일 확정 금지"}
+{"benchmark_id": "neb-ko-070", "query": "마고", "expected_entity_id": "chateau-margaux-2015", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "마고 — 지역(Margaux AOC)과 모호. clarify 허용"}
+{"benchmark_id": "neb-ko-071", "query": "오프스원", "expected_entity_id": "opus-one-2018", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "오프스 — 오푸스 모음 오타(ㅡ/ㅜ)"}
+{"benchmark_id": "neb-ko-072", "query": "모에", "expected_entity_id": "moet-brut", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "모에 단독 — 부분 토큰 모호"}
+{"benchmark_id": "neb-ko-073", "query": "오퍼스 원", "expected_entity_id": "opus-one-2018", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias 오퍼스 원 정확 일치"}
+{"benchmark_id": "neb-ko-074", "query": "오 푸 스 원 18", "expected_entity_id": "opus-one-2018", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "음절 과분할 + 빈티지"}
+{"benchmark_id": "neb-ko-075", "query": "모에 샹동 브뤼", "expected_entity_id": "moet-brut", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "cuvee(브뤼) 부착"}
+{"benchmark_id": "neb-ko-076", "query": "바롤로 몬포르티노", "expected_entity_id": "barolo-giacomo", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "cuvee(몬포르티노) 한글 표기"}
+{"benchmark_id": "neb-ko-077", "query": "마시 아마로네 발폴리첼라", "expected_entity_id": "masi-amarone", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "appellation(발폴리첼라) 부착"}
+{"benchmark_id": "neb-ko-078", "query": "클라우디 베이 소비뇽", "expected_entity_id": "cloudy-bay-2022", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "품종(소비뇽 블랑) 부착"}
+{"benchmark_id": "neb-ko-079", "query": "나파 오푸스원", "expected_entity_id": "opus-one-2018", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(나파) + label"}
+{"benchmark_id": "neb-ko-080", "query": "보르도 마고", "expected_entity_id": "chateau-margaux-2015", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(보르도) + label"}
+{"benchmark_id": "neb-ko-081", "query": "토스카나 사시카이아", "expected_entity_id": "sassicaia-2018", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(토스카나) + label"}
+{"benchmark_id": "neb-ko-082", "query": "말보로 클라우디베이", "expected_entity_id": "cloudy-bay-2022", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(말보로) + label"}
+{"benchmark_id": "neb-ko-083", "query": "피에몬테 바롤로", "expected_entity_id": "barolo-giacomo", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(피에몬테) + label"}
+{"benchmark_id": "neb-ko-084", "query": "샴페인 모에", "expected_entity_id": "moet-brut", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "category(샴페인) + producer"}
+{"benchmark_id": "neb-ko-085", "query": "소테른 이켐", "expected_entity_id": "sauternes-2015", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "appellation(소테른) + label"}
+{"benchmark_id": "neb-ko-086", "query": "마고 샤또", "expected_entity_id": "chateau-margaux-2015", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "어순 도치 마고 샤또"}
+{"benchmark_id": "neb-ko-087", "query": "자코모 콘테르노", "expected_entity_id": "barolo-giacomo", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "생산자 풀네임(자코모 콘테르노) 한글"}
+{"benchmark_id": "neb-ko-088", "query": "이켐 2015", "expected_entity_id": "sauternes-2015", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "한글 alias + 빈티지"}
+{"benchmark_id": "neb-ko-089", "query": "바롤로 자코모 2010", "expected_entity_id": "barolo-giacomo", "category": "ko_vintage", "language": "ko", "difficulty": "hard", "notes": "빈티지 결합(연도 무관 엔티티)"}
+{"benchmark_id": "neb-ko-090", "query": "마시 아마로네 2015", "expected_entity_id": "masi-amarone", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "한글 + 빈티지"}
+{"benchmark_id": "neb-ko-091", "query": "로마네 꽁티", "expected_entity_id": "romanee-conti-2015", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "코퍼스 한계: fixture는 2019, 한글 alias 미등록 — 미해결 예상(정직 측정)"}
+{"benchmark_id": "neb-ko-092", "query": "로마네꽁티", "expected_entity_id": "romanee-conti-2015", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "코퍼스 한계 — 미해결 예상"}
+{"benchmark_id": "neb-ko-093", "query": "오푸스 원 추천해줘", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어 추천해줘 잡음 + 공백"}
+{"benchmark_id": "neb-ko-094", "query": "모에샹동이요", "expected_entity_id": "moet-brut", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "존칭 이요 부착"}
+{"benchmark_id": "neb-ko-095", "query": "펜폴즈그레인지좀", "expected_entity_id": "penfolds-grange-2017", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "붙여쓰기 + 보조어 좀"}
+{"benchmark_id": "neb-ko-096", "query": "클라우디베이는", "expected_entity_id": "cloudy-bay-2022", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "주제 조사 는 부착"}
+{"benchmark_id": "neb-ko-097", "query": "opus one 오푸스원", "expected_entity_id": "opus-one-2018", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 full + 한글 full 병기"}
+{"benchmark_id": "neb-ko-098", "query": "margaux 마고", "expected_entity_id": "chateau-margaux-2015", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 + 한글 병기"}
+{"benchmark_id": "neb-ko-099", "query": "amarone 아마로네", "expected_entity_id": "masi-amarone", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문 cuvee + 한글"}
+{"benchmark_id": "neb-ko-100", "query": "yquem 이켐", "expected_entity_id": "sauternes-2015", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문 + 한글 병기"}
+{"benchmark_id": "neb-ko-101", "query": "사시카이아 2018 toscana", "expected_entity_id": "sassicaia-2018", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "한글 + 빈티지 + 영문 region"}
+{"benchmark_id": "neb-ko-102", "query": "펜폴즈 grange", "expected_entity_id": "penfolds-grange-2017", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "한글 producer + 영문 cuvee"}
+{"benchmark_id": "neb-ko-103", "query": "오푸스원 나파밸리", "expected_entity_id": "opus-one-2018", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "label + region(나파밸리) 접미"}
+{"benchmark_id": "neb-ko-104", "query": "클 라 우 디 베 이", "expected_entity_id": "cloudy-bay-2022", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "전음절 과분할"}
+{"benchmark_id": "neb-ko-105", "query": "모 에 샹 동", "expected_entity_id": "moet-brut", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "전음절 과분할"}
+{"benchmark_id": "neb-ko-106", "query": "오푸스원!!", "expected_entity_id": "opus-one-2018", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음(느낌표)"}
+{"benchmark_id": "neb-ko-107", "query": "샤토마고...", "expected_entity_id": "chateau-margaux-2015", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음(말줄임)"}
+{"benchmark_id": "neb-ko-108", "query": "사시카이아???", "expected_entity_id": "sassicaia-2018", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음(물음표)"}
+{"benchmark_id": "neb-ko-109", "query": "모에 샹동~", "expected_entity_id": "moet-brut", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음(물결)"}
+{"benchmark_id": "neb-ko-110", "query": "디켐 와인", "expected_entity_id": "sauternes-2015", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "이켐 표기변형(디켐) + 카테고리어"}
+{"benchmark_id": "neb-ko-111", "query": "마시아마로네 와인 추천", "expected_entity_id": "masi-amarone", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "붙여쓰기 + 카테고리어 + 의도어"}
+{"benchmark_id": "neb-ko-112", "query": "바롤로자코모 찾아", "expected_entity_id": "barolo-giacomo", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기 + 의도어 찾아"}
+{"benchmark_id": "neb-ko-113", "query": "오퍼스원 2018", "expected_entity_id": "opus-one-2018", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "표기변형(오퍼스) + 빈티지"}
+{"benchmark_id": "neb-ko-114", "query": "샤또마고 2015", "expected_entity_id": "chateau-margaux-2015", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "된소리 표기 + 빈티지"}
+{"benchmark_id": "neb-ko-115", "query": "모엣 샹동 2015", "expected_entity_id": "moet-brut", "category": "ko_vintage", "language": "ko", "difficulty": "hard", "notes": "표기변형 + 빈티지(NV 와인)"}
+{"benchmark_id": "neb-ko-116", "query": "오푸스 원이요", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "공백 + 존칭 이요"}
+{"benchmark_id": "neb-ko-117", "query": "그레인지 펜폴즈", "expected_entity_id": "penfolds-grange-2017", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "어순 도치 cuvee+producer"}
+{"benchmark_id": "neb-ko-118", "query": "아마로네 마시", "expected_entity_id": "masi-amarone", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "어순 도치 cuvee+producer"}
+{"benchmark_id": "neb-ko-119", "query": "오푸스원2018", "expected_entity_id": "opus-one-2018", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "label+빈티지 무공백 결합"}
+{"benchmark_id": "neb-ko-120", "query": "클라우디베이2022", "expected_entity_id": "cloudy-bay-2022", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "label+빈티지 무공백 결합"}
+{"benchmark_id": "neb-ko-121", "query": "이켐", "expected_entity_id": "sauternes-2015", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "중복 케이스 검증용 — 안정성"}
+{"benchmark_id": "neb-ko-122", "query": "오퍼스 원 18", "expected_entity_id": "opus-one-2018", "category": "ko_vintage", "language": "ko", "difficulty": "hard", "notes": "표기변형 + 공백 + 2자리 빈티지"}
+{"benchmark_id": "neb-ko-123", "query": "펜폴즈 그레인지 17", "expected_entity_id": "penfolds-grange-2017", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "2자리 빈티지"}
+{"benchmark_id": "neb-ko-124", "query": "마시 아마로네 와인", "expected_entity_id": "masi-amarone", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어 와인 접미"}
+{"benchmark_id": "neb-ko-125", "query": "바롤로 와인", "expected_entity_id": "barolo-giacomo", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "바롤로 — 지역/품종 모호. clarify 허용"}
+{"benchmark_id": "neb-ko-126", "query": "사시카이아 찾아줘", "expected_entity_id": "sassicaia-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어 찾아줘"}
+{"benchmark_id": "neb-ko-127", "query": "모에샹동 추천", "expected_entity_id": "moet-brut", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어 추천"}
+{"benchmark_id": "neb-ko-128", "query": "오푸스 원 와인 추천해줘", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "공백 + 카테고리어 + 의도구"}
+{"benchmark_id": "neb-ko-129", "query": "클라우디 베이 소비뇽 블랑", "expected_entity_id": "cloudy-bay-2022", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "풀 품종명(소비뇽 블랑) 한글"}
+{"benchmark_id": "neb-ko-130", "query": "샤토 마고 그랑크뤼", "expected_entity_id": "chateau-margaux-2015", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "등급어(그랑크뤼) 부착"}
+{"benchmark_id": "neb-ko-131", "query": "1865", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "한국 최대 베스트셀러 — 숫자 단독"}
+{"benchmark_id": "neb-ko-132", "query": "1865 카베르네 소비뇽", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "풀 한글명"}
+{"benchmark_id": "neb-ko-133", "query": "1865 까베르네", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "까베르네 된소리 표기"}
+{"benchmark_id": "neb-ko-134", "query": "일팔육오", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "숫자 한글 음독"}
+{"benchmark_id": "neb-ko-135", "query": "1865 와인 추천", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어+의도어"}
+{"benchmark_id": "neb-ko-136", "query": "1865 카베네", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 카베네(카베르네 음절누락)"}
+{"benchmark_id": "neb-ko-137", "query": "1865 칠레", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country(칠레) 부착"}
+{"benchmark_id": "neb-ko-138", "query": "몬테스 알파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-139", "query": "몬테스알파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-140", "query": "몬테스", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "생산자 단독"}
+{"benchmark_id": "neb-ko-141", "query": "몬데스 알파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 몬데스(ㅔ/ㅐ 혼동)"}
+{"benchmark_id": "neb-ko-142", "query": "몬테스 알파 카베르네", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-143", "query": "몬테스알파ㅍ", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 자모 잔류"}
+{"benchmark_id": "neb-ko-144", "query": "montes 몬테스", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문+한글 병기"}
+{"benchmark_id": "neb-ko-145", "query": "카시예로 델 디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias 풀네임"}
+{"benchmark_id": "neb-ko-146", "query": "카시예로델디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-147", "query": "디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별 토큰"}
+{"benchmark_id": "neb-ko-148", "query": "악마의 와인", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "한국 별칭(악마의 와인)"}
+{"benchmark_id": "neb-ko-149", "query": "디아볼로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 디아볼로"}
+{"benchmark_id": "neb-ko-150", "query": "까시예로 델 디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "까시예로 된소리"}
+{"benchmark_id": "neb-ko-151", "query": "옐로우 테일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-152", "query": "옐로우테일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-153", "query": "옐로테일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "옐로테일 축약 표기"}
+{"benchmark_id": "neb-ko-154", "query": "엘로우테일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 엘로우(옐로우)"}
+{"benchmark_id": "neb-ko-155", "query": "노란 캥거루", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "한국 별칭(노란 캥거루)"}
+{"benchmark_id": "neb-ko-156", "query": "옐로우 테일 시라즈", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-157", "query": "빌라엠", "expected_entity_id": "villa-m-rosso", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-158", "query": "빌라 엠", "expected_entity_id": "villa-m-rosso", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "공백 변형"}
+{"benchmark_id": "neb-ko-159", "query": "빌라엠 레드", "expected_entity_id": "villa-m-rosso", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "색상어 부착"}
+{"benchmark_id": "neb-ko-160", "query": "빌라엠 달아요", "expected_entity_id": "villa-m-rosso", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "맛 서술 부착(달아요)"}
+{"benchmark_id": "neb-ko-161", "query": "빌라엠 단맛", "expected_entity_id": "villa-m-rosso", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "맛 키워드 부착"}
+{"benchmark_id": "neb-ko-162", "query": "모스카토 다스티", "expected_entity_id": "moscato-dasti-saracco", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-163", "query": "모스카토", "expected_entity_id": "moscato-dasti-saracco", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "품종/스타일 단독"}
+{"benchmark_id": "neb-ko-164", "query": "모스카토다스티", "expected_entity_id": "moscato-dasti-saracco", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-165", "query": "모스까토 다스티", "expected_entity_id": "moscato-dasti-saracco", "category": "ko_loanword_variant", "language": "ko", "difficulty": "hard", "notes": "모스까토 된소리"}
+{"benchmark_id": "neb-ko-166", "query": "제이콥스 크릭", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-167", "query": "제이콥스크릭", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-168", "query": "야곱의 시내", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "직역 별칭"}
+{"benchmark_id": "neb-ko-169", "query": "제이콥스 크릭 시라즈", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-170", "query": "베린저", "expected_entity_id": "beringer-white-zinfandel", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "생산자 단독"}
+{"benchmark_id": "neb-ko-171", "query": "베린저 화이트 진판델", "expected_entity_id": "beringer-white-zinfandel", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "풀네임"}
+{"benchmark_id": "neb-ko-172", "query": "베린저 화이트진판델", "expected_entity_id": "beringer-white-zinfandel", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "부분 붙여쓰기"}
+{"benchmark_id": "neb-ko-173", "query": "케이머스", "expected_entity_id": "caymus-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-174", "query": "케이머스 카베르네", "expected_entity_id": "caymus-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-175", "query": "케이머스 까베르네", "expected_entity_id": "caymus-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "까베르네 된소리"}
+{"benchmark_id": "neb-ko-176", "query": "카이무스", "expected_entity_id": "caymus-cabernet", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "카이무스 발음 변형(Caymus)"}
+{"benchmark_id": "neb-ko-177", "query": "케이무스", "expected_entity_id": "caymus-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 케이무스"}
+{"benchmark_id": "neb-ko-178", "query": "케이머스ㅅ", "expected_entity_id": "caymus-cabernet", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 자모 잔류"}
+{"benchmark_id": "neb-ko-179", "query": "caymus 케이머스", "expected_entity_id": "caymus-cabernet", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문+한글 병기"}
+{"benchmark_id": "neb-ko-180", "query": "실버 오크", "expected_entity_id": "silver-oak-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-181", "query": "실버오크", "expected_entity_id": "silver-oak-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-182", "query": "실버 오크 카베르네", "expected_entity_id": "silver-oak-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-183", "query": "실버오크 추천해줘", "expected_entity_id": "silver-oak-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어"}
+{"benchmark_id": "neb-ko-184", "query": "샤토 라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-185", "query": "라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별 토큰"}
+{"benchmark_id": "neb-ko-186", "query": "샤또 라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "샤또 된소리"}
+{"benchmark_id": "neb-ko-187", "query": "라피트 로칠드", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "가문명 부착"}
+{"benchmark_id": "neb-ko-188", "query": "라피뜨", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "라피뜨 된소리 발음"}
+{"benchmark_id": "neb-ko-189", "query": "샤토 라피트 2016", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지 결합"}
+{"benchmark_id": "neb-ko-190", "query": "샤토 라투르", "expected_entity_id": "chateau-latour-2016", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-191", "query": "라투르", "expected_entity_id": "chateau-latour-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별 토큰"}
+{"benchmark_id": "neb-ko-192", "query": "샤또 라뚜르", "expected_entity_id": "chateau-latour-2016", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "라뚜르 된소리"}
+{"benchmark_id": "neb-ko-193", "query": "라뚜르", "expected_entity_id": "chateau-latour-2016", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "라뚜르 단독"}
+{"benchmark_id": "neb-ko-194", "query": "샤토 무통", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-195", "query": "무통 로칠드", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "가문명 부착"}
+{"benchmark_id": "neb-ko-196", "query": "샤또 무똥", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "무똥 된소리"}
+{"benchmark_id": "neb-ko-197", "query": "무똥", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "무똥 단독"}
+{"benchmark_id": "neb-ko-198", "query": "티냐넬로", "expected_entity_id": "tignanello-antinori", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-199", "query": "안티노리 티냐넬로", "expected_entity_id": "tignanello-antinori", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "생산자 부착"}
+{"benchmark_id": "neb-ko-200", "query": "티그나넬로", "expected_entity_id": "tignanello-antinori", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 티그나넬로"}
+{"benchmark_id": "neb-ko-201", "query": "솔라이아", "expected_entity_id": "solaia-antinori", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-202", "query": "안티노리 솔라이아", "expected_entity_id": "solaia-antinori", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "생산자 부착"}
+{"benchmark_id": "neb-ko-203", "query": "솔라이아ㅇ", "expected_entity_id": "solaia-antinori", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 자모 잔류"}
+{"benchmark_id": "neb-ko-204", "query": "펜폴즈 빈 389", "expected_entity_id": "penfolds-bin-389", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-205", "query": "빈 389", "expected_entity_id": "penfolds-bin-389", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "빈 넘버 단독"}
+{"benchmark_id": "neb-ko-206", "query": "빈389", "expected_entity_id": "penfolds-bin-389", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-207", "query": "펜폴즈 389", "expected_entity_id": "penfolds-bin-389", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "생산자+넘버"}
+{"benchmark_id": "neb-ko-208", "query": "켄달 잭슨", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-209", "query": "켄달잭슨", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-210", "query": "켄달 잭슨 샤르도네", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-211", "query": "켄달 잭슨 샤도네이", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_loanword_variant", "language": "ko", "difficulty": "hard", "notes": "샤도네이 표기 변형"}
+{"benchmark_id": "neb-ko-212", "query": "돔 페리뇽", "expected_entity_id": "dom-perignon", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-213", "query": "돔페리뇽", "expected_entity_id": "dom-perignon", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-214", "query": "돔페리뇨", "expected_entity_id": "dom-perignon", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 돔페리뇨(받침 누락)"}
+{"benchmark_id": "neb-ko-215", "query": "돔 페리뇸", "expected_entity_id": "dom-perignon", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "페리뇸 표기 변형"}
+{"benchmark_id": "neb-ko-216", "query": "돔페리뇽 샴페인", "expected_entity_id": "dom-perignon", "category": "ko_region_producer", "language": "ko", "difficulty": "medium", "notes": "카테고리어 부착"}
+{"benchmark_id": "neb-ko-217", "query": "돔페리뇽 추천", "expected_entity_id": "dom-perignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어"}
+{"benchmark_id": "neb-ko-218", "query": "뵈브 클리코", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-219", "query": "뵈브클리코", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-220", "query": "클리코", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별 토큰"}
+{"benchmark_id": "neb-ko-221", "query": "베브 클리코", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "흔한 오타 베브(뵈브)"}
+{"benchmark_id": "neb-ko-222", "query": "뵈브 클리꼬", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_loanword_variant", "language": "ko", "difficulty": "hard", "notes": "클리꼬 된소리"}
+{"benchmark_id": "neb-ko-223", "query": "가야 바르바레스코", "expected_entity_id": "gaja-barbaresco", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-224", "query": "가야", "expected_entity_id": "gaja-barbaresco", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "생산자 단독"}
+{"benchmark_id": "neb-ko-225", "query": "바르바레스코", "expected_entity_id": "gaja-barbaresco", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "appellation 토큰"}
+{"benchmark_id": "neb-ko-226", "query": "가야 바르바레스꼬", "expected_entity_id": "gaja-barbaresco", "category": "ko_loanword_variant", "language": "ko", "difficulty": "hard", "notes": "바르바레스꼬 된소리"}
+{"benchmark_id": "neb-ko-227", "query": "로마네 콩티", "expected_entity_id": "romanee-conti-2015", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias(이제 카탈로그에 2015 존재)"}
+{"benchmark_id": "neb-ko-228", "query": "로마네콩티", "expected_entity_id": "romanee-conti-2015", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-229", "query": "로마네 꽁띠", "expected_entity_id": "romanee-conti-2015", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "꽁띠 된소리 표기"}
+{"benchmark_id": "neb-ko-230", "query": "로마네 꼰띠", "expected_entity_id": "romanee-conti-2015", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "꼰띠 발음 변형"}
+{"benchmark_id": "neb-ko-231", "query": "DRC", "expected_entity_id": "romanee-conti-2015", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 약어 DRC"}
+{"benchmark_id": "neb-ko-232", "query": "샤토 디켐", "expected_entity_id": "sauternes-2015", "category": "ko_spacing", "language": "ko", "difficulty": "easy", "notes": "등록 alias"}
+{"benchmark_id": "neb-ko-233", "query": "디켐", "expected_entity_id": "sauternes-2015", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별 토큰"}
+{"benchmark_id": "neb-ko-234", "query": "이켐", "expected_entity_id": "sauternes-2015", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "이켐 표기 변형"}
+{"benchmark_id": "neb-ko-235", "query": "샤또 디켐 2015", "expected_entity_id": "sauternes-2015", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "된소리+빈티지"}
+{"benchmark_id": "neb-ko-236", "query": "1865", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_vintage", "language": "ko", "difficulty": "hard", "expected_resolution": "resolved", "notes": "숫자 1865는 빈티지가 아니라 브랜드명 — 빈티지 오인 금지"}
+{"benchmark_id": "neb-ko-237", "query": "몬테스 알파 2018", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지 결합"}
+{"benchmark_id": "neb-ko-238", "query": "케이머스 2019", "expected_entity_id": "caymus-cabernet", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지 결합"}
+{"benchmark_id": "neb-ko-239", "query": "옐로우테일 시라즈 호주", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "품종+country"}
+{"benchmark_id": "neb-ko-240", "query": "칠레 몬테스 알파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country 선행"}
+{"benchmark_id": "neb-ko-241", "query": "나파 케이머스", "expected_entity_id": "caymus-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region 선행"}
+{"benchmark_id": "neb-ko-242", "query": "montes alpha 몬테스알파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문 full + 한글 full"}
+{"benchmark_id": "neb-ko-243", "query": "dom perignon 돔페리뇽", "expected_entity_id": "dom-perignon", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문+한글 병기"}
+{"benchmark_id": "neb-ko-244", "query": "lafite 라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문+한글"}
+{"benchmark_id": "neb-ko-245", "query": "1865 한병", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "수량어(한병) 잡음"}
+{"benchmark_id": "neb-ko-246", "query": "몬테스 알파 어때", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의문어(어때) 잡음"}
+{"benchmark_id": "neb-ko-247", "query": "디아블로 없나요", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "의문구(없나요) 잡음"}
+{"benchmark_id": "neb-ko-248", "query": "돔페리뇽 가격", "expected_entity_id": "dom-perignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "속성어(가격) 잡음"}
+{"benchmark_id": "neb-ko-249", "query": "케이머스 카베르네 나파", "expected_entity_id": "caymus-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "품종+region"}
+{"benchmark_id": "neb-ko-250", "query": "빌라엠ㅁ", "expected_entity_id": "villa-m-rosso", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 자모 잔류"}
+{"benchmark_id": "neb-ko-251", "query": "디아블로ㅗ", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 모음 잔류"}
+{"benchmark_id": "neb-ko-252", "query": "돔페리뇽ㅇ", "expected_entity_id": "dom-perignon", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 자모 잔류"}
+{"benchmark_id": "neb-ko-253", "query": "몬테스 알파!!", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음"}
+{"benchmark_id": "neb-ko-254", "query": "1865...", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음"}
+{"benchmark_id": "neb-ko-255", "query": "케이머스~~", "expected_entity_id": "caymus-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음"}
+{"benchmark_id": "neb-ko-256", "query": "몬 테 스 알 파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "전음절 과분할"}
+{"benchmark_id": "neb-ko-257", "query": "카 시 예 로 디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "음절 과분할"}
+{"benchmark_id": "neb-ko-258", "query": "옐 로 우 테 일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "전음절 과분할"}
+{"benchmark_id": "neb-ko-259", "query": "펜폴즈 빈389 추천", "expected_entity_id": "penfolds-bin-389", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기+의도어"}
+{"benchmark_id": "neb-ko-260", "query": "실버오크ㅋ", "expected_entity_id": "silver-oak-cabernet", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 자모 잔류"}
+{"benchmark_id": "neb-ko-261", "query": "티냐넬로 안티노리", "expected_entity_id": "tignanello-antinori", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "어순 도치"}
+{"benchmark_id": "neb-ko-262", "query": "가야 와인", "expected_entity_id": "gaja-barbaresco", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "가야 — 생산자 다제품 모호"}
+{"benchmark_id": "neb-ko-263", "query": "펜폴즈", "expected_entity_id": "penfolds-grange-2017", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "펜폴즈 — 그레인지/빈389 등 다제품 모호"}
+{"benchmark_id": "neb-ko-264", "query": "샤토", "expected_entity_id": "chateau-margaux-2015", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "샤토 — 마고/라피트/라투르/무통/디켐 모두 후보, 단일 확정 금지"}
+{"benchmark_id": "neb-ko-265", "query": "안티노리", "expected_entity_id": "tignanello-antinori", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "안티노리 — 티냐넬로/솔라이아 모호"}
+{"benchmark_id": "neb-ko-266", "query": "카베르네", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "품종어 단독 — 다수 카베르네 후보, 단일 확정 금지"}
+{"benchmark_id": "neb-ko-267", "query": "몬테스 알파 까베르네 소비뇽", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "풀 품종명 된소리"}
+{"benchmark_id": "neb-ko-268", "query": "1865 까베르네 소비뇽 칠레", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "풀명+country"}
+{"benchmark_id": "neb-ko-269", "query": "카시예로 디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "del 누락형"}
+{"benchmark_id": "neb-ko-270", "query": "몬테스알파 레드", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "색상어 부착"}
+{"benchmark_id": "neb-ko-271", "query": "실버오크 알렉산더밸리", "expected_entity_id": "silver-oak-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region 부착"}
+{"benchmark_id": "neb-ko-272", "query": "옐로우테일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복 검증"}
+{"benchmark_id": "neb-ko-273", "query": "제이콥스크릭 시라즈 호주", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "품종+country"}
+{"benchmark_id": "neb-ko-274", "query": "켄달잭슨 샤르도네 캘리포니아", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "품종+region"}
+{"benchmark_id": "neb-ko-275", "query": "빌라엠 모스카토", "expected_entity_id": "villa-m-rosso", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "빌라엠 + 다른 품종어 — 혼동 유발"}
+{"benchmark_id": "neb-ko-276", "query": "돔페리뇽 빈티지", "expected_entity_id": "dom-perignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "속성어(빈티지) 잡음"}
+{"benchmark_id": "neb-ko-277", "query": "뵈브 클리코 옐로라벨", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "라벨명 부착"}
+{"benchmark_id": "neb-ko-278", "query": "샤토 라피트 로칠드 2016", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "풀명+빈티지"}
+{"benchmark_id": "neb-ko-279", "query": "무통", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별 토큰"}
+{"benchmark_id": "neb-ko-280", "query": "케이머스 까베", "expected_entity_id": "caymus-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "까베(카베르네 줄임 오타)"}
+{"benchmark_id": "neb-ko-281", "query": "1865 한잔", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "수량어(한잔)"}
+{"benchmark_id": "neb-ko-282", "query": "디아블로 카베르네", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "식별토큰+품종"}
+{"benchmark_id": "neb-ko-283", "query": "몬테스", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "몬테스 단독 — 알파/클래식 등 라인업 모호"}
+{"benchmark_id": "neb-ko-284", "query": "가야 바르바레스코 2016", "expected_entity_id": "gaja-barbaresco", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지 결합"}
+{"benchmark_id": "neb-ko-285", "query": "티냐넬로 토스카나", "expected_entity_id": "tignanello-antinori", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region 부착"}
+{"benchmark_id": "neb-ko-286", "query": "솔라이아 슈퍼투스칸", "expected_entity_id": "solaia-antinori", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "카테고리(슈퍼투스칸) 부착"}
+{"benchmark_id": "neb-ko-287", "query": "펜폴즈 빈 389 시라즈", "expected_entity_id": "penfolds-bin-389", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "품종 부착"}
+{"benchmark_id": "neb-ko-288", "query": "클라우디 베이 말보로", "expected_entity_id": "cloudy-bay-2022", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region 부착"}
+{"benchmark_id": "neb-ko-289", "query": "오퍼스원", "expected_entity_id": "opus-one-2018", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "오퍼스 표기 변형"}
+{"benchmark_id": "neb-ko-290", "query": "모엣샹동", "expected_entity_id": "moet-brut", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "모엣 표기+붙여쓰기"}
+{"benchmark_id": "neb-ko-291", "query": "몬태스 알파", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "ㅔ/ㅐ 혼동 몬태스"}
+{"benchmark_id": "neb-ko-292", "query": "오포스원", "expected_entity_id": "opus-one-2018", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "ㅜ/ㅗ 모음 혼동"}
+{"benchmark_id": "neb-ko-293", "query": "케이머수", "expected_entity_id": "caymus-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "받침/모음 오타 케이머수"}
+{"benchmark_id": "neb-ko-294", "query": "클라우드 베이", "expected_entity_id": "cloudy-bay-2022", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "클라우드(클라우디 받침 오타)"}
+{"benchmark_id": "neb-ko-295", "query": "사시카아", "expected_entity_id": "sassicaia-2018", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "음절 누락 사시카아"}
+{"benchmark_id": "neb-ko-296", "query": "배린저", "expected_entity_id": "beringer-white-zinfandel", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "ㅔ/ㅐ 혼동 배린저"}
+{"benchmark_id": "neb-ko-297", "query": "제이콥수 크릭", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "제이콥수 받침 오타"}
+{"benchmark_id": "neb-ko-298", "query": "실버오쿠", "expected_entity_id": "silver-oak-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "오쿠(오크 모음 오타)"}
+{"benchmark_id": "neb-ko-299", "query": "솔라이야", "expected_entity_id": "solaia-antinori", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "솔라이야(솔라이아 변형)"}
+{"benchmark_id": "neb-ko-300", "query": "가야 바르바래스코", "expected_entity_id": "gaja-barbaresco", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "ㅔ/ㅐ 혼동 바르바래스코"}
+{"benchmark_id": "neb-ko-301", "query": "돔 페리농", "expected_entity_id": "dom-perignon", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "페리농(페리뇽 받침 오타)"}
+{"benchmark_id": "neb-ko-302", "query": "부브 클리코", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "부브(뵈브 모음 단순화)"}
+{"benchmark_id": "neb-ko-303", "query": "티냐넬료", "expected_entity_id": "tignanello-antinori", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "넬료(넬로 변형)"}
+{"benchmark_id": "neb-ko-304", "query": "라피트 로쉴드", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "로쉴드(로칠드 표기 변형)"}
+{"benchmark_id": "neb-ko-305", "query": "마고 와인", "expected_entity_id": "chateau-margaux-2015", "category": "ko_particle", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "마고+카테고리어"}
+{"benchmark_id": "neb-ko-306", "query": "몬테스 알파 칠레 와인", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country+카테고리어"}
+{"benchmark_id": "neb-ko-307", "query": "1865 레드와인", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어(레드와인)"}
+{"benchmark_id": "neb-ko-308", "query": "디아블로 까베르네 소비뇽", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "풀품종 된소리"}
+{"benchmark_id": "neb-ko-309", "query": "케이머스 나파 카베르네", "expected_entity_id": "caymus-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region+품종"}
+{"benchmark_id": "neb-ko-310", "query": "옐로우테일 레드", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "색상어"}
+{"benchmark_id": "neb-ko-311", "query": "빌라엠 로쏘", "expected_entity_id": "villa-m-rosso", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "로쏘 부착"}
+{"benchmark_id": "neb-ko-312", "query": "빌라엠 로소", "expected_entity_id": "villa-m-rosso", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "로소(로쏘 표기 변형)"}
+{"benchmark_id": "neb-ko-313", "query": "사라코 모스카토", "expected_entity_id": "moscato-dasti-saracco", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "생산자(사라코) 부착"}
+{"benchmark_id": "neb-ko-314", "query": "펜폴즈 빈389 어때요", "expected_entity_id": "penfolds-bin-389", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의문어"}
+{"benchmark_id": "neb-ko-315", "query": "켄달 잭슨 빈트너스", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "라인명(빈트너스) 부착"}
+{"benchmark_id": "neb-ko-316", "query": "실버오크 알렉산더", "expected_entity_id": "silver-oak-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(알렉산더밸리) 부분"}
+{"benchmark_id": "neb-ko-317", "query": "오퍼스 원 2018", "expected_entity_id": "opus-one-2018", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "표기변형+빈티지"}
+{"benchmark_id": "neb-ko-318", "query": "몬테스알파 까베", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "까베(까베르네 줄임 오타)"}
+{"benchmark_id": "neb-ko-319", "query": "카시예로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "카시예로 단독"}
+{"benchmark_id": "neb-ko-320", "query": "디아블로 칠레", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country 부착"}
+{"benchmark_id": "neb-ko-321", "query": "몬테스 알파ㅏ", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_ime_jamo", "language": "ko", "difficulty": "hard", "notes": "IME 모음 잔류"}
+{"benchmark_id": "neb-ko-322", "query": "케이머스 까베르네 소비뇽", "expected_entity_id": "caymus-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "풀품종 된소리"}
+{"benchmark_id": "neb-ko-323", "query": "가야 바르바레스코 피에몬테", "expected_entity_id": "gaja-barbaresco", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region 부착"}
+{"benchmark_id": "neb-ko-324", "query": "돔페리뇽 한병", "expected_entity_id": "dom-perignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "수량어"}
+{"benchmark_id": "neb-ko-325", "query": "뵈브클리코 옐로우라벨", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "라벨명 부착"}
+{"benchmark_id": "neb-ko-326", "query": "무똥 로칠드", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_loanword_variant", "language": "ko", "difficulty": "medium", "notes": "무똥 된소리"}
+{"benchmark_id": "neb-ko-327", "query": "샤또 라피뜨", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_phonetic_var", "language": "ko", "difficulty": "hard", "notes": "이중 된소리(샤또 라피뜨)"}
+{"benchmark_id": "neb-ko-328", "query": "로마네콩티 2015", "expected_entity_id": "romanee-conti-2015", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기+빈티지"}
+{"benchmark_id": "neb-ko-329", "query": "샤토디켐", "expected_entity_id": "sauternes-2015", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "붙여쓰기"}
+{"benchmark_id": "neb-ko-330", "query": "티냐넬로 2018", "expected_entity_id": "tignanello-antinori", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지 결합"}
+{"benchmark_id": "neb-ko-331", "query": "오 푸 스 원 2018", "expected_entity_id": "opus-one-2018", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "전음절 분할+빈티지"}
+{"benchmark_id": "neb-ko-332", "query": "카 시 예 로 델 디아블로", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "음절 과분할"}
+{"benchmark_id": "neb-ko-333", "query": "몬 테 스", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "음절분할 부분명"}
+{"benchmark_id": "neb-ko-334", "query": "케이머스!!!", "expected_entity_id": "caymus-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음"}
+{"benchmark_id": "neb-ko-335", "query": "돔페리뇽???", "expected_entity_id": "dom-perignon", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음"}
+{"benchmark_id": "neb-ko-336", "query": "몬테스 알파~~", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_loanword_variant", "language": "ko", "difficulty": "easy", "notes": "구두점 잡음"}
+{"benchmark_id": "neb-ko-337", "query": "1865 카베르네소비뇽", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "품종 붙여쓰기"}
+{"benchmark_id": "neb-ko-338", "query": "caymus cabernet 케이머스", "expected_entity_id": "caymus-cabernet", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문 풀+한글"}
+{"benchmark_id": "neb-ko-339", "query": "silver oak 실버오크", "expected_entity_id": "silver-oak-cabernet", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문+한글"}
+{"benchmark_id": "neb-ko-340", "query": "veuve clicquot 뵈브", "expected_entity_id": "veuve-clicquot-yellow-label", "category": "ko_codeswitch", "language": "mixed", "difficulty": "hard", "notes": "영문+한글"}
+{"benchmark_id": "neb-ko-341", "query": "gaja 가야", "expected_entity_id": "gaja-barbaresco", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문+한글"}
+{"benchmark_id": "neb-ko-342", "query": "tignanello 티냐넬로", "expected_entity_id": "tignanello-antinori", "category": "ko_codeswitch", "language": "mixed", "difficulty": "medium", "notes": "영문+한글"}
+{"benchmark_id": "neb-ko-343", "query": "솔라이아 안티노리 토스카나", "expected_entity_id": "solaia-antinori", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "생산자+region"}
+{"benchmark_id": "neb-ko-344", "query": "펜폴즈 그레인지 바로사", "expected_entity_id": "penfolds-grange-2017", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(바로사) 부착"}
+{"benchmark_id": "neb-ko-345", "query": "클라우디 소비뇽 블랑", "expected_entity_id": "cloudy-bay-2022", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "부분명+품종"}
+{"benchmark_id": "neb-ko-346", "query": "모엣 샹동 임페리얼", "expected_entity_id": "moet-brut", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "cuvee(임페리얼) 부착"}
+{"benchmark_id": "neb-ko-347", "query": "라투르 2016", "expected_entity_id": "chateau-latour-2016", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "부분명+빈티지"}
+{"benchmark_id": "neb-ko-348", "query": "무통 2016", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "부분명+빈티지"}
+{"benchmark_id": "neb-ko-349", "query": "빈 389 펜폴즈", "expected_entity_id": "penfolds-bin-389", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "어순 도치"}
+{"benchmark_id": "neb-ko-350", "query": "악마의와인", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_spacing", "language": "ko", "difficulty": "hard", "notes": "별칭 붙여쓰기"}
+{"benchmark_id": "neb-ko-351", "query": "디켐 와인", "expected_entity_id": "sauternes-2015", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "카테고리어"}
+{"benchmark_id": "neb-ko-352", "query": "바롤로 자코모 몬포르티노", "expected_entity_id": "barolo-giacomo", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "풀명(생산자+cuvee)"}
+{"benchmark_id": "neb-ko-353", "query": "마시 아마로네 발폴리첼라 클라시코", "expected_entity_id": "masi-amarone", "category": "ko_shorthand", "language": "ko", "difficulty": "hard", "notes": "풀 appellation"}
+{"benchmark_id": "neb-ko-354", "query": "솔라이아", "expected_entity_id": "solaia-antinori", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복"}
+{"benchmark_id": "neb-ko-355", "query": "옐로우테일 시라즈 한병", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_particle", "language": "ko", "difficulty": "hard", "notes": "품종+수량어"}
+{"benchmark_id": "neb-ko-356", "query": "몬테스알파 2019년", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_vintage", "language": "ko", "difficulty": "medium", "notes": "빈티지+년"}
+{"benchmark_id": "neb-ko-357", "query": "케이머스 19", "expected_entity_id": "caymus-cabernet", "category": "ko_vintage", "language": "ko", "difficulty": "hard", "notes": "2자리 빈티지"}
+{"benchmark_id": "neb-ko-358", "query": "1865 까베르네소비뇽 칠레산", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "품종+원산지"}
+{"benchmark_id": "neb-ko-359", "query": "제이콥스크릭", "expected_entity_id": "jacobs-creek-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복"}
+{"benchmark_id": "neb-ko-360", "query": "모스카토 다스티 사라코", "expected_entity_id": "moscato-dasti-saracco", "category": "ko_spacing", "language": "ko", "difficulty": "medium", "notes": "생산자 후위"}
+{"benchmark_id": "neb-ko-361", "query": "라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복"}
+{"benchmark_id": "neb-ko-362", "query": "몬테스 알파 카쇼", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "카쇼(카베르네 소비뇽 줄임 은어)"}
+{"benchmark_id": "neb-ko-363", "query": "까쇼 1865", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_typo", "language": "ko", "difficulty": "hard", "notes": "까쇼 은어 + 브랜드"}
+{"benchmark_id": "neb-ko-364", "query": "오푸스 원이요", "expected_entity_id": "opus-one-2018", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "공백+존칭"}
+{"benchmark_id": "neb-ko-365", "query": "케이머스 까베르네 추천", "expected_entity_id": "caymus-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도어"}
+{"benchmark_id": "neb-ko-366", "query": "디아블로 추천해줘", "expected_entity_id": "casillero-del-diablo-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "의도구"}
+{"benchmark_id": "neb-ko-367", "query": "몬테스알파 좀 찾아줘", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "보조어+의도구"}
+{"benchmark_id": "neb-ko-368", "query": "돔페리뇽 가격 알려줘", "expected_entity_id": "dom-perignon", "category": "ko_particle", "language": "ko", "difficulty": "medium", "notes": "속성어+의도구"}
+{"benchmark_id": "neb-ko-369", "query": "실버오크", "expected_entity_id": "silver-oak-cabernet", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복"}
+{"benchmark_id": "neb-ko-370", "query": "라투르", "expected_entity_id": "chateau-latour-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복"}
+{"benchmark_id": "neb-ko-371", "query": "빈티지 샴페인 돔페리뇽", "expected_entity_id": "dom-perignon", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "카테고리 선행"}
+{"benchmark_id": "neb-ko-372", "query": "부르고뉴 로마네콩티", "expected_entity_id": "romanee-conti-2015", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region(부르고뉴) 선행"}
+{"benchmark_id": "neb-ko-373", "query": "보르도 라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "region 선행"}
+{"benchmark_id": "neb-ko-374", "query": "이탈리아 가야", "expected_entity_id": "gaja-barbaresco", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country 선행"}
+{"benchmark_id": "neb-ko-375", "query": "호주 펜폴즈 그레인지", "expected_entity_id": "penfolds-grange-2017", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country 선행"}
+{"benchmark_id": "neb-ko-376", "query": "뉴질랜드 클라우디베이", "expected_entity_id": "cloudy-bay-2022", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "country 선행"}
+{"benchmark_id": "neb-ko-377", "query": "케이머스 카베르네 소비뇽 나파밸리", "expected_entity_id": "caymus-cabernet", "category": "ko_region_producer", "language": "ko", "difficulty": "hard", "notes": "풀품종+region"}
+{"benchmark_id": "neb-ko-378", "query": "옐로우 테일", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_shorthand", "language": "ko", "difficulty": "easy", "notes": "안정성 중복"}
+{"benchmark_id": "neb-ko-379", "query": "라뚜르", "expected_entity_id": "chateau-latour-2016", "category": "ko_phonetic_var", "language": "ko", "difficulty": "medium", "notes": "라뚜르 된소리"}
+{"benchmark_id": "neb-ko-380", "query": "무똥", "expected_entity_id": "chateau-mouton-rothschild-2016", "category": "ko_phonetic_var", "language": "ko", "difficulty": "medium", "notes": "무똥 된소리"}
+{"benchmark_id": "neb-ko-381", "query": "라피트", "expected_entity_id": "chateau-lafite-rothschild-2016", "category": "ko_shorthand", "language": "ko", "difficulty": "medium", "notes": "5대샤토 변별(라피트)"}
+{"benchmark_id": "neb-ko-382", "query": "몬테스 클래식", "expected_entity_id": "montes-alpha-cabernet", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "notes": "몬테스 클래식(알파 아님) — 변별/모호"}
+{"benchmark_id": "neb-ko-383", "query": "펜폴즈 빈", "expected_entity_id": "penfolds-bin-389", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "notes": "빈 시리즈(389/407/707) 모호"}
+{"benchmark_id": "neb-ko-384", "query": "샹동", "expected_entity_id": "moet-brut", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "clarify_acceptable": true, "notes": "샹동 단독 — 모에/샹동 호주 등 모호"}
+{"benchmark_id": "neb-ko-385", "query": "진판델", "expected_entity_id": "beringer-white-zinfandel", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "품종어 단독 — 모호"}
+{"benchmark_id": "neb-ko-386", "query": "샤르도네", "expected_entity_id": "kendall-jackson-chardonnay", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "품종어 단독 — 모호"}
+{"benchmark_id": "neb-ko-387", "query": "시라즈", "expected_entity_id": "yellow-tail-shiraz", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "품종어 단독 — 옐로우테일/제이콥스 등 모호"}
+{"benchmark_id": "neb-ko-388", "query": "네비올로", "expected_entity_id": "barolo-giacomo", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "품종어 단독 — 바롤로/가야 모호"}
+{"benchmark_id": "neb-ko-389", "query": "칠레 와인", "expected_entity_id": "1865-cabernet-sauvignon", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "원산지만 — 1865/몬테스/디아블로 모호"}
+{"benchmark_id": "neb-ko-390", "query": "샴페인 추천", "expected_entity_id": "moet-brut", "category": "ko_ambiguous", "language": "ko", "difficulty": "hard", "expected_resolution": "ambiguous", "clarify_acceptable": true, "confident_wrong_top1_forbidden": true, "notes": "카테고리만 — 모에/돔페리뇽/뵈브 모호"}
