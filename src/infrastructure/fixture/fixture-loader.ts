@@ -33,6 +33,43 @@ export type { SuiteId } from './suite-registry.js';
 const log = bootstrapLogger.child({ component: 'FixtureLoader' });
 
 // ---------------------------------------------------------------------------
+// Fixture schema versioning (SemVer-style major version for fixture data)
+// ---------------------------------------------------------------------------
+
+/**
+ * Current major version of the benchmark-case fixture schema.
+ *
+ * Mirrors the industry standard for data SemVer (Snowplow Iglu, OpenAPI
+ * `openapi: <major>`, JSON Schema `$schema` URIs): we pin a single major
+ * version that the loader understands and reject anything else at the
+ * external-data boundary so that schema drift never propagates silently into
+ * the eval runners.
+ *
+ * **Migration policy:**
+ *  - **Backwards-compatible additive change** (new optional field, new enum
+ *    value): keep `FIXTURE_SCHEMA_VERSION` unchanged. Existing fixtures still
+ *    parse, new ones pick up the new field via the loader normalisation.
+ *  - **Breaking change** (rename, removal, semantics change): bump
+ *    `FIXTURE_SCHEMA_VERSION` to the next major (`'2'`), keep `'1'` in
+ *    `FIXTURE_SCHEMA_VERSIONS` until all on-disk fixtures are migrated, then
+ *    drop `'1'` and document the removal in the fixture repo CHANGELOG.
+ *  - **Default for fixtures without an explicit field**: cases that omit
+ *    `schema_version` are treated as the current `FIXTURE_SCHEMA_VERSION` —
+ *    this preserves the existing 9-suite fixture corpus without a forced
+ *    backfill while still rejecting unknown versions.
+ */
+export const FIXTURE_SCHEMA_VERSION = '1' as const;
+
+/**
+ * All schema versions the loader can read. Add the next major BEFORE dropping
+ * the old one so a single fixture-repo PR can flip the corpus across boundary
+ * lines without breaking CI.
+ */
+export const FIXTURE_SCHEMA_VERSIONS = ['1'] as const;
+
+export type FixtureSchemaVersion = (typeof FIXTURE_SCHEMA_VERSIONS)[number];
+
+// ---------------------------------------------------------------------------
 // Max-bounds (domain: suites have O(100) cases, catalogs O(1000) entries)
 // ---------------------------------------------------------------------------
 
@@ -107,6 +144,16 @@ const ProvenanceSchema = z.object({
   expected_source: z.string().optional(),
 }).strict().optional();
 
+/**
+ * Schema-version enum for fixture cases. Backed by `FIXTURE_SCHEMA_VERSIONS`
+ * so the allowlist has exactly one source of truth. The default ensures
+ * fixtures authored before the versioning field was introduced continue to
+ * parse cleanly (Rule 26: explicit default — never silently strip).
+ */
+const SchemaVersionSchema = z
+  .enum(FIXTURE_SCHEMA_VERSIONS)
+  .default(FIXTURE_SCHEMA_VERSION);
+
 /** Validated benchmark case contract. */
 export const BenchmarkCaseSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]+-\d{3,}$/),
@@ -120,6 +167,7 @@ export const BenchmarkCaseSchema = z.object({
   tags: z.array(z.string()).optional(),
   notes: z.string().optional(),
   added_version: z.string().optional(),
+  schema_version: SchemaVersionSchema,
 }).strict().superRefine((val, ctx) => {
   const prefix = val.id.split('-')[0];
   if (prefix == null || CASE_PREFIX_TO_SUITE[prefix] === undefined) {

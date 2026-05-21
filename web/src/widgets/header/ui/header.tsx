@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, FlaskConical, Heart } from 'lucide-react';
+import { Compass, FlaskConical, Heart, Sparkles } from 'lucide-react';
 import { cn } from '@/shared/lib';
 import { ThemeToggle } from '@/features/theme';
 
@@ -10,6 +10,9 @@ const NAV = [
   { href: '/explore', label: '탐색', icon: Compass },
   { href: '/watchlist', label: '위시리스트', icon: Heart },
   { href: '/agent-lab', label: '에이전트 랩', icon: FlaskConical },
+  // /v1/wine-search consumer — sibling of /agent-lab during the strangler-fig
+  // window. Kept side-by-side so reviewers can compare the two surfaces.
+  { href: '/wine-search-lab', label: '와인 검색 랩', icon: Sparkles },
 ] as const;
 
 export function Header() {

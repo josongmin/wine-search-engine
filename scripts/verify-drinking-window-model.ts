@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { access } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
-async function main(): Promise<void> {
+export async function main(): Promise<number> {
   const modelDir = process.argv[2];
   if (modelDir === undefined || modelDir.trim().length === 0) {
     throw new Error('Usage: tsx scripts/verify-drinking-window-model.ts <model-dir>');
@@ -15,10 +16,22 @@ async function main(): Promise<void> {
   await access(endPath);
 
   process.stdout.write(`${resolved}\n`);
+  return 0;
 }
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
-});
+const isCliEntrypoint =
+  process.argv[1] !== undefined
+  && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isCliEntrypoint) {
+  void main()
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((error: unknown) => {
+      const message
+        = error instanceof Error ? error.stack ?? error.message : String(error);
+      process.stderr.write(`${message}\n`);
+      process.exitCode = 1;
+    });
+}

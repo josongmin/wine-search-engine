@@ -5,6 +5,31 @@ import type { ConstraintGraph } from '../../../domain/query/model/constraint-gra
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import { buildRetrievalExecutionResult } from '../../../domain/retrieval/model/retrieval-execution-result.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
+import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
+
+/**
+ * Look up the first candidate for a subquery from the mock's candidate map.
+ *
+ * The bundle-selector mock receives `ReadonlyMap<string, readonly HybridCandidate[]>`
+ * — both the lookup and the index can fail. Throwing here surfaces a fixture
+ * misconfiguration immediately instead of letting `undefined!` propagate into
+ * a downstream assertion as a vague `TypeError` (avoids
+ * `no-non-null-asserted-optional-chain` while keeping intent explicit).
+ */
+function requireFirstCandidate(
+  candidatesBySubquery: ReadonlyMap<string, readonly HybridCandidate[]>,
+  subqueryId: string,
+): HybridCandidate {
+  const pool = candidatesBySubquery.get(subqueryId);
+  if (pool === undefined || pool.length === 0) {
+    throw new Error(`test fixture missing candidates for subquery "${subqueryId}"`);
+  }
+  const [head] = pool;
+  if (head === undefined) {
+    throw new Error(`test fixture has empty candidate slot for subquery "${subqueryId}"`);
+  }
+  return head;
+}
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -324,10 +349,13 @@ describe('executeGraphAware', () => {
   });
 
   it('keeps surviving required subqueries when an optional subquery retriever rejects', async () => {
-    const chooseAssignment = vi.fn((_graph, candidatesBySubquery) => ({
+    const chooseAssignment = vi.fn((
+      _graph: ConstraintGraph,
+      candidatesBySubquery: ReadonlyMap<string, readonly HybridCandidate[]>,
+    ) => ({
       assignments: [{
         subqueryId: 'sq_required',
-        candidate: candidatesBySubquery.get('sq_required')?.[0]!,
+        candidate: requireFirstCandidate(candidatesBySubquery, 'sq_required'),
       }],
       bundleScore: 1,
       budgetUsage: [],
@@ -384,10 +412,13 @@ describe('executeGraphAware', () => {
   });
 
   it('prunes optional subqueries with empty candidate pools before bundle selection', async () => {
-    const chooseAssignment = vi.fn((_graph, candidatesBySubquery) => ({
+    const chooseAssignment = vi.fn((
+      _graph: ConstraintGraph,
+      candidatesBySubquery: ReadonlyMap<string, readonly HybridCandidate[]>,
+    ) => ({
       assignments: [{
         subqueryId: 'sq_required',
-        candidate: candidatesBySubquery.get('sq_required')?.[0]!,
+        candidate: requireFirstCandidate(candidatesBySubquery, 'sq_required'),
       }],
       bundleScore: 1,
       budgetUsage: [],

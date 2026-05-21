@@ -111,6 +111,12 @@ function makeResolverResult(
       top2CalibratedScore: C - gap,
       calibratedGap: gap,
       decisionConfidenceC: C,
+      // These tests exercise the confidence-refusal path on production-shaped
+      // inputs where the trained calibrator produced C — set
+      // `calibrationTrusted=true` so the AdmissionGate's confidence-refusal
+      // floor (RFC-016 §3, Epic 17.3) actually runs against C instead of
+      // being skipped as untrusted.
+      calibrationTrusted: true,
       ambiguityDetected,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },

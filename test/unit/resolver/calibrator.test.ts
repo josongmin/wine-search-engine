@@ -330,4 +330,51 @@ describe('Calibrator', () => {
       ).rejects.toThrow(/Missing trained calibration params/);
     });
   });
+
+  describe('calibrationTrusted flag (gates downstream probability-semantics consumers)', () => {
+    it('returns calibrationTrusted=false when the store has no trained params for the query class', async () => {
+      const calibrator = new Calibrator(makeStubStore(null));
+      const result = await calibrator.calibrate({ top1: 0.7, top2: 0.2 }, 'short_entity');
+      expect(result.calibrationTrusted).toBe(false);
+    });
+
+    it('returns calibrationTrusted=true when the store returns explicit trained Platt params', async () => {
+      const params: CalibrationParams = {
+        method: 'platt',
+        queryClass: 'short_entity',
+        params: { a: 2, b: -1 },
+        trainedAt: new Date(),
+        ece: 0.05,
+      };
+      const calibrator = new Calibrator(makeStubStore(params));
+      const result = await calibrator.calibrate({ top1: 0.7, top2: 0.2 }, 'short_entity');
+      expect(result.calibrationTrusted).toBe(true);
+    });
+
+    it('returns calibrationTrusted=true when the store returns explicit trained isotonic params', async () => {
+      const params: CalibrationParams = {
+        method: 'isotonic',
+        queryClass: 'short_entity',
+        params: { breakpoint_count: 2, x_0: 0.3, y_0: 0.4, x_1: 0.7, y_1: 0.9 },
+        trainedAt: new Date(),
+        ece: 0.03,
+      };
+      const calibrator = new Calibrator(makeStubStore(params));
+      const result = await calibrator.calibrate({ top1: 0.5, top2: 0.2 }, 'short_entity');
+      expect(result.calibrationTrusted).toBe(true);
+    });
+
+    it('returns calibrationTrusted=true when the store returns explicit trained temperature params', async () => {
+      const params: CalibrationParams = {
+        method: 'temperature',
+        queryClass: 'short_entity',
+        params: { temperature: 1.5 },
+        trainedAt: new Date(),
+        ece: 0.07,
+      };
+      const calibrator = new Calibrator(makeStubStore(params));
+      const result = await calibrator.calibrate({ top1: 0.6, top2: 0.2 }, 'short_entity');
+      expect(result.calibrationTrusted).toBe(true);
+    });
+  });
 });

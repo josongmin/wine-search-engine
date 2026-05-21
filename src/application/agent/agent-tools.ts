@@ -1953,7 +1953,14 @@ function buildExactLookupAliasVariants(canonicalValue: string): readonly string[
   return [...variants];
 }
 
-function resolveCuratedExactLookupTarget(query: string | undefined): { readonly canonicalValue: string; readonly acceptedVariants: readonly string[] } | undefined {
+// EXPORT NOTE: this helper is exported solely so that
+// `test/regression/entity-lookup-provenance-properties.regression.test.ts`
+// can run a parity check against a richer reference implementation that also
+// returns provenance/surface. Do NOT change the return shape without updating
+// the parity test in lockstep — the test depends on the exported function
+// returning the same `canonicalValue` as the test's reference implementation
+// for every CURATED catalog surface.
+export function resolveCuratedExactLookupTarget(query: string | undefined): { readonly canonicalValue: string; readonly acceptedVariants: readonly string[] } | undefined {
   if (query === undefined) return undefined;
   const normalizedQuery = normalizeExactLookupLabel(query).replace(EXACT_LOOKUP_OPTIONAL_VINTAGE_RE, '');
   if (normalizedQuery.length === 0) return undefined;

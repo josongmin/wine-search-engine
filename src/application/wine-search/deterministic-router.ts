@@ -91,6 +91,27 @@ const MULTI_STEP_INITIAL_ACTION_BY_INTENT = new Map<
   ['unknown', 'search'],
 ]);
 
+/**
+ * Wine-domain top-level keywords. Presence of any of these in the user
+ * query — even when the analyzer found zero anchors and zero constraints —
+ * is sufficient evidence that the query is wine-domain. We then fall through
+ * to a generic single-search instead of rejecting as `unsupported_intent`.
+ *
+ * Why this matters (CLAUDE.md rule 23 — false-positive guard):
+ *   Casual / conversational queries like "와인 좀 알려줘",
+ *   "와인 추천해 주시겠어요?", "아이 태어난 해 와인" carry no anchorable
+ *   span and no rule-based constraint, yet they are unambiguously
+ *   wine-domain. The original rule-1 guard collapsed them to
+ *   `unsupported_intent` and surfaced a "we can't help with that"
+ *   coverage-gap template — a silent UX bug that this catalog corrects.
+ *
+ * Unicode-safe (rule 8/24): pattern uses
+ * `(?:^|[^\p{L}\p{N}])…(?=$|[^\p{L}\p{N}])` boundaries on the
+ * lower-cased + collapsed-whitespace query surface, never `\b`.
+ */
+const WINE_DOMAIN_KEYWORD_RE =
+  /(?:^|[^\p{L}\p{N}])(?:와인|wine|wines|vino|grape|grapes|sommelier|소믈리에|포도주|양조)(?=$|[^\p{L}\p{N}])/iu;
+
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
@@ -361,11 +382,16 @@ export class DeterministicRouter {
   route(analysis: WineSearchAnalysis): ExecutionPlan {
     // Rule 1 — analysis-rejected guard. We don't reject "intent=unknown
     // with anchors" because the deterministic anchor extractor may still
-    // yield a valid query (e.g. just "Opus One").
+    // yield a valid query (e.g. just "Opus One"). We also DO NOT reject
+    // when the preserved surface contains a top-level wine-domain keyword
+    // (와인 / wine / 포도주 / 소믈리에 / …) — see WINE_DOMAIN_KEYWORD_RE
+    // for the rationale (CLAUDE.md rule 23 — false-positive guard for
+    // unsupported_intent on benign conversational queries).
     if (
       analysis.intent === 'unknown'
       && analysis.anchors.length === 0
       && analysis.normalizedConstraints.length === 0
+      && !WINE_DOMAIN_KEYWORD_RE.test(analysis.preservedSurface)
     ) {
       return { kind: 'reject', reason: 'unsupported_intent' };
     }

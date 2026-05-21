@@ -41,7 +41,7 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import {
-  fitBestCalibration,
+  fitBestCalibrationWithDiagnostics,
   type CalibrationSample,
 } from '../../src/domain/resolver/service/calibration-fitting.js';
 import { PgCalibrationStore } from '../../src/infrastructure/adapter/pg-calibration-store.js';
@@ -188,12 +188,20 @@ async function main(): Promise<void> {
     if (flags.restrictClass !== undefined && queryClass !== flags.restrictClass) {
       continue;
     }
-    const params = fitBestCalibration(samples, queryClass);
+    const diag = fitBestCalibrationWithDiagnostics(samples, queryClass);
+    const params = diag.params;
     const positives = samples.filter((s) => s.label === 1).length;
     const negatives = samples.length - positives;
+    const eceSource = diag.outOfSample ? 'holdout' : 'in-sample';
+    const methodEce = [
+      `platt=${diag.methodEce.platt.toFixed(4)}`,
+      `temperature=${diag.methodEce.temperature.toFixed(4)}`,
+      `isotonic=${diag.methodEce.isotonic.toFixed(4)}`,
+    ].join(', ');
     console.log(
       `[fit-resolver-calibration] ${queryClass}: n=${samples.length} (+${positives} / -${negatives}) → ` +
-      `method=${params.method}, ECE=${params.ece.toFixed(4)}, params=${JSON.stringify(params.params)}`,
+      `method=${params.method}, ECE=${params.ece.toFixed(4)} (${eceSource}), ` +
+      `method-ECE=[${methodEce}], params=${JSON.stringify(params.params)}`,
     );
     if (store !== null) {
       await store.save(queryClass, params);

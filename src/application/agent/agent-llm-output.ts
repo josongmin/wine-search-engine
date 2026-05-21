@@ -730,10 +730,15 @@ export function parseLlmOutput(text: string): LlmAction {
       };
     }
 
+    // At this point `hasAnswer` is necessarily false: the (hasAnswer && ...)
+    // mixed-output branch above returns, and the bare `if (hasAnswer)` branch
+    // returns as well. Earlier branches handle hasActionObject, hasActionsArray
+    // (when validActions > 0) and hasBareTool too — but those may fall through
+    // when the action/actions/bare-tool candidate failed to parse, so they
+    // remain meaningful guards against double-handling.
     const embeddedThoughtToolCall = recoverEmbeddedToolCall(thought, 'thought_string');
     if (
       embeddedThoughtToolCall !== null
-      && !hasAnswer
       && !hasActionObject
       && !hasActionsArray
       && !hasBareTool

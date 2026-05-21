@@ -6,11 +6,15 @@ summary: |
   feature flag (RETRIEVAL_EXECUTOR_CRITIC) 게이트 + retry cap + 텔레메트리 통합. 저품질
   결과가 ranking 단계로 흘러 들어가는 것을 차단.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Integration test (retrieval-critic-flag-on) + regression 2개 (decision + retry-cap)로
-  결정 로직과 retry 상한 모두 게이트. ADR-015에 따른 retry count 반영, 텔레메트리 hook
-  완비. 사용자 feedback loop 부재로 5는 못 됨.
+  Integration test (retrieval-critic-flag-on) + regression 3개 (decision + retry-cap
+  + properties)로 결정 로직과 retry 상한 모두 게이트. SOTA++ property-based suite
+  (fast-check numRuns=100, 10개 invariants) covers retry-cap upper bound,
+  decision idempotence (5x), 한글 NFC pass-through, degradation-code permutation
+  invariance, 경계 (cap, cap-1, cap+1), decision enum closure, JSON-roundtrip
+  determinism, error fallback. ADR-015에 따른 retry count 반영, 텔레메트리 hook
+  완비.
 
 status: active
 since: 2025-11
@@ -29,6 +33,7 @@ tests:
   regression:
     - test/regression/retrieval-critic-decision.regression.test.ts
     - test/regression/retrieval-critic-retry-cap.regression.test.ts
+    - test/regression/retrieval-critic-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

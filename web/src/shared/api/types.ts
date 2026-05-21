@@ -479,3 +479,144 @@ export interface AgentExecuteRequest {
   query: string;
   options?: { max_steps?: number };
 }
+
+// ── Wine Search (POST /v1/wine-search) ──
+//
+// New Plan-then-Execute orchestrator surface. BREAKING vs `/v1/agent`:
+//   - `tool_calls[].{ name, arguments }` instead of `{ tool, input }`.
+//   - Every step carries uniform `tool_calls[]` + `observations[]` arrays —
+//     the legacy `action` / `actions[]` split is gone.
+//   - `meta.intent` and `meta.plan_kind` replace `meta.analysisIntent`.
+//   - `meta.termination` is a nested record (`reason`, `layer`, optional
+//     `kind`, optional `degraded_reason`). Old `termination_reason`,
+//     `fallback_applied` siblings are gone.
+//   - `meta.policy_blocked` is a typed boolean; do NOT infer it from
+//     `termination_reason` + `fallback_trace`.
+//   - `meta.termination.degraded_reason` adds a `'unexpected_error'` slot
+//     (P-M1: distinguishes runtime crashes from malformed LLM output).
+//   - `meta.termination.kind` discriminates the two `reason: 'blocked'`
+//     cases: `'security_block'` (policy_blocked=true) vs
+//     `'unsupported_intent'` (policy_blocked=false, coverage-gap template).
+//   - `execution` wraps `steps[]` and `tool_call_count` into one record
+//     (top-level `steps[]` is gone).
+//
+// Wire shape is snake_case across the boundary. We keep that here to
+// match the existing /v1/search and /v1/agent local convention.
+//
+// The legacy /v1/agent types above are kept intact for strangler-fig
+// coexistence — DO NOT delete them.
+
+export type WineSearchStepSource =
+  | 'analyzer'
+  | 'router'
+  | 'runner'
+  | 'mini_loop'
+  | 'synthesizer';
+
+export type WineSearchQueryIntent =
+  | 'search'
+  | 'compare'
+  | 'pair'
+  | 'drinkability'
+  | 'unknown'
+  | 'rejected';
+
+export type WineSearchPlanKind =
+  | 'single-search'
+  | 'parallel-search'
+  | 'comparison'
+  | 'food-pairing-then-search'
+  | 'search-then-drinkability'
+  | 'multi-step'
+  | 'reject';
+
+export type WineSearchTerminationReason =
+  | 'answer'
+  | 'max_steps'
+  | 'timeout'
+  | 'budget'
+  | 'error'
+  | 'loop_detected'
+  | 'fallback'
+  | 'blocked'
+  | 'aborted';
+
+export type WineSearchAnswerLayer = 'primary' | 'layer2' | 'layer3' | 'layer4';
+
+export type WineSearchDegradedReason =
+  | 'malformed_llm_output'
+  | 'timeout'
+  | 'circuit_open'
+  | 'no_results'
+  | 'policy_blocked'
+  | 'unexpected_error';
+
+/**
+ * S1 discriminant — present only when `termination.reason === 'blocked'`.
+ *   - `'security_block'`: adversarial sanitizer fired → `policy_blocked=true`.
+ *   - `'unsupported_intent'`: planner could not derive a wine search →
+ *     `policy_blocked=false`, Korean coverage-gap template emitted.
+ */
+export type WineSearchTerminationKind = 'security_block' | 'unsupported_intent';
+
+export interface WineSearchTokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+}
+
+export interface WineSearchToolCallDto {
+  /** Tool name (e.g. `search_wines`, `compare_wines`). May also be an
+   *  unregistered tool name surfaced by the orchestrator for audit. */
+  name: string;
+  /** Tool-specific arguments. Shape varies by tool; validated server-side. */
+  arguments: Record<string, unknown>;
+}
+
+export interface WineSearchStepDto {
+  index: number;
+  source: WineSearchStepSource;
+  summary: string;
+  tool_calls?: readonly WineSearchToolCallDto[];
+  observations?: readonly string[];
+  duration_ms: number;
+  token_usage?: WineSearchTokenUsage;
+}
+
+export interface WineSearchTermination {
+  reason: WineSearchTerminationReason;
+  layer: WineSearchAnswerLayer;
+  /** S1: present only when `reason === 'blocked'`. */
+  kind?: WineSearchTerminationKind;
+  /** Present only when the runner fell back from the primary LLM path. */
+  degraded_reason?: WineSearchDegradedReason;
+}
+
+export interface WineSearchResponse {
+  query_type: 'wine_search';
+  answer: string;
+  execution: {
+    steps: readonly WineSearchStepDto[];
+    tool_call_count: number;
+  };
+  meta: {
+    request_id: string;
+    total_duration_ms: number;
+    total_tokens: WineSearchTokenUsage;
+    intent: WineSearchQueryIntent;
+    plan_kind: WineSearchPlanKind;
+    termination: WineSearchTermination;
+    policy_blocked: boolean;
+  };
+}
+
+export interface WineSearchRequest {
+  query: string;
+  options?: {
+    max_steps?: number;
+    per_step_timeout_ms?: number;
+    agent_timeout_ms?: number;
+    max_total_tokens?: number;
+  };
+}

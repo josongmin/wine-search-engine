@@ -50,6 +50,7 @@ import { QueryAnalyzerService } from '../application/wine-search/query-analyzer.
 import { DeterministicRouter } from '../application/wine-search/deterministic-router.js';
 import { ExecutionRunner } from '../application/wine-search/execution-runner.js';
 import { MiniLoopRunner } from '../application/wine-search/mini-loop.js';
+import { buildMiniLoopToolBundle } from '../application/wine-search/mini-loop-tool-bundle.js';
 import { SynthesisRunner } from '../application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../application/wine-search/adapters/search-use-case-adapter.js';
 import { ComparisonUseCaseAdapter } from '../application/wine-search/adapters/comparison-use-case-adapter.js';
@@ -62,6 +63,17 @@ import type { DecomposedSearchUseCase } from '../application/search/decomposed-s
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { WineSearchOrchestrator as WineSearchOrchestratorImpl } from '../application/wine-search/wine-search-orchestrator.js';
 import type { WineSearchOrchestratorContract as WineSearchOrchestrator } from '../application/wine-search/wine-search-orchestrator.js';
+export {
+  getWiringManifest,
+  topologicalBuildOrder,
+  WIRING_MANIFEST,
+} from './container-wiring-manifest.js';
+export type {
+  ContainerPortId,
+  SubContainerId,
+  SubContainerSpec,
+  WiringManifest,
+} from './container-wiring-manifest.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when an OpenAI credential or credential pool is set. */
@@ -230,6 +242,21 @@ function buildWineSearchContainerServices(
   //      `@app/wine-search/wine-search-result-schemas.js`). No translation
   //      happens here — the HTTP route owns the single camelCase →
   //      snake_case re-case at the wire boundary.
+  // ── 4a) MiniLoop tool bundle. Without this slot the orchestrator falls
+  //       through to Synthesizer Layer 4 (graceful degradation) on
+  //       multi-step plans — i.e. the new architecture would silently NOT
+  //       drive `MiniLoopRunner` for the ~10–20% of queries that need
+  //       multi-hop ReAct. The bundle reuses the SAME adapter instances
+  //       already wired into `ExecutionRunner` so the deterministic and
+  //       LLM-driven lanes share state, caches, and circuit breakers
+  //       (CLAUDE.md rule 30 — SSoT for tool ports).
+  const miniLoopToolBundle = buildMiniLoopToolBundle({
+    searchUseCase: searchAdapter,
+    comparisonUseCase: comparisonAdapter,
+    foodPairingUseCase: foodPairingAdapter,
+    drinkabilityUseCase: drinkabilityAdapter,
+  });
+
   const wineSearchOrchestrator: WineSearchOrchestrator =
     new WineSearchOrchestratorImpl({
       queryAnalyzer,
@@ -237,6 +264,7 @@ function buildWineSearchContainerServices(
       executionRunner,
       miniLoopRunner,
       synthesisRunner,
+      miniLoopToolBundle,
       logger: bootstrapLogger,
     });
 

@@ -79,6 +79,19 @@ export const FALLBACK_TEMPLATES = {
   },
   policyBlocked: {
     korean: '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.',
+    english: 'This request cannot be processed. Please ask a wine-related question.',
+  },
+  /**
+   * Unsupported-intent (S1 semantic split): the orchestrator's deterministic
+   * router could not derive a wine-search plan from the query (no anchors,
+   * no constraints, intent=unknown — or admit-gate empty / too-long /
+   * malformed). This is a vocabulary-coverage signal, NOT a security event.
+   * The Korean / English copy explicitly nudges the user toward inputs the
+   * planner can handle (entity name, region, price range, food pairing).
+   */
+  unsupportedIntent: {
+    korean: '이 요청은 와인 검색으로 처리하기 어려워요. 와인 이름, 산지, 가격대, 음식 페어링 등을 알려주시면 도와드릴 수 있어요.',
+    english: 'I could not handle this as a wine search. Please share details like wine name, region, price range, or food pairing so I can help.',
   },
   oodAlcohol: {
     korean: '저는 와인 중심으로만 도와드립니다. 맥주나 다른 주류 추천은 도와드리지 않고, 원하시면 취향에 맞는 와인으로 바로 추천해드릴게요.',

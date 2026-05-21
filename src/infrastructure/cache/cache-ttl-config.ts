@@ -28,6 +28,15 @@ const SECONDS_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
 const SECONDS_PER_DAY = SECONDS_PER_HOUR * HOURS_PER_DAY;
 
 /**
+ * Per-kind TTL horizon constants. Each value is a domain-justified count of
+ * the base unit it is multiplied by (days, minutes). Extracting them keeps
+ * the scaling arithmetic auditable without leaking magic numbers.
+ */
+const EMBEDDING_TTL_DAYS = 7; // OpenAI embeddings stable per model version
+const PHRASE_TTL_DAYS = 1; // formalises llm-nl-mapper.PHRASE_CACHE_TTL_SECONDS (24h)
+const QUERY_TTL_MINUTES = 5; // freshness vs. repeat-query hit rate tradeoff
+
+/**
  * Default TTL (in seconds) per cache kind.
  *
  * EMBEDDING — 7 days. OpenAI `text-embedding-3-small` vectors are stable
@@ -40,9 +49,9 @@ const SECONDS_PER_DAY = SECONDS_PER_HOUR * HOURS_PER_DAY;
  *   freshness (new ingest, ranker tweaks) against repeat-query hit rate.
  */
 export const CACHE_TTL_SECONDS = {
-  EMBEDDING: 7 * SECONDS_PER_DAY,
-  PHRASE: 1 * SECONDS_PER_DAY,
-  QUERY: 5 * SECONDS_PER_MINUTE,
+  EMBEDDING: EMBEDDING_TTL_DAYS * SECONDS_PER_DAY,
+  PHRASE: PHRASE_TTL_DAYS * SECONDS_PER_DAY,
+  QUERY: QUERY_TTL_MINUTES * SECONDS_PER_MINUTE,
 } as const;
 
 export type CacheKind = keyof typeof CACHE_TTL_SECONDS;

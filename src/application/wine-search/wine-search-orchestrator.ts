@@ -84,8 +84,11 @@ import {
   ORCHESTRATOR_MAX_QUERY_CHARS,
   ORCHESTRATOR_STEP_SUMMARY_MAX_CHARS,
   ORCHESTRATOR_TOOL_INPUT_MAX_CHARS,
+  TERMINATION_KIND_SECURITY_BLOCK,
+  TERMINATION_KIND_UNSUPPORTED_INTENT,
   assertWineSearchResult,
   type ExecutionStep,
+  type TerminationKind,
   type WineSearchResult,
 } from './wine-search-result-schemas.js';
 
@@ -133,6 +136,23 @@ const ORCHESTRATOR_DEFAULT_PER_TOOL_CAP = 2;
  *  enough to identify a typical use-case error class without bloating the
  *  trace. Kept above the typical Vespa error message length (≈80 chars). */
 const ORCHESTRATOR_ERROR_SUMMARY_MAX_CHARS = 120;
+
+/**
+ * Zero-width characters that the JavaScript `String.prototype.trim()` does
+ * NOT strip (they are not in the Unicode WhiteSpace property): ZWSP
+ * (U+200B), ZWNJ (U+200C), ZWJ (U+200D), and BOM/ZWNBSP (U+FEFF). The
+ * admit gate strips these in addition to whitespace so a query containing
+ * only invisible separators is rejected as empty (not silently admitted
+ * into the analyzer where it surfaces as Layer-4 fallback).
+ *
+ * The character class uses explicit `\u…` escapes (not literal invisible
+ * glyphs) so the source remains greppable and lint rules
+ * (`no-irregular-whitespace`, `no-misleading-character-class`) pass.
+ *
+ * CLAUDE.md rule 8 — character class with `/u` flag, not `\b`.
+ * CLAUDE.md rule 16 — module-scope const, not inline regex inside a method.
+ */
+const ORCHESTRATOR_ADMIT_GATE_ZERO_WIDTH_RE = /(?:\u200B|\u200C|\u200D|\uFEFF)/gu;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -231,6 +251,25 @@ interface OrchestratorState {
   terminationReason: AgentTerminationReason;
   toolOutcomes: ToolOutcome[];
 }
+
+/**
+ * Dispatch outcome — every plan-branch returns the same shape so the
+ * orchestrator's caller (`execute`) can uniformly read the terminal
+ * `terminationReason`, `policyBlocked`, and the S1 `terminationKind`
+ * discriminant (security vs unsupported, when applicable).
+ *
+ * `terminationKind` is OPTIONAL and present only on `terminationReason ===
+ * 'blocked'` branches — see `wine-search-result-schemas.ts` for the full
+ * design note.
+ */
+type DispatchOutcome =
+  | {
+      readonly kind: 'ok';
+      readonly terminationReason: AgentTerminationReason;
+      readonly policyBlocked: boolean;
+      readonly terminationKind?: TerminationKind | undefined;
+    }
+  | { readonly kind: 'aborted' };
 
 function makeInitialState(): OrchestratorState {
   return {
@@ -401,6 +440,13 @@ export class WineSearchOrchestrator {
 
     // ── Phase 4: synthesizer (always runs).
     const synthesisPhaseStart = this.clock.now();
+    // For dispatch-level blocks (router-reject, runner-rejected) we need to
+    // route the synthesizer to the correct Korean/English template. When
+    // `terminationKind` is present we set `policyBlocked: true` on the
+    // synthesizer call (its short-circuit branch) and pass `blockedKind`
+    // for template selection. When absent, the synthesizer runs the LLM
+    // path as before.
+    const dispatchKind = dispatchResult.terminationKind;
     let answer: AnswerResult;
     try {
       answer = await this.deps.synthesisRunner.run({
@@ -408,7 +454,8 @@ export class WineSearchOrchestrator {
         requestId: input.requestId,
         analysis,
         toolOutcomes: state.toolOutcomes,
-        policyBlocked: dispatchResult.policyBlocked,
+        policyBlocked: dispatchKind !== undefined || dispatchResult.policyBlocked,
+        ...(dispatchKind !== undefined ? { blockedKind: dispatchKind } : {}),
         perStepTimeoutMs: baseConfig.perStepTimeoutMs,
         maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
@@ -433,6 +480,7 @@ export class WineSearchOrchestrator {
         analysis.intent,
         plan.kind,
         'no_results',
+        dispatchKind,
       );
     }
     const synthesisDurationMs = Math.max(0, this.clock.now() - synthesisPhaseStart);
@@ -472,6 +520,7 @@ export class WineSearchOrchestrator {
       intent: analysis.intent,
       planKind: plan.kind,
       policyBlocked: dispatchResult.policyBlocked,
+      ...(dispatchKind !== undefined ? { terminationKind: dispatchKind } : {}),
     });
   }
 
@@ -485,18 +534,35 @@ export class WineSearchOrchestrator {
     input: WineSearchInput,
     state: OrchestratorState,
     baseConfig: AgentConfig,
-  ): Promise<
-    | { readonly kind: 'ok'; readonly terminationReason: AgentTerminationReason; readonly policyBlocked: boolean }
-    | { readonly kind: 'aborted' }
-  > {
+  ): Promise<DispatchOutcome> {
     if (plan.kind === 'reject') {
+      // Router-level reject = `unsupported_intent` (no anchors, no
+      // constraints, intent=unknown). It is NOT a security event, so
+      // `policyBlocked` is false. See S1 split in
+      // `wine-search-result-schemas.ts`.
       state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
       this.appendStep(state, {
         source: 'runner',
         summary: `rejected: ${plan.reason}`,
         durationMs: 0,
       });
-      return { kind: 'ok', terminationReason: 'blocked', policyBlocked: true };
+      this.logger.info(
+        {
+          requestId: input.requestId,
+          phase: 'router_reject',
+          reason: plan.reason,
+          terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
+          anchors: analysis.anchors.length,
+          constraints: analysis.normalizedConstraints.length,
+        },
+        '[wine-search-orchestrator] router rejected → unsupported_intent',
+      );
+      return {
+        kind: 'ok',
+        terminationReason: 'blocked',
+        policyBlocked: false,
+        terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
+      };
     }
 
     if (plan.kind === 'multi-step') {
@@ -511,10 +577,7 @@ export class WineSearchOrchestrator {
     input: WineSearchInput,
     state: OrchestratorState,
     baseConfig: AgentConfig,
-  ): Promise<
-    | { readonly kind: 'ok'; readonly terminationReason: AgentTerminationReason; readonly policyBlocked: boolean }
-    | { readonly kind: 'aborted' }
-  > {
+  ): Promise<DispatchOutcome> {
     const runnerPhaseStart = this.clock.now();
     let outcome: ExecutionOutcome;
     try {
@@ -546,9 +609,7 @@ export class WineSearchOrchestrator {
     plan: ExecutionPlan,
     durationMs: number,
     state: OrchestratorState,
-  ):
-    | { readonly kind: 'ok'; readonly terminationReason: AgentTerminationReason; readonly policyBlocked: boolean }
-    | { readonly kind: 'aborted' } {
+  ): DispatchOutcome {
     switch (outcome.kind) {
       case 'search-result':
       case 'comparison-result':
@@ -573,13 +634,21 @@ export class WineSearchOrchestrator {
         return { kind: 'ok', terminationReason: 'answer', policyBlocked: false };
       }
       case 'rejected': {
+        // Runner-level rejection (e.g. use-case refused the input). This is
+        // a planner / vocabulary signal, NOT a security event — emit
+        // `unsupported_intent`, NOT `policy_blocked=true`. See S1 split.
         this.appendStep(state, {
           source: 'runner',
           summary: `rejected: ${outcome.reason}`,
           durationMs,
         });
         state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
-        return { kind: 'ok', terminationReason: 'blocked', policyBlocked: true };
+        return {
+          kind: 'ok',
+          terminationReason: 'blocked',
+          policyBlocked: false,
+          terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
+        };
       }
       case 'error': {
         this.appendStep(state, {
@@ -621,10 +690,7 @@ export class WineSearchOrchestrator {
     input: WineSearchInput,
     state: OrchestratorState,
     baseConfig: AgentConfig,
-  ): Promise<
-    | { readonly kind: 'ok'; readonly terminationReason: AgentTerminationReason; readonly policyBlocked: boolean }
-    | { readonly kind: 'aborted' }
-  > {
+  ): Promise<DispatchOutcome> {
     const bundle = this.deps.miniLoopToolBundle;
     if (bundle === undefined) {
       this.logger.warn(
@@ -722,9 +788,7 @@ export class WineSearchOrchestrator {
   private dispatchMultiStepFromHandoff(
     syntheticPlan: Extract<ExecutionPlan, { kind: 'multi-step' }>,
     state: OrchestratorState,
-  ):
-    | { readonly kind: 'ok'; readonly terminationReason: AgentTerminationReason; readonly policyBlocked: boolean }
-    | { readonly kind: 'aborted' } {
+  ): DispatchOutcome {
     // The runner can only emit `multi-step-required` when the underlying use
     // case explicitly hands off. We don't have analysis here; we surface a
     // fallback step and let the synthesizer handle the rest.
@@ -743,7 +807,13 @@ export class WineSearchOrchestrator {
   // -------------------------------------------------------------------------
 
   private runAdmitGate(input: WineSearchInput): { readonly reason: 'empty_query' | 'too_long' } | undefined {
-    const trimmed = input.query.trim();
+    // Strip zero-width characters BEFORE trim — `String.prototype.trim()`
+    // removes Unicode WhiteSpace property runs, which excludes ZWSP
+    // (U+200B), ZWNJ (U+200C), ZWJ (U+200D), and BOM (U+FEFF). Without
+    // this strip, a query of three U+200B ZWSPs survives trim and reaches
+    // the analyzer as a non-empty string.
+    const stripped = input.query.replace(ORCHESTRATOR_ADMIT_GATE_ZERO_WIDTH_RE, '');
+    const trimmed = stripped.trim();
     if (trimmed.length === 0) return { reason: 'empty_query' };
     if (input.query.length > ORCHESTRATOR_MAX_QUERY_CHARS) return { reason: 'too_long' };
     return undefined;
@@ -767,6 +837,12 @@ export class WineSearchOrchestrator {
     });
     state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
 
+    // Admit-gate rejections (empty / too long) are NOT security events —
+    // they are malformed-input signals. S1 split: emit
+    // `unsupported_intent`, NOT `policy_blocked=true`. The synthesizer
+    // surfaces the coverage-gap Korean / English template.
+    const blockedKind: TerminationKind = TERMINATION_KIND_UNSUPPORTED_INTENT;
+
     // Run synthesizer on the policy-blocked branch so the user gets a
     // consistent, deterministic Korean/English template (no fabrication).
     const synthesisStart = this.clock.now();
@@ -782,6 +858,7 @@ export class WineSearchOrchestrator {
         analysis: shellAnalysis,
         toolOutcomes: [],
         policyBlocked: true,
+        blockedKind,
         perStepTimeoutMs: this.resolvePerStepTimeoutMs(input),
         maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
@@ -798,6 +875,7 @@ export class WineSearchOrchestrator {
         'unknown',
         'reject',
         'policy_blocked',
+        blockedKind,
       );
     }
     const synthesisDurationMs = Math.max(0, this.clock.now() - synthesisStart);
@@ -808,6 +886,17 @@ export class WineSearchOrchestrator {
       durationMs: synthesisDurationMs,
       tokenUsage: answer.tokenUsage,
     });
+    this.logger.info(
+      {
+        requestId: input.requestId,
+        phase: 'admit_gate_blocked',
+        reason: admit.reason,
+        terminationKind: blockedKind,
+        anchors: 0,
+        constraints: 0,
+      },
+      '[wine-search-orchestrator] admit-gate blocked → unsupported_intent',
+    );
 
     return this.finalize({
       answer,
@@ -815,7 +904,8 @@ export class WineSearchOrchestrator {
       startMs,
       intent: 'rejected',
       planKind: 'reject',
-      policyBlocked: true,
+      policyBlocked: false,
+      terminationKind: blockedKind,
     });
   }
 
@@ -827,10 +917,22 @@ export class WineSearchOrchestrator {
     input: WineSearchInput,
     baseConfig: AgentConfig,
   ): Promise<WineSearchResult> {
-    const policyBlocked = reason === 'blocked';
+    // S1 semantic split: `reason === 'blocked'` is the ONLY case set by the
+    // analyzer's adversarial sanitizer (`classifyQueryBudget === 'adversarial'`).
+    // Every other analyzer-rejection reason (`empty_query`, `too_long`,
+    // `malformed`) is a coverage/shape signal — emit `unsupported_intent`,
+    // NOT `policy_blocked=true`.
+    const isSecurityBlock = reason === 'blocked';
+    const blockedKind: TerminationKind = isSecurityBlock
+      ? TERMINATION_KIND_SECURITY_BLOCK
+      : TERMINATION_KIND_UNSUPPORTED_INTENT;
+    const policyBlocked = isSecurityBlock;
     state.terminationReason = transitionTerminationReason(
       state.terminationReason,
-      policyBlocked ? 'blocked' : 'error',
+      // Both branches map to 'blocked' so the termination state machine
+      // surfaces a single hard-failure terminator. The S1 `terminationKind`
+      // discriminant on the final result disambiguates downstream.
+      'blocked',
     );
 
     const synthesisStart = this.clock.now();
@@ -842,7 +944,12 @@ export class WineSearchOrchestrator {
         requestId: input.requestId,
         analysis: shellAnalysis,
         toolOutcomes: [],
-        policyBlocked,
+        // The synthesizer's short-circuit fires on `policyBlocked === true`.
+        // For unsupported-intent (no security event), we still want the
+        // deterministic template — set `policyBlocked = true` and route via
+        // `blockedKind` to the unsupported-intent Korean / English template.
+        policyBlocked: true,
+        blockedKind,
         perStepTimeoutMs: baseConfig.perStepTimeoutMs,
         maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
@@ -858,7 +965,8 @@ export class WineSearchOrchestrator {
         queryHasHangul,
         'rejected',
         'reject',
-        policyBlocked ? 'policy_blocked' : 'no_results',
+        'policy_blocked',
+        blockedKind,
       );
     }
     const synthesisDurationMs = Math.max(0, this.clock.now() - synthesisStart);
@@ -869,6 +977,19 @@ export class WineSearchOrchestrator {
       durationMs: synthesisDurationMs,
       tokenUsage: answer.tokenUsage,
     });
+    if (!isSecurityBlock) {
+      this.logger.info(
+        {
+          requestId: input.requestId,
+          phase: 'analyzer_rejected_unsupported',
+          reason,
+          terminationKind: blockedKind,
+          anchors: 0,
+          constraints: 0,
+        },
+        '[wine-search-orchestrator] analyzer rejected → unsupported_intent',
+      );
+    }
 
     return this.finalize({
       answer,
@@ -877,6 +998,7 @@ export class WineSearchOrchestrator {
       intent: 'rejected',
       planKind: 'reject',
       policyBlocked,
+      terminationKind: blockedKind,
     });
   }
 
@@ -913,11 +1035,22 @@ export class WineSearchOrchestrator {
     intent: QueryIntent | 'rejected',
     planKind: ExecutionPlan['kind'],
     degradedReason: NonNullable<AnswerResult['degradedReason']>,
+    terminationKind?: TerminationKind,
   ): WineSearchResult {
     const totalDurationMs = Math.max(0, this.clock.now() - startMs);
     const answerText = queryHasHangul
       ? '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.'
       : 'We could not process your wine query. Please try rephrasing or simplifying your search.';
+    // S1: `policyBlocked` is true ONLY for a real security block. When the
+    // caller passes a `terminationKind` we honor it; otherwise we fall back
+    // to the legacy "policy_blocked degradedReason → true" heuristic ONLY
+    // when the caller has not narrowed the kind (degradedReason alone is
+    // ambiguous between security and coverage-gap blocks).
+    const policyBlocked = terminationKind === TERMINATION_KIND_SECURITY_BLOCK
+      ? true
+      : terminationKind === TERMINATION_KIND_UNSUPPORTED_INTENT
+        ? false
+        : degradedReason === 'policy_blocked';
     return assertWineSearchResult({
       answer: answerText,
       layer: 'layer4',
@@ -928,7 +1061,8 @@ export class WineSearchOrchestrator {
       tokenUsage: state.tokenUsage,
       totalDurationMs,
       terminationReason: state.terminationReason,
-      policyBlocked: degradedReason === 'policy_blocked',
+      policyBlocked,
+      ...(terminationKind !== undefined ? { terminationKind } : {}),
       degradedReason,
       intent,
       planKind,
@@ -942,6 +1076,7 @@ export class WineSearchOrchestrator {
     readonly intent: QueryIntent | 'rejected';
     readonly planKind: ExecutionPlan['kind'];
     readonly policyBlocked: boolean;
+    readonly terminationKind?: TerminationKind | undefined;
   }): WineSearchResult {
     const totalDurationMs = Math.max(0, this.clock.now() - args.startMs);
     return assertWineSearchResult({
@@ -955,6 +1090,7 @@ export class WineSearchOrchestrator {
       totalDurationMs,
       terminationReason: args.state.terminationReason,
       policyBlocked: args.policyBlocked,
+      ...(args.terminationKind !== undefined ? { terminationKind: args.terminationKind } : {}),
       ...(args.answer.degradedReason !== undefined ? { degradedReason: args.answer.degradedReason } : {}),
       intent: args.intent,
       planKind: args.planKind,

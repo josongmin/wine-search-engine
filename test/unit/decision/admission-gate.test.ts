@@ -125,6 +125,10 @@ function makeResolveResult(overrides: {
       top2CalibratedScore: C - 0.2,
       calibratedGap: 0.2,
       decisionConfidenceC: C,
+      // Default fixture treats C as a trained-calibration output so §e fires.
+      // The untrusted-calibration regression tests below explicitly flip this
+      // to false to verify the bypass branch.
+      calibrationTrusted: true,
       ambiguityDetected: false,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0.45, gapThreshold: 0.02 },
@@ -388,6 +392,43 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
   });
 
   describe('AMBIGUITY_BLOCKED — policy clarify outcome at high ambiguity severity', () => {
+    /**
+     * Severity-discrimination invariant: high severity must route the clarify
+     * outcome to AMBIGUITY_BLOCKED, while medium/low severity (when paired
+     * with sufficient identity evidence) must admit instead of falling into
+     * EVIDENCE_INSUFFICIENT. The two sibling tests below cover both halves so
+     * a regression that collapses the clarify-severity split is caught.
+     */
+    it('admits when ambiguity severity is medium and all other invariants are satisfied (no clarify branch taken)', () => {
+      const input = makeDecisionInput({
+        ambiguitySummary: {
+          types: ['homonym'],
+          severity: 'medium',
+          sources: ['resolver'],
+        },
+        provenanceContract: {
+          policy: {
+            requireIdentitySeal: false,
+            requireConstraintEvidence: false,
+            requireAnchorEvidence: false,
+          },
+          observed: {
+            identityEvidenceSatisfied: true,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            topEntityPresent: true,
+            rankedTopResultPresent: false,
+            matchedConstraintAttributes: [],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+          missing: [],
+        },
+      });
+      const result = gate.check(input, snapshot);
+      expect(result.admitted).toBe(true);
+    });
+
     it('rejects with AMBIGUITY_BLOCKED when severity=high (clarify branch differentiates by severity over EVIDENCE_INSUFFICIENT)', () => {
       // Trigger sequence:
       //   1. identitySeal satisfied (identityEvidenceSatisfied=true, snapshot match)
@@ -476,6 +517,38 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
       });
       const result = gateNoRefusal.check(input, snapshot);
       expect(result.admitted).toBe(true);
+    });
+
+    it('bypasses §e when calibrationTrusted=false (raw-score refusal-floor would be noise on identity-calibration fallback)', () => {
+      // CRITICAL invariant: when no trained calibration_params exist for the
+      // query class, the Calibrator returns identity (raw score → C). Applying
+      // a probability threshold to a raw score is RFC-006 §6 violation, so
+      // §e must skip enforcement and emit a silent-skip counter instead.
+      const gateWithRefusal = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
+      const resolveResult = makeResolveResult({ C: 0.20 });  // would normally refuse
+      const untrusted: EntityResolveResult = {
+        ...resolveResult,
+        decisionTrace: {
+          ...resolveResult.decisionTrace,
+          calibrationTrusted: false,
+        } as never,
+      };
+      const result = gateWithRefusal.check(makeDecisionInput({ resolveResult: untrusted }), snapshot);
+      expect(result.admitted).toBe(true);
+    });
+
+    it('enforces §e when calibrationTrusted=true even at C marginally below threshold', () => {
+      const gateWithRefusal = new AdmissionGate(new ConfidenceRefusalPolicy(0.45));
+      const resolveResult = makeResolveResult({ C: 0.449 });
+      const trusted: EntityResolveResult = {
+        ...resolveResult,
+        decisionTrace: {
+          ...resolveResult.decisionTrace,
+          calibrationTrusted: true,
+        } as never,
+      };
+      const result = gateWithRefusal.check(makeDecisionInput({ resolveResult: trusted }), snapshot);
+      expectRejectedWith(result, 'CONFIDENCE_BELOW_THRESHOLD');
     });
   });
 

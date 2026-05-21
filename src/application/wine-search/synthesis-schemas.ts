@@ -73,7 +73,15 @@ export type DegradedReason =
   | 'timeout'
   | 'circuit_open'
   | 'no_results'
-  | 'policy_blocked';
+  | 'policy_blocked'
+  /**
+   * The primary structured-LLM call threw an exception that is NOT one of
+   * the typed {@link StructuredLlm*Error} classes — i.e. an unmodeled
+   * runtime failure (network hiccup, downstream adapter bug, generic
+   * `Error`). Distinguished from `malformed_llm_output` so operations can
+   * tell schema-validation noise apart from genuine surprises.
+   */
+  | 'unexpected_error';
 
 export interface AnswerResult {
   /** Non-empty answer string — invariant guaranteed by the runner's

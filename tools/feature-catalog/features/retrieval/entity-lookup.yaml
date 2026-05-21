@@ -6,11 +6,20 @@ summary: |
   retrieval_mode='entity' 단발 lookup으로 직행하는 경로. 한국어 별칭 catalog (3-tier:
   gold/seeded/silver)에 매칭되면 LLM 없이 처리.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   프로덕션 와이어링 완료 (`cascade-router`가 query를 적절한 retrieval mode로 라우팅).
-  3-tier alias catalog regression 게이트 운영 중. 카탈로그 누락에 따른 long-tail 미스가
-  남아 있어 5는 아님.
+  3-tier alias catalog regression 게이트 + property-based 불변식 검증 운영 중
+  (test/regression/entity-lookup-provenance-properties.regression.test.ts):
+  provenance 결정성, tier monotonicity (gold/seeded/silver ⊂ resolvable), cascade
+  routing determinism (5x stability), Korean curated alias correctness, NFC/NFD
+  invariance, 3-tier surface non-collision, special-character preservation 모두
+  fast-check 100 runs로 잠금. 어떤 입력에서도 resolver/router가 throw하지 않음.
+  추가로 dual-implementation parity property가 production
+  `resolveCuratedExactLookupTarget` (agent-tools.ts) 와 reference impl
+  (test 내부, provenance/surface 노출용) 간의 canonicalValue 동일성을 100 runs +
+  전체 curated surface로 검증 — production normalize/vintage-strip 로직 drift
+  발생 시 즉시 실패.
 
 status: active
 since: 2025-09
@@ -31,6 +40,7 @@ tests:
     - test/regression/gold-korean-entity-alias-catalog.regression.test.ts
     - test/regression/seeded-korean-entity-alias-catalog.regression.test.ts
     - test/regression/silver-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/entity-lookup-provenance-properties.regression.test.ts
 
 depends_on:
   - korean-i18n.curated-alias-catalog
@@ -43,6 +53,7 @@ related_rfcs:
 known_limitations:
   - "Gold catalog manual curation 필요 — 신규 와이너리 신속 반영 불가"
   - "Cross-language alias expansion 미흡 (e.g. 'Moët' ↔ '모엣')"
+  - "resolveCuratedExactLookupTarget는 trailing 4-digit vintage를 strip한 뒤 base entity surface로 lookup — 결과적으로 year-specific SKU surface (예: '라피트 2016' → 'Château Lafite Rothschild 2016') 는 production 경로로 직접 도달 불가. Regression test는 이를 의도된 divergence로 핀(dual-implementation parity property의 out-of-scope case)."
 
 next_steps:
   - "Gold catalog 자동 갱신 파이프라인 (Korean wine 이커머스 데이터 활용)"

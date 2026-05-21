@@ -6,11 +6,22 @@ summary: |
   (3) phonetic normalize (sch→ch, ph→f, eaux→o), (4) Korean transliteration view
   (샤또 마고 → chateau margaux), (5) compact form. Vintage canonicalization 포함.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  357 lines, NFKC + accent strip + Unicode homoglyph + Korean josa 12+ particle 정확
-  처리 + 16개 transliteration pattern 적용. Planner / policy-compiler / exact-entity-metadata
-  테스트로 광범위 커버. Determinism 검증된 regression 있음.
+  357 lines, NFKC + accent strip + Unicode homoglyph + Korean josa 22 particle 정확
+  처리 (KOREAN_JOSA_STRIP_RE — 은/는/이/가/을/를/의/에서/에게/에/으로/로/과/와/이랑/
+  랑/부터/까지/보다/도/님/씨) + 16개 transliteration pattern 적용. Planner /
+  policy-compiler / exact-entity-metadata 테스트로 광범위 커버. Property-based
+  regression (`test/regression/query-normalizer-properties.regression.test.ts`,
+  32 tests, fast-check numRuns≥100 per property)으로 invariants 검증 완료:
+  (1) NFC idempotence (TR15), (2) determinism, (3) Korean josa stripping,
+  (4) lower-case stability, (5) vintage round-trip [1800-2100],
+  (6) punctuation strip stability, (7) empty/whitespace lock,
+  (8) length bound (linear) — |view| ≤ K_LEN(=8) × |input| + K_CONST(=64);
+  source comment above KOREAN_TRANSLITERATION_RULES 에 empirical rationale
+  (worst observed ≈5× growth, 37% safety margin) 기재,
+  (9) Hangul Jamo NFC recomposition,
+  (10) 16 transliteration patterns 모두 pinned + emoji passthrough locked.
 
 status: active
 since: 2025-08
@@ -24,7 +35,11 @@ key_files:
   - src/domain/query/service/query-normalizer.ts
   - src/domain/query/model/query-views.ts
 
-tests: {}
+tests:
+  unit:
+    - src/domain/query/__tests__/query-normalizer.test.ts
+  regression:
+    - test/regression/query-normalizer-properties.regression.test.ts
 
 depends_on:
   - korean-i18n.transliterator

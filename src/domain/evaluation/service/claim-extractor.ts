@@ -67,6 +67,13 @@ const PRICE_COMPOSITE_MAN_WON_RE = /(\d+(?:\.\d+)?)\s*만\s*(\d{1,3}(?:,\d{3})+|
 const PRICE_PLAIN_WON_RE = /(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/gu;
 const PRICE_USD_RE = /\$\s*(\d+(?:\.\d+)?)/gu;
 
+/** Context-window widths around a price token used to detect "aggregate"
+ *  framings (총/예산/평균/budget/total). Asymmetric: aggregate qualifiers
+ *  usually precede the figure ("총 50만원"), so the left window is wider
+ *  than the right ("50만원 대" only needs to peek a few chars). */
+const PRICE_AGGREGATE_CONTEXT_LEFT_WINDOW = 16;
+const PRICE_AGGREGATE_CONTEXT_RIGHT_WINDOW = 6;
+
 /** Known wine regions for extraction (lowercased keys → display form values). */
 const KNOWN_REGIONS: ReadonlyMap<string, string> = new Map([
   ['bordeaux', 'Bordeaux'], ['burgundy', 'Burgundy'], ['bourgogne', 'Burgundy'],
@@ -447,11 +454,11 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
   const latinMatches = text.match(LATIN_IDENTITY_RE);
   if (latinMatches) {
     for (const match of text.matchAll(LATIN_IDENTITY_RE)) {
-      const name = match[0];
-      if (name === undefined) continue;
-      const trimmed = normalizeLatinIdentitySurface(name);
+      // matchAll on a /g regex always yields a full-match string at index 0 and
+      // a numeric `match.index`; LATIN_IDENTITY_RE has no optional capture group.
+      const trimmed = normalizeLatinIdentitySurface(match[0]);
       if (trimmed.length < 3) continue;
-      if (isPairingListContext(text, match.index ?? 0)) continue;
+      if (isPairingListContext(text, match.index)) continue;
       const lowered = trimmed.toLowerCase().normalize('NFKC');
       if (resolveGrapeSurface(trimmed) !== undefined) continue;
       if (KNOWN_REGIONS.has(lowered)) continue;
@@ -695,8 +702,8 @@ function isRangeConsumed(
 }
 
 function isAggregatePriceContext(text: string, start: number, end: number): boolean {
-  const left = text.slice(Math.max(0, start - 16), start);
-  const right = text.slice(end, Math.min(text.length, end + 6));
+  const left = text.slice(Math.max(0, start - PRICE_AGGREGATE_CONTEXT_LEFT_WINDOW), start);
+  const right = text.slice(end, Math.min(text.length, end + PRICE_AGGREGATE_CONTEXT_RIGHT_WINDOW));
   if (/(?:총|예산|합계|총액|평균|병당|budget|total|sum)\s*$/iu.test(left)) {
     return true;
   }

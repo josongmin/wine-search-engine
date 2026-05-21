@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { HttpRouteContract } from './route-contracts.js';
 import { AgentRouteContract } from './agent.contract.js';
 import { WineSearchRouteContract } from './wine-search.contract.js';
@@ -34,11 +35,34 @@ import {
   HTTP_SUCCESS_STATUS_MIN,
 } from '../constants.js';
 
-interface DeclaredHttpRouteContract {
+export interface DeclaredHttpRouteContract {
   readonly method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
   readonly url: string;
   readonly contract: HttpRouteContract;
 }
+
+/**
+ * Semantic version of the declared HTTP route contract catalog
+ * (semver.org 2.0.0 — major.minor.patch).
+ *
+ * Versioning policy (industry-verified — OpenAPI versioning best practices):
+ *   - MAJOR: breaking change to the public HTTP surface (route removed,
+ *     URL renamed, method changed, request body shape backward-incompatible,
+ *     success-response shape backward-incompatible). Consumers MUST update.
+ *   - MINOR: backward-compatible addition (new route, new optional field,
+ *     new error status). Existing consumers keep working.
+ *   - PATCH: documentation, internal refactor, additive error envelope
+ *     fields, or non-surface fix. No consumer impact.
+ *
+ * The companion HTTP_CONTRACT_CATALOG_FINGERPRINT acts as a structural
+ * tripwire: any change to the catalog flips the fingerprint and fails the
+ * regression test, forcing a deliberate version bump and review.
+ *
+ * History:
+ *   1.0.0 — initial pinned surface (2026-05-21). 26 declared routes,
+ *           OpenAPI 3 export + verify:http-contracts CI gate.
+ */
+export const HTTP_CONTRACT_CATALOG_VERSION = '1.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -77,6 +101,102 @@ function compareContracts(
     || left.method.localeCompare(right.method)
     || left.operationId.localeCompare(right.operationId);
 }
+
+/**
+ * Canonical structural surface of a single declared contract — the subset
+ * of the contract that is observable to clients (method, URL, operationId,
+ * body/params presence, status codes). Schema *shapes* are intentionally
+ * excluded: that level of detail is owned by the OpenAPI parity test
+ * (verify:http-contracts), which runs on prepush. The catalog fingerprint
+ * is the *first* line of defense — fast, deterministic, no schema
+ * traversal.
+ */
+interface CanonicalContractSurface {
+  readonly method: string;
+  readonly url: string;
+  readonly operationId: string;
+  readonly hasBody: boolean;
+  readonly hasParams: boolean;
+  readonly responseStatusCodes: readonly number[];
+}
+
+function canonicalizeContract(
+  entry: DeclaredHttpRouteContract,
+): CanonicalContractSurface {
+  // Status code keys are stringified integers; toFiniteInteger guards
+  // against contract corruption injecting NaN into the fingerprint.
+  const statusCodes = Object.keys(entry.contract.responses)
+    .map((statusCode) => toFiniteInteger(statusCode))
+    .filter((n): n is number => n !== null)
+    .sort((left, right) => left - right);
+  return {
+    method: entry.method,
+    url: entry.url,
+    operationId: entry.contract.operationId,
+    hasBody: entry.contract.body !== undefined,
+    hasParams: entry.contract.params !== undefined,
+    responseStatusCodes: statusCodes,
+  };
+}
+
+/**
+ * Deterministic structural fingerprint of the declared HTTP contract
+ * catalog: sha256(JSON of canonicalized, key-sorted surface).
+ *
+ * Determinism guarantees:
+ *   - Entries are sorted by (url, method, operationId) before hashing, so
+ *     source ordering is irrelevant.
+ *   - Each entry's JSON serialization uses a fixed key order
+ *     (CanonicalContractSurface field declaration order is the JSON order
+ *     via the explicit object literal below).
+ *   - Status codes are sorted numerically.
+ *   - Output is lowercase hex sha256 (64 chars).
+ *
+ * The fingerprint is the breaking-change tripwire: HTTP_CONTRACT_CATALOG_FINGERPRINT
+ * pins the current surface; the regression test asserts they match.
+ */
+export function computeHttpContractCatalogFingerprint(
+  catalog: readonly DeclaredHttpRouteContract[],
+): string {
+  const canonical = catalog
+    .map(canonicalizeContract)
+    .slice()
+    .sort((left, right) =>
+      left.url.localeCompare(right.url)
+        || left.method.localeCompare(right.method)
+        || left.operationId.localeCompare(right.operationId),
+    )
+    .map((surface) => ({
+      // Explicit key order — do NOT use object spread; spread preserves
+      // insertion order of the source object which is harder to audit.
+      method: surface.method,
+      url: surface.url,
+      operationId: surface.operationId,
+      hasBody: surface.hasBody,
+      hasParams: surface.hasParams,
+      responseStatusCodes: [...surface.responseStatusCodes],
+    }));
+  const payload = JSON.stringify({
+    version: HTTP_CONTRACT_CATALOG_VERSION,
+    routes: canonical,
+  });
+  return createHash('sha256').update(payload, 'utf8').digest('hex');
+}
+
+/**
+ * Pinned structural fingerprint of the declared catalog at version
+ * HTTP_CONTRACT_CATALOG_VERSION. Regenerate by running:
+ *
+ *   pnpm run test:file -- test/regression/http-contract-catalog-properties.regression.test.ts
+ *
+ * If the regression test fails with a fingerprint mismatch, the catalog
+ * surface has drifted — review the diff, decide whether it is MAJOR /
+ * MINOR / PATCH per the versioning policy on HTTP_CONTRACT_CATALOG_VERSION,
+ * bump that constant, and update this hash to the value reported by the
+ * failing test.
+ */
+export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
+  'ebd5241ee536f8ad0367814ed05fee3f6a58796bcc59cb1c9731fb216c5e67da';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

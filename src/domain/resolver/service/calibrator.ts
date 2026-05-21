@@ -112,6 +112,7 @@ export class Calibrator {
       top2CalibratedScore: top2Calibrated,
       calibratedGap,
       decisionConfidenceC: top1Calibrated,
+      calibrationTrusted: !this.isDefaultFallbackParams(params),
     };
   }
 

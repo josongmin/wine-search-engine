@@ -10,6 +10,13 @@ export default tseslint.config(
       '.tsbuildcache/**',
       'src/**/*.d.ts',
       'src/**/*.d.ts.map',
+      // Generated declaration outputs under test/ (emitted by ad-hoc tsc runs)
+      // are not part of any `tsconfig.json` project graph, so the type-checked
+      // ESLint parser cannot resolve them. They are pure type-shape artefacts —
+      // skip them at the ignore layer to match the policy already in place for
+      // `src/**/*.d.ts`.
+      'test/**/*.d.ts',
+      'test/**/*.d.ts.map',
       'eslint.config.js',
       '.claude/**',
       'web/**',
@@ -517,6 +524,19 @@ export default tseslint.config(
    */
   {
     files: ['src/domain/shared/utils/clamp.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
+    },
+  },
+  /**
+   * constants.ts IS the SSoT for cross-module domain constants
+   * (vintage-year bounds, KRW conversions, etc.). The hard-coded-literal
+   * guardrails are meant to FORCE other modules to import from here, so
+   * the SSoT file itself must be allowed to materialize the literal values.
+   * Aligned with the same pattern used for zod-coerce.ts and clamp.ts above.
+   */
+  {
+    files: ['src/domain/shared/constants.ts'],
     rules: {
       'no-restricted-syntax': 'off',
     },

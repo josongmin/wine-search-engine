@@ -21,7 +21,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function WineColumn({ item }: { item: ResultItem }) {
   const { entity, match, drinking_window } = item;
   return (
-    <div className="space-y-4 rounded-xl border border-neutral-200 bg-white p-5">
+    <article
+      aria-label={entity.canonical_label}
+      className="space-y-4 rounded-xl border border-neutral-200 bg-white p-5"
+    >
       <h3 className="text-lg font-semibold text-neutral-900 line-clamp-2">
         {entity.canonical_label}
       </h3>
@@ -34,7 +37,7 @@ function WineColumn({ item }: { item: ResultItem }) {
       </dl>
       <TasteProfileBar scores={match.score_components} />
       {drinking_window && <DrinkingWindowBar window={drinking_window} />}
-    </div>
+    </article>
   );
 }
 

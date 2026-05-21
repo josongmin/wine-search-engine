@@ -6,11 +6,17 @@ summary: |
   tier (0.95 exception / 0.75 rule / 0.6 compact). alias 생성 파이프라인 + entity
   resolver fallback에 모두 사용.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   RFC-003 §4.5 구현. ordered rule set (FR/IT/ES/EN→KO) + exception catalog. transliteration
-  benchmark scenario로 회귀 모니터링. exception dict는 hand-curated이고 native-speaker
-  validation 부재로 5는 못 됨.
+  benchmark scenario로 회귀 모니터링. 4→5 승급(2026-05-21): fast-check 기반 property
+  regression suite 추가 — determinism (4 langs × 100 runs), idempotence (20-term 도메인
+  코퍼스), confidence tier 어휘 검증 ({0.95, 0.75, 0.6}만 허용·결정성), 길이 상한
+  (K=10), no-phantom-character 불변(input∪Hangul∪whitespace), 예외 카탈로그 완전성
+  (15개 well-known wine vocab pin: Chateau Margaux, Bordeaux, Burgundy, Bourgogne,
+  Champagne, Sauternes, Pauillac, Margaux, Barolo, Chianti, Pinot, Rioja, Chateau,
+  Opus One, Sassicaia 등) + 적대적 입력 회귀(emoji+한글+Latin, 1000자, NFC/NFD 충돌).
+  65/65 tests pass on initial run — invariants 모두 성립.
 
 status: active
 since: 2025-09
@@ -28,6 +34,10 @@ key_files:
 tests:
   bench:
     - test/benchmark/agent/scenarios.transliteration-large.ts
+  regression:
+    - test/regression/transliterator-properties.regression.test.ts
+  unit:
+    - test/unit/alias/transliterator.test.ts
 
 depends_on: []
 
@@ -38,6 +48,10 @@ known_limitations:
   - "Exception dictionary 신규 producer 누락"
   - "Phonetic alignment scoring 없음"
   - "Native speaker validation 없음"
+  - "Idempotence 보장 범위는 1차 출력이 Hangul∪공백 범위 안에 있는 경우로 한정.
+    숫자(vintage)·이모지 등 passthrough 문자가 출력에 남아 있으면 2차 호출에서도
+    동일하게 통과되어 안정적이지만, Latin 문자가 일부 잔존하는 케이스(예: 룰
+    테이블에 없는 다국어 혼합)는 2회차에서 추가 변환이 발생할 수 있음."
 
 next_steps:
   - "Korean 와인 e-commerce 데이터로 exception 확장"

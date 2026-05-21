@@ -86,18 +86,22 @@ function isSideSpecificSharedConstraint(
 export function stripSideSpecificCompareSharedConstraints<T extends CompareToolSharedConstraintInput>(
   input: T,
 ): T {
-  const strippedInput: Partial<CompareToolSharedConstraintInput> = { ...input };
-  let strippedAny = false;
+  const fieldsToStrip = new Set<CompareConceptEntityType>();
   for (const field of SIDE_SPECIFIC_SHARED_CONSTRAINT_FIELDS) {
     if (isSideSpecificSharedConstraint(input, field)) {
-      delete strippedInput[field];
-      strippedAny = true;
+      fieldsToStrip.add(field);
     }
   }
-  if (!strippedAny) {
+  if (fieldsToStrip.size === 0) {
     return input;
   }
-  return strippedInput as T;
+  // Rebuild without the contaminated keys. Object.entries preserves all
+  // non-stripped fields (including the caller's extra `T`-only keys), avoiding
+  // dynamic-delete mutation while satisfying `exactOptionalPropertyTypes`.
+  const filteredEntries = Object.entries(input).filter(
+    ([key]) => !(fieldsToStrip as Set<string>).has(key),
+  );
+  return Object.fromEntries(filteredEntries) as T;
 }
 
 export function buildCompareBaseRetrievalQueries(

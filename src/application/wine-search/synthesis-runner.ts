@@ -88,6 +88,37 @@ const GROUNDING_TRUNCATION_TAIL = '\n…[grounding truncated]';
 const VALIDATION_RETRY_CLARIFIER =
   'Previous output failed schema validation. Re-emit valid JSON that conforms to the supplied tool schema. Do not include extra prose.';
 
+/** Maximum number of characters from an unexpected error's `name`/`message`
+ *  pair that we log. Redacts long stack-trace-style messages or echoed
+ *  user content while keeping the field operator-useful. */
+const UNEXPECTED_ERROR_LOG_PAYLOAD_CHARS = 200;
+
+interface SafeErrorSummary {
+  readonly name: string;
+  readonly message: string;
+}
+
+/**
+ * Build a bounded, log-safe summary of an unexpected error caught in the
+ * synthesis primary path. Truncates the message at
+ * {@link UNEXPECTED_ERROR_LOG_PAYLOAD_CHARS} so we never echo arbitrary
+ * downstream payloads (which may include user input).
+ */
+function summarizeUnexpectedError(err: unknown): SafeErrorSummary {
+  if (err instanceof Error) {
+    return {
+      name: err.name.slice(0, UNEXPECTED_ERROR_LOG_PAYLOAD_CHARS),
+      message: err.message.slice(0, UNEXPECTED_ERROR_LOG_PAYLOAD_CHARS),
+    };
+  }
+  return {
+    name: 'NonError',
+    message: typeof err === 'string'
+      ? err.slice(0, UNEXPECTED_ERROR_LOG_PAYLOAD_CHARS)
+      : '[unknown thrown value]',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers — extract top result fields from an `unknown` ToolOutcome.result
 // ---------------------------------------------------------------------------
@@ -325,12 +356,35 @@ export interface SynthesisRunnerDeps {
   readonly model?: string;
 }
 
+/**
+ * Discriminant for the policy-blocked short-circuit branch — see the S1
+ * semantic split in `wine-search-result-schemas.ts`. The orchestrator supplies
+ * this when `policyBlocked === true` (and may omit it otherwise) so the
+ * synthesizer can pick the appropriate Korean / English template:
+ *  - `'security_block'`: adversarial sanitizer fired → existing security
+ *    template ("이 요청은 처리할 수 없습니다…").
+ *  - `'unsupported_intent'`: planner could not derive a wine search →
+ *    coverage-gap template ("이 요청은 와인 검색으로 처리하기 어려워요…").
+ *
+ * The two literal values are sourced from
+ * `wine-search-result-schemas.ts` (SSoT — CLAUDE.md rule 25/30); we re-declare
+ * the union here so the synthesis-runner module does not need to import from
+ * the orchestrator result module (one-way dependency).
+ */
+export type SynthesisBlockedKind = 'security_block' | 'unsupported_intent';
+
 export interface SynthesisRunInput {
   readonly query: string;
   readonly requestId: string;
   readonly analysis: WineSearchAnalysis;
   readonly toolOutcomes: readonly ToolOutcome[];
   readonly policyBlocked: boolean;
+  /** Required iff `policyBlocked === true` — discriminator for which
+   *  Korean/English template the synthesizer should emit. Defaults to
+   *  `'security_block'` when omitted on the blocked path (preserves the
+   *  legacy single-template behavior for callers that have not yet been
+   *  updated). */
+  readonly blockedKind?: SynthesisBlockedKind;
   readonly perStepTimeoutMs: number;
   readonly maxOutputTokens: number;
   readonly abortSignal?: AbortSignal;
@@ -357,12 +411,15 @@ export class SynthesisRunner {
   async run(input: SynthesisRunInput): Promise<AnswerResult> {
     this.throwIfAborted(input.abortSignal);
 
-    // Branch 1 — policy block short-circuit (no LLM call).
+    const queryHasHangul = containsHangul(input.query);
+
+    // Branch 1 — policy block short-circuit (no LLM call). The
+    // `blockedKind` discriminator (S1) selects the Korean/English template.
     if (input.policyBlocked) {
-      return this.makePolicyBlockedResult();
+      const kind: SynthesisBlockedKind = input.blockedKind ?? 'security_block';
+      return this.makePolicyBlockedResult(kind, queryHasHangul);
     }
 
-    const queryHasHangul = containsHangul(input.query);
     const hasGrounding = input.toolOutcomes.some(
       (o) => o.kind === 'success' || o.kind === 'partial_result',
     );
@@ -536,7 +593,17 @@ export class SynthesisRunner {
         lastDegraded = 'policy_blocked';
         return { usage: aggregatedUsage, attempts, degradedReason: lastDegraded };
       } else {
-        lastDegraded = 'malformed_llm_output';
+        // Unmodeled exception — operationally distinct from a known-shape
+        // validation failure. Tag with `unexpected_error` so dashboards can
+        // separate "LLM produced bad JSON" from "something else exploded"
+        // (P-M1 finding). Log at WARN with a bounded summary so we never
+        // echo arbitrary payload content.
+        lastDegraded = 'unexpected_error';
+        const summary = summarizeUnexpectedError(err);
+        this.logger.warn(
+          { requestId: input.requestId, errName: summary.name, errMessage: summary.message },
+          '[synthesis] primary attempt 1 raised an unmodeled exception',
+        );
       }
       this.logger.warn(
         { requestId: input.requestId, err },
@@ -574,11 +641,28 @@ export class SynthesisRunner {
       return { usage: aggregatedUsage, attempts, degradedReason: 'malformed_llm_output' };
     } catch (err) {
       if (isAbortError(err)) throw new SynthesisAbortedError();
-      const reason: DegradedReason = err instanceof StructuredLlmTimeoutError
-        ? 'timeout'
-        : err instanceof StructuredLlmCircuitOpenError
-          ? 'circuit_open'
-          : 'malformed_llm_output';
+      let reason: DegradedReason;
+      if (err instanceof StructuredLlmTimeoutError) {
+        reason = 'timeout';
+      } else if (err instanceof StructuredLlmCircuitOpenError) {
+        reason = 'circuit_open';
+      } else if (
+        err instanceof StructuredLlmValidationError
+        || err instanceof StructuredLlmPartialOutputError
+      ) {
+        reason = 'malformed_llm_output';
+      } else if (err instanceof StructuredLlmRefusalError) {
+        reason = 'policy_blocked';
+      } else {
+        // Same operational rationale as attempt 1: distinguish unmodeled
+        // exceptions from real schema failures (P-M1 finding).
+        reason = 'unexpected_error';
+        const summary = summarizeUnexpectedError(err);
+        this.logger.warn(
+          { requestId: input.requestId, errName: summary.name, errMessage: summary.message },
+          '[synthesis] retry attempt 2 raised an unmodeled exception',
+        );
+      }
       this.logger.warn(
         { requestId: input.requestId, err },
         '[synthesis] retry attempt 2 failed — falling through to layer ladder',
@@ -618,9 +702,36 @@ export class SynthesisRunner {
     }
   }
 
-  private makePolicyBlockedResult(): AnswerResult {
+  /**
+   * Build the deterministic policy-blocked / unsupported-intent answer.
+   *
+   * S1 semantic split: the `kind` discriminator selects between the
+   * security-template ("이 요청은 처리할 수 없습니다…") and the
+   * unsupported-intent / coverage-gap template
+   * ("이 요청은 와인 검색으로 처리하기 어려워요…"). `queryHasHangul`
+   * picks Korean vs English. The `switch` is exhaustive — TypeScript will
+   * fail the build if a new {@link SynthesisBlockedKind} value is added
+   * without a corresponding template.
+   */
+  private makePolicyBlockedResult(
+    kind: SynthesisBlockedKind,
+    queryHasHangul: boolean,
+  ): AnswerResult {
+    let answer: string;
+    switch (kind) {
+      case 'security_block':
+        answer = queryHasHangul
+          ? FALLBACK_TEMPLATES.policyBlocked.korean
+          : FALLBACK_TEMPLATES.policyBlocked.english;
+        break;
+      case 'unsupported_intent':
+        answer = queryHasHangul
+          ? FALLBACK_TEMPLATES.unsupportedIntent.korean
+          : FALLBACK_TEMPLATES.unsupportedIntent.english;
+        break;
+    }
     return {
-      answer: FALLBACK_TEMPLATES.policyBlocked.korean,
+      answer,
       layer: 'layer4',
       groundedOnToolResults: false,
       synthesisAttempts: 0,

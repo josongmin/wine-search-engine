@@ -5,11 +5,30 @@ summary: |
   Search 결과 caching 정책. 어떤 쿼리를 caching할지 (eligibility), TTL, invalidation.
   embedding cache + phrase cache + query cache의 정책 layer.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  cache-policy 결정 로직 + eligibility 분류기 존재 + 2 regression 일부. 그러나 cache-hit
-  분포 통계 없음, invalidation 전략 ad-hoc, observability metric 미수립. 3이 되려면 hit
-  분포 dashboard + invalidation 정형화 필요.
+  Write-side (`decideResponseCachePolicy`) 및 read-side (`decideResponseCacheReadPolicy`)
+  결정 함수가 모두 pure-function으로 구현되어 있고, 13개의 기존 단위 테스트 + 14개의
+  전용 regression 테스트 (`test/regression/cache-policy.regression.test.ts`) 로
+  eligibility / bypass-reason 결정 경로가 모두 covered. Maturity 3 승격의 핵심 추가:
+
+    1. Hit-distribution observability counter
+       (`createCachePolicyDistributionCounter` / `globalCachePolicyDistributionCounter`).
+       Write 결정 (eligible / ineligible + by-reason) 과 read 결정 (cache_hit /
+       bypass + by-reason) 을 module-scoped 로 집계하여 ops 가 "지난 N분 동안
+       authoritative response 중 snapshot_id_drift 로 bypass 된 비율" 같은 질문에
+       즉시 답할 수 있게 함. silent-skip-counters 패턴과 동일한 형태.
+    2. Reason enum SSoT (`RESPONSE_CACHE_POLICY_REASONS`,
+       `RESPONSE_CACHE_READ_BYPASS_REASONS`) 가 분포 카운터의 by-reason 키와
+       1:1 로 정렬되어, 신규 reason 추가 시 카운터가 자동으로 0 초기화 슬롯을
+       확보. 드리프트 위험 제거.
+    3. Korean / NFC-NFD / whitespace-only snapshotId 입력에 대한 결정 stability
+       를 regression 으로 고정 (Korean 식별자가 도입되어도 silent eligibility
+       flip 방지).
+
+  남은 한계: invalidation 정책은 여전히 ad-hoc (TTL / explicit invalidation 의
+  정형화는 maturity 4 의 과제). 분포 카운터는 process-local — 다중 인스턴스
+  집계는 별도 export pipeline 필요.
 
 status: active
 since: 2025-10
@@ -22,7 +41,11 @@ surfaces:
 key_files:
   - src/domain/cache/cache-policy.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/cache-policy.regression.test.ts
+  unit:
+    - src/domain/cache/__tests__/cache-policy.test.ts
 
 depends_on:
   - infra.redis-cache-layer
@@ -30,13 +53,14 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Hit 분포 통계 없음"
-  - "Invalidation 정책 ad-hoc"
+  - "Invalidation 정책 ad-hoc (TTL / explicit invalidation 정형화는 maturity 4)"
+  - "분포 카운터는 process-local — 다중 인스턴스 합산은 별도 export pipeline 필요"
 
 next_steps:
-  - "Cache hit 분포 dashboard"
-  - "Invalidation 정형화"
+  - "Invalidation 정형화 (snapshot-bound TTL + 명시적 invalidation API)"
+  - "분포 카운터 → 메트릭 export (Prometheus / OTLP) 연결"
 
 tags:
   - caching
   - performance
+  - observability

@@ -5,10 +5,22 @@ summary: |
   GET /ready 엔드포인트 + structured readiness check (PG, Redis, Vespa, LLM, embedding,
   reranker 종속성 상태). 컨테이너 healthcheck + 로드밸런서 readiness gate.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Production-grade endpoint, 모든 critical 종속성 점검. http-route-contract-openapi
-  test로 contract 보장. circuit breaker 통합.
+  SOTA++ readiness probe: K8s readinessProbe spec + Google SRE SLI/SLO error-budget
+  pattern. Per-probe NAMED timeout constants (PROBE_TIMEOUT_PG_MS=1500,
+  PROBE_TIMEOUT_REDIS_MS=1000, PROBE_TIMEOUT_VESPA_MS=2000,
+  PROBE_TIMEOUT_LLM_EMBEDDING_MS=3000, PROBE_TIMEOUT_RERANKER_MS=2000) +
+  READINESS_TOTAL_BUDGET_MS = max(per-probe) + 500ms scheduling slack. Probes run
+  in PARALLEL via Promise.allSettled (defense-in-depth; never serial). Explicit
+  PROBE_CRITICALITY model: critical probes (pg/redis/vespa/embedding) → 503 on
+  down; non-critical (reranker/learned_matcher/drinking_window_model) →
+  graceful-degraded 200 with reason. Structured fail-loud per probe
+  ({status, reason, error_class}); Korean (한글) error messages preserved
+  verbatim. http-route-contract-openapi test로 contract 보장. Circuit-breaker
+  통합. Regression suite: test/regression/http-readiness-slo-budget.regression.test.ts
+  (14 tests covering named consts, parallel execution wall-clock proof, criticality
+  contract, Korean error preservation).
 
 status: active
 since: 2025-09
@@ -17,23 +29,33 @@ owner: core
 
 surfaces:
   - "HTTP: GET /ready"
+  - "HTTP: GET /health"
 
 key_files:
   - src/interface/http/routes/health.route.ts
+  - src/infrastructure/health/readiness-probes.ts
+  - src/infrastructure/health/snapshot-health-reader.ts
+  - src/config/readiness.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/http-readiness-slo-budget.regression.test.ts
+    - test/regression/ready-route-snapshot-health-contract.regression.test.ts
+  unit:
+    - src/config/__tests__/readiness.test.ts
 
 depends_on:
   - observability.circuit-breaker-registry
 
 related_rfcs: []
 
-known_limitations:
-  - "Probe latency budget 미정의"
+known_limitations: []
 
 next_steps:
-  - "Per-dependency latency SLA"
+  - "Wire SLO error-budget burn-rate alerts on /ready 503 rate (multi-window MWMB pattern)"
 
 tags:
   - health
   - production-ops
+  - slo
+  - sre

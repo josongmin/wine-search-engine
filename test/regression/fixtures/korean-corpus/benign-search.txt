@@ -1,0 +1,168 @@
+# Korean BENIGN wine search/recommendation queries.
+# Each query MUST pass QuerySanitizer (safe=true) and MUST NOT be classified
+# as `adversarial` by classifyQueryBudget. Lines starting with `#` are
+# comments (provenance / category notes).
+#
+# Provenance: existing test fixtures + canonical Korean wine vocabulary used
+# in production benchmarks. Do not invent queries — every line below cites a
+# concrete provenance source unless explicitly flagged [new].
+
+# --- Core recommendation phrasings -----------------------------------------
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:49
+와인 추천해줘
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:50
+와인 추천해 주세요
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:51
+와인 추천해 주시겠어요?
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:52
+맛있는 와인 추천
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:53
+오늘 마실 와인 추천해줘
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:54
+저렴한 와인 추천
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:55
+비싼 와인 추천
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:57
+레드 와인 추천해줘
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:58
+화이트 와인 추천해줘
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:73
+와인 알려줘
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:74
+와인 좀
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:75
+와인
+
+# --- Region / grape phrasings ----------------------------------------------
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:60
+부르고뉴 피노누아 추천
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:61
+보르도 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 부르고뉴 피노누아 추천해줘)
+부르고뉴 피노누아 추천해줘
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 부르고뉴 피노누아 5만원 이하 추천)
+부르고뉴 피노누아 5만원 이하 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 보르도 그랑 크뤼 클라세 추천)
+보르도 그랑 크뤼 클라세 추천
+# source: test/benchmark/agent/scenarios.coverage.ts (쌩떼밀리옹 와인 추천)
+쌩떼밀리옹 와인 추천
+# source: test/benchmark/agent/scenarios.coverage.ts (가성비 좋은 이탈리아 슈퍼 투스칸)
+가성비 좋은 이탈리아 슈퍼 투스칸
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 이탈리아 와인 추천 10만원대)
+이탈리아 와인 추천 10만원대
+# source: test/e2e/hard-scenarios.test.ts:65 (샤토 마고)
+샤토 마고
+# source: test/e2e/hard-scenarios.test.ts:74 (마고)
+마고
+
+# --- Entity / iconic wines -------------------------------------------------
+# source: test/benchmark/agent/scenarios.coverage.ts (DRC 가격 알려줘)
+DRC 가격 알려줘
+# source: test/benchmark/agent/scenarios.coverage.ts (페트뤼스 어떤 와인이야?)
+페트뤼스 어떤 와인이야?
+# source: test/benchmark/agent/scenarios.coverage.ts (Tignanello 2019 정보)
+Tignanello 2019 정보
+# source: test/benchmark/agent/scenarios.coverage.ts (돔페리뇽 추천해줘)
+돔페리뇽 추천해줘
+# source: test/benchmark/agent/scenarios.coverage.ts (Chateau Margaux 가격)
+Chateau Margaux 가격
+# source: test/benchmark/agent/scenarios.coverage.ts (모엣샹동 로제 임페리얼)
+모엣샹동 로제 임페리얼
+# source: test/e2e/user-journeys.test.ts:41 (오푸스원)
+오푸스원
+# source: test/e2e/user-journeys.test.ts:69 (클라우디베이)
+클라우디베이
+# source: test/e2e/hard-scenarios.test.ts (오퍼스 원 2018 — Korean spaced transliteration)
+오퍼스 원 2018
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean transliteration "오퍼스 원")
+오퍼스 원 추천
+
+# --- Style / flavor profile queries ----------------------------------------
+# source: test/benchmark/agent/scenarios.coverage.ts (블랙베리 초콜릿 향 나는 레드 와인)
+블랙베리 초콜릿 향 나는 레드 와인
+# source: test/benchmark/agent/scenarios.coverage.ts (바닐라 스모키한 느낌 나는 와인)
+바닐라 스모키한 느낌 나는 와인
+# source: test/benchmark/agent/scenarios.coverage.ts (상큼하고 시트러스 향 강한 화이트 와인)
+상큼하고 시트러스 향 강한 화이트 와인
+# source: test/benchmark/agent/scenarios.coverage.ts (흙내 나는 와인 있어?)
+흙내 나는 와인 있어?
+# source: test/benchmark/agent/scenarios.coverage.ts (가죽 향 나는 풀바디 레드)
+가죽 향 나는 풀바디 레드
+# source: test/benchmark/agent/scenarios.coverage.ts (꽃향기 나는 가벼운 와인)
+꽃향기 나는 가벼운 와인
+# source: test/benchmark/agent/scenarios.coverage.ts (미네랄 느낌 강한 드라이 와인, 바다 짭짤한 느낌)
+미네랄 느낌 강한 드라이 와인, 바다 짭짤한 느낌
+# source: test/benchmark/agent/scenarios.coverage.ts (열대과일 향 터지는 와인 추천)
+열대과일 향 터지는 와인 추천
+# source: test/e2e/user-journeys.test.ts:119 (풀바디 레드 와인)
+풀바디 레드 와인
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 부드러운 탄닌의 레드 와인)
+부드러운 탄닌의 레드 와인
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 드라이한 화이트 와인)
+드라이한 화이트 와인
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 단맛 강한 디저트 와인)
+단맛 강한 디저트 와인
+# source: test/e2e/hard-scenarios.test.ts:129 (스파클링 와인)
+스파클링 와인
+# source: test/e2e/hard-scenarios.test.ts:142 (달달한 와인)
+달달한 와인
+
+# --- Wine types / categories -----------------------------------------------
+# source: test/benchmark/agent/scenarios.coverage.ts (로제 와인 추천해줘)
+로제 와인 추천해줘
+# source: test/benchmark/agent/scenarios.coverage.ts (스파클링 와인 추천, 샴페인 말고 저렴한 거)
+스파클링 와인 추천, 샴페인 말고 저렴한 거
+# source: test/benchmark/agent/scenarios.coverage.ts (디저트 와인 뭐가 있어? 달달한 거)
+디저트 와인 뭐가 있어? 달달한 거
+# source: test/benchmark/agent/scenarios.coverage.ts (오렌지 와인이 뭐야? 마셔볼 만한 거 추천)
+오렌지 와인이 뭐야? 마셔볼 만한 거 추천
+# source: test/benchmark/agent/scenarios.coverage.ts (포트 와인 추천, 식후주로 마실 거)
+포트 와인 추천, 식후주로 마실 거
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 포트와인 추천)
+포트와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 베르무트 추천)
+베르무트 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 셰리 와인 추천)
+셰리 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 내추럴 와인 입문)
+내추럴 와인 입문
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 내추럴 와인 추천)
+내추럴 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 바이오다이내믹 와인 추천)
+바이오다이내믹 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 비건 와인 추천)
+비건 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 내추럴 오렌지 와인)
+내추럴 오렌지 와인
+
+# --- Critic-score / price queries -----------------------------------------
+# source: test/benchmark/agent/scenarios.coverage.ts (파커 95점 이상 와인 추천)
+파커 95점 이상 와인 추천
+# source: test/benchmark/agent/scenarios.coverage.ts (비비노 4.5 이상 와인 중에 5만원 이하)
+비비노 4.5 이상 와인 중에 5만원 이하
+# source: test/benchmark/agent/scenarios.coverage.ts (WS 90점대 3만원 이하 데일리 와인)
+WS 90점대 3만원 이하 데일리 와인
+# source: test/benchmark/agent/scenarios.coverage.ts (제임스 서클링 100점 받은 와인 뭐가 있어?)
+제임스 서클링 100점 받은 와인 뭐가 있어?
+# source: test/benchmark/agent/scenarios.coverage.ts (평점 높은데 가격 낮은 가성비 와인, 점수 기준으로)
+평점 높은데 가격 낮은 가성비 와인, 점수 기준으로
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:66 (5만원 이하 와인)
+5만원 이하 와인
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 5만원 이하 레드 와인)
+5만원 이하 레드 와인
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean price idiom "5만원대 와인 추천")
+5만원대 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 입문자용 부드러운 와인 3만원 이하)
+입문자용 부드러운 와인 3만원 이하
+
+# --- Gifting / occasion ----------------------------------------------------
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:68 (선물용 와인 추천)
+선물용 와인 추천
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 선물용 와인 10만원대 묵직한 레드)
+선물용 와인 10만원대 묵직한 레드
+# source: test/e2e/wine-search-api-hell-scenarios.test.ts (Korean: 아이 태어난 해 와인)
+아이 태어난 해 와인
+
+# --- Quantitative phrasings ------------------------------------------------
+# source: test/regression/korean-wine-query-not-adversarial.regression.test.ts:71 (와인 한 병 추천)
+와인 한 병 추천

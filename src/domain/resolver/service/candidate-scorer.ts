@@ -29,6 +29,32 @@ const SCORING_WEIGHTS = {
 const CATALOG_NOISE_ALIAS_CAP = 0.3;
 
 /**
+ * Maximum contribution cap for `derived_initialism` aliases (caps-initialism
+ * derived deterministically from canonical labels at index time).
+ *
+ * Initialisms collide more often than curated aliases ("CM" matches Château
+ * Margaux AND Cloudy Mountain AND any other entity whose label starts with
+ * those two words). The cap keeps the resolver from emitting a confident
+ * single-entity decision purely on an initialism — disambiguation needs
+ * either a vintage / region / producer signal or a fuzzy-match boost.
+ */
+const DERIVED_INITIALISM_CAP = 0.55;
+
+/**
+ * Maximum contribution cap for `abbreviation` aliases (curated / LLM-proposed
+ * wine-community shorthand, gated by a review workflow before landing in
+ * `aliases`).
+ *
+ * Sits above {@link DERIVED_INITIALISM_CAP} because curated abbreviations
+ * include explicit producer+vintage compounds ("CM 15", "DRC 19") whose
+ * collision risk is dramatically lower than bare initialisms. The cap still
+ * sits below the canonical signal so a bare initialism ("CM") cannot beat a
+ * canonical normalized match for a different entity — disambiguation
+ * remains evidence-driven.
+ */
+const ABBREVIATION_CAP = 0.7;
+
+/**
  * Scores resolution candidates using a weighted-sum function over
  * match signals, per RFC-006 §5.
  *
@@ -81,6 +107,20 @@ export class CandidateScorer {
     const hasObservedQuery = candidate.aliasMatches.some(
       (m) => m.aliasType === 'observed_query_alias',
     );
+    // The derived-initialism cap fires only when *every* alias match on the
+    // candidate is a derived initialism. `.some()` would silently downgrade
+    // candidates whose curated signal coexists with an initialism sibling
+    // (e.g. curated 'Masi Amarone' alongside derived 'MA' both anchoring
+    // to the same entity). Per RFC-006 §5.4 the cap exists to handle the
+    // *collision-prone* pure-initialism case ("CM" → many producers); when
+    // any non-derived evidence is present the resolver already has full
+    // canonical signal and the cap must not engage.
+    const hasDerivedInitialism =
+      candidate.aliasMatches.length > 0 &&
+      candidate.aliasMatches.every((m) => m.aliasType === 'derived_initialism');
+    const hasAbbreviation = candidate.aliasMatches.some(
+      (m) => m.aliasType === 'abbreviation',
+    );
 
     let aliasExactMatch = signals.aliasExactMatch;
     let aliasFuzzyMatch = signals.aliasFuzzyMatch;
@@ -97,6 +137,24 @@ export class CandidateScorer {
     if (hasObservedQuery && !this.hasCoreAliasMatch(candidate)) {
       aliasExactMatch = Math.min(aliasExactMatch, signals.canonicalNormalizedMatch);
       aliasFuzzyMatch = Math.min(aliasFuzzyMatch, signals.canonicalNormalizedMatch);
+    }
+
+    // derived_initialism: structural recall lever, but high collision rate.
+    // Cap below catalog_noise's neighbour band so the resolver still
+    // requires corroborating signal (vintage, region, producer) before
+    // resolving on an initialism alone.
+    if (hasDerivedInitialism && !this.hasCoreAliasMatch(candidate)) {
+      aliasExactMatch = Math.min(aliasExactMatch, DERIVED_INITIALISM_CAP);
+      aliasFuzzyMatch = Math.min(aliasFuzzyMatch, DERIVED_INITIALISM_CAP);
+    }
+
+    // abbreviation: curated/LLM-proposed shorthand. Cap above derived
+    // initialisms (curated compounds carry vintage anchors) but still
+    // below the canonical band so a wrong-entity abbreviation cannot
+    // outscore a canonical normalized match for a different entity.
+    if (hasAbbreviation && !this.hasCoreAliasMatch(candidate)) {
+      aliasExactMatch = Math.min(aliasExactMatch, ABBREVIATION_CAP);
+      aliasFuzzyMatch = Math.min(aliasFuzzyMatch, ABBREVIATION_CAP);
     }
 
     return {

@@ -75,8 +75,10 @@ export const FeatureSchema = z
     summary: z.string().min(10).max(500),
 
     maturity: MaturitySchema,
-    /** Free-form justification for the maturity score. Required so reviewers can audit drift. */
-    maturity_rationale: z.string().min(10).max(2000),
+    /** Free-form justification for the maturity score. Required so reviewers can audit drift.
+     *  Bound at 4000 chars to accommodate SOTA++ features that cite property test counts,
+     *  named consts, and industry-pattern compliance with line-number references. */
+    maturity_rationale: z.string().min(10).max(4000),
 
     status: StatusSchema,
     /** Approximate inception date (YYYY-MM). Optional. */

@@ -102,6 +102,11 @@ export function buildFailedMixedRouteExecution(
       top2CalibratedScore: undefined,
       calibratedGap: undefined,
       decisionConfidenceC: 0,
+      // Mixed-route failure path never invoked the trained Calibrator, so
+      // `decisionConfidenceC=0` is a sentinel. Flag the trace as untrusted
+      // so the AdmissionGate's confidence-refusal floor (RFC-016 §3, Epic
+      // 17.3) skips enforcement on this fallback.
+      calibrationTrusted: false,
       ambiguityDetected: false,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },

@@ -60,7 +60,32 @@ export const DEFAULT_OUTPUT = ETL_ARTIFACT_FILES.docquery;
  * Korean discovery question. See `openai-doc2query-generator.ts` for
  * the exact slot taxonomy and evidence behind it.
  */
-const QUERIES_PER_WINE = 15;
+export const DOC_QUERIES_PER_DOC = 15;
+/** Backwards-compatible alias kept so the rest of this script reads as before. */
+const QUERIES_PER_WINE = DOC_QUERIES_PER_DOC;
+
+/**
+ * Minimum query length (characters, post-NFC, post-trim). Anything shorter is
+ * either a slot-collapse artifact ("a", "ok") or an LLM truncation glitch and
+ * has no useful BM25 signal. CLAUDE.md rule 15 — named constant, not magic.
+ */
+export const DOC_QUERY_MIN_CHARS = 3;
+
+/**
+ * Maximum query length (characters, post-NFC, post-trim). 200 chars covers
+ * the longest legitimate Korean discovery-question slot ("스테이크와 함께
+ * 마시기 좋은 풀바디 카베르네 소비뇽 추천해주세요" ≈ 40 chars) plus an
+ * order-of-magnitude safety margin while keeping ill-formed LLM outputs
+ * (run-on paragraphs, leaked rationales) out of the BM25 field.
+ */
+export const DOC_QUERY_MAX_CHARS = 200;
+
+/**
+ * Output schema version on the processed-queries record. Bump whenever the
+ * dedup / normalization / bound rules change so downstream consumers can
+ * detect and migrate stale artifacts.
+ */
+export const DOC_QUERIES_SCHEMA_VERSION = '1';
 
 /**
  * Concurrent in-flight LLM calls. With ~3s p50 latency per call against
@@ -248,6 +273,77 @@ function isFingerprintFresh(
 }
 
 // ---------------------------------------------------------------------------
+// Query post-processing (bounds + dedup + schema version)
+// ---------------------------------------------------------------------------
+
+/**
+ * Processed Doc2Query payload: a deduplicated, bounded list of synthetic
+ * queries plus the schema version that produced them. The list is what the
+ * rest of the pipeline writes onto `EnrichedSilverRecord.syntheticQueries`;
+ * the schema version is stamped onto the Doc2Query fingerprint so downstream
+ * stages can detect rule drift.
+ */
+export interface ProcessedDoc2QueryResult {
+  readonly queries: readonly string[];
+  readonly schemaVersion: string;
+}
+
+/**
+ * Whitespace-only or empty? Used to drop placeholder slots that the LLM
+ * occasionally emits when it can't fill a slot but doesn't drop the index.
+ */
+function isBlank(s: string): boolean {
+  return s.trim().length === 0;
+}
+
+/**
+ * Canonical form for dedup: NFC + lowercase + collapsed internal whitespace.
+ * Case- and spacing-insensitive so the LLM's near-duplicate emissions
+ * ("Opus One Napa" / "opus one  napa" / "OPUS ONE NAPA") collapse to one.
+ *
+ * This is INTERNAL — we never emit the canonical form to consumers; we use
+ * it only as a dedup key. The first-occurrence original-cased query wins
+ * so display surfaces keep human-readable capitalization.
+ */
+function canonicalDedupKey(s: string): string {
+  return s.normalize('NFC').toLowerCase().replace(/\s+/gu, ' ').trim();
+}
+
+/**
+ * Normalize, length-bound, and dedup a raw LLM-emitted query list. Pure —
+ * no I/O, no side effects, deterministic for a given input list. Returns
+ * an empty list (never throws) for empty / malformed input.
+ *
+ * Invariants enforced (regression-tested in
+ * `test/regression/doc-queries-generation.regression.test.ts`):
+ *   - Every emitted query has length ∈ [DOC_QUERY_MIN_CHARS, DOC_QUERY_MAX_CHARS].
+ *   - Every emitted query is NFC-normalized.
+ *   - Duplicates by `canonicalDedupKey` are emitted at most once, first wins.
+ *   - Empty / whitespace-only entries are silently dropped (LLM slot misfires).
+ */
+export function normalizeAndDedupeQueries(
+  raw: readonly string[],
+): ProcessedDoc2QueryResult {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of raw) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.normalize('NFC').trim();
+    if (isBlank(trimmed)) continue;
+    if (trimmed.length < DOC_QUERY_MIN_CHARS) continue;
+    if (trimmed.length > DOC_QUERY_MAX_CHARS) continue;
+    const key = canonicalDedupKey(trimmed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return {
+    queries: out,
+    schemaVersion: DOC_QUERIES_SCHEMA_VERSION,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -269,14 +365,32 @@ export function assertDocQueryRunSucceeded(stats: RunStats): void {
 
 /**
  * Process one record: skip if fingerprint fresh, otherwise call the LLM.
- * Always returns a valid record — on error/empty, returns the prior record
- * unchanged so we never lose ground on transient failures.
+ * Always returns a valid record — on error/empty/blank-canonical-label,
+ * returns the prior record unchanged so we never lose ground on transient
+ * failures.
+ *
+ * `signal` (optional) — cooperative cancellation. If aborted before the LLM
+ * call is dispatched the call is skipped entirely (no wasted token spend),
+ * matching the batch-cancellation contract used by `generateForBatch`.
  */
 async function processRecord(
   rec: EnrichedSilverRecord,
   generator: Doc2QueryGeneratorPort,
   force: boolean,
+  signal?: AbortSignal,
 ): Promise<{ rec: EnrichedSilverRecord; outcome: 'skipped' | 'generated' | 'failed'; queryCount: number }> {
+  // Pre-flight abort check — pre-call so we don't spend tokens (CLAUDE.md rule 20).
+  if (signal?.aborted === true) {
+    return { rec, outcome: 'failed', queryCount: 0 };
+  }
+
+  // Empty/whitespace canonical labels can't anchor a useful Doc2Query input;
+  // skip without an LLM round-trip. Matches the port contract documented in
+  // `doc2query-generator.port.ts`.
+  if (rec.canonicalLabel.trim().length === 0) {
+    return { rec, outcome: 'failed', queryCount: 0 };
+  }
+
   const input = buildGeneratorInput(rec, QUERIES_PER_WINE);
 
   if (!force && isFingerprintFresh(rec, generator.modelId, input)) {
@@ -284,14 +398,15 @@ async function processRecord(
   }
 
   try {
-    const queries = await generator.generate(input);
-    if (queries.length > 0) {
+    const rawQueries = await generator.generate(input);
+    const processed = normalizeAndDedupeQueries(rawQueries);
+    if (processed.queries.length > 0) {
       const next: EnrichedSilverRecord = {
         ...rec,
-        syntheticQueries: queries,
+        syntheticQueries: processed.queries,
         doc2queryFingerprint: fingerprintFor(generator.modelId, input),
       };
-      return { rec: next, outcome: 'generated', queryCount: queries.length };
+      return { rec: next, outcome: 'generated', queryCount: processed.queries.length };
     }
     return { rec, outcome: 'failed', queryCount: 0 };
   } catch (err) {
@@ -300,6 +415,13 @@ async function processRecord(
     return { rec, outcome: 'failed', queryCount: 0 };
   }
 }
+
+/**
+ * Test-only re-export of `processRecord` so the regression suite can drive
+ * the function with a mocked `Doc2QueryGeneratorPort` without spawning the
+ * CLI entrypoint or touching OpenAI. NOT intended for production callers.
+ */
+export const processRecordForTest = processRecord;
 
 /**
  * Run `processRecord` over the corpus with a fixed-size in-flight pool.

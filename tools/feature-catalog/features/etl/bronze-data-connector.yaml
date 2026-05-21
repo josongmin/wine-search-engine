@@ -5,10 +5,16 @@ summary: |
   Vivino API에서 wine_pdp_snapshot 데이터 fetch + bronze NDJSON 저장. periodic refresh
   오케스트레이션. silver ETL의 입력.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Functional이지만 manual 실행 위주. retry / backoff / rate-limit 정책 단순. snapshot
-  freshness SLA 없음.
+  HTTP fetch resilience가 명시적인 정책으로 캡처됨: 설정 가능한 retry budget
+  (`maxRetries`, 기본 BRONZE_FETCH_MAX_RETRIES_DEFAULT=3), exponential
+  full-jitter backoff (`BRONZE_FETCH_BASE_BACKOFF_MS`=1000ms ~
+  `BRONZE_FETCH_MAX_BACKOFF_MS`=30000ms cap), 5xx/429/transient network 에러
+  retry, 4xx no-retry. Snapshot artifact는 ISO 8601 `fetchedAt` freshness
+  메타데이터를 항상 동반함. 클록·RNG·sleep·fetch가 모두 주입 가능하여 결정성
+  있는 regression suite로 검증됨 (`test/regression/bronze-data-connector
+  .regression.test.ts`). 여전히 manual orchestration / SLA monitor 미비.
 
 status: active
 since: 2025-08
@@ -17,24 +23,28 @@ owner: core
 
 surfaces:
   - "CLI: pnpm vivino:bronze"
+  - "Library: fetchVivinoSnapshot()"
 
 key_files:
   - tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/bronze-data-connector.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "Retry / backoff 단순"
-  - "Snapshot freshness SLA 없음"
-  - "Schedule 자동화 없음"
+  - "Schedule 자동화 없음 (cron / orchestrator 미연결)"
+  - "Snapshot freshness SLA 모니터 미비 (메타데이터는 기록되지만 alert 없음)"
+  - "Rate-limit Retry-After 헤더는 아직 미반영"
 
 next_steps:
   - "Cron 자동화"
-  - "Freshness 모니터링"
+  - "Freshness SLA 모니터 + alert 연결"
+  - "Retry-After 헤더 honor (현재는 균일 exponential backoff)"
 
 tags:
   - data-ingestion

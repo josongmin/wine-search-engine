@@ -30,6 +30,19 @@ const SOURCE_TRUST_GATES: Readonly<Record<AliasType, number>> = {
   misspelling: 0.5,
   observed_query_alias: 0.4,
   catalog_noise_alias: 0.3,
+  // Derived initialisms are produced by a deterministic ETL transform —
+  // the source noise-risk floor sits between misspelling and phonetic to
+  // reflect that the underlying canonical label still has full provenance
+  // but the initialism itself is a derivation with structural collision
+  // risk.
+  derived_initialism: 0.55,
+  // Curated/LLM-proposed abbreviations land in `aliases` only after a
+  // review gate (`alias_proposals` workflow in the ETL CLI). They carry
+  // less collision risk than a pure deterministic initialism (curation
+  // explicitly attaches a vintage anchor on compound forms like "CM 15")
+  // but are still derivations, so the trust floor sits between
+  // derived_initialism and misspelling.
+  abbreviation: 0.5,
 };
 
 /**

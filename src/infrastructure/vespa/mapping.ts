@@ -582,7 +582,7 @@ export function fromVespaFields(
     // omit key when undefined.
     ...(summary.body !== undefined ? { body: summary.body } : {}),
     ...(summary.sweetness !== undefined ? { sweetness: summary.sweetness } : {}),
-    style: getRequiredString(fields, 'style'),
+    style: getOptionalString(fields, 'style') ?? '',
     priceBand: getRequiredString(fields, 'price_band'),
     pairing: summary.pairing ?? [],
     ...(summary.occasion !== undefined ? { occasion: [...summary.occasion] } : {}),

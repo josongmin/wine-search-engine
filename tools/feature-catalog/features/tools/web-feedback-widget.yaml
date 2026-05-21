@@ -5,10 +5,12 @@ summary: |
   사용자 검색 결과에 대한 like/dislike/relevance feedback 위젯. /v1/feedback POST.
   position-debias용 client-side metadata 첨부.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Widget 구현, /v1/feedback 호출. 그러나 widget UX A/B 없음, feedback rate 낮음 (개입
-  필요). signal 품질 검증 미수립.
+  Widget 구현, /v1/feedback 호출. Dedicated component test로 render / positive·negative
+  signal 분기 / in-flight & 사후 disabled (no double-submit) / 에러 graceful recovery /
+  Korean aria-label verbatim / 키보드 활성화 (Enter, Space) regression 커버. UX A/B 및
+  signal quality 대시보드는 다음 단계.
 
 status: active
 since: 2025-11
@@ -21,7 +23,10 @@ surfaces:
 key_files:
   - web/src/features/feedback
 
-tests: {}
+tests:
+  unit:
+    - web/src/features/feedback/ui/__tests__/feedback-buttons.test.tsx
+    - web/src/features/feedback/ui/__tests__/feedback-widget.test.tsx
 
 depends_on:
   - tools.feedback

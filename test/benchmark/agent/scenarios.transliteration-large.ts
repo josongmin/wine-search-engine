@@ -5,6 +5,17 @@ import type {
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 
+/**
+ * Scenario ID bases for the large transliteration lookup set.
+ *
+ * Each generator (positive / negative) allocates a contiguous block starting
+ * at its base + index. Picking widely-spaced bases (600 / 700) keeps the
+ * ranges disjoint from neighbour benchmark files (500-599 robustness,
+ * 800+ reserved for future lookup batches).
+ */
+const LARGE_TRANSLITERATION_POSITIVE_SCENARIO_ID_BASE = 600;
+const LARGE_TRANSLITERATION_NEGATIVE_SCENARIO_ID_BASE = 700;
+
 type PositiveExactLookupRow = readonly [
   query: string,
   expectedEntityId: string,
@@ -267,7 +278,7 @@ function buildPositiveScenario(row: PositiveExactLookupRow, index: number): Agen
   const [query, expectedEntityId, canonicalKo, canonicalEn, phenomena, difficulty, mustNotReturnEntityIds] = row;
   const acceptedAliases = [query, ...aliasesForEntityIds([expectedEntityId])];
   return {
-    id: 600 + index,
+    id: LARGE_TRANSLITERATION_POSITIVE_SCENARIO_ID_BASE + index,
     tier: 'wine_name_lookup',
     query,
     description: `Large Korean transliteration exact lookup positive: ${canonicalEn} (${difficulty})`,
@@ -312,7 +323,7 @@ function buildPositiveScenario(row: PositiveExactLookupRow, index: number): Agen
 function buildNegativeScenario(row: NegativeExactLookupRow, index: number): AgentBenchmarkScenario {
   const [query, mustNotReturnEntityIds, reason, phenomena, difficulty] = row;
   return {
-    id: 700 + index,
+    id: LARGE_TRANSLITERATION_NEGATIVE_SCENARIO_ID_BASE + index,
     tier: 'wine_name_lookup',
     query,
     description: `Large Korean transliteration exact lookup hard negative: ${reason} (${difficulty})`,

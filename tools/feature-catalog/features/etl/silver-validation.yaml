@@ -6,11 +6,18 @@ summary: |
   numeric bound (price/alcohol/rating), date format. 잘못된 ~5-10 records per 10K 캐치
   후 fail-fast.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Validate-silver + artifact-contract 결합. integration test 운영 (test/integration/etl).
-  Pre-indexing gate로 안정. 그러나 schema versioning 부재 — 마이그레이션 시 backward
-  compat 정책 없음.
+  Validate-silver + artifact-contract 결합. Aggregate quality gates (record
+  count, coverage thresholds, distribution checks) 위에 per-record Zod schema
+  (SilverWineRecordSchema) 추가 — 필수 field, wineType/priceBand enum,
+  priceUsd ≥ 0, alcoholPct ∈ [0, 100], sensory [0, 1] bound 강제. Schema
+  versioning 도입 (SILVER_SCHEMA_VERSIONS = ['1'], CURRENT_SILVER_SCHEMA_VERSION):
+  schema_version 부재 시 '1' 로 fallback (backward compat), unknown version 은
+  fail-closed. Batch validator (validateSilverRecordBatch) 가 bad-record
+  index + ZodError 를 반환해 fail-fast 가능. 전용 regression suite
+  (test/regression/silver-validation.regression.test.ts) 가 Korean NFC
+  보존, 빈 입력, 전부 invalid, 부분 invalid 케이스를 append-only 로 잠금.
 
 status: active
 since: 2025-09
@@ -19,12 +26,17 @@ owner: core
 
 surfaces:
   - "CLI: pnpm etl:validate"
+  - "Library: SilverWineRecordSchema / validateSilverRecordBatch (scripts/etl/validate-silver.ts)"
 
 key_files:
   - scripts/etl/validate-silver.ts
   - scripts/etl/artifact-contract.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/silver-validation.regression.test.ts
+  unit:
+    - test/unit/etl/validate-silver.test.ts
 
 depends_on:
   - etl.vivino-to-silver
@@ -32,13 +44,14 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Schema versioning 부재"
+  - "Schema 가 현재 v1 단일 — multi-version 마이그레이션 경로는 정책으로만 문서화"
 
 next_steps:
-  - "Schema 버전 (v1, v2) 도입"
-  - "Backward compat 정책"
+  - "v2 도입 시 union(v1, v2) + per-version migrator"
+  - "Per-record validation 을 NDJSON ingest 단계에서 강제 (현재는 호출 가능 라이브러리)"
 
 tags:
   - data-quality
   - schema-validation
+  - schema-versioning
   - ci-gate

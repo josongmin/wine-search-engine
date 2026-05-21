@@ -22,6 +22,9 @@ import { Transliterator } from '../../domain/alias/service/transliterator.js';
 import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import type { AliasType } from '../../domain/alias/model/alias.js';
+import { parseAliasType, ALIAS_TYPES } from '../../domain/alias/model/alias.js';
+import { pickHigherTrustAliasType } from '../../domain/alias/service/conflict-resolver.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
@@ -38,6 +41,16 @@ interface SnapshotAliasRecord {
   readonly normalizedValue: string;
   readonly sourceTrust: number;
   readonly confidencePrior: number;
+  /**
+   * RFC-003 §4 alias type. Optional during incremental ingest migration;
+   * older snapshot artifacts may omit it, in which case the matcher emits
+   * no `aliasType` and the resolver scorer falls back to strategy-based
+   * inference (`inferAliasType` in search-usecase-resolver-candidates.ts).
+   *
+   * The explicit `| undefined` is required for zod's `.optional()` parse
+   * shape under `exactOptionalPropertyTypes`.
+   */
+  readonly aliasType?: AliasType | undefined;
 }
 
 interface PgAliasRecord {
@@ -47,6 +60,7 @@ interface PgAliasRecord {
   readonly normalized_value: string;
   readonly source_trust: number;
   readonly confidence: number;
+  readonly alias_type?: string;
 }
 
 type AliasStrategy = AliasMatchConfidenceStrategy;
@@ -61,6 +75,7 @@ const SnapshotAliasRecordSchema = z.object({
   normalizedValue: z.string().min(1),
   sourceTrust: z.number(),
   confidencePrior: z.number(),
+  aliasType: z.enum(ALIAS_TYPES).optional(),
 }).passthrough();
 const SnapshotManifestSchema = z.object({
   artifacts: z.object({
@@ -156,6 +171,7 @@ interface GroupedAliasMatch {
   readonly entityIds: Set<string>;
   matchConfidence: number;
   readonly strategies: Set<string>;
+  aliasType: AliasType | undefined;
 }
 
 export class SearchSnapshotAliasMatcher implements AliasMatcher {
@@ -163,13 +179,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     try {
       const { activeSnapshotId } = await resolveActiveSnapshot(pool);
       const { rows } = await pool.query<PgAliasRecord>(
-        `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence
+        `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
          FROM aliases
          WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
          ORDER BY confidence DESC`,
         [activeSnapshotId],
       );
-      const aliases = rows
+      const aliases: SnapshotAliasRecord[] = rows
         .filter((row) => (
           typeof row.alias_id === 'string' &&
           row.alias_id.length > 0 &&
@@ -180,14 +196,18 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
           typeof row.normalized_value === 'string' &&
           row.normalized_value.length > 0
         ))
-        .map((row) => ({
-          aliasId: row.alias_id,
-          entityId: row.entity_id,
-          value: row.surface_form,
-          normalizedValue: row.normalized_value,
-          sourceTrust: Number.isFinite(row.source_trust) ? row.source_trust : 0,
-          confidencePrior: Number.isFinite(row.confidence) ? row.confidence : 0,
-        }));
+        .map((row) => {
+          const aliasType = parseAliasType(row.alias_type);
+          return {
+            aliasId: row.alias_id,
+            entityId: row.entity_id,
+            value: row.surface_form,
+            normalizedValue: row.normalized_value,
+            sourceTrust: Number.isFinite(row.source_trust) ? row.source_trust : 0,
+            confidencePrior: Number.isFinite(row.confidence) ? row.confidence : 0,
+            ...(aliasType !== undefined ? { aliasType } : {}),
+          };
+        });
 
       if (aliases.length === 0) {
         bootstrapLogger.info(
@@ -419,6 +439,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         entityIds: [...match.entityIds].map((entityId) => createCanonicalEntityId(entityId)),
         matchConfidence: match.matchConfidence,
         lookupStrategy: [...match.strategies].sort().join('+'),
+        ...(match.aliasType !== undefined ? { aliasType: match.aliasType } : {}),
       }));
   }
 
@@ -537,6 +558,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         entityIds: new Set([alias.entityId]),
         matchConfidence,
         strategies: new Set([strategy]),
+        aliasType: alias.aliasType,
       });
       return;
     }
@@ -546,5 +568,8 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     if (matchConfidence > existing.matchConfidence) {
       existing.matchConfidence = matchConfidence;
     }
+    // Higher-trust alias_type wins so a curated sibling lifts a derived
+    // sibling's tag on the same (surfaceForm, normalizedForm) key.
+    existing.aliasType = pickHigherTrustAliasType(existing.aliasType, alias.aliasType);
   }
 }

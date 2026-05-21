@@ -25,6 +25,18 @@ export const MIN_PRODUCED_VINTAGE_YEAR = 1700;
 export const MAX_PRODUCED_VINTAGE_YEAR = 2200;
 
 /**
+ * Lower bound for deterministic drinking-window math.
+ *
+ * Why narrower than `MIN_PRODUCED_VINTAGE_YEAR = 1700`: 18th-century Madeira /
+ * Port records exist in raw catalogs and must be accepted at ingestion, but
+ * the deterministic structural formula has no calibration anchors below the
+ * 19th century (modern viticulture, market signals, sensory ordinals are all
+ * 1800+). Accepting 1700–1799 vintages would silently push the formula into
+ * an extrapolation regime where every term is fabricated.
+ */
+export const DETERMINISTIC_DRINKING_WINDOW_MIN_VINTAGE_YEAR = 1800;
+
+/**
  * Approximate KRW per USD for NL price extraction (soft filters only; no FX API).
  * Mid-2025 reference rate; aligns rule-based and search-constraint extractors.
  */

@@ -5,11 +5,18 @@ summary: |
   train/val/test split의 leakage 검증. 동일 query가 multiple split에 등장 / ground-truth
   label 불일치 등 감지. LTR / offline eval 실행 전 pre-flight gate.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Overlap detection (query hashing + set intersection). pre-flight gate로 안정 운영.
-  RFC-017 §2.5 준수. 그러나 query 단위 dedup만 — entity 동의어 그룹 단위 leakage 미검사
-  (e.g. "Opus One" ≡ "Opus One 2018").
+  Overlap detection (query hashing + set intersection) + entity-synonym group
+  leakage detection. Pre-flight gate로 안정 운영, RFC-017 §2.5 준수.
+  SOTA++ 확장:
+  - `groupQueriesByEntity` helper: canonical entity_id 기반 split assignment
+    (vintage / template variant가 train/val/gate 경계를 넘지 않음).
+  - `assignSplitsByEntityGroup`: deterministic seed-based 분배 + MIN split size 보장.
+  - `verifyGoldenSplitIntegrity` train↔val entity_id leak 추가 (기존 gate fence 보완).
+  - Property-based invariants (fast-check, 100 runs each): query-level uniqueness,
+    entity-group leakage, split balance, determinism, relabel consistency.
+  - Korean canonical entity_id 보존 테스트 포함.
 
 status: active
 since: 2025-10
@@ -21,8 +28,13 @@ surfaces:
 
 key_files:
   - scripts/eval/run-offline-eval.ts
+  - scripts/eval/split-integrity.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/split-integrity-entity-leakage.regression.test.ts
+  unit:
+    - test/unit/eval/split-integrity.test.ts
 
 depends_on:
   - eval.offline-eval-runner
@@ -30,12 +42,12 @@ depends_on:
 related_rfcs:
   - docs/RFC-017.md
 
-known_limitations:
-  - "Entity 동의어 단위 leakage 미검사"
+known_limitations: []
 
 next_steps:
-  - "Entity-synonym group 확장 (e.g. Opus One variants)"
+  - "build-splits.ts에 `assignSplitsByEntityGroup` 통합 (현재 cluster-based assigner와 병행 운영 후 deprecate)"
 
 tags:
   - data-quality
   - leakage-detection
+  - property-based-testing

@@ -11,7 +11,9 @@ function toAliasType(value: string): AliasType {
     value === 'phonetic' ||
     value === 'misspelling' ||
     value === 'observed_query_alias' ||
-    value === 'catalog_noise_alias'
+    value === 'catalog_noise_alias' ||
+    value === 'derived_initialism' ||
+    value === 'abbreviation'
   ) return value;
   throw new Error(`PgAliasRepository: unknown alias_type "${value}" — schema drift or corrupted row`);
 }

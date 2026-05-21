@@ -38,9 +38,13 @@ const VALID_BENCHMARK_KINDS: ReadonlySet<string> = new Set([
   'agentic_tool_use_fixture',
 ] satisfies EvalBenchmarkKind[]);
 
+function isEvalBenchmarkKind(value: string): value is EvalBenchmarkKind {
+  return VALID_BENCHMARK_KINDS.has(value);
+}
+
 function toEvalBenchmarkKind(raw: unknown): EvalBenchmarkKind {
-  if (typeof raw === 'string' && VALID_BENCHMARK_KINDS.has(raw)) {
-    return raw as EvalBenchmarkKind;
+  if (typeof raw === 'string' && isEvalBenchmarkKind(raw)) {
+    return raw;
   }
   throw new Error(`Invalid benchmark_kind from DB: ${String(raw)}`);
 }
@@ -52,11 +56,15 @@ function toActivationStatus(value: string): EvalBenchmarkRun['activationStatus']
   throw new Error(`PgEvalBenchmarkRunStore: unknown activation_status "${value}"`);
 }
 
+function isPlainRecord(raw: unknown): raw is Readonly<Record<string, unknown>> {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw);
+}
+
 function parseMetrics(raw: unknown): Readonly<Record<string, number>> | undefined {
-  if (typeof raw !== 'object' || raw === null) return undefined;
+  if (!isPlainRecord(raw)) return undefined;
   const result: Record<string, number> = {};
   let hasKey = false;
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+  for (const [k, v] of Object.entries(raw)) {
     if (typeof v === 'number' && Number.isFinite(v)) {
       result[k] = v;
       hasKey = true;
@@ -80,9 +88,7 @@ function rowToEvalBenchmarkRun(row: EvalBenchmarkRunRow): EvalBenchmarkRun {
     ...(row.false_exact_rate === null ? {} : { falseExactRate: row.false_exact_rate }),
     releaseGatePassed: row.release_gate_passed,
     activationStatus: toActivationStatus(row.activation_status),
-    report: (typeof row.report_json === 'object' && row.report_json !== null
-      ? row.report_json
-      : {}) as Readonly<Record<string, unknown>>,
+    report: isPlainRecord(row.report_json) ? row.report_json : {},
     ...(metrics != null ? { metrics } : {}),
     createdAt: row.created_at,
   };

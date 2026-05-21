@@ -10,9 +10,33 @@
  *     `actions[]` duality is gone — every step carries a `tool_calls[]`
  *     and `observations[]` list, even when there is only one of each).
  *   - `meta.termination` is a single nested record (`reason`, `layer`,
- *     `degraded_reason`) instead of a flat trio of optional fields.
+ *     `degraded_reason`, optional `kind`) instead of a flat trio of
+ *     optional fields.
  *   - `meta.policy_blocked` is a typed boolean (no more inferring blocked
  *     state from `termination_reason` + `fallback_trace`).
+ *
+ * S1 SEMANTIC SPLIT — BREAKING CHANGE (vs previous wine-search wire shape):
+ *   `meta.policy_blocked: true` used to mean BOTH (a) a security-sanitizer
+ *   block AND (b) a deterministic-router reject of an unsupported intent.
+ *   The two cases are now distinguished by `meta.termination.kind`:
+ *
+ *     - `kind = 'security_block'`: adversarial query → `policy_blocked = true`,
+ *       Korean security-template emitted.
+ *     - `kind = 'unsupported_intent'`: planner could not derive a wine
+ *       search (admit-gate empty/too-long, analyzer malformed, router
+ *       reject, runner reject) → `policy_blocked = false`, Korean
+ *       coverage-gap template emitted.
+ *
+ *   `kind` is OPTIONAL on the wire — present only when
+ *   `termination.reason === 'blocked'`. See
+ *   `src/application/wine-search/wine-search-result-schemas.ts` for the
+ *   internal contract.
+ *
+ *   QUERY LENGTH (secondary breaking change): `query` is now bounded by
+ *   user-perceived codepoints, not UTF-16 code units (Zod's default
+ *   `.max(N)` on strings). The previous behaviour halved the documented
+ *   limit for emoji queries (each emoji is two UTF-16 code units). See
+ *   {@link WineSearchRequestSchema}.
  *
  * All schemas chain `.strict()` per CLAUDE.md rule 10. None of these are
  * LLM tool-call shapes — they are HTTP contract shapes that MUST fail
@@ -145,8 +169,42 @@ const REQUEST_TOTAL_TOKEN_MIN = 1_000;
  *  Anthropic context window for Claude-4 Sonnet. */
 const REQUEST_TOTAL_TOKEN_MAX = 200_000;
 
+/** Pure-JS codepoint length helper — Zod's `.max(N)` for `z.string()`
+ *  counts UTF-16 code units, which double-counts surrogate-paired emoji and
+ *  some CJK extensions. We use `[...str].length` to count codepoints
+ *  (iterator semantics). The result aligns the wire bound with the
+ *  documented "max ~2000 user-perceived chars" guarantee. */
+function countCodepoints(value: string): number {
+  let n = 0;
+  for (const ch of value) {
+    void ch;
+    n += 1;
+  }
+  return n;
+}
+
 export const WineSearchRequestSchema = z.object({
-  query: z.string().min(1).max(MAX_AGENT_HTTP_QUERY_CHARS),
+  /**
+   * User query (UTF-8 string). Bounded by CODEPOINTS — not UTF-16 code
+   * units. Zod's default `.max(N)` on `z.string()` measures code units,
+   * which halves the effective limit for surrogate-paired characters
+   * (most emoji, some CJK extensions). The `.refine` below pins the
+   * bound to the user-perceived character count so the documented limit
+   * holds for ASCII, Korean, and emoji alike.
+   *
+   * BREAKING CHANGE (S1 work): emoji queries longer than
+   * `MAX_AGENT_HTTP_QUERY_CHARS` UTF-16 code units but ≤ that many
+   * codepoints are now ACCEPTED (previously rejected). Conversely,
+   * queries with > `MAX_AGENT_HTTP_QUERY_CHARS` codepoints are now
+   * rejected with the explicit message below.
+   */
+  query: z
+    .string()
+    .min(1)
+    .refine(
+      (s) => countCodepoints(s) <= MAX_AGENT_HTTP_QUERY_CHARS,
+      { message: `query exceeds max length of ${String(MAX_AGENT_HTTP_QUERY_CHARS)} codepoints` },
+    ),
   options: z.object({
     max_steps: z.number()
       .int()
@@ -231,6 +289,11 @@ export const WineSearchDegradedReasonSchema = z.enum([
   'circuit_open',
   'no_results',
   'policy_blocked',
+  // Unmodeled runtime failure inside the primary structured-LLM path —
+  // distinguished from `malformed_llm_output` so client telemetry and
+  // server-side dashboards can separate "LLM produced a bad shape" from
+  // "something else blew up" (P-M1 finding).
+  'unexpected_error',
 ]);
 export type WineSearchDegradedReason = z.infer<typeof WineSearchDegradedReasonSchema>;
 
@@ -260,9 +323,30 @@ export const WineSearchPlanKindSchema = z.enum([
 ]);
 export type WineSearchPlanKind = z.infer<typeof WineSearchPlanKindSchema>;
 
+/**
+ * S1 semantic-split discriminant (wire form). Present only when
+ * `termination.reason === 'blocked'`. Mirrors {@link TerminationKind} in
+ * `src/application/wine-search/wine-search-result-schemas.ts` (SSoT — the
+ * application module owns the literal values; this enum re-states them for
+ * the wire shape).
+ *
+ *  - `'security_block'`: adversarial sanitizer fired → `policy_blocked = true`,
+ *    Korean security-template emitted.
+ *  - `'unsupported_intent'`: planner could not derive a wine search →
+ *    `policy_blocked = false`, coverage-gap template emitted.
+ */
+export const WineSearchTerminationKindSchema = z.enum([
+  'security_block',
+  'unsupported_intent',
+]);
+export type WineSearchTerminationKind = z.infer<typeof WineSearchTerminationKindSchema>;
+
 export const WineSearchTerminationSchema = z.object({
   reason: WineSearchTerminationReasonSchema,
   layer: WineSearchAnswerLayerSchema,
+  /** S1 discriminant — see {@link WineSearchTerminationKindSchema}.
+   *  Present only when `reason === 'blocked'`; omitted otherwise. */
+  kind: WineSearchTerminationKindSchema.optional(),
   degraded_reason: WineSearchDegradedReasonSchema.optional(),
 }).strict();
 export type WineSearchTerminationBody = z.infer<typeof WineSearchTerminationSchema>;

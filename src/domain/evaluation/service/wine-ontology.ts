@@ -287,15 +287,39 @@ export function grapesEquivalent(a: string, b: string): boolean {
 // Wine type normalization
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Canonical wine types. */
+/**
+ * Canonical wine types.
+ *
+ * Fortified/aromatized expansion (2026-05, S3): Korean and English aliases for
+ * Port (포트와인/포트), Sherry (셰리/쉐리), Vermouth (베르무트/베르뭇), Madeira
+ * (마데이라), Marsala (마살라). All map to the canonical `fortified`
+ * wine-type so the entity resolver routes them through the wine-domain
+ * pipeline (preventing the OOD-alcohol redirect and avoiding the
+ * unsupported-intent reject path documented in S3).
+ *
+ * Note: 토카이 (Tokaji) is intentionally NOT registered here because the gold
+ * catalog already maps it to the higher-precision appellation
+ * "Royal Tokaji Aszú 6 Puttonyos 2017" (verified by
+ * gold-korean-entity-alias-catalog.regression.test.ts). Adding 토카이 here
+ * would shadow that appellation mapping.
+ */
 export const WINE_TYPE_ALIASES: ReadonlyMap<string, string> = new Map([
   ['red', 'red'], ['레드', 'red'], ['rouge', 'red'], ['rosso', 'red'], ['tinto', 'red'],
   ['white', 'white'], ['화이트', 'white'], ['blanc', 'white'], ['bianco', 'white'], ['blanco', 'white'],
   ['rosé', 'rosé'], ['rose', 'rosé'], ['로제', 'rosé'],
   ['sparkling', 'sparkling'], ['스파클링', 'sparkling'], ['champagne', 'sparkling'],
   ['dessert', 'dessert'], ['디저트', 'dessert'], ['sweet', 'dessert'],
-  ['fortified', 'fortified'], ['포트', 'fortified'], ['port', 'fortified'],
-  ['sherry', 'fortified'], ['madeira', 'fortified'],
+  ['fortified', 'fortified'],
+  // Port (Portuguese fortified).
+  ['port', 'fortified'], ['포트', 'fortified'], ['포트와인', 'fortified'], ['포트 와인', 'fortified'],
+  // Sherry (Spanish fortified). 쉐리/세리 — common Korean transliterations.
+  ['sherry', 'fortified'], ['셰리', 'fortified'], ['쉐리', 'fortified'], ['세리', 'fortified'],
+  // Madeira (Portuguese fortified).
+  ['madeira', 'fortified'], ['마데이라', 'fortified'],
+  // Marsala (Italian fortified).
+  ['marsala', 'fortified'], ['마살라', 'fortified'],
+  // Vermouth (aromatized — fortified base + botanicals).
+  ['vermouth', 'fortified'], ['베르무트', 'fortified'], ['베르뭇', 'fortified'], ['버무스', 'fortified'],
 ]);
 
 /**

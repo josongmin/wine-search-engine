@@ -53,24 +53,29 @@ export type PairingTag = (typeof PAIRING_TAXONOMY)[number];
  * Multiple pattern variants support different languages and phrasing.
  */
 export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
-  // Beef
+  // Beef — Korean expansion 2026-05: add 갈비/갈비탕/등심/안심/안창살/채끝/목살/
+  // 양념갈비/떡갈비/비빔밥(소고기 베이스 일반 표현)/잡채(소고기). 한식 - 소고기 요리.
   beef: [
     /(?<!\p{L})(?<!\p{N})(?:beef|steak|ribeye|filet|sirloin|t[\s-]?bone)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:소고기|스테이크|비프|쇠고기)(?:용|에|와|과|랑|이랑|하고)?(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:등심구이|안심구이|양념갈비|떡갈비|갈비탕|비빔밥|잡채|소고기|스테이크|비프|쇠고기|등심|안심|안창살|채끝|목살|갈비)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
     /(?:^|[^\p{L}\p{N}])소(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Lamb
   lamb: [/(?<!\p{L})(?<!\p{N})(?:lamb|mutton|agneau)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:양고기|램)(?=$|[^\p{L}\p{N}])/u],
 
-  // Pork
+  // Pork — Korean expansion 2026-05: 한식 - 돼지고기 요리 (삼겹살/목살/보쌈/족발/
+  // 수육/부대찌개/돈카츠 등 일식 포함) + 중식 탕수육.
   pork: [
-    /(?<!\p{L})(?<!\p{N})(?:pork|ham|bacon|chop|loin)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:돼지고기|돼지|햄|베이컨|삼겹살)(?:이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:pork|ham|bacon|chop|loin|tonkatsu)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:돼지고기|부대찌개|돼지|햄|베이컨|삼겹살|보쌈|족발|수육|돈카츠|돈까스|탕수육)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // Chicken
-  chicken: [/(?<!\p{L})(?<!\p{N})(?:chicken|poultry|fowl)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:닭|닭고기|치킨|가금류)(?:이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u],
+  // Chicken — Korean expansion 2026-05: 한식 - 닭요리 (닭갈비/닭볶음탕/닭한마리).
+  chicken: [
+    /(?<!\p{L})(?<!\p{N})(?:chicken|poultry|fowl)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:닭볶음탕|닭한마리|닭갈비|깐풍기|닭고기|치킨|가금류|닭)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
+  ],
 
   // Duck
   duck: [/(?<!\p{L})(?<!\p{N})(?:duck|confit|magret)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:오리|오리고기|덕)(?=$|[^\p{L}\p{N}])/u],
@@ -87,22 +92,29 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
   // Tuna
   tuna: [/(?<!\p{L})(?<!\p{N})(?:tuna|sashimi|maguro)(?!\p{L})(?!\p{N})/iu, /(?:^|[^\p{L}\p{N}])(?:참치|다랭이|사시미)(?=$|[^\p{L}\p{N}])/u],
 
-  // Shellfish
+  // Shellfish — Korean expansion 2026-05: 해물 한식/일식 (해물파전/회덮밥의 갑각류
+  // 변형 등은 white_fish 와 겹칠 수 있으므로 화이트피쉬는 별도 유지).
   shellfish: [
     /(?<!\p{L})(?<!\p{N})(?:shrimp|prawn|lobster|crab|oyster|mussel|clam|scallop|seafood|shellfish)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:새우|랍스터|게|굴|홍합|조개|가리비|해산물)(?:는|은|이|가|을|를|랑|이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:새우|랍스터|게|굴|홍합|조개|가리비|해산물|해물파전)(?:용|에|에는|는|은|이|가|을|를|랑|이랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // White fish
+  // White fish — Korean expansion 2026-05: 한식/일식 회·생선요리 (회/초밥/사시미/
+  // 생선구이/회덮밥).
   white_fish: [
-    /(?<!\p{L})(?<!\p{N})(?:cod|halibut|flounder|sole|sea bass|branzino|white fish|sashimi|raw fish)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:흰살고기|대구|넙치|광어|농어|회|사시미)(?:랑|하고|과|와|를)?(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:cod|halibut|flounder|sole|sea bass|branzino|white fish|sashimi|raw fish|sushi)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:흰살고기|대구|넙치|광어|농어|회덮밥|초밥|사시미|생선구이|회)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // Spicy food
+  // Spicy food — Korean expansion 2026-05: 한식 - 매운 국물/요리.
+  //   감자탕/김치찌개/된장찌개/청국장/부대찌개(매콤+짭짤)/마라탕/마파두부/
+  //   순대(매콤한 양념에 곁들이는 경우)/낙지볶음/쭈꾸미/순두부찌개 등 매운
+  //   음식 전반 + 일반 카테고리 "매운 음식 / 매콤한 음식 / 짠 음식 / 단 음식".
+  //   "짠/단/신/기름진" 카테고리는 anchor 신호로만 사용; spicy 와 동일 큰
+  //   카테고리로 묶어 라우팅 가능하도록 spicy_food 태그에 매핑.
   spicy_food: [
-    /(?<!\p{L})(?<!\p{N})(?:spicy food|spicy|tteokbokki|topokki)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:매운\s*음식|매콤한\s*음식|떡볶이|매운\s*떡볶이)(?:랑|하고|과|와)?(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:spicy food|spicy|tteokbokki|topokki|mala|mapo)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:매운\s*음식|매콤한\s*음식|짠\s*음식|단\s*음식|신\s*음식|기름진\s*음식|매운\s*떡볶이|떡볶이|감자탕|김치찌개|된장찌개|청국장|마라탕|마파두부|낙지볶음|쭈꾸미|순두부찌개|김치전|김치)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Mushroom
@@ -126,22 +138,30 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
     /(?:^|[^\p{L}\p{N}])(?:브리|깡베르|염소치즈|샤브르|모차렐라)(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // Pasta
+  // Pasta — Korean expansion 2026-05: 한식/일식/중식 면류 (라면/칼국수/우동/짜장면/
+  // 라멘) + 김밥(밥/면류 카테고리 인접) 포함.
   pasta: [
-    /(?<!\p{L})(?<!\p{N})(?:pasta|noodle|spaghetti|penne|ravioli|lasagna)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:파스타|국수|스파게티|펜네|라비올리|라자냐)(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:pasta|noodle|spaghetti|penne|ravioli|lasagna|ramen|udon)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:파스타|국수|스파게티|펜네|라비올리|라자냐|라면|칼국수|우동|짜장면|라멘|김밥)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // Risotto
+  // Risotto — Korean expansion 2026-05: 양식 일반 (피자/햄버거/샌드위치) +
+  // 일식 전골 (스키야키/샤브샤브). 명확히 별도 태그가 없으므로 "탄수화물+탄/지방"
+  // 무게감 있는 양식 카테고리로 risotto 태그 아래에 통합 — 매핑이 거칠더라도
+  // unsupported-intent 라우팅보다 낫다 (S2 보완).
   risotto: [
-    /(?<!\p{L})(?<!\p{N})(?:risotto|arborio|risoto)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:리소토|아르보리오|리조또)(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:risotto|arborio|risoto|pizza|burger|hamburger|sandwich|sukiyaki|shabu[\s-]?shabu)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:리소토|아르보리오|리조또|피자|햄버거|샌드위치|스키야키|샤브샤브)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // Grilled vegetables
+  // Grilled vegetables — Korean expansion 2026-05: 한식 전/부침개 류 (파전/부침개/
+  //   해물파전 등). "김치전" 은 spicy_food 에 이미 매핑됨 (매운 양념 우세).
+  //   주의 (rule 23): 단독 "전" 은 한국어에서 시간 부사 ("전에/전 와인 …") 등으로
+  //   광범위하게 쓰이므로 false-positive 가 매우 크다 → 단독 "전" 은 매칭하지 않고
+  //   반드시 "파전/부침개/X전" 의 합성 형태로만 매핑한다.
   grilled_vegetables: [
     /(?<!\p{L})(?<!\p{N})(?:grilled|vegetable|veggie|asparagus|zucchini|eggplant)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:그릴|야채|채소|아스파라거스|주키니|가지)(?=$|[^\p{L}\p{N}])/u,
+    /(?:^|[^\p{L}\p{N}])(?:그릴|야채|채소|아스파라거스|주키니|가지|파전|부침개)(?:용|에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Aperitif
@@ -150,10 +170,10 @@ export const PAIRING_PATTERNS: Record<PairingTag, RegExp[]> = {
     /(?:^|[^\p{L}\p{N}])(?:아페리티프(?:용)?|에피타이저(?:용)?|전식(?:용)?|식전주)(?=$|[^\p{L}\p{N}])/u,
   ],
 
-  // Dessert
+  // Dessert — Korean expansion 2026-05: 한국에서 흔한 디저트 (치즈케이크/마카롱).
   dessert: [
-    /(?<!\p{L})(?<!\p{N})(?:dessert|sweet|chocolate|cake|pudding|fruit)(?!\p{L})(?!\p{N})/iu,
-    /(?:^|[^\p{L}\p{N}])(?:디저트(?:용)?|후식(?:용)?|초콜릿|케이크|푸딩|과일)(?=$|[^\p{L}\p{N}])/u,
+    /(?<!\p{L})(?<!\p{N})(?:dessert|sweet|chocolate|cake|pudding|fruit|cheesecake|macaron|macaroon)(?!\p{L})(?!\p{N})/iu,
+    /(?:^|[^\p{L}\p{N}])(?:디저트(?:용)?|후식(?:용)?|초콜릿|케이크|푸딩|과일|치즈케이크|마카롱)(?:에|에는|와|과|랑|이랑|하고|은|는|이|가|을|를)?(?=$|[^\p{L}\p{N}])/u,
   ],
 
   // Solo drinking

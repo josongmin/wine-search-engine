@@ -160,6 +160,110 @@ describe('jaroWinklerSimilarity — prefix-weighted Jaro', () => {
   });
 });
 
+describe('KIL typo-recall regression — Damerau/JW blending must clear pg-alias-matcher thresholds', () => {
+  /**
+   * pg-alias-matcher.ts:bestFuzzySimilarity gates on (using compact forms):
+   *   damerauDistance ≤ floor(maxLen · 0.25)  OR
+   *   trigramOverlap ≥ 0.45                   OR
+   *   bigramOverlap  ≥ 0.6
+   * and reports similarity = max(damerauSim, jaroWinkler, trigramOverlap, bigramOverlap).
+   *
+   * Below we verify the algorithm-level building blocks separately for
+   * well-known KIL typo classes. If any of these regress (e.g. someone reverts
+   * Damerau back to Levenshtein) the recall guarantee for `/v1/search/lookup`
+   * silently degrades — this suite catches the move at unit-test time.
+   */
+  const RATIO = 0.25;
+  const maxDistanceFor = (a: string, b: string): number =>
+    Math.max(1, Math.floor(Math.max(a.length, b.length) * RATIO));
+
+  it('single-edit substitution: "Sasicaia" → "Sassicaia" (compact form) clears threshold', () => {
+    const a = 'sasicaia';
+    const b = 'sassicaia';
+    const d = damerauLevenshteinOsa(a, b);
+    expect(d).toBeLessThanOrEqual(maxDistanceFor(a, b));
+    expect(jaroWinklerSimilarity(a, b)).toBeGreaterThan(0.85);
+  });
+
+  it('adjacent transposition: "opus one" → "opsu one" clears with Damerau but FAILS with Levenshtein on tight thresholds', () => {
+    const a = 'opusone';
+    const b = 'opsuone';
+    expect(damerauLevenshteinOsa(a, b)).toBe(1);
+    expect(levenshteinDistance(a, b)).toBe(2);
+    // maxDistance for length 7 = floor(7*0.25) = 1. Damerau passes, Levenshtein fails.
+    expect(damerauLevenshteinOsa(a, b)).toBeLessThanOrEqual(maxDistanceFor(a, b));
+    expect(levenshteinDistance(a, b)).toBeGreaterThan(maxDistanceFor(a, b));
+  });
+
+  it('Korean syllable transposition: "샤또" ↔ "샤토" treated as 1 Damerau-edit', () => {
+    expect(damerauLevenshteinOsa('샤또 마고', '샤토 마고')).toBeLessThanOrEqual(1);
+  });
+
+  it('Jaro-Winkler boosts prefix-shared producer family (Bordeaux Château ...) over plain Jaro', () => {
+    const baseline = jaroSimilarity('Château Margaux', 'Château Lafite');
+    const boosted = jaroWinklerSimilarity('Château Margaux', 'Château Lafite');
+    // Long shared prefix → JW > Jaro (when Jaro ≥ promote threshold).
+    if (baseline >= 0.7) {
+      expect(boosted).toBeGreaterThan(baseline);
+    }
+  });
+
+  it('numeric vintage edit: "Margaux 2015" → "Margaux 2016" stays high-similarity', () => {
+    // Only the last char differs — substring overlap dominates.
+    const a = 'margaux2015';
+    const b = 'margaux2016';
+    expect(damerauLevenshteinOsa(a, b)).toBe(1);
+    expect(jaroWinklerSimilarity(a, b)).toBeGreaterThan(0.95);
+  });
+
+  it('completely unrelated strings stay below the 0.45 trigram-overlap floor (no false-positive recall)', () => {
+    // Negative-case regression: short common substring must not create false
+    // similarity. "cat" vs "Château Margaux Pavillon" — 'cat' appears inside
+    // "Château" but the larger structures are unrelated.
+    expect(jaroWinklerSimilarity('cat', 'corkscrew')).toBeLessThan(0.7);
+  });
+});
+
+describe('boundary: UTF-16 surrogate-pair behaviour (documented limitation)', () => {
+  /**
+   * edit-distance.ts is explicit that comparisons use UTF-16 code units.
+   * Surrogate-pair characters (most emojis, supplementary-plane CJK) count
+   * as two units. The wine alias catalog runs an NFC pass upstream so this
+   * does not impact normal entity matching, but we still need to assert that
+   * the algorithms do not throw and produce sensible bounds on such input,
+   * so the "limitation" doesn't drift into "silent crash".
+   */
+  it('damerauLevenshteinOsa: same emoji on both sides has distance 0', () => {
+    expect(damerauLevenshteinOsa('🍷', '🍷')).toBe(0);
+  });
+
+  it('damerauLevenshteinOsa: identical emoji-prefixed labels have distance 0', () => {
+    expect(damerauLevenshteinOsa('🍷 opus', '🍷 opus')).toBe(0);
+  });
+
+  it('damerauLevenshteinOsa: emoji-prefixed vs plain reports 2 (the surrogate pair plus the space)', () => {
+    // Documented behaviour: the wine glass surrogate pair counts as 2 units.
+    // Plus the leading space → total distance 3 by code-unit accounting.
+    const distance = damerauLevenshteinOsa('🍷 opus', 'opus');
+    expect(distance).toBeGreaterThanOrEqual(2);
+    expect(distance).toBeLessThanOrEqual(3);
+  });
+
+  it('jaroWinklerSimilarity stays in [0, 1] for emoji inputs (no NaN / no throw)', () => {
+    const value = jaroWinklerSimilarity('🍷 opus one', 'opus one');
+    expect(value).toBeGreaterThanOrEqual(0);
+    expect(value).toBeLessThanOrEqual(1);
+    expect(Number.isFinite(value)).toBe(true);
+  });
+
+  it('jaroSimilarity handles a pure-emoji input pair without throwing', () => {
+    expect(jaroSimilarity('🍷', '🍷')).toBe(1);
+    const cross = jaroSimilarity('🍷', '🍇');
+    expect(cross).toBeGreaterThanOrEqual(0);
+    expect(cross).toBeLessThanOrEqual(1);
+  });
+});
+
 describe('editDistanceSimilarity — normalized [0, 1] view of distance', () => {
   it('returns 1 on empty-vs-empty (canonical zero-distance trivial pair)', () => {
     expect(editDistanceSimilarity('', '', 0)).toBe(1);

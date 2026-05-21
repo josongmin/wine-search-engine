@@ -431,6 +431,129 @@ describe('buildResolverCandidatesFromGenerator', () => {
       message: expect.stringContaining('partial_resolution_forbidden'),
     });
   });
+
+  // inferAliasType is exercised here through the public builder so the
+  // observable contract — anchor.aliasType wins over strategy inference —
+  // is locked, even though the helper itself is module-private.
+  describe('inferAliasType (via builder)', () => {
+    function makeAnchorInput(
+      anchor: Partial<EntityCandidateGeneratorInput['anchors'][number]> & {
+        candidateEntityIds: readonly CanonicalEntityId[];
+      },
+    ): EntityCandidateGeneratorInput {
+      return {
+        rawQuery: 'q',
+        normalizedQuery: 'q',
+        anchors: [
+          {
+            surfaceForm: 'CM',
+            normalizedForm: 'cm',
+            confidence: 0.5,
+            source: 'alias',
+            ...anchor,
+          },
+        ],
+      };
+    }
+
+    it('uses anchor.aliasType when explicit (overrides strategy inference)', async () => {
+      const entityId = createEntityId('chateau-margaux-2015');
+      const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
+      const lookup = makeBatchLookup(async () => doc);
+      const candidates = await buildResolverCandidatesFromGenerator(
+        makeAnchorInput({
+          candidateEntityIds: [entityId],
+          // Strategy looks exact-like (would normally infer 'canonical'),
+          // but the explicit field MUST win.
+          lookupStrategies: ['exact'],
+          aliasType: 'derived_initialism',
+        }),
+        lookup,
+      );
+      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('derived_initialism');
+    });
+
+    it('falls back to canonical when no aliasType and only exact-like strategies', async () => {
+      const entityId = createEntityId('chateau-margaux-2015');
+      const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
+      const lookup = makeBatchLookup(async () => doc);
+      const candidates = await buildResolverCandidatesFromGenerator(
+        makeAnchorInput({
+          candidateEntityIds: [entityId],
+          lookupStrategies: ['exact'],
+        }),
+        lookup,
+      );
+      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('canonical');
+    });
+
+    it('falls back to misspelling for substring strategy', async () => {
+      const entityId = createEntityId('chateau-margaux-2015');
+      const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
+      const lookup = makeBatchLookup(async () => doc);
+      const candidates = await buildResolverCandidatesFromGenerator(
+        makeAnchorInput({
+          candidateEntityIds: [entityId],
+          lookupStrategies: ['substring'],
+        }),
+        lookup,
+      );
+      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('misspelling');
+    });
+
+    it('falls back to phonetic when phonetic strategy and no aliasType', async () => {
+      const entityId = createEntityId('chateau-margaux-2015');
+      const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
+      const lookup = makeBatchLookup(async () => doc);
+      const candidates = await buildResolverCandidatesFromGenerator(
+        makeAnchorInput({
+          candidateEntityIds: [entityId],
+          lookupStrategies: ['phonetic_fuzzy'],
+        }),
+        lookup,
+      );
+      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('phonetic');
+    });
+
+    it('mixed anchors on same entity preserve per-anchor aliasType (canonical + derived_initialism coexist)', async () => {
+      // Critical regression guard for the cap-leak bug: two anchors landing
+      // on the same entity must each carry their own type so the scorer's
+      // `.every()` gate sees the canonical evidence and DOES NOT cap.
+      const entityId = createEntityId('masi-amarone');
+      const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Masi Amarone della Valpolicella' };
+      const lookup = makeBatchLookup(async () => doc);
+      const candidates = await buildResolverCandidatesFromGenerator(
+        {
+          rawQuery: 'masi 15',
+          normalizedQuery: 'masi 15',
+          anchors: [
+            {
+              surfaceForm: 'Masi Amarone',
+              normalizedForm: 'masi amarone',
+              candidateEntityIds: [entityId],
+              lookupStrategies: ['prefix_exact'],
+              aliasType: 'canonical',
+              confidence: 0.9,
+              source: 'alias',
+            },
+            {
+              surfaceForm: 'MA',
+              normalizedForm: 'ma',
+              candidateEntityIds: [entityId],
+              lookupStrategies: ['prefix_exact'],
+              aliasType: 'derived_initialism',
+              confidence: 0.5,
+              source: 'alias',
+            },
+          ],
+        },
+        lookup,
+      );
+      const types = candidates[0]?.aliasMatches.map((m) => m.aliasType) ?? [];
+      expect(types).toContain('canonical');
+      expect(types).toContain('derived_initialism');
+    });
+  });
 });
 
 // ─── 수학적 완결성: mergeSignals 교환법칙 · 멱등법칙 · 3-anchor max() ──────────

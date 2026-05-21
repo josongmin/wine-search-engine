@@ -202,6 +202,27 @@ export const HTTP_DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
 /** Default per-request processing deadline (ms). */
 export const HTTP_DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * Default rate-limit max requests per window when ServerOptions.rateLimitMax
+ * is omitted. Aligned with `@fastify/rate-limit` standard guidance for a
+ * single-process unauthenticated JSON API (RFC-014 §13). Tunable per
+ * deployment via `HTTP_RATE_LIMIT_MAX`.
+ *
+ * Rule 15 / Rule 30: shared between server.ts and the middleware-stack
+ * regression test — keep one source of truth here.
+ */
+export const RATE_LIMIT_MAX_REQUESTS_DEFAULT = 100;
+
+/**
+ * Default rate-limit sliding-window length (ms) when ServerOptions does not
+ * override it. 60 000 ms = 1 minute = the documented `timeWindow: '1 minute'`
+ * literal previously inlined in server.ts.
+ *
+ * Rule 30: shared with the regression test that exercises the window.
+ */
+export const RATE_LIMIT_WINDOW_MS_DEFAULT =
+  SECONDS_PER_MINUTE * 1000; // 60 000 ms
+
 /** Minimum per-item timeout for batch search items (ms). */
 export const MIN_BATCH_SEARCH_ITEM_TIMEOUT_MS = 1_000;
 

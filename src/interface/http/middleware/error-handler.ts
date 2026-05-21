@@ -21,8 +21,32 @@ import {
   HTTP_STATUS_REQUEST_TIMEOUT,
   HTTP_STATUS_SERVICE_UNAVAILABLE,
   HTTP_STATUS_TOO_MANY_REQUESTS,
+  HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE,
   RETRY_AFTER_SECONDS_BLOCKING_MISS,
 } from '../constants.js';
+
+/**
+ * Fastify content-type-parser (CTP) error codes that legitimately mean
+ * "the client sent bad bytes / unparseable JSON" and MUST surface as 400
+ * (or 415 for unsupported media types), wrapped in the RFC-014 envelope.
+ *
+ * Without an explicit branch, the global error handler would fall through
+ * to the generic "unknown 500" path and clients would see HTTP 500
+ * INTERNAL_ERROR — a misleading status code for a client-side payload
+ * defect. See `node_modules/fastify/lib/errors.js` for the authoritative
+ * list (matches Fastify 4.x/5.x).
+ *
+ * Note: `FST_ERR_CTP_BODY_TOO_LARGE` is handled separately above as a 413,
+ * and `FST_ERR_CTP_INVALID_MEDIA_TYPE` is broken out below as a 415.
+ */
+const MALFORMED_REQUEST_BODY_ERROR_CODES: ReadonlySet<string> = new Set([
+  // Body is not valid JSON (raw NaN, trailing commas, truncated input, etc.).
+  'FST_ERR_CTP_INVALID_JSON_BODY',
+  // Body was empty under Content-Type: application/json.
+  'FST_ERR_CTP_EMPTY_JSON_BODY',
+  // Content-Length header disagreed with the actual body bytes.
+  'FST_ERR_CTP_INVALID_CONTENT_LENGTH',
+]);
 
 /**
  * Maps DomainError codes to HTTP status codes.
@@ -137,6 +161,50 @@ export function errorHandler(
       false,
     );
     sendSearchErrorResponse(request, reply, HTTP_STATUS_PAYLOAD_TOO_LARGE, body);
+    return;
+  }
+
+  // Malformed JSON body / empty body / mismatched Content-Length — 400.
+  // Fastify's default JSON body parser throws an FST_ERR_CTP_* error for
+  // these cases; without this branch they fall through to the unknown-error
+  // 500 path. The CONTRACT (RFC-014) is that a client-side payload defect
+  // MUST surface as 400 with the canonical error envelope (H1-F1, H1-F2).
+  if (
+    typeof fastifyError.code === 'string'
+    && MALFORMED_REQUEST_BODY_ERROR_CODES.has(fastifyError.code)
+  ) {
+    request.log.warn(
+      { requestId, code: fastifyError.code },
+      'malformed_request_body',
+    );
+    const body = buildSearchErrorResponse(
+      requestId,
+      'MALFORMED_JSON_BODY',
+      'Request body is not valid JSON.',
+      null,
+      false,
+    );
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_BAD_REQUEST, body);
+    return;
+  }
+
+  // Unsupported media type — 415. Fastify throws FST_ERR_CTP_INVALID_MEDIA_TYPE
+  // when the request's Content-Type is missing or does not match any registered
+  // content parser (e.g. text/plain hitting a JSON-only route). Surface as a
+  // proper 415 with the RFC-014 envelope rather than a generic 500.
+  if (fastifyError.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE') {
+    request.log.warn(
+      { requestId, code: fastifyError.code },
+      'unsupported_media_type',
+    );
+    const body = buildSearchErrorResponse(
+      requestId,
+      'UNSUPPORTED_MEDIA_TYPE',
+      'Unsupported request Content-Type. Expected application/json.',
+      null,
+      false,
+    );
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE, body);
     return;
   }
 

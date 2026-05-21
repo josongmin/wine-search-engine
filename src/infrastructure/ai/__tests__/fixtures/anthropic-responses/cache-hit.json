@@ -1,0 +1,25 @@
+{
+  "id": "msg_01CacheHitReportedTokens9",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01CacheHitResponderXyz12",
+      "name": "respond",
+      "input": {
+        "intent": "lookup",
+        "count": 1
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 42,
+    "output_tokens": 11,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1287
+  }
+}

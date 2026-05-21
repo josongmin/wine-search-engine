@@ -5,10 +5,18 @@ summary: |
   Domain shared/circuit-breaker — open/closed/half-open 상태 + threshold + cooldown.
   observability.circuit-breaker-registry가 이 primitive를 등록 관리.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  단순 잘 검증된 pattern, observability registry와 결합되어 다수 종속성에 wired.
-  Unit test 보유. State persistence는 없음 (in-memory only).
+  Netflix Hystrix-style three-state machine (CLOSED/OPEN/HALF_OPEN) with named
+  defaults (DEFAULT_FAILURE_THRESHOLD / DEFAULT_RECOVERY_TIMEOUT_MS /
+  DEFAULT_HALF_OPEN_ATTEMPTS), wired into observability registry and consumed
+  by multiple infra adapters. Backed by industry-verified state-machine
+  property tests (fast-check, numRuns=100) covering CLOSED→OPEN threshold,
+  success-reset, off-by-one boundary, OPEN→HALF_OPEN cooldown with injectable
+  clock (vi.useFakeTimers), HALF_OPEN→CLOSED on probe success,
+  HALF_OPEN→OPEN with cooldown reset on probe failure, counter monotonicity,
+  deterministic-clock invariance, and force-open/force-close admin paths.
+  State persistence는 없음 (in-memory only).
 
 status: active
 since: 2025-09
@@ -21,7 +29,12 @@ surfaces:
 key_files:
   - src/domain/shared/circuit-breaker
 
-tests: {}
+tests:
+  regression:
+    - test/regression/circuit-breaker-primitive-properties.regression.test.ts
+    - test/regression/circuit-breaker-registry-properties.regression.test.ts
+  unit:
+    - src/domain/shared/circuit-breaker/__tests__/circuit-breaker.test.ts
 
 depends_on: []
 

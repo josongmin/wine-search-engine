@@ -1,0 +1,22 @@
+{
+  "id": "msg_01WrongToolNameHallucinat",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01WrongNameHallucinated00",
+      "name": "search_database",
+      "input": {
+        "query": "anything"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 350,
+    "output_tokens": 18
+  }
+}

@@ -40,6 +40,19 @@ import {
 /** Prefix for snapshot entity ids when no benchmark gold row matches (ADR-007). */
 export const SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX = 'wine-ce-' as const;
 
+/**
+ * Versioning hook for `WineSnapshotEntityResolution` records.
+ *
+ * Bumped when the resolution record shape or identity-derivation rules change.
+ * Defaults to '1' for backward compatibility with previously emitted records.
+ * Downstream consumers MUST tolerate unknown future versions (warn + degrade)
+ * but MUST NOT silently accept a missing version on new code paths — read the
+ * field with `?? SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION` only on legacy
+ * deserialization sites.
+ */
+export const SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION = '1' as const;
+export type SnapshotEntityIdentitySchemaVersion = typeof SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION;
+
 const GoldEntityRowSchema = z
   .object({
     entity_id: z.string().min(1),
@@ -84,6 +97,8 @@ export type BenchmarkLinkageAuthority = typeof BENCHMARK_LINKAGE_AUTHORITY;
  * runtime entity; it can never rename an entity's runtime public id.
  */
 export interface WineSnapshotEntityResolution {
+  /** Schema version of this resolution record (see {@link SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION}). */
+  readonly schemaVersion: SnapshotEntityIdentitySchemaVersion;
   /** Runtime public id (immutable authority). */
   readonly entityId: CanonicalEntityId;
   readonly identitySignature: string;
@@ -282,6 +297,7 @@ export function resolveWineSnapshotEntity(
       throw new Error(`Gold lookup returned forbidden source-style id for ${key}: ${goldHit}`);
     }
     return {
+      schemaVersion: SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION,
       entityId: publicEntityId,
       identitySignature,
       runtimePublicIdAuthority: RUNTIME_PUBLIC_ID_AUTHORITY,
@@ -298,6 +314,7 @@ export function resolveWineSnapshotEntity(
   }
 
   return {
+    schemaVersion: SNAPSHOT_ENTITY_IDENTITY_SCHEMA_VERSION,
     entityId: publicEntityId,
     identitySignature,
     runtimePublicIdAuthority: RUNTIME_PUBLIC_ID_AUTHORITY,

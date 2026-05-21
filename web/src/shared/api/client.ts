@@ -11,6 +11,8 @@ import type {
   AgentBenchmarkScenariosResponse,
   AgentExecuteRequest,
   AgentExecuteResponse,
+  WineSearchRequest,
+  WineSearchResponse,
 } from './types';
 import { getSubjectId } from '@/shared/lib/subject';
 
@@ -20,6 +22,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** Agent loop can exceed default browser/fetch timeouts. */
 const AGENT_EXECUTE_TIMEOUT_MS = 180_000;
+/** Plan-then-execute wine-search shares the same patience ceiling as the
+ *  legacy agent loop — the planner can fan out several Vespa round-trips
+ *  before synthesis. Aligned with the wire schema's `agent_timeout_ms`
+ *  upper bound (120_000 ms) plus headroom for network + serialization. */
+const WINE_SEARCH_EXECUTE_TIMEOUT_MS = 180_000;
 
 export class ApiError extends Error {
   constructor(
@@ -184,6 +191,30 @@ export const api = {
           externalSignal: opts.signal,
         },
         AGENT_EXECUTE_TIMEOUT_MS,
+      );
+    },
+  },
+
+  /**
+   * Plan-then-Execute wine search (POST /v1/wine-search). New orchestrator
+   * surface gated by `WINE_SEARCH_ENABLED` server-side. BREAKING vs
+   * `/v1/agent` — see {@link WineSearchResponse} in `./types`.
+   *
+   * NOTE: The legacy `api.agent.execute` is intentionally retained for
+   * strangler-fig coexistence. Callers MUST NOT mix the two response
+   * shapes — the discriminator is `query_type` (`'agent'` vs
+   * `'wine_search'`).
+   */
+  wineSearch: {
+    execute(body: WineSearchRequest, opts: ApiCallOptions = {}) {
+      return request<WineSearchResponse>(
+        '/v1/wine-search',
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+          externalSignal: opts.signal,
+        },
+        WINE_SEARCH_EXECUTE_TIMEOUT_MS,
       );
     },
   },

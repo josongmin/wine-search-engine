@@ -5,18 +5,21 @@ summary: |
   Cohere rerank API 어댑터 + cached-reranker로 동일 query/doc 조합 cache. retrieval
   candidate pool 위 후처리 reranking 후보 (현재 hybrid score blend만 사용 중).
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  어댑터 코드 존재, cache wrapper 있음. 그러나 hybrid retrieval pipeline에 wired되지
-  않음 (POC 단계). 프로덕션 적용 미진행.
+  Production DI-wired in `container-adapters.ts:217` —
+  `new CachedReranker({ modelId: config.cohere.rerankModel, inner: new CohereReranker({...}) })`.
+  RerankerPort 구현, Cohere rerank API + per-query-doc cache. 그러나 production
+  retrieval pipeline에서 활성화되는 시점 / A/B 게이트 미수립, cost/latency budget
+  데이터 부재. 4가 되려면 production A/B + cost dashboard + 회귀 게이트 필요.
 
-status: experimental
+status: active
 since: 2025-11
 last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "Internal (POC)"
+  - "Internal (DI-wired via container-adapters.ts; conditional usage by retrieval pipeline)"
 
 key_files:
   - src/infrastructure/ai/cohere-reranker.ts
@@ -29,15 +32,15 @@ depends_on: []
 related_rfcs: []
 
 known_limitations:
-  - "Production retrieval pipeline 미wired"
-  - "A/B 테스트 결과 없음"
+  - "A/B 테스트 결과 없음 — quality lift 미입증"
   - "Cost/latency budget 미수립"
+  - "Cohere API 외부 의존 (vendor lock-in)"
 
 next_steps:
-  - "Dual-lane fusion 뒤에 rerank stage 추가 (feature flag)"
-  - "A/B 테스트로 quality 검증"
+  - "A/B 테스트로 quality lift 측정"
+  - "Cost dashboard + p95 latency SLA 도입"
 
 tags:
   - reranking
-  - experimental
-  - poc
+  - production-wired
+  - vendor-cohere

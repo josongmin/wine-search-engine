@@ -988,7 +988,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     throw new Error(`NL mappings runtime count mismatch: runtime=${nlMappingsRuntime.count}, state=${runtimeState.counts.nlMappings}`);
   }
   const activeLtrCountMismatch = activeLtrCount !== runtimeState.counts.activeLtrModels;
-  const allowMissingActiveLtr = runtimeState.allowMissingLtr === true && activeLtrCount === 0;
+  const allowMissingActiveLtr = runtimeState.allowMissingLtr && activeLtrCount === 0;
   if (activeLtrCountMismatch && !allowMissingActiveLtr) {
     throw new Error(`Active LTR runtime count mismatch: runtime=${activeLtrCount}/${activeLtrTotalCount}, state=${runtimeState.counts.activeLtrModels}`);
   }

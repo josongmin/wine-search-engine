@@ -33,6 +33,7 @@ import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
 import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
+import { AmbiguityIntentCompiler } from '../domain/query/service/ambiguity-intent-compiler.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import { ConstraintTopologyPlanner } from '../domain/query/service/constraint-topology-planner.js';
@@ -40,10 +41,10 @@ import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
 import type { RuntimeSupportServices } from './container-runtime-support.js';
-import { bootstrapLogger } from './bootstrap-logger.js';
+import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { validateFeatureFlagsAtStartup } from './feature-flag-coherence.js';
 import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
-import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../domain/observability/silent-skip-counters.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
 import type {
   BlockingUseCasePort,
@@ -142,12 +143,23 @@ export async function buildQueryPlanner(
     ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
-  // ADR-012 Phase 1b.2: wire optional ConstraintTopologyPlanner when a
-  // ChatLlmPort is available AND the env flag is on. When unavailable,
-  // ConstraintCompiler falls through to the deterministic trivial graph.
+  // ADR-012 Phase 1b.2 + Wave I4: auto-instantiate the
+  // ConstraintTopologyPlanner whenever a ChatLlmPort is available.
+  //
+  // Container-vs-compiler gate separation:
+  //   - The container gate (here) controls *construction*: the planner
+  //     instance must exist for the compiler to ever invoke it.
+  //   - The compiler gate (constraint-compiler.ts
+  //     `isConstraintGraphTopologyLlmEnabled()`) controls *invocation*
+  //     per-request by re-reading `CONSTRAINT_GRAPH_TOPOLOGY_LLM` on
+  //     every `compile()` call.
   const topologyPlanner =
-    chatLlm !== undefined && process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true'
+    chatLlm !== undefined
       ? new ConstraintTopologyPlanner(chatLlm)
+      : undefined;
+  const ambiguityIntentCompiler =
+    chatLlm !== undefined
+      ? new AmbiguityIntentCompiler(chatLlm)
       : undefined;
 
   return new Planner(
@@ -157,6 +169,7 @@ export async function buildQueryPlanner(
     nlMapper,
     fuzzyMatcher,
     topologyPlanner,
+    ambiguityIntentCompiler,
   );
 }
 

@@ -5,10 +5,28 @@ summary: |
   External 종속성 (PG / Redis / Vespa / LLM / embedding) readiness check + search
   snapshot readiness reader + snapshot health metadata reader. GET /ready의 백엔드.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Production-grade probes, 모든 critical dep 점검. snapshot health reader가
-  active snapshot 메타 자동 fetch. 그러나 latency budget per probe 미정의.
+  Production-grade probes, 모든 critical dep 점검. Per-probe named timeout
+  budgets (PROBE_TIMEOUT_PG_MS, PROBE_TIMEOUT_VESPA_MS, …)이 SSoT로 노출되어
+  있고 PROBE_CRITICALITY 매트릭스가 critical vs non_critical 분류를 강제.
+  snapshot health reader가 active snapshot 메타를 best-effort fetch
+  (실패 시 /ready를 503으로 떨어뜨리지 않음).
+
+  Property-based regression invariants
+  (`test/regression/readiness-probes-matrix-properties.regression.test.ts`):
+    P1. PROBE_CRITICALITY vocabulary 완비 (critical | non_critical).
+    P2. 임의 매트릭스에서 critical probe down → /ready=503.
+    P3. non_critical만 down → /ready=200 + degraded surfaced in body.
+    P4. snapshot readiness 가 정의된 invariant (entities>0, aliases>0,
+        NL hash match, allowMissingLtr semantics)에 대해 임의 입력에서 정확히
+        up/down을 결정 (fast-check, numRuns=20, FS fixture per case).
+    P5. Promise.allSettled 병렬 실행: total wall-clock ≤ slowest probe + slack
+        (sum 대비 5x 감소).
+    P6. Korean (한글) 에러 메시지가 reason 필드에 verbatim 보존.
+
+  Pair는 SLO budget 회귀 (`http-readiness-slo-budget.regression.test.ts`)와
+  함께 K8s readinessProbe + Google SRE SLI/SLO 계약을 양면으로 고정.
 
 status: active
 since: 2025-09
@@ -23,19 +41,23 @@ key_files:
   - src/infrastructure/health/search-snapshot-readiness.ts
   - src/infrastructure/health/snapshot-health-reader.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/readiness-probes-matrix-properties.regression.test.ts
+    - test/regression/http-readiness-slo-budget.regression.test.ts
 
 depends_on:
   - observability.http-readiness
 
 related_rfcs: []
 
-known_limitations:
-  - "Per-probe latency budget 없음"
+known_limitations: []
 
 next_steps:
-  - "Latency SLA per probe"
+  - "선택: 매트릭스 단위 단일-호출 helper 도입으로 health.route.ts에서 PROBE_CRITICALITY를 직접 소비"
 
 tags:
   - health
   - readiness
+  - property-based
+  - slo

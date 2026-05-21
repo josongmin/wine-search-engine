@@ -201,7 +201,7 @@ function withDefaultToolInput<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<T
   return z.preprocess((input) => input ?? {}, schema);
 }
 
-const ClaudeToolsExecuteRequestSchema = z.discriminatedUnion('tool_name', [
+export const ClaudeToolsExecuteRequestSchema = z.discriminatedUnion('tool_name', [
   z.object({
     tool_name: z.literal('search_wines'),
     tool_input: withDefaultToolInput(SearchToolInputSchema),
@@ -356,6 +356,8 @@ export const RetrievalDegradationMetricsRouteContract = defineRouteContract({
     [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
   },
 });
+
+export type ClaudeToolsExecuteRequest = z.output<typeof ClaudeToolsExecuteRequestSchema>;
 
 export const ClaudeToolsExecuteRouteContract: RouteContractWithRequiredBody<typeof ClaudeToolsExecuteRequestSchema> = defineRouteContract({
   operationId: 'tools.execute',

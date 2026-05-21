@@ -5,10 +5,17 @@ summary: |
   OpenAI text-embedding-3-small을 통한 텍스트 임베딩. 검색 ANN, similarity, ranking에
   사용. Batch API + cache로 cost 절감 (cache hit rate ~70% on repeated query).
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  안정 모델, batch API 통합, cache 통합. 그러나 embedding versioning 없음 (모델 update 시
-  전체 corpus 재-embedding 필요).
+  안정 모델, batch API 통합, cache 통합. 명시적 ML 모델 버전 상수
+  (`EMBEDDING_MODEL_VERSION = 'text-embedding-3-small@v1'`)과
+  결정론적 캐시 키 헬퍼(`getEmbeddingCacheKey(text, modelVersion)`)를
+  module-scope에서 노출하여, OpenAI가 같은 모델 슬러그로 가중치를
+  silently 갱신할 때 발생하는 vector geometry drift를 차단하고
+  버전 간 캐시 격리를 보장한다. NFC 정규화로 한글(NFD/NFC) 및
+  accented Latin 입력의 캐시 키 단편화 방지. 빈/공백-only 입력은 API
+  경계에서 즉시 거부하여 cosine 0-norm NaN 사고 방지. 11개 invariant이
+  property-based(fast-check, 100 runs) 회귀 테스트로 잠금됨.
 
 status: active
 since: 2025-08
@@ -22,18 +29,23 @@ key_files:
   - src/infrastructure/ai/openai-embedding-service.ts
   - src/infrastructure/ai/openai-key-pool.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/openai-embedding-service-properties.regression.test.ts
+  unit:
+    - src/infrastructure/ai/__tests__/openai-embedding-service.circuit-breaker.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "Embedding versioning 없음 — 모델 update 시 corpus 재-embedding 필요"
+  - "Incremental corpus re-embedding은 ETL 사이드(`scripts/etl/*`)에서 별도 처리 필요 — 이 모듈은 모델 버전 namespace만 책임진다."
+  - "In-flight de-dup 미구현: 동일 텍스트에 대한 동시 호출 2개는 캐시 미스 2회를 발생시킨다 (정상 동작, 캐시 적중률은 sequential 호출 기준)."
 
 next_steps:
-  - "Embedding versioning"
-  - "Incremental corpus re-embedding"
+  - "In-flight request coalescing for concurrent identical texts (singleflight)"
+  - "Re-embedding ETL flow가 EMBEDDING_MODEL_VERSION을 직접 import해 corpus 재처리 트리거에 연결"
 
 tags:
   - infrastructure

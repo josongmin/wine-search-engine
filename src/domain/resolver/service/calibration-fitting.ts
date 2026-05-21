@@ -45,6 +45,18 @@ interface IsotonicBreakpoint {
 /** Default number of equal-width ECE bins. Guo et al. 2017 use 15. */
 const DEFAULT_ECE_BIN_COUNT = 15;
 
+/**
+ * Fraction of samples reserved for holdout ECE measurement (default 20%).
+ * Lower bound mandated by RFC-006 §7.4 ("calibration holdout minimum
+ * 500 examples"); when the input is smaller than 500 the entire dataset
+ * is used in-sample and the returned ECE is annotated `ece` directly
+ * (no holdout possible — annotate caller documentation).
+ */
+const DEFAULT_HOLDOUT_FRACTION = 0.2;
+
+/** Minimum total samples required to attempt a holdout split. Below this we fit on all and measure in-sample (annotated). */
+const MIN_HOLDOUT_TOTAL = 50;
+
 /** Maximum Newton iterations for Platt fitting (well-conditioned data converges in <10). */
 const PLATT_MAX_ITERATIONS = 100;
 
@@ -58,6 +70,19 @@ const PLATT_RIDGE = 1e-8;
 const TEMPERATURE_LOWER_BOUND = 1e-3;
 const TEMPERATURE_UPPER_BOUND = 1e3;
 const TEMPERATURE_BISECTION_ITERATIONS = 60;
+
+/**
+ * Bias used for degenerate single-class Platt fits — large enough that
+ * `sigmoid(b)` rounds to the dominant class but small enough to stay
+ * numerically safe under double precision.
+ */
+const PLATT_DEGENERATE_BIAS = 10;
+
+/** Maximum backtracking-line-search halvings per Newton step. */
+const PLATT_LINE_SEARCH_ITERATIONS = 20;
+
+/** Backtracking step shrink factor (Armijo-style halving). */
+const PLATT_LINE_SEARCH_SHRINK = 0.5;
 
 // ── PAV isotonic regression ────────────────────────────────────────────────
 
@@ -197,7 +222,7 @@ export function fitPlattScaling(
   }
   if (positives === 0 || negatives === 0) {
     // Degenerate: only one class. Return params that bias toward that class.
-    const b = positives === 0 ? -10 : 10;
+    const b = positives === 0 ? -PLATT_DEGENERATE_BIAS : PLATT_DEGENERATE_BIAS;
     return { a: 0, b };
   }
 
@@ -236,18 +261,26 @@ export function fitPlattScaling(
     const baseLoss = plattNegativeLogLikelihood(samples, a, b);
     let newA = a;
     let newB = b;
-    for (let ls = 0; ls < 20; ls++) {
+    for (let ls = 0; ls < PLATT_LINE_SEARCH_ITERATIONS; ls++) {
       newA = a - step * dA;
       newB = b - step * dB;
       const newLoss = plattNegativeLogLikelihood(samples, newA, newB);
       if (newLoss < baseLoss) break;
-      step *= 0.5;
+      step *= PLATT_LINE_SEARCH_SHRINK;
     }
 
     const change = Math.max(Math.abs(newA - a), Math.abs(newB - b));
     a = newA;
     b = newB;
     if (change < PLATT_PARAM_TOLERANCE) break;
+  }
+
+  // Hessian inversion can drift on pathological data (e.g. all rawScore=0).
+  // If we end up with non-finite params, fall back to the prior-bias-only
+  // baseline so the persisted CalibrationParams can never poison the
+  // runtime calibrator with NaN multipliers.
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { a: 0, b: Math.log((negatives + 1) / (positives + 1)) };
   }
 
   return { a, b };
@@ -331,7 +364,15 @@ export function fitTemperatureScaling(
       hi = mid;
     }
   }
-  return { temperature: Math.exp((lo + hi) / 2) };
+  const result = Math.exp((lo + hi) / 2);
+  // Bisection on a malformed derivative landscape can produce Infinity /
+  // NaN at the bound limits. Fall back to identity scaling (T=1) so the
+  // persisted params stay finite — runtime calibrator would otherwise
+  // divide by NaN and emit NaN confidences.
+  if (!Number.isFinite(result) || result <= 0) {
+    return { temperature: 1 };
+  }
+  return { temperature: result };
 }
 
 // ── Expected Calibration Error (ECE) ──────────────────────────────────────
@@ -362,102 +403,253 @@ export function expectedCalibrationError(
   const binCorrect = new Array<number>(binCount).fill(0);
   const binConfSum = new Array<number>(binCount).fill(0);
 
+  // Surfaces NaN/Infinity predictions distinctly so they can't quietly
+  // collapse into bin 0 (or into an out-of-range NaN index that
+  // JavaScript coerces to a string key on the array). A miscalibrated
+  // candidate that emits NaN must fail loud — silent absorption into
+  // ECE would make a broken fitter look perfectly calibrated.
+  let nonFiniteCount = 0;
+  let validCount = 0;
   for (let i = 0; i < predictions.length; i++) {
     const p = predictions[i];
     const y = labels[i];
     if (p === undefined || y === undefined) continue;
+    if (!Number.isFinite(p)) {
+      nonFiniteCount += 1;
+      continue;
+    }
     const clamped = Math.max(0, Math.min(1 - Number.EPSILON, p));
     const bin = Math.min(binCount - 1, Math.floor(clamped * binCount));
     binCounts[bin] = (binCounts[bin] ?? 0) + 1;
     binCorrect[bin] = (binCorrect[bin] ?? 0) + y;
     binConfSum[bin] = (binConfSum[bin] ?? 0) + p;
+    validCount += 1;
+  }
+
+  // ECE on a sample of all-NaN predictions is undefined; report the worst
+  // possible value (1) rather than 0. Same when every prediction was
+  // out-of-range — the model is fundamentally broken.
+  if (validCount === 0) {
+    return nonFiniteCount > 0 ? 1 : 0;
   }
 
   let ece = 0;
-  const n = predictions.length;
   for (let b = 0; b < binCount; b++) {
     const count = binCounts[b] ?? 0;
     if (count === 0) continue;
     const acc = (binCorrect[b] ?? 0) / count;
     const conf = (binConfSum[b] ?? 0) / count;
-    ece += (count / n) * Math.abs(acc - conf);
+    ece += (count / validCount) * Math.abs(acc - conf);
+  }
+  // If any prediction was non-finite, mix in a penalty so the reported
+  // ECE rises monotonically with the broken-fraction — keeps the
+  // best-fit selector from preferring a NaN-emitting fitter just because
+  // it scored low on the finite subset.
+  if (nonFiniteCount > 0) {
+    const total = validCount + nonFiniteCount;
+    ece = ece * (validCount / total) + (nonFiniteCount / total);
   }
   return ece;
 }
 
 // ── Best fit selector ─────────────────────────────────────────────────────
 
+export interface FitBestCalibrationOptions {
+  /**
+   * Fraction of samples reserved for holdout ECE measurement. Defaults to
+   * {@link DEFAULT_HOLDOUT_FRACTION} (0.2). Set to 0 to opt out and report
+   * in-sample ECE (for very small datasets or unit tests).
+   */
+  readonly holdoutFraction?: number;
+}
+
+interface StratifiedSplit {
+  readonly train: readonly CalibrationSample[];
+  readonly holdout: readonly CalibrationSample[];
+  /** True when the split actually carries holdout samples (otherwise in-sample). */
+  readonly hasHoldout: boolean;
+}
+
 /**
- * Fits all three methods (Platt, temperature, isotonic) on the provided
- * samples, measures ECE for each, and returns the {@link CalibrationParams}
- * for the method with the lowest ECE.
+ * Deterministic stratified split: positives and negatives each take their
+ * own every-Nth slice for the holdout, balancing class proportions.
+ * Deterministic ordering (no RNG) lets two calls on the same data produce
+ * the same params — important for reproducible training pipelines.
+ */
+function stratifiedHoldoutSplit(
+  samples: readonly CalibrationSample[],
+  holdoutFraction: number,
+): StratifiedSplit {
+  if (holdoutFraction <= 0 || samples.length < MIN_HOLDOUT_TOTAL) {
+    return { train: samples, holdout: [], hasHoldout: false };
+  }
+  const positives: CalibrationSample[] = [];
+  const negatives: CalibrationSample[] = [];
+  for (const s of samples) {
+    (s.label === 1 ? positives : negatives).push(s);
+  }
+  // Sort each class by rawScore so the every-Nth stride spans the score range.
+  positives.sort((a, b) => a.rawScore - b.rawScore);
+  negatives.sort((a, b) => a.rawScore - b.rawScore);
+
+  const stride = Math.max(2, Math.round(1 / holdoutFraction));
+  const train: CalibrationSample[] = [];
+  const holdout: CalibrationSample[] = [];
+  const slice = (arr: readonly CalibrationSample[]): void => {
+    for (let i = 0; i < arr.length; i++) {
+      const sample = arr[i];
+      if (sample === undefined) continue;
+      if (i % stride === 0) holdout.push(sample);
+      else train.push(sample);
+    }
+  };
+  slice(positives);
+  slice(negatives);
+
+  // Refuse to split if either class would have zero training samples — a
+  // single-class train set produces degenerate fits.
+  const trainPos = train.filter((s) => s.label === 1).length;
+  const trainNeg = train.length - trainPos;
+  if (trainPos === 0 || trainNeg === 0 || holdout.length === 0) {
+    return { train: samples, holdout: [], hasHoldout: false };
+  }
+  return { train, holdout, hasHoldout: true };
+}
+
+/**
+ * Fits all three methods (Platt, temperature, isotonic) on the training
+ * subset of the provided samples, measures ECE on a held-out subset, and
+ * returns the {@link CalibrationParams} for the method with the lowest
+ * holdout ECE — then refits that chosen method on the FULL sample set so
+ * the persisted parameters use all available data.
  *
- * Falls back to an empty isotonic (identity) when samples are empty or
- * degenerate (single class) — calibration without label diversity is
- * undefined.
+ * In-sample fallback fires when the dataset is too small to split safely
+ * ({@link MIN_HOLDOUT_TOTAL}) or when one class would be wiped out by the
+ * holdout cut. The returned `ece` is the holdout ECE when available, else
+ * the in-sample ECE — callers can detect which by checking the trainedAt
+ * timestamp's relationship to `holdoutFraction` or via the `outOfSample`
+ * flag exposed through {@link fitBestCalibrationWithDiagnostics}.
+ *
+ * Empty / single-class data → identity-isotonic fallback (calibration
+ * without label diversity is undefined).
  */
 export function fitBestCalibration(
   samples: readonly CalibrationSample[],
   queryClass: QueryClass,
+  options: FitBestCalibrationOptions = {},
 ): CalibrationParams {
+  return fitBestCalibrationWithDiagnostics(samples, queryClass, options).params;
+}
+
+export interface FitBestCalibrationDiagnostics {
+  readonly params: CalibrationParams;
+  /** True when the reported ECE was measured on a holdout set, not the training set. */
+  readonly outOfSample: boolean;
+  /** ECE measured for every candidate method on the holdout (or in-sample). */
+  readonly methodEce: Readonly<Record<'platt' | 'temperature' | 'isotonic', number>>;
+}
+
+/**
+ * Diagnostic variant of {@link fitBestCalibration} for operators who need
+ * to inspect the per-method ECE values + whether the measurement was on
+ * holdout. The CLI prints this to give the operator visibility into
+ * "why was isotonic chosen over Platt for this query class".
+ */
+export function fitBestCalibrationWithDiagnostics(
+  samples: readonly CalibrationSample[],
+  queryClass: QueryClass,
+  options: FitBestCalibrationOptions = {},
+): FitBestCalibrationDiagnostics {
+  const trainedAt = new Date();
   if (samples.length === 0) {
     return {
-      method: 'isotonic',
-      queryClass,
-      params: { breakpoint_count: 0 },
-      trainedAt: new Date(),
-      ece: 1,
+      params: {
+        method: 'isotonic',
+        queryClass,
+        params: { breakpoint_count: 0 },
+        trainedAt,
+        ece: 1,
+      },
+      outOfSample: false,
+      methodEce: { platt: 1, temperature: 1, isotonic: 1 },
     };
   }
-  const labels = samples.map((s) => s.label);
 
-  const platt = fitPlattScaling(samples);
-  const plattPreds = samples.map((s) => sigmoid(platt.a * s.rawScore + platt.b));
-  const plattEce = expectedCalibrationError(plattPreds, labels);
+  const holdoutFraction = options.holdoutFraction ?? DEFAULT_HOLDOUT_FRACTION;
+  const split = stratifiedHoldoutSplit(samples, holdoutFraction);
+  const train = split.train;
+  const evalSet = split.hasHoldout ? split.holdout : train;
+  const evalLabels = evalSet.map((s) => s.label);
 
-  const temperature = fitTemperatureScaling(samples);
-  const temperaturePreds = samples.map((s) => sigmoid(s.rawScore / temperature.temperature));
-  const temperatureEce = expectedCalibrationError(temperaturePreds, labels);
+  // Fit candidates on the training subset, score them on the eval subset.
+  const platt = fitPlattScaling(train);
+  const plattPreds = evalSet.map((s) => sigmoid(platt.a * s.rawScore + platt.b));
+  const plattEce = expectedCalibrationError(plattPreds, evalLabels);
 
-  const isotonic = fitIsotonicRegression(samples);
-  const isotonicPreds = samples.map((s) => applyIsotonicFit(s.rawScore, isotonic.breakpoints));
-  const isotonicEce = expectedCalibrationError(isotonicPreds, labels);
+  const temperature = fitTemperatureScaling(train);
+  const temperaturePreds = evalSet.map((s) => sigmoid(s.rawScore / temperature.temperature));
+  const temperatureEce = expectedCalibrationError(temperaturePreds, evalLabels);
 
-  const trainedAt = new Date();
-  const candidates: readonly CalibrationParams[] = [
-    {
+  const isotonicTrain = fitIsotonicRegression(train);
+  const isotonicPreds = evalSet.map((s) => applyIsotonicFit(s.rawScore, isotonicTrain.breakpoints));
+  const isotonicEce = expectedCalibrationError(isotonicPreds, evalLabels);
+
+  const methodEce = {
+    platt: plattEce,
+    temperature: temperatureEce,
+    isotonic: isotonicEce,
+  } as const;
+
+  // Pick the method with the lowest eval ECE.
+  let bestMethod: 'platt' | 'temperature' | 'isotonic' = 'isotonic';
+  let bestEce = isotonicEce;
+  if (plattEce < bestEce) {
+    bestMethod = 'platt';
+    bestEce = plattEce;
+  }
+  if (temperatureEce < bestEce) {
+    bestMethod = 'temperature';
+    bestEce = temperatureEce;
+  }
+
+  // Refit the chosen method on the FULL sample set so persisted params use
+  // every available datapoint — the holdout only served as a model-selection
+  // signal, not as a deployed-params filter.
+  let params: CalibrationParams;
+  if (bestMethod === 'platt') {
+    const full = fitPlattScaling(samples);
+    params = {
       method: 'platt',
       queryClass,
-      params: { a: platt.a, b: platt.b },
+      params: { a: full.a, b: full.b },
       trainedAt,
-      ece: plattEce,
-    },
-    {
+      ece: bestEce,
+    };
+  } else if (bestMethod === 'temperature') {
+    const full = fitTemperatureScaling(samples);
+    params = {
       method: 'temperature',
       queryClass,
-      params: { temperature: temperature.temperature },
+      params: { temperature: full.temperature },
       trainedAt,
-      ece: temperatureEce,
-    },
-    {
+      ece: bestEce,
+    };
+  } else {
+    const full = fitIsotonicRegression(samples);
+    params = {
       method: 'isotonic',
       queryClass,
-      params: encodeIsotonicParams(isotonic.breakpoints),
+      params: encodeIsotonicParams(full.breakpoints),
       trainedAt,
-      ece: isotonicEce,
-    },
-  ];
+      ece: bestEce,
+    };
+  }
 
-  let best = candidates[0];
-  for (const candidate of candidates) {
-    if (best === undefined || candidate.ece < best.ece) {
-      best = candidate;
-    }
-  }
-  if (best === undefined) {
-    throw new Error('fitBestCalibration: no candidate selected (unreachable)');
-  }
-  return best;
+  return {
+    params,
+    outOfSample: split.hasHoldout,
+    methodEce,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

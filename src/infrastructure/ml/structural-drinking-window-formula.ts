@@ -10,35 +10,231 @@ export const STRUCTURAL_DRINKING_WINDOW_FORMULA_VERSION = 'structural-slot-v2';
 
 type ConfidenceLevel = DrinkingWindowDeterministicFormulaResult['confidence'];
 
+// ---------------------------------------------------------------------------
+// Varietal longevity priors
+//
+// Each value sits on a normalized [0,1] cellarability axis. The numbers are
+// the calibration anchors derived from professional cellaring guidance and
+// auction-market survival distributions. They are NOT learned weights — they
+// are the structural priors a deterministic formula must encode by hand.
+// ---------------------------------------------------------------------------
+
+const LONGEVITY_PRIOR_NEBBIOLO = 0.92;
+const LONGEVITY_PRIOR_CABERNET_SAUVIGNON = 0.86;
+const LONGEVITY_PRIOR_RIESLING = 0.82;
+const LONGEVITY_PRIOR_SYRAH = 0.76;
+const LONGEVITY_PRIOR_CHENIN_BLANC = 0.74;
+const LONGEVITY_PRIOR_SANGIOVESE = 0.72;
+const LONGEVITY_PRIOR_PETIT_VERDOT = 0.72;
+const LONGEVITY_PRIOR_TEMPRANILLO = 0.70;
+const LONGEVITY_PRIOR_CABERNET_FRANC = 0.68;
+const LONGEVITY_PRIOR_MOURVEDRE = 0.68;
+const LONGEVITY_PRIOR_SEMILLON = 0.66;
+const LONGEVITY_PRIOR_PINOT_NOIR = 0.58;
+const LONGEVITY_PRIOR_CHARDONNAY = 0.56;
+const LONGEVITY_PRIOR_MERLOT = 0.56;
+const LONGEVITY_PRIOR_MALBEC = 0.56;
+const LONGEVITY_PRIOR_CARIGNAN = 0.52;
+const LONGEVITY_PRIOR_ZINFANDEL = 0.48;
+const LONGEVITY_PRIOR_GRENACHE = 0.42;
+const LONGEVITY_PRIOR_GAMAY = 0.34;
+const LONGEVITY_PRIOR_SAUVIGNON_BLANC = 0.30;
+const LONGEVITY_PRIOR_GLERA = 0.18;
+
 const VARIETAL_LONGEVITY_PRIORS = new Map<string, number>([
-  ['nebbiolo', 0.92],
-  ['cabernet sauvignon', 0.86],
-  ['riesling', 0.82],
-  ['syrah', 0.76],
-  ['shiraz', 0.76],
-  ['chenin blanc', 0.74],
-  ['sangiovese', 0.72],
-  ['petit verdot', 0.72],
-  ['tempranillo', 0.70],
-  ['cabernet franc', 0.68],
-  ['mourvedre', 0.68],
-  ['monastrell', 0.68],
-  ['mataro', 0.68],
-  ['semillon', 0.66],
-  ['pinot noir', 0.58],
-  ['chardonnay', 0.56],
-  ['merlot', 0.56],
-  ['malbec', 0.56],
-  ['carignan', 0.52],
-  ['zinfandel', 0.48],
-  ['primitivo', 0.48],
-  ['grenache', 0.42],
-  ['garnacha', 0.42],
-  ['gamay', 0.34],
-  ['sauvignon blanc', 0.30],
-  ['glera', 0.18],
-  ['prosecco', 0.18],
+  ['nebbiolo', LONGEVITY_PRIOR_NEBBIOLO],
+  ['cabernet sauvignon', LONGEVITY_PRIOR_CABERNET_SAUVIGNON],
+  ['riesling', LONGEVITY_PRIOR_RIESLING],
+  ['syrah', LONGEVITY_PRIOR_SYRAH],
+  ['shiraz', LONGEVITY_PRIOR_SYRAH],
+  ['chenin blanc', LONGEVITY_PRIOR_CHENIN_BLANC],
+  ['sangiovese', LONGEVITY_PRIOR_SANGIOVESE],
+  ['petit verdot', LONGEVITY_PRIOR_PETIT_VERDOT],
+  ['tempranillo', LONGEVITY_PRIOR_TEMPRANILLO],
+  ['cabernet franc', LONGEVITY_PRIOR_CABERNET_FRANC],
+  ['mourvedre', LONGEVITY_PRIOR_MOURVEDRE],
+  ['monastrell', LONGEVITY_PRIOR_MOURVEDRE],
+  ['mataro', LONGEVITY_PRIOR_MOURVEDRE],
+  ['semillon', LONGEVITY_PRIOR_SEMILLON],
+  ['pinot noir', LONGEVITY_PRIOR_PINOT_NOIR],
+  ['chardonnay', LONGEVITY_PRIOR_CHARDONNAY],
+  ['merlot', LONGEVITY_PRIOR_MERLOT],
+  ['malbec', LONGEVITY_PRIOR_MALBEC],
+  ['carignan', LONGEVITY_PRIOR_CARIGNAN],
+  ['zinfandel', LONGEVITY_PRIOR_ZINFANDEL],
+  ['primitivo', LONGEVITY_PRIOR_ZINFANDEL],
+  ['grenache', LONGEVITY_PRIOR_GRENACHE],
+  ['garnacha', LONGEVITY_PRIOR_GRENACHE],
+  ['gamay', LONGEVITY_PRIOR_GAMAY],
+  ['sauvignon blanc', LONGEVITY_PRIOR_SAUVIGNON_BLANC],
+  ['glera', LONGEVITY_PRIOR_GLERA],
+  ['prosecco', LONGEVITY_PRIOR_GLERA],
 ]);
+
+// ---------------------------------------------------------------------------
+// Neutral defaults + bottle-size parsing constants
+// ---------------------------------------------------------------------------
+
+/** Neutral midpoint on [0,1] used whenever a prior cannot be derived. */
+const NEUTRAL_LONGEVITY_PRIOR = 0.5;
+
+/** Magnum bottle volume in ml — used when the source label says "magnum". */
+const MAGNUM_BOTTLE_SIZE_ML = 1500;
+
+/** Conversion factor from liters to ml for `<N>L` labels (e.g. "1.5L"). */
+const ML_PER_LITER = 1000;
+
+// ---------------------------------------------------------------------------
+// Blend-class corrections applied on top of the primary varietal prior.
+// Positive values: blend extends cellaring potential; negative: shortens it.
+// ---------------------------------------------------------------------------
+
+/** Bordeaux blend (Cabernet + Merlot/Cab Franc) reinforces structural longevity. */
+const BLEND_BORDEAUX_BOOST = 0.08;
+/** Classic GSM blend (Grenache + Syrah + Mourvèdre) — mild longevity boost. */
+const BLEND_GSM_BOOST = 0.03;
+/** Nebbiolo-dominant blends — tannic backbone outlasts pure varietal expression. */
+const BLEND_NEBBIOLO_BOOST = 0.04;
+/** Pinot-dominant blends — pulled slightly earlier (Pinot oxidizes faster in blends). */
+const BLEND_PINOT_PENALTY = -0.02;
+/** Sparkling-aromatic primary (Glera/Prosecco) — strong freshness-first penalty. */
+const BLEND_SPARKLING_AROMATIC_PENALTY = -0.08;
+
+// ---------------------------------------------------------------------------
+// Rating-distribution consensus stability
+// ---------------------------------------------------------------------------
+
+/** Neutral consensus when no rating distribution is available. */
+const CONSENSUS_NEUTRAL_DEFAULT = 0.55;
+/** Midpoint anchor of the consensus axis (0 = pure dislike, 1 = pure praise). */
+const CONSENSUS_MIDPOINT = 0.5;
+/** Scaling factor that maps the (4+5)-(1+2) skew into a ±0.5 offset around the midpoint. */
+const CONSENSUS_SKEW_AMPLITUDE = 0.5;
+
+// ---------------------------------------------------------------------------
+// Bottle-size factor — how volume scales maturation speed vs. 750ml baseline.
+// Larger bottles age more slowly (lower headspace-to-volume ratio).
+// ---------------------------------------------------------------------------
+
+const BOTTLE_SIZE_THRESHOLD_DOUBLE_MAGNUM_ML = 3000;
+const BOTTLE_SIZE_THRESHOLD_MAGNUM_ML = 1500;
+const BOTTLE_SIZE_THRESHOLD_STANDARD_ML = 750;
+const BOTTLE_SIZE_THRESHOLD_HALF_ML = 375;
+
+const BOTTLE_FACTOR_DOUBLE_MAGNUM_OR_LARGER = 1.3;
+const BOTTLE_FACTOR_MAGNUM = 1.18;
+const BOTTLE_FACTOR_STANDARD = 1;
+const BOTTLE_FACTOR_HALF = 0.86;
+const BOTTLE_FACTOR_QUARTER_OR_SMALLER = 0.78;
+
+// ---------------------------------------------------------------------------
+// Closure adjustment — tiny additive correction only.
+// Screw caps preserve fruit slightly longer than cork in early life;
+// synthetic closures leak oxygen and shorten the window.
+// ---------------------------------------------------------------------------
+
+const CLOSURE_SCREW_CAP_BOOST = 0.01;
+const CLOSURE_SYNTHETIC_PENALTY = -0.02;
+
+// ---------------------------------------------------------------------------
+// Confidence thresholds for the categorical `confidence` label.
+// ---------------------------------------------------------------------------
+
+const CONFIDENCE_THRESHOLD_HIGH = 0.75;
+const CONFIDENCE_THRESHOLD_MEDIUM = 0.5;
+
+// ---------------------------------------------------------------------------
+// Lognorm engagement / price scales — pegged to realistic upper percentiles
+// of the Vivino-style distribution. Lognorm saturates at these scales.
+// ---------------------------------------------------------------------------
+
+/** ~99th-percentile engagement (ratings or reviews) for a single wine. */
+const ENGAGEMENT_LOGNORM_SCALE = 20_000;
+/** ~99th-percentile winery-level rating count. */
+const WINERY_RATING_LOGNORM_SCALE = 50_000;
+/** ~99th-percentile bottle price in USD where log saturation is acceptable. */
+const PRICE_USD_LOGNORM_SCALE = 400;
+
+// ---------------------------------------------------------------------------
+// Rating-average normalization bounds for the 1–5 source scale.
+// `RATING_AVG_FALLBACK` is the "no data" anchor — slightly above the typical
+// crowd mean so blank inputs don't drag scores down.
+// ---------------------------------------------------------------------------
+
+const RATING_AVG_LOWER = 3.2;
+const RATING_AVG_UPPER = 4.8;
+const RATING_AVG_FALLBACK = 4.0;
+
+// ---------------------------------------------------------------------------
+// Longevity composite weights — must sum to 1.0 across the principal terms.
+// ---------------------------------------------------------------------------
+
+/** Market quality = mean rating × MARKET_WEIGHT_RATING_AVG + engagement × … + dispersion × … */
+const MARKET_WEIGHT_RATING_AVG = 0.62;
+const MARKET_WEIGHT_ENGAGEMENT = 0.2;
+const MARKET_WEIGHT_CONSENSUS = 0.18;
+
+/** Producer signal = winery-rating-count saturation + producer identity presence. */
+const PRODUCER_WEIGHT_WINERY_RATING = 0.75;
+const PRODUCER_WEIGHT_IDENTITY = 0.25;
+
+/** Longevity composite weights. */
+const LONGEVITY_WEIGHT_VARIETAL = 0.52;
+const LONGEVITY_WEIGHT_MARKET = 0.18;
+const LONGEVITY_WEIGHT_PRODUCER = 0.12;
+const LONGEVITY_WEIGHT_PRICE = 0.06;
+/** Headroom above 1.0 for size-bonus blow-out on large formats. */
+const LONGEVITY_CEILING_WITH_SIZE_BONUS = 1.15;
+
+/** Readiness composite weights — pulls accessible wines earlier on calendar. */
+const READINESS_WEIGHT_INV_VARIETAL = 0.58;
+const READINESS_WEIGHT_RATING_AVG = 0.2;
+const READINESS_WEIGHT_CONSENSUS = 0.14;
+const READINESS_WEIGHT_INV_SIZE = 0.08;
+
+// ---------------------------------------------------------------------------
+// Year-offset coefficients — convert dimensionless longevity/readiness into
+// integer year offsets from the vintage anchor.
+// ---------------------------------------------------------------------------
+
+const OFFSET_DRINK_FROM_BASE_YEARS = 1;
+const OFFSET_DRINK_FROM_LONGEVITY_COEF = 11;
+const OFFSET_DRINK_FROM_READINESS_COEF = 4;
+const OFFSET_DRINK_FROM_MAX_YEARS = 18;
+
+const OFFSET_PEAK_CENTER_LEAD_YEARS = 2;
+const OFFSET_PEAK_CENTER_LONGEVITY_COEF = 9;
+const OFFSET_PEAK_CENTER_MAX_YEARS = 32;
+
+const OFFSET_PEAK_WIDTH_BASE_YEARS = 2;
+const OFFSET_PEAK_WIDTH_VARIETAL_COEF = 5;
+const OFFSET_PEAK_WIDTH_ENGAGEMENT_COEF = 2;
+const OFFSET_PEAK_WIDTH_MIN_YEARS = 2;
+const OFFSET_PEAK_WIDTH_MAX_YEARS = 14;
+
+const OFFSET_TAIL_BASE_YEARS = 1;
+const OFFSET_TAIL_LONGEVITY_COEF = 5;
+const OFFSET_TAIL_MAX_YEARS = 8;
+
+/** Hard ceiling for sparkling/aromatic primaries (e.g. Prosecco, SB, Gamay). */
+const SHORT_LIVED_BEST_UNTIL_CEILING_YEARS = 8;
+/** Hard floor for tannic/longevity primaries (e.g. Nebbiolo, Cab Sauv, Riesling). */
+const LONG_LIVED_BEST_UNTIL_FLOOR_YEARS = 12;
+
+// ---------------------------------------------------------------------------
+// Confidence-composite weights (sum to 1.0 within each composite).
+// ---------------------------------------------------------------------------
+
+const DATA_CONFIDENCE_WEIGHT_COMPLETENESS = 0.4;
+const DATA_CONFIDENCE_WEIGHT_ENGAGEMENT = 0.4;
+const DATA_CONFIDENCE_WEIGHT_DISTRIBUTION = 0.2;
+
+const MODEL_CONFIDENCE_WEIGHT_PRIMARY_VARIETAL = 0.6;
+const MODEL_CONFIDENCE_WEIGHT_FORMULA_PRESENT = 0.2;
+const MODEL_CONFIDENCE_WEIGHT_PRICE = 0.2;
+
+const CONFIDENCE_BLEND_DATA = 0.55;
+const CONFIDENCE_BLEND_MODEL = 0.45;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -65,7 +261,7 @@ function parseBottleSizeMl(input: DrinkingWindowDeterministicInputV2): number | 
   const raw = input.bottleSize?.trim().toLowerCase();
   if (!raw) return undefined;
   const normalized = raw.replace(/\s+/g, '');
-  if (normalized === 'magnum') return 1500;
+  if (normalized === 'magnum') return MAGNUM_BOTTLE_SIZE_ML;
 
   const mlMatch = normalized.match(/^(\d+(?:\.\d+)?)ml$/);
   if (mlMatch) {
@@ -76,7 +272,7 @@ function parseBottleSizeMl(input: DrinkingWindowDeterministicInputV2): number | 
   const literMatch = normalized.match(/^(\d+(?:\.\d+)?)l$/);
   if (literMatch) {
     const parsed = Number.parseFloat(literMatch[1] ?? '');
-    return Number.isFinite(parsed) ? Math.round(parsed * 1000) : undefined;
+    return Number.isFinite(parsed) ? Math.round(parsed * ML_PER_LITER) : undefined;
   }
 
   return undefined;
@@ -111,58 +307,62 @@ function hasAny(values: ReadonlySet<string>, ...candidates: readonly string[]): 
 }
 
 function varietalLongevityPrior(primaryVarietal: string | undefined): number {
-  if (primaryVarietal === undefined) return 0.5;
-  return VARIETAL_LONGEVITY_PRIORS.get(primaryVarietal) ?? 0.5;
+  if (primaryVarietal === undefined) return NEUTRAL_LONGEVITY_PRIOR;
+  return VARIETAL_LONGEVITY_PRIORS.get(primaryVarietal) ?? NEUTRAL_LONGEVITY_PRIOR;
 }
 
 function blendAdjustment(primaryVarietal: string | undefined, varietals: ReadonlySet<string>): number {
   if (hasAny(varietals, 'cabernet sauvignon') && (hasAny(varietals, 'merlot') || hasAny(varietals, 'cabernet franc'))) {
-    return 0.08;
+    return BLEND_BORDEAUX_BOOST;
   }
   if (
     (hasAny(varietals, 'grenache', 'garnacha')) &&
     (hasAny(varietals, 'syrah', 'shiraz')) &&
     (hasAny(varietals, 'mourvedre', 'monastrell', 'mataro'))
   ) {
-    return 0.03;
+    return BLEND_GSM_BOOST;
   }
   if ((varietals.size > 1 || primaryVarietal === 'nebbiolo') && hasAny(varietals, 'nebbiolo')) {
-    return 0.04;
+    return BLEND_NEBBIOLO_BOOST;
   }
   if (varietals.size > 1 && primaryVarietal !== undefined && primaryVarietal.startsWith('pinot')) {
-    return -0.02;
+    return BLEND_PINOT_PENALTY;
   }
   if (primaryVarietal !== undefined && (primaryVarietal === 'glera' || primaryVarietal === 'prosecco')) {
-    return -0.08;
+    return BLEND_SPARKLING_AROMATIC_PENALTY;
   }
   return 0;
 }
 
 function consensusStability(distribution: DrinkingWindowDeterministicInputV2['ratingDistribution']): number {
-  if (distribution === undefined) return 0.55;
+  if (distribution === undefined) return CONSENSUS_NEUTRAL_DEFAULT;
   const n1 = distribution['1'] ?? 0;
   const n2 = distribution['2'] ?? 0;
   const n3 = distribution['3'] ?? 0;
   const n4 = distribution['4'] ?? 0;
   const n5 = distribution['5'] ?? 0;
   const total = Math.max(1, n1 + n2 + n3 + n4 + n5);
-  return clamp(0.5 + 0.5 * (((n4 + n5) - (n1 + n2)) / total), 0, 1);
+  return clamp(
+    CONSENSUS_MIDPOINT + CONSENSUS_SKEW_AMPLITUDE * (((n4 + n5) - (n1 + n2)) / total),
+    0,
+    1,
+  );
 }
 
 function bottleSizeFactor(sizeMl: number | undefined): number {
-  if (sizeMl === undefined) return 1;
-  if (sizeMl >= 3000) return 1.3;
-  if (sizeMl >= 1500) return 1.18;
-  if (sizeMl >= 750) return 1;
-  if (sizeMl >= 375) return 0.86;
-  return 0.78;
+  if (sizeMl === undefined) return BOTTLE_FACTOR_STANDARD;
+  if (sizeMl >= BOTTLE_SIZE_THRESHOLD_DOUBLE_MAGNUM_ML) return BOTTLE_FACTOR_DOUBLE_MAGNUM_OR_LARGER;
+  if (sizeMl >= BOTTLE_SIZE_THRESHOLD_MAGNUM_ML) return BOTTLE_FACTOR_MAGNUM;
+  if (sizeMl >= BOTTLE_SIZE_THRESHOLD_STANDARD_ML) return BOTTLE_FACTOR_STANDARD;
+  if (sizeMl >= BOTTLE_SIZE_THRESHOLD_HALF_ML) return BOTTLE_FACTOR_HALF;
+  return BOTTLE_FACTOR_QUARTER_OR_SMALLER;
 }
 
 function closureAdjustment(closure: string | undefined): number {
   if (closure === undefined || closure.trim().length === 0) return 0;
   const normalized = normalizeName(closure);
-  if (normalized.includes('screw')) return 0.01;
-  if (normalized.includes('synthetic')) return -0.02;
+  if (normalized.includes('screw')) return CLOSURE_SCREW_CAP_BOOST;
+  if (normalized.includes('synthetic')) return CLOSURE_SYNTHETIC_PENALTY;
   return 0;
 }
 
@@ -182,8 +382,8 @@ function completenessScore(input: DrinkingWindowDeterministicInputV2, primaryVar
 }
 
 function confidenceLevel(score: number): ConfidenceLevel {
-  if (score >= 0.75) return 'high';
-  if (score >= 0.5) return 'medium';
+  if (score >= CONFIDENCE_THRESHOLD_HIGH) return 'high';
+  if (score >= CONFIDENCE_THRESHOLD_MEDIUM) return 'medium';
   return 'low';
 }
 
@@ -200,51 +400,82 @@ export class StructuralDrinkingWindowFormula implements DrinkingWindowDeterminis
     const sizeMl = parseBottleSizeMl(input);
 
     const engagement = Math.max(input.ratingsCount ?? 0, input.reviewCount ?? 0, 0);
-    const C = lognorm(engagement, 20_000);
-    const W = lognorm(input.wineryRatingCount, 50_000);
-    const R = norm(input.ratingAvg, 3.2, 4.8, 4.0);
-    const P = lognorm(input.priceUsd, 400);
+    const C = lognorm(engagement, ENGAGEMENT_LOGNORM_SCALE);
+    const W = lognorm(input.wineryRatingCount, WINERY_RATING_LOGNORM_SCALE);
+    const R = norm(input.ratingAvg, RATING_AVG_LOWER, RATING_AVG_UPPER, RATING_AVG_FALLBACK);
+    const P = lognorm(input.priceUsd, PRICE_USD_LOGNORM_SCALE);
     const D = consensusStability(input.ratingDistribution);
 
     const varietalAnchor = varietalLongevityPrior(primaryVarietal);
     const blendCorrection = blendAdjustment(primaryVarietal, varietals);
     const varietalAdjusted = clamp(varietalAnchor + blendCorrection, 0, 1);
 
-    const marketQuality = 0.62 * R + 0.2 * C + 0.18 * D;
+    const marketQuality =
+      MARKET_WEIGHT_RATING_AVG * R + MARKET_WEIGHT_ENGAGEMENT * C + MARKET_WEIGHT_CONSENSUS * D;
+    const hasProducerIdentity = input.producer !== undefined && input.producer.trim().length > 0 ? 1 : 0;
     const producerSignal = clamp(
-      0.75 * W +
-      0.25 * (input.producer !== undefined && input.producer.trim().length > 0 ? 1 : 0),
+      PRODUCER_WEIGHT_WINERY_RATING * W + PRODUCER_WEIGHT_IDENTITY * hasProducerIdentity,
       0,
       1,
     );
     const sizeFactor = bottleSizeFactor(sizeMl);
     const closureSignal = closureAdjustment(input.closure);
 
-    const longevityRaw = 0.52 * varietalAdjusted + 0.18 * marketQuality + 0.12 * producerSignal + 0.06 * P + closureSignal;
-    const longevity = clamp(longevityRaw * sizeFactor, 0, 1.15);
+    const longevityRaw =
+      LONGEVITY_WEIGHT_VARIETAL * varietalAdjusted +
+      LONGEVITY_WEIGHT_MARKET * marketQuality +
+      LONGEVITY_WEIGHT_PRODUCER * producerSignal +
+      LONGEVITY_WEIGHT_PRICE * P +
+      closureSignal;
+    const longevity = clamp(longevityRaw * sizeFactor, 0, LONGEVITY_CEILING_WITH_SIZE_BONUS);
     const readiness = clamp(
-      0.58 * (1 - varietalAdjusted) +
-      0.2 * R +
-      0.14 * D +
-      0.08 * (1 - (sizeFactor / 1.3)),
+      READINESS_WEIGHT_INV_VARIETAL * (1 - varietalAdjusted) +
+        READINESS_WEIGHT_RATING_AVG * R +
+        READINESS_WEIGHT_CONSENSUS * D +
+        READINESS_WEIGHT_INV_SIZE * (1 - (sizeFactor / BOTTLE_FACTOR_DOUBLE_MAGNUM_OR_LARGER)),
       0,
       1,
     );
 
-    const drinkFromOffset = Math.round(clamp(1 + 11 * longevity - 4 * readiness, 0, 18));
-    const peakCenterOffset = Math.round(clamp(drinkFromOffset + 2 + 9 * longevity, 1, 32));
-    const peakWidth = Math.round(clamp(2 + 5 * varietalAdjusted + 2 * C, 2, 14));
-    const tailOffset = Math.round(clamp(1 + 5 * longevity, 1, 8));
+    const drinkFromOffset = Math.round(
+      clamp(
+        OFFSET_DRINK_FROM_BASE_YEARS +
+          OFFSET_DRINK_FROM_LONGEVITY_COEF * longevity -
+          OFFSET_DRINK_FROM_READINESS_COEF * readiness,
+        0,
+        OFFSET_DRINK_FROM_MAX_YEARS,
+      ),
+    );
+    const peakCenterOffset = Math.round(
+      clamp(
+        drinkFromOffset + OFFSET_PEAK_CENTER_LEAD_YEARS + OFFSET_PEAK_CENTER_LONGEVITY_COEF * longevity,
+        1,
+        OFFSET_PEAK_CENTER_MAX_YEARS,
+      ),
+    );
+    const peakWidth = Math.round(
+      clamp(
+        OFFSET_PEAK_WIDTH_BASE_YEARS +
+          OFFSET_PEAK_WIDTH_VARIETAL_COEF * varietalAdjusted +
+          OFFSET_PEAK_WIDTH_ENGAGEMENT_COEF * C,
+        OFFSET_PEAK_WIDTH_MIN_YEARS,
+        OFFSET_PEAK_WIDTH_MAX_YEARS,
+      ),
+    );
+    const tailOffset = Math.round(
+      clamp(OFFSET_TAIL_BASE_YEARS + OFFSET_TAIL_LONGEVITY_COEF * longevity, 1, OFFSET_TAIL_MAX_YEARS),
+    );
 
-    let peakStartOffset = Math.max(drinkFromOffset, peakCenterOffset - Math.round(peakWidth / 2));
-    let peakEndOffset = peakCenterOffset + Math.round(peakWidth / 2);
+    const halfPeakWidth = Math.round(peakWidth / 2);
+    let peakStartOffset = Math.max(drinkFromOffset, peakCenterOffset - halfPeakWidth);
+    let peakEndOffset = peakCenterOffset + halfPeakWidth;
     let bestUntilOffset = peakEndOffset + tailOffset;
 
     if (primaryVarietal !== undefined && ['glera', 'prosecco', 'sauvignon blanc', 'gamay'].includes(primaryVarietal)) {
-      bestUntilOffset = Math.min(bestUntilOffset, 8);
+      bestUntilOffset = Math.min(bestUntilOffset, SHORT_LIVED_BEST_UNTIL_CEILING_YEARS);
     }
     if (primaryVarietal !== undefined && ['nebbiolo', 'cabernet sauvignon', 'riesling'].includes(primaryVarietal)) {
-      bestUntilOffset = Math.max(bestUntilOffset, 12);
+      bestUntilOffset = Math.max(bestUntilOffset, LONG_LIVED_BEST_UNTIL_FLOOR_YEARS);
     }
 
     peakStartOffset = Math.max(peakStartOffset, drinkFromOffset);
@@ -253,15 +484,31 @@ export class StructuralDrinkingWindowFormula implements DrinkingWindowDeterminis
 
     const complete = completenessScore(input, primaryVarietal, sizeMl);
     const hasDistribution = input.ratingDistribution !== undefined ? 1 : 0;
-    const dataConfidence = clamp(0.4 * complete + 0.4 * C + 0.2 * hasDistribution, 0, 1);
-    const modelConfidence = clamp(
-      0.6 * (primaryVarietal !== undefined ? 1 : 0) +
-      0.2 * 1 +
-      0.2 * (input.priceUsd !== undefined ? 1 : 0),
+    const dataConfidence = clamp(
+      DATA_CONFIDENCE_WEIGHT_COMPLETENESS * complete +
+        DATA_CONFIDENCE_WEIGHT_ENGAGEMENT * C +
+        DATA_CONFIDENCE_WEIGHT_DISTRIBUTION * hasDistribution,
       0,
       1,
     );
-    const confidenceScore = clamp(0.55 * dataConfidence + 0.45 * modelConfidence, 0, 1);
+    const hasPrimaryVarietal = primaryVarietal !== undefined ? 1 : 0;
+    const hasPrice = input.priceUsd !== undefined ? 1 : 0;
+    // FORMULA_PRESENT axis is always 1 here — this implementation IS the
+    // deterministic formula. Kept as an explicit term so future variants
+    // (e.g. fallback predictor) can reuse the same weighting scheme.
+    const formulaPresent = 1;
+    const modelConfidence = clamp(
+      MODEL_CONFIDENCE_WEIGHT_PRIMARY_VARIETAL * hasPrimaryVarietal +
+        MODEL_CONFIDENCE_WEIGHT_FORMULA_PRESENT * formulaPresent +
+        MODEL_CONFIDENCE_WEIGHT_PRICE * hasPrice,
+      0,
+      1,
+    );
+    const confidenceScore = clamp(
+      CONFIDENCE_BLEND_DATA * dataConfidence + CONFIDENCE_BLEND_MODEL * modelConfidence,
+      0,
+      1,
+    );
 
     const breakdown: DrinkingWindowDeterministicTermBreakdown = {
       varietalAnchor: contribution(

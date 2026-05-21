@@ -1,4 +1,5 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
+import type { AliasType } from '../../alias/model/alias.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
@@ -7,6 +8,7 @@ import { RelativeQueryExtractor } from './relative-query-extractor.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import { buildAliasLookupPlan } from './alias-lookup-plan.js';
 import { isExactLikeLookupStrategy } from './lookup-strategy-taxonomy.js';
+import { pickHigherTrustAliasType } from '../../alias/service/conflict-resolver.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -19,6 +21,19 @@ export interface AliasMatchResult {
   readonly matchConfidence: number;
   /** Strategy label for noisy lookup provenance. */
   readonly lookupStrategy?: string | undefined;
+  /**
+   * Domain alias type (RFC-003 §4) of the underlying alias record.
+   *
+   * SSoT for provenance — every matcher (PG-backed, snapshot, search-index,
+   * in-memory) MUST populate this from the `alias_type` column / fixture
+   * field so the resolver scorer can apply type-specific caps without
+   * parsing `lookupStrategy` strings.
+   *
+   * Optional only to keep call-site migration incremental; downstream
+   * consumers MUST treat `undefined` as legacy/unknown and fall back to
+   * strategy-based inference.
+   */
+  readonly aliasType?: AliasType | undefined;
 }
 
 /**
@@ -264,6 +279,7 @@ export class AnchorExtractor {
       ...(match.lookupStrategy !== undefined
         ? { lookupStrategies: splitLookupStrategies(match.lookupStrategy) }
         : {}),
+      ...(match.aliasType !== undefined ? { aliasType: match.aliasType } : {}),
       confidence: match.matchConfidence,
       source: 'alias' as const,
     }));
@@ -346,11 +362,12 @@ export class AnchorExtractor {
     const merged = new Map<
       string,
       {
-        readonly match: AliasMatchResult;
-        readonly confidence: number;
-        readonly priority: number;
+        match: AliasMatchResult;
+        confidence: number;
+        priority: number;
         readonly lookupVariants: Set<string>;
         readonly lookupStrategies: Set<string>;
+        aliasType: AliasType | undefined;
       }
     >();
 
@@ -377,7 +394,15 @@ export class AnchorExtractor {
             priority,
             lookupVariants: existing?.lookupVariants ?? new Set<string>(),
             lookupStrategies: existing?.lookupStrategies ?? new Set<string>(),
+            aliasType: pickHigherTrustAliasType(existing?.aliasType, match.aliasType),
           });
+        } else {
+          // Even when this row is not the new leader, fold its provenance:
+          // higher-trust alias_type wins. A sibling curated match arriving
+          // after a derived one must lift the merged type back to canonical,
+          // otherwise the resolver scorer's derived-initialism cap fires on
+          // an anchor that already has canonical evidence.
+          existing.aliasType = pickHigherTrustAliasType(existing.aliasType, match.aliasType);
         }
 
         merged.get(key)?.lookupVariants.add(trimmedLookupQuery);
@@ -418,11 +443,12 @@ export class AnchorExtractor {
     merged: Map<
       string,
       {
-        readonly match: AliasMatchResult;
-        readonly confidence: number;
-        readonly priority: number;
+        match: AliasMatchResult;
+        confidence: number;
+        priority: number;
         readonly lookupVariants: Set<string>;
         readonly lookupStrategies: Set<string>;
+        aliasType: AliasType | undefined;
       }
     >,
   ): readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[] {
@@ -433,12 +459,13 @@ export class AnchorExtractor {
         }
         return left.priority - right.priority;
       })
-      .map(({ match, lookupVariants, lookupStrategies }) => ({
+      .map(({ match, lookupVariants, lookupStrategies, aliasType }) => ({
         ...match,
         lookupVariants: [...lookupVariants],
         ...(lookupStrategies.size > 0
           ? { lookupStrategy: [...lookupStrategies].sort().join('+') }
           : {}),
+        ...(aliasType !== undefined ? { aliasType } : {}),
       }));
   }
 

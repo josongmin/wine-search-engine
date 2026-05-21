@@ -7,10 +7,13 @@ summary: |
   search-contracts / stubs / tool-contracts / usecases / watchlist). 모든 use case
   + adapter 와이어링.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  체계적으로 분할된 sub-container, 신규 wiring 추가 패턴 명확. unit test (container-watchlist
-  외). 그러나 의존성 graph가 14개 파일에 분산 — 사이클 검출 자동화 없음.
+  체계적으로 분할된 sub-container, 신규 wiring 추가 패턴 명확. 선언적
+  wiring manifest (`src/config/container-wiring-manifest.ts`)가 sub-container DAG의
+  SSoT 역할을 수행, Kahn topological sort 기반 cycle 검출 + production port 열거 +
+  factory test-override hook + 에러 메시지 NFC 보존을 단일 regression 스위트
+  (`test/regression/di-composition-root.regression.test.ts`, 13 tests)에서 강제.
 
 status: active
 since: 2025-09
@@ -35,23 +38,25 @@ key_files:
   - src/config/container-runtime-support.ts
   - src/config/container-stubs.ts
   - src/config/container-core-builders.ts
+  - src/config/container-wiring-manifest.ts
   - src/main.ts
 
 tests:
   unit:
     - src/__tests__/container-watchlist.test.ts
+  regression:
+    - test/regression/di-composition-root.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "Dependency graph 분산 — cycle 자동 검출 없음"
   - "Container 빌드 latency 측정 안 됨"
 
 next_steps:
-  - "Cycle 검출 CI gate"
   - "Container 빌드 latency telemetry"
+  - "Manifest port enumeration → Container type generation으로 한쪽 SSoT 통합"
 
 tags:
   - di

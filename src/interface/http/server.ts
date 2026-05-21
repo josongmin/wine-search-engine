@@ -48,6 +48,8 @@ import {
   HTTP_DEFAULT_REQUEST_TIMEOUT_MS,
   HTTP_STATUS_INTERNAL_SERVER_ERROR,
   HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE,
+  RATE_LIMIT_MAX_REQUESTS_DEFAULT,
+  RATE_LIMIT_WINDOW_MS_DEFAULT,
 } from './constants.js';
 
 const serverLog = bootstrapLogger.child({ component: 'HttpServer' });
@@ -290,10 +292,10 @@ export async function createServer(
   // proxy) over raw IP.  IP-only keying is bypassable via IPv6 rotation; principal-based
   // keying enforces the limit per identity even when an attacker cycles source addresses.
   // Fall back to IP when no authenticated subject header is present (unauthenticated paths).
-  if ((options?.rateLimitMax ?? 100) > 0) {
+  if ((options?.rateLimitMax ?? RATE_LIMIT_MAX_REQUESTS_DEFAULT) > 0) {
     await app.register(rateLimit, {
-      max: options?.rateLimitMax ?? 100,
-      timeWindow: '1 minute',
+      max: options?.rateLimitMax ?? RATE_LIMIT_MAX_REQUESTS_DEFAULT,
+      timeWindow: RATE_LIMIT_WINDOW_MS_DEFAULT,
       keyGenerator(request) {
         // Only trust X-Authenticated-Subject for rate-limit keying when a
         // trusted reverse proxy is in front (trustProxy=true). Without a proxy

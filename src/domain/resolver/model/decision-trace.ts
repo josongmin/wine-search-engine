@@ -89,6 +89,18 @@ export interface ResolverDecisionTrace {
   /** THE calibrated decision confidence C. */
   readonly decisionConfidenceC: number;
 
+  /**
+   * Whether `decisionConfidenceC` was produced from trained calibration
+   * parameters (true) or from the identity-fallback path that the
+   * {@link Calibrator} uses when no trained params exist for this query
+   * class (false). Decision-layer thresholds that semantically depend on
+   * probability (Epic 17.3 ConfidenceRefusalPolicy) MUST skip enforcement
+   * when this is `false` — otherwise a raw score is treated as a
+   * probability and the refusal floor becomes a quasi-random gate on
+   * uncalibrated state. Propagated from {@link CalibratedResolutionScore}.
+   */
+  readonly calibrationTrusted: boolean;
+
   /** Whether any ambiguity was detected among candidates. */
   readonly ambiguityDetected: boolean;
 

@@ -63,13 +63,49 @@ function makeConstraint(
 // ---------------------------------------------------------------------------
 
 describe('DeterministicRouter — Rule 1: analysis-rejected guard', () => {
-  it('intent=unknown + no anchors + no constraints → reject', () => {
+  it('intent=unknown + no anchors + no constraints + NON-wine surface → reject', () => {
+    // The `preservedSurface` here intentionally does NOT contain a wine-domain
+    // keyword (와인 / wine / 포도주 / …). The rule-1 guard only rejects when
+    // the surface ALSO lacks wine-domain evidence — see the
+    // `WINE_DOMAIN_KEYWORD_RE` false-positive guard in
+    // `deterministic-router.ts` (CLAUDE.md rule 23 — benign conversational
+    // wine queries must NOT route to `unsupported_intent`).
     const router = makeRouter();
-    const plan = router.route(baseAnalysis({ intent: 'unknown' }));
+    const plan = router.route(baseAnalysis({ intent: 'unknown', preservedSurface: 'hello there' }));
     expect(plan.kind).toBe('reject');
     if (plan.kind !== 'reject') return;
     expect(plan.reason).toBe('unsupported_intent');
     expect(ExecutionPlanSchema.parse(plan)).toEqual(plan);
+  });
+
+  it('intent=unknown + no anchors + no constraints + wine-domain surface → falls through to single-search', () => {
+    // Regression guard for the CLAUDE.md rule 23 fix: "와인 좀 알려줘" /
+    // "와인 추천해 주시겠어요?" produce zero anchors AND zero constraints
+    // through the deterministic pipeline, yet they are unambiguously
+    // wine-domain. The router must NOT reject these as unsupported.
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'unknown',
+        preservedSurface: '와인 좀 알려줘',
+        hangulDominant: true,
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+  });
+
+  it('intent=unknown + no anchors + no constraints + English "wine" surface → falls through to single-search', () => {
+    // Symmetric guard for the English path — "wine please" must not be
+    // rejected even when the deterministic pipeline extracts no anchor /
+    // constraint.
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'unknown',
+        preservedSurface: 'wine please',
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
   });
 
   it('intent=unknown WITH constraints → does NOT reject (falls through to single-search)', () => {

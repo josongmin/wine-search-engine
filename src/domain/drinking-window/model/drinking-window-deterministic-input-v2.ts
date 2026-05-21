@@ -1,5 +1,48 @@
 import { z } from 'zod';
+import {
+  DETERMINISTIC_DRINKING_WINDOW_MIN_VINTAGE_YEAR,
+  MAX_PRODUCED_VINTAGE_YEAR,
+} from '../../shared/constants.js';
 import type { DrinkingWindowInput } from '../port/drinking-window-predictor.port.js';
+
+/**
+ * Deterministic drinking-window vintage bounds.
+ *
+ * Sourced from `@domain/shared/constants` to satisfy Rule 30 (no duplicated
+ * cross-module constants) and to ensure the structural formula stays aligned
+ * with the wider ingestion bounds whenever the calibration window shifts.
+ */
+const DETERMINISTIC_MIN_VINTAGE_YEAR = DETERMINISTIC_DRINKING_WINDOW_MIN_VINTAGE_YEAR;
+const DETERMINISTIC_MAX_VINTAGE_YEAR = MAX_PRODUCED_VINTAGE_YEAR;
+
+/** Sensory ordinal scale upper bound (1–5 ordinal, schema allows 0 for "absent"). */
+const SENSORY_ORDINAL_MAX = 5;
+
+/** Critic proxy score upper bound (0–100 scale, e.g. 100-point Parker/WS). */
+const CRITIC_PROXY_SCORE_MAX = 100;
+
+/** Alcohol-by-volume ceiling. 25% covers high-proof fortified wines (Port, sherry). */
+const ALCOHOL_PCT_MAX = 25;
+
+/**
+ * Engagement count ceiling for ratings/reviews/winery-rating counts.
+ * 10M is far above Vivino's largest single-wine review count and safely
+ * rejects corrupted multi-billion values without truncating real data.
+ */
+const ENGAGEMENT_COUNT_MAX = 10_000_000;
+
+/**
+ * Price-in-USD ceiling. 1M USD permits ultra-rare investment bottlings
+ * (e.g. 1945 Romanée-Conti hammer prices exceed $500K) while still
+ * catching obvious unit / decimal errors.
+ */
+const PRICE_USD_MAX = 1_000_000;
+
+/**
+ * Bottle volume ceiling in ml. 30L covers the largest commercial format
+ * (Melchizedek). Volumes above this are almost certainly bad ETL data.
+ */
+const BOTTLE_SIZE_ML_MAX = 30_000;
 
 /**
  * Canonical wine-type enum already used across search/query layers.
@@ -178,7 +221,7 @@ export interface DrinkingWindowDeterministicInputV2 {
 }
 
 export const DrinkingWindowDeterministicInputV2Schema = z.object({
-  vintage: z.number().int().min(1800).max(2200),
+  vintage: z.number().int().min(DETERMINISTIC_MIN_VINTAGE_YEAR).max(DETERMINISTIC_MAX_VINTAGE_YEAR),
   grapePrimaryEnc: z.number().int().optional(),
   regionEnc: z.number().int().optional(),
   countryEnc: z.number().int().optional(),
@@ -197,14 +240,14 @@ export const DrinkingWindowDeterministicInputV2Schema = z.object({
   producerType: z.enum(DRINKING_WINDOW_DETERMINISTIC_PRODUCER_TYPES).optional(),
   certifications: z.array(z.string().trim().min(1)).min(1).optional(),
   soilType: z.string().trim().min(1).optional(),
-  body: z.number().min(0).max(5).optional(),
-  tannin: z.number().min(0).max(5).optional(),
-  acidity: z.number().min(0).max(5).optional(),
-  sweetness: z.number().min(0).max(5).optional(),
+  body: z.number().min(0).max(SENSORY_ORDINAL_MAX).optional(),
+  tannin: z.number().min(0).max(SENSORY_ORDINAL_MAX).optional(),
+  acidity: z.number().min(0).max(SENSORY_ORDINAL_MAX).optional(),
+  sweetness: z.number().min(0).max(SENSORY_ORDINAL_MAX).optional(),
   finishLength: z.number().min(0).max(1).optional(),
-  alcoholPct: z.number().min(0).max(25).optional(),
-  avgCriticProxyScore: z.number().min(0).max(100).optional(),
-  ratingAvg: z.number().min(0).max(5).optional(),
+  alcoholPct: z.number().min(0).max(ALCOHOL_PCT_MAX).optional(),
+  avgCriticProxyScore: z.number().min(0).max(CRITIC_PROXY_SCORE_MAX).optional(),
+  ratingAvg: z.number().min(0).max(SENSORY_ORDINAL_MAX).optional(),
   ratingsCount: z.number().int().min(0).optional(),
   reviewCount: z.number().int().min(0).optional(),
   ratingDistribution: z.object({
@@ -217,12 +260,12 @@ export const DrinkingWindowDeterministicInputV2Schema = z.object({
   criticScoreNormalized: z.number().min(0).max(1).optional(),
   producerPrestige: z.number().min(0).max(1).optional(),
   wineryRatingCount: z.number().int().min(0).optional(),
-  priceUsd: z.number().min(0).max(1_000_000).optional(),
-  bottleSizeMl: z.number().int().min(0).max(30_000).optional(),
+  priceUsd: z.number().min(0).max(PRICE_USD_MAX).optional(),
+  bottleSizeMl: z.number().int().min(0).max(BOTTLE_SIZE_ML_MAX).optional(),
   bottleSize: z.string().trim().min(1).optional(),
   closure: z.string().trim().min(1).optional(),
-  priorDrinkingWindowStart: z.number().int().min(1800).max(2200).optional(),
-  priorDrinkingWindowEnd: z.number().int().min(1800).max(2200).optional(),
+  priorDrinkingWindowStart: z.number().int().min(DETERMINISTIC_MIN_VINTAGE_YEAR).max(DETERMINISTIC_MAX_VINTAGE_YEAR).optional(),
+  priorDrinkingWindowEnd: z.number().int().min(DETERMINISTIC_MIN_VINTAGE_YEAR).max(DETERMINISTIC_MAX_VINTAGE_YEAR).optional(),
   priorDrinkingWindowModelVersion: z.string().trim().min(1).optional(),
   hasCompleteStructureSignals: z.boolean().optional(),
   sourceConfidence: z.enum(DRINKING_WINDOW_SOURCE_CONFIDENCE_LEVELS).optional(),
@@ -247,7 +290,7 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'integer',
     required: true,
     description: 'Production year used as the absolute calendar anchor for all offsets.',
-    range: [1800, 2200],
+    range: [DETERMINISTIC_MIN_VINTAGE_YEAR, DETERMINISTIC_MAX_VINTAGE_YEAR],
     unit: 'year',
     examples: ['2018', '2020'],
     sourceCandidates: ['catalog.vintageYear', 'entity.vintage', 'retrieval.vintageYear'],
@@ -382,28 +425,28 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'number',
     required: false,
     description: 'Body intensity on 1–5 ordinal scale.',
-    range: [0, 5],
+    range: [0, SENSORY_ORDINAL_MAX],
     sourceCandidates: ['predictor.body', 'retrieval.body', 'sensory.body'],
   },
   tannin: {
     kind: 'number',
     required: false,
     description: 'Tannin structure on 1–5 ordinal scale.',
-    range: [0, 5],
+    range: [0, SENSORY_ORDINAL_MAX],
     sourceCandidates: ['predictor.tannin', 'retrieval.tannin', 'sensory.tannin'],
   },
   acidity: {
     kind: 'number',
     required: false,
     description: 'Acidity on 1–5 ordinal scale.',
-    range: [0, 5],
+    range: [0, SENSORY_ORDINAL_MAX],
     sourceCandidates: ['predictor.acidity', 'retrieval.acidity', 'sensory.acidity'],
   },
   sweetness: {
     kind: 'number',
     required: false,
     description: 'Sweetness on 1–5 ordinal scale.',
-    range: [0, 5],
+    range: [0, SENSORY_ORDINAL_MAX],
     sourceCandidates: ['predictor.sweetness', 'retrieval.sweetness', 'sensory.sweetness'],
   },
   finishLength: {
@@ -417,7 +460,7 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'number',
     required: false,
     description: 'Alcohol percentage by volume.',
-    range: [0, 25],
+    range: [0, ALCOHOL_PCT_MAX],
     unit: '% abv',
     sourceCandidates: ['retrieval.alcoholPct', 'entity.alcoholPct'],
   },
@@ -425,28 +468,28 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'number',
     required: false,
     description: 'Critic proxy score on 0–100 scale.',
-    range: [0, 100],
+    range: [0, CRITIC_PROXY_SCORE_MAX],
     sourceCandidates: ['predictor.avgCriticProxyScore', 'catalog.criticProxyScore'],
   },
   ratingAvg: {
     kind: 'number',
     required: false,
     description: 'Wine-level average rating on the source 1–5 scale.',
-    range: [0, 5],
+    range: [0, SENSORY_ORDINAL_MAX],
     sourceCandidates: ['vivino.ratingAvg', 'vivino.payload.rating'],
   },
   ratingsCount: {
     kind: 'integer',
     required: false,
     description: 'Wine-level rating count backing the average score.',
-    range: [0, 10_000_000],
+    range: [0, ENGAGEMENT_COUNT_MAX],
     sourceCandidates: ['vivino.ratingsCount', 'vivino.payload.rating_count'],
   },
   reviewCount: {
     kind: 'integer',
     required: false,
     description: 'Wine-level text review count.',
-    range: [0, 10_000_000],
+    range: [0, ENGAGEMENT_COUNT_MAX],
     sourceCandidates: ['vivino.payload.review_count'],
   },
   ratingDistribution: {
@@ -474,14 +517,14 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'integer',
     required: false,
     description: 'Count backing the winery-level prestige signal.',
-    range: [0, 10_000_000],
+    range: [0, ENGAGEMENT_COUNT_MAX],
     sourceCandidates: ['vivino.payload.winery_rating_count'],
   },
   priceUsd: {
     kind: 'number',
     required: false,
     description: 'Price in USD; optional luxury / cellarability prior only.',
-    range: [0, 1_000_000],
+    range: [0, PRICE_USD_MAX],
     unit: 'USD',
     sourceCandidates: ['retrieval.priceUsd', 'catalog.priceUsd'],
   },
@@ -489,7 +532,7 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'integer',
     required: false,
     description: 'Bottle volume in milliliters; controls maturation time scaling.',
-    range: [0, 30_000],
+    range: [0, BOTTLE_SIZE_ML_MAX],
     unit: 'ml',
     examples: ['375', '750', '1500'],
     sourceCandidates: ['vivino.payload.bottle_ml', 'vivino.payload.bottle_size'],
@@ -512,7 +555,7 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'integer',
     required: false,
     description: 'Existing cached drinking-window start year from another source.',
-    range: [1800, 2200],
+    range: [DETERMINISTIC_MIN_VINTAGE_YEAR, DETERMINISTIC_MAX_VINTAGE_YEAR],
     unit: 'year',
     sourceCandidates: ['retrieval.drinkingWindowStart', 'entity.drinkingWindowStart'],
   },
@@ -520,7 +563,7 @@ export const DRINKING_WINDOW_DETERMINISTIC_FIELD_SPECS: Readonly<
     kind: 'integer',
     required: false,
     description: 'Existing cached drinking-window end year from another source.',
-    range: [1800, 2200],
+    range: [DETERMINISTIC_MIN_VINTAGE_YEAR, DETERMINISTIC_MAX_VINTAGE_YEAR],
     unit: 'year',
     sourceCandidates: ['retrieval.drinkingWindowEnd', 'entity.drinkingWindowEnd'],
   },

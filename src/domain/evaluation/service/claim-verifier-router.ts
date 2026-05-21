@@ -156,6 +156,12 @@ const SEMANTIC_ANCHOR_FIELDS: readonly WineField[] = [
   'wine_type',
 ];
 
+/** Maximum length of raw evidence snippet surfaced as a fallback semantic
+ *  anchor. Sized to keep audit UI / error envelopes lightweight while still
+ *  preserving enough context for downstream verdict review (a typical
+ *  sentence-or-two paragraph fits in 500 chars). */
+const RAW_EVIDENCE_ANCHOR_MAX_CHARS = 500;
+
 function attachSemanticEvidenceAnchor(
   verification: ClaimVerification,
   claim: ExtractedClaim,
@@ -202,7 +208,7 @@ function findSemanticEvidenceAnchor(
     return {
       wineId: semanticAnchorWineId(rawEvidence),
       field: claim.field,
-      value: rawEvidence['__raw__'].slice(0, 500),
+      value: rawEvidence['__raw__'].slice(0, RAW_EVIDENCE_ANCHOR_MAX_CHARS),
       source: semanticAnchorSource(rawEvidence),
     };
   }

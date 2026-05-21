@@ -390,7 +390,7 @@ describe('SynthesisRunner — Layer 4 hard-coded fallback', () => {
 // ---------------------------------------------------------------------------
 
 describe('SynthesisRunner — policy blocked branch', () => {
-  it('returns Korean policy template, makes no LLM call', async () => {
+  it('defaults to security-block template when no blockedKind is provided (English query → English template)', async () => {
     const llm = makeStubLlm(async () => {
       throw new Error('LLM must not be called when policyBlocked=true');
     });
@@ -400,7 +400,7 @@ describe('SynthesisRunner — policy blocked branch', () => {
       toolOutcomes: [],
     });
     expect(result.layer).toBe('layer4');
-    expect(result.answer).toBe(FALLBACK_TEMPLATES.policyBlocked.korean);
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.policyBlocked.english);
     expect(result.degradedReason).toBe('policy_blocked');
     expect(result.synthesisAttempts).toBe(0);
     expect(result.tokenUsage.inputTokens).toBe(0);

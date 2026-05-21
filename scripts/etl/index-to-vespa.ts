@@ -537,7 +537,22 @@ function normalizeStringArray(values: readonly string[] | undefined): readonly s
  * When the sensory inputs are absent, the field is omitted instead of
  * synthesizing a midpoint label.
  */
-function deriveStyle(rec: GoldRecord): string {
+/**
+ * Derives the `style` index field from gold-curated wine attributes.
+ *
+ * Returns `undefined` when no authoritative style classifier can be
+ * synthesised — specifically when `wineType` ∈ {red, white} AND either
+ * `body` or `sweetness` is missing. Returning the bare `wineType` in that
+ * case (the previous behaviour) was a heuristic: callers downstream that
+ * faceted on `style` ended up with the coarse wineType masquerading as a
+ * style bucket, which leaked the missing-data condition into the ranking
+ * signal. Style facets must be derivable from real data or absent.
+ *
+ * Returns a string for `sparkling`, `dessert`, `fortified`, and `rosé`
+ * wineTypes — those map deterministically to a single style without
+ * needing body/sweetness, so omitting them would lose a real signal.
+ */
+function deriveStyle(rec: GoldRecord): string | undefined {
   const wt = rec.wineType;
   if (wt === undefined) {
     throw new Error('deriveStyle: wineType is required');
@@ -546,7 +561,7 @@ function deriveStyle(rec: GoldRecord): string {
   if (wt === 'dessert') return 'sweet';
   if (wt === 'fortified') return 'fortified';
   if (wt === 'rosé') return 'rosé';
-  if (rec.body == null || rec.sweetness == null) return wt;
+  if (rec.body == null || rec.sweetness == null) return undefined;
   // Only override to 'sweet' for clearly sweet wines (threshold raised from 0.6 to 0.75)
   if (rec.sweetness >= 0.75) return 'sweet';
   if (wt === 'white') {
@@ -618,10 +633,26 @@ export function silverToIndexable(
   const style = deriveStyle(gold);
   const soilType = trimNonEmpty(rec.soilType);
   const producerType = trimNonEmpty(rec.producerType);
-  const grapeFamily = trimNonEmpty(rec.grapeFamily)
-    ?? (rec.grapePrimary != null
-      ? (GRAPE_FAMILY_MAP.get(rec.grapePrimary.toLowerCase()) ?? rec.grapePrimary.split(/\s+/)[0])
-      : undefined);
+  // grapeFamily resolution (structural, no whitespace-split heuristic):
+  //  1. Authoritative upstream value (gold > silver) wins.
+  //  2. Multi-word varieties resolve via GRAPE_FAMILY_MAP only — splitting on
+  //     whitespace produced wrong families ("Nero d'Avola" → "Nero",
+  //     "Pinot Noir" → "Pinot"), so an unmapped multi-word variety stays
+  //     undefined (recorded as missing taxonomy data, not synthesised).
+  //  3. Single-word varieties are their own family by definition (Shiraz,
+  //     Merlot, Chardonnay …). No synthesis required.
+  const grapeFamily = (() => {
+    const trimmed = trimNonEmpty(rec.grapeFamily);
+    if (trimmed !== undefined) return trimmed;
+    if (rec.grapePrimary == null) return undefined;
+    const primary = rec.grapePrimary;
+    const mapped = GRAPE_FAMILY_MAP.get(primary.toLowerCase());
+    if (mapped !== undefined) return mapped;
+    // Single-word variety: `primary` is the family. Whitespace presence
+    // means it is multi-word, and the absence from MAP means we lack a
+    // curated mapping — leave undefined rather than splitting.
+    return /\s/.test(primary) ? undefined : primary;
+  })();
   const aliasPrefixTerms = buildAliasPrefixTerms([
     rec.canonicalLabel,
     rec.producer,
@@ -675,7 +706,7 @@ export function silverToIndexable(
     grapes: rec.grapes,
     searchTextKo: buildSearchTextKo(rec),
     semanticSummary: buildEmbedText(rec),
-    style,
+    ...(style !== undefined ? { style } : {}),
     priceBand: rec.priceBand,
     pairing: rec.pairingTags,
     ...(occasion !== undefined ? { occasion: [...occasion] } : {}),

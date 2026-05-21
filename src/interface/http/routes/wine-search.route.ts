@@ -204,6 +204,12 @@ export function mapResultToResponse(
   const termination: WineSearchTerminationBody = {
     reason: result.terminationReason,
     layer: result.layer,
+    // S1 semantic split: forward the internal `terminationKind` to the
+    // wire `kind` field. Present only when the orchestrator emitted one
+    // (always on `terminationReason === 'blocked'`).
+    ...(result.terminationKind !== undefined
+      ? { kind: result.terminationKind }
+      : {}),
     ...(result.degradedReason !== undefined
       ? { degraded_reason: result.degradedReason }
       : {}),

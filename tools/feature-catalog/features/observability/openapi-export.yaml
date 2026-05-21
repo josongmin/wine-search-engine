@@ -5,10 +5,14 @@ summary: |
   GET /openapi.json — route contract catalog로부터 OpenAPI 3.1 spec 자동 생성.
   외부 SDK + 클라이언트 도구 통합용. verify:http-contracts CI 게이트.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Route contract와 1:1 parity 보장 (CI gate). Bridge export script (contracts:http) + spec
   생성기. consumer 도구 (Postman / OpenAPI codegen) 사용 가능.
+  SOTA++ properties codified as regression suite: OpenAPI 3.1.0 validity, path/schema/method
+  parity, operationId uniqueness, 3.1 nullable form (`type: ['X','null']` — no deprecated
+  3.0 `nullable: true`), idempotence/determinism, JSON round-trip stability, 한글
+  description 보존, fast-check property over 100 random catalog subsets.
 
 status: active
 since: 2025-09
@@ -23,7 +27,11 @@ key_files:
   - src/interface/http/routes/openapi.route.ts
   - src/interface/http/routes/http-route-contract-openapi.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/openapi-export-properties.regression.test.ts
+  unit:
+    - test/unit/interface/http/http-route-catalog-openapi-parity.test.ts
 
 depends_on:
   - observability.http-contract-catalog

@@ -6,10 +6,16 @@ summary: |
   (generate-transliteration-aliases), NL mapping 생성 (generate-nl-mappings), canonical
   entity graph ingest (ingest-canonical-entity-graph).
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  4-step 파이프라인 모두 작동, monthly 실행. 그러나 자동화된 통합 gate 없음 — 각 단계
-  수동 실행. cross-language alias 일관성 검증 없음.
+  4-step 파이프라인 + dedicated regression suite로 invariant 잠금:
+  identity determinism (5× 동일 입력 → 동일 출력), Korean alias bridge
+  (영문 canonical → Hangul 보유 alias, NFC 강제), cross-tier resolution
+  non-overlap (gold_overlay ↔ identity_signature 상호배타), dedup
+  (동일 canonical tuple → 동일 entityId, 서로 다른 producer → 충돌 없음),
+  빈 입력 무예외, schemaVersion versioning hook. accent variant
+  (Château vs Chateau)는 alias-layer 책임으로 명시 — identity-resolution은
+  hash-based이며 accent fold 하지 않음 (정책 boundary 테스트로 잠금).
 
 status: active
 since: 2025-09
@@ -25,7 +31,9 @@ key_files:
   - scripts/etl/generate-nl-mappings.ts
   - scripts/etl/ingest-canonical-entity-graph.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/entity-identity-snapshot.regression.test.ts
 
 depends_on:
   - korean-i18n.transliterator
@@ -35,11 +43,11 @@ related_rfcs: []
 
 known_limitations:
   - "통합 gate 없음 (각 단계 수동)"
-  - "Cross-language 일관성 검증 없음"
+  - "Identity-resolution은 accent를 fold 하지 않음 — alias-layer가 bridging 책임"
 
 next_steps:
   - "End-to-end pipeline orchestrator"
-  - "Cross-language consistency check"
+  - "Identity resolution: accent-folding 정책 결정 (alias-layer 위임 vs. resolver 통합)"
 
 tags:
   - entity-identity

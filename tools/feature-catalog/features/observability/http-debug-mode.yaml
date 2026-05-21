@@ -8,9 +8,23 @@ summary: |
 
 maturity: 4
 maturity_rationale: |
-  프로덕션 troubleshooting 인프라로 안정. AsyncLocalStorage 컨텍스트가 미들웨어/서비스
-  레이어 전체에서 신뢰성 있게 작동. 그러나 단일 HTTP 요청 단위 — cross-request session
-  debugging 없음.
+  Production-grade in-process context propagation. Node AsyncLocalStorage 기반의
+  request-scoped 디버그 컨텍스트가 미들웨어/서비스 레이어에서 안정적으로 작동하며,
+  property-based 회귀 테스트(15 properties × 100 runs)로 핵심 invariant이 lock-in 되어 있음:
+  - AsyncLocalStorage 전파 (await/Promise.all 경계 보존)
+  - 동시 요청 격리 (N concurrent requests, 컨텍스트 cross-talk 없음)
+  - 한국어 NFC 보존 (step 라벨/입력 normalization)
+  - X-Debug-Key 검증의 상수시간 비교 (HMAC-SHA256 + timingSafeEqual, OWASP ASVS V14.5)
+
+  단, 본 기능은 **process-internal context propagation**에 한정됨. W3C Trace Context
+  표준(traceparent / tracestate)을 emit/parse 하지 않으며, outbound 호출(LLM, Vespa,
+  Redis)에 trace 헤더를 주입하지 않음 → cross-service span linking 불가능. 따라서
+  업계 표준 distributed tracing 기준에서는 5(SOTA)가 아니라 4(robust in-process tracing).
+
+  5로 승격되려면 다음이 필요: traceparent/tracestate 헤더 emission on outbound,
+  inbound traceparent parsing, OTel SDK W3C TC propagator 통합. 이는
+  `observability.opentelemetry-tracing` (현재 maturity 4)의 스코프이며, 두 기능이
+  통합되면 함께 5로 승격 가능.
 
 status: active
 since: 2025-09
@@ -26,7 +40,11 @@ key_files:
   - .ai/debug-mode.md
   - .ai/llm-debugging-playbook.md
 
-tests: {}
+tests:
+  regression:
+    - test/regression/http-debug-mode-context-propagation.regression.test.ts
+  unit:
+    - src/domain/observability/__tests__/request-pipeline-debug.test.ts
 
 depends_on:
   - observability.pipeline-debug-steps
@@ -34,12 +52,17 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
+  - "W3C Trace Context propagation 없음 (traceparent/tracestate 헤더 emit/parse 안 함 → cross-service span linking 불가능)"
+  - "Outbound 호출(LLM/Vespa/Redis)에 trace 헤더 주입 없음 — process 경계를 넘는 trace 연결 불가"
   - "Cross-request session debugging 없음 (multi-turn agent 분석 어려움)"
 
 next_steps:
+  - "W3C Trace Context emission (traceparent on outbound to LLM/Vespa/Redis) — observability.opentelemetry-tracing와 통합 후 가능"
+  - "Inbound traceparent parsing + OTel SDK W3C TC propagator 통합"
   - "Session-level debug context (multi-turn agent)"
 
 tags:
   - debug
   - troubleshooting
   - production-tooling
+  - in-process-tracing

@@ -232,6 +232,12 @@ function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResul
       top2CalibratedScore: undefined,
       calibratedGap: undefined,
       decisionConfidenceC: 0,
+      // The missing-resolver fallback never invoked the trained Calibrator,
+      // so `decisionConfidenceC=0` is a sentinel, not a calibrated
+      // probability. Flag the trace as untrusted so the AdmissionGate's
+      // confidence-refusal floor (RFC-016 §3, Epic 17.3) skips enforcement
+      // instead of refusing the sentinel against a fixed threshold.
+      calibrationTrusted: false,
       ambiguityDetected: false,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },

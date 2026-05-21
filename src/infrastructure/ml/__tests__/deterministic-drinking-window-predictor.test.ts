@@ -47,6 +47,12 @@ describe('DeterministicDrinkingWindowPredictor', () => {
 });
 
 describe('FixedDrinkingWindowFormula', () => {
+  it('pins the placeholder formula slot to its declared version namespace', () => {
+    const formula = new FixedDrinkingWindowFormula();
+
+    expect(formula.formulaVersion).toBe(FIXED_DRINKING_WINDOW_FORMULA_VERSION);
+  });
+
   it('returns fixed offsets as the placeholder formula slot', () => {
     const formula = new FixedDrinkingWindowFormula();
 

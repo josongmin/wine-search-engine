@@ -27,8 +27,10 @@ import {
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import {
+  ClaudeToolsExecuteRequestSchema,
   ClaudeToolsExecuteRouteContract,
   ClaudeToolsListRouteContract,
+  type ClaudeToolsExecuteRequest,
 } from './route-contracts.js';
 import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import { getRequestId, resolveRequestId } from '../request-id.js';
@@ -55,7 +57,14 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
       // payload on catch-all errors — that shape violated the contract in
       // CLAUDE.md ("catch blocks in use-case code MUST NOT fabricate
       // success-shaped responses from unexpected errors").
-      const parsed = parseContractBody(request, ClaudeToolsExecuteRouteContract);
+      // Pass the schema directly (instead of the wider contract object) so
+      // TypeScript can infer `TBody` precisely as the discriminated union schema.
+      // Without this, the intersection type on the contract (`HttpRouteContract &
+      // { readonly body: typeof ClaudeToolsExecuteRequestSchema }`) widens `body`
+      // back to `z.ZodTypeAny` and propagates `any` through `z.output<TBody>`.
+      const parsed: ClaudeToolsExecuteRequest = parseContractBody(request, {
+        body: ClaudeToolsExecuteRequestSchema,
+      });
       const requestId = resolveRequestId(request, parsed.request_id);
       const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
         parsed.tool_name,

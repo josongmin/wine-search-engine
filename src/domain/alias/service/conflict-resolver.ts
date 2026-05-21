@@ -10,14 +10,29 @@ import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator
  * Type priority weights for conflict resolution scoring.
  * Higher weight = stronger claim to the alias.
  * See RFC-003 §4.4.1.
+ *
+ * Exported as the SSoT trust ordering — also consumed by the AnchorExtractor
+ * merger to pick the higher-trust {@link AliasType} when consolidating
+ * sibling {@link AliasMatchResult}s for the same surface form / entity.
  */
-const TYPE_PRIORITY_WEIGHTS: Readonly<Record<AliasType, number>> = {
+export const ALIAS_TYPE_PRIORITY_WEIGHTS: Readonly<Record<AliasType, number>> = {
   canonical: 1.0,
   translation: 0.95,
   phonetic: 0.85,
   misspelling: 0.6,
   observed_query_alias: 0.7,
   catalog_noise_alias: 0.4,
+  // Derived initialisms sit just below misspelling: deterministic + low
+  // ambiguity per individual surface, but high cross-entity collision
+  // rate ("CM" → many possible producers), so conflict resolution should
+  // never let an initialism beat a curated alias on tie.
+  derived_initialism: 0.55,
+  // Abbreviations are curated/LLM-proposed (after review). On a tie
+  // against a canonical or curated translation they still lose, but they
+  // outrank the deterministic derived_initialism set because the review
+  // gate attaches explicit producer+vintage compounds ("CM 15" rather
+  // than bare "CM"), which dramatically lowers collision risk.
+  abbreviation: 0.65,
 };
 
 /**
@@ -26,6 +41,28 @@ const TYPE_PRIORITY_WEIGHTS: Readonly<Record<AliasType, number>> = {
  * be registered in the ambiguity registry for manual review.
  */
 const AUTO_RESOLVE_MARGIN_THRESHOLD = 0.2;
+
+/**
+ * Picks the higher-trust {@link AliasType} between two candidates.
+ *
+ * Trust ordering uses {@link ALIAS_TYPE_PRIORITY_WEIGHTS}. When merging
+ * sibling alias-match results for the same surface form, the merged
+ * record adopts the higher-trust type so downstream consumers (resolver
+ * scorer caps, evidence gate) see canonical-grade evidence dominate
+ * derived-grade evidence rather than being silently downgraded.
+ *
+ * Returns `undefined` only when *both* inputs are undefined.
+ */
+export function pickHigherTrustAliasType(
+  left: AliasType | undefined,
+  right: AliasType | undefined,
+): AliasType | undefined {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  const leftWeight = ALIAS_TYPE_PRIORITY_WEIGHTS[left];
+  const rightWeight = ALIAS_TYPE_PRIORITY_WEIGHTS[right];
+  return leftWeight >= rightWeight ? left : right;
+}
 
 /**
  * Computes a conflict-resolution score for a single alias claim.
@@ -41,7 +78,7 @@ const AUTO_RESOLVE_MARGIN_THRESHOLD = 0.2;
  * @returns The computed score in [0, 1].
  */
 function computeScore(entry: AliasConflictEntry): number {
-  const typeWeight = TYPE_PRIORITY_WEIGHTS[entry.aliasType];
+  const typeWeight = ALIAS_TYPE_PRIORITY_WEIGHTS[entry.aliasType];
   const scopePenalty = 0; // No query context in conflict resolution
   return typeWeight * entry.confidencePrior * entry.sourceTrust * (1 - scopePenalty);
 }

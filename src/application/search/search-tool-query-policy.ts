@@ -1,5 +1,12 @@
 import { buildSearchToolStyleQueryTerms } from './search-tool-contract.js';
 
+/**
+ * Number of KRW (Korean Won) in 1 만원 (man-won = 10,000 won).
+ * Used to render KRW price clauses in the user-facing "만원" denomination
+ * (e.g. `30000 KRW` → `"3만원"`) which matches how Korean consumers articulate wine prices.
+ */
+const KRW_PER_MAN_WON = 10_000;
+
 interface SearchToolSoftClauseInput {
   readonly exclude_grapes?: readonly string[] | undefined;
   readonly exclude_regions?: readonly string[] | undefined;
@@ -15,7 +22,7 @@ interface SearchToolSoftClauseInput {
 }
 
 function formatKrwAsManWon(krw: number): string {
-  const manWon = krw / 10_000;
+  const manWon = krw / KRW_PER_MAN_WON;
   return Number.isInteger(manWon) ? String(manWon) : manWon.toString();
 }
 

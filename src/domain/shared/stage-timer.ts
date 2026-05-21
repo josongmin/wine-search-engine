@@ -23,18 +23,34 @@ export interface StageTimer {
   isRunning(stage: string): boolean;
 }
 
+/**
+ * Optional configuration for {@link createStageTimer}.
+ *
+ * `now` injects a monotone clock for deterministic testing. The default is
+ * `performance.now` which is monotone non-decreasing per the W3C HR-Time
+ * spec — the same invariant property-based tests assume.
+ */
+export interface StageTimerOptions {
+  readonly now?: () => number;
+}
+
 class StageTimerImpl implements StageTimer {
   private readonly starts = new Map<string, number>();
   private readonly elapsed = new Map<string, number>();
+  private readonly now: () => number;
+
+  constructor(now: () => number) {
+    this.now = now;
+  }
 
   start(stage: string): void {
-    this.starts.set(stage, performance.now());
+    this.starts.set(stage, this.now());
   }
 
   end(stage: string): number {
     const startTime = this.starts.get(stage);
     if (startTime === undefined) return 0;
-    const elapsedMs = performance.now() - startTime;
+    const elapsedMs = this.now() - startTime;
     this.elapsed.set(stage, elapsedMs);
     this.starts.delete(stage);
     return elapsedMs;
@@ -53,6 +69,9 @@ class StageTimerImpl implements StageTimer {
   }
 }
 
-export function createStageTimer(): StageTimer {
-  return new StageTimerImpl();
+const defaultNow = (): number => performance.now();
+
+export function createStageTimer(options?: StageTimerOptions): StageTimer {
+  const now = options?.now ?? defaultNow;
+  return new StageTimerImpl(now);
 }

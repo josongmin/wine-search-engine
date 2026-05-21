@@ -6,10 +6,49 @@ summary: |
   (gen-ai-tracing — input/output token, model name, latency). external observability
   backend (Honeycomb/Datadog) 연동 가능.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  OTel SDK 통합, gen-ai semantic convention 적용. 그러나 sampling 정책 미수립,
-  production backend 미연결 (collector 설정 환경별).
+  OTel SDK 통합 + gen-ai semantic convention + **W3C Trace Context (RFC, https://www.w3.org/TR/trace-context/)**
+  cross-service propagation을 production-grade로 갖춤. `initTelemetry()`는
+  `@opentelemetry/core`의 `W3CTraceContextPropagator`를 SDK `textMapPropagator`
+  에 wire (sdk-node가 transitive로 노출), 직접 `NodeTracerProvider`를 쓰는 경로용
+  `installW3CTraceContextPropagator()` helper도 export. Inbound `traceparent`/
+  `tracestate` extract → child span이 upstream trace에 join, outbound carrier에
+  spec-compliant `00-{32-hex}-{16-hex}-{2-hex}` 형식으로 inject 됨. 전용 헬퍼
+  `getTraceparentForCurrentSpan()` / `extractTraceparent()`는 W3C invalid 케이스
+  (version != `00`, traceId/spanId hex length 위반, all-zero ids, non-hex
+  문자)를 모두 거부.
+
+  두 개의 regression suite로 lock:
+  (1) 기존 `opentelemetry-tracing.regression.test.ts` (16 tests) — span lifecycle,
+  parent/child context propagation, gen-ai 속성 (input/output token, model, cost),
+  exception recording, status code mapping, Korean attribute 보존, sampling
+  policy, concurrent span isolation.
+  (2) `opentelemetry-w3c-trace-context.regression.test.ts` (37 tests) —
+  traceparent emission/parsing, version byte 검증, 32-hex traceId/16-hex spanId
+  format 단언, sampled (01)/not-sampled (00) flags, cross-context inject
+  라운드트립, **fast-check property test (numRuns: 100)** — 임의 W3C-적법
+  traceparent의 extract→re-inject 안정성, async chain을 통한 traceId 안정성,
+  concurrent span의 traceparent 격리, propagator global registration 검증.
+  여기에 **`tracestate` (W3C TC §3.3) 전용 12개 테스트**: (a) emit —
+  `getTracestateForCurrentSpan()` helper가 active SpanContext의 vendor 엔트리를
+  `key=value` 형식으로 반환 (단일/다중 vendor, prepend 순서 = OTel TraceState.set
+  semantics), 활성 span 없을 때 `undefined`, vendor 없는 span에서 `undefined`,
+  inbound으로 extract된 tracestate가 child context까지 전파; (b) parse — 다중
+  vendor lookup (`vendor1`/`vendor2`/missing key), empty header → no entries,
+  semicolon-separated/공백 키 등 malformed → 안전 무시 (traceparent는 유지);
+  (c) spec §3.3 limit — 40-member oversized list가 32 list-member 상한으로
+  truncate/ignore 됨; (d) extract→inject 라운드트립으로 vendor value (`rojo`,
+  `congo`) 보존 단언.
+
+  Named consts (`W3C_TRACE_CONTEXT_VERSION = '00'`, `W3C_TRACE_CONTEXT_HEADER =
+  'traceparent'`, `W3C_TRACE_STATE_HEADER = 'tracestate'`)는 SSoT module로 export,
+  ad-hoc 문자열 hard-code 금지 (test discipline rule 15 / SSoT rule 30).
+  Emit helpers `getTraceparentForCurrentSpan()` / `getTracestateForCurrentSpan()`
+  는 OTel propagator를 통한 spec-compliant 출력 보장 (문자열 concat 금지).
+  Sampling 정책은 `SAMPLING_RATE_DEFAULT = 1.0` named const + `ParentBasedSampler` +
+  `TraceIdRatioBasedSampler` 조합 (root → ratio, child → inherit). 다음 단계는
+  collector wiring 및 adaptive/tail-based sampling.
 
 status: active
 since: 2025-10
@@ -23,21 +62,29 @@ key_files:
   - src/infrastructure/telemetry/tracer.ts
   - src/infrastructure/telemetry/gen-ai-tracing.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/opentelemetry-tracing.regression.test.ts
+    - test/regression/opentelemetry-w3c-trace-context.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
+# External specs (not local files): W3C Trace Context — https://www.w3.org/TR/trace-context/
+# OpenTelemetry Semantic Conventions GenAI — https://opentelemetry.io/docs/specs/semconv/gen-ai/
 
 known_limitations:
-  - "Production collector 미설정"
-  - "Sampling 정책 단순 (1.0)"
+  - "Production collector 미설정 (env별 wiring 필요)"
+  - "Head-based ratio sampling만 지원 — adaptive/tail-based 미구현"
 
 next_steps:
-  - "Collector + backend wire"
-  - "Adaptive sampling"
+  - "Collector + backend (Honeycomb/Datadog) wire"
+  - "Adaptive / tail-based sampling 도입"
+  - "OTEL_TRACES_SAMPLER_ARG env override surface 노출"
+  - "Fastify onRequest hook에서 inbound traceparent를 extract하여 server span의 parent로 wire (현재 helper만 노출)"
 
 tags:
   - tracing
   - opentelemetry
   - gen-ai
+  - w3c-trace-context

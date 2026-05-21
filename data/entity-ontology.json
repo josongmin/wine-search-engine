@@ -1,6 +1,6 @@
 {
   "version": "ontology-snapshot-v1.0",
-  "generatedAt": "2026-04-22T11:03:12.310Z",
+  "generatedAt": "2026-05-20T20:50:55.527Z",
   "nodes": [
     {
       "id": "appellation:barbaresco",
@@ -1551,9 +1551,21 @@
       "aliases": [
         "fortified",
         "madeira",
+        "marsala",
         "port",
         "sherry",
-        "포트"
+        "vermouth",
+        "마데이라",
+        "마살라",
+        "버무스",
+        "베르무트",
+        "베르뭇",
+        "세리",
+        "셰리",
+        "쉐리",
+        "포트",
+        "포트 와인",
+        "포트와인"
       ],
       "parents": []
     },
@@ -3322,9 +3334,21 @@
       "aliases": [
         "fortified",
         "madeira",
+        "marsala",
         "port",
         "sherry",
-        "포트"
+        "vermouth",
+        "마데이라",
+        "마살라",
+        "버무스",
+        "베르무트",
+        "베르뭇",
+        "세리",
+        "셰리",
+        "쉐리",
+        "포트",
+        "포트 와인",
+        "포트와인"
       ]
     },
     "wine_type:red": {
@@ -3551,9 +3575,21 @@
     "디저트": "dessert",
     "sweet": "dessert",
     "fortified": "fortified",
-    "포트": "fortified",
     "port": "fortified",
+    "포트": "fortified",
+    "포트와인": "fortified",
+    "포트 와인": "fortified",
     "sherry": "fortified",
-    "madeira": "fortified"
+    "셰리": "fortified",
+    "쉐리": "fortified",
+    "세리": "fortified",
+    "madeira": "fortified",
+    "마데이라": "fortified",
+    "marsala": "fortified",
+    "마살라": "fortified",
+    "vermouth": "fortified",
+    "베르무트": "fortified",
+    "베르뭇": "fortified",
+    "버무스": "fortified"
   }
 }

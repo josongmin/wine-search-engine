@@ -44,9 +44,16 @@ describe('OpenAiLLMInjectionClassifier', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer sk-test' }),
       }),
     );
-    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
-    expect(body.model).toBe('gpt-5.4-mini');
-    expect(body.max_completion_tokens).toBe(50);
+    const rawBody = vi.mocked(fetch).mock.calls[0]?.[1]?.body;
+    // The classifier always sends `JSON.stringify({...})` as the request body.
+    // Narrowing to `string` here keeps `JSON.parse` honest and avoids the
+    // `[object Object]` foot-gun caught by `@typescript-eslint/no-base-to-string`.
+    expect(typeof rawBody).toBe('string');
+    if (typeof rawBody !== 'string') {
+      throw new Error('expected serialized OpenAI request body to be a string');
+    }
+    const body: unknown = JSON.parse(rawBody);
+    expect(body).toMatchObject({ model: 'gpt-5.4-mini', max_completion_tokens: 50 });
   });
 
   it('classifies parsed injection results', async () => {

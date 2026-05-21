@@ -4,13 +4,16 @@ category: nlu
 summary: |
   LLM 없는 결정적 constraint 추출. price (KRW/USD, adaptive band ±10%), vintage range,
   wine type, region, grape exclusion. SearchConstraints 구조로 YQL NOT filter + numeric
-  range injection 가능.
+  range injection 가능. FX rate는 hexagonal port (FxRatePort)로 외부 주입 가능.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Regression 게이트 (search-constraint-extractor) + benchmark constraint-metrics 통합.
-  KRW band ±10%는 calibrated. 그러나 KRW↔USD rate hardcoded, negation regex가 복합
-  구절에 edge case (e.g. "Cabernet but not too tannic") 존재.
+  Hexagonal port (FxRatePort) 도입으로 KRW↔USD/EUR/GBP rate hardcoded gap 해소.
+  fast-check property-based regression (numRuns=100) 21건 — FX-rate independence,
+  rate-injection determinism, 만원/천원 normalization exactness, vintage round-trip,
+  idempotence, NaN-safety (adversarial port + malformed string fuzz) 모두 통과.
+  기존 142건 regression 0건 회귀 유지. Backward-compat: 옵션 인자 미주입 시
+  DEFAULT_FX_RATE_PORT (mid-2025 static rate)로 fall-back.
 
 status: active
 since: 2025-08
@@ -22,10 +25,12 @@ surfaces:
 
 key_files:
   - src/domain/query/service/search-constraint-extractor.ts
+  - src/domain/query/port/fx-rate.port.ts
 
 tests:
   regression:
     - test/regression/search-constraint-extractor.regression.test.ts
+    - test/regression/search-constraint-fx-port-properties.regression.test.ts
 
 depends_on:
   - nlu.query-normalizer
@@ -34,12 +39,12 @@ related_rfcs:
   - docs/RFC-004.md
 
 known_limitations:
-  - "KRW↔USD rate hardcoded"
   - "Negation 복합 구문 edge case"
   - "Exclusion scope ambiguity (primary grape vs any)"
+  - "Live FX feed adapter는 아직 미구현 — DEFAULT_FX_RATE_PORT (static)만 wiring 완료"
 
 next_steps:
-  - "FX rate 외부 주입"
+  - "Live FX feed adapter (BOK/ECB rate API 캐싱 어댑터)"
   - "Phrase-level negation parsing"
   - "Confidence score per extraction"
 
@@ -47,3 +52,5 @@ tags:
   - constraint-extraction
   - deterministic
   - zero-llm-cost
+  - hexagonal-port
+  - property-tested

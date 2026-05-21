@@ -6,11 +6,17 @@ summary: |
   (gold=hand-curated / seeded=transliteration / silver=ML)로 운영. provenance 추적 +
   direct vs context_required 해석 모드 분리.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  3-tier 모두에 dedicated regression 게이트 (gold/seeded/silver). entity-alias-catalog.ts
-  + 별도 generation script per tier. ambiguity hint 시스템과 통합. producer/vintage
-  disambiguation hint 부재로 5는 못 됨.
+  3-tier 모두에 dedicated regression 게이트 (gold/seeded/silver) + property-based
+  data-integrity invariants (curated-alias-catalog-integrity.regression.test.ts,
+  fast-check 100 runs × 7 properties). NLP industry-standard entity-linking
+  provenance pattern (spaCy/ELQ/BLINK): closed provenance enum + intra-tier
+  surface uniqueness + NFC normalization lock + gold-dominance lookup ordering
+  + cross-tier canonical→attribute consistency + resolutionMode validity +
+  round-trip serialization stability. Tier counts locked (gold=122, seeded=138,
+  silver=0). entity-alias-catalog.ts + generation script per tier. ambiguity
+  hint 시스템과 통합 (context_required entries property-gated).
 
 status: active
 since: 2025-09
@@ -29,6 +35,7 @@ tests:
     - test/regression/gold-korean-entity-alias-catalog.regression.test.ts
     - test/regression/seeded-korean-entity-alias-catalog.regression.test.ts
     - test/regression/silver-korean-entity-alias-catalog.regression.test.ts
+    - test/regression/curated-alias-catalog-integrity.regression.test.ts
 
 depends_on:
   - korean-i18n.transliterator

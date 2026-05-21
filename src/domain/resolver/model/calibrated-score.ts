@@ -39,4 +39,19 @@ export interface CalibratedResolutionScore {
    * comparison may reference. Derived from the calibrated top-1 score.
    */
   readonly decisionConfidenceC: number;
+
+  /**
+   * Whether the calibration applied to produce `decisionConfidenceC` used
+   * trained parameters loaded from the {@link CalibrationStore}, or fell
+   * back to the identity (uncalibrated) pass-through that ships when no
+   * trained params exist for the query class.
+   *
+   * Downstream gates that depend on calibrated probability semantics
+   * (e.g. {@link ConfidenceRefusalPolicy} in the AdmissionGate, RFC-016 §3
+   * Epic 17.3) MUST skip their thresholding when this is `false` —
+   * otherwise an uncalibrated raw score is treated as a probability,
+   * which violates RFC-006 §6 ("raw scores must never influence
+   * decisions") and produces miscalibrated refusals.
+   */
+  readonly calibrationTrusted: boolean;
 }

@@ -2,14 +2,21 @@ id: etl.doc-queries-generation
 name: Synthetic Doc Queries Generation
 category: etl
 summary: |
-  Wine document (desc, pairing, note 등) 필드를 Claude로 합성 query 생성. golden query
-  set 다양성 + ranking 학습용 augmentation.
+  Wine document (canonical label, region, producer, grape, pairing 등) 구조화 입력으로
+  Doc2Query (Nogueira 2019) 합성 쿼리 N=15 슬롯 생성. BM25 `synthetic_queries` 전용
+  필드로 라우팅되어 원문 IDF 오염 없이 가중치 독립 튜닝 가능. Korean alias 주입으로
+  romanization hallucination 차단.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Claude 기반, model version 고정 시 결정적. 생성 결과 length/content 검증. 그러나
-  ground-truth 없음, synthetic query가 실제 사용자 intent 분포를 반영하지 않을 수
-  있음.
+  - 명명 상수 + 도메인 근거 bound: `DOC_QUERY_MIN_CHARS=3`, `DOC_QUERY_MAX_CHARS=200`,
+    `DOC_QUERIES_PER_DOC=15`, `DOC_QUERIES_SCHEMA_VERSION='1'` (CLAUDE.md 규칙 15).
+  - 정규화 파이프라인 (NFC + trim + 공백/대소문자 무시 canonical dedup) 으로 LLM의
+    근접 중복 슬롯 emission (`Opus One Napa` vs `OPUS ONE  NAPA`) 단일 결과로 수렴.
+  - JUST inside / JUST outside bound 경계 테스트 + 한글 NFC 안정성 테스트 + 한·영 혼합
+    배치 + AbortSignal 사전 점검 + malformed LLM 출력 graceful skip 회귀 18건.
+  - 모델 + content hash + schema_version 으로 idempotent skip; rule drift 감지 가능.
+  Long-tail 사용자 의도 적용 / popularity 가중치 / online eval 통합은 추후 단계.
 
 status: active
 since: 2025-09
@@ -22,7 +29,11 @@ surfaces:
 key_files:
   - scripts/etl/generate-doc-queries.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/doc-queries-generation.regression.test.ts
+  unit:
+    - test/unit/etl/generate-doc-queries.test.ts
 
 depends_on:
   - infra.anthropic-chat-llm
@@ -36,6 +47,7 @@ known_limitations:
 next_steps:
   - "예상 popularity로 weighting"
   - "Online eval 통합"
+  - "Schema version 2: 슬롯별 메타데이터 (intent type) 부착"
 
 tags:
   - query-augmentation

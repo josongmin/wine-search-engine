@@ -1,5 +1,8 @@
 import type { Pool } from 'pg';
 import type { AliasMatcher, AliasMatchResult } from '../../domain/query/service/anchor-extractor.js';
+import type { AliasType } from '../../domain/alias/model/alias.js';
+import { parseAliasType } from '../../domain/alias/model/alias.js';
+import { pickHigherTrustAliasType } from '../../domain/alias/service/conflict-resolver.js';
 import {
   buildAliasLookupPlan,
   isPhoneticAliasSurfaceCompatible,
@@ -26,6 +29,14 @@ interface AliasRow {
   surface_form: string;
   normalized_value: string;
   confidence: number;
+  /**
+   * RFC-003 §4 alias type as stored on the `aliases.alias_type` column.
+   * Optional only because the SQL is incrementally migrating call sites
+   * to include the column. When present, the matcher emits it on
+   * {@link AliasMatchResult.aliasType} so the resolver scorer can apply
+   * type-specific caps without parsing strategy strings.
+   */
+  alias_type?: string | undefined;
 }
 
 type FuzzyLookupStrategy =
@@ -257,7 +268,13 @@ function groupRows<TRow extends AliasRow>(
 ): readonly AliasMatchResult[] {
   const byNorm = new Map<
     string,
-    { surfaceForm: string; entityIds: Set<string>; confidence: number; strategies: Set<string> }
+    {
+      surfaceForm: string;
+      entityIds: Set<string>;
+      confidence: number;
+      strategies: Set<string>;
+      aliasType: AliasType | undefined;
+    }
   >();
 
   for (const row of rows) {
@@ -266,6 +283,7 @@ function groupRows<TRow extends AliasRow>(
     if (strategyForRow === undefined) {
       continue;
     }
+    const rowAliasType = parseAliasType(row.alias_type);
     const existing = byNorm.get(row.normalized_value);
     if (existing == null) {
       byNorm.set(row.normalized_value, {
@@ -273,6 +291,7 @@ function groupRows<TRow extends AliasRow>(
         entityIds: new Set([row.entity_id]),
         confidence: row.confidence,
         strategies: new Set([strategyForRow]),
+        aliasType: rowAliasType,
       });
       continue;
     }
@@ -282,6 +301,8 @@ function groupRows<TRow extends AliasRow>(
     if (row.confidence > existing.confidence) {
       existing.confidence = row.confidence;
     }
+    // Higher-trust alias_type wins on conflict (curated > derived).
+    existing.aliasType = pickHigherTrustAliasType(existing.aliasType, rowAliasType);
   }
 
   const matches: AliasMatchResult[] = [];
@@ -292,6 +313,7 @@ function groupRows<TRow extends AliasRow>(
       entityIds: Array.from(data.entityIds).map((id) => createCanonicalEntityId(id)),
       matchConfidence: data.confidence,
       lookupStrategy: Array.from(data.strategies).sort().join('+'),
+      ...(data.aliasType !== undefined ? { aliasType: data.aliasType } : {}),
     });
   }
 
@@ -405,11 +427,12 @@ export class PgAliasMatcher implements AliasMatcher {
            candidate.surface_form,
            candidate.normalized_value,
            candidate.confidence,
+           candidate.alias_type,
            q.query_id
          FROM unnest($1::int[], $2::text[][], $3::text[][], $4::text[][], $5::text[][])
               AS q(query_id, exact_values, compact_values, transliterated_values, phonetic_values)
          CROSS JOIN LATERAL (
-           SELECT entity_id, surface_form, normalized_value, confidence
+           SELECT entity_id, surface_form, normalized_value, confidence, alias_type
            FROM aliases
            WHERE search_snapshot_id = $6
              AND (
@@ -515,11 +538,12 @@ export class PgAliasMatcher implements AliasMatcher {
            candidate.surface_form,
            candidate.normalized_value,
            candidate.confidence,
+           candidate.alias_type,
            q.query_id
          FROM unnest($1::int[], $2::text[][])
               AS q(query_id, fuzzy_grams)
          CROSS JOIN LATERAL (
-           SELECT entity_id, surface_form, normalized_value, confidence
+           SELECT entity_id, surface_form, normalized_value, confidence, alias_type
            FROM aliases
            WHERE search_snapshot_id = $3
              AND is_suppressed = FALSE

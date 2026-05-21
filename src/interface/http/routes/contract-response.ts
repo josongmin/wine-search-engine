@@ -37,11 +37,11 @@ export function sendContractResponse<T>(
   void reply.status(statusCode).send(body);
 }
 
-export function parseContractBody<TContract extends { readonly body: z.ZodTypeAny }>(
+export function parseContractBody<TBody extends z.ZodTypeAny>(
   request: FastifyRequest,
-  contract: TContract,
-): z.output<TContract['body']> {
-  return contract.body.parse(request.body) as z.output<TContract['body']>;
+  contract: { readonly body: TBody },
+): z.output<TBody> {
+  return contract.body.parse(request.body) as z.output<TBody>;
 }
 
 export function sendRouteContractResponse(

@@ -1036,23 +1036,72 @@ export const ROBUSTNESS_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   ...TRANSLITERATION_EXACT_LOOKUP_LARGE_SCENARIOS,
 ];
 
-export const MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS: ReadonlySet<number> = new Set([
-  520, 521, 522, 523, 524,
-]);
+/**
+ * Scenario ID layout for this module. Every range is half-open `[start, endExclusive)`
+ * and derived from the literal `id:` fields in {@link ROBUSTNESS_SCENARIOS} above.
+ *
+ * Maintaining these as named ranges avoids `no-magic-numbers` violations on the
+ * sets below and keeps the boundaries auditable from a single block.
+ *
+ * Inherited core IDs (202/204/209) live in `scenarios.coverage.ts` and are
+ * surfaced here as a shared transliteration core anchor.
+ */
+const MESSY_QUERY_ROBUSTNESS_ID_START = 520;
+const MESSY_QUERY_ROBUSTNESS_ID_END_EXCLUSIVE = 525; // covers 520..524 (5 scenarios)
+
+const TRANSLITERATION_CORE_LOCAL_ID_START = 530;
+const TRANSLITERATION_CORE_LOCAL_ID_END_EXCLUSIVE = 552; // covers 530..551 (22 scenarios)
+
+const TRANSLITERATION_HARD_NEGATIVE_ID_START = 552;
+const TRANSLITERATION_HARD_NEGATIVE_ID_END_EXCLUSIVE = 556; // covers 552..555 (4 scenarios)
+
+const TRANSLITERATION_POLICY_PENDING_ID_START = 556;
+const TRANSLITERATION_POLICY_PENDING_ID_END_EXCLUSIVE = 557; // covers 556 (1 scenario)
+
+/**
+ * IDs inherited from `scenarios.coverage.ts` that anchor the transliteration core.
+ *
+ * Each constant names the original `id:` literal at its definition site in
+ * `scenarios.coverage.ts`. Listing them out (instead of an opaque numeric
+ * literal array) keeps the linkage explicit and satisfies `no-magic-numbers`.
+ */
+const SCENARIO_COVERAGE_TRANSLITERATION_ANCHOR_ID_A = 202;
+const SCENARIO_COVERAGE_TRANSLITERATION_ANCHOR_ID_B = 204;
+const SCENARIO_COVERAGE_TRANSLITERATION_ANCHOR_ID_C = 209;
+
+const TRANSLITERATION_CORE_INHERITED_IDS: readonly number[] = [
+  SCENARIO_COVERAGE_TRANSLITERATION_ANCHOR_ID_A,
+  SCENARIO_COVERAGE_TRANSLITERATION_ANCHOR_ID_B,
+  SCENARIO_COVERAGE_TRANSLITERATION_ANCHOR_ID_C,
+] as const;
+
+function rangeToSet(startInclusive: number, endExclusive: number): ReadonlySet<number> {
+  const ids: number[] = [];
+  for (let id = startInclusive; id < endExclusive; id += 1) {
+    ids.push(id);
+  }
+  return new Set(ids);
+}
+
+export const MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS: ReadonlySet<number> = rangeToSet(
+  MESSY_QUERY_ROBUSTNESS_ID_START,
+  MESSY_QUERY_ROBUSTNESS_ID_END_EXCLUSIVE,
+);
 
 export const TRANSLITERATION_EXACT_LOOKUP_CORE_SCENARIO_IDS: ReadonlySet<number> = new Set([
-  202, 204, 209, 530, 531, 532, 533, 534,
-  535, 536, 537, 538, 539, 540, 541, 542, 543,
-  544, 545, 546, 547, 548, 549, 550, 551,
+  ...TRANSLITERATION_CORE_INHERITED_IDS,
+  ...rangeToSet(TRANSLITERATION_CORE_LOCAL_ID_START, TRANSLITERATION_CORE_LOCAL_ID_END_EXCLUSIVE),
 ]);
 
-export const TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_SCENARIO_IDS: ReadonlySet<number> = new Set([
-  552, 553, 554, 555,
-]);
+export const TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_SCENARIO_IDS: ReadonlySet<number> = rangeToSet(
+  TRANSLITERATION_HARD_NEGATIVE_ID_START,
+  TRANSLITERATION_HARD_NEGATIVE_ID_END_EXCLUSIVE,
+);
 
-export const TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_SCENARIO_IDS: ReadonlySet<number> = new Set([
-  556,
-]);
+export const TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_SCENARIO_IDS: ReadonlySet<number> = rangeToSet(
+  TRANSLITERATION_POLICY_PENDING_ID_START,
+  TRANSLITERATION_POLICY_PENDING_ID_END_EXCLUSIVE,
+);
 
 export const TRANSLITERATION_EXACT_LOOKUP_SCENARIO_IDS: ReadonlySet<number> = new Set([
   ...TRANSLITERATION_EXACT_LOOKUP_CORE_SCENARIO_IDS,

@@ -8,10 +8,11 @@
  */
 
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config/env.js';
 import { buildRuntimeSupportServices } from '../src/config/container-runtime-support.js';
 
-async function main(): Promise<void> {
+export async function main(): Promise<number> {
   const live = process.argv.includes('--live');
   const config = loadConfig();
   const hasKey = config.anthropic.apiKey !== undefined && config.anthropic.apiKey.length > 0;
@@ -31,8 +32,7 @@ async function main(): Promise<void> {
   if (hasKey && !kill && !wired) {
     lines.push('  ERROR: Key present and kill switch off, but injection judge missing — check config.');
     process.stdout.write(`${lines.join('\n')}\n`);
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   if (wired && services.injectionJudge) {
@@ -56,10 +56,21 @@ async function main(): Promise<void> {
   }
 
   process.stdout.write(`${lines.join('\n')}\n`);
+  return 0;
 }
 
-void main().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`${msg}\n`);
-  process.exitCode = 1;
-});
+const isCliEntrypoint =
+  process.argv[1] !== undefined
+  && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isCliEntrypoint) {
+  void main()
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`${msg}\n`);
+      process.exitCode = 1;
+    });
+}

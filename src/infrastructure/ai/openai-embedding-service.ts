@@ -3,6 +3,7 @@
  * Implements {@link EmbeddingServicePort} with Bearer auth.
  */
 
+import { createHash } from 'node:crypto';
 import type { EmbeddingServicePort } from '../../domain/retrieval/port/embedding-service.port.js';
 import {
   fetchWithTimeout,
@@ -32,6 +33,66 @@ const OPENAI_EMBEDDING_BREAKER_NAME = 'openai-embedding';
 const OPENAI_EMBEDDING_FAILURE_THRESHOLD = 3;
 const OPENAI_EMBEDDING_RECOVERY_TIMEOUT_MS = 30_000;
 const OPENAI_EMBEDDING_HALF_OPEN_MAX = 2;
+
+/**
+ * ML-model SemVer identifier for the production embedding artifact.
+ *
+ * Industry-standard practice: pinning the model NAME alone is insufficient
+ * — OpenAI silently rotates underlying weights for "text-embedding-3-small"
+ * (and other endpoints) without changing the slug, which can drift vector
+ * geometry mid-deployment. The `@vN` suffix lets us namespace the cache
+ * (and any persisted-vector catalog) by an explicit version we bump
+ * deliberately when we choose to re-embed the corpus.
+ *
+ * Bump procedure:
+ *   1. Run the offline eval against the new candidate version.
+ *   2. Bump the suffix here (v1 → v2).
+ *   3. Re-embed the corpus via ETL; cache keys diverge automatically,
+ *      so old vectors live in dead key space and expire via TTL.
+ */
+export const EMBEDDING_MODEL_VERSION = 'text-embedding-3-small@v1' as const;
+
+/** Truncate SHA-256 hex in deterministic cache keys (collision-safe, bounded length). */
+const EMBEDDING_CACHE_KEY_HASH_HEX_LENGTH = 16;
+
+/**
+ * Compute a deterministic cache key for an embedding of `text` under
+ * `modelVersion`. Pure function — no I/O, no side effects.
+ *
+ * Determinism contract:
+ *   - Same `{text, modelVersion}` → same key, byte-for-byte.
+ *   - Different modelVersion → different key (cache isolation across
+ *     model upgrades; no accidental cross-version reuse).
+ *   - Korean text in NFD vs NFC normalizes to NFC first, so visually
+ *     identical strings collide on the same key even if the input
+ *     decomposition differs (a common bug when text traverses OS,
+ *     browser, or HTTP boundaries).
+ *
+ * The returned key is shaped `embedding:<modelVersion>:<sha256-16hex>`.
+ * It is independent of the runtime Redis layer so unit tests can assert
+ * against it without standing up Redis.
+ */
+export function getEmbeddingCacheKey(
+  text: string,
+  modelVersion: string = EMBEDDING_MODEL_VERSION,
+): string {
+  // NFC normalization — Korean (한글), accented Latin (é/ñ), and emoji
+  // ZWJ sequences round-trip through HTTP/JSON in inconsistent forms;
+  // canonicalizing eliminates that source of cache-key fragmentation.
+  const normalized = text.normalize('NFC');
+  const hash = createHash('sha256').update(normalized).digest('hex').slice(0, EMBEDDING_CACHE_KEY_HASH_HEX_LENGTH);
+  return `embedding:${modelVersion}:${hash}`;
+}
+
+/**
+ * True when `text` is non-empty after NFC normalization and trimming.
+ * Used to reject empty / whitespace-only inputs at the API boundary
+ * rather than silently emitting an all-zero embedding (which downstream
+ * scoring math would happily multiply with, producing NaN/zero scores).
+ */
+function isEmbeddableText(text: string): boolean {
+  return text.normalize('NFC').trim().length > 0;
+}
 
 interface OpenAiEmbeddingServiceOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
@@ -72,6 +133,12 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
   }
 
   async embed(text: string): Promise<readonly number[]> {
+    // Reject empty / whitespace-only at the API boundary — emitting an
+    // all-zero embedding for "" would corrupt downstream cosine scores
+    // (NaN from zero-norm vectors, or silent ties at the top of the rank).
+    if (!isEmbeddableText(text)) {
+      throw new Error('OpenAI embeddings: text must be non-empty after trim');
+    }
     const results = await this.runWithKeyPool((slot) => this.callApi(text, slot.apiKey));
     const first = results[0];
     if (first === undefined) {
@@ -84,6 +151,16 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
     texts: readonly string[],
   ): Promise<readonly (readonly number[])[]> {
     if (texts.length === 0) return [];
+    // Reject if ANY input is empty/whitespace-only — partial-failure
+    // batching silently mis-aligns text→vector pairs on the caller side.
+    for (let i = 0; i < texts.length; i++) {
+      const candidate = texts[i] ?? '';
+      if (!isEmbeddableText(candidate)) {
+        throw new Error(
+          `OpenAI embeddings: text at index ${i} must be non-empty after trim`,
+        );
+      }
+    }
     return this.runWithKeyPool((slot) => this.callApi([...texts], slot.apiKey));
   }
 

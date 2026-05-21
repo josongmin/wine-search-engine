@@ -197,9 +197,9 @@ export function detectQueryIntent(
     return 'mixed_query';
   }
 
-  if (hasPairingKeyword) {
-    return 'pairing_search';
-  }
+  // NOTE: a `hasPairingKeyword` branch used to live here, but the early
+  // `if (hasPairingKeyword) { return 'pairing_search'; }` above already
+  // dominates every reachable path — the duplicate was statically dead.
 
   if (hasPriceKeyword) {
     return 'budget_search';

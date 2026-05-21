@@ -96,6 +96,14 @@ export function buildRankedRouteResolveResult(
       top2CalibratedScore: top2Score,
       calibratedGap,
       decisionConfidenceC,
+      // Ranked-route lifts the ranker's `finalScore` directly into
+      // `decisionConfidenceC` without invoking a trained Calibrator —
+      // the value is a ranking signal, not a calibrated probability.
+      // The optional DualLaneResolveCalibrator below may overwrite this
+      // trace; until then, flag calibration as untrusted so the
+      // AdmissionGate's confidence-refusal floor (RFC-016 §3, Epic 17.3)
+      // does not refuse a raw score against a probability threshold.
+      calibrationTrusted: false,
       ambiguityDetected: false,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },

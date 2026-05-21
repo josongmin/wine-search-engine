@@ -5,10 +5,19 @@ summary: |
   Pino 기반 structured logger + 보안 강화 err serializer (SQL params, connection
   string, auth header, user query 등 PII/secret strip). 모든 backend 서비스가 사용.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Production-grade serializer. CLAUDE.md에 사용 강제 명시. 그러나 PII detection이
-  pattern-based (ML 없음), 신규 secret pattern 시 코드 변경 필요.
+  Production-grade serializer + Unicode-aware PII scrubbing (`scrubPiiFromString`).
+  Industry-verified categories: GDPR Article 4(1) (email, IPv4, auth header,
+  conn-string credentials, payment card). Property-based regression coverage
+  (fast-check, numRuns: 100) on real pino integration via in-memory sink:
+  idempotence, Korean preservation, stack-trace preservation, false-positive
+  guard (snapshot version numbers, benign messages). CLAUDE.md rule 8 compliant
+  (Unicode boundaries with /u flag). 8 named PII regex constants (CLAUDE.md
+  rule 15): 6 atomic PII consts (email, IPv4, auth header, conn-string, card
+  grouped, card contiguous) + 2 SQL literal consts (quoted RHS, numeric RHS) —
+  SQL consts exported and asserted by regression tests after a 2026-05 audit
+  found one previously inlined inside `scrubPiiFromString`.
 
 status: active
 since: 2025-09
@@ -21,19 +30,22 @@ surfaces:
 key_files:
   - src/domain/shared/bootstrap-logger.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/pino-logger-pii-properties.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "PII detection pattern-based"
+  - "PII detection은 여전히 pattern-based (ML 미적용). 신규 secret 형식 추가는 코드 변경 필요."
 
 next_steps:
-  - "PII detection 학습 기반 추가"
+  - "PII detection 학습 기반(예: presidio-style) 추가 검토"
 
 tags:
   - logging
   - security
   - pii-strip
+  - gdpr

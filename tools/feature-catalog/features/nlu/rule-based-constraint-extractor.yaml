@@ -6,11 +6,17 @@ summary: |
   정규화 + 50+ exclusion rule로 attribute 도메인 mapping (e.g. "no high tannin" →
   tannin_max < 3). Pure lexical, composable.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Korean negation normalizer + rule inventory 잘 정리. constraint-graph 테스트로 간접
-  커버. 그러나 rule weighting / confidence scoring 부재, scope ambiguity (e.g. "not too
-  sweet"의 정확한 threshold) 명세 없음.
+  Korean negation normalizer + rule inventory 잘 정리. 부정 scope의 정량적 cutoff을
+  named constants로 정형화 — NEGATION_SOFT_CAP_QUANTILE = 0.4 (mild aversion: "not
+  too X" / "별로 안 X"), NEGATION_HARD_CAP_QUANTILE = 0.25 (strong aversion: "no
+  high X" / "low X only" / "안 X" / "X 빼고" / "X 없이" / "X 말고"). 전용 regression
+  suite (31 tests) — English/Korean 양쪽, 정확한 threshold 값 assertion, 5x
+  determinism, particle variants (안/못/없이/빼고/말고), false-positive guard ("this
+  wine is not what I want" ≠ 부정 cap), mixed positive+negative ("sweet but not too
+  sweet" → sweetness=sweet ∧ sweetness_max=SOFT). rule weighting / learning은 여전히
+  부재 — 5단계는 ML-driven scope arbitration 필요.
 
 status: active
 since: 2025-09
@@ -24,7 +30,9 @@ key_files:
   - src/domain/query/service/rule-based-constraint-extractor.ts
   - src/domain/query/service/korean-negation-normalizer.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/rule-based-constraint-extractor.regression.test.ts
 
 depends_on:
   - nlu.query-normalizer
@@ -34,12 +42,13 @@ related_rfcs:
 
 known_limitations:
   - "Rule 50+ hardcoded — learning 없음"
-  - "Negation scope ambiguity (\"not too X\"의 quantile cutoff 명세 없음)"
-  - "Positive constraint 상호작용 문서화 부재"
+  - "Quantile cutoff은 catalog 분포 가정 (실제 catalog 분포와 sync 필요)"
+  - "Tannin/sweetness만 quantile cap 적용 — acidity/body 미적용"
 
 next_steps:
-  - "Scope mapping 정형화"
   - "Offline error analysis 기반 rule 확장"
+  - "ML-driven scope arbitration (5단계 진입 요건)"
+  - "Acidity/body 등 다른 palate 축에도 quantile cap 확장"
 
 tags:
   - negation

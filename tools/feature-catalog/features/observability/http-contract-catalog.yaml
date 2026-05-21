@@ -2,14 +2,19 @@ id: observability.http-contract-catalog
 name: HTTP Route Contract Catalog (SSoT)
 category: observability
 summary: |
-  16개 declared HTTP route의 method / URL / operationId / 상태 코드 / response shape
+  26개 declared HTTP route의 method / URL / operationId / 상태 코드 / response shape
   중앙 등록부. register-contract-route + http-route-contract-catalog. OpenAPI export +
-  http-contracts CI gate의 SSoT.
+  http-contracts CI gate의 SSoT. SemVer 2.0 카탈로그 버전 + sha256 구조 fingerprint로
+  breaking-change tripwire 제공.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Production contract gating (verify:http-contracts on prepush). register-contract-route +
-  contract-route-discipline test로 contract 일관성 보장. OpenAPI parity test 운영.
+  Production contract gating (verify:http-contracts on prepush) + SemVer 2.0
+  카탈로그 버전(HTTP_CONTRACT_CATALOG_VERSION) + 결정적 sha256 fingerprint
+  (HTTP_CONTRACT_CATALOG_FINGERPRINT). Property-based regression
+  (fast-check, numRuns=100)으로 (method,url)·operationId 유일성, HTTP method
+  enum 준수, 2xx/error status 커버리지를 임의 subset에서 검증.
+  Fingerprint mismatch 시 breaking-change로 표면화 → 검토·버전 bump 강제.
 
 status: active
 since: 2025-09
@@ -23,20 +28,23 @@ key_files:
   - src/interface/http/routes/http-route-contract-catalog.ts
   - src/interface/http/routes/register-contract-route.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/http-contract-catalog-properties.regression.test.ts
 
 depends_on: []
 
 related_rfcs:
   - docs/RFC-014.md
 
-known_limitations:
-  - "Schema versioning 정책 (v1/v2) 부재"
+known_limitations: []
 
 next_steps:
-  - "Route versioning"
+  - "Route-level schema versioning policy (v1/v2 split) 자동 검증"
 
 tags:
   - api
   - contract
   - ssot
+  - semver
+  - breaking-change-detection

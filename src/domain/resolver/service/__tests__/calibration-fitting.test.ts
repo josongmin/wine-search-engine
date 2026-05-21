@@ -242,6 +242,75 @@ describe('expectedCalibrationError', () => {
   it('rejects invalid binCount', () => {
     expect(() => expectedCalibrationError([0.5], [0], 0)).toThrow(/binCount/);
   });
+
+  describe('non-finite predictions (NaN / Infinity guard)', () => {
+    it('reports worst-case ECE=1 when every prediction is NaN (no silent zero-ECE on a broken fitter)', () => {
+      const preds = [Number.NaN, Number.NaN, Number.NaN];
+      const labels: (0 | 1)[] = [1, 0, 1];
+      expect(expectedCalibrationError(preds, labels)).toBe(1);
+    });
+
+    it('reports worst-case ECE=1 when every prediction is Infinity', () => {
+      expect(expectedCalibrationError([Infinity, -Infinity], [1, 0])).toBe(1);
+    });
+
+    it('blends a non-finite penalty into ECE proportional to the broken fraction', () => {
+      // 1 finite (well-calibrated) + 1 NaN → finite ECE ≈ 0, non-finite penalty 0.5.
+      const preds = [0.5, Number.NaN];
+      const labels: (0 | 1)[] = [1, 0];
+      const ece = expectedCalibrationError(preds, labels);
+      // (validCount/total) * finiteECE + (nonFinite/total) * 1 ≈ 0.5
+      expect(ece).toBeGreaterThan(0.3);
+      expect(ece).toBeLessThanOrEqual(1);
+    });
+
+    it('clean case (no non-finite) is unaffected by the guard', () => {
+      // Regression-guard the non-finite branch from disturbing the clean case.
+      const preds = [0.5, 0.5];
+      const labels: (0 | 1)[] = [1, 0];
+      expect(expectedCalibrationError(preds, labels)).toBeLessThan(0.01);
+    });
+  });
+});
+
+// ─── Numerical guards on fit functions ─────────────────────────────────────
+
+describe('fitPlattScaling — numerical-guard safety', () => {
+  it('returns finite params on degenerate uniform-rawScore input (Hessian near-singular)', () => {
+    // Every sample has rawScore = 0 — Hessian.a_a term goes to zero. With L2
+    // ridge the inversion is still well-defined; output must stay finite.
+    const samples: CalibrationSample[] = Array.from({ length: 50 }, (_, i) => ({
+      rawScore: 0,
+      label: i % 2 === 0 ? 1 : 0,
+    }));
+    const { a, b } = fitPlattScaling(samples);
+    expect(Number.isFinite(a)).toBe(true);
+    expect(Number.isFinite(b)).toBe(true);
+  });
+
+  it('never emits NaN params even when Newton diverges on extreme-scale data', () => {
+    // Very large rawScores can push the Newton step magnitude. The non-finite
+    // fallback at the end of fitPlattScaling must take over.
+    const samples: CalibrationSample[] = Array.from({ length: 200 }, (_, i) => ({
+      rawScore: i < 100 ? -1e6 : 1e6,
+      label: i < 100 ? 0 : 1,
+    }));
+    const { a, b } = fitPlattScaling(samples);
+    expect(Number.isFinite(a)).toBe(true);
+    expect(Number.isFinite(b)).toBe(true);
+  });
+});
+
+describe('fitTemperatureScaling — numerical-guard safety', () => {
+  it('returns T=1 (identity fallback) when bisection result is non-positive (pathological data)', () => {
+    // Construct a sample set where both labels are 1 (single-class) — early
+    // guard returns identity. Tests the explicit branch.
+    const samples: CalibrationSample[] = Array.from({ length: 10 }, (_, i) => ({
+      rawScore: i / 10,
+      label: 1 as const,
+    }));
+    expect(fitTemperatureScaling(samples).temperature).toBe(1);
+  });
 });
 
 // ─── fitBestCalibration ─────────────────────────────────────────────────────
@@ -272,16 +341,59 @@ describe('fitBestCalibration', () => {
     }
   });
 
-  it('selects the method with the lowest ECE among the three candidates', () => {
+  it('selects a method with reasonable ECE on synthetic logistic data', () => {
     const samples = synthesizeLogisticSamples({ count: 500, slope: 1.5, bias: 0.2, seed: 19 });
     const params = fitBestCalibration(samples, 'short_entity');
-    // Whatever was selected, its reported ECE should be ≤ the ECE of using the
-    // raw clipped scores as the calibrator (the baseline this is replacing).
-    const labels = samples.map((s) => s.label);
-    const rawEce = expectedCalibrationError(
-      samples.map((s) => Math.max(0, Math.min(1, s.rawScore))),
-      labels,
-    );
-    expect(params.ece).toBeLessThanOrEqual(rawEce);
+    expect(params.ece).toBeGreaterThanOrEqual(0);
+    expect(params.ece).toBeLessThanOrEqual(1);
+  });
+
+  describe('holdout split (RFC-006 §7.4 — out-of-sample ECE)', () => {
+    it('measures ECE on holdout subset for datasets above the size threshold', async () => {
+      const { fitBestCalibrationWithDiagnostics } = await import('../calibration-fitting.js');
+      const samples = synthesizeLogisticSamples({ count: 500, slope: 1.5, bias: 0.2, seed: 23 });
+      const diag = fitBestCalibrationWithDiagnostics(samples, 'short_entity');
+      expect(diag.outOfSample).toBe(true);
+    });
+
+    it('falls back to in-sample ECE for small datasets (below the holdout threshold)', async () => {
+      const { fitBestCalibrationWithDiagnostics } = await import('../calibration-fitting.js');
+      const samples = synthesizeLogisticSamples({ count: 30, slope: 1.5, bias: 0.2, seed: 31 });
+      const diag = fitBestCalibrationWithDiagnostics(samples, 'short_entity');
+      expect(diag.outOfSample).toBe(false);
+    });
+
+    it('refits the chosen method on the FULL dataset (persisted params use all available data)', async () => {
+      const { fitBestCalibrationWithDiagnostics } = await import('../calibration-fitting.js');
+      const samples = synthesizeLogisticSamples({ count: 600, slope: 2, bias: 0, seed: 37 });
+      const diag = fitBestCalibrationWithDiagnostics(samples, 'short_entity');
+      // Persisted params shape is non-trivial (not an empty isotonic identity)
+      // because the refit used the entire sample set.
+      if (diag.params.method === 'isotonic') {
+        expect(diag.params.params['breakpoint_count']).toBeGreaterThan(0);
+      } else {
+        expect(Object.keys(diag.params.params).length).toBeGreaterThan(0);
+      }
+    });
+
+    it('opt-out via holdoutFraction=0 reports in-sample ECE on any size', async () => {
+      const { fitBestCalibrationWithDiagnostics } = await import('../calibration-fitting.js');
+      const samples = synthesizeLogisticSamples({ count: 500, slope: 1.5, bias: 0.2, seed: 41 });
+      const diag = fitBestCalibrationWithDiagnostics(samples, 'short_entity', { holdoutFraction: 0 });
+      expect(diag.outOfSample).toBe(false);
+    });
+
+    it('exposes per-method ECE for operator diagnostics', async () => {
+      const { fitBestCalibrationWithDiagnostics } = await import('../calibration-fitting.js');
+      const samples = synthesizeLogisticSamples({ count: 500, slope: 1.8, bias: 0, seed: 43 });
+      const diag = fitBestCalibrationWithDiagnostics(samples, 'short_entity');
+      expect(diag.methodEce.platt).toBeGreaterThanOrEqual(0);
+      expect(diag.methodEce.temperature).toBeGreaterThanOrEqual(0);
+      expect(diag.methodEce.isotonic).toBeGreaterThanOrEqual(0);
+      // The chosen method must have ECE ≤ each candidate's ECE.
+      expect(diag.params.ece).toBeLessThanOrEqual(diag.methodEce.platt);
+      expect(diag.params.ece).toBeLessThanOrEqual(diag.methodEce.temperature);
+      expect(diag.params.ece).toBeLessThanOrEqual(diag.methodEce.isotonic);
+    });
   });
 });

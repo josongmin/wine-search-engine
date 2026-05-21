@@ -1,0 +1,18 @@
+{
+  "id": "msg_01EndTurnReply9876543ABCD",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "text",
+      "text": "Sancerre is a Loire Valley white made from Sauvignon Blanc. It pairs well with goat cheese and shellfish, and is best enjoyed within 2–4 years of vintage."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 412,
+    "output_tokens": 53
+  }
+}

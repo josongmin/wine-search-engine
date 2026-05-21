@@ -1,0 +1,18 @@
+{
+  "id": "msg_01RefusedSafetyBlock5678",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "text",
+      "text": "I can't help with that request."
+    }
+  ],
+  "stop_reason": "refusal",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 312,
+    "output_tokens": 9
+  }
+}

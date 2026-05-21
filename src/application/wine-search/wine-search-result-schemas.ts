@@ -34,6 +34,27 @@
  *    carry `.finite()` so NaN cannot poison downstream observability.
  *  - Every array carries `.max(N)` with a domain-justified bound (CLAUDE.md
  *    schema-quality bar).
+ *
+ * S1 SEMANTIC SPLIT (terminationKind — Design Option C):
+ *   `policy_blocked: boolean` historically conflated two distinct shutdown
+ *   modes: (a) the security sanitizer rejecting an adversarial query and
+ *   (b) the deterministic router rejecting an unsupported / signal-free
+ *   query. Operators reading `policy_blocked=true` could not tell whether
+ *   they were looking at a security event or a vocabulary-coverage gap;
+ *   users in both cases received the same Korean security-template.
+ *
+ *   Resolution: a new {@link TerminationKind} discriminant lives on the
+ *   termination record. `'security_block'` is set ONLY when the analyzer's
+ *   adversarial sanitizer fires (`classifyQueryBudget === 'adversarial'`),
+ *   and only that branch sets `policy_blocked=true`. Every other
+ *   shutdown — admit-gate empty / too-long, router reject, analyzer
+ *   malformed — emits `'unsupported_intent'` with `policy_blocked=false`.
+ *   The synthesizer selects a different Korean/English template per kind
+ *   so the user-facing answer also disambiguates the two cases.
+ *
+ *   The `kind` field is OPTIONAL on the wire — present only when the
+ *   underlying `terminationReason` is `'blocked'`. Other terminations
+ *   (`'answer'`, `'fallback'`, `'error'`, ...) omit it.
  */
 
 import { z } from 'zod';
@@ -127,6 +148,32 @@ export const ORCHESTRATOR_ABORTED_ANSWER_KOREAN = '요청이 취소되었습니�
 export const ORCHESTRATOR_ABORTED_ANSWER_ENGLISH = 'Request canceled.';
 
 // ---------------------------------------------------------------------------
+// TerminationKind — S1 semantic split (security vs unsupported intent).
+// CLAUDE.md rule 15 (named constants), rule 25/30 (SSoT for the enum), and
+// the docstring above motivates the discriminant.
+// ---------------------------------------------------------------------------
+
+/** Terminal kind indicating the adversarial sanitizer (analyzer's
+ *  `classifyQueryBudget` → `classification === 'adversarial'`) blocked the
+ *  query. This is the ONLY case that should surface `policy_blocked=true`. */
+export const TERMINATION_KIND_SECURITY_BLOCK = 'security_block';
+
+/** Terminal kind indicating the orchestrator stopped because the request
+ *  could not be handled — empty after trim, exceeded the length cap, the
+ *  deterministic router emitted a `reject` plan (no anchors, no
+ *  constraints, intent=unknown), or the analyzer failed self-consistency
+ *  (`malformed`). Operationally this is a vocabulary / coverage signal,
+ *  NOT a security event; `policy_blocked` MUST be false. */
+export const TERMINATION_KIND_UNSUPPORTED_INTENT = 'unsupported_intent';
+
+/** Zod enum mirroring the {@link TerminationKind} discriminant. */
+export const TerminationKindSchema = z.enum([
+  TERMINATION_KIND_SECURITY_BLOCK,
+  TERMINATION_KIND_UNSUPPORTED_INTENT,
+]);
+export type TerminationKind = z.infer<typeof TerminationKindSchema>;
+
+// ---------------------------------------------------------------------------
 // Zod sub-schemas
 // ---------------------------------------------------------------------------
 
@@ -210,6 +257,10 @@ const DegradedReasonSchema = z.enum([
   'circuit_open',
   'no_results',
   'policy_blocked',
+  // Unmodeled runtime failure inside the primary structured-LLM path —
+  // distinguished from `malformed_llm_output` so operations can tell
+  // schema-validation noise apart from genuine surprises (P-M1 finding).
+  'unexpected_error',
 ]);
 
 const PlanKindSchema = z.enum([
@@ -277,6 +328,11 @@ export const WineSearchResultSchema = z.object({
   totalDurationMs: z.number().finite().min(0).max(ORCHESTRATOR_MAX_TOTAL_DURATION_MS),
   terminationReason: AgentTerminationReasonSchema,
   policyBlocked: z.boolean(),
+  /** S1 discriminant — see module docstring. Present only when
+   *  `terminationReason === 'blocked'`. The two values distinguish a real
+   *  security-sanitizer block (`policy_blocked === true`) from an
+   *  unsupported-intent / vocabulary-gap rejection (`policy_blocked === false`). */
+  terminationKind: TerminationKindSchema.optional(),
   degradedReason: DegradedReasonSchema.optional(),
   /** Canonical name (`intent`) matches the HTTP wire field; the underlying
    *  semantic is the analyzer's intent classifier output, with `'rejected'`
@@ -298,6 +354,9 @@ export interface WineSearchResult {
   readonly totalDurationMs: number;
   readonly terminationReason: AgentTerminationReason;
   readonly policyBlocked: boolean;
+  /** Discriminator for the two distinct `terminationReason === 'blocked'`
+   *  modes. See module docstring (S1 semantic split). */
+  readonly terminationKind?: TerminationKind | undefined;
   readonly degradedReason: AnswerResult['degradedReason'];
   readonly intent: QueryIntent | 'rejected';
   readonly planKind: ExecutionPlan['kind'];

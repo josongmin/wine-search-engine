@@ -6,13 +6,17 @@ summary: |
   judgment 변환 + alias-proposer + promotion-gate. LTR 재학습용 데이터 + auto-rollback
   결정.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Domain layer 코드 존재 (feedback + learning module). 그러나 production wiring 부분적,
-  online quality monitor가 metric만 emit, auto-rollback이 실제 deploy에 연결 안 됨.
-  사용자 ↔ 학습 closed loop 미완성.
+  Production wired in container-learning.ts: PgFeedbackStore (PG-backed) +
+  FeedbackProcessor + FeedbackTTLEnforcer 모두 composed. POST /v1/feedback 핸들러가
+  `deps.feedbackStore.saveFeedback(signal)` 직접 호출 (route file). feedbackIngestEnabled
+  toggle은 `!killSwitch.learning && feedbackStore !== null`로 활성화 — 즉 PG가
+  설정되어 있고 학습 kill-switch off일 때 ingest 작동. Idempotency key 처리 (UUID 검증).
+  4 위해서는 LTR 재학습 cron 통합 + online quality monitor가 emit 외에 actionable
+  alerting + auto-rollback이 actual deploy에 연결 필요.
 
-status: experimental
+status: active
 since: 2025-11
 last_reviewed: 2026-05-21
 owner: core
@@ -40,15 +44,16 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Production wiring 미완 (online quality monitor만 emit)"
-  - "Auto-rollback이 deploy에 연결 안 됨"
-  - "Closed-loop A/B 부재"
+  - "LTR 재학습 cron 트리거 미통합 (수동 학습만)"
+  - "Auto-rollback decision은 결정은 하나 deploy 시스템에 비연결"
+  - "Online quality monitor가 emit하지만 alerting threshold 미설정"
 
 next_steps:
-  - "Production wiring 완성"
+  - "LTR retraining cron 통합 (feedback → silver → train → A/B)"
   - "Auto-rollback ↔ deploy 통합"
+  - "Alerting thresholds for online quality monitor"
 
 tags:
   - feedback
   - learning
-  - experimental
+  - production-wired

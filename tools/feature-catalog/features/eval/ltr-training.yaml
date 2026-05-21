@@ -6,21 +6,30 @@ summary: |
   Claude 기반 semantic relevance judgment. 학습 파이프라인 작동, Vespa serving 통합은
   POC 단계.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Pipeline 코드는 존재 + 학습/export 동작. 그러나 Vespa serving 통합 미완 (production
-  ranking에 미적용), retraining cadence SLA 없음. Weak label 품질 검증 없음.
+  Training pipeline (LambdaMARTExample + trainLambdaMARTModel + LtrTrainingService) +
+  serving 통합 모두 production-wired. PgLtrModelRegistry (container-runtime-support.ts:270)
+  가 PG에 학습된 모델 저장, `LTRRanker.rerank` (ranker.ts:540)가 production search 경로
+  에서 모델 로드 후 호출. rerankDecision이 search-usecase-post-route-phase에서 score
+  drift / model version 추적. 그러나 retraining cadence cron 미설정 (수동 학습 only),
+  weak label cross-validation 부재, online quality feedback loop 미통합. 4가 되려면
+  자동화된 retraining + label quality assessment + 회귀 게이트 필요.
 
-status: experimental
+status: active
 since: 2025-11
 last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "CLI (offline)"
+  - "CLI: scripts/eval/run-eval-and-train-ltr.ts (training)"
+  - "Internal: ltr_model_registry PG table → production rerank pipeline"
 
 key_files:
   - scripts/eval/run-eval-and-train-ltr.ts
+  - src/domain/ranking/service/ltr-training-service.ts
+  - src/domain/ranking/service/lambdamart-ranker.ts
+  - src/infrastructure/adapter/pg-ltr-model-registry.ts
 
 tests: {}
 
@@ -30,15 +39,16 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Vespa serving 통합 미완"
-  - "Retraining SLA 없음"
-  - "Weak label 품질 검증 없음"
+  - "Retraining cadence cron 미설정 (수동 학습 only)"
+  - "Weak label (Claude judge) 품질 cross-validation 없음"
+  - "Online quality feedback loop 미통합 (학습→배포→피드백→재학습 closed loop 없음)"
 
 next_steps:
-  - "Vespa serving stack 통합"
-  - "Retraining cadence 셋업 (weekly/monthly)"
+  - "Weekly/monthly retraining cron 셋업"
+  - "Weak label quality benchmark vs human-labeled subset"
+  - "Online feedback loop (feedback-and-learning과 통합)"
 
 tags:
   - ml-training
   - ranking
-  - experimental
+  - production-wired

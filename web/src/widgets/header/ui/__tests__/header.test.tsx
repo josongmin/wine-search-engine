@@ -44,6 +44,8 @@ describe('Header', () => {
     expect(screen.getByText('탐색')).toBeInTheDocument();
     expect(screen.getByText('위시리스트')).toBeInTheDocument();
     expect(screen.getByText('에이전트 랩')).toBeInTheDocument();
+    // Strangler-fig: the new wine-search lab lives alongside the agent lab.
+    expect(screen.getByText('와인 검색 랩')).toBeInTheDocument();
   });
 
   it('does NOT show search input on home page', () => {

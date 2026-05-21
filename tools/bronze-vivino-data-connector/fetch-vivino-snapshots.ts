@@ -21,6 +21,172 @@ import type { PoolConfig } from 'pg';
 
 const SOURCE_ID = 'vivino';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP fetch resilience (etl.bronze-data-connector maturity bump 2→3)
+//
+// The CLI above reads bronze rows out of Postgres. The fetcher below performs
+// HTTP refreshes from the upstream Vivino API into the same bronze artifact
+// shape, with the retry/backoff/freshness guarantees that the maturity
+// rationale calls out.
+//
+// Resilience policy:
+//   - Retry on 5xx and 429 and on transient network errors (TypeError from
+//     undici fetch).
+//   - Do NOT retry on 4xx (other than 429).
+//   - Backoff is exponential with full-jitter: delay = floor(random * expDelay),
+//     where expDelay = min(BASE * 2^(attempt-1), CAP).
+//   - Attempts cap is a configurable retry budget (`maxRetries`).
+//   - Snapshot artifacts carry a `fetchedAt` ISO 8601 timestamp for freshness.
+//
+// Determinism: all I/O effects (clock, RNG, sleep, fetch) are injectable so the
+// regression suite can exercise the policy without real network or timers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Default maximum number of HTTP attempts before giving up (1 initial + N-1 retries). */
+export const BRONZE_FETCH_MAX_RETRIES_DEFAULT = 3;
+
+/** Base exponential backoff in milliseconds (used at attempt 1). */
+export const BRONZE_FETCH_BASE_BACKOFF_MS = 1000;
+
+/** Absolute cap on a single between-attempt sleep, regardless of exponential growth. */
+export const BRONZE_FETCH_MAX_BACKOFF_MS = 30000;
+
+/** Freshness metadata format embedded in every snapshot artifact. */
+export const BRONZE_FETCHED_AT_FORMAT = 'iso-8601';
+
+/** Multiplier used inside the exponential backoff envelope. */
+const BRONZE_FETCH_BACKOFF_GROWTH_FACTOR = 2;
+
+/** Lowest HTTP status code considered a transient server error (retried). */
+const HTTP_SERVER_ERROR_FLOOR = 500;
+
+/** HTTP 429 — explicit rate-limit signal (retried). */
+const HTTP_TOO_MANY_REQUESTS = 429;
+
+/** Injectable side-effect surface for deterministic tests. */
+export interface BronzeFetchClock {
+  /** Current wall-clock as ISO 8601. Defaults to `new Date().toISOString()`. */
+  nowIso: () => string;
+  /** Uniform random in [0, 1). Defaults to `Math.random`. */
+  random: () => number;
+  /** Sleep for `ms` milliseconds. Defaults to a real `setTimeout` promise. */
+  sleep: (ms: number) => Promise<void>;
+}
+
+/** Discriminated failure modes surfaced by the fetcher. */
+export type BronzeFetchError =
+  | { kind: 'http-error'; status: number; bodyText: string }
+  | { kind: 'network-error'; message: string };
+
+/** Final result envelope from `fetchVivinoSnapshot`. */
+export type BronzeFetchResult<TBody> =
+  | { ok: true; snapshot: TBody; fetchedAt: string; attempts: number }
+  | { ok: false; error: BronzeFetchError; attempts: number };
+
+/** Options for `fetchVivinoSnapshot`. */
+export interface FetchVivinoSnapshotOptions {
+  /** Endpoint URL (e.g. Vivino API resource). */
+  url: string;
+  /** Optional `fetch` implementation. Defaults to `globalThis.fetch`. */
+  fetch?: typeof globalThis.fetch;
+  /** Optional injectable clock/RNG/sleep — see {@link BronzeFetchClock}. */
+  clock?: Partial<BronzeFetchClock>;
+  /** Optional retry budget override. Must be ≥ 1. */
+  maxRetries?: number;
+  /** Optional HTTP request init (headers, signal, …). */
+  init?: RequestInit;
+}
+
+function defaultClock(): BronzeFetchClock {
+  return {
+    nowIso: () => new Date().toISOString(),
+    random: () => Math.random(),
+    sleep: (ms: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, ms);
+      }),
+  };
+}
+
+function computeBackoffMs(attempt: number, random: () => number): number {
+  const expDelay = Math.min(
+    BRONZE_FETCH_BASE_BACKOFF_MS *
+      Math.pow(BRONZE_FETCH_BACKOFF_GROWTH_FACTOR, attempt - 1),
+    BRONZE_FETCH_MAX_BACKOFF_MS,
+  );
+  // Full-jitter envelope: delay ∈ [0, expDelay).
+  return Math.floor(random() * expDelay);
+}
+
+function isRetriableStatus(status: number): boolean {
+  return status >= HTTP_SERVER_ERROR_FLOOR || status === HTTP_TOO_MANY_REQUESTS;
+}
+
+/**
+ * Fetches a Vivino bronze snapshot from `url` with retry/backoff/freshness
+ * guarantees. Pure function over its injected effects — safe for unit tests.
+ */
+export async function fetchVivinoSnapshot<TBody = unknown>(
+  opts: FetchVivinoSnapshotOptions,
+): Promise<BronzeFetchResult<TBody>> {
+  const maxRetries = opts.maxRetries ?? BRONZE_FETCH_MAX_RETRIES_DEFAULT;
+  if (!Number.isInteger(maxRetries) || maxRetries < 1) {
+    throw new Error(
+      `fetchVivinoSnapshot: maxRetries must be an integer ≥ 1 (received ${String(maxRetries)})`,
+    );
+  }
+
+  const fetchImpl = opts.fetch ?? globalThis.fetch;
+  const defaults = defaultClock();
+  const clock: BronzeFetchClock = {
+    nowIso: opts.clock?.nowIso ?? defaults.nowIso,
+    random: opts.clock?.random ?? defaults.random,
+    sleep: opts.clock?.sleep ?? defaults.sleep,
+  };
+
+  let attempts = 0;
+  let lastError: BronzeFetchError = {
+    kind: 'network-error',
+    message: 'no attempt made',
+  };
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    attempts = attempt;
+    try {
+      const response = await fetchImpl(opts.url, opts.init);
+      if (response.ok) {
+        const body = (await response.json()) as TBody;
+        return {
+          ok: true,
+          snapshot: body,
+          fetchedAt: clock.nowIso(),
+          attempts,
+        };
+      }
+      // Non-2xx response — capture body for diagnostics.
+      const bodyText = await response.text().catch(() => '');
+      lastError = { kind: 'http-error', status: response.status, bodyText };
+      if (!isRetriableStatus(response.status)) {
+        return { ok: false, error: lastError, attempts };
+      }
+    } catch (err: unknown) {
+      // undici raises `TypeError` for network-layer failures (DNS, reset, …).
+      lastError = {
+        kind: 'network-error',
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    // Sleep BEFORE the next attempt, only if one remains. This keeps the
+    // retry budget guard pre-flight (rule 20) — no extra wait past the cap.
+    if (attempt < maxRetries) {
+      await clock.sleep(computeBackoffMs(attempt, clock.random));
+    }
+  }
+
+  return { ok: false, error: lastError, attempts };
+}
+
 function wantsRdsSsl(host: string): boolean {
   return host.includes('rds.amazonaws.com');
 }

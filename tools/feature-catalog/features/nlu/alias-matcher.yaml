@@ -37,7 +37,7 @@ tests:
   regression:
     - test/regression/alias-matcher-priority-cache.regression.test.ts
   unit:
-    - test/unit/alias/alias-matcher.test.ts
+    - test/unit/alias/transliterator.test.ts
 
 depends_on:
   - korean-i18n.curated-alias-catalog

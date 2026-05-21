@@ -6,10 +6,16 @@ summary: |
   유효성 + OpenAI injection classifier wiring을 사전 검증하는 verify 스크립트 모음.
   Deploy 전 외부 의존성 핸드셰이크 보증.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  CI gate로 운영, deploy 전 안정성 확인. semgrep + 보안 패턴 체크와 함께 verify:security-local
-  / check:ci 게이트에 포함.
+  Hexagonal port-adapter manifest enumeration (Cockburn 2005) + DI completeness
+  check (Spring Boot @ConfigurationProperties 패턴). 6개 구조적 invariant를
+  regression test로 강제: (P1) WIRING_MANIFEST의 모든 critical port가 verify
+  script 또는 readiness probe에 매핑됨, (P2) scripts/verify-*.ts ↔ package.json
+  verify:* 양방향 parity, (P3) verify:all 단일 entry가 모든 verify:* 형제를
+  체인, (P4) 각 verify 스크립트가 `main(): Promise<number>` 구조 노출,
+  (P5) Korean 에러 메시지 NFC 보존, (P6) 외부 SDK mock 기반 happy/sad path.
+  Drift는 PR review 시점에 표면화됨 — production 500 에러로 발견 안 됨.
 
 status: active
 since: 2025-10
@@ -18,26 +24,31 @@ owner: core
 
 surfaces:
   - "CLI: pnpm verify:anthropic-wiring / verify:openai-injection-wiring / verify:drinking-window-model"
+  - "CLI: pnpm verify:all (unified pre-deploy gate)"
 
 key_files:
   - scripts/verify-anthropic-wiring.ts
   - scripts/verify-openai-injection-wiring.ts
   - scripts/verify-drinking-window-model.ts
+  - src/config/container-wiring-manifest.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/wiring-verification-exhaustive.regression.test.ts
+    - test/regression/di-composition-root.regression.test.ts
 
 depends_on:
   - infra.anthropic-chat-llm
   - infra.openai-chat-llm
+  - infra.di-composition-root
   - retrieval.drinking-window-prediction
 
 related_rfcs: []
 
 known_limitations:
-  - "각 verify가 별개 스크립트 — 통합 entry 없음"
+  - "verify:all은 외부 네트워크 호출 없이 wiring만 확인 — `--live` 플래그가 별도 비용 게이트"
 
-next_steps:
-  - "verify:all 단일 entry"
+next_steps: []
 
 tags:
   - ci-gate

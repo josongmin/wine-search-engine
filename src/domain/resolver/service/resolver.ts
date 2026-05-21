@@ -301,6 +301,10 @@ export class Resolver {
         top2CalibratedScore: undefined,
         calibratedGap: undefined,
         decisionConfidenceC: 0,
+        // Zero-candidate path never invoked the calibrator; flag the C as
+        // untrusted so the AdmissionGate's confidence floor (§e) cannot
+        // refuse a value it never produced.
+        calibrationTrusted: false,
         ambiguityDetected: false,
         ambiguityTypes: [],
         appliedThresholds: {
@@ -867,6 +871,7 @@ export class Resolver {
       top2CalibratedScore: calibrated.top2CalibratedScore,
       calibratedGap: calibrated.calibratedGap,
       decisionConfidenceC: calibrated.decisionConfidenceC,
+      calibrationTrusted: calibrated.calibrationTrusted,
       ambiguityDetected: ambiguity.detected,
       ambiguityTypes: ambiguity.types,
       appliedThresholds: {

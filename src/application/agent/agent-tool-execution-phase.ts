@@ -72,7 +72,14 @@ function normalizeForStableJson(value: unknown): unknown {
 }
 
 function stableJson(value: unknown): string {
-  return JSON.stringify(normalizeForStableJson(value)) ?? String(value);
+  // JSON.stringify returns `undefined` for top-level `undefined` / function /
+  // symbol values (lib.d.ts narrows this to `string`, which is misleading).
+  // Pre-handle those cases so the deduplication key is always a string and
+  // we never fall into a runtime `undefined === undefined` collision bucket.
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+    return String(value);
+  }
+  return JSON.stringify(normalizeForStableJson(value));
 }
 
 function stableEqual(left: unknown, right: unknown): boolean {

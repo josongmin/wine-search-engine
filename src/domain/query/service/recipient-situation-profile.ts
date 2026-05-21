@@ -1,8 +1,34 @@
+import { clamp01 } from '../../shared/utils/clamp.js';
+
 export const RECIPIENT_PROFILE_VALUES = [
   'parents_first_time',
   'senior_colleague_gift',
   'unknown_preference_recipient',
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Sensory thresholds (parents_first_time profile)
+//
+// All thresholds operate on the [0, 1] normalized sensory scale. They encode
+// "gentle, approachable" wine semantics for a first-time / parent recipient.
+// Wider tolerances on acidity & body reflect that those axes are less
+// off-putting at the top end than tannin/dryness.
+// ---------------------------------------------------------------------------
+
+/** 1–5 sensory scale maximum used to fold raw scores into [0, 1]. */
+const SENSORY_RAW_SCALE_MAX = 5;
+/** Low-tannin upper bound — above this, perceived as "grippy". */
+const LOW_TANNIN_MAX = 0.3;
+/** Off-dry-or-sweeter lower bound — below this, perceived as "bone dry". */
+const NOT_TOO_DRY_MIN = 0.2;
+/** Acidity ceiling tolerated by gentle palates. */
+const NOT_HIGH_ACID_MAX = 0.75;
+/** Body ceiling tolerated by gentle palates (medium-light or lower). */
+const GENTLE_BODY_MAX = 0.6;
+/** Producer prestige floor that qualifies as a "formal gift" anchor. */
+const FORMAL_GIFT_PRESTIGE_MIN = 0.7;
+/** Popularity floor for "broad recognition" anchor in the unknown-preference profile. */
+const BROAD_RECOGNITION_POPULARITY_MIN = 0.6;
 
 export type RecipientProfileValue = (typeof RECIPIENT_PROFILE_VALUES)[number];
 
@@ -53,10 +79,13 @@ function normalizeSensory01(value: number | undefined): number | undefined {
   if (value === undefined || !Number.isFinite(value)) {
     return undefined;
   }
+  // Two input shapes are accepted: pre-normalized [0, 1], OR the raw 1–5
+  // sensory scale used by older ETL paths. Anything above 1 is treated as
+  // the raw scale and folded down before clamping.
   if (value <= 1) {
     return Math.max(0, value);
   }
-  return Math.max(0, Math.min(1, value / 5));
+  return clamp01(value / SENSORY_RAW_SCALE_MAX);
 }
 
 function candidateTextBag(candidate: RecipientProfileCandidate): readonly string[] {
@@ -98,10 +127,10 @@ function parentsFirstTimeProfileEvidenceAxes(
   const sweetness = normalizeSensory01(candidate.sweetness);
   const body = normalizeSensory01(candidate.body);
 
-  const lowTannin = tannin !== undefined && tannin <= 0.3;
-  const notTooDry = sweetness !== undefined && sweetness >= 0.2;
-  const notHighAcid = acidity === undefined || acidity <= 0.75;
-  const gentleBody = body === undefined || body <= 0.6;
+  const lowTannin = tannin !== undefined && tannin <= LOW_TANNIN_MAX;
+  const notTooDry = sweetness !== undefined && sweetness >= NOT_TOO_DRY_MIN;
+  const notHighAcid = acidity === undefined || acidity <= NOT_HIGH_ACID_MAX;
+  const gentleBody = body === undefined || body <= GENTLE_BODY_MAX;
   const hasMoscatoFamily = containsAny(textBag, ['moscato', 'muscat']);
   const hasGamayFamily = containsAny(textBag, ['beaujolais', 'gamay']);
   const hasFruitForwardSignal = hasMoscatoFamily
@@ -155,7 +184,7 @@ function seniorColleagueGiftProfileEvidenceAxes(
   if (containsAny(textBag, ['celebration', 'special occasion', 'gift'])) {
     axes.push('celebration_context');
   }
-  if (prestige !== undefined && prestige >= 0.7) {
+  if (prestige !== undefined && prestige >= FORMAL_GIFT_PRESTIGE_MIN) {
     axes.push('formal_prestige');
   }
   return uniqueAxes(axes);
@@ -180,7 +209,7 @@ function unknownPreferenceRecipientProfileEvidenceAxes(
   if (containsAny(textBag, ['merlot', 'pinot noir', 'gamay'])) {
     axes.push('crowd_pleasing_red');
   }
-  if (popularity !== undefined && popularity >= 0.6) {
+  if (popularity !== undefined && popularity >= BROAD_RECOGNITION_POPULARITY_MIN) {
     axes.push('broad_recognition');
   }
   return uniqueAxes(axes);

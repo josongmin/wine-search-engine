@@ -5,10 +5,17 @@ summary: |
   파생 index (alias / NL mapping / ambiguity registry / drinking-window rule)를 runtime
   cache/CDN으로 publish. 버전 관리 + cache invalidation 포함.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Substrate distribution 안정. 그러나 cache freshness SLA 없음, CDN 수동 invalidation
-  사용 중.
+  Substrate distribution이 안정적이며, atomic stage-then-promote cutover (staging
+  파일 → atomic rename)와 실패 시 이전 active artifact를 그대로 복원하는 rollback path를
+  갖춤 (`promoteRuntimeSubstrateArtifacts`, `restoreRuntimeSubstrateArtifacts`).
+  각 published envelope는 `schema_version = ${SUBSTRATE_VERSION_PREFIX}:${snapshot_id}`
+  와 `ttl_seconds = RUNTIME_SUBSTRATE_TTL_SECONDS (= 7 days)`를 캐리하여 downstream
+  freshness 판정을 결정론적으로 수행 가능. 회귀 스위트
+  `test/regression/runtime-substrates-publication.regression.test.ts`가 TTL 값,
+  schema_version 증가, atomic cutover, rollback, NFC Korean 보존, 동시 publish의
+  staging path 분리를 모두 고정.
 
 status: active
 since: 2025-09
@@ -22,7 +29,12 @@ key_files:
   - scripts/etl/publish-runtime-substrates.ts
   - scripts/etl/build-ambiguity-registry.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/runtime-substrates-publication.regression.test.ts
+    - test/regression/runtime-plane-double-publish-invariant.regression.test.ts
+  unit:
+    - test/unit/etl/publish-runtime-substrates.test.ts
 
 depends_on:
   - etl.korean-aliases-generation
@@ -31,12 +43,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Cache 수동 invalidation"
-  - "TTL-based refresh 없음"
+  - "TTL 기반 freshness는 envelope에 명시되지만, downstream reader가 stale envelope를
+    거부하도록 강제하는 enforcement는 별도 작업 (runtime readiness gate)으로 분리."
 
 next_steps:
-  - "Atomic cache version update"
-  - "TTL-based refresh"
+  - "Downstream readiness gate: stale envelope (`now - generated_at > ttl_seconds`)를
+    refuse-to-start 처리"
+  - "Multi-region CDN propagation 검증"
 
 tags:
   - publication

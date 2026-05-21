@@ -2,11 +2,11 @@
 
 The **source of truth** for allowed `step` string values is TypeScript:
 
-**[`src/observability/pipeline-debug-steps.ts`](../src/observability/pipeline-debug-steps.ts)** — export `PipelineDebugStep` and type `PipelineDebugStepId`.
+**[`src/domain/observability/pipeline-debug-steps.ts`](../src/domain/observability/pipeline-debug-steps.ts)** — export `PipelineDebugStep` and type `PipelineDebugStepId`.
 
 ## Conventions
 
-- Prefer **`domain.area.detail`** (e.g. `decision.engine.response`, `http.embedding.timeout`).
+- Prefer the **domain.area.detail** shape (e.g. `decision.engine.response`, `http.embedding.timeout`).
 - New call sites should use **`PipelineDebugStep.*`** constants to avoid typos and to make refactors grep-friendly.
 - Legacy code may still use inline string literals; migrate when touching those lines.
 
@@ -14,7 +14,7 @@ The **source of truth** for allowed `step` string values is TypeScript:
 
 Each pipeline stage emits a consistent set of debug fields. This table documents the
 **canonical field set** per stage so that shortfall timelines can be reconstructed from
-structured logs. The TS type definition is in `src/observability/pipeline-debug-steps.ts`
+structured logs. The TS type definition is in `src/domain/observability/pipeline-debug-steps.ts`
 (`PipelineStageFieldSet`).
 
 ### Stage 1: Search entry
@@ -80,6 +80,7 @@ structured logs. The TS type definition is in `src/observability/pipeline-debug-
 |------|--------|--------|
 | `post_route.enter` | `effective_route`, `resolve_status`, `ranked_count` | `search-usecase-post-route-phase.ts` |
 | `post_route.entropy_abstain` | `effective_route`, `abstain_reason`, `entropy` (optional), `score_count`, `top_score_source` | `search-usecase-post-route-phase.ts` |
+| `post_route.entropy_abstain_bypassed` | `effective_route`, `bypass_reason` | `search-usecase-post-route-phase.ts` |
 | `cache.set_skipped` | `reason` | `search-usecase-post-route-phase.ts` |
 
 ### Stage 9: Completion
@@ -87,6 +88,28 @@ structured logs. The TS type definition is in `src/observability/pipeline-debug-
 | Step | Fields | Source |
 |------|--------|--------|
 | `search.execute.done` | `latency_ms`, `ranked_count`, `resolve_status` | `search.usecase.ts` |
+
+### Resolve / interpret (planner phase)
+
+| Step | Fields | Source |
+|------|--------|--------|
+| `resolve.use_case.start` | `query_class` | `resolve.usecase.ts` |
+| `resolve.constraint_sat.contradicted` | `contradiction_reason` | `resolve.usecase.ts` |
+| `resolve.use_case.done` | `resolve_status`, `candidate_count` | `resolve.usecase.ts` |
+| `interpret.planner.done` | `query_class`, `planner_status` | `interpret-planner.ts` |
+
+### Hybrid execution (use case entry)
+
+| Step | Fields | Source |
+|------|--------|--------|
+| `hybrid.execute.start` | `query_class`, `retrieval_mode` | `hybrid.usecase.ts` |
+| `hybrid.execute.ranked` | `ranked_count`, `latency_ms` | `hybrid.usecase.ts` |
+
+### Batch
+
+| Step | Fields | Source |
+|------|--------|--------|
+| `batch.search.start` | `batch_size` | `batch-search.usecase.ts` |
 
 ### Infrastructure HTTP steps
 

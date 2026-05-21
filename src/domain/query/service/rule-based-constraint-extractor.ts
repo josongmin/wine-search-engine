@@ -13,6 +13,34 @@ import { normalizeQueryPredicates } from './korean-predicate-variants.js';
 const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
 
 const DECIMAL_RADIX = 10;
+
+/**
+ * Formalized negation scope thresholds (NLU rule-based-constraint-extractor v4).
+ *
+ * Wine palate attributes (tannin, sweetness, etc.) are normalized into the
+ * [0, 1] range across the catalog. When a user phrases an aversion ("not too
+ * tannic", "no high tannin", "안 단", "별로 안 단"), we map the implied
+ * upper bound to one of two named percentile cutoffs instead of a magic
+ * number. CLAUDE.md rule 15: extract penalty/threshold magic numbers to
+ * named constants with documented rationale.
+ *
+ *   - SOFT cap (40th percentile): mild aversion phrasing — "not too X",
+ *     "별로 안 X". The user tolerates moderate intensity but rejects the
+ *     high end. Quantile chosen so that wines in the bottom 40% of the
+ *     catalog's intensity distribution remain eligible — broad recall, mild
+ *     filtering.
+ *
+ *   - HARD cap (25th percentile): strong aversion phrasing — "no high X",
+ *     "low X only", "안 X" (Korean short-form negation), "X 빼고" /
+ *     "X 없이" (exclusion phrases). The user wants the bottom quartile only;
+ *     anything above is undesired.
+ *
+ * Note: these are *soft* constraint upper bounds (operator '<=') — they
+ * influence ranking, not hard filtering. A wine at 0.45 tannin is still
+ * eligible under "not too tannic" but penalized relative to one at 0.30.
+ */
+export const NEGATION_SOFT_CAP_QUANTILE = 0.4;
+export const NEGATION_HARD_CAP_QUANTILE = 0.25;
 /** USD thresholds for mapping numeric "under $X" hints to price_band labels.
  *  Derived from Vivino/Wine-Searcher market segmentation (2024):
  *    budget: ≤$20 (everyday wines, supermarket tier)
@@ -32,7 +60,15 @@ const PRICE_BAND_PREMIUM_MAX_USD = 100;
 export function extractRuleBasedConstraints(normalizedQuery: string): ConstraintBundle {
   const hard: ConstraintBundle['hard'][number][] = [];
   const soft: ConstraintBundle['soft'][number][] = [];
-  const q = normalizedQuery;
+  // Unicode hygiene: Korean Hangul has both NFC (precomposed syllable) and
+  // NFD (decomposed jamo) byte forms. All regexes in this file are written
+  // in NFC; NFD input (e.g. from clipboard/HFS+ filenames/cross-platform
+  // round-trips) would silently miss every Korean-targeting cap.
+  // extractSearchConstraints (search-constraint-extractor.ts:823) already
+  // normalizes internally — we now do the same at this entry boundary so
+  // both extractor pipelines see identical Unicode forms (CLAUDE.md rule 8,
+  // SOTA++ Unicode safety baseline).
+  const q = normalizedQuery.normalize('NFC');
   const predicateNormalizedQuery = normalizeQueryPredicates(q);
   const searchConstraints = extractSearchConstraints(q);
   const mv = RULE_BASED_CONSTRAINT_MAPPING_VERSION;
@@ -269,12 +305,109 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       confidence: 0.8,
       mapping_version: mv,
     });
-  } else if (/(?:^|[^\p{L}\p{N}])(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
+  } else if (
+    /(?:^|[^\p{L}\p{N}])(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)(?=$|[^\p{L}\p{N}])/iu.test(q)
+    // Bare "sweet" qualifies as a positive sweetness preference when it is
+    // NOT immediately preceded by an aversion modifier ("too"/"not"/"no").
+    // This allows "sweet but not too sweet" to emit BOTH sweetness=sweet
+    // (positive intent) AND sweetness_max=SOFT cap (the "not too sweet"
+    // qualifier). Negative lookbehind avoids false-positives where the
+    // ONLY occurrence is in the negated phrase.
+    || /(?:^|[^\p{L}\p{N}])(?<!too\s)(?<!not\s)(?<!no\s)sweet(?=$|[^\p{L}\p{N}])/iu.test(q)
+  ) {
     soft.push({
       attribute: 'sweetness',
       operator: '=',
       value: 'sweet',
       source_phrase: 'sweet',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Formalized negation scope: tannin_max / sweetness_max upper bounds
+  // -------------------------------------------------------------------------
+  // Pure-pattern extraction of palate aversions. Two cap tiers:
+  //   - SOFT (40th percentile) for mild phrasings: "not too X", "별로 안 X"
+  //   - HARD (25th percentile) for strong phrasings: "no high X", "low X only",
+  //     "안 X" (KR short-form negation), "X 빼고" / "X 없이" / "X 말고"
+  //
+  // Precedence rules (critical to correctness):
+  //   1. SOFT must be detected before HARD ("별로 안 단" must NOT also trigger
+  //      the bare "안" hard cap).
+  //   2. "not too X" coexists with positive "X" (e.g. "sweet but not too sweet"
+  //      emits BOTH sweetness=sweet (positive, above) AND sweetness_max=SOFT).
+  //   3. False-positive guard: generic "not" without an adjective (e.g.
+  //      "this wine is not what I want") MUST NOT trigger any cap.
+  //
+  // Rule 8 / 24: Unicode-safe boundaries via (?:^|[^\p{L}\p{N}]) /
+  //              (?=$|[^\p{L}\p{N}]) — never \b on Korean.
+
+  // English / Korean SOFT cap — TANNIN
+  // "not too tannic" / "약간 떫은" / "별로 안 떫" — palatable bottom 40%.
+  const tanninSoftNeg =
+    /(?:^|[^\p{L}\p{N}])not\s+too\s+tannic(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /별로\s*안\s*떫/u.test(q);
+
+  // English / Korean HARD cap — TANNIN
+  // "no high tannin" / "low tannin only" / "안 떫" (without 별로) /
+  // "떫은 와인 빼고|없이|말고".
+  const tanninHardNeg =
+    /(?:^|[^\p{L}\p{N}])no\s+high\s+tannin(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /(?:^|[^\p{L}\p{N}])low\s+tannin\s+only(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || (/(?:^|[^\p{L}\p{N}])안\s+떫/u.test(q) && !/별로\s*안\s*떫/u.test(q))
+    || /떫은?\s*와인\s*(?:빼고|없이|말고)/u.test(q);
+
+  if (tanninSoftNeg) {
+    soft.push({
+      attribute: 'tannin_max',
+      operator: '<=',
+      value: NEGATION_SOFT_CAP_QUANTILE,
+      source_phrase: 'not too tannic / 별로 안 떫',
+      confidence: 0.7,
+      mapping_version: mv,
+    });
+  } else if (tanninHardNeg) {
+    soft.push({
+      attribute: 'tannin_max',
+      operator: '<=',
+      value: NEGATION_HARD_CAP_QUANTILE,
+      source_phrase: 'no high tannin / low tannin only / 안 떫 / 떫은 와인 빼고',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // English / Korean SOFT cap — SWEETNESS
+  const sweetnessSoftNeg =
+    /(?:^|[^\p{L}\p{N}])not\s+too\s+sweet(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /별로\s*안\s*단/u.test(q);
+
+  // English / Korean HARD cap — SWEETNESS
+  // Includes both 안/못 short-form negations (KR) and exclusion phrases.
+  const sweetnessHardNeg =
+    /(?:^|[^\p{L}\p{N}])no\s+sweet(?:\s+wines?)?(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /(?:^|[^\p{L}\p{N}])low\s+sweetness\s+only(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || (/(?:^|[^\p{L}\p{N}])안\s+단(?=[^\p{L}\p{N}]|$)/u.test(q) && !/별로\s*안\s*단/u.test(q))
+    || /(?:^|[^\p{L}\p{N}])못\s+단(?=[^\p{L}\p{N}]|$)/u.test(q)
+    || /단\s*와인(?:은|는)?\s*(?:빼고|없이|말고|제외)/u.test(q);
+
+  if (sweetnessSoftNeg) {
+    soft.push({
+      attribute: 'sweetness_max',
+      operator: '<=',
+      value: NEGATION_SOFT_CAP_QUANTILE,
+      source_phrase: 'not too sweet / 별로 안 단',
+      confidence: 0.7,
+      mapping_version: mv,
+    });
+  } else if (sweetnessHardNeg) {
+    soft.push({
+      attribute: 'sweetness_max',
+      operator: '<=',
+      value: NEGATION_HARD_CAP_QUANTILE,
+      source_phrase: 'no sweet / 안 단 / 못 단 / 단 와인 빼고',
       confidence: 0.8,
       mapping_version: mv,
     });
@@ -405,6 +538,85 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
         mapping_version: mv,
       });
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Certification / philosophy signals (vegan / biodynamic / organic).
+  //
+  // These are wine-domain attributes that the user expects to filter on but
+  // were previously absent from the rule-based catalog — queries like
+  // "비건 와인 추천" and "바이오다이내믹 와인" produced zero anchors AND
+  // zero constraints, which collapsed to `intent=unknown` →
+  // router.reject(unsupported_intent) (CLAUDE.md rule 23 false-positive
+  // for the unsupported-intent gate). Surface as soft constraints so the
+  // analyzer can route them through the single-search lane.
+  //
+  // Patterns use Unicode-safe boundaries (rule 8): `(?:^|[^\p{L}\p{N}])` /
+  // `(?=$|[^\p{L}\p{N}])` instead of `\b` (which is ASCII-only and
+  // silently fails on Korean).
+  // -------------------------------------------------------------------------
+
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:vegan|비건)(?=$|[^\p{L}\p{N}])/iu.test(q)
+  ) {
+    soft.push({
+      attribute: 'certification',
+      operator: '=',
+      value: 'vegan',
+      source_phrase: 'vegan/비건',
+      confidence: 0.85,
+      mapping_version: mv,
+    });
+  }
+
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:biodynamic|바이오다이내믹|바이오다이나믹)(?=$|[^\p{L}\p{N}])/iu.test(q)
+  ) {
+    soft.push({
+      attribute: 'certification',
+      operator: '=',
+      value: 'biodynamic',
+      source_phrase: 'biodynamic/바이오다이내믹',
+      confidence: 0.85,
+      mapping_version: mv,
+    });
+  }
+
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:organic|오가닉|유기농)(?=$|[^\p{L}\p{N}])/iu.test(q)
+  ) {
+    soft.push({
+      attribute: 'certification',
+      operator: '=',
+      value: 'organic',
+      source_phrase: 'organic/오가닉/유기농',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Cellaring / aging intent.
+  //
+  // "셀러에 넣어둘 만한 와인" / "장기 숙성용" / "long-term cellaring" — user
+  // is asking for wines suitable for aging. Surface as a soft `aging_potential`
+  // signal so the analyzer routes through single-search rather than rejecting
+  // the query as unsupported (CLAUDE.md rule 23 false-positive guard).
+  // -------------------------------------------------------------------------
+
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:cellaring|cellar[\s-]?worthy|aging[\s-]?potential|장기\s*숙성|숙성\s*가능|셀러|셀러링)(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /셀러에\s*넣/u.test(q)
+    || /오래\s*보관/u.test(q)
+  ) {
+    soft.push({
+      attribute: 'aging_potential',
+      operator: '=',
+      value: 'high',
+      source_phrase: 'cellaring / 셀러 / 장기 숙성',
+      confidence: 0.75,
+      mapping_version: mv,
+    });
   }
 
   return { hard, soft, inferred: [] };

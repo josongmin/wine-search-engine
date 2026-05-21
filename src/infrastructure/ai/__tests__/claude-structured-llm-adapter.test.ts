@@ -9,6 +9,10 @@
  * directly, so mocking the network is sufficient end-to-end coverage.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -19,8 +23,22 @@ import {
   StructuredLlmTimeoutError,
   StructuredLlmValidationError,
 } from '../../../domain/ai/port/structured-llm.port.js';
-import { ClaudeStructuredLlmAdapter } from '../claude-structured-llm-adapter.js';
+import {
+  ClaudeStructuredLlmAdapter,
+  __testOnly,
+} from '../claude-structured-llm-adapter.js';
 import { globalCircuitBreakerRegistry } from '../../../domain/observability/circuit-breaker-registry.js';
+
+const { zodToJsonSchema, parseUsage } = __testOnly;
+
+// Resolve fixtures directory relative to this test file (ESM-safe).
+const FIXTURES_DIR = join(
+  fileURLToPath(new URL('./fixtures/anthropic-responses/', import.meta.url)),
+);
+
+function readFixture(name: string): string {
+  return readFileSync(join(FIXTURES_DIR, name), 'utf8');
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -620,6 +638,569 @@ describe('ClaudeStructuredLlmAdapter', () => {
       expect(messages).toHaveLength(2);
       expect(messages[0]?.['role']).toBe('user');
       expect(messages[1]?.['role']).toBe('assistant');
+    });
+  });
+
+  // ---------------------- fixture-based integration ----------------------
+
+  describe('fixtures (real Anthropic response shapes)', () => {
+    it('tool-use-single.json → parses input, reports usage', async () => {
+      const body = readFixture('tool-use-single.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      const result = await adapter().analyze({
+        query: 'q',
+        schema: z.object({
+          intent: z.enum(['recommend', 'lookup']),
+          count: z.number().int(),
+          regionPreference: z.string().optional(),
+        }),
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+      });
+      expect(result.data.intent).toBe('recommend');
+      expect(result.data.count).toBe(5);
+      expect(result.usage.inputTokens).toBe(1342);
+      expect(result.usage.outputTokens).toBe(87);
+      expect(result.usage.cacheReadTokens).toBe(0);
+      expect(result.usage.cacheCreationTokens).toBe(0);
+    });
+
+    it('tool-use-parallel.json → execute() surfaces both calls', async () => {
+      const body = readFixture('tool-use-parallel.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      const result = await adapter().execute({
+        messages: [{ role: 'user', content: 'find me wines' }],
+        tools: [
+          {
+            name: 'search_wines',
+            description: 'd',
+            inputSchema: z.object({
+              region: z.string(),
+              vintage: z.number().int(),
+            }),
+          },
+        ],
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+        toolChoice: 'any',
+      });
+      expect(result.kind).toBe('tool_use');
+      if (result.kind !== 'tool_use') throw new Error('typeguard');
+      expect(result.calls).toHaveLength(2);
+      expect(result.calls[0]?.input).toEqual({ region: 'Burgundy', vintage: 2018 });
+      expect(result.calls[1]?.input).toEqual({ region: 'Loire', vintage: 2020 });
+    });
+
+    it('tool-use-truncated.json → PartialOutput on max_tokens+schema-miss', async () => {
+      const body = readFixture('tool-use-truncated.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      // Schema demands `count` which the truncated input omits.
+      await expect(
+        adapter().analyze({
+          query: 'q',
+          schema: z.object({ intent: z.string(), count: z.number().int() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        }),
+      ).rejects.toBeInstanceOf(StructuredLlmPartialOutputError);
+    });
+
+    it('text-end-turn.json → execute() returns text kind', async () => {
+      const body = readFixture('text-end-turn.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      const result = await adapter().execute({
+        messages: [{ role: 'user', content: 'tell me about Sancerre' }],
+        tools: [],
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+      });
+      expect(result.kind).toBe('text');
+      if (result.kind !== 'text') throw new Error('typeguard');
+      expect(result.stopReason).toBe('end_turn');
+      expect(result.text).toContain('Sancerre');
+    });
+
+    it('refusal.json → RefusalError', async () => {
+      const body = readFixture('refusal.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      await expect(
+        adapter().analyze({
+          query: 'q',
+          schema: z.object({ x: z.number() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        }),
+      ).rejects.toBeInstanceOf(StructuredLlmRefusalError);
+    });
+
+    it('cache-hit.json → all four usage fields propagate', async () => {
+      const body = readFixture('cache-hit.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      const result = await adapter().analyze({
+        query: 'q',
+        schema: z.object({ intent: z.string(), count: z.number().int() }),
+        systemPrompt: 'sys',
+        enablePromptCache: true,
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+      });
+      expect(result.usage.inputTokens).toBe(42);
+      expect(result.usage.outputTokens).toBe(11);
+      expect(result.usage.cacheReadTokens).toBe(1287);
+      expect(result.usage.cacheCreationTokens).toBe(0);
+    });
+
+    it('mixed-content.json → tool_use block extracted; text block ignored', async () => {
+      const body = readFixture('mixed-content.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      const result = await adapter().analyze({
+        query: 'q',
+        schema: z.object({ intent: z.string(), count: z.number().int() }),
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+      });
+      expect(result.data).toEqual({ intent: 'recommend', count: 3 });
+    });
+
+    it('wrong-tool-name.json → ValidationError (model emitted unexpected tool)', async () => {
+      const body = readFixture('wrong-tool-name.json');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+      let caught: unknown = null;
+      try {
+        await adapter().analyze({
+          query: 'q',
+          schema: z.object({ x: z.number() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(StructuredLlmValidationError);
+      const valErr = caught as StructuredLlmValidationError;
+      expect(valErr.message).toContain('search_database');
+    });
+  });
+
+  // ---------------------- Anthropic edge cases ----------------------
+
+  describe('response edge cases', () => {
+    it('extra fields in tool input pass through (CLAUDE.md rule 10 — no .strict)', async () => {
+      // LLMs frequently emit reasoning/confidence fields not in our schema.
+      // Without .strict(), Zod ignores them — the caller schema controls.
+      const schema = z.object({ intent: z.string() });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(
+            toolUseBody({
+              toolInput: {
+                intent: 'recommend',
+                reasoning: 'The user asked for fruity options',
+                confidence: 0.93,
+                extraGarbage: { nested: true },
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      const result = await adapter().analyze({
+        query: 'q',
+        schema,
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+      });
+      expect(result.data).toEqual({ intent: 'recommend' });
+    });
+
+    it('empty content array → PartialOutputError', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({
+              id: 'msg_test',
+              model: TEST_MODEL,
+              stop_reason: 'end_turn',
+              content: [],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      await expect(
+        adapter().analyze({
+          query: 'q',
+          schema: z.object({ x: z.number() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        }),
+      ).rejects.toBeInstanceOf(StructuredLlmPartialOutputError);
+    });
+
+    it('malformed JSON body (200 OK) → adapter does NOT 500', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response('not-json-at-all{{{', { status: 200 })),
+      );
+      // Should surface as a real error (not silent success), but not crash.
+      await expect(
+        adapter().analyze({
+          query: 'q',
+          schema: z.object({ x: z.number() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        }),
+      ).rejects.toThrow(/malformed JSON|unexpected response/i);
+    });
+
+    it('unexpected response shape (missing id/content) → typed error', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(JSON.stringify({ unrelated: true }), { status: 200 }),
+        ),
+      );
+      await expect(
+        adapter().analyze({
+          query: 'q',
+          schema: z.object({ x: z.number() }),
+          systemPrompt: 'sys',
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+          model: TEST_MODEL,
+        }),
+      ).rejects.toThrow(/unexpected response/i);
+    });
+
+    it('execute() handles parallel tool_use blocks (multiple distinct calls)', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({
+              id: 'msg_test',
+              model: TEST_MODEL,
+              stop_reason: 'tool_use',
+              content: [
+                { type: 'tool_use', id: 'a', name: 'tool_a', input: { p: 1 } },
+                { type: 'tool_use', id: 'b', name: 'tool_b', input: { p: 2 } },
+                { type: 'tool_use', id: 'c', name: 'tool_a', input: { p: 3 } },
+              ],
+              usage: { input_tokens: 5, output_tokens: 5 },
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      const result = await adapter().execute({
+        messages: [{ role: 'user', content: 'go' }],
+        tools: [
+          { name: 'tool_a', description: 'd', inputSchema: z.object({ p: z.number() }) },
+          { name: 'tool_b', description: 'd', inputSchema: z.object({ p: z.number() }) },
+        ],
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+        toolChoice: 'any',
+      });
+      expect(result.kind).toBe('tool_use');
+      if (result.kind !== 'tool_use') throw new Error('typeguard');
+      expect(result.calls).toHaveLength(3);
+      expect(result.calls.map((c) => c.id)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('tool input not an object (rare) → coerced to {value: ...}', async () => {
+      // Anthropic input is typed `object` in spec but defensive — if a model
+      // ever emits a literal string the helper should normalize it.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({
+              id: 'msg_test',
+              model: TEST_MODEL,
+              stop_reason: 'tool_use',
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'x',
+                  name: 'tool_a',
+                  input: 'plain-string',
+                },
+              ],
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      const result = await adapter().execute({
+        messages: [{ role: 'user', content: 'go' }],
+        tools: [{ name: 'tool_a', description: 'd', inputSchema: z.object({}) }],
+        systemPrompt: 'sys',
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        perStepTimeoutMs: DEFAULT_PER_STEP_TIMEOUT_MS,
+        model: TEST_MODEL,
+      });
+      if (result.kind !== 'tool_use') throw new Error('typeguard');
+      expect(result.calls[0]?.input).toEqual({ value: 'plain-string' });
+    });
+  });
+
+  // ---------------------- Zod → JSON Schema converter ----------------------
+
+  describe('zodToJsonSchema converter', () => {
+    it('z.string() with .min/.max/.regex/.email emits constraints', () => {
+      const s = z.string().min(3).max(20).regex(/^[a-z]+$/);
+      const out = zodToJsonSchema(s);
+      expect(out).toMatchObject({
+        type: 'string',
+        minLength: 3,
+        maxLength: 20,
+        pattern: '^[a-z]+$',
+      });
+
+      const email = z.string().email();
+      expect(zodToJsonSchema(email)).toMatchObject({ type: 'string', format: 'email' });
+
+      const url = z.string().url();
+      expect(zodToJsonSchema(url)).toMatchObject({ type: 'string', format: 'uri' });
+
+      const uuid = z.string().uuid();
+      expect(zodToJsonSchema(uuid)).toMatchObject({ type: 'string', format: 'uuid' });
+    });
+
+    it('z.number().int().multipleOf().min().max() emits constraints', () => {
+      const n = z.number().int().multipleOf(2).min(0).max(100);
+      const out = zodToJsonSchema(n);
+      expect(out).toMatchObject({
+        type: 'integer',
+        multipleOf: 2,
+        minimum: 0,
+        maximum: 100,
+      });
+    });
+
+    it('z.union([a, b]) → anyOf', () => {
+      const u = z.union([z.string(), z.number()]);
+      const out = zodToJsonSchema(u);
+      expect(out['anyOf']).toEqual([{ type: 'string' }, { type: 'number' }]);
+    });
+
+    it('z.discriminatedUnion(kind, [...]) → oneOf with x-discriminator', () => {
+      const du = z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('a'), payload: z.string() }),
+        z.object({ kind: z.literal('b'), payload: z.number() }),
+      ]);
+      const out = zodToJsonSchema(du);
+      expect(Array.isArray(out['oneOf'])).toBe(true);
+      const variants = out['oneOf'] as Array<Record<string, unknown>>;
+      expect(variants).toHaveLength(2);
+      expect((variants[0]?.['properties'] as Record<string, unknown>)?.['kind'])
+        .toMatchObject({ const: 'a' });
+      expect(out['x-discriminator']).toBe('kind');
+    });
+
+    it('z.intersection(a, b) → allOf', () => {
+      const inter = z.intersection(
+        z.object({ a: z.string() }),
+        z.object({ b: z.number() }),
+      );
+      const out = zodToJsonSchema(inter);
+      expect(Array.isArray(out['allOf'])).toBe(true);
+      const branches = out['allOf'] as Array<Record<string, unknown>>;
+      expect(branches).toHaveLength(2);
+    });
+
+    it('z.tuple([a, b, c]) → array with prefixItems and exact bounds', () => {
+      const tup = z.tuple([z.string(), z.number(), z.boolean()]);
+      const out = zodToJsonSchema(tup);
+      expect(out).toMatchObject({
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        items: false,
+      });
+      const pref = out['prefixItems'] as Array<Record<string, unknown>>;
+      expect(pref).toHaveLength(3);
+      expect(pref[0]?.['type']).toBe('string');
+      expect(pref[1]?.['type']).toBe('number');
+      expect(pref[2]?.['type']).toBe('boolean');
+    });
+
+    it('z.tuple([a, b]).rest(c) → variadic tuple (items from rest)', () => {
+      const tup = z.tuple([z.string(), z.number()]).rest(z.boolean());
+      const out = zodToJsonSchema(tup);
+      expect(out['minItems']).toBe(2);
+      expect(out['maxItems']).toBeUndefined();
+      expect(out['items']).toEqual({ type: 'boolean' });
+    });
+
+    it('z.lazy(() => inner) unwraps once to inner schema', () => {
+      const lazy = z.lazy(() => z.object({ name: z.string() }));
+      const out = zodToJsonSchema(lazy);
+      expect(out['type']).toBe('object');
+      expect((out['properties'] as Record<string, unknown>)['name'])
+        .toMatchObject({ type: 'string' });
+    });
+
+    it('z.coerce.string() behaves like z.string() (coercion is JS-side only)', () => {
+      const c = z.coerce.string().min(1);
+      const out = zodToJsonSchema(c);
+      expect(out).toMatchObject({ type: 'string', minLength: 1 });
+    });
+
+    it('z.array().nonempty() → minItems: 1', () => {
+      const a = z.array(z.string()).nonempty();
+      const out = zodToJsonSchema(a);
+      expect(out).toMatchObject({ type: 'array', minItems: 1 });
+    });
+
+    it('z.array().min(2).max(5) → minItems / maxItems', () => {
+      const a = z.array(z.string()).min(2).max(5);
+      const out = zodToJsonSchema(a);
+      expect(out).toMatchObject({ type: 'array', minItems: 2, maxItems: 5 });
+    });
+
+    it('z.record(z.string(), z.number()) → object additionalProperties: number', () => {
+      const r = z.record(z.string(), z.number());
+      const out = zodToJsonSchema(r);
+      expect(out).toMatchObject({
+        type: 'object',
+        additionalProperties: { type: 'number' },
+      });
+    });
+
+    it('z.nativeEnum dedupes numeric-enum reverse-mapped keys', () => {
+      const NumE = { Low: 0, High: 1 } as const;
+      // Simulate TS numeric enum reverse map: {0: 'Low', 1: 'High', Low: 0, High: 1}
+      const NumericEnum: Record<string, string | number> = {
+        ...NumE,
+        0: 'Low',
+        1: 'High',
+      };
+      const out = zodToJsonSchema(z.nativeEnum(NumericEnum));
+      const enumValues = out['enum'] as Array<string | number>;
+      // Dedupe yields the union of unique values in insertion order.
+      expect(new Set(enumValues)).toEqual(new Set([0, 1, 'Low', 'High']));
+    });
+
+    it('z.object with optional + default keys → not in required', () => {
+      const s = z.object({
+        a: z.string(),
+        b: z.string().optional(),
+        c: z.number().default(1),
+      });
+      const out = zodToJsonSchema(s);
+      expect(out['required']).toEqual(['a']);
+    });
+
+    it('z.nullable(z.string()) → type [string, null]', () => {
+      const n = z.nullable(z.string());
+      const out = zodToJsonSchema(n);
+      expect(out['type']).toEqual(['string', 'null']);
+    });
+
+    it('completes a 50-field object schema within 10ms', () => {
+      const shape: Record<string, z.ZodTypeAny> = {};
+      const FIELD_COUNT = 50;
+      for (let i = 0; i < FIELD_COUNT; i++) {
+        shape[`field_${i}`] = z.string().min(1).max(100);
+      }
+      const big = z.object(shape);
+      const PERF_BUDGET_MS = 10;
+      const start = performance.now();
+      const out = zodToJsonSchema(big);
+      const elapsed = performance.now() - start;
+      expect(elapsed).toBeLessThan(PERF_BUDGET_MS);
+      expect(Object.keys(out['properties'] as Record<string, unknown>)).toHaveLength(FIELD_COUNT);
+    });
+
+    it('bounded recursion depth (no infinite loop on self-referential lazy)', () => {
+      // Construct a directly self-referential lazy (no base case). The
+      // converter MUST terminate via depth guard, returning {} eventually.
+      interface RecursiveBox { children?: RecursiveBox[] }
+      const recursive: z.ZodType<RecursiveBox> = z.lazy(() =>
+        z.object({ children: z.array(recursive).optional() }),
+      );
+      // Should not throw / hang.
+      const out = zodToJsonSchema(recursive);
+      expect(typeof out).toBe('object');
+    });
+  });
+
+  // ---------------------- parseUsage edge cases ----------------------
+
+  describe('parseUsage helper', () => {
+    it('handles undefined usage entirely', () => {
+      const out = parseUsage(undefined);
+      expect(out).toEqual({
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      });
+    });
+
+    it('handles partial usage (only input/output, no cache fields)', () => {
+      const out = parseUsage({ input_tokens: 10, output_tokens: 5 });
+      expect(out.inputTokens).toBe(10);
+      expect(out.outputTokens).toBe(5);
+      expect(out.cacheReadTokens).toBe(0);
+      expect(out.cacheCreationTokens).toBe(0);
+    });
+
+    it('handles all four fields populated', () => {
+      const out = parseUsage({
+        input_tokens: 1,
+        output_tokens: 2,
+        cache_creation_input_tokens: 3,
+        cache_read_input_tokens: 4,
+      });
+      expect(out).toEqual({
+        inputTokens: 1,
+        outputTokens: 2,
+        cacheReadTokens: 4,
+        cacheCreationTokens: 3,
+      });
+    });
+
+    it('NaN / Infinity / null fields coerced to 0', () => {
+      const out = parseUsage({
+        // @ts-expect-error — exercising defensive runtime path
+        input_tokens: Number.NaN,
+        // @ts-expect-error — exercising defensive runtime path
+        output_tokens: Number.POSITIVE_INFINITY,
+        // @ts-expect-error — exercising defensive runtime path
+        cache_creation_input_tokens: null,
+      });
+      expect(out.inputTokens).toBe(0);
+      expect(out.outputTokens).toBe(0);
+      expect(out.cacheCreationTokens).toBe(0);
     });
   });
 

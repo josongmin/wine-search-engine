@@ -11,6 +11,9 @@ import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid
 import type { RetrievalTrace } from '../../../src/domain/retrieval/model/retrieval-trace.js';
 import type { AnchorEntityData } from '../../../src/domain/mixed/service/anchor-profiler.js';
 import type { SimilarityCandidate } from '../../../src/domain/mixed/service/similarity-scorer.js';
+import { deriveInitialisms } from '../../../src/domain/alias/service/initialism-derivation.js';
+import { deriveAbbreviations } from '../../../src/domain/alias/service/abbreviation-derivation.js';
+import type { InMemoryAliasProvenance } from './in-memory-adapters.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entity IDs (stable, deterministic)
@@ -427,6 +430,14 @@ interface TestAlias {
   surfaceForm: string;
   entityId: EntityId;
   confidence: number;
+  /**
+   * Optional provenance tag. Omitted = 'curated' (hand-authored entries).
+   * Set to 'derived_initialism' for entries emitted by the deterministic
+   * ETL initialism deriver — the in-memory matcher uses this to decorate
+   * `lookupStrategy` with `+initialism_match` so the resolver scorer can
+   * apply the derived-initialism cap.
+   */
+  provenance?: InMemoryAliasProvenance;
 }
 
 export const TEST_ALIASES: readonly TestAlias[] = [
@@ -732,6 +743,65 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     availability: true,
     popularityScore: 0.80,
   },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Derived caps-initialism aliases (RFC-003 §4.3, alias_type='derived_initialism')
+//
+// Mirrors what the production ETL pipeline emits when it processes the
+// silver alias catalog: a deterministic transform of each canonical label
+// into the conventional caps-initialism family ("Château Margaux" → "CM",
+// "Domaine Romanée Conti" → "DR" / "DRC", …). Defined *below* TEST_DOCUMENTS
+// because module-scope `const` initialisers are evaluated top-to-bottom and
+// the derivation reads canonical labels off the document list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DERIVED_INITIALISM_ALIASES: readonly TestAlias[] =
+  TEST_DOCUMENTS.flatMap((doc) =>
+    deriveInitialisms(doc.canonicalLabel).map((derived) => ({
+      surfaceForm: derived.surface,
+      entityId: doc.entityId,
+      confidence: derived.confidencePrior,
+      provenance: 'derived_initialism' as const,
+    })),
+  );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Derived abbreviation aliases (RFC-003 §4.3, alias_type='abbreviation')
+//
+// Mirrors what `scripts/etl/generate-abbreviation-aliases.ts` emits in
+// production: deterministic wine-community shorthand
+// (producer-initials × vintage, producer-first-word × vintage). This
+// keeps the in-memory test substrate aligned with the production
+// `aliases` table contents so the KIL noisy-benchmark recall on the
+// `abbreviation` slice tracks real-world performance, not an artefact
+// of missing fixtures.
+//
+// Each surface is registered with the `'abbreviation'` provenance which
+// flows into the resolver scorer's ABBREVIATION_CAP via the standard
+// alias_type plumbing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DERIVED_ABBREVIATION_ALIASES: readonly TestAlias[] =
+  TEST_DOCUMENTS.flatMap((doc) =>
+    deriveAbbreviations({ canonicalLabel: doc.canonicalLabel }).map((derived) => ({
+      surfaceForm: derived.surface,
+      entityId: doc.entityId,
+      confidence: derived.confidencePrior,
+      provenance: 'abbreviation' as const,
+    })),
+  );
+
+/**
+ * Default alias set used by {@link createTestContainer}: curated aliases
+ * union the deterministic initialism derivations union the deterministic
+ * abbreviation derivations. Tests that need a pure curated-only baseline
+ * can still pass `fixtureAliases: TEST_ALIASES` explicitly.
+ */
+export const TEST_ALIASES_WITH_DERIVED: readonly TestAlias[] = [
+  ...TEST_ALIASES,
+  ...DERIVED_INITIALISM_ALIASES,
+  ...DERIVED_ABBREVIATION_ALIASES,
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

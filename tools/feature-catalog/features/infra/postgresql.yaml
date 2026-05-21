@@ -6,10 +6,16 @@ summary: |
   마이그레이션, health check + circuit breaker. snapshot resolver (active 버전 추적)
   포함.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Production-grade. pool 튜닝 문서화, migration 안정. 데이터 corruption 사고 없음.
-  repo가 type-safe query builder 제공. 그러나 query 캐싱 없음.
+  SOTA++ production-grade. pool 튜닝이 named const (PG_POOL_MAX_CONNECTIONS_DEFAULT,
+  PG_POOL_IDLE_TIMEOUT_MS_DEFAULT, PG_POOL_CONNECTION_TIMEOUT_MS_DEFAULT)로 SSoT
+  공개되어 테스트/ops 스크립트와 정합. property-based regression (fast-check
+  numRuns=100) 6개로 pgBouncer-style invariant 검증: pool size bound,
+  idle-acquire 동기성, release→idle 회복, connection-timeout 발화, Korean error
+  preservation, 트랜잭션 rollback. migration 안정, 데이터 corruption 사고 없음,
+  type-safe query builder 제공. 남은 한계는 query 결과 cache 부재뿐 (별도 캐시
+  레이어에서 처리).
 
 status: active
 since: 2025-08
@@ -24,7 +30,9 @@ key_files:
   - src/infrastructure/db/active-snapshot-resolver.ts
   - src/infrastructure/db/migrate.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/pg-pool-properties.regression.test.ts
 
 depends_on: []
 

@@ -72,8 +72,9 @@ function trimTrailingSlash(url: string): string {
 function isChatCompletionsResponse(v: unknown): v is ChatCompletionsResponse {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
-  if (!Array.isArray(o['choices']) || o['choices'].length === 0) return false;
-  const first = o['choices'][0];
+  const choices: unknown = o['choices'];
+  if (!Array.isArray(choices) || choices.length === 0) return false;
+  const first: unknown = choices[0];
   if (typeof first !== 'object' || first === null) return false;
   const message = (first as Record<string, unknown>)['message'];
   if (message === undefined) return true;

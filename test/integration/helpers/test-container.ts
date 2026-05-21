@@ -59,6 +59,7 @@ import {
   InMemoryAnchorResolver,
   InMemorySimilarRetrieval,
   InMemoryCandidateAttributes,
+  type InMemoryAliasProvenance,
 } from './in-memory-adapters.js';
 import { PlannerV1Adapter } from '../../../src/config/planner-v1-adapter.js';
 import {
@@ -67,7 +68,7 @@ import {
 } from '../../../src/domain/query/service/static-ambiguity-dictionary.js';
 import {
   MIXED_NEIGHBORHOOD_FIXTURES,
-  TEST_ALIASES,
+  TEST_ALIASES_WITH_DERIVED,
   TEST_DOCUMENTS,
   toAnchorEntityData,
   toCandidateAttributes,
@@ -81,6 +82,8 @@ export interface TestFixtureAlias {
   readonly surfaceForm: string;
   readonly entityId: EntityId;
   readonly confidence: number;
+  /** Origin of the alias entry — defaults to 'curated' when omitted. */
+  readonly provenance?: InMemoryAliasProvenance;
 }
 
 export interface TestContainerParts {
@@ -127,11 +130,23 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const candidateAttributes = new InMemoryCandidateAttributes();
   const watchlistStore = new InMemoryWatchlistStore();
 
-  const fixtureAliases = options.fixtureAliases ?? TEST_ALIASES;
+  // Default to curated ∪ deterministic initialism derivations.
+  // The InMemoryAliasMatcher propagates provenance through
+  // `lookupStrategy` decoration (`+initialism_match` suffix) so the
+  // downstream resolver scorer applies DERIVED_INITIALISM_CAP only to
+  // initialism-only matches, preventing initialism aliases from
+  // competing with curated aliases at full weight. Tests that want a
+  // pure curated baseline can pass `fixtureAliases: TEST_ALIASES`.
+  const fixtureAliases = options.fixtureAliases ?? TEST_ALIASES_WITH_DERIVED;
   const fixtureDocuments = options.fixtureDocuments ?? TEST_DOCUMENTS;
 
   for (const alias of fixtureAliases) {
-    aliasMatcher.addAlias(alias.surfaceForm, alias.entityId, alias.confidence);
+    aliasMatcher.addAlias(
+      alias.surfaceForm,
+      alias.entityId,
+      alias.confidence,
+      alias.provenance ?? 'curated',
+    );
   }
 
   const materializedDocuments = fixtureDocuments.map((doc) => {

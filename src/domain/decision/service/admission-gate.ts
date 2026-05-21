@@ -1,4 +1,5 @@
 import type { DecisionSnapshot } from '../../shared/types/index.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 import {
   type AdmissionClosureSummary,
   type DecisionInput,
@@ -210,17 +211,32 @@ export class AdmissionGate {
 
     // ── (e) Confidence sufficiency (Epic 17.3, RFC-016 §3) ──────────────────────
     //
-    // When a ConfidenceRefusalPolicy is provided (opt-in via env var), check that
-    // the resolver's calibrated decision confidence C meets the minimum threshold.
-    // This guards against hallucinations by refusing low-confidence resolved
+    // When a ConfidenceRefusalPolicy is provided, check that the resolver's
+    // calibrated decision confidence C meets the minimum threshold. This
+    // guards against hallucinations by refusing low-confidence resolved
     // decisions.
     //
-    // The policy is OPTIONAL: if not provided, this check is skipped entirely
-    // (backward compatible).
+    // CRITICAL: enforcement is skipped when `calibrationTrusted` is false —
+    // the resolver flags this when the Calibrator fell back to identity
+    // pass-through because no trained calibration params exist for the
+    // query class (RFC-006 §6). Treating an uncalibrated raw score as a
+    // probability and refusing it against a fixed threshold would convert
+    // the hallucination guard into a quasi-random gate on raw scoring,
+    // producing high false-refusal rates immediately after deployment and
+    // before the calibration ETL has populated the params table.
+    // Operators see the silent-skip counter rise so the missing-calibration
+    // condition is observable instead of silently neutering the guard.
     if (this.confidenceRefusalPolicy !== undefined) {
-      const C = input.resolveResult.decisionTrace.decisionConfidenceC;
-      if (this.confidenceRefusalPolicy.shouldRefuse(C)) {
-        return this.reject('CONFIDENCE_BELOW_THRESHOLD', input, snapshot);
+      const trusted = input.resolveResult.decisionTrace.calibrationTrusted;
+      if (!trusted) {
+        globalSilentSkipCounter.increment('admission_gate_confidence_refusal_skipped_untrusted', {
+          queryClass: input.queryPlan.queryClass,
+        });
+      } else {
+        const C = input.resolveResult.decisionTrace.decisionConfidenceC;
+        if (this.confidenceRefusalPolicy.shouldRefuse(C)) {
+          return this.reject('CONFIDENCE_BELOW_THRESHOLD', input, snapshot);
+        }
       }
     }
 

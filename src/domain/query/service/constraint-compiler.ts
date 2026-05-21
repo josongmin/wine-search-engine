@@ -1,11 +1,16 @@
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
+import type { AmbiguousEntityHint } from '../../attribute/model/ambiguous-entity-hint.js';
 import type { NLMapper } from '../../attribute/service/nl-mapper.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
-import { resolveEntity, type ResolvedEntity } from '../../attribute/service/entity-resolver.js';
+import {
+  isDirectEntityResolution,
+  resolveEntity,
+  type ResolvedEntity,
+} from '../../attribute/service/entity-resolver.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
+import { REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
 import {
   applyCompositionalInference,
   inferComparisonImpliedWineType,
@@ -23,12 +28,14 @@ import { isTopologyIntentGateOpen } from './constraint-topology-planner.js';
 import { mergeTopologyIntoTrivial } from './merge-topology-into-trivial.js';
 import { DeterministicTopologyDetector } from './deterministic-topology-detector.js';
 import type { QueryDecompositionHint } from '../model/query-decomposition.js';
+import { extractAllPairingConstraints, type PairingTag } from './pairing-extractor.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   readonly retrievalPlan: RetrievalPlan;
   readonly resolvedEntities: readonly ResolvedEntity[];
+  readonly ambiguousEntityHints: readonly AmbiguousEntityHint[];
   /**
    * E2-T2: ConstraintReasoner output — conflict-resolved atoms + pairwise relations.
    *
@@ -62,36 +69,93 @@ export interface ConstraintCompilerResult {
  * ADR-012 Phase 1b.2 feature flag. Default OFF; set to literal 'true' to
  * enable LLM topology planner. When off (or when the planner is not
  * injected, e.g. no `ChatLlmPort` at composition root), the compiler
- * falls through to the deterministic trivial graph.
+ * falls through to the deterministic detector (F1) or the trivial graph.
  */
 function isConstraintGraphTopologyLlmEnabled(): boolean {
   return process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true';
 }
 
 /**
- * Wave F1 feature flag. Default ON — set to literal `'false'` to
- * disable the deterministic topology detector. The detector is
- * LLM-free, pure, and covered by regression tests, so rollback is
- * considered ops-level rather than dev-level: the flag exists so ops
- * can bypass the detector without a code change if it ever
- * misbehaves in production.
- *
- * Priority chain implemented below:
- *   LLM planner (if enabled + injected + intent gate opens)
- *     > deterministic detector (if enabled, non-null return)
- *     > trivial graph (always).
+ * Wave F1 feature flag. Default ON; set to literal 'false' to disable
+ * the deterministic pattern-based topology detector. Priority chain:
+ * LLM (if enabled) > deterministic (this flag, default on) > trivial.
  */
 function isConstraintGraphTopologyDeterministicEnabled(): boolean {
   return process.env['CONSTRAINT_GRAPH_TOPOLOGY_DETERMINISTIC'] !== 'false';
 }
 
-/** Wave F1 — stateless detector reused across every compile() call. */
-const DETERMINISTIC_TOPOLOGY_DETECTOR = new DeterministicTopologyDetector();
-
 // SOFT_CONSTRAINT_ATTRIBUTES is imported from SSoT: ../../shared/constants/constraint-attributes.js
 const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 
 const CONSTRAINT_REASONER = new ConstraintReasoner();
+/** Wave F1: single shared deterministic detector — stateless, safe to reuse. */
+const DETERMINISTIC_TOPOLOGY_DETECTOR = new DeterministicTopologyDetector();
+const PAIRING_OBJECTIVE_MAPPING_VERSION = 'pairing-objective-v1.0';
+const PAIRING_OBJECTIVE_CONFIDENCE = 0.9;
+const SPICY_FOOD_STYLE_VALUES = ['off_dry', 'sweet'] as const;
+const WHITE_FISH_WINE_TYPE_VALUES = ['white', 'sparkling', 'rosé'] as const;
+
+function foldOntologyKey(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim();
+}
+
+function isOntologyAppellationValue(value: string): boolean {
+  const foldedValue = foldOntologyKey(value);
+  return [...REGION_PARENTS.keys()].some((key) => foldOntologyKey(key) === foldedValue);
+}
+
+function canPromoteResolvedEntityToConstraint(entity: ResolvedEntity): boolean {
+  if (entity.entityType !== 'appellation') {
+    return true;
+  }
+  return isOntologyAppellationValue(entity.canonicalValue);
+}
+
+function spanContains(container: Span, candidate: Span): boolean {
+  return (
+    container.startChar <= candidate.startChar
+    && container.endChar >= candidate.endChar
+    && (container.startChar !== candidate.startChar || container.endChar !== candidate.endChar)
+  );
+}
+
+function buildIdentityOnlyShieldSpans(
+  spans: readonly Span[],
+  fuzzyMatcher: FuzzyMatcherPort | undefined,
+): readonly Span[] {
+  return spans.filter((span) => {
+    const resolved = resolveEntity(span.text, { preferEntityOverStyle: true }, fuzzyMatcher);
+    return isDirectEntityResolution(resolved) && !canPromoteResolvedEntityToConstraint(resolved);
+  });
+}
+
+function constraintSourceIsShieldedByIdentityOnlySpan(
+  constraint: NormalizedConstraint,
+  spans: readonly Span[],
+  identityOnlyShieldSpans: readonly Span[],
+): boolean {
+  const source = constraint.source_phrase.trim().toLowerCase();
+  if (source.length === 0 || identityOnlyShieldSpans.length === 0) {
+    return false;
+  }
+  return spans
+    .filter((span) => span.text === source)
+    .some((span) => identityOnlyShieldSpans.some((shield) => spanContains(shield, span)));
+}
+
+function stripIdentityOnlyShadowConstraints(
+  constraints: readonly NormalizedConstraint[],
+  spans: readonly Span[],
+  identityOnlyShieldSpans: readonly Span[],
+): readonly NormalizedConstraint[] {
+  return constraints.filter((constraint) =>
+    !constraintSourceIsShieldedByIdentityOnlySpan(constraint, spans, identityOnlyShieldSpans),
+  );
+}
 
 export class ConstraintCompiler {
   constructor(
@@ -111,33 +175,13 @@ export class ConstraintCompiler {
     const mapped = await this.nlMapper.mapConstraints(
       candidatePhrases,
       abortSignal !== undefined ? { abortSignal } : undefined,
-    ).catch((err: unknown) => {
-      // NLMapper failure: return empty constraints so Tier 6 rule-based
-      // extraction and entity resolver can still run. The query proceeds
-      // with reduced precision rather than aborting entirely.
-      bootstrapLogger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
-        '[constraint-compiler] NLMapper.mapConstraints failed — falling back to Tier 6 rules only',
-      );
-      return {
-        constraints: [],
-        constraintExtraction: {
-          candidatePhraseCount: candidatePhrases.length,
-          ruleTableHitCount: 0,
-          llmHitCount: 0,
-          llmSkippedCount: 0,
-          fallbackTriggered: true,
-          source: 'fallback' as const,
-          llmLatencyMs: null,
-          phraseCacheHits: 0,
-          phraseCacheNegativeSkipped: 0,
-          phraseCacheMisses: 0,
-          missedPhrases: [...candidatePhrases],
-          fallbackReason: 'nlmapper_exception' as const,
-        },
-      };
-    });
-    const matched = mapped.constraints;
+    );
+    const identityOnlyShieldSpans = buildIdentityOnlyShieldSpans(spans, this.fuzzyMatcher);
+    const matched = stripIdentityOnlyShadowConstraints(
+      mapped.constraints,
+      spans,
+      identityOnlyShieldSpans,
+    );
     const mapperTrace = mapped.constraintExtraction;
 
     const hard: ConstraintBundle['hard'][number][] = [];
@@ -158,6 +202,7 @@ export class ConstraintCompiler {
     }
 
     const coveredPhrases = new Set(matched.map((c) => c.source_phrase.toLowerCase()));
+    const coveredSpans = spans.filter((span) => coveredPhrases.has(span.text));
     const matchedAttributesByPhrase = new Map<string, Set<string>>();
     for (const constraint of matched) {
       const key = constraint.source_phrase.toLowerCase();
@@ -166,30 +211,52 @@ export class ConstraintCompiler {
       matchedAttributesByPhrase.set(key, existing);
     }
 
+    type ResolverResolution =
+      | { entity: ResolvedEntity; kind: 'primary' | 'shadow' | 'covered' }
+      | { hint: AmbiguousEntityHint; kind: 'ambiguous_hint' };
     const resolverCandidates: {
       span: Span;
-      resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } | null;
+      resolved: ResolverResolution | null;
     }[] = [];
     for (const span of spans) {
       const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true }, this.fuzzyMatcher);
+      // `resolveEntity` returns `ResolvedEntity | null` — no `undefined` arm,
+      // so we only need to gate on the null and the ambiguity hint.
+      const ambiguousEntity =
+        preferredEntity !== null
+        && preferredEntity.ambiguityHint !== undefined
+          ? preferredEntity
+          : null;
       if (!coveredPhrases.has(span.text)) {
+        let resolved: ResolverResolution | null = null;
+        if (isDirectEntityResolution(preferredEntity)) {
+          resolved = { entity: preferredEntity, kind: 'primary' };
+        } else if (ambiguousEntity !== null) {
+          resolved = { hint: ambiguousEntity.ambiguityHint!, kind: 'ambiguous_hint' };
+        }
         resolverCandidates.push({
           span,
-          resolved: preferredEntity !== null
-            ? { entity: preferredEntity, kind: 'primary' }
-            : null,
+          resolved,
         });
         continue;
       }
       const coveredAttributes = matchedAttributesByPhrase.get(span.text) ?? new Set<string>();
       if (
-        preferredEntity !== null
+        isDirectEntityResolution(preferredEntity)
         && preferredEntity.entityType !== 'wine_type'
         && !coveredAttributes.has(preferredEntity.entityType)
       ) {
         resolverCandidates.push({
           span,
           resolved: { entity: preferredEntity, kind: 'shadow' },
+        });
+      } else if (
+        isDirectEntityResolution(preferredEntity)
+        && coveredAttributes.has(preferredEntity.entityType)
+      ) {
+        resolverCandidates.push({
+          span,
+          resolved: { entity: preferredEntity, kind: 'covered' },
         });
       } else {
         resolverCandidates.push({ span, resolved: null });
@@ -199,12 +266,28 @@ export class ConstraintCompiler {
     const resolvedNonOverlap = resolveOverlaps(resolverCandidates)
       .filter((e): e is {
         span: Span;
-        resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+        resolved: ResolverResolution;
       } => e.resolved !== null);
 
     const resolvedEntities: ResolvedEntity[] = [];
-    for (const { resolved } of resolvedNonOverlap) {
+    const ambiguousEntityHints: AmbiguousEntityHint[] = [];
+    let promotedResolvedEntityConstraintCount = 0;
+    for (const { span, resolved } of resolvedNonOverlap) {
+      if (resolved.kind === 'ambiguous_hint') {
+        if (isShieldedByCoveredSpan(span, coveredSpans)) {
+          continue;
+        }
+        ambiguousEntityHints.push(resolved.hint);
+        continue;
+      }
       resolvedEntities.push(resolved.entity);
+      if (resolved.kind === 'covered') {
+        continue;
+      }
+      if (!canPromoteResolvedEntityToConstraint(resolved.entity)) {
+        continue;
+      }
+      promotedResolvedEntityConstraintCount += 1;
       const constraint = {
         attribute: resolved.entity.entityType,
         operator: '=' as const,
@@ -223,6 +306,12 @@ export class ConstraintCompiler {
     }
 
     const tier12Empty = hard.length === 0 && soft.length === 0;
+    // Tier 6 receives the ORIGINAL query — predicate normalization is handled
+    // by the NL mapper's phrase-level variant lookup (korean-predicate-variants.ts),
+    // NOT by query-level transformation. Applying normalizeQueryPredicates to the
+    // full query breaks negation markers: "말고" (postpositional negation) gets
+    // transformed to "말은" (meaningless) by the "고→은" suffix rule, preventing
+    // NEGATION_SUBJECT_AFTER from matching.
     const tier6Bundle = extractRuleBasedConstraints(normalizedQuery);
     const tier6ConstraintCount = mergeConstraintBundleIntoLists(
       tier6Bundle,
@@ -241,6 +330,7 @@ export class ConstraintCompiler {
         ontologyExpanded,
         { impliedWineType: inferComparisonImpliedWineType(ontologyExpanded, normalizedQuery) },
       );
+      finalBundle = applyPairingObjectiveInference(finalBundle, normalizedQuery);
       baseBundle = tier6Bundle;
     } else {
       baseBundle = { hard, soft, inferred: [] };
@@ -249,6 +339,7 @@ export class ConstraintCompiler {
         expanded,
         { impliedWineType: inferComparisonImpliedWineType(expanded, normalizedQuery) },
       );
+      finalBundle = applyPairingObjectiveInference(finalBundle, normalizedQuery);
     }
 
     // E2-T2: Run ConstraintReasoner after Tier 6 (Wave 2 design: Tier 6 → Reasoner →
@@ -263,6 +354,7 @@ export class ConstraintCompiler {
       spans,
       matched,
       resolvedEntityCount: resolvedEntities.length,
+      promotedResolvedEntityConstraintCount,
       finalBundle: effectiveBundle,
       ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
       compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
@@ -293,6 +385,13 @@ export class ConstraintCompiler {
       const trivial = buildTrivialGraphFromAtoms(reasonerOutput.survivingAtoms);
       constraintGraph = trivial;
 
+      // Priority chain: LLM (if enabled + planner injected + intent gate) >
+      // deterministic (F1, default on) > trivial (already assigned above).
+      const slotIds = trivial.nodes
+        .filter((n) => n.kind === 'slot')
+        .map((n) => n.nodeId);
+
+      let topologyHandled = false;
       if (
         isConstraintGraphTopologyLlmEnabled() &&
         this.topologyPlanner !== undefined &&
@@ -301,9 +400,6 @@ export class ConstraintCompiler {
           ...(decompositionHint !== undefined ? { decompositionHint } : {}),
         })
       ) {
-        const slotIds = trivial.nodes
-          .filter((n) => n.kind === 'slot')
-          .map((n) => n.nodeId);
         const topology = await this.topologyPlanner.plan({
           atoms: reasonerOutput.survivingAtoms,
           normalizedQuery,
@@ -313,6 +409,26 @@ export class ConstraintCompiler {
         });
         if (topology !== null) {
           const merged = mergeTopologyIntoTrivial(trivial, topology);
+          if (merged !== null) {
+            constraintGraph = merged;
+            topologyHandled = true;
+          }
+        }
+      }
+
+      // Wave F1: deterministic pattern-based topology detector. Runs when
+      // the LLM path did not produce a usable graph (either disabled, not
+      // injected, intent gate closed, LLM returned null, or merge failed).
+      // Stateless + pure — safe to call on every compile.
+      if (!topologyHandled && isConstraintGraphTopologyDeterministicEnabled()) {
+        const detected = DETERMINISTIC_TOPOLOGY_DETECTOR.detect({
+          atoms: reasonerOutput.survivingAtoms,
+          normalizedQuery,
+          slotIds,
+          ...(decompositionHint !== undefined ? { decompositionHint } : {}),
+        });
+        if (detected !== null) {
+          const merged = mergeTopologyIntoTrivial(trivial, detected);
           if (merged !== null) {
             constraintGraph = merged;
           }
@@ -325,10 +441,29 @@ export class ConstraintCompiler {
       ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
       retrievalPlan,
       resolvedEntities,
+      ambiguousEntityHints,
       reasonerOutput,
       ...(constraintGraph !== undefined ? { constraintGraph } : {}),
     };
   }
+}
+
+function isShieldedByCoveredSpan(
+  candidate: Span,
+  coveredSpans: readonly Span[],
+): boolean {
+  return coveredSpans.some((coveredSpan) =>
+    spansOverlap(candidate, coveredSpan)
+    && spanLength(coveredSpan) > spanLength(candidate),
+  );
+}
+
+function spansOverlap(left: Span, right: Span): boolean {
+  return left.startChar < right.endChar && right.startChar < left.endChar;
+}
+
+function spanLength(span: Span): number {
+  return span.endChar - span.startChar;
 }
 
 function countBundleConstraints(bundle: ConstraintBundle): number {
@@ -339,6 +474,74 @@ function constraintKey(constraint: NormalizedConstraint): string {
   // canonicalJsonStringify sorts object keys so range constraints
   // ({min,max} vs {max,min}) produce the same dedup key. (Bugbash Round 18)
   return `${constraint.attribute}|${constraint.operator}|${canonicalJsonStringify(constraint.value)}`;
+}
+
+function applyPairingObjectiveInference(
+  bundle: ConstraintBundle,
+  normalizedQuery: string,
+): ConstraintBundle {
+  const inferred = inferPairingObjectiveConstraints(normalizedQuery);
+  if (inferred.length === 0) {
+    return bundle;
+  }
+
+  const existing = new Set<string>([
+    ...bundle.hard.map(constraintKey),
+    ...bundle.soft.map(constraintKey),
+    ...bundle.inferred.map(constraintKey),
+  ]);
+  const mergedInferred: NormalizedConstraint[] = [...bundle.inferred];
+  for (const constraint of inferred) {
+    const key = constraintKey(constraint);
+    if (existing.has(key)) {
+      continue;
+    }
+    existing.add(key);
+    mergedInferred.push(constraint);
+  }
+
+  return {
+    hard: bundle.hard,
+    soft: bundle.soft,
+    inferred: mergedInferred,
+  };
+}
+
+function inferPairingObjectiveConstraints(normalizedQuery: string): readonly NormalizedConstraint[] {
+  const constraints: NormalizedConstraint[] = [];
+  for (const tag of extractAllPairingConstraints(normalizedQuery)) {
+    const inferred = pairingTagToObjectiveConstraint(tag);
+    if (inferred !== null) {
+      constraints.push(inferred);
+    }
+  }
+  return constraints;
+}
+
+function pairingTagToObjectiveConstraint(tag: PairingTag): NormalizedConstraint | null {
+  if (tag === 'spicy_food') {
+    return {
+      attribute: 'style',
+      operator: 'in',
+      value: SPICY_FOOD_STYLE_VALUES,
+      source_phrase: `pairing_objective(${tag})`,
+      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+    };
+  }
+
+  if (tag === 'white_fish') {
+    return {
+      attribute: 'wine_type',
+      operator: 'in',
+      value: WHITE_FISH_WINE_TYPE_VALUES,
+      source_phrase: `pairing_objective(${tag})`,
+      confidence: PAIRING_OBJECTIVE_CONFIDENCE,
+      mapping_version: PAIRING_OBJECTIVE_MAPPING_VERSION,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -394,7 +597,7 @@ function collectUnresolvedSpanSamples(
   coveredPhrases: ReadonlySet<string>,
   resolved: readonly {
     span: Span;
-    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+    resolved: unknown;
   }[],
 ): readonly string[] {
   const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
@@ -418,7 +621,7 @@ function countUnresolvedSpans(
   coveredPhrases: ReadonlySet<string>,
   resolved: readonly {
     span: Span;
-    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+    resolved: unknown;
   }[],
 ): number {
   const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
@@ -448,6 +651,7 @@ function buildConstraintExtractionTrace(args: {
   readonly spans: readonly Span[];
   readonly matched: readonly NormalizedConstraint[];
   readonly resolvedEntityCount: number;
+  readonly promotedResolvedEntityConstraintCount: number;
   readonly finalBundle: ConstraintBundle;
   readonly ontologyAddedCount: number;
   readonly compositionalAddedCount: number;
@@ -460,6 +664,7 @@ function buildConstraintExtractionTrace(args: {
     spans,
     matched,
     resolvedEntityCount,
+    promotedResolvedEntityConstraintCount,
     finalBundle,
     ontologyAddedCount,
     compositionalAddedCount,
@@ -485,7 +690,7 @@ function buildConstraintExtractionTrace(args: {
     candidateSpanCount: spans.length,
     resolvedEntityCount,
     directHardConstraintCount: matched.filter((constraint) =>
-      !SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)).length + resolvedEntityCount,
+      !SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)).length + promotedResolvedEntityConstraintCount,
     ontologyExpandedConstraintCount: ontologyAddedCount,
     compositionalInferenceCount: compositionalAddedCount,
     phrasesByTier: {

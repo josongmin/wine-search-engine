@@ -133,8 +133,61 @@ describe('CandidateScorer', () => {
   it('phoneticMatch and editDistanceScore contribute at expected weights', () => {
     const signals = makeSignals({ phoneticMatch: 1.0, editDistanceScore: 1.0 });
     const candidate = makeCandidate(signals);
-    const score = scorer.score(candidate);
     // phoneticMatch=0.4 + editDistanceScore=0.3 = 0.7
+    const score = scorer.score(candidate);
     expect(score).toBeCloseTo(0.7, 5);
+  });
+
+  describe('derived_initialism cap', () => {
+    // The cap exists to handle the collision-prone pure-initialism case
+    // ("CM" → many possible producers). It MUST NOT engage when curated
+    // evidence coexists on the same candidate, otherwise a curated match
+    // is silently downgraded to 0.55 even though full-trust evidence is
+    // present. (Root cause of the KIL benchmark regression in vintage_partial
+    // / producer_label_partial / mixed_language.)
+
+    function makeWithMatches(matches: ResolverCandidate['aliasMatches']): ResolverCandidate {
+      return makeCandidate(makeSignals({ aliasExactMatch: 1.0 }), matches);
+    }
+
+    it('pure-derived candidate has aliasExactMatch capped at 0.55', () => {
+      const candidate = makeWithMatches([
+        { aliasValue: 'CM', aliasType: 'derived_initialism', matchScore: 0.5 },
+      ]);
+      const score = scorer.score(candidate);
+      // aliasExactMatch weight = 0.8, capped value = 0.55 → 0.8 * 0.55 = 0.44
+      expect(score).toBeCloseTo(0.44, 5);
+    });
+
+    it('does NOT cap when a canonical sibling match coexists (mixed candidate)', () => {
+      // Same aliasExactMatch=1.0 signal but a canonical match is present.
+      // Cap must not fire — the candidate's evidence is already canonical-grade.
+      const candidate = makeWithMatches([
+        { aliasValue: 'Chateau Margaux', aliasType: 'canonical', matchScore: 0.95 },
+        { aliasValue: 'CM', aliasType: 'derived_initialism', matchScore: 0.5 },
+      ]);
+      const score = scorer.score(candidate);
+      // aliasExactMatch stays at 1.0 → 0.8 * 1.0 = 0.8
+      expect(score).toBeCloseTo(0.8, 5);
+    });
+
+    it('does NOT cap when only one of several aliasMatches is derived_initialism', () => {
+      // Even when no canonical/translation/phonetic match is present, a
+      // misspelling sibling means the resolver has stronger evidence than
+      // pure initialism — cap must not engage on `.every()` semantics.
+      const candidate = makeWithMatches([
+        { aliasValue: 'opus 1', aliasType: 'misspelling', matchScore: 0.8 },
+        { aliasValue: 'O1', aliasType: 'derived_initialism', matchScore: 0.5 },
+      ]);
+      const score = scorer.score(candidate);
+      expect(score).toBeCloseTo(0.8, 5);
+    });
+
+    it('candidate with empty aliasMatches does not engage the cap (no signal source)', () => {
+      // Blocker-seeded zero-evidence candidates must not be affected.
+      const candidate = makeWithMatches([]);
+      const score = scorer.score(candidate);
+      expect(score).toBeCloseTo(0.8, 5);
+    });
   });
 });

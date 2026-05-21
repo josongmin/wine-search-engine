@@ -6,19 +6,26 @@ summary: |
   execution-runner → synthesis-runner 4단 파이프라인. wine-search-schemas + execution-plan-schemas
   + synthesis-schemas로 각 단계 IO를 Zod-validated. fallback templates 포함.
 
-maturity: 2
+maturity: 4
 maturity_rationale: |
-  스캐폴드 완성 (7개 모듈), __tests__ 존재. 그러나 ReAct 대비 production traffic
-  아직 안 받음 (실험적). shadow mode / A/B 검증 미수립. 18K bench scenario에 대한
-  parity 미입증.
+  Production-wired with feature flag (`WINE_SEARCH_ENABLED`). Full HTTP surface:
+  POST /v1/wine-search 라우트 등록 (server.ts:390-394 + http-route-contract-catalog.ts:69),
+  WineSearchRouteContract + WineSearchRequestSchema (200+ lines Zod-validated),
+  WineSearchOrchestrator class implementation. DI 통합 — buildWineSearchContainerServices가
+  feature flag 켜질 때 (`isWineSearchEnabled()`) container에 inject. Test coverage:
+  4 e2e files (wine-search-api / -api-hell-http / -api-hell-adversarial /
+  -api-hell-pipeline), integration test (wine-search.route.test.ts), bundle wiring
+  test, feature flag test, +주변 application/wine-search/__tests__/. 4-단 PtE pipeline
+  (query-analyzer → deterministic-router → execution-runner → synthesis-runner)
+  모두 Zod-strict. 5는 18K bench scenario parity 입증 + ReAct cutover 시 가능.
 
-status: experimental
+status: active
 since: 2026-04
 last_reviewed: 2026-05-21
 owner: core
 
 surfaces:
-  - "Internal (대체 orchestrator — flag-gated)"
+  - "HTTP: POST /v1/wine-search (flag-gated by WINE_SEARCH_ENABLED)"
 
 key_files:
   - src/application/wine-search/query-analyzer.ts
@@ -30,7 +37,17 @@ key_files:
   - src/application/wine-search/synthesis-fallback-templates.ts
   - src/application/wine-search/wine-search-schemas.ts
 
-tests: {}
+tests:
+  e2e:
+    - test/e2e/wine-search-api.test.ts
+    - test/e2e/wine-search-api-hell-http.test.ts
+    - test/e2e/wine-search-api-hell-adversarial.test.ts
+    - test/e2e/wine-search-api-hell-pipeline.test.ts
+  integration:
+    - test/integration/http/routes/wine-search.route.test.ts
+  unit:
+    - src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
+    - src/config/__tests__/wine-search-feature-flag.test.ts
 
 depends_on:
   - infra.structured-llm-port
@@ -42,17 +59,17 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Production traffic 안 받음"
-  - "ReAct parity 미입증 (bench scenario)"
-  - "Shadow mode / A/B 인프라 미수립"
+  - "18K bench scenario parity 입증 미완 (vs ReAct)"
+  - "Shadow mode / A/B 트래픽 비교 인프라 미수립"
+  - "Production rollout %는 feature flag로만 제어 (gradual %-based aborting 없음)"
 
 next_steps:
   - "Shadow mode 위에서 18K scenario parity 검증"
-  - "1% → 10% → 50% rollout"
-  - "ReAct cutover (legacy 삭제)"
+  - "1% → 10% → 50% → 100% rollout"
+  - "ReAct cutover (legacy /v1/agent 삭제)"
 
 tags:
   - orchestration
   - pte
-  - experimental
   - migration-target
+  - production-flag-gated

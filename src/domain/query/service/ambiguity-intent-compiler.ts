@@ -22,18 +22,26 @@ const AMBIGUITY_INTENT_COMPILER_TIMEOUT_MS = 4_000;
 const CLARIFY_QUESTION_MAX_LEN = 160;
 const RESPONSE_TEXT_PREVIEW_MAX_LEN = 200;
 
+/** Upper bound on the number of branches the LLM may return per ambiguous
+ *  surface, AND on the number of ambiguous surfaces selected per query.
+ *  Beyond this the trace surface becomes too wide for downstream consumers
+ *  (clarification prompts, planner) — empirically 8 covers all realistic
+ *  multi-entity ambiguity (e.g. "Riesling" varietal × region splits). */
+const AMBIGUITY_BRANCH_MAX = 8;
+const AMBIGUITY_SELECTIONS_MAX = 8;
+
 const AmbiguityBranchSelectionSchema = z.object({
   surface: z.string().min(1),
   entityType: z.string().min(1),
   decision: z.enum(['preserve_ambiguity', 'select_branches']),
-  selectedBranchLabels: z.array(z.string().min(1)).max(8),
+  selectedBranchLabels: z.array(z.string().min(1)).max(AMBIGUITY_BRANCH_MAX),
   resolvedQueryClass: z.string().optional(),
   clarifyQuestion: z.string().min(1).max(CLARIFY_QUESTION_MAX_LEN).optional(),
   confidence: z.number().finite().min(0).max(1),
 }).strict();
 
 const AmbiguityIntentResponseSchema = z.object({
-  selections: z.array(AmbiguityBranchSelectionSchema).max(8),
+  selections: z.array(AmbiguityBranchSelectionSchema).max(AMBIGUITY_SELECTIONS_MAX),
 }).strict();
 
 type LlmAmbiguityBranchSelection = z.infer<typeof AmbiguityBranchSelectionSchema>;
@@ -171,8 +179,8 @@ export class AmbiguityIntentCompiler {
     throwIfAborted(input.abortSignal, 'Ambiguity intent compilation aborted');
     const startedAt = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-    const propagateAbort = (): void => controller.abort();
+    const timeout = setTimeout(() => { controller.abort(); }, this.timeoutMs);
+    const propagateAbort = (): void => { controller.abort(); };
     input.abortSignal?.addEventListener('abort', propagateAbort, { once: true });
 
     try {

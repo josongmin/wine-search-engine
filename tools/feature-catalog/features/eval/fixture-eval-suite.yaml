@@ -6,11 +6,15 @@ summary: |
   quality fixture eval 통합 스위트. 각 feature 영역별 골드 fixture 정의 + 자동
   비교 + smoke-prediction mode.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   4종 fixture runner 모두 운영, smoke + live mode 지원. test:verification:search CI
-  gate. eval/run-*-fixture-eval.ts 표준화된 patternを. 그러나 fixture format 통일
-  안 됨 (runner마다 다름).
+  gate. eval/run-*-fixture-eval.ts 표준화된 pattern. Fixture loader는 SemVer-style
+  schema versioning (FIXTURE_SCHEMA_VERSION='1', FIXTURE_SCHEMA_VERSIONS=['1'])과
+  명시적 migration policy를 갖췄고, 100-run fast-check 기반 property regression
+  (test/regression/fixture-eval-suite-properties.regression.test.ts)이 loader
+  determinism / schema_version enforcement / suite registry uniqueness / Korean
+  preservation / empty-fixture graceful degradation 전 영역을 잠갔다.
 
 status: active
 since: 2025-10
@@ -25,10 +29,14 @@ key_files:
   - scripts/eval/run-search-feature-behavior-fixture-eval.ts
   - scripts/eval/run-agentic-tool-use-fixture-eval.ts
   - scripts/eval/run-agentic-answer-quality-fixture-eval.ts
+  - src/infrastructure/fixture/fixture-loader.ts
+  - src/infrastructure/fixture/suite-registry.ts
 
 tests:
   e2e:
     - test/e2e/search-replay-fixtures.test.ts
+  regression:
+    - test/regression/fixture-eval-suite-properties.regression.test.ts
 
 depends_on:
   - infra.anthropic-chat-llm
@@ -37,12 +45,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Fixture format이 runner마다 다름"
+  - "Fixture format이 runner마다 다름 (BenchmarkCaseSchema는 통일, runner-level adapter는 별도)"
   - "Auto-discovery 없음"
 
 next_steps:
-  - "Fixture schema 통일"
+  - "Runner-level fixture adapter 통일"
   - "Bench runner와 통합"
+  - "FIXTURE_SCHEMA_VERSIONS=['1','2'] 진입 시점 migration playbook 작성"
 
 tags:
   - fixture-based

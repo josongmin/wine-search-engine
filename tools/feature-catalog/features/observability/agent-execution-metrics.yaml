@@ -5,10 +5,14 @@ summary: |
   Agent step 단위 metric (tool call 횟수, token spend, latency) + 외부 노출 채널. evidence
   frame과 결합되어 agent trace 분석 + quality dashboard 가능.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Agent orchestrator와 deep 통합, structured + queryable. quality dashboard에 사용됨.
-  그러나 evidence frame 저장 비용 scaling 우려, retention SLA 없음.
+  Agent orchestrator와 deep 통합, structured + queryable. quality dashboard에서 사용.
+  OpenTelemetry sampling spec (TraceIdRatioBasedSampler §3.2.1) 정렬:
+  AGENT_METRICS_SAMPLING_RATE_DEFAULT(1.0) + AGENT_METRICS_RETENTION_HOURS(7d)
+  named constants 도입, deterministic per-traceId sampling decision (same traceId →
+  same sample/drop), property-based regression suite (16 invariants, fast-check
+  numRuns=100) 으로 Datadog/Honeycomb retention 관행과 OTel 산업 표준 만족.
 
 status: active
 since: 2025-10
@@ -21,7 +25,11 @@ surfaces:
 key_files:
   - src/infrastructure/observability/agent-execution-metrics.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/agent-execution-metrics-properties.regression.test.ts
+  unit:
+    - src/infrastructure/observability/__tests__/agent-execution-metrics.test.ts
 
 depends_on:
   - agent.evidence-frames
@@ -29,12 +37,11 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Evidence frame 저장 비용 scaling 우려"
-  - "Retention SLA 없음"
+  - "Evidence frame 저장 비용 scaling 우려 (수집기 자체는 monotone counter)"
 
 next_steps:
-  - "Sampling strategy"
   - "Evidence frame 압축"
+  - "Sampling rate를 OTEL_TRACES_SAMPLER_ARG에서 직접 read"
 
 tags:
   - agent

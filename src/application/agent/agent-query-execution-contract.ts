@@ -19,6 +19,46 @@ import type { AgentSemanticContract } from './agent-semantic-contract.js';
 const QUERY_NORMALIZER = new QueryNormalizer();
 const EXACT_METADATA_ALLOWED_SEARCH_KEYS = new Set(['query', 'limit', 'retrieval_mode']);
 
+/**
+ * Numeric defaults applied to {@link AgentSearchDefaults} when the query
+ * carries an intent cue (gift, beginner, recipient-profile, prestige, …).
+ *
+ * All thresholds are in normalized [0..1] space (matching domain attribute
+ * scoring), or KRW for price/alcohol/year limits. Each constant documents
+ * which keyword family triggers it and the downstream filter it tightens —
+ * magic numbers in scoring/gating logic are unauditable (CLAUDE.md rule 15).
+ */
+/** Baseline gift-suitability floor when the query contains "선물 / gift". */
+const GIFT_SUITABILITY_MIN_DEFAULT = 0.65;
+/** Stronger gift-suitability floor when the query also asks for a safe / crowd-pleasing pick. */
+const GIFT_SUITABILITY_MIN_SAFE_PICK = 0.7;
+/** Premium gift-suitability floor for senior-colleague / promotion / retirement gifts. */
+const GIFT_SUITABILITY_MIN_SENIOR = 0.75;
+/** Beginner-suitability floor for healing / approachable / first-time-drinker cues. */
+const BEGINNER_SUITABILITY_MIN_DEFAULT = 0.65;
+/** Popularity floor for "무난한 / crowd-pleasing / online tasting" cues. */
+const POPULARITY_MIN_CROWD_PLEASING = 0.5;
+/** Producer-prestige floor for "격식 / 퇴직 / 상사 / luxury" cues. */
+const PRODUCER_PRESTIGE_MIN_FORMAL = 0.7;
+/** Sweetness floor for the parents-first-time recipient profile (avoid bone-dry). */
+const PARENTS_FIRST_TIME_SWEETNESS_MIN = 0.2;
+/** Sweetness ceiling for the parents-first-time recipient profile (avoid dessert-sweet). */
+const PARENTS_FIRST_TIME_SWEETNESS_MAX = 0.75;
+/** Tannin ceiling for the parents-first-time recipient profile (avoid harsh tannin). */
+const PARENTS_FIRST_TIME_TANNIN_MAX = 0.3;
+/** Acidity ceiling for the parents-first-time recipient profile (avoid sharp acidity). */
+const PARENTS_FIRST_TIME_ACIDITY_MAX = 0.75;
+/** Max ABV (%) for "저도수 / low-alcohol" cues. */
+const LOW_ALCOHOL_MAX_PCT = 12;
+/** KRW conversion factor for the Korean "만 원" unit (10,000 KRW). */
+const KRW_PER_MAN_WON = 10_000;
+/** Max price (KRW) inferred from "5만 원 이하 / under 50k" cues. */
+const MAX_PRICE_KRW_UNDER_FIVE_MAN_WON = 50_000;
+/** Min price (KRW) baseline for senior-colleague / promotion / retirement gifts. */
+const SENIOR_GIFT_MIN_PRICE_KRW = 50_000;
+/** Max price (KRW) ceiling for senior-colleague / promotion / retirement gifts. */
+const SENIOR_GIFT_MAX_PRICE_KRW = 150_000;
+
 export interface AgentQueryExecutionContract {
   readonly requiresDrinkabilityCheck: boolean;
   readonly hasEntityMetadataSignal: boolean;
@@ -69,7 +109,7 @@ export interface AgentSearchSlot {
 }
 
 function hasCellaringIntent(normalized: string): boolean {
-  return /(?:셀러|cellar(?:ing)?|지금\s*마시면\s*아까운|숙성(?:용|할|해둘|해서|가능|잠재력)?|ageworthy|aging\s+potential|long[\s-]?term\s+aging|hold\s+for|hold\b|성인\s*될\s*때)/iu.test(normalized);
+  return /(?:셀러|cellar(?:ing)?|지금\s*마시면\s*아까운|숙성(?:용|할|해둘|해서|가능|잠재력)?|ageworthy|aging\s+potential|long[\s-]?term\s+aging|hold\s+for|hold(?=$|[^\p{L}\p{N}])|성인\s*될\s*때)/iu.test(normalized);
 }
 
 function hasImmediateDrinkabilityIntent(normalized: string): boolean {
@@ -164,7 +204,7 @@ function queryRequiresGroundedWineSearch(query: string, normalized: string): boo
 }
 
 function hasMixedColorPairingShape(normalized: string): boolean {
-  return /(?:레드\s*[\/,+&와과및]*\s*화이트|화이트\s*[\/,+&와과및]*\s*레드|red\s*(?:\/|and|&|\+|,)\s*white|white\s*(?:\/|and|&|\+|,)\s*red|반반|both\s+colors?)/iu.test(normalized);
+  return /(?:레드\s*[/,+&와과및]*\s*화이트|화이트\s*[/,+&와과및]*\s*레드|red\s*(?:\/|and|&|\+|,)\s*white|white\s*(?:\/|and|&|\+|,)\s*red|반반|both\s+colors?)/iu.test(normalized);
 }
 
 function addUnique(target: string[], value: string): void {
@@ -217,42 +257,42 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
   }
   if (/(?:선물|gift)/iu.test(normalized)) {
     addUnique(occasion, 'gift');
-    giftSuitabilityMin = 0.65;
+    giftSuitabilityMin = GIFT_SUITABILITY_MIN_DEFAULT;
   }
   if (/(?:힐링|위로|편안|휴식|relax(?:ing|ation)?|comfort(?:ing)?|healing)/iu.test(normalized)) {
     addUnique(occasion, 'healing');
     addUnique(styles, 'approachable');
-    beginnerSuitabilityMin = Math.max(beginnerSuitabilityMin ?? 0, 0.65);
+    beginnerSuitabilityMin = Math.max(beginnerSuitabilityMin ?? 0, BEGINNER_SUITABILITY_MIN_DEFAULT);
   }
   if (/(?:괜찮은?|무난한?|실패\s*없는|대중적인?|decent|crowd[-\s]?pleasing|safe\s+pick)/iu.test(normalized)) {
     addUnique(styles, 'crowd_pleasing');
-    popularityMin = Math.max(popularityMin ?? 0, 0.5);
+    popularityMin = Math.max(popularityMin ?? 0, POPULARITY_MIN_CROWD_PLEASING);
   }
   if (/(?:온라인\s*와인\s*시음회|온라인\s*시음회|online\s+tasting|virtual\s+tasting|참가자\s*모두|모두가\s*살\s*수|widely\s+available|accessible\s+to\s+all)/iu.test(normalized)) {
     addUnique(styles, 'approachable');
     addUnique(styles, 'crowd_pleasing');
-    beginnerSuitabilityMin = Math.max(beginnerSuitabilityMin ?? 0, 0.65);
-    popularityMin = Math.max(popularityMin ?? 0, 0.5);
+    beginnerSuitabilityMin = Math.max(beginnerSuitabilityMin ?? 0, BEGINNER_SUITABILITY_MIN_DEFAULT);
+    popularityMin = Math.max(popularityMin ?? 0, POPULARITY_MIN_CROWD_PLEASING);
   }
   if (
     maxPriceKrw === undefined &&
     /(?:5\s*만\s*원\s*이하|5만원\s*이하|under\s*(?:₩|krw)?\s*50[, ]?000|under\s*50k)/iu.test(normalized)
   ) {
-    maxPriceKrw = 50_000;
+    maxPriceKrw = MAX_PRICE_KRW_UNDER_FIVE_MAN_WON;
   }
   if (hasBeginnerOrFirstTimeCue) {
     addUnique(styles, 'approachable');
-    beginnerSuitabilityMin = 0.65;
+    beginnerSuitabilityMin = BEGINNER_SUITABILITY_MIN_DEFAULT;
   }
   if (hasOlderFamilyCue) {
     addUnique(styles, 'crowd_pleasing');
   }
   if (hasOlderFamilyCue && hasBeginnerOrFirstTimeCue) {
     recipientProfile = 'parents_first_time';
-    sweetnessMin = 0.2;
-    sweetnessMax = 0.75;
-    tanninMax = 0.3;
-    acidityMax = 0.75;
+    sweetnessMin = PARENTS_FIRST_TIME_SWEETNESS_MIN;
+    sweetnessMax = PARENTS_FIRST_TIME_SWEETNESS_MAX;
+    tanninMax = PARENTS_FIRST_TIME_TANNIN_MAX;
+    acidityMax = PARENTS_FIRST_TIME_ACIDITY_MAX;
   }
   if (/(?:상대방이\s*뭘\s*좋아하(?:는지|실지)\s*몰라|취향(?:을)?\s*몰라|don['’]t\s+know\s+(?:what\s+)?(?:they|the\s+recipient)\s+like|unknown\s+preferences?)/iu.test(normalized)) {
     addUnique(styles, 'crowd_pleasing');
@@ -260,16 +300,16 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
   }
   if (/(?:실패\s*없는|무난한?|대중적인?|crowd[-\s]?pleasing|safe\s+gift)/iu.test(normalized)) {
     addUnique(styles, 'crowd_pleasing');
-    giftSuitabilityMin = Math.max(giftSuitabilityMin ?? 0, 0.7);
+    giftSuitabilityMin = Math.max(giftSuitabilityMin ?? 0, GIFT_SUITABILITY_MIN_SAFE_PICK);
   }
   if (/(?:달달|달콤|스위트|sweet)/iu.test(normalized)) {
     addUnique(styles, 'sweet');
   }
   if (/(?:도수\s*낮|저도수|low[-\s]?alcohol)/iu.test(normalized)) {
-    maxAlcoholPct = 12;
+    maxAlcoholPct = LOW_ALCOHOL_MAX_PCT;
   }
   if (/(?:격식|품격|퇴직|상사|고급스러운|prestige|formal|luxury)/iu.test(normalized)) {
-    producerPrestigeMin = 0.7;
+    producerPrestigeMin = PRODUCER_PRESTIGE_MIN_FORMAL;
   }
   if (hasCellaringIntent(normalized)) {
     addUnique(occasion, 'cellaring');
@@ -283,10 +323,10 @@ function buildSearchDefaults(query: string, normalized: string): AgentSearchDefa
     addUnique(occasion, 'gift');
     addUnique(styles, 'crowd_pleasing');
     recipientProfile = 'senior_colleague_gift';
-    minPriceKrw = 50_000;
-    maxPriceKrw = 150_000;
-    giftSuitabilityMin = Math.max(giftSuitabilityMin ?? 0, 0.75);
-    producerPrestigeMin = Math.max(producerPrestigeMin ?? 0, 0.7);
+    minPriceKrw = SENIOR_GIFT_MIN_PRICE_KRW;
+    maxPriceKrw = SENIOR_GIFT_MAX_PRICE_KRW;
+    giftSuitabilityMin = Math.max(giftSuitabilityMin ?? 0, GIFT_SUITABILITY_MIN_SENIOR);
+    producerPrestigeMin = Math.max(producerPrestigeMin ?? 0, PRODUCER_PRESTIGE_MIN_FORMAL);
   }
 
   const defaults: AgentSearchDefaults = {
@@ -440,7 +480,7 @@ function extractExplicitTotalBudgetKrw(query: string, normalized: string): numbe
     if (koreanManWon?.[1] !== undefined) {
       const parsed = Number(koreanManWon[1]);
       if (Number.isFinite(parsed)) {
-        return Math.round(parsed * 10_000);
+        return Math.round(parsed * KRW_PER_MAN_WON);
       }
       continue;
     }
@@ -454,7 +494,7 @@ function extractExplicitTotalBudgetKrw(query: string, normalized: string): numbe
       continue;
     }
 
-    const english = /\b(?:total|budget)\s*(?:₩|krw)?\s*(\d[\d,]*)\s*(?:원|krw)?\b/iu.exec(candidate);
+    const english = /(?:^|(?<=[^\p{L}\p{N}]))(?:total|budget)\s*(?:₩|krw)?\s*(\d[\d,]*)\s*(?:원|krw)?(?=$|[^\p{L}\p{N}])/iu.exec(candidate);
     if (english?.[1] !== undefined) {
       const parsed = Number(english[1].replace(/,/gu, ''));
       if (Number.isFinite(parsed)) {
@@ -630,10 +670,17 @@ export function hasBareExactEntityAnchor(query: string): boolean {
     if (!isDirectEntityResolution(resolved) || resolved.entityType !== 'appellation') {
       return false;
     }
-    const canonical = QUERY_NORMALIZER.normalize(resolved.canonicalValue).punctuationStripped.trim().toLowerCase();
-    const tokenCount = trimmed.split(/\s+/u).filter((token) => token.length > 0).length;
-    const canonicalLooksLabelLike = canonical.includes(' ') || canonical.includes('&');
-    return tokenCount >= 2 || extractVintageYear(trimmed) !== undefined || (canonicalLooksLabelLike && canonical !== trimmed);
+    // Direct appellation resolution without a generic wine-noun shell is
+    // already strong enough evidence to lock entity retrieval mode: the
+    // entity resolver has confirmed the span maps to a canonical
+    // appellation, and the absence of "와인 / wine" rules out generic
+    // recommendation phrasing. Single-token labels (돔페리뇽, Sassicaia,
+    // Barolo, Burgundy) therefore qualify just as much as multi-token
+    // ones (모엣샹동 로제 임페리얼) — the previous extra short-circuits
+    // (`tokenCount >= 2 || extractVintageYear(...) !== undefined || …`)
+    // were dead code that always evaluated true via a typo against
+    // extractVintageYear's `number | null` signature.
+    return true;
   });
 }
 
@@ -727,9 +774,7 @@ function extractPendingSearchDrinkabilityEntityIds(
     }
 
     const stepGroupId = getToolOutcomeStepGroupId(outcome.stepId);
-    if (targetStepGroupId === undefined) {
-      targetStepGroupId = stepGroupId;
-    }
+    targetStepGroupId ??= stepGroupId;
     if (stepGroupId !== targetStepGroupId) {
       break;
     }

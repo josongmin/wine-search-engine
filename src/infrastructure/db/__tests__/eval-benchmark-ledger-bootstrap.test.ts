@@ -4,9 +4,19 @@ import {
   ensureEvalBenchmarkLedgerBootstrap,
 } from '../eval-benchmark-ledger-bootstrap.js';
 
+/**
+ * Shape-matched mock signature for {@link PgQueryable.query}. Declaring the
+ * argument tuple explicitly lets `mock.calls[N][0]` narrow to `string` without
+ * collapsing to the empty-tuple inferred from `vi.fn(async () => ...)`.
+ */
+type MockQueryFn = (text: string, values?: readonly unknown[]) => Promise<{
+  rows: readonly unknown[];
+  rowCount?: number | null;
+}>;
+
 describe('ensureEvalBenchmarkLedgerBootstrap', () => {
   it('applies the targeted 017/018/019 final schema contract once per queryable', async () => {
-    const query = vi.fn(async () => ({ rows: [] }));
+    const query = vi.fn<MockQueryFn>(async () => Promise.resolve({ rows: [] }));
     const queryable = { query };
 
     await ensureEvalBenchmarkLedgerBootstrap(queryable);
@@ -21,7 +31,7 @@ describe('ensureEvalBenchmarkLedgerBootstrap', () => {
   });
 
   it('clears the cache when bootstrap fails so the next attempt can retry', async () => {
-    const query = vi.fn()
+    const query = vi.fn<MockQueryFn>()
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValue({ rows: [] });
     const queryable = { query };

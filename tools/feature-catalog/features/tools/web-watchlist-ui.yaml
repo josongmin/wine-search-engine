@@ -4,10 +4,12 @@ category: tools
 summary: |
   사용자 watchlist 추가/조회/제거 UI + wine detail page. /v1/watchlist endpoint 호출.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Page + feature 구현. 그러나 notification preview UI 없음, watchlist freshness 표시
-  없음.
+  Page + feature 구현 + dedicated component test (watchlist-list.test.tsx) —
+  empty/N-item/loading/error/Korean NFC/aria-label/keyboard 활성화/optimistic
+  add+remove 콜백 경로 모두 회귀 보호. notification preview UI 및 freshness
+  표시는 여전히 missing.
 
 status: active
 since: 2025-10
@@ -22,7 +24,9 @@ key_files:
   - web/src/app/wine/[entityId]/page.tsx
   - web/src/features/watchlist
 
-tests: {}
+tests:
+  unit:
+    - web/src/features/watchlist/ui/__tests__/watchlist-list.test.tsx
 
 depends_on:
   - tools.watchlist

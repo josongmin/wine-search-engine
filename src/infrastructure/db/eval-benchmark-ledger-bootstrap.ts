@@ -1,10 +1,40 @@
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 
+/**
+ * Minimal PG-compatible queryable surface used by the ledger bootstrap helpers.
+ *
+ * The generic on the underlying `pg.Pool.query<R>` is preserved at the call site
+ * via {@link typedRowsQuery}, keeping this interface itself free of the
+ * single-use type-parameter anti-pattern (`@typescript-eslint/no-unnecessary-type-parameters`).
+ */
 export interface PgQueryable {
-  query: <T = unknown>(text: string, values?: readonly unknown[]) => Promise<{
-    rows: T[];
+  query: (text: string, values?: readonly unknown[]) => Promise<{
+    rows: readonly unknown[];
     rowCount?: number | null;
   }>;
+}
+
+/**
+ * Typed projection over {@link PgQueryable.query}. The generic parameter `T`
+ * appears in both the input position (`rowGuard`) and the output position
+ * (`Promise<readonly T[]>`), satisfying the no-unnecessary-type-parameters rule
+ * while keeping row narrowing on the caller side.
+ */
+async function typedRowsQuery<T>(
+  queryable: PgQueryable,
+  text: string,
+  rowGuard: (row: unknown) => row is T,
+  values?: readonly unknown[],
+): Promise<readonly T[]> {
+  const result = await queryable.query(text, values);
+  const rows: T[] = [];
+  for (const row of result.rows) {
+    if (!rowGuard(row)) {
+      throw new Error(`eval-benchmark-ledger-bootstrap: row failed schema guard for query: ${text}`);
+    }
+    rows.push(row);
+  }
+  return rows;
 }
 
 interface EvalBenchmarkLedgerObjectPresenceRow {
@@ -176,6 +206,24 @@ export async function ensureEvalBenchmarkLedgerBootstrap(queryable: PgQueryable)
   await bootstrapPromise;
 }
 
+function isPresenceRow(row: unknown): row is EvalBenchmarkLedgerObjectPresenceRow {
+  if (typeof row !== 'object' || row === null) return false;
+  const r = row as Record<string, unknown>;
+  const isStringOrNull = (v: unknown): v is string | null => v === null || typeof v === 'string';
+  return (
+    isStringOrNull(r['runs_table']) &&
+    isStringOrNull(r['metrics_view']) &&
+    isStringOrNull(r['trends_view']) &&
+    typeof r['can_insert'] === 'boolean'
+  );
+}
+
+function isColumnRow(row: unknown): row is EvalBenchmarkLedgerColumnRow {
+  if (typeof row !== 'object' || row === null) return false;
+  const r = row as Record<string, unknown>;
+  return typeof r['column_name'] === 'string';
+}
+
 export async function inspectEvalBenchmarkLedgerStatus(
   queryable: PgQueryable,
 ): Promise<{
@@ -183,7 +231,8 @@ export async function inspectEvalBenchmarkLedgerStatus(
     readonly missingColumns: readonly string[];
     readonly canInsert: boolean;
   }> {
-  const presenceResult = await queryable.query<EvalBenchmarkLedgerObjectPresenceRow>(
+  const presenceRows = await typedRowsQuery(
+    queryable,
     `SELECT
        to_regclass('public.eval_benchmark_runs')::text AS runs_table,
        to_regclass('public.eval_benchmark_run_metrics_v')::text AS metrics_view,
@@ -192,8 +241,9 @@ export async function inspectEvalBenchmarkLedgerStatus(
          has_table_privilege(current_user, 'public.eval_benchmark_runs', 'INSERT'),
          FALSE
        ) AS can_insert`,
+    isPresenceRow,
   );
-  const presence = presenceResult.rows[0] ?? {
+  const presence: EvalBenchmarkLedgerObjectPresenceRow = presenceRows[0] ?? {
     runs_table: null,
     metrics_view: null,
     trends_view: null,
@@ -205,13 +255,15 @@ export async function inspectEvalBenchmarkLedgerStatus(
     ...(presence.trends_view === 'eval_benchmark_run_trends_v' ? [] : ['eval_benchmark_run_trends_v']),
   ];
 
-  const columnResult = await queryable.query<EvalBenchmarkLedgerColumnRow>(
+  const columnRows = await typedRowsQuery(
+    queryable,
     `SELECT column_name
        FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name = 'eval_benchmark_runs'`,
+    isColumnRow,
   );
-  const presentColumns = new Set(columnResult.rows.map((row) => row.column_name));
+  const presentColumns = new Set(columnRows.map((row) => row.column_name));
   const missingColumns = EVAL_BENCHMARK_LEDGER_REQUIRED_COLUMNS
     .filter((columnName) => !presentColumns.has(columnName));
 

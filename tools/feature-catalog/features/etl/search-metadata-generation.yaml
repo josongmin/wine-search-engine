@@ -5,11 +5,17 @@ summary: |
   생성된 doc queries + retrieval-mode tagging + 추가 pairings inference로 search snapshot
   메타데이터 enrich. corpus 단위 한 번 실행, runtime 검색 신호 향상.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
   3-스크립트 파이프라인 (generate-doc-queries / tag-queries-retrieval-mode / generate-pairings)
-  운영. nightly 실행. 그러나 생성 quality 측정 안 됨, retrieval-mode tagging recall
-  unknown.
+  운영. nightly 실행. Doc2Query 측은 wave 8에서 quality/structural invariants를 pinning
+  하는 regression suite로 maturity 3으로 승격. 이번 wave에서 retrieval-mode tagging
+  쪽도 동일하게 분류 invariants — entity/comparison/pairing/region discrimination,
+  Korean coverage (오푸스 원, 레드 와인 추천, 스테이크와 어울리는…), 5x determinism,
+  schema_version='1' wiring, 빈/오류 input graceful handling, 배치 처리 순서 보존 —
+  을 pinning하는 31-건 regression test로 승격. 분류기는 순수 함수로 export되며,
+  enum 값/query_class 토큰/lexical regex가 모두 명명 상수화되어 magic string 없음.
+  Tag recall benchmark는 여전히 별도 과제로 남아 있음 (next_steps).
 
 status: active
 since: 2025-10
@@ -23,7 +29,10 @@ key_files:
   - scripts/etl/generate-doc-queries.ts
   - scripts/etl/tag-queries-retrieval-mode.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/doc-queries-generation.regression.test.ts
+    - test/regression/tag-queries-retrieval-mode.regression.test.ts
 
 depends_on:
   - infra.anthropic-chat-llm
@@ -31,12 +40,12 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Doc2Query quality 측정 없음"
-  - "Retrieval-mode tagging recall 미측정"
+  - "Doc2Query quality 측정 없음 (structural invariants는 pinning 됨)"
+  - "Retrieval-mode tagging recall은 미측정 (classifier 분류 정확도는 regression suite로 pinning 됨)"
 
 next_steps:
   - "Doc2Query quality eval"
-  - "Tag recall benchmark"
+  - "Tag recall benchmark (gold label 대비 정량 평가)"
 
 tags:
   - metadata

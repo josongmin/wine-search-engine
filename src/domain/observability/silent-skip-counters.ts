@@ -46,6 +46,12 @@ export type SilentSkipKind =
   | 'blocker_snapshot_resolve_failure'
   | 'blocker_alias_query_failure'
   | 'blocker_zero_candidates'
+  // AdmissionGate §e: ConfidenceRefusalPolicy is bypassed when the
+  // resolver's calibrated C was produced by the identity-fallback path
+  // (no trained calibration_params for the query class). The counter
+  // gives operators a metric to monitor calibration-pipeline health —
+  // a high rate here means the hallucination guard is silently off.
+  | 'admission_gate_confidence_refusal_skipped_untrusted'
   // Runtime plane composite-PK migration (016): learning/warmup read paths
   // must be scoped to the active snapshot; when the snapshot pointer table
   // is absent (fresh DB, pre-publish) these features degrade cleanly.
@@ -106,6 +112,7 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'blocker_snapshot_resolve_failure',
   'blocker_alias_query_failure',
   'blocker_zero_candidates',
+  'admission_gate_confidence_refusal_skipped_untrusted',
   'learning_warmup_disabled_snapshot_pointer_missing',
   'alias_checker_disabled_snapshot_pointer_missing',
 ] as const;

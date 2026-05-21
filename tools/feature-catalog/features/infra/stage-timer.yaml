@@ -5,10 +5,16 @@ summary: |
   Pipeline stage별 latency 측정 utility. pipelineTrace + circular-latency-buffer +
   OpenTelemetry span과 함께 사용. async stack frame 보존.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  견고하게 사용 중. cooperative-abort + request-execution-context와 결합. unit
-  test 보유. 모든 critical path가 instrument됨.
+  SOTA++ 등급. 모든 critical path가 instrument되어 있으며 cooperative-abort +
+  request-execution-context와 결합. unit test 외에 fast-check 기반 property
+  regression suite 보유 (`test/regression/stage-timer-properties.regression.test.ts`,
+  100 runs/property): monotonic clock, duration non-negative, nested LIFO
+  (inner ≤ outer), deterministic snapshot, parallel async non-interference,
+  Korean stage name verbatim (NFC), abort-during-stage 등 invariant 검증.
+  clock은 `createStageTimer({ now })` 로 주입 가능 — 결정론적 timing test 기반.
+  default는 `performance.now` (W3C HR-Time monotone).
 
 status: active
 since: 2025-09

@@ -9,11 +9,12 @@
  */
 
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config/env.js';
 import { buildRuntimeSupportServices } from '../src/config/container-runtime-support.js';
 import { AGENT_FIXTURE_ANSWER_QUALITY_DEFAULT_JUDGE_MODEL } from './eval/agent-fixture-judge-config.js';
 
-async function main(): Promise<void> {
+export async function main(): Promise<number> {
   const live = process.argv.includes('--live');
   const config = loadConfig();
   const keyCount = config.openai.apiKeys.length;
@@ -36,22 +37,19 @@ async function main(): Promise<void> {
   if (provider !== 'openai') {
     lines.push('  ERROR: LLM_INJECTION_PROVIDER must be openai for the production agent benchmark lane.');
     process.stdout.write(`${lines.join('\n')}\n`);
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   if (keyCount > 0 && !kill && !wired) {
     lines.push('  ERROR: OpenAI key present and kill switch off, but injection judge missing — check config.');
     process.stdout.write(`${lines.join('\n')}\n`);
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   if (AGENT_FIXTURE_ANSWER_QUALITY_DEFAULT_JUDGE_MODEL.startsWith('claude-')) {
     lines.push('  ERROR: agent fixture answer-quality judge default must be OpenAI, not Claude/Anthropic.');
     process.stdout.write(`${lines.join('\n')}\n`);
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   if (wired && services.injectionJudge) {
@@ -75,10 +73,21 @@ async function main(): Promise<void> {
   }
 
   process.stdout.write(`${lines.join('\n')}\n`);
+  return 0;
 }
 
-void main().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`${msg}\n`);
-  process.exitCode = 1;
-});
+const isCliEntrypoint =
+  process.argv[1] !== undefined
+  && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isCliEntrypoint) {
+  void main()
+    .then((exitCode) => {
+      process.exitCode = exitCode;
+    })
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`${msg}\n`);
+      process.exitCode = 1;
+    });
+}

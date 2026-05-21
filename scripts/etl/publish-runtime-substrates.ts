@@ -26,6 +26,75 @@ const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot
 const DEFAULT_RUNTIME_NL_MAPPINGS_PATH = resolveDataPath('data/nl-mappings.json');
 const RUNTIME_SUBSTRATE_PUBLISH_STATEMENT_TIMEOUT_MS = 5 * 60_000;
 
+// ---------------------------------------------------------------------------
+// Runtime substrate freshness / version constants
+//
+// These constants drive the maturity-3 contract for runtime substrate
+// distribution: every published artifact advertises its schema identity
+// (`SUBSTRATE_VERSION_PREFIX`) and a deterministic freshness window
+// (`RUNTIME_SUBSTRATE_TTL_SECONDS`).
+//
+// The TTL is expressed in SECONDS because Redis EXPIRE and CDN Cache-Control
+// both consume seconds. Do NOT switch units silently — `RUNTIME_SUBSTRATE_TTL_SECONDS`
+// is grep-able and pinned by a regression test.
+// ---------------------------------------------------------------------------
+const SECONDS_PER_HOUR = 3600;
+const HOURS_PER_DAY = 24;
+const RUNTIME_SUBSTRATE_TTL_DAYS = 7;
+export const RUNTIME_SUBSTRATE_TTL_SECONDS =
+  RUNTIME_SUBSTRATE_TTL_DAYS * HOURS_PER_DAY * SECONDS_PER_HOUR;
+export const SUBSTRATE_VERSION_PREFIX = 'runtime-substrate.v1' as const;
+
+export type RuntimeSubstrateKind = 'aliases' | 'nl-mappings' | 'ambiguity-registry' | 'drinking-window';
+
+export interface RuntimeSubstrateArtifactEnvelope {
+  readonly schema_version: string;
+  readonly snapshot_id: string;
+  readonly generated_at: string;
+  readonly ttl_seconds: number;
+  readonly kind: RuntimeSubstrateKind;
+  readonly sample?: string;
+}
+
+/**
+ * Build the artifact envelope attached to every published runtime substrate.
+ *
+ * The envelope carries:
+ *  - `schema_version`: `${SUBSTRATE_VERSION_PREFIX}:${snapshotId}` — the
+ *    snapshot id acts as the version-increment suffix, so a fresh publish
+ *    deterministically yields a fresh schema_version (cache-busting key).
+ *  - `ttl_seconds`: the freshness window in seconds (named constant).
+ *  - `generated_at`: ISO-8601 timestamp; rejected if not parseable.
+ *  - `kind`: which substrate this envelope describes.
+ *  - `sample` (optional): caller-supplied content, normalized to NFC so
+ *    Korean (precomposed) and accented Latin survive the round trip.
+ */
+export function buildRuntimeSubstrateArtifactEnvelope(args: {
+  readonly snapshotId: string;
+  readonly generatedAt: string;
+  readonly kind: RuntimeSubstrateKind;
+  readonly sample?: string;
+}): RuntimeSubstrateArtifactEnvelope {
+  const parsed = new Date(args.generatedAt).getTime();
+  if (!Number.isFinite(parsed)) {
+    throw new Error(
+      `Invalid generated_at timestamp: "${args.generatedAt}" is not parseable as ISO-8601`,
+    );
+  }
+  const base = {
+    schema_version: `${SUBSTRATE_VERSION_PREFIX}:${args.snapshotId}`,
+    snapshot_id: args.snapshotId,
+    generated_at: args.generatedAt,
+    ttl_seconds: RUNTIME_SUBSTRATE_TTL_SECONDS,
+    kind: args.kind,
+  } as const;
+  // Conditional spread to respect exactOptionalPropertyTypes — omit `sample`
+  // entirely when not supplied rather than setting it to `undefined`.
+  return args.sample === undefined
+    ? base
+    : { ...base, sample: args.sample.normalize('NFC') };
+}
+
 interface Args {
   readonly manifestPath: string;
   readonly runtimeStatePath: string;

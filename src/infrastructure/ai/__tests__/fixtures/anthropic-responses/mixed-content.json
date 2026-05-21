@@ -1,0 +1,27 @@
+{
+  "id": "msg_01MixedTextPlusToolUse00",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "text",
+      "text": "Let me search the catalog for you."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01MixedContentToolBlock1",
+      "name": "respond",
+      "input": {
+        "intent": "recommend",
+        "count": 3
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 901,
+    "output_tokens": 64
+  }
+}

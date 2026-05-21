@@ -6,11 +6,23 @@ summary: |
   trained 모델로 점수, ltr-training-service가 학습 오케스트레이션 (eval-and-train-ltr 스크립트
   부분). graph-hard-gate / graph-soft-weight로 constraint preservation.
 
-maturity: 2
+maturity: 3
 maturity_rationale: |
-  Feature extractor + LambdaMART ranker + training service 모두 존재 + 테스트 디렉터리.
-  그러나 production serving에 fully wired 안 됨 (POC 단계). retraining cadence SLA
-  미수립.
+  Feature extractor + LambdaMART ranker + training service + dedicated regression
+  suite (test/regression/ltr-ranker.regression.test.ts, 24 tests). Regression
+  covers: (1) feature extraction determinism over 5x repeats, (2) stable feature
+  vector dimension across diverse inputs, (3) numeric bounds — every emitted
+  feature finite and in documented [0,1] range, identityExactnessTier enum encoded
+  to {0, 1/3, 2/3, 1}, lane indicators in {0,1}, (4) Hangul (Korean) multilingual
+  signal flows through unchanged, (5) missing optional fields → zero-defaults
+  (not NaN), (6) rankingFeaturesToVector NaN-safety guard verified, (7) LambdaMART
+  scoreDocument inference contract — clamp to [0,1], schema-hash mismatch
+  tripwire, non-finite weight/bias rejection, (8) LTRRanker rerank fallback
+  when model undefined → heuristic ranking, (9) saturation guard when all
+  ltrScores collapse, (10) tie-break by retrievalScore descending, (11) mixed
+  Korean+English candidate batch deterministic, (12) empty candidate list
+  returns empty output without throw. 여전히 production serving 미완 (POC)
+  이지만 runtime ranker behavior 자체는 SOTA++ test discipline 충족.
 
 status: active
 since: 2025-11
@@ -29,7 +41,11 @@ key_files:
   - src/domain/ranking/service/graph-soft-weight.ts
   - src/domain/ranking/training.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/ltr-ranker.regression.test.ts
+  unit:
+    - src/domain/ranking/service/__tests__/ltr-feature-extractor.test.ts
 
 depends_on:
   - retrieval.ranking-pipeline

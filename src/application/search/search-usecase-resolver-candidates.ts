@@ -239,6 +239,17 @@ function anchorMatchesIdentitySafeProjection(
 }
 
 function inferAliasType(anchor: AnchorCandidate): AliasType {
+  // Prefer the explicit alias_type the matcher attached to the anchor
+  // (RFC-003 §4 — single source of truth). This eliminates string-parsing
+  // round trips through `lookupStrategy` and avoids the merge-collapse
+  // ambiguity where a curated and a derived sibling produce a strategy
+  // set that looks "derived" by accident.
+  if (anchor.aliasType !== undefined) {
+    return anchor.aliasType;
+  }
+  // Strategy-based fallback for callers that haven't been migrated to
+  // emit `aliasType` (e.g. legacy fuzzy-corrected term lookups). Kept as
+  // a best-effort inference; new matchers MUST set `aliasType` directly.
   const strategies = new Set(anchor.lookupStrategies ?? []);
   if (hasPhoneticLookupStrategy(strategies)) {
     return 'phonetic';

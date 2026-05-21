@@ -13,6 +13,13 @@ import { z } from 'zod';
 /** Webhook HMAC secret minimum length (watchlist delivery signing). */
 const ENV_WEBHOOK_SECRET_MIN_LEN = 16;
 
+/**
+ * Default confidence-refusal threshold (Epic 17.3 AURC-calibrated operating
+ * point). Refusal recall ≥ 0.90 / false-refusal rate ≤ 0.05 on the
+ * wrong_top1 eval slice that motivates the policy.
+ */
+const DEFAULT_CONFIDENCE_REFUSAL_THRESHOLD = 0.45;
+
 export const FeaturesEnvSchema = z.object({
   /** Run evaluation on startup (fire-and-forget). */
   EVAL_RUN_AT_STARTUP: z
@@ -38,7 +45,12 @@ export const FeaturesEnvSchema = z.object({
    * Set to 0 to allow any positive-confidence decision (NaN is still refused
    * — the hallucination guard treats non-finite C as zero confidence).
    */
-  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().finite().min(0).max(1).default(0.45),
+  CONFIDENCE_REFUSAL_THRESHOLD: z
+    .coerce.number()
+    .finite()
+    .min(0)
+    .max(1)
+    .default(DEFAULT_CONFIDENCE_REFUSAL_THRESHOLD),
 
   /** Optional path to a runtime LTR model file for PG-less / bootstrap startup.
    * When unset, learned LTR is skipped unless registry data is available from PG.

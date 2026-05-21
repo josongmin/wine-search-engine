@@ -41,6 +41,21 @@ const SEMANTIC_RESULT_LIMIT_MIN = 1;
 const SEMANTIC_RESULT_LIMIT_MAX = 10;
 /** One-shot slang/preferences should not force low-confidence semantic defaults. */
 const SEMANTIC_PREFERENCE_CONFIDENCE_FLOOR = 0.75;
+/**
+ * Calibrated abstention threshold for the top-level semantic contract
+ * `confidence` field. Below this value the compiler abstains — i.e. returns
+ * `undefined` so the deterministic contract is preserved instead of merging
+ * an under-confident LLM contract that could degrade tool selection.
+ *
+ * Selective prediction with a calibrated threshold is the standard
+ * "abstain when the model is unsure" technique (Mozannar & Sontag,
+ * "Consistent Estimators for Learning to Defer to an Expert," NeurIPS 2020).
+ * The 0.5 value matches the schema midpoint (confidence is on [0, 1]) and
+ * is the canonical cut-off for binary admit/reject under unit cost. Tune
+ * upward only with gold-abstention labels demonstrating that a stricter
+ * threshold yields net-positive admission quality.
+ */
+export const MIN_SEMANTIC_CONTRACT_CONFIDENCE_THRESHOLD = 0.5;
 
 const SEMANTIC_CONTRACT_INTENTS = [
   'recommendation',
@@ -388,6 +403,16 @@ export class AgentSemanticContractCompiler {
         log.warn(
           { requestId: input.requestId },
           'semantic contract compiler returned invalid or surface-mutating output; ignoring contract',
+        );
+        return undefined;
+      }
+      // Calibrated abstention: under-confident contracts are silently
+      // discarded in favor of the deterministic contract (Mozannar &
+      // Sontag, NeurIPS 2020 — learning-to-defer with calibrated cut-off).
+      if (parsed.confidence < MIN_SEMANTIC_CONTRACT_CONFIDENCE_THRESHOLD) {
+        log.warn(
+          { requestId: input.requestId, confidence: parsed.confidence },
+          'semantic contract compiler abstained: confidence below MIN_SEMANTIC_CONTRACT_CONFIDENCE_THRESHOLD',
         );
         return undefined;
       }

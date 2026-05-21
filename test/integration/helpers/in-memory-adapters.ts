@@ -4,6 +4,7 @@
  */
 
 import type { EntityId, QueryClass } from '../../../src/domain/shared/types/index.js';
+import type { AliasType } from '../../../src/domain/alias/model/alias.js';
 import type { AmbiguityDictionary } from '../../../src/domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../../../src/domain/resolver/port/blocking.port.js';
 import type {
@@ -49,6 +50,7 @@ import {
 } from '../../../src/domain/query/service/alias-prefix-terms.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
 import { buildHangulJamoKey } from '../../../src/domain/shared/utils/hangul.js';
+import { pickHigherTrustAliasType } from '../../../src/domain/alias/service/conflict-resolver.js';
 import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/service/hybrid-candidate-summary.js';
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 
@@ -321,11 +323,48 @@ export class InMemoryThresholdStore implements ThresholdStore {
  * Stores alias→entityId mappings, supports exact and normalized lookups.
  * Enhanced with smart alias generation from indexed documents.
  */
+/**
+ * Provenance tag for alias entries in {@link InMemoryAliasMatcher}.
+ *
+ * Mirrors the production `aliases.alias_type` column at a coarser tier:
+ * - `curated`            — hand-authored aliases (downstream {@link AliasType}
+ *                          is `'canonical'`)
+ * - `derived_initialism` — deterministic ETL-style caps initialism, eligible
+ *                          for the resolver scorer's DERIVED_INITIALISM_CAP
+ * - `abbreviation`       — curated/LLM-proposed wine-community shorthand
+ *                          (e.g. "CM 15", "DRC 19"), eligible for the
+ *                          resolver scorer's ABBREVIATION_CAP. Lands in the
+ *                          production `aliases` table via the
+ *                          `scripts/etl/generate-abbreviation-aliases.ts`
+ *                          ETL after a review-gate workflow.
+ *
+ * The matcher emits the resolved {@link AliasType} on every
+ * {@link AliasMatchResult} so the resolver scorer can apply type-specific
+ * caps without parsing strategy strings.
+ */
+export type InMemoryAliasProvenance = 'curated' | 'derived_initialism' | 'abbreviation';
+
+/**
+ * SSoT for the provenance → {@link AliasType} mapping used by the in-memory
+ * matcher. Production matchers read `alias_type` directly from PG; this
+ * lookup mirrors that shape for the in-process test substrate.
+ */
+const PROVENANCE_TO_ALIAS_TYPE: Readonly<Record<InMemoryAliasProvenance, AliasType>> = {
+  curated: 'canonical',
+  derived_initialism: 'derived_initialism',
+  abbreviation: 'abbreviation',
+};
+
 export class InMemoryAliasMatcher implements AliasMatcher {
-  // normalized form → list of (entityId, surfaceForm, confidence)
+  // normalized form → list of (entityId, surfaceForm, confidence, provenance)
   private readonly aliases = new Map<
     string,
-    Array<{ entityId: EntityId; surfaceForm: string; confidence: number }>
+    Array<{
+      entityId: EntityId;
+      surfaceForm: string;
+      confidence: number;
+      provenance: InMemoryAliasProvenance;
+    }>
   >();
   private readonly hangulCompletionPrefixIndex = new Map<
     string,
@@ -347,8 +386,17 @@ export class InMemoryAliasMatcher implements AliasMatcher {
    * @param surfaceForm - Original user-facing form (e.g. "오푸스원")
    * @param entityId - The entity this alias maps to
    * @param confidence - Match confidence [0, 1]
+   * @param provenance - Origin of the alias: 'curated' (default) for
+   *   hand-authored entries, 'derived_initialism' for deterministic ETL
+   *   derivations. The match results inherit this so the downstream
+   *   resolver scorer can apply type-specific caps.
    */
-  addAlias(surfaceForm: string, entityId: EntityId, confidence = 0.95): void {
+  addAlias(
+    surfaceForm: string,
+    entityId: EntityId,
+    confidence = 0.95,
+    provenance: InMemoryAliasProvenance = 'curated',
+  ): void {
     const normalized = this.normalize(surfaceForm);
     const existing = this.aliases.get(normalized) ?? [];
     if (
@@ -356,12 +404,13 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         (entry) =>
           entry.surfaceForm === surfaceForm &&
           entry.entityId === entityId &&
-          entry.confidence === confidence,
+          entry.confidence === confidence &&
+          entry.provenance === provenance,
       )
     ) {
       return;
     }
-    existing.push({ entityId, surfaceForm, confidence });
+    existing.push({ entityId, surfaceForm, confidence, provenance });
     this.aliases.set(normalized, existing);
     this.indexHangulCompletionSurface(surfaceForm, normalized, entityId, confidence);
   }
@@ -373,6 +422,31 @@ export class InMemoryAliasMatcher implements AliasMatcher {
    */
   indexDocument(doc: RetrievalDocument): void {
     this.documents.set(doc.entityId, doc);
+  }
+
+  /**
+   * Resolves the {@link AliasType} for a bucket of entries that all share
+   * the same normalized-form key in {@link aliases}.
+   *
+   * When entries are mixed-provenance under a single key (rare but
+   * possible — e.g. a hand-authored 'CM' alias coexisting with a derived
+   * 'CM' for a different entity), the higher-trust type wins. This mirrors
+   * the AnchorExtractor merger's policy and keeps cap-firing semantics
+   * consistent across the pipeline.
+   *
+   * Returns `undefined` only when the bucket is empty (defensive — never
+   * occurs for an alias that we just looked up).
+   */
+  private pickAliasTypeForEntries(
+    entries: ReadonlyArray<{ readonly provenance: InMemoryAliasProvenance }>,
+  ): AliasType | undefined {
+    if (entries.length === 0) return undefined;
+    let best: AliasType | undefined;
+    for (const entry of entries) {
+      const candidate = PROVENANCE_TO_ALIAS_TYPE[entry.provenance];
+      best = pickHigherTrustAliasType(best, candidate);
+    }
+    return best;
   }
 
   /**
@@ -401,13 +475,18 @@ export class InMemoryAliasMatcher implements AliasMatcher {
           });
         }
       }
-      return Array.from(grouped.entries()).map(([surfaceForm, { entityIds, confidence }]) => ({
-        surfaceForm,
-        normalizedForm: views.strict,
-        entityIds,
-        matchConfidence: confidence,
-        lookupStrategy: 'exact',
-      }));
+      return Array.from(grouped.entries()).map(([surfaceForm, { entityIds, confidence }]) => {
+        const matchedEntries = exact.filter((e) => e.surfaceForm === surfaceForm);
+        const aliasType = this.pickAliasTypeForEntries(matchedEntries);
+        return {
+          surfaceForm,
+          normalizedForm: views.strict,
+          entityIds,
+          matchConfidence: confidence,
+          lookupStrategy: 'exact',
+          ...(aliasType !== undefined ? { aliasType } : {}),
+        };
+      });
     }
 
     // Stage 1.5: compact normalization match for 붙여쓰기/구두점 noise
@@ -419,12 +498,14 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
       const entityIds = entries.map((entry) => entry.entityId);
       const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      const aliasType = this.pickAliasTypeForEntries(entries);
       compactResults.push({
         surfaceForm: entries[0]?.surfaceForm ?? normalized,
         normalizedForm: normalized,
         entityIds,
         matchConfidence: maxConfidence * 0.93,
         lookupStrategy: 'compact_exact',
+        ...(aliasType !== undefined ? { aliasType } : {}),
       });
     }
     if (compactResults.length > 0) {
@@ -445,12 +526,14 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
         const entityIds = entries.map((entry) => entry.entityId);
         const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+        const aliasType = this.pickAliasTypeForEntries(entries);
         transliteratedResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
           normalizedForm: normalized,
           entityIds,
           matchConfidence: maxConfidence * 0.91,
           lookupStrategy: 'transliterated_exact',
+          ...(aliasType !== undefined ? { aliasType } : {}),
         });
       }
       if (transliteratedResults.length > 0) {
@@ -484,6 +567,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       ]);
       const entityIds = entries.map((entry) => entry.entityId);
       const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      const aliasType = this.pickAliasTypeForEntries(entries);
 
       if (
         transliteratedPrefixTerms.some((term) =>
@@ -496,6 +580,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
           entityIds,
           matchConfidence: maxConfidence * 0.89,
           lookupStrategy: 'transliterated_prefix',
+          ...(aliasType !== undefined ? { aliasType } : {}),
         });
         continue;
       }
@@ -511,6 +596,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
           entityIds,
           matchConfidence: maxConfidence * 0.9,
           lookupStrategy: 'prefix_exact',
+          ...(aliasType !== undefined ? { aliasType } : {}),
         });
       }
     }
@@ -536,12 +622,14 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
         const entityIds = entries.map((entry) => entry.entityId);
         const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+        const aliasType = this.pickAliasTypeForEntries(entries);
         phoneticResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
           normalizedForm: normalized,
           entityIds,
           matchConfidence: maxConfidence * 0.88,
           lookupStrategy: 'phonetic_exact',
+          ...(aliasType !== undefined ? { aliasType } : {}),
         });
       }
       if (phoneticResults.length > 0) {
@@ -570,12 +658,14 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       if (isSubstringMatch || isTokenPrefixMatch) {
         const entityIds = entries.map((e) => e.entityId);
         const maxConfidence = Math.max(...entries.map((e) => e.confidence));
+        const aliasType = this.pickAliasTypeForEntries(entries);
         substringResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
           normalizedForm: normalized,
           entityIds,
           matchConfidence: maxConfidence * 0.85,
           lookupStrategy: 'substring',
+          ...(aliasType !== undefined ? { aliasType } : {}),
         });
       }
     }

@@ -10,10 +10,168 @@
  */
 
 import fs from 'node:fs/promises';
+import { z } from 'zod';
 import type { EnrichedSilverRecord, SilverQualityReport } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { atomicWriteFile } from './etl-utils.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+
+// ---------------------------------------------------------------------------
+// Schema versioning + backward-compat policy
+// ---------------------------------------------------------------------------
+
+/**
+ * Known SilverWineRecord schema versions, ordered oldest → newest.
+ *
+ * Backward-compat policy (etl.silver-validation maturity 4):
+ *  - Records WITHOUT a `schema_version` field default to the oldest known
+ *    version ('1') so existing NDJSON files (written before the field was
+ *    added) keep parsing without ETL changes.
+ *  - Records WITH an unknown `schema_version` fail closed — never silently
+ *    accepted, since downstream indexing assumes a known field set.
+ *  - When introducing version 'N', append it to this tuple and bump
+ *    `CURRENT_SILVER_SCHEMA_VERSION`. Old records remain parseable; new
+ *    fields land as `.optional()` until the migration window closes.
+ */
+export const SILVER_SCHEMA_VERSIONS = ['1'] as const;
+export type SilverSchemaVersion = (typeof SILVER_SCHEMA_VERSIONS)[number];
+
+/** The current write version emitted by vivino-to-silver.ts and Track C. */
+export const CURRENT_SILVER_SCHEMA_VERSION: SilverSchemaVersion = '1';
+
+const WINE_TYPE_VALUES = [
+  'red',
+  'white',
+  'rosé',
+  'sparkling',
+  'dessert',
+  'fortified',
+] as const;
+
+const PRICE_BAND_VALUES = ['value', 'mid', 'premium', 'luxury'] as const;
+
+// Numeric bounds for SilverWineRecord — domain facts:
+//   - priceUsd: USD prices must be ≥ 0; no realistic upper bound enforced here.
+//   - alcoholPct: % ABV ∈ [0, 100]. A value > 100% is physically impossible.
+//   - body / sweetness / acidity / tannin: normalised to [0, 1].
+//   - vintageYear: post-phylloxera realistic window [1800, current year + 1].
+const ALCOHOL_PCT_MIN = 0;
+const ALCOHOL_PCT_MAX = 100;
+const NORMALISED_MIN = 0;
+const NORMALISED_MAX = 1;
+
+/**
+ * Per-record Zod schema for SilverWineRecord.
+ *
+ * Required fields: sourceId, externalId, canonicalLabel, producer, country,
+ * region, wineType, grapes, ratingsCount, priceBand, popularityScore.
+ *
+ * `schema_version` is optional; when absent it defaults to the oldest known
+ * version (backward-compat). When present, it MUST be a known version string.
+ */
+export const SilverWineRecordSchema = z
+  .object({
+    schema_version: z
+      .enum(SILVER_SCHEMA_VERSIONS)
+      .optional()
+      .default(CURRENT_SILVER_SCHEMA_VERSION),
+    sourceId: z.string().min(1),
+    externalId: z.string().min(1),
+    canonicalLabel: z.string().min(1),
+    producer: z.string(),
+    vintageYear: z.number().int().min(1800).max(2100).nullable(),
+    country: z.string(),
+    region: z.string(),
+    appellation: z.string().nullable().optional(),
+    wineType: z.enum(WINE_TYPE_VALUES),
+    grapePrimary: z.string().nullable(),
+    grapes: z.array(z.string()).max(20),
+    body: z.number().finite().min(NORMALISED_MIN).max(NORMALISED_MAX).nullable(),
+    sweetness: z
+      .number()
+      .finite()
+      .min(NORMALISED_MIN)
+      .max(NORMALISED_MAX)
+      .nullable(),
+    acidity: z.number().finite().min(NORMALISED_MIN).max(NORMALISED_MAX).nullable(),
+    tannin: z.number().finite().min(NORMALISED_MIN).max(NORMALISED_MAX).nullable(),
+    pairingTags: z.array(z.string()).max(50),
+    flavorProfiles: z.array(z.string()).max(50),
+    searchTextEn: z.string(),
+    ratingAvg: z.number().finite().min(0).max(5).nullable(),
+    ratingsCount: z.number().int().min(0),
+    priceUsd: z.number().finite().min(0).nullable(),
+    priceBand: z.enum(PRICE_BAND_VALUES),
+    popularityScore: z
+      .number()
+      .finite()
+      .min(NORMALISED_MIN)
+      .max(NORMALISED_MAX),
+    scrapedAt: z.string().nullable(),
+    alcoholPct: z
+      .number()
+      .finite()
+      .min(ALCOHOL_PCT_MIN)
+      .max(ALCOHOL_PCT_MAX)
+      .nullable(),
+    producerPrestige: z
+      .number()
+      .finite()
+      .min(NORMALISED_MIN)
+      .max(NORMALISED_MAX)
+      .nullable(),
+    isTopRated: z.boolean(),
+  })
+  .passthrough();
+// `.passthrough()` (not `.strict()`): Silver records carry many optional
+// Track-C enrichment fields (criticProxy, drinkingWindow, gift / beginner
+// suitability, learned-sparse weights, …). They are validated by their own
+// stage-specific schemas, so the gate schema must not reject unknown keys.
+// Per CLAUDE.md test discipline rule 10, this is a documented exception to
+// the default `.strict()` policy.
+
+export type ParsedSilverWineRecord = z.infer<typeof SilverWineRecordSchema>;
+
+// ---------------------------------------------------------------------------
+// Batch validation
+// ---------------------------------------------------------------------------
+
+export interface SilverBatchInvalidEntry {
+  readonly index: number;
+  readonly error: z.ZodError;
+}
+
+export interface SilverBatchValidationResult {
+  readonly valid: readonly ParsedSilverWineRecord[];
+  readonly invalid: readonly SilverBatchInvalidEntry[];
+  readonly passed: boolean;
+}
+
+/**
+ * Validate a batch of unknown silver-shaped records, returning the parsed
+ * valid records plus per-record error reports for any invalid entries.
+ *
+ * Empty input → empty result, `passed: true` (vacuously valid).
+ */
+export function validateSilverRecordBatch(
+  records: readonly unknown[],
+): SilverBatchValidationResult {
+  const valid: ParsedSilverWineRecord[] = [];
+  const invalid: SilverBatchInvalidEntry[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const parsed = SilverWineRecordSchema.safeParse(records[i]);
+    if (parsed.success) {
+      valid.push(parsed.data);
+    } else {
+      invalid.push({ index: i, error: parsed.error });
+    }
+  }
+  return {
+    valid,
+    invalid,
+    passed: invalid.length === 0,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Constants

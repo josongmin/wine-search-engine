@@ -3,9 +3,20 @@ type CacheEligibility =
   | 'non_cacheable'
   | 'cacheable_but_snapshot_bound';
 
+export const RESPONSE_CACHE_POLICY_REASONS = [
+  'heuristic_response',
+  'degraded_response',
+  'advisory_response',
+  'not_blocking_eligible',
+  'missing_snapshot_id',
+] as const;
+
+export type ResponseCachePolicyReason =
+  typeof RESPONSE_CACHE_POLICY_REASONS[number];
+
 interface CachePolicyDecision {
   eligibility: CacheEligibility;
-  reason?: string;
+  reason?: ResponseCachePolicyReason;
 }
 
 export const RESPONSE_CACHE_READ_BYPASS_REASONS = [
@@ -159,4 +170,147 @@ export function decideResponseCacheReadPolicy(input: {
     return { eligibility: 'bypass', reason: 'snapshot_id_drift' };
   }
   return { eligibility: 'cache_hit' };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache-policy distribution counter (maturity 3 observability).
+//
+// Rationale: write/read decisions above are pure functions, which makes them
+// trivial to test but invisible to ops. Without a tally, "what fraction of
+// authoritative responses are skipping the cache because of model drift?"
+// requires log-grepping. This module-scoped counter mirrors the
+// silent-skip-counters pattern: callers record each decision, ops snapshot
+// the totals via `getStats()` / `getReadStats()`.
+//
+// The counter is intentionally injectable (factory + global singleton) so
+// tests can isolate state without depending on the global.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CachePolicyWriteStats {
+  readonly evaluations: number;
+  readonly eligible_count: number;
+  readonly ineligible_count: number;
+  readonly by_reason: Readonly<Record<ResponseCachePolicyReason, number>>;
+}
+
+export interface CachePolicyReadStats {
+  readonly evaluations: number;
+  readonly hit_count: number;
+  readonly bypass_count: number;
+  readonly by_reason: Readonly<Record<ResponseCacheReadBypassReason, number>>;
+}
+
+export interface CachePolicyDistributionCounter {
+  recordWriteDecision(decision: CachePolicyDecision): void;
+  recordReadDecision(decision: ResponseCacheReadDecision): void;
+  getStats(): CachePolicyWriteStats;
+  getReadStats(): CachePolicyReadStats;
+  reset(): void;
+}
+
+function zeroedWriteByReason(): Record<ResponseCachePolicyReason, number> {
+  const out = {} as Record<ResponseCachePolicyReason, number>;
+  for (const reason of RESPONSE_CACHE_POLICY_REASONS) {
+    out[reason] = 0;
+  }
+  return out;
+}
+
+function zeroedReadByReason(): Record<ResponseCacheReadBypassReason, number> {
+  const out = {} as Record<ResponseCacheReadBypassReason, number>;
+  for (const reason of RESPONSE_CACHE_READ_BYPASS_REASONS) {
+    out[reason] = 0;
+  }
+  return out;
+}
+
+export function createCachePolicyDistributionCounter(): CachePolicyDistributionCounter {
+  let writeEvaluations = 0;
+  let writeEligible = 0;
+  let writeIneligible = 0;
+  const writeByReason = zeroedWriteByReason();
+
+  let readEvaluations = 0;
+  let readHits = 0;
+  let readBypass = 0;
+  const readByReason = zeroedReadByReason();
+
+  return {
+    recordWriteDecision(decision) {
+      writeEvaluations += 1;
+      if (decision.eligibility === 'non_cacheable') {
+        writeIneligible += 1;
+        if (decision.reason !== undefined) {
+          writeByReason[decision.reason] += 1;
+        }
+      } else {
+        writeEligible += 1;
+      }
+    },
+    recordReadDecision(decision) {
+      readEvaluations += 1;
+      if (decision.eligibility === 'cache_hit') {
+        readHits += 1;
+      } else {
+        readBypass += 1;
+        if (decision.reason !== undefined) {
+          readByReason[decision.reason] += 1;
+        }
+      }
+    },
+    getStats() {
+      return Object.freeze({
+        evaluations: writeEvaluations,
+        eligible_count: writeEligible,
+        ineligible_count: writeIneligible,
+        by_reason: Object.freeze({ ...writeByReason }),
+      });
+    },
+    getReadStats() {
+      return Object.freeze({
+        evaluations: readEvaluations,
+        hit_count: readHits,
+        bypass_count: readBypass,
+        by_reason: Object.freeze({ ...readByReason }),
+      });
+    },
+    reset() {
+      writeEvaluations = 0;
+      writeEligible = 0;
+      writeIneligible = 0;
+      for (const reason of RESPONSE_CACHE_POLICY_REASONS) {
+        writeByReason[reason] = 0;
+      }
+      readEvaluations = 0;
+      readHits = 0;
+      readBypass = 0;
+      for (const reason of RESPONSE_CACHE_READ_BYPASS_REASONS) {
+        readByReason[reason] = 0;
+      }
+    },
+  };
+}
+
+/**
+ * Process-wide shared counter. Production code paths that already call
+ * `decideResponseCachePolicy` / `decideResponseCacheReadPolicy` should
+ * additionally call the matching `recordResponseCache*Decision` helper to
+ * keep ops dashboards populated. Tests that need isolation should use
+ * `createCachePolicyDistributionCounter()` or call `.reset()` in setup.
+ */
+export const globalCachePolicyDistributionCounter: CachePolicyDistributionCounter =
+  createCachePolicyDistributionCounter();
+
+export function recordResponseCachePolicyDecision(
+  decision: CachePolicyDecision,
+  counter: CachePolicyDistributionCounter = globalCachePolicyDistributionCounter,
+): void {
+  counter.recordWriteDecision(decision);
+}
+
+export function recordResponseCacheReadDecision(
+  decision: ResponseCacheReadDecision,
+  counter: CachePolicyDistributionCounter = globalCachePolicyDistributionCounter,
+): void {
+  counter.recordReadDecision(decision);
 }

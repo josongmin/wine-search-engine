@@ -135,6 +135,90 @@ describe('api client', () => {
     });
   });
 
+  describe('wineSearch', () => {
+    it('execute sends POST to /v1/wine-search with body', async () => {
+      mockFetch(
+        { ok: true, status: 200 },
+        {
+          query_type: 'wine_search',
+          answer: '레드 와인 추천 결과입니다',
+          execution: {
+            steps: [],
+            tool_call_count: 0,
+          },
+          meta: {
+            request_id: 'r1',
+            total_duration_ms: 1,
+            total_tokens: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_tokens: 0,
+              cache_creation_tokens: 0,
+            },
+            intent: 'search',
+            plan_kind: 'single-search',
+            termination: { reason: 'answer', layer: 'primary' },
+            policy_blocked: false,
+          },
+        },
+      );
+
+      const res = await api.wineSearch.execute({ query: '레드 와인 추천해줘' });
+      expect(res.query_type).toBe('wine_search');
+      expect(res.meta.intent).toBe('search');
+      expect(res.meta.plan_kind).toBe('single-search');
+      expect(res.meta.policy_blocked).toBe(false);
+
+      const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(String(url)).toContain('/v1/wine-search');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({ query: '레드 와인 추천해줘' });
+    });
+
+    it('forwards options.max_steps in the request body', async () => {
+      mockFetch(
+        { ok: true, status: 200 },
+        {
+          query_type: 'wine_search',
+          answer: 'x',
+          execution: { steps: [], tool_call_count: 0 },
+          meta: {
+            request_id: 'r2',
+            total_duration_ms: 0,
+            total_tokens: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_tokens: 0,
+              cache_creation_tokens: 0,
+            },
+            intent: 'search',
+            plan_kind: 'single-search',
+            termination: { reason: 'answer', layer: 'primary' },
+            policy_blocked: false,
+          },
+        },
+      );
+
+      await api.wineSearch.execute({ query: 'x', options: { max_steps: 7 } });
+      const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(options.body)).toEqual({ query: 'x', options: { max_steps: 7 } });
+    });
+
+    it('throws ApiError on non-OK wine-search response', async () => {
+      mockFetch(
+        { ok: false, status: 400, statusText: 'Bad Request' },
+        { error: { code: 'VALIDATION', message: 'query empty', retryable: false } },
+      );
+      try {
+        await api.wineSearch.execute({ query: '' });
+      } catch (e) {
+        const err = e as ApiError;
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('VALIDATION');
+      }
+    });
+  });
+
   describe('watchlist', () => {
     it('delete returns void on 204', async () => {
       mockFetch({ ok: true, status: 204 });

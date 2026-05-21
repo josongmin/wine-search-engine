@@ -17,8 +17,6 @@ import {
   KRW_PER_EOK_WON,
   KRW_PER_MAN_WON,
   KRW_PER_USD_APPROXIMATE,
-  KRW_PER_EUR_APPROXIMATE,
-  KRW_PER_GBP_APPROXIMATE,
 } from '../../shared/constants.js';
 import { WINE_TYPE_ALL_TOKENS, WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
@@ -27,6 +25,28 @@ import {
   extractVintageRange,
 } from '../../shared/utils/vintage.js';
 import { normalizeKoreanNegation } from './korean-negation-normalizer.js';
+import {
+  DEFAULT_FX_RATE_PORT,
+  isValidFxRate,
+  type FxRatePort,
+  type SupportedFxCurrency,
+} from '../port/fx-rate.port.js';
+
+/**
+ * Optional injection bag for {@link extractSearchConstraints}.
+ *
+ * The extractor remains backward-compatible: callers that pass only a query
+ * string get {@link DEFAULT_FX_RATE_PORT} (the static mid-2025 approximate
+ * rates). Callers that need rate sensitivity (tests, A/B experiments, live
+ * FX feeds) inject a custom port.
+ */
+export interface ExtractSearchConstraintsOptions {
+  /**
+   * FX-rate adapter for foreign-currency phrases ($/€/£, "USD"/"dollars").
+   * Omit to use the static defaults from `domain/shared/constants.ts`.
+   */
+  readonly fxRatePort?: FxRatePort;
+}
 
 // ---------------------------------------------------------------------------
 // KRW ↔ USD conversion
@@ -56,11 +76,20 @@ const KRW_PRICE_BAND_UPPER_FRACTION = 1.1;
 /**
  * Converts Korean Won to US Dollars, rounding to two decimal places.
  *
+ * Backward-compatible default: when no port is supplied the conversion uses
+ * the static {@link KRW_PER_USD} approximation. Injecting an {@link FxRatePort}
+ * lets tests (and live-rate adapters) drive the conversion deterministically.
+ *
  * @param krw - Price in Korean Won.
- * @returns Price in USD.
+ * @param port - Optional FX rate port; defaults to {@link DEFAULT_FX_RATE_PORT}.
+ * @returns Price in USD (rate-port-defined units), 2-decimal rounded.
  */
-export function krwToUsd(krw: number): number {
-  return Math.round((krw / KRW_PER_USD) * 100) / 100;
+export function krwToUsd(krw: number, port: FxRatePort = DEFAULT_FX_RATE_PORT): number {
+  const rate = port.getKrwUsdRate();
+  // Guard the port — a bad implementation must not silently produce NaN/Inf
+  // downstream (would corrupt Vespa filter tokens).
+  if (!isValidFxRate(rate)) return Math.round((krw / KRW_PER_USD) * 100) / 100;
+  return Math.round((krw / rate) * 100) / 100;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,14 +400,20 @@ function koreanNumberWordToDigit(s: string): string {
  * CLAUDE.md Rule 21: never uses toLocaleString(); amounts are converted with
  * integer arithmetic so locale-specific formatting cannot corrupt output.
  */
-function foreignCurrencyToKrw(symbol: string, amount: number): number | null {
+function foreignCurrencyToKrw(
+  symbol: string,
+  amount: number,
+  port: FxRatePort,
+): number | null {
   if (!Number.isFinite(amount)) return null;
   const sym = symbol.trim();
   if (sym === '₩' || sym.toLowerCase() === 'w') return Math.round(amount);
-  if (sym === '$') return Math.round(amount * KRW_PER_USD_APPROXIMATE);
-  if (sym === '€') return Math.round(amount * KRW_PER_EUR_APPROXIMATE);
-  if (sym === '£') return Math.round(amount * KRW_PER_GBP_APPROXIMATE);
-  return null;
+  const currency: SupportedFxCurrency | null =
+    sym === '$' ? 'USD' : sym === '€' ? 'EUR' : sym === '£' ? 'GBP' : null;
+  if (currency === null) return null;
+  const rate = port.getKrwPerUnit(currency);
+  if (!isValidFxRate(rate)) return null;
+  return Math.round(amount * rate);
 }
 
 /**
@@ -399,9 +434,15 @@ function foreignCurrencyToKrw(symbol: string, amount: number): number | null {
  */
 function extractForeignCurrencyPrice(
   q: string,
+  port: FxRatePort,
 ): Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> {
   // Strip thousands-separator commas before matching
   const qn = q.replace(/,/g, '');
+  // Pre-compute the rate per call so a port that does I/O (cached lookup) is
+  // invoked at most once per extractor pass. Guard up-front so a malformed
+  // port falls back cleanly to "no FX constraint" rather than NaN tokens.
+  const usdRate = port.getKrwUsdRate();
+  const usdRateOk = isValidFxRate(usdRate);
 
   // Priority A — foreign-currency range: "$50~$80" or "€30-€50" or "$50~80"
   // Symbol before both bounds, or only before the first (second bound uses same currency).
@@ -417,8 +458,8 @@ function extractForeignCurrencyPrice(
     const loRaw = parseFloat(fxRangeMatch[2]);
     const hiRaw = parseFloat(fxRangeMatch[3]);
     if (!Number.isFinite(loRaw) || !Number.isFinite(hiRaw)) return {};
-    const lo = foreignCurrencyToKrw(sym, loRaw);
-    const hi = foreignCurrencyToKrw(sym, hiRaw);
+    const lo = foreignCurrencyToKrw(sym, loRaw, port);
+    const hi = foreignCurrencyToKrw(sym, hiRaw, port);
     if (lo !== null && hi !== null) {
       const [safeMin, safeMax] = lo <= hi ? [lo, hi] : [hi, lo];
       return { minPriceKrw: safeMin, maxPriceKrw: safeMax };
@@ -435,7 +476,7 @@ function extractForeignCurrencyPrice(
   ) {
     const underAmt = parseFloat(fxUnderPrefixSymbolMatch[2]);
     if (!Number.isFinite(underAmt)) return {};
-    const krw = foreignCurrencyToKrw(fxUnderPrefixSymbolMatch[1], underAmt);
+    const krw = foreignCurrencyToKrw(fxUnderPrefixSymbolMatch[1], underAmt, port);
     if (krw !== null) return { maxPriceKrw: krw };
   }
 
@@ -444,16 +485,16 @@ function extractForeignCurrencyPrice(
     /(?:under|below|up\s+to|less\s+than|no\s+more\s+than)\s+(\d+(?:\.\d+)?)\s*(?:usd|u\.s\.\s*dollars?|us\s*dollars?|dollars?)(?=$|[^\p{L}\p{N}])/iu.exec(qn);
   if (usdWordUnderPrefixMatch?.[1] !== undefined) {
     const underAmt = parseFloat(usdWordUnderPrefixMatch[1]);
-    if (!Number.isFinite(underAmt)) return {};
-    return { maxPriceKrw: Math.round(underAmt * KRW_PER_USD_APPROXIMATE) };
+    if (!Number.isFinite(underAmt) || !usdRateOk) return {};
+    return { maxPriceKrw: Math.round(underAmt * usdRate) };
   }
 
   const usdWordUnderSuffixMatch =
     /(\d+(?:\.\d+)?)\s*(?:usd|u\.s\.\s*dollars?|us\s*dollars?|dollars?)\s*(?:or\s+less|and\s+under|or\s+under|under|below|max(?:imum)?)/iu.exec(qn);
   if (usdWordUnderSuffixMatch?.[1] !== undefined) {
     const underAmt = parseFloat(usdWordUnderSuffixMatch[1]);
-    if (!Number.isFinite(underAmt)) return {};
-    return { maxPriceKrw: Math.round(underAmt * KRW_PER_USD_APPROXIMATE) };
+    if (!Number.isFinite(underAmt) || !usdRateOk) return {};
+    return { maxPriceKrw: Math.round(underAmt * usdRate) };
   }
 
   // Priority B — foreign-currency upper bound: "$100 이하/이내/미만" or "$100 under/below"
@@ -466,7 +507,7 @@ function extractForeignCurrencyPrice(
   ) {
     const underAmt = parseFloat(fxUnderMatch[2]);
     if (!Number.isFinite(underAmt)) return {};
-    const krw = foreignCurrencyToKrw(fxUnderMatch[1], underAmt);
+    const krw = foreignCurrencyToKrw(fxUnderMatch[1], underAmt, port);
     if (krw !== null) return { maxPriceKrw: krw };
   }
 
@@ -480,7 +521,7 @@ function extractForeignCurrencyPrice(
   ) {
     const overAmt = parseFloat(fxOverMatch[2]);
     if (!Number.isFinite(overAmt)) return {};
-    const krw = foreignCurrencyToKrw(fxOverMatch[1], overAmt);
+    const krw = foreignCurrencyToKrw(fxOverMatch[1], overAmt, port);
     if (krw !== null) return { minPriceKrw: krw };
   }
 
@@ -494,7 +535,7 @@ function extractForeignCurrencyPrice(
   ) {
     const bareAmt = parseFloat(fxBareMatch[2]);
     if (!Number.isFinite(bareAmt)) return {};
-    const krw = foreignCurrencyToKrw(fxBareMatch[1], bareAmt);
+    const krw = foreignCurrencyToKrw(fxBareMatch[1], bareAmt, port);
     if (krw !== null) return { maxPriceKrw: krw };
   }
 
@@ -767,7 +808,11 @@ function resolveWineTypeCanonical(token: string): string | undefined {
  * extractSearchConstraints('not Merlot, without France')
  * // → { excludeGrapes: ['Merlot'], excludeCountries: ['France'] }
  */
-export function extractSearchConstraints(query: string): SearchConstraints {
+export function extractSearchConstraints(
+  query: string,
+  options?: ExtractSearchConstraintsOptions,
+): SearchConstraints {
+  const fxRatePort = options?.fxRatePort ?? DEFAULT_FX_RATE_PORT;
   // NFC-normalize at the boundary so decomposed Hangul (NFD) inputs still
   // match the 한글 regex patterns. Without this, a client that sends
   // decomposed jamo (e.g. copy-pasted from an OS that uses NFD like macOS
@@ -894,7 +939,7 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   // none match, fall through to the KRW-native (만원/천원/원) extractor.
   // Ordering matters: "₩70,000 이하" contains no Korean unit suffix, so the
   // KRW-native extractor silently misses it without this pre-pass.
-  const fxPrice = extractForeignCurrencyPrice(q);
+  const fxPrice = extractForeignCurrencyPrice(q, fxRatePort);
   const numericPrice =
     fxPrice.minPriceKrw !== undefined || fxPrice.maxPriceKrw !== undefined
       ? fxPrice
@@ -949,7 +994,9 @@ export function extractSearchConstraints(query: string): SearchConstraints {
  */
 export function searchConstraintsToFilterTokens(
   constraints: SearchConstraints,
+  options?: { readonly fxRatePort?: FxRatePort },
 ): readonly string[] {
+  const port = options?.fxRatePort ?? DEFAULT_FX_RATE_PORT;
   const tokens: string[] = [];
 
   for (const grape of constraints.excludeGrapes ?? []) {
@@ -974,12 +1021,12 @@ export function searchConstraintsToFilterTokens(
   }
 
   if (constraints.minPriceKrw !== undefined) {
-    const usd = krwToUsd(constraints.minPriceKrw);
+    const usd = krwToUsd(constraints.minPriceKrw, port);
     tokens.push(`price_usd_min:${usd}`);
   }
 
   if (constraints.maxPriceKrw !== undefined) {
-    const usd = krwToUsd(constraints.maxPriceKrw);
+    const usd = krwToUsd(constraints.maxPriceKrw, port);
     tokens.push(`price_usd_max:${usd}`);
   }
 

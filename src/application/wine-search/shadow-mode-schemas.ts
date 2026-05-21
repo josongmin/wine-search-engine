@@ -71,6 +71,33 @@ export const SHADOW_MODE_MAX_ANSWER_CHARS = 3_000;
  *  truncated before persistence. */
 export const SHADOW_MODE_MAX_ERROR_MESSAGE_CHARS = 2_000;
 
+/**
+ * Per-observation length bound (chars). Mirrors
+ * `ORCHESTRATOR_OBSERVATION_MAX_CHARS` (2 000) and the HTTP wire boundary
+ * `STEP_OBSERVATION_MAX_CHARS` so the same truncation rule applies at every
+ * surface that serializes observations. Bench-scorer faithfulness/
+ * contextRecall both operate on observation text — using a different bound
+ * here would mean shadow-mode scoring sees a different grounded surface than
+ * the production HTTP path, violating the cutover validation invariant.
+ */
+export const SHADOW_MODE_OBSERVATION_MAX_CHARS = 2_000;
+
+/**
+ * Cap on the number of observations carried in a single outcome.
+ *
+ * The new orchestrator allows up to `ORCHESTRATOR_MAX_OBSERVATIONS_PER_STEP`
+ * (32) observations per step and up to `ORCHESTRATOR_MAX_EXECUTION_STEPS`
+ * (64) steps; the legacy agent runs at most `AGENT_MAX_STEPS` (10) with up
+ * to ~32 parallel actions per batch. We cap at 256 to allow a worst-case
+ * mini-loop trace (8 anchor drinkability fan-outs × 4 turns × ~8 tool calls
+ * per turn ≈ 256) without unbounding. Same justification class as
+ * `SHADOW_MODE_MAX_TOOL_NAMES` (128 cap on tool names).
+ *
+ * Sized as the smallest power-of-two ≥ the worst-case mini-loop fan-out so
+ * downstream consumers can pre-size buffers without re-growing.
+ */
+export const SHADOW_MODE_OBSERVATIONS_MAX = 256;
+
 // ---------------------------------------------------------------------------
 // Orchestrator identity
 // ---------------------------------------------------------------------------
@@ -112,6 +139,29 @@ export const ShadowModeOrchestratorOutcomeSchema = z.object({
   totalDurationMs: z.number().int().finite().min(0),
   tokenUsage: ShadowModeTokenUsageSchema,
   errorMessage: z.string().max(SHADOW_MODE_MAX_ERROR_MESSAGE_CHARS).optional(),
+  /**
+   * Grounded observation strings captured from the orchestrator's tool calls,
+   * truncated per-string to `SHADOW_MODE_OBSERVATION_MAX_CHARS` and capped at
+   * `SHADOW_MODE_OBSERVATIONS_MAX` entries. Required for the bench scorer's
+   * `faithfulness` and `contextRecall` dimensions — without this surface,
+   * those scores collapse to `null` (the "dropped from geo-mean" path) and
+   * the cutover gate cannot detect hallucination drift.
+   *
+   * Sourced from:
+   *   - WineSearchResult: `executionSteps[].observations` where
+   *     `source ∈ { 'runner', 'mini_loop' }`. Analyzer / router / synthesizer
+   *     phases never produce grounded observations.
+   *   - AgentResult: `evidenceFrames[].observationSnapshot` when present
+   *     (ADR-009 Phase 0 typed-frame path), otherwise `step.observation`
+   *     (single) + `step.actionPairs[].observation` (parallel batches).
+   *
+   * Empty strings are filtered out by the producer — an empty observation
+   * carries no grounding signal and would dilute the scorer's recall metric.
+   * Optional so historical reports (pre-Gap-4 patch) parse unchanged.
+   */
+  observations: z.array(z.string().max(SHADOW_MODE_OBSERVATION_MAX_CHARS))
+    .max(SHADOW_MODE_OBSERVATIONS_MAX)
+    .optional(),
 }).strict();
 export type ShadowModeOrchestratorOutcome = z.infer<typeof ShadowModeOrchestratorOutcomeSchema>;
 

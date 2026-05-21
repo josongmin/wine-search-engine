@@ -1,0 +1,32 @@
+{
+  "id": "msg_01YBgdwQ2o6lrLM3dO7AzX4K",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-4-5-20251001",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01XYZparallel1AAAAAAA",
+      "name": "search_wines",
+      "input": {
+        "region": "Burgundy",
+        "vintage": 2018
+      }
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01XYZparallel2BBBBBBB",
+      "name": "search_wines",
+      "input": {
+        "region": "Loire",
+        "vintage": 2020
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1577,
+    "output_tokens": 142
+  }
+}

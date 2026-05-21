@@ -38,21 +38,201 @@ const CONFUSABLES_REGEX = new RegExp(
   'gu',
 );
 
+// ── Hangul Syllable Composition constants ───────────────────────────────────
+//
+// Unicode Hangul Syllable Composition algorithm:
+//   syllable = SBase + (L_idx * VCount * TCount) + (V_idx * TCount) + T_idx
+//
+// Where:
+//   - L (choseong / initial) ∈ U+1100..U+1112 (19 jamo, indices 0..18)
+//   - V (jungseong / medial) ∈ U+1161..U+1175 (21 jamo, indices 0..20)
+//   - T (jongseong / final)  ∈ U+11A8..U+11C2 (27 jamo, indices 1..27),
+//     T_idx = 0 means "no final"
+//   - SBase = U+AC00, syllable count = 19 * 21 * 28 = 11_172
+//
+// Compat Jamo (U+3130..U+318F) decompose via NFKC into the choseong/jungseong
+// range (U+1100..U+1175); the algorithm therefore runs *after* NFKC.
+//
+// Reference: Unicode 16.0 §3.12 "Conjoining Jamo Behavior", D118–D132.
+const HANGUL_SBASE = 0xac00;
+const HANGUL_LBASE = 0x1100;
+const HANGUL_VBASE = 0x1161;
+const HANGUL_TBASE = 0x11a7; // T_idx 0 sentinel; actual finals start at 0x11A8 (T_idx=1)
+const HANGUL_LCOUNT = 19;
+const HANGUL_VCOUNT = 21;
+const HANGUL_TCOUNT = 28; // includes the "no final" sentinel
+/** Last precomposed Hangul syllable (U+D7A3) — SBase + 11_171. */
+const HANGUL_SYLLABLE_END = 0xd7a3;
+/** First conjoining-jamo codepoint (start of U+1100..U+11FF range). */
+const HANGUL_JAMO_BLOCK_START = 0x1100;
+/** Last conjoining-jamo codepoint (end of U+1100..U+11FF range). */
+const HANGUL_JAMO_BLOCK_END = 0x11ff;
+
 /**
- * Applies NFKC normalization followed by confusables substitution.
+ * Returns true if any codepoint in the input is a precomposed Hangul syllable
+ * (U+AC00..U+D7A3) or a conjoining Hangul Jamo (U+1100..U+11FF).
  *
- * NFKC handles compatibility variants (fullwidth, superscripts, etc.).
- * The confusables map handles cross-script homoglyphs (Cyrillic/Greek lookalikes)
- * that NFKC cannot resolve because they are distinct Unicode characters.
+ * Used as a fast pre-check: if the input contains no Hangul whatsoever, the
+ * decompose/compose pass is a no-op and can be skipped.
+ */
+function hasHangulContent(input: string): boolean {
+  for (let i = 0; i < input.length; i += 1) {
+    const c = input.charCodeAt(i);
+    if (
+      (c >= HANGUL_SBASE && c <= HANGUL_SYLLABLE_END) ||
+      (c >= HANGUL_JAMO_BLOCK_START && c <= HANGUL_JAMO_BLOCK_END)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Decomposes precomposed Hangul syllables (U+AC00..U+D7A3) into their
+ * conjoining L V [T] jamo sequence. Non-Hangul characters pass through.
+ *
+ * Required as a preprocessing step before {@link composeHangulSyllables}
+ * so that *mixed* forms — e.g. attacker insertion of a lone choseong
+ * between two precomposed syllables (`무ㅅ시` → after NFKC `무ᄉ시` =
+ * U+BB34 U+1109 U+C2DC) — are normalized to a fully-jamo stream that the
+ * composer can resynthesize into clean syllables.
+ *
+ * Algorithm: index = code - SBase, L_idx = index / (V*T), V_idx =
+ * (index % (V*T)) / T, T_idx = index % T. Emit the corresponding
+ * conjoining jamo codepoints (U+1100+L_idx, U+1161+V_idx, U+11A7+T_idx
+ * when T_idx > 0).
+ */
+function decomposeHangulSyllables(input: string): string {
+  let out = '';
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    const sIdx = code - HANGUL_SBASE;
+    if (sIdx >= 0 && sIdx < HANGUL_LCOUNT * HANGUL_VCOUNT * HANGUL_TCOUNT) {
+      const lIdx = Math.floor(sIdx / (HANGUL_VCOUNT * HANGUL_TCOUNT));
+      const vIdx = Math.floor((sIdx % (HANGUL_VCOUNT * HANGUL_TCOUNT)) / HANGUL_TCOUNT);
+      const tIdx = sIdx % HANGUL_TCOUNT;
+      out += String.fromCharCode(HANGUL_LBASE + lIdx);
+      out += String.fromCharCode(HANGUL_VBASE + vIdx);
+      if (tIdx > 0) {
+        out += String.fromCharCode(HANGUL_TBASE + tIdx);
+      }
+    } else {
+      out += input.charAt(i);
+    }
+  }
+  return out;
+}
+
+/**
+ * Composes a sequence of conjoining Hangul Jamo (U+1100..U+11FF) into the
+ * precomposed syllable form (U+AC00..U+D7A3). Orphan conjoining jamo that
+ * cannot be combined into a syllable are dropped — they are not legitimate
+ * standalone characters in well-formed Korean text and their presence
+ * indicates either attacker tampering or already-broken input.
+ *
+ * Required because NFKC alone leaves Hangul Compatibility Jamo
+ * (U+3130..U+318F) in *decomposed* conjoining form (U+1100…) — the Korean
+ * injection regexes in {@link QuerySanitizer.INJECTION_PATTERNS} expect the
+ * *syllable* form (e.g. `무시` = U+BB34 U+C2DC), so an attacker can re-encode
+ * `무시` as compat jamo (ㅁㅜㅅㅣ) or mid-syllable jamo (무ㅅ시) and bypass the
+ * regex match. Composing back to syllables closes that bypass.
+ *
+ * The algorithm is the canonical L+V[+T] composition per Unicode §3.12 —
+ * 19 × 21 × 28 = 11_172 syllables addressable.
+ *
+ * Performance: single linear scan, O(n).
+ */
+function composeHangulSyllables(input: string): string {
+  let out = '';
+  let i = 0;
+  while (i < input.length) {
+    const lCode = input.charCodeAt(i);
+    const lIdx = lCode - HANGUL_LBASE;
+    if (lIdx >= 0 && lIdx < HANGUL_LCOUNT && i + 1 < input.length) {
+      const vCode = input.charCodeAt(i + 1);
+      const vIdx = vCode - HANGUL_VBASE;
+      if (vIdx >= 0 && vIdx < HANGUL_VCOUNT) {
+        // Optional trailing T (final consonant): only consume if it is a
+        // valid jongseong in U+11A8..U+11C2 AND it is not immediately
+        // followed by a medial V — in `다아` (L V L V) the second L
+        // belongs to the next syllable, not to the first as a final.
+        let tIdx = 0;
+        let consumed = 2;
+        if (i + 2 < input.length) {
+          const tCode = input.charCodeAt(i + 2);
+          const candidateT = tCode - HANGUL_TBASE;
+          const isValidT = candidateT > 0 && candidateT < HANGUL_TCOUNT;
+          let nextIsV = false;
+          if (isValidT && i + 3 < input.length) {
+            const afterT = input.charCodeAt(i + 3);
+            nextIsV = afterT >= HANGUL_VBASE && afterT < HANGUL_VBASE + HANGUL_VCOUNT;
+          }
+          if (isValidT && !nextIsV) {
+            tIdx = candidateT;
+            consumed = 3;
+          }
+        }
+        const syllable =
+          HANGUL_SBASE + (lIdx * HANGUL_VCOUNT + vIdx) * HANGUL_TCOUNT + tIdx;
+        out += String.fromCharCode(syllable);
+        i += consumed;
+        continue;
+      }
+    }
+    // Orphan conjoining jamo (U+1100..U+11FF) that we could not compose:
+    // drop it. Legitimate text contains only precomposed syllables; orphan
+    // jamo is either attacker tampering or already-malformed input.
+    if (lCode >= HANGUL_JAMO_BLOCK_START && lCode <= HANGUL_JAMO_BLOCK_END) {
+      i += 1;
+      continue;
+    }
+    out += input.charAt(i);
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * Full Hangul normalization: decompose precomposed syllables to L V [T]
+ * jamo, then re-compose to syllables, dropping any orphan jamo. The
+ * round-trip canonicalizes attacker-encoded forms (compat jamo, mid-
+ * syllable jamo insertion) into clean syllable form so the Korean
+ * injection regexes can match.
+ *
+ * Pure passthrough when the input contains no Hangul.
+ */
+function normalizeHangul(input: string): string {
+  if (!hasHangulContent(input)) return input;
+  return composeHangulSyllables(decomposeHangulSyllables(input));
+}
+
+/**
+ * Applies NFKC normalization, Hangul syllable composition, and confusables
+ * substitution.
+ *
+ * NFKC handles compatibility variants (fullwidth, superscripts, ligatures,
+ * AND Hangul Compatibility Jamo → conjoining jamo). After NFKC, conjoining
+ * jamo are still decomposed (L V [T] triplets) — {@link composeHangulSyllables}
+ * folds them back to the precomposed syllable form so the Korean injection
+ * regexes can match. The confusables map handles cross-script homoglyphs
+ * (Cyrillic/Greek lookalikes) that NFKC cannot resolve because they are
+ * distinct Unicode characters.
  *
  * @param input - Raw query string (already confirmed non-empty)
  * @returns Normalized string with lookalikes replaced by ASCII equivalents
  */
 function applyNormalization(input: string): string {
-  // Step 1: NFKC — resolves fullwidth Latin, superscripts, ligatures, etc.
+  // Step 1: NFKC — resolves fullwidth Latin, superscripts, ligatures, and
+  // maps Hangul Compat Jamo (U+3130..U+318F) to conjoining jamo (U+1100..).
   const nfkc = input.normalize('NFKC');
-  // Step 2: Confusables substitution — replaces cross-script homoglyphs
-  return nfkc.replace(CONFUSABLES_REGEX, (ch) => SECURITY_CONFUSABLES_MAP.get(ch) ?? ch);
+  // Step 2: Hangul canonicalization — decompose syllables into L V [T] jamo,
+  // then re-compose to clean syllables (dropping orphan jamo). Closes the
+  // compat-jamo and mid-syllable-jamo bypasses against the Korean injection
+  // regexes which only match precomposed syllable form (e.g. 무시).
+  const hangulNormalized = normalizeHangul(nfkc);
+  // Step 3: Confusables substitution — replaces cross-script homoglyphs.
+  return hangulNormalized.replace(CONFUSABLES_REGEX, (ch) => SECURITY_CONFUSABLES_MAP.get(ch) ?? ch);
 }
 
 /**
@@ -158,6 +338,37 @@ export class QuerySanitizer {
       // <<SYS>> and <|im_start|> are unambiguous LLM-format tokens with no legitimate
       // use in wine queries.
       /<<SYS>>|<\|im_start\|>/,
+      // ── Korean instruction-hijack patterns (S4, defense-in-depth) ─────────
+      //
+      // Korean equivalents of the English "ignore previous instructions" /
+      // "show system prompt" / "you are now X" family. All patterns use the
+      // CLAUDE.md rule 8/24 Unicode-aware approach: NO `\b`; `/u` flag set
+      // explicitly; left boundary `(?:^|[^\p{L}\p{N}])` so the pattern does
+      // not fire inside larger Korean words (false-positive guard, rule 23).
+      //
+      // 무시 / "ignore" family — require an explicit "지시 / 명령 / 규칙" object so
+      // unrelated 무시 usage ("그건 무시해도 돼" referring to a wine review)
+      // does not trigger. The "지시 / 명령 / 규칙" object combined with 무시 is
+      // unambiguous Korean injection language. "이전 / 위 / 지금까지의 / 모든"
+      // qualifiers strengthen the signal but are not required — bare
+      // "지시 무시" / "명령 무시" is already injection-flavored enough.
+      /(?:^|[^\p{L}\p{N}])(?:이전(?:의)?|위(?:의)?|지금까지의|모든)?\s*(?:지시\s*사항|지시|명령|규칙)\s*(?:을|를|은|는)?\s*(?:모두\s*)?무시/u,
+      // 시스템 프롬프트 / 시스템 메시지 — extraction attempts ("보여줘 / 출력해 /
+      // 알려줘 / 공개해"). Korean particles before the verb optional.
+      /(?:^|[^\p{L}\p{N}])시스템\s*(?:프롬프트|메시지|지시(?:사항)?)\s*(?:을|를|은|는)?\s*(?:보여|출력|알려|공개|말해)/u,
+      // 너의/당신의 (시스템) 지시 — request the assistant to reveal its
+      // instructions. Requires the request verb (말해/알려/보여/출력/공개) to
+      // avoid blocking innocuous "너의 추천 알려줘".
+      /(?:^|[^\p{L}\p{N}])(?:너의|당신의)\s*(?:시스템\s*)?(?:지시(?:\s*사항)?|프롬프트|명령)\s*(?:을|를|은|는)?\s*(?:말해|알려|보여|출력|공개)/u,
+      // Role hijack — "너는/당신은 이제 (관리자|admin|루트|root|시스템)".
+      // FP guard (rule 23): "관리자가 추천한 와인" is NOT blocked because it
+      // lacks the "너는/당신은 이제" preamble. Pattern requires the role-claim
+      // structure, not bare 관리자.
+      /(?:^|[^\p{L}\p{N}])(?:너는|당신은|넌)\s*이제\s*(?:관리자|admin|루트|root|시스템|개발자|디버그|debug)/iu,
+      // (관리자|개발자|디버그) 모드 (전환|변경|진입). Specific operational verbs
+      // narrow the false-positive surface — "관리자 모드를 좋아한다" requires
+      // an action verb to be considered injection.
+      /(?:^|[^\p{L}\p{N}])(?:관리자|개발자|디버그|debug)\s*모드\s*(?:로|를|을)?\s*(?:전환|변경|진입|들어가|들어가서)/iu,
     ],
 
     // Jailbreak / adversarial prompts

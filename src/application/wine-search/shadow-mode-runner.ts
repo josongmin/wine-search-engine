@@ -35,6 +35,8 @@ import {
   SHADOW_MODE_MAX_ANSWER_CHARS,
   SHADOW_MODE_MAX_ERROR_MESSAGE_CHARS,
   SHADOW_MODE_MAX_TOOL_NAMES,
+  SHADOW_MODE_OBSERVATION_MAX_CHARS,
+  SHADOW_MODE_OBSERVATIONS_MAX,
   type ShadowModeOrchestratorOutcome,
   type ShadowModeOrchestratorStatus,
   type ShadowModeReport,
@@ -463,6 +465,101 @@ function extractWineSearchToolNames(
 }
 
 /**
+ * Step-source allowlist for observation extraction. Only the runner /
+ * mini_loop phases dispatch tools and therefore carry grounded
+ * observations; analyzer / router / synthesizer phases are framework
+ * bookkeeping (parity with `bench-scorer-adapter.SCORER_STEP_SOURCES`).
+ *
+ * Allocated at module scope (CLAUDE.md rule 16) so the Set is not rebuilt
+ * on every call.
+ */
+const SHADOW_MODE_OBSERVATION_STEP_SOURCES: ReadonlySet<
+  WineSearchResult['executionSteps'][number]['source']
+> = new Set(['runner', 'mini_loop']);
+
+/**
+ * Walk a `WineSearchResult.executionSteps` array and emit the ordered list
+ * of grounded observation strings. Only runner / mini_loop sourced steps are
+ * inspected; analyzer / router / synthesizer phases never carry grounding
+ * (CLAUDE.md rule 23: filter narrowly, document the gate).
+ *
+ * Empty strings are dropped — they carry no signal and would dilute the
+ * scorer's `contextRecall` / `faithfulness` dimensions. Each retained string
+ * is truncated to `SHADOW_MODE_OBSERVATION_MAX_CHARS` (mirrors the HTTP wire
+ * boundary `STEP_OBSERVATION_MAX_CHARS` and the upstream orchestrator bound
+ * `ORCHESTRATOR_OBSERVATION_MAX_CHARS` — same byte ceiling at every layer).
+ *
+ * The aggregate list is capped at `SHADOW_MODE_OBSERVATIONS_MAX`. Truncation
+ * happens before serialization so the Zod schema's `.max()` invariant always
+ * holds without retries.
+ */
+function extractWineSearchObservations(
+  steps: WineSearchResult['executionSteps'],
+): string[] {
+  const observations: string[] = [];
+  for (const step of steps) {
+    if (observations.length >= SHADOW_MODE_OBSERVATIONS_MAX) break;
+    if (!SHADOW_MODE_OBSERVATION_STEP_SOURCES.has(step.source)) continue;
+    const obs = step.observations;
+    if (obs === undefined) continue;
+    for (const o of obs) {
+      if (observations.length >= SHADOW_MODE_OBSERVATIONS_MAX) break;
+      if (o.length === 0) continue;
+      observations.push(truncateObservation(o));
+    }
+  }
+  return observations;
+}
+
+/**
+ * Walk an `AgentResult` and emit grounded observation strings.
+ *
+ * Prefers typed `evidenceFrames[].observationSnapshot` when present
+ * (ADR-009 Phase 0) — the snapshots are byte-equivalent to what the LLM
+ * saw but sourced from a structured frame. Falls back to step-level
+ * `actionPairs[].observation` (parallel batches) and `step.observation`
+ * (single tool call) otherwise.
+ *
+ * Parity with `bench-scorer-adapter.extractLegacyObservations` so the
+ * legacy projection AND the shadow-mode outcome see the SAME grounded
+ * surface (cutover gate invariant).
+ */
+function extractLegacyObservations(result: AgentResult): string[] {
+  const observations: string[] = [];
+  const frames = result.evidenceFrames;
+  if (frames !== undefined && frames.length > 0) {
+    for (const f of frames) {
+      if (observations.length >= SHADOW_MODE_OBSERVATIONS_MAX) break;
+      if (f.observationSnapshot.length === 0) continue;
+      observations.push(truncateObservation(f.observationSnapshot));
+    }
+    return observations;
+  }
+  for (const step of result.steps) {
+    if (observations.length >= SHADOW_MODE_OBSERVATIONS_MAX) break;
+    const pairs = step.actionPairs;
+    if (pairs !== undefined) {
+      for (const p of pairs) {
+        if (observations.length >= SHADOW_MODE_OBSERVATIONS_MAX) break;
+        if (p.observation.length === 0) continue;
+        observations.push(truncateObservation(p.observation));
+      }
+      continue;
+    }
+    if (step.observation !== undefined && step.observation.length > 0) {
+      observations.push(truncateObservation(step.observation));
+    }
+  }
+  return observations;
+}
+
+function truncateObservation(input: string): string {
+  if (input.length <= SHADOW_MODE_OBSERVATION_MAX_CHARS) return input;
+  const cutoff = Math.max(0, SHADOW_MODE_OBSERVATION_MAX_CHARS - ERROR_MESSAGE_TRUNCATION_TAIL.length);
+  return `${input.slice(0, cutoff)}${ERROR_MESSAGE_TRUNCATION_TAIL}`;
+}
+
+/**
  * Adapt a per-side envelope from the legacy agent into the orchestrator-
  * agnostic `ShadowModeOrchestratorOutcome` shape consumed by the differ.
  */
@@ -481,6 +578,7 @@ export function toLegacyOutcome(
         : envelope.status,
       totalDurationMs: Math.trunc(duration),
       tokenUsage: { ...ZERO_TOKEN_USAGE },
+      observations: [],
       ...(envelope.errorMessage !== undefined
         ? { errorMessage: truncateMessage(envelope.errorMessage) }
         : {}),
@@ -489,6 +587,7 @@ export function toLegacyOutcome(
   }
   const result = envelope.result;
   const toolNames = extractLegacyToolNames(result.steps);
+  const observations = extractLegacyObservations(result);
   return {
     orchestrator: 'legacy_agent',
     status: 'ok',
@@ -501,6 +600,7 @@ export function toLegacyOutcome(
       inputTokens: Math.max(0, Math.trunc(result.totalTokens.input)),
       outputTokens: Math.max(0, Math.trunc(result.totalTokens.output)),
     },
+    observations,
   };
 }
 
@@ -523,6 +623,7 @@ export function toWineSearchOutcome(
         : envelope.status,
       totalDurationMs: Math.trunc(duration),
       tokenUsage: { ...ZERO_TOKEN_USAGE },
+      observations: [],
       ...(envelope.errorMessage !== undefined
         ? { errorMessage: truncateMessage(envelope.errorMessage) }
         : {}),
@@ -531,6 +632,7 @@ export function toWineSearchOutcome(
   }
   const result = envelope.result;
   const toolNames = extractWineSearchToolNames(result.executionSteps);
+  const observations = extractWineSearchObservations(result.executionSteps);
   return {
     orchestrator: 'wine_search',
     status: 'ok',
@@ -546,5 +648,6 @@ export function toWineSearchOutcome(
       cacheReadTokens: Math.max(0, Math.trunc(result.tokenUsage.cacheReadTokens)),
       cacheCreationTokens: Math.max(0, Math.trunc(result.tokenUsage.cacheCreationTokens)),
     },
+    observations,
   };
 }

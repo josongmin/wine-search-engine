@@ -6,10 +6,17 @@ summary: |
   ranking-rerank, llm-call 등). pipelineTrace() 호출이 이 enum만 emit하도록 강제 →
   debug 로그 일관성 + queryable. SSoT 정책에 따라 모든 step 이름 단일 출처.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   종합적 step 커버리지, 코드베이스 전반에서 일관적으로 사용. .ai/pipeline-debug-steps.md
   index 보유. 2026년 breaking change 없음. append-only 유지 정책.
+  SOTA++ 도달 (2026-05-21):
+  - TypeScript discriminated-union exhaustiveness witness (assertNever)로
+    누락된 enum 값을 compile-time에서 차단.
+  - test/regression/pipeline-debug-steps-exhaustiveness.regression.test.ts:
+    enum 값 uniqueness / 명명 규칙 / append-only snapshot / docs ↔ enum 양방향
+    parity / `pipelineTrace()` 콜사이트 문자열 리터럴 금지 invariant 보장.
+  - .ai/pipeline-debug-steps.md drift 수정 (누락 8개 step 문서화, SSoT 경로 정정).
 
 status: active
 since: 2025-09
@@ -22,8 +29,13 @@ surfaces:
 key_files:
   - src/domain/observability/pipeline-debug-steps.ts
   - .ai/pipeline-debug-steps.md
+  - test/regression/pipeline-debug-steps-exhaustiveness.regression.test.ts
+  - test/regression/pipeline-timeline-parity.regression.test.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/pipeline-debug-steps-exhaustiveness.regression.test.ts
+    - test/regression/pipeline-timeline-parity.regression.test.ts
 
 depends_on: []
 

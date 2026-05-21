@@ -16,6 +16,7 @@
  */
 
 import { Transliterator } from '../../alias/service/transliterator.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import type {
   ExtractedClaim,
   ClaimVerification,
@@ -259,7 +260,7 @@ function detectStructuredIdentityMismatch(
       wineId: best.wineId,
       field: best.field,
       value: String(best.evidenceValue),
-      source: buildEvidenceAnchorSource(best.evidence as EvidenceRecord),
+      source: buildEvidenceAnchorSource(best.evidence),
     },
     explanation:
       `identity claim "${claim.value}" matched structured field ${best.field}=` +
@@ -583,8 +584,8 @@ function matchClaimAgainstPriceRange(
 
   const krwRange = /^(?:₩|)?([0-9][0-9]*)\s*원?\s*-\s*(?:₩|)?([0-9][0-9]*)\s*원?$/u.exec(normalized);
   if (krwRange?.[1] !== undefined && krwRange[2] !== undefined) {
-    const minUsd = Number(krwRange[1]) / 1350;
-    const maxUsd = Number(krwRange[2]) / 1350;
+    const minUsd = Number(krwRange[1]) / KRW_PER_USD_APPROXIMATE;
+    const maxUsd = Number(krwRange[2]) / KRW_PER_USD_APPROXIMATE;
     if (Number.isFinite(minUsd) && Number.isFinite(maxUsd)) {
       return claimUsd >= minUsd && claimUsd <= maxUsd
         ? { type: 'range_match', score: 1.0, details: `price ${claimUsd} within evidence range ${minUsd.toFixed(2)}-${maxUsd.toFixed(2)} USD` }
