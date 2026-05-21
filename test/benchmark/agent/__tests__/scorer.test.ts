@@ -489,6 +489,35 @@ describe('scoreCostEfficiency', () => {
     );
     expect(r.scores.costEfficiency).toBe(1);
   });
+
+  // S1.1: latency dimension MUST score against agentWorkMs (throttle-corrected),
+  // not raw totalDurationMs/wall, so provider 429/503 backoff never penalizes.
+  it('latency scores agentWorkMs when present, ignoring throttle-inflated totalDurationMs', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, maxDurationMs: 1_000 }),
+      // totalDurationMs blown to 5x budget (throttle) but agentWorkMs within budget.
+      makeExecution({
+        totalDurationMs: 5_000,
+        agentWorkMs: 800,
+        totalTokens: { input: 100, output: 100 },
+      }),
+      undefined,
+    );
+    expect(r.scores.costEfficiency).toBe(1);
+  });
+
+  it('latency penalises agentWorkMs overshoot even when totalDurationMs is small', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, maxDurationMs: 1_000 }),
+      makeExecution({
+        totalDurationMs: 100,
+        agentWorkMs: 1_500, // 0.5x overshoot → cost 0.5
+        totalTokens: { input: 100, output: 100 },
+      }),
+      undefined,
+    );
+    expect(r.scores.costEfficiency).toBeCloseTo(0.5, 3);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────

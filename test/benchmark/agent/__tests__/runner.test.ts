@@ -7,7 +7,8 @@ describe('withRetry', () => {
 
     const result = await withRetry(fn, 0, () => true);
 
-    expect(result).toBe('ok');
+    expect(result.value).toBe('ok');
+    expect(result.throttleWaitMs).toBe(0);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
@@ -22,7 +23,9 @@ describe('withRetry', () => {
       (err) => err instanceof Error && err.message === 'timeout',
     );
 
-    expect(result).toBe('ok');
+    expect(result.value).toBe('ok');
+    // One transient retry → backoff sleep recorded as throttle wait (>= 0).
+    expect(result.throttleWaitMs).toBeGreaterThanOrEqual(0);
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
