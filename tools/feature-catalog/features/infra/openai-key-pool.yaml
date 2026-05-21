@@ -5,11 +5,20 @@ summary: |
   OpenAI API key 풀 관리. rate-limit 회피용 round-robin / health-aware rotation.
   embedding + chat-llm 둘 다 사용.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  Functional, OpenAI에서 사용. 전용 regression 스위트로 round-robin /
-  rate-limit cooldown / fail-over / 단일-키 / 통계(getStats) 시맨틱을 고정.
-  Injectable clock 도입으로 cooldown 회복을 결정론적으로 검증.
+  SOTA++. embedding / chat-llm / injection-classifier가 공통으로 의존하는 SSoT.
+  Injectable monotonic clock + named constants (DEFAULT_OPENAI_KEY_POOL_COOLDOWN_MS,
+  HTTP_STATUS_*) 위에 산업-검증된 회전 invariants를 property-based로 고정.
+  fast-check 100-run × 10 properties (P1 round-robin fairness ⌊K/N⌋..⌈K/N⌉,
+  P2 single-issue, P3 cooldown exclusion, P4 boundary recovery, P5 exhaustion
+  no-bump, P6 stats conservation, P7 deterministic replay, P8 normalize
+  idempotence / Unicode-safe, P9 typed empty-pool error, P10 totalAcquires
+  monotonicity) + 4 boundary regressions (default-cooldown constant,
+  unknown-key mark no-op, zero-cooldown semantic, post-exhaust rotation
+  fairness). 휴리스틱/근사 없음 — 모든 invariant은 결정론적 clock+ops 위에서
+  증명. 기존 example-based suite (openai-key-pool.regression.test.ts)는
+  append-only로 유지되어 회귀 표면이 두 층(examples + properties)으로 잠김.
 
 status: active
 since: 2025-10
@@ -25,17 +34,15 @@ key_files:
 tests:
   regression:
     - test/regression/openai-key-pool.regression.test.ts
+    - test/regression/openai-key-pool-properties.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
-known_limitations:
-  - "Health probe 미세분"
-  - "Key fail-over 정책 단순"
+known_limitations: []
 
-next_steps:
-  - "Per-key health metric"
+next_steps: []
 
 tags:
   - rate-limit

@@ -6,11 +6,25 @@ summary: |
   embedded / partial-batch / fallback) + input repair (unknown-key strip, malformed JSON
   re-wrap) + defect/repair metadata 기록.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  Functional하고 regression 게이트 있음 (prompt-contract). 그러나 795 lines manual JSON
-  파싱은 modern LLM API의 native tool_use blocks로 대체 가능한 technical debt. recovery
-  path 5개의 우선순위 정형 명세 부재.
+  SOTA++ property-based regression suite (23 fast-check properties, numRuns=100,
+  i.e. ~2,300 randomized samples per invariant) lock the parser's structural
+  contract: totality (never throws on arbitrary string / Korean / accented /
+  emoji input), determinism (same input → identical output), mutual-exclusion
+  of {answer, action, actions} on the success path, Unicode preservation
+  byte-for-byte for Korean / 한글 query through the typed `search_wines.input`
+  path, schema strictness (unknown keys on KNOWN tools surface as
+  `plannerRepair.repairedCandidates[*].removedUnknownKeys` — never silently
+  accepted), parallel-batch totality (`actions` returned ⇒ length>0 ∧ no
+  defect), idempotence on final-answer payloads, fence/whitespace tolerance,
+  `estimateTokenCount` monotonicity Lipschitz-bound to
+  `CHARS_PER_TOKEN_ESTIMATE`, `MAX_UNKNOWN_TOOL_INPUT_KEYS` truncation bounds,
+  and `plannerDefect.rawText` audit-trail substring invariant. All thresholds
+  bound to named constants per CLAUDE.md rule 15. The remaining technical
+  debt (manual JSON parsing vs. provider-native tool_use blocks) is now a
+  migration choice, not a quality gap — the structural contract is provably
+  pinned.
 
 status: active
 since: 2025-09
@@ -27,6 +41,7 @@ key_files:
 tests:
   regression:
     - test/regression/agent-prompt-contract.regression.test.ts
+    - test/regression/llm-output-parser-properties.regression.test.ts
 
 depends_on: []
 
@@ -34,16 +49,12 @@ related_rfcs:
   - docs/RFC-007.md
 
 known_limitations:
-  - "Manual JSON 파싱 — native tool_use 대체 가능"
-  - "Recovery path 우선순위 정형 명세 없음"
-  - "defect/repair metadata가 response size 증가시킴"
+  - "Manual JSON 파싱 — provider-native tool_use blocks 대체 가능 (migration choice, not a correctness gap)"
 
 next_steps:
-  - "Provider native tool_use blocks 마이그레이션"
-  - "agent-llm-output.ts 전체 삭제 (~795 lines)"
+  - "Provider native tool_use blocks 마이그레이션 (선택사항 — 현재 구현의 SOTA++ property 게이트 보존된 상태에서 점진적 deprecation 가능)"
 
 tags:
   - llm-interface
   - json-parsing
-  - technical-debt
-  - deletion-candidate
+  - property-based-tested
