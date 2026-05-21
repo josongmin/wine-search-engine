@@ -1535,15 +1535,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         // Extract pipeline stage timings from the first successful search response.
         const searchStageTimings = result.searchResults?.stageTimings;
 
-        // S1.1 measurement integrity: agent work time = orchestrator-reported
-        // duration. Throttle/transient backoff sleeps in withRetry happen BETWEEN
-        // full re-executions, so they are NOT part of result.totalDurationMs; we
-        // still expose throttleWaitMs for reporting and subtract it from the
-        // scenario WALL (which DOES include the sleeps) to derive scenarioAgentWorkMs.
-        // The cost/latency dimension scores against agentWorkMs (orchestrator
-        // duration) so provider throttling never penalizes agent latency.
-        const agentWorkMs = result.totalDurationMs;
-
         // hard_constraints_low insight: sum planner-emitted hard constraints
         // across every search tool call in this scenario. Reads from typed
         // ToolOutcome.result (SearchResponseV1.parsedConstraints.hard) — the
