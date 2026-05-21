@@ -20,7 +20,7 @@
 import { z } from 'zod';
 import type { StructuredLlmPort } from '@domain/ai/port/structured-llm.port.js';
 import type { NormalizedConstraint } from '@shared/types/index.js';
-import { containsHangul, normalizeHangul } from '@shared/utils/hangul.js';
+import { containsHangul, normalizeHangulLexical } from '@shared/utils/hangul.js';
 import { parseSpans, resolveOverlaps } from '@domain/attribute/service/span-parser.js';
 import {
   isDirectEntityResolution,
@@ -180,7 +180,7 @@ export class QueryAnalyzerService {
     //    `preservedSurface` is intentionally left byte-identical — the
     //    schema invariant + downstream HTTP echo must mirror the user
     //    input exactly.
-    const normalized = normalizeHangul(trimmed.normalize('NFKC'));
+    const normalized = normalizeHangulLexical(trimmed.normalize('NFKC'));
 
     // Adaptive-budget also performs sanitizer/off-domain classification.
     // We treat `adversarial` as a hard block (refuse path); `off_domain`

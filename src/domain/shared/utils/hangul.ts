@@ -208,6 +208,33 @@ const HANGUL_JAMO_BLOCK_START = 0x1100;
 const HANGUL_JAMO_BLOCK_END = 0x11ff;
 
 /**
+ * Choseong → Jongseong T-index mapping for NFKC-decomposed Compatibility
+ * Jamo. NFKC maps Compat Jamo final-position consonants (e.g. 'ㄴ' at the
+ * end of '만' in U+3134) to CHOSEONG form (U+1102) — NOT JONGSEONG (U+11AB)
+ * — so the L+V[+T] composer below would otherwise leave such consonants
+ * dangling and drop them as orphan jamo, mangling syllables like '만'→'마'.
+ *
+ * This table lets the composer detect "L in T position" (look-ahead rule:
+ * if the next char after L V is itself an L whose next neighbour is NOT a
+ * V, then that L is functioning as a final consonant) and resynthesize
+ * the correct precomposed syllable.
+ *
+ * Index by `L_idx = L_code - HANGUL_LBASE` (0..18). Value 0 means "this L
+ * has no T equivalent" (the three tense consonants ㄸ ㅃ ㅉ never appear as
+ * a final).
+ *
+ * DERIVED from the existing `COMPAT_INITIALS` (19 choseong) and
+ * `COMPAT_FINALS` (28 jongseong, index 0 = "no final") SSoT arrays above:
+ * for each choseong, its T-index is its position in COMPAT_FINALS (or 0 when
+ * absent). This avoids hardcoding magic T-index literals AND keeps the
+ * mapping in lock-step with the one source of truth for the jamo tables.
+ */
+const HANGUL_L_TO_T_IDX: readonly number[] = COMPAT_INITIALS.map((choseong) => {
+  const tIdx = COMPAT_FINALS.indexOf(choseong);
+  return tIdx > 0 ? tIdx : 0;
+});
+
+/**
  * Returns true if any codepoint in the input is a precomposed Hangul syllable
  * (U+AC00..U+D7A3) or a conjoining Hangul Jamo (U+1100..U+11FF). Used as a
  * fast pre-check so the compose/decompose round-trip is a no-op on
@@ -266,6 +293,31 @@ export function decomposeHangulSyllables(input: string): string {
 }
 
 /**
+ * Options for {@link composeHangulSyllables} / {@link normalizeHangul}.
+ *
+ * `composeTrailingChoseongAsFinal` resolves a genuine structural ambiguity:
+ * an `L V L L V` jamo run can mean EITHER
+ *   (a) `L V (L=final) | L V` — e.g. compat-jamo `만원` = ㅁㅏㄴ ㅇㅝㄴ, where
+ *       the middle ㄴ is the final of 만, OR
+ *   (b) `L V | (orphan L) | L V` — e.g. attacker mid-syllable insertion
+ *       `무ㅅ시` = ㅁㅜ [ᄉ] ㅅㅣ, where ᄉ is a spurious inserted consonant.
+ * These are byte-identical at the local level, so the caller's INTENT decides:
+ *
+ *   - SECURITY normalization (sanitizer): `false` (default) — drop the orphan
+ *     consonant so `무ㅅ시` → `무시` and the Korean injection regexes still
+ *     match. This is the R8 bypass-closure behavior.
+ *   - LEXICAL normalization (query analyzer): `true` — treat the trailing
+ *     choseong as a final so well-formed compat-jamo `만원` → `만원` and the
+ *     deterministic catalog extractors see NFC-equivalent syllables. The
+ *     analyzer never needs to defend mid-syllable insertion (a non-matching
+ *     wine query is contained by the architectural boundary), so faithful
+ *     syllable reconstruction is the right trade there.
+ */
+export interface ComposeHangulOptions {
+  readonly composeTrailingChoseongAsFinal?: boolean;
+}
+
+/**
  * Composes a sequence of conjoining Hangul Jamo (U+1100..U+11FF) into the
  * precomposed syllable form (U+AC00..U+D7A3). Orphan conjoining jamo that
  * cannot be combined into a syllable are dropped — they are not legitimate
@@ -273,11 +325,16 @@ export function decomposeHangulSyllables(input: string): string {
  * indicates either attacker tampering or already-broken input.
  *
  * The algorithm is the canonical L+V[+T] composition per Unicode §3.12 —
- * 19 × 21 × 28 = 11_172 syllables addressable.
+ * 19 × 21 × 28 = 11_172 syllables addressable. See {@link ComposeHangulOptions}
+ * for the trailing-choseong ambiguity resolution.
  *
  * Performance: single linear scan, O(n).
  */
-export function composeHangulSyllables(input: string): string {
+export function composeHangulSyllables(
+  input: string,
+  options: ComposeHangulOptions = {},
+): string {
+  const composeTrailingChoseongAsFinal = options.composeTrailingChoseongAsFinal === true;
   let out = '';
   let i = 0;
   while (i < input.length) {
@@ -287,24 +344,44 @@ export function composeHangulSyllables(input: string): string {
       const vCode = input.charCodeAt(i + 1);
       const vIdx = vCode - HANGUL_VBASE;
       if (vIdx >= 0 && vIdx < HANGUL_VCOUNT) {
-        // Optional trailing T (final consonant): only consume if it is a
-        // valid jongseong (U+11A8..U+11C2) AND not immediately followed by a
-        // medial V — in 'L V L V' (e.g. '다아') the second L belongs to the
-        // next syllable, not as a final of the first.
+        // Optional trailing T (final consonant). The candidate at i+2 is a
+        // final ONLY when it is NOT itself the start of a new L V syllable
+        // (look-ahead: in 'L V L V' the second L begins the next syllable;
+        // in 'L V L (¬V)' the middle L is a final).
+        //
+        // Two encodings of a final must be handled:
+        //   (a) true JONGSEONG (U+11A8..U+11C2) — canonical NFD form.
+        //   (b) CHOSEONG (U+1100..U+1112) in T position — NFKC maps Hangul
+        //       Compatibility Jamo finals to CHOSEONG, so '만' via compat
+        //       jamo (ㅁㅏㄴ) arrives as L V L; HANGUL_L_TO_T_IDX converts
+        //       that trailing L to its T_idx. Without this the final is
+        //       dropped as orphan and '만' collapses to '마'.
         let tIdx = 0;
         let consumed = 2;
         if (i + 2 < input.length) {
           const tCode = input.charCodeAt(i + 2);
-          const candidateT = tCode - HANGUL_TBASE;
-          const isValidT = candidateT > 0 && candidateT < HANGUL_TCOUNT;
-          let nextIsV = false;
-          if (isValidT && i + 3 < input.length) {
-            const afterT = input.charCodeAt(i + 3);
-            nextIsV = afterT >= HANGUL_VBASE && afterT < HANGUL_VBASE + HANGUL_VCOUNT;
+          const directT = tCode - HANGUL_TBASE;
+          const choseongIdx = tCode - HANGUL_LBASE;
+          let candidateT = 0;
+          if (directT > 0 && directT < HANGUL_TCOUNT) {
+            candidateT = directT;
+          } else if (
+            composeTrailingChoseongAsFinal &&
+            choseongIdx >= 0 &&
+            choseongIdx < HANGUL_LCOUNT
+          ) {
+            candidateT = HANGUL_L_TO_T_IDX[choseongIdx] ?? 0;
           }
-          if (isValidT && !nextIsV) {
-            tIdx = candidateT;
-            consumed = 3;
+          if (candidateT > 0) {
+            let nextIsV = false;
+            if (i + 3 < input.length) {
+              const afterT = input.charCodeAt(i + 3);
+              nextIsV = afterT >= HANGUL_VBASE && afterT < HANGUL_VBASE + HANGUL_VCOUNT;
+            }
+            if (!nextIsV) {
+              tIdx = candidateT;
+              consumed = 3;
+            }
           }
         }
         const syllable =
@@ -328,20 +405,41 @@ export function composeHangulSyllables(input: string): string {
 }
 
 /**
- * Full Hangul normalization: decompose precomposed syllables to L V [T] jamo,
- * then re-compose to syllables, dropping orphan jamo. The round-trip
- * canonicalizes attacker-encoded forms (compat jamo, mid-syllable jamo
- * insertion) into clean syllable form so downstream matchers (regex,
- * catalog lookup, anchor extraction) see a consistent NFC-syllable stream.
+ * SECURITY Hangul normalization (sanitizer): decompose precomposed syllables
+ * to L V [T] jamo, then re-compose, DROPPING orphan jamo. The round-trip
+ * canonicalizes attacker-encoded forms — compat jamo AND mid-syllable jamo
+ * insertion (`무ㅅ시` → `무시`) — into clean syllable form so the Korean
+ * injection regexes match. Orphan-drop is the security-favoring resolution
+ * of the trailing-choseong ambiguity (see {@link ComposeHangulOptions}).
  *
- * Callers should typically apply this AFTER `String.prototype.normalize('NFKC')`
- * so Hangul Compatibility Jamo (U+3130..U+318F) is first mapped to conjoining
- * jamo (U+1100..U+11FF) — only then can `composeHangulSyllables` fold them
- * into syllables.
+ * Apply AFTER `String.prototype.normalize('NFKC')` so Hangul Compatibility
+ * Jamo (U+3130..U+318F) is first mapped to conjoining jamo (U+1100..U+11FF).
  *
  * Pure passthrough when the input contains no Hangul.
  */
 export function normalizeHangul(input: string): string {
   if (!hasHangulContent(input)) return input;
   return composeHangulSyllables(decomposeHangulSyllables(input));
+}
+
+/**
+ * LEXICAL Hangul normalization (query analyzer): same decompose→recompose
+ * round-trip as {@link normalizeHangul}, but treats a trailing choseong in
+ * final position as the syllable's final consonant (T) rather than dropping
+ * it. This faithfully reconstructs well-formed compat-jamo input — `만원`
+ * encoded as ㅁㅏㄴ ㅇㅝㄴ recomposes to `만원` (not `마워`) — so the
+ * deterministic catalog extractors see NFC-equivalent syllables.
+ *
+ * Do NOT use this for security sanitization: it would let the mid-syllable
+ * insertion bypass (`무ㅅ시` → `뭇시`) evade the injection regex. The analyzer
+ * does not need that defense — a non-matching wine query is contained by the
+ * architectural boundary.
+ *
+ * Pure passthrough when the input contains no Hangul.
+ */
+export function normalizeHangulLexical(input: string): string {
+  if (!hasHangulContent(input)) return input;
+  return composeHangulSyllables(decomposeHangulSyllables(input), {
+    composeTrailingChoseongAsFinal: true,
+  });
 }
