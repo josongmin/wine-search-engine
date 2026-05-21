@@ -24,7 +24,11 @@ describe('withRetry', () => {
     );
 
     expect(result.value).toBe('ok');
+<<<<<<< HEAD
     // One transient retry → a non-trivial backoff sleep was recorded as throttle wait.
+=======
+    // One transient retry → backoff sleep recorded as throttle wait (>= 0).
+>>>>>>> worktree-agent-a7ce976e8716bec6d
     expect(result.throttleWaitMs).toBeGreaterThanOrEqual(0);
     expect(fn).toHaveBeenCalledTimes(2);
   });

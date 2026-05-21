@@ -11,6 +11,21 @@
  *   npx tsx test/benchmark/agent/runner.ts --concurrency 5
  *   npx tsx test/benchmark/agent/runner.ts --baseline test/benchmark/agent/results/baseline.json
  *   npx tsx test/benchmark/agent/runner.ts --fail-if-worse-than 0.05
+ *   npx tsx test/benchmark/agent/runner.ts --judge-samples 3 --judge-required-samples 5  # S1.3 variance reduction
+ *
+ * Frozen baseline (S1.2): capture a reference report at the current commit so
+ * later runs can diff against it per-scenario:
+ *   npx tsx scripts/eval/freeze-agent-baseline.ts            # → results/baseline-<gitsha>.json
+ *   npx tsx test/benchmark/agent/runner.ts --baseline test/benchmark/agent/results/baseline-<gitsha>.json
+ * With --baseline the runner prints a per-scenario delta table (sorted by delta,
+ * regressions first) to stderr and embeds it as `report.baselineDelta` in the JSON.
+ *
+ * Throttle-resilient timing (S1.1): retryable infra failures (429/503/GOAWAY/
+ * ECONNRESET) are retried with exponential backoff + full jitter. The time spent
+ * sleeping on backoff is tracked as `wallClock.throttleWaitMs` (and per-scenario
+ * `throttleWaitMs`) and EXCLUDED from the latency/cost score, which is computed
+ * against `agentWorkMs` (orchestrator work time) — so provider throttling never
+ * inflates the latency KPI.
  *   npx tsx test/benchmark/agent/runner.ts --model gpt-5.4 --judge-model gpt-5.4-mini
  *   npx tsx test/benchmark/agent/runner.ts --no-judge                         # disable LLM-as-judge
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
@@ -120,10 +135,17 @@ interface CliArgs {
   readonly enableJudge: boolean;
   readonly judgeSamples: number;
   /**
+<<<<<<< HEAD
    * S1.3 judge-variance reduction: sample count used ONLY for scenarios flagged
    * `judgeRequired`. Defaults to {@link DEFAULT_JUDGE_REQUIRED_SAMPLES} (5) so the
    * highest-stakes scenarios get a tighter median, while all other scenarios stay
    * at `judgeSamples` (default 3) to bound cost. Override with `--judge-required-samples`.
+=======
+   * S1.3: sample count used ONLY for scenarios flagged `judgeRequired`. Defaults
+   * to {@link DEFAULT_JUDGE_REQUIRED_SAMPLES} (5) so the highest-stakes scenarios
+   * get a tighter median; all others stay at `judgeSamples` (default 3) to bound
+   * cost. Override with `--judge-required-samples`.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
    */
   readonly judgeRequiredSamples: number;
   readonly baseline?: string;
@@ -779,9 +801,15 @@ async function runWithConcurrency<T, R>(
 // quota time to recover: 5s → 10s → 20s (capped at RUNNER_RATE_LIMIT_MAX_MS).
 const RUNNER_RATE_LIMIT_BASE_MS = 5_000;
 const RUNNER_RATE_LIMIT_MAX_MS = 30_000;
+<<<<<<< HEAD
 // Transient errors (5xx, network): short jittered backoff, not quota-related.
 // Base 500ms, factor 2, capped — applied with FULL jitter so concurrent workers
 // retrying the same upstream do not synchronize into a thundering herd.
+=======
+// Transient errors (5xx, network, GOAWAY): base 500ms × 2^n full jitter, capped.
+// Full jitter decorrelates concurrent retries so they don't re-synchronize into
+// a thundering herd against the same upstream.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
 const RUNNER_TRANSIENT_BASE_MS = 500;
 const RUNNER_TRANSIENT_MAX_MS = 8_000;
 
@@ -793,11 +821,16 @@ function isRateLimitError(err: unknown): boolean {
 /**
  * Full-jitter exponential backoff (AWS "Exponential Backoff And Jitter" model).
  * Returns a delay in [0, min(cap, base * 2^attempt)). Full jitter is the
+<<<<<<< HEAD
  * variance-minimizing choice for many concurrent clients hitting one quota —
  * it decorrelates retries far better than fixed or equal-jitter backoff.
  *
  * `attempt` is the zero-based retry index (0 for the first backoff after the
  * initial attempt fails).
+=======
+ * variance-minimizing choice for many concurrent clients hitting one quota.
+ * `attempt` is the zero-based retry index (0 for the first backoff).
+>>>>>>> worktree-agent-a7ce976e8716bec6d
  */
 function fullJitterBackoffMs(attempt: number, baseMs: number, capMs: number): number {
   const exp = Math.min(capMs, baseMs * 2 ** attempt);
@@ -808,9 +841,15 @@ function fullJitterBackoffMs(attempt: number, baseMs: number, capMs: number): nu
  * Outcome of {@link withRetry}: the resolved value plus the cumulative wall-clock
  * time spent SLEEPING between retries due to throttling/transient infra failures.
  *
+<<<<<<< HEAD
  * MEASUREMENT INTEGRITY: `throttleWaitMs` is subtracted from the per-scenario
  * wall before the latency/cost score dimension is computed, so provider 429/503
  * backoff never masquerades as agent slowness. See `agentWorkMs` in the report.
+=======
+ * MEASUREMENT INTEGRITY: `throttleWaitMs` is reported per-scenario and subtracted
+ * from the scenario wall, so provider 429/503/GOAWAY backoff never masquerades as
+ * agent slowness in the latency/cost score dimension.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
  */
 export interface WithRetryOutcome<T> {
   readonly value: T;
@@ -843,8 +882,14 @@ export async function withRetry<T>(
   // entirely and falls through to `throw undefined`.
   const totalAttempts = Math.max(1, maxRetries + 1);
   let lastErr: unknown;
+<<<<<<< HEAD
   // Cumulative time spent sleeping on throttle/transient backoff. This is infra
   // wait, NOT agent work — the caller subtracts it from the scenario wall.
+=======
+  // S1.1: cumulative time spent sleeping on throttle/transient backoff. This is
+  // infra wait, NOT agent work — the caller reports it and excludes it from the
+  // latency/cost score.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
   let throttleWaitMs = 0;
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
@@ -854,8 +899,12 @@ export async function withRetry<T>(
       lastErr = err;
       if (attempt >= totalAttempts || !shouldRetry(err)) throw normalizeRunnerError(err);
       // Rate-limit errors (429/TPM): slow exponential backoff — quota windows
+<<<<<<< HEAD
       // are 60s; fast retries just keep hitting the wall. Capped, with full
       // jitter on the lower half to break synchronized retry storms.
+=======
+      // are 60s; fast retries just keep hitting the wall.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
       // Other transient errors (5xx, network, GOAWAY): base 500ms × 2^n full jitter.
       // `attempt` is 1-based here, so the zero-based retry index is `attempt - 1`.
       const delayMs = isRateLimitError(err)
@@ -1088,12 +1137,20 @@ export interface BenchmarkWallClock {
   readonly concurrency: number;
   /**
    * S1.1: total wall-clock time spent SLEEPING on throttle/transient-infra
+<<<<<<< HEAD
    * backoff (429/503/GOAWAY/ECONNRESET retries) across all scenarios. This is
    * infra wait, NOT agent work — `agentWorkMs` (per-scenario) excludes it from
    * the latency/cost score so provider throttling never inflates the latency KPI.
    */
   readonly throttleWaitMs: number;
   /** S1.1: sum of per-scenario wall minus throttle backoff (lower-bound agent work-time). */
+=======
+   * backoff (429/503/GOAWAY/ECONNRESET retries) across all scenarios. Infra wait,
+   * NOT agent work — per-scenario `agentWorkMs` excludes it from the latency KPI.
+   */
+  readonly throttleWaitMs: number;
+  /** S1.1: sum of per-scenario wall minus throttle backoff (agent work-time lower bound). */
+>>>>>>> worktree-agent-a7ce976e8716bec6d
   readonly sumAgentWorkMs: number;
 }
 
@@ -1159,6 +1216,12 @@ export interface BenchmarkReport {
   /** Wall-clock breakdown for the whole CLI run (profiling). */
   readonly wallClock: BenchmarkWallClock;
   readonly results: readonly ScenarioResult[];
+  /**
+   * S1.2: per-scenario baseline delta table, sorted most-regressed first. Present
+   * only when the run was invoked with `--baseline`. Omitted otherwise so the
+   * report shape is unchanged for non-baseline runs.
+   */
+  readonly baselineDelta?: readonly ScenarioDelta[];
   readonly summary: {
     readonly overallScore: number;
     readonly overallCi95: WilsonCi;
@@ -1368,8 +1431,12 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   let scenarioWallMsSum = 0;
   let scenarioWallSampleCount = 0;
   // S1.1: cumulative throttle/backoff wait across all scenarios — subtracted from
+<<<<<<< HEAD
   // the scenario wall before latency scoring so infra 429/503/GOAWAY backoff does
   // not pollute the agent-work latency signal.
+=======
+  // the scenario wall so infra 429/503/GOAWAY backoff does not pollute the latency signal.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
   let throttleWaitMsSum = 0;
   let completedCount = 0;
   // Infra failure tracking: step-0 fallback = LLM rate-limit / timeout before agent ran.
@@ -1433,11 +1500,17 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
         // S1.1 measurement integrity: agent work time = orchestrator-reported
         // duration. Throttle/transient backoff sleeps in withRetry happen BETWEEN
+<<<<<<< HEAD
         // full re-executions, so they are NOT part of result.totalDurationMs; we
         // still expose throttleWaitMs for reporting and subtract it from the
         // scenario WALL (which DOES include the sleeps) to derive scenarioAgentWorkMs.
         // The cost/latency dimension scores against agentWorkMs (orchestrator
         // duration) so provider throttling never penalizes agent latency.
+=======
+        // full re-executions, so they are NOT part of result.totalDurationMs. The
+        // cost/latency dimension scores against agentWorkMs so provider throttling
+        // never penalizes agent latency. throttleWaitMs is reported separately.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
         const agentWorkMs = result.totalDurationMs;
 
         const execution: ScenarioExecution = {
@@ -1585,11 +1658,18 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
+<<<<<<< HEAD
         // S1.1: record per-scenario throttle wait so the report can show how much
         // of the wall was infra backoff vs agent work. The latency/cost dimension
         // already scored against execution.agentWorkMs (orchestrator duration,
         // which excludes the between-retry backoff sleeps). scenarioWallMs − throttle
         // gives the throttle-corrected scenario wall for cross-checking the dimension.
+=======
+        // S1.1: record per-scenario throttle wait so the report shows how much of
+        // the wall was infra backoff vs agent work. The latency/cost dimension
+        // already scored against execution.agentWorkMs (orchestrator duration,
+        // which excludes the between-retry backoff sleeps).
+>>>>>>> worktree-agent-a7ce976e8716bec6d
         throttleWaitMsSum += throttleWaitMs;
         const scored: ScenarioResult = {
           ...scoredBase,
@@ -2004,9 +2084,15 @@ function buildReport(
 export interface ScenarioDelta {
   readonly id: number;
   readonly tier: string;
+<<<<<<< HEAD
   /** Overall score in the baseline report, or null if the scenario is new. */
   readonly baselineScore: number | null;
   /** Overall score in the current report, or null if the scenario was dropped. */
+=======
+  /** Overall score in the baseline report, or null if the scenario is new/skipped. */
+  readonly baselineScore: number | null;
+  /** Overall score in the current report, or null if dropped/skipped. */
+>>>>>>> worktree-agent-a7ce976e8716bec6d
   readonly currentScore: number | null;
   /** currentScore − baselineScore. null when either side is missing. */
   readonly delta: number | null;
@@ -2020,8 +2106,13 @@ export interface ScenarioDelta {
 
 /**
  * S1.2: minimal shape this diff needs from a report. Both the live report and a
+<<<<<<< HEAD
  * loaded baseline JSON satisfy it. Kept narrow so the function is pure and
  * trivially unit-testable without constructing a full BenchmarkReport.
+=======
+ * loaded baseline JSON satisfy it. Kept narrow so {@link computeScenarioDeltas}
+ * is pure and trivially unit-testable without a full BenchmarkReport.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
  */
 export interface ScenarioScoreRow {
   readonly id: number;
@@ -2031,10 +2122,17 @@ export interface ScenarioScoreRow {
 }
 
 /**
+<<<<<<< HEAD
  * S1.2 (pure): compute the per-scenario delta table between a baseline and the
  * current run, sorted by delta ascending (biggest regressions first). Skipped
  * scenarios are excluded on both sides. `regressionThreshold` decides what
  * counts as a meaningful move (default 0.05 = 5pp), keeping noise off the table.
+=======
+ * S1.2 (pure): per-scenario delta table between a baseline and the current run,
+ * sorted by delta ascending (biggest regressions first). Skipped scenarios are
+ * excluded on both sides. `regressionThreshold` (e.g. 0.05 = 5pp) decides what
+ * counts as a meaningful move, keeping noise off the table.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
  */
 export function computeScenarioDeltas(
   baselineResults: readonly ScenarioScoreRow[],
@@ -2094,7 +2192,19 @@ function formatScenarioDeltaTable(rows: readonly ScenarioDelta[]): string {
   const lines: string[] = [];
   lines.push('  id    tier                 base   curr   Δpp    flag');
   for (const r of rows) {
+<<<<<<< HEAD
     const flag = r.regressed ? '❌ REGRESSED' : r.improved ? '✅ improved' : r.presence === 'new' ? '🆕 new' : r.presence === 'dropped' ? '🗑 dropped' : '';
+=======
+    const flag = r.regressed
+      ? '❌ REGRESSED'
+      : r.improved
+        ? '✅ improved'
+        : r.presence === 'new'
+          ? '🆕 new'
+          : r.presence === 'dropped'
+            ? '🗑 dropped'
+            : '';
+>>>>>>> worktree-agent-a7ce976e8716bec6d
     lines.push(
       `  ${String(r.id).padEnd(5)} ${r.tier.slice(0, 20).padEnd(20)} `
       + `${fmt(r.baselineScore)} ${fmt(r.currentScore)} ${fmtDelta(r.delta)}  ${flag}`,
@@ -2155,7 +2265,28 @@ async function compareBaseline(
     if (regressed) {
       console.error(`  [BASELINE] ❌ REGRESSION: overall dropped by more than ${threshold}`);
     }
-    return { regressed, delta };
+
+    // S1.2: per-scenario delta table — shows WHICH scenarios moved, not just the
+    // aggregate. Uses the per-scenario regression threshold (same as overall gate).
+    const scenarioDeltas = computeScenarioDeltas(
+      baseline.results ?? [],
+      current.results,
+      threshold,
+    );
+    const moved = scenarioDeltas.filter((r) => r.regressed || r.improved || r.presence !== 'both');
+    console.error(`\n  [BASELINE] per-scenario delta (threshold=±${(threshold * 100).toFixed(1)}pp, ${moved.length} moved / ${scenarioDeltas.length} total):`);
+    if (moved.length > 0) {
+      // Print only the rows that meaningfully moved to keep the table scannable;
+      // the full sorted table is in the report JSON (report.baselineDelta).
+      console.error(formatScenarioDeltaTable(moved));
+    } else {
+      console.error('  (no scenario moved beyond threshold)');
+    }
+    const regressedCount = scenarioDeltas.filter((r) => r.regressed).length;
+    const improvedCount = scenarioDeltas.filter((r) => r.improved).length;
+    console.error(`  [BASELINE] ${regressedCount} regressed, ${improvedCount} improved`);
+
+    return { regressed, delta, scenarioDeltas };
   } catch (err) {
     // v4 fix: baseline read failure → fail-safe (regressed: true).
     // Missing or unreadable baseline should NOT silently pass the benchmark.
@@ -2172,7 +2303,18 @@ async function compareBaseline(
 
 async function main(): Promise<void> {
   const args = parseArgs();
-  const report = await runBenchmark(args);
+  const reportBase = await runBenchmark(args);
+
+  // S1.2: when a baseline is supplied, compute + print the per-scenario delta
+  // table BEFORE serializing the report so `baselineDelta` lands in the written
+  // JSON. The gate (exit 2) still uses the returned `regressed` flag below.
+  let baselineRegressed = false;
+  let report: BenchmarkReport = reportBase;
+  if (args.baseline !== undefined) {
+    const cmp = await compareBaseline(reportBase, args.baseline, args.failIfWorseThan);
+    baselineRegressed = cmp.regressed;
+    report = { ...reportBase, baselineDelta: cmp.scenarioDeltas };
+  }
 
   // JSON to stdout (or to file if --out)
   const json = JSON.stringify(report, null, 2);
@@ -2487,12 +2629,10 @@ async function main(): Promise<void> {
 
   console.error('');
 
-  // Baseline comparison gate
-  if (args.baseline !== undefined) {
-    const { regressed } = await compareBaseline(report, args.baseline, args.failIfWorseThan);
-    if (regressed) {
-      process.exit(2);
-    }
+  // Baseline comparison gate — the diff already ran (and printed) before the
+  // report was serialized; reuse its regression verdict here. Exit 2 on regression.
+  if (args.baseline !== undefined && baselineRegressed) {
+    process.exit(2);
   }
 }
 

@@ -143,11 +143,19 @@ export interface ScenarioExecution {
   readonly terminationReason: TerminationReason;
   readonly totalDurationMs: number;
   /**
+<<<<<<< HEAD
    * S1.1 measurement integrity: per-scenario wall MINUS time spent sleeping on
    * throttle/transient-infra backoff (429/503/GOAWAY/ECONNRESET retries). This
    * is the agent's actual work time. The latency/cost dimension scores against
    * this, NOT `totalDurationMs`, so provider throttling never penalizes the
    * agent. Absent for legacy callers → scoring falls back to `totalDurationMs`.
+=======
+   * S1.1 measurement integrity: agent work time, EXCLUDING time spent sleeping on
+   * throttle/transient-infra backoff (429/503/GOAWAY/ECONNRESET retries). The
+   * latency/cost dimension scores against this, NOT `totalDurationMs`, so provider
+   * throttling never penalizes the agent. Absent for legacy callers → scoring
+   * falls back to `totalDurationMs`.
+>>>>>>> worktree-agent-a7ce976e8716bec6d
    */
   readonly agentWorkMs?: number | undefined;
   readonly totalTokens: { input: number; output: number };
@@ -311,12 +319,21 @@ export interface ScenarioResult {
   readonly terminationReason?: string;
   readonly totalDurationMs?: number;
   /**
+<<<<<<< HEAD
    * S1.1: agent work time (scenario wall minus throttle/backoff wait). This is
    * what the latency/cost dimension scores against. Omitted for skipped/errored
    * scenarios. May equal `totalDurationMs` when no throttling occurred.
    */
   readonly agentWorkMs?: number;
   /** S1.1: cumulative ms spent sleeping on throttle/transient-infra backoff. */
+=======
+   * S1.1: agent work time (orchestrator duration, excludes throttle backoff). This
+   * is what the latency/cost dimension scores against. Omitted for skipped/errored
+   * scenarios.
+   */
+  readonly agentWorkMs?: number;
+  /** S1.1: cumulative ms spent sleeping on throttle/transient-infra backoff this scenario. */
+>>>>>>> worktree-agent-a7ce976e8716bec6d
   readonly throttleWaitMs?: number;
   readonly totalTokens?: { input: number; output: number };
   /**
@@ -1358,8 +1375,13 @@ export function scoreScenario(
     toolsUsed: execution.toolsUsed.map((t) => t.tool),
     terminationReason: execution.terminationReason,
     totalDurationMs: execution.totalDurationMs,
+<<<<<<< HEAD
     // S1.1: surface agent-work time when the runner supplied it (wall minus
     // throttle backoff). Omit the key entirely when absent (exactOptionalPropertyTypes).
+=======
+    // S1.1: surface agent-work time when the runner supplied it (orchestrator
+    // duration). Omit the key entirely when absent (exactOptionalPropertyTypes).
+>>>>>>> worktree-agent-a7ce976e8716bec6d
     ...(execution.agentWorkMs != null ? { agentWorkMs: execution.agentWorkMs } : {}),
     totalTokens: execution.totalTokens,
     // ADR-009 Phase 0: evidence frame count for cutover-gate aggregation.
@@ -2797,9 +2819,15 @@ function scoreCostEfficiency(
   const maxTokens = exp.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS;
   const totalTokens = execution.totalTokens.input + execution.totalTokens.output;
 
+<<<<<<< HEAD
   // S1.1: score latency against agent WORK time (wall minus throttle backoff),
   // not raw orchestrator duration. `agentWorkMs` is omitted by legacy callers →
   // fall back to `totalDurationMs`. `!= null` (not truthiness) so a legitimate
+=======
+  // S1.1: score latency against agent WORK time (excludes throttle backoff), not
+  // raw orchestrator duration. `agentWorkMs` is omitted by legacy callers → fall
+  // back to `totalDurationMs`. `!= null` (not truthiness) so a legitimate
+>>>>>>> worktree-agent-a7ce976e8716bec6d
   // agentWorkMs of 0 is honored rather than silently replaced (CLAUDE.md rule 26).
   const effectiveDurationMs = execution.agentWorkMs != null
     ? execution.agentWorkMs
