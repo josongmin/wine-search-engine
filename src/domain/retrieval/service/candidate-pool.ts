@@ -238,10 +238,35 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // use. This closes the gap where "평점 좋은 와인" / "지금 마실 수 있는" parsed as
     // soft and NEVER tightened Vespa retrieval — leaving the 7K-doc corpus
     // under-filtered and the candidate pool low-precision.
+    const hardFilterTokens = hardConstraintsToSparseFilterTokens(input.hardConstraints);
+    const promotedSoftFilterTokens = softConstraintsToOptionalFilterTokens(input.softConstraints);
     const filters = [
-      ...hardConstraintsToSparseFilterTokens(input.hardConstraints),
-      ...softConstraintsToOptionalFilterTokens(input.softConstraints),
+      ...hardFilterTokens,
+      ...promotedSoftFilterTokens,
     ];
+
+    // S4.1 — soft→hard promotion observability. Without this, bench logs
+    // cannot tell whether P1's confidence-gated promotion actually fired or
+    // whether the promoted soft filters reached the Vespa YQL filter set.
+    // We log BEFORE the KRW price-token augmentation below so the count
+    // reflects ONLY the promotion path (not raw-query price extraction).
+    // Emitted as an `event`-tagged structured log to mirror the existing
+    // `retrieval.difficulty_parallel` / search_execution observability shape.
+    bootstrapLogger.debug(
+      {
+        event: 'retrieval.soft_promotion',
+        query_class: input.queryPlan.queryClass,
+        promotedSoftFilterCount: promotedSoftFilterTokens.length,
+        promotedSoftFilterTokens,
+        hardFilterTokenCount: hardFilterTokens.length,
+        softConstraintCount: input.softConstraints.length,
+        yqlFilterTokenCount: filters.length,
+        ...(input.requestContext?.requestId !== undefined
+          ? { request_id: input.requestContext.requestId }
+          : {}),
+      },
+      'soft→hard constraint promotion',
+    );
 
     // KRW price constraints from the raw query surface (e.g. "5만원대", "3만원 이하").
     // extractSearchConstraints parses Korean price expressions that the planner's
@@ -915,6 +940,12 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         anchor_hits: anchorHits.length,
         skipped_phases: skippedPhases,
         final_candidates: assembled.candidates.length,
+        // S4.1 — surface soft→hard promotion in the HTTP pipeline_debug trace
+        // so a single debugged request shows whether promotion fired and how
+        // many tokens reached the final YQL filter set.
+        promoted_soft_filter_count: promotedSoftFilterTokens.length,
+        promoted_soft_filter_tokens: promotedSoftFilterTokens,
+        yql_filter_token_count: filters.length,
       },
       'pipeline candidate pool',
     );
