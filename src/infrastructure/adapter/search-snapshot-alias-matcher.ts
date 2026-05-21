@@ -19,6 +19,7 @@ import {
 } from '../../domain/query/service/alias-match-confidence.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { Transliterator } from '../../domain/alias/service/transliterator.js';
+import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone.js';
 import { buildHangulJamoKey } from '../../domain/shared/utils/hangul.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
@@ -66,6 +67,13 @@ interface PgAliasRecord {
 type AliasStrategy = AliasMatchConfidenceStrategy;
 
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
+
+/**
+ * Reused empty Double Metaphone keyset for aliases that don't produce
+ * Latin-script phonetic codes (Hangul-only aliases, etc.). Module-scope
+ * to avoid per-iteration allocation during the strategy decision loop.
+ */
+const EMPTY_DM_KEYSET: ReadonlySet<string> = new Set<string>();
 
 const LATIN_VOWEL_RE = /[aeiouy]/g;
 const SnapshotAliasRecordSchema = z.object({
@@ -275,6 +283,17 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   private readonly wholeTokenIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly compactIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly phoneticIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  /**
+   * Double Metaphone code → aliases. Each alias contributes its
+   * primary key and (if distinct) its alternate key. The matcher uses
+   * the union of query DM keys to retrieve candidates from this index.
+   */
+  private readonly doubleMetaphoneIndex = new Map<string, readonly IndexedAliasRecord[]>();
+  /**
+   * Cached DM keyset per alias to avoid re-encoding during the strategy
+   * decision loop. Empty set for non-Latin aliases.
+   */
+  private readonly doubleMetaphoneKeysByAliasId = new Map<string, ReadonlySet<string>>();
   private readonly prefixIndex = new Map<string, readonly IndexedAliasRecord[]>();
   private readonly hangulCompletionPrefixIndex = new Map<string, readonly HangulCompletionAliasRecord[]>();
   private readonly prefixTermsByAliasId = new Map<string, readonly string[]>();
@@ -300,6 +319,12 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
       if (phoneticValue.length > 0) {
         this.addToIndex(this.phoneticIndex, phoneticValue, alias);
+      }
+
+      const dmKeys = doubleMetaphoneKeys(alias.normalizedValue);
+      this.doubleMetaphoneKeysByAliasId.set(alias.aliasId, dmKeys);
+      for (const dmKey of dmKeys) {
+        this.addToIndex(this.doubleMetaphoneIndex, dmKey, alias);
       }
 
       const prefixTerms = buildAliasPrefixTerms([alias.value, alias.normalizedValue]);
@@ -349,6 +374,15 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     const compactSet = new Set(compactTokens);
     const transliteratedSet = new Set(transliteratedTokens);
     const phoneticSet = new Set(phoneticTokens);
+    // Union the Double Metaphone keys across every lookup variant so a
+    // phonetic match can fire regardless of which normalization variant
+    // happened to produce a Latin-script signal.
+    const queryDmKeys = new Set<string>();
+    for (const variant of views.lookupVariants) {
+      for (const dmKey of doubleMetaphoneKeys(variant)) {
+        queryDmKeys.add(dmKey);
+      }
+    }
     const prefixTokens = buildAliasPrefixTerms([views.strict]).filter((token) => isEligiblePrefixQuery(token));
     const transliteratedPrefixTokens = views.transliterated !== undefined
       ? buildAliasPrefixTerms([views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
@@ -379,6 +413,16 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       }
     }
 
+    // Double Metaphone recall: gather every alias whose primary or
+    // alternate code shares any code with the query. This catches the
+    // foreign-origin proper-noun cases the crude vowel-strip skeleton
+    // misses (Margeaux↔Margaux, Sasicaia↔Sassicaia).
+    for (const dmKey of queryDmKeys) {
+      for (const alias of this.doubleMetaphoneIndex.get(dmKey) ?? []) {
+        candidateAliases.set(alias.aliasId, alias);
+      }
+    }
+
     for (const token of [...prefixTokens, ...transliteratedPrefixTokens]) {
       for (const alias of this.prefixIndex.get(token) ?? []) {
         candidateAliases.set(alias.aliasId, alias);
@@ -390,6 +434,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     for (const alias of candidateAliases.values()) {
       const compactValue = compactForLookup(alias.normalizedValue);
       const phoneticValue = phoneticCompactForLookup(alias.normalizedValue);
+      const aliasDmKeys = this.doubleMetaphoneKeysByAliasId.get(alias.aliasId) ?? EMPTY_DM_KEYSET;
       const prefixTerms = this.prefixTermsByAliasId.get(alias.aliasId) ?? [];
       const hasWholeTokenMatch =
         tokens.some((token) => (
@@ -403,6 +448,20 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       const hasPrefixMatch = prefixTokens.some((token) =>
         prefixTerms.some((term) => term.startsWith(token))
       );
+      // Phonetic *promotion* accepts EITHER the legacy compact-vowel
+      // skeleton OR a Double Metaphone keyset overlap. Decoupling
+      // recall (broad) from promotion (precise) lets us tighten
+      // precision via DM without dropping the legacy recall path.
+      const hasPhoneticSkeletonMatch = phoneticSet.has(phoneticValue);
+      const hasPhoneticDoubleMetaphoneMatch =
+        queryDmKeys.size > 0
+        && aliasDmKeys.size > 0
+        && (() => {
+          for (const k of queryDmKeys) {
+            if (aliasDmKeys.has(k)) return true;
+          }
+          return false;
+        })();
       const strategy: AliasStrategy | null =
         transliteratedSet.has(alias.normalizedValue) || transliteratedSet.has(compactValue)
           ? 'transliterated_exact'
@@ -416,7 +475,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
           ? 'transliterated_prefix'
         : hasPrefixMatch
           ? 'prefix_exact'
-        : phoneticSet.has(phoneticValue)
+        : (hasPhoneticSkeletonMatch || hasPhoneticDoubleMetaphoneMatch)
                   ? isPhoneticAliasSurfaceCompatible(trimmed, alias.value)
                     ? 'phonetic_exact'
                     : null

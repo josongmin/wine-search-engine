@@ -8,6 +8,7 @@ import {
   isPhoneticAliasSurfaceCompatible,
 } from '../../domain/query/service/alias-lookup-plan.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
+import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 import {
@@ -58,6 +59,19 @@ const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
   [/eau/g, 'o'],
   [/aux/g, 'o'],
 ] as const;
+
+/**
+ * Similarity score injected when a candidate's Double Metaphone key
+ * intersects the query's key-set during the fuzzy phase.
+ *
+ * Set high enough to surface phonetic-only matches above noise, but
+ * strictly below 1.0 so that lexical/transliterated exact matches still
+ * outrank a phonetic-only result when both are present. Empirically,
+ * Levenshtein-similar names (e.g. Margaux↔Margeaux) land around 0.86–
+ * 0.92; 0.85 keeps phonetic candidates in the same recall band without
+ * inflating them past genuine exact matches.
+ */
+const PHONETIC_FUZZY_BASE_SIMILARITY = 0.85;
 
 interface AliasTablePresenceCacheEntry {
   readonly exists: boolean;
@@ -122,12 +136,46 @@ function compactForLookup(value: string): string {
   return value.replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
+/**
+ * Legacy compact phonetic skeleton used by the SQL phonetic recall channel.
+ *
+ * The SQL phonetic ANY-match still computes this skeleton via inline
+ * `regexp_replace` because Double Metaphone cannot be expressed in
+ * PostgreSQL without a stored procedure. Once a candidate is retrieved,
+ * the *promotion decision* uses Double Metaphone instead — so this
+ * skeleton is intentionally lossy/permissive (recall over precision).
+ *
+ * Kept exported here as a callsite-local helper so the strategy
+ * resolution code in this file can compare values across the SQL
+ * boundary. Do not export — the SSoT for phonetic *decisions* is
+ * `doubleMetaphone` in `@domain/alias/service/double-metaphone`.
+ */
 function phoneticCompactForLookup(value: string): string {
   let normalized = compactForLookup(value).toLowerCase();
   for (const [pattern, replacement] of PHONETIC_NORMALIZATION_RULES) {
     normalized = normalized.replace(pattern, replacement);
   }
   return normalized.replace(LATIN_VOWEL_RE, '');
+}
+
+/**
+ * `true` iff two phonetic key-sets share at least one Double Metaphone
+ * code. The empty-set case returns `false`: non-Latin inputs MUST NOT
+ * fabricate a phonetic match.
+ */
+function doubleMetaphoneKeySetsIntersect(
+  a: ReadonlySet<string>,
+  b: ReadonlySet<string>,
+): boolean {
+  if (a.size === 0 || b.size === 0) {
+    return false;
+  }
+  for (const key of a) {
+    if (b.has(key)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 interface QueryVariantCandidate {
@@ -163,6 +211,12 @@ interface MatchPlan {
   readonly transliteratedList: readonly string[];
   readonly phoneticList: readonly string[];
   readonly fuzzyVariants: readonly QueryVariantCandidate[];
+  /**
+   * Union of Double Metaphone primary+alternate keys across every
+   * lookup variant for the query. Empty when no variant produced any
+   * Latin-script phonetic signal (e.g. pure-Hangul queries).
+   */
+  readonly phoneticDoubleMetaphoneKeys: ReadonlySet<string>;
 }
 
 type QueryResultQueryId = number | string;
@@ -200,7 +254,19 @@ function resolveExactLookupStrategy(
   if (exactSet.has(row.normalized_value)) {
     return 'exact';
   }
-  if (phoneticSet.has(phoneticValue)) {
+  // Phonetic promotion uses Double Metaphone (Philips 2000) as the
+  // *decision* signal, even though the SQL recall channel still uses the
+  // looser compact-vowel-strip skeleton (`phoneticSet`/`phoneticValue`).
+  // Either signal is sufficient to anchor the row to the phonetic phase;
+  // requiring DM keyset overlap when present keeps precision high
+  // without losing the legacy recall path.
+  const candidateDmKeys = doubleMetaphoneKeys(row.normalized_value);
+  const phoneticSkeletonMatches = phoneticSet.has(phoneticValue);
+  const phoneticDoubleMetaphoneMatches = doubleMetaphoneKeySetsIntersect(
+    plan.phoneticDoubleMetaphoneKeys,
+    candidateDmKeys,
+  );
+  if (phoneticSkeletonMatches || phoneticDoubleMetaphoneMatches) {
     return isPhoneticAliasSurfaceCompatible(plan.views.punctuationStripped, row.surface_form)
       ? 'phonetic_exact'
       : undefined;
@@ -232,6 +298,8 @@ function resolveExactLookupStrategy(
 function bestFuzzySimilarity(
   queryVariants: readonly QueryVariantCandidate[],
   candidateCompact: string,
+  queryDoubleMetaphoneKeys: ReadonlySet<string>,
+  candidateDoubleMetaphoneKeys: ReadonlySet<string>,
 ): { similarity: number; strategy: FuzzyLookupStrategy } | null {
   let best: { similarity: number; strategy: FuzzyLookupStrategy } | null = null;
 
@@ -257,6 +325,19 @@ function bestFuzzySimilarity(
     if (best === null || similarity > best.similarity) {
       best = { similarity, strategy: queryVariant.strategy };
     }
+  }
+
+  // Double Metaphone fuzzy fallback — gives recall for phonetic
+  // variants where compact edit distance / n-gram overlap fall below
+  // the thresholds (Sasicaia↔Sassicaia, Margeaux↔Margaux, etc.). Only
+  // engages when no lexical fuzzy match was found; never *replaces* a
+  // higher-scoring lexical hit because the lexical signal is more
+  // discriminative when present.
+  if (
+    best === null
+    && doubleMetaphoneKeySetsIntersect(queryDoubleMetaphoneKeys, candidateDoubleMetaphoneKeys)
+  ) {
+    best = { similarity: PHONETIC_FUZZY_BASE_SIMILARITY, strategy: 'phonetic_fuzzy' };
   }
 
   return best;
@@ -576,7 +657,13 @@ export class PgAliasMatcher implements AliasMatcher {
         if (candidateCompact.length === 0) {
           continue;
         }
-        const fuzzyMatch = bestFuzzySimilarity(plan.fuzzyVariants, candidateCompact);
+        const candidateDmKeys = doubleMetaphoneKeys(row.normalized_value);
+        const fuzzyMatch = bestFuzzySimilarity(
+          plan.fuzzyVariants,
+          candidateCompact,
+          plan.phoneticDoubleMetaphoneKeys,
+          candidateDmKeys,
+        );
         if (fuzzyMatch === null) {
           continue;
         }
@@ -652,6 +739,17 @@ export class PgAliasMatcher implements AliasMatcher {
       return null;
     }
 
+    // Union the Double Metaphone keys across every lookup variant.
+    // Each variant is a different normalization of the same query, so
+    // any phonetic code it produces is a legitimate match signal. Hangul-
+    // only variants contribute the empty set and are ignored implicitly.
+    const phoneticDoubleMetaphoneKeys = new Set<string>();
+    for (const variant of views.lookupVariants) {
+      for (const key of doubleMetaphoneKeys(variant)) {
+        phoneticDoubleMetaphoneKeys.add(key);
+      }
+    }
+
     return {
       views,
       tokenList,
@@ -659,6 +757,7 @@ export class PgAliasMatcher implements AliasMatcher {
       transliteratedList,
       phoneticList,
       fuzzyVariants,
+      phoneticDoubleMetaphoneKeys,
     };
   }
 
