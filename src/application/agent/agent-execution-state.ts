@@ -49,6 +49,13 @@ export interface AgentExecutionState {
    * is itself a candidate; the guard only fires once per query.
    */
   verificationStepCompleted: boolean;
+  /**
+   * L1.C: latched true when the tool execution phase short-circuited the
+   * run loop instead of letting the planner LLM emit `answer`. Observable
+   * for telemetry / tests; does NOT drive control flow on its own (the
+   * terminal routing already uses `state.answer === ''` as its gate).
+   */
+  fastAnswerBypassTriggered: boolean;
   fallbackApplied: boolean;
   fallbackLayer: SynthesisContext['fallbackApplied'];
   failedSynthesisAttempts: number;
@@ -76,6 +83,7 @@ export function createAgentExecutionState(): AgentExecutionState {
     pendingRefinementRetry: false,
     pendingPlannerDirective: undefined,
     verificationStepCompleted: false,
+    fastAnswerBypassTriggered: false,
     fallbackApplied: false,
     fallbackLayer: null,
     failedSynthesisAttempts: 0,

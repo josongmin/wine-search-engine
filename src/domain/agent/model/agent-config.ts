@@ -25,6 +25,23 @@ export interface AgentConfig {
    * When false, the legacy "one tool + answer" path is preserved.
    */
   readonly requireVerificationStep?: boolean | undefined;
+  /**
+   * L1.C structural latency lever: short-circuit the run loop after a single
+   * tool call whose observation already satisfies every contract gate the
+   * planner would itself enforce on emit-answer. The orchestrator's terminal
+   * routing then drives `AgentObservationSynthesisRunner` to produce the
+   * grounded answer directly, replacing one planner LLM RTT with a (cheaper)
+   * synthesis RTT.
+   *
+   * Bypass predicate is the SAME constraint-coverage signal the planner's
+   * answer-acceptance gate already uses (no required-tool gap, no grounded-
+   * search gap, no pending drinkability, no food-pairing follow-up, no
+   * refinement retry pending) - evaluated from the other side of the
+   * boolean. Not a heuristic.
+   *
+   * Default: true. Override via env AGENT_FAST_ANSWER_BYPASS_PLANNER.
+   */
+  readonly fastAnswerBypassPlanner?: boolean | undefined;
 }
 
 /**
@@ -49,4 +66,8 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   maxContextChars: 8_000,
   maxTotalTokens: 50_000,
   requireVerificationStep: true,
+  // L1.C: structural one-RTT save on simple lookups. Off-switch via env
+  // AGENT_FAST_ANSWER_BYPASS_PLANNER=false at the composition root (see
+  // src/config/container.ts where the orchestrator is wired).
+  fastAnswerBypassPlanner: true,
 } as const;

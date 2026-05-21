@@ -34,8 +34,20 @@ export interface BenchmarkReportSlice {
   readonly contextRelevance: number | null;
   readonly contextRecall: number | null;
   readonly judge: number | null;
+  /**
+   * L1.A: latency p50 in ms, scored against AGENT WORK time (scenario wall
+   * minus throttle/backoff sleep). This is what the SLA gate evaluates.
+   */
   readonly latencyP50Ms: number;
+  /** L1.A: latency p95 in ms (agent-work). SLA gate evaluates against this. */
   readonly latencyP95Ms: number;
+  /**
+   * L1.A: raw scenario wall p95 (NOT SLA-gated). Surfaced so the insight
+   * generator can call out infra throttle without confusing it with agent
+   * slowness. May be greater than `latencyP95Ms` when provider 429/503
+   * backoff was absorbed during the run.
+   */
+  readonly latencyP95WallMs: number;
   readonly tier6SoleExtractionRate: number | null;
   readonly meanHardConstraints: number;
   readonly scrOverall: number | null;
@@ -152,12 +164,31 @@ const DETERMINISTIC_RULES: readonly InsightRule[] = [
       ? `Tier 6 sole-extraction rate ${(r.tier6SoleExtractionRate * 100).toFixed(0)}% — half of queries rely only on regex patterns. Note: mood/atmosphere queries ("비 오는 날 혼술") have NO extractable constraints → Tier 6 is the correct path for these. Filter to constraint-bearing queries for accurate measurement.`
       : null,
   },
-  // ── Latency SLA ──
+  // ── Latency SLA — gated on AGENT WORK time (wall MINUS throttle backoff) ──
+  // L1.A: switching the gate input from raw wall to agent-work eliminates the
+  // false-positive SLA fail when the slow scenarios are at step=1 (pure
+  // provider 429/503 backoff, not agent multi-step work). The wall p95 is
+  // still surfaced so reviewers can see infra impact.
   {
     id: 'latency_p95_fail',
     severity: '🔴',
-    check: (r) => r.latencyP95Ms > THRESHOLDS.latencyP95
-      ? `Latency p95 ${r.latencyP95Ms}ms exceeds SLA (${THRESHOLDS.latencyP95}ms). Check: LLM provider throttling, Vespa query latency, or agent step count.`
+    check: (r) => {
+      if (r.latencyP95Ms <= THRESHOLDS.latencyP95) return null;
+      const wallDelta = Math.max(0, r.latencyP95WallMs - r.latencyP95Ms);
+      const wallNote = wallDelta > 0
+        ? ` (wall p95 ${r.latencyP95WallMs}ms; +${wallDelta}ms infra throttle backoff already excluded)`
+        : '';
+      return `Latency p95 ${r.latencyP95Ms}ms (agent-work) exceeds SLA (${THRESHOLDS.latencyP95}ms)${wallNote}. Check: Vespa query latency, agent step count, or planner LLM RTT (provider throttle already excluded — see L1.A).`;
+    },
+  },
+  // L1.A: when only the WALL p95 is over budget but the agent-work p95 is
+  // under, the run absorbed infra throttle backoff that the SLA correctly
+  // ignored. Inform the operator so the run is not misread as a regression.
+  {
+    id: 'latency_p95_wall_high_agent_ok',
+    severity: 'ℹ️',
+    check: (r) => (r.latencyP95Ms <= THRESHOLDS.latencyP95 && r.latencyP95WallMs > THRESHOLDS.latencyP95)
+      ? `Wall p95 ${r.latencyP95WallMs}ms > SLA (${THRESHOLDS.latencyP95}ms), but agent-work p95 ${r.latencyP95Ms}ms is WITHIN SLA. The gap (${r.latencyP95WallMs - r.latencyP95Ms}ms) is provider throttle backoff during retries — not an agent regression.`
       : null,
   },
   // ── Judge variance ──

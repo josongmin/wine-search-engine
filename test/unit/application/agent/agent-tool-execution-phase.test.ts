@@ -149,7 +149,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-exact',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: true },
@@ -190,7 +194,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-pairing-reroute',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       {
@@ -235,7 +243,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-red-white-repair',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       {
@@ -294,7 +306,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-partial-batch',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -331,7 +347,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-embedded-repair',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -362,7 +382,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-planner-defect-budget',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -426,7 +450,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const compareShouldBreak = await phase.run(
       'req-compare-cache',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: true },
@@ -444,7 +472,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const checkShouldBreak = await phase.run(
       'req-compare-cache',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: true },
@@ -484,7 +516,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const firstShouldBreak = await phase.run(
       'req-refine',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -497,7 +533,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const secondShouldBreak = await phase.run(
       'req-refine',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -524,7 +564,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-batch',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -567,7 +611,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-contract',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
@@ -606,7 +654,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-wrong-contract-id',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
@@ -644,7 +696,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-answer-gate',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
@@ -671,7 +727,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-grounded-search',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       {
@@ -703,7 +763,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-refinement-retry',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -738,7 +802,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-batch-contract',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
@@ -771,7 +839,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-batch-success',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -804,7 +876,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-compare-mix',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -853,7 +929,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-compare-placeholder-repair',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
@@ -905,7 +985,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-search-placeholder-repair',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: true, hasEntityMetadataSignal: false },
@@ -949,7 +1033,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-compare-duplicate',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -1013,7 +1101,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-compare-duplicate-conflict',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -1063,7 +1155,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-unknown-tool',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -1092,7 +1188,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-timeout-tool',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -1124,7 +1224,11 @@ describe('AgentToolExecutionPhase', () => {
 
     const shouldBreak = await phase.run(
       'req-policy-blocked',
-      DEFAULT_AGENT_CONFIG,
+      // L1.C-aware: tests in this block predate the fast-answer bypass and
+      // exercise the legacy "continue loop" tool-execution path. Pin the
+      // flag off so loop-break vs continue behaviour is unaffected by the
+      // bypass. (New L1.C tests live further down with their own config.)
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -1162,6 +1266,28 @@ describe('AgentToolExecutionPhase', () => {
     const shouldBreak = await phase.run(
       'req-concurrency',
       DEFAULT_AGENT_CONFIG,
+  // L1.C — fast-answer planner bypass (structural latency lever).
+  //
+  // After a successful first tool call whose observation satisfies every
+  // contract gate that the planner would itself enforce on emit-answer, the
+  // tool execution phase short-circuits the run loop. The orchestrator's
+  // terminal routing then runs observation synthesis — replacing one planner
+  // LLM RTT with a (cheaper) synthesis RTT.
+  //
+  // The bypass MUST mirror the planner-answer-acceptance gates 1:1 so it
+  // never commits an answer the planner itself would reject.
+
+  it('L1.C fast-answer bypass fires after a successful single-tool call when all contract gates pass', async () => {
+    const execute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const { phase, runDrinkabilityChecks } = makePhase({
+      searchUseCase: { execute } as never,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 5 });
+
+    const shouldBreak = await phase.run(
+      'req-fast-answer',
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: true },
       budget,
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
@@ -1181,5 +1307,75 @@ describe('AgentToolExecutionPhase', () => {
     expect(state.toolOutcomes).toHaveLength(3);
     // Concurrent: ~100ms, not ~300ms. Allow generous slack for CI jitter.
     expect(elapsedMs).toBeLessThan(2 * TOOL_DELAY_MS);
+        thought: 'simple lookup',
+        action: { tool: 'search_wines', input: { query: 'opus one' } },
+      }),
+    );
+
+    expect(shouldBreak).toBe(true);
+    expect(state.fastAnswerBypassTriggered).toBe(true);
+    expect(runDrinkabilityChecks).toHaveBeenCalledTimes(1);
+    // synthesis still needs to run -> answer is empty and termination is not 'answer'.
+    expect(state.answer).toBe('');
+    expect(state.terminationReason).not.toBe('answer');
+  });
+
+  it('L1.C bypass does NOT fire when food-pairing requires a price-aware search follow-up', async () => {
+    const execute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const foodPairingExecute = vi.fn().mockResolvedValue({
+      observation: 'Pairing: oak-aged whites; budget hint: 30k-80k KRW.',
+      rawResult: { kind: 'food_pairing', pairing_tags: ['white_fish'] },
+    });
+    const { phase } = makePhase({
+      searchUseCase: { execute } as never,
+      foodPairingUseCase: { execute: foodPairingExecute } as never,
+    });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 5 });
+
+    const shouldBreak = await phase.run(
+      'req-fast-answer-blocked',
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: true },
+      budget,
+      state,
+      {
+        requiresDrinkabilityCheck: false,
+        hasEntityMetadataSignal: false,
+        requiredTool: 'get_food_pairings',
+        foodPairing: { food: 'sushi', pairingTags: ['white_fish'] },
+        totalBudgetKrw: 50_000,
+      },
+      plannerPhase({
+        thought: 'food pairing first',
+        action: { tool: 'get_food_pairings', input: { food: 'sushi' } },
+      }),
+    );
+
+    // search_wines is still required after the food pairing → bypass MUST NOT fire.
+    expect(shouldBreak).toBe(false);
+    expect(state.fastAnswerBypassTriggered).toBe(false);
+  });
+
+  it('L1.C bypass is disabled when fastAnswerBypassPlanner=false (feature flag off)', async () => {
+    const execute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const { phase } = makePhase({ searchUseCase: { execute } as never });
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 5 });
+
+    const shouldBreak = await phase.run(
+      'req-flag-off',
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'simple lookup',
+        action: { tool: 'search_wines', input: { query: 'opus one' } },
+      }),
+    );
+
+    // Legacy "continue loop, planner emits answer next" path preserved.
+    expect(shouldBreak).toBe(false);
+    expect(state.fastAnswerBypassTriggered).toBe(false);
   });
 });

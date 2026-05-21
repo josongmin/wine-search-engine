@@ -147,9 +147,11 @@ export interface ScenarioExecution {
    * throttle/transient-infra backoff (429/503/GOAWAY/ECONNRESET retries). This
    * is the agent's actual work time. The latency/cost dimension scores against
    * this, NOT `totalDurationMs`, so provider throttling never penalizes the
-   * agent. Absent for legacy callers → scoring falls back to `totalDurationMs`.
+   * agent. Absent for legacy callers — scoring falls back to `totalDurationMs`.
    */
   readonly agentWorkMs?: number | undefined;
+  /** S1.1: cumulative ms spent sleeping on throttle/transient-infra backoff. */
+  readonly throttleWaitMs?: number | undefined;
   readonly totalTokens: { input: number; output: number };
   /**
    * ADR-009 Phase 0: number of tool calls that emitted a typed evidence frame.
@@ -325,8 +327,9 @@ export interface ScenarioResult {
   readonly totalDurationMs?: number;
   /**
    * S1.1: agent work time (scenario wall minus throttle/backoff wait). This is
-   * what the latency/cost dimension scores against. Omitted for skipped/errored
-   * scenarios. May equal `totalDurationMs` when no throttling occurred.
+   * what the latency/cost dimension scores against AND what drives the bench
+   * summary's SLA gate. Omitted for skipped/errored scenarios. May equal
+   * `totalDurationMs` when no throttling occurred.
    */
   readonly agentWorkMs?: number;
   /** S1.1: cumulative ms spent sleeping on throttle/transient-infra backoff. */
@@ -1382,8 +1385,10 @@ export function scoreScenario(
     terminationReason: execution.terminationReason,
     totalDurationMs: execution.totalDurationMs,
     // S1.1: surface agent-work time when the runner supplied it (wall minus
-    // throttle backoff). Omit the key entirely when absent (exactOptionalPropertyTypes).
+    // throttle backoff). Omit the key entirely when absent
+    // (exactOptionalPropertyTypes).
     ...(execution.agentWorkMs != null ? { agentWorkMs: execution.agentWorkMs } : {}),
+    ...(execution.throttleWaitMs != null ? { throttleWaitMs: execution.throttleWaitMs } : {}),
     totalTokens: execution.totalTokens,
     // ADR-009 Phase 0: evidence frame count for cutover-gate aggregation.
     ...(execution.evidenceFrameCount !== undefined
@@ -2829,9 +2834,10 @@ function scoreCostEfficiency(
   const totalTokens = execution.totalTokens.input + execution.totalTokens.output;
 
   // S1.1: score latency against agent WORK time (wall minus throttle backoff),
-  // not raw orchestrator duration. `agentWorkMs` is omitted by legacy callers →
-  // fall back to `totalDurationMs`. `!= null` (not truthiness) so a legitimate
-  // agentWorkMs of 0 is honored rather than silently replaced (CLAUDE.md rule 26).
+  // not raw orchestrator duration. `agentWorkMs` is omitted by legacy callers
+  // -> fall back to `totalDurationMs`. `!= null` (not truthiness) so a
+  // legitimate agentWorkMs of 0 is honored rather than silently replaced
+  // (CLAUDE.md rule 26).
   const effectiveDurationMs = execution.agentWorkMs != null
     ? execution.agentWorkMs
     : execution.totalDurationMs;

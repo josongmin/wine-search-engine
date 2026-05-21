@@ -401,6 +401,41 @@ export class AgentToolExecutionPhase {
 
   constructor(private readonly deps: AgentToolExecutionPhaseDeps) {}
 
+  /**
+   * L1.C structural latency lever: after a successful tool execution, check
+   * whether the FIRST observation has already satisfied every contract gate
+   * that the planner's second-round emit-answer would itself enforce. When
+   * yes AND the feature flag is enabled, return `true` so the caller breaks
+   * the run loop - the orchestrator's terminal routing will then invoke
+   * `AgentObservationSynthesisRunner.run` to produce the grounded answer.
+   *
+   * Net effect on the simple-lookup category: one planner LLM RTT (~2-4s p50)
+   * is replaced by one (shorter) synthesis LLM RTT. The synthesis prompt has
+   * NO tool catalog and a smaller system message, so the round-trip is
+   * cheaper than a planner round even though both involve an LLM call.
+   */
+  private shouldFastAnswerBypass(
+    queryExecutionContract: AgentQueryExecutionContract,
+    state: AgentExecutionState,
+    effectiveConfig: AgentConfig,
+  ): boolean {
+    if (effectiveConfig.fastAnswerBypassPlanner !== true) return false;
+    const hasObservation = state.steps.some((s) =>
+      (s.observation !== undefined && s.observation.length > 0)
+      || (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
+    );
+    if (!hasObservation) return false;
+    const pendingDrinkabilityEntityIds = this.contractPolicy.getPendingDrinkabilityEntityIds(
+      queryExecutionContract,
+      state,
+    );
+    return this.contractPolicy.canFastAnswerBypassPlanner({
+      queryExecutionContract,
+      state,
+      pendingDrinkabilityEntityIds,
+    });
+  }
+
   private buildRuntimeToolDeps(state: AgentExecutionState): AgentToolDeps {
     return {
       ...this.deps.toolDeps,
@@ -903,6 +938,14 @@ export class AgentToolExecutionPhase {
     if (!await this.deps.contractExecutionPhase.runDrinkabilityChecks(queryExecutionContract, requestId, effectiveConfig, budget, state, abortSignal)) {
       return true;
     }
+    if (this.shouldFastAnswerBypass(queryExecutionContract, state, effectiveConfig)) {
+      // L1.C: skip the planner's emit-answer LLM round. Synthesis will run
+      // because state.answer is still '' and terminationReason is not 'answer'.
+      // We deliberately do NOT set terminationReason here so synthesis drives
+      // the success/failure transition (answer / fallback / aborted).
+      state.fastAnswerBypassTriggered = true;
+      return true;
+    }
     return false;
   }
 
@@ -1067,6 +1110,14 @@ export class AgentToolExecutionPhase {
     this.policy.maybeInjectRefinementHint(state, [observation], effectiveConfig.maxSteps - budget.getStepCount());
 
     if (!await this.deps.contractExecutionPhase.runDrinkabilityChecks(queryExecutionContract, requestId, effectiveConfig, budget, state, abortSignal)) {
+      return true;
+    }
+    if (this.shouldFastAnswerBypass(queryExecutionContract, state, effectiveConfig)) {
+      // L1.C: skip the planner's emit-answer LLM round. Synthesis will run
+      // because state.answer is still '' and terminationReason is not 'answer'.
+      // We deliberately do NOT set terminationReason here so synthesis drives
+      // the success/failure transition (answer / fallback / aborted).
+      state.fastAnswerBypassTriggered = true;
       return true;
     }
     return false;

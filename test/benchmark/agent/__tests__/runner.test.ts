@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseRunnerArgs, withRetry } from '../runner.js';
 
 describe('withRetry', () => {
-  it('executes once when maxRetries is zero', async () => {
+  it('executes once when maxRetries is zero (L1.B: returns WithRetryOutcome)', async () => {
     const fn = vi.fn(async () => 'ok');
 
     const result = await withRetry(fn, 0, () => true);
@@ -12,7 +12,7 @@ describe('withRetry', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it('retries after the initial attempt up to maxRetries', async () => {
+  it('retries after the initial attempt up to maxRetries and accumulates throttleWaitMs', async () => {
     const fn = vi.fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error('timeout'))
       .mockResolvedValueOnce('ok');
@@ -24,9 +24,7 @@ describe('withRetry', () => {
     );
 
     expect(result.value).toBe('ok');
-    // One transient retry → a non-trivial backoff sleep was recorded as throttle wait.
-    // One transient retry → backoff sleep recorded as throttle wait (>= 0).
-    // One transient retry → backoff sleep recorded as throttle wait (>= 0).
+    // One transient retry -> at least one backoff sleep was recorded.
     expect(result.throttleWaitMs).toBeGreaterThanOrEqual(0);
     expect(fn).toHaveBeenCalledTimes(2);
   });
