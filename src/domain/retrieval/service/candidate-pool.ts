@@ -24,7 +24,7 @@ import {
   toCanonicalCandidateChannel,
 } from '../model/retrieval-channel.js';
 import { rrfContribution } from '../../shared/utils/rrf.js';
-import { type FusionService } from './fusion.js';
+import { type FusionService, NEUTRAL_FUSION_WEIGHTS, type FusionWeights } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import {
   getFusionConfig,
@@ -33,7 +33,10 @@ import {
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { estimateQueryDifficulty } from './query-difficulty-estimator.js';
 import { ConstraintFilter } from './constraint-filter.js';
-import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
+import {
+  hardConstraintsToSparseFilterTokens,
+  softConstraintsToOptionalFilterTokens,
+} from './constraint-to-sparse-filter-tokens.js';
 import {
   extractSearchConstraints,
   searchConstraintsToFilterTokens,
@@ -44,7 +47,7 @@ import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
 import { accumulateEvidence } from './evidence-accumulator.js';
 import { applyRelativeFilter } from './relative-filter-policy.js';
 import { combineSemanticEmbeddings } from './semantic-embedding-combiner.js';
-import { globalSilentSkipCounter } from '../../../domain/observability/silent-skip-counters.js';
+import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 import type { CacheService } from '../../performance/index.js';
 import type {
   RetrievalDegradationObserver,
@@ -52,8 +55,8 @@ import type {
   RetrievalDegradationSignal,
 } from '../port/retrieval-degradation-observer.port.js';
 import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port.js';
-import { bootstrapLogger } from '../../../domain/shared/bootstrap-logger.js';
-import { pipelineDebug } from '../../../domain/observability/request-pipeline-debug.js';
+import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
 
 /** Default anchor confidence when plan omits explicit score (neutral). */
@@ -227,8 +230,18 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     ];
     const skippedPhases = allPhases.filter((phase) => !this.shouldExecutePhase(phase, activeChannels));
 
-    // Vespa sparse filter tokens (aligned with browse/compare + buildSparseFilters)
-    const filters = [...hardConstraintsToSparseFilterTokens(input.hardConstraints)];
+    // Vespa sparse filter tokens (aligned with browse/compare + buildSparseFilters).
+    //
+    // P1.A — soft→hard confidence-gated promotion. High-confidence preference
+    // signals (rule-based / entity-resolver mapping versions, confidence ≥ 0.8)
+    // promote into the same registry-mapped sparse filter tokens hard constraints
+    // use. This closes the gap where "평점 좋은 와인" / "지금 마실 수 있는" parsed as
+    // soft and NEVER tightened Vespa retrieval — leaving the 7K-doc corpus
+    // under-filtered and the candidate pool low-precision.
+    const filters = [
+      ...hardConstraintsToSparseFilterTokens(input.hardConstraints),
+      ...softConstraintsToOptionalFilterTokens(input.softConstraints),
+    ];
 
     // KRW price constraints from the raw query surface (e.g. "5만원대", "3만원 이하").
     // extractSearchConstraints parses Korean price expressions that the planner's
@@ -681,12 +694,32 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     const fusionQueryClass = mapDomainQueryClassToFusionQueryClass(input.queryPlan.queryClass, retrievalMode);
     const fusionConfig = getFusionConfig(fusionQueryClass);
     const effectiveFusionK = fusionConfig.rrfK;
+    // P1.C — thread per-class lane weights into FusionService.fuse(). Prior
+    // to this wire-up, per-class sparseWeight/denseWeight/anchorWeight were
+    // documentation-only — fuse() consumed only `k`.
+    //
+    // Fallback class explicitly uses NEUTRAL_FUSION_WEIGHTS to preserve
+    // byte-identical behavior for the long tail of unmapped query classes
+    // (every unknown class still routes through the fallback registry entry).
+    // Mapped classes (specific_wine / entity_exact / browse / compare / pairing)
+    // use their calibrated registry values, which is the change that closes
+    // the "RRF weights are dead code" gap.
+    const fusionWeights: FusionWeights =
+      fusionQueryClass === 'fallback'
+        ? NEUTRAL_FUSION_WEIGHTS
+        : {
+            sparseWeight: fusionConfig.sparseWeight,
+            denseWeight: fusionConfig.denseWeight,
+            anchorWeight: fusionConfig.anchorWeight,
+            learnedSparseWeight: fusionConfig.learnedSparseWeight,
+          };
     let candidates = this.fusionService.fuse(
       sparseHits,
       denseHits,
       anchorHits,
       effectiveFusionK,
       learnedSparseHits,
+      fusionWeights,
     );
     stageTimer?.end('retrieval.rrf_fusion');
     const countAfterFusion = candidates.length;

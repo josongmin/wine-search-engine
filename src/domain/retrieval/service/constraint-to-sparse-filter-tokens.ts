@@ -1,6 +1,53 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 
 /**
+ * P1.A — Soft→hard confidence-gated promotion.
+ *
+ * Confidence floor at or above which a soft constraint may be promoted to a
+ * Vespa filter token. The 0.8 floor matches the planner's tier-1/tier-2
+ * confidence emission for rule-based and entity-resolver paths; below this
+ * the constraint is treated as low-confidence preference, not retrieval filter.
+ */
+const SOFT_PROMOTION_DEFAULT_CONFIDENCE_FLOOR = 0.8;
+
+/**
+ * Mapping versions whose output is trustworthy enough to be promoted from a
+ * soft signal into a Vespa retrieval filter. These are the deterministic
+ * tier-1 (rule-based) and tier-2 (entity-resolver) outputs whose semantics
+ * are fully audited. LLM-sourced or planner-inferred soft constraints stay
+ * soft regardless of confidence — they have no replay-deterministic guarantee.
+ */
+const SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS: ReadonlySet<string> = new Set([
+  'rule-based-v1.0',
+  'entity-resolver-v1.0',
+]);
+
+/**
+ * Numeric soft attributes that get a clean lower-bound filter token during
+ * promotion. For each, we emit ONLY the MIN bound (`<key>_min:<n>`) — never
+ * the MAX bound — to avoid over-pruning recall for the unbounded-high end
+ * of user intent (e.g. "good critic score" has no implicit ceiling; "fuller
+ * body" has no implicit ceiling).
+ *
+ * Mapping is to existing sparse filter token keys defined in
+ * `src/infrastructure/vespa/mapping.ts` (FILTER_TOKEN_REGISTRY). We do NOT
+ * duplicate the YQL translation here — emitting the registered token key
+ * routes the constraint through the same buildSparseFilters path used for
+ * hard constraints.
+ *
+ * `drinking_window` is intentionally excluded from this min-only map because
+ * its semantic is two-sided (start ≤ year ≤ end) and there is no
+ * single-bound translation that does not silently break recall on one half.
+ * A future PR can wire drinking_window through `drinking_window_now:<year>`
+ * once the soft-constraint value carries a concrete year.
+ */
+const SOFT_PROMOTION_MIN_TOKEN_KEY: ReadonlyMap<string, string> = new Map([
+  ['critic_score', 'critic_score_min'],
+  ['body', 'body_min'],
+  ['producer_prestige', 'producer_prestige_min'],
+]);
+
+/**
  * Vespa `style` field stores compound strings: "medium red", "bold red", "light red",
  * "medium white", "full white". The field uses `attribute` indexing only (no full-text
  * index), so `contains` does NOT do substring matching on multi-token strings.
@@ -350,7 +397,7 @@ function constraintToSparseFilterTokens(
     // hardConstraintsToSparseFilterTokens in production. Cases removed to prevent the
     // footgun where a direct call silently generates a hard filter that collapses recall.
     // drinking_window is also SOFT — same reasoning, case removed below.
-    // Ref: SOFT_CONSTRAINT_ATTRIBUTES in src/shared/constants/constraint-attributes.ts
+    // Ref: SOFT_CONSTRAINT_ATTRIBUTES in src/domain/shared/constants/constraint-attributes.ts
 
     case 'price':
     case 'price_usd': {
@@ -436,4 +483,102 @@ function isNumericRange(
     typeof rec.min === 'number' && Number.isFinite(rec.min) &&
     typeof rec.max === 'number' && Number.isFinite(rec.max)
   );
+}
+
+/**
+ * Options controlling the confidence-gated promotion of soft constraints
+ * into sparse filter tokens.
+ */
+export interface SoftPromotionOptions {
+  /**
+   * Confidence floor (inclusive). Soft constraints with `confidence` below
+   * this value are NEVER promoted. Defaults to
+   * {@link SOFT_PROMOTION_DEFAULT_CONFIDENCE_FLOOR} (0.8).
+   */
+  readonly confidenceFloor?: number;
+}
+
+/**
+ * P1.A — Confidence-gated promotion of SOFT constraints into Vespa filter tokens.
+ *
+ * The constraint-compiler keeps high-confidence preference signals
+ * (`critic_score`, `body`, `producer_prestige`, …) in {@link ConstraintBundle.soft}
+ * so the ranker can apply graceful penalties rather than 0-result hard cuts.
+ * Historically these never reached YQL — meaning queries like "평점 좋은 와인"
+ * never tightened retrieval below the full 7K-doc corpus.
+ *
+ * This function performs a NARROW, principled promotion: each soft constraint
+ * is converted into the same `<key>_min:` filter token used by hard constraints
+ * IFF every gate passes:
+ *
+ *   1. `confidence >= confidenceFloor` (default 0.8 — the tier-1/tier-2 floor)
+ *   2. `mapping_version ∈ {rule-based-v1.0, entity-resolver-v1.0}`
+ *      (no LLM-sourced or planner-inferred promotion)
+ *   3. `attribute ∈ SOFT_PROMOTION_MIN_TOKEN_KEY` (only attributes with a
+ *      clean MIN-only translation; drinking_window is two-sided and excluded)
+ *   4. The operator/value combination yields a finite numeric MIN bound:
+ *        - `=` / `>=` numeric value → use that value as the floor
+ *        - `range` { min, max }      → use `min` as the floor
+ *        - all other operators are skipped to avoid over-pruning
+ *
+ * NEVER duplicates the YQL translation: the emitted token is consumed by
+ * `buildSparseFilters` in `src/infrastructure/vespa/mapping.ts`, identical
+ * to the hard-constraint path.
+ *
+ * @returns Filter tokens for the promoted constraints, in stable input order.
+ */
+export function softConstraintsToOptionalFilterTokens(
+  constraints: readonly NormalizedConstraint[],
+  options: SoftPromotionOptions = {},
+): readonly string[] {
+  const floor = options.confidenceFloor ?? SOFT_PROMOTION_DEFAULT_CONFIDENCE_FLOOR;
+  const out: string[] = [];
+  for (const c of constraints) {
+    if (!Number.isFinite(c.confidence) || c.confidence < floor) {
+      continue;
+    }
+    if (c.mapping_version === undefined
+      || !SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS.has(c.mapping_version)) {
+      continue;
+    }
+    const tokenKey = SOFT_PROMOTION_MIN_TOKEN_KEY.get(c.attribute);
+    if (tokenKey === undefined) {
+      continue;
+    }
+    const minValue = extractPromotionMinBound(c);
+    if (minValue === undefined) {
+      continue;
+    }
+    out.push(`${tokenKey}:${minValue}`);
+  }
+  return out;
+}
+
+/**
+ * Extracts the lower bound from a numeric soft constraint, or undefined when
+ * the operator/value shape does not have a sensible MIN translation.
+ *
+ * Accepted shapes:
+ *   - `=`     with finite number → that number
+ *   - `>=`    with finite number → that number
+ *   - `range` with { min, max }  → min (normalized: lo of min/max)
+ *
+ * Rejected shapes (return undefined — caller skips):
+ *   - `<=`   (would be a MAX bound, not MIN — we never emit MAX in promotion)
+ *   - `in` / `=` with non-numeric / array / string
+ *   - `exclude` / `not_in`
+ */
+function extractPromotionMinBound(c: NormalizedConstraint): number | undefined {
+  const { operator, value } = c;
+  if (operator === '=' || operator === '>=') {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    return undefined;
+  }
+  if (operator === 'range' && isNumericRange(value)) {
+    // Normalize reversed ranges so `{ min: 5, max: 2 }` still yields a sane lo.
+    return Math.min(value.min, value.max);
+  }
+  return undefined;
 }

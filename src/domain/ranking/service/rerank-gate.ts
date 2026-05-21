@@ -38,11 +38,17 @@ interface RerankGateDecision {
  * Gate priority (first matching rule wins):
  *  1. rerankForced === true        → always rerank
  *  2. candidateCount < 5           → skip (not enough candidates)
- *  3. short_entity / entity route    → skip (already highly precise)
- *  4. comparison_query / hasAnchor → always rerank (high value)
- *  5. semantic_preference          → always rerank (ambiguous semantics benefit most)
- *  6. candidateCount >= 20         → rerank (enough candidates to benefit)
- *  7. default                      → skip
+ *  3. budget_disabled (rerankLimit ≤ 0) → skip (compiled budget opts out)
+ *  4. short_entity / entity route    → skip (already highly precise)
+ *  5. comparison_query / hasAnchor → always rerank (high value)
+ *  6. semantic_preference          → always rerank (ambiguous semantics benefit most)
+ *  7. pure_constraint              → always rerank (price/style/pairing intent)
+ *  8. ambiguous_short_form         → always rerank (multiple plausible entities)
+ *  9. queryClass='unknown'         → always rerank (P1.B — unclassified queries default
+ *                                    benefit from cross-encoder precision; previously
+ *                                    fell through to default_skip even with 22+ candidates)
+ * 10. candidateCount >= 20         → rerank (enough candidates to benefit)
+ * 11. default                      → skip
  */
 
 /** Below this candidate count, cross-encoder overhead exceeds benefit — the
@@ -116,6 +122,21 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return {
       shouldRerank: true,
       reason: 'ambiguous_short_form',
+      ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
+    };
+  }
+
+  // P1.B — queryClass='unknown' (planner could not classify) previously fell
+  // through to default_skip even with 22+ candidates, causing reranking to be
+  // silently bypassed on the long tail of Korean colloquial / bilingual /
+  // pairing scenarios. Treat 'unknown' as always-rerank when candidates exist:
+  // the cost is bounded by `rerankLimit` (budget gate already enforced above),
+  // and cross-encoder rerank is the strongest known precision lever for
+  // unclassified queries.
+  if (queryClass === 'unknown') {
+    return {
+      shouldRerank: true,
+      reason: 'unknown_class_default_rerank',
       ...(boundedTopK !== undefined ? { topKOverride: boundedTopK } : {}),
     };
   }

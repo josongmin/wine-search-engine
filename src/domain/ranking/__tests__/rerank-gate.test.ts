@@ -156,15 +156,20 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('candidateCount >= 20', () => {
-    it('reranks when candidateCount is exactly 20 (unknown query class)', () => {
-      // Use unknown to isolate the large_candidate_set rule from class-specific rules.
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'unknown' }));
+    it('reranks when candidateCount is exactly 20 (uses an isolating class without overlap)', () => {
+      // P1.B: 'unknown' now triggers unknown_class_default_rerank, so we use a
+      // non-special class label to isolate the large_candidate_set rule.
+      const decision = evaluateRerankGate(
+        makeInput({ candidateCount: 20, queryClass: 'isolated_class_for_large_candidate_set_rule' }),
+      );
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('large_candidate_set');
     });
 
-    it('reranks when candidateCount exceeds 20 (unknown query class)', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 50, queryClass: 'unknown' }));
+    it('reranks when candidateCount exceeds 20 (isolating class)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ candidateCount: 50, queryClass: 'isolated_class_for_large_candidate_set_rule' }),
+      );
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('large_candidate_set');
     });
@@ -222,17 +227,20 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('default: skip', () => {
-    it('skips when candidateCount is between 5 and 19 with no high-value signal (unknown class)', () => {
-      // unknown class with no anchor and insufficient candidates → default_skip
+    it('skips when candidateCount is between 5 and 19 with no high-value signal (unclassified, non-special class)', () => {
+      // P1.B: 'unknown' is now its own always-rerank class. Use a placeholder
+      // class label that matches none of the rule branches to isolate default_skip.
       const decision = evaluateRerankGate(
-        makeInput({ candidateCount: 10, queryClass: 'unknown', hasAnchor: false }),
+        makeInput({ candidateCount: 10, queryClass: 'placeholder_default_skip_class', hasAnchor: false }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
 
-    it('skips for candidateCount 19 just below threshold (unknown class)', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 19, queryClass: 'unknown' }));
+    it('skips for candidateCount 19 just below threshold (non-special class)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ candidateCount: 19, queryClass: 'placeholder_default_skip_class' }),
+      );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
@@ -240,8 +248,12 @@ describe('evaluateRerankGate', () => {
 
   describe('topKOverride', () => {
     it('caps topKOverride to the contract rerankLimit when reranking is enabled', () => {
-      // Use unknown class to exercise the large_candidate_set path without class-specific rules.
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'unknown' }));
+      // P1.B: 'unknown' now triggers its own always-rerank rule; use a
+      // placeholder class label so the large_candidate_set path is exercised
+      // for topKOverride coverage.
+      const decision = evaluateRerankGate(
+        makeInput({ candidateCount: 20, queryClass: 'isolated_class_for_topk_override' }),
+      );
       expect(decision.topKOverride).toBe(20);
     });
 
@@ -290,11 +302,12 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('pure_constraint');
     });
 
-    it('empty string effectiveRoute does not match entity route (unknown falls to default_skip)', () => {
+    it('empty string effectiveRoute does not match entity route (non-special class falls to default_skip)', () => {
       // effectiveRoute='' must NOT trigger already_precise; falls through to default_skip.
-      // Use unknown so no class-specific rule fires.
+      // P1.B: 'unknown' is no longer the empty-class baseline; use a placeholder
+      // class label that matches no special rule.
       const decision = evaluateRerankGate(
-        makeInput({ effectiveRoute: '', candidateCount: 10, queryClass: 'unknown' }),
+        makeInput({ effectiveRoute: '', candidateCount: 10, queryClass: 'placeholder_no_special_rule' }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');

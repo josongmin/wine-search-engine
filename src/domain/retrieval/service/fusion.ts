@@ -1,5 +1,5 @@
 import { createCanonicalEntityId } from '../../shared/types/index.js';
-import { rrfFuse, RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
+import { rrfContribution, RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 import type {
   SparseHit,
   DenseHit,
@@ -13,6 +13,33 @@ import {
   normalizeRetrievalHitSummary,
   summaryToHybridCandidateFields,
 } from './hybrid-candidate-summary.js';
+
+/**
+ * P1.C — Per-lane RRF weight knobs.
+ *
+ * Each weight multiplies the canonical RRF contribution `1/(k+rank)` for the
+ * matching lane before summing. Default is neutral (1.0 for every lane) which
+ * is byte-identical to the un-weighted RRF baseline produced by {@link rrfFuse}.
+ *
+ * The fusion-class registry in `per-class-fusion-config.ts` defines the per-
+ * class weight priors. Wiring those priors through this knob is what closes
+ * the "RRF weights are dead code" gap: prior to P1.C, fuse() consumed only `k`
+ * and the per-class sparse/dense/anchor weights had no effect.
+ */
+export interface FusionWeights {
+  readonly sparseWeight: number;
+  readonly denseWeight: number;
+  readonly anchorWeight: number;
+  readonly learnedSparseWeight: number;
+}
+
+/** Neutral weight set — fuse() produces identical scores to the un-weighted baseline. */
+export const NEUTRAL_FUSION_WEIGHTS: FusionWeights = {
+  sparseWeight: 1.0,
+  denseWeight: 1.0,
+  anchorWeight: 1.0,
+  learnedSparseWeight: 1.0,
+};
 
 /**
  * Build a Map<entityId, normalized summary> from a hit list in a single pass.
@@ -62,6 +89,7 @@ export class FusionService {
     anchorHits?: readonly DenseHit[],
     k?: number,
     learnedSparseHits: readonly DenseHit[] = [],
+    weights: FusionWeights = NEUTRAL_FUSION_WEIGHTS,
   ): readonly HybridCandidate[] {
     // Guard against k=0 or negative k: the `??` operator passes through
     // explicit 0 (only catches null/undefined), so we need an explicit check.
@@ -70,6 +98,18 @@ export class FusionService {
     // The standard RRF value is 60; callers should never pass k<1.
     if (k !== undefined && k < 1) {
       throw new Error(`FusionService.fuse: k must be ≥ 1, got ${k}`);
+    }
+    // Weights must be finite non-negative numbers. NaN / Infinity / negative
+    // would corrupt the fused scores silently — fail loudly instead.
+    for (const [name, w] of [
+      ['sparseWeight', weights.sparseWeight],
+      ['denseWeight', weights.denseWeight],
+      ['anchorWeight', weights.anchorWeight],
+      ['learnedSparseWeight', weights.learnedSparseWeight],
+    ] as const) {
+      if (!Number.isFinite(w) || w < 0) {
+        throw new Error(`FusionService.fuse: ${name} must be a finite non-negative number, got ${w}`);
+      }
     }
     const effectiveK = k ?? RRF_DEFAULT_K;
 
@@ -126,23 +166,57 @@ export class FusionService {
     // lexical signal and demotes pure-semantic recalls. Collapse them
     // into a single "lexical family" by taking the BEST (lowest) rank
     // for each entity across the two channels.
+    //
+    // P1.C — per-lane weights: when both sparse and learned-sparse contribute
+    // a rank for the same entity, the lexical family rank uses the BEST rank
+    // and the EFFECTIVE weight is the MAX of the two lane weights (a learned-
+    // sparse boost should not be diluted by a lower sparse weight). This
+    // preserves the historical "lexical family is one channel" invariant
+    // while letting per-class configs prefer one BM25 vs SPLADE.
     const lexicalFamilyMap = new Map<string, number>();
+    const lexicalFamilyWeightMap = new Map<string, number>();
     for (const [id, rank] of sparseRankMap) {
       lexicalFamilyMap.set(id, rank);
+      lexicalFamilyWeightMap.set(id, weights.sparseWeight);
     }
     for (const [id, rank] of learnedSparseRankMap) {
       const existing = lexicalFamilyMap.get(id);
       if (existing === undefined || rank < existing) {
         lexicalFamilyMap.set(id, rank);
       }
+      const existingWeight = lexicalFamilyWeightMap.get(id);
+      const candidateWeight = weights.learnedSparseWeight;
+      lexicalFamilyWeightMap.set(
+        id,
+        existingWeight === undefined ? candidateWeight : Math.max(existingWeight, candidateWeight),
+      );
     }
 
-    const rankings: ReadonlyMap<string, number>[] = [];
-    if (lexicalFamilyMap.size > 0) rankings.push(lexicalFamilyMap);
-    if (denseRankMap.size > 0) rankings.push(denseRankMap);
-    if (anchorHits && anchorRankMap.size > 0) rankings.push(anchorRankMap);
+    // P1.C — apply per-lane weights deterministically.
+    //   weightedRrf = weight * (1 / (k + rank))
+    // Lanes with weight === 0 simply contribute nothing; lanes default to
+    // 1.0 (NEUTRAL_FUSION_WEIGHTS) so omitting `weights` is byte-identical
+    // to the previous un-weighted behavior. Uses the SSoT `rrfContribution()`
+    // from `@shared/utils/rrf.ts` for the per-rank reciprocal — Rule 30.
+    const fusedScores = new Map<string, number>();
+    const accumulate = (entityId: string, contribution: number): void => {
+      if (!Number.isFinite(contribution) || contribution === 0) return;
+      const current = fusedScores.get(entityId) ?? 0;
+      fusedScores.set(entityId, current + contribution);
+    };
 
-    const fusedScores = rrfFuse(rankings, effectiveK);
+    for (const [entityId, rank] of lexicalFamilyMap) {
+      const weight = lexicalFamilyWeightMap.get(entityId) ?? weights.sparseWeight;
+      accumulate(entityId, weight * rrfContribution(rank, effectiveK));
+    }
+    for (const [entityId, rank] of denseRankMap) {
+      accumulate(entityId, weights.denseWeight * rrfContribution(rank, effectiveK));
+    }
+    if (anchorHits) {
+      for (const [entityId, rank] of anchorRankMap) {
+        accumulate(entityId, weights.anchorWeight * rrfContribution(rank, effectiveK));
+      }
+    }
 
     // Collect all unique entity IDs
     const allEntityIds = new Set<string>();
