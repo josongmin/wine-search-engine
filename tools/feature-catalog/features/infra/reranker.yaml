@@ -5,13 +5,28 @@ summary: |
   Cohere rerank API 어댑터 + cached-reranker로 동일 query/doc 조합 cache. retrieval
   candidate pool 위 후처리 reranking 후보 (현재 hybrid score blend만 사용 중).
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   Production DI-wired in `container-adapters.ts:217` —
   `new CachedReranker({ modelId: config.cohere.rerankModel, inner: new CohereReranker({...}) })`.
-  RerankerPort 구현, Cohere rerank API + per-query-doc cache. 그러나 production
-  retrieval pipeline에서 활성화되는 시점 / A/B 게이트 미수립, cost/latency budget
-  데이터 부재. 4가 되려면 production A/B + cost dashboard + 회귀 게이트 필요.
+  RerankerPort + Cohere HTTP adapter + per-query-doc cache (in-memory LRU or
+  Redis). 2026-05-21 SOTA++ pass:
+  - Replaced bare `sort((a,b) => b.score - a.score)` with SSoT
+    `compareScoreWithTiebreaker` (entityId-ascending tie-break) — eliminates
+    input-order leakage on equal Cohere relevance_scores. This was a real
+    determinism bug surfaced by fast-check counterexample
+    (candidates `_0a`, `-0-` flipped order across input permutations).
+  - Added 9 fast-check property tests (numRuns=100 ⇒ 900 randomized cases
+    per CI run) covering: permutation, dense 1-based rank, score
+    monotonicity, deterministic tie-break across input permutations,
+    NaN/Infinity rejection, out-of-[0,1] rejection, empty/non-positive
+    limit guards, cache memoization (byte-identical hit/miss), cache key
+    disjoint on limit. See test/regression/reranker-properties.regression.test.ts.
+  - Reused SSoT comparator from `@shared/utils/stable-comparator.ts` —
+    no private duplicate.
+  Still blocking 5: production A/B + cost dashboard + p95 latency SLA + cost
+  regression gate. The reranker is wired but its A/B lift on retrieval
+  quality is not yet measured against the baseline blend.
 
 status: active
 since: 2025-11
@@ -25,20 +40,26 @@ key_files:
   - src/infrastructure/ai/cohere-reranker.ts
   - src/infrastructure/ai/cached-reranker.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/reranker-properties.regression.test.ts
+  unit:
+    - src/infrastructure/ai/__tests__/cohere-reranker.test.ts
+    - src/infrastructure/ai/__tests__/cached-reranker.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "A/B 테스트 결과 없음 — quality lift 미입증"
-  - "Cost/latency budget 미수립"
-  - "Cohere API 외부 의존 (vendor lock-in)"
+  - "A/B 테스트 결과 없음 — quality lift 미입증 (5로 가려면 필수)"
+  - "Cost/latency p95 SLA 미수립 + regression gate 부재"
+  - "Cohere API 외부 의존 (vendor lock-in) — fallback adapter 없음"
 
 next_steps:
-  - "A/B 테스트로 quality lift 측정"
-  - "Cost dashboard + p95 latency SLA 도입"
+  - "Production A/B 게이트로 quality lift 측정 (NDCG@10, MRR)"
+  - "Cost dashboard + p95 latency SLA + regression gate 도입"
+  - "Vendor-neutral fallback (BGE / ColBERT self-host) 검토"
 
 tags:
   - reranking

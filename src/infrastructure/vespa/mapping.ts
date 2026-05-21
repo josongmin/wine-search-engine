@@ -547,9 +547,9 @@ export function fromVespaFields(
   const lineageRefsFromFields = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);
 
   const canonicalLabel = getRequiredString(fields, 'canonical_label');
-  const searchTextKo = summary.searchTextKo ?? getOptionalString(fields, 'search_text_ko');
-  const searchTextEn = summary.searchTextEn ?? getOptionalString(fields, 'search_text_en');
-  const semanticSummary = summary.semanticSummary ?? getOptionalString(fields, 'semantic_summary');
+  const searchTextKo = summary.searchTextKo;
+  const searchTextEn = summary.searchTextEn;
+  const semanticSummary = summary.semanticSummary;
 
   const normalizeSurfaceText = (value: string | undefined): string => value !== undefined && value.length > 0
     ? value
@@ -572,7 +572,7 @@ export function fromVespaFields(
       ? { aliasPrefixTerms: getOptionalStringArray(fields, 'alias_prefix_terms') }
       : {}),
     producer: getRequiredString(fields, 'producer'),
-    region: getOptionalString(fields, 'region') ?? '',
+    region: summary.region ?? '',
     grapes: getOptionalStringArray(fields, 'grapes') ?? [],
     searchTextKo: resolvedSearchTextKo,
     searchTextEn: resolvedSearchTextEn,
@@ -582,7 +582,7 @@ export function fromVespaFields(
     // omit key when undefined.
     ...(summary.body !== undefined ? { body: summary.body } : {}),
     ...(summary.sweetness !== undefined ? { sweetness: summary.sweetness } : {}),
-    style: getOptionalString(fields, 'style') ?? '',
+    style: summary.style ?? '',
     priceBand: getRequiredString(fields, 'price_band'),
     pairing: summary.pairing ?? [],
     ...(summary.occasion !== undefined ? { occasion: [...summary.occasion] } : {}),

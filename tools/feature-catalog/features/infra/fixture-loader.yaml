@@ -5,10 +5,24 @@ summary: |
   Eval / regression / replay fixture를 디렉터리 단위로 로드하고 suite로 등록.
   fixture 파일 발견 + Zod 검증 + suite 메타데이터.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  Functional, fixture-eval suite 백엔드. 그러나 fixture schema migration 정책 없음
-  (스키마 변경 시 모든 fixture 일괄 갱신 필요).
+  SOTA++ external-data boundary. 모든 외부 fixture 경계에 다음 산업 표준 패턴 적용:
+
+  - **Schema enforcement**: Zod `.strict()` + JSON Schema `additionalProperties: false`
+    이중 게이트. case ↔ suite prefix cross-validation은 `superRefine`으로 강제.
+  - **Determinism**: 같은 바이트 → deeply-equal 객체 (fast-check 100-run property test).
+  - **Path safety**: `assertSafePath`가 절대 경로 강제 + traversal 차단
+    (fast-check 100-run으로 `../` 깊이 1-10 임의 조합 검증).
+  - **Encoding stability (NEW)**: UTF-8 BOM 자동 stripping (RFC 8259 §8.1) + Korean
+    NFC 재정규화 (W3C i18n WG "Early Uniform Normalization"). macOS HFS+ NFD 입력
+    이 silently `===` mismatch 일으키던 버그 구조적으로 차단.
+  - **DoS guard (NEW)**: per-file 4 MB cap (`MAX_FIXTURE_JSON_BYTES`) — 대용량 blob이
+    JSON.parse heap 폭증 일으키기 전에 typed Error.
+  - **Schema versioning**: `FIXTURE_SCHEMA_VERSION` + `FIXTURE_SCHEMA_VERSIONS` allowlist
+    (Snowplow Iglu / OpenAPI 패턴). default 적용 + unknown version reject.
+  - **Property tests**: 17 tests / 8 invariant groups / fast-check `numRuns=100`
+    (I/O lane 30) — append-only regression `test/regression/fixture-loader-properties.regression.test.ts`.
 
 status: active
 since: 2025-10
@@ -22,17 +36,21 @@ key_files:
   - src/infrastructure/fixture/fixture-loader.ts
   - src/infrastructure/fixture/suite-registry.ts
 
-tests: {}
+tests:
+  unit:
+    - src/infrastructure/fixture/__tests__/fixture-loader.test.ts
+  regression:
+    - test/regression/fixture-loader-properties.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "Fixture schema migration 정책 없음"
+  - "Fixture schema major-version bump 시 in-place auto-migration은 없음 (외부 fixture repo CHANGELOG 수동 진행)."
 
 next_steps:
-  - "Fixture versioning + auto-migration"
+  - "fixture repo bump 시 자동 codemod / migration tool (현재 미구현 — major bump 빈도가 낮아 우선순위 낮음)."
 
 tags:
   - fixture

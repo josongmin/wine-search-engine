@@ -22,13 +22,27 @@ interface SignatureParams {
 
 /**
  * Normalizes a label for deterministic hashing:
- * trims, lowercases, and collapses whitespace.
+ * NFC-normalises Unicode, trims, lowercases, and collapses whitespace.
+ *
+ * NFC normalisation is required for cross-platform identity stability:
+ * macOS file system paths and pasted strings are commonly NFD-encoded
+ * (decomposed accented chars, decomposed Hangul syllables), while Linux
+ * / Postgres / Vespa typically store NFC. Without `normalize('NFC')` the
+ * same logical label produces two different identity signatures across
+ * platforms — i.e. a content-addressable identity bug that silently
+ * splits one wine into two snapshot entities.
+ *
+ * Mirrors the canonical-form contract of {@link normalizeForMatch} which
+ * is used for producer / region synthesis (`buildSyntheticProducerId`,
+ * `buildSyntheticRegionId` in snapshot-entity-identity.ts). Drift between
+ * canonicalLabel normalisation and producer/region normalisation would
+ * silently break wine-identity stability.
  *
  * Exported so ETL gold-overlay matching (ADR-007) stays aligned with wine
  * identity signatures — drift between the two would break canonical resolution.
  */
 export function normalizeCanonicalLabelForIdentity(label: string): string {
-  return label.trim().toLowerCase().replace(/\s+/g, ' ');
+  return label.normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /**

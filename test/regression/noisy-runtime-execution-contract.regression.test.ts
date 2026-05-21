@@ -116,6 +116,37 @@ describe('Noisy runtime execution contract', () => {
     // (entity-only topology). This is the SOTA routing behaviour for a
     // confident known-item match.
     expect(response.engineDecision.laneTrace?.general.participated).toBe(false);
+    // Audit-restored: the gate-decision contract was silently dropped in the
+    // rewrite. It is NOT topology-dependent — pin it here.
+    expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_resolved');
+  });
+
+  it('auto Latin typo with multiple in-fixture candidates stays ambiguous (multi-candidate fuzzy guard)', async () => {
+    // Companion guard for the SOTA single-typo resolve case above:
+    // when a Latin typo could plausibly map to *more than one* in-fixture
+    // alias within the fuzzy similarity threshold, the calibrated gap
+    // narrows and the decision engine MUST stay ambiguous instead of
+    // confidently sealing identity (Epic 17.3 hallucination guard, encoded
+    // by `NOISY_SHORT_QUERY_GUARD` in decision-engine.ts).
+    //
+    // The default fixture ships both `Penfolds Grange` and `Penfolds Bin 389`-
+    // adjacent aliases via the regular grange entity plus a Korean catalog
+    // counterpart; "penfols" (single deletion of the 'd') is within
+    // Damerau-1 of "penfolds" and Damerau-2 of multiple Penfolds-namespaced
+    // surfaces. With multiple candidates inside the fuzzy band the system
+    // must abstain, not seal.
+    const response = await parts.container.searchUseCase.execute(
+      {
+        query: 'penfols',
+        options: { mode: 'auto', explain: true, clarification: false },
+      },
+      'noisy-runtime-multi-candidate-fuzzy-guard',
+    );
+
+    // Whether the top entity is grange or another Penfolds-namespaced row
+    // is not the assertion — abstention is. Recall-K elsewhere covers the
+    // "did the user's intended entity surface" question.
+    expect(response.engineDecision.decisionStatus).not.toBe('resolved');
   });
 
   it('hybrid override on short Korean prefix query preserves identity evidence and resolves', async () => {

@@ -67,6 +67,28 @@ const KO_PER_CATEGORY_RECALL_AT_3_FLOORS: Readonly<Record<string, number>> = {
   ko_phonetic_var: 0.75, // measured 0.92 — 된소리 변형 (마꼬 등 일부 한계)
 };
 
+/**
+ * Abstention gates — Epic 17.3 hallucination guard.
+ *
+ * `ko_ambiguous` rows carry `expected_resolution: 'ambiguous'` +
+ * `confident_wrong_top1_forbidden: true`. Without these floors the recall
+ * gate above is structurally incomplete: a system that *confidently resolved*
+ * every designed-abstain query to a wrong wine would still pass the recall
+ * floors. The eval harness already computes the metrics
+ * (`resolution_checked_count`, `resolution_match_rate`, `false_exact_rate`);
+ * these constants make the regression read them.
+ *
+ *  - `KO_MIN_RESOLUTION_CHECKED` — sanity floor; if the corpus loses its
+ *    `expected_resolution` tags the test must red rather than silently skip.
+ *  - `KO_FALSE_EXACT_CEILING` — fraction of `expected_resolution='ambiguous'`
+ *    rows the system was permitted to confidently resolve. Strict ceiling.
+ *  - `KO_RESOLUTION_MATCH_FLOOR` — fraction of `expected_resolution`-tagged
+ *    rows whose decisionStatus matched the expectation.
+ */
+const KO_MIN_RESOLUTION_CHECKED = 15;
+const KO_FALSE_EXACT_CEILING = 0.25;
+const KO_RESOLUTION_MATCH_FLOOR = 0.55;
+
 describe('KIL Korean-pattern benchmark — in-process pipeline', () => {
   it('clears recall floors on the Korean noisy entity suite', async () => {
     const parts = createTestContainer({
@@ -87,6 +109,9 @@ describe('KIL Korean-pattern benchmark — in-process pipeline', () => {
       recall_at_1: report.recall_at_1,
       recall_at_3: report.recall_at_3,
       mrr: report.mrr,
+      resolution_checked_count: report.resolution_checked_count,
+      resolution_match_rate: report.resolution_match_rate,
+      false_exact_rate: report.false_exact_rate,
       by_category: Object.fromEntries(
         Object.entries(report.by_category).map(([cat, stats]) => [
           cat,
@@ -119,5 +144,26 @@ describe('KIL Korean-pattern benchmark — in-process pipeline', () => {
           `n=${String(stats.query_count)}; summary: ${JSON.stringify(summary)}`,
       ).toBeGreaterThanOrEqual(floor);
     }
+
+    // Abstention gates — pin the `ko_ambiguous` category whose recall is
+    // intentionally low-by-design. Without these the entire category goes
+    // silently unenforced (audit-3 #2: eval reports the metrics, regression
+    // never read them; a system that confidently mis-resolved every ambiguous
+    // query would still pass the recall floors above).
+    expect(
+      report.resolution_checked_count,
+      `resolution_checked_count=${String(report.resolution_checked_count)} below floor ${String(KO_MIN_RESOLUTION_CHECKED)} — abstention is unmeasured; ` +
+        `summary: ${JSON.stringify(summary)}`,
+    ).toBeGreaterThanOrEqual(KO_MIN_RESOLUTION_CHECKED);
+    expect(
+      report.false_exact_rate ?? 0,
+      `false_exact_rate=${String(report.false_exact_rate)} above ceiling ${String(KO_FALSE_EXACT_CEILING)} — designed-abstain rows were confidently resolved (Epic 17.3 violation); ` +
+        `summary: ${JSON.stringify(summary)}`,
+    ).toBeLessThanOrEqual(KO_FALSE_EXACT_CEILING);
+    expect(
+      report.resolution_match_rate ?? 0,
+      `resolution_match_rate=${String(report.resolution_match_rate)} below floor ${String(KO_RESOLUTION_MATCH_FLOOR)}; ` +
+        `summary: ${JSON.stringify(summary)}`,
+    ).toBeGreaterThanOrEqual(KO_RESOLUTION_MATCH_FLOOR);
   }, 180_000);
 });

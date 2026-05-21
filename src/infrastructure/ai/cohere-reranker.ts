@@ -15,6 +15,7 @@ import {
   isAbortError,
 } from '../http/fetch-with-timeout.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
+import { compareScoreWithTiebreaker } from '../../domain/shared/utils/stable-comparator.js';
 import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
@@ -232,7 +233,21 @@ export class CohereReranker implements RerankerPort {
       scored.push({ entityId: candidate.entityId, score: clamp01(item.relevance_score) });
     }
 
-    scored.sort((a, b) => b.score - a.score);
+    // Stable descending sort with deterministic tie-break on entityId.
+    // The Cohere server returns ties in server-determined order (which can
+    // shift between API versions), and `sort((a,b) => b.score - a.score)`
+    // leaves ties resolved by V8's TimSort stability over input order. For
+    // reproducible ranking — the SOTA++ contract for an audited reranker —
+    // ties MUST resolve deterministically on a domain-stable key. The SSoT
+    // comparator also normalizes any non-finite score to -Infinity (it should
+    // not occur because we reject non-finite scores at parse time, but this
+    // is defense-in-depth against an upstream shape drift).
+    scored.sort(
+      compareScoreWithTiebreaker(
+        (item) => item.score,
+        (item) => String(item.entityId),
+      ),
+    );
 
     // Defense-in-depth: Cohere honors `top_n: limit` server-side, but if the
     // API ever returns more than `limit` items (version drift, proxy, bug),

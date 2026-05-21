@@ -24,6 +24,34 @@ const SEARCH_INDEX_ALIAS_LIMIT = 24;
 const log = bootstrapLogger.child({ component: 'SearchIndexAliasMatcher' });
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 
+/**
+ * Known limitation — alias_type cap bypass on the kill-switch path.
+ *
+ * This matcher is the secondary substrate, used when the PG / snapshot
+ * substrate is unavailable. The Vespa schema flattens the alias catalog
+ * into two arrays (`aliasesIdentitySafe`, `aliasesNoisyRecall`) with no
+ * per-alias `alias_type` column, and `SparseHit` only reports which FIELD
+ * matched — not which alias surface within it. Consequence: an alias that
+ * is `derived_initialism` (or `abbreviation`) at source is served here as
+ * an untyped match against the document's `canonicalLabel` / `producer`
+ * surface, so the resolver scorer's `DERIVED_INITIALISM_CAP` /
+ * `ABBREVIATION_CAP` does not engage on this path
+ * (`candidate-scorer.ts:applyAliasCaps` requires every aliasMatch to be
+ * `aliasType === 'derived_initialism'`, which never occurs without an
+ * explicit emission here).
+ *
+ * Why this is acceptable as-is:
+ *  - This is a degraded-availability fallback. Primary production traffic
+ *    uses `SearchSnapshotAliasMatcher` (loaded from PG), which DOES emit
+ *    `aliasType` from the `aliases.alias_type` column and engages caps.
+ *  - Closing this gap fully requires adding `alias_type` to the Vespa
+ *    schema + ETL projection — that's an ingest-substrate change, not a
+ *    matcher fix.
+ *
+ * If/when the schema gains alias_type per surface form, populate
+ * `AliasMatchResult.aliasType` in `resolveMatchesForQuery` below.
+ */
+
 const FIELD_CONFIDENCE = {
   canonical_label: 0.97,
   aliases_identity_safe: 0.96,

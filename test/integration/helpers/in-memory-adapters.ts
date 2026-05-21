@@ -59,12 +59,31 @@ import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/ser
 
 /**
  * Fuzzy-stage tuning for {@link InMemoryAliasMatcher.findFuzzyMatches}.
- * High threshold + min length keep it to near-typos only (production parity
- * with pg-alias-matcher's Damerau channel, without the greedy over-match that
- * would steal from the exact-ish stages).
+ *
+ * Single-signal Damerau-OSA, in contrast to production `pg-alias-matcher`'s
+ * multi-signal (Damerau + Jaro-Winkler + char-trigram + bigram + Double
+ * Metaphone) max-fused score. The in-memory matcher trades coverage for
+ * determinism: tests need a stable, easy-to-reason-about fuzzy gate.
+ *
+ *  - `FUZZY_MIN_KEY_LENGTH = 5` matches pg-alias-matcher's
+ *    `MIN_FUZZY_QUERY_LENGTH = 5` so a Latin query like "opus" (4) does NOT
+ *    enter the fuzzy stage in either substrate. Hangul side uses jamo
+ *    length, so "오푸스" (jamo len 6) clears; "마고" (jamo len 4) does not
+ *    — that's intentional, matching production's policy of refusing
+ *    fuzzy on very short surfaces.
+ *  - `FUZZY_SIMILARITY_THRESHOLD = 0.8` is tighter than pg's effective
+ *    threshold (multi-signal `max` rarely drops below ~0.85 on real
+ *    typos), so the in-memory side is *stricter*, not looser. The
+ *    in-memory stage is documented as a recall channel for tests, not a
+ *    behavioral parity claim for production.
+ *  - `FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8` is the haircut applied so a
+ *    fuzzy candidate doesn't outscore an exact one. (production pg
+ *    doesn't apply this factor explicitly — it relies on the Jaro-Winkler
+ *    prefix bonus instead. The numerical asymmetry is documented; do not
+ *    use the in-memory matcher's confidence as a proxy for production's.)
  */
 const FUZZY_SIMILARITY_THRESHOLD = 0.8;
-const FUZZY_MIN_KEY_LENGTH = 4;
+const FUZZY_MIN_KEY_LENGTH = 5;
 const FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8;
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 
@@ -728,11 +747,17 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     // consonant/vowel slip is one edit); Latin → compact lowercased string.
     // KIL typo recovery is a *string* problem (Damerau edit distance), not a
     // semantic one — this is the same lexical mechanism for both scripts.
-    // The emitted match is `fuzzy_char_ngram` → `misspelling` tier, so the
-    // decision engine treats it as approximate and keeps the result
-    // `ambiguous` rather than sealing identity (Epic 17.3 caution preserved:
-    // the entity surfaces for recall, but an approximate match never
-    // confidently resolves on its own).
+    //
+    // Emits `lookupStrategy: 'fuzzy_char_ngram'` with no `aliasType`. The
+    // resolver's `inferAliasType` maps that strategy to the `misspelling`
+    // tier. Decision-engine behaviour on the resulting match is calibrated,
+    // not absolute: a single unambiguous typo (one in-fixture candidate
+    // within similarity threshold, large gap to the next) can saturate
+    // `C → 1.0` and bypass `NOISY_SHORT_QUERY_GUARD` via the explicit
+    // `NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE` rule
+    // (decision-engine.ts ~ line 760); a multi-candidate fuzzy match keeps
+    // the gap narrow and stays ambiguous. Both regimes are pinned by
+    // tests in `noisy-runtime-execution-contract.regression.test.ts`.
     const queryJamo = buildHangulJamoKey(normalizedQuery);
     const queryIsHangul = queryJamo.containsHangul;
     const queryKey = queryIsHangul ? queryJamo.key : this.compact(normalizedQuery);

@@ -211,15 +211,21 @@ describe('isTopologyIntentGateOpen — P1 purity', () => {
 // ─── P2 — Korean XOR keyword opens the gate ────────────────────────────────
 
 describe('isTopologyIntentGateOpen — P2 Korean XOR keyword always opens', () => {
-  it('opens for any non-letter prefix/suffix around a curated Korean XOR keyword', () => {
+  it('opens for any Unicode prefix/suffix neighborhood around a curated Korean XOR keyword', () => {
+    // Real adversarial Unicode generator (audit critique: prior version used
+    // hand-picked 5-string constantFrom which is parameterized example, not
+    // a property). We sample over the full Unicode BMP + Astral, then filter
+    // OUT strings that themselves contain any KO_XOR_KEYWORD substring (which
+    // would make the property trivially true regardless of `kw`). The gate
+    // must still open: the planner uses .includes() on whole syllables.
+    const containsAnyXorKeyword = (s: string): boolean =>
+      KO_XOR_KEYWORDS.some((k) => s.includes(k));
     fc.assert(
       fc.property(
         fc.constantFrom(...KO_XOR_KEYWORDS),
-        fc.constantFrom('', ' ', ' 와인 ', '레드 ', ' 추천'),
-        fc.constantFrom('', ' ', ' 화이트', ' 추천해줘'),
+        fc.string({ maxLength: 16 }).filter((s) => !containsAnyXorKeyword(s)),
+        fc.string({ maxLength: 16 }).filter((s) => !containsAnyXorKeyword(s)),
         (kw, prefix, suffix) => {
-          // Korean planner uses .includes() on whole syllables — substring
-          // collisions inside curated tokens are zero by construction.
           const query = `${prefix}${kw}${suffix}`;
           return isTopologyIntentGateOpen({ normalizedQuery: query });
         },

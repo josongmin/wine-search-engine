@@ -10,8 +10,10 @@ summary: |
 
 maturity: 5
 maturity_rationale: |
-  SOTA++ 한국어 키워드 vocabulary SSoT — 검증 가능한 invariants 9종이
-  fast-check (numRuns=100) property-regression으로 락업되어 있음.
+  SOTA++ 한국어 키워드 vocabulary SSoT — 8 deterministic structural invariants
+  (V1–V8: 유한 catalog set 위에서의 결정론적 sweep, fast-check이 아닌 finite
+  enumeration) + 1 fast-check fuzz property (V9, numRuns=100, Hangul+accented
+  +emoji+ASCII Unicode 생성기) + R1/R2 명시적 회귀 케이스로 락업되어 있음.
   V1 set-integrity (unique keys, lowercase-trim invariant), V2 NFC stability
   (lookup key + phrase 필드 모두 normalize('NFC') 동치), V3 whitespace
   discipline (edge/double space 금지), V4 phrase↔key coherence,

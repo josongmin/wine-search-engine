@@ -8,8 +8,8 @@ summary: |
 maturity: 5
 maturity_rationale: |
   SOTA++. embedding / chat-llm / injection-classifier가 공통으로 의존하는 SSoT.
-  Injectable monotonic clock + named constants (DEFAULT_OPENAI_KEY_POOL_COOLDOWN_MS,
-  HTTP_STATUS_*) 위에 산업-검증된 회전 invariants를 property-based로 고정.
+  Injectable monotonic clock + named constant DEFAULT_OPENAI_KEY_POOL_COOLDOWN_MS
+  위에 산업-검증된 회전 invariants를 property-based로 고정.
   fast-check 100-run × 10 properties (P1 round-robin fairness ⌊K/N⌋..⌈K/N⌉,
   P2 single-issue, P3 cooldown exclusion, P4 boundary recovery, P5 exhaustion
   no-bump, P6 stats conservation, P7 deterministic replay, P8 normalize

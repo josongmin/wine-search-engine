@@ -38,6 +38,20 @@ export const RELATIVE_DELTA_MUCH_MORE = 0.5;
 /** Similarity neutral — anchor-near, no axis shift. */
 export const RELATIVE_DELTA_SIMILAR = 0;
 
+/**
+ * Upper bound on the number of {@link RelativeQueryExpression} entries the
+ * extractor will return for a single query.
+ *
+ * Each of the {@link OPERATOR_PATTERNS} entries can contribute AT MOST one
+ * expression per `extract()` call (the inner loop returns on the first regex
+ * match per operator), so the structural bound equals the number of operator
+ * entries. This constant is the SSoT for downstream consumers (e.g. mixed
+ * mode retrieval planners) that need to size buffers or enforce schema
+ * `.max(N)` bounds against the extractor's output without re-deriving the
+ * count from `OPERATOR_PATTERNS.length`.
+ */
+export const MAX_RELATIVE_EXPRESSIONS = 13;
+
 // ---------------------------------------------------------------------------
 // Pattern tables
 // ---------------------------------------------------------------------------
@@ -270,8 +284,18 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Trims, collapses internal whitespace, and NFC-normalises the captured
+ * anchor surface form.
+ *
+ * NFC normalisation is required because upstream callers do not all
+ * pre-normalise (some bypass `nlu.query-normalizer` — e.g. fixture / eval
+ * call sites). Returning a precomposed string makes the extractor output
+ * a deterministic SSoT regardless of caller hygiene, so downstream entity
+ * resolvers see byte-identical surface forms across input encodings.
+ */
 function trimAnchor(raw: string): string {
-  return raw.trim().replace(/\s+/g, ' ');
+  return raw.trim().replace(/\s+/g, ' ').normalize('NFC');
 }
 
 /**

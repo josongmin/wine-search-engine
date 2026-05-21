@@ -96,6 +96,22 @@ const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB;
 const MAX_CORPUS_LOAD_MB = 20;
 const MAX_CORPUS_LOAD_BYTES = MAX_CORPUS_LOAD_MB * BYTES_PER_MB;
 
+/**
+ * 4 MB — maximum size for a single suite.json / case.json / catalog.json file.
+ *
+ * Domain bound: the largest realistic fixture file is a catalog with ~2K
+ * entries averaging ~500 bytes (~1 MB). 4 MB is a 4× safety margin while
+ * still preventing an accidentally-committed multi-GB blob from blowing up
+ * the event loop or exhausting heap when JSON.parse builds the tree.
+ *
+ * Exported so property tests and ETL guards can reference the same bound.
+ */
+const MAX_FIXTURE_JSON_MB = 4;
+export const MAX_FIXTURE_JSON_BYTES = MAX_FIXTURE_JSON_MB * BYTES_PER_MB;
+
+/** UTF-8 BOM code point (U+FEFF) — Node's `readFile('utf8')` does NOT strip this. */
+const UTF8_BOM_CODE_POINT = 0xFEFF;
+
 // ---------------------------------------------------------------------------
 // Zod schemas — strict() to catch schema drift at the source boundary
 // ---------------------------------------------------------------------------
@@ -229,6 +245,46 @@ const AliasSurfaceEntrySchema = z.object({
 }).strict();
 
 type AliasSurfaceEntry = z.infer<typeof AliasSurfaceEntrySchema>;
+
+// ---------------------------------------------------------------------------
+// Unicode normalisation helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively normalises every string in a JSON tree to Unicode NFC.
+ *
+ * Why: fixtures may be authored on macOS (HFS+ returns NFD-decomposed Hangul
+ * in directory entries / file content created via Finder) but compared against
+ * NFC-normalised data downstream (entity IDs, alias surface forms, golden
+ * answers). NFD vs NFC are different byte sequences for the same human-visible
+ * string, and `===` returns false — silently breaking every comparison.
+ *
+ * Operates on JSON-shaped values only (string / number / boolean / null /
+ * Array / plain object). Non-string leaves pass through unchanged.
+ *
+ * Object keys are NOT normalised on purpose: schema field names are
+ * ASCII-only by contract (Zod schemas declare them) and normalising keys
+ * would break the `key in obj` invariant if a key happened to contain
+ * decomposable Latin diacritics.
+ */
+function normalizeNfcDeep(value: unknown): unknown {
+  if (typeof value === 'string') {
+    // String.prototype.normalize is a no-op when input is already NFC, so
+    // this is safe to call unconditionally.
+    return value.normalize('NFC');
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeNfcDeep);
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = normalizeNfcDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
 
 // ---------------------------------------------------------------------------
 // FixtureLoader
@@ -595,9 +651,35 @@ export class FixtureLoader {
 
   private async readJsonFile(path: string): Promise<unknown> {
     this.assertSafePath(path);
-    const raw = await readFile(path, 'utf8');
+    let raw = await readFile(path, 'utf8');
+
+    // DoS guard: reject single files larger than the per-file cap so that an
+    // accidentally-committed multi-GB blob cannot exhaust heap via JSON.parse.
+    // Streaming consumers must use loadCorpusNdjson() / corpusPath() instead.
+    const byteLen = Buffer.byteLength(raw, 'utf8');
+    if (byteLen > MAX_FIXTURE_JSON_BYTES) {
+      throw new Error(
+        `readJsonFile: fixture file exceeds ${MAX_FIXTURE_JSON_BYTES}-byte size limit ` +
+        `(actual: ${byteLen} bytes). Path: ${path}`,
+      );
+    }
+
+    // Strip UTF-8 BOM (U+FEFF) — Node's readFile('utf8') leaves it intact and
+    // JSON.parse rejects BOM-prefixed input with a cryptic error. Industry
+    // standard: BOM is a stream marker, not a data character (RFC 8259 §8.1).
+    if (raw.length > 0 && raw.charCodeAt(0) === UTF8_BOM_CODE_POINT) {
+      raw = raw.slice(1);
+    }
+
     // Rule 12: JSON.parse result is cast to unknown first, then validated by callers
-    return JSON.parse(raw) as unknown;
+    const parsed = JSON.parse(raw) as unknown;
+
+    // Unicode normalisation: NFC at the boundary so downstream `===` and
+    // Set/Map keys behave correctly regardless of how the fixture file was
+    // encoded on disk (macOS HFS+ returns NFD-decomposed Hangul; Linux/Git
+    // typically NFC; Windows is mixed). This is the same pattern used by
+    // the W3C Internationalization WG "Early Uniform Normalization" advice.
+    return normalizeNfcDeep(parsed);
   }
 
   private async loadCatalogEntries<T>(
