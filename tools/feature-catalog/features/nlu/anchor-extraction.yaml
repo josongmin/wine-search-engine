@@ -7,16 +7,21 @@ summary: |
   ("같은", "비슷한", "보다") + 영문 comparison marker ("vs", "compared to") 처리,
   phrase-level idiom/temporal anti-pattern guard 포함.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Alias matcher 추상화 + unit test + planner 통합 + dedicated regression suite
-  (`anchor-extraction-marker-precision.regression.test.ts`, 17 case). Phrase-level
-  idiom guard (`KOREAN_MARKER_IDIOM_ANTIPATTERNS`)로 "어제와 같은 와인" 같은
-  temporal false-positive와 "가솔린처럼 가볍다" 같은 simile idiom false-positive를
-  marker 단계에서 차단. determinism, Unicode (Hangul jamo, accented Latin,
-  emoji) hygiene까지 잠금. 아직 미진: lookup strategy ranking (exact > fuzzy >
-  metaphone) hardcoded, multi-anchor priority 결정론은 confidence + surface form
-  tiebreaker로만 보장 (rank-learned 아님).
+  Alias matcher 추상화 + unit test + planner 통합 + 2-tier regression suite:
+  (1) enumerated marker-precision (`anchor-extraction-marker-precision.regression.test.ts`,
+  17 case) + (2) property-based invariants (`anchor-extraction-properties.regression.test.ts`,
+  fast-check numRuns=100). Property suite는 hand-picked case를 넘어 생성 공간 전체에서
+  invariant를 잠금: determinism(동일 query 5회 → 동일 verdict), idiom false-positive
+  guard(생성된 모든 temporal "X와/과 같은 …" + "<noun>처럼" simile → 절대 marker
+  미발화), true comparison detection(entity-pair × 모든 Latin marker {vs/versus/
+  compared to} 및 Korean "과/와 … 비교" frame → 발화), NFC idempotence(production
+  normalizer 계약 형태), empty/noise-only → no false anchor, accented-Latin +
+  apostrophe entity("Château d'Yquem") preservation. NFD divergence는 pinned
+  known-limitation으로 잠금(loosening 금지, normalizer가 NFC 보장). 아직 미진:
+  lookup strategy ranking (exact > fuzzy > metaphone) hardcoded, multi-anchor
+  priority 결정론은 confidence + surface form tiebreaker로만 보장 (rank-learned 아님).
 
 status: active
 since: 2025-09
@@ -34,6 +39,7 @@ key_files:
 tests:
   regression:
     - test/regression/anchor-extraction-marker-precision.regression.test.ts
+    - test/regression/anchor-extraction-properties.regression.test.ts
   unit:
     - src/domain/query/__tests__/anchor-extractor.test.ts
     - src/domain/query/service/__tests__/relative-query-extractor.test.ts
@@ -49,6 +55,7 @@ known_limitations:
   - "Lookup strategy ranking hardcoded (exact > fuzzy > metaphone)"
   - "Multi-anchor priority는 confidence + surface tiebreaker 기반 — learned ranker 아님"
   - "Idiom anti-pattern list는 enumerated (audit-driven, not exhaustive)"
+  - "Marker regex는 NFC(precomposed Hangul) 입력 가정 — raw NFD jamo 입력은 미발화 (nlu.query-normalizer가 NFC 보장; property suite에 pinned)"
 
 next_steps:
   - "Lookup strategy ranking 학습화 (LTR/contextual)"

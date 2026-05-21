@@ -424,4 +424,206 @@ describe('ShadowModeRunner', () => {
       'check_drinking_window',
     ]);
   });
+
+  // -------------------------------------------------------------------------
+  // Observation provenance (Gap-4: faithfulness / contextRecall grounding)
+  // -------------------------------------------------------------------------
+
+  describe('observation extraction', () => {
+    it('wine-search: flattens observations from runner + mini_loop steps in step order', async () => {
+      const legacy = makeFakeLegacyAgent(async () => makeAgentResult());
+      const wineSearch = makeFakeWineSearchOrchestrator(async () =>
+        makeWineSearchResult({
+          executionSteps: [
+            {
+              index: 0,
+              source: 'analyzer',
+              summary: 'analyze',
+              observations: ['SHOULD_BE_DROPPED_analyzer'],
+              durationMs: 1,
+            },
+            {
+              index: 1,
+              source: 'runner',
+              summary: 'search',
+              toolCalls: [{ name: 'search_wines', arguments: { q: 'opus' } }],
+              observations: ['runner-obs-1', 'runner-obs-2'],
+              durationMs: 10,
+            },
+            {
+              index: 2,
+              source: 'mini_loop',
+              summary: 'refine',
+              toolCalls: [{ name: 'check_drinking_window', arguments: {} }],
+              observations: ['mini-obs-3'],
+              durationMs: 5,
+            },
+            {
+              index: 3,
+              source: 'synthesizer',
+              summary: 'synth',
+              observations: ['SHOULD_BE_DROPPED_synth'],
+              durationMs: 1,
+            },
+          ],
+        }),
+      );
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-obs' });
+      // Step-order fidelity; analyzer / synthesizer observations excluded.
+      expect(report.wineSearch.observations).toEqual([
+        'runner-obs-1',
+        'runner-obs-2',
+        'mini-obs-3',
+      ]);
+    });
+
+    it('wine-search: empty observations when no runner/mini_loop steps carry grounding', async () => {
+      const legacy = makeFakeLegacyAgent(async () => makeAgentResult());
+      const wineSearch = makeFakeWineSearchOrchestrator(async () =>
+        makeWineSearchResult({
+          executionSteps: [
+            {
+              index: 0,
+              source: 'analyzer',
+              summary: 'analyze only',
+              observations: ['analyzer-noise'],
+              durationMs: 1,
+            },
+          ],
+        }),
+      );
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-empty-obs' });
+      expect(report.wineSearch.observations).toEqual([]);
+    });
+
+    it('wine-search: drops empty observation strings (no signal)', async () => {
+      const legacy = makeFakeLegacyAgent(async () => makeAgentResult());
+      const wineSearch = makeFakeWineSearchOrchestrator(async () =>
+        makeWineSearchResult({
+          executionSteps: [
+            {
+              index: 0,
+              source: 'runner',
+              summary: 'search',
+              toolCalls: [{ name: 'search_wines', arguments: {} }],
+              observations: ['', 'kept', ''],
+              durationMs: 10,
+            },
+          ],
+        }),
+      );
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-empty-str' });
+      expect(report.wineSearch.observations).toEqual(['kept']);
+    });
+
+    it('wine-search: preserves Korean observations byte-identical (CLAUDE.md rule 5)', async () => {
+      const koreanObs = '바롤로 2016 — 가성비 좋은 이탈리아 레드 와인 🍷';
+      const legacy = makeFakeLegacyAgent(async () => makeAgentResult());
+      const wineSearch = makeFakeWineSearchOrchestrator(async () =>
+        makeWineSearchResult({
+          executionSteps: [
+            {
+              index: 0,
+              source: 'runner',
+              summary: 'search',
+              toolCalls: [{ name: 'search_wines', arguments: {} }],
+              observations: [koreanObs],
+              durationMs: 10,
+            },
+          ],
+        }),
+      );
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: '바롤로 추천', requestId: 'req-kr' });
+      expect(report.wineSearch.observations).toEqual([koreanObs]);
+      // Byte-identical: no NFKC mangling, no truncation under the 2000-char cap.
+      expect(report.wineSearch.observations?.[0]).toBe(koreanObs);
+    });
+
+    it('legacy: prefers evidenceFrames[].observationSnapshot when present', async () => {
+      const legacy = makeFakeLegacyAgent(async () =>
+        makeAgentResult({
+          evidenceFrames: [
+            { observationSnapshot: 'frame-obs-1' },
+            { observationSnapshot: 'frame-obs-2' },
+          ] as unknown as NonNullable<AgentResult['evidenceFrames']>,
+        }),
+      );
+      const wineSearch = makeFakeWineSearchOrchestrator(async () => makeWineSearchResult());
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-frames' });
+      expect(report.legacy.observations).toEqual(['frame-obs-1', 'frame-obs-2']);
+    });
+
+    it('legacy: falls back to actionPairs[].observation when no evidenceFrames', async () => {
+      const legacy = makeFakeLegacyAgent(async () =>
+        makeAgentResult({
+          steps: [
+            {
+              index: 0,
+              thought: 'batch',
+              actionPairs: [
+                { action: { tool: 'search_wines', input: {} }, observation: 'pair-obs-1' },
+                { action: { tool: 'check_drinking_window', input: {} }, observation: 'pair-obs-2' },
+              ],
+              durationMs: 10,
+              tokenCount: { input: 50, output: 25 },
+            },
+          ],
+          toolCallCount: 2,
+        }),
+      );
+      const wineSearch = makeFakeWineSearchOrchestrator(async () => makeWineSearchResult());
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-pairs' });
+      expect(report.legacy.observations).toEqual(['pair-obs-1', 'pair-obs-2']);
+    });
+
+    it('legacy: single-step result surfaces step.observation', async () => {
+      const legacy = makeFakeLegacyAgent(async () => makeAgentResult());
+      const wineSearch = makeFakeWineSearchOrchestrator(async () => makeWineSearchResult());
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-single' });
+      // makeAgentResult's default single step carries observation 'found'.
+      expect(report.legacy.observations).toEqual(['found']);
+    });
+
+    it('errored side carries an empty observations array (never undefined)', async () => {
+      const legacy = makeFakeLegacyAgent(async () => {
+        throw new Error('boom');
+      });
+      const wineSearch = makeFakeWineSearchOrchestrator(async () => makeWineSearchResult());
+      const runner = new ShadowModeRunner({
+        legacyOrchestrator: legacy,
+        wineSearchOrchestrator: wineSearch,
+      });
+      const report = await runner.runOnce({ query: 'q', requestId: 'req-err-obs' });
+      expect(report.legacy.status).toBe('error');
+      expect(report.legacy.observations).toEqual([]);
+    });
+  });
 });

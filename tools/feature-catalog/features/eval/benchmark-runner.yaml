@@ -6,11 +6,28 @@ summary: |
   constraint-extraction metric, retrieval ceiling, ranking (NDCG/MRR), dimension scoring
   + graph coverage 산출. nightly 실행, results/baseline.json regression baseline.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  복잡한 judge (token budget + tool order + LLM fact-check) + dimension weight + retrieval
-  analysis. baseline + diff reporter 완비. 그러나 judge rubric 수작업 tuning per scenario
-  update — drift 자동 감지 없음.
+  MT-Bench/AlpacaEval 패턴: LLM-as-judge는 본질적으로 확률적이며 그 variance는
+  문서화된 한계 (judge.ts: N=3 median + DIMENSION_FLOOR로 noise 상한). SOTA++를
+  정당화하는 것은 judge 주변의 SCORING/METRIC/AGGREGATION harness가 완전히
+  deterministic하고 property-lock 되었다는 점이다.
+
+  결정론적 채점 harness가 fast-check property test (각 100 runs)로 잠김 —
+  test/regression/benchmark-runner-scoring-properties.regression.test.ts:
+    - dimension weight normalization (renormaliseWeights → sum=1.0,
+      weightedGeometricMean ∈ [0,1])
+    - constraint-metric bounds (SCR/Slot-F1 precision·recall·F1 ∈ [0,1])
+    - constraint perfect-match (extracted ⊇ expected → recall=F1=1.0)
+    - retrieval ceiling bounds (recall@k / oracle nDCG / oracle MRR /
+      coverage / efficiency ∈ [0,1]; achieved ≤ oracle)
+    - scoring determinism (동일 input → byte-identical score, Date/random 無)
+    - aggregation monotonicity (passing scenario 추가 → pass rate 감소 不可)
+
+  이는 휴리스틱이 아니라 metric 정의에 대한 정리 (TAC KBP / SemEval F1,
+  Järvelin & Kekäläinen 2002 nDCG, weighted geometric mean). baseline + diff
+  reporter 완비. judge rubric 수작업 tuning + drift 자동 감지 부재는 확률적
+  judge 레이어에 국한된 한계로, 결정론적 harness rigor와 분리됨.
 
 status: active
 since: 2025-10
@@ -23,9 +40,15 @@ surfaces:
 key_files:
   - test/benchmark/agent/runner.ts
   - test/benchmark/agent/scenario.ts
+  - test/benchmark/agent/constraint-metrics.ts
+  - test/benchmark/agent/ranking-metrics.ts
+  - test/benchmark/agent/retrieval-ceiling-metrics.ts
+  - test/benchmark/agent/scorer.ts
 
 tests:
   bench: []
+  regression:
+    - test/regression/benchmark-runner-scoring-properties.regression.test.ts
 
 depends_on:
   - eval.benchmark-scenarios
@@ -34,8 +57,9 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Rubric 수작업 tuning"
-  - "Rubric drift 자동 감지 없음"
+  - "LLM-judge variance는 본질적 한계 (확률적 rubric) — N=3 median + DIMENSION_FLOOR로 완화하나 제거 불가"
+  - "Rubric 수작업 tuning per scenario"
+  - "Rubric drift 자동 감지 없음 (확률적 judge 레이어에 국한; 결정론적 harness는 property-locked)"
 
 next_steps:
   - "RFC 예시 기반 rubric 자동 생성"

@@ -1,0 +1,395 @@
+{
+  "url": "https://api.anthropic.com/v1/messages",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+    "x-api-key": "<redacted>"
+  },
+  "body": {
+    "model": "claude-4-sonnet-latest",
+    "system": [
+      {
+        "type": "text",
+        "text": "You are the wine-search query analyzer. Emit a WineSearchAnalysis object matching the supplied JSON schema. Preserve the user query byte-for-byte in `preservedSurface`. Set `intent` to the closest match in (\"search\", \"compare\", \"pair\", \"drinkability\", \"unknown\"). Anchors and normalized constraints MUST come from the user query — do not invent entities that are not present. If you cannot identify a wine-domain signal, return intent=\"search\" with empty anchors and constraints."
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "something nice"
+      }
+    ],
+    "max_tokens": 4096,
+    "tools": [
+      {
+        "name": "respond",
+        "description": "Return your final response as a single structured object matching the provided schema. Call this tool exactly once.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "intent": {
+              "type": "string",
+              "enum": [
+                "search",
+                "compare",
+                "pair",
+                "drinkability",
+                "unknown"
+              ]
+            },
+            "anchors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "surface": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "canonicalValue": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "entityType": {
+                    "type": "string",
+                    "enum": [
+                      "producer",
+                      "wine",
+                      "appellation",
+                      "region",
+                      "country",
+                      "grape",
+                      "style"
+                    ]
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "surface",
+                  "canonicalValue",
+                  "entityType",
+                  "confidence"
+                ]
+              },
+              "maxItems": 8
+            },
+            "normalizedConstraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "operator": {
+                    "type": "string",
+                    "enum": [
+                      "=",
+                      "<=",
+                      ">=",
+                      "range",
+                      "in",
+                      "exclude",
+                      "not_in"
+                    ]
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "min": {
+                            "type": "number"
+                          },
+                          "max": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "min",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "maxItems": 32
+                      }
+                    ]
+                  },
+                  "source_phrase": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "mapping_version": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "attribute",
+                  "operator",
+                  "value",
+                  "source_phrase",
+                  "confidence"
+                ]
+              },
+              "maxItems": 32
+            },
+            "decomposition": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "comparison"
+                    },
+                    "legs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "surface": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "constraints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "attribute": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                },
+                                "operator": {
+                                  "type": "string",
+                                  "enum": [
+                                    "=",
+                                    "<=",
+                                    ">=",
+                                    "range",
+                                    "in",
+                                    "exclude",
+                                    "not_in"
+                                  ]
+                                },
+                                "value": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 2000
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "min": {
+                                          "type": "number"
+                                        },
+                                        "max": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "min",
+                                        "max"
+                                      ]
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "maxLength": 2000
+                                      },
+                                      "maxItems": 32
+                                    }
+                                  ]
+                                },
+                                "source_phrase": {
+                                  "type": "string",
+                                  "maxLength": 2000
+                                },
+                                "confidence": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "mapping_version": {
+                                  "type": "string",
+                                  "maxLength": 2000
+                                }
+                              },
+                              "required": [
+                                "attribute",
+                                "operator",
+                                "value",
+                                "source_phrase",
+                                "confidence"
+                              ]
+                            },
+                            "maxItems": 32
+                          }
+                        },
+                        "required": [
+                          "surface",
+                          "constraints"
+                        ]
+                      },
+                      "minItems": 2,
+                      "maxItems": 4
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "legs"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "parallel-slot"
+                    },
+                    "slots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "wineType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10
+                          }
+                        },
+                        "required": [
+                          "wineType"
+                        ]
+                      },
+                      "minItems": 2,
+                      "maxItems": 4
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "slots"
+                  ]
+                }
+              ],
+              "x-discriminator": "kind"
+            },
+            "contract": {
+              "type": "object",
+              "properties": {
+                "requiresDrinkabilityCheck": {
+                  "type": "boolean"
+                },
+                "requiredTool": {
+                  "type": "string",
+                  "enum": [
+                    "search_wines",
+                    "compare_wines",
+                    "check_drinking_window",
+                    "get_food_pairings"
+                  ]
+                },
+                "requiresGroundedWineSearch": {
+                  "type": "boolean"
+                },
+                "hasEntityMetadataSignal": {
+                  "type": "boolean"
+                },
+                "exactMetadataTargetVintage": {
+                  "type": "integer",
+                  "minimum": 1700,
+                  "maximum": 2200
+                }
+              },
+              "required": [
+                "requiresDrinkabilityCheck",
+                "requiresGroundedWineSearch",
+                "hasEntityMetadataSignal"
+              ]
+            },
+            "expectedMultiStep": {
+              "type": "boolean"
+            },
+            "recommendedBudget": {
+              "type": "object",
+              "properties": {
+                "maxSteps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "perToolCap": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 6
+                }
+              },
+              "required": [
+                "maxSteps",
+                "perToolCap"
+              ]
+            },
+            "hangulDominant": {
+              "type": "boolean"
+            },
+            "preservedSurface": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "required": [
+            "intent",
+            "anchors",
+            "normalizedConstraints",
+            "contract",
+            "expectedMultiStep",
+            "recommendedBudget",
+            "hangulDominant",
+            "preservedSurface"
+          ]
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "tool",
+      "name": "respond"
+    }
+  }
+}

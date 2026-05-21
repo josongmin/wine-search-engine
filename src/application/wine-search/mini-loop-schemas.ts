@@ -119,8 +119,10 @@ const DIRECTIVE_INSTRUCTION_MAX_CHARS = 512;
 const DIRECTIVE_ENTITY_ID_MAX_CHARS = 128;
 
 /** Default Anthropic model id for mini-loop execution. Overrideable via
- *  runner deps for tests / future routing. */
-export const MINI_LOOP_DEFAULT_MODEL = 'claude-4-sonnet-latest';
+ *  runner deps for tests / future routing.
+ *  Format `claude-<family>-<gen>` per Anthropic Messages API spec — matches
+ *  `claude-(opus|sonnet|haiku)-N-M`. `claude-4-sonnet-latest` is rejected with HTTP 400. */
+export const MINI_LOOP_DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 // ---------------------------------------------------------------------------
 // AgentToolName re-export — convenience for runner consumers.

@@ -25,6 +25,7 @@ import {
   loadGoldCanonicalLookupForBuild,
   resolveDefaultFixtureRepoRoot,
   resolveWineSnapshotEntity,
+  type SourceEntityContinuityRecord as _SourceEntityContinuityRecord,
 } from './snapshot-entity-identity.js';
 import type {
   CanonicalEntityId,
@@ -522,7 +523,7 @@ function readSeedIsTopRated(doc: object, entityId: string): boolean {
   throw new Error(`benchmark anchor ${entityId} has invalid isTopRated=${JSON.stringify(value)}`);
 }
 
-function buildGiftSuitabilityContentHash(record: EnrichedSilverRecord): string {
+export function buildGiftSuitabilityContentHash(record: EnrichedSilverRecord): string {
   return crypto.createHash('sha256').update([
     record.canonicalLabel,
     record.producer,
@@ -540,7 +541,7 @@ function buildGiftSuitabilityContentHash(record: EnrichedSilverRecord): string {
   ].join('\n')).digest('hex');
 }
 
-function buildBeginnerSuitabilityContentHash(record: EnrichedSilverRecord): string {
+export function buildBeginnerSuitabilityContentHash(record: EnrichedSilverRecord): string {
   return crypto.createHash('sha256').update([
     record.canonicalLabel,
     record.producer,

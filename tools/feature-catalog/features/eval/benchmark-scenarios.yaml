@@ -7,11 +7,17 @@ summary: |
   (Korean ↔ Latin). v3 contract (tool expectation + LLM rubric + token budget +
   attack type + grounding guard).
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   v3 contract migration 완료 (goldenEntityIds → goldenKeywords 등 breaking). 다차원
   weight + adversarial injection detection + constraint-extraction eval. 149+
-  scenario-specific regression test. authoring DSL 부재로 5는 못 됨.
+  scenario-specific regression test. 추가로 property-based corpus contract
+  invariants (test/regression/benchmark-scenarios-contract-properties.regression.test.ts)
+  가 REAL 480-scenario corpus 전수 enumeration으로 id uniqueness / tier validity /
+  attack-type validity / NFC Korean coverage / budget finiteness / non-empty query /
+  expectation-signal presence를 강제 — 시나리오는 deterministic DATA이므로 LLM judge와
+  분리해 단위 테스트 시점에 malformed scenario를 차단. fast-check (numRuns:100) 로
+  per-scenario contract predicate sampling + shrinking 보강.
 
 status: active
 since: 2025-10

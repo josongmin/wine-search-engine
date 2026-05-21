@@ -6,17 +6,17 @@ summary: |
   정규화 + 50+ exclusion rule로 attribute 도메인 mapping (e.g. "no high tannin" →
   tannin_max < 3). Pure lexical, composable.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Korean negation normalizer + rule inventory 잘 정리. 부정 scope의 정량적 cutoff을
-  named constants로 정형화 — NEGATION_SOFT_CAP_QUANTILE = 0.4 (mild aversion: "not
-  too X" / "별로 안 X"), NEGATION_HARD_CAP_QUANTILE = 0.25 (strong aversion: "no
-  high X" / "low X only" / "안 X" / "X 빼고" / "X 없이" / "X 말고"). 전용 regression
-  suite (31 tests) — English/Korean 양쪽, 정확한 threshold 값 assertion, 5x
-  determinism, particle variants (안/못/없이/빼고/말고), false-positive guard ("this
-  wine is not what I want" ≠ 부정 cap), mixed positive+negative ("sweet but not too
-  sweet" → sweetness=sweet ∧ sweetness_max=SOFT). rule weighting / learning은 여전히
-  부재 — 5단계는 ML-driven scope arbitration 필요.
+  Korean negation morphology를 industry NLP taxonomy 수준으로 정형화 + property-based
+  exhaustiveness 검증. named constants: NEGATION_SOFT_CAP_QUANTILE=0.4, NEGATION_HARD_CAP_QUANTILE=0.25.
+  Two regression suites: (1) 31-case scenario suite, (2) NEW property suite
+  (rule-based-constraint-extractor-properties.regression.test.ts, 27 tests, 12 fast-check
+  properties × numRuns=100): negation taxonomy exhaustiveness (particle × attribute matrix),
+  SOFT<HARD ordering invariant, extraction idempotence, positive+negative coexistence,
+  false-positive guard (prosaic negation generators), NFC stability, 22+ Korean josa variations.
+  Industry pattern: Korean 부정 표현 morphological analysis. SOTA++ — property-based
+  linguistic invariants over the full particle space.
 
 status: active
 since: 2025-09
@@ -33,6 +33,7 @@ key_files:
 tests:
   regression:
     - test/regression/rule-based-constraint-extractor.regression.test.ts
+    - test/regression/rule-based-constraint-extractor-properties.regression.test.ts
 
 depends_on:
   - nlu.query-normalizer

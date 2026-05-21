@@ -66,8 +66,12 @@ const defaultLog = bootstrapLogger.child({ component: 'SynthesisRunner' });
 // Named constants (CLAUDE.md rule 15)
 // ---------------------------------------------------------------------------
 
-/** Anthropic model id for synthesis. Overrideable via deps for tests. */
-const DEFAULT_SYNTHESIS_MODEL = 'claude-4-sonnet-latest';
+/**
+ * Anthropic model id for synthesis. Overrideable via deps for tests.
+ * Format `claude-<family>-<gen>` per Anthropic Messages API spec (matches
+ * `claude-(opus|sonnet|haiku)-N-M` — `claude-4-sonnet-latest` is rejected with HTTP 400).
+ */
+const DEFAULT_SYNTHESIS_MODEL = 'claude-sonnet-4-6';
 
 /** Marker for structured grounding payload appended by search tools. PORTED
  *  from `agent-answer-recovery-policy.ts` (single-source-of-truth would

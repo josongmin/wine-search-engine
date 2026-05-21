@@ -6,11 +6,20 @@ summary: |
   결정적 graph로 컴파일하기 위한 40+ template lexicon. constraint-topology-planner의
   입력. rule-based.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
   431 lines, 40+ template로 흔한 query shape 커버. regression 게이트 (topology-planner
-  flag-on integration). 그러나 정적 inventory, parameterization 없음 ("under 50K" 문자
-  hardcoded), overlap precedence 미정의.
+  flag-on integration) + property-based invariant lock (fast-check, numRuns:100,
+  test/regression/topology-pattern-lexicon-properties.regression.test.ts):
+    - P1 pattern-id/token uniqueness (regex + keyword 카탈로그 중복 0)
+    - P2 regex validity + /u flag 보장 (재컴파일 가능)
+    - P3 Korean-safe boundary — exported regex source 에 ASCII `\b` 부재 (rule 8 scan)
+    - P4 `\p{L}\p{N}` sequence bug 부재 — 모든 property escape 가 `[...]` char class 내부 (rule 24 scan)
+    - P5 match determinism (5x 반복 동일) + non-global (stateless `.test()`)
+    - P6 known query shapes — "red wine under 50K"/한글 등가, XOR/course/shared-budget canonical
+    - P7 empty → no match, arbitrary 한글/accent/emoji → no throw
+  rule 8/24 compliance scan 가 정적 inventory 전체를 property 로 락. parameterization 부재는
+  의도된 결정적 설계 (production query 로그 기반 자동 발견은 next_steps).
 
 status: active
 since: 2025-10
@@ -23,7 +32,10 @@ surfaces:
 key_files:
   - src/domain/query/service/topology-pattern-lexicon.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/topology-pattern-lexicon.regression.test.ts
+    - test/regression/topology-pattern-lexicon-properties.regression.test.ts
 
 depends_on:
   - nlu.search-constraint-extraction

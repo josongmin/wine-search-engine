@@ -6,7 +6,7 @@ summary: |
   분리. subtype 분류 (entity_pair / region_contrast / price_contrast 등).
   decomposed-search-adapter가 단일 SearchUseCase 재사용.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Pattern 기반 detection + decomposed adapter. E6-U3 lock으로 overengineering 방지.
   test/regression/decomposition-detection.regression.test.ts (35 cases) 가
@@ -36,6 +36,7 @@ key_files:
 
 tests:
   regression:
+    - test/regression/decomposition-detection-properties.regression.test.ts
     - test/regression/decomposition-detection.regression.test.ts
   unit:
     - src/domain/query/service/__tests__/decomposition-detector.test.ts

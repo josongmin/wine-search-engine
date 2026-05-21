@@ -1,0 +1,172 @@
+{
+  "url": "https://api.anthropic.com/v1/messages",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+    "x-api-key": "<redacted>"
+  },
+  "body": {
+    "model": "claude-haiku-4-5-20251001",
+    "system": [
+      {
+        "type": "text",
+        "text": "You are a wine search agent driving a small, focused ReAct loop.\n\nAvailable tools:\n  - search_wines: retrieve wines matching the query and constraints.\n  - get_food_pairings: retrieve wines that pair with a food description.\n  - check_drinking_window: evaluate drinkability of a specific wine entity at a target year.\n  - compare_wines: compare two wine descriptors.\n\nHard rules:\n  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.\n  - Ground every factual claim in a tool result. NEVER fabricate.\n  - When you emit a final answer, do NOT make additional tool calls.\n  - Honor any \"directive\" message the controller injects between turns. Directives are authoritative — they reflect contract requirements derived from the user query.\n  - If the controller injects a \"Loop detected\" notice, switch to a different tool or substantially different input on the next turn.",
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "find and assess a Burgundy pinot"
+      }
+    ],
+    "max_tokens": 1024,
+    "tools": [
+      {
+        "name": "search_wines",
+        "description": "Search the wine catalog. Use for finding wines by name, region, style, vintage, price, food pairing intent, or any combination. Accepts structured filters.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "filters": {
+              "type": "array",
+              "items": {},
+              "maxItems": 16
+            },
+            "preferences": {
+              "type": "array",
+              "items": {},
+              "maxItems": 16
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "entity",
+                "hybrid",
+                "mixed"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "compare_wines",
+        "description": "Compare two wines side-by-side. Use ONLY for explicit head-to-head comparisons. Cannot batch with other tools — must run alone.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query_a": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "query_b": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "query_a",
+            "query_b"
+          ]
+        }
+      },
+      {
+        "name": "check_drinking_window",
+        "description": "Check current/future drinkability for a specific wine. Provide an entity_id from a prior search_wines result; never invent ids.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "entity_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "target_year": {
+              "type": "integer",
+              "minimum": 1900,
+              "maximum": 2100
+            }
+          },
+          "required": [
+            "entity_id"
+          ]
+        }
+      },
+      {
+        "name": "get_food_pairings",
+        "description": "Suggest wine pairings for a food description. Returns ranked wines. Accepts color, styles, budget.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "food": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "color": {
+              "type": "string",
+              "enum": [
+                "red",
+                "white",
+                "rosé",
+                "sparkling",
+                "both"
+              ]
+            },
+            "styles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "maxItems": 16
+            },
+            "pairing_tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "maxItems": 16
+            },
+            "max_price_krw": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000
+            }
+          },
+          "required": [
+            "food"
+          ]
+        },
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "auto"
+    }
+  }
+}

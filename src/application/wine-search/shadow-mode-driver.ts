@@ -43,6 +43,7 @@ import type {
   ShadowModeLogger,
   WineSearchOrchestratorLike,
 } from './shadow-mode-runner.js';
+import type { AgentOrchestrator } from '../agent/agent-orchestrator.js';
 import {
   ShadowModeScorer,
   type BenchScorerFn,
@@ -75,6 +76,16 @@ const CUTOVER_RUNBOOK_PATH = 'docs/runbook-wine-search-cutover.md';
 export interface ShadowModeDriver {
   /** Shadow-mode runner wired to the real legacy and new orchestrators. */
   readonly runner: ShadowModeRunner;
+  /**
+   * The real legacy orchestrator pulled from the container. Exposed so the
+   * bench CLI's `runBench()` — which builds its own runner internally — can
+   * consume the raw orchestrators without the driver and the CLI each owning
+   * an independent runner. The driver's `runner` and the CLI's runner wrap the
+   * SAME orchestrator instances, so there is no duplicate LLM client.
+   */
+  readonly legacyOrchestrator: AgentOrchestrator;
+  /** The real wine-search orchestrator (structural adapter) from the container. */
+  readonly wineSearchOrchestrator: WineSearchOrchestratorLike;
   /**
    * Shadow-mode scorer wrapping the runner with the bench scorer. The CLI
    * supplies the scorer fn (loaded dynamically from `test/benchmark/agent`)
@@ -180,7 +191,7 @@ export async function buildShadowModeDriver(
 
   // ── Pre-flight 3: agentOrchestrator present (AGENT_ENABLED=true gate).
   if (container.agentOrchestrator === undefined) {
-    await safeClose(built.close);
+    await safeClose(built.close?.bind(built));
     throw new Error(
       `[shadow-mode-driver] container.agentOrchestrator is undefined — set AGENT_ENABLED=true and `
       + `configure an OpenAI credential so the legacy agent route is wired. The bench requires both `
@@ -194,7 +205,7 @@ export async function buildShadowModeDriver(
   //    container change that silently drops the slot.
   const wineSearchSlice = container.wineSearch;
   if (wineSearchSlice === undefined) {
-    await safeClose(built.close);
+    await safeClose(built.close?.bind(built));
     throw new Error(
       `[shadow-mode-driver] container.wineSearch is undefined despite ${WINE_SEARCH_FEATURE_FLAG_ENV}=true. `
       + `Check that buildWineSearchContainerServices() ran successfully — see container.ts. `
@@ -225,10 +236,12 @@ export async function buildShadowModeDriver(
   return {
     runner,
     scorer,
+    legacyOrchestrator: container.agentOrchestrator,
+    wineSearchOrchestrator: wineSearchAdapter,
     async shutdown(): Promise<void> {
       if (shutdownInvoked) return;
       shutdownInvoked = true;
-      await safeClose(built.close);
+      await safeClose(built.close?.bind(built));
     },
   };
 }

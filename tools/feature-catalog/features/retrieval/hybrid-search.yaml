@@ -6,12 +6,24 @@ summary: |
   dense/sparse 모드 선택. 한국어 query에 대해 Hangul threshold 적용 +
   entity boost. 단발 검색 핫패스.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  프로덕션 트래픽에서 안정 동작. golden-set + regression test 커버 완료.
-  Korean Jaccard tuning + entity boost + curated alias catalog 적용.
-  Late-interaction reranker(ColBERT) 또는 LTR 미도입 상태라 5(SOTA++)는
-  아님. 그 외 영역 (recall, latency, observability)은 모두 production grade.
+  프로덕션 트래픽에서 안정 동작. 융합 코어(RRF math + dual-lane merge)에 대한
+  edge-case regression suite 추가로 production grade 확정.
+  - FusionService.fuse: RRF 공식(1/(k+rank)) 정확도, k<1 거부, sparse-only /
+    dense-only / both-empty lane 처리, score monotonicity, 동점 시 entityId
+    오름차순 tie-break, sparse+learned_sparse lexical-family collapse(중복
+    가산 방지), channel dedup을 직접 단언.
+  - fuseDualLaneArtifacts: entity+general dedup→corroborated, 한국어
+    canonicalLabel NFC flow-through, rank 기반 stable ordering, both-empty
+    no-throw를 단언.
+  - Determinism은 양쪽 코어 모두 동일 입력 5회 재실행으로 검증.
+  audit가 지적한 "e2e golden-set 1건뿐" 갭 해소 (test/regression/
+  hybrid-search-fusion.regression.test.ts, 17 cases). Korean Jaccard tuning +
+  entity boost + curated alias catalog 적용.
+  Late-interaction reranker(ColBERT) 또는 LTR 미도입 상태가 5(SOTA++)와의
+  유일한 경계 — 이 갭은 next_steps로 추적 중. recall / latency /
+  observability / fusion determinism 영역은 모두 production grade.
 
 status: active
 since: 2025-09
@@ -27,10 +39,15 @@ key_files:
   - src/application/search/search.usecase.ts
   - src/infrastructure/vespa/vespa-client.ts
   - src/domain/retrieval/service/retrieval-plan-builder.ts
+  - src/domain/retrieval/service/fusion.ts
+  - src/domain/retrieval/service/dual-lane-fusion.ts
+  - src/domain/shared/utils/rrf.ts
 
 tests:
   e2e:
     - test/e2e/golden-set.test.ts
+  regression:
+    - test/regression/hybrid-search-fusion.regression.test.ts
 
 related_rfcs:
   - docs/RFC-014.md

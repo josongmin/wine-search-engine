@@ -5,7 +5,7 @@ summary: |
   Alias catalog와 query span 사이의 매칭. Cached alias matcher (in-mem cache) + fuzzy
   match + exact match + metaphone fallback. anchor-extraction의 backend.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   cached-alias-matcher (infra) + alias-match-confidence + alias-lookup-plan (domain)
   통합 완료. Cache layer는 명시적 LRU eviction cap (`ALIAS_CACHE_DEFAULT_MAX_ENTRIES =
@@ -15,6 +15,16 @@ maturity_rationale: |
   inner matcher가 결정하고 cache는 ordering을 byte-identical하게 보존하는 transparent
   memoizer임을 regression suite로 잠금. 한글/NFC·NFD/Korean+English mixed/empty/garbage
   경계 케이스 모두 cover. Production wired via `src/config/container-adapters.ts`.
+
+  Wave 5 (SOTA++): example-based 잠금을 property-based 불변식으로 심화. fast-check
+  (numRuns: 100) 7-property suite (`alias-matcher-properties.regression.test.ts`)로
+  arbitrary 입력 분포에서 (1) match-priority 보존(exact > fuzzy > metaphone, 항상
+  exact-first), (2) cache 결정성(2nd call → 동일 reference hit), (3) LRU eviction
+  bound(size ≤ cap 무조건), (4) LRU recency(re-touch된 key가 older key보다 생존),
+  (5) stats 정확도(독립 LRU oracle과 hits/misses/evictions 정확 일치), (6) Korean
+  surface 안정 provenance + NFC-stable, (7) empty/whitespace → [] no-throw no-inner-call
+  를 검증. Eviction victim 선택과 stats counter가 randomized op order에서 oracle과
+  byte-exact 일치함을 증명.
 
   남은 한계: strategy 자체의 priority 가중치는 여전히 hardcoded
   (`alias-match-confidence.ts`의 `STRATEGY_CONFIDENCE_MULTIPLIER`); offline label로부터
@@ -36,6 +46,7 @@ key_files:
 tests:
   regression:
     - test/regression/alias-matcher-priority-cache.regression.test.ts
+    - test/regression/alias-matcher-properties.regression.test.ts
   unit:
     - test/unit/alias/transliterator.test.ts
 

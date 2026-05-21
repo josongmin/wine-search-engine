@@ -10,15 +10,17 @@ summary: |
   로 흐름. 모든 application/agent 및 application/wine-search 작성 사이트는 직접
   대입 대신 이 transition 함수를 호출.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Termination 전이가 단일 SSoT 모듈(`src/domain/agent/service/termination-state-machine.ts`)
-  로 중앙화. 전 40개 write site가 직접 대입이 아니라 `transitionTerminationReason`을
-  통해서만 상태를 변경하므로 last-writer-wins 회귀 가능성이 제거됨. 우선순위 테이블은
-  rationale 주석과 함께 모듈-스코프 const로 노출. 두 개의 회귀 스위트(legacy 페어와이즈
-  + 신규 precedence/idempotence/terminal property 테스트)가 우선순위 격자, 흡수 상태
-  ('aborted'), monotone non-downgrade, undefined sentinel, 81 페어 명시 winner를 고정.
-  남은 작업: state 24-field god-object 분해와 per-step admission gate (level 5).
+  로 중앙화. 전 40개 write site가 `transitionTerminationReason`을 통해서만 상태를 변경 →
+  last-writer-wins 회귀 제거. 우선순위 테이블은 rationale 주석과 함께 모듈-스코프 const.
+  THREE regression suites: (1) legacy 페어와이즈, (2) precedence/idempotence/terminal,
+  (3) NEW property suite (agent-execution-context-properties.regression.test.ts, 21 tests,
+  12 fast-check properties × numRuns=100): state transition closure (enum domain),
+  monotone precedence (aborted absorbing), idempotent admission, state snapshot determinism,
+  Korean query verbatim preservation, deterministic budget exhaustion, concurrent admission
+  isolation. SOTA++ — property-based state-machine invariants over arbitrary event sequences.
 
 status: active
 since: 2025-09
@@ -38,6 +40,7 @@ tests:
   regression:
     - test/regression/agent-termination-state-machine.regression.test.ts
     - test/regression/agent-termination-state-machine-precedence.regression.test.ts
+    - test/regression/agent-execution-context-properties.regression.test.ts
 
 depends_on:
   - security.query-sanitizer

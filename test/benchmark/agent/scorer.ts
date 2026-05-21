@@ -2892,7 +2892,7 @@ function clamp01(x: number): number {
  * scenario overrides over tier defaults so users can set "terminationCorrectness: 0.80"
  * as a ratio-style boost without manually balancing the other dims.
  */
-function renormaliseWeights(weights: Required<DimensionWeights>): Required<DimensionWeights> {
+export function renormaliseWeights(weights: Required<DimensionWeights>): Required<DimensionWeights> {
   const sum = Object.values(weights).reduce((a, b) => a + b, 0);
   if (sum <= 0 || !Number.isFinite(sum)) return weights;
   if (Math.abs(sum - 1) < 1e-9) return weights;
@@ -2956,7 +2956,7 @@ const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>([
                      // Flooring it to 0.05 reduced the log-space penalty by 10.8x.
 ]);
 
-function weightedGeometricMean(
+export function weightedGeometricMean(
   dimScores: Record<string, number | null>,
   weights: Record<string, number>,
 ): number {

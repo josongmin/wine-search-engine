@@ -5,10 +5,14 @@ summary: |
   Golden query ground-truth 엔티티가 published search snapshot에 모두 존재하는지 검증.
   데이터 손실 / catalog mismatch를 promotion 전에 차단. CI gate.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  단순 set intersection 로직, catalog regression을 안정적으로 캐치. pre-publication
-  gate로 운영. attribute-level coverage 검사는 아직 미적용.
+  Set-theoretic coverage(golden ⊆ snapshot)를 순수 함수 computeCatalogCoverage로
+  추출하고 property-based invariant(fast-check, numRuns:100)로 고정: ratio ∈ [0,1],
+  full-coverage⇒missing=[]·ratio=1.0, missing detection, empty-golden vacuous
+  coverage, determinism(5x), Korean entity_id verbatim 보존, snapshot 추가 시
+  monotone(coverage 비감소). pre-publication CI gate로 운영. attribute-level
+  coverage 검사는 여전히 미적용(known limitation).
 
 status: active
 since: 2025-10
@@ -21,7 +25,9 @@ surfaces:
 key_files:
   - scripts/etl/verify-gold-catalog-coverage.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/gold-catalog-coverage-properties.regression.test.ts
 
 depends_on:
   - eval.golden-set

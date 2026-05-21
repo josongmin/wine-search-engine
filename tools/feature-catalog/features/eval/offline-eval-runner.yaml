@@ -6,7 +6,7 @@ summary: |
   Decision-Utility/AURC/ECE 계산. scenario / language / entity-type slicing. release
   gate verdict (pass/fail) 출력. JSON 결과 산출.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Split-integrity 검증 (RFC-017 §2.5) + per-mode metric (hybrid/BM25/semantic). nightly
   + pre-deployment gate. 그러나 online A/B framework 없음, golden label ~500 queries
@@ -23,7 +23,9 @@ surfaces:
 key_files:
   - scripts/eval/run-offline-eval.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/offline-eval-metrics-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

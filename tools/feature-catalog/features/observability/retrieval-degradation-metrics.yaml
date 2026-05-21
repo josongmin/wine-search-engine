@@ -6,7 +6,7 @@ summary: |
   silent skip 등을 reason별 카운트. GET /metrics/retrieval-degradation으로 노출 (X-Debug-Key
   gated).
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Counter 인프라 + /metrics 엔드포인트 + 시계열 집계 (`pool_shrink`,
   `channel_omit`, `zero_result`, `silent_skip` 4-reason ring buffer with
@@ -31,6 +31,7 @@ key_files:
 
 tests:
   regression:
+    - test/regression/retrieval-degradation-metrics-properties.regression.test.ts
     - test/regression/retrieval-degradation-metrics-time-series.regression.test.ts
 
 depends_on:

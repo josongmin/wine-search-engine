@@ -5,7 +5,7 @@ summary: |
   Silver + Track-C enriched 레코드를 immutable runtime snapshot으로 집계. 파생 feature
   (search tokens, aliases, scores) 계산, schema 검증, Vespa indexing 직전 readiness 점검.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Production snapshot builder, deterministic. 완전한 contract validation + 버전 관리.
   nightly 실행, SLA 위반 없음. 그러나 delta snapshot 미지원 (corpus 커지면 시간 늘어남).
@@ -21,7 +21,9 @@ surfaces:
 key_files:
   - scripts/etl/build-search-snapshot.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/search-snapshot-build-properties.regression.test.ts
 
 depends_on:
   - etl.track-c-enrichment

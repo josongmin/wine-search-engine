@@ -5,10 +5,18 @@ summary: |
   Watchlist 저장 + pub/sub + 안전성. PG store + poison store (실패 큐) + Redis publisher/
   subscriber + SSRF guard + watchlist-aware search index 통합.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  6개 컴포넌트 통합, integration test (pg-watchlist-store) 보유. 그러나 delivery
-  reliability 메트릭 부재, poison queue 처리 정책 단순.
+  6개 컴포넌트 통합 + property-based invariant lock (fast-check numRuns:100).
+  SSRF guard(SSoT)가 property-locked 됨: RFC1918(10/8, 172.16/12, 192.168/16),
+  loopback(127/8), link-local(169.254/16), "this network"(0/8) 전 범위를
+  dotted-decimal 뿐 아니라 inet_aton 인코딩 우회(decimal-integer, hex 0x,
+  octal 0NNN, octal-dotted)까지 모두 차단. IPv4-mapped IPv6 + IPv6 loopback/
+  ULA(fc/fd)/link-local+site-local(fe80::/10, fec0::/10)/multicast(ff) 차단.
+  Pub/sub 채널 결정성 + 한국어 entity id verbatim(NFC) 보존, poison-queue
+  isolation(실패 핸들러 → DLQ, 정상 핸들러 미차단, payload verbatim) invariant 고정.
+  Audit 중 발견된 실제 SSRF 우회(decimal/hex/octal IP 인코딩, fec0:: site-local)
+  를 가드에서 수정 — 단순 dotted-decimal-only 검사는 우회 가능했음.
 
 status: active
 since: 2025-10
@@ -32,6 +40,9 @@ tests:
     - src/__tests__/redis-watchlist-publisher.test.ts
     - src/__tests__/watchlist-aware-search-index.test.ts
     - src/__tests__/watchlist-delivery-runtime.test.ts
+  regression:
+    - test/regression/ssrf-validation.regression.test.ts
+    - test/regression/watchlist-stack-properties.regression.test.ts
 
 depends_on:
   - infra.postgresql
@@ -40,12 +51,16 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Delivery reliability metric 없음"
-  - "Poison queue 처리 정책 단순"
+  - "Delivery reliability metric 없음 (DLQ size 노출만 존재)"
+  - "Poison queue 처리 정책 단순 (수동 재처리, auto-retry 미구현)"
+  - "SSRF guard는 resolved IP 인코딩 우회를 차단하지만 CGNAT(100.64/10),
+     TEST-NET(192.0.2/24 등), 240/4 Class E 등 일부 reserved 범위는 미차단
+     (RFC1918+loopback+link-local 핵심 사설 범위는 전부 차단)"
 
 next_steps:
   - "Delivery SLA monitoring"
   - "Poison auto-retry with exponential backoff"
+  - "SSRF guard에 CGNAT/TEST-NET/Class-E reserved 범위 추가 차단 검토"
 
 tags:
   - watchlist

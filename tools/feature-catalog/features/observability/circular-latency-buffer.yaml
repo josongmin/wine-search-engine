@@ -5,10 +5,16 @@ summary: |
   in-memory ring buffer로 최근 N건 latency 보관. p50/p95/p99 계산용. 메모리 bound +
   recent-window 분석. tracer/gen-ai-tracing과 별개의 lightweight 측정 path.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  단순 ring buffer, 작동 안정. 그러나 multi-process aggregation 없음 (각 worker별
-  독립).
+  Ring buffer + nearest-rank order-statistic percentile(p50/p95/p99)을
+  property-based(fast-check, numRuns:100)로 invariant lock:
+  capacity bound, percentile monotonicity(p50≤p95≤p99), [min,max] bound,
+  single-sample, ring overwrite(recent-window 보존), empty-default(0, no NaN),
+  determinism. Named const(LATENCY_PERCENTILE_P50/95/99, EMPTY_PERCENTILE_DEFAULT)
+  추출 + slice-evaluator percentile convention과 정렬. known-distribution
+  correctness([1..100]→p50=50/p95=95/p99=99), 음수/0 latency 처리 검증.
+  multi-process aggregation 부재는 단일 노드 측정 path로서 의도된 scope.
 
 status: active
 since: 2025-10
@@ -21,7 +27,11 @@ surfaces:
 key_files:
   - src/infrastructure/observability/circular-latency-buffer.ts
 
-tests: {}
+tests:
+  unit:
+    - src/infrastructure/observability/__tests__/circular-latency-buffer.test.ts
+  regression:
+    - test/regression/circular-latency-buffer-properties.regression.test.ts
 
 depends_on: []
 

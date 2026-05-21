@@ -125,6 +125,13 @@ interface CliArgs {
    * streaming, opt-in to debug-grade artifacts).
    */
   readonly observations: boolean;
+  /**
+   * When true, build the REAL orchestrators from the production composition
+   * root (live Anthropic + live Vespa) via `buildShadowModeDriver`. Mutually
+   * exclusive with `--dry-run`. Requires `WINE_SEARCH_ENABLED=true` and
+   * `ANTHROPIC_API_KEY` — the driver throws an operator-facing error otherwise.
+   */
+  readonly compositionRoot: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
@@ -140,6 +147,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let summaryOutput: string | undefined;
   let regressedRateCeilingPercent = DEFAULT_REGRESSED_RATE_CEILING_PERCENT;
   let observations = false;
+  let compositionRoot = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -210,6 +218,10 @@ function parseArgs(argv: readonly string[]): CliArgs {
         observations = true;
         break;
       }
+      case '--composition-root': {
+        compositionRoot = true;
+        break;
+      }
       case '--regressed-rate-ceiling': {
         const next = argv[++i];
         if (next !== undefined) {
@@ -244,6 +256,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
     score,
     regressedRateCeilingPercent,
     observations,
+    compositionRoot,
     ...(scenariosPath !== undefined ? { scenariosPath } : {}),
     ...(limit !== undefined ? { limit } : {}),
     ...(summaryOutput !== undefined ? { summaryOutput } : {}),
@@ -293,6 +306,12 @@ Options:
                                 Caveat: enabling this can grow per-scenario JSONL records by ~50KB+
                                 for verbose mini-loop traces with Korean text.
   --dry-run                     Use deterministic in-memory orchestrators (no live LLM/Vespa)
+  --composition-root            Build the REAL orchestrators from the production container
+                                (live Anthropic + live Vespa) via buildShadowModeDriver.
+                                Mutually exclusive with --dry-run. Pre-flight (driver throws
+                                if unmet): WINE_SEARCH_ENABLED=true and ANTHROPIC_API_KEY set.
+                                This is the staging cutover-validation entrypoint — see
+                                docs/runbook-wine-search-cutover.md.
   --help, -h                    Show this help
 `);
 }
@@ -812,19 +831,35 @@ async function mainCli(): Promise<void> {
     process.exit(1);
   }
 
+  if (args.dryRun && args.compositionRoot) {
+    process.stderr.write('--dry-run and --composition-root are mutually exclusive\n');
+    process.exit(1);
+  }
+
   let legacyOrchestrator: AgentOrchestrator;
   let wineSearchOrchestrator: WineSearchOrchestratorLike;
+  // Driver owns the live container's PG / Redis / telemetry handles. When set,
+  // it MUST be shut down after the run so those resources are released.
+  let driverShutdown: (() => Promise<void>) | undefined;
   if (args.dryRun) {
     legacyOrchestrator = makeDryRunLegacy();
     wineSearchOrchestrator = makeDryRunWineSearch();
+  } else if (args.compositionRoot) {
+    // Build the REAL orchestrators from the production composition root. The
+    // driver enforces pre-flight (WINE_SEARCH_ENABLED, ANTHROPIC_API_KEY) and
+    // throws an operator-facing error if the environment is not ready.
+    const { buildShadowModeDriver } = await import(
+      '../../src/application/wine-search/shadow-mode-driver.js'
+    );
+    const driver = await buildShadowModeDriver({ logger: consoleLogger });
+    legacyOrchestrator = driver.legacyOrchestrator;
+    wineSearchOrchestrator = driver.wineSearchOrchestrator;
+    driverShutdown = () => driver.shutdown();
   } else {
-    // Production wiring lives outside this script (additive-only scope).
-    // Operators must build orchestrators via the composition root and pass
-    // them in by importing `runBench` from this module. Refuse to silently
-    // run against fake stubs in non-dry-run mode.
+    // Neither dry-run nor composition-root: refuse to run against fake stubs.
     process.stderr.write(
-      'production orchestrator wiring is not built into this script — re-run with --dry-run, '
-      + 'or import { runBench } from this module and pass orchestrators built via the composition root.\n',
+      'no orchestrator source selected — re-run with --dry-run (in-memory stubs) '
+      + 'or --composition-root (live container; requires WINE_SEARCH_ENABLED=true + ANTHROPIC_API_KEY).\n',
     );
     process.exit(1);
   }
@@ -832,22 +867,29 @@ async function mainCli(): Promise<void> {
   const runId = randomUUID();
   process.stdout.write(
     `shadow-mode bench run ${runId}: ${scenarios.length} scenarios, concurrency=${args.concurrency}`
-    + `${args.score ? ', scoring=on' : ''}\n`,
+    + `${args.score ? ', scoring=on' : ''}${args.compositionRoot ? ', source=composition-root' : ''}\n`,
   );
 
   const scorer = args.score ? await loadBenchScorer(consoleLogger) : undefined;
 
-  const summary = await runBench({
-    scenarios,
-    legacyOrchestrator,
-    wineSearchOrchestrator,
-    outputPath: args.output,
-    concurrency: args.concurrency,
-    timeoutMs: args.timeoutMs,
-    logger: consoleLogger,
-    includeObservations: args.observations,
-    ...(scorer !== undefined ? { scorer } : {}),
-  });
+  let summary: BenchSummary;
+  try {
+    summary = await runBench({
+      scenarios,
+      legacyOrchestrator,
+      wineSearchOrchestrator,
+      outputPath: args.output,
+      concurrency: args.concurrency,
+      timeoutMs: args.timeoutMs,
+      logger: consoleLogger,
+      includeObservations: args.observations,
+      ...(scorer !== undefined ? { scorer } : {}),
+    });
+  } finally {
+    if (driverShutdown !== undefined) {
+      await driverShutdown();
+    }
+  }
 
   process.stdout.write(
     `\n=== shadow-mode bench summary ===\n`
@@ -930,7 +972,6 @@ function stripObservationsFromReport(report: ShadowModeReport): ShadowModeReport
   const stripOutcome = (
     outcome: ShadowModeReport['legacy'],
   ): ShadowModeReport['legacy'] => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- intentional destructure to drop a field
     const { observations: _observations, ...rest } = outcome;
     return rest;
   };

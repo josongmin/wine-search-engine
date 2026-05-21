@@ -572,7 +572,7 @@ export function fromVespaFields(
       ? { aliasPrefixTerms: getOptionalStringArray(fields, 'alias_prefix_terms') }
       : {}),
     producer: getRequiredString(fields, 'producer'),
-    region: getRequiredString(fields, 'region'),
+    region: getOptionalString(fields, 'region') ?? '',
     grapes: getOptionalStringArray(fields, 'grapes') ?? [],
     searchTextKo: resolvedSearchTextKo,
     searchTextEn: resolvedSearchTextEn,

@@ -6,11 +6,18 @@ summary: |
   Champagne=sparkling vs region-of-origin) 정적 참조. planner intent detection에서
   disambiguation hint 제공.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
-  Compact (~118 lines), 50+ entry 수작업 curated. planner-intent-detection이 사용.
-  그러나 정적이라 신규 ambiguity는 코드 변경 필요. frequency weighting / context-aware
-  ranking / 임베딩 fallback 없음.
+  Compact (~118 lines), 수작업 curated 29 + generated 5 = 34 entry 머지(normalizeSurface
+  키로 dedupe). planner-intent-detection이 사용. 정적 reference data integrity가 이제
+  property-based regression으로 lock됨 (fast-check numRuns:100, 7개 invariant family):
+  surface uniqueness(충돌 dup 없음), NFKC/NFC idempotent 정규화, lookup determinism(5x),
+  sense non-empty(>=1 type + valid severity), case-insensitive(라틴, 예: drc) +
+  whitespace-insensitive lookup stability, 문서화된 known ambiguity 9종이 documented
+  sense로 resolve, unknown 문자열(Hangul/Latin/accented/emoji noise) → false match 없음,
+  isKnownAmbiguous ↔ getAmbiguityInfo presence 일치. 데이터는 clean (finding 없음).
+  잔여 한계(frequency weighting / context-aware ranking / 임베딩 fallback 부재)는 정확도
+  enhancement 영역이며 reference-data 무결성 등급에는 영향 없음.
 
 status: active
 since: 2025-09
@@ -23,7 +30,11 @@ surfaces:
 key_files:
   - src/domain/query/service/static-ambiguity-dictionary.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/static-ambiguity-dictionary-properties.regression.test.ts
+  unit:
+    - src/domain/query/service/__tests__/static-ambiguity-dictionary.test.ts
 
 depends_on: []
 

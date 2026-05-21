@@ -27,6 +27,59 @@ interface CliArgs {
   readonly entitiesNdjson?: string | undefined;
 }
 
+/**
+ * Result of a set-theoretic catalog coverage check (golden ⊆ snapshot).
+ */
+export interface CatalogCoverage {
+  /** Count of distinct golden ids present in the snapshot set. */
+  readonly covered: number;
+  /**
+   * Distinct golden ids absent from the snapshot, in first-seen order of the
+   * golden input (deterministic, dedup'd, verbatim — no normalization).
+   */
+  readonly missing: readonly string[];
+  /**
+   * covered / |distinct golden|, always in [0, 1]. Empty golden ⇒ 1.0
+   * (vacuous full coverage).
+   */
+  readonly coverageRatio: number;
+}
+
+/**
+ * Pure core of the ADR-007 gate: does every golden ground-truth entity_id
+ * appear in the published snapshot set?
+ *
+ * Set-theoretic and deterministic — `golden`/`snapshot` are treated as sets
+ * (duplicates collapse). `missing` is reported in first-seen golden order so
+ * the result is byte-stable for identical inputs. Ids are compared and
+ * surfaced verbatim (no NFC folding, no transliteration) so Korean and
+ * accented canonical ids round-trip exactly.
+ */
+export function computeCatalogCoverage(
+  goldenIds: readonly string[],
+  snapshotIds: readonly string[],
+): CatalogCoverage {
+  const snapshotSet = new Set(snapshotIds);
+  const seen = new Set<string>();
+  const missing: string[] = [];
+  let covered = 0;
+  for (const id of goldenIds) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    if (snapshotSet.has(id)) {
+      covered += 1;
+    } else {
+      missing.push(id);
+    }
+  }
+  const distinctGolden = seen.size;
+  // Empty golden ⇒ vacuous full coverage (nothing required, nothing missing).
+  const coverageRatio = distinctGolden === 0 ? 1 : covered / distinctGolden;
+  return { covered, missing, coverageRatio };
+}
+
 function parseArgs(argv: readonly string[]): CliArgs {
   let fixtureRepoRoot: string | undefined;
   let entitiesNdjson: string | undefined;
@@ -72,7 +125,8 @@ async function main(): Promise<void> {
   const mapRaw = await readFile(mapPath, 'utf8');
   const mapParsed = TargetMapSchema.parse(JSON.parse(mapRaw) as unknown);
 
-  const missing: string[] = [];
+  const goldenTargets: string[] = [];
+  const targetToCaseIds = new Map<string, string[]>();
   for (const [caseId, target] of Object.entries(mapParsed.map)) {
     if (target == null) {
       continue;
@@ -80,14 +134,23 @@ async function main(): Promise<void> {
     if (isSourceRecordStylePublicEntityId(target)) {
       throw new Error(`target-entity-map references forbidden source-style id for ${caseId}: ${target}`);
     }
-    if (!allowedIds.has(target)) {
-      missing.push(`${caseId} → ${target}`);
+    goldenTargets.push(target);
+    const cases = targetToCaseIds.get(target);
+    if (cases == null) {
+      targetToCaseIds.set(target, [caseId]);
+    } else {
+      cases.push(caseId);
     }
   }
 
-  if (missing.length > 0) {
+  const coverage = computeCatalogCoverage(goldenTargets, [...allowedIds]);
+
+  if (coverage.missing.length > 0) {
+    const detail = coverage.missing
+      .flatMap((target) => (targetToCaseIds.get(target) ?? []).map((caseId) => `${caseId} → ${target}`))
+      .join('\n');
     throw new Error(
-      `Gold catalog coverage failed: target entity ids missing from canonical-entities.json:\n${missing.join('\n')}`,
+      `Gold catalog coverage failed: target entity ids missing from canonical-entities.json:\n${detail}`,
     );
   }
 

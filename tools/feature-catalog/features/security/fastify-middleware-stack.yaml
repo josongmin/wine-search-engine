@@ -6,10 +6,16 @@ summary: |
   @fastify/cors (configurable origin), @fastify/rate-limit (per-IP bucket).
   모든 라우트에 적용.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
-  Upstream library 사용, minimal customization. 알려진 우회 없음. rate-limit bucket
-  env-var 튜닝 가능. CORS origin list hardcoded.
+  OWASP ASVS Level 2 (V14.4 Browser Security Headers) contract validation +
+  property-based security-header tests. Helmet CSP/X-Frame-Options/HSTS/
+  X-Content-Type-Options 헤더를 실제 Fastify 인스턴스(`fastify.inject()`)로
+  검증. CORS origin allowlist 경계(localhost-only dev/test, production
+  exact-match, subdomain 거부) 및 preflight max-age 검증. rate-limit N/N+1
+  경계(429), bucket monotonicity property, 한글(Korean) 에러 보존, RFC-014
+  envelope 검증. 기본값은 named const SSoT(`RATE_LIMIT_MAX_REQUESTS_DEFAULT`,
+  `RATE_LIMIT_WINDOW_MS_DEFAULT`)로 추출되어 server.ts와 테스트가 동일 출처 공유.
 
 status: active
 since: 2025-08
@@ -21,8 +27,11 @@ surfaces:
 
 key_files:
   - src/interface/http/server.ts
+  - src/interface/http/constants.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/fastify-middleware-stack-properties.regression.test.ts
 
 depends_on: []
 

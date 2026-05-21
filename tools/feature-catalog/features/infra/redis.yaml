@@ -6,10 +6,16 @@ summary: |
   primary source로 fallback. key pattern delete 지원. circuit breaker wrapper로
   Redis 장애 cascade 방지.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   단순하지만 효과적. query/entity cache로 사용, circuit breaker로 Redis 장애 격리됨.
   silent data loss 사고 없음. unit test (redis-client.circuit-breaker) 보유.
+  property-based regression (fast-check numRuns:100)으로 fallback invariant를 검증:
+  cache miss/infra error → null fallback (no throw), breaker OPEN → backend
+  미접근 fallback, get/set round-trip, 한글 key/value verbatim 보존,
+  delete-by-pattern bounded (non-matching key 미삭제), breaker recovery
+  (injectable fake clock로 OPEN→HALF_OPEN cooldown 경계), idempotent delete.
+  mock Redis 전용 — 실제 Redis 미접속.
 
 status: active
 since: 2025-08
@@ -27,6 +33,8 @@ key_files:
 tests:
   unit:
     - src/infrastructure/db/__tests__/redis-client.circuit-breaker.test.ts
+  regression:
+    - test/regression/redis-client-properties.regression.test.ts
 
 depends_on:
   - observability.circuit-breaker-registry

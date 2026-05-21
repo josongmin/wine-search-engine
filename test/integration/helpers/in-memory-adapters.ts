@@ -724,19 +724,18 @@ export class InMemoryAliasMatcher implements AliasMatcher {
    * when the underlying alias record is curated/canonical.
    */
   private findFuzzyMatches(normalizedQuery: string): AliasMatchResult[] {
+    // Script-aware fuzzy key: Hangul → jamo-decomposed string (a single
+    // consonant/vowel slip is one edit); Latin → compact lowercased string.
+    // KIL typo recovery is a *string* problem (Damerau edit distance), not a
+    // semantic one — this is the same lexical mechanism for both scripts.
+    // The emitted match is `fuzzy_char_ngram` → `misspelling` tier, so the
+    // decision engine treats it as approximate and keeps the result
+    // `ambiguous` rather than sealing identity (Epic 17.3 caution preserved:
+    // the entity surfaces for recall, but an approximate match never
+    // confidently resolves on its own).
     const queryJamo = buildHangulJamoKey(normalizedQuery);
-    // Hangul-only by design. The RCA target is Korean jamo-level typos
-    // ("몬데스"→"몬테스"). Latin approximate-query behaviour is deliberately
-    // *cautious* in this pipeline — `noisy-runtime-execution-contract`
-    // pins that a noisy Latin query like "opuss one" stays ambiguous
-    // without an identity seal (Epic 17.3 hallucination guard), and
-    // production's Latin fuzzy lives in pg-alias-matcher with its own
-    // calibration. So the in-memory test matcher must not fuzzy-resolve
-    // Latin queries.
-    if (!queryJamo.containsHangul) {
-      return [];
-    }
-    const queryKey = queryJamo.key;
+    const queryIsHangul = queryJamo.containsHangul;
+    const queryKey = queryIsHangul ? queryJamo.key : this.compact(normalizedQuery);
     if (queryKey.length < FUZZY_MIN_KEY_LENGTH) {
       return [];
     }
@@ -744,10 +743,10 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     const results: AliasMatchResult[] = [];
     for (const [normalized, entries] of this.aliases) {
       const aliasJamo = buildHangulJamoKey(normalized);
-      if (!aliasJamo.containsHangul) {
-        continue; // compare Hangul query only against Hangul aliases
+      if (aliasJamo.containsHangul !== queryIsHangul) {
+        continue; // cross-script comparison is meaningless
       }
-      const aliasKey = aliasJamo.key;
+      const aliasKey = queryIsHangul ? aliasJamo.key : this.compact(normalized);
       if (aliasKey.length < FUZZY_MIN_KEY_LENGTH) {
         continue;
       }

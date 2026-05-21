@@ -5,14 +5,19 @@ summary: |
   Query sanitizer + admission gate에서 차단된 query를 reason (homoglyph / injection /
   rate-limit / oversized) 별 카운트. 보안 anomaly 모니터링용.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Cumulative reason-keyed counter + time-bucketed ring (per-reason `Uint32Array`
   with injectable clock) + structural `checkThreshold({tripped, observed,
   threshold})` alert hook + Prometheus-friendly snapshot export
-  `{reason, count_60s, count_300s}`. Pattern mirrors silent-skip-counters
-  wave-1 (maturity 4). Alert dispatch (Slack/PD/etc.) remains external —
-  this module is structural only.
+  `{reason, count_60s, count_300s}`. Pattern mirrors silent-skip-counters and
+  retrieval-degradation-metrics (both maturity 5). Beyond example-based
+  scenarios, the ring is locked by a fast-check property suite (numRuns: 100,
+  injectable clock, no real timers) proving the *universal* invariants: window
+  count bounded by in-window events, exact roll-over with no off-by-one,
+  per-reason isolation, strict-`>` threshold boundary, non-negative snapshot
+  rows, exactly-N monotonicity within a bucket, and clock determinism. Alert
+  dispatch (Slack/PD/etc.) remains external — this module is structural only.
 
 status: active
 since: 2025-11
@@ -28,6 +33,7 @@ key_files:
 tests:
   regression:
     - test/regression/security-metrics-time-series.regression.test.ts
+    - test/regression/security-metrics-properties.regression.test.ts
 
 depends_on:
   - security.query-sanitizer

@@ -1,0 +1,46 @@
+# Korean UNICODE-VARIANT base queries (stored in NFC syllable form).
+#
+# The test generates THREE forms from each base line PROGRAMMATICALLY:
+#   1. NFC   — canonical precomposed syllables (the line as written here)
+#   2. NFD   — String.normalize('NFD')  (canonical-decomposed conjoining jamo)
+#   3. CompatJamo — each syllable replaced with its Hangul Compatibility Jamo
+#                   sequence (U+3130 block) via the test's jamo decomposer.
+#
+# Invariant (routing): all three normalization forms of the SAME query MUST
+# route to the SAME meta.intent — Unicode normalization must not change intent.
+# Invariant (security): all three forms of a benign query MUST pass the
+# sanitizer (NFKC + Hangul re-composition canonicalizes NFD/Compat back to
+# clean syllable form — see query-sanitizer.ts applyNormalization).
+#
+# Provenance: each base query is an EXISTING benign query already present in
+# benign-search.txt / benign-conversational.txt; restated here as the NFC base
+# for variant generation.
+
+# source: benign-search.txt:12 (와인 추천해줘)
+와인 추천해줘
+# source: benign-search.txt:26 (레드 와인 추천해줘)
+레드 와인 추천해줘
+# source: benign-search.txt:28 (화이트 와인 추천해줘)
+화이트 와인 추천해줘
+# source: benign-search.txt:38 (부르고뉴 피노누아 추천)
+부르고뉴 피노누아 추천
+# source: benign-search.txt:40 (보르도 와인 추천)
+보르도 와인 추천
+# source: benign-search.txt:98 (풀바디 레드 와인)
+풀바디 레드 와인
+# source: benign-search.txt:150 (5만원 이하 와인)
+5만원 이하 와인
+# source: benign-search.txt:160 (선물용 와인 추천)
+선물용 와인 추천
+# source: benign-search.txt:34 (와인)
+와인
+# source: benign-pair.txt (스테이크에 어울리는 와인)
+스테이크에 어울리는 와인
+# source: benign-search.txt:18 (맛있는 와인 추천)
+맛있는 와인 추천
+# source: benign-search.txt:22 (저렴한 와인 추천)
+저렴한 와인 추천
+# source: benign-search.txt:112 (로제 와인 추천해줘)
+로제 와인 추천해줘
+# source: benign-conversational.txt (가성비 갑 와인 추천)
+가성비 갑 와인 추천

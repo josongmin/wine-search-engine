@@ -6,11 +6,18 @@ summary: |
   application → diversity enforcement. signal computation (BM25/semantic/popularity) +
   score aggregation + evidence mapping + rerank safety + diversity 단계 포함.
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
   src/domain/ranking/ 광범위 구현 (15+ service file). default-ranking-policy + funnel-metrics
-  + rerank-blend + evidence-mapper + lambdamart-ranker 통합. ranking 단위 테스트 디렉터리
-  존재. 그러나 LTR이 hybrid 결정에 fully integrate 안 됨 (다음 단계).
+  + rerank-blend + evidence-mapper + lambdamart-ranker 통합.
+  결정론적 정렬 코어(compareScoredEntriesByFinalScoreDesc, ranker.ts step 5)가
+  property-based 회귀로 lock 됨 (ranking-pipeline-properties.regression.test.ts,
+  fast-check numRuns:100): ranking determinism(5회 반복), permutation invariance,
+  stable tie-break(entityId 오름차순), score monotonicity(epsilon 밴드 인식),
+  NaN/±Infinity-safety(crash 없이 항상 유한 점수 뒤), 한글 entity 통과, 빈 후보,
+  comparator antisymmetry/reflexivity. 기존 example-based 스위트
+  (e1-p03-ranker-tiebreak / e1-determinism-core)와 함께 5단계 tie-break의 보편
+  불변식을 보장. 정렬 코어 변경 없이 통과 — 이미 SOTA++ 결정론 수준.
 
 status: active
 since: 2025-10
@@ -28,7 +35,11 @@ key_files:
   - src/domain/ranking/service/rerank-blend.ts
   - src/domain/ranking/service/funnel-metrics.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/ranking-pipeline-properties.regression.test.ts
+    - test/regression/e1-p03-ranker-tiebreak.regression.test.ts
+    - test/regression/e1-determinism-core.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

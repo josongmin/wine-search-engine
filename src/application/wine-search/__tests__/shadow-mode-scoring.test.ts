@@ -17,9 +17,10 @@ import {
   type BenchScorerFn,
   type ShadowModeScoringReport,
 } from '../shadow-mode-scoring.js';
-import type {
-  ScenarioResult,
-  ScenarioScores,
+import {
+  scoreScenario,
+  type ScenarioResult,
+  type ScenarioScores,
 } from '../../../../test/benchmark/agent/scorer.js';
 import type {
   AgentBenchmarkScenario,
@@ -432,5 +433,144 @@ describe('scoreRawResults', () => {
     });
     expect(out.legacyScore.error).toBe('no legacy result');
     expect(out.scoreDelta.totalDelta).toBeCloseTo(0.8, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end provenance: observations flow into ScenarioExecution and drive
+// the bench scorer's contextRecall dimension (Gap-4 close-out).
+//
+// These tests use the REAL `scoreScenario` (not a mock) so they prove the
+// full chain: runner outcome.observations → projectOutcome → ScenarioExecution
+// → scorer.contextRecall. faithfulness in `scoreScenario` derives from the
+// injected `faithfulnessScore` param (LLM judge), so the observation-driven
+// dimension we can assert deterministically here is contextRecall; a separate
+// capturing-scorer test below proves observations reach the execution object
+// that faithfulness scoring consumes downstream.
+// ---------------------------------------------------------------------------
+
+/** Production wiring shape: `(s, e, err) => scoreScenario(s, e, undefined, undefined, err)`. */
+const realScorer: BenchScorerFn = (scenario, execution, error) =>
+  scoreScenario(scenario, execution, undefined, undefined, error);
+
+function makeGoldenScenario(): AgentBenchmarkScenario {
+  const expectation: ScenarioExpectation = { maxSteps: 5 };
+  return {
+    id: 42,
+    tier: 'single_shot',
+    query: '바롤로 추천',
+    description: 'context-recall fixture with golden keywords',
+    expectation,
+    goldenKeywords: ['barolo', 'nebbiolo'],
+  };
+}
+
+function makeReportWithObservations(
+  legacyObs: readonly string[],
+  wineSearchObs: readonly string[],
+): ShadowModeReport {
+  return makeReport({
+    legacy: makeOutcome({
+      orchestrator: 'legacy_agent',
+      answer: 'Barolo from Nebbiolo grapes',
+      observations: [...legacyObs],
+    }),
+    wineSearch: makeOutcome({
+      orchestrator: 'wine_search',
+      answer: 'Barolo from Nebbiolo grapes',
+      observations: [...wineSearchObs],
+    }),
+  });
+}
+
+describe('observation provenance → contextRecall (real scorer)', () => {
+  it('contextRecall is NON-NULL when observations contain golden keywords', async () => {
+    const report = makeReportWithObservations(
+      ['Barolo is made from Nebbiolo in Piedmont'],
+      ['Barolo is made from Nebbiolo in Piedmont'],
+    );
+    const scorer = new ShadowModeScorer({
+      runner: makeRunner(report),
+      scorer: realScorer,
+    });
+    const out: ShadowModeScoringReport = await scorer.scoreOnce({
+      scenario: makeGoldenScenario(),
+      requestId: 'req-e2e-recall',
+    });
+    // Both golden keywords (barolo, nebbiolo) appear → recall = 1.0, non-null.
+    expect(out.legacyScore.scores.contextRecall).not.toBeNull();
+    expect(out.legacyScore.scores.contextRecall).toBeCloseTo(1, 6);
+    expect(out.wineSearchScore.scores.contextRecall).not.toBeNull();
+    expect(out.wineSearchScore.scores.contextRecall).toBeCloseTo(1, 6);
+  });
+
+  it('contextRecall is NULL when observations are empty (no grounding surface)', async () => {
+    const report = makeReportWithObservations([], []);
+    const scorer = new ShadowModeScorer({
+      runner: makeRunner(report),
+      scorer: realScorer,
+    });
+    const out = await scorer.scoreOnce({
+      scenario: makeGoldenScenario(),
+      requestId: 'req-e2e-norecall',
+    });
+    // No observations → scorer drops contextRecall from the geo-mean (null).
+    expect(out.legacyScore.scores.contextRecall).toBeNull();
+    expect(out.wineSearchScore.scores.contextRecall).toBeNull();
+  });
+
+  it('partial keyword coverage → fractional, finite contextRecall', async () => {
+    const report = makeReportWithObservations(
+      ['Barolo is a great wine'], // contains "barolo" only, missing "nebbiolo"
+      ['Barolo is a great wine'],
+    );
+    const scorer = new ShadowModeScorer({
+      runner: makeRunner(report),
+      scorer: realScorer,
+    });
+    const out = await scorer.scoreOnce({
+      scenario: makeGoldenScenario(),
+      requestId: 'req-e2e-partial',
+    });
+    expect(out.legacyScore.scores.contextRecall).toBeCloseTo(0.5, 6);
+    expect(out.wineSearchScore.scores.contextRecall).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe('projection propagates observations to ScenarioExecution', () => {
+  it('projectLegacy / projectWineSearch forward outcome.observations to the scorer', async () => {
+    const captured: Array<readonly string[] | null> = [];
+    const capturingScorer: BenchScorerFn = (scenario, execution) => {
+      captured.push(execution === null ? null : execution.observations);
+      return makeScenarioResult({ id: scenario.id, scores: makeScores({ overall: 0.5 }) });
+    };
+    const report = makeReportWithObservations(['legacy-grounding'], ['wine-grounding']);
+    const scorer = new ShadowModeScorer({
+      runner: makeRunner(report),
+      scorer: capturingScorer,
+    });
+    await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'req-capture' });
+    // Scorer invoked legacy first, then wine-search (scoreOnce ordering).
+    expect(captured).toEqual([['legacy-grounding'], ['wine-grounding']]);
+  });
+
+  it('defaults to [] when outcome.observations is absent (pre-Gap-4 report)', async () => {
+    const captured: Array<readonly string[] | null> = [];
+    const capturingScorer: BenchScorerFn = (scenario, execution) => {
+      captured.push(execution === null ? null : execution.observations);
+      return makeScenarioResult({ id: scenario.id });
+    };
+    // Outcomes without an `observations` field (optional in the schema).
+    const report = makeReport({
+      legacy: makeOutcome({ orchestrator: 'legacy_agent', answer: 'a' }),
+      wineSearch: makeOutcome({ orchestrator: 'wine_search', answer: 'a' }),
+    });
+    expect(report.legacy.observations).toBeUndefined();
+    const scorer = new ShadowModeScorer({
+      runner: makeRunner(report),
+      scorer: capturingScorer,
+    });
+    await scorer.scoreOnce({ scenario: makeScenario(), requestId: 'req-default' });
+    expect(captured).toEqual([[], []]);
   });
 });

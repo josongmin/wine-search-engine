@@ -5,7 +5,7 @@ summary: |
   Loop 종료 후 tool observation들을 자연어 answer로 합성하는 LLM 호출. grounding JSON
   optional 임베드. tool evidence grounding과 fallback 콘텐츠 재사용 모두 처리.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Orchestrator integration 테스트 + evidence-frame-emission regression 게이트 위에,
   observation 안에 임베드되는 `GROUNDING_JSON` 페이로드에 대한 Zod 검증 펜스가
@@ -34,6 +34,7 @@ tests:
     - test/unit/application/agent/agent-grounding-observation-policy.test.ts
     - test/unit/application/agent/agent-observation-synthesis-runner.test.ts
   regression:
+    - test/regression/observation-synthesis-properties.regression.test.ts
     - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
     - test/regression/agent-result-evidence-frames-contract.regression.test.ts
     - test/regression/observation-synthesis-grounding-fence.regression.test.ts

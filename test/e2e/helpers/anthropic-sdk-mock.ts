@@ -502,3 +502,111 @@ export function makeStructuredLlmThatAborts(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Anthropic wire-contract capture (ADDITIVE).
+//
+// Unlike `buildStructuredLlmMock` (which substitutes the *port*), this helper
+// is for tests that drive the REAL `ClaudeStructuredLlmAdapter` and need to
+// intercept the raw HTTP request bodies it sends to `api.anthropic.com`. It
+// captures the URL, method, headers, and JSON-parsed body of every outgoing
+// `fetch`, and lets the test script the canned Anthropic Messages-API
+// response per call. This proves real-LLM compatibility WITHOUT an API key.
+//
+// The adapter calls global `fetch` via `fetchWithTimeout`, which invokes
+// `fetch(url, init)`; the captured `init.body` is always the JSON string the
+// adapter serialized. Headers are normalized to a plain lowercased record so
+// assertions are case-insensitive (HTTP header names are case-insensitive).
+// ---------------------------------------------------------------------------
+
+/** A single captured outgoing Anthropic request. */
+export interface CapturedAnthropicRequest {
+  readonly url: string;
+  readonly method: string;
+  /** Header names lowercased; values as the adapter set them. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** The JSON-parsed request body. `unknown` — the test validates shape with
+   *  Zod (CLAUDE.md rule 12: never `JSON.parse(x) as T`). */
+  readonly body: unknown;
+}
+
+/** The canned Anthropic Messages-API response a scripted call returns. */
+export interface ScriptedAnthropicResponse {
+  readonly status?: number;
+  readonly bodyJson: unknown;
+}
+
+export interface AnthropicFetchCapture {
+  /** Ordered list of every captured outgoing request. */
+  readonly requests: CapturedAnthropicRequest[];
+  /** The `vi.fn` to install via `vi.stubGlobal('fetch', capture.fetchMock)`. */
+  readonly fetchMock: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Normalize a `fetch` `init.headers` (which may be a `Headers`, a record, or
+ * an array of pairs) into a lowercased plain record.
+ */
+function normalizeHeaders(headers: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (headers === undefined || headers === null) return out;
+  if (headers instanceof Headers) {
+    headers.forEach((value, key) => {
+      out[key.toLowerCase()] = value;
+    });
+    return out;
+  }
+  if (Array.isArray(headers)) {
+    for (const pair of headers) {
+      if (!Array.isArray(pair)) continue;
+      const key: unknown = pair[0];
+      const value: unknown = pair[1];
+      if (typeof key === 'string' && typeof value === 'string') out[key.toLowerCase()] = value;
+    }
+    return out;
+  }
+  if (typeof headers === 'object') {
+    for (const [key, value] of Object.entries(headers)) {
+      if (typeof value === 'string') out[key.toLowerCase()] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Build a `fetch` capture for the real `ClaudeStructuredLlmAdapter`.
+ *
+ * The `responder` is invoked once per outgoing request (in call order) and
+ * must return the canned Anthropic response for that call. It receives the
+ * captured request and the zero-based call index so a test can vary the
+ * response per phase (e.g. analyze → tool_use, synthesize → tool_use).
+ *
+ * Bodies are parsed with `JSON.parse` and stored as `unknown`; the caller
+ * validates them with a Zod schema (no `as` casts on captured payloads).
+ */
+export function buildAnthropicFetchCapture(
+  responder: (req: CapturedAnthropicRequest, callIndex: number) => ScriptedAnthropicResponse,
+): AnthropicFetchCapture {
+  const requests: CapturedAnthropicRequest[] = [];
+  const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit): Promise<Response> => {
+    const bodyText = typeof init?.body === 'string' ? init.body : '';
+    let parsedBody: unknown = undefined;
+    if (bodyText.length > 0) {
+      // Cast to unknown first (CLAUDE.md rule 12) — never `JSON.parse(x) as T`.
+      parsedBody = JSON.parse(bodyText) as unknown;
+    }
+    const captured: CapturedAnthropicRequest = {
+      url: typeof url === 'string' ? url : url.toString(),
+      method: typeof init?.method === 'string' ? init.method : 'GET',
+      headers: normalizeHeaders(init?.headers),
+      body: parsedBody,
+    };
+    requests.push(captured);
+    const scripted = responder(captured, requests.length - 1);
+    return new Response(JSON.stringify(scripted.bodyJson), {
+      status: scripted.status ?? 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  return { requests, fetchMock };
+}

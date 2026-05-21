@@ -205,7 +205,13 @@ const SearchInputObjectSchema = z.object({
   validateSearchToolVintageRange(data, ctx);
 });
 
-const SearchInputSchema = z.preprocess(normalizeSingularStyleArrayInput, SearchInputObjectSchema);
+/**
+ * Runtime input contract for the `search_wines` tool. Exported so property-based
+ * contract tests can fuzz the same schema the handler validates against
+ * (see the `SearchInputSchema.safeParse(sanitizeOptionalToolNulls(input))` call
+ * in the dispatcher). Do not duplicate the bounds in tests — import this.
+ */
+export const SearchInputSchema = z.preprocess(normalizeSingularStyleArrayInput, SearchInputObjectSchema);
 
 const CompareInputObjectSchema = z.object({
   query_a: buildSearchToolQueryField({

@@ -7,13 +7,17 @@ summary: |
   bucket aggregation (per-reason ring of fixed-width time buckets) + 구조적 threshold
   alert hook까지 노출.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Request-scoped counter (`createSilentSkipCounter`) 외에 reason-keyed time-bucket
   ring (`createTimeBucketedSilentSkipCounters`)을 추가하여 시계열 집계가 가능해짐.
   Injectable clock으로 결정론적 테스트, `checkThreshold(kind, threshold)`로 구조적
-  alert 판정 (transport는 caller가 wire). 아직 production transport (Prometheus/Slack
-  등)에는 직접 연결되어 있지 않아 5는 아님.
+  alert 판정 (transport는 caller가 wire). time-series ring buffer의 보편 불변식을
+  fast-check property 기반 (numRuns:100)으로 검증: ring count bounded, rollover
+  off-by-one 없음 (정확 만료), reason isolation (cross-contamination 없음),
+  threshold strict-`>`, count 비음수·current ≤ window, same-bucket monotone (정확 N),
+  clock determinism. injectable clock으로 실타이머 없이 결정론적. example-based
+  Wave 1 suite + property-based suite로 시계열 집계가 SOTA++ 수준으로 잠김.
 
 status: active
 since: 2025-10
@@ -33,6 +37,7 @@ tests:
   regression:
     - test/regression/silent-skip-kinds-runtime-plane-migration.regression.test.ts
     - test/regression/silent-skip-counters-time-series.regression.test.ts
+    - test/regression/silent-skip-counters-properties.regression.test.ts
 
 depends_on: []
 

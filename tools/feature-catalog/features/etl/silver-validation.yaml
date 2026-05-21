@@ -6,7 +6,7 @@ summary: |
   numeric bound (price/alcohol/rating), date format. 잘못된 ~5-10 records per 10K 캐치
   후 fail-fast.
 
-maturity: 4
+maturity: 5
 maturity_rationale: |
   Validate-silver + artifact-contract 결합. Aggregate quality gates (record
   count, coverage thresholds, distribution checks) 위에 per-record Zod schema
@@ -18,6 +18,18 @@ maturity_rationale: |
   index + ZodError 를 반환해 fail-fast 가능. 전용 regression suite
   (test/regression/silver-validation.regression.test.ts) 가 Korean NFC
   보존, 빈 입력, 전부 invalid, 부분 invalid 케이스를 append-only 로 잠금.
+
+  SOTA++ (maturity 5): example-based fixture 를 넘어 property-based 검증
+  invariant 로 일반화 (test/regression/silver-validation-properties.regression.test.ts,
+  fast-check numRuns:100). 8개 universally-quantified 속성 — (1) validity
+  closure: 모든 bound 만족 record 는 항상 통과, (2) negative priceUsd 는 항상
+  거부 (path=priceUsd), (3) alcoholPct ∈ (100, ∞) 는 항상 거부 (path=alcoholPct),
+  (4) 임의 required field 누락 시 해당 path 에서 거부, (5) schema_version 부재
+  시 current version default, (6) batch bad-index 보고가 주입된 invalid index
+  집합과 정확히 일치, (7) Korean NFC canonicalLabel/producer 가 byte-for-byte
+  보존 (Hangul U+AC00–U+D7A3 생성기), (8) 동일 batch 재검증 시 valid/invalid
+  분할 결정성. Boundary value (0, 1, 100) 명시 탐색. Wave 7 구현이 모든 속성을
+  만족 — schema bound gap 없음.
 
 status: active
 since: 2025-09
@@ -35,6 +47,7 @@ key_files:
 tests:
   regression:
     - test/regression/silver-validation.regression.test.ts
+    - test/regression/silver-validation-properties.regression.test.ts
   unit:
     - test/unit/etl/validate-silver.test.ts
 
