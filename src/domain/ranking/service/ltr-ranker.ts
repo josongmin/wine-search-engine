@@ -5,8 +5,29 @@
  */
 
 import type { QueryClass } from '../../shared/types/index.js';
+import { clamp } from '../../shared/utils/clamp.js';
+import { compareScoreDescending } from '../../shared/utils/stable-comparator.js';
 import type { RankingFeatures, QueryClassWeights } from './lambdamart-ranker.js';
 import { scoreDocument } from './lambdamart-ranker.js';
+
+/**
+ * Default retrieval↔LTR blend weight when the caller does not supply one.
+ * 0.5 = equal trust in fusion retrieval score and learned LTR score; the
+ * neutral midpoint avoids biasing toward either signal before tuning.
+ * Named per CLAUDE.md rule 15 (multiplier/weight constants must be named).
+ */
+const BLEND_ALPHA_DEFAULT = 0.5;
+/** Blend weight is a convex mixing coefficient — must stay within [0, 1]. */
+const BLEND_ALPHA_MIN = 0;
+const BLEND_ALPHA_MAX = 1;
+/**
+ * Below this many candidates the saturation guard is a no-op: a single
+ * candidate has no ordering to lose, so an identical-score "collapse" is
+ * not a degeneracy worth falling back for.
+ */
+const SATURATION_MIN_CANDIDATES = 2;
+/** A score column is saturated when it carries this many distinct values. */
+const SATURATION_UNIQUE_THRESHOLD = 1;
 
 /**
  * A searchable document to be ranked.
@@ -63,7 +84,10 @@ function rerank(
   // entropy is 1.0 and the resolver cannot distinguish candidates. Fall back
   // to heuristic retrieval scores which at least preserve fusion rank order.
   const uniqueScores = new Set(scored.map((d) => d.ltrScore));
-  if (uniqueScores.size <= 1 && scored.length > 1) {
+  if (
+    uniqueScores.size <= SATURATION_UNIQUE_THRESHOLD &&
+    scored.length >= SATURATION_MIN_CANDIDATES
+  ) {
     return {
       documents: documents.map((doc, idx) => ({
         ...doc,
@@ -74,11 +98,20 @@ function rerank(
     };
   }
 
+  // Deterministic ordering via the SSoT comparator (NaN→-Infinity, stable):
+  //   1) ltrScore descending
+  //   2) retrievalScore descending (tie-break on equal learned score)
+  //   3) entityId ascending (final lexicographic tie-break so two candidates
+  //      with identical ltrScore AND retrievalScore can never resolve by
+  //      input/iteration order — see @shared/utils/stable-comparator).
   const sorted = [...scored].sort((a, b) => {
-    if (b.ltrScore !== a.ltrScore) {
-      return b.ltrScore - a.ltrScore;
-    }
-    return b.retrievalScore - a.retrievalScore;
+    const byLtr = compareScoreDescending(a.ltrScore, b.ltrScore);
+    if (byLtr !== 0) return byLtr;
+    const byRetrieval = compareScoreDescending(a.retrievalScore, b.retrievalScore);
+    if (byRetrieval !== 0) return byRetrieval;
+    if (a.entityId < b.entityId) return -1;
+    if (a.entityId > b.entityId) return 1;
+    return 0;
   });
 
   return {
@@ -96,9 +129,18 @@ function rerank(
 function blendScores(
   retrievalScore: number,
   ltrScore: number,
-  alpha: number = 0.5,
+  alpha: number = BLEND_ALPHA_DEFAULT,
 ): number {
-  return (1 - alpha) * retrievalScore + alpha * ltrScore;
+  // Non-finite inputs (NaN/Infinity from upstream signal bugs) must not
+  // propagate into the blended score — a single NaN poisons every downstream
+  // comparison (NaN compared with anything is false). Drop the offending term
+  // to 0 rather than emit NaN. Rule: Number.isFinite guard before arithmetic.
+  const safeRetrieval = Number.isFinite(retrievalScore) ? retrievalScore : 0;
+  const safeLtr = Number.isFinite(ltrScore) ? ltrScore : 0;
+  // alpha is a convex mixing coefficient; clamp so an out-of-range or NaN
+  // alpha cannot push the blend outside the span of its two inputs.
+  const safeAlpha = clamp(alpha, BLEND_ALPHA_MIN, BLEND_ALPHA_MAX);
+  return (1 - safeAlpha) * safeRetrieval + safeAlpha * safeLtr;
 }
 
 /**

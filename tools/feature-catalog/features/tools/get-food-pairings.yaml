@@ -6,15 +6,20 @@ summary: |
   (style, price band, region) 입력. food-pairing-tool-policy로 filter/preference
   구성 후 hybrid retrieval, structured pairing confidence 반환.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  agent-tools.ts FoodPairingInputSchema + food-pairing-tool-policy 와이어링이
-  goldened 되어 있고, dedicated regression suite가 tool 입력 → 출력 계약
-  (영어/한국어 food, color/wine_type filter, max_price_krw clause, multi-constraint
-  forwarding, Zod 검증 경계, negation forwarding, 결정성, 특수문자/한글 조사 보존)
-  을 잠근다. Pairing extractor Wave 1 negation도 forwarding 경로로 검증됨.
-  여전히 부재한 부분(maturity 4로 가기 위한): wine↔food embedding alignment,
-  pairing confidence calibration, cuisine-specific weight.
+  HONEST 4. food-pairing-tool-policy 결정론 코어를 fast-check property suite
+  (numRuns=100, 9 tests)로 락업: budget resolution (max_price_krw가 max_price보다
+  우선·verbatim, USD→KRW 변환이 maxPriceKrwCap에서 capped + integer, non-finite
+  USD → undefined no-leak, no-field → undefined, determinism), color clause/filter
+  ('both'/undefined → ''·[], concrete color → ` ${color} wine` + 단일 wine_type '='
+  constraint w/ confidence 1.0 + version forwarding), structured preferences (typed
+  objective가 각자 constraint로 보존 + 올바른 operator: sweetness '=', acidity '>=',
+  tannin '<=', pairing 'in'; empty pairing_tags → pairing constraint 없음; Korean
+  pairing tag NFC-stable; empty input → []). 기존 tool 입력→출력 계약 regression
+  유지 (영/한 food, Zod 경계, negation forwarding). 남은 maturity 5 과제:
+  wine↔food embedding alignment, pairing confidence calibration, cuisine-specific
+  weight (learning/product gap, policy code 결함 아님).
 
 status: active
 since: 2025-09
@@ -33,6 +38,7 @@ tests:
   regression:
     - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
     - test/regression/get-food-pairings-tool.regression.test.ts
+    - test/regression/get-food-pairings-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

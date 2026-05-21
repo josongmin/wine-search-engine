@@ -6,11 +6,18 @@ summary: |
   (country/region/appellation/grape/vintage/wine_type per side). Parallel
   dual-leg retrieval → side별 결과 with ranking.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   agent-tools.ts CompareInputSchema + compare-retriever 와이어링 완료. parallel
-  execution regression 게이트. 그러나 비교 전용 ranking / cross-side balance /
-  contrast scoring 부재로 단순 2x search 수준에 머무름.
+  execution regression 게이트. 신규 comparison-contrast 도메인 모듈로 비교 전용
+  side-by-side contrast scoring 추가: attribute 정렬 + per-attribute agree/differ
+  verdict + numeric spread + divergent/agreement facet count(pairwise balance
+  signal). buildGroundingJsonFromComparison 에 production wiring 되어 agent가
+  구조화된 contrast를 GROUNDING_JSON으로 수신. 결정성/순서대칭/comparand 상한/
+  Korean NFC/missing-attr NaN-safety/dedup/empty·single 7개 invariant를
+  property test(numRuns=100)로 게이트. 4에 머무는 이유: contrast는 retrieval 이후
+  관측(observation) 레이어에서 동작 — 무엇을 검색할지 바꾸는 side-aware *retrieval
+  reranking* 은 아직 미구현이고, 검색된 top result에 대한 post-hoc 대조에 한정됨.
 
 status: active
 since: 2025-09
@@ -23,11 +30,13 @@ surfaces:
 key_files:
   - src/application/agent/agent-tools.ts
   - src/application/search/compare-tool-shared-constraints.ts
+  - src/domain/response/service/comparison-contrast.ts
 
 tests:
   regression:
     - test/regression/agent-parallel-tools.regression.test.ts
     - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
+    - test/regression/compare-wines-properties.regression.test.ts
 
 depends_on:
   - retrieval.comparison-retrieval
@@ -37,13 +46,12 @@ related_rfcs:
   - docs/RFC-010.md
 
 known_limitations:
-  - "Side-aware reranking 부재"
-  - "Pairwise balance scoring 부재"
-  - "Contrast diversity penalty 미적용"
+  - "Side-aware *retrieval* reranking 부재 (contrast는 retrieval 이후 관측 레이어에 한정)"
+  - "Contrast diversity penalty 미적용 (현재는 verdict/spread 보고만, 능동적 다양성 패널티 없음)"
 
 next_steps:
-  - "Pairwise balance score"
-  - "Top contrast pair mode"
+  - "Side-aware retrieval reranking: contrast divergentFacetCount를 retrieval 단계에 피드백"
+  - "Top contrast pair mode (N>2 comparand에서 가장 대조적인 페어 선택)"
 
 tags:
   - agent-tool

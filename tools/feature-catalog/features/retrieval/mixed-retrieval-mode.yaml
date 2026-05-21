@@ -5,11 +5,18 @@ summary: |
   기준 wine에 anchor하고 dense similarity + structured filter를 동시 적용하는 mode.
   "이거랑 비슷한", "스타일이 비슷한" 류 쿼리에 사용. retrieval_mode='mixed'로 라우팅.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   Vespa similar-retrieval 인프라 작동, candidate-pool에 통합. 기본 anchor + ANN 시나리오는
-  안정. 그러나 anchor decay / cross-anchor dedup / 전용 similarity 스코어링 부재로 4점은
-  못 됨.
+  안정. 2026-05-21: dense+sparse 혼합 fusion 코어(FusionService.fuse)에 대해 numRuns=100
+  property 회귀 9종 추가 — 결정성, RRF SSoT(@shared/utils/rrf.ts 단일 출처, private
+  1/(k+rank) 중복 없음), lane 내 순서 permutation-stability, NaN/±Infinity 점수 안전성,
+  exact-equality tie-break(entityId 오름차순) 결정성, 출력 상한(named const) bound,
+  channel-set 보존(엔티티 불변·candidateSources 정확), empty-channel 안전성, weight
+  monotonicity. 한글 라벨/쿼리("이거랑 비슷한", "스타일이 비슷한") payload 통과 검증 포함.
+  코드 변경은 불필요했음 — fusion 코어는 이미 SSoT·??·NaN-guard 충족. 5점은 feature
+  고유 한계(anchor decay / cross-anchor dedup / 전용 similarity 스코어링 부재)가 남아
+  보류.
 
 status: active
 since: 2025-10
@@ -28,6 +35,7 @@ key_files:
 tests:
   regression:
     - test/regression/nested-condition-hints.regression.test.ts
+    - test/regression/mixed-retrieval-mode-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

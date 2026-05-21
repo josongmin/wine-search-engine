@@ -15,6 +15,7 @@ import {
   hasExactLikeLookupStrategy,
   hasPhoneticLookupStrategy,
   hasTranslationLookupStrategy,
+  isPhoneticLookupStrategy,
 } from '../../domain/query/service/lookup-strategy-taxonomy.js';
 import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
 
@@ -267,6 +268,36 @@ function inferAliasType(anchor: AnchorCandidate): AliasType {
   return 'canonical';
 }
 
+/**
+ * True iff EVERY lookup strategy that fired on this anchor is phonetic.
+ *
+ * `lookup-strategy-taxonomy.ts` classifies `phonetic_exact` as `exactLike` so
+ * the recall phase can pick up Double Metaphone hits, but at signal-derivation
+ * time a phonetic hit MUST NOT be treated as identity-bearing evidence (an
+ * exact / canonical / alias match). When the anchor's strategy set is purely
+ * phonetic, suppress the exact/canonical/alias lanes and route the anchor's
+ * confidence solely through `phoneticMatch`. The resolver scorer further bounds
+ * that lane via {@link PHONETIC_ONLY_CONTRIBUTION_CEILING}, so phonetic-only
+ * candidates cannot ALONE clear `T_resolve` — restoring the invariant that
+ * phonetic evidence is structurally weaker than an exact alias hit.
+ *
+ * If ANY non-phonetic strategy coexists (lexical_exact, transliterated_exact,
+ * compact_exact, prefix_exact, fuzzy_*, …), the candidate has identity-bearing
+ * evidence and the suppression does NOT engage — so a clearly-intended
+ * misspelling that ALSO matches a non-phonetic lane is unaffected.
+ */
+function isPhoneticOnlyStrategySet(strategies: ReadonlySet<string>): boolean {
+  if (strategies.size === 0) {
+    return false;
+  }
+  for (const strategy of strategies) {
+    if (!isPhoneticLookupStrategy(strategy)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function buildSignals(
   rawQuery: string,
   normalizedQuery: string,
@@ -274,7 +305,10 @@ function buildSignals(
   doc: RetrievalDocument,
 ): MatchSignalSet {
   const strategies = new Set(anchor.lookupStrategies ?? []);
-  const exactLike = hasExactLikeLookupStrategy(strategies);
+  const phoneticOnly = isPhoneticOnlyStrategySet(strategies);
+  // A purely-phonetic strategy set is NOT exact-like for signal purposes —
+  // it carries weaker, collision-prone evidence. See isPhoneticOnlyStrategySet.
+  const exactLike = !phoneticOnly && hasExactLikeLookupStrategy(strategies);
   const fuzzyLike =
     strategies.has('fuzzy_char_ngram') ||
     strategies.has('transliterated_fuzzy') ||
@@ -286,7 +320,7 @@ function buildSignals(
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)
     : undefined;
   const exactSignalAllowed = identitySafeMatch !== false;
-  const identityNormalizedMatch = identitySafeMatch === false ? 0 : anchor.confidence;
+  const identityNormalizedMatch = identitySafeMatch === false || phoneticOnly ? 0 : anchor.confidence;
 
   return {
     ...ZERO_SIGNALS,

@@ -68,6 +68,25 @@ export const STYLE_SENSORY_ATTRIBUTES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Numeric sensory attributes that produce RFC-018 drinking-window sensory
+ * priors (body / tannin / acidity / sweetness). This is the STYLE_SENSORY
+ * subset MINUS `style` — `style` is a compound categorical value, not a
+ * normalized [0,1] numeric prior, so it never becomes a SensoryPrior.
+ *
+ * SSoT — import from here. Do NOT inline `new Set(['body','tannin','acidity','sweetness'])`.
+ * Previously duplicated in:
+ *   - retrieval-plan-builder.ts (SENSORY_KEYS)
+ *   - extract-sensory-priors.ts (SENSORY_KEYS)
+ * Divergence between those copies silently breaks RFC-018 prior fallback.
+ */
+export const SENSORY_PRIOR_ATTRIBUTES: ReadonlySet<string> = new Set([
+  'body',
+  'tannin',
+  'acidity',
+  'sweetness',
+]);
+
+/**
  * Geography attributes that use Vespa `contains` (substring) semantics at
  * retrieval time. Annotation-layer comparisons must mirror this so that a
  * candidate whose region field reads "Bordeaux AOC" is not falsely marked as

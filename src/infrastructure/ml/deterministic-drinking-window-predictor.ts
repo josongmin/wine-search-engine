@@ -41,6 +41,17 @@ export class DeterministicDrinkingWindowPredictor implements DrinkingWindowPredi
   }
 
   predictStructured(input: DrinkingWindowDeterministicInputV2): DrinkingWindowPrediction {
+    // Rule 28: vintage is the absolute calendar anchor for every offset. A
+    // non-finite vintage silently turns drinkingWindowStart/End/peakYear into
+    // NaN (serialized as `null`), and `end > start` becomes `NaN > NaN` =
+    // false — the window-validity invariant collapses without any error. The
+    // ONNX path already throws here (predictWithOnnx); the deterministic path
+    // must fail just as loudly rather than fabricate a null-year prediction.
+    if (!Number.isFinite(input.vintage)) {
+      throw new Error(
+        `DeterministicDrinkingWindowPredictor: vintage is not finite (got ${String(input.vintage)})`,
+      );
+    }
     const evaluated = this.formula.evaluate(input);
     const drinkingWindowStart = Math.round(
       input.vintage + Math.max(0, evaluated.startOffsetYears),

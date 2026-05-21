@@ -78,14 +78,52 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Markdown code-fence delimiter. */
+const MARKDOWN_FENCE = '```';
+
+/**
+ * Strips an optional `json` / `JSON` language tag plus a single run of leading
+ * horizontal whitespace and at most one newline from fenced-block content.
+ *
+ * Both sub-patterns are LEFT-ANCHORED (`^`) and bounded — `[ \t]*` cannot
+ * cross a newline and `\r?\n?` matches at most one line break — so neither can
+ * backtrack across the body. This is the linear-time replacement for the
+ * inner portion of the previous combined fence regex.
+ */
+const FENCE_LANG_TAG_RE = /^json/i;
+const FENCE_LEADING_WS_RE = /^[ \t]*\r?\n?/;
+
 /**
  * Models sometimes wrap JSON in markdown fences despite the system prompt; strip and extract `{...}`.
+ *
+ * ReDoS hardening (security feature `security.llm-injection-classifier`):
+ * the previous implementation used a single regex
+ * `/```(?:json)?\s*\r?\n?([\s\S]*?)```/` whose lazy body `[\s\S]*?` combined
+ * with the backtrackable `\s*\r?\n?` prefix exhibited QUADRATIC blowup on an
+ * UNCLOSED fence (an opening ``` ``` with a large whitespace+text tail and no
+ * closing fence): ~240ms at 20K chars, ~6.1s at 100K chars. An LLM response is
+ * normally tiny, but this parser is a defense-in-depth boundary on
+ * attacker-influenced text and must be linear-time regardless.
+ *
+ * The fence is now located with two `String.indexOf` scans (open fence, then
+ * the next fence after it) — strictly linear, no catastrophic backtracking —
+ * and only the small left-anchored {@link FENCE_LANG_TAG_RE} /
+ * {@link FENCE_LEADING_WS_RE} regexes run on the extracted body. Output is
+ * byte-for-byte identical to the previous regex on well-formed inputs.
  */
 export function normalizeClassifierJsonText(raw: string): string {
   let t = raw.trim();
-  const fence = t.match(/```(?:json)?\s*\r?\n?([\s\S]*?)```/);
-  if (fence?.[1]) {
-    t = fence[1].trim();
+  const open = t.indexOf(MARKDOWN_FENCE);
+  if (open >= 0) {
+    const afterOpen = open + MARKDOWN_FENCE.length;
+    const close = t.indexOf(MARKDOWN_FENCE, afterOpen);
+    if (close > afterOpen) {
+      t = t
+        .slice(afterOpen, close)
+        .replace(FENCE_LANG_TAG_RE, '')
+        .replace(FENCE_LEADING_WS_RE, '')
+        .trim();
+    }
   }
   const start = t.indexOf('{');
   const end = t.lastIndexOf('}');

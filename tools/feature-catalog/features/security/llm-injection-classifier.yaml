@@ -6,10 +6,23 @@ summary: |
   (legitimate vs injection)을 semantic 수준에서 판단. dual-vendor (Anthropic +
   OpenAI) 어댑터로 vendor lock-in 방지.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Functional. Anthropic + OpenAI 두 어댑터 운영. 그러나 LLM judge 자체가 prompt injection
-  대상이 될 수 있고, 추가 latency (~200ms), high-volume 공격 시 rate limit 우려.
+  결정론적 인프라 계층은 SOTA++ 회귀 게이트로 하드닝 완료:
+  - normalizeClassifierJsonText 의 markdown-fence 파서가 ReDoS 취약점을 가지고 있었음
+    (단일 정규식 /```(?:json)?\s*\r?\n?([\s\S]*?)```/ 의 lazy body + 백트래킹 prefix가
+    닫히지 않은 fence 입력에서 QUADRATIC: 20K자 ~240ms, 100K자 ~6.1s). String.indexOf
+    기반 선형 스캔으로 구조적 재작성 → 500K자 <1ms. 출력은 정상 입력에서 byte-identical.
+  - 양 어댑터 fail-closed strict-shape 파싱({ is_injection: boolean } 이외 전부 injection 처리),
+    LLMInjectionJudge 의 SHA-256 full-query 캐시 키(byte-exact — source 는 NFC 정규화를
+    하지 않으며 NFD/NFC 는 의도적으로 distinct 키, prefix-collision 차단),
+    corrupt/shape-mismatch 캐시 항목 = miss 재질의(캐시 포이즈닝 방어), abort-before-work,
+    classifier 실패 propagation(fail-open/closed 정책은 상위 게이트 결정) — 모두 fast-check
+    numRuns=100 프로퍼티 + 한국어 true/false-positive 코퍼스로 회귀 게이트화.
+  4에 머무는 이유(정직한 평가 — 보안 over-claim 금지): Layer-2 의 핵심인 LLM judge 자체가
+  여전히 meta-prompt-injection 대상이며(시스템 프롬프트의 "do not reveal rules" 지시는
+  완화책일 뿐 보장 아님), +200ms latency / real-time SLA / confidence-threshold /
+  반복공격 전용 캐시 등 LLM-judge 통합 갭이 미해결. 이 갭들이 해소되어야 5.
 
 status: active
 since: 2025-10
@@ -22,8 +35,17 @@ surfaces:
 key_files:
   - src/infrastructure/adapter/anthropic-llm-injection-classifier.ts
   - src/infrastructure/adapter/openai-llm-injection-classifier.ts
+  - src/domain/security/service/llm-injection-judge.ts
+  - src/domain/security/port/llm-injection-classifier.port.ts
+  - src/domain/security/port/injection-judge.port.ts
 
-tests: {}
+tests:
+  unit:
+    - src/domain/security/__tests__/anthropic-llm-injection-classifier.test.ts
+    - src/domain/security/__tests__/openai-llm-injection-classifier.test.ts
+    - src/domain/security/__tests__/llm-injection-judge.test.ts
+  regression:
+    - test/regression/llm-injection-classifier-properties.regression.test.ts
 
 depends_on:
   - security.query-sanitizer
@@ -32,13 +54,15 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "LLM judge 자체가 prompt injection 대상"
+  - "LLM judge 자체가 meta-prompt-injection 대상 (시스템 프롬프트 방어 지시는 완화책, 보장 아님)"
   - "+200ms latency"
   - "Real-time SLA 어려움"
+  - "verdict 캐시는 있으나 반복 공격 패턴 전용 차단/레이트리밋 없음"
 
 next_steps:
-  - "Confidence threshold"
-  - "반복 공격 caching"
+  - "Confidence threshold (LLM 출력에 score 요청 + 임계값 기반 라우팅) → maturity 5 전제"
+  - "반복 공격 caching/레이트리밋 (동일 SHA-256 키 고빈도 hit 시 알림/차단)"
+  - "judge 입력 wrapping 강화 (사용자 쿼리를 data-only 델리미터로 격리해 meta-injection 추가 완화)"
 
 tags:
   - security

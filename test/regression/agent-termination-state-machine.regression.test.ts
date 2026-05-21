@@ -73,20 +73,58 @@ describe('transitionTerminationReason', () => {
     expect(transitionTerminationReason('fallback', 'max_steps')).toBe('fallback');
   });
 
-  it('budget dominates timeout and max_steps but is dominated by error/blocked/aborted', () => {
+  // ── A3: completions dominate resource limits ──────────────────────────────
+  it('A3: answer dominates ALL resource limits (budget/timeout/max_steps) regardless of order', () => {
+    // The A3 decision: a run that produced a final grounded answer is a terminal
+    // SUCCESS even if a resource limit was hit along the way. The answer came
+    // through, so it is the dominant outcome.
+    for (const limit of ['budget', 'timeout', 'max_steps'] as const) {
+      expect(transitionTerminationReason(limit, 'answer')).toBe('answer');
+      expect(transitionTerminationReason('answer', limit)).toBe('answer');
+    }
+  });
+
+  it('A3: fallback dominates ALL resource limits but is dominated by answer', () => {
+    // A degraded/substitute completion still means the user received output, so
+    // it outranks resource limits — but a real grounded `answer` outranks it.
+    for (const limit of ['budget', 'timeout', 'max_steps'] as const) {
+      expect(transitionTerminationReason(limit, 'fallback')).toBe('fallback');
+      expect(transitionTerminationReason('fallback', limit)).toBe('fallback');
+    }
+    expect(transitionTerminationReason('fallback', 'answer')).toBe('answer');
+    expect(transitionTerminationReason('answer', 'fallback')).toBe('answer');
+  });
+
+  it('A3: hard failures dominate completions (answer/fallback) regardless of order', () => {
+    // A structurally-terminated run that coincidentally set 'answer'/'fallback'
+    // MUST report the failure — the failure is the dominant operator signal.
+    for (const hard of ['aborted', 'blocked', 'error', 'loop_detected'] as const) {
+      for (const completion of ['answer', 'fallback'] as const) {
+        expect(transitionTerminationReason(completion, hard)).toBe(hard);
+        expect(transitionTerminationReason(hard, completion)).toBe(hard);
+      }
+    }
+  });
+
+  it('budget dominates timeout and max_steps but is dominated by completions/hard failures', () => {
     expect(transitionTerminationReason('timeout', 'budget')).toBe('budget');
     expect(transitionTerminationReason('budget', 'timeout')).toBe('budget');
     expect(transitionTerminationReason('max_steps', 'budget')).toBe('budget');
+    // A3: completions now dominate budget.
+    expect(transitionTerminationReason('budget', 'answer')).toBe('answer');
+    expect(transitionTerminationReason('budget', 'fallback')).toBe('fallback');
     expect(transitionTerminationReason('budget', 'error')).toBe('error');
     expect(transitionTerminationReason('budget', 'blocked')).toBe('blocked');
     expect(transitionTerminationReason('budget', 'aborted')).toBe('aborted');
   });
 
-  it('loop_detected dominates max_steps/timeout/fallback/answer; is dominated by hard failures', () => {
+  it('loop_detected dominates resource limits AND completions; is dominated by aborted/blocked/error', () => {
     expect(transitionTerminationReason('max_steps', 'loop_detected')).toBe('loop_detected');
     expect(transitionTerminationReason('loop_detected', 'max_steps')).toBe('loop_detected');
+    // loop_detected is a HARD failure — it dominates completions.
     expect(transitionTerminationReason('loop_detected', 'answer')).toBe('loop_detected');
     expect(transitionTerminationReason('loop_detected', 'fallback')).toBe('loop_detected');
+    expect(transitionTerminationReason('loop_detected', 'budget')).toBe('loop_detected');
     expect(transitionTerminationReason('loop_detected', 'error')).toBe('error');
     expect(transitionTerminationReason('loop_detected', 'aborted')).toBe('aborted');
   });
@@ -101,14 +139,72 @@ describe('transitionTerminationReason', () => {
     expect(reason).toBe('aborted');
   });
 
-  it('domain test: sequence max_steps → fallback → answer ends as fallback', () => {
+  it('A3 domain test: budget → answer (answered despite budget) ends as answer', () => {
+    // The run loop wrote 'budget' (token budget exhausted), then a later
+    // synthesis / Layer-3 recovery produced a grounded answer. The user got the
+    // answer, so the dominant outcome is 'answer' — NOT 'budget'. The budget
+    // exhaustion remains visible via fallbackApplied / fallbackTrace.
+    let reason: AgentTerminationReason = 'budget';
+    reason = transitionTerminationReason(reason, 'answer');
+    expect(reason).toBe('answer');
+  });
+
+  it('A3 domain test: timeout → fallback (fallback after timeout) ends as fallback', () => {
+    // The LLM step / tool timed out ('timeout'), then a Layer-2 fallback search
+    // produced a substitute answer ('fallback'). The completion dominates the
+    // resource limit.
+    let reason: AgentTerminationReason = 'timeout';
+    reason = transitionTerminationReason(reason, 'fallback');
+    expect(reason).toBe('fallback');
+  });
+
+  it('domain test: error after answer ends as error (hard failure dominates completion)', () => {
+    // Synthesis claimed 'answer', then an unexpected downstream error fired.
+    // The error MUST be reported — a coincidental answer must not mask it.
+    let reason: AgentTerminationReason = 'answer';
+    reason = transitionTerminationReason(reason, 'error');
+    expect(reason).toBe('error');
+  });
+
+  it('domain test: aborted after everything stays aborted', () => {
+    // Walk the full lattice bottom→top then land an abort: aborted is the apex
+    // and must survive any subsequent same-or-lower write.
+    let reason: AgentTerminationReason = 'max_steps';
+    for (const next of ['timeout', 'budget', 'fallback', 'answer', 'loop_detected', 'error', 'blocked', 'aborted'] as const) {
+      reason = transitionTerminationReason(reason, next);
+    }
+    expect(reason).toBe('aborted');
+    // Any further softer write is rejected.
+    for (const softer of ['error', 'blocked', 'answer', 'fallback', 'budget', 'timeout', 'max_steps'] as const) {
+      expect(transitionTerminationReason('aborted', softer)).toBe('aborted');
+    }
+  });
+
+  it('domain test: max_steps → fallback → answer ends as answer (A3: real answer wins)', () => {
     // The run loop seeds 'max_steps'; synthesis emits a fallback substitute;
-    // later, answer-recovery tries to claim 'answer'. Fallback must remain so
-    // operators can distinguish substitute answers from real grounded answers.
+    // later, answer-recovery produces a real grounded 'answer'. Under A3 the
+    // real answer dominates the substitute (answer > fallback). Provenance of
+    // the substitute is preserved in fallbackTrace, not in terminationReason.
     let reason: AgentTerminationReason = 'max_steps';
     reason = transitionTerminationReason(reason, 'fallback');
     reason = transitionTerminationReason(reason, 'answer');
-    expect(reason).toBe('fallback');
+    expect(reason).toBe('answer');
+  });
+
+  it('3-class band invariant: hard failures > completions > resource-limits > sentinel', () => {
+    // Encodes the disjoint-band design: every hard failure outranks every
+    // completion, every completion outranks every resource limit, and every
+    // resource limit outranks the max_steps sentinel.
+    const hard: readonly AgentTerminationReason[] = ['aborted', 'blocked', 'error', 'loop_detected'];
+    const completions: readonly AgentTerminationReason[] = ['answer', 'fallback'];
+    const resourceLimits: readonly AgentTerminationReason[] = ['budget', 'timeout'];
+    const minOf = (group: readonly AgentTerminationReason[]): number =>
+      group.reduce((m, r) => Math.min(m, TERMINATION_REASON_PRIORITY[r]), Number.POSITIVE_INFINITY);
+    const maxOf = (group: readonly AgentTerminationReason[]): number =>
+      group.reduce((m, r) => Math.max(m, TERMINATION_REASON_PRIORITY[r]), Number.NEGATIVE_INFINITY);
+    expect(minOf(hard)).toBeGreaterThan(maxOf(completions));
+    expect(minOf(completions)).toBeGreaterThan(maxOf(resourceLimits));
+    expect(minOf(resourceLimits)).toBeGreaterThan(TERMINATION_REASON_PRIORITY['max_steps']);
   });
 
   it('priority table covers every AgentTerminationReason exactly once', () => {

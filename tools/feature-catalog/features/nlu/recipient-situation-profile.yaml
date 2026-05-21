@@ -8,21 +8,22 @@ summary: |
   으로 retrieval 후 필터, (2) query-side classifier (한·영 signal 사전 + saturation
   scoring)로 NLU 시점에 profile + confidence + runner-up 산출.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Maturity 3: dedicated regression suite (21 tests) + query-side classifier가
-  confidence ∈ [0,1] + runner-up profile + deterministic tie-break (canonical
-  RECIPIENT_PROFILE_VALUES 순서) 제공. Korean (부모님/엄마/상사/모르는 등) +
-  English signal coverage, 빈 query / 화이트스페이스 / no-signal 입력 모두
-  curve-aware (confidence floor 0.2 미만이면 profile undefined). 기존
-  candidate-based API (candidateMatchesRecipientProfile, recipientProfileEvidenceAxes)
-  는 backward-compatible 하게 유지 — candidate-constraint-evidence,
-  agent-semantic-contract 등 다운스트림 호출자는 무변경. Math.random 없음,
-  toLocaleString 없음, \b 비-ASCII 함정 없음.
+  HONEST 4. query-side classifier 계약을 fast-check property suite (numRuns=100,
+  14 tests)로 락업: determinism (순수 함수, 반복 호출 deep-equal), adversarial
+  unicode/control/emoji no-throw (binary-unit fuzz), call-history 독립성 (공유
+  가변 상태 없음), runner-up < top + distinct + positive evidence, Korean NFC/NFD
+  동치 분류, Korean 조사 agglutination robustness, Latin substring-collision
+  safety (rule 29 — signal 부분문자열 포함 단어 미발화, free-standing token만 발화),
+  Korean non-gift false-positive safety, whitespace → confidence 0, monotonicity
+  (recipient signal 추가가 confidence 낮추지 않음). confidence ∈ [0,1] + canonical
+  RECIPIENT_PROFILE_VALUES 결정론 tie-break. backward-compatible candidate API 유지.
+  Math.random/toLocaleString/\b-비ASCII 함정 없음.
 
-  Maturity 4 로 가려면: (a) axis weight를 offline gift-quality 라벨로 학습,
-  (b) chef / collector / health-conscious 등 profile inventory 확장,
-  (c) candidate-side axis와 query-side signal 사이 의미적 정합성 자동 검증.
+  남은 maturity 5 과제 (product/learning gap, code 결함 아님): axis weight를
+  offline gift-quality 라벨로 학습, profile inventory 확장 (chef/collector/
+  health-conscious), query-side ↔ candidate-side 신호 cross-validation harness.
 
 status: active
 since: 2025-09
@@ -39,6 +40,7 @@ key_files:
 tests:
   regression:
     - test/regression/recipient-situation-profile.regression.test.ts
+    - test/regression/recipient-situation-profile-properties.regression.test.ts
 
 depends_on:
   - nlu.query-normalizer

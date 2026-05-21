@@ -5,11 +5,17 @@ summary: |
   Typo / 음성 인식 오류 / partial query 등 noisy 입력에 대한 entity recognition
   robustness 평가. Recall@1/3, MRR per language/category. 카테고리/언어별 gate.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Dedicated eval script + check baseline + benchmark:messy:entity 통합. CI gate
-  (test:verification:noisy)에 wired. min-recall/resolution-match-rate 정확한
-  pass/fail. baseline 데이터 partial.
+  HONEST 4. eval scorer 메트릭 수학적 invariants를 fast-check property suite
+  (numRuns=100, 9 tests)로 락업: 메트릭 [0,1] bounded + finite (임의 ranking),
+  determinism, recall@1 = expected ID가 rank 0인 case 비율, Korean expected ID
+  NFC normalization-form 무관 매칭, perfect prediction → recall@1=recall@3=mrr=1
+  (empty → 0), empty/fully-missing 안전 (zero metric, no NaN), miss bucket이
+  MAX_REPORTED_MISSES 초과 안 함 (메트릭은 정확 유지), quality-gate violation이
+  floor 통과 시 미발생. structural safety: source에 Math.max/min spread 없음 (rule 9).
+  CI gate (test:verification:noisy) wired. 남은 maturity 5 과제: noisy fixture
+  규모 확장 (production 로그 기반), 음성인식 오류 패턴 확장 — data-coverage gap.
 
 status: active
 since: 2025-10
@@ -23,7 +29,9 @@ key_files:
   - scripts/eval/run-noisy-entity-eval.ts
   - scripts/eval/check-noisy-entity-baseline.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/noisy-entity-eval-properties.regression.test.ts
 
 depends_on:
   - nlu.entity-resolver

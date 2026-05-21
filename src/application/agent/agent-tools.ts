@@ -55,6 +55,7 @@ import {
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
+import { buildComparisonContrast } from '../../domain/response/service/comparison-contrast.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
@@ -2897,10 +2898,23 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
       : {}),
   }));
 
+  // Deterministic, order-symmetric side-by-side contrast over the resolved
+  // comparands. This replaces "eyeball two free-text legs" with a structural
+  // attribute alignment (agree/differ verdict + numeric spread per attribute),
+  // giving the agent an explicit pairwise-balance / contrast signal.
+  const contrastEntities = response.entities
+    .slice(0, 2)
+    .flatMap((entry) => {
+      const top = entry.topResult ?? entry.conceptAggregate?.representativeResult ?? null;
+      return top !== null ? [top.entity] : [];
+    });
+  const contrast = buildComparisonContrast(contrastEntities);
+
   return `GROUNDING_JSON: ${JSON.stringify({
     query_type: 'comparison',
     total_results: wines.length,
     wines,
     comparison_legs: comparisonLegs,
+    contrast,
   })}`;
 }

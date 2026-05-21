@@ -63,11 +63,18 @@ function makeSearchResponse(): SearchResponseV1 {
 }
 
 describe('AgentOrchestrator', () => {
-  // terminationReason carries the HIGHEST-SEVERITY reason encountered (per
-  // TerminationStateMachine priority table); recovery is signaled by
+  // terminationReason carries the DOMINANT outcome per the TerminationStateMachine
+  // 3-class priority table; recovery detail is signaled separately by
   // fallbackApplied / fallbackTrace.fallbackApplied ('layer2'|'layer3'|'layer4').
-  // Hard failures (error/timeout/loop_detected/...) correctly dominate the
-  // softer 'fallback'/'answer' a recovery layer might write afterward.
+  // A3 outcome semantics:
+  //   - HARD FAILURES (aborted > blocked > error > loop_detected) dominate
+  //     everything — a structurally-terminated run reports the failure even if a
+  //     recovery layer later wrote 'answer'/'fallback'.
+  //   - COMPLETIONS (answer > fallback) dominate RESOURCE LIMITS — a run that
+  //     produced a (possibly degraded) answer is a success even if it hit
+  //     budget/timeout/max_steps along the way.
+  //   - RESOURCE LIMITS (budget > timeout > max_steps) are the dominant signal
+  //     ONLY when no completion was produced.
   it('handles malformed LLM step payload by failing closed to fallback', async () => {
     const chatLlm: ChatLlmPort = {
       complete: vi.fn().mockResolvedValue(undefined as unknown as { text: string; model: string; finishReason: string }),
@@ -344,7 +351,13 @@ describe('AgentOrchestrator', () => {
       const result = await runPromise;
 
       expect(result.fallbackApplied).toBe(true);
-      expect(result.terminationReason).toBe('timeout');
+      // A3 outcome semantics: the LLM step timed out (`timeout` written), then
+      // the Layer-2 fallback search produced a usable answer (`fallback`
+      // written). A completion dominates a resource limit, so terminationReason
+      // is `fallback` ("the user got a degraded answer"), NOT `timeout`. The
+      // timeout itself is preserved in fallbackTrace.reasoningFailure=true and
+      // fallbackApplied='layer2'.
+      expect(result.terminationReason).toBe('fallback');
       expect(result.answer).toContain('Opus One 2018');
       expect(result.fallbackTrace).toEqual({
         fallbackApplied: 'layer2',
@@ -599,7 +612,11 @@ describe('AgentOrchestrator', () => {
       await vi.advanceTimersByTimeAsync(20);
       const result = await runPromise;
 
-      expect(result.terminationReason).toBe('timeout');
+      // A3 outcome semantics: the tool call timed out (`timeout` written), then
+      // a fallback answer was produced (`fallback`). The completion dominates the
+      // resource limit. The timeout is still visible via the step's [TIMEOUT]
+      // observation and fallbackApplied=true.
+      expect(result.terminationReason).toBe('fallback');
       expect(result.fallbackApplied).toBe(true);
       expect(result.steps[0]?.observation).toContain('[TIMEOUT]');
     } finally {
@@ -645,7 +662,11 @@ describe('AgentOrchestrator', () => {
       await vi.advanceTimersByTimeAsync(100);
     const result = await runPromise;
 
-    expect(result.terminationReason).toBe('timeout');
+    // A3 outcome semantics: the parallel batch timed out (`timeout` written),
+    // then synthesis produced a no-match fallback answer (`fallback`). The
+    // completion dominates the resource limit; the timeout is preserved via
+    // fallbackApplied=true.
+    expect(result.terminationReason).toBe('fallback');
     expect(result.fallbackApplied).toBe(true);
       expect(result.answer).toContain('No matching wine was found under the provided constraints');
     } finally {

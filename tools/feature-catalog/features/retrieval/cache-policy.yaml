@@ -5,30 +5,42 @@ summary: |
   Search 결과 caching 정책. 어떤 쿼리를 caching할지 (eligibility), TTL, invalidation.
   embedding cache + phrase cache + query cache의 정책 layer.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Write-side (`decideResponseCachePolicy`) 및 read-side (`decideResponseCacheReadPolicy`)
-  결정 함수가 모두 pure-function으로 구현되어 있고, 13개의 기존 단위 테스트 + 14개의
-  전용 regression 테스트 (`test/regression/cache-policy.regression.test.ts`) 로
-  eligibility / bypass-reason 결정 경로가 모두 covered. Maturity 3 승격의 핵심 추가:
+  Cache 정책은 두 결정 layer 로 구성: (1) eligibility/bypass 결정
+  (`cache-policy.ts`, pure-function) 와 (2) cache-KEY + TTL 도출
+  (`cache-key.ts` + SSoT `cache-ttl-config.ts`). 이전 maturity 3 은 (1) 만
+  property 수준으로 고정했고, 실제 retrieval 결과 버킷팅을 결정하는 (2) 의
+  핵심 불변식은 example-based 테스트(`cache-key-collision`)로만 sampling
+  되어 있었다. Maturity 4 승격의 핵심:
 
-    1. Hit-distribution observability counter
-       (`createCachePolicyDistributionCounter` / `globalCachePolicyDistributionCounter`).
-       Write 결정 (eligible / ineligible + by-reason) 과 read 결정 (cache_hit /
-       bypass + by-reason) 을 module-scoped 로 집계하여 ops 가 "지난 N분 동안
-       authoritative response 중 snapshot_id_drift 로 bypass 된 비율" 같은 질문에
-       즉시 답할 수 있게 함. silent-skip-counters 패턴과 동일한 형태.
-    2. Reason enum SSoT (`RESPONSE_CACHE_POLICY_REASONS`,
-       `RESPONSE_CACHE_READ_BYPASS_REASONS`) 가 분포 카운터의 by-reason 키와
-       1:1 로 정렬되어, 신규 reason 추가 시 카운터가 자동으로 0 초기화 슬롯을
-       확보. 드리프트 위험 제거.
-    3. Korean / NFC-NFD / whitespace-only snapshotId 입력에 대한 결정 stability
-       를 regression 으로 고정 (Korean 식별자가 도입되어도 silent eligibility
-       flip 방지).
+    1. **구조적 버그 수정 — NFC cache-key fragmentation.** `QueryCacheKeyBuilder`
+       /`EmbeddingCacheKeyBuilder` 가 query/constraint/expansion/snapshotId/
+       embedding text 를 Unicode 정규화 없이 해시했다. 업스트림 정규화기는
+       NFC/NFKC/NFD 를 제각각 적용(`search-constraint-extractor`,
+       `static-ambiguity-dictionary`, `recipient-situation-profile` 등)하므로,
+       동일 한글 쿼리("위" composed U+C704 vs decomposed U+110B U+1171)가 서로
+       다른 키로 해시 → 하나의 의미 쿼리가 두 버킷으로 분열(silent
+       fragmentation: 잘못된 hit 는 없으나 hit 를 영구히 놓침). 이제 builder 가
+       해시 경계(`hashDeterministic`)와 정렬·length-prefix 인코딩 단계 모두에서
+       NFC 로 canonical 화하여 invariant 를 **builder 가 소유**. NFKC 가 아닌 NFC
+       선택(호환 문자 폴딩으로 의미 구분이 무너지는 역방향 회귀 방지)을 주석으로
+       명시.
+    2. **Property-based 회귀 고정 (numRuns=100)** —
+       `test/regression/cache-policy-properties.regression.test.ts`: 결정성,
+       constraint/expansion 순서 독립성(set 의미), NFC/NFD 폼 불변성(한글+accented
+       Latin), snapshot/locale/soft-vs-hard collision-freedom, 빈 set·whitespace·
+       -0/0·빈 문자열 edge key, 그리고 TTL 이 named SSoT 상수(`CACHE_TTL_SECONDS`)
+       에서 도출됨을 고정. (참고: zero-TTL 보존 테스트는 `??` vs `||` 연산자
+       계약 수준이며, source 코드가 해당 패턴을 사용함을 assert 하지는 않음.)
+    3. (유지) Hit-distribution observability counter + reason enum SSoT 정렬은
+       maturity 3 에서 도입된 그대로.
 
-  남은 한계: invalidation 정책은 여전히 ad-hoc (TTL / explicit invalidation 의
-  정형화는 maturity 4 의 과제). 분포 카운터는 process-local — 다중 인스턴스
-  집계는 별도 export pipeline 필요.
+  남은 한계 (maturity 5 의 과제): invalidation 정책은 여전히 부분적으로 ad-hoc
+  (snapshot-bound TTL + 명시적 invalidation API 의 완전 정형화 미완). 분포
+  카운터는 process-local — 다중 인스턴스 집계는 별도 export pipeline 필요.
+  localeCompare 기반 정렬은 host ICU collator 에 의존(동일 호스트 내 결정적이나
+  크로스-호스트 동일 ICU 가정).
 
 status: active
 since: 2025-10
@@ -40,10 +52,15 @@ surfaces:
 
 key_files:
   - src/domain/cache/cache-policy.ts
+  - src/domain/performance/model/cache-key.ts
+  - src/infrastructure/cache/cache-ttl-config.ts
+  - src/domain/performance/service/cache-service.ts
 
 tests:
   regression:
     - test/regression/cache-policy.regression.test.ts
+    - test/regression/cache-policy-properties.regression.test.ts
+    - test/regression/cache-key-collision.regression.test.ts
   unit:
     - src/domain/cache/__tests__/cache-policy.test.ts
 
@@ -53,12 +70,14 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Invalidation 정책 ad-hoc (TTL / explicit invalidation 정형화는 maturity 4)"
+  - "Invalidation 정책 부분적 ad-hoc (snapshot-bound TTL + 명시적 invalidation API 완전 정형화는 maturity 5)"
   - "분포 카운터는 process-local — 다중 인스턴스 합산은 별도 export pipeline 필요"
+  - "constraint/expansion 정렬이 host ICU collator(localeCompare)에 의존 — 크로스-호스트 동일 ICU 가정"
 
 next_steps:
   - "Invalidation 정형화 (snapshot-bound TTL + 명시적 invalidation API)"
   - "분포 카운터 → 메트릭 export (Prometheus / OTLP) 연결"
+  - "정렬 결정성을 ICU-독립 코드포인트 비교로 전환(크로스-호스트 안정성)"
 
 tags:
   - caching

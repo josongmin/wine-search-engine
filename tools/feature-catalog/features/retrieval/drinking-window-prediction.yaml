@@ -8,19 +8,29 @@ summary: |
   begin/end/peak 외에 enum confidence 와 numeric confidenceScore (∈ [0, 1]) 양쪽을
   포함하여 다운스트림 랭킹/필터링이 coarse 3-bucket 이상으로 동작할 수 있다.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  프로덕션 와이어링 완료 (deterministic + ONNX dual 구현), 구조식 단위 테스트
-  + 헝리스틱 제거 regression + 신규 dedicated regression suite (11 케이스)
-  세 층으로 invariant 가 잠겨 있음. regression 은 style-aware shape (young
-  Bordeaux / drink-now Glera / vintage Champagne), Korean alias entity
-  ('오푸스 원'), vintage boundary (current year + 1900), determinism (5회 반복),
-  fortified/producer-prestige tail, 그리고 numeric confidenceScore 의 [0, 1]
-  bound 와 enum confidence 와의 threshold 정합성을 모두 커버한다. ONNX 경로는
-  calibrated probabilistic head 가 없어 medium-band midpoint 를 상수로 노출하며,
-  deterministic 경로는 구조식 confidenceScore 를 그대로 전달한다.
-  남은 제약: critic / cellar 데이터 기반 cross-validation, retraining cadence/SLA
-  는 여전히 미정 — 정확도 ground-truth 셋업은 별도 트랙으로 분리되어 있다.
+  프로덕션 와이어링 완료 (deterministic + ONNX dual 구현). invariant 가 네 층으로
+  잠겨 있음: 구조식 단위 테스트 + 헝리스틱 제거 regression + example-based
+  regression (11 케이스) + 신규 property-based regression suite (fast-check,
+  numRuns=100 × 5 properties). property suite 는 임의의 schema-valid 입력 전체에
+  대해 determinism, strict window validity (end > start), peak containment
+  (start ≤ peak ≤ end), anchor-relative bound (start ≥ vintage, end ≤ vintage +
+  파생 ceiling), confidenceScore∈[0,1] + enum 정합성, 그리고 hard-floor 장기숙성
+  varietal 이 hard-ceiling 단기 varietal 보다 먼저 끝나지 않는 provable ordering
+  을 검증한다.
+  이 라운드에서 구조적 버그 두 건을 수정함:
+  (1) deterministic 경로가 non-finite vintage 를 가드하지 않아 start/end/peak 가
+      null(NaN) 로 직렬화되고 end>start invariant 가 조용히 붕괴 — ONNX 경로와
+      동일하게 throw 하도록 수정 (Rule 28).
+  (2) norm/lognorm/consensus 헬퍼가 NaN/±Infinity feature(부패 ETL / 상위 산술)
+      를 그대로 통과시켜 연도 산술에 NaN 을 주입 — non-finite 입력을 "absent" 로
+      취급하도록 finite-safe 하드닝 (Rule 28/32). 휴리스틱 도입 없음 — 기존 fallback
+      앵커를 재사용.
+  4 인 이유 (정직): invariant 는 SOTA++ 로 잠겼으나 정확도 트랙은 미완. ONNX
+  경로는 calibrated probabilistic head 가 없어 medium-band midpoint (0.625) 를
+  상수로 노출하고, critic/cellar 데이터 기반 cross-validation ground-truth 가
+  여전히 미정량 상태다. 이 두 product gap 이 해소되어야 5.
 
 status: active
 since: 2025-09
@@ -43,6 +53,7 @@ tests:
   regression:
     - test/regression/heuristic-drinking-window-removal.regression.test.ts
     - test/regression/drinking-window-prediction.regression.test.ts
+    - test/regression/drinking-window-prediction-properties.regression.test.ts
   unit:
     - src/infrastructure/ml/__tests__/deterministic-drinking-window-predictor.test.ts
 

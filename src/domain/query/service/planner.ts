@@ -129,6 +129,32 @@ function hasDirectResolvableAttributeEntity(normalizedQuery: string): boolean {
 const KOREAN_NOT_MARKER_PATTERN = '\\s*(?:말고|대신)\\s*';
 const ENGLISH_NOT_MARKER_PATTERN = '(?<!\\p{L})(?<!\\p{N})instead\\s+of\\s+';
 
+/**
+ * Similarity markers used to strip a similarity-query ANCHOR from the
+ * constraint-parsing surface (intent-aware soft anchoring).
+ *
+ * On a similarity / relative query ("마고 비슷한 레드" — "red wine similar to
+ * Margaux"), the anchor (마고 / Margaux) is a REFERENCE POINT, not a hard
+ * filter: the user wants wines *like* Margaux, not wines that *are* Margaux.
+ * If the anchor surface stays in the constraint-parsing query, the compiler
+ * resolves it into HARD appellation/country/region constraints and the
+ * ranker's coarse prune drops every candidate to zero results.
+ *
+ * We therefore remove the anchor surface together with its similarity marker
+ * — exactly mirroring the existing `not`-operator strip (which already removes
+ * `<anchor> 말고`) — so the anchor degrades to the soft/anchor retrieval path
+ * (the `similar_items` retrieval mode still consumes it via `relativeQuery`),
+ * while the remaining intent words (e.g. 레드 → wine_type) are still parsed.
+ *
+ * Korean markers follow the anchor (`<anchor> 비슷한`); English markers precede
+ * it (`like <anchor>`). Patterns are interpolated with the regex-escaped anchor
+ * by {@link Planner.buildConstraintParsingQuery}. The English lookbehinds keep
+ * the boundary Unicode-safe (CLAUDE.md test discipline rule 8 — never `\\b`).
+ */
+const KOREAN_SIMILARITY_MARKER_PATTERN = '\\s*(?:같은|비슷한|처럼|같이)\\s*';
+const ENGLISH_SIMILARITY_MARKER_PATTERN =
+  '(?<!\\p{L})(?<!\\p{N})(?:like|similar\\s+to)\\s+';
+
 const EMPTY_FALLBACK_MAPPER: NLMapper = {
   mapPhrase: () => Promise.resolve(null),
   mapConstraints: (phrases: readonly string[]) =>
@@ -958,19 +984,35 @@ export class Planner {
 
     if (relativeQuery !== null) {
       for (const expression of relativeQuery.relativeExpressions) {
-        if (expression.operator !== 'not') {
-          continue;
-        }
-
         const anchorSurface = expression.anchorSurfaceForm.trim();
         if (anchorSurface.length === 0 || !matchedAnchorForms.has(anchorSurface.toLowerCase())) {
           continue;
         }
 
         const escapedAnchor = escapeRegex(anchorSurface);
-        sanitizedQuery = sanitizedQuery
-          .replace(new RegExp(`${escapedAnchor}${KOREAN_NOT_MARKER_PATTERN}`, 'u'), ' ')
-          .replace(new RegExp(`${ENGLISH_NOT_MARKER_PATTERN}${escapedAnchor}`, 'iu'), ' ');
+
+        // `not` ("X 말고"): the anchor is being EXCLUDED — strip it so it never
+        // becomes a hard include filter.
+        if (expression.operator === 'not') {
+          sanitizedQuery = sanitizedQuery
+            .replace(new RegExp(`${escapedAnchor}${KOREAN_NOT_MARKER_PATTERN}`, 'u'), ' ')
+            .replace(new RegExp(`${ENGLISH_NOT_MARKER_PATTERN}${escapedAnchor}`, 'iu'), ' ');
+          continue;
+        }
+
+        // `similar_to` ("X 비슷한"): the anchor is a REFERENCE POINT for the
+        // similarity neighbourhood, NOT a hard filter. Strip the anchor surface
+        // (with its similarity marker) from the constraint-parsing query so the
+        // compiler does not promote it to hard appellation/region/country
+        // constraints that coarse-prune every candidate to zero. The anchor is
+        // still carried for retrieval via `relativeQuery` / the `similar_items`
+        // mode. Non-anchor intent words (e.g. 레드 → wine_type) are preserved.
+        if (expression.operator === 'similar_to') {
+          sanitizedQuery = sanitizedQuery
+            .replace(new RegExp(`${escapedAnchor}${KOREAN_SIMILARITY_MARKER_PATTERN}`, 'u'), ' ')
+            .replace(new RegExp(`${ENGLISH_SIMILARITY_MARKER_PATTERN}${escapedAnchor}`, 'iu'), ' ');
+          continue;
+        }
       }
     }
 

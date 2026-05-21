@@ -55,6 +55,37 @@ const DERIVED_INITIALISM_CAP = 0.55;
 const ABBREVIATION_CAP = 0.7;
 
 /**
+ * Maximum raw-score contribution from a candidate matched ONLY via phonetic
+ * provenance (every `aliasMatch` is `aliasType === 'phonetic'`, i.e. found via
+ * the consonant-skeleton or Double Metaphone phonetic phase — never an exact /
+ * lexical / transliterated alias hit).
+ *
+ * WHY A CAP (RFC-006 §5.4): phonetic similarity is structurally WEAKER evidence
+ * than an exact or alias match. Double Metaphone (Philips 2000) buckets
+ * dissimilar surfaces under one code (Margaux↔Margeaux, but also collision-prone
+ * gibberish↔real-wine pairs). Without a ceiling a phonetic-only candidate enters
+ * the scorer through the SAME `aliasExactMatch` (weight 0.8) and even
+ * `canonicalExactMatch` (weight 1.0) lanes as a genuine exact hit — because
+ * `phonetic_exact` is classified `exactLike` in `lookup-strategy-taxonomy.ts`
+ * for RECALL. That mislabels HOW the match was found as full identity evidence,
+ * inflating the calibrated confidence C of gibberish above T_resolve and tying a
+ * phonetic collision with a real exact alias hit.
+ *
+ * WHY 0.34: in the resolve gate C is monotone in this raw total (the identity /
+ * isotonic calibration path is order-preserving), and the SMALLEST per-class
+ * `resolveTau` in `threshold-profile.ts` is 0.35 (`pure_constraint`). Capping the
+ * phonetic-only contribution at 0.34 keeps it STRICTLY below every `resolveTau`,
+ * so a phonetic-only match can never ALONE clear the resolve threshold. It still
+ * leaves full headroom for corroboration: a single producer (0.7), vintage (0.6),
+ * or region (0.5) signal lifts the total well past any threshold, so a clearly-
+ * intended phonetic match with supporting evidence still resolves. The value is
+ * intentionally below `DERIVED_INITIALISM_CAP` (0.55) — a phonetic collision is
+ * even less identity-bearing than a derived initialism, which at least shares
+ * the canonical's leading characters.
+ */
+const PHONETIC_ONLY_CONTRIBUTION_CEILING = 0.34;
+
+/**
  * Scores resolution candidates using a weighted-sum function over
  * match signals, per RFC-006 §5.
  *
@@ -71,7 +102,8 @@ export class CandidateScorer {
    */
   score(candidate: ResolverCandidate): number {
     const signals = candidate.sourceSignals;
-    const adjustedSignals = this.applyAliasCaps(signals, candidate);
+    const cappedSignals = this.applyAliasCaps(signals, candidate);
+    const adjustedSignals = this.applyPhoneticOnlyCap(cappedSignals, candidate);
 
     let total = 0;
     total += SCORING_WEIGHTS.canonicalExactMatch * adjustedSignals.canonicalExactMatch;
@@ -165,15 +197,114 @@ export class CandidateScorer {
   }
 
   /**
+   * Caps the contribution of a candidate matched ONLY via phonetic provenance.
+   *
+   * Provenance-driven (NOT query-pattern-driven): the cap engages iff EVERY
+   * alias match on the candidate is `aliasType === 'phonetic'`. The moment a
+   * single non-phonetic match coexists (exact / lexical / transliterated alias,
+   * curated abbreviation, …) the candidate has identity-bearing evidence and the
+   * cap must NOT engage — mirroring the `every(...)` gate used by
+   * {@link DERIVED_INITIALISM_CAP} so a phonetic sibling never downgrades a
+   * candidate that ALSO has a real alias hit. This is what lets an EXACT alias
+   * hit dominate a competing phonetic-only collision (e.g. "romanee conti" exact
+   * vs a phonetic near-tie): only the phonetic-only side is ceilinged.
+   *
+   * The phonetic phase reuses the `phonetic_exact` strategy which
+   * `lookup-strategy-taxonomy.ts` classifies `exactLike` for RECALL. As a side
+   * effect `buildSignals` populates SEVERAL lanes from the SAME phonetic hit:
+   * `phoneticMatch`, `aliasExactMatch`, and (when the normalized surfaces happen
+   * to coincide) `canonicalExactMatch` / `canonicalNormalizedMatch`. These are
+   * the same recall artifact double-counted across lanes — not independent
+   * evidence. The weighted sum of those lanes is what inflated C.
+   *
+   * Fix: collapse the phonetic-only evidence to a SINGLE bounded lane.
+   *   1. Zero the identity lanes that misrepresent a phonetic hit as an exact /
+   *      canonical / alias match (`canonicalExactMatch`, `canonicalNormalizedMatch`,
+   *      `aliasExactMatch`, `aliasFuzzyMatch`, `editDistanceScore`).
+   *   2. Route the surviving evidence through the single `phoneticMatch` lane
+   *      (weight {@link SCORING_WEIGHTS.phoneticMatch}) and clamp that lane so its
+   *      WEIGHTED contribution cannot exceed {@link PHONETIC_ONLY_CONTRIBUTION_CEILING}.
+   *
+   * The phonetic-only total is therefore exactly one bounded term, strictly
+   * below every resolveTau. Corroborating signals (producer / vintage / region /
+   * grape) are NOT touched, so a clearly-intended phonetic match with supporting
+   * evidence still resolves.
+   */
+  private applyPhoneticOnlyCap(
+    signals: MatchSignalSet,
+    candidate: ResolverCandidate,
+  ): MatchSignalSet {
+    // Provenance gate: phonetic-only candidates are detected by EITHER source
+    //   (a) the alias-match metadata says every match is `aliasType: 'phonetic'`
+    //       — true for curated phonetic aliases (`alias_type='phonetic'` rows);
+    //   (b) the upstream `buildSignals` zeroed every identity-bearing lane
+    //       except `phoneticMatch` — true for any anchor whose lookup-strategy
+    //       set is purely phonetic (Double Metaphone / consonant skeleton)
+    //       regardless of the matched alias's stored type. This is the SSoT
+    //       provenance tag carried in the signal vector itself: a non-zero
+    //       phoneticMatch with zero exact/canonical/alias lanes is, by
+    //       construction, a phonetic-only hit (see buildSignals'
+    //       isPhoneticOnlyStrategySet branch).
+    //
+    // Either gate alone is sufficient to engage the cap — the moment a
+    // non-phonetic identity signal coexists the cap stands down (no
+    // over-correction).
+    const isPhoneticOnlyByAliasType =
+      candidate.aliasMatches.length > 0 &&
+      candidate.aliasMatches.every((m) => m.aliasType === 'phonetic');
+    const isPhoneticOnlyBySignals =
+      signals.phoneticMatch > 0 &&
+      signals.canonicalExactMatch === 0 &&
+      signals.canonicalNormalizedMatch === 0 &&
+      signals.aliasExactMatch === 0 &&
+      signals.aliasFuzzyMatch === 0 &&
+      signals.editDistanceScore === 0;
+    if (!isPhoneticOnlyByAliasType && !isPhoneticOnlyBySignals) {
+      return signals;
+    }
+
+    // Strongest phonetic-evidence value across the lanes the recall phase
+    // populated from the single phonetic hit (they all carry the same anchor
+    // confidence; take the max to be robust to which lane was set).
+    const phoneticEvidence = Math.max(
+      signals.phoneticMatch,
+      signals.aliasExactMatch,
+      signals.aliasFuzzyMatch,
+      signals.canonicalExactMatch,
+      signals.canonicalNormalizedMatch,
+    );
+
+    // Clamp so weight * phoneticMatch <= ceiling. weight is a positive constant,
+    // so the lane bound is ceiling / weight.
+    const phoneticLaneBound = PHONETIC_ONLY_CONTRIBUTION_CEILING / SCORING_WEIGHTS.phoneticMatch;
+    const phoneticMatch = Math.min(phoneticEvidence, phoneticLaneBound);
+
+    return {
+      ...signals,
+      canonicalExactMatch: 0,
+      canonicalNormalizedMatch: 0,
+      aliasExactMatch: 0,
+      aliasFuzzyMatch: 0,
+      editDistanceScore: 0,
+      phoneticMatch,
+    };
+  }
+
+  /**
    * Checks whether the candidate has at least one match from a core
-   * (high-trust) alias type: canonical, translation, or phonetic.
+   * (high-trust) alias type: canonical or translation.
+   *
+   * `phonetic` is intentionally EXCLUDED. Phonetic provenance is weaker
+   * evidence than an exact / alias / translation match (RFC-006 §5.4); treating
+   * it as "core" would bypass the alias caps (catalog-noise / initialism /
+   * abbreviation) and let a phonetic-only collision inflate confidence. Phonetic
+   * candidates are bounded separately by {@link applyPhoneticOnlyCap}.
    */
   private hasCoreAliasMatch(candidate: ResolverCandidate): boolean {
     return candidate.aliasMatches.some(
       (m) =>
         m.aliasType === 'canonical' ||
-        m.aliasType === 'translation' ||
-        m.aliasType === 'phonetic',
+        m.aliasType === 'translation',
     );
   }
 }

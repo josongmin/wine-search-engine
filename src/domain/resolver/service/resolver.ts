@@ -24,6 +24,7 @@ import type {
 } from '../port/learned-matcher.port.js';
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 import { CONFORMAL_ALPHA } from '../../shared/config/conformal-config.js';
 import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD as RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../model/corrective-retry-thresholds.js';
 
@@ -36,6 +37,54 @@ const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
 const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
 /** Decimal places when serializing gap for traces. */
 const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
+
+/**
+ * Upper bound on the number of ranked candidates the resolver emits.
+ *
+ * The blocker (recall >= 0.99) can return a large candidate pool for noisy /
+ * short-form queries, but the decision layer and the clarification UI only ever
+ * consume the top of the ranked list:
+ *   - resolution reads top-1;
+ *   - the calibrated gap reads top-1 vs top-2;
+ *   - the conformal prediction set caps at K = 2 for any C >= 1 - 2*alpha;
+ *   - the clarification surface (RFC-006 §7) presents a small disambiguation
+ *     menu, not the full pool.
+ *
+ * Bounding the *emitted* list to a named constant keeps the result payload
+ * deterministic in size and prevents an unbounded array from flowing into the
+ * trace / HTTP response on adversarial high-fan-out queries. The bound is >= 2
+ * so the top-1/top-2 calibration contract (buildResolvedCandidates index 0/1)
+ * is always satisfiable. Ranking, scoring, ambiguity detection, and calibration
+ * all run over the FULL pool first; only the final emitted slice is bounded.
+ */
+export const MAX_RESOLVED_CANDIDATES = 16;
+
+/**
+ * Floor raw score assigned to a candidate whose computed raw score is
+ * non-finite (NaN / ±Infinity).
+ *
+ * A non-finite raw score can only arise from a corrupted MatchSignalSet (e.g. a
+ * JSONB column that survived validation but carries NaN, or an upstream divide
+ * that produced Infinity). Two contracts force the resolver to neutralize it at
+ * the scoring boundary rather than propagate it:
+ *   1. The SSoT comparator normalizes NaN to -Infinity, so a poisoned candidate
+ *      already sorts to the END of the list — but its raw value is still NaN.
+ *   2. `Calibrator.calibrate()` THROWS on a non-finite top1/top2 raw score
+ *      (its documented fail-loud contract). Without sanitization a single
+ *      poisoned candidate crashes the entire resolution into an exception
+ *      instead of degrading to a typed `failed` result.
+ *
+ * Mapping the value to a finite floor keeps the candidate strictly below any
+ * legitimately-scored candidate (the weighted-sum scorer's only negative term
+ * is the ambiguity penalty at weight -0.8 over a [0,1] signal, so real scores
+ * are >= -0.8) while letting the pipeline degrade gracefully.
+ */
+const NON_FINITE_RAW_SCORE_FLOOR = -1;
+
+/** Replaces a non-finite raw score with the deterministic floor sentinel. */
+function sanitizeRawScore(rawScore: number): number {
+  return Number.isFinite(rawScore) ? rawScore : NON_FINITE_RAW_SCORE_FLOOR;
+}
 
 function classifyLearnedMatcherFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -135,10 +184,17 @@ interface LookupStrategyAdjustment {
  * - Returns **2** when C >= (1 - 2 * alpha)   — two candidates are needed.
  * - Returns **K** otherwise                   — abstain; return all candidates.
  *
+ * The returned size is ALWAYS clamped to `k`: a prediction set can never name
+ * more candidates than actually exist. Without the clamp a high-confidence
+ * singleton (k=1) whose C lands in the [1-2*alpha, 1-alpha) band returned 2 —
+ * claiming a runner-up that does not exist and breaking the
+ * `conformalSetSize <= candidates.length` contract that the result envelope
+ * advertises (resolve-result.ts: "K = number of candidates").
+ *
  * @param calibratedScore - Calibrated decision confidence C in [0, 1].
  * @param alpha - Significance level (must be in (0, 0.5]).
  * @param k - Total number of candidates (fallback set size on abstain).
- * @returns The conformal prediction set size.
+ * @returns The conformal prediction set size, in [0, k].
  */
 export function computeConformalSetSize(
   calibratedScore: number,
@@ -157,11 +213,12 @@ export function computeConformalSetSize(
     );
   }
 
+  // A prediction set can never name more candidates than exist: clamp to k.
   if (calibratedScore >= 1 - alpha) {
-    return 1;
+    return Math.min(1, k);
   }
   if (calibratedScore >= 1 - 2 * alpha) {
-    return 2;
+    return Math.min(2, k);
   }
   return k;
 }
@@ -233,10 +290,14 @@ export class Resolver {
       (c) => blockedIdSet.has(String(c.entityId)),
     );
 
-    // Step 2: Score each candidate
+    // Step 2: Score each candidate.
+    // Sanitize non-finite raw scores at the boundary: a corrupted signal must
+    // degrade to a typed result, not crash the calibrator (see
+    // NON_FINITE_RAW_SCORE_FLOOR). The floor keeps the candidate ranked below
+    // every legitimately-scored candidate.
     const scored = candidates.map((candidate) => ({
       candidate,
-      rawScore: this.candidateScorer.score(candidate),
+      rawScore: sanitizeRawScore(this.candidateScorer.score(candidate)),
     }));
     const lookupStrategyAdjustments = this.collectLookupStrategyAdjustments(input);
     const adjustedScored = this.applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
@@ -269,15 +330,37 @@ export class Resolver {
       }
     }
 
+    // Re-sanitize after adjustment/blend: the lookup-strategy delta and the
+    // learned-matcher blend operate on the raw score and could reintroduce a
+    // non-finite value (e.g. a learned matcher returning Infinity). Enforce the
+    // finite-score contract once more at the single chokepoint before sort +
+    // calibrate so the calibrator's fail-loud guard is never tripped.
+    blendedScored = blendedScored.map((entry) =>
+      Number.isFinite(entry.rawScore)
+        ? entry
+        : { candidate: entry.candidate, rawScore: sanitizeRawScore(entry.rawScore) },
+    );
+
     // Step 3: Sort by raw score descending.
     // Tiebreak on entityId string to guarantee a stable, deterministic order
     // when two candidates share identical raw scores (e.g. vintage siblings
     // "Opus One 2018" vs "Opus One 2019" matched by the same alias signals).
-    blendedScored.sort((a, b) => {
-      const scoreDiff = b.rawScore - a.rawScore;
-      if (scoreDiff !== 0) return scoreDiff;
-      return String(a.candidate.entityId).localeCompare(String(b.candidate.entityId));
-    });
+    //
+    // Uses the SSoT comparator (compareScoreWithTiebreaker) instead of an
+    // inline `b - a` + localeCompare:
+    //   1. `b.rawScore - a.rawScore` mishandles NaN — a corrupted/NaN raw score
+    //      stays at the FRONT (NaN subtraction is never < 0), silently ranking
+    //      a garbage candidate #1. The SSoT normalizes NaN to -Infinity so it
+    //      sorts to the END.
+    //   2. `localeCompare` is locale-dependent and can reorder ASCII entity IDs
+    //      differently across machines/ICU versions; the SSoT compares with raw
+    //      `<`/`>` on the string key for byte-stable, machine-independent order.
+    blendedScored.sort(
+      compareScoreWithTiebreaker(
+        (entry) => entry.rawScore,
+        (entry) => String(entry.candidate.entityId),
+      ),
+    );
 
     // Step 4: Calibrate top scores.
     //
@@ -594,7 +677,14 @@ export class Resolver {
     status: DecisionStatus,
     singletonBypass: boolean,
   ): readonly ResolvedCandidate[] {
-    return scored.map((entry, index) => {
+    // Emit at most MAX_RESOLVED_CANDIDATES. Scoring/sort/calibration/ambiguity
+    // already ran over the full pool; this only bounds the payload that flows
+    // into the trace and HTTP response (the decision layer consumes top-1/top-2
+    // and a small clarification menu — never the full high-recall pool).
+    const bounded = scored.length > MAX_RESOLVED_CANDIDATES
+      ? scored.slice(0, MAX_RESOLVED_CANDIDATES)
+      : scored;
+    return bounded.map((entry, index) => {
       // The top-1 and top-2 get their calibrated scores; others get
       // linearly interpolated estimates relative to their raw scores.
       let calibratedScore: number;

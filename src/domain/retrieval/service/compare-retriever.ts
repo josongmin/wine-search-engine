@@ -10,12 +10,18 @@ import { ConstraintFilter } from './constraint-filter.js';
 import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 import { extractHardConstraintsFromGraph } from '../../query/service/graph-slot-constraints.js';
+import { normalizeUnicode } from '../../shared/utils/unicode-normalize.js';
 
 export class CompareRetriever {
   private readonly constraintFilter = new ConstraintFilter();
 
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
+  /**
+   * Bounded fan-out multiplier: over-fetch this many × `limit` sparse hits
+   * before de-dup + anchor exclusion + slice. Keeps the comparison candidate
+   * set bounded regardless of how many anchor lexical legs are emitted.
+   */
   private static readonly FETCH_MULTIPLIER = 4;
 
   private static hitsToCandidates(
@@ -40,29 +46,29 @@ export class CompareRetriever {
     readonly appellation?: string | undefined;
     readonly country?: string | undefined;
   }): readonly string[] {
+    // SSoT: every anchor-derived lexical leg is NFC-normalized + whitespace
+    // collapsed via normalizeUnicode before it reaches the sparse index. The
+    // index stores NFC text, so an NFD Korean anchor label (e.g. decomposed
+    // 한글 jamo) must be composed first or the BM25 match silently misses.
+    // Normalizing through the Set also collapses NFC-equivalent duplicates
+    // deterministically (insertion-order-stable). See test discipline rule 5/8.
     const queries = new Set<string>();
-    const compactLabel = stripVintageYearsBounded(anchor.canonicalLabel).trim();
-    if (compactLabel.length > 0) {
-      queries.add(compactLabel);
-    }
-    if (anchor.producer.trim().length > 0) {
-      queries.add(anchor.producer.trim());
-    }
-    if (anchor.region.trim().length > 0) {
-      queries.add(anchor.region.trim());
-    }
-    if (anchor.appellation !== undefined && anchor.appellation.trim().length > 0) {
-      queries.add(anchor.appellation.trim());
-    }
-    if (anchor.country !== undefined && anchor.country.trim().length > 0) {
-      queries.add(anchor.country.trim());
-    }
-    if (anchor.grapes[0] !== undefined && anchor.grapes[0].trim().length > 0) {
-      queries.add(anchor.grapes[0].trim());
-    }
-    if (anchor.style.trim().length > 0) {
-      queries.add(anchor.style.trim());
-    }
+    const add = (raw: string | undefined): void => {
+      if (raw === undefined) {
+        return;
+      }
+      const normalized = normalizeUnicode(raw);
+      if (normalized.length > 0) {
+        queries.add(normalized);
+      }
+    };
+    add(stripVintageYearsBounded(anchor.canonicalLabel));
+    add(anchor.producer);
+    add(anchor.region);
+    add(anchor.appellation);
+    add(anchor.country);
+    add(anchor.grapes[0]);
+    add(anchor.style);
     return [...queries];
   }
 

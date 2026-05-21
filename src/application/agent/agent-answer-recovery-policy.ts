@@ -443,23 +443,36 @@ export class AgentAnswerRecoveryPolicy {
     if (state.policyBlocked || isAborted) {
       return answer;
     }
-    return this.normalizeSituationalDirectAnswer(query, answer, observedToolOutput);
+    return this.normalizeSituationalDirectAnswer(query, answer, observedToolOutput, state);
   }
 
   private normalizeSituationalDirectAnswer(
     query: string,
     answer: string,
     observedToolOutput: boolean,
+    state: AgentExecutionState,
   ): string {
     const normalizedMetadataAbstention = normalizeExactMetadataAbstentionAnswer(query, answer);
     if (observedToolOutput) {
       return normalizedMetadataAbstention;
     }
     const queryHasHangul = containsHangul(query);
+    // Out-of-domain (alcohol) / unsupported-external-info redirects are the
+    // INTENDED terminal answer for these queries — a deliberate, policy-grounded
+    // completion, not a degraded fallback. Record it as `answer` through the FSM
+    // so `terminationReason` reflects the dominant outcome ("the user got the
+    // intended answer") rather than the resource-limit reason the planner-replan
+    // churn happened to leave behind (e.g. `budget` after grounded-search-required
+    // re-plans exhaust the token budget). Under the A3 priority order
+    // (`answer` > `budget`/`timeout`/`max_steps`) this transition wins over a
+    // prior resource-limit write but is still dominated by hard failures — which
+    // are already short-circuited above (`policyBlocked` / aborted return early).
     if (isWineOutOfDomainAlcoholQuery(query)) {
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
       return buildOutOfDomainWineRedirectAnswer(queryHasHangul);
     }
     if (isUnsupportedWineExternalInfoQuery(query)) {
+      state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
       return buildUnsupportedWineExternalInfoAnswer(queryHasHangul);
     }
     return normalizedMetadataAbstention;

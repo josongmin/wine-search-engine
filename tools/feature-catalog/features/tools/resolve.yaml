@@ -5,14 +5,19 @@ summary: |
   POST /v1/resolve — 쿼리의 entity 후보를 confidence + abstention 결정과 함께 반환.
   conformal prediction set로 70% coverage guarantee + 명시적 ambiguity hint.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Use case + route + nlu.entity-resolver (calibration/decision) 통합.
-  HTTP route 레벨 regression suite (19 tests) 가 happy-path / ambiguity (no
-  top_entity) / failed (empty candidates) / Korean NFC·NFD / boundary / RFC-014
-  envelope / X-Request-Id threading / AbortSignal / unexpected-error envelope를
-  커버. Production abstention rate / coverage 모니터링 (대시보드) 은 여전히
-  미수립 — maturity 4 가 되려면 그 작업이 선결조건.
+  HONEST 4. route boundary 계약을 fast-check property suite (numRuns=100, 9 tests)
+  로 락업: determinism (Math.random/Date/iteration-order 누수 없음), output-envelope
+  conformance (임의 resolver 결과 → 200 body가 ResolveResponseSchema .strict() 검증,
+  snake_case key, candidates ≤ MAX_RESOLVE_CANDIDATES, calibrated_score ∈ [0,1],
+  decision_trace_ref === authority_trace_ref), abstention surfacing (ambiguous/
+  failed status verbatim 통과, top_entity 절대 fabricate 안 함), Korean NFC/NFD
+  transparency (route가 silently re-normalize 안 함 — entity-identity layer 책임,
+  no `\b` on Korean), input schema .strict() (HTTP body라 strict 정당 — rule 10),
+  empty/adversarial safety (whitespace/control/proto-pollution/length-attack
+  no-crash). 기존 19 integration tests 유지. 남은 maturity 5 과제: production
+  abstention rate + coverage SLA dashboard (ops/monitoring gap, code 결함 아님).
 
 status: active
 since: 2025-10
@@ -29,6 +34,8 @@ key_files:
 tests:
   integration:
     - test/integration/http/routes/resolve.route.test.ts
+  regression:
+    - test/regression/resolve-tool-properties.regression.test.ts
 
 depends_on:
   - nlu.entity-resolver

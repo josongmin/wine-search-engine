@@ -8,17 +8,28 @@ summary: |
   (3) unsupported external info (weather). 매칭 시 situational directive 반환,
   아니면 pass-through.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Phrase-level parsing 적용 — "tasting notes" / "시음 노트" false-positive
-  제거 (audit-identified bug fixed). Online-tasting hit requires BOTH a
-  tasting token AND a live/online context modifier (online, virtual, live,
-  session, 실시간, 온라인, 시음회). OOD alcohol redirect는 pairing intent를
-  보존 — "beer that pairs with steak" → redirect가 steak 페어링 제안을
-  유지함. Cocktail이 OOD alcohol 어휘에 추가됨. Empty/whitespace 입력 안전
-  처리. 18-case Unicode-safe regression suite (Korean + English + mixed).
-  여전히 keyword-based이지만 phrase-level precision과 intent preservation
-  으로 productionizable 수준.
+  Substring-collision hardening (CLAUDE.md rule 29 — the #1 bug class) +
+  property-based invariant suite. 구조적으로 수정한 실제 버그:
+  (a) bare "진" 매칭이 "진한"(full-bodied)/"사진"(photo)/"진짜"를 OOD alcohol
+  로 오분류 → 전체 loanword "진토닉"만 매칭하도록 축소; (b) bare "럼"이
+  "드럼"/"클럼지"를 오분류 → Korean boundary `[^가-힣]` 요구; (c) Latin 토큰이
+  무경계로 "rumored"→rum, "ginger/beginning"→gin, "training/terrain"→rain,
+  "delivery"→live, "obsession"→session 오분류 → ASCII `\b` 경계 적용;
+  (d) "for the sake of" 관용구가 sake(청주)로 오분류 → negative lookahead
+  `sake(?!\s+of\b)`로 구조적 배제. NFC stability: 모든 entry point가 입력을
+  Unicode NFC로 정규화 — NFD(macOS/IME) 한글이 더 이상 silent miss 안 함.
+  Bounded output: pairing residue가 MAX_PAIRING_CONTEXT_LEN(80)로 캡.
+  모든 정규식 상수는 named const + rationale 주석. Korean boundary는 절대
+  `\b` 미사용 (rule 8). 16-case fast-check property suite (numRuns=100):
+  determinism / NFC stability / collision safety / 한국어 occasion
+  (결혼기념일·집들이·회식·돌잔치) false-positive safety / input safety /
+  bounded output. 기존 18-case precision suite 유지.
+  여전히 SOTA(5)가 아닌 이유: 분류기가 lexical/regex 기반이며, calibrated
+  confidence를 갖는 LLM-backed situational-vs-lexical intent classifier
+  (next_steps)가 미구현. 정밀도·결정성·관측 가능성 면에서 productionizable
+  하게 견고하나, 의미 기반 일반화는 아직 어휘에 의존.
 
 status: active
 since: 2025-09
@@ -34,20 +45,24 @@ key_files:
 tests:
   regression:
     - test/regression/situational-query-policy-precision.regression.test.ts
+    - test/regression/situational-query-policy-properties.regression.test.ts
 
 depends_on: []
 
 related_rfcs: []
 
 known_limitations:
-  - "Pairing context extraction은 verbatim residue 기반 — sentence parsing 아님"
+  - "Pairing context extraction은 verbatim residue 기반 — sentence parsing 아님 (단, 출력은 80자로 캡)"
   - "Confidence score 미제공 (binary classification)"
   - "Context modifier vocabulary는 hard-coded (online/virtual/live/session/실시간/온라인/시음회)"
+  - "어휘 기반 분류 — OOD 어휘 목록에 없는 비-와인 주류(mead/perry 등)는 통과"
+  - "영어 'for goodness sake' 같은 희귀 관용구는 여전히 sake로 매칭 가능 (와인 검색 맥락에서 극히 드묾)"
 
 next_steps:
-  - "LLM-backed intent classifier (situational vs lexical) with calibrated confidence"
+  - "LLM-backed intent classifier (situational vs lexical) with calibrated confidence — maturity 5 진입 조건"
   - "Pairing dish entity extraction via NER instead of residue heuristic"
   - "Expand OOD vocabulary coverage (mead, perry, fortified non-wine, etc.)"
+  - "OOD/weather 어휘를 adaptive-budget.ts의 병렬 분류기와 공유 SSoT 모듈로 통합 검토 (rule 30)"
 
 tags:
   - ood-filtering

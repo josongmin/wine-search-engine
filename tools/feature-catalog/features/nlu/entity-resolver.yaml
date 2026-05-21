@@ -6,11 +6,24 @@ summary: |
   Platt scaling, AURC/ECE) + decision engine (admission-gate, confidence-refusal,
   evidence-gate, selective predictor). 70% coverage 보장 conformal set + abstention 결정.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   Calibration + decision 통합된 selective prediction system. ambiguity-classifier로 1:1/
-  1:N/N:1/N:N 패턴 분류 후 calibrated 결정. 그러나 calibration curve를 production gold
-  label과 cross-validate 시스템 부재, threshold optimizer가 sparse.
+  1:N/N:1/N:N 패턴 분류 후 calibrated 결정. surface→canonical resolution 파이프라인의
+  핵심 불변식이 property 기반(fast-check, numRuns=100, 10 properties)으로 잠김:
+  determinism, permutation invariance, NaN/Inf-safe ranking, descending-order +
+  entityId tiebreak, bounded candidate count(MAX_RESOLVED_CANDIDATES=16),
+  empty/unknown surface → typed failed(no throw), Korean(한글) NFC 안정성, accent
+  변형(Château/Chateau) 결정성, conformalSetSize ∈ [0,k] 계약.
+  이 과정에서 3개 구조적 버그 수정: (1) inline `b-a`+localeCompare tiebreak를 SSoT
+  compareScoreWithTiebreaker로 교체 — NaN raw score가 top-1로 잘못 정렬되던 문제와
+  locale-의존 정렬 제거; (2) non-finite raw score가 Calibrator.calibrate()를 throw시켜
+  전체 resolution이 예외로 죽던 문제를 boundary sanitization(NON_FINITE_RAW_SCORE_FLOOR)으로
+  typed degrade; (3) computeConformalSetSize가 k=1일 때 2를 반환해
+  conformalSetSize<=candidates.length 계약을 깨던 문제를 min clamp로 수정.
+  5가 아닌 4인 이유: calibration curve를 production gold label로 cross-validate하는
+  시스템이 여전히 부재하고, learned-matcher ranking의 product-level 검증(AURC/ECE on
+  prod eval set)이 미완. 이는 코드 하드닝이 아닌 제품/데이터 검증 갭이라 정직하게 4 유지.
 
 status: active
 since: 2025-10
@@ -31,7 +44,9 @@ key_files:
   - src/domain/decision/service/evidence-gate.ts
   - src/domain/decision/service/admission-gate.ts
 
-tests: {}
+tests:
+  regression:
+    - test/regression/entity-resolver-properties.regression.test.ts
 
 depends_on:
   - korean-i18n.curated-alias-catalog
@@ -40,12 +55,13 @@ depends_on:
 related_rfcs: []
 
 known_limitations:
-  - "Calibration curve가 prod gold label과 cross-validate 안 됨"
-  - "Threshold optimizer test coverage 미흡"
-  - "Selective prediction abstention 정책 미문서화"
+  - "Calibration curve가 prod gold label과 cross-validate 안 됨 (maturity 5 차단 갭)"
+  - "Learned-matcher ranking의 product-level AURC/ECE 검증 미완"
+  - "Threshold optimizer 자동화 미흡 (현재 DEFAULT_THRESHOLD_PROFILE 고정)"
 
 next_steps:
-  - "Production label로 calibration re-fit"
+  - "Production label로 calibration re-fit + cross-validation 파이프라인 구축"
+  - "Learned-matcher를 prod eval set에서 AURC/ECE로 검증"
   - "Threshold tuning 자동화"
 
 tags:

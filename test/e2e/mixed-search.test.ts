@@ -75,7 +75,10 @@ describe('Mixed search E2E', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    assertMixedResponse(res.json());
+    const body2 = res.json() as Record<string, unknown>;
+    console.error('CLB RESULTS', (body2['results'] as unknown[] | undefined)?.length);
+    console.error('CLB DECISION', JSON.stringify(body2['engine_decision']));
+    assertMixedResponse(body2);
   });
 
   it('handles "마고 비슷한 레드" without crashing and returns results', async () => {
@@ -85,6 +88,10 @@ describe('Mixed search E2E', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    assertMixedResponse(res.json());
+    const body = res.json() as Record<string, unknown>;
+    console.error('DBG RESULTS', (body['results'] as unknown[] | undefined)?.length);
+    console.error('DBG META', JSON.stringify(body['meta']));
+    console.error('DBG DECISION', JSON.stringify(body['engine_decision']));
+    assertMixedResponse(body);
   });
 });

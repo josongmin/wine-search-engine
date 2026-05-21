@@ -441,18 +441,43 @@ export function validateNoisyEntityPredictions(
   }
 }
 
+/**
+ * Default top-K cut for the recall_at_3 slice when a benchmark row does not
+ * pin its own `top_k`. Named so the metric's window is auditable rather than a
+ * bare literal embedded in the scoring loop.
+ */
+export const DEFAULT_RECALL_TOP_K = 3;
+
+/**
+ * Cap on the number of detailed miss rows retained per miss bucket
+ * (recall / provenance / resolution). The aggregate metrics are unaffected;
+ * this only bounds the diagnostic payload so a fully-missing run cannot grow
+ * the report unboundedly.
+ */
+export const MAX_REPORTED_MISSES = 25;
+
+/**
+ * NFC-normalize an entity ID before comparison. Entity IDs that originate from
+ * Korean-surface perturbations (or are echoed back from a live API / captured
+ * predictions file) can arrive in NFD form, while the benchmark's
+ * `expected_entity_id` is authored in NFC. Raw `indexOf` / `includes` would
+ * then silently miss a true match (NFC "각" !== NFD "ᄀ ᅡ ᆨ" by code point),
+ * deflating recall on exactly the Korean cases this benchmark exists to guard.
+ * Normalizing both sides makes the match canonical and deterministic.
+ */
+function canonicalEntityId(entityId: string): string {
+  return entityId.normalize('NFC');
+}
+
 function recallAtK(rankedEntityIds: readonly string[], expectedEntityId: string, k: number): number {
-  return rankedEntityIds.slice(0, k).includes(expectedEntityId) ? 1 : 0;
+  const expected = canonicalEntityId(expectedEntityId);
+  return rankedEntityIds.slice(0, k).some((id) => canonicalEntityId(id) === expected) ? 1 : 0;
 }
 
 function reciprocalRank(rankedEntityIds: readonly string[], expectedEntityId: string): number {
-  const rank = rankedEntityIds.indexOf(expectedEntityId);
+  const expected = canonicalEntityId(expectedEntityId);
+  const rank = rankedEntityIds.findIndex((id) => canonicalEntityId(id) === expected);
   return rank >= 0 ? 1 / (rank + 1) : 0;
-}
-
-function _average(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function normalizeRankedEntities(raw: readonly RankedEntityLike[] | undefined): readonly RankedEntity[] {
@@ -527,10 +552,11 @@ function scoreRows(
     const prediction = normalizeRankedPrediction(rankedByBenchmarkId.get(row.benchmark_id));
     const rankedEntities = prediction.rankedEntities;
     const rankedEntityIds = rankedEntities.map((item) => item.entity_id);
-    const rank = rankedEntityIds.indexOf(row.expected_entity_id);
+    const expectedCanonical = canonicalEntityId(row.expected_entity_id);
+    const rank = rankedEntityIds.findIndex((id) => canonicalEntityId(id) === expectedCanonical);
     const topEntity = rankedEntities[0] ?? null;
     const predictedResolution = prediction.decisionStatus ?? (rankedEntityIds.length > 0 ? 'resolved' : 'failed');
-    const topK = row.top_k ?? 3;
+    const topK = row.top_k ?? DEFAULT_RECALL_TOP_K;
     const recallAt1 = recallAtK(rankedEntityIds, row.expected_entity_id, 1);
     const recallAt3 = recallAtK(rankedEntityIds, row.expected_entity_id, topK);
     const reciprocal = reciprocalRank(rankedEntityIds, row.expected_entity_id);
@@ -564,7 +590,7 @@ function scoreRows(
     languageAccumulator.mrrTotal += reciprocal;
     languageAccumulators.set(row.language, languageAccumulator);
 
-    if (rank === -1 && misses.length < 25) {
+    if (rank === -1 && misses.length < MAX_REPORTED_MISSES) {
       misses.push({
         benchmark_id: row.benchmark_id,
         query: row.query,
@@ -584,7 +610,7 @@ function scoreRows(
           topEntity?.provenance_source === row.expected_provenance_source);
       if (provenanceMatch) {
         provenanceMatchCount += 1;
-      } else if (provenanceMisses.length < 25) {
+      } else if (provenanceMisses.length < MAX_REPORTED_MISSES) {
         provenanceMisses.push({
           benchmark_id: row.benchmark_id,
           query: row.query,
@@ -605,7 +631,7 @@ function scoreRows(
         resolutionMatchCount += 1;
       } else if (row.expected_resolution === 'ambiguous' && predictedResolution === 'resolved') {
         falseExactCount += 1;
-        if (resolutionMisses.length < 25) {
+        if (resolutionMisses.length < MAX_REPORTED_MISSES) {
           resolutionMisses.push({
             benchmark_id: row.benchmark_id,
             query: row.query,
@@ -613,7 +639,7 @@ function scoreRows(
             actual_resolution: predictedResolution,
           });
         }
-      } else if (resolutionMisses.length < 25) {
+      } else if (resolutionMisses.length < MAX_REPORTED_MISSES) {
         resolutionMisses.push({
           benchmark_id: row.benchmark_id,
           query: row.query,

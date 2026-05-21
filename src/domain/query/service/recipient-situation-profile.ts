@@ -410,6 +410,63 @@ function normalizeQueryForClassification(query: string): string {
   return query.toLowerCase().normalize('NFC');
 }
 
+// Latin signals ('mom', 'safe', 'cava', 'light', ...) MUST be matched on
+// Unicode word boundaries, not as raw substrings — otherwise 'mom' fires on
+// "moment", 'cava' on "excavation" (CLAUDE.md rule 29 example), 'safe' on
+// "safety", 'light' on "delightful". Korean signals ('부모님', '선물', ...)
+// agglutinate with particles ("부모님께", "선물용"), so substring matching is
+// the CORRECT semantics there — Korean has no whitespace word boundary inside a
+// 어절. We therefore partition by script.
+//
+// Boundary assertions use [\p{L}\p{N}] (letter OR digit) with /u — NEVER \b,
+// which is ASCII-only and silently fails across script boundaries
+// (CLAUDE.md rules 8, 24, 29). The negative look-around guards both the leading
+// and trailing edge so a Latin signal only counts when it is a free-standing
+// token (its own edges are non-alphanumeric, query start, or query end).
+
+/** Matches any code point in the Hangul ranges (Jamo, Compatibility Jamo, Syllables). */
+const HANGUL_RANGE = /[ᄀ-ᇿ㄰-㆏가-힣]/u;
+
+/** A signal that contains at least one Hangul code point is matched as a raw substring. */
+function signalIsHangul(signal: string): boolean {
+  return HANGUL_RANGE.test(signal);
+}
+
+/**
+ * Escapes regex metacharacters so a literal signal (e.g. "fruit-forward",
+ * "don't know") can be embedded in a RegExp source without being interpreted.
+ */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Cache of compiled Unicode word-boundary regexes, keyed by lowercased Latin signal. */
+const LATIN_SIGNAL_BOUNDARY_REGEX_CACHE = new Map<string, RegExp>();
+
+function latinSignalBoundaryRegex(needle: string): RegExp {
+  const cached = LATIN_SIGNAL_BOUNDARY_REGEX_CACHE.get(needle);
+  if (cached !== undefined) {
+    return cached;
+  }
+  // (?<![\p{L}\p{N}]) ... (?![\p{L}\p{N}]) — same boundary idiom as vintage.ts.
+  const regex = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(needle)}(?![\\p{L}\\p{N}])`, 'u');
+  LATIN_SIGNAL_BOUNDARY_REGEX_CACHE.set(needle, regex);
+  return regex;
+}
+
+function signalMatches(normalizedQuery: string, signal: string): boolean {
+  const needle = signal.toLowerCase();
+  if (needle.length === 0) {
+    return false;
+  }
+  if (signalIsHangul(needle)) {
+    // Korean: substring is correct (particle-agglutinating, no inner boundary).
+    return normalizedQuery.includes(needle);
+  }
+  // Latin/ASCII: require a free-standing token via Unicode word boundaries.
+  return latinSignalBoundaryRegex(needle).test(normalizedQuery);
+}
+
 function countDistinctSignalHits(normalizedQuery: string, signals: readonly string[]): number {
   if (normalizedQuery.length === 0) {
     return 0;
@@ -417,10 +474,10 @@ function countDistinctSignalHits(normalizedQuery: string, signals: readonly stri
   const seen = new Set<string>();
   for (const signal of signals) {
     const needle = signal.toLowerCase();
-    if (needle.length === 0) {
+    if (needle.length === 0 || seen.has(needle)) {
       continue;
     }
-    if (normalizedQuery.includes(needle) && !seen.has(needle)) {
+    if (signalMatches(normalizedQuery, signal)) {
       seen.add(needle);
     }
   }

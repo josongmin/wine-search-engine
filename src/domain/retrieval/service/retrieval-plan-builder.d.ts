@@ -68,4 +68,8 @@ export interface RetrievalPlan {
 export declare function buildRetrievalPlan(bundle: ConstraintBundle): RetrievalPlan;
 /** Plan version constant (for trace). */
 export declare function retrievalPlanVersion(): string;
+export declare const INFERRED_CONSTRAINT_WEIGHT_MULTIPLIER = 0.7;
+export declare const MAX_BOOSTS_PER_TIER = 64;
+export declare const BOOST_WEIGHT_MIN = 0;
+export declare const BOOST_WEIGHT_MAX = 1;
 //# sourceMappingURL=retrieval-plan-builder.d.ts.map

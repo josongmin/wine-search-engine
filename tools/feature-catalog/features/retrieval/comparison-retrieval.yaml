@@ -5,11 +5,18 @@ summary: |
   두 wine 비교 시나리오에서 query_a / query_b 두 leg를 병렬 hybrid retrieval로 실행하고
   결과를 per-side로 머지. shared-constraints로 양쪽 leg에 공통 필터 적용.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  프로덕션 와이어링 완료, compare_wines agent tool로 노출. parallel execution 및
-  constraint isolation regression 게이트 보유. 그러나 cross-leg balance scoring /
-  comparison-aware reranking 부재로 단순 "2개 검색의 합집합" 수준.
+  HONEST 4. compare-retriever 코어를 fast-check property suite (numRuns=100,
+  9 tests)로 락업: determinism (동일 anchor+index → deep-equal), order-independence
+  (permuted index hit order → identical candidates), bounded fan-out (≤ limit,
+  ≤ FETCH_MULTIPLIER×limit over-fetch), anchor self-exclusion (anchor가 자기 비교
+  집합에 안 나타남), NaN/Infinity score safety (never throws, NaN가 finite보다
+  상위 안 됨), per-entity independence (두 anchor의 own-exclusion disjoint),
+  Korean NFC/NFD anchor 동치 lexical leg, empty/single safety, no private RRF
+  (compare candidate가 sparseRawScore만 carry, fabricated fusion total 없음 —
+  rule 30). 남은 maturity 5 과제: cross-leg balance scoring + comparison-aware
+  reranking (product gap, 코어 retrieval 결함 아님).
 
 status: active
 since: 2025-09
@@ -29,6 +36,7 @@ tests:
   regression:
     - test/regression/agent-parallel-tools.regression.test.ts
     - test/regression/agent-tools-inner-surface-contract.regression.test.ts
+    - test/regression/comparison-retrieval-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

@@ -6,11 +6,19 @@ summary: |
   channel 선택, soft vs hard filtering, relaxation 순서, ANN target hit 결정.
   Query difficulty estimator + retrieval profile 입력으로 plan 산출.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  핵심 인프라로 hybrid retrieval executor에 wired. planner trace evidence regression 게이트
-  운영. heuristic 위주이며 cost model / online learning 부재. plan quality metric도
-  암시적 (downstream search metric으로 추정).
+  핵심 인프라로 hybrid retrieval executor / constraint-compiler / planner에 wired.
+  buildRetrievalPlan의 plan-level 불변식을 property-based regression (numRuns=100)으로 고정:
+  determinism, order-independence (boost를 content-only comparator로 정렬 — 입력 순서 무관),
+  idempotence, constraint conservation (soft/inferred → boost 1:1, silent drop 없음),
+  bounded fan-out (MAX_BOOSTS_PER_TIER=64, weakest-first drop), weight invariant
+  (모든 weight clamp to [BOOST_WEIGHT_MIN, BOOST_WEIGHT_MAX], NaN/∞ 차단), NFC preservation
+  (한글/accented Latin string·array 값 정규화), empty→typed minimal plan.
+  INFERRED_CONSTRAINT_WEIGHT_MULTIPLIER / cap / weight bound는 SOURCE에서 export (rule 13).
+  SENSORY_PRIOR_ATTRIBUTES를 SSoT 상수로 추출해 plan-builder·extract-sensory-priors 중복 제거.
+  5 미달 사유: cost-aware relaxation 순서·channel mix 온라인 학습 부재, plan quality는
+  여전히 downstream search metric으로 간접 측정 (직접 instrumentation 없음).
 
 status: active
 since: 2025-10
@@ -25,10 +33,12 @@ key_files:
   - src/domain/retrieval/service/query-difficulty-estimator.ts
   - src/domain/retrieval/service/retrieval-profile.ts
   - src/domain/retrieval/service/channel-mix-policy.ts
+  - src/domain/shared/constants/constraint-attributes.ts
 
 tests:
   regression:
     - test/regression/retrieval-critic-decision.regression.test.ts
+    - test/regression/retrieval-plan-builder-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search
@@ -38,13 +48,13 @@ related_rfcs:
   - docs/RFC-008.md
 
 known_limitations:
-  - "Plan builder heuristic 학습 불가능 (hard-coded)"
-  - "Plan quality metric 직접 측정 안 됨"
+  - "Channel mix / relaxation 순서 온라인 학습 불가능 (정책 고정)"
+  - "Plan quality metric 직접 측정 안 됨 (downstream search metric으로 간접 추정)"
   - "Cost-aware relaxation 순서 결정 부재"
 
 next_steps:
   - "Channel mix 온라인 학습 (query profile별 적응)"
-  - "Plan quality instrumentation"
+  - "Plan quality instrumentation (plan→search-metric 직접 연결)"
   - "Cost-aware relaxation 시퀀스"
 
 tags:

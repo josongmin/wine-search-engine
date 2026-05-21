@@ -11,10 +11,9 @@
  */
 
 import type { ConstraintBundle } from '../../domain/shared/types/index.js';
+import { SENSORY_PRIOR_ATTRIBUTES } from '../../domain/shared/constants/constraint-attributes.js';
 import type { RetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { QueryLevelSensoryPriors } from './search-usecase-map-result-items.js';
-
-const SENSORY_KEYS: ReadonlySet<string> = new Set(['body', 'tannin', 'acidity', 'sweetness']);
 
 export function extractSensoryPriorsFromConstraints(
   constraints: ConstraintBundle,
@@ -22,7 +21,7 @@ export function extractSensoryPriorsFromConstraints(
   const out: { -readonly [K in keyof QueryLevelSensoryPriors]: number } = {};
   let found = false;
   for (const c of constraints.inferred) {
-    if (!SENSORY_KEYS.has(c.attribute)) continue;
+    if (!SENSORY_PRIOR_ATTRIBUTES.has(c.attribute)) continue;
     if (typeof c.value !== 'number') continue;
     if (c.operator !== '>=' && c.operator !== '=') continue;
     const key = c.attribute as keyof QueryLevelSensoryPriors;

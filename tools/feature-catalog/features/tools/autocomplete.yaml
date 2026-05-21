@@ -5,13 +5,24 @@ summary: |
   POST /v1/autocomplete — 사용자 typing 중 prefix completion 제안. entity / region /
   grape / producer 완성 후보 반환. low-latency 핫 패스.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   Use case 와이어링 완료 + dedicated eval script (run-autocomplete-eval) + HTTP
   route regression suite (12 tests covering ASCII/Korean prefixes, NFC/NFD
   invariance, RFC-014 validation envelopes, boundary length, no-match surface,
   special-char preservation, requestId threading, AbortSignal plumbing).
-  NDCG / satisfaction calibration 없음, prefix decay weight 미튜닝.
+  추가로 property-based regression suite (autocomplete-properties, fast-check
+  numRuns=100, 한글 prefix 와/까베/샤르 first-class) 가 production projection 의
+  핵심 invariant 를 핀: 결정성(P1), faithful 1:1 cardinality·order·rank·entity-id
+  multiset 보존(P2-P4), document hydration label fallback(P5), status/trace-ref/
+  request_id passthrough(P6), 한글 NFC/NFD prefix transparency — resolver 로
+  byte-for-byte 전달, label 은 NFC 재정규화 후 동일(P7), empty-prefix/empty-
+  candidate safety + doc-lookup skip(P8), calibrated_score [0,1] verbatim 보존
+  (P9), 공유 scorer recall@k 단조성·MRR 일관성(P10), wire 추출 order/filter
+  invariant(P11). projection 은 휴리스틱 0 — resolver 계약을 충실히 투영.
+  HONEST 4 (5 아님): NDCG/satisfaction online calibration 없음, prefix decay
+  weight 미튜닝, 사용자 클릭 시그널 기반 online ranking 미도입 — offline
+  benchmark recall/MRR 만으로는 typeahead 만족도 SOTA++ 입증 불충분.
 
 status: active
 since: 2025-10
@@ -31,6 +42,8 @@ tests:
   unit:
     - test/unit/application/search/autocomplete.usecase.test.ts
     - test/unit/eval/autocomplete-eval.test.ts
+  regression:
+    - test/regression/autocomplete-properties.regression.test.ts
 
 depends_on:
   - retrieval.entity-lookup
@@ -40,10 +53,12 @@ related_rfcs: []
 
 known_limitations:
   - "Prefix decay weight 미튜닝"
-  - "Suggestion satisfaction score 없음"
+  - "Suggestion satisfaction score 없음 (NDCG/online calibration 부재)"
+  - "online 클릭 시그널 기반 ranking 미도입 — offline recall/MRR benchmark 만 존재"
 
 next_steps:
-  - "사용자 클릭 시그널로 ranking 학습"
+  - "사용자 클릭 시그널로 ranking 학습 (online calibration → maturity 5 게이트)"
+  - "prefix decay weight 튜닝 + NDCG 기반 satisfaction proxy 도입"
 
 tags:
   - hot-path

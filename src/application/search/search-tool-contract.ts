@@ -47,6 +47,14 @@ export const SEARCH_TOOL_MAX_EXCLUDE_FILTERS = 10;
 export const SEARCH_TOOL_VINTAGE_MIN = 1600;
 export const SEARCH_TOOL_VINTAGE_MAX = 2100;
 const FOOD_PAIRING_FOOD_MAX_LEN = 200;
+/**
+ * Unicode normalization form applied to the food text before it is forwarded
+ * into the pairing query. NFC (Canonical Composition) matches the form used by
+ * the catalog/extractor SSoT (see `normalizeHangul` in
+ * `@domain/shared/utils/hangul`), guaranteeing canonically-equivalent inputs
+ * collapse to one deterministic query string.
+ */
+const FOOD_TEXT_UNICODE_NORMALIZATION_FORM = 'NFC' as const;
 
 export const SEARCH_TOOL_QUERY_DESCRIPTION =
   'Wine search query anchor. Preserve the user\'s original language and lexical anchor; do not translate Korean queries into broad English paraphrases. Put extra constraints into structured fields instead (e.g., "보르도 5만원 이하", "Pinot Noir 2020", "dry red wine").';
@@ -344,7 +352,14 @@ export function buildFoodPairingFieldShape(
       maxLen: FOOD_PAIRING_FOOD_MAX_LEN,
       requiredMessage: options.foodRequiredMessage,
       placeholderMessage: 'food cannot be a placeholder. Use the actual dish or ingredient.',
-    }),
+    })
+      // Canonicalize to Unicode NFC so canonically-equivalent Korean dish names
+      // (e.g. NFD-decomposed jamo "삼겹살" emitted by some LLM/IME pipelines vs
+      // the NFC pre-composed form) produce a single deterministic query string.
+      // The downstream nlu.pairing-extraction extractors compare against
+      // NFC-encoded catalog terms; without this the tool would forward NFD into
+      // the query verbatim, breaking determinism at the tool contract boundary.
+      .transform((value) => value.normalize(FOOD_TEXT_UNICODE_NORMALIZATION_FORM)),
     max_price: coerceFiniteNumber.pipe(z.number().finite().min(1).max(maxPriceUsdMax)).optional(),
     max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(options.maxPriceKrwMax)).optional(),
     color: z.enum(FOOD_PAIRING_COLORS).optional(),

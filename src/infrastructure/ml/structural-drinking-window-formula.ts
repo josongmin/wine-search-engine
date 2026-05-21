@@ -241,11 +241,19 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function norm(value: number | undefined, low: number, high: number, fallback: number): number {
-  return clamp((((value ?? fallback) - low) / (high - low)), 0, 1);
+  // A non-finite numeric feature (NaN / ±Infinity from corrupted ETL or
+  // upstream arithmetic) carries no information — treat it as "absent" and
+  // use the fallback anchor rather than letting NaN poison every downstream
+  // term. `value ?? fallback` only covers null/undefined, so NaN must be
+  // filtered explicitly (CLAUDE.md rule 28: Number.isFinite before use).
+  const safe = value !== undefined && Number.isFinite(value) ? value : fallback;
+  return clamp(((safe - low) / (high - low)), 0, 1);
 }
 
 function lognorm(value: number | undefined, maxValue: number): number {
-  if (value === undefined || value <= 0) return 0;
+  // Non-finite inputs collapse to 0 (the "no signal" anchor) for the same
+  // reason as norm() — NaN <= 0 is false, so the guard must be explicit.
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return 0;
   return clamp(Math.log1p(value) / Math.log1p(maxValue), 0, 1);
 }
 
@@ -336,11 +344,16 @@ function blendAdjustment(primaryVarietal: string | undefined, varietals: Readonl
 
 function consensusStability(distribution: DrinkingWindowDeterministicInputV2['ratingDistribution']): number {
   if (distribution === undefined) return CONSENSUS_NEUTRAL_DEFAULT;
-  const n1 = distribution['1'] ?? 0;
-  const n2 = distribution['2'] ?? 0;
-  const n3 = distribution['3'] ?? 0;
-  const n4 = distribution['4'] ?? 0;
-  const n5 = distribution['5'] ?? 0;
+  // Histogram buckets come from upstream JSONB — a non-finite bucket count
+  // would propagate NaN into the skew ratio and ultimately the year output.
+  // Coerce each bucket to a finite, non-negative count (CLAUDE.md rule 28).
+  const bucket = (raw: number | undefined): number =>
+    raw !== undefined && Number.isFinite(raw) && raw > 0 ? raw : 0;
+  const n1 = bucket(distribution['1']);
+  const n2 = bucket(distribution['2']);
+  const n3 = bucket(distribution['3']);
+  const n4 = bucket(distribution['4']);
+  const n5 = bucket(distribution['5']);
   const total = Math.max(1, n1 + n2 + n3 + n4 + n5);
   return clamp(
     CONSENSUS_MIDPOINT + CONSENSUS_SKEW_AMPLITUDE * (((n4 + n5) - (n1 + n2)) / total),

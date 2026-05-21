@@ -6,12 +6,20 @@ summary: |
   L2=single-shot search w/ refined query, L3=constraint-relaxation search, L4=abstention
   + grounding preview. OOD alcohol / unsupported external info redirect 포함.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  4단 진행 명확, 각 layer guard + timeout. unit test 2개 + regression 1개로 borderline.
-  fallback timeout 5초 hardcoded (query 난이도 무관), constraint relaxation 순서 hardcoded,
-  OOD detection rule-based — 학습 layer 없음. 4가 되려면 adaptive timeout + learned
-  relaxation order + observability metric 필요.
+  HONEST 4. 4단 fallback ladder의 결정론적 invariants를 fast-check property suite
+  (numRuns=100, 10 tests)로 락업: P1 determinism (동일 입력 → 동일 answer),
+  P2 idempotence (recover(recover(x))가 non-empty answer + fallback layer 보존),
+  P3 non-empty guarantee (non-aborted/non-blocked 쿼리는 항상 non-empty),
+  P4 bounded output (Layer-3 raw-slice가 300자 observation cap 준수),
+  P5 Korean NFC stability (모든 emitted 한글 템플릿 NFC-stable),
+  P6 policy-block dominance (blocked 쿼리는 OOD/weather hook 무관 firm template),
+  P7 abort dominance (aborted 쿼리는 situational redirect로 answer 조작 안 함 —
+  CLAUDE.md catch-flag-without-control-flow 버그 클래스 방어),
+  P8 fallback-search guard (어떤 guard라도 금지 시 searchUseCase.execute skip).
+  남은 maturity 5 과제: adaptive timeout (현재 static), learned relaxation order,
+  OOD confidence calibration — product/learning gap이지 code-hardening gap 아님.
 
 status: active
 since: 2025-10
@@ -32,6 +40,7 @@ tests:
     - test/unit/application/agent/agent-grounding-observation-policy.test.ts
   regression:
     - test/regression/empty-answer-fallback.regression.test.ts
+    - test/regression/answer-recovery-policy-properties.regression.test.ts
 
 depends_on:
   - tools.search-wines

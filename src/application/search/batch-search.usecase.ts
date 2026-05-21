@@ -556,7 +556,17 @@ export class BatchSearchUseCase {
   }
 
   /**
-   * Deterministic batch id from ordered request items (id + trimmed query per row).
+   * Deterministic batch id from ordered request items (id + trimmed, NFC-normalized
+   * query per row).
+   *
+   * The query is normalized with `String.prototype.normalize('NFC')` before
+   * hashing so the idempotency key is invariant under Unicode normalization
+   * form. Korean (한글) clients legitimately submit either precomposed (NFC)
+   * or decomposed (NFD/NFKD) syllables for the same logical query — without
+   * normalization, NFC `까베르네` and its NFD form would mint distinct batch
+   * ids and break replay/idempotency. NFC is the canonical Unicode operation
+   * (W3C charmod-norm), not a heuristic.
+   *
    * Schema: `batch:<version>:<sha256 hex>`
    */
   private generateBatchId(
@@ -569,7 +579,7 @@ export class BatchSearchUseCase {
     const digest = deterministicHash({
       requests: requests.map((request) => ({
         id: request.id,
-        query: request.query.trim(),
+        query: request.query.trim().normalize('NFC'),
         ...(request.limit !== undefined ? { limit: request.limit } : {}),
         ...(request.retrieval_mode !== undefined ? { retrieval_mode: request.retrieval_mode } : {}),
         ...(request.context !== undefined ? { context: request.context } : {}),

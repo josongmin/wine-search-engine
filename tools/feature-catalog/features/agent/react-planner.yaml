@@ -6,11 +6,21 @@ summary: |
   observation으로 thought + action/answer 출력 받고 5가지 recovery path로 파싱.
   Promise.race 타임아웃 + abort propagation.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
-  Functional이고 regression 게이트 있음. 그러나 agent-llm-output.ts (795 lines)의 manual
-  JSON 파싱은 native tool use가 표준인 modern LLM API 환경에서 technical debt. plannerDefect
-  / plannerRepair 매커니즘이 cognitive load 증가.
+  HONEST 4. Planner phase의 결정론적 invariants를 fast-check property suite
+  (numRuns=100, 10 tests)로 락업: determinism (fixed mock + fresh state →
+  byte-equal parsed output), tool-name conservation (parsed output의 모든 tool이
+  KNOWN_AGENT_TOOL_NAME), output shape mutex (answer XOR tool actions, never both),
+  Korean NFC anchor preservation (non-anchored English drift → original 한글 복원),
+  bounded step token accounting (CHARS_PER_TOKEN_ESTIMATE 기준 non-negative finite
+  delta), malformed LLM → terminationReason error 전이 + reasoningFailureDetected
+  latch, idempotent terminal state (hard terminator는 반복 policy 호출에도 downgrade
+  안 함), directive rendering exhaustiveness (모든 directive kind가 known prefix +
+  state clear), budget pre-flight (maxTotalTokens=1 → payload 무관 budget termination),
+  pure parser mutex. 남은 maturity 5 과제: agent-llm-output.ts manual JSON 파싱을
+  Anthropic native tool_use blocks로 마이그레이션 (technical debt, 기능 결함 아님 —
+  parser 계약은 property로 완전히 고정됨).
 
 status: active
 since: 2025-09
@@ -32,6 +42,7 @@ tests:
   regression:
     - test/regression/agent-prompt-contract.regression.test.ts
     - test/regression/agent-runner-profile.regression.test.ts
+    - test/regression/react-planner-properties.regression.test.ts
 
 depends_on:
   - agent.semantic-contract-compiler

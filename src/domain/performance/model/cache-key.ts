@@ -18,6 +18,30 @@ const HALF_HOUR_SECONDS = ONE_HOUR_SECONDS / 2;
 const CACHE_KEY_HASH_HEX_PREFIX_LENGTH = 16;
 
 /**
+ * Canonical Unicode form for every string that feeds a cache-key hash.
+ *
+ * Korean (한글) text reaches the builder in inconsistent normalization forms:
+ * upstream query normalizers variously apply NFC / NFKC / NFD (see
+ * `search-constraint-extractor`, `static-ambiguity-dictionary`,
+ * `recipient-situation-profile`), and raw constraint values / expansion terms
+ * may carry whatever form the source data used. "위" composed (U+C704) and
+ * decomposed (U+110B U+1171) are visually identical but hash differently —
+ * producing two cache buckets for one semantic query (silent fragmentation:
+ * never a wrong hit, always a missed hit). Normalizing to NFC at the hash
+ * boundary makes the key canonical regardless of the caller's Unicode form,
+ * so the builder OWNS the invariant rather than trusting every upstream path.
+ *
+ * NFC (not NFKC) is deliberate: NFKC folds compatibility characters (e.g.
+ * full-width forms to ASCII, circled-digit to plain digit) which would collapse
+ * semantically-distinct inputs into one bucket — a regression in the opposite
+ * direction.
+ * NFC only canonicalizes encoding of the SAME abstract characters.
+ */
+function toCanonicalKeyForm(input: string): string {
+  return input.normalize('NFC');
+}
+
+/**
  * Query-level cache key: Identifies an entire search query + mode.
  *
  * Used for memoizing complete search responses within a time window.
@@ -103,16 +127,33 @@ export class QueryCacheKeyBuilder {
     // Use length-prefix encoding to prevent delimiter-collision cache poisoning:
     // a value containing "|" or "||" must not collide with a different
     // (attribute, operator, value) tuple at a different position.
-    const encodeField = (s: string): string => `${s.length}:${s}`;
+    // Length-prefix encoding is computed on the NFC-canonical field so the
+    // prefix length matches the bytes that will be hashed (an NFD field has a
+    // different `.length` than its NFC form — encoding the raw length would
+    // reintroduce a form-dependent signature even after the final NFC pass).
+    const encodeField = (s: string): string => {
+      const canonical = toCanonicalKeyForm(s);
+      return `${canonical.length}:${canonical}`;
+    };
+    // Sort on the NFC-canonical fields so tuple ordering is identical
+    // regardless of the caller's Unicode form — otherwise NFC vs NFD inputs
+    // could sort into different positions and hash differently.
     const sortedConstraints = Array.from(constraintTuples)
+      .map((t) => [
+        toCanonicalKeyForm(t[0]),
+        toCanonicalKeyForm(t[1]),
+        toCanonicalKeyForm(t[2]),
+      ] as const)
       .sort(([a1, a2, a3], [b1, b2, b3]) =>
         a1.localeCompare(b1) || a2.localeCompare(b2) || a3.localeCompare(b3))
       .map((t) => t.map(encodeField).join('\u0000'))
       .join('\u0001');
     const constraintSignature = hashDeterministic(sortedConstraints);
 
-    // Hash expansions deterministically (sorted terms, length-prefixed).
-    const sortedExpansions = Array.from(expansionTerms).sort();
+    // Hash expansions deterministically (NFC-canonical, sorted, length-prefixed).
+    const sortedExpansions = Array.from(expansionTerms)
+      .map(toCanonicalKeyForm)
+      .sort();
     const expansionHash = hashDeterministic(sortedExpansions.map(encodeField).join('\u0000'));
 
     // Combine components into deterministic Redis key.
@@ -197,8 +238,12 @@ export class EmbeddingCacheKeyBuilder {
  * @returns Hex-encoded SHA-256 hash (16 chars for brevity)
  */
 function hashDeterministic(input: string): string {
+  // NFC at the single hash boundary: every key component (query text,
+  // constraint signature, expansion hash, snapshot id, embedding text) is
+  // routed through here, so canonicalizing once guarantees Korean / accented
+  // inputs in any Unicode form collapse to one cache bucket.
   return createHash('sha256')
-    .update(input)
+    .update(toCanonicalKeyForm(input))
     .digest('hex')
     .substring(0, CACHE_KEY_HASH_HEX_PREFIX_LENGTH);
 }
