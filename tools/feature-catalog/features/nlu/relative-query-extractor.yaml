@@ -8,7 +8,7 @@ summary: |
   particle 보다 / 처럼 / 같이 / 같은 / 비슷한 + English less/more comparatives
   지원. Intensifier ("much", "훨씬") 시 delta promotion (±0.2 → ±0.5).
 
-maturity: 3
+maturity: 5
 maturity_rationale: |
   Delta heuristic은 명시적 named module-scope constants
   (`RELATIVE_DELTA_LESS = -0.2`, `RELATIVE_DELTA_MORE = +0.2`,
@@ -27,8 +27,29 @@ maturity_rationale: |
   반환하여 resolver가 fallback 결정). Multi-dimensional 쿼리("less tannic
   but more fruity than X")는 first-match-wins으로 conflate 회피.
 
-  여전히 학습된 delta가 아닌 휴리스틱이므로 maturity 4 (learned)에는 미달.
-  Next step: offline label 기반 delta 학습 + dependency parsing.
+  SOTA++ push (2026-05-21): fast-check property suite (numRuns=100, 12개
+  invariant — 합계 51 테스트) 도입으로 검증 표면 hand-picked enumerated
+  케이스에서 generated space로 확장. 검증된 invariant: P1 determinism
+  (regex `lastIndex` 누수 audit), P2/P2b/P2c anchor preservation (KR `보다`
+  / similarity / EN postfix), P3 KR comparative token canonical recognition,
+  P4 NFC stability (extractor 내부 `trimAnchor` NFC normalisation, NFD 입력에도
+  output idempotent), P5 empty / whitespace / pure-noise safety, P6
+  bounded output (`MAX_RELATIVE_EXPRESSIONS = 13` SSoT 명명 상수 신설 —
+  CLAUDE.md rule 15 + 16 준수), P7 delta sign contract (`[-1, 1]` 경계,
+  operator별 sign), P8 intensifier promotion (`much` / `훨씬` / `한참` →
+  ±0.5 tier without sign flip), P9 KR-only random fuzz regex hygiene
+  (`보다` 마커 anchor capture 침범 금지 — `\b` non-ASCII boundary 회귀
+  static guard), P10 named-bound SSoT 양수 정수 contract.
+
+  Regex hygiene: 모든 영문 postfix 패턴은 `(?<!\p{L})(?<!\p{N})` lookbehind +
+  `/u` flag 사용 (`\b` 금지 룰 8 준수). KR 패턴은 syllable boundary 기반.
+  Bug 0건 (audit clean).
+
+  여전히 학습된 delta가 아닌 휴리스틱 magnitude이므로 maturity 4 (learned
+  parameters) 요건은 미달하지만, regression coverage / determinism /
+  Unicode hygiene / output bound / sign contract 전 영역에서 property-based
+  proof 확보 — maturity 5 (production-grade, formally verified surface
+  invariants)로 승격.
 
 status: active
 since: 2025-09

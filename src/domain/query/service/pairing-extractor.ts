@@ -286,9 +286,12 @@ export function extractPairingConstraintsWithExclusions(query: string): PairingE
   if (typeof query !== 'string' || query.length === 0) {
     return { included: [], excluded: [] };
   }
-  // Normalize Korean predicative negation ("안 좋아하는" stays — it is a
+  // NFC normalize first: macOS HFS+ / pasted text can emit NFD Hangul whose
+  // bytes don't equal NFC catalog terms ('소' = U+C18C ≠ U+1109 U+1169).
+  const nfc = query.normalize('NFC');
+  // Then normalize Korean predicative negation ("안 좋아하는" stays — it is a
   // dislike verb, not the predicative copula — but "아닌"/"않고" become 말고).
-  const normalized = normalizeKoreanNegation(query);
+  const normalized = normalizeKoreanNegation(nfc);
 
   const included: PairingTag[] = [];
   const excluded: PairingTag[] = [];

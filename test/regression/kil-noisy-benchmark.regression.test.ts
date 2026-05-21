@@ -30,36 +30,33 @@ import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { TEST_ALIASES } from '../integration/helpers/test-fixtures.js';
 
 /**
- * Conservative recall@3 floor — protects against ~20% regression below
- * current measured performance.
+ * Recall@3 floor.
  *
  * Floor history:
  *  - 0.50: pre-P1.4 baseline (covered ~0.74 measured).
- *  - 0.64: post-P1.4 (abbreviation ETL lifted overall to ~0.80 measured;
- *    floor sits ~20% below). See `docs/runbook-abbreviation-aliases.md`.
+ *  - 0.64: post-P1.4 (abbreviation ETL lifted overall to ~0.80 measured).
+ *  - 0.73: post-Latin-fuzzy (in-memory matcher gained Damerau-OSA on Latin,
+ *    en bench lifted to ~0.81 measured; floor tightened ~10% below to catch
+ *    a real backslide. Previously the 0.64 floor allowed the Latin-fuzzy
+ *    gain to fully unwind without reding the test — see audit findings).
  */
-const KIL_RECALL_AT_3_FLOOR = 0.64;
+const KIL_RECALL_AT_3_FLOOR = 0.73;
 
-/** Conservative recall@1 floor — same 20% margin below measured. */
-const KIL_RECALL_AT_1_FLOOR = 0.30;
+/** Conservative recall@1 floor — same ~10% margin below measured. */
+const KIL_RECALL_AT_1_FLOOR = 0.73;
 
 /**
- * Per-category recall@3 floors. Surfaces category-level regressions
- * that the overall metric would smooth over (e.g. if abbreviation
- * recall collapses from 0.78 → 0.33 but transliteration overshoots
- * to compensate, the overall stays stable but a real lever is broken).
- *
- * Floors set ~25% below measured to give head-room for fixture
- * shuffles while still catching real backslides. Categories not
- * listed have no floor — they're either too small (n < 5) or too
- * volatile to gate on.
+ * Per-category recall@3 floors. Tightened to ~10% below measured (audit
+ * found the previous ~25% cushion let multiple categories regress
+ * silently). Categories not listed are small (n < 5) or too volatile.
  */
 const PER_CATEGORY_RECALL_AT_3_FLOORS: Readonly<Record<string, number>> = {
-  abbreviation: 0.55, // measured ~0.78, floor ~30% below
-  accent_stripped: 0.70, // measured 1.0 post-P1.4 lift
-  whitespace_collapse_split: 0.70,
-  producer_label_partial: 0.65,
-  noisy_short_form: 0.55,
+  abbreviation: 0.60, // measured ~0.67–0.78 (depends on fixture)
+  accent_stripped: 0.83, // measured 1.0
+  whitespace_collapse_split: 0.90, // measured 1.0
+  producer_label_partial: 0.80, // measured ~0.92
+  noisy_short_form: 0.80, // measured ~0.89
+  transliteration: 0.80, // measured ~0.9
 };
 
 describe('KIL noisy benchmark — in-process pipeline against curated fixture corpus', () => {
