@@ -259,8 +259,19 @@ export class DecisionEngine {
     // ── Step 2: Numeric gate (RFC-007 §6.2) ────────────────────────
     const numericState = this.applyNumericGate(input, effectiveThresholds, rulesApplied);
 
+    // ── Step 2.5: Calibration-trust gate ──────────────────────────
+    // Mirrors AdmissionGate's existing calibrationTrusted skip on the
+    // confidence-refusal floor (admission-gate.ts:237) at the resolve seam:
+    // an untrusted C is not a probability, so the probability-space
+    // threshold comparison in the numeric gate is undefined for it.
+    const afterCalibrationTrust = this.applyCalibrationTrustGate(
+      input,
+      numericState,
+      rulesApplied,
+    );
+
     // ── Step 3: Evidence obligation (RFC-007 §4.1) ───���──────────────
-    const afterEvidence = this.applyEvidenceObligation(input, numericState, rulesApplied);
+    const afterEvidence = this.applyEvidenceObligation(input, afterCalibrationTrust, rulesApplied);
 
     // ── Step 4: Policy overlay ─────────────────────────────────────
     const afterPolicy = this.applyPolicyOverlay(input, afterEvidence, rulesApplied);
@@ -616,6 +627,72 @@ export class DecisionEngine {
       nextAction: 'fail',
       rulesApplied: [...rulesApplied],
       finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
+    };
+  }
+
+  /**
+   * Step 2.5: Calibration-trust gate.
+   *
+   * When the resolver / ranked-route lift emits `calibrationTrusted: false`,
+   * the `decisionConfidenceC` it carries is NOT a calibrated probability:
+   *
+   *   - Resolver path: the Calibrator fell back to the identity-isotonic
+   *     curve because no trained calibration params exist for the query
+   *     class (see `Calibrator.loadParamsWithTrust` /
+   *     `PgCalibrationStore.loadIfFresh`). The emitted C is a raw weighted
+   *     match-signal sum, monotonic with rank but not probability-scaled.
+   *
+   *   - Hybrid / mixed ranked-route: `buildRankedRouteResolveResult` lifts
+   *     `top1Score` (the fused-ranker `finalScore`) directly into
+   *     `decisionConfidenceC` without invoking any Calibrator (see
+   *     `search-usecase-ranked-route-resolve.ts:99-106`). C is the
+   *     ranking signal, not a probability.
+   *
+   * The threshold profile `T_resolve` is defined in probability space
+   * (AURC-calibrated against probability scores per RFC-009 §5.3), so
+   * comparing an untrusted C against it is undefined — the same reasoning
+   * that already drives AdmissionGate to SKIP its confidence-refusal floor
+   * when calibrationTrusted is false (admission-gate.ts:237).
+   *
+   * Substitute trust signal: a resolver-side identity artifact with
+   * exactness tier `exact` or `alias_exact`. The exact identity match is
+   * itself the calibration witness (the resolver bound the query surface
+   * to the entity's canonical / alias surface at the lexical layer); no
+   * probability calibration is needed to trust a literal label hit.
+   *
+   * Effect: gibberish that slipped through the hybrid lift path (raw
+   * fused-ranker score happens to clear T_resolve) now downgrades to
+   * `ambiguous + clarify`, while real entity-exact lookups whose
+   * Calibrator stub is the stub fallback still resolve via the substitute
+   * signal.
+   */
+  private applyCalibrationTrustGate(
+    input: DecisionInput,
+    state: DecisionState,
+    rulesApplied: string[],
+  ): DecisionState {
+    if (state.status !== 'resolved') {
+      return state;
+    }
+
+    const calibrationTrusted = input.resolveResult.decisionTrace.calibrationTrusted;
+    if (calibrationTrusted) {
+      return state;
+    }
+
+    if (hasExactMatchCandidate(input.evidenceSummary)) {
+      rulesApplied.push('CALIBRATION_TRUST_GATE_EXACT_IDENTITY');
+      return state;
+    }
+
+    rulesApplied.push('CALIBRATION_TRUST_GATE_DOWNGRADE');
+    return {
+      status: 'ambiguous',
+      nextAction: 'clarify',
+      rulesApplied: [...rulesApplied],
+      finalReason:
+        'Calibration untrusted and no exact identity evidence; cannot resolve ' +
+        'from a raw ranker score against a probability-space threshold.',
     };
   }
 

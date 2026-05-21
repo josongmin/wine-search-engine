@@ -92,6 +92,10 @@ function makeResolverResult(
       top2CalibratedScore: C - gap,
       calibratedGap: gap,
       decisionConfidenceC: C,
+      // Decision-engine unit tests operate in trusted-calibration space by
+      // default — Step 2.5 (`applyCalibrationTrustGate`) is exercised by
+      // scenarios that explicitly override `calibrationTrusted: false`.
+      calibrationTrusted: true,
       ambiguityDetected,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0.50, gapThreshold: 0.03 },
@@ -829,6 +833,7 @@ describe('DecisionEngine', () => {
           top2CalibratedScore: 0.5,
           calibratedGap: 0.45,
           decisionConfidenceC: 0.95,
+          calibrationTrusted: true,
           ambiguityDetected: false,
           ambiguityTypes: [],
           appliedThresholds: { resolveThreshold: 0.50, gapThreshold: 0.03 },
