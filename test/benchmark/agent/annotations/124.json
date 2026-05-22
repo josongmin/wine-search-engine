@@ -1,0 +1,22 @@
+{
+  "scenarioId": 124,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Sassicaia 2025 future-vintage honesty (bilingual mixed).",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "producer", "operator": "=", "value": "Sassicaia" },
+      { "attribute": "vintage_year", "operator": "=", "value": 2025 }
+    ]
+  },
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": ["released", "출시"]
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Answer is honest about missing evidence",
+    "Sassicaia surface form recognized"
+  ]
+}

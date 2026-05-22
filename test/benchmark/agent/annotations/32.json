@@ -1,0 +1,21 @@
+{
+  "scenarioId": 32,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Pinot Noir vs Gamay for chicken — pairing rationale required.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "grape_primary", "operator": "in", "value": ["Pinot Noir", "Gamay"] }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "피노 누아르", "canonical": "Pinot Noir", "type": "grape_primary" },
+    { "surface": "가메이", "canonical": "Gamay", "type": "grape_primary" }
+  ],
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Compares Pinot Noir and Gamay specifically for chicken pairing",
+    "Picks one with explicit reasoning"
+  ]
+}

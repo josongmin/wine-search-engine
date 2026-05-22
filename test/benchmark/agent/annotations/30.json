@@ -1,0 +1,24 @@
+{
+  "scenarioId": 30,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Barolo vs Brunello + drinking-window pick. ADR-011 graph case.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "appellation", "operator": "in", "value": ["Barolo", "Brunello di Montalcino"] }
+    ],
+    "inferred": [
+      { "attribute": "grape_primary", "operator": "in", "value": ["Nebbiolo", "Sangiovese"] }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "바롤로", "canonical": "Barolo", "type": "appellation" },
+    { "surface": "브루넬로", "canonical": "Brunello di Montalcino", "type": "appellation" }
+  ],
+  "expectedSteps": { "min": 2, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Both Barolo and Brunello compared",
+    "Drinking-window status used to pick the winner"
+  ]
+}

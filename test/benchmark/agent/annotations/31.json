@@ -1,0 +1,22 @@
+{
+  "scenarioId": 31,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Napa vs Bordeaux Cab under 100K KRW.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "region", "operator": "in", "value": ["Napa Valley", "Bordeaux"] },
+      { "attribute": "grape_primary", "operator": "=", "value": "Cabernet Sauvignon" }
+    ],
+    "soft": [
+      { "attribute": "max_price_krw", "operator": "<=", "value": 100000 }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "나파", "canonical": "Napa Valley", "type": "region" },
+    { "surface": "보르도", "canonical": "Bordeaux", "type": "region" },
+    { "surface": "카베르네", "canonical": "Cabernet Sauvignon", "type": "grape_primary" }
+  ],
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer"
+}

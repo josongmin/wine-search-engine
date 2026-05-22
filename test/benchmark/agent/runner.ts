@@ -69,6 +69,18 @@ import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
 import { printBenchmarkInsights, type BenchmarkReportSlice } from './benchmark-insight-generator.js';
+import { loadAnnotations, type AnnotationStore } from './annotation-loader.js';
+import {
+  applyAnnotationDiagnostics,
+  mergeAnnotationIntoScenario,
+  type AnnotationApplied,
+} from './annotation-apply.js';
+import {
+  buildEnvManifest,
+  manifestHash,
+  type EnvManifest,
+} from './env-manifest.js';
+import { archiveBenchReport } from './bench-archive.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
 import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
@@ -122,6 +134,10 @@ interface CliArgs {
   readonly baseline?: string;
   readonly failIfWorseThan?: number;
   readonly outputPath?: string;
+  /** When set, write the env manifest to this path as JSON (separate from the report). */
+  readonly envManifestPath?: string;
+  /** When false (--no-archive), skip the data/bench-archive/ copy on exit. */
+  readonly archive: boolean;
 }
 
 type CriticalWineType = 'red' | 'white' | 'sparkling';
@@ -256,6 +272,11 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
         ? Number.parseFloat(get('--fail-if-worse-than')!)
         : undefined,
     outputPath: get('--out'),
+    // Conditional spread to respect exactOptionalPropertyTypes — omit the
+    // key when the flag is absent instead of setting it to `undefined`.
+    ...(get('--env-manifest') !== undefined ? { envManifestPath: get('--env-manifest')! } : {}),
+    // Default-on archive (we've lost /tmp results too many times). Opt-out with --no-archive.
+    archive: !has('--no-archive'),
   };
 
   // Apply profile defaults AFTER parsing individual flags so explicit flags still override.
@@ -1170,6 +1191,32 @@ export interface BenchmarkReport {
       readonly framedToolCalls: number;
       readonly totalToolCalls: number;
     };
+    /**
+     * SOTA++ env manifest: full reproducibility footer captured at run time.
+     * Use `manifestHash(summary.environment)` to compare two runs config-by-config.
+     */
+    readonly environment: EnvManifest;
+    /** SHA-256 (sliced) of the manifest's config fields — stable across identical configs. */
+    readonly environmentHash: string;
+    /**
+     * Annotation coverage: count of scenarios where ground-truth annotation
+     * drove at least one scoring dimension. Below MIN_ANNOTATION_SAMPLES
+     * (insight rule `scr_annotation_sparse`) means SCR/ELA/Slot-F1 aggregates
+     * are statistically unreliable.
+     */
+    readonly annotation: {
+      readonly annotatedScenarioCount: number;
+      readonly judgeOnlyScenarioCount: number;
+      readonly drives: {
+        readonly constraints: number;
+        readonly entities: number;
+        readonly answerClaims: number;
+        readonly steps: number;
+        readonly termination: number;
+        readonly retrievalIds: number;
+        readonly rubric: number;
+      };
+    };
   };
 }
 
@@ -1255,6 +1302,17 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
   const scenarios = filterScenarios(AGENT_SCENARIOS, args);
 
+  // SOTA++ ground truth: load annotations once and apply them per-scenario at
+  // scoring time. Merge happens in-loop (so each scoring path sees the merged
+  // expectation); post-scoring diagnostics layer on top.
+  const annotationStore: AnnotationStore = loadAnnotations();
+  if (annotationStore.stats.loaded > 0 || annotationStore.stats.failed > 0) {
+    console.error(
+      `  [ANNOTATIONS] loaded=${annotationStore.stats.loaded} `
+      + `failed=${annotationStore.stats.failed}`,
+    );
+  }
+
   // Container wiring
   console.error('  [INIT] real container — wiring PG + Redis + production deps...');
   const built = await buildRealToolDeps();
@@ -1286,10 +1344,21 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   let infraFallbackCount = 0;
   const totalToRun = scenarios.filter((s) => s.skip === undefined).length;
 
+  // Per-scenario annotation outcomes — surfaced on the report to count
+  // annotated vs judge-only scenarios for the SCR/ELA insight rule.
+  const annotationOutcomes = new Map<number, AnnotationApplied>();
+
   const results = await runWithConcurrency(
     scenarios,
     effectiveConcurrency,
-    async (scenario) => {
+    async (rawScenario) => {
+      // Apply ground-truth annotation BEFORE any code path sees the scenario —
+      // skipped, errored, or executed. The merge is shallow (only fields the
+      // annotation defines) and never deletes inline data.
+      const annotation = annotationStore.get(rawScenario.id);
+      const { scenario, applied } = mergeAnnotationIntoScenario(rawScenario, annotation);
+      annotationOutcomes.set(scenario.id, applied);
+
       if (scenario.skip !== undefined) {
         console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
         return scoreScenario(scenario, null, undefined, undefined);
@@ -1474,7 +1543,10 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           console.error(`  [CONSTRAINT-EVAL] #${scenario.id} failed: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
         }
 
-        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics, constraintMetrics);
+        const scoredBase = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics, constraintMetrics);
+        // Layer annotation-derived diagnostics on top of the scored result.
+        // applyAnnotationDiagnostics is a no-op when annotation is undefined.
+        const scored = applyAnnotationDiagnostics(scoredBase, execution, annotation);
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
@@ -1585,7 +1657,20 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     );
   }
 
-  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock, infraFallbackCount);
+  return buildReport(
+    results,
+    scenarios,
+    modelId,
+    judgeModelId,
+    embeddingModel,
+    apiBaseDomain,
+    args,
+    judgeFailCount,
+    judgeAttemptCount,
+    wallClock,
+    infraFallbackCount,
+    annotationOutcomes,
+  );
 }
 
 function filterScenarios(
@@ -1613,6 +1698,7 @@ function buildReport(
   judgeAttemptCount: number,
   wallClock: BenchmarkWallClock,
   infraFallbackCount: number = 0,
+  annotationOutcomes: ReadonlyMap<number, AnnotationApplied> = new Map(),
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
 
@@ -1741,6 +1827,40 @@ function buildReport(
   // Bootstrap CI — distribution-free, more robust for skewed geo-mean scores.
   const overallBootstrapCi95 = bootstrapCi95(overallScores);
 
+  // Annotation outcomes — exposed on the report so insight rules and
+  // downstream bench-compare can read "annotated vs judge-only" without
+  // having to re-load annotation JSON.
+  const annotatedScenarioCount = [...annotationOutcomes.values()].filter((o) => o.applied).length;
+  const annotationDrives = {
+    constraints: 0, entities: 0, answerClaims: 0, steps: 0, termination: 0, retrievalIds: 0, rubric: 0,
+  };
+  for (const o of annotationOutcomes.values()) {
+    if (!o.applied) continue;
+    if (o.drives.constraints) annotationDrives.constraints++;
+    if (o.drives.entities) annotationDrives.entities++;
+    if (o.drives.answerClaims) annotationDrives.answerClaims++;
+    if (o.drives.steps) annotationDrives.steps++;
+    if (o.drives.termination) annotationDrives.termination++;
+    if (o.drives.retrievalIds) annotationDrives.retrievalIds++;
+    if (o.drives.rubric) annotationDrives.rubric++;
+  }
+
+  const promptHashValue = createHash('sha256').update(buildSystemMessage().content).digest('hex').slice(0, 16);
+
+  // SOTA++ env manifest — captured here so every report carries the
+  // reproducibility footer. Standalone file write happens in main() when
+  // --env-manifest is passed.
+  const environment: EnvManifest = buildEnvManifest({
+    agentModel: model,
+    judgeModel,
+    embeddingModel,
+    apiBaseDomain,
+    container: args.container,
+    seed: args.seed ?? null,
+    profile: args.profile,
+    promptHash: promptHashValue,
+  });
+
   return {
     baselineVersion: BASELINE_VERSION_CURRENT,
     timestamp: new Date().toISOString(),
@@ -1755,7 +1875,7 @@ function buildReport(
     seed: args.seed ?? null,
     nodeVersion: process.version,
     platform: process.platform,
-    promptHash: createHash('sha256').update(buildSystemMessage().content).digest('hex').slice(0, 16),
+    promptHash: promptHashValue,
     scenarioCount: scenarios.length,
     executedCount: executed.length,
     skippedCount: results.filter((r) => r.skipped).length,
@@ -1869,6 +1989,13 @@ function buildReport(
           },
         };
       })(),
+      environment,
+      environmentHash: manifestHash(environment),
+      annotation: {
+        annotatedScenarioCount,
+        judgeOnlyScenarioCount: Math.max(0, executed.length - annotatedScenarioCount),
+        drives: annotationDrives,
+      },
     },
   };
 }
@@ -1955,6 +2082,27 @@ async function main(): Promise<void> {
     console.error(`  [OUT] wrote ${args.outputPath}`);
   } else {
     console.log(json);
+  }
+
+  // SOTA++ env manifest (standalone): operators verifying rerun-equivalence
+  // can hash this file independently of the full report.
+  if (args.envManifestPath !== undefined) {
+    const manifestJson = JSON.stringify(
+      { manifest: report.summary.environment, manifestHash: report.summary.environmentHash },
+      null,
+      2,
+    );
+    await fs.writeFile(resolvePath(args.envManifestPath), manifestJson, 'utf8');
+    console.error(`  [ENV-MANIFEST] wrote ${args.envManifestPath} (hash=${report.summary.environmentHash})`);
+  }
+
+  // SOTA++ bench archive: copy the report JSON into a sha-and-timestamp file
+  // under data/bench-archive/. Default on; disable with --no-archive. Failure
+  // here MUST NOT block the run — archiving is best-effort.
+  if (args.archive) {
+    await archiveBenchReport(report, json).catch((err: unknown) => {
+      console.error(`  [BENCH-ARCHIVE] failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   // Human-readable summary to stderr

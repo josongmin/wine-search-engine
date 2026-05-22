@@ -1,0 +1,21 @@
+{
+  "scenarioId": 25,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Soft tannin + fruit-forward red under 30K KRW. All four constraints must drive recommendation.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "wine_type", "operator": "=", "value": "red" }
+    ],
+    "soft": [
+      { "attribute": "tannin", "operator": "<=", "value": 0.5 },
+      { "attribute": "max_price_krw", "operator": "<=", "value": 30000 }
+    ]
+  },
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer"
+}

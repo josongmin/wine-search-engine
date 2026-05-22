@@ -1,0 +1,28 @@
+name: bench-smoke
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: bench-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Operators may set this in a PR description / commit message to suppress
+      # the gate in case of a known infra outage. The bench-pr-gate.ts script
+      # reads the same env var and short-circuits when YES.
+      BENCH_SMOKE_OVERRIDE: ${{ vars.BENCH_SMOKE_OVERRIDE }}
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Bench smoke (unit-only lightweight)
+        run: pnpm run bench:smoke
+      - name: PR-level micro-bench gate (covers smoke + future regression gate)
+        run: tsx scripts/eval/bench-pr-gate.ts --skip-smoke

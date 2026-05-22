@@ -1,0 +1,17 @@
+{
+  "scenarioId": 6,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Steak pairing under 100K KRW. Both pairing rationale and budget must hold.",
+  "expectedConstraints": {
+    "soft": [
+      { "attribute": "max_price_krw", "operator": "<=", "value": 100000 }
+    ]
+  },
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": ["over budget", "exceeds 100,000"]
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer"
+}
