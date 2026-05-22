@@ -71,7 +71,11 @@ function normalizeForStableJson(value: unknown): unknown {
 }
 
 function stableJson(value: unknown): string {
-  return JSON.stringify(normalizeForStableJson(value)) ?? String(value);
+  // JSON.stringify returns undefined at runtime for top-level undefined/function/symbol,
+  // although the lib's TS signature under-specifies it as always `string`. The widening
+  // assertion keeps the ?? fallback live for those inputs.
+  const json = JSON.stringify(normalizeForStableJson(value)) as string | undefined;
+  return json ?? String(value);
 }
 
 function stableEqual(left: unknown, right: unknown): boolean {

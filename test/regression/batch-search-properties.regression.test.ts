@@ -257,11 +257,12 @@ describe('batch-search properties (regression)', () => {
         itemsArb(EXPECTED_MAX_BATCH_SIZE),
         // verdict bitmask: bit i decides whether query i succeeds.
         fc.bigInt({ min: 0n, max: (1n << 20n) - 1n }),
-        async (items, mask) => {
+        async (items: BatchSearchRequestItem[], mask) => {
           let idx = 0;
           const queryToBit = new Map<string, boolean>();
           for (const it of items) {
-            queryToBit.set(it.query + ' ' + String(idx), ((mask >> BigInt(idx)) & 1n) === 1n);
+            const query: string = it.query;
+            queryToBit.set(query + ' ' + String(idx), ((mask >> BigInt(idx)) & 1n) === 1n);
             idx++;
           }
           let callIdx = 0;

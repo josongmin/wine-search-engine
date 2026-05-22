@@ -11,6 +11,7 @@ import type {
   EntityCandidateSource,
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD } from '../../domain/query/service/planner.js';
 import {
   hasExactLikeLookupStrategy,
   hasPhoneticLookupStrategy,
@@ -332,7 +333,7 @@ function buildSignals(
   const isTrustedPrefixSingleEntityAnchor =
     strategies.has('prefix_exact') &&
     anchor.candidateEntityIds.length === 1 &&
-    anchor.confidence >= 0.8;
+    anchor.confidence >= SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD;
 
   const identitySafeMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)

@@ -899,18 +899,6 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       ...candidate.legacyCandidate,
       retrievalProvenance: candidate.provenance,
     }));
-    // eslint-disable-next-line no-console
-    console.error('POOL_ASSEMBLED_DBG', {
-      queryClass: input.queryPlan.queryClass,
-      fusionClass: fusionQueryClass,
-      sparseHits: sparseHits.length,
-      denseHits: denseHits.length,
-      order: resultCandidates.slice(0, 8).map((c) => ({
-        id: String(c.entityId),
-        protected: c.retrievalProvenance?.protectedInclusionReason,
-        fusion: c.retrievalProvenance?.fusionScore,
-      })),
-    });
     const lanes: RetrievalExecutionLanes = {
       sparse: toExecutionLane(sparseResult),
       learnedSparse: toExecutionLane(learnedSparseResult),

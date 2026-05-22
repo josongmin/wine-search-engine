@@ -50,7 +50,7 @@
  * tools/feature-catalog/features/tools/resolve.yaml under known_limitations.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fc from 'fast-check';
 import { registerResolveRoute } from '../../src/interface/http/routes/resolve.route.js';
@@ -207,6 +207,16 @@ const arbCandidateList = fc
       : fc.tuple(...Array.from({ length: n }, (_, i) => arbCandidate(i + 1))),
   );
 
+/**
+ * Coerce an `unknown` candidate field to a string with a fallback. Candidate
+ * records are typed `Record<string, unknown>`, so `entityId`/`canonicalLabel`
+ * widen to `unknown`; narrow to a real string before use (a bare `String()` on
+ * `unknown` could stringify an object to "[object Object]").
+ */
+function asStringField(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
 /** A full synthetic resolver result with abstention shapes represented. */
 const arbResolverResult: fc.Arbitrary<SyntheticResolverResult> = fc
   .tuple(arbStatus, arbCandidateList)
@@ -220,8 +230,8 @@ const arbResolverResult: fc.Arbitrary<SyntheticResolverResult> = fc
         ? fc.boolean().map((hasTop) =>
             hasTop
               ? {
-                  entityId: String(candidates[0]?.entityId ?? 'e'),
-                  canonicalLabel: String(candidates[0]?.canonicalLabel ?? 'L'),
+                  entityId: asStringField(candidates[0]?.entityId, 'e'),
+                  canonicalLabel: asStringField(candidates[0]?.canonicalLabel, 'L'),
                   calibratedScore: Number(candidates[0]?.calibratedScore ?? 0),
                 }
               : undefined,
@@ -425,7 +435,12 @@ describe('tools.resolve route — input validation envelope', () => {
         fc
           .string({ minLength: 1, maxLength: 20 })
           // Avoid colliding with real schema keys so the body stays valid
-          // except for the injected unknown key.
+          // except for the injected unknown key. Also exclude prototype-
+          // pollution-shaped keys: Fastify's secure JSON body parser rejects
+          // `__proto__`/`constructor`/`prototype` at PARSE time with
+          // MALFORMED_JSON_BODY, before schema validation runs — so the
+          // VALIDATION_ERROR claim only holds for benign unknown keys. The
+          // proto-pollution path is asserted separately below (invariant 6).
           .filter(
             (k) =>
               ![
@@ -435,6 +450,9 @@ describe('tools.resolve route — input validation envelope', () => {
                 'session_context',
                 'queryBudget',
                 'query_budget',
+                '__proto__',
+                'constructor',
+                'prototype',
               ].includes(k),
           ),
         async (query, unknownKey) => {
@@ -546,6 +564,41 @@ describe('tools.resolve route — adversarial input safety', () => {
             const parsed = res.json();
             expect(ErrorResponseSchema.safeParse(parsed).success).toBe(true);
             expect(deps.resolveUseCase.execute).not.toHaveBeenCalled();
+          } finally {
+            await app.close();
+          }
+        },
+      ),
+      { numRuns: FC_RUNS },
+    );
+  });
+
+  it('rejects prototype-pollution-shaped top-level KEYS with a 400 RFC-014 envelope, never 5xx, use case not invoked', async () => {
+    // The dangerous keys must appear in the wire bytes verbatim, so we send a
+    // raw JSON string (a JS object literal could re-route `__proto__` through
+    // prototype assignment instead of an own key). Fastify's secure JSON body
+    // parser rejects these at PARSE time (before schema validation), so the
+    // code is MALFORMED_JSON_BODY rather than VALIDATION_ERROR — but it MUST
+    // still be a 400 RFC-014 envelope and MUST NOT reach the use case. This is
+    // the proto-pollution half of invariant 6 that the benign unknown-key
+    // property above deliberately excludes.
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom('__proto__', 'constructor', 'prototype'),
+        async (dangerousKey) => {
+          const deps = depsReturning({ status: 'resolved', candidates: [] });
+          const app = buildApp(deps);
+          try {
+            const rawBody = `{"query":"opus one","${dangerousKey}":{"polluted":true}}`;
+            const res = await post(app, rawBody);
+            expect(res.statusCode).toBeGreaterThanOrEqual(400);
+            expect(res.statusCode).toBeLessThan(500);
+            const body = res.json();
+            expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+            expect(body.error.request_id.length).toBeGreaterThan(0);
+            expect(deps.resolveUseCase.execute).not.toHaveBeenCalled();
+            // Sanity: the global Object prototype was not polluted.
+            expect(({} as Record<string, unknown>).polluted).toBeUndefined();
           } finally {
             await app.close();
           }

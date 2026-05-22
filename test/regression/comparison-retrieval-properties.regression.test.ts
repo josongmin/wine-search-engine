@@ -199,7 +199,7 @@ describe('comparison retrieval — property-based invariants', () => {
 
   it('1b. order-independence: permuted index hit order yields identical candidates', async () => {
     await fc.assert(
-      fc.asyncProperty(anchorArb, hitsArb, limitArb, async (anchor, hits, limit) => {
+      fc.asyncProperty(anchorArb, hitsArb, limitArb, async (anchor, hits, _limit) => {
         const forward = new CompareRetriever(makeIndex({ anchor, hits }));
         const reversed = new CompareRetriever(
           makeIndex({ anchor, hits: [...hits].reverse() }),
@@ -211,7 +211,7 @@ describe('comparison retrieval — property-based invariants', () => {
         const a = await forward.compareAgainstAnchor(anchor.entityId, EMPTY_BUNDLE, hits.length + 1);
         const b = await reversed.compareAgainstAnchor(anchor.entityId, EMPTY_BUNDLE, hits.length + 1);
         const ids = (xs: readonly { entityId: string }[]): string[] =>
-          xs.map((x) => String(x.entityId));
+          xs.map((x) => x.entityId);
         expect(ids(b)).toStrictEqual(ids(a));
       }),
       { numRuns: NUM_RUNS },

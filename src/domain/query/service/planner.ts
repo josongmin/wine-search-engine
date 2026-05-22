@@ -80,7 +80,7 @@ const FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY = 0.1;
 const POLICY_RULE_VERSION = '1.0.0';
 
 /** Short-query ambiguity: anchor confidence must exceed this when multiple candidates exist. */
-const SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD = 0.8;
+export const SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD = 0.8;
 /** Confidence assigned to taxonomy-derived pairing soft constraints. */
 const PAIRING_SOFT_CONSTRAINT_CONFIDENCE = 0.88;
 /** Parser confidence floor in uncertainty (weak prior). */
