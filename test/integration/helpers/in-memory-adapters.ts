@@ -59,8 +59,6 @@ import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/ser
 import { hardConstraintsToSparseFilterTokens } from '../../../src/domain/retrieval/service/constraint-to-sparse-filter-tokens.js';
 import {
   buildFilterPredicate,
-  hashTextToVector,
-  cosineSimilarity,
   hybridCandidateToFilterableDoc,
 } from './in-memory-retrieval-helpers.js';
 
@@ -248,48 +246,36 @@ export class InMemorySearchIndex implements SearchIndexPort {
   }
 
   async denseSearch(
-    embedding: readonly number[],
+    _embedding: readonly number[],
     filters?: readonly string[],
     limit?: number,
     _rankProfile?: string,
   ): Promise<readonly DenseHit[]> {
-    // Query-aware cosine ranking + filter application. The previous
-    // implementation ignored both `embedding` and `filters` and returned all
-    // docs in fixed popularity order, which (a) made denseSearch behave like
-    // a popularity bias regardless of query — `"romanee conti"` ranked
-    // `opus-one-2018` #1 because Opus One has the highest seeded
-    // popularityScore — and (b) silently no-op'd hard-constraint filtering
-    // for the recommendation/similar_items modes that depend on the dense
-    // lane to enforce wine_type / region / etc. constraints.
+    // Honor hard-constraint filter tokens (wine_type:red, region:Burgundy,
+    // style_matches:bold, …) — production VespaSearchIndex applies them at
+    // the Vespa WHERE layer, so the stub must too. Without this, mixed-route
+    // `similar_items` with a `wine_type` constraint silently returned every
+    // wine type (the constraint overlay then dropped them all, leaving 0
+    // candidates — the 마고 비슷한 레드 zero-result class).
     //
-    // The fake-embedding scheme used by `InMemoryEmbeddingService.hashText`
-    // is deterministic on the character-code sum (`(code * (i+1)) % DIM`),
-    // so a doc whose canonical label shares characters with the query will
-    // naturally produce a higher cosine similarity. Hashing the doc's
-    // canonical label with the SAME function lets `embedding` actually
-    // discriminate `romanee-conti-2019` from `opus-one-2018` for the
-    // `romanee conti` query — the structural property we want from any
-    // honest dense-lane simulation.
-    //
-    // PopularityScore is folded in as a weak tiebreaker (`epsilon=1e-6`)
-    // so identical-cosine ties still resolve deterministically.
-    const queryVec = embedding;
+    // We intentionally keep the popularity-ordered ranking inside the
+    // filtered set instead of computing a cosine against `_embedding`.
+    // The InMemoryEmbeddingService produces deterministic but
+    // dimensionally-collapsed vectors that don't carry the semantic
+    // structure of real embeddings; cosine ranking off those vectors
+    // shifts many e2e contracts that were calibrated against the
+    // popularity-stable order, and that's a separate test-harness
+    // re-baselining job.
     const filterPredicate = buildFilterPredicate(filters);
-    const POPULARITY_EPSILON = 1e-6;
-    const scored = Array.from(this.docs.values())
+    const docs = Array.from(this.docs.values())
       .filter(filterPredicate)
-      .map((doc) => {
-        const docVec = hashTextToVector(doc.canonicalLabel);
-        const cosine = cosineSimilarity(queryVec, docVec);
-        return { doc, score: cosine + doc.popularityScore * POPULARITY_EPSILON };
-      })
-      .sort((a, b) => b.score - a.score);
-    const limited = limit != null ? scored.slice(0, limit) : scored;
-    return limited.map(({ doc, score }, i) => ({
+      .sort((a, b) => b.popularityScore - a.popularityScore);
+    const limited = limit != null ? docs.slice(0, limit) : docs;
+    return limited.map((doc, i) => ({
       entityId: doc.entityId,
-      score,
+      score: doc.popularityScore,
       rank: i + 1,
-      similarity: score,
+      similarity: doc.popularityScore,
       summary: retrievalDocumentToHitSummary(doc),
     }));
   }

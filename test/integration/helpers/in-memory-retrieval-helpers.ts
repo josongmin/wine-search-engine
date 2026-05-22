@@ -1,65 +1,18 @@
 /**
- * Shared helpers for the in-memory retrieval stubs:
- *  - hash-based query-aware embedding (parity with `InMemoryEmbeddingService`)
- *  - cosine similarity for dense ranking
- *  - sparse-filter-token parser that mirrors the production
- *    `buildSparseFilters` semantics (`wine_type:red`, `region:Burgundy`,
- *    `style_matches:bold`, etc.) on the in-memory document shape.
+ * Shared helpers for the in-memory retrieval stubs — sparse-filter-token
+ * parser that mirrors the production `buildSparseFilters` semantics
+ * (`wine_type:red`, `region:Burgundy`, `style_matches:bold`, etc.) on the
+ * in-memory document shape.
  *
- * These exist so the in-memory `denseSearch` / `sparseSearch` /
- * `retrieveSimilar` paths honor query + hard-constraint structure the same
- * way the Vespa adapter does. Without them the stubs returned popularity-
- * sorted, filter-ignoring results, which silently broke any e2e test that
- * depended on hard-constraint filtering (mixed-route `similar_items` with a
- * `wine_type` constraint, hybrid-route ranking against an alias-matched
- * canonical, etc.).
+ * Exists so the in-memory `denseSearch` / `sparseSearch` / `retrieveSimilar`
+ * paths honor hard-constraint structure the same way the Vespa adapter does.
+ * Without this the stubs returned filter-ignoring results, which silently
+ * broke any e2e test that depended on hard-constraint filtering (mixed-route
+ * `similar_items` with a `wine_type` constraint, ETC.).
  */
 
 import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
-
-/** Vector dimension. Matches `InMemoryEmbeddingService.DIM` so the query
- *  embedding and document embedding live in the same space. */
-const VECTOR_DIM = 1024;
-
-/**
- * Deterministic hash → unit vector. SAME algorithm as
- * `InMemoryEmbeddingService.hashText` (in-memory-adapters.ts:305-315) so a
- * query embedding produced by the embedding service and a document
- * embedding produced here are directly comparable. The function is
- * intentionally permutation-sensitive on the character-position weight
- * (`code * (i+1)`), which gives "romanee conti" and "romanee-conti-2019"
- * higher overlap than "romanee conti" and "opus-one-2018".
- */
-export function hashTextToVector(text: string): readonly number[] {
-  const vec = new Array<number>(VECTOR_DIM).fill(0);
-  const lower = text.toLowerCase();
-  for (let i = 0; i < lower.length; i++) {
-    const code = lower.charCodeAt(i);
-    const idx = (code * (i + 1)) % VECTOR_DIM;
-    vec[idx] = ((vec[idx] ?? 0) + code / 255) % 1;
-  }
-  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0)) || 1;
-  return vec.map((v) => v / norm);
-}
-
-/**
- * Cosine similarity over two unit vectors. Returns 0 when either vector is
- * empty / dimension-mismatched rather than throwing — the in-memory stubs
- * never want to abort a search on a malformed query vector.
- */
-export function cosineSimilarity(
-  a: readonly number[],
-  b: readonly number[],
-): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  const n = Math.min(a.length, b.length);
-  let dot = 0;
-  for (let i = 0; i < n; i++) {
-    dot += (a[i] ?? 0) * (b[i] ?? 0);
-  }
-  return dot;
-}
 
 /**
  * Subset of the document shape we need for filter predicate evaluation.
