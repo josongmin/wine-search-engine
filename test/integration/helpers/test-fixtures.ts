@@ -407,6 +407,15 @@ export function toHybridCandidate(
     sweetness: doc.sweetness,
     country: doc.country,
     appellation: doc.appellation ?? doc.region,
+    // Carry the wine-type-bearing attributes through so the in-memory
+    // `InMemorySimilarRetrieval` filter predicate can honor a
+    // `wine_type:red` hard constraint on the candidate set. Without
+    // these, the predicate sees `style=undefined / wineType=undefined`,
+    // can't infer red/white, and drops every candidate — emptying the
+    // mixed-route fused lane for queries like `마고 비슷한 레드`.
+    style: doc.style,
+    priceBand: doc.priceBand,
+    wineType: doc.wineType ?? inferWineType(doc.style),
     sparseRank: anchorRank,
     denseRank: anchorRank,
     anchorRank,

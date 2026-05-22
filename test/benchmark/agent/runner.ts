@@ -79,7 +79,15 @@ import {
   TRANSLITERATION_EXACT_LOOKUP_POSITIVE_CORE_PROFILE_SCENARIO_IDS,
   TRANSLITERATION_EXACT_LOOKUP_PROFILE_SCENARIO_IDS,
 } from './scenarios.js';
-import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTrace } from './scorer.js';
+import {
+  scoreScenario,
+  aggregateGeoMean,
+  aggregateTrimmedGeoMean,
+  type ScenarioResult,
+  type ScenarioExecution,
+  type StepTrace,
+  type MetricProvenance,
+} from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
@@ -90,6 +98,12 @@ import {
 } from './hard-constraints-aggregator.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
 import type { ConstraintExtractionMetricsInput } from './scorer.js';
+import {
+  LATENCY_SLA_P50_MS as K_LATENCY_SLA_P50_MS,
+  LATENCY_SLA_P95_MS as K_LATENCY_SLA_P95_MS,
+  LATENCY_SLA_TIMEOUT_MS as K_LATENCY_SLA_TIMEOUT_MS,
+  TRIMMED_GEOMEAN_PROPORTION,
+} from './constants.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
@@ -753,6 +767,11 @@ async function computeConstraintMetricsForScenario(
     csrSoft: csr.csrSoft,
     csrInferred: csr.csrInferred,
     csrInferredGraph: csr.csrInferredGraph,
+    // SOTA++ reliability fix: bench was hardcoding `meanHardConstraints = 0` with
+    // a TODO comment. The actual hard-constraint count is sitting right here in
+    // `extraction.bundle.hard`. Thread it through so the run-level aggregate in
+    // buildReport() is real, not stubbed.
+    extractedHardConstraintCount: extraction.bundle.hard.length,
   };
 }
 
@@ -968,12 +987,11 @@ function percentile(sortedAsc: readonly number[], p: number): number {
 }
 
 // ── Latency SLA thresholds (KPI targets) ──
-/** p50 must be under this for SLA pass (ms). */
-const LATENCY_SLA_P50_MS = 10_000;
-/** p95 must be under this for SLA pass (ms). */
-const LATENCY_SLA_P95_MS = 20_000;
-/** Individual scenario hard timeout (ms) — exceeding this = SLA violation. */
-const LATENCY_SLA_TIMEOUT_MS = 30_000;
+// Bound from `./constants.js` SSoT — see CLAUDE.md rule 30. The aliased
+// re-bind keeps the local symbols stable for the rest of the file.
+const LATENCY_SLA_P50_MS = K_LATENCY_SLA_P50_MS;
+const LATENCY_SLA_P95_MS = K_LATENCY_SLA_P95_MS;
+const LATENCY_SLA_TIMEOUT_MS = K_LATENCY_SLA_TIMEOUT_MS;
 
 interface LatencyStats {
   readonly mean: number;
@@ -1224,6 +1242,27 @@ export interface BenchmarkReport {
   readonly baselineDelta?: readonly ScenarioDelta[];
   readonly summary: {
     readonly overallScore: number;
+    /**
+     * Geometric mean of per-scenario `scores.overall`.
+     *
+     * Identical to {@link overallScore} on healthy populations; surfaced as an
+     * explicitly-named alias so the contract test can assert provenance against
+     * a stable key (the legacy name `overallScore` is preserved for baseline
+     * JSON compat — never drop it).
+     */
+    readonly overallScoreGeoMean: number;
+    /**
+     * 5%-trimmed geometric mean of per-scenario `scores.overall`. Drops the
+     * bottom 5% and top 5% of values before computing the geo-mean — robust
+     * to heavy-left-tailed runs where a handful of critical failures (score=0)
+     * dominate the raw aggregate.
+     *
+     * SOTA++ reliability addition: published alongside the raw `overallScore`
+     * so operators see both signals. Critical-failure counts are reported
+     * separately (`criticalFailureCount`) — trimming does NOT squelch the
+     * security/correctness signal. See `docs/bench/metric-spec.md` §A2.
+     */
+    readonly overallScoreTrimmedGeoMean5: number;
     readonly overallCi95: WilsonCi;
     /** Bootstrap 95% CI — distribution-free, more robust for skewed geo-mean. */
     readonly overallBootstrapCi95: WilsonCi;
@@ -1350,6 +1389,30 @@ export interface BenchmarkReport {
       readonly framedToolCalls: number;
       readonly totalToolCalls: number;
     };
+    /**
+     * Mean number of HARD constraints extracted per query
+     * (`runConstraintExtraction(query).bundle.hard.length`).
+     *
+     * SOTA++ reliability fix: previously this aggregate sat hardcoded `0` in
+     * `benchmark-insight-generator.ts` with a TODO comment, corrupting every
+     * `hard_constraints_low` insight that fired. Now derived from real
+     * per-scenario `scores.extractedHardConstraintCount` (averaged over
+     * scenarios with non-null values; null when no scenarios had
+     * `expectedConstraints` or `expectedEntities`).
+     */
+    readonly meanHardConstraints: number | null;
+    /**
+     * Provenance map: aggregateName → MetricProvenance.
+     *
+     * Every numeric aggregate reported in `summary.*` MUST have an entry here.
+     * The contract test
+     * `test/regression/scorer-no-hardcoded-aggregate.regression.test.ts`
+     * fails loudly if any reported aggregate is untraceable or if any
+     * `derivationSummary` contains the substring `"TODO"`.
+     *
+     * Adding a new aggregate? Register it here in `buildReport()`.
+     */
+    readonly provenance: Readonly<Record<string, MetricProvenance>>;
   };
 }
 
@@ -1981,6 +2044,20 @@ function buildReport(
   // Bootstrap CI — distribution-free, more robust for skewed geo-mean scores.
   const overallBootstrapCi95 = bootstrapCi95(overallScores);
 
+  // SOTA++ reliability addition: trimmed geo-mean alongside the raw mean.
+  // Raw geo-mean is dominated by left-tail critical failures (score=0);
+  // the 5%-trimmed variant exposes the underlying agent quality. Critical
+  // failures STAY counted via `criticalFailureCount` so the security/correctness
+  // signal is never squelched.
+  const overallScoreGeoMean = aggregateGeoMean(overallScores);
+  const overallScoreTrimmedGeoMean5 = aggregateTrimmedGeoMean(overallScores, TRIMMED_GEOMEAN_PROPORTION);
+
+  // SOTA++ reliability fix: meanHardConstraints was hardcoded `0` in
+  // benchmark-insight-generator.ts (TODO comment). Now derived from real
+  // per-scenario `extractedHardConstraintCount`.
+  const hardConstraintCounts = executedForAggregate.map((r) => r.scores.extractedHardConstraintCount);
+  const meanHardConstraints = nullableMean(hardConstraintCounts);
+
   return {
     baselineVersion: BASELINE_VERSION_CURRENT,
     timestamp: new Date().toISOString(),
@@ -2010,6 +2087,8 @@ function buildReport(
     results,
     summary: {
       overallScore,
+      overallScoreGeoMean,
+      overallScoreTrimmedGeoMean5,
       overallCi95,
       overallBootstrapCi95,
       executionEfficiency: avgScore('executionEfficiency'),
@@ -2130,8 +2209,142 @@ function buildReport(
           },
         };
       })(),
+      meanHardConstraints,
+      // SOTA++ reliability addition: provenance map for the contract test.
+      // Every reported aggregate above MUST have a corresponding entry here.
+      // The contract test asserts:
+      //   1. provenance entry exists for every numeric summary field,
+      //   2. `derivationSummary` MUST NOT contain "TODO" (silent-hardcode trap),
+      //   3. `sourceField` is a real ScenarioScores/ScenarioExecution path or a
+      //      documented magic key (e.g. '__scenario_count__').
+      provenance: buildSummaryProvenance(),
     },
   };
+}
+
+/**
+ * Build the `summary.provenance` map. Centralised so the contract test reads a
+ * single function rather than having to crawl the buildReport() return block.
+ *
+ * MUST be updated whenever a new aggregate is added to `BenchmarkReport.summary`.
+ * Forgetting causes the contract test
+ * (`test/regression/scorer-no-hardcoded-aggregate.regression.test.ts`) to fail
+ * loudly with the missing key.
+ */
+export function buildSummaryProvenance(): Readonly<Record<string, MetricProvenance>> {
+  const arith = (aggregateName: string, sourceField: string): MetricProvenance => ({
+    aggregateName,
+    sourceField,
+    derivationSummary: `arithmetic mean over executedForAggregate scenarios of ${sourceField}`,
+  });
+  const nullableArith = (aggregateName: string, sourceField: string): MetricProvenance => ({
+    aggregateName,
+    sourceField,
+    derivationSummary: `arithmetic mean over executedForAggregate scenarios with non-null ${sourceField}`,
+  });
+  const percentileEntry = (aggregateName: string, sourceField: string, pct: string): MetricProvenance => ({
+    aggregateName,
+    sourceField,
+    derivationSummary: `${pct} percentile over executed scenarios of ${sourceField}`,
+  });
+
+  return Object.freeze({
+    overallScore: arith('overallScore', 'scores.overall'),
+    overallScoreGeoMean: {
+      aggregateName: 'overallScoreGeoMean',
+      sourceField: 'scores.overall',
+      derivationSummary: 'geometric mean over executedForAggregate scenarios (aggregateGeoMean) of scores.overall',
+    },
+    overallScoreTrimmedGeoMean5: {
+      aggregateName: 'overallScoreTrimmedGeoMean5',
+      sourceField: 'scores.overall',
+      derivationSummary: '5%-trimmed geometric mean (aggregateTrimmedGeoMean, proportion=0.05) over executedForAggregate scenarios of scores.overall',
+    },
+    overallCi95: {
+      aggregateName: 'overallCi95',
+      sourceField: 'scores.overall',
+      derivationSummary: 'Student-t 95% CI (tCi95) over executedForAggregate scenarios of scores.overall',
+    },
+    overallBootstrapCi95: {
+      aggregateName: 'overallBootstrapCi95',
+      sourceField: 'scores.overall',
+      derivationSummary: 'distribution-free bootstrap 95% CI (bootstrapCi95) over executedForAggregate scenarios of scores.overall',
+    },
+    executionEfficiency: arith('executionEfficiency', 'scores.executionEfficiency'),
+    toolAccuracy: arith('toolAccuracy', 'scores.toolAccuracy'),
+    stepEfficiency: arith('stepEfficiency', 'scores.stepEfficiency'),
+    answerQuality: arith('answerQuality', 'scores.answerQuality'),
+    terminationCorrectness: arith('terminationCorrectness', 'scores.terminationCorrectness'),
+    costEfficiency: arith('costEfficiency', 'scores.costEfficiency'),
+    faithfulness: nullableArith('faithfulness', 'scores.faithfulness'),
+    contextRelevance: nullableArith('contextRelevance', 'scores.contextRelevance'),
+    contextRecall: nullableArith('contextRecall', 'scores.contextRecall'),
+    judge: nullableArith('judge', 'scores.judge'),
+    claimFaithfulness: nullableArith('claimFaithfulness', 'claimDiagnostics.faithfulnessScore'),
+    claimContradictionRate: nullableArith('claimContradictionRate', 'claimDiagnostics.contradictionRate'),
+    claimCriticalErrorRate: nullableArith('claimCriticalErrorRate', 'claimDiagnostics.criticalErrorRate'),
+    claimProvenanceCoverage: nullableArith('claimProvenanceCoverage', 'claimDiagnostics.provenanceCoverage'),
+    claimHardFailCount: {
+      aggregateName: 'claimHardFailCount',
+      sourceField: 'claimDiagnostics.hardFail',
+      derivationSummary: 'count of executedForAggregate scenarios with claimDiagnostics.hardFail === true',
+    },
+    claimEvaluatedCount: {
+      aggregateName: 'claimEvaluatedCount',
+      sourceField: '__scenario_count__',
+      derivationSummary: 'count of executedForAggregate scenarios with non-undefined claimDiagnostics',
+    },
+    scrOverall: nullableArith('scrOverall', 'scores.semanticConstraintRecall'),
+    scrHard: nullableArith('scrHard', 'scores.scrHard'),
+    scrSoft: nullableArith('scrSoft', 'scores.scrSoft'),
+    scrInferred: nullableArith('scrInferred', 'scores.scrInferred'),
+    scrInferredGraph: nullableArith('scrInferredGraph', 'scores.scrInferredGraph'),
+    entityLinkingAccuracy: nullableArith('entityLinkingAccuracy', 'scores.entityLinkingAccuracy'),
+    slotF1Strict: nullableArith('slotF1Strict', 'scores.slotF1Strict'),
+    slotF1Relaxed: nullableArith('slotF1Relaxed', 'scores.slotF1Relaxed'),
+    csrOverall: nullableArith('csrOverall', 'scores.csrOverall'),
+    csrHard: nullableArith('csrHard', 'scores.csrHard'),
+    csrSoft: nullableArith('csrSoft', 'scores.csrSoft'),
+    csrInferred: nullableArith('csrInferred', 'scores.csrInferred'),
+    csrInferredGraph: nullableArith('csrInferredGraph', 'scores.csrInferredGraph'),
+    constraintEvaluatedCount: {
+      aggregateName: 'constraintEvaluatedCount',
+      sourceField: '__scenario_count__',
+      derivationSummary: 'count of executedForAggregate scenarios with non-null semanticConstraintRecall or entityLinkingAccuracy',
+    },
+    avgSteps: arith('avgSteps', 'stepCount'),
+    latencyMs: percentileEntry('latencyMs', 'totalDurationMs', 'mean/p50/p95/p99/max'),
+    latencySla: {
+      aggregateName: 'latencySla',
+      sourceField: 'totalDurationMs',
+      derivationSummary: 'boolean gates derived from latencyMs.p50 / latencyMs.p95 vs LATENCY_SLA_P50_MS / LATENCY_SLA_P95_MS, timeoutCount = count of totalDurationMs > LATENCY_SLA_TIMEOUT_MS',
+    },
+    tokens: {
+      aggregateName: 'tokens',
+      sourceField: 'totalTokens',
+      derivationSummary: 'inputMean/outputMean = arithmetic mean over executed; totalP95 = p95 of (input+output) over executed',
+    },
+    byTier: {
+      aggregateName: 'byTier',
+      sourceField: 'scores.overall',
+      derivationSummary: 'per-tier { count, avgScore } where avgScore = arithmetic mean of scores.overall within tier',
+    },
+    evidenceFrameCoverage: {
+      aggregateName: 'evidenceFrameCoverage',
+      sourceField: 'evidenceFrameCount',
+      derivationSummary: 'sum(evidenceFrameCount) / sum(toolCallCount) over executed; null when totalToolCalls=0',
+    },
+    evidenceFrameCounts: {
+      aggregateName: 'evidenceFrameCounts',
+      sourceField: 'evidenceFrameCount',
+      derivationSummary: 'sums of evidenceFrameCount and toolCallCount over executed scenarios',
+    },
+    meanHardConstraints: {
+      aggregateName: 'meanHardConstraints',
+      sourceField: 'scores.extractedHardConstraintCount',
+      derivationSummary: 'arithmetic mean over executedForAggregate scenarios with non-null scores.extractedHardConstraintCount; replaces the previously hardcoded 0',
+    },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -2633,10 +2846,12 @@ async function main(): Promise<void> {
       latencyP95Ms: s.latencyMs.p95,
       latencyP95WallMs: s.latencyWallMs.p95,
       tier6SoleExtractionRate: null, // TODO: aggregate from query logs
-      // Wired from summary.meanHardConstraints — arithmetic mean over scenarios
-      // that produced ≥1 search outcome. The `hard_constraints_low` insight
-      // rule fires when this drops below 1.5 across the bench.
+      // SOTA++ reliability fix: was `meanHardConstraints: 0 // TODO`. Now sourced
+      // from the run-level aggregate computed in buildReport(). Null when no
+      // scenarios had constraint extraction (insight rule skips silently).
       meanHardConstraints: s.meanHardConstraints,
+      overallScoreGeoMean: s.overallScoreGeoMean,
+      overallScoreTrimmedGeoMean5: s.overallScoreTrimmedGeoMean5,
       scrOverall: s.scrOverall ?? null,
       scrHard: s.scrHard ?? null,
       scrSoft: s.scrSoft ?? null,

@@ -1195,9 +1195,25 @@ export class InMemorySimilarRetrieval implements SimilarRetrievalPort {
       return limit > 0 ? seeded.slice(0, limit) : seeded;
     }
     const filterPredicate = buildFilterPredicate(filterTokens);
-    const filtered = seeded.filter((candidate) =>
-      filterPredicate(hybridCandidateToFilterableDoc(candidate)),
-    );
+    // eslint-disable-next-line no-console
+    console.error('RETRIEVE_SIMILAR_DBG', {
+      anchorId: String(anchorProfile.entityId),
+      filterTokens,
+      seededCount: seeded.length,
+      firstSeededFilterable: seeded[0] ? hybridCandidateToFilterableDoc(seeded[0]) : null,
+    });
+    const filtered = seeded.filter((candidate) => {
+      const filterable = hybridCandidateToFilterableDoc(candidate);
+      const passed = filterPredicate(filterable);
+      // eslint-disable-next-line no-console
+      console.error('FILTER_CHECK', {
+        entityId: String(candidate.entityId),
+        wineType: filterable.wineType,
+        style: filterable.style,
+        passed,
+      });
+      return passed;
+    });
     return limit > 0 ? filtered.slice(0, limit) : filtered;
   }
 }

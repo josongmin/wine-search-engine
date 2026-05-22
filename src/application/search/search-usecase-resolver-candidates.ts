@@ -316,7 +316,25 @@ function buildSignals(
     strategies.has('substring') ||
     strategies.has('smart_document');
 
-  const identitySafeMatch = exactLike
+  // Trust-the-matcher gate for high-confidence single-entity prefix_exact
+  // anchors: the alias matcher already validated that `"opu"` binds to
+  // `opus-one-2018` at the alias index. Re-running the identity-key
+  // overlap check below would compare anchor.normalizedForm `"opu"`
+  // against the doc's identity keys (`"opus"`, `"opus one"`, …), find no
+  // overlap, and force `exactSignalAllowed=false` — collapsing the
+  // resolver to a raw score of ~0.05 and pushing every clean Latin
+  // prefix query under T_resolve. Restricted to single-entity anchors
+  // so the bypass cannot mask a genuine ambiguity (`distinctEntityIds
+  // .size > 1` would have already pushed the query class to
+  // `ambiguous_short_form` in the planner, and this branch wouldn't
+  // even be reached). The confidence floor matches the planner's
+  // SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD floor (0.8).
+  const isTrustedPrefixSingleEntityAnchor =
+    strategies.has('prefix_exact') &&
+    anchor.candidateEntityIds.length === 1 &&
+    anchor.confidence >= 0.8;
+
+  const identitySafeMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)
     : undefined;
   const exactSignalAllowed = identitySafeMatch !== false;
