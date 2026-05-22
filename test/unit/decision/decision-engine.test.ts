@@ -46,6 +46,7 @@ function makeResolverResult(overrides?: {
   ambiguityDetected?: boolean;
   topEntityLabel?: string;
   conformalSetSize?: number;
+  calibrationTrusted?: boolean;
 }): EntityResolveResult {
   const C = overrides?.C ?? 0.85;
   const gap = overrides?.gap ?? 0.2;
@@ -75,6 +76,9 @@ function makeResolverResult(overrides?: {
       decisionConfidenceC: C,
       ambiguityDetected,
       ambiguityTypes: [],
+      ...(overrides?.calibrationTrusted !== undefined
+        ? { calibrationTrusted: overrides.calibrationTrusted }
+        : {}),
       appliedThresholds: { resolveThreshold: 0.45, gapThreshold: 0.02 },
       outcomeReasonCodes: [],
       queryProvenance: {
@@ -334,7 +338,11 @@ describe('DecisionEngine', () => {
 
   it('requireExact=true downgrades when winner identity evidence is approximate', async () => {
     const input = makeDecisionInput({
-      resolveResult: makeResolverResult({ C: 0.92, gap: 0.20, ambiguityDetected: false }),
+      // calibrationTrusted=true so the calibration-trust gate (which also
+      // downgrades approximate-identity resolved verdicts when the score is an
+      // untrusted raw ranker value) does NOT preempt; this isolates the
+      // requireExact policy override as the rule under test.
+      resolveResult: makeResolverResult({ C: 0.92, gap: 0.20, ambiguityDetected: false, calibrationTrusted: true }),
       policy: makePolicy({ requireExact: true, allowApproximate: false }),
       evidenceSummary: {
         identityEvidencePresent: true,

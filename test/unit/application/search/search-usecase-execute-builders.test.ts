@@ -352,6 +352,15 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       normalizedQuery: 'opus',
       intent: 'semantic_discovery',
       queryClass: 'ambiguous_short_form',
+      // The presentation filter only engages when identity sealing is required
+      // (search-usecase-execute-builders.ts filterAmbiguousShortFormPresentation):
+      // exploratory list-shaped queries emit requires_identity_seal=false and
+      // are intentionally left unfiltered.
+      admission_context: {
+        requires_identity_seal: true,
+        requires_constraint_evidence: false,
+        requires_anchor_evidence: false,
+      },
     } as QueryPlanV1;
     const rankedResults = [
       {
@@ -512,6 +521,11 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       normalizedQuery: 'opus',
       intent: 'semantic_discovery',
       queryClass: 'ambiguous_short_form',
+      admission_context: {
+        requires_identity_seal: true,
+        requires_constraint_evidence: false,
+        requires_anchor_evidence: false,
+      },
     } as QueryPlanV1;
     const rankedResults = [
       {

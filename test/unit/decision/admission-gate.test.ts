@@ -312,7 +312,16 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
       expectRejectedWith(result, 'EVIDENCE_INSUFFICIENT');
     });
 
-    it('rejects when admission policy returns clarify without high-severity ambiguity', async () => {
+    it('admits a preference-mode decision (requires_identity_seal=false) despite missing identity evidence', async () => {
+      // RFC-016 identity-seal honoring: when admission_context emits
+      // requires_identity_seal=false (list-shaped queries — recommendation /
+      // similar_items / pairing), the strict identity-evidence presence is
+      // irrelevant; the resolved verdict isn't claiming an identity. Both the
+      // closure's identitySeal row (`!required || satisfied`) and
+      // `evidenceSufficientForAdmission` honor that, so decideAdmission returns
+      // 'allow' rather than auto-rejecting every recommendation query with
+      // EVIDENCE_INSUFFICIENT. (The only surviving clarify path is high-severity
+      // ambiguity → AMBIGUITY_BLOCKED, covered by the severity=high test.)
       const input = makeDecisionInput({
         resolveResult: makeResolveResult({ C: 0.85 }),
         evidenceSummary: makeEvidenceSummary({
@@ -326,7 +335,7 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
             requireAnchorEvidence: false,
           },
           observed: {
-            identityEvidenceSatisfied: false,  // decideAdmission → clarify
+            identityEvidenceSatisfied: false,
             constraintEvidenceSatisfied: true,
             anchorEvidenceSatisfied: true,
             topEntityPresent: true,
@@ -339,10 +348,7 @@ describe('AdmissionGate.check — RFC-016 closure invariants', () => {
         },
       });
       const result = await gate.check(input, snapshot);
-      // ambiguity not 'high' → clarify branch routes to EVIDENCE_INSUFFICIENT,
-      // NOT AMBIGUITY_BLOCKED. This invariant lets operators distinguish
-      // "low confidence on weak evidence" from "high ambiguity blocked".
-      expectRejectedWith(result, 'EVIDENCE_INSUFFICIENT');
+      expect(result.admitted).toBe(true);
     });
   });
 

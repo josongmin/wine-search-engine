@@ -28,6 +28,39 @@ function makeObservedState() {
   return state;
 }
 
+/**
+ * RC3 high-fan-out fixture: 3 grounded outcomes (compare 3 vintages + drinking
+ * window class). Each step carries a grounding observation; toolOutcomes hold
+ * 3 successful grounded legs (≥ HIGH_FAN_OUT_GROUNDED_OUTCOME_THRESHOLD).
+ */
+function makeHighFanOutState() {
+  const state = createAgentExecutionState();
+  const vintages = [2016, 2018, 2020];
+  vintages.forEach((vintage, i) => {
+    state.steps.push({
+      index: i,
+      thought: `searched vintage ${vintage}`,
+      action: { tool: 'search_wines', input: { query: `opus one ${vintage}` } },
+      observation:
+        `[Tool Result: search_wines]\n${i + 1}. Opus One ${vintage} | (id: opus-${vintage}) | region: Napa | vintage: ${vintage} | price: ₩420,000 | drink: ${vintage + 5}-${vintage + 20}\n` +
+        `GROUNDING_JSON: {"query_type":"search","wines":[{"entity_id":"opus-${vintage}","canonical_label":"Opus One ${vintage}","vintage":${vintage},"region":"Napa"}]}`,
+      durationMs: 10,
+      tokenCount: { input: 10, output: 10 },
+    });
+    state.toolOutcomes.push({
+      stepId: `req:${i}:0`,
+      tool: 'search_wines',
+      kind: 'success',
+      result: {
+        queryType: 'search',
+        results: [{ entity: { entityId: `opus-${vintage}`, canonicalLabel: `Opus One ${vintage}` } }],
+      },
+      durationMs: 10,
+    });
+  });
+  return state;
+}
+
 describe('AgentObservationSynthesisRunner', () => {
   it('synthesizes a final answer and updates token counters', async () => {
     const complete = vi.fn().mockResolvedValue({
@@ -252,6 +285,110 @@ describe('AgentObservationSynthesisRunner', () => {
     expect(state.fallbackApplied).toBe(true);
     expect(state.fallbackLayer).toBe('layer3');
     expect(state.reasoningFailureDetected).toBe(true);
+  });
+
+  // ── RC3: high-fan-out synthesis robustness ──────────────────────────────
+
+  it('produces a non-empty structured answer on high fan-out (3 grounded outcomes)', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({
+        thought: 'compare three vintages',
+        answer: '오퍼스 원 2016은 피크에 도달했고, 2018은 곧 마시기 좋으며, 2020은 더 숙성이 필요합니다. 세 빈티지 모두 나파 밸리산입니다.',
+      }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = makeHighFanOutState();
+
+    await runner.run('오퍼스 원 2016 2018 2020 비교하고 음용 시기 알려줘', 'req-synth-fanout-ok', DEFAULT_AGENT_CONFIG, state);
+
+    expect(state.answer.length).toBeGreaterThanOrEqual(40);
+    expect(state.terminationReason).toBe('answer');
+    expect(state.failedSynthesisAttempts).toBe(0);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a collapsed near-empty answer on high fan-out and retries with the structured per-entity prompt', async () => {
+    const complete = vi.fn()
+      // Attempt 1: collapsed 1-word answer despite 3 grounded outcomes.
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ thought: 'collapse', answer: '좋습니다.' }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      // Attempt 2 (structured retry): full per-entity answer.
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'structured',
+          answer: '오퍼스 원 2016 (나파, 음용 적기), 2018 (나파, 곧 적기), 2020 (나파, 숙성 필요)을 각각 정리했습니다.',
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = makeHighFanOutState();
+
+    await runner.run('오퍼스 원 세 빈티지 비교', 'req-synth-fanout-collapse-recover', DEFAULT_AGENT_CONFIG, state);
+
+    expect(state.answer).toContain('2016');
+    expect(state.answer).toContain('2020');
+    expect(state.terminationReason).toBe('answer');
+    expect(state.failedSynthesisAttempts).toBe(1);
+    expect(complete).toHaveBeenCalledTimes(2);
+    // The structured retry must carry the per-entity directive, not the default sentinel.
+    const retryMessages = complete.mock.calls[1]?.[0].messages ?? [];
+    expect(retryMessages.some((m) => m.content.includes('STRUCTURED_FINAL_ANSWER_REQUIRED'))).toBe(true);
+    expect(retryMessages.some((m) => m.content.includes('summarizes EACH wine/vintage'))).toBe(true);
+  });
+
+  it('does NOT terminate as answer when high-fan-out synthesis collapses on both attempts (leaves recovery to orchestrator)', async () => {
+    // Both attempts return collapsed near-empty answers → never accepted.
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({ thought: 'collapse', answer: '네.' }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = makeHighFanOutState();
+
+    await runner.run('오퍼스 원 세 빈티지 비교', 'req-synth-fanout-collapse', DEFAULT_AGENT_CONFIG, state);
+
+    // Collapsed answers rejected on both attempts → answer stays empty so the
+    // orchestrator's Layer-3 structured grounding preview can recover.
+    expect(state.answer).toBe('');
+    expect(state.terminationReason).not.toBe('answer');
+    expect(state.failedSynthesisAttempts).toBe(2);
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it('budgets observation context to maxContextChars while preserving grounding-bearing observations', async () => {
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify({
+        thought: 'ok',
+        answer: '오퍼스 원 2016, 2018, 2020 세 빈티지를 나파 밸리 기준으로 비교해 정리했습니다.',
+      }),
+      model: 'test-model',
+      finishReason: 'stop',
+    });
+    const chatLlm: ChatLlmPort = { complete };
+    const runner = new AgentObservationSynthesisRunner({ chatLlm });
+    const state = makeHighFanOutState();
+    // Tight budget that cannot hold all three observation messages.
+    const tightConfig = { ...DEFAULT_AGENT_CONFIG, maxContextChars: 220 };
+
+    await runner.run('오퍼스 원 세 빈티지 비교', 'req-synth-fanout-budget', tightConfig, state);
+
+    const messages = complete.mock.calls[0]?.[0].messages ?? [];
+    const toolResultMessages = messages.filter((m) => m.content.includes('[Tool Result: search_wines]'));
+    // Budget enforced: not all three observations included.
+    expect(toolResultMessages.length).toBeLessThan(3);
+    expect(toolResultMessages.length).toBeGreaterThanOrEqual(1);
+    // Grounding payload preserved in whatever was kept.
+    expect(toolResultMessages.some((m) => m.content.includes('GROUNDING_JSON'))).toBe(true);
   });
 
   it('skips synthesis when token budget is already exhausted or no observation exists', async () => {
