@@ -26,6 +26,7 @@ import {
 } from '../../src/domain/shared/constants/source-systems.js';
 import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/domain/shared/constants/embedding.js';
 import { parseNdjson } from './ndjson.js';
+import { normalizeRegion } from './region-normalizer.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
@@ -713,7 +714,16 @@ export function silverToIndexable(
     ...rec.aliases.identitySafeProjection,
     ...rec.aliases.noisyRecallProjection,
   ]);
-  const regionHierarchy = normalizeStringArray(rec.regionHierarchy);
+  // Region breadcrumb normalization: deterministically reverse the
+  // duplicated-prefix corruption (see region-normalizer.ts). Authoritative
+  // upstream values take priority; the normalizer fills the gap when the flat
+  // region string carries the mangled hierarchy.
+  const normalizedRegion = normalizeRegion(rec.region);
+  const region = normalizedRegion.region;
+  const regionHierarchy =
+    normalizeStringArray(rec.regionHierarchy) ??
+    normalizeStringArray(normalizedRegion.hierarchy);
+  const appellation = trimNonEmpty(rec.appellation) ?? normalizedRegion.appellation;
   const occasion = normalizeStringArray(
     rec.occasionClassification?.values ?? rec.occasion,
   );
@@ -724,8 +734,8 @@ export function silverToIndexable(
     sourceRecordRefs: resolveDocumentPlaneSourceRecordRefs(rec),
     canonicalLabel: rec.canonicalLabel,
     ...(rec.producer.length > 0 ? { producer: rec.producer } : {}),
-    ...(rec.region.length > 0 ? { region: rec.region } : {}),
-    ...(rec.appellation ? { appellation: rec.appellation } : {}),
+    ...(region.length > 0 ? { region } : {}),
+    ...(appellation !== undefined && appellation.length > 0 ? { appellation } : {}),
     ...(rec.grapePrimary ? { grapePrimary: rec.grapePrimary } : {}),
     ...(rec.vintageYear !== null ? { vintageYear: rec.vintageYear } : {}),
     ...(rec.searchTextEn.length > 0 ? { searchTextEn: rec.searchTextEn } : {}),
@@ -907,7 +917,9 @@ export function silverToRetrievalDoc(
     aliasesIdentitySafe: indexable.aliasesIdentitySafe,
     aliasesNoisyRecall: indexable.aliasesNoisyRecall,
     producer: rec.producer,
-    region: rec.region,
+    // Prefer the breadcrumb-normalized region; fall back to the raw value only
+    // when normalization produced nothing (RetrievalDocument.region is required).
+    region: indexable.region ?? rec.region,
     grapes: indexable.grapes,
     searchTextKo: indexable.searchTextKo,
     searchTextEn: rec.searchTextEn,
