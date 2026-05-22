@@ -189,6 +189,7 @@ interface CliArgs {
    * at `judgeSamples` (default 3) to bound cost. Override with `--judge-required-samples`.
    */
   readonly judgeRequiredSamples: number;
+  /**
    * Multi-sample runs per scenario for statistical stability. Default 1
    * preserves the legacy single-run behavior; nightly uses >= 3 so paired
    * bootstrap + variance decomposition have enough datapoints to detect a
@@ -1648,11 +1649,13 @@ export interface BenchmarkReport {
      * Adding a new aggregate? Register it here in `buildReport()`.
      */
     readonly provenance: Readonly<Record<string, MetricProvenance>>;
+  /**
      * SOTA++ B3 variance decomposition. Populated only when --runs > 1 so
      * there is non-degenerate within-scenario variance to decompose. null
      * for legacy single-run benches.
      */
     readonly varianceDecomposition: VarianceDecompositionSummary | null;
+  /**
      * SOTA++ env manifest: full reproducibility footer captured at run time.
      * Use `manifestHash(summary.environment)` to compare two runs config-by-config.
      */
