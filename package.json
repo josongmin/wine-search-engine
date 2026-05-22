@@ -14,6 +14,7 @@
     "clean:worktree": "bash scripts/build/clean-worktree-artifacts.sh",
     "deadcode": "knip --no-exit-code",
     "dev": "tsx watch src/main.ts",
+    "agent:cli": "tsx src/interface/cli/agent-repl.ts",
     "build": "pnpm run artifacts:link && tsc --project tsconfig.build.json --pretty false",
     "start": "node dist/main.js",
     "test": "vitest run --config config/vitest/dev.config.ts",

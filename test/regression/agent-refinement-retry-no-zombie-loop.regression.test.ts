@@ -120,4 +120,27 @@ describe('AgentToolExecutionPhase pendingRefinementRetry zombie-loop guard', () 
     expect(state.terminationReason).toBe('answer');
     expect(secondShouldBreak).toBe(true);
   });
+
+  it('re-arms cleanly for a SECOND independent refinement cycle (one-shot per cycle)', async () => {
+    // Adjacent-case regression: the one-shot clear must hold across multiple
+    // legitimate cycles. A later no-match search can re-set pendingRefinementRetry;
+    // each such cycle must enqueue exactly one directive and then clear itself.
+    const { phase } = makePhase();
+    const state = createAgentExecutionState();
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 8 });
+    const contract = { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false };
+
+    // Cycle A.
+    state.pendingRefinementRetry = true;
+    await phase.run('req-zombie-3', DEFAULT_AGENT_CONFIG, budget, state, contract, makePlannerPhase('없음 A'));
+    expect(state.pendingPlannerDirective).toEqual({ kind: 'relax_constraints_retry' });
+    expect(state.pendingRefinementRetry).toBe(false);
+    state.pendingPlannerDirective = undefined;
+
+    // Cycle B: guard re-armed by a fresh no-match search later in the run.
+    state.pendingRefinementRetry = true;
+    await phase.run('req-zombie-3', DEFAULT_AGENT_CONFIG, budget, state, contract, makePlannerPhase('없음 B'));
+    expect(state.pendingPlannerDirective).toEqual({ kind: 'relax_constraints_retry' });
+    expect(state.pendingRefinementRetry).toBe(false);
+  });
 });

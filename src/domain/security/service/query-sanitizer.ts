@@ -76,12 +76,18 @@ function applyNormalization(input: string): string {
  * even if a pattern is accidentally made vulnerable, an attacker cannot
  * exploit it by submitting a multi-megabyte payload.
  *
- * This bound is DELIBERATELY much larger than the user-facing
- * {@link MAX_QUERY_LENGTH} (500) — legitimate queries never approach this
- * size, so anything above it is almost certainly an attack. Truncating
- * (rather than rejecting immediately) preserves the existing error path:
- * the downstream length check will still reject the (truncated) input with
- * {@link InjectionResult}`.reason = 'LENGTH_EXCEEDED'`.
+ * This bound now COINCIDES with the user-facing {@link MAX_QUERY_LENGTH}
+ * (also 2000): 2000 is the largest input at which the injection regexes are
+ * still evaluated, so it is simultaneously the security-screening ceiling and
+ * the legitimate-query ceiling. A raw input above 2000 is rejected here in
+ * O(1) (`reason = 'LENGTH_EXCEEDED'`) BEFORE any regex runs; inputs at or below
+ * 2000 are normalized and fully screened, then re-checked against
+ * {@link MAX_QUERY_LENGTH} after normalization (NFKC can change length).
+ *
+ * INVARIANT: this guard MUST be >= {@link MAX_QUERY_LENGTH}. It must never be
+ * raised above 2000 without re-auditing every INJECTION_PATTERN for
+ * catastrophic backtracking at the larger length — that is the whole reason
+ * the pre-regex bail exists.
  */
 const MAX_QUERY_LENGTH_FOR_REDOS_GUARD = 2_000;
 

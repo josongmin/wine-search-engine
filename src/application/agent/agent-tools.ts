@@ -401,15 +401,15 @@ const MIN_RESULTS_FOR_RELIABLE_QUALITY = 3;
 
 /**
  * Maximum length of the enriched query string (original query + appended exclusion/price params).
- * Must not exceed MAX_QUERY_LENGTH (500) — the security gate in query-sanitizer.ts rejects
- * queries longer than MAX_QUERY_LENGTH, so an enriched query built to 700 chars would always
+ * Must not exceed MAX_QUERY_LENGTH — the security gate in query-sanitizer.ts rejects
+ * queries longer than MAX_QUERY_LENGTH, so an enriched query exceeding it would always
  * be rejected. Capping here at MAX_QUERY_LENGTH ensures the enriched query passes the gate.
  *
- * Domain rationale: Vespa YQL parser has a 4 KB query limit; downstream NL parser
- * operates well within 500 chars. The previously used value of 700 was inconsistent
- * with the security gate constant.
+ * Domain rationale: Vespa YQL parser has a 4 KB query limit; MAX_QUERY_LENGTH (the
+ * regex-screening ceiling) stays well within it. Sourced from the constant so this stays
+ * in lockstep with the security gate.
  */
-const MAX_ENRICHED_QUERY_LEN = MAX_QUERY_LENGTH; // 500 — must match security gate
+const MAX_ENRICHED_QUERY_LEN = MAX_QUERY_LENGTH; // SSoT: must match security gate
 
 /**
  * Keyword → label pairs for constraint detection.

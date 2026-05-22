@@ -870,21 +870,33 @@ export function hasBareExactEntityAnchor(query: string): boolean {
       return false;
     }
     const resolved = resolveEntity(trimmed, { preferEntityOverStyle: true });
-    // The discriminator is the entity-type gate above: a query that DIRECTLY and
-    // unambiguously resolves to an `appellation` entity (not a grape, not a style)
-    // and survived the generic-wine-noun filter IS a bare exact entity anchor.
-    // Single-word appellation names (Barolo, Chablis, Sancerre) are exact anchors
-    // just as much as multi-word ones (Brunello di Montalcino, Dom Pérignon).
+    if (!isDirectEntityResolution(resolved) || resolved.entityType !== 'appellation') {
+      return false;
+    }
+    const canonical = QUERY_NORMALIZER.normalize(resolved.canonicalValue).punctuationStripped.trim().toLowerCase();
+    const canonicalLooksLabelLike = canonical.includes(' ') || canonical.includes('&');
+    // A query is a bare exact entity anchor when it is, on its own, a tight reference
+    // to a specific appellation entity. Three sufficient signals:
+    //   1. the whole query IS the appellation name (`trimmed === canonical`) — covers
+    //      single-word appellations like "Barolo", "Chablis", "Sancerre";
+    //   2. it carries a vintage year (specific bottling);
+    //   3. its canonical label is multi-token / contains '&' (label-like) — covers
+    //      "Brunello di Montalcino", "Dom Pérignon".
     //
-    // History: this used to additionally require `tokenCount >= 2 ||
-    // extractVintageYear(...) !== undefined || (canonicalLooksLabelLike && ...)`.
-    // That `!== undefined` guard was always true (extractVintageYear returns
-    // `number | null`, never `undefined`), so the whole clause was a no-op and every
-    // direct appellation resolved as an anchor. A later correctness fix flipped it to
-    // `!== null`, which silently dropped single-token appellations like Barolo from
-    // entity-retrieval mode. The entity-type gate already encodes the real intent, so
-    // a direct non-generic appellation resolution is sufficient.
-    return resolved.entityType === 'appellation';
+    // History: this clause used to be `tokenCount >= 2 || extractVintageYear(...) !==
+    // undefined || (canonicalLooksLabelLike && canonical !== trimmed)`. The `!==
+    // undefined` guard was always true (extractVintageYear returns `number | null`,
+    // never `undefined`), so the clause was a no-op and EVERY direct appellation
+    // resolution counted — including multi-token noise queries whose alias substring
+    // happened to resolve. A later correctness fix flipped it to `!== null`, which over-
+    // corrected and silently dropped single-token appellations like Barolo from entity-
+    // retrieval mode. The `trimmed === canonical` signal restores single-word anchors
+    // without re-admitting the multi-token-noise false positives (those have extra
+    // tokens around the alias, so `trimmed !== canonical` and are not label-like — they
+    // only matched before via the always-true vintage no-op). We deliberately do NOT
+    // use a `tokenCount >= 2` signal: a multi-token noise query (e.g. a Korean phrase
+    // whose aliased substring resolves) would slip through it.
+    return trimmed === canonical || extractVintageYear(trimmed) !== null || canonicalLooksLabelLike;
   });
 }
 

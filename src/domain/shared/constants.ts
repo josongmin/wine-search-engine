@@ -6,8 +6,23 @@
  * Adding a new constant: cite the source (RFC, real-world data, regulation).
  */
 
-/** Maximum allowed query length in characters. */
-export const MAX_QUERY_LENGTH = 500;
+/**
+ * Maximum allowed query length in characters.
+ *
+ * Set to 2000 — the SAME bound as the sanitizer's pre-regex ReDoS guard
+ * (`MAX_QUERY_LENGTH_FOR_REDOS_GUARD` in query-sanitizer.ts). 2000 is the
+ * largest input at which the injection-detection regexes are still evaluated;
+ * anything above it bypasses pattern screening entirely (O(1) bail), so it is
+ * the principled security ceiling for any query that must still be screened.
+ *
+ * Historically this was 500 ("legitimate single-shot queries never approach
+ * 500"). That assumption breaks for the agent CLI / multi-turn flows, which
+ * compose prior conversation context into a single stateless query. Raising to
+ * the regex-screening ceiling lets context-rich queries through while keeping
+ * every safety pattern in force. It MUST NOT exceed the ReDoS guard — see
+ * query-sanitizer.ts.
+ */
+export const MAX_QUERY_LENGTH = 2_000;
 
 /**
  * Minimum allowed vintage year for produced wine.
