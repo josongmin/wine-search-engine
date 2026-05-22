@@ -500,6 +500,12 @@ export async function runHybridRankingPipeline(
   };
 
   const { results: rankedResults, metadata: rankingMetadata } = await ranker.rank(rankingInput);
+  // eslint-disable-next-line no-console
+  console.error('RANKER_OUT_DBG', {
+    queryClass: plan.queryClass,
+    candidatesIn: candidates.slice(0, 6).map((c) => String(c.entityId)),
+    rankedOut: rankedResults.slice(0, 6).map((r) => ({ id: String(r.entityId), score: r.finalScore })),
+  });
   const provenanceClosure = buildExecutionProvenanceClosureFromStages(
     compiled.execution.provenancePolicy,
     retrievalProvenanceCoverage
