@@ -345,17 +345,21 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
     });
   });
 
-  it('filters ambiguous short-form presentation to authoritative identity-supported candidates', () => {
+  it('fails closed for identity-seal ambiguous short-form even when some identity-supported candidates exist', () => {
+    // Mixed input: two alias_exact (identity-bearing) + one hybrid (non-identity)
+    // candidate. When admission_context requires an identity seal, an ambiguous
+    // short form fails closed regardless of whether SOME identity-supported
+    // candidates exist — the gate does not surface a partial wine list as if a
+    // single entity had resolved. (shouldFailClosedIdentityClarification returns
+    // true on requires_identity_seal=true; both results and clarification
+    // candidates are emptied, and the payload degrades to preference_gap.) The
+    // no-candidate variant is covered separately below.
     const plan = {
       ...makePlan(),
       rawQuery: 'opus',
       normalizedQuery: 'opus',
       intent: 'semantic_discovery',
       queryClass: 'ambiguous_short_form',
-      // The presentation filter only engages when identity sealing is required
-      // (search-usecase-execute-builders.ts filterAmbiguousShortFormPresentation):
-      // exploratory list-shaped queries emit requires_identity_seal=false and
-      // are intentionally left unfiltered.
       admission_context: {
         requires_identity_seal: true,
         requires_constraint_evidence: false,
@@ -403,30 +407,11 @@ describe('search-usecase-execute-builders synthetic decision traces', () => {
       rankedResults,
     });
 
-    expect(params.results.map((result) => result.entity.canonicalLabel)).toEqual([
-      '2019 Opus One Overture',
-      'Opus One 2018',
-    ]);
-    expect(params.clarification.candidates.map((candidate) => candidate.label)).toEqual([
-      '2019 Opus One Overture',
-      'Opus One 2018',
-    ]);
+    expect(params.results).toEqual([]);
+    expect(params.clarification.candidates).toEqual([]);
     expect(params.clarification.structuredPayload).toEqual({
-      kind: 'anchor_disambiguation',
-      question: '결과가 모호합니다. 어떤 후보를 찾으시나요?',
-      options: ['2019 Opus One Overture', 'Opus One 2018'],
-      optionEntities: [
-        {
-          entityId: createEntityId('wine:2019 Opus One Overture:1'),
-          label: '2019 Opus One Overture',
-          distinguishingFeatures: [],
-        },
-        {
-          entityId: createEntityId('wine:Opus One 2018:2'),
-          label: 'Opus One 2018',
-          distinguishingFeatures: [],
-        },
-      ],
+      kind: 'preference_gap',
+      question: '결과가 모호합니다. 조건을 더 구체적으로 알려주세요.',
     });
   });
 

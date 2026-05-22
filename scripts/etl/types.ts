@@ -552,8 +552,12 @@ export interface IndexableWineRecord {
   readonly searchTextKo: string;
   /** Natural-language summary for semantic embedding. */
   readonly semanticSummary: string;
-  /** Wine style descriptor (e.g. "bold red"). */
-  readonly style: string;
+  /**
+   * Wine style descriptor (e.g. "bold red"). Absent when no authoritative
+   * style can be derived (red/white wine missing body/sweetness) — omitted
+   * rather than synthesised from the coarse wineType.
+   */
+  readonly style?: string;
   /** Price band label (e.g. "premium"). */
   readonly priceBand: string;
   /** Food pairing suggestions. */

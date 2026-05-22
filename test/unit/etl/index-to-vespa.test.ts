@@ -498,6 +498,52 @@ describe('taxonomy field ingest contract', () => {
     ).toThrow(/wineType is required/);
   });
 
+  it('omits style for a red wine missing body instead of synthesizing one from wineType', () => {
+    const record = makeEnrichedRecord({ wineType: 'red', body: null });
+    const doc = silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+    );
+    const fields = toVespaFields(doc);
+
+    expect(doc.style).toBeUndefined();
+    expect(fields).not.toHaveProperty('style');
+  });
+
+  it('omits style for a white wine missing sweetness instead of synthesizing one from wineType', () => {
+    const record = makeEnrichedRecord({ wineType: 'white', sweetness: null });
+    const doc = silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+    );
+    const fields = toVespaFields(doc);
+
+    expect(doc.style).toBeUndefined();
+    expect(fields).not.toHaveProperty('style');
+  });
+
+  it('derives style for a red wine with full body/sweetness data', () => {
+    const record = makeEnrichedRecord({ wineType: 'red', body: 0.82, sweetness: 0.08 });
+    const doc = silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+    );
+    const fields = toVespaFields(doc);
+
+    expect(doc.style).toBe('bold red');
+    expect(fields['style']).toBe('bold red');
+  });
+
+  it('derives sparkling style without body/sweetness (deterministic wineType mapping)', () => {
+    const record = makeEnrichedRecord({ wineType: 'sparkling', body: null, sweetness: null });
+    const doc = silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+    );
+
+    expect(doc.style).toBe('sparkling');
+  });
+
   it('derives grape_family via split fallback when grapePrimary is not in GRAPE_FAMILY_MAP', () => {
     const record = makeEnrichedRecord({ grapePrimary: 'Shiraz', grapeFamily: undefined });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));

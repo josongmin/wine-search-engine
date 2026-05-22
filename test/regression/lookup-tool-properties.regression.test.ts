@@ -99,7 +99,7 @@ function makeWineResult(entityId: string, label: string): SearchResponseV1['resu
     },
     relevanceScore: 0.9,
     match: {
-      matchType: 'entity',
+      matchType: 'exact',
       scoreComponents: {
         lexical: 0.9,
         semantic: 0.9,
@@ -114,7 +114,16 @@ function makeWineResult(entityId: string, label: string): SearchResponseV1['resu
       missingInfo: [],
       approximationUsed: false,
     },
-    evidenceItems: [],
+    // Schema requires >=1 evidence item per result (search-response.schema.ts).
+    evidenceItems: [
+      {
+        type: 'exact_match',
+        source: 'entity_index',
+        contribution: 'identity',
+        strength: 'high',
+        provenance: 'lookup',
+      },
+    ],
   };
 }
 
@@ -130,7 +139,7 @@ function buildLookupResponse(n: number, failureReason = 'NO_RESULTS'): SearchRes
     queryType: 'search',
     engineDecision: {
       decisionStatus: n > 0 ? 'resolved' : 'failed',
-      nextAction: n > 0 ? 'return' : 'fail',
+      nextAction: n > 0 ? 'return_result' : 'fail',
       route: 'entity',
       decisionConfidence: n > 0 ? 0.95 : 0,
       confidenceSemantics: 'calibrated_decision_confidence',

@@ -178,8 +178,13 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Sweetness score [0,1] normalised. Absent when not present in the index document. */
   readonly sweetness?: number | undefined;
 
-  /** Wine style descriptor (e.g. "bold red", "crisp white"). */
-  readonly style: string;
+  /**
+   * Wine style descriptor (e.g. "bold red", "crisp white").
+   * Absent when no authoritative style can be derived (e.g. red/white wine
+   * missing body/sweetness) — the ETL omits the field rather than synthesising
+   * a heuristic label from the coarse wineType.
+   */
+  readonly style?: string;
 
   /** Price band label (e.g. "$20-$30", "premium"). */
   readonly priceBand: string;

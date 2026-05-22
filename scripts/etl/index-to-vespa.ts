@@ -926,7 +926,7 @@ export function silverToRetrievalDoc(
     semanticSummary: indexable.semanticSummary,
     ...(indexable.body != null ? { body: indexable.body } : {}),
     ...(indexable.sweetness != null ? { sweetness: indexable.sweetness } : {}),
-    style: indexable.style,
+    ...(indexable.style !== undefined ? { style: indexable.style } : {}),
     priceBand: indexable.priceBand,
     pairing: indexable.pairing,
     ...(indexable.occasion !== undefined ? { occasion: [...indexable.occasion] } : {}),

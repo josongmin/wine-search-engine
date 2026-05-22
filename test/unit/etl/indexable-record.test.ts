@@ -168,8 +168,17 @@ describe('silverToIndexable — hit projection fields', () => {
     expect(indexable.producerPrestige).toBe(0.9);
   });
 
-  it('omits producerPrestige when null', () => {
+  it('derives producerPrestige from community ratings when the authoritative value is null', () => {
+    // makeEnrichedRecord has ratingsCount/ratingAvg, so computeProducerPrestige
+    // yields a community-signal prestige rather than dropping the field.
     const rec = makeEnrichedRecord({ producerPrestige: null });
+    const indexable = silverToIndexable(rec);
+    expect(indexable.producerPrestige).toBeGreaterThan(0);
+    expect(indexable.producerPrestige).toBeLessThanOrEqual(1);
+  });
+
+  it('omits producerPrestige when null and no ratings exist to derive from', () => {
+    const rec = makeEnrichedRecord({ producerPrestige: null, ratingsCount: 0, ratingAvg: null });
     const indexable = silverToIndexable(rec);
     expect(indexable).not.toHaveProperty('producerPrestige');
   });

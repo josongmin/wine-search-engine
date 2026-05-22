@@ -210,7 +210,17 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.97);
   });
 
-  it('does not mint exact identity evidence from latin bare prefixes without a query-attested safe alias', async () => {
+  it('trusts a single-entity high-confidence prefix_exact anchor and mints exact identity evidence', async () => {
+    // Trust-the-matcher gate (search-usecase-resolver-candidates.ts
+    // isTrustedPrefixSingleEntityAnchor): a `prefix_exact` anchor that binds to
+    // exactly ONE entity at confidence >= 0.8 has already been validated by the
+    // alias matcher. Re-running the identity-key overlap check would compare the
+    // bare prefix ('opus') against the doc identity keys, find no overlap, and
+    // collapse the resolver to a raw ~0.05 score — pushing every clean Latin
+    // prefix query under T_resolve. Single-entity + >=0.8 keeps the bypass safe:
+    // a genuinely ambiguous prefix has >1 candidate entity (planner marks it
+    // ambiguous_short_form) and does NOT take this branch — see the adversarial
+    // low-confidence case below.
     const entityId = createEntityId('opus-one-2018');
     const lookup = makeBatchLookup(async () => ({
       entityId,
@@ -247,9 +257,51 @@ describe('buildResolverCandidatesFromGenerator', () => {
         matchScore: 0.95,
       }),
     ]);
-    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
+    // Trusted prefix → exact-like identity evidence is minted at anchor.confidence.
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
+    // Still not fuzzy, and not a full canonical-exact match (query 'opus' !== 'opus one').
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(0);
+  });
+
+  it('does NOT mint exact identity evidence from a low-confidence latin bare prefix anchor', async () => {
+    // Adversarial guard: below the 0.8 trust floor the single-entity prefix
+    // bypass does NOT engage, so the identity-safe projection check runs and
+    // finds the bare prefix 'opus' is not a query-attested safe alias of
+    // 'Opus One' — exact/normalized identity lanes stay zero.
+    const entityId = createEntityId('opus-one-2018');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'wine',
+      canonicalLabel: 'Opus One 2018',
+      producer: 'Opus One',
+      aliasesIdentitySafe: ['Opus One', '오푸스원'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: 'opus',
+        normalizedQuery: 'opus',
+        anchors: [
+          {
+            surfaceForm: 'Opus One',
+            normalizedForm: 'opus one',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['opus'],
+            lookupStrategies: ['prefix_exact'],
+            confidence: 0.7,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(0);
   });
 
   it('treats transliterated prefix identity artifacts as exact-like translation evidence', async () => {
