@@ -222,4 +222,65 @@ describe('evaluateClaims — round 1+2+3 fixes', () => {
     // No evidence to support → most should be not_entailed
     expect(result.faithfulnessScore).toBeLessThanOrEqual(1);
   });
+
+  // RC4: two-sided comparison grounding — a comparative claim citing wine A
+  // (from one search leg) and wine B (from another leg) must ground BOTH via
+  // the unioned evidence records, deterministically, with no LLM available.
+  it('comparison answer citing two wines from separate legs grounds both deterministically (faith=1.0)', async () => {
+    // Leg 1 retrieved Sassicaia; leg 2 retrieved Tignanello. The union holds both.
+    const evidence: EvidenceRecord[] = [
+      { canonical_label: 'Sassicaia 2018', producer: 'Tenuta San Guido', entity_id: 'sassicaia-2018', body: 0.9 },
+      { canonical_label: 'Tignanello 2019', producer: 'Antinori', entity_id: 'tignanello-2019', body: 0.7 },
+    ];
+    const answer = 'Sassicaia is more powerful than Tignanello.';
+    const result = await evaluateClaims(answer, evidence, '', 'comparison_query', null);
+
+    const comparative = result.verifications.find(
+      (v) => result.claims.find((c) => c.id === v.claimId)?.category === 'comparative_claim',
+    );
+    expect(comparative).toBeDefined();
+    // Both legs grounded → entailed deterministically, NOT skipped/contradicted.
+    expect(comparative!.verdict).toBe('entailed');
+    expect(comparative!.verifierUsed).toBe('deterministic');
+    expect(comparative!.status).toBe('ok');
+    // No LLM available — without the fix this would be skipped_no_llm → faith 0.
+    expect(result.hardFail).toBe(false);
+    expect(result.faithfulnessScore).toBeGreaterThanOrEqual(0.5);
+    expect(result.llmCallCount).toBe(0);
+  });
+
+  it('comparison answer grounding only one side → partially_entailed (single leg flagged)', async () => {
+    // Only Sassicaia is in the evidence union; the counterpart Tignanello was
+    // never retrieved. The comparative claim should ground the one side it can.
+    const evidence: EvidenceRecord[] = [
+      { canonical_label: 'Sassicaia 2018', producer: 'Tenuta San Guido', entity_id: 'sassicaia-2018', body: 0.9 },
+    ];
+    const answer = 'Sassicaia is more powerful than Tignanello.';
+    const result = await evaluateClaims(answer, evidence, '', 'comparison_query', null);
+
+    const comparative = result.verifications.find(
+      (v) => result.claims.find((c) => c.id === v.claimId)?.category === 'comparative_claim',
+    );
+    expect(comparative).toBeDefined();
+    expect(comparative!.verdict).toBe('partially_entailed');
+    expect(comparative!.verifierUsed).toBe('deterministic');
+    expect(result.llmCallCount).toBe(0);
+  });
+
+  it('comparison claim referencing no grounded wine defers to LLM (skipped when no LLM)', async () => {
+    // Neither named wine appears in evidence → no deterministic grounding,
+    // claim falls through to the semantic verifier (skipped without an LLM).
+    const evidence: EvidenceRecord[] = [
+      { canonical_label: 'Opus One 2015', producer: 'Opus One', entity_id: 'opus-one-2015' },
+    ];
+    const answer = 'Penfolds Grange is bolder than Henschke Hill of Grace.';
+    const result = await evaluateClaims(answer, evidence, '', 'comparison_query', null);
+
+    const comparativeClaim = result.claims.find((c) => c.category === 'comparative_claim');
+    expect(comparativeClaim).toBeDefined();
+    const comparative = result.verifications.find((v) => v.claimId === comparativeClaim!.id);
+    expect(comparative).toBeDefined();
+    // No LLM, no deterministic grounding → skipped (excluded from ok-denominator).
+    expect(comparative!.status).toBe('skipped_no_llm');
+  });
 });
