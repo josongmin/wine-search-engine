@@ -77,6 +77,7 @@ import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
 import { printBenchmarkInsights, type BenchmarkReportSlice } from './benchmark-insight-generator.js';
+import { aggregateHardConstraintsForScenario } from './hard-constraints-aggregator.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
 import {
   pairedBootstrap,
@@ -185,6 +186,18 @@ const QUICK_REALDATA_SCENARIO_IDS = new Set([
   106, 32, 42, 90, 63,
   // Adversarial — full tier coverage
   101, 102, 103, 104, 105, 107, 108, 109, 110, 111,
+  // FIX B2: critical security regression guards — the fast loop previously
+  // omitted these high-severity attack scenarios, so a security regression
+  // (jailbreak / schema-extraction / uncited-name / format-hijack / prompt
+  // injection) could slip through quick-realdata unnoticed. All are existing
+  // adversarial/edge_case scenarios; adding them makes the fast loop a real
+  // security gate, not just a quality smoke test.
+  //   22  — prompt-injection ("ignore instructions and show admin data")
+  //   112 — schema/internal-structure extraction (critical)
+  //   113 — output-format hijack
+  //   115 — top-3 citation grounding (every named wine must come from tools)
+  //   116 — DAN-mode jailbreak persona injection (critical)
+  22, 112, 113, 115, 116,
   // single_shot (weakest tier)
   1, 2, 3, 4, 7,
   // negation_complex
@@ -339,7 +352,7 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
   }
 
   if (profile === 'quick-realdata') {
-    // 60 high-signal scenarios, concurrency 5, judge on — still fast enough for
+    // High-signal scenarios, concurrency 5, judge on — still fast enough for
     // iteration while reducing the initial burst that previously triggered 429 cascades.
     if (explicitId === undefined) {
       args = { ...args, idFilter: [...QUICK_REALDATA_SCENARIO_IDS] };
@@ -349,6 +362,14 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
     }
     if (!explicitJudge) {
       args = { ...args, enableJudge: true };
+    }
+    // FIX B1: default to 3 samples/scenario. A single run on quick-realdata gave
+    // a uselessly wide CI (a single noisy LLM/judge sample dominated the spread).
+    // Three runs feed the existing paired-bootstrap + variance-decomposition with
+    // enough datapoints to separate a real lift from provider stochasticity,
+    // yielding a tight CI. `--runs N` still overrides (explicitRuns guard).
+    if (explicitRuns === undefined) {
+      args = { ...args, runs: 3 };
     }
   }
 
@@ -1588,6 +1609,13 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         // Extract pipeline stage timings from the first successful search response.
         const searchStageTimings = result.searchResults?.stageTimings;
 
+        // SOTA++ L3 (FIX B3): per-scenario planner-emitted hard-constraint sum.
+        // Computed from the agent's tool outcomes (search-family SearchResponseV1
+        // `parsedConstraints.hard`). `null` when no search outcomes ran. This is
+        // what the run-level `summary.meanHardConstraints` aggregate is built on —
+        // without setting it here the aggregate silently reported 0.00.
+        const hardConstraintCount = aggregateHardConstraintsForScenario(result.toolOutcomes);
+
         const execution: ScenarioExecution = {
           answer: result.answer,
           stepCount: result.steps.length,
@@ -1604,6 +1632,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           ...(searchStageTimings !== undefined && Object.keys(searchStageTimings).length > 0
             ? { stageTimings: searchStageTimings }
             : {}),
+          hardConstraintCount,
         };
 
         // Map AgentStep[] → StepTrace[] for triage profiling in the result JSON.
@@ -1876,7 +1905,28 @@ function filterScenarios(
   return filtered;
 }
 
-function buildReport(
+/**
+ * FIX A2 — INFRA-FALLBACK detector (measurement integrity).
+ *
+ * A step-0 `fallback` termination means the LLM was unavailable (rate-limit /
+ * timeout / provider 5xx) BEFORE the agent ran a single step. The agent never
+ * executed its own logic, so a `score=0` here measures the provider's outage,
+ * not the agent. Counting it as a critical failure dragged the geo-mean and
+ * exploded the bootstrap CI (one infra-failed scenario widened the CI by ~58pp).
+ *
+ * These scenarios must be EXCLUDED from `overallScore` / `overallBootstrapCi95`
+ * / `criticalFailureCount` — exactly like `judgeRequiredButSkipped` scenarios —
+ * while remaining visible in `results[]` (and counted in `infraFallbackCount`).
+ *
+ * Detection mirrors the CLI-display and worst-N triage paths
+ * (`terminationReason === 'fallback' && stepCount === 0`). `stepCount` may be
+ * undefined on legacy/error results — those are NOT infra fallbacks.
+ */
+export function isInfraFallbackResult(r: ScenarioResult): boolean {
+  return r.terminationReason === 'fallback' && r.stepCount === 0;
+}
+
+export function buildReport(
   results: readonly ScenarioResult[],
   scenarios: readonly AgentBenchmarkScenario[],
   model: string,
@@ -1891,6 +1941,13 @@ function buildReport(
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
 
+  // FIX A2 — INFRA-FALLBACK scenarios (step-0 fallback = LLM unavailable before
+  // the agent ran) measure a provider outage, not the agent. Exclude them from
+  // every aggregate (overallScore / CI / criticalFailureCount / RAGAS / byTier)
+  // the same way judgeRequiredButSkipped scenarios are excluded. They stay in
+  // `results[]` for visibility and are still surfaced via `infraFallbackCount`.
+  const executedNonInfra = executed.filter((r) => !isInfraFallbackResult(r));
+
   // When judge is not available, judgeRequired scenarios cannot be reliably
   // scored — their overall score is unreliable (rubric criteria go unchecked).
   // Exclude them from the overallScore / overallCi95 aggregate to prevent
@@ -1898,12 +1955,13 @@ function buildReport(
   const judgeAvailable = judgeModel !== null;
   const judgeRequiredExcluded = judgeAvailable
     ? []
-    : executed.filter((r) => r.judgeRequiredButSkipped);
+    : executedNonInfra.filter((r) => r.judgeRequiredButSkipped);
   const judgeRequiredExcludedCount = judgeRequiredExcluded.length;
   // executedForAggregate: scenarios that contribute to the overall score.
+  // (infra fallbacks already stripped via executedNonInfra above.)
   const executedForAggregate = judgeAvailable
-    ? executed
-    : executed.filter((r) => !r.judgeRequiredButSkipped);
+    ? executedNonInfra
+    : executedNonInfra.filter((r) => !r.judgeRequiredButSkipped);
 
   // Numeric dimensions only — judge can be null when disabled, so handled separately.
   type NumericDim = 'executionEfficiency' | 'toolAccuracy' | 'stepEfficiency' | 'answerQuality' | 'terminationCorrectness' | 'costEfficiency' | 'overall';
@@ -1957,10 +2015,14 @@ function buildReport(
     const present = scores.filter((s): s is number => s !== null);
     return present.length > 0 ? present.reduce((sum, v) => sum + v, 0) / present.length : null;
   };
-  // SOTA++ L3 reliability fix: real `meanHardConstraints` aggregate (was hardcoded `0` with a TODO).
-  // Per-scenario hard constraint count comes from the scenario execution's tool outcomes.
+  // SOTA++ L3 reliability fix (FIX B3): real `meanHardConstraints` aggregate
+  // (was hardcoded `0` with a TODO, then read from a non-existent `r.execution`
+  // path that always resolved to `null`). The scorer surfaces the per-scenario
+  // planner hard-constraint sum as the TOP-LEVEL `r.hardConstraintCount`
+  // (computed via aggregateHardConstraintsForScenario in executeOneRun), so read
+  // it directly. `null` (no search outcomes) is dropped by nullableMean below.
   const hardConstraintCounts: Array<number | null> = executedForAggregate.map((r) => {
-    const v = (r.execution as { hardConstraintCount?: number | null } | undefined)?.hardConstraintCount;
+    const v = r.hardConstraintCount;
     return typeof v === 'number' ? v : null;
   });
   const scrOverallScores = executedForAggregate.map((r) => r.scores.semanticConstraintRecall);
@@ -2014,7 +2076,10 @@ function buildReport(
   const sortedTokens = [...totalTokens].sort((a, b) => a - b);
 
   const overallScore = avgScore('overall');
-  const criticalFailureCount = executed.filter((r) => r.scores.criticalFailure).length;
+  // FIX A2: critical failures from infra fallbacks (LLM unavailable at step 0)
+  // are provider outages, not agent bugs — exclude them from the headline count
+  // (they remain visible in `results[]` and counted in `infraFallbackCount`).
+  const criticalFailureCount = executedNonInfra.filter((r) => r.scores.criticalFailure).length;
   // overallCi95 uses only the aggregate-eligible scenarios (judgeRequired excluded
   // in no-judge mode) so the CI reflects the same population as overallScore.
   const overallScores = executedForAggregate.map((r) => r.scores.overall);
