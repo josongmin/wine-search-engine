@@ -39,16 +39,22 @@ export const AgentEnvSchema = z.object({
     .default(DEFAULT_AGENT_PER_STEP_TIMEOUT_MS),
 
   /**
-   * L1.C structural latency lever: when true (default), the tool execution
-   * phase may short-circuit the run loop after a single tool call whose
-   * observation already satisfies every contract gate. Set to "false" to
-   * force the legacy path where the planner always runs a second round
-   * after the first tool call.
+   * L1.C structural latency lever: when true, the tool execution phase may
+   * short-circuit the run loop after a single tool call whose observation
+   * already satisfies every contract gate. Default OFF — the bypass predicate
+   * is structurally sound but in the current synthesis prompt shape it leads
+   * to Layer 2 template fallbacks (the synthesized answer mentions fields
+   * beyond the GROUNDING_JSON union, deterministic grounding-verify rejects,
+   * re-synth fails, scorer marks `terminationReason='fallback'` → term=0.25
+   * partial credit instead of full). Reconciling the predicate with grounding-
+   * verify (tighter bypass OR a bypass-aware synthesis prompt) is the
+   * structural fix; opt-in only until that lands. See DEFAULT_AGENT_CONFIG
+   * (agent-config.ts) for the full rationale.
    */
   AGENT_FAST_ANSWER_BYPASS_PLANNER: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
-    .default('true'),
+    .default('false'),
 
   /**
    * When true, GET /v1/agent/benchmark-scenarios returns the quick-profile scenario list.

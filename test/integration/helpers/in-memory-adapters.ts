@@ -56,6 +56,13 @@ import {
   editDistanceSimilarity,
 } from '../../../src/domain/alias/service/edit-distance.js';
 import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/service/hybrid-candidate-summary.js';
+import { hardConstraintsToSparseFilterTokens } from '../../../src/domain/retrieval/service/constraint-to-sparse-filter-tokens.js';
+import {
+  buildFilterPredicate,
+  hashTextToVector,
+  cosineSimilarity,
+  hybridCandidateToFilterableDoc,
+} from './in-memory-retrieval-helpers.js';
 
 /**
  * Fuzzy-stage tuning for {@link InMemoryAliasMatcher.findFuzzyMatches}.
@@ -173,7 +180,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
 
   async sparseSearch(
     queries: readonly string[],
-    _filters?: readonly string[],
+    filters?: readonly string[],
     limit?: number,
     _rankProfile?: string,
   ): Promise<readonly SparseHit[]> {
@@ -182,8 +189,14 @@ export class InMemorySearchIndex implements SearchIndexPort {
     const prefixQueries = queries
       .map((q) => buildNormalizedQueryViews(q).strict)
       .filter((q) => isEligiblePrefixQuery(q));
+    // Filter parity with denseSearch: hard-constraint filter tokens must be
+    // honored here too, otherwise a sparse-lane match (BM25 phrase hit) can
+    // bypass a hard constraint that the dense lane correctly excluded —
+    // letting a non-red wine survive a `wine_type:red` constraint.
+    const filterPredicate = buildFilterPredicate(filters);
 
     for (const doc of this.docs.values()) {
+      if (!filterPredicate(doc)) continue;
       const searchableText = [
         doc.canonicalLabel,
         doc.searchTextEn,
@@ -235,21 +248,48 @@ export class InMemorySearchIndex implements SearchIndexPort {
   }
 
   async denseSearch(
-    _embedding: readonly number[],
-    _filters?: readonly string[],
+    embedding: readonly number[],
+    filters?: readonly string[],
     limit?: number,
     _rankProfile?: string,
   ): Promise<readonly DenseHit[]> {
-    // Return all docs with a deterministic fake similarity in popularity order
-    const docs = Array.from(this.docs.values()).sort(
-      (a, b) => b.popularityScore - a.popularityScore,
-    );
-    const limited = limit != null ? docs.slice(0, limit) : docs;
-    return limited.map((doc, i) => ({
+    // Query-aware cosine ranking + filter application. The previous
+    // implementation ignored both `embedding` and `filters` and returned all
+    // docs in fixed popularity order, which (a) made denseSearch behave like
+    // a popularity bias regardless of query — `"romanee conti"` ranked
+    // `opus-one-2018` #1 because Opus One has the highest seeded
+    // popularityScore — and (b) silently no-op'd hard-constraint filtering
+    // for the recommendation/similar_items modes that depend on the dense
+    // lane to enforce wine_type / region / etc. constraints.
+    //
+    // The fake-embedding scheme used by `InMemoryEmbeddingService.hashText`
+    // is deterministic on the character-code sum (`(code * (i+1)) % DIM`),
+    // so a doc whose canonical label shares characters with the query will
+    // naturally produce a higher cosine similarity. Hashing the doc's
+    // canonical label with the SAME function lets `embedding` actually
+    // discriminate `romanee-conti-2019` from `opus-one-2018` for the
+    // `romanee conti` query — the structural property we want from any
+    // honest dense-lane simulation.
+    //
+    // PopularityScore is folded in as a weak tiebreaker (`epsilon=1e-6`)
+    // so identical-cosine ties still resolve deterministically.
+    const queryVec = embedding;
+    const filterPredicate = buildFilterPredicate(filters);
+    const POPULARITY_EPSILON = 1e-6;
+    const scored = Array.from(this.docs.values())
+      .filter(filterPredicate)
+      .map((doc) => {
+        const docVec = hashTextToVector(doc.canonicalLabel);
+        const cosine = cosineSimilarity(queryVec, docVec);
+        return { doc, score: cosine + doc.popularityScore * POPULARITY_EPSILON };
+      })
+      .sort((a, b) => b.score - a.score);
+    const limited = limit != null ? scored.slice(0, limit) : scored;
+    return limited.map(({ doc, score }, i) => ({
       entityId: doc.entityId,
-      score: doc.popularityScore,
+      score,
       rank: i + 1,
-      similarity: doc.popularityScore,
+      similarity: score,
       summary: retrievalDocumentToHitSummary(doc),
     }));
   }
@@ -1132,10 +1172,33 @@ export class InMemorySimilarRetrieval implements SimilarRetrievalPort {
 
   async retrieveSimilar(
     anchorProfile: AnchorProfile,
-    _limit: number,
-    _hardConstraints?: readonly NormalizedConstraint[],
+    limit: number,
+    hardConstraints?: readonly NormalizedConstraint[],
   ): Promise<readonly HybridCandidate[]> {
-    return this.results.get(anchorProfile.entityId) ?? [];
+    // Apply hard-constraint filtering on the seeded neighborhood so the
+    // mixed route's `similar_items` retrieval honors structural intent.
+    // Without this filter, `마고 비슷한 레드` ("red wines similar to
+    // Margaux") returned the seeded all-red neighborhood unmodified — but
+    // the downstream `applySetConstraintsForSimilarItems` filter then
+    // dropped any candidate whose attributes didn't match the wine_type
+    // constraint, frequently to ZERO. Production's `VespaSimilarRetrieval`
+    // applies these constraints at the Vespa query layer (via
+    // `hardConstraintsToSparseFilterTokens`); the in-memory stub must
+    // match that semantics or e2e tests cannot exercise the constraint
+    // path realistically.
+    const seeded = this.results.get(anchorProfile.entityId) ?? [];
+    if (hardConstraints === undefined || hardConstraints.length === 0) {
+      return limit > 0 ? seeded.slice(0, limit) : seeded;
+    }
+    const filterTokens = hardConstraintsToSparseFilterTokens(hardConstraints);
+    if (filterTokens.length === 0) {
+      return limit > 0 ? seeded.slice(0, limit) : seeded;
+    }
+    const filterPredicate = buildFilterPredicate(filterTokens);
+    const filtered = seeded.filter((candidate) =>
+      filterPredicate(hybridCandidateToFilterableDoc(candidate)),
+    );
+    return limit > 0 ? filtered.slice(0, limit) : filtered;
   }
 }
 

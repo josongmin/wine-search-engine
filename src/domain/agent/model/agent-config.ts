@@ -66,8 +66,21 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   maxContextChars: 8_000,
   maxTotalTokens: 50_000,
   requireVerificationStep: true,
-  // L1.C: structural one-RTT save on simple lookups. Off-switch via env
-  // AGENT_FAST_ANSWER_BYPASS_PLANNER=false at the composition root (see
-  // src/config/container.ts where the orchestrator is wired).
-  fastAnswerBypassPlanner: true,
+  // L1.C: structural one-RTT save on "simple lookup" paths. Currently OFF by
+  // default — the bypass predicate (constraint-coverage satisfied) is
+  // structurally sound, but in the present synthesis prompt shape it triggers
+  // for cases where the synthesized answer mentions facts beyond the strict
+  // GROUNDING_JSON union. The deterministic grounding-verify (correctly) rejects
+  // those, the re-synth often also fails, and the chain ends in a Layer 2
+  // template fallback → scorer assigns `terminationReason='fallback'` (term=0.25
+  // partial credit) rather than `'answer'` (term=1.0). Net effect on the
+  // standard bench: +21 term=25% scenarios, ~-3pp on overall geo-mean.
+  //
+  // The fix is to reconcile the bypass predicate with grounding-verify by
+  // either (a) tightening bypass to single-entity simple lookups only, or
+  // (b) constraining the synthesis prompt under bypass to mention ONLY fields
+  // present in GROUNDING_JSON (no embellishment). Both are larger changes that
+  // need their own measurement pass. Until then, opt-in only:
+  //   AGENT_FAST_ANSWER_BYPASS_PLANNER=true
+  fastAnswerBypassPlanner: false,
 } as const;
