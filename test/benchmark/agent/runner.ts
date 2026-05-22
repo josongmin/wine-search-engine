@@ -11,21 +11,6 @@
  *   npx tsx test/benchmark/agent/runner.ts --concurrency 5
  *   npx tsx test/benchmark/agent/runner.ts --baseline test/benchmark/agent/results/baseline.json
  *   npx tsx test/benchmark/agent/runner.ts --fail-if-worse-than 0.05
- *   npx tsx test/benchmark/agent/runner.ts --judge-samples 3 --judge-required-samples 5  # S1.3 variance reduction
- *
- * Frozen baseline (S1.2): capture a reference report at the current commit so
- * later runs can diff against it per-scenario:
- *   npx tsx scripts/eval/freeze-agent-baseline.ts            # → results/baseline-<gitsha>.json
- *   npx tsx test/benchmark/agent/runner.ts --baseline test/benchmark/agent/results/baseline-<gitsha>.json
- * With --baseline the runner prints a per-scenario delta table (sorted by delta,
- * regressions first) to stderr and embeds it as `report.baselineDelta` in the JSON.
- *
- * Throttle-resilient timing (S1.1): retryable infra failures (429/503/GOAWAY/
- * ECONNRESET) are retried with exponential backoff + full jitter. The time spent
- * sleeping on backoff is tracked as `wallClock.throttleWaitMs` (and per-scenario
- * `throttleWaitMs`) and EXCLUDED from the latency/cost score, which is computed
- * against `agentWorkMs` (orchestrator work time) — so provider throttling never
- * inflates the latency KPI.
  *   npx tsx test/benchmark/agent/runner.ts --model gpt-5.4 --judge-model gpt-5.4-mini
  *   npx tsx test/benchmark/agent/runner.ts --no-judge                         # disable LLM-as-judge
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
@@ -81,12 +66,6 @@ import {
 } from './scenarios.js';
 import {
   scoreScenario,
-  aggregateGeoMean,
-  aggregateTrimmedGeoMean,
-  type ScenarioResult,
-  type ScenarioExecution,
-  type StepTrace,
-  type MetricProvenance,
   type ScenarioResult,
   type ScenarioExecution,
   type StepTrace,
@@ -98,22 +77,6 @@ import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
 import { printBenchmarkInsights, type BenchmarkReportSlice } from './benchmark-insight-generator.js';
-import {
-  aggregateHardConstraintsForScenario,
-  meanHardConstraintsAcrossScenarios,
-} from './hard-constraints-aggregator.js';
-import { loadAnnotations, type AnnotationStore } from './annotation-loader.js';
-import {
-  applyAnnotationDiagnostics,
-  mergeAnnotationIntoScenario,
-  type AnnotationApplied,
-} from './annotation-apply.js';
-import {
-  buildEnvManifest,
-  manifestHash,
-  type EnvManifest,
-} from './env-manifest.js';
-import { archiveBenchReport } from './bench-archive.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
 import {
   pairedBootstrap,
@@ -128,12 +91,6 @@ import {
   type VarianceObservation,
 } from './variance-decomposition.js';
 import type { ConstraintExtractionMetricsInput } from './scorer.js';
-import {
-  LATENCY_SLA_P50_MS as K_LATENCY_SLA_P50_MS,
-  LATENCY_SLA_P95_MS as K_LATENCY_SLA_P95_MS,
-  LATENCY_SLA_TIMEOUT_MS as K_LATENCY_SLA_TIMEOUT_MS,
-  TRIMMED_GEOMEAN_PROPORTION,
-} from './constants.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
@@ -183,13 +140,6 @@ interface CliArgs {
   readonly enableJudge: boolean;
   readonly judgeSamples: number;
   /**
-   * S1.3 judge-variance reduction: sample count used ONLY for scenarios flagged
-   * `judgeRequired`. Defaults to {@link DEFAULT_JUDGE_REQUIRED_SAMPLES} (5) so the
-   * highest-stakes scenarios get a tighter median, while all other scenarios stay
-   * at `judgeSamples` (default 3) to bound cost. Override with `--judge-required-samples`.
-   */
-  readonly judgeRequiredSamples: number;
-  /**
    * Multi-sample runs per scenario for statistical stability. Default 1
    * preserves the legacy single-run behavior; nightly uses >= 3 so paired
    * bootstrap + variance decomposition have enough datapoints to detect a
@@ -199,10 +149,6 @@ interface CliArgs {
   readonly baseline?: string;
   readonly failIfWorseThan?: number;
   readonly outputPath?: string;
-  /** When set, write the env manifest to this path as JSON (separate from the report). */
-  readonly envManifestPath?: string;
-  /** When false (--no-archive), skip the data/bench-archive/ copy on exit. */
-  readonly archive: boolean;
 }
 
 /**
@@ -213,30 +159,6 @@ const MAX_RUNS_PER_SCENARIO = 25;
 
 type CriticalWineType = 'red' | 'white' | 'sparkling';
 type CriticalWineTypeCoverage = Record<CriticalWineType, number>;
-
-/**
- * S1.3 judge-variance reduction. judgeRequired scenarios are the highest-stakes
- * (refusals, structured-fact checks, register/hedging) where a single judge
- * outlier most distorts the aggregate. Raising the median sample to N=5 for ONLY
- * these scenarios shrinks per-scenario judge variance ~√(5/3) ≈ 1.29× while
- * keeping the rest at N=3 so total judge-call cost stays bounded.
- */
-const DEFAULT_JUDGE_SAMPLES = 3;
-const DEFAULT_JUDGE_REQUIRED_SAMPLES = 5;
-
-/**
- * S1.3: effective judge sample count for one scenario. judgeRequired scenarios
- * use the (typically higher) required-samples budget; everything else uses the
- * baseline budget. Always >= 1.
- */
-function effectiveJudgeSamples(
-  scenario: AgentBenchmarkScenario,
-  baselineSamples: number,
-  judgeRequiredSamples: number,
-): number {
-  const n = scenario.expectation.judgeRequired === true ? judgeRequiredSamples : baselineSamples;
-  return Math.max(1, Math.floor(n));
-}
 
 // 20 scenario IDs spread across tiers for the "quick" profile (~2 min PR smoke test).
 const QUICK_SCENARIO_IDS = new Set([
@@ -342,7 +264,6 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
   // --judge-model explicitly passed counts as opting into judge mode
   const explicitJudge = explicitNoJudge || explicitJudgeModel !== undefined;
   const explicitJudgeSamples = get('--judge-samples');
-  const explicitJudgeRequiredSamples = get('--judge-required-samples');
   const explicitRuns = get('--runs');
 
   const profile = get('--profile') as CliArgs['profile'];
@@ -362,9 +283,6 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
     model: get('--model'),
     judgeModel: get('--judge-model'),
     enableJudge: !explicitNoJudge,
-    judgeSamples: parseOptionalInt(explicitJudgeSamples, DEFAULT_JUDGE_SAMPLES),
-    // S1.3: judgeRequired scenarios get a higher median sample by default.
-    judgeRequiredSamples: parseOptionalInt(explicitJudgeRequiredSamples, DEFAULT_JUDGE_REQUIRED_SAMPLES),
     judgeSamples: parseOptionalInt(explicitJudgeSamples, 3),
     runs: Math.max(1, Math.min(MAX_RUNS_PER_SCENARIO, parseOptionalInt(explicitRuns, 1))),
     baseline: get('--baseline'),
@@ -373,11 +291,6 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
         ? Number.parseFloat(get('--fail-if-worse-than')!)
         : undefined,
     outputPath: get('--out'),
-    // Conditional spread to respect exactOptionalPropertyTypes — omit the
-    // key when the flag is absent instead of setting it to `undefined`.
-    ...(get('--env-manifest') !== undefined ? { envManifestPath: get('--env-manifest')! } : {}),
-    // Default-on archive (we've lost /tmp results too many times). Opt-out with --no-archive.
-    archive: !has('--no-archive'),
   };
 
   // Apply profile defaults AFTER parsing individual flags so explicit flags still override.
@@ -828,11 +741,6 @@ async function computeConstraintMetricsForScenario(
     csrSoft: csr.csrSoft,
     csrInferred: csr.csrInferred,
     csrInferredGraph: csr.csrInferredGraph,
-    // SOTA++ reliability fix: bench was hardcoding `meanHardConstraints = 0` with
-    // a TODO comment. The actual hard-constraint count is sitting right here in
-    // `extraction.bundle.hard`. Thread it through so the run-level aggregate in
-    // buildReport() is real, not stubbed.
-    extractedHardConstraintCount: extraction.bundle.hard.length,
   };
 }
 
@@ -879,41 +787,11 @@ async function runWithConcurrency<T, R>(
 const RUNNER_RATE_LIMIT_BASE_MS = 5_000;
 const RUNNER_RATE_LIMIT_MAX_MS = 30_000;
 // Transient errors (5xx, network): short jittered backoff, not quota-related.
-// Base 500ms, factor 2, capped — applied with FULL jitter so concurrent workers
-// retrying the same upstream do not synchronize into a thundering herd.
-const RUNNER_TRANSIENT_BASE_MS = 500;
-const RUNNER_TRANSIENT_MAX_MS = 8_000;
+const RUNNER_TRANSIENT_BASE_MS = 200;
 
 function isRateLimitError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
   return msg.includes('rate limit') || msg.includes('429');
-}
-
-/**
- * Full-jitter exponential backoff (AWS "Exponential Backoff And Jitter" model).
- * Returns a delay in [0, min(cap, base * 2^attempt)). Full jitter is the
- * variance-minimizing choice for many concurrent clients hitting one quota —
- * it decorrelates retries far better than fixed or equal-jitter backoff.
- *
- * `attempt` is the zero-based retry index (0 for the first backoff after the
- * initial attempt fails).
- */
-function fullJitterBackoffMs(attempt: number, baseMs: number, capMs: number): number {
-  const exp = Math.min(capMs, baseMs * 2 ** attempt);
-  return Math.random() * exp;
-}
-
-/**
- * Outcome of {@link withRetry}: the resolved value plus the cumulative wall-clock
- * time spent SLEEPING between retries due to throttling/transient infra failures.
- *
- * MEASUREMENT INTEGRITY: `throttleWaitMs` is subtracted from the per-scenario
- * wall before the latency/cost score dimension is computed, so provider 429/503
- * backoff never masquerades as agent slowness. See `agentWorkMs` in the report.
- */
-export interface WithRetryOutcome<T> {
-  readonly value: T;
-  readonly throttleWaitMs: number;
 }
 
 function normalizeRunnerError(err: unknown): Error {
@@ -932,75 +810,29 @@ function normalizeRunnerError(err: unknown): Error {
   return new Error('Scenario failed with non-Error rejection: [non-stringifiable object]');
 }
 
-/**
- * Outcome of {@link withRetry}: the resolved value plus the cumulative wall-clock
- * time spent SLEEPING between retries due to throttling/transient infra failures.
- *
- * S1.1 MEASUREMENT INTEGRITY: `throttleWaitMs` is subtracted from the per-scenario
- * wall before the latency/cost score dimension is computed, so provider 429/503
- * backoff never masquerades as agent slowness. See `agentWorkMs` in the report.
- *
- * L1.B NO-DOUBLE-COUNT: when `fn()` itself returns a {@link WithRetryOutcome}
- * (i.e. a nested withRetry call), this wrapper folds the child's
- * `throttleWaitMs` into its own accumulator at most ONCE per leaf attempt —
- * preventing parent+child waits from being summed twice (which would
- * UNDER-report agentWorkMs and OVER-report wall on the receiving end).
- */
-export interface WithRetryOutcome<T> {
-  readonly value: T;
-  readonly throttleWaitMs: number;
-}
-
-function isWithRetryOutcome<U>(value: unknown): value is WithRetryOutcome<U> {
-  return (
-    typeof value === 'object'
-    && value !== null
-    && 'value' in value
-    && 'throttleWaitMs' in value
-    && typeof (value as { throttleWaitMs: unknown }).throttleWaitMs === 'number'
-  );
-}
-
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number,
   shouldRetry: (err: unknown) => boolean,
-): Promise<WithRetryOutcome<T>> {
+): Promise<T> {
   // `--max-retries N` means "initial attempt + up to N retries".
   // N=0 must still execute fn() once; otherwise the runner skips the scenario
   // entirely and falls through to `throw undefined`.
   const totalAttempts = Math.max(1, maxRetries + 1);
   let lastErr: unknown;
-  // Cumulative time spent sleeping on throttle/transient backoff. This is infra
-  // wait, NOT agent work — the caller subtracts it from the scenario wall.
-  let throttleWaitMs = 0;
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
-      const value = await fn();
-      // L1.B no-double-count: when `fn` is itself a withRetry-wrapped call
-      // (nested retry), unwrap the child's outcome and fold its
-      // `throttleWaitMs` exactly ONCE into our accumulator. The outer caller
-      // must consume the OUTER outcome only — never the child's value
-      // separately — so each leaf backoff sleep is counted exactly once.
-      if (isWithRetryOutcome<unknown>(value)) {
-        const inner = value as unknown as WithRetryOutcome<T>;
-        return { value: inner.value, throttleWaitMs: throttleWaitMs + inner.throttleWaitMs };
-      }
-      return { value: value as T, throttleWaitMs };
+      return await fn();
     } catch (err) {
       lastErr = err;
       if (attempt >= totalAttempts || !shouldRetry(err)) throw normalizeRunnerError(err);
       // Rate-limit errors (429/TPM): slow exponential backoff — quota windows
-      // are 60s; fast retries just keep hitting the wall. Capped, with full
-      // jitter on the lower half to break synchronized retry storms.
-      // Other transient errors (5xx, network, GOAWAY): base 500ms × 2^n full jitter.
-      // `attempt` is 1-based here, so the zero-based retry index is `attempt - 1`.
+      // are 60s; fast retries just keep hitting the wall.
+      // Other transient errors (5xx, network): light exponential backoff.
       const delayMs = isRateLimitError(err)
         ? Math.min(RUNNER_RATE_LIMIT_BASE_MS * 2 ** (attempt - 1), RUNNER_RATE_LIMIT_MAX_MS)
         : RUNNER_TRANSIENT_BASE_MS * attempt;
-      const sleepStart = Date.now();
       await new Promise((r) => setTimeout(r, delayMs));
-      throttleWaitMs += Date.now() - sleepStart;
     }
   }
   throw normalizeRunnerError(lastErr);
@@ -1023,12 +855,6 @@ function isTransient(err: unknown): boolean {
     || msg.includes('502')
     || msg.includes('503')
     || msg.includes('504')
-    // HTTP/2 graceful shutdown + undici socket errors: the provider closed the
-    // connection mid-flight (load-shedding). Always safe to retry.
-    || msg.includes('goaway')
-    || msg.includes('socketerror')
-    || msg.includes('und_err_socket')
-    || msg.includes('socket hang up')
   );
 }
 
@@ -1048,11 +874,12 @@ function percentile(sortedAsc: readonly number[], p: number): number {
 }
 
 // ── Latency SLA thresholds (KPI targets) ──
-// Bound from `./constants.js` SSoT — see CLAUDE.md rule 30. The aliased
-// re-bind keeps the local symbols stable for the rest of the file.
-const LATENCY_SLA_P50_MS = K_LATENCY_SLA_P50_MS;
-const LATENCY_SLA_P95_MS = K_LATENCY_SLA_P95_MS;
-const LATENCY_SLA_TIMEOUT_MS = K_LATENCY_SLA_TIMEOUT_MS;
+/** p50 must be under this for SLA pass (ms). */
+const LATENCY_SLA_P50_MS = 10_000;
+/** p95 must be under this for SLA pass (ms). */
+const LATENCY_SLA_P95_MS = 20_000;
+/** Individual scenario hard timeout (ms) — exceeding this = SLA violation. */
+const LATENCY_SLA_TIMEOUT_MS = 30_000;
 
 interface LatencyStats {
   readonly mean: number;
@@ -1391,15 +1218,6 @@ export interface BenchmarkWallClock {
   readonly scenarioWallSampleCount: number;
   /** Same as CLI `--concurrency`; explains pool wall vs sum of per-scenario walls. */
   readonly concurrency: number;
-  /**
-   * S1.1: total wall-clock time spent SLEEPING on throttle/transient-infra
-   * backoff (429/503/GOAWAY/ECONNRESET retries) across all scenarios. This is
-   * infra wait, NOT agent work — `agentWorkMs` (per-scenario) excludes it from
-   * the latency/cost score so provider throttling never inflates the latency KPI.
-   */
-  readonly throttleWaitMs: number;
-  /** S1.1: sum of per-scenario wall minus throttle backoff (lower-bound agent work-time). */
-  readonly sumAgentWorkMs: number;
 }
 
 /**
@@ -1470,35 +1288,8 @@ export interface BenchmarkReport {
   /** Wall-clock breakdown for the whole CLI run (profiling). */
   readonly wallClock: BenchmarkWallClock;
   readonly results: readonly ScenarioResult[];
-  /**
-   * S1.2: per-scenario baseline delta table, sorted most-regressed first. Present
-   * only when the run was invoked with `--baseline`. Omitted otherwise so the
-   * report shape is unchanged for non-baseline runs.
-   */
-  readonly baselineDelta?: readonly ScenarioDelta[];
   readonly summary: {
     readonly overallScore: number;
-    /**
-     * Geometric mean of per-scenario `scores.overall`.
-     *
-     * Identical to {@link overallScore} on healthy populations; surfaced as an
-     * explicitly-named alias so the contract test can assert provenance against
-     * a stable key (the legacy name `overallScore` is preserved for baseline
-     * JSON compat — never drop it).
-     */
-    readonly overallScoreGeoMean: number;
-    /**
-     * 5%-trimmed geometric mean of per-scenario `scores.overall`. Drops the
-     * bottom 5% and top 5% of values before computing the geo-mean — robust
-     * to heavy-left-tailed runs where a handful of critical failures (score=0)
-     * dominate the raw aggregate.
-     *
-     * SOTA++ reliability addition: published alongside the raw `overallScore`
-     * so operators see both signals. Critical-failure counts are reported
-     * separately (`criticalFailureCount`) — trimming does NOT squelch the
-     * security/correctness signal. See `docs/bench/metric-spec.md` §A2.
-     */
-    readonly overallScoreTrimmedGeoMean5: number;
     readonly overallCi95: WilsonCi;
     /** Bootstrap 95% CI — distribution-free, more robust for skewed geo-mean. */
     readonly overallBootstrapCi95: WilsonCi;
@@ -1565,36 +1356,15 @@ export interface BenchmarkReport {
     /** Number of scenarios that received constraint extraction evaluation. */
     readonly constraintEvaluatedCount: number;
     readonly avgSteps: number;
-    /**
-     * Primary latency stats — driven by `agentWorkMs` (wall MINUS throttle/
-     * backoff sleep) when the runner supplies it; falls back to
-     * `totalDurationMs` for legacy callers. The bench-level SLA gate is
-     * evaluated against THIS distribution so provider throttling never
-     * surfaces as a false-positive SLA fail (S1.1 measurement integrity).
-     */
     readonly latencyMs: LatencyStats;
-    /**
-     * L1.A: raw scenario wall percentiles, retained alongside `latencyMs` for
-     * infra diagnostics. When `throttleWaitMs > 0` for any scenario, this
-     * distribution will be STRICTLY GREATER than `latencyMs` and indicates
-     * how much provider 429/503 backoff the run absorbed. Never used to gate
-     * the SLA pass/fail — that is `latencyMs`'s job.
-     */
-    readonly latencyWallMs: LatencyStats;
-    /** Latency SLA KPI assessment — gated on `latencyMs` (agent-work). */
+    /** Latency SLA KPI assessment. */
     readonly latencySla: {
-      /** p50 < 10s target (assessed on agent-work latency). */
+      /** p50 < 10s target. */
       readonly p50Pass: boolean;
-      /** p95 < 20s target (assessed on agent-work latency). */
+      /** p95 < 20s target. */
       readonly p95Pass: boolean;
-      /** Scenarios exceeding 30s (hard timeout, on agent-work latency). */
+      /** Scenarios exceeding 30s (hard timeout). */
       readonly timeoutCount: number;
-      /**
-       * L1.A: same SLA judgement applied to RAW wall — exposed for parity
-       * checks. When this is false but `p95Pass` (agent-work) is true, the
-       * gap is pure infra throttle wait, not agent slowness.
-       */
-      readonly p95PassWall: boolean;
     };
     readonly tokens: {
       readonly inputMean: number;
@@ -1602,15 +1372,6 @@ export interface BenchmarkReport {
       readonly totalP95: number;
     };
     readonly byTier: Record<string, { readonly count: number; readonly avgScore: number }>;
-    /**
-     * Bench-wide mean of per-scenario planner-emitted hard-constraint counts.
-     * Source: `SearchResponseV1.parsedConstraints.hard.length` summed across
-     * every search tool call within a scenario, then arithmetic-meaned over
-     * scenarios that produced at least one search outcome. Drives the
-     * `hard_constraints_low` insight rule. `0` only when no executed scenario
-     * carried a non-null hard-constraint sample.
-     */
-    readonly meanHardConstraints: number;
     /**
      * ADR-009 Phase 0: fraction of tool calls across the run that emitted a
      * typed evidence frame. Cutover gate is >= 0.99 on two consecutive
@@ -1626,61 +1387,11 @@ export interface BenchmarkReport {
       readonly totalToolCalls: number;
     };
     /**
-     * Mean number of HARD constraints extracted per query
-     * (`runConstraintExtraction(query).bundle.hard.length`).
-     *
-     * SOTA++ reliability fix: previously this aggregate sat hardcoded `0` in
-     * `benchmark-insight-generator.ts` with a TODO comment, corrupting every
-     * `hard_constraints_low` insight that fired. Now derived from real
-     * per-scenario `scores.extractedHardConstraintCount` (averaged over
-     * scenarios with non-null values; null when no scenarios had
-     * `expectedConstraints` or `expectedEntities`).
-     */
-    readonly meanHardConstraints: number | null;
-    /**
-     * Provenance map: aggregateName → MetricProvenance.
-     *
-     * Every numeric aggregate reported in `summary.*` MUST have an entry here.
-     * The contract test
-     * `test/regression/scorer-no-hardcoded-aggregate.regression.test.ts`
-     * fails loudly if any reported aggregate is untraceable or if any
-     * `derivationSummary` contains the substring `"TODO"`.
-     *
-     * Adding a new aggregate? Register it here in `buildReport()`.
-     */
-    readonly provenance: Readonly<Record<string, MetricProvenance>>;
-  /**
      * SOTA++ B3 variance decomposition. Populated only when --runs > 1 so
      * there is non-degenerate within-scenario variance to decompose. null
      * for legacy single-run benches.
      */
     readonly varianceDecomposition: VarianceDecompositionSummary | null;
-  /**
-     * SOTA++ env manifest: full reproducibility footer captured at run time.
-     * Use `manifestHash(summary.environment)` to compare two runs config-by-config.
-     */
-    readonly environment: EnvManifest;
-    /** SHA-256 (sliced) of the manifest's config fields — stable across identical configs. */
-    readonly environmentHash: string;
-    /**
-     * Annotation coverage: count of scenarios where ground-truth annotation
-     * drove at least one scoring dimension. Below MIN_ANNOTATION_SAMPLES
-     * (insight rule `scr_annotation_sparse`) means SCR/ELA/Slot-F1 aggregates
-     * are statistically unreliable.
-     */
-    readonly annotation: {
-      readonly annotatedScenarioCount: number;
-      readonly judgeOnlyScenarioCount: number;
-      readonly drives: {
-        readonly constraints: number;
-        readonly entities: number;
-        readonly answerClaims: number;
-        readonly steps: number;
-        readonly termination: number;
-        readonly retrievalIds: number;
-        readonly rubric: number;
-      };
-    };
   };
 }
 
@@ -1782,17 +1493,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
   const scenarios = filterScenarios(AGENT_SCENARIOS, args);
 
-  // SOTA++ ground truth: load annotations once and apply them per-scenario at
-  // scoring time. Merge happens in-loop (so each scoring path sees the merged
-  // expectation); post-scoring diagnostics layer on top.
-  const annotationStore: AnnotationStore = loadAnnotations();
-  if (annotationStore.stats.loaded > 0 || annotationStore.stats.failed > 0) {
-    console.error(
-      `  [ANNOTATIONS] loaded=${annotationStore.stats.loaded} `
-      + `failed=${annotationStore.stats.failed}`,
-    );
-  }
-
   // Container wiring
   console.error('  [INIT] real container — wiring PG + Redis + production deps...');
   const built = await buildRealToolDeps();
@@ -1818,10 +1518,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   let judgeAttemptCount = 0;
   let scenarioWallMsSum = 0;
   let scenarioWallSampleCount = 0;
-  // S1.1: cumulative throttle/backoff wait across all scenarios — subtracted from
-  // the scenario wall before latency scoring so infra 429/503/GOAWAY backoff does
-  // not pollute the agent-work latency signal.
-  let throttleWaitMsSum = 0;
   let completedCount = 0;
   // Infra failure tracking: step-0 fallback = LLM rate-limit / timeout before agent ran.
   // These pollute the overall score but are NOT agent logic failures.
@@ -1837,25 +1533,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   // `aggregates` fields emitted, no merge layer.
   const RUNS_PER_SCENARIO = Math.max(1, args.runs);
   const totalAgentExecutions = totalToRun * RUNS_PER_SCENARIO;
-  // Per-scenario annotation outcomes — surfaced on the report to count
-  // annotated vs judge-only scenarios for the SCR/ELA insight rule.
-  const annotationOutcomes = new Map<number, AnnotationApplied>();
-
-  const results = await runWithConcurrency(
-    scenarios,
-    effectiveConcurrency,
-    async (rawScenario) => {
-      // Apply ground-truth annotation BEFORE any code path sees the scenario —
-      // skipped, errored, or executed. The merge is shallow (only fields the
-      // annotation defines) and never deletes inline data.
-      const annotation = annotationStore.get(rawScenario.id);
-      const { scenario, applied } = mergeAnnotationIntoScenario(rawScenario, annotation);
-      annotationOutcomes.set(scenario.id, applied);
-
-      if (scenario.skip !== undefined) {
-        console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
-        return scoreScenario(scenario, null, undefined, undefined);
-      }
 
   const executeOneRun = async (
     scenario: AgentBenchmarkScenario,
@@ -1874,13 +1551,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         // classifier doesn't override the scenario's expected budget.
         // Without this, a scenario expecting maxSteps:2 would get
         // adaptive_budget=3 for specific_sku, deflating stepEfficiency.
-        // S1.1: `withRetry` returns a {@link WithRetryOutcome} so the runner can
-        // separate "agent work time" from "infra throttle/transient backoff
-        // sleep". The cumulative sleep across retry attempts is `throttleWaitMs`;
-        // subtracting it from the scenario wall yields `agentWorkMs`, which the
-        // latency dimension and the bench-level SLA assertion both score
-        // against (raw wall is still surfaced for infra diagnostics).
-        const { value: result, throttleWaitMs } = await withRetry(
+        const result = await withRetry(
           () => orchestrator.execute(
             scenario.query,
             `bench-${scenario.id}`,
@@ -1889,11 +1560,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           args.maxRetries,
           isTransient,
         );
-        // Wall captured at the point the retry-wrapper resolved (BEFORE
-        // judge calls / claim eval / scoring). This is the truest "agent +
-        // infra wait" wall; `agentWorkMs` strips the infra wait.
-        const wallAtResolveMs = Date.now() - start;
-        const agentWorkMs = Math.max(0, wallAtResolveMs - throttleWaitMs);
 
         const toolsUsed = result.steps.flatMap((s) => {
           if (s.actionPairs !== undefined) {
@@ -1922,14 +1588,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         // Extract pipeline stage timings from the first successful search response.
         const searchStageTimings = result.searchResults?.stageTimings;
 
-        // hard_constraints_low insight: sum planner-emitted hard constraints
-        // across every search tool call in this scenario. Reads from typed
-        // ToolOutcome.result (SearchResponseV1.parsedConstraints.hard) — the
-        // canonical post-compilation hard-constraint set. Returns `null` when
-        // no search tools ran (knowledge-only / blocked), so the summary
-        // aggregator can exclude rather than bias toward zero.
-        const hardConstraintCount = aggregateHardConstraintsForScenario(result.toolOutcomes);
-
         const execution: ScenarioExecution = {
           answer: result.answer,
           stepCount: result.steps.length,
@@ -1941,22 +1599,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             : {}),
           terminationReason: mapTerminationReason(result.terminationReason),
           totalDurationMs: result.totalDurationMs,
-          // S1.1 measurement integrity: agentWorkMs = wall - throttleWaitMs.
-          // Both raw orchestrator duration AND wall-minus-throttle are
-          // surfaced so the scorer / bench summary can pick the appropriate
-          // signal (latency dim and SLA gate both score against agentWorkMs).
-          agentWorkMs,
-          throttleWaitMs,
           totalTokens: result.totalTokens,
           ...(result.evidenceFrames !== undefined ? { evidenceFrameCount } : {}),
           ...(searchStageTimings !== undefined && Object.keys(searchStageTimings).length > 0
             ? { stageTimings: searchStageTimings }
             : {}),
-          // Always set the key (including explicit `null` for no-search
-          // scenarios) so downstream consumers can distinguish "not measured"
-          // from "measured as zero". Under exactOptionalPropertyTypes this is
-          // allowed because the field is typed as `number | null | undefined`.
-          hardConstraintCount,
         };
 
         // Map AgentStep[] → StepTrace[] for triage profiling in the result JSON.
@@ -1984,17 +1631,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         let claimDiagnostics: DiagnosticVector | undefined;
         if (judgeLlm !== null) {
           const judgePromises: Promise<void>[] = [];
-          // S1.3: judgeRequired scenarios use N=5 median (default), all others N=3.
-          const scenarioJudgeSamples = effectiveJudgeSamples(
-            scenario,
-            args.judgeSamples,
-            args.judgeRequiredSamples,
-          );
           // Answer quality judge (rubric-based or structured fields via auto-rubric)
           if (hasJudgeMaterial(scenario.expectation)) {
             judgeAttemptCount++;
             judgePromises.push(
-              judgeAnswerN(judgeLlm, scenario, result.answer, scenarioJudgeSamples, { observations }).then((r) => {
+              judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples, { observations }).then((r) => {
                 if (r.score !== null) judgeScore = r.score;
                 if (r.rationale.length > 0) judgeReasoning = r.rationale;
                 if (r.failed) judgeFailCount++;
@@ -2041,7 +1682,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           } else if (observations.length > 0) {
             judgeAttemptCount++;
             judgePromises.push(
-              judgeFaithfulness(judgeLlm, result.answer, observations, scenarioJudgeSamples).then((r) => {
+              judgeFaithfulness(judgeLlm, result.answer, observations, args.judgeSamples).then((r) => {
                 if (r.score !== null) faithScore = r.score;
                 if (r.failed) judgeFailCount++;
               }),
@@ -2081,23 +1722,10 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           console.error(`  [CONSTRAINT-EVAL] #${scenario.id} failed: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
         }
 
-        const scoredBase = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics, constraintMetrics);
-        // Layer annotation-derived diagnostics on top of the scored result.
-        // applyAnnotationDiagnostics is a no-op when annotation is undefined.
-        const scored = applyAnnotationDiagnostics(scoredBase, execution, annotation);
+        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics, constraintMetrics);
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
-        // S1.1: record per-scenario throttle wait so the report can show how much
-        // of the wall was infra backoff vs agent work. The latency/cost dimension
-        // already scored against execution.agentWorkMs (orchestrator duration,
-        // which excludes the between-retry backoff sleeps). scenarioWallMs − throttle
-        // gives the throttle-corrected scenario wall for cross-checking the dimension.
-        throttleWaitMsSum += throttleWaitMs;
-        const scored: ScenarioResult = {
-          ...scoredBase,
-          ...(throttleWaitMs > 0 ? { throttleWaitMs } : {}),
-        };
         const sc = scored.scores;
         const judgePart = judgeScore !== undefined ? ` judge=${judgeScore.toFixed(2)}` : '';
         const faithPart = faithScore !== undefined ? ` faith=${faithScore.toFixed(2)}` : '';
@@ -2223,8 +1851,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     sumScenarioWallMs: scenarioWallMsSum,
     scenarioWallSampleCount,
     concurrency: effectiveConcurrency,
-    throttleWaitMs: throttleWaitMsSum,
-    sumAgentWorkMs: Math.max(0, scenarioWallMsSum - throttleWaitMsSum),
   };
 
   const wallClockPhaseSum = initMs + scenariosPhaseMs + shutdownMs;
@@ -2234,20 +1860,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     );
   }
 
-  return buildReport(
-    results,
-    scenarios,
-    modelId,
-    judgeModelId,
-    embeddingModel,
-    apiBaseDomain,
-    args,
-    judgeFailCount,
-    judgeAttemptCount,
-    wallClock,
-    infraFallbackCount,
-    annotationOutcomes,
-  );
+  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock, infraFallbackCount);
 }
 
 function filterScenarios(
@@ -2275,7 +1888,6 @@ function buildReport(
   judgeAttemptCount: number,
   wallClock: BenchmarkWallClock,
   infraFallbackCount: number = 0,
-  annotationOutcomes: ReadonlyMap<number, AnnotationApplied> = new Map(),
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
 
@@ -2391,15 +2003,7 @@ function buildReport(
     );
   }
 
-  // L1.A: latency dim and SLA gate score against agent-work time
-  // (wall MINUS throttle backoff) — see scoreCostEfficiency in scorer.ts and
-  // `WithRetryOutcome.throttleWaitMs` in this file. Legacy scenarios without
-  // `agentWorkMs` fall back to `totalDurationMs` (which on those legacy
-  // paths IS the wall, so behaviour is unchanged for them).
-  const durations = executed.map((r) => r.agentWorkMs ?? r.totalDurationMs ?? 0);
-  // Raw wall distribution kept for infra diagnostics — published as
-  // `summary.latencyWallMs`. Never gates the SLA.
-  const wallDurations = executed.map((r) => r.totalDurationMs ?? 0);
+  const durations = executed.map((r) => r.totalDurationMs ?? 0);
   const totalTokens = executed.map((r) => (r.totalTokens?.input ?? 0) + (r.totalTokens?.output ?? 0));
   const sortedTokens = [...totalTokens].sort((a, b) => a - b);
 
@@ -2412,19 +2016,6 @@ function buildReport(
   // Bootstrap CI — distribution-free, more robust for skewed geo-mean scores.
   const overallBootstrapCi95 = bootstrapCi95(overallScores);
 
-  // SOTA++ reliability addition: trimmed geo-mean alongside the raw mean.
-  // Raw geo-mean is dominated by left-tail critical failures (score=0);
-  // the 5%-trimmed variant exposes the underlying agent quality. Critical
-  // failures STAY counted via `criticalFailureCount` so the security/correctness
-  // signal is never squelched.
-  const overallScoreGeoMean = aggregateGeoMean(overallScores);
-  const overallScoreTrimmedGeoMean5 = aggregateTrimmedGeoMean(overallScores, TRIMMED_GEOMEAN_PROPORTION);
-
-  // SOTA++ reliability fix: meanHardConstraints was hardcoded `0` in
-  // benchmark-insight-generator.ts (TODO comment). Now derived from real
-  // per-scenario `extractedHardConstraintCount`.
-  const hardConstraintCounts = executedForAggregate.map((r) => r.scores.extractedHardConstraintCount);
-  const meanHardConstraints = nullableMean(hardConstraintCounts);
   // SOTA++ B3: variance decomposition over per-run scenario observations.
   // Only meaningful when --runs > 1 (otherwise within-scenario SS is 0 and
   // the share collapses into scenario-fraction-only).
@@ -2462,39 +2053,6 @@ function buildReport(
         return summary;
       })()
     : null;
-  // Annotation outcomes — exposed on the report so insight rules and
-  // downstream bench-compare can read "annotated vs judge-only" without
-  // having to re-load annotation JSON.
-  const annotatedScenarioCount = [...annotationOutcomes.values()].filter((o) => o.applied).length;
-  const annotationDrives = {
-    constraints: 0, entities: 0, answerClaims: 0, steps: 0, termination: 0, retrievalIds: 0, rubric: 0,
-  };
-  for (const o of annotationOutcomes.values()) {
-    if (!o.applied) continue;
-    if (o.drives.constraints) annotationDrives.constraints++;
-    if (o.drives.entities) annotationDrives.entities++;
-    if (o.drives.answerClaims) annotationDrives.answerClaims++;
-    if (o.drives.steps) annotationDrives.steps++;
-    if (o.drives.termination) annotationDrives.termination++;
-    if (o.drives.retrievalIds) annotationDrives.retrievalIds++;
-    if (o.drives.rubric) annotationDrives.rubric++;
-  }
-
-  const promptHashValue = createHash('sha256').update(buildSystemMessage().content).digest('hex').slice(0, 16);
-
-  // SOTA++ env manifest — captured here so every report carries the
-  // reproducibility footer. Standalone file write happens in main() when
-  // --env-manifest is passed.
-  const environment: EnvManifest = buildEnvManifest({
-    agentModel: model,
-    judgeModel,
-    embeddingModel,
-    apiBaseDomain,
-    container: args.container,
-    seed: args.seed ?? null,
-    profile: args.profile,
-    promptHash: promptHashValue,
-  });
 
   return {
     baselineVersion: BASELINE_VERSION_CURRENT,
@@ -2511,7 +2069,7 @@ function buildReport(
     seed: args.seed ?? null,
     nodeVersion: process.version,
     platform: process.platform,
-    promptHash: promptHashValue,
+    promptHash: createHash('sha256').update(buildSystemMessage().content).digest('hex').slice(0, 16),
     scenarioCount: scenarios.length,
     executedCount: executed.length,
     skippedCount: results.filter((r) => r.skipped).length,
@@ -2526,8 +2084,6 @@ function buildReport(
     results,
     summary: {
       overallScore,
-      overallScoreGeoMean,
-      overallScoreTrimmedGeoMean5,
       overallCi95,
       overallBootstrapCi95,
       executionEfficiency: avgScore('executionEfficiency'),
@@ -2564,25 +2120,12 @@ function buildReport(
         executed.length > 0
           ? executed.reduce((s, r) => s + (r.stepCount ?? 0), 0) / executed.length
           : 0,
-      // L1.A: `latencyMs` is the agent-work distribution (SLA-gated);
-      // `latencyWallMs` is the raw scenario wall (diagnostic only).
-      // Compute each percentile bundle ONCE to avoid quadratic sort cost on
-      // large runs (>200 scenarios).
-      latencyMs: (() => summariseLatency(durations))(),
-      latencyWallMs: (() => summariseLatency(wallDurations))(),
-      latencySla: (() => {
-        const agentStats = summariseLatency(durations);
-        const wallStats = summariseLatency(wallDurations);
-        return {
-          p50Pass: agentStats.p50 < LATENCY_SLA_P50_MS,
-          p95Pass: agentStats.p95 < LATENCY_SLA_P95_MS,
-          timeoutCount: durations.filter((d) => d > LATENCY_SLA_TIMEOUT_MS).length,
-          // L1.A: parity flag against raw wall — false here while p95Pass is
-          // true means the run absorbed infra throttle that the SLA gate
-          // (correctly) ignores.
-          p95PassWall: wallStats.p95 < LATENCY_SLA_P95_MS,
-        };
-      })(),
+      latencyMs: summariseLatency(durations),
+      latencySla: {
+        p50Pass: summariseLatency(durations).p50 < LATENCY_SLA_P50_MS,
+        p95Pass: summariseLatency(durations).p95 < LATENCY_SLA_P95_MS,
+        timeoutCount: durations.filter((d) => d > LATENCY_SLA_TIMEOUT_MS).length,
+      },
       tokens: {
         inputMean:
           executed.length > 0
@@ -2595,14 +2138,6 @@ function buildReport(
         totalP95: percentile(sortedTokens, 0.95),
       },
       byTier,
-      // hard_constraints_low insight: arithmetic mean of per-scenario
-      // hardConstraintCount across executed scenarios. Scenarios with `null`
-      // (no search tools ran) are excluded from the denominator so the metric
-      // measures planner filter pressure, not the rate of search-issuing
-      // scenarios. See `hard-constraints-aggregator.ts` for the full semantics.
-      meanHardConstraints: meanHardConstraintsAcrossScenarios(
-        executed.map((r) => r.hardConstraintCount),
-      ),
       // ADR-009 Phase 0 cutover metric: framed / total tool calls.
       // Scenarios that never invoked a tool (terminationReason='answer',
       // stepCount=1) contribute nothing to either numerator or denominator.
@@ -2649,149 +2184,8 @@ function buildReport(
           },
         };
       })(),
-      meanHardConstraints,
-      // SOTA++ reliability addition: provenance map for the contract test.
-      // Every reported aggregate above MUST have a corresponding entry here.
-      // The contract test asserts:
-      //   1. provenance entry exists for every numeric summary field,
-      //   2. `derivationSummary` MUST NOT contain "TODO" (silent-hardcode trap),
-      //   3. `sourceField` is a real ScenarioScores/ScenarioExecution path or a
-      //      documented magic key (e.g. '__scenario_count__').
-      provenance: buildSummaryProvenance(),
-      environment,
-      environmentHash: manifestHash(environment),
-      annotation: {
-        annotatedScenarioCount,
-        judgeOnlyScenarioCount: Math.max(0, executed.length - annotatedScenarioCount),
-        drives: annotationDrives,
-      },
     },
   };
-}
-
-/**
- * Build the `summary.provenance` map. Centralised so the contract test reads a
- * single function rather than having to crawl the buildReport() return block.
- *
- * MUST be updated whenever a new aggregate is added to `BenchmarkReport.summary`.
- * Forgetting causes the contract test
- * (`test/regression/scorer-no-hardcoded-aggregate.regression.test.ts`) to fail
- * loudly with the missing key.
- */
-export function buildSummaryProvenance(): Readonly<Record<string, MetricProvenance>> {
-  const arith = (aggregateName: string, sourceField: string): MetricProvenance => ({
-    aggregateName,
-    sourceField,
-    derivationSummary: `arithmetic mean over executedForAggregate scenarios of ${sourceField}`,
-  });
-  const nullableArith = (aggregateName: string, sourceField: string): MetricProvenance => ({
-    aggregateName,
-    sourceField,
-    derivationSummary: `arithmetic mean over executedForAggregate scenarios with non-null ${sourceField}`,
-  });
-  const percentileEntry = (aggregateName: string, sourceField: string, pct: string): MetricProvenance => ({
-    aggregateName,
-    sourceField,
-    derivationSummary: `${pct} percentile over executed scenarios of ${sourceField}`,
-  });
-
-  return Object.freeze({
-    overallScore: arith('overallScore', 'scores.overall'),
-    overallScoreGeoMean: {
-      aggregateName: 'overallScoreGeoMean',
-      sourceField: 'scores.overall',
-      derivationSummary: 'geometric mean over executedForAggregate scenarios (aggregateGeoMean) of scores.overall',
-    },
-    overallScoreTrimmedGeoMean5: {
-      aggregateName: 'overallScoreTrimmedGeoMean5',
-      sourceField: 'scores.overall',
-      derivationSummary: '5%-trimmed geometric mean (aggregateTrimmedGeoMean, proportion=0.05) over executedForAggregate scenarios of scores.overall',
-    },
-    overallCi95: {
-      aggregateName: 'overallCi95',
-      sourceField: 'scores.overall',
-      derivationSummary: 'Student-t 95% CI (tCi95) over executedForAggregate scenarios of scores.overall',
-    },
-    overallBootstrapCi95: {
-      aggregateName: 'overallBootstrapCi95',
-      sourceField: 'scores.overall',
-      derivationSummary: 'distribution-free bootstrap 95% CI (bootstrapCi95) over executedForAggregate scenarios of scores.overall',
-    },
-    executionEfficiency: arith('executionEfficiency', 'scores.executionEfficiency'),
-    toolAccuracy: arith('toolAccuracy', 'scores.toolAccuracy'),
-    stepEfficiency: arith('stepEfficiency', 'scores.stepEfficiency'),
-    answerQuality: arith('answerQuality', 'scores.answerQuality'),
-    terminationCorrectness: arith('terminationCorrectness', 'scores.terminationCorrectness'),
-    costEfficiency: arith('costEfficiency', 'scores.costEfficiency'),
-    faithfulness: nullableArith('faithfulness', 'scores.faithfulness'),
-    contextRelevance: nullableArith('contextRelevance', 'scores.contextRelevance'),
-    contextRecall: nullableArith('contextRecall', 'scores.contextRecall'),
-    judge: nullableArith('judge', 'scores.judge'),
-    claimFaithfulness: nullableArith('claimFaithfulness', 'claimDiagnostics.faithfulnessScore'),
-    claimContradictionRate: nullableArith('claimContradictionRate', 'claimDiagnostics.contradictionRate'),
-    claimCriticalErrorRate: nullableArith('claimCriticalErrorRate', 'claimDiagnostics.criticalErrorRate'),
-    claimProvenanceCoverage: nullableArith('claimProvenanceCoverage', 'claimDiagnostics.provenanceCoverage'),
-    claimHardFailCount: {
-      aggregateName: 'claimHardFailCount',
-      sourceField: 'claimDiagnostics.hardFail',
-      derivationSummary: 'count of executedForAggregate scenarios with claimDiagnostics.hardFail === true',
-    },
-    claimEvaluatedCount: {
-      aggregateName: 'claimEvaluatedCount',
-      sourceField: '__scenario_count__',
-      derivationSummary: 'count of executedForAggregate scenarios with non-undefined claimDiagnostics',
-    },
-    scrOverall: nullableArith('scrOverall', 'scores.semanticConstraintRecall'),
-    scrHard: nullableArith('scrHard', 'scores.scrHard'),
-    scrSoft: nullableArith('scrSoft', 'scores.scrSoft'),
-    scrInferred: nullableArith('scrInferred', 'scores.scrInferred'),
-    scrInferredGraph: nullableArith('scrInferredGraph', 'scores.scrInferredGraph'),
-    entityLinkingAccuracy: nullableArith('entityLinkingAccuracy', 'scores.entityLinkingAccuracy'),
-    slotF1Strict: nullableArith('slotF1Strict', 'scores.slotF1Strict'),
-    slotF1Relaxed: nullableArith('slotF1Relaxed', 'scores.slotF1Relaxed'),
-    csrOverall: nullableArith('csrOverall', 'scores.csrOverall'),
-    csrHard: nullableArith('csrHard', 'scores.csrHard'),
-    csrSoft: nullableArith('csrSoft', 'scores.csrSoft'),
-    csrInferred: nullableArith('csrInferred', 'scores.csrInferred'),
-    csrInferredGraph: nullableArith('csrInferredGraph', 'scores.csrInferredGraph'),
-    constraintEvaluatedCount: {
-      aggregateName: 'constraintEvaluatedCount',
-      sourceField: '__scenario_count__',
-      derivationSummary: 'count of executedForAggregate scenarios with non-null semanticConstraintRecall or entityLinkingAccuracy',
-    },
-    avgSteps: arith('avgSteps', 'stepCount'),
-    latencyMs: percentileEntry('latencyMs', 'totalDurationMs', 'mean/p50/p95/p99/max'),
-    latencySla: {
-      aggregateName: 'latencySla',
-      sourceField: 'totalDurationMs',
-      derivationSummary: 'boolean gates derived from latencyMs.p50 / latencyMs.p95 vs LATENCY_SLA_P50_MS / LATENCY_SLA_P95_MS, timeoutCount = count of totalDurationMs > LATENCY_SLA_TIMEOUT_MS',
-    },
-    tokens: {
-      aggregateName: 'tokens',
-      sourceField: 'totalTokens',
-      derivationSummary: 'inputMean/outputMean = arithmetic mean over executed; totalP95 = p95 of (input+output) over executed',
-    },
-    byTier: {
-      aggregateName: 'byTier',
-      sourceField: 'scores.overall',
-      derivationSummary: 'per-tier { count, avgScore } where avgScore = arithmetic mean of scores.overall within tier',
-    },
-    evidenceFrameCoverage: {
-      aggregateName: 'evidenceFrameCoverage',
-      sourceField: 'evidenceFrameCount',
-      derivationSummary: 'sum(evidenceFrameCount) / sum(toolCallCount) over executed; null when totalToolCalls=0',
-    },
-    evidenceFrameCounts: {
-      aggregateName: 'evidenceFrameCounts',
-      sourceField: 'evidenceFrameCount',
-      derivationSummary: 'sums of evidenceFrameCount and toolCallCount over executed scenarios',
-    },
-    meanHardConstraints: {
-      aggregateName: 'meanHardConstraints',
-      sourceField: 'scores.extractedHardConstraintCount',
-      derivationSummary: 'arithmetic mean over executedForAggregate scenarios with non-null scores.extractedHardConstraintCount; replaces the previously hardcoded 0',
-    },
-  });
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -2799,110 +2193,6 @@ export function buildSummaryProvenance(): Readonly<Record<string, MetricProvenan
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * S1.2: one row of the per-scenario baseline diff. Lets a human see WHICH
- * scenarios moved between the frozen baseline and the current run, not just the
- * aggregate. `delta = currentScore − baselineScore` (positive = improvement).
- */
-export interface ScenarioDelta {
-  readonly id: number;
-  readonly tier: string;
-  /** Overall score in the baseline report, or null if the scenario is new. */
-  readonly baselineScore: number | null;
-  /** Overall score in the current report, or null if the scenario was dropped. */
-  readonly currentScore: number | null;
-  /** currentScore − baselineScore. null when either side is missing. */
-  readonly delta: number | null;
-  /** True when delta is below −regressionThreshold (a real regression). */
-  readonly regressed: boolean;
-  /** True when delta is above +regressionThreshold (a real improvement). */
-  readonly improved: boolean;
-  /** 'new' (only in current), 'dropped' (only in baseline), or 'both'. */
-  readonly presence: 'new' | 'dropped' | 'both';
-}
-
-/**
- * S1.2: minimal shape this diff needs from a report. Both the live report and a
- * loaded baseline JSON satisfy it. Kept narrow so the function is pure and
- * trivially unit-testable without constructing a full BenchmarkReport.
- */
-export interface ScenarioScoreRow {
-  readonly id: number;
-  readonly tier?: string;
-  readonly skipped?: boolean;
-  readonly scores?: { readonly overall?: number };
-}
-
-/**
- * S1.2 (pure): compute the per-scenario delta table between a baseline and the
- * current run, sorted by delta ascending (biggest regressions first). Skipped
- * scenarios are excluded on both sides. `regressionThreshold` decides what
- * counts as a meaningful move (default 0.05 = 5pp), keeping noise off the table.
- */
-export function computeScenarioDeltas(
-  baselineResults: readonly ScenarioScoreRow[],
-  currentResults: readonly ScenarioScoreRow[],
-  regressionThreshold: number,
-): readonly ScenarioDelta[] {
-  const scoreOf = (r: ScenarioScoreRow): number | null => {
-    if (r.skipped === true) return null;
-    const v = r.scores?.overall;
-    return typeof v === 'number' && Number.isFinite(v) ? v : null;
-  };
-  const baselineById = new Map<number, ScenarioScoreRow>();
-  for (const r of baselineResults) baselineById.set(r.id, r);
-  const currentById = new Map<number, ScenarioScoreRow>();
-  for (const r of currentResults) currentById.set(r.id, r);
-
-  const allIds = new Set<number>();
-  for (const r of baselineResults) allIds.add(r.id);
-  for (const r of currentResults) allIds.add(r.id);
-
-  const rows: ScenarioDelta[] = [];
-  for (const id of allIds) {
-    const b = baselineById.get(id);
-    const c = currentById.get(id);
-    const baselineScore = b !== undefined ? scoreOf(b) : null;
-    const currentScore = c !== undefined ? scoreOf(c) : null;
-    const tier = c?.tier ?? b?.tier ?? 'unknown';
-    const presence: ScenarioDelta['presence'] =
-      b === undefined ? 'new' : c === undefined ? 'dropped' : 'both';
-    const delta =
-      baselineScore !== null && currentScore !== null ? currentScore - baselineScore : null;
-    const regressed = delta !== null && delta < -regressionThreshold;
-    const improved = delta !== null && delta > regressionThreshold;
-    rows.push({ id, tier, baselineScore, currentScore, delta, regressed, improved, presence });
-  }
-
-  // Sort by delta ascending (most-regressed first). Rows with a null delta
-  // (new/dropped scenarios) sort last, tie-broken by id for determinism.
-  rows.sort((a, b) => {
-    if (a.delta === null && b.delta === null) return a.id - b.id;
-    if (a.delta === null) return 1;
-    if (b.delta === null) return -1;
-    if (a.delta !== b.delta) return a.delta - b.delta;
-    return a.id - b.id;
-  });
-  return rows;
-}
-
-/** S1.2: render the delta table as compact stderr lines (regressions first). */
-function formatScenarioDeltaTable(rows: readonly ScenarioDelta[]): string {
-  const fmt = (v: number | null): string => (v === null ? '  —  ' : (v * 100).toFixed(1).padStart(5));
-  const fmtDelta = (v: number | null): string => {
-    if (v === null) return '   — ';
-    const pp = v * 100;
-    return `${pp >= 0 ? '+' : ''}${pp.toFixed(1)}`.padStart(6);
-  };
-  const lines: string[] = [];
-  lines.push('  id    tier                 base   curr   Δpp    flag');
-  for (const r of rows) {
-    const flag = r.regressed ? '❌ REGRESSED' : r.improved ? '✅ improved' : r.presence === 'new' ? '🆕 new' : r.presence === 'dropped' ? '🗑 dropped' : '';
-    lines.push(
-      `  ${String(r.id).padEnd(5)} ${r.tier.slice(0, 20).padEnd(20)} `
-      + `${fmt(r.baselineScore)} ${fmt(r.currentScore)} ${fmtDelta(r.delta)}  ${flag}`,
-    );
-  }
-  return lines.join('\n');
  * SOTA++ B2: compute paired bootstrap on overall scores between two reports.
  *
  * Returns null when either side has fewer than 2 paired scenarios (no
@@ -2930,7 +2220,7 @@ async function compareBaseline(
   current: BenchmarkReport,
   baselinePath: string,
   failIfWorseThan: number | undefined,
-): Promise<{ regressed: boolean; delta: number; scenarioDeltas: readonly ScenarioDelta[] }> {
+): Promise<{ regressed: boolean; delta: number }> {
   try {
     const raw = await fs.readFile(resolvePath(baselinePath), 'utf8');
     // Cast to unknown first (CLAUDE.md rule 12): JSON.parse result is unknown until validated.
@@ -2945,7 +2235,7 @@ async function compareBaseline(
       // The previous behavior (regressed: false) meant a corrupted or missing
       // baseline file always reported "PASSED" — masking real regressions.
       console.error(`  [BASELINE] ⚠ Baseline file has unexpected shape — treating as regression (fail-safe)`);
-      return { regressed: true, delta: 0, scenarioDeltas: [] };
+      return { regressed: true, delta: 0 };
     }
 
     // ADR-011 PR2 dual-emit: baseline version compatibility.
@@ -2962,7 +2252,7 @@ async function compareBaseline(
         `  [BASELINE] ⚠ Unknown baselineVersion="${effectiveVersion}" — compatible: `
         + `${[...BASELINE_VERSION_COMPATIBLE].join(', ')}. Treating as regression (fail-safe).`,
       );
-      return { regressed: true, delta: 0, scenarioDeltas: [] };
+      return { regressed: true, delta: 0 };
     }
     const baseline = baselineUnknown as BenchmarkReport;
 
@@ -2979,27 +2269,6 @@ async function compareBaseline(
       console.error(`  [BASELINE] ❌ REGRESSION: overall dropped by more than ${threshold}`);
     }
 
-    // S1.2: per-scenario delta table — shows WHICH scenarios moved, not just the
-    // aggregate. Uses the per-scenario regression threshold (same as overall gate).
-    const scenarioDeltas = computeScenarioDeltas(
-      baseline.results ?? [],
-      current.results,
-      threshold,
-    );
-    const moved = scenarioDeltas.filter((r) => r.regressed || r.improved || r.presence !== 'both');
-    console.error(`\n  [BASELINE] per-scenario delta (threshold=±${(threshold * 100).toFixed(1)}pp, ${moved.length} moved / ${scenarioDeltas.length} total):`);
-    if (moved.length > 0) {
-      // Print only the rows that meaningfully moved to keep the table scannable;
-      // the full sorted table is in the report JSON (report.baselineDelta).
-      console.error(formatScenarioDeltaTable(moved));
-    } else {
-      console.error('  (no scenario moved beyond threshold)');
-    }
-    const regressedCount = scenarioDeltas.filter((r) => r.regressed).length;
-    const improvedCount = scenarioDeltas.filter((r) => r.improved).length;
-    console.error(`  [BASELINE] ${regressedCount} regressed, ${improvedCount} improved`);
-
-    return { regressed, delta, scenarioDeltas };
     // SOTA++ B2 paired bootstrap headline. Falls through silently when either
     // side has too few scenarios to be useful, so a partial / quick-profile
     // baseline never breaks the baseline gate.
@@ -3022,7 +2291,7 @@ async function compareBaseline(
     console.error(
       `  [BASELINE] ⚠ read failed: ${err instanceof Error ? err.message : String(err)} — treating as regression (fail-safe)`,
     );
-    return { regressed: true, delta: 0, scenarioDeltas: [] };
+    return { regressed: true, delta: 0 };
   }
 }
 
@@ -3032,18 +2301,7 @@ async function compareBaseline(
 
 async function main(): Promise<void> {
   const args = parseArgs();
-  const reportBase = await runBenchmark(args);
-
-  // S1.2: when a baseline is supplied, compute + print the per-scenario delta
-  // table BEFORE serializing the report so `baselineDelta` lands in the written
-  // JSON. The gate (exit 2) still uses the returned `regressed` flag below.
-  let baselineRegressed = false;
-  let report: BenchmarkReport = reportBase;
-  if (args.baseline !== undefined) {
-    const cmp = await compareBaseline(reportBase, args.baseline, args.failIfWorseThan);
-    baselineRegressed = cmp.regressed;
-    report = { ...reportBase, baselineDelta: cmp.scenarioDeltas };
-  }
+  const report = await runBenchmark(args);
 
   // JSON to stdout (or to file if --out)
   const json = JSON.stringify(report, null, 2);
@@ -3052,27 +2310,6 @@ async function main(): Promise<void> {
     console.error(`  [OUT] wrote ${args.outputPath}`);
   } else {
     console.log(json);
-  }
-
-  // SOTA++ env manifest (standalone): operators verifying rerun-equivalence
-  // can hash this file independently of the full report.
-  if (args.envManifestPath !== undefined) {
-    const manifestJson = JSON.stringify(
-      { manifest: report.summary.environment, manifestHash: report.summary.environmentHash },
-      null,
-      2,
-    );
-    await fs.writeFile(resolvePath(args.envManifestPath), manifestJson, 'utf8');
-    console.error(`  [ENV-MANIFEST] wrote ${args.envManifestPath} (hash=${report.summary.environmentHash})`);
-  }
-
-  // SOTA++ bench archive: copy the report JSON into a sha-and-timestamp file
-  // under data/bench-archive/. Default on; disable with --no-archive. Failure
-  // here MUST NOT block the run — archiving is best-effort.
-  if (args.archive) {
-    await archiveBenchReport(report, json).catch((err: unknown) => {
-      console.error(`  [BENCH-ARCHIVE] failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
   }
 
   // Human-readable summary to stderr
@@ -3210,22 +2447,12 @@ async function main(): Promise<void> {
   }
   console.error('  ────── execution ───────');
   console.error(`  Avg Steps:    ${s.avgSteps.toFixed(1)}`);
-  // L1.A: latencyMs is agent-work (wall MINUS throttle backoff) and gates
-  // the SLA; latencyWallMs is raw wall, shown only for infra diagnostics.
   const p50Tag = s.latencySla.p50Pass ? 'PASS' : 'FAIL';
   const p95Tag = s.latencySla.p95Pass ? 'PASS' : 'FAIL';
-  console.error(`  Latency p50:  ${s.latencyMs.p50.toFixed(0)}ms  [SLA <${LATENCY_SLA_P50_MS / 1000}s: ${p50Tag}]  (agent-work)`);
-  console.error(`  Latency p95:  ${s.latencyMs.p95.toFixed(0)}ms  [SLA <${LATENCY_SLA_P95_MS / 1000}s: ${p95Tag}]  (agent-work)`);
-  console.error(`  Latency p99:  ${s.latencyMs.p99.toFixed(0)}ms                       (agent-work)`);
-  console.error(`  Latency max:  ${s.latencyMs.max.toFixed(0)}ms                       (agent-work)`);
-  // Raw-wall percentile alongside agent-work to make infra throttle visible
-  // when the agent-work SLA passes but the raw wall would not.
-  const wallP95Tag = s.latencySla.p95PassWall ? 'pass' : 'FAIL';
-  const throttleDelta = Math.max(0, s.latencyWallMs.p95 - s.latencyMs.p95);
-  console.error(
-    `  Wall p95:     ${s.latencyWallMs.p95.toFixed(0)}ms  [raw, diagnostic: ${wallP95Tag}]`
-    + `  (+${throttleDelta.toFixed(0)}ms throttle backoff vs agent-work)`,
-  );
+  console.error(`  Latency p50:  ${s.latencyMs.p50.toFixed(0)}ms  [SLA <${LATENCY_SLA_P50_MS / 1000}s: ${p50Tag}]`);
+  console.error(`  Latency p95:  ${s.latencyMs.p95.toFixed(0)}ms  [SLA <${LATENCY_SLA_P95_MS / 1000}s: ${p95Tag}]`);
+  console.error(`  Latency p99:  ${s.latencyMs.p99.toFixed(0)}ms`);
+  console.error(`  Latency max:  ${s.latencyMs.max.toFixed(0)}ms`);
   if (s.latencySla.timeoutCount > 0) {
     console.error(`  Timeouts:     ${s.latencySla.timeoutCount} scenario(s) exceeded ${LATENCY_SLA_TIMEOUT_MS / 1000}s`);
   }
@@ -3371,20 +2598,10 @@ async function main(): Promise<void> {
       contextRelevance: s.contextRelevance,
       contextRecall: s.contextRecall,
       judge: s.judge,
-      // L1.A: latency stats fed into the insight generator are AGENT WORK
-      // (wall MINUS throttle backoff). The SLA-fail rule (latency_p95_fail)
-      // gates against these. `latencyP95WallMs` is surfaced too so the rule
-      // can distinguish infra-throttle from genuine agent slowness.
       latencyP50Ms: s.latencyMs.p50,
       latencyP95Ms: s.latencyMs.p95,
-      latencyP95WallMs: s.latencyWallMs.p95,
       tier6SoleExtractionRate: null, // TODO: aggregate from query logs
-      // SOTA++ reliability fix: was `meanHardConstraints: 0 // TODO`. Now sourced
-      // from the run-level aggregate computed in buildReport(). Null when no
-      // scenarios had constraint extraction (insight rule skips silently).
-      meanHardConstraints: s.meanHardConstraints,
-      overallScoreGeoMean: s.overallScoreGeoMean,
-      overallScoreTrimmedGeoMean5: s.overallScoreTrimmedGeoMean5,
+      meanHardConstraints: 0, // TODO: aggregate from query logs
       scrOverall: s.scrOverall ?? null,
       scrHard: s.scrHard ?? null,
       scrSoft: s.scrSoft ?? null,
@@ -3427,10 +2644,12 @@ async function main(): Promise<void> {
 
   console.error('');
 
-  // Baseline comparison gate — the diff already ran (and printed) before the
-  // report was serialized; reuse its regression verdict here. Exit 2 on regression.
-  if (args.baseline !== undefined && baselineRegressed) {
-    process.exit(2);
+  // Baseline comparison gate
+  if (args.baseline !== undefined) {
+    const { regressed } = await compareBaseline(report, args.baseline, args.failIfWorseThan);
+    if (regressed) {
+      process.exit(2);
+    }
   }
 }
 

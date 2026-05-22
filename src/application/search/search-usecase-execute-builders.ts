@@ -42,6 +42,21 @@ function filterAmbiguousShortFormPresentation(
   if (results.length === 0) {
     return rankedResults;
   }
+  // The ambiguous_short_form filter exists to drop list-shaped results that
+  // don't have an exact/alias identity-bearing match — keeps a "Sass" query
+  // from surfacing fuzzy non-identity rankings as if they were the resolved
+  // wine. But for similarity / similar_items / recommendation queries the
+  // user is explicitly asking for a LIST shaped by an anchor + constraints
+  // (`마고 비슷한 레드` = "red wines similar to Margaux"); the planner
+  // surfaces this by emitting `requires_identity_seal: false`. When the
+  // admission context says identity isn't required, this filter would
+  // empty the result list (no candidate has an identity matchType because
+  // there is no identity claim being made) — the same `!required ||
+  // satisfied` pattern we applied in evidence-gate.ts Rule 1 and
+  // admission-gate identitySeal applies here at the presentation seam.
+  if (plan.admission_context?.requires_identity_seal !== true) {
+    return rankedResults;
+  }
 
   const supportedEntityIds = new Set(
     results
