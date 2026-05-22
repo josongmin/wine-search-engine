@@ -426,6 +426,67 @@ export interface ScenarioResult {
    * Omitted when claim-level evaluation is disabled or fails.
    */
   readonly claimDiagnostics?: DiagnosticVector;
+  /**
+   * SOTA++ multi-sample (B1): per-run snapshots captured under `--runs N`.
+   * Absent when N === 1 (legacy single-run shape preserved).
+   */
+  readonly runs?: readonly ScenarioRun[];
+  /**
+   * SOTA++ multi-sample (B1): per-dimension aggregates across N runs.
+   * Absent when N === 1.
+   */
+  readonly aggregates?: ScenarioAggregates;
+}
+
+/**
+ * SOTA++ multi-sample (B1): single-run snapshot for a scenario.
+ *
+ * Captured when the runner is invoked with `--runs N` (N >= 2). The shape
+ * is intentionally flat so JSON reports can be diff'd line-by-line across
+ * runs without nested object reshuffling.
+ */
+export interface ScenarioRun {
+  readonly runIndex: number;
+  readonly overall: number;
+  readonly executionEfficiency: number;
+  readonly toolAccuracy: number;
+  readonly stepEfficiency: number;
+  readonly answerQuality: number;
+  readonly terminationCorrectness: number;
+  readonly costEfficiency: number;
+  readonly judge: number | null;
+  readonly faithfulness: number | null;
+  readonly totalDurationMs: number;
+  readonly totalTokensInput: number;
+  readonly totalTokensOutput: number;
+  readonly terminationReason: string;
+  readonly criticalFailure: boolean;
+}
+
+/**
+ * SOTA++ multi-sample (B1): summary stats over a numeric series of N runs.
+ * `stdev` uses Bessel correction (n−1 denominator). `n=1` yields stdev=0.
+ */
+export interface ScenarioRunAggregates {
+  readonly mean: number;
+  readonly stdev: number;
+  readonly n: number;
+  readonly min: number;
+  readonly max: number;
+}
+
+/**
+ * SOTA++ multi-sample (B1): per-dimension aggregates across N scenario runs.
+ * `judge` / `faithfulness` can be null when no run produced a non-null value.
+ */
+export interface ScenarioAggregates {
+  readonly overall: ScenarioRunAggregates;
+  readonly executionEfficiency: ScenarioRunAggregates;
+  readonly answerQuality: ScenarioRunAggregates;
+  readonly terminationCorrectness: ScenarioRunAggregates;
+  readonly costEfficiency: ScenarioRunAggregates;
+  readonly judge: ScenarioRunAggregates | null;
+  readonly faithfulness: ScenarioRunAggregates | null;
 }
 
 const ZERO_SCORES: ScenarioScores = {

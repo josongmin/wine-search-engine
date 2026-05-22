@@ -87,6 +87,12 @@ import {
   type ScenarioExecution,
   type StepTrace,
   type MetricProvenance,
+  type ScenarioResult,
+  type ScenarioExecution,
+  type StepTrace,
+  type ScenarioRun,
+  type ScenarioRunAggregates,
+  type ScenarioAggregates,
 } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
@@ -97,6 +103,18 @@ import {
   meanHardConstraintsAcrossScenarios,
 } from './hard-constraints-aggregator.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
+import {
+  pairedBootstrap,
+  formatPairedBootstrapHeadline,
+  type PairedBootstrapResult,
+  type ScenarioScorePair,
+} from './statistical-compare.js';
+import {
+  decomposeVariance,
+  formatVarianceInsight,
+  type VarianceDecomposition,
+  type VarianceObservation,
+} from './variance-decomposition.js';
 import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import {
   LATENCY_SLA_P50_MS as K_LATENCY_SLA_P50_MS,
@@ -159,10 +177,22 @@ interface CliArgs {
    * at `judgeSamples` (default 3) to bound cost. Override with `--judge-required-samples`.
    */
   readonly judgeRequiredSamples: number;
+   * Multi-sample runs per scenario for statistical stability. Default 1
+   * preserves the legacy single-run behavior; nightly uses >= 3 so paired
+   * bootstrap + variance decomposition have enough datapoints to detect a
+   * real lift vs LLM/judge stochasticity.
+   */
+  readonly runs: number;
   readonly baseline?: string;
   readonly failIfWorseThan?: number;
   readonly outputPath?: string;
 }
+
+/**
+ * Maximum sane value for `--runs` — guards against typos like `--runs 100000`
+ * that would blow LLM budget. 25 is well above the n=3..5 nightly target.
+ */
+const MAX_RUNS_PER_SCENARIO = 25;
 
 type CriticalWineType = 'red' | 'white' | 'sparkling';
 type CriticalWineTypeCoverage = Record<CriticalWineType, number>;
@@ -296,6 +326,7 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
   const explicitJudge = explicitNoJudge || explicitJudgeModel !== undefined;
   const explicitJudgeSamples = get('--judge-samples');
   const explicitJudgeRequiredSamples = get('--judge-required-samples');
+  const explicitRuns = get('--runs');
 
   const profile = get('--profile') as CliArgs['profile'];
 
@@ -317,6 +348,8 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
     judgeSamples: parseOptionalInt(explicitJudgeSamples, DEFAULT_JUDGE_SAMPLES),
     // S1.3: judgeRequired scenarios get a higher median sample by default.
     judgeRequiredSamples: parseOptionalInt(explicitJudgeRequiredSamples, DEFAULT_JUDGE_REQUIRED_SAMPLES),
+    judgeSamples: parseOptionalInt(explicitJudgeSamples, 3),
+    runs: Math.max(1, Math.min(MAX_RUNS_PER_SCENARIO, parseOptionalInt(explicitRuns, 1))),
     baseline: get('--baseline'),
     failIfWorseThan:
       get('--fail-if-worse-than') !== undefined
@@ -361,6 +394,12 @@ export function parseRunnerArgs(argv: readonly string[]): CliArgs {
     }
     if (explicitJudgeSamples === undefined) {
       args = { ...args, judgeSamples: 3 };
+    }
+    // Multi-sample agent runs: needed for paired-bootstrap signal vs LLM
+    // stochasticity. Three runs is the minimum to estimate within-scenario
+    // variance; CI nightly is the natural place to absorb the 3x cost.
+    if (explicitRuns === undefined) {
+      args = { ...args, runs: 3 };
     }
   }
 
@@ -1017,6 +1056,174 @@ function summariseLatency(values: readonly number[]): LatencyStats {
 }
 
 /**
+ * Bessel-corrected sample stdev. Returns 0 for n < 2 so a single observation
+ * collapses to a deterministic zero-width spread (NaN would propagate
+ * downstream and silently nullify dependent stats).
+ */
+export function sampleStdev(values: readonly number[]): number {
+  if (values.length < 2) return 0;
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length < 2) return 0;
+  const mean = finite.reduce((s, v) => s + v, 0) / finite.length;
+  const variance = finite.reduce((s, v) => s + (v - mean) ** 2, 0) / (finite.length - 1);
+  return Math.sqrt(variance);
+}
+
+/**
+ * Aggregate a numeric series into mean/stdev/min/max — used for per-dimension
+ * cross-run summarization. Skips NaN/Infinity inputs (consistent with the
+ * benchmark's null-drop policy) so a single rogue run doesn't poison the
+ * aggregate.
+ */
+export function aggregateSeries(values: readonly number[]): ScenarioRunAggregates {
+  const finite = values.filter((v): v is number => Number.isFinite(v));
+  if (finite.length === 0) {
+    return { mean: 0, stdev: 0, n: 0, min: 0, max: 0 };
+  }
+  const mean = finite.reduce((s, v) => s + v, 0) / finite.length;
+  let min = finite[0]!;
+  let max = finite[0]!;
+  for (let i = 1; i < finite.length; i++) {
+    const v = finite[i]!;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { mean, stdev: sampleStdev(finite), n: finite.length, min, max };
+}
+
+/**
+ * Aggregate a nullable numeric series — null entries are dropped from the
+ * count. Returns null when no non-null entries are present, signalling that
+ * the dimension has no signal across runs (e.g. judge disabled).
+ */
+export function aggregateNullableSeries(
+  values: readonly (number | null)[],
+): ScenarioRunAggregates | null {
+  const present = values.filter((v): v is number => v !== null && Number.isFinite(v));
+  if (present.length === 0) return null;
+  return aggregateSeries(present);
+}
+
+/**
+ * Project one ScenarioResult into a flat ScenarioRun snapshot. The runIndex
+ * argument is the 0-based ordering across the N samples — caller is
+ * responsible for the contiguous indexing.
+ */
+export function projectToScenarioRun(
+  res: ScenarioResult,
+  runIndex: number,
+): ScenarioRun {
+  const s = res.scores;
+  return {
+    runIndex,
+    overall: s.overall,
+    executionEfficiency: s.executionEfficiency,
+    toolAccuracy: s.toolAccuracy,
+    stepEfficiency: s.stepEfficiency,
+    answerQuality: s.answerQuality,
+    terminationCorrectness: s.terminationCorrectness,
+    costEfficiency: s.costEfficiency,
+    judge: s.judge,
+    faithfulness: s.faithfulness,
+    totalDurationMs: res.totalDurationMs ?? 0,
+    totalTokensInput: res.totalTokens?.input ?? 0,
+    totalTokensOutput: res.totalTokens?.output ?? 0,
+    terminationReason: res.terminationReason ?? 'unknown',
+    criticalFailure: s.criticalFailure,
+  };
+}
+
+/**
+ * Build the per-dimension aggregate vector across all N runs.
+ * judge/faithfulness aggregates are null when no run produced a non-null value.
+ */
+export function buildScenarioAggregates(runs: readonly ScenarioRun[]): ScenarioAggregates {
+  return {
+    overall: aggregateSeries(runs.map((r) => r.overall)),
+    executionEfficiency: aggregateSeries(runs.map((r) => r.executionEfficiency)),
+    answerQuality: aggregateSeries(runs.map((r) => r.answerQuality)),
+    terminationCorrectness: aggregateSeries(runs.map((r) => r.terminationCorrectness)),
+    costEfficiency: aggregateSeries(runs.map((r) => r.costEfficiency)),
+    judge: aggregateNullableSeries(runs.map((r) => r.judge)),
+    faithfulness: aggregateNullableSeries(runs.map((r) => r.faithfulness)),
+  };
+}
+
+/**
+ * Merge N per-run ScenarioResults into a single ScenarioResult where:
+ *   - `scores.{dim}` reflects the MEAN of the per-run scores (per-dim).
+ *   - `runs: ScenarioRun[]` and `aggregates: ScenarioAggregates` are attached.
+ *   - Other top-level diagnostic fields (toolsUsed, steps, judgeReasoning,
+ *     claimDiagnostics) carry the LAST successful run's values — these are
+ *     used purely for human triage and a representative trace is more useful
+ *     than a synthetic merge.
+ *   - `criticalFailure` is the OR across runs (any critical failure flips
+ *     the merged result). This is intentionally pessimistic — a scenario
+ *     that critically fails in any sample is unstable.
+ *
+ * If all runs failed (all carry `error`), the merge returns the first as-is.
+ */
+function mergeMultiSampleResults(
+  scenario: AgentBenchmarkScenario,
+  perRunResults: readonly ScenarioResult[],
+): ScenarioResult {
+  if (perRunResults.length === 0) {
+    return scoreScenario(scenario, null, undefined, undefined, 'no runs');
+  }
+  if (perRunResults.length === 1) {
+    return perRunResults[0]!;
+  }
+
+  const successful = perRunResults.filter((r) => r.error === undefined && !r.skipped);
+  if (successful.length === 0) {
+    // All runs errored or were skipped → return the first (still carries the error).
+    return perRunResults[0]!;
+  }
+
+  const runs = perRunResults.map((r, idx) => projectToScenarioRun(r, idx));
+  const aggregates = buildScenarioAggregates(runs);
+
+  const template = successful[successful.length - 1]!;
+  const tplScores = template.scores;
+
+  // Per-dimension means — replace per-run scalar with cross-run mean.
+  const meanOrFallback = (
+    agg: ScenarioRunAggregates,
+    fallback: number,
+  ): number => (agg.n > 0 ? agg.mean : fallback);
+
+  const nullableMeanOrFallback = (
+    agg: ScenarioRunAggregates | null,
+    fallback: number | null,
+  ): number | null => (agg !== null && agg.n > 0 ? agg.mean : fallback);
+
+  const criticalFailureMerged = perRunResults.some((r) => r.scores.criticalFailure);
+
+  // Build the merged scores by overriding the dims we have aggregates for;
+  // keep everything else (RAGAS, constraint metrics, etc.) from the template.
+  const mergedScores: ScenarioResult['scores'] = {
+    ...tplScores,
+    executionEfficiency: meanOrFallback(aggregates.executionEfficiency, tplScores.executionEfficiency),
+    toolAccuracy: aggregateSeries(runs.map((r) => r.toolAccuracy)).mean,
+    stepEfficiency: aggregateSeries(runs.map((r) => r.stepEfficiency)).mean,
+    answerQuality: meanOrFallback(aggregates.answerQuality, tplScores.answerQuality),
+    terminationCorrectness: meanOrFallback(aggregates.terminationCorrectness, tplScores.terminationCorrectness),
+    costEfficiency: meanOrFallback(aggregates.costEfficiency, tplScores.costEfficiency),
+    judge: nullableMeanOrFallback(aggregates.judge, tplScores.judge),
+    faithfulness: nullableMeanOrFallback(aggregates.faithfulness, tplScores.faithfulness),
+    overall: meanOrFallback(aggregates.overall, tplScores.overall),
+    criticalFailure: criticalFailureMerged,
+  };
+
+  return {
+    ...template,
+    scores: mergedScores,
+    runs,
+    aggregates,
+  };
+}
+
+/**
  * Student-t 95% confidence interval for the mean of continuous bounded
  * [0,1] scores. The earlier implementation used Wilson, which is designed
  * for binomial PROPORTIONS (k successes / n trials) — applying it to a
@@ -1137,6 +1344,7 @@ export interface WilsonCi {
   readonly n: number;
 }
 
+
 /**
  * End-to-end wall clock for the benchmark process (distinct from per-scenario
  * `summary.latencyMs`, which reflects orchestrator-reported durations).
@@ -1198,6 +1406,12 @@ export interface BenchmarkReport {
   readonly model: string;
   readonly judgeModel: string | null;
   readonly judgeSamples: number;
+  /**
+   * SOTA++ B1: number of independent agent runs per scenario. Default 1
+   * (legacy single-run); CI nightly uses >= 3 to enable paired bootstrap
+   * + variance decomposition.
+   */
+  readonly runsPerScenario: number;
   /** Embedding model used for dense retrieval (from OPENAI_EMBEDDING_MODEL). */
   readonly embeddingModel: string;
   /** Hostname of the OpenAI-compatible API endpoint (e.g. "api.openai.com"). */
@@ -1413,7 +1627,28 @@ export interface BenchmarkReport {
      * Adding a new aggregate? Register it here in `buildReport()`.
      */
     readonly provenance: Readonly<Record<string, MetricProvenance>>;
+     * SOTA++ B3 variance decomposition. Populated only when --runs > 1 so
+     * there is non-degenerate within-scenario variance to decompose. null
+     * for legacy single-run benches.
+     */
+    readonly varianceDecomposition: VarianceDecompositionSummary | null;
   };
+}
+
+/**
+ * Trimmed projection of {@link VarianceDecomposition} for the bench summary.
+ * Mirrors the runtime type but is declared here to keep the BenchmarkReport
+ * shape self-contained.
+ */
+export interface VarianceDecompositionSummary {
+  readonly scenarioFraction: number;
+  readonly runFraction: number;
+  readonly judgeFraction: number;
+  readonly residualFraction: number;
+  readonly dominantSource: VarianceDecomposition['dominantSource'];
+  readonly observationCount: number;
+  readonly scenarioCount: number;
+  readonly grandMean: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1533,16 +1768,26 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   let infraFallbackCount = 0;
   const totalToRun = scenarios.filter((s) => s.skip === undefined).length;
 
-  const results = await runWithConcurrency(
-    scenarios,
-    effectiveConcurrency,
-    async (scenario) => {
-      if (scenario.skip !== undefined) {
-        console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
-        return scoreScenario(scenario, null, undefined, undefined);
-      }
+  // SOTA++ B1 multi-sample: when --runs N > 1, each scenario executes N
+  // independent agent runs. Per-run ScenarioResults are merged into a single
+  // result where `scores` reflect the per-dimension mean across runs, with
+  // raw `runs: ScenarioRun[]` and `aggregates: ScenarioAggregates` attached.
+  //
+  // The legacy --runs 1 path is bit-identical to pre-B1: no `runs` /
+  // `aggregates` fields emitted, no merge layer.
+  const RUNS_PER_SCENARIO = Math.max(1, args.runs);
+  const totalAgentExecutions = totalToRun * RUNS_PER_SCENARIO;
 
-      console.error(`  [RUN]  #${String(scenario.id).padEnd(3)} [${scenario.tier.slice(0, 16).padEnd(16)}] ${scenario.description.slice(0, 55)}`);
+  const executeOneRun = async (
+    scenario: AgentBenchmarkScenario,
+    runIndex: number,
+  ): Promise<ScenarioResult> => {
+      console.error(
+        `  [RUN]  #${String(scenario.id).padEnd(3)} `
+        + `[${scenario.tier.slice(0, 16).padEnd(16)}] `
+        + scenario.description.slice(0, 55)
+        + (RUNS_PER_SCENARIO > 1 ? ` (run ${runIndex + 1}/${RUNS_PER_SCENARIO})` : ''),
+      );
       const start = Date.now();
 
       try {
@@ -1800,7 +2045,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           + `tools=${execution.toolCallCount} steps=${scored.stepCount} `
           + `${dimParts}${judgePart}${faithPart}${scrPart}${elaPart}${claimPart} `
           + `${(elapsed / 1000).toFixed(1)}s `
-          + `[${completedCount}/${totalToRun}]${infraTag}`,
+          + `[${completedCount}/${totalAgentExecutions}]${infraTag}`,
         );
         return scored;
       } catch (err) {
@@ -1813,7 +2058,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           `  [FAIL] #${String(scenario.id).padEnd(3)} [${scenario.tier.slice(0, 16).padEnd(16)}] `
           + `${normalizedErr.message.slice(0, 80)} `
           + `${(elapsed / 1000).toFixed(1)}s `
-          + `[${completedCount}/${totalToRun}]`,
+          + `[${completedCount}/${totalAgentExecutions}]`,
         );
         return scoreScenario(
           scenario,
@@ -1823,6 +2068,33 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           normalizedErr.message,
         );
       }
+    };
+
+  const results = await runWithConcurrency(
+    scenarios,
+    effectiveConcurrency,
+    async (scenario): Promise<ScenarioResult> => {
+      if (scenario.skip !== undefined) {
+        console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
+        return scoreScenario(scenario, null, undefined, undefined);
+      }
+
+      // Single-run legacy path: bit-identical to pre-B1 — no `runs` /
+      // `aggregates` fields, no merge layer.
+      if (RUNS_PER_SCENARIO <= 1) {
+        return executeOneRun(scenario, 0);
+      }
+
+      // Multi-sample path: execute N independent runs. We DO NOT parallelize
+      // runs for the same scenario — they share the same OpenAI rate-limit
+      // budget and serialized retries are the correct cost model. The outer
+      // concurrency pool already exploits parallelism across scenarios.
+      const perRunResults: ScenarioResult[] = [];
+      for (let runIndex = 0; runIndex < RUNS_PER_SCENARIO; runIndex++) {
+        const r = await executeOneRun(scenario, runIndex);
+        perRunResults.push(r);
+      }
+      return mergeMultiSampleResults(scenario, perRunResults);
     },
   );
 
@@ -2057,6 +2329,43 @@ function buildReport(
   // per-scenario `extractedHardConstraintCount`.
   const hardConstraintCounts = executedForAggregate.map((r) => r.scores.extractedHardConstraintCount);
   const meanHardConstraints = nullableMean(hardConstraintCounts);
+  // SOTA++ B3: variance decomposition over per-run scenario observations.
+  // Only meaningful when --runs > 1 (otherwise within-scenario SS is 0 and
+  // the share collapses into scenario-fraction-only).
+  const varianceDecomposition = args.runs > 1
+    ? (() => {
+        const observations: VarianceObservation[] = [];
+        for (const r of executedForAggregate) {
+          const runsArr = r.runs;
+          if (runsArr === undefined || runsArr.length === 0) continue;
+          for (const run of runsArr) {
+            // judgeSampleIndex=0 — judge samples are already collapsed into
+            // the per-run judge score (median across N judge votes). When the
+            // benchmark exposes per-judge-sample raw scores in a future phase,
+            // this index becomes meaningful; today it's a fixed 0.
+            observations.push({
+              scenarioId: r.id,
+              runIndex: run.runIndex,
+              judgeSampleIndex: 0,
+              score: run.overall,
+            });
+          }
+        }
+        if (observations.length === 0) return null;
+        const decomp = decomposeVariance(observations);
+        const summary: VarianceDecompositionSummary = {
+          scenarioFraction: decomp.scenarioFraction,
+          runFraction: decomp.runFraction,
+          judgeFraction: decomp.judgeFraction,
+          residualFraction: decomp.residualFraction,
+          dominantSource: decomp.dominantSource,
+          observationCount: decomp.observationCount,
+          scenarioCount: decomp.scenarioCount,
+          grandMean: decomp.grandMean,
+        };
+        return summary;
+      })()
+    : null;
 
   return {
     baselineVersion: BASELINE_VERSION_CURRENT,
@@ -2066,6 +2375,7 @@ function buildReport(
     model,
     judgeModel,
     judgeSamples: args.judgeSamples,
+    runsPerScenario: args.runs,
     embeddingModel,
     apiBaseDomain,
     container: args.container,
@@ -2179,6 +2489,7 @@ function buildReport(
         return {
           evidenceFrameCoverage: totalToolCalls > 0 ? framedToolCalls / totalToolCalls : null,
           evidenceFrameCounts: { framedToolCalls, totalToolCalls },
+          varianceDecomposition,
         };
       })(),
       // Pipeline stage latency breakdown: median and p95 per stage across all
@@ -2456,6 +2767,27 @@ function formatScenarioDeltaTable(rows: readonly ScenarioDelta[]): string {
     );
   }
   return lines.join('\n');
+ * SOTA++ B2: compute paired bootstrap on overall scores between two reports.
+ *
+ * Returns null when either side has fewer than 2 paired scenarios (no
+ * signal). Uses per-scenario overall as the unit of analysis — paired by
+ * scenario id, so scenario set differences are dropped (not extrapolated).
+ *
+ * Iterations is fixed at 10_000 (task spec). Reuses
+ * {@link pairedBootstrap} so the statistical math is single-source.
+ */
+export function computePairedBootstrapFromReports(
+  baseline: BenchmarkReport,
+  current: BenchmarkReport,
+): PairedBootstrapResult | null {
+  const project = (r: BenchmarkReport): ScenarioScorePair[] =>
+    r.results
+      .filter((row) => !row.skipped && row.error === undefined)
+      .map((row) => ({ id: row.id, score: row.scores.overall }));
+  const basePairs = project(baseline);
+  const curPairs = project(current);
+  if (basePairs.length < 2 || curPairs.length < 2) return null;
+  return pairedBootstrap(basePairs, curPairs, { iterations: 10_000, alpha: 0.05 });
 }
 
 async function compareBaseline(
@@ -2532,6 +2864,22 @@ async function compareBaseline(
     console.error(`  [BASELINE] ${regressedCount} regressed, ${improvedCount} improved`);
 
     return { regressed, delta, scenarioDeltas };
+    // SOTA++ B2 paired bootstrap headline. Falls through silently when either
+    // side has too few scenarios to be useful, so a partial / quick-profile
+    // baseline never breaks the baseline gate.
+    const pb = computePairedBootstrapFromReports(baseline, current);
+    if (pb !== null) {
+      console.error(`  [BASELINE] ${formatPairedBootstrapHeadline('overall', pb)}`);
+      if (pb.regressedScenarios.length > 0) {
+        const worst = pb.regressedScenarios.slice(0, 3);
+        console.error(
+          `  [BASELINE] worst regressions: `
+          + worst.map((d) => `#${d.id}(${(d.delta * 100).toFixed(1)}pp)`).join(' '),
+        );
+      }
+    }
+
+    return { regressed, delta };
   } catch (err) {
     // v4 fix: baseline read failure → fail-safe (regressed: true).
     // Missing or unreadable baseline should NOT silently pass the benchmark.
@@ -2640,6 +2988,34 @@ async function main(): Promise<void> {
   console.error(
     `                (t-CI: ${(s.overallCi95.lower * 100).toFixed(1)}–${(s.overallCi95.upper * 100).toFixed(1)}%)`,
   );
+  // SOTA++ B1 + B3: multi-sample + variance decomposition signal.
+  if (report.runsPerScenario > 1) {
+    console.error(`  Runs/scenario: ${report.runsPerScenario}`);
+    if (s.varianceDecomposition !== null) {
+      const vd = s.varianceDecomposition;
+      const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
+      console.error(
+        `  Var decomp:   scenario=${pct(vd.scenarioFraction)} `
+        + `run=${pct(vd.runFraction)} judge=${pct(vd.judgeFraction)} `
+        + `residual=${pct(vd.residualFraction)} `
+        + `(n=${vd.observationCount})`,
+      );
+      // Mechanical insight from the variance-decomposition module — names the
+      // dominant source and recommends the next reliability lever.
+      console.error(`                ${formatVarianceInsight({
+        ...vd,
+        // Reconstruct the runtime shape from the summary projection for the
+        // formatter (SS values are not stored in the summary).
+        totalSS: 0,
+        scenarioSS: 0,
+        runSS: 0,
+        judgeSS: 0,
+        residualSS: 0,
+        meanRunsPerScenario: 0,
+        meanJudgeSamplesPerRun: 0,
+      })}`);
+    }
+  }
   console.error('  ────── dimensions ──────');
   console.error(`  Exec Eff:     ${(s.executionEfficiency * 100).toFixed(1)}%   (tool ${(s.toolAccuracy * 100).toFixed(0)}% × step ${(s.stepEfficiency * 100).toFixed(0)}%)`);
   console.error(`  Answer Qual:  ${(s.answerQuality * 100).toFixed(1)}%`);
