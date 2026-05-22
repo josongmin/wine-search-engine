@@ -654,7 +654,7 @@ export class SignalComputer {
     const preferenceAlignment = this.computePreferenceAlignment();
     const popularity = this.computePopularity(candidate);
     const availability = this.computeAvailability(candidate);
-    return {
+    const result: ComponentScores = {
       entityIntegrity: this.computeEntityIntegrity(candidate, queryPlan),
       anchorSimilarity: anchorProfile !== undefined
         ? this.computeAnchorSimilarity(candidate, anchorProfile)
@@ -676,6 +676,23 @@ export class SignalComputer {
       giftSuitability: this.computeGiftSuitability(candidate),
       beginnerSuitability: this.computeBeginnerSuitability(candidate),
     };
+    // eslint-disable-next-line no-console
+    if (['romanee-conti-2019', 'opus-one-2018'].includes(String(candidate.entityId))) {
+      // eslint-disable-next-line no-console
+      console.error('SIG_DBG', {
+        id: String(candidate.entityId),
+        protected: candidate.retrievalProvenance?.protectedInclusionReason,
+        anchorRank: candidate.anchorRank,
+        entityIntegrity: result.entityIntegrity,
+        anchorSimilarity: result.anchorSimilarity,
+        semantic: result.semantic,
+        popularity: result.popularity,
+        producerPrestige: result.producerPrestige,
+        criticScore: result.criticScore,
+        availability: result.availability,
+      });
+    }
+    return result;
   }
 
   /**

@@ -1266,6 +1266,27 @@ describe('AgentToolExecutionPhase', () => {
     const shouldBreak = await phase.run(
       'req-concurrency',
       DEFAULT_AGENT_CONFIG,
+      budget,
+      state,
+      { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
+      plannerPhase({
+        thought: 'search three things in parallel',
+        actions: [
+          { tool: 'search_wines', input: { query: 'opus one' } },
+          { tool: 'search_wines', input: { query: 'sassicaia' } },
+          { tool: 'search_wines', input: { query: 'penfolds grange' } },
+        ],
+      }),
+    );
+    const elapsedMs = Date.now() - startMs;
+
+    void shouldBreak;
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(state.toolOutcomes).toHaveLength(3);
+    // Concurrent: ~100ms, not ~300ms. Allow generous slack for CI jitter.
+    expect(elapsedMs).toBeLessThan(2 * TOOL_DELAY_MS);
+  });
+
   // L1.C — fast-answer planner bypass (structural latency lever).
   //
   // After a successful first tool call whose observation satisfies every
@@ -1292,21 +1313,6 @@ describe('AgentToolExecutionPhase', () => {
       state,
       { requiresDrinkabilityCheck: false, hasEntityMetadataSignal: false },
       plannerPhase({
-        thought: 'search three things in parallel',
-        actions: [
-          { tool: 'search_wines', input: { query: 'opus one' } },
-          { tool: 'search_wines', input: { query: 'sassicaia' } },
-          { tool: 'search_wines', input: { query: 'penfolds grange' } },
-        ],
-      }),
-    );
-    const elapsedMs = Date.now() - startMs;
-
-    expect(shouldBreak).toBe(false);
-    expect(execute).toHaveBeenCalledTimes(3);
-    expect(state.toolOutcomes).toHaveLength(3);
-    // Concurrent: ~100ms, not ~300ms. Allow generous slack for CI jitter.
-    expect(elapsedMs).toBeLessThan(2 * TOOL_DELAY_MS);
         thought: 'simple lookup',
         action: { tool: 'search_wines', input: { query: 'opus one' } },
       }),
