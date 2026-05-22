@@ -151,9 +151,21 @@ describe('CandidateScorer', () => {
       expect(scorer.score(candidate)).toBeCloseTo(0.5, 10);
     });
 
-    it('phonetic match has correct weight 0.4', () => {
+    it('phonetic-only candidate is capped at PHONETIC_ONLY_CONTRIBUTION_CEILING (0.34), below the raw 0.4 weight', () => {
+      // phoneticMatch weight is 0.4, but a phonetic-ONLY candidate (no
+      // corroborating identity / alias / canonical / edit-distance lane) is
+      // clamped to 0.34 by applyPhoneticOnlyCap (RFC-006 §5.4) so it can never
+      // ALONE clear resolveTau. See candidate-scorer.ts isPhoneticOnlyBySignals.
       const candidate = makeCandidate({ phoneticMatch: 1.0 });
-      expect(scorer.score(candidate)).toBeCloseTo(0.4, 10);
+      expect(scorer.score(candidate)).toBeCloseTo(0.34, 10);
+    });
+
+    it('phonetic match contributes its full 0.4 weight when an identity lane stands the cap down', () => {
+      // The moment a non-phonetic identity signal coexists (here aliasExactMatch),
+      // the phonetic-only cap stands down and the phonetic lane contributes its
+      // raw 0.4 weight: aliasExactMatch 0.8 + phoneticMatch 0.4 = 1.2.
+      const candidate = makeCandidate({ aliasExactMatch: 1.0, phoneticMatch: 1.0 });
+      expect(scorer.score(candidate)).toBeCloseTo(1.2, 10);
     });
   });
 

@@ -72,6 +72,7 @@ import {
   type ScenarioRun,
   type ScenarioRunAggregates,
   type ScenarioAggregates,
+  type MetricProvenance,
 } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulnessHybrid } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
@@ -831,19 +832,58 @@ function normalizeRunnerError(err: unknown): Error {
   return new Error('Scenario failed with non-Error rejection: [non-stringifiable object]');
 }
 
+/**
+ * Outcome of {@link withRetry}: the resolved value plus the cumulative wall-clock
+ * time spent SLEEPING between retries due to throttling/transient infra failures.
+ *
+ * S1.1 MEASUREMENT INTEGRITY: `throttleWaitMs` is subtracted from the per-scenario
+ * wall before the latency/cost score dimension is computed (`agentWorkMs`), so
+ * provider 429/503 backoff never masquerades as agent slowness.
+ *
+ * L1.B NO-DOUBLE-COUNT: when `fn()` itself returns a {@link WithRetryOutcome}
+ * (a nested withRetry call), this wrapper folds the child's `throttleWaitMs`
+ * into its own accumulator exactly ONCE — so parent+child waits are never
+ * summed twice.
+ */
+export interface WithRetryOutcome<T> {
+  readonly value: T;
+  readonly throttleWaitMs: number;
+}
+
+function isWithRetryOutcome<U>(value: unknown): value is WithRetryOutcome<U> {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'value' in value
+    && 'throttleWaitMs' in value
+    && typeof (value as { throttleWaitMs: unknown }).throttleWaitMs === 'number'
+  );
+}
+
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number,
   shouldRetry: (err: unknown) => boolean,
-): Promise<T> {
+): Promise<WithRetryOutcome<T>> {
   // `--max-retries N` means "initial attempt + up to N retries".
   // N=0 must still execute fn() once; otherwise the runner skips the scenario
   // entirely and falls through to `throw undefined`.
   const totalAttempts = Math.max(1, maxRetries + 1);
   let lastErr: unknown;
+  // Cumulative time spent sleeping on throttle/transient backoff. This is infra
+  // wait, NOT agent work — the caller subtracts it from the scenario wall.
+  let throttleWaitMs = 0;
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
-      return await fn();
+      const value = await fn();
+      // L1.B no-double-count: when `fn` is itself a withRetry-wrapped call
+      // (nested retry), unwrap the child's outcome and fold its
+      // `throttleWaitMs` exactly ONCE into our accumulator.
+      if (isWithRetryOutcome<unknown>(value)) {
+        const inner = value as unknown as WithRetryOutcome<T>;
+        return { value: inner.value, throttleWaitMs: throttleWaitMs + inner.throttleWaitMs };
+      }
+      return { value: value as T, throttleWaitMs };
     } catch (err) {
       lastErr = err;
       if (attempt >= totalAttempts || !shouldRetry(err)) throw normalizeRunnerError(err);
@@ -853,7 +893,9 @@ export async function withRetry<T>(
       const delayMs = isRateLimitError(err)
         ? Math.min(RUNNER_RATE_LIMIT_BASE_MS * 2 ** (attempt - 1), RUNNER_RATE_LIMIT_MAX_MS)
         : RUNNER_TRANSIENT_BASE_MS * attempt;
+      const sleepStart = Date.now();
       await new Promise((r) => setTimeout(r, delayMs));
+      throttleWaitMs += Date.now() - sleepStart;
     }
   }
   throw normalizeRunnerError(lastErr);
@@ -1583,7 +1625,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         // classifier doesn't override the scenario's expected budget.
         // Without this, a scenario expecting maxSteps:2 would get
         // adaptive_budget=3 for specific_sku, deflating stepEfficiency.
-        const result = await withRetry(
+        const { value: result, throttleWaitMs } = await withRetry(
           () => orchestrator.execute(
             scenario.query,
             `bench-${scenario.id}`,
@@ -1592,6 +1634,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           args.maxRetries,
           isTransient,
         );
+        // S1.1 measurement integrity: the runner wall (start → resolve) includes
+        // retry/throttle backoff sleeps; agentWorkMs strips that infra wait so
+        // provider 429/503 backoff never masquerades as agent latency. The scorer
+        // prefers agentWorkMs over totalDurationMs for the cost/latency dimension.
+        const agentWorkMs = Math.max(0, (Date.now() - start) - throttleWaitMs);
 
         const toolsUsed = result.steps.flatMap((s) => {
           if (s.actionPairs !== undefined) {
@@ -1638,6 +1685,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             : {}),
           terminationReason: mapTerminationReason(result.terminationReason),
           totalDurationMs: result.totalDurationMs,
+          agentWorkMs,
           totalTokens: result.totalTokens,
           ...(result.evidenceFrames !== undefined ? { evidenceFrameCount } : {}),
           ...(searchStageTimings !== undefined && Object.keys(searchStageTimings).length > 0
@@ -2778,6 +2826,222 @@ async function main(): Promise<void> {
       process.exit(2);
     }
   }
+}
+
+/**
+ * Build the `summary.provenance` map. Centralised so the contract test reads a
+ * single function rather than having to crawl the buildReport() return block.
+ *
+ * MUST be updated whenever a new aggregate is added to `BenchmarkReport.summary`.
+ * Forgetting causes the contract test
+ * (`test/regression/scorer-no-hardcoded-aggregate.regression.test.ts`) to fail
+ * loudly with the missing key.
+ */
+export function buildSummaryProvenance(): Readonly<Record<string, MetricProvenance>> {
+  const arith = (aggregateName: string, sourceField: string): MetricProvenance => ({
+    aggregateName,
+    sourceField,
+    derivationSummary: `arithmetic mean over executedForAggregate scenarios of ${sourceField}`,
+  });
+  const nullableArith = (aggregateName: string, sourceField: string): MetricProvenance => ({
+    aggregateName,
+    sourceField,
+    derivationSummary: `arithmetic mean over executedForAggregate scenarios with non-null ${sourceField}`,
+  });
+  const percentileEntry = (aggregateName: string, sourceField: string, pct: string): MetricProvenance => ({
+    aggregateName,
+    sourceField,
+    derivationSummary: `${pct} percentile over executed scenarios of ${sourceField}`,
+  });
+
+  return Object.freeze({
+    overallScore: arith('overallScore', 'scores.overall'),
+    overallScoreGeoMean: {
+      aggregateName: 'overallScoreGeoMean',
+      sourceField: 'scores.overall',
+      derivationSummary: 'geometric mean over executedForAggregate scenarios (aggregateGeoMean) of scores.overall',
+    },
+    overallScoreTrimmedGeoMean5: {
+      aggregateName: 'overallScoreTrimmedGeoMean5',
+      sourceField: 'scores.overall',
+      derivationSummary: '5%-trimmed geometric mean (aggregateTrimmedGeoMean, proportion=0.05) over executedForAggregate scenarios of scores.overall',
+    },
+    overallCi95: {
+      aggregateName: 'overallCi95',
+      sourceField: 'scores.overall',
+      derivationSummary: 'Student-t 95% CI (tCi95) over executedForAggregate scenarios of scores.overall',
+    },
+    overallBootstrapCi95: {
+      aggregateName: 'overallBootstrapCi95',
+      sourceField: 'scores.overall',
+      derivationSummary: 'distribution-free bootstrap 95% CI (bootstrapCi95) over executedForAggregate scenarios of scores.overall',
+    },
+    executionEfficiency: arith('executionEfficiency', 'scores.executionEfficiency'),
+    toolAccuracy: arith('toolAccuracy', 'scores.toolAccuracy'),
+    stepEfficiency: arith('stepEfficiency', 'scores.stepEfficiency'),
+    answerQuality: arith('answerQuality', 'scores.answerQuality'),
+    terminationCorrectness: arith('terminationCorrectness', 'scores.terminationCorrectness'),
+    costEfficiency: arith('costEfficiency', 'scores.costEfficiency'),
+    faithfulness: nullableArith('faithfulness', 'scores.faithfulness'),
+    contextRelevance: nullableArith('contextRelevance', 'scores.contextRelevance'),
+    contextRecall: nullableArith('contextRecall', 'scores.contextRecall'),
+    judge: nullableArith('judge', 'scores.judge'),
+    claimFaithfulness: nullableArith('claimFaithfulness', 'claimDiagnostics.faithfulnessScore'),
+    claimContradictionRate: nullableArith('claimContradictionRate', 'claimDiagnostics.contradictionRate'),
+    claimCriticalErrorRate: nullableArith('claimCriticalErrorRate', 'claimDiagnostics.criticalErrorRate'),
+    claimProvenanceCoverage: nullableArith('claimProvenanceCoverage', 'claimDiagnostics.provenanceCoverage'),
+    claimHardFailCount: {
+      aggregateName: 'claimHardFailCount',
+      sourceField: 'claimDiagnostics.hardFail',
+      derivationSummary: 'count of executedForAggregate scenarios with claimDiagnostics.hardFail === true',
+    },
+    claimEvaluatedCount: {
+      aggregateName: 'claimEvaluatedCount',
+      sourceField: '__scenario_count__',
+      derivationSummary: 'count of executedForAggregate scenarios with non-undefined claimDiagnostics',
+    },
+    scrOverall: nullableArith('scrOverall', 'scores.semanticConstraintRecall'),
+    scrHard: nullableArith('scrHard', 'scores.scrHard'),
+    scrSoft: nullableArith('scrSoft', 'scores.scrSoft'),
+    scrInferred: nullableArith('scrInferred', 'scores.scrInferred'),
+    scrInferredGraph: nullableArith('scrInferredGraph', 'scores.scrInferredGraph'),
+    entityLinkingAccuracy: nullableArith('entityLinkingAccuracy', 'scores.entityLinkingAccuracy'),
+    slotF1Strict: nullableArith('slotF1Strict', 'scores.slotF1Strict'),
+    slotF1Relaxed: nullableArith('slotF1Relaxed', 'scores.slotF1Relaxed'),
+    csrOverall: nullableArith('csrOverall', 'scores.csrOverall'),
+    csrHard: nullableArith('csrHard', 'scores.csrHard'),
+    csrSoft: nullableArith('csrSoft', 'scores.csrSoft'),
+    csrInferred: nullableArith('csrInferred', 'scores.csrInferred'),
+    csrInferredGraph: nullableArith('csrInferredGraph', 'scores.csrInferredGraph'),
+    constraintEvaluatedCount: {
+      aggregateName: 'constraintEvaluatedCount',
+      sourceField: '__scenario_count__',
+      derivationSummary: 'count of executedForAggregate scenarios with non-null semanticConstraintRecall or entityLinkingAccuracy',
+    },
+    avgSteps: arith('avgSteps', 'stepCount'),
+    latencyMs: percentileEntry('latencyMs', 'totalDurationMs', 'mean/p50/p95/p99/max'),
+    latencySla: {
+      aggregateName: 'latencySla',
+      sourceField: 'totalDurationMs',
+      derivationSummary: 'boolean gates derived from latencyMs.p50 / latencyMs.p95 vs LATENCY_SLA_P50_MS / LATENCY_SLA_P95_MS, timeoutCount = count of totalDurationMs > LATENCY_SLA_TIMEOUT_MS',
+    },
+    tokens: {
+      aggregateName: 'tokens',
+      sourceField: 'totalTokens',
+      derivationSummary: 'inputMean/outputMean = arithmetic mean over executed; totalP95 = p95 of (input+output) over executed',
+    },
+    byTier: {
+      aggregateName: 'byTier',
+      sourceField: 'scores.overall',
+      derivationSummary: 'per-tier { count, avgScore } where avgScore = arithmetic mean of scores.overall within tier',
+    },
+    evidenceFrameCoverage: {
+      aggregateName: 'evidenceFrameCoverage',
+      sourceField: 'evidenceFrameCount',
+      derivationSummary: 'sum(evidenceFrameCount) / sum(toolCallCount) over executed; null when totalToolCalls=0',
+    },
+    evidenceFrameCounts: {
+      aggregateName: 'evidenceFrameCounts',
+      sourceField: 'evidenceFrameCount',
+      derivationSummary: 'sums of evidenceFrameCount and toolCallCount over executed scenarios',
+    },
+    meanHardConstraints: {
+      aggregateName: 'meanHardConstraints',
+      sourceField: 'scores.extractedHardConstraintCount',
+      derivationSummary: 'arithmetic mean over executedForAggregate scenarios with non-null scores.extractedHardConstraintCount; replaces the previously hardcoded 0',
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Baseline comparison (S1.2)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * S1.2: one row of the per-scenario baseline diff. Lets a human see WHICH
+ * scenarios moved between the frozen baseline and the current run, not just the
+ * aggregate. `delta = currentScore − baselineScore` (positive = improvement).
+ */
+export interface ScenarioDelta {
+  readonly id: number;
+  readonly tier: string;
+  /** Overall score in the baseline report, or null if the scenario is new. */
+  readonly baselineScore: number | null;
+  /** Overall score in the current report, or null if the scenario was dropped. */
+  readonly currentScore: number | null;
+  /** currentScore − baselineScore. null when either side is missing. */
+  readonly delta: number | null;
+  /** True when delta is below −regressionThreshold (a real regression). */
+  readonly regressed: boolean;
+  /** True when delta is above +regressionThreshold (a real improvement). */
+  readonly improved: boolean;
+  /** 'new' (only in current), 'dropped' (only in baseline), or 'both'. */
+  readonly presence: 'new' | 'dropped' | 'both';
+}
+
+/**
+ * S1.2: minimal shape this diff needs from a report. Both the live report and a
+ * loaded baseline JSON satisfy it. Kept narrow so the function is pure and
+ * trivially unit-testable without constructing a full BenchmarkReport.
+ */
+export interface ScenarioScoreRow {
+  readonly id: number;
+  readonly tier?: string;
+  readonly skipped?: boolean;
+  readonly scores?: { readonly overall?: number };
+}
+
+/**
+ * S1.2 (pure): compute the per-scenario delta table between a baseline and the
+ * current run, sorted by delta ascending (biggest regressions first). Skipped
+ * scenarios are excluded on both sides. `regressionThreshold` decides what
+ * counts as a meaningful move (default 0.05 = 5pp), keeping noise off the table.
+ */
+export function computeScenarioDeltas(
+  baselineResults: readonly ScenarioScoreRow[],
+  currentResults: readonly ScenarioScoreRow[],
+  regressionThreshold: number,
+): readonly ScenarioDelta[] {
+  const scoreOf = (r: ScenarioScoreRow): number | null => {
+    if (r.skipped === true) return null;
+    const v = r.scores?.overall;
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  };
+  const baselineById = new Map<number, ScenarioScoreRow>();
+  for (const r of baselineResults) baselineById.set(r.id, r);
+  const currentById = new Map<number, ScenarioScoreRow>();
+  for (const r of currentResults) currentById.set(r.id, r);
+
+  const allIds = new Set<number>();
+  for (const r of baselineResults) allIds.add(r.id);
+  for (const r of currentResults) allIds.add(r.id);
+
+  const rows: ScenarioDelta[] = [];
+  for (const id of allIds) {
+    const b = baselineById.get(id);
+    const c = currentById.get(id);
+    const baselineScore = b !== undefined ? scoreOf(b) : null;
+    const currentScore = c !== undefined ? scoreOf(c) : null;
+    const tier = c?.tier ?? b?.tier ?? 'unknown';
+    const presence: ScenarioDelta['presence'] =
+      b === undefined ? 'new' : c === undefined ? 'dropped' : 'both';
+    const delta =
+      baselineScore !== null && currentScore !== null ? currentScore - baselineScore : null;
+    const regressed = delta !== null && delta < -regressionThreshold;
+    const improved = delta !== null && delta > regressionThreshold;
+    rows.push({ id, tier, baselineScore, currentScore, delta, regressed, improved, presence });
+  }
+
+  // Sort by delta ascending (most-regressed first). Rows with a null delta
+  // (new/dropped scenarios) sort last, tie-broken by id for determinism.
+  rows.sort((a, b) => {
+    if (a.delta === null && b.delta === null) return a.id - b.id;
+    if (a.delta === null) return 1;
+    if (b.delta === null) return -1;
+    if (a.delta !== b.delta) return a.delta - b.delta;
+    return a.id - b.id;
+  });
+  return rows;
 }
 
 // Allow importing types/helpers (e.g. unit tests) without starting the benchmark.

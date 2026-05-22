@@ -1109,7 +1109,11 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
 
     expect(candidates[0]?.source).toBe('alias');
     expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
-    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeGreaterThan(0);
+    // RFC-006 §5.4 phonetic-only collapse: a purely phonetic_exact anchor routes
+    // its confidence solely through the phoneticMatch lane and ZEROES the
+    // identity-bearing lanes (aliasExactMatch/canonical*), so a phonetic collision
+    // can never masquerade as an exact alias hit. See isPhoneticOnlyStrategySet.
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
   });
 
   it('P0-2-K: phonetic_fuzzy strategy — phoneticMatch AND editDistanceScore both populated', async () => {

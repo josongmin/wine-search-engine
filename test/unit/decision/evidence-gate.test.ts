@@ -45,7 +45,10 @@ describe('EvidenceGate', () => {
         identityEvidenceSatisfied: hasIdentityEvidence(evidence),
         constraintEvidenceSatisfied: hasConstraintEvidence(evidence),
         anchorEvidenceSatisfied: hasAnchorEvidence(evidence),
-        topEntityPresent: false,
+        // A 'resolved' decision points to a concrete entity by construction, so
+        // EvidenceGate Rule 0 (no-target downgrade) is satisfied here. Tests that
+        // exercise the no-target path set this false explicitly.
+        topEntityPresent: true,
         rankedTopResultPresent: false,
         matchedConstraintAttributes: [],
         unmetConstraintAttributes: [],
@@ -115,6 +118,37 @@ describe('EvidenceGate', () => {
       const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
+    });
+  });
+
+  describe('resolved + no concrete target → downgrade to ambiguous (Rule 0)', () => {
+    it('downgrades when neither a top entity nor a ranked result is present', () => {
+      // Rule 0: a 'resolved' verdict must point to *something*. Even with full
+      // identity evidence, if both topEntityPresent and rankedTopResultPresent
+      // are false there is no concrete output — downgrade rather than emit
+      // 'resolved' for an unbindable anchor (e.g. a generic token like 'wine').
+      const evidence = makeIdentityEvidenceSummary();
+      const base = makeContract(evidence);
+      const noTarget: DecisionProvenanceContract = {
+        ...base,
+        observed: { ...base.observed, topEntityPresent: false, rankedTopResultPresent: false },
+      };
+      const result = gate.check('resolved', noTarget);
+      expect(result.passed).toBe(false);
+      expect(result.downgradeTo).toBe('ambiguous');
+      expect(result.downgradeAction).toBe('clarify');
+      expect(result.reason).toContain('NO_TARGET');
+    });
+
+    it('passes on identity evidence when only a ranked result (no top entity) is present', () => {
+      const evidence = makeIdentityEvidenceSummary();
+      const base = makeContract(evidence);
+      const rankedOnly: DecisionProvenanceContract = {
+        ...base,
+        observed: { ...base.observed, topEntityPresent: false, rankedTopResultPresent: true },
+      };
+      const result = gate.check('resolved', rankedOnly);
+      expect(result.passed).toBe(true);
     });
   });
 
