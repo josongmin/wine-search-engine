@@ -45,6 +45,19 @@ export type ToolCallStructuredOutput =
       readonly resultCount: number;
     }
   | {
+      /**
+       * Discriminator for `lookup_wine` (high-precision identity resolution).
+       * Distinct from `search_result_set` so downstream consumers that run
+       * search-specific invariants (negation/quality-tag/exact-lookup
+       * contract guards) correctly skip lookup outputs rather than
+       * mis-treating them as constraint-filtered search results.
+       * See SOLID audit LSP-MED — lookup MUST NOT inherit search invariants.
+       */
+      readonly kind: 'lookup_result_set';
+      readonly resultSet: readonly ResultItem[];
+      readonly resultCount: number;
+    }
+  | {
       readonly kind: 'comparison_result';
       readonly response: ComparisonSearchResponse;
     }
@@ -135,6 +148,11 @@ const ToolCallRequestSchema = z.object({
 const ToolCallStructuredOutputSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('search_result_set'),
+    resultSet: z.array(z.unknown()),
+    resultCount: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({
+    kind: z.literal('lookup_result_set'),
     resultSet: z.array(z.unknown()),
     resultCount: z.number().int().nonnegative(),
   }).strict(),

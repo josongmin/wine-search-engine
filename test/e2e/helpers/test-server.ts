@@ -22,7 +22,7 @@ export interface TestServer {
   readonly app: FastifyInstance;
 }
 
-export interface TestAmbiguousSurface {
+interface TestAmbiguousSurface {
   readonly term: string;
   readonly types: readonly string[];
   readonly severity: 'low' | 'medium' | 'high';

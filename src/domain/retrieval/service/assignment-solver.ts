@@ -65,7 +65,7 @@ export interface AssignmentRowSpec {
   readonly obligation?: 'required' | 'optional' | undefined;
 }
 
-export interface AssignmentGroupConstraint {
+interface AssignmentGroupConstraint {
   readonly kind: 'at_least_one' | 'exactly_one';
   readonly rows: readonly number[];
   readonly label?: string | undefined;

@@ -43,7 +43,7 @@ const LEGACY_DEFAULT_THRESHOLD = 0.45;
  * `calibrationTrusted` first: when false, the confidence check is treated
  * as inapplicable (no refuse) and a silent-skip counter is incremented.
  */
-export interface ConfidenceRefusalDecision {
+interface ConfidenceRefusalDecision {
   readonly shouldRefuse: boolean;
   readonly calibrationTrusted: boolean;
   /** The τ actually applied. Undefined when calibration was untrusted. */
@@ -52,7 +52,7 @@ export interface ConfidenceRefusalDecision {
   readonly classApplied?: string;
 }
 
-export interface ConfidenceRefusalPolicyOptions {
+interface ConfidenceRefusalPolicyOptions {
   /** Per-class provider; when omitted the legacy scalar fallback applies. */
   readonly provider?: RefusalThresholdProvider;
   /**

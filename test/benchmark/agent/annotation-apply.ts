@@ -41,7 +41,7 @@ const DIAGNOSTIC_OBSERVED_MAX_ITEMS = 3;
  * Surfaced on each ScenarioResult so the bench summary can count
  * "annotated vs judge-only" without re-deriving from the annotation map.
  */
-export interface AnnotationApplied {
+interface AnnotationApplied {
   readonly applied: boolean;
   readonly drives: {
     readonly constraints: boolean;

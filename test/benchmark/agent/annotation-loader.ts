@@ -34,7 +34,7 @@ const ANNOTATION_FILE_PATTERN = /^(\d+)\.json$/u;
 /** Max characters from a parse-error message preserved in the loader log line. */
 const ERROR_MESSAGE_MAX_LENGTH = 200;
 
-export interface AnnotationLoadStats {
+interface AnnotationLoadStats {
   /** Number of annotation files successfully parsed. */
   readonly loaded: number;
   /** Number of files that failed to parse (logged, but not fatal). */
@@ -43,7 +43,7 @@ export interface AnnotationLoadStats {
   readonly failedPaths: readonly string[];
 }
 
-export interface AnnotationStore {
+interface AnnotationStore {
   readonly byScenarioId: ReadonlyMap<number, ScenarioAnnotation>;
   readonly stats: AnnotationLoadStats;
   /** Convenience accessor; returns undefined when no annotation exists. */
@@ -59,7 +59,7 @@ export interface AnnotationStore {
  * file MUST NOT crash the bench runner. The dimension that file would have
  * deterministically scored simply stays on the judge-only path.
  */
-export function loadAnnotations(dir: string = DEFAULT_ANNOTATION_DIR): AnnotationStore {
+function loadAnnotations(dir: string = DEFAULT_ANNOTATION_DIR): AnnotationStore {
   const byScenarioId = new Map<number, ScenarioAnnotation>();
   const failedPaths: string[] = [];
   let loaded = 0;

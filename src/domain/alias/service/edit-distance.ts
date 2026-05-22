@@ -194,7 +194,7 @@ const DEFAULT_WINKLER_PREFIX_SCALE = 0.1;
 const DEFAULT_WINKLER_PREFIX_CAP = 4;
 const DEFAULT_WINKLER_PROMOTE_THRESHOLD = 0.7;
 
-export interface JaroWinklerOptions {
+interface JaroWinklerOptions {
   /** Per-character prefix weight `p`. Standard value: 0.1. */
   readonly prefixScale?: number;
   /** Maximum prefix length contributing to the boost. Standard cap: 4. */

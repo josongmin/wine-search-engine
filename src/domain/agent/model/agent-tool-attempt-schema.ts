@@ -185,16 +185,16 @@ const KnownAgentToolInputAttemptSchemas = {
   compare_wines: CompareWinesAttemptInputSchema,
 } as const satisfies Record<KnownAgentToolName, z.ZodType<Record<string, unknown>>>;
 
-export interface KnownAgentToolAttemptParseIssue {
+interface KnownAgentToolAttemptParseIssue {
   readonly path: readonly (string | number)[];
   readonly message: string;
 }
 
-export interface KnownAgentToolAttemptParseRepair {
+interface KnownAgentToolAttemptParseRepair {
   readonly removedUnknownKeys: readonly string[];
 }
 
-export interface KnownAgentToolAttemptParseResult {
+interface KnownAgentToolAttemptParseResult {
   readonly attempt: KnownAgentToolAttempt | null;
   readonly normalizedInput: Record<string, unknown>;
   readonly issues: readonly KnownAgentToolAttemptParseIssue[];

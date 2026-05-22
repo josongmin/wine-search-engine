@@ -60,7 +60,7 @@ export function hasExactLikeLookupStrategy(strategies: Iterable<string>): boolea
   return false;
 }
 
-export function isTranslationLookupStrategy(strategy: string): boolean {
+function isTranslationLookupStrategy(strategy: string): boolean {
   return TRANSLATION_LOOKUP_STRATEGIES.has(stripStrategySourcePrefix(strategy));
 }
 

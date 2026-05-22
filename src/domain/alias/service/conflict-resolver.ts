@@ -15,7 +15,7 @@ import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator
  * merger to pick the higher-trust {@link AliasType} when consolidating
  * sibling {@link AliasMatchResult}s for the same surface form / entity.
  */
-export const ALIAS_TYPE_PRIORITY_WEIGHTS: Readonly<Record<AliasType, number>> = {
+const ALIAS_TYPE_PRIORITY_WEIGHTS: Readonly<Record<AliasType, number>> = {
   canonical: 1.0,
   translation: 0.95,
   phonetic: 0.85,

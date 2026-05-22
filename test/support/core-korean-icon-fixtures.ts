@@ -42,7 +42,7 @@ export interface CoreKoreanEntityCase {
   readonly expectedEntityId: string;
 }
 
-export interface CoreKoreanAmbiguityCase {
+interface CoreKoreanAmbiguityCase {
   readonly query: string;
   readonly expectedCandidateEntityId?: string;
   readonly forbiddenResolvedEntityId?: string;
@@ -372,11 +372,11 @@ export const CORE_KOREAN_ICON_AMBIGUITY_CASES: readonly CoreKoreanAmbiguityCase[
   },
 ] as const;
 
-export const CORE_KOREAN_ICON_AMBIGUOUS_SURFACES: ReadonlySet<string> = new Set(
+const CORE_KOREAN_ICON_AMBIGUOUS_SURFACES: ReadonlySet<string> = new Set(
   CORE_KOREAN_ICON_AMBIGUITY_CASES.map((testCase) => normalizeSurfaceKey(testCase.query)),
 );
 
-export interface CoreKoreanIconFixtureBundle {
+interface CoreKoreanIconFixtureBundle {
   readonly cases: readonly CoreKoreanEntityCase[];
   readonly releaseGateCases: readonly CoreKoreanReleaseGateCase[];
   readonly ambiguityCases: readonly CoreKoreanAmbiguityCase[];

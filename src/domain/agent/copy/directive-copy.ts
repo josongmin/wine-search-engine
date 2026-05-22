@@ -75,7 +75,7 @@ function buildKoreanPendingDrinkabilityInstruction(
  * calls per-directive accessors; the agent contract policy emits one
  * English directive at a time. Both call sites consume the same bundle.
  */
-export interface DirectiveCopy {
+interface DirectiveCopy {
   /** `relax_constraints_retry` directive — instructs the model to drop a
    *  non-must-have constraint and retry `search_wines`. */
   readonly relax: string;

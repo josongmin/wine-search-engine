@@ -130,7 +130,7 @@ const RETRIEVAL_DEGRADATION_REASON_SET: ReadonlySet<string> = new Set(
  * Verdict returned by `checkThreshold` — structural only; this module never
  * dispatches alerts itself.
  */
-export interface RetrievalDegradationThresholdVerdict {
+interface RetrievalDegradationThresholdVerdict {
   readonly reason: RetrievalDegradationReason;
   readonly observed: number;
   readonly threshold: number;
@@ -150,7 +150,7 @@ export interface RetrievalDegradationSnapshotRow {
   readonly count_300s: number;
 }
 
-export interface TimeBucketedRetrievalDegradationCountersOptions {
+interface TimeBucketedRetrievalDegradationCountersOptions {
   /** Bucket width in milliseconds. Must be a positive integer. */
   readonly bucketWidthMs: number;
   /** Number of buckets retained in the ring. Window = `bucketWidthMs * capacity`. */
@@ -159,7 +159,7 @@ export interface TimeBucketedRetrievalDegradationCountersOptions {
   readonly now?: () => number;
 }
 
-export interface TimeBucketedRetrievalDegradationCounters {
+interface TimeBucketedRetrievalDegradationCounters {
   /** Increment the current-time bucket for `reason`. Unknown reasons are silently dropped. */
   increment(reason: RetrievalDegradationReason): void;
   /** Sum of events across the live window for `reason`. Unknown reasons return 0. */
@@ -334,21 +334,10 @@ export function createTimeBucketedRetrievalDegradationCounters(
   };
 }
 
-let globalTimeSeries: TimeBucketedRetrievalDegradationCounters | undefined;
 
-/** Default ring width: 1-minute buckets × 5 buckets ⇒ 5-minute live window. */
-const DEFAULT_BUCKET_WIDTH_MS = 60_000;
-const DEFAULT_RING_CAPACITY = 5;
 
 /**
  * Process-wide shared instance. Production code paths that already increment
  * the legacy collector should mirror those increments into this counter when
  * the signal maps to a known `RetrievalDegradationReason`.
  */
-export function getRetrievalDegradationTimeSeries(): TimeBucketedRetrievalDegradationCounters {
-  globalTimeSeries ??= createTimeBucketedRetrievalDegradationCounters({
-    bucketWidthMs: DEFAULT_BUCKET_WIDTH_MS,
-    capacity: DEFAULT_RING_CAPACITY,
-  });
-  return globalTimeSeries;
-}

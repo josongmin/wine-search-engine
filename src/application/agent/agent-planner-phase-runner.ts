@@ -49,6 +49,25 @@ const STEP_LOG_PREVIEW_CHARS = 500;
 const PLANNER_MAX_OUTPUT_TOKENS_DEFAULT = 1_024;
 const PLANNER_MAX_OUTPUT_TOKENS_LAST_STEP = 1_536;
 
+/**
+ * Tools whose primary `query` input carries a user-language wine-name anchor
+ * that MUST be preserved verbatim — no Korean→English paraphrase. Both
+ * `search_wines` and `lookup_wine` route on the literal text of `query`, so
+ * the same anchor-preservation rule applies. Sanitizers that target
+ * search_wines-only fields (`wine_type`, `retrieval_mode`, `limit`,
+ * `want_diversity`) intentionally stay scoped to that one tool by literal —
+ * see the per-sanitizer comments below.
+ *
+ * Construction is statically checked against the branded tool-name union so
+ * adding a new known tool that should preserve the anchor is a one-line edit.
+ * The set is typed as `ReadonlySet<string>` at the lookup surface so callers
+ * can pass `AgentToolAttempt.tool` (which is `string` because the discriminated
+ * union admits unknown tools) without a per-site cast.
+ */
+const TOOLS_WITH_QUERY_ANCHOR: ReadonlySet<string> = new Set<
+  import('../../domain/agent/model/agent-tool-attempt-schema.js').KnownAgentToolName
+>(['search_wines', 'lookup_wine']);
+
 export interface PlannerPhaseResult {
   readonly stepStartMs: number;
   readonly parsed: LlmAction;
@@ -154,7 +173,7 @@ function enforceSearchQueryLanguageAnchor(
     return { ...input, query: originalTrimmed };
   };
 
-  if (parsed.action?.tool === 'search_wines') {
+  if (parsed.action !== undefined && TOOLS_WITH_QUERY_ANCHOR.has(parsed.action.tool)) {
     return {
       ...parsed,
       action: {
@@ -165,16 +184,18 @@ function enforceSearchQueryLanguageAnchor(
   }
 
   if (parsed.actions !== undefined) {
-    const searchActionCount = parsed.actions.filter((action) => action.tool === 'search_wines').length;
+    const anchorActionCount = parsed.actions.filter((action) =>
+      TOOLS_WITH_QUERY_ANCHOR.has(action.tool)
+    ).length;
     return {
       ...parsed,
       actions: parsed.actions.map((action) =>
-        action.tool === 'search_wines'
+        TOOLS_WITH_QUERY_ANCHOR.has(action.tool)
           ? {
               ...action,
               input: enforceActionInput(
                 action.input,
-                { preserveAnchoredPlannerQuery: searchActionCount > 1 },
+                { preserveAnchoredPlannerQuery: anchorActionCount > 1 },
               ),
             }
           : action
@@ -233,6 +254,8 @@ function enforceExplicitWineTypeProvenance(
     };
   };
 
+  // Scoped to search_wines: `wine_type` is a search_wines-only filter param
+  // (lookup_wine exposes NO filters — see lookup-wine-tool.regression.test.ts).
   if (parsed.action?.tool === 'search_wines') {
     return {
       ...parsed,
@@ -266,6 +289,7 @@ function hasExplicitRedWhitePairRequest(query: string): boolean {
 }
 
 function getActionWineType(action: AgentToolAttempt): string | undefined {
+  // Scoped to search_wines: `wine_type` only lives on the search_wines schema.
   if (action.tool !== 'search_wines') {
     return undefined;
   }
@@ -280,6 +304,8 @@ function enforceExplicitPerSlotCardinality(
     return parsed;
   }
 
+  // Scoped to search_wines: red/white per-slot splitting writes the
+  // search_wines-only fields `wine_type`, `limit`, `want_diversity`.
   if (
     parsed.action?.tool === 'search_wines'
     && hasExplicitRedWhitePairRequest(originalQuery)
@@ -378,6 +404,8 @@ function sanitizeSearchRetrievalModeOverrides(parsed: LlmAction): LlmAction {
     return rest;
   };
 
+  // Scoped to search_wines: `retrieval_mode` is a search_wines-only param;
+  // lookup_wine always forces the entity route at dispatch time.
   if (parsed.action?.tool === 'search_wines') {
     return {
       ...parsed,
@@ -437,6 +465,8 @@ function resolveInitialCuratedExactEntitySearch(
     return undefined;
   }
 
+  // Scoped to search_wines: the curated initial action explicitly sets
+  // `retrieval_mode: 'entity'`, which is a search_wines-only param.
   return {
     thought: 'Curated Korean exact-entity alias resolved deterministically; search the canonical entity first.',
     action: {

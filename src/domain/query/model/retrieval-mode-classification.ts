@@ -21,7 +21,7 @@ import type { ExecutionRetrievalMode } from './engine-execution-contract.js';
  * identity-requiring regardless of mode. Bridging both through the same
  * constant fixes the structural asymmetry.
  */
-export const EXPLORATORY_RETRIEVAL_MODES: ReadonlySet<ExecutionRetrievalMode> = new Set<ExecutionRetrievalMode>([
+const EXPLORATORY_RETRIEVAL_MODES: ReadonlySet<ExecutionRetrievalMode> = new Set<ExecutionRetrievalMode>([
   'compare_candidates',
   'recommendation',
   'similar_items',
@@ -49,8 +49,3 @@ export function isExploratoryRetrievalMode(
  * entity. `requireIdentitySeal` MAY be set for these modes; for any other mode
  * the seal is structurally inapplicable and must NOT be required.
  */
-export function isIdentityRetrievalMode(
-  mode: string | undefined,
-): boolean {
-  return mode === 'entity_lookup' || mode === 'entity_resolution';
-}

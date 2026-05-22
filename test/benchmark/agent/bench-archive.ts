@@ -52,7 +52,7 @@ export interface BenchArchiveManifest {
 }
 
 /** Subset of the bench report this module actually consumes. */
-export interface ArchivableReport {
+interface ArchivableReport {
   readonly timestamp: string;
   readonly model: string;
   readonly judgeModel: string | null;
@@ -71,7 +71,7 @@ export interface ArchivableReport {
  *
  * Returns the absolute path of the archived report so callers can log it.
  */
-export async function archiveBenchReport(
+async function archiveBenchReport(
   report: ArchivableReport,
   reportJson: string,
   options?: {
@@ -145,7 +145,7 @@ export async function listArchiveManifests(
 }
 
 /** Reader for a full archived report. Returns null when the path is absent or malformed. */
-export async function loadArchivedReport(reportPath: string): Promise<unknown> {
+async function loadArchivedReport(reportPath: string): Promise<unknown> {
   try {
     const raw = await fs.readFile(reportPath, 'utf8');
     return JSON.parse(raw) as unknown;

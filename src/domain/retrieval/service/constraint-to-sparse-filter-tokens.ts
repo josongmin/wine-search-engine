@@ -489,7 +489,7 @@ function isNumericRange(
  * Options controlling the confidence-gated promotion of soft constraints
  * into sparse filter tokens.
  */
-export interface SoftPromotionOptions {
+interface SoftPromotionOptions {
   /**
    * Confidence floor (inclusive). Soft constraints with `confidence` below
    * this value are NEVER promoted. Defaults to

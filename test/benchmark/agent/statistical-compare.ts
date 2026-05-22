@@ -68,7 +68,7 @@ export interface ScenarioDelta {
   readonly current: number;
 }
 
-export interface PairedBootstrapOptions {
+interface PairedBootstrapOptions {
   /** Number of bootstrap resamples. Default 10_000. */
   readonly iterations?: number;
   /** Significance level for the CI. Default 0.05 (95% CI). */

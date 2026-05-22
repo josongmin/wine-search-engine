@@ -165,13 +165,13 @@ function makeInitialState(): RunnerState {
 // Logger seam
 // ---------------------------------------------------------------------------
 
-export interface MiniLoopRunnerLogger {
+interface MiniLoopRunnerLogger {
   warn(payload: Record<string, unknown>, msg: string): void;
   info(payload: Record<string, unknown>, msg: string): void;
   error(payload: Record<string, unknown>, msg: string): void;
 }
 
-export interface MiniLoopRunnerDeps {
+interface MiniLoopRunnerDeps {
   readonly structuredLlm: StructuredLlmPort;
   readonly logger?: MiniLoopRunnerLogger;
   /** Override of the Anthropic model id used for `execute`. Defaults to

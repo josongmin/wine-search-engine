@@ -281,7 +281,7 @@ export interface AuditExtension {
 /** Append-only list of supported audit-extension schema versions. */
 export const AUDIT_EXTENSION_SCHEMA_VERSIONS = ['1', '2'] as const;
 
-export type AuditExtensionSchemaVersion = (typeof AUDIT_EXTENSION_SCHEMA_VERSIONS)[number];
+type AuditExtensionSchemaVersion = (typeof AUDIT_EXTENSION_SCHEMA_VERSIONS)[number];
 
 /** Current emitted schema version. Producers MUST emit this value. */
 export const CURRENT_AUDIT_EXTENSION_SCHEMA_VERSION: AuditExtensionSchemaVersion = '1';
@@ -297,7 +297,7 @@ const ENVELOPE_MAX_MESSAGE_LENGTH = 4096;
  * Mirrors the `AuditExtension.fallback_trace` semantics but uses the wire
  * field names that bench harness + HTTP consumers parse directly.
  */
-export const FallbackTraceWireSchema = z
+const FallbackTraceWireSchema = z
   .object({
     fallback_applied: z.enum(['layer2', 'layer3', 'layer4']).nullable(),
     reasoning_failure: z.boolean(),
@@ -310,7 +310,6 @@ export const FallbackTraceWireSchema = z
   })
   .strict();
 
-export type FallbackTraceWire = z.infer<typeof FallbackTraceWireSchema>;
 
 /**
  * Versioned audit-extension envelope (SSoT).

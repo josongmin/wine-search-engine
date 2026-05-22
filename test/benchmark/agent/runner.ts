@@ -2101,9 +2101,23 @@ export function isToolTimeoutInfraFallback(r: ScenarioResult): boolean {
     ) {
       return true;
     }
-    // Parallel action pairs are NOT matched here: a parallel-batch timeout sets
-    // `reasoningFailureDetected` (agent-planning signal), and the per-call
-    // observation strings carry the batch marker, not the single-tool marker.
+    // Parallel batch: actions[] + observations[]. Classify as infra IFF EVERY
+    // call in the batch is a retrieval tool with well-formed input AND every
+    // observation carries the deterministic TIMEOUT marker. This catches the
+    // 3-vintage-compare-style scenarios where Vespa load makes ALL concurrent
+    // retrievals time out — the agent issued legitimate parallel queries and
+    // the backend couldn't service them. Mixed/partial batches (some success,
+    // some timeout) and non-retrieval batches stay counted as agent behavior.
+    if (
+      step.actions !== undefined
+      && step.actions.length > 0
+      && step.observations !== undefined
+      && step.observations.length === step.actions.length
+      && step.actions.every((a) => RETRIEVAL_INFRA_TOOLS.has(a.tool) && hasWellFormedToolInput(a.input))
+      && step.observations.every((o) => observationIsToolTimeout(o))
+    ) {
+      return true;
+    }
   }
   return false;
 }

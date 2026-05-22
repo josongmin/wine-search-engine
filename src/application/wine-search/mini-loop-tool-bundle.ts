@@ -216,7 +216,7 @@ export const SEARCH_WINES_TOOL_DEF: ToolDefinition = {
   inputSchema: SearchWinesInputSchema,
 };
 
-export const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
+const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
   name: 'lookup_wine' satisfies KnownAgentToolName,
   description: LOOKUP_WINE_DESCRIPTION,
   inputSchema: LookupWineInputSchema,

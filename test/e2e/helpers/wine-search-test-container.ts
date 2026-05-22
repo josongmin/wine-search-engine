@@ -62,7 +62,7 @@ import type { SearchResponseV1 } from '../../../src/domain/response/model/search
 // Public API
 // ---------------------------------------------------------------------------
 
-export interface WineSearchTestContainerOptions {
+interface WineSearchTestContainerOptions {
   /**
    * Scripted responses for the StructuredLlmPort mock. Synthesize is invoked
    * on every non-aborted, non-admit-rejected request; analyze is only invoked
@@ -267,7 +267,7 @@ export async function buildAppWithoutWineSearch(): Promise<{
 }
 
 // Re-export the route deps type so test files can spy on its shape if needed.
-export type { WineSearchRouteDeps };
+type { WineSearchRouteDeps };
 
 // ---------------------------------------------------------------------------
 // Convenience stub builders — bypass the pre-existing runtime bug in

@@ -62,7 +62,7 @@ export interface GeneralLaneCandidateArtifact {
   readonly rank: number;
 }
 
-export interface DualLaneAgreement {
+interface DualLaneAgreement {
   readonly corroborated: boolean;
   readonly disagreement: boolean;
   readonly entityOnly: boolean;

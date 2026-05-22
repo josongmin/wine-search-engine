@@ -57,7 +57,7 @@ function isUppercaseAcronymSurface(value: string): boolean {
   );
 }
 
-export interface AliasLookupPlan {
+interface AliasLookupPlan {
   readonly views: NormalizedQueryViews;
   readonly tokenList: readonly string[];
   readonly compactList: readonly string[];

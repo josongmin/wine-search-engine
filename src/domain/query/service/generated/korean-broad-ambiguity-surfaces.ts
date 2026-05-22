@@ -13,12 +13,12 @@
  * - curated exact aliases remain outside this automatic ambiguity lane
  */
 
-export type GeneratedBroadAmbiguityClassifier =
+type GeneratedBroadAmbiguityClassifier =
   | 'producer_family'
   | 'cross_producer_shared_surface'
   | 'multi_entity_generic_surface';
 
-export interface GeneratedKoreanBroadAmbiguitySurfaceEntry {
+interface GeneratedKoreanBroadAmbiguitySurfaceEntry {
   readonly term: string;
   readonly types: readonly string[];
   readonly severity: 'high';

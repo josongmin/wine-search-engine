@@ -58,7 +58,7 @@ export interface RetrievalExecutionResult extends ReadonlyArray<HybridCandidate>
   readonly telemetry?: RetrievalExecutionTelemetry | undefined;
 }
 
-export interface BuildRetrievalExecutionResultInput {
+interface BuildRetrievalExecutionResultInput {
   readonly candidates: readonly HybridCandidate[];
   readonly lanes: RetrievalExecutionLanes;
   readonly degradation: RetrievalExecutionDegradation;

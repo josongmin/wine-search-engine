@@ -37,7 +37,7 @@ export interface ReplOptions {
   readonly trace?: boolean;
 }
 
-export interface ProcessTurnResult {
+interface ProcessTurnResult {
   readonly output: string;
 }
 
@@ -84,7 +84,7 @@ const HELP = `사용 가능한 명령:
   /help          이 도움말
   (그 외 입력은 모두 에이전트에게 질문으로 전달됩니다)`;
 
-export interface ReplLoopDeps {
+interface ReplLoopDeps {
   readonly runner: AgentRunner;
   readonly options?: ReplOptions;
   /** Overridable for tests; default to process stdin/stdout. */

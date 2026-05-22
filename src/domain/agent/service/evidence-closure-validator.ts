@@ -30,7 +30,7 @@ import type {
   ToolCallStructuredOutput,
 } from '../model/tool-call-evidence-frame.js';
 
-export interface EvidenceClosureResult {
+interface EvidenceClosureResult {
   readonly closed: boolean;
   readonly hallucinations?: readonly string[];
 }

@@ -48,7 +48,7 @@ import { stripAccents } from '../../shared/utils/unicode-normalize.js';
  *
  * Both fields are deterministic and pure functions of the input string.
  */
-export interface DoubleMetaphoneKeys {
+interface DoubleMetaphoneKeys {
   readonly primary: string;
   readonly alternate: string | null;
 }

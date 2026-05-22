@@ -36,7 +36,7 @@ type IdentityLaneInput = CandidateCommonOverrides & {
   readonly entityPosteriorScore?: number;
 };
 
-export type HybridCandidateTestInput =
+type HybridCandidateTestInput =
   | GeneralLaneOnlyInput
   | GeneralOnlyInput
   | IdentityLaneInput;

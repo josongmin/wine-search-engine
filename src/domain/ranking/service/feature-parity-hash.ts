@@ -14,7 +14,6 @@ import { LTR_FEATURE_SCHEMA_HASH } from './ltr-feature-extractor.js';
 /** Schema major version.
  *  v4: authoritative dual-lane 14-feature inference/training schema.
  *  Order-sensitive hash derived from the canonical feature vector layout. */
-export const LTR_FEATURE_SCHEMA_VERSION = '4';
 
 export function getCurrentFeatureSchemaHash(): string {
   return LTR_FEATURE_SCHEMA_HASH;

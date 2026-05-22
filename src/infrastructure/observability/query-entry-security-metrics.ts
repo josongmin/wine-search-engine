@@ -113,14 +113,14 @@ const SECURITY_BLOCK_REASONS: readonly SecurityBlockReason[] = [
 const SECURITY_BLOCK_REASON_SET: ReadonlySet<string> = new Set(SECURITY_BLOCK_REASONS);
 
 /** Verdict returned by `checkThreshold` — structural only; never dispatches. */
-export interface SecurityMetricsThresholdVerdict {
+interface SecurityMetricsThresholdVerdict {
   readonly kind: SecurityBlockReason;
   readonly observed: number;
   readonly threshold: number;
   readonly tripped: boolean;
 }
 
-export interface TimeBucketedSecurityMetricsOptions {
+interface TimeBucketedSecurityMetricsOptions {
   /** Bucket width in milliseconds. Must be a positive integer. */
   readonly bucketWidthMs: number;
   /** Number of buckets retained in the ring. Window = `bucketWidthMs * capacity`. */
@@ -138,7 +138,7 @@ export interface SecurityMetricsSnapshotRow {
   readonly count_300s: number;
 }
 
-export interface TimeBucketedSecurityMetrics {
+interface TimeBucketedSecurityMetrics {
   /** Increment the current-time bucket for `reason`. Unknown reasons silently dropped. */
   increment(reason: SecurityBlockReason): void;
   /** Sum of events across the live window for `reason`. Unknown reasons return 0. */

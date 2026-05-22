@@ -15,6 +15,7 @@
  * All fields are already trimmed/clipped by the caller; the model carries no
  * behavior. Keep this leaf pure (domain layer): no imports outside domain.
  */
+import type { CanonicalEntityId } from '../../shared/types/entity-id.js';
 
 /**
  * A compact reference to a wine the agent surfaced in a prior turn. Derived
@@ -22,7 +23,12 @@
  * follow-up ("the second one", "the Napa cab", "cheaper than that").
  */
 export interface PriorEntityRef {
-  readonly entityId: string;
+  /**
+   * Branded canonical entity id (not a raw string) so consumers can feed this
+   * back into ports like `entityLookup(id: CanonicalEntityId)` without an
+   * unsafe re-cast. The brand flows through from the result-item shape.
+   */
+  readonly entityId: CanonicalEntityId;
   readonly label: string;
   readonly vintage?: number | undefined;
   readonly producer?: string | undefined;

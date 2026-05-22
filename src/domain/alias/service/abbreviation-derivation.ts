@@ -163,7 +163,7 @@ export interface DerivedAbbreviation {
   readonly confidencePrior: number;
 }
 
-export interface AbbreviationDerivationInput {
+interface AbbreviationDerivationInput {
   /** The canonical wine label (full form, with or without trailing vintage). */
   readonly canonicalLabel: string;
   /**
@@ -375,7 +375,7 @@ export function deriveAbbreviations(
  * (e.g. "샤또 마고" → "마고"). Co-located with the Latin set so the two
  * vocabularies stay in lock-step under CLAUDE.md SSoT discipline.
  */
-export const KOREAN_PRODUCER_STOP_WORDS: ReadonlySet<string> = new Set([
+const KOREAN_PRODUCER_STOP_WORDS: ReadonlySet<string> = new Set([
   '샤또', '샤토', '도멘', '돔', '테누타', '카사', '비냐', '보데가', '바인구트', '메종',
 ]);
 

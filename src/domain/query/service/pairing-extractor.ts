@@ -268,7 +268,7 @@ function findAllMatchesForTag(query: string, tag: PairingTag): PairingMatch[] {
   return out;
 }
 
-export interface PairingExtraction {
+interface PairingExtraction {
   /** Foods the query positively asks for. Order matches PAIRING_TAXONOMY. */
   included: PairingTag[];
   /** Foods explicitly negated/excluded. Order matches PAIRING_TAXONOMY. */

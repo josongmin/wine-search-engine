@@ -72,7 +72,7 @@ const MEDIAL_JAMO_END = 0x1175;
 const FINAL_JAMO_BASE = 0x11a7;
 const FINAL_JAMO_END = 0x11c2;
 
-export interface HangulJamoKey {
+interface HangulJamoKey {
   readonly key: string;
   readonly syllableBoundaryOffsets: ReadonlySet<number>;
   readonly syllableCount: number;
@@ -249,7 +249,7 @@ const HANGUL_L_TO_T_IDX: readonly number[] = COMPAT_INITIALS.map((choseong) => {
  * Jamo U+3130..U+318F) because this is specifically the pre-check for the
  * composition algorithm, which expects NFKC-decomposed conjoining jamo only.
  */
-export function hasHangulContent(input: string): boolean {
+function hasHangulContent(input: string): boolean {
   for (let i = 0; i < input.length; i += 1) {
     const c = input.charCodeAt(i);
     if (
@@ -276,7 +276,7 @@ export function hasHangulContent(input: string): boolean {
  * V_idx = (index % (V*T)) / T; T_idx = index % T. Emit the corresponding
  * conjoining jamo codepoints.
  */
-export function decomposeHangulSyllables(input: string): string {
+function decomposeHangulSyllables(input: string): string {
   let out = '';
   for (let i = 0; i < input.length; i += 1) {
     const code = input.charCodeAt(i);
@@ -318,7 +318,7 @@ export function decomposeHangulSyllables(input: string): string {
  *     wine query is contained by the architectural boundary), so faithful
  *     syllable reconstruction is the right trade there.
  */
-export interface ComposeHangulOptions {
+interface ComposeHangulOptions {
   readonly composeTrailingChoseongAsFinal?: boolean;
 }
 
@@ -335,7 +335,7 @@ export interface ComposeHangulOptions {
  *
  * Performance: single linear scan, O(n).
  */
-export function composeHangulSyllables(
+function composeHangulSyllables(
   input: string,
   options: ComposeHangulOptions = {},
 ): string {

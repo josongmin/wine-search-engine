@@ -75,6 +75,12 @@ function recordsForStructuredOutput(
   switch (output.kind) {
     case 'search_result_set':
       return output.resultSet.map((item) => resultItemToEvidenceRecord(item));
+    case 'lookup_result_set':
+      // High-precision identity-resolution output (lookup_wine). Carries the
+      // same per-item evidence as search_result_set; only the discriminator
+      // differs (search invariants do not apply — see LSP-MED comment in
+      // tool-call-evidence-frame.ts).
+      return output.resultSet.map((item) => resultItemToEvidenceRecord(item));
     case 'food_pairing':
       return output.resultSet.map((item) => resultItemToEvidenceRecord(item));
     case 'comparison_result': {

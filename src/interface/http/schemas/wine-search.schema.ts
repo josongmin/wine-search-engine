@@ -62,12 +62,12 @@ import {
 /** Per-step natural-language summary (string-rendered planner/synthesizer
  *  decision). Sized to fit an LLM-paraphrased justification of a single
  *  reasoning step without inflating response bytes. */
-export const STEP_SUMMARY_MAX_CHARS = 500;
+const STEP_SUMMARY_MAX_CHARS = 500;
 
 /** Maximum parallel tool invocations per step. Aligned with the parallel
  *  batch cap in `agent-tool-execution-support.ts` (parallel batches fan out
  *  at most 4 search/pairing/drinkability calls per step). */
-export const STEP_TOOL_CALL_MAX = 4;
+const STEP_TOOL_CALL_MAX = 4;
 
 /** Per-observation text cap. Observations are tool-output summaries that the
  *  orchestrator passes back to the LLM and surfaces in the response. Sized
@@ -78,7 +78,7 @@ export const STEP_OBSERVATION_MAX_CHARS = 2_000;
  *  observation, and the parallel batch cap is `STEP_TOOL_CALL_MAX = 4`. Soft
  *  ceiling at 8 leaves headroom for future multi-observation tools (e.g. a
  *  pairing tool that emits a primary + secondary observation). */
-export const STEP_OBSERVATION_MAX = 8;
+const STEP_OBSERVATION_MAX = 8;
 
 /** Maximum length of the synthesizer's final answer string. Mirrors
  *  `SYNTHESIS_MAX_ANSWER_CHARS = 3000` in
@@ -95,7 +95,7 @@ export const ANSWER_MAX_CHARS = 3_000;
  * envelope. We allow `MAX_AGENT_STEPS_CAP * 2 = 20` slots so a 10-step
  * loop with analyzer/router/synth bookends still fits.
  */
-export const WINE_SEARCH_STEPS_MAX = MAX_AGENT_STEPS_CAP * 2;
+const WINE_SEARCH_STEPS_MAX = MAX_AGENT_STEPS_CAP * 2;
 
 // ---------------------------------------------------------------------------
 // Shared sub-schemas
@@ -124,14 +124,13 @@ export type TokenUsageBody = z.infer<typeof TokenUsageSchema>;
  *  - `mini_loop`: nested ReAct mini-loop inside a `multi-step` plan.
  *  - `synthesizer`: final answer synthesis.
  */
-export const WineSearchStepSourceSchema = z.enum([
+const WineSearchStepSourceSchema = z.enum([
   'analyzer',
   'router',
   'runner',
   'mini_loop',
   'synthesizer',
 ]);
-export type WineSearchStepSource = z.infer<typeof WineSearchStepSourceSchema>;
 
 /** Single tool call (uniform shape across known and unknown tools). The
  *  `arguments` shape is intentionally `z.record(z.unknown())` — the inner
@@ -231,7 +230,6 @@ export const WineSearchRequestSchema = z.object({
       .optional(),
   }).strict().optional(),
 }).strict();
-export type WineSearchRequestBody = z.infer<typeof WineSearchRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // Step schema
@@ -299,12 +297,11 @@ export const WineSearchDegradedReasonSchema = z.enum([
   // deterministic layer ladder.
   'ungrounded_claim',
 ]);
-export type WineSearchDegradedReason = z.infer<typeof WineSearchDegradedReasonSchema>;
 
 /** Query intent classifier output. Matches `QueryIntentSchema` in
  *  `wine-search-schemas.ts`, plus a `'rejected'` slot the orchestrator
  *  emits when the analyzer refuses the query. */
-export const WineSearchQueryIntentSchema = z.enum([
+const WineSearchQueryIntentSchema = z.enum([
   'search',
   'compare',
   'pair',
@@ -312,11 +309,10 @@ export const WineSearchQueryIntentSchema = z.enum([
   'unknown',
   'rejected',
 ]);
-export type WineSearchQueryIntent = z.infer<typeof WineSearchQueryIntentSchema>;
 
 /** Plan kind selected by the deterministic router. Matches the
  *  discriminated union in `execution-plan-schemas.ts`. */
-export const WineSearchPlanKindSchema = z.enum([
+const WineSearchPlanKindSchema = z.enum([
   'single-search',
   'parallel-search',
   'comparison',
@@ -325,7 +321,6 @@ export const WineSearchPlanKindSchema = z.enum([
   'multi-step',
   'reject',
 ]);
-export type WineSearchPlanKind = z.infer<typeof WineSearchPlanKindSchema>;
 
 /**
  * S1 semantic-split discriminant (wire form). Present only when
@@ -339,11 +334,10 @@ export type WineSearchPlanKind = z.infer<typeof WineSearchPlanKindSchema>;
  *  - `'unsupported_intent'`: planner could not derive a wine search →
  *    `policy_blocked = false`, coverage-gap template emitted.
  */
-export const WineSearchTerminationKindSchema = z.enum([
+const WineSearchTerminationKindSchema = z.enum([
   'security_block',
   'unsupported_intent',
 ]);
-export type WineSearchTerminationKind = z.infer<typeof WineSearchTerminationKindSchema>;
 
 export const WineSearchTerminationSchema = z.object({
   reason: WineSearchTerminationReasonSchema,

@@ -42,7 +42,7 @@ export type AliasType = (typeof ALIAS_TYPES)[number];
  * Vespa response, JSONB blob) — never `as AliasType` casts on
  * unvalidated strings (CLAUDE.md rule 11/12).
  */
-export function isAliasType(value: unknown): value is AliasType {
+function isAliasType(value: unknown): value is AliasType {
   return (
     typeof value === 'string' &&
     (ALIAS_TYPES as readonly string[]).includes(value)

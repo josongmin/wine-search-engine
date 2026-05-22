@@ -60,7 +60,7 @@ const MAX_SCENARIO_ID = 100_000;
  * union shape because constraints range over scalars, lists, and numeric
  * ranges (price band, vintage range).
  */
-export const constraintAtomSchema = z.object({
+const constraintAtomSchema = z.object({
   attribute: z.string().min(1).max(MAX_TEXT_LENGTH),
   operator: z.enum(['=', '<=', '>=', 'range', 'in', 'exclude']),
   value: z.union([
@@ -78,26 +78,26 @@ export const constraintAtomSchema = z.object({
 /**
  * Bucketed constraint annotation. Mirrors scenario.expectedConstraints shape.
  */
-export const expectedConstraintsSchema = z.object({
+const expectedConstraintsSchema = z.object({
   hard: z.array(constraintAtomSchema).max(MAX_CONSTRAINTS_PER_BUCKET).optional(),
   soft: z.array(constraintAtomSchema).max(MAX_CONSTRAINTS_PER_BUCKET).optional(),
   inferred: z.array(constraintAtomSchema).max(MAX_CONSTRAINTS_PER_BUCKET).optional(),
 }).strict();
 
-export const expectedEntitySchema = z.object({
+const expectedEntitySchema = z.object({
   surface: z.string().min(1).max(MAX_TEXT_LENGTH),
   canonical: z.string().min(1).max(MAX_TEXT_LENGTH),
   type: z.enum(['wine_type', 'country', 'region', 'appellation', 'grape_primary']),
 }).strict();
 
-export const expectedClaimsSchema = z.object({
+const expectedClaimsSchema = z.object({
   /** Claim atoms (canonical lower-case substrings) that MUST appear in the answer. */
   mustMention: z.array(z.string().min(1).max(MAX_TEXT_LENGTH)).max(MAX_CLAIM_ATOMS).optional(),
   /** Claim atoms that MUST NOT appear in the answer. */
   mustNotMention: z.array(z.string().min(1).max(MAX_TEXT_LENGTH)).max(MAX_CLAIM_ATOMS).optional(),
 }).strict();
 
-export const expectedStepsSchema = z.object({
+const expectedStepsSchema = z.object({
   /** Min agent step count (inclusive). */
   min: z.number().int().min(0).max(MAX_EXPECTED_STEPS),
   /** Max agent step count (inclusive). */
@@ -107,7 +107,7 @@ export const expectedStepsSchema = z.object({
 });
 
 /** Termination reason union — mirrors scenario.ts `TerminationReason`. */
-export const terminationReasonSchema: z.ZodType<TerminationReason> = z.enum([
+const terminationReasonSchema: z.ZodType<TerminationReason> = z.enum([
   'answer', 'fallback', 'blocked', 'error', 'timeout',
 ]);
 
@@ -159,9 +159,9 @@ export const scenarioAnnotationSchema = z.object({
 }).strict();
 
 export type ScenarioAnnotation = z.infer<typeof scenarioAnnotationSchema>;
-export type AnnotationConstraintAtom = z.infer<typeof constraintAtomSchema>;
-export type AnnotationExpectedClaims = z.infer<typeof expectedClaimsSchema>;
-export type AnnotationExpectedSteps = z.infer<typeof expectedStepsSchema>;
+type AnnotationConstraintAtom = z.infer<typeof constraintAtomSchema>;
+type AnnotationExpectedClaims = z.infer<typeof expectedClaimsSchema>;
+type AnnotationExpectedSteps = z.infer<typeof expectedStepsSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Parse helpers

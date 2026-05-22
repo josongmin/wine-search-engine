@@ -67,7 +67,6 @@ export const FIXTURE_SCHEMA_VERSION = '1' as const;
  */
 export const FIXTURE_SCHEMA_VERSIONS = ['1'] as const;
 
-export type FixtureSchemaVersion = (typeof FIXTURE_SCHEMA_VERSIONS)[number];
 
 // ---------------------------------------------------------------------------
 // Max-bounds (domain: suites have O(100) cases, catalogs O(1000) entries)

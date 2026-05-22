@@ -18,7 +18,7 @@ interface CachedAliasMatcherOptions {
  * - `evictions` — entries removed by LRU because `maxEntries` was exceeded.
  * - `size` — number of entries currently resident in the cache.
  */
-export interface CachedAliasMatcherStats {
+interface CachedAliasMatcherStats {
   readonly hits: number;
   readonly misses: number;
   readonly evictions: number;

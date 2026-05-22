@@ -7,7 +7,7 @@ import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
  * via {@link typedRowsQuery}, keeping this interface itself free of the
  * single-use type-parameter anti-pattern (`@typescript-eslint/no-unnecessary-type-parameters`).
  */
-export interface PgQueryable {
+interface PgQueryable {
   query: (text: string, values?: readonly unknown[]) => Promise<{
     rows: readonly unknown[];
     rowCount?: number | null;
@@ -52,7 +52,7 @@ const log = bootstrapLogger.child({ component: 'EvalBenchmarkLedgerBootstrap' })
 
 const bootstrapCache = new WeakMap<object, Promise<void>>();
 
-export const EVAL_BENCHMARK_LEDGER_REQUIRED_COLUMNS = [
+const EVAL_BENCHMARK_LEDGER_REQUIRED_COLUMNS = [
   'run_id',
   'benchmark_kind',
   'search_snapshot_id',

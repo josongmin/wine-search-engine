@@ -210,7 +210,7 @@ export interface WineSearchInput {
 }
 
 export {
-  type ExecutionStep,
+  
   type WineSearchResult,
 } from './wine-search-result-schemas.js';
 

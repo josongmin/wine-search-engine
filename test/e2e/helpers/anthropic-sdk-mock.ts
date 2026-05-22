@@ -49,13 +49,13 @@ import type { SynthesisAnswer } from '../../../src/application/wine-search/synth
 
 /** Default analyze input token count used by the mock unless overridden by
  *  the caller. Sized like a typical Anthropic analyze response footprint. */
-export const MOCK_ANALYZE_INPUT_TOKENS = 120;
+const MOCK_ANALYZE_INPUT_TOKENS = 120;
 /** Default analyze output token count. */
-export const MOCK_ANALYZE_OUTPUT_TOKENS = 40;
+const MOCK_ANALYZE_OUTPUT_TOKENS = 40;
 /** Default synthesize input token count. */
-export const MOCK_SYNTHESIZE_INPUT_TOKENS = 200;
+const MOCK_SYNTHESIZE_INPUT_TOKENS = 200;
 /** Default synthesize output token count. */
-export const MOCK_SYNTHESIZE_OUTPUT_TOKENS = 80;
+const MOCK_SYNTHESIZE_OUTPUT_TOKENS = 80;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -294,7 +294,7 @@ export function getLastSynthesizeUserContent(mock: StructuredLlmMock): string | 
 /** Discriminated identifier for the kind of error to inject. Mirrors the
  *  classes exported from `structured-llm.port.ts` plus the generic `Error`
  *  case (which the orchestrator must NOT let bubble out as a 500). */
-export type StructuredLlmInjectedErrorClass =
+type StructuredLlmInjectedErrorClass =
   | 'validation'
   | 'refusal'
   | 'partial'
@@ -303,7 +303,7 @@ export type StructuredLlmInjectedErrorClass =
   | 'generic';
 
 /** Which phase of the pipeline the injected failure should fire on. */
-export type StructuredLlmInjectedPhase = 'analyze' | 'execute' | 'synthesize';
+type StructuredLlmInjectedPhase = 'analyze' | 'execute' | 'synthesize';
 
 function makeInjectedError(klass: StructuredLlmInjectedErrorClass): Error {
   switch (klass) {
@@ -359,7 +359,7 @@ export function makeStructuredLlmThatThrows(
 /** Per-call response in a scripted sequence. Either yields a SynthesizeMockOutcome
  *  (success) or throws a typed error class. Order is consumed on the synthesize
  *  phase only — analyze and execute keep their default behavior. */
-export type StructuredLlmMockResponse =
+type StructuredLlmMockResponse =
   | { readonly kind: 'ok'; readonly outcome: SynthesizeMockOutcome }
   | { readonly kind: 'throw'; readonly errorClass: StructuredLlmInjectedErrorClass };
 
@@ -416,7 +416,7 @@ export function makeStructuredLlmWithSequence(
  * assert per-request signal isolation (each request must see its OWN signal,
  * not a sibling's).
  */
-export interface MarkerEchoSynthesizeOptions {
+interface MarkerEchoSynthesizeOptions {
   readonly markerRe: RegExp;
   readonly observedSignalsByMarker: Map<string, AbortSignal>;
   readonly delayMs?: number;
@@ -455,7 +455,7 @@ export function makeMarkerEchoSynthesize(
  * `listenerSnapshot` callback is invoked after the signal is observed so the
  * test can probe `listenerCount` on the signal at call time.
  */
-export interface ListenerProbeSynthesizeOptions {
+interface ListenerProbeSynthesizeOptions {
   readonly onCall: (req: { abortSignal?: AbortSignal | undefined }) => void;
   readonly delayMs?: number;
 }
@@ -536,7 +536,7 @@ export interface ScriptedAnthropicResponse {
   readonly bodyJson: unknown;
 }
 
-export interface AnthropicFetchCapture {
+interface AnthropicFetchCapture {
   /** Ordered list of every captured outgoing request. */
   readonly requests: CapturedAnthropicRequest[];
   /** The `vi.fn` to install via `vi.stubGlobal('fetch', capture.fetchMock)`. */

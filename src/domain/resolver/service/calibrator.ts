@@ -16,7 +16,7 @@ import type {
  *
  * Override via `CALIBRATION_TTL_DAYS` env var (see config wiring).
  */
-export const DEFAULT_CALIBRATION_TTL_DAYS = 14;
+const DEFAULT_CALIBRATION_TTL_DAYS = 14;
 
 /**
  * Default fallback calibration params used when no trained model exists.

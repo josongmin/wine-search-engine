@@ -7,7 +7,7 @@ function normalizeDisplayPart(value: string | undefined): string {
   return buildNormalizedQueryViews(value).punctuationStripped;
 }
 
-export interface DisplayIdentityParts {
+interface DisplayIdentityParts {
   readonly canonicalLabel: string;
   readonly producer?: string | undefined;
   readonly region?: string | undefined;

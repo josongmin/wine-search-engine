@@ -35,7 +35,7 @@ import {
   HTTP_SUCCESS_STATUS_MIN,
 } from '../constants.js';
 
-export interface DeclaredHttpRouteContract {
+interface DeclaredHttpRouteContract {
   readonly method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
   readonly url: string;
   readonly contract: HttpRouteContract;

@@ -10,7 +10,7 @@
  *   structured planner constraints
  */
 
-export interface SilverKoreanEntityAliasCatalogEntry {
+interface SilverKoreanEntityAliasCatalogEntry {
   readonly surface: string;
   readonly mappedAttribute: 'appellation';
   readonly canonicalValue: string;

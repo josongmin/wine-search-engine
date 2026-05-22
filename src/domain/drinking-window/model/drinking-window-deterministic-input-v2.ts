@@ -90,7 +90,7 @@ export const DRINKING_WINDOW_SOURCE_CONFIDENCE_LEVELS = [
   'low',
 ] as const;
 
-export type DrinkingWindowDeterministicValueKind =
+type DrinkingWindowDeterministicValueKind =
   | 'number'
   | 'integer'
   | 'string'
@@ -99,7 +99,7 @@ export type DrinkingWindowDeterministicValueKind =
   | 'enum'
   | 'boolean';
 
-export interface DrinkingWindowDeterministicFieldSpec {
+interface DrinkingWindowDeterministicFieldSpec {
   readonly kind: DrinkingWindowDeterministicValueKind;
   readonly required: boolean;
   readonly description: string;

@@ -30,7 +30,7 @@ export interface StageTimer {
  * `performance.now` which is monotone non-decreasing per the W3C HR-Time
  * spec — the same invariant property-based tests assume.
  */
-export interface StageTimerOptions {
+interface StageTimerOptions {
   readonly now?: () => number;
 }
 

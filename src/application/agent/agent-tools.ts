@@ -28,8 +28,15 @@ import {
   SEARCH_TOOL_MAX_STYLES,
   sanitizeOptionalToolNulls,
   validateSearchToolVintageRange,
-  LOOKUP_WINE_LIMIT_MAX,
 } from '../search/search-tool-contract.js';
+import {
+  LookupWineInputSchema as SharedLookupWineInputSchema,
+  executeLookupAsEntitySearch,
+} from '../search/lookup-wine-execution.js';
+import { LOOKUP_WINE_LIMIT_MAX } from '../search/search-tool-contract.js';
+// Local alias keeps the dispatcher reading like before; the re-export above is
+// the public contract.
+const LookupWineInputSchema = SharedLookupWineInputSchema;
 import {
   buildFoodPairingStructuredFilters,
   buildFoodPairingStructuredPreferences,
@@ -216,17 +223,12 @@ const SearchInputObjectSchema = z.object({
 export const SearchInputSchema = z.preprocess(normalizeSingularStyleArrayInput, SearchInputObjectSchema);
 
 /**
- * Runtime input contract for the `lookup_wine` tool. Deliberately minimal:
- * a required wine name/identity + an optional small result cap (≤
- * {@link LOOKUP_WINE_LIMIT_MAX}). No constraint filters — lookup is identity
- * resolution, not filtered search. Exported for property/contract tests.
+ * Runtime input contract for the `lookup_wine` tool. Re-exported from the
+ * shared helper module so every dispatcher (legacy agent-tools, mini-loop,
+ * future runners) validates against the SAME schema. See SOLID audit H2 —
+ * before extraction, three independent copies existed and could drift.
  */
-export const LookupWineInputSchema = z.object({
-  query: buildSearchToolQueryField({ maxLen: SEARCH_QUERY_MAX_LEN }),
-  // No upper bound here on purpose: an LLM passing limit:5 should not hard-fail
-  // the whole tool call. The dispatcher clamps to LOOKUP_WINE_LIMIT_MAX.
-  limit: coercePositiveInt.pipe(z.number().int().min(1)).optional(),
-});
+export { LookupWineInputSchema } from '../search/lookup-wine-execution.js';
 
 const CompareInputObjectSchema = z.object({
   query_a: buildSearchToolQueryField({
@@ -978,7 +980,11 @@ function buildGroundingJsonFromStructuredOutput(
   }
 
   switch (structuredOutput.kind) {
-    case 'search_result_set': {
+    case 'search_result_set':
+    case 'lookup_result_set': {
+      // Both share the per-item ResultItem shape; only the dispatcher-level
+      // invariants differ (lookup_result_set intentionally skips
+      // search-specific guards — see tool-call-evidence-frame.ts LSP note).
       return buildGroundingJsonFromSearch(
         {
           queryType: 'search',

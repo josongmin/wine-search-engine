@@ -60,7 +60,7 @@ const AgentToolCallSchema = z.union([
   AgentUnknownToolCallSchema,
 ]);
 
-export const AgentStepSchema = z.object({
+const AgentStepSchema = z.object({
   index: z.number().int().nonnegative(),
   thought: z.string(),
   action: AgentToolCallSchema.optional(),
@@ -108,6 +108,4 @@ export const AgentResponseSchema = z.object({
   }).strict(),
 }).strict();
 
-export type AgentRequestBody = z.infer<typeof AgentRequestSchema>;
 export type AgentResponseBody = z.infer<typeof AgentResponseSchema>;
-export type AgentStepBody = z.infer<typeof AgentStepSchema>;

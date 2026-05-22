@@ -40,7 +40,6 @@ import type {
 } from '../schemas/wine-search.schema.js';
 import type {
   WineSearchOrchestratorContract as WineSearchOrchestrator,
-  WineSearchInput as OrchestratorInput,
   WineSearchResult as OrchestratorResult,
   TokenUsageShape as OrchestratorTokenUsage,
 } from '@app/wine-search/wine-search-orchestrator.js';
@@ -58,11 +57,6 @@ export type { WineSearchOrchestrator };
  *  so existing callers keep their import surface. `abortSignal` is required
  *  at the HTTP boundary (the route always wires one), whereas the
  *  orchestrator itself treats it as optional. */
-export type WineSearchOrchestratorInput =
-  Omit<OrchestratorInput, 'abortSignal' | 'maxSteps'> & {
-    readonly maxSteps: number;
-    readonly abortSignal: AbortSignal;
-  };
 
 // ---------------------------------------------------------------------------
 // Route dependencies + registration

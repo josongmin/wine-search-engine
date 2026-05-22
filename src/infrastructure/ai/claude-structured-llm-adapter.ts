@@ -115,7 +115,7 @@ const HTTP_STATUS_UNPROCESSABLE_ENTITY = 422;
 // Adapter options + Anthropic wire types
 // ---------------------------------------------------------------------------
 
-export interface ClaudeStructuredLlmAdapterOptions {
+interface ClaudeStructuredLlmAdapterOptions {
   readonly apiKey: string;
   readonly defaultModel?: string;
   /** Overall HTTP-layer timeout — outer bound. The per-step timeout passed

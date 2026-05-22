@@ -1,9 +1,9 @@
 /** Median latency percentile (typical case). */
-export const LATENCY_PERCENTILE_P50 = 0.5;
+const LATENCY_PERCENTILE_P50 = 0.5;
 /** Tail latency percentile (SLO-style). */
-export const LATENCY_PERCENTILE_P95 = 0.95;
+const LATENCY_PERCENTILE_P95 = 0.95;
 /** Extreme tail latency percentile (worst-case monitoring). */
-export const LATENCY_PERCENTILE_P99 = 0.99;
+const LATENCY_PERCENTILE_P99 = 0.99;
 
 /** Documented default returned by percentile() / pXX() when no samples exist. */
 const EMPTY_PERCENTILE_DEFAULT = 0;

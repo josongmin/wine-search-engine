@@ -75,7 +75,7 @@ export interface FaithfulnessResult extends JudgeResult {
  */
 const FAITH_DISAGREEMENT_THRESHOLD = 0.5;
 
-export interface JudgeEvidenceContext {
+interface JudgeEvidenceContext {
   readonly observations?: readonly string[];
 }
 
@@ -571,7 +571,7 @@ Output ONLY the JSON. No markdown.`;
  *
  * Default samples=1 for back-compat; runner passes args.judgeSamples for parity.
  */
-export async function judgeFaithfulness(
+async function judgeFaithfulness(
   judgeLlm: ChatLlmPort,
   answer: string,
   observations: readonly string[],

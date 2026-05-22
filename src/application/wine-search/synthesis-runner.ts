@@ -1040,10 +1040,5 @@ export class SynthesisRunner {
 // Re-exports for callers that only need the runner module.
 // ---------------------------------------------------------------------------
 
-export type {
-  AnswerLayer,
-  AnswerResult,
-  DegradedReason,
-  SynthesisAnswer,
-} from './synthesis-schemas.js';
+;
 // Re-export schema only as value so tests can import directly.

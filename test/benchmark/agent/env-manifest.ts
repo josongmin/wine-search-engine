@@ -92,7 +92,7 @@ export type EnvManifest = z.infer<typeof envManifestSchema>;
 // Builder
 // ─────────────────────────────────────────────────────────────────────────
 
-export interface BuildEnvManifestInput {
+interface BuildEnvManifestInput {
   readonly agentModel: string;
   readonly judgeModel: string | null;
   readonly embeddingModel: string;

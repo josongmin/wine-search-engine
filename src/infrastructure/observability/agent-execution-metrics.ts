@@ -129,7 +129,7 @@ const PARALLEL_BATCH_TIMEOUT_RATE_ALERT_THRESHOLD = 0.1;
  * OTel SpanContext.traceId when available so the sample/drop decision is
  * stable across the trace (TraceIdRatioBasedSampler invariant).
  */
-export interface AgentExecutionRecordOptions {
+interface AgentExecutionRecordOptions {
   readonly traceId?: string | undefined;
 }
 

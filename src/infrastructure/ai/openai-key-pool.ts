@@ -32,14 +32,14 @@ export interface OpenAiKeyPoolClock {
 /** Default rate-limit cooldown when none provided (60s — matches OpenAI 429 backoff guidance). */
 export const DEFAULT_OPENAI_KEY_POOL_COOLDOWN_MS = 60_000;
 
-export interface OpenAiKeyPoolConstructorOptions extends OpenAiKeyPoolOptions {
+interface OpenAiKeyPoolConstructorOptions extends OpenAiKeyPoolOptions {
   /** Cooldown window after `markRateLimited` before the key becomes acquirable again. */
   readonly rateLimitCooldownMs?: number;
   /** Injectable clock; defaults to `Date.now`-backed wall-clock. */
   readonly clock?: OpenAiKeyPoolClock;
 }
 
-export interface OpenAiKeyPoolStats {
+interface OpenAiKeyPoolStats {
   readonly keyCount: number;
   readonly exhaustedCount: number;
   readonly totalAcquires: number;

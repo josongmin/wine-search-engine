@@ -454,7 +454,7 @@ export function expectedCalibrationError(
 
 // ── Best fit selector ─────────────────────────────────────────────────────
 
-export interface FitBestCalibrationOptions {
+interface FitBestCalibrationOptions {
   /**
    * Fraction of samples reserved for holdout ECE measurement. Defaults to
    * {@link DEFAULT_HOLDOUT_FRACTION} (0.2). Set to 0 to opt out and report
@@ -541,7 +541,7 @@ export function fitBestCalibration(
   return fitBestCalibrationWithDiagnostics(samples, queryClass, options).params;
 }
 
-export interface FitBestCalibrationDiagnostics {
+interface FitBestCalibrationDiagnostics {
   readonly params: CalibrationParams;
   /** True when the reported ECE was measured on a holdout set, not the training set. */
   readonly outOfSample: boolean;

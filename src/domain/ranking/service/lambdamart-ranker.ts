@@ -103,7 +103,7 @@ export function checkFeatureParityAndWarn(
   }
 }
 
-export function assertFeatureParityOrThrow(
+function assertFeatureParityOrThrow(
   modelHash: string,
   currentHash: string,
   queryClass: string,

@@ -47,7 +47,7 @@ export type RecipientProfileEvidenceAxis =
   | 'crowd_pleasing_red'
   | 'broad_recognition';
 
-export interface RecipientProfileCandidate {
+interface RecipientProfileCandidate {
   readonly wineType?: string | undefined;
   readonly style?: string | undefined;
   readonly grapePrimary?: string | undefined;
@@ -219,9 +219,6 @@ function matchesUnknownPreferenceRecipientProfile(candidate: RecipientProfileCan
   return unknownPreferenceRecipientProfileEvidenceAxes(candidate).length > 0;
 }
 
-export function isRecipientProfileValue(value: string): value is RecipientProfileValue {
-  return (RECIPIENT_PROFILE_VALUES as readonly string[]).includes(value);
-}
 
 export function recipientProfileToRetrievalTerms(profile: string): readonly string[] {
   switch (profile) {
@@ -277,12 +274,12 @@ export function recipientProfileEvidenceAxes(
 // runs. No randomness, no locale-dependent string ops, no \b on non-ASCII.
 // ---------------------------------------------------------------------------
 
-export interface RecipientProfileScore {
+interface RecipientProfileScore {
   readonly profile: RecipientProfileValue;
   readonly confidence: number;
 }
 
-export interface RecipientProfileClassification {
+interface RecipientProfileClassification {
   readonly profile?: RecipientProfileValue;
   readonly confidence: number;
   readonly runnerUp?: RecipientProfileScore;

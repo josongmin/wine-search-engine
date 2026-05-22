@@ -33,7 +33,7 @@ export interface RefusalDerivationSample {
   readonly queryClass: string;
 }
 
-export interface RefusalDerivationResult {
+interface RefusalDerivationResult {
   readonly queryClass: string;
   /** Calibrated probability τ ∈ [0,1]. */
   readonly threshold: number;
@@ -47,7 +47,7 @@ export interface RefusalDerivationResult {
   readonly aurc: number;
 }
 
-export interface RefusalDerivationOptions {
+interface RefusalDerivationOptions {
   /** Operating point in (0,1]. */
   readonly targetCoverage: number;
 }

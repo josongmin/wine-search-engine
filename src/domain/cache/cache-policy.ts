@@ -3,7 +3,7 @@ type CacheEligibility =
   | 'non_cacheable'
   | 'cacheable_but_snapshot_bound';
 
-export const RESPONSE_CACHE_POLICY_REASONS = [
+const RESPONSE_CACHE_POLICY_REASONS = [
   'heuristic_response',
   'degraded_response',
   'advisory_response',
@@ -11,7 +11,7 @@ export const RESPONSE_CACHE_POLICY_REASONS = [
   'missing_snapshot_id',
 ] as const;
 
-export type ResponseCachePolicyReason =
+type ResponseCachePolicyReason =
   typeof RESPONSE_CACHE_POLICY_REASONS[number];
 
 interface CachePolicyDecision {
@@ -186,21 +186,21 @@ export function decideResponseCacheReadPolicy(input: {
 // tests can isolate state without depending on the global.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface CachePolicyWriteStats {
+interface CachePolicyWriteStats {
   readonly evaluations: number;
   readonly eligible_count: number;
   readonly ineligible_count: number;
   readonly by_reason: Readonly<Record<ResponseCachePolicyReason, number>>;
 }
 
-export interface CachePolicyReadStats {
+interface CachePolicyReadStats {
   readonly evaluations: number;
   readonly hit_count: number;
   readonly bypass_count: number;
   readonly by_reason: Readonly<Record<ResponseCacheReadBypassReason, number>>;
 }
 
-export interface CachePolicyDistributionCounter {
+interface CachePolicyDistributionCounter {
   recordWriteDecision(decision: CachePolicyDecision): void;
   recordReadDecision(decision: ResponseCacheReadDecision): void;
   getStats(): CachePolicyWriteStats;

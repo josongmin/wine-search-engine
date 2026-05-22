@@ -32,7 +32,7 @@ import type { NormalizedConstraint } from './constraint-bundle.js';
  * interface-layer code (clean architecture: domain ports must not import
  * from `@interface`).
  */
-export const NORMALIZED_CONSTRAINT_MAX_STRING_CHARS = 2000;
+const NORMALIZED_CONSTRAINT_MAX_STRING_CHARS = 2000;
 
 /**
  * Maximum cardinality of an `in` / `not_in` value list. Aligns with the
@@ -40,7 +40,7 @@ export const NORMALIZED_CONSTRAINT_MAX_STRING_CHARS = 2000;
  * `.max(50)` on emitted constraint arrays; 32 covers the worst observed
  * compound query (~6 entities × ~5 constraints each ≈ 30) with headroom.
  */
-export const NORMALIZED_CONSTRAINT_MAX_VALUE_LIST = 32;
+const NORMALIZED_CONSTRAINT_MAX_VALUE_LIST = 32;
 
 /**
  * Closed operator enum — must stay in lockstep with `ConstraintOperator`

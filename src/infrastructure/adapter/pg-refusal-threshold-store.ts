@@ -37,7 +37,7 @@ const log = bootstrapLogger.child({ component: 'PgRefusalThresholdStore' });
  * than re-querying on every request, and the upper bound (1 day) is
  * enforced at the env-schema layer.
  */
-export const DEFAULT_REFUSAL_THRESHOLD_TTL_SECONDS = 300;
+const DEFAULT_REFUSAL_THRESHOLD_TTL_SECONDS = 300;
 
 /** Milliseconds per second — named to keep the multiplication self-documenting. */
 const MILLIS_PER_SECOND = 1_000;
@@ -83,7 +83,7 @@ function rowToThreshold(row: RefusalThresholdRowParsed): RefusalThreshold {
   };
 }
 
-export interface PgRefusalThresholdStoreOptions {
+interface PgRefusalThresholdStoreOptions {
   readonly ttlSeconds?: number;
   /**
    * Injection seam for tests — defaults to `Date.now`. The store does NOT

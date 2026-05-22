@@ -303,7 +303,7 @@ function compareArtifacts(
   return left.entityId < right.entityId ? -1 : left.entityId > right.entityId ? 1 : 0;
 }
 
-export interface DualLaneFusionResult {
+interface DualLaneFusionResult {
   readonly fusedCandidates: readonly HybridCandidate[];
   readonly laneArtifacts: readonly DualLaneArtifact[];
 }

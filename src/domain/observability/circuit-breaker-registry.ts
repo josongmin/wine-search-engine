@@ -22,7 +22,7 @@ interface CircuitBreakerSnapshot {
  * conventions, so the registry snapshot can be fed directly into a gauge
  * exporter without further normalization.
  */
-export type RegistrySnapshotState = 'closed' | 'open' | 'half-open';
+type RegistrySnapshotState = 'closed' | 'open' | 'half-open';
 
 /**
  * Per-breaker entry returned by `getRegistrySnapshot()`. Shape is intentionally
@@ -34,7 +34,7 @@ export type RegistrySnapshotState = 'closed' | 'open' | 'half-open';
  * `last_trip_ms` is omitted (not `undefined`) when the breaker has never
  * tripped, in line with the repo's `exactOptionalPropertyTypes` discipline.
  */
-export interface RegistrySnapshotEntry {
+interface RegistrySnapshotEntry {
   readonly name: string;
   readonly state: RegistrySnapshotState;
   readonly failures: number;

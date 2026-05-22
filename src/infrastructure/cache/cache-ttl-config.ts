@@ -54,7 +54,7 @@ export const CACHE_TTL_SECONDS = {
   QUERY: QUERY_TTL_MINUTES * SECONDS_PER_MINUTE,
 } as const;
 
-export type CacheKind = keyof typeof CACHE_TTL_SECONDS;
+type CacheKind = keyof typeof CACHE_TTL_SECONDS;
 
 /**
  * Returns the documented default TTL for a given cache kind.

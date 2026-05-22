@@ -80,7 +80,7 @@ const MIN_SIGNIFICANT_TOKENS = 2;
 const MAX_PREFIX_LENGTH = 4;
 
 /** Public result row: a single derived initialism with its confidence weight. */
-export interface DerivedInitialism {
+interface DerivedInitialism {
   readonly surface: string;
   readonly confidencePrior: number;
 }
