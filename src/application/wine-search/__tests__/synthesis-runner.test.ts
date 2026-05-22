@@ -50,9 +50,13 @@ function makeTokenUsage(input: number, output: number): TokenUsage {
   };
 }
 
-function makeAnalysis(query: string, hangulDominant: boolean): WineSearchAnalysis {
+function makeAnalysis(
+  query: string,
+  hangulDominant: boolean,
+  intent: WineSearchAnalysis['intent'] = 'search',
+): WineSearchAnalysis {
   return {
-    intent: 'search',
+    intent,
     anchors: [],
     normalizedConstraints: [],
     contract: {
@@ -148,10 +152,15 @@ async function run(
     readonly policyBlocked?: boolean;
     readonly hangulDominant?: boolean;
     readonly abortSignal?: AbortSignal;
+    readonly intent?: WineSearchAnalysis['intent'];
   },
 ): Promise<AnswerResult> {
   const { runner } = makeRunner(llm);
-  const analysis = makeAnalysis(overrides.query, overrides.hangulDominant ?? false);
+  const analysis = makeAnalysis(
+    overrides.query,
+    overrides.hangulDominant ?? false,
+    overrides.intent ?? 'search',
+  );
   return runner.run({
     query: overrides.query,
     requestId: REQUEST_ID,
@@ -762,5 +771,236 @@ describe('SynthesisRunner — S3 grounding-verify', () => {
     expect(result.layer).toBe('primary');
     expect(result.verificationAttempts).toBe(1);
     expect(calls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A1 — grounding-verify intent gating (inverted gate). Previously only
+// `search` / `pair` were verified; now verify runs on ALL factual-claim
+// intents and is SKIPPED only for `unknown`.
+// ---------------------------------------------------------------------------
+
+describe('SynthesisRunner — A1 inverted grounding-verify gate', () => {
+  it.each<WineSearchAnalysis['intent']>(['search', 'compare', 'pair', 'drinkability'])(
+    'intent=%s NOW runs grounding-verify: ungrounded label citation forces a re-synth',
+    async (intent) => {
+      let calls = 0;
+      const llm = makeStubLlm(async () => {
+        calls += 1;
+        if (calls === 1) {
+          // Hallucinated wine absent from grounding (only "Wine A" grounded).
+          return {
+            data: { answer: 'I recommend Wine B.', citations: ['Wine B'] },
+            usage: makeTokenUsage(100, 50),
+            durationMs: 5,
+          };
+        }
+        return {
+          data: { answer: 'Wine A is the grounded pick.', citations: ['Wine A'] },
+          usage: makeTokenUsage(80, 40),
+          durationMs: 5,
+        };
+      });
+      const result = await run(llm, {
+        query: 'pick a wine',
+        intent,
+        hangulDominant: false,
+        toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+      });
+      // Verify ran (re-synth happened) and the grounded re-synth committed at primary.
+      expect(result.layer).toBe('primary');
+      expect(result.verificationAttempts).toBe(2);
+      expect(result.answer).toContain('Wine A');
+      expect(calls).toBe(2);
+    },
+  );
+
+  it('comparison answer must ground BOTH cited wines (one grounded, one hallucinated → re-synth)', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      if (calls === 1) {
+        // Cites a grounded wine AND a hallucinated one — comparison must ground both.
+        return {
+          data: {
+            answer: 'Wine A beats Wine Z on every axis.',
+            citations: ['Wine A', 'Wine Z'],
+          },
+          usage: makeTokenUsage(100, 50),
+          durationMs: 5,
+        };
+      }
+      return {
+        data: { answer: 'Wine A and Wine B compared.', citations: ['Wine A', 'Wine B'] },
+        usage: makeTokenUsage(80, 40),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'compare A and B',
+      intent: 'compare',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018), makeGroundedWineOutcome('Wine B', 2019)],
+    });
+    expect(result.layer).toBe('primary');
+    expect(result.verificationAttempts).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it('NEGATIVE — intent=unknown SKIPS grounding-verify (pure-knowledge answer not falsely rejected)', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      // Names a wine absent from grounding, but this is a pure-knowledge intent
+      // that legitimately cites no groundable surface — must NOT re-synth.
+      return {
+        data: { answer: 'Tannin is a polyphenol; Wine Q illustrates it well.', citations: ['Wine Q'] },
+        usage: makeTokenUsage(60, 30),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'what is tannin?',
+      intent: 'unknown',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('primary');
+    expect(result.verificationAttempts).toBe(1);
+    expect(calls).toBe(1); // no re-synth — verify was skipped for `unknown`
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A3 — reduce spurious Layer-2 fallbacks. A grounded-but-thin re-synth must
+// terminate as `primary` (full credit), NOT fall to the Layer 2 template.
+// Only a genuinely ungrounded re-synth degrades to Layer 2.
+// ---------------------------------------------------------------------------
+
+describe('SynthesisRunner — A3 grounded-but-thin vs ungrounded fallback', () => {
+  it('grounded-but-THIN re-synth terminates as primary (answer), NOT layer2/fallback', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      if (calls === 1) {
+        // Primary hallucinates a wine not in grounding.
+        return {
+          data: { answer: 'I recommend Wine B, a stunning bottle.', citations: ['Wine B'] },
+          usage: makeTokenUsage(100, 50),
+          durationMs: 5,
+        };
+      }
+      // Re-synth is GROUNDED but very thin (one short grounded line).
+      return {
+        data: { answer: 'Wine A.', citations: ['Wine A'] },
+        usage: makeTokenUsage(40, 8),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    // A thin grounded answer beats a template — full credit at primary layer.
+    expect(result.layer).toBe('primary');
+    expect(result.degradedReason).toBeUndefined();
+    expect(result.answer).toContain('Wine A');
+    expect(result.verificationAttempts).toBe(2);
+  });
+
+  it('re-synth directive enumerates grounded labels so the model can re-anchor (A3 additive directive)', async () => {
+    let secondPrompt = '';
+    let calls = 0;
+    const llm = makeStubLlm(async (req) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          data: { answer: 'I recommend Wine B.', citations: ['Wine B'] },
+          usage: makeTokenUsage(100, 50),
+          durationMs: 5,
+        };
+      }
+      // Capture the re-synth directive (last user message).
+      const msgs = req.messages;
+      const last = msgs[msgs.length - 1];
+      secondPrompt = typeof last?.content === 'string' ? last.content : '';
+      return {
+        data: { answer: 'Wine A is grounded.', citations: ['Wine A'] },
+        usage: makeTokenUsage(80, 40),
+        durationMs: 5,
+      };
+    });
+    await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(calls).toBe(2);
+    // Additive: the directive names the actual grounded label so the model
+    // re-anchors instead of producing a thin/empty answer.
+    expect(secondPrompt.toLowerCase()).toContain('wine a');
+    expect(secondPrompt.toLowerCase()).toContain('grounding');
+  });
+
+  it('re-synth directive samples grounded region/grape fields so context is EXPANDED (A3)', async () => {
+    let secondPrompt = '';
+    let calls = 0;
+    const llm = makeStubLlm(async (req) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          data: { answer: 'I recommend Wine B.', citations: ['Wine B'] },
+          usage: makeTokenUsage(100, 50),
+          durationMs: 5,
+        };
+      }
+      const msgs = req.messages;
+      const last = msgs[msgs.length - 1];
+      secondPrompt = typeof last?.content === 'string' ? last.content : '';
+      return {
+        data: { answer: 'Wine A is grounded.', citations: ['Wine A'] },
+        usage: makeTokenUsage(80, 40),
+        durationMs: 5,
+      };
+    });
+    await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      // Grounding carries label + region + grape so the directive can sample
+      // more than just the label (context expansion, not claim-stripping only).
+      toolOutcomes: [
+        makeGroundingObservation([
+          { canonical_label: 'Wine A', region: 'Bordeaux', grapes: ['Merlot'] },
+        ]),
+      ],
+    });
+    expect(calls).toBe(2);
+    const lower = secondPrompt.toLowerCase();
+    expect(lower).toContain('bordeaux');
+    expect(lower).toContain('merlot');
+    expect(lower).toContain('grounded fields');
+  });
+
+  it('genuinely-ungrounded re-synth still degrades to Layer 2 (true failure)', async () => {
+    let calls = 0;
+    const llm = makeStubLlm(async () => {
+      calls += 1;
+      // Both passes hallucinate the same ungrounded wine.
+      return {
+        data: { answer: 'I recommend Wine B again.', citations: ['Wine B'] },
+        usage: makeTokenUsage(90, 45),
+        durationMs: 5,
+      };
+    });
+    const result = await run(llm, {
+      query: 'Recommend a Bordeaux',
+      hangulDominant: false,
+      toolOutcomes: [makeGroundedWineOutcome('Wine A', 2018)],
+    });
+    expect(result.layer).toBe('layer2');
+    expect(result.degradedReason).toBe('ungrounded_claim');
+    expect(result.verificationAttempts).toBe(2);
+    expect(calls).toBe(2);
   });
 });
