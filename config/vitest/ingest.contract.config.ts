@@ -9,6 +9,7 @@ export default defineConfig({
     include: [
       'test/unit/etl/ndjson.test.ts',
       'test/unit/etl/index-to-vespa.test.ts',
+      'test/unit/etl/region-normalizer.test.ts',
       'test/unit/etl/validate-silver.test.ts',
       'test/unit/etl/indexable-record.test.ts',
       'test/unit/etl/etl-utils.test.ts',
