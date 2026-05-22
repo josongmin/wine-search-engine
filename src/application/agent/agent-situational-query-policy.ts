@@ -221,7 +221,7 @@ function extractPairingContext(query: string): string | null {
     : cleaned;
 }
 
-export interface OutOfDomainRedirectOptions {
+interface OutOfDomainRedirectOptions {
   /** Original user query — enables pairing-intent preservation when present. */
   query?: string;
 }

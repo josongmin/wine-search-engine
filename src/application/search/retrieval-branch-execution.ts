@@ -1,25 +1,25 @@
-export type RetrievalBranchObligation = 'required' | 'optional';
+type RetrievalBranchObligation = 'required' | 'optional';
 
-export interface RetrievalBranchSpec<TKey extends string, TResult> {
+interface RetrievalBranchSpec<TKey extends string, TResult> {
   readonly key: TKey;
   readonly obligation: RetrievalBranchObligation;
   readonly execute: () => Promise<TResult>;
 }
 
-export interface RetrievalBranchSuccess<TKey extends string, TResult> {
+interface RetrievalBranchSuccess<TKey extends string, TResult> {
   readonly key: TKey;
   readonly obligation: RetrievalBranchObligation;
   readonly result: TResult;
 }
 
-export interface RetrievalBranchFailure<TKey extends string> {
+interface RetrievalBranchFailure<TKey extends string> {
   readonly key: TKey;
   readonly obligation: RetrievalBranchObligation;
   readonly error: unknown;
   readonly errorMessage: string;
 }
 
-export type RetrievalBranchExecutionResult<TKey extends string, TResult> =
+type RetrievalBranchExecutionResult<TKey extends string, TResult> =
   | {
       readonly status: 'ok';
       readonly successes: readonly RetrievalBranchSuccess<TKey, TResult>[];

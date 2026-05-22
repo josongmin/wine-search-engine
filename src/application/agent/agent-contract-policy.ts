@@ -16,7 +16,7 @@ import type { ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
  * gates in `AgentToolExecutionPhase.run` so the bypass NEVER commits an answer
  * the planner would itself have rejected.
  */
-export interface FastAnswerBypassInput {
+interface FastAnswerBypassInput {
   readonly queryExecutionContract: AgentQueryExecutionContract;
   readonly state: AgentExecutionState;
   readonly pendingDrinkabilityEntityIds: readonly string[];

@@ -237,13 +237,13 @@ export function buildUserMessage(query: string): ChatMessage {
 //   + observations within the ~10k-token/step budget.
 
 /** Most recent N turns eligible for injection (older turns are dropped). */
-export const CONVERSATION_MAX_TURNS = 4;
+const CONVERSATION_MAX_TURNS = 4;
 /** Entity rows kept for the most recent turn (the likely follow-up referent). */
 export const CONVERSATION_MAX_ENTITIES_RECENT = 8;
 /** Entity rows kept for each older turn. */
 export const CONVERSATION_MAX_ENTITIES_OLDER = 3;
 /** Per-turn answer-summary character cap. */
-export const CONVERSATION_ANSWER_CLIP_CHARS = 240;
+const CONVERSATION_ANSWER_CLIP_CHARS = 240;
 /** Approx char allowance per included turn (label + answer summary + entity rows). */
 const CONVERSATION_PER_TURN_CHARS = 450;
 /** Hard ceiling on the entire rendered context block (≈ turns × per-turn budget). */

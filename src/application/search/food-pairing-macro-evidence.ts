@@ -77,7 +77,7 @@ const SWEETNESS_BALANCING_STYLE_TOKENS: ReadonlySet<string> = new Set([
 /** Pairing-tag token that signals spicy-food intent. */
 const SPICY_FOOD_PAIRING_TOKEN = 'spicy_food';
 
-export function normalizeEvidenceToken(value: string): string {
+function normalizeEvidenceToken(value: string): string {
   return value
     .trim()
     .toLowerCase()
@@ -86,7 +86,7 @@ export function normalizeEvidenceToken(value: string): string {
     .replace(/[_\s-]+/gu, '_');
 }
 
-export function hasNormalizedOverlap(
+function hasNormalizedOverlap(
   left: readonly string[] | undefined,
   right: readonly string[] | undefined,
 ): boolean {

@@ -88,8 +88,7 @@ const FOOD_PAIRING_SENSORY_SCALE_MAX = 10;
 /** Pairing color enum. Mirrors `FOOD_PAIRING_COLORS` in
  *  `search-tool-contract.ts`. `both` retained for legacy callers — the
  *  agent system prompt steers them to `search_wines` instead. */
-export const FOOD_PAIRING_COLORS = ['red', 'white', 'rosé', 'sparkling', 'both'] as const;
-export type FoodPairingColor = (typeof FOOD_PAIRING_COLORS)[number];
+const FOOD_PAIRING_COLORS = ['red', 'white', 'rosé', 'sparkling', 'both'] as const;
 
 /** Mapping-version tag stamped onto constraints produced by this use case.
  *  Mirrors `AGENT_FILTER_VERSION` in agent-tools so structured-filter
@@ -216,13 +215,13 @@ function buildPairingQuery(
 // Dependencies / Use case
 // ---------------------------------------------------------------------------
 
-export interface FoodPairingUseCaseDeps {
+interface FoodPairingUseCaseDeps {
   /** Search executor used for the underlying hybrid retrieval. Same port
    *  the agent tool branch uses, so callers may share an instance. */
   readonly searchUseCase: SearchExecutorPort;
 }
 
-export interface FoodPairingExecuteOptions {
+interface FoodPairingExecuteOptions {
   readonly abortSignal?: AbortSignal | undefined;
 }
 
