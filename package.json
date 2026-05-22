@@ -183,6 +183,7 @@
     "etl:ingest-canonical-entity-graph": "tsx scripts/etl/ingest-canonical-entity-graph.ts",
     "etl:publish-search-snapshot": "tsx scripts/etl/publish-search-snapshot.ts",
     "etl:full": "pnpm run etl:silver && pnpm run etl:aliases && pnpm run etl:korean-aliases && pnpm run etl:doc-queries && pnpm run etl:track-c && pnpm run etl:validate && pnpm run etl:index",
+    "etl:bootstrap": "bash scripts/etl/bootstrap-search-snapshot.sh",
     "prepare": "husky",
     "check:security-patterns": "node scripts/test/check-security-patterns.mjs",
     "check:ci": "pnpm run typecheck && pnpm run typecheck:etl && pnpm run check:security-patterns && pnpm run test:unit && pnpm --dir web test && pnpm run test:integration:file -- test/integration/bundle-selector-flag-on.integration.test.ts test/integration/retrieval-critic-flag-on.integration.test.ts test/integration/topology-planner-flag-on.integration.test.ts test/integration/cross-feature-flag-matrix.integration.test.ts && pnpm run verify:http-contracts && pnpm run test:verification:noisy && pnpm run deadcode",

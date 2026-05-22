@@ -9,20 +9,31 @@ maturity: 3
 maturity_rationale: |
   State machine + 사전 점검 완비. 매 데이터 갱신마다 사용, 데이터 손실 사고 없음.
   그러나 Vespa indexing 실패 시 자동 rollback 없음 (수동 개입 필요).
+  2026-05-22: 신규 deploy 시 "first serve"까지의 end-to-end 부트스트랩 갭 해소 —
+  `etl:full`은 etl:index에서 멈춰 snapshot pointer를 publish하지 않아 /ready가 통과하지
+  못했음. `etl:bootstrap` (scripts/etl/bootstrap-search-snapshot.sh)이 silver→index→
+  build-snapshot→ingest-canonical-graph→publish→verify 전체 체인을 단일 커맨드로 묶고,
+  build-search-snapshot이 쓴 runtime-state에서 manifest 경로를 해소해 ingest 스텝에
+  전달. env preflight(DATABASE_URL/VESPA_URL/OPENAI) + operator ack 안내 포함.
+  드리프트 가드 회귀 테스트가 부트스트랩이 참조하는 모든 pnpm 타깃의 실재성 + publish
+  체인 커버리지를 강제.
 
 status: active
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-22
 owner: core
 
 surfaces:
-  - "CLI: pnpm etl:publish-search-snapshot, pnpm etl:index"
+  - "CLI: pnpm etl:bootstrap (full first-serve chain), pnpm etl:publish-search-snapshot, pnpm etl:index"
 
 key_files:
   - scripts/etl/publish-search-snapshot.ts
   - scripts/etl/index-to-vespa.ts
+  - scripts/etl/bootstrap-search-snapshot.sh
 
-tests: {}
+tests:
+  regression:
+    - test/regression/bootstrap-search-snapshot-script-drift.regression.test.ts
 
 depends_on:
   - etl.search-snapshot-build
@@ -33,10 +44,12 @@ related_rfcs: []
 known_limitations:
   - "Vespa indexing 실패 시 자동 rollback 없음"
   - "Batch indexing SLA 없음"
+  - "etl:bootstrap은 bronze 소스(vivino:bronze)·PG 마이그레이션·Vespa 스키마 배포를 전제로 함 (그 선행 단계는 포함 안 함)"
 
 next_steps:
   - "Auto-rollback on SLA 위반"
   - "Streaming incremental indexing"
+  - "bootstrap에 vivino:bronze + 마이그레이션 + Vespa 스키마 배포 선행 단계 통합 (완전 zero-to-serving)"
 
 tags:
   - publication
