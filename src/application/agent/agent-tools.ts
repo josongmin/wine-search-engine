@@ -33,7 +33,6 @@ import {
   LookupWineInputSchema as SharedLookupWineInputSchema,
   executeLookupAsEntitySearch,
 } from '../search/lookup-wine-execution.js';
-import { LOOKUP_WINE_LIMIT_MAX } from '../search/search-tool-contract.js';
 // Local alias keeps the dispatcher reading like before; the re-export above is
 // the public contract.
 const LookupWineInputSchema = SharedLookupWineInputSchema;
@@ -96,7 +95,7 @@ import {
   shouldRunTypedWineDiversityDiscovery,
   withWineTypeFilter,
 } from '../search/search-tool-diversity.js';
-import { isKnownAgentToolName } from '../../domain/agent/model/agent-tool-attempt-schema.js';
+import { isKnownAgentToolName, type KnownAgentToolName } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 import { isAccessibleOnlineTastingQuery } from './agent-situational-query-policy.js';
 import { closeFoodPairingMacroEvidence } from '../search/food-pairing-macro-evidence.js';
 
@@ -1351,301 +1350,167 @@ function normalizeSearchToolRetrievalMode(
 // the two routes (legacy agent tool branch + new use case) never drift on
 // the lift-pairing-constraint rule (CLAUDE.md rule 25/30).
 
-async function executeAgentToolInner(
-  toolName: string,
+// ---------------------------------------------------------------------------
+// Handler registry (SOLID H1 — replaces the single ~500-line switch). Each
+// known tool maps to a pure handler with the same signature. New tools are
+// added by extending KNOWN_AGENT_TOOL_NAMES and registering a handler — no
+// dispatcher edits needed.
+// ---------------------------------------------------------------------------
+
+/** Common signature every per-tool handler must satisfy. */
+type ToolHandler = (
   input: Record<string, unknown>,
   deps: AgentToolDeps,
   requestId: string,
-  options?: AgentToolExecutionOptions,
+  options: AgentToolExecutionOptions | undefined,
+) => Promise<AgentToolInnerResult>;
+
+/**
+ * Build the canonical "INVALID_INPUT" failure observation. Reads `toolName`
+ * from the caller so we never hardcode the per-branch string (previously each
+ * case literal-repeated its name, which drifted from the dispatcher key on
+ * rename — see SOLID H1 audit notes).
+ */
+function buildInvalidInputResult(toolName: string, message: string): AgentToolInnerResult {
+  return {
+    observation: `Invalid input for ${toolName}: ${message}`,
+    rawResult: null,
+    structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message },
+  };
+}
+
+async function handleSearchWines(
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+  options: AgentToolExecutionOptions | undefined,
 ): Promise<AgentToolInnerResult> {
-  switch (toolName) {
-    case 'search_wines': {
-      const parseResult = SearchInputSchema.safeParse(sanitizeOptionalToolNulls(input));
-      if (!parseResult.success) {
-        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
-        return {
-          observation: `Invalid input for search_wines: ${msg}`,
-          rawResult: null,
-          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
-        };
-      }
-      const parsed = parseResult.data;
-      const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(parsed);
+  const parseResult = SearchInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+  if (!parseResult.success) {
+    return buildInvalidInputResult('search_wines', parseResult.error.issues.map((i) => i.message).join(', '));
+  }
+  const parsed = parseResult.data;
+  const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(parsed);
 
-      // Enrich query with structured exclusion/price params so the existing
-      // search pipeline (which understands natural language) applies them.
-      // Truncate the BASE query before appending clauses so that structured
-      // clauses (exclusions, price) are never silently truncated mid-token.
-      // Slicing the enriched string after appending can cut e.g. "not Cabern"
-      // (malformed exclusion) — truncating base-first guarantees clauses intact.
-      const clauses = shouldPreferTypedStructuredQuery(parsed) || shouldPreserveRepresentativeAnchorOnlyQuery(parsed)
-        ? []
-        : buildSearchToolSoftClauses(parsed);
-      const clausesStr = clauses.length > 0 ? `, ${clauses.join(', ')}` : '';
-      // Truncate BASE query so that the full enriched string never exceeds the limit.
-      // `Math.max(0, ...)` prevents negative slice when clauses alone exceed the limit;
-      // in that extreme case the base query is dropped and only clauses are kept (still
-      // bounded because appendStructuredQueryClauses just concatenates).
-      const maxBaseLen = Math.max(0, MAX_ENRICHED_QUERY_LEN - clausesStr.length);
-      const baseQueryCapped = retrievalCoreQuery.slice(0, maxBaseLen);
-      // Hard clamp on the final string — handles the edge case where clauses
-      // themselves exceed MAX_ENRICHED_QUERY_LEN (very many exclusions).
-      const enrichedRaw = appendStructuredQueryClauses(baseQueryCapped, clauses);
-      const enrichedQuery = enrichedRaw.length > MAX_ENRICHED_QUERY_LEN
-        ? enrichedRaw.slice(0, MAX_ENRICHED_QUERY_LEN)
-        : enrichedRaw;
-      const diversityDiscoveryQuery = enrichedQuery;
+  // Enrich query with structured exclusion/price params so the existing
+  // search pipeline (which understands natural language) applies them.
+  // Truncate the BASE query before appending clauses so that structured
+  // clauses (exclusions, price) are never silently truncated mid-token.
+  // Slicing the enriched string after appending can cut e.g. "not Cabern"
+  // (malformed exclusion) — truncating base-first guarantees clauses intact.
+  const clauses = shouldPreferTypedStructuredQuery(parsed) || shouldPreserveRepresentativeAnchorOnlyQuery(parsed)
+    ? []
+    : buildSearchToolSoftClauses(parsed);
+  const clausesStr = clauses.length > 0 ? `, ${clauses.join(', ')}` : '';
+  // Truncate BASE query so that the full enriched string never exceeds the limit.
+  // `Math.max(0, ...)` prevents negative slice when clauses alone exceed the limit;
+  // in that extreme case the base query is dropped and only clauses are kept (still
+  // bounded because appendStructuredQueryClauses just concatenates).
+  const maxBaseLen = Math.max(0, MAX_ENRICHED_QUERY_LEN - clausesStr.length);
+  const baseQueryCapped = retrievalCoreQuery.slice(0, maxBaseLen);
+  // Hard clamp on the final string — handles the edge case where clauses
+  // themselves exceed MAX_ENRICHED_QUERY_LEN (very many exclusions).
+  const enrichedRaw = appendStructuredQueryClauses(baseQueryCapped, clauses);
+  const enrichedQuery = enrichedRaw.length > MAX_ENRICHED_QUERY_LEN
+    ? enrichedRaw.slice(0, MAX_ENRICHED_QUERY_LEN)
+    : enrichedRaw;
+  const diversityDiscoveryQuery = enrichedQuery;
 
-      // Build structured hard constraints from agent params (price, exclusions)
-      // so they flow directly to Vespa as YQL filters.
-      const structuredFilters = buildStructuredFilters(parsed);
-      const structuredPreferences = buildStructuredPreferences(parsed);
-      const effectiveRetrievalMode = normalizeSearchToolRetrievalMode(
-        parsed.retrieval_mode,
-        structuredFilters,
-        structuredPreferences,
-      );
+  // Build structured hard constraints from agent params (price, exclusions)
+  // so they flow directly to Vespa as YQL filters.
+  const structuredFilters = buildStructuredFilters(parsed);
+  const structuredPreferences = buildStructuredPreferences(parsed);
+  const effectiveRetrievalMode = normalizeSearchToolRetrievalMode(
+    parsed.retrieval_mode,
+    structuredFilters,
+    structuredPreferences,
+  );
 
-      const wantsDiversity = parsed.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(parsed.query);
-      const effectiveLimit = wantsDiversity
-        ? Math.max(parsed.limit ?? SEARCH_TOOL_DIVERSITY_MIN_LIMIT, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
-        : parsed.limit;
+  const wantsDiversity = parsed.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(parsed.query);
+  const effectiveLimit = wantsDiversity
+    ? Math.max(parsed.limit ?? SEARCH_TOOL_DIVERSITY_MIN_LIMIT, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
+    : parsed.limit;
 
-      const baseRequest = buildSearchRequestForAgentQuery(
-        enrichedQuery,
-        effectiveLimit,
+  const baseRequest = buildSearchRequestForAgentQuery(
+    enrichedQuery,
+    effectiveLimit,
+    effectiveRetrievalMode,
+    structuredFilters,
+    structuredPreferences,
+  );
+
+  // Create a per-tool-call StageTimer so pipeline stage latencies
+  // propagate to the SearchResponseV1.stageTimings field — surfaced in
+  // bench reports as the latencyBreakdown section.
+  const toolStageTimer = createStageTimer();
+
+  let response: SearchResponseV1 | ComparisonSearchResponse;
+  response = await executeSearchWithTypedWineDiversityDiscovery({
+    searchUseCase: deps.searchUseCase,
+    requestId,
+    fallbackRequest: baseRequest,
+    effectiveLimit: effectiveLimit ?? SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
+    shouldRun: shouldRunTypedWineDiversityDiscovery({
+      query: parsed.query,
+      wantsDiversity,
+      wineType: parsed.wine_type,
+    }),
+    buildTypedRequest: (wineType) =>
+      buildSearchRequestForAgentQuery(
+        diversityDiscoveryQuery,
+        SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
         effectiveRetrievalMode,
-        structuredFilters,
+        withWineTypeFilter(structuredFilters, wineType, 'agent_tool_diversity_v1'),
         structuredPreferences,
-      );
+      ),
+    ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+    ...(deps.corpusCardinality !== undefined ? { corpusCardinality: deps.corpusCardinality } : {}),
+    stageTimer: toolStageTimer,
+  });
 
-      // Create a per-tool-call StageTimer so pipeline stage latencies
-      // propagate to the SearchResponseV1.stageTimings field — surfaced in
-      // bench reports as the latencyBreakdown section.
-      const toolStageTimer = createStageTimer();
+  if (response.queryType === 'comparison') {
+    return {
+      observation: summarizeComparison(response),
+      rawResult: response,
+      structuredOutput: { kind: 'comparison_result', response },
+    };
+  }
 
-      let response: SearchResponseV1 | ComparisonSearchResponse;
-      response = await executeSearchWithTypedWineDiversityDiscovery({
-        searchUseCase: deps.searchUseCase,
-        requestId,
-        fallbackRequest: baseRequest,
-        effectiveLimit: effectiveLimit ?? SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
-        shouldRun: shouldRunTypedWineDiversityDiscovery({
-          query: parsed.query,
-          wantsDiversity,
-          wineType: parsed.wine_type,
-        }),
-        buildTypedRequest: (wineType) =>
-          buildSearchRequestForAgentQuery(
-            diversityDiscoveryQuery,
-            SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
-            effectiveRetrievalMode,
-            withWineTypeFilter(structuredFilters, wineType, 'agent_tool_diversity_v1'),
-            structuredPreferences,
-          ),
-        ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
-        ...(deps.corpusCardinality !== undefined ? { corpusCardinality: deps.corpusCardinality } : {}),
-        stageTimer: toolStageTimer,
-      });
-
-      if (response.queryType === 'comparison') {
+  // Negation post-filter: exclude results whose identity fields contain negated terms.
+  // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
+  const negTerms = collectSearchToolNegationTerms(parsed);
+  if (negTerms.length > 0) {
+    const negationFiltered = applySearchToolNegationResultPolicy(response, negTerms);
+    if (negationFiltered.filteredCount > 0) {
+      if (negationFiltered.fallbackToUnfiltered) {
         return {
-          observation: summarizeComparison(response),
+          observation:
+            `[NEGATION_FALLBACK: All ${response.results.length} result(s) matched excluded terms (${negTerms.join(', ')}). `
+            + `Showing unfiltered results — YOU MUST skip any wine whose grape/region matches the excluded terms and recommend only the non-matching ones. `
+            + `If all wines match, tell the user and suggest broadening.]\n`
+            + summarizeSearchResults(response, wantsDiversity, {
+              requestedQuery: parsed.query,
+              requestedRetrievalMode: effectiveRetrievalMode,
+              requestedRecipientProfile: parsed.recipient_profile,
+            }),
           rawResult: response,
-          structuredOutput: { kind: 'comparison_result', response },
-        };
-      }
-
-      // Negation post-filter: exclude results whose identity fields contain negated terms.
-      // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
-      const negTerms = collectSearchToolNegationTerms(parsed);
-      if (negTerms.length > 0) {
-        const negationFiltered = applySearchToolNegationResultPolicy(response, negTerms);
-        if (negationFiltered.filteredCount > 0) {
-          if (negationFiltered.fallbackToUnfiltered) {
-            return {
-              observation:
-                `[NEGATION_FALLBACK: All ${response.results.length} result(s) matched excluded terms (${negTerms.join(', ')}). `
-                + `Showing unfiltered results — YOU MUST skip any wine whose grape/region matches the excluded terms and recommend only the non-matching ones. `
-                + `If all wines match, tell the user and suggest broadening.]\n`
-                + summarizeSearchResults(response, wantsDiversity, {
-                  requestedQuery: parsed.query,
-                  requestedRetrievalMode: effectiveRetrievalMode,
-                  requestedRecipientProfile: parsed.recipient_profile,
-                }),
-              rawResult: response,
-              structuredOutput: {
-                kind: 'search_result_set',
-                resultSet: response.results,
-                resultCount: response.results.length,
-              },
-            };
-          }
-          response = negationFiltered.response;
-          return {
-            observation: appendObservationNote(
-              summarizeSearchResults(response, wantsDiversity, {
-                requestedQuery: parsed.query,
-                requestedRetrievalMode: effectiveRetrievalMode,
-                requestedRecipientProfile: parsed.recipient_profile,
-              }),
-              `[Excluded ${negationFiltered.filteredCount} result(s) matching negation terms: ${negTerms.join(', ')}]`,
-            ),
-            rawResult: response,
-            structuredOutput: {
-              kind: 'search_result_set',
-              resultSet: response.results,
-              resultCount: response.results.length,
-            },
-          };
-        }
-      }
-
-      // Price post-filter: when agent specified a budget bound/range, drop results
-      // whose priceRange falls outside it. The search pipeline does not have a
-      // native price filter — price bounds are text hints — so out-of-range
-      // results can slip through. This post-filter gives the agent accurate
-      // budget-aware results.
-      if (parsed.min_price_krw !== undefined || parsed.max_price_krw !== undefined) {
-        response = applySearchToolBudgetResultPolicy(
-          response,
-          {
-            minKrw: parsed.min_price_krw,
-            maxKrw: parsed.max_price_krw,
+          structuredOutput: {
+            kind: 'search_result_set',
+            resultSet: response.results,
+            resultCount: response.results.length,
           },
-          { krwPerUsd: KRW_PER_USD_APPROXIMATE },
-        ).response;
-      }
-
-      const alcoholPreference = applySearchToolAlcoholPreference(response, parsed.max_alcohol_pct);
-      response = alcoholPreference.response;
-
-      // Zero-result escalation: guide the agent to relax constraints one by one,
-      // or signal corpus exhaustion when the wine type has very few entries.
-      if (response.results.length === 0) {
-        const corpusLimited =
-          typeof parsed.wine_type === 'string'
-          && parsed.wine_type.length > 0
-          && (deps.corpusCardinality?.isCorpusLimited(parsed.wine_type) ?? false);
-        const tag = corpusLimited
-          ? `[RETRIEVAL_QUALITY: corpus_limited — this wine type has very few entries in the database]\n이 타입의 와인이 데이터베이스에 매우 적습니다. 검색어: "${parsed.query}". 재검색하지 말고, 가능한 범위에서 답변하거나 더 넓은 카테고리를 제안하세요.`
-          : `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`;
-        return {
-          observation: tag,
-          rawResult: response,
-          structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
         };
       }
-
-      // Multi-constraint hint: when 3+ constraint types are detected, remind the
-      // agent it can relax constraints if results are insufficient.
-      const summaryContext = {
-        requestedQuery: parsed.query,
-        requestedRetrievalMode: effectiveRetrievalMode,
-        requestedRecipientProfile: parsed.recipient_profile,
-      };
-      const exactLookupContractViolation = needsResolvedExactLabelContractGuard(response, summaryContext);
-      let obs = summarizeSearchResults(response, wantsDiversity, summaryContext);
-      const constraintHints = detectConstraintKeywords(parsed.query);
-      if (constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT) {
-        obs = appendObservationNote(
-          obs,
-          `[감지된 조건 ${constraintHints.length}개: ${constraintHints.join(', ')}. 결과가 부족하면 조건을 하나씩 제거하며 재검색하세요.]`,
-        );
-      }
-
-      // Corrective RAG quality tag: structured annotation that classifies retrieval
-      // quality so the agent can reliably decide whether to retry with relaxed constraints.
-      // "partial" = results returned but count is low (1–2) with multi-constraint query —
-      // agent should consider relaxing a NICE-TO-HAVE constraint before answering.
-      // "reliable" = ≥3 results or no multi-constraint pressure.
-      const qualityTag = (
-        response.results.length < MIN_RESULTS_FOR_RELIABLE_QUALITY &&
-        constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT
-      )
-        ? '[RETRIEVAL_QUALITY: partial — consider relaxing one NICE-TO-HAVE constraint before answering]'
-        : '[RETRIEVAL_QUALITY: reliable]';
-      obs = `${qualityTag}\n${obs}`;
-      if (isAccessibleOnlineTastingQuery(parsed.query)) {
-        obs = appendObservationNote(
-          obs,
-          '[ACCESSIBILITY_GROUNDING: User asked for wines all online-tasting participants can access. This corpus does not expose retailer inventory, supermarket listings, or real-time stock. Use only grounded wine/price/popularity fields; do not claim a specific store carries a bottle. Explicitly tell the user to confirm availability through their chosen retailer before the event.]',
-        );
-      }
-
-      // Price filter context: when a budget bound/range was applied, annotate
-      // the observation so the agent can explicitly cite the enforced range even
-      // when some per-wine prices are sparse in the index.
-      const priceFilterObservation = buildPriceFilterObservation(parsed);
-      if (priceFilterObservation !== undefined) {
-        obs = appendObservationNote(obs, priceFilterObservation);
-      }
-      if (parsed.max_alcohol_pct !== undefined && (alcoholPreference.demotedCount > 0 || alcoholPreference.unknownCount > 0)) {
-        obs = appendObservationNote(
-          obs,
-          `[ALCOHOL_PREFERENCE: ${parsed.max_alcohol_pct}% 이하를 우선 정렬했습니다. 검증된 초과 도수 ${alcoholPreference.demotedCount}개 결과는 뒤로 보냈고, 도수 정보가 없는 후보 ${alcoholPreference.unknownCount}개는 유지했습니다.]`,
-        );
-      }
-
+      response = negationFiltered.response;
       return {
-        observation: obs,
-        rawResult: response,
-        structuredOutput: {
-          kind: 'search_result_set',
-          resultSet: exactLookupContractViolation !== undefined ? [] : response.results,
-          resultCount: exactLookupContractViolation !== undefined ? 0 : response.results.length,
-        },
-      };
-    }
-
-    case 'lookup_wine': {
-      const parseResult = LookupWineInputSchema.safeParse(sanitizeOptionalToolNulls(input));
-      if (!parseResult.success) {
-        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
-        return {
-          observation: `Invalid input for lookup_wine: ${msg}`,
-          rawResult: null,
-          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
-        };
-      }
-      const parsed = parseResult.data;
-      const limit = Math.min(parsed.limit ?? LOOKUP_WINE_LIMIT_MAX, LOOKUP_WINE_LIMIT_MAX);
-
-      // High-precision identity resolution: force the entity route, no filters.
-      // This is the dedicated "find THIS wine" primitive; constraint-filtered
-      // discovery belongs to search_wines.
-      const response = await deps.searchUseCase.execute(
-        {
-          query: parsed.query,
-          limit,
-          options: { mode: 'entity', explain: false, clarification: false },
-        },
-        requestId,
-        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
-      );
-
-      if (response.queryType !== 'search') {
-        return {
-          observation: 'Unexpected response type for wine lookup.',
-          rawResult: response,
-          structuredOutput: { kind: 'tool_error', errorCode: 'UNEXPECTED_RESPONSE_TYPE', message: `expected search, got ${response.queryType}` },
-        };
-      }
-
-      if (response.results.length === 0) {
-        return {
-          observation: `[LOOKUP_QUALITY: not_found — 0 exact matches]\n"${parsed.query}"에 해당하는 와인을 찾지 못했습니다. 이름 철자를 확인하거나, 조건 탐색이 필요하면 search_wines 를 사용하세요.`,
-          rawResult: response,
-          structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
-        };
-      }
-
-      const obs = summarizeSearchResults(response, false, {
-        requestedQuery: parsed.query,
-        requestedRetrievalMode: 'entity',
-      });
-      return {
-        observation: `[LOOKUP_RESULT: ${response.results.length} exact match(es)]\n${obs}`,
+        observation: appendObservationNote(
+          summarizeSearchResults(response, wantsDiversity, {
+            requestedQuery: parsed.query,
+            requestedRetrievalMode: effectiveRetrievalMode,
+            requestedRecipientProfile: parsed.recipient_profile,
+          }),
+          `[Excluded ${negationFiltered.filteredCount} result(s) matching negation terms: ${negTerms.join(', ')}]`,
+        ),
         rawResult: response,
         structuredOutput: {
           kind: 'search_result_set',
@@ -1654,288 +1519,468 @@ async function executeAgentToolInner(
         },
       };
     }
-
-    case 'compare_wines': {
-      const parseResult = CompareInputSchema.safeParse(sanitizeOptionalToolNulls(input));
-      if (!parseResult.success) {
-        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
-        return {
-          observation: `Invalid input for compare_wines: ${msg}`,
-          rawResult: null,
-          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
-        };
-      }
-      const parsed = parseResult.data;
-      if (deps.decomposedSearchExecute === undefined) {
-        return {
-          observation: 'Compare tool not available.',
-          rawResult: null,
-          structuredOutput: { kind: 'no_op', reason: 'decomposedSearchExecute port not wired' },
-        };
-      }
-      const sharedContextInput = stripSideSpecificCompareSharedConstraints(parsed);
-      const sharedFilters = buildStructuredFilters(sharedContextInput);
-      const sharedPreferences = buildStructuredPreferences(sharedContextInput);
-      const baseRetrievalQueries = buildCompareBaseRetrievalQueries(parsed);
-      const [sideAOverrides, sideBOverrides] = buildCompareSideOverrides(parsed);
-      const sideSpecificFilters = [
-        buildCompareSideOnlyFilters(sideAOverrides),
-        buildCompareSideOnlyFilters(sideBOverrides),
-      ] as const;
-      const retrievalSubQueries = [
-        buildStructuredQuery({
-          ...sharedContextInput,
-          query: baseRetrievalQueries[0],
-          grape_primary: sideAOverrides.grape_primary ?? sharedContextInput.grape_primary,
-          wine_type: sideAOverrides.wine_type ?? sharedContextInput.wine_type,
-          country: sideAOverrides.country ?? sharedContextInput.country,
-          region: sideAOverrides.region ?? sharedContextInput.region,
-          appellation: sideAOverrides.appellation ?? sharedContextInput.appellation,
-          vintage_min: sideAOverrides.vintage_min ?? sharedContextInput.vintage_min,
-          vintage_max: sideAOverrides.vintage_max ?? sharedContextInput.vintage_max,
-          preserveRepresentativeSearch: true,
-        }),
-        buildStructuredQuery({
-          ...sharedContextInput,
-          query: baseRetrievalQueries[1],
-          grape_primary: sideBOverrides.grape_primary ?? sharedContextInput.grape_primary,
-          wine_type: sideBOverrides.wine_type ?? sharedContextInput.wine_type,
-          country: sideBOverrides.country ?? sharedContextInput.country,
-          region: sideBOverrides.region ?? sharedContextInput.region,
-          appellation: sideBOverrides.appellation ?? sharedContextInput.appellation,
-          vintage_min: sideBOverrides.vintage_min ?? sharedContextInput.vintage_min,
-          vintage_max: sideBOverrides.vintage_max ?? sharedContextInput.vintage_max,
-          preserveRepresentativeSearch: true,
-        }),
-      ] as const;
-      const rawSubQueries = [parsed.query_a, parsed.query_b] as const;
-      const response = await deps.decomposedSearchExecute(
-        rawSubQueries,
-        'compare',
-        buildComparisonOriginalQuery(sharedContextInput),
-        requestId,
-        Date.now(),
-        sharedFilters.length > 0 || sharedPreferences.length > 0 || sideSpecificFilters.some((entries) => entries.length > 0)
-          ? {
-              ...(sharedFilters.length > 0 ? { filters: sharedFilters } : {}),
-              ...(sharedPreferences.length > 0 ? { preferences: sharedPreferences } : {}),
-              ...(sideSpecificFilters.some((entries) => entries.length > 0)
-                ? {
-                    perSideFilters: sideSpecificFilters.map((entries) =>
-                      entries.length > 0 ? entries : undefined,
-                    ) as [
-                      readonly NormalizedConstraint[] | undefined,
-                      readonly NormalizedConstraint[] | undefined,
-                    ],
-                  }
-                : {}),
-            }
-          : undefined,
-        options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
-        retrievalSubQueries,
-      );
-      const rescuedResponse = await rescueExactComparisonResponse(
-        response,
-        deps,
-        requestId,
-        retrievalSubQueries,
-        sharedFilters,
-        sharedPreferences,
-        sideSpecificFilters,
-        [sideAOverrides, sideBOverrides] as const,
-        options,
-      );
-      return {
-        observation: summarizeComparison(rescuedResponse),
-        rawResult: rescuedResponse,
-        structuredOutput: { kind: 'comparison_result', response: rescuedResponse },
-      };
-    }
-
-    case 'check_drinking_window': {
-      const parseResult = DrinkingWindowInputSchema.safeParse(sanitizeOptionalToolNulls(input));
-      if (!parseResult.success) {
-        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
-        return {
-          observation: `Invalid input for check_drinking_window: ${msg}`,
-          rawResult: null,
-          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
-        };
-      }
-      const parsed = parseResult.data;
-      const targetYear = parsed.target_year ?? new Date().getFullYear();
-      const entityId = createCanonicalEntityId(parsed.entity_id);
-      const groundedProjection = deps.groundedDrinkingWindowLookup?.(entityId);
-      if (groundedProjection !== undefined) {
-        const grounded = buildDrinkingWindowToolResult(groundedProjection, targetYear);
-        if (grounded.structuredOutput.kind !== 'no_op') {
-          return grounded;
-        }
-      }
-
-      if (deps.drinkingWindowEntityLookup !== undefined) {
-        const entity = await deps.drinkingWindowEntityLookup(entityId);
-        if (entity === undefined) {
-          return {
-            observation: `Wine ${parsed.entity_id} not found.`,
-            rawResult: null,
-            structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
-          };
-        }
-        return buildDrinkingWindowToolResultWithSearchFallback(
-          entity,
-          targetYear,
-          deps,
-          requestId,
-          options,
-        );
-      }
-
-      // Prefer direct entity lookup (O(1) Vespa GET) over the full search
-      // pipeline (planner → retrieval → ranking → decision). The search-as-lookup
-      // approach was fundamentally broken: it used the entity_id as a natural-language
-      // query, which ran NL parsing, fuzzy matching, and ranking on an opaque ID.
-      if (deps.entityLookup !== undefined) {
-        const doc = await deps.entityLookup(entityId);
-        if (doc === undefined) {
-          return {
-            observation: `Wine ${parsed.entity_id} not found.`,
-            rawResult: null,
-            structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
-          };
-        }
-        return buildDrinkingWindowToolResultWithSearchFallback(
-          doc,
-          targetYear,
-          deps,
-          requestId,
-          options,
-        );
-      }
-
-      // Fallback: search-as-lookup when entityLookup port is not wired.
-      const searchResult = await deps.searchUseCase.execute(
-        { query: parsed.entity_id, options: { mode: 'entity', explain: false, clarification: false } },
-        requestId,
-        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
-      );
-      const firstResult = searchResult.queryType === 'search' ? searchResult.results[0] : undefined;
-      if (firstResult === undefined) {
-        return {
-          observation: `Wine ${parsed.entity_id} not found.`,
-          rawResult: null,
-          structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found via search fallback` },
-        };
-      }
-      const dw = firstResult.drinkingWindow;
-      if (dw !== undefined) {
-        const statusLabelFallback = dw.currentlyDrinkable
-          ? `currently drinkable (peak: ${dw.drinkingWindowStart}–${dw.drinkingWindowEnd})`
-          : targetYear < dw.drinkingWindowStart
-            ? `not yet at peak — hold until ${dw.drinkingWindowStart}`
-            : `past peak (window closed ${dw.drinkingWindowEnd})`;
-        return {
-          observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}. As of ${targetYear}: ${statusLabelFallback}. Confidence: ${dw.confidence}`,
-          rawResult: dw,
-          structuredOutput: {
-            kind: 'drinking_window',
-            entityId: firstResult.entity.entityId,
-            window: dw,
-            targetYear,
-          },
-        };
-      }
-      return {
-        observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: no drinking window data available.`,
-        rawResult: null,
-        structuredOutput: { kind: 'no_op', reason: 'drinking window data absent on entity (search fallback)' },
-      };
-    }
-
-    case 'get_food_pairings': {
-      const parseResult = FoodPairingInputSchema.safeParse(sanitizeOptionalToolNulls(input));
-      if (!parseResult.success) {
-        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
-        return {
-          observation: `Invalid input for get_food_pairings: ${msg}`,
-          rawResult: null,
-          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
-        };
-      }
-      const parsed = parseResult.data;
-      const budgetKrw = resolveFoodPairingBudgetKrw(parsed, {
-        krwPerUsd: KRW_PER_USD_APPROXIMATE,
-        maxPriceKrwCap: MAX_PRICE_KRW_BOUND,
-      });
-      const queryBase = `wine pairing for ${parsed.food}`;
-      const query = appendStructuredQueryClauses(
-        queryBase,
-        [
-          ...(budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : []),
-          ...(parsed.styles !== undefined ? [...parsed.styles] : []),
-          ...(parsed.pairing_tags !== undefined ? [...parsed.pairing_tags] : []),
-        ],
-      );
-      const structuredFilters = buildFoodPairingStructuredFilters(parsed, AGENT_FILTER_VERSION);
-      const structuredPreferences = buildFoodPairingStructuredPreferences(parsed, AGENT_FILTER_VERSION);
-      const rawResponseWithContext = await deps.searchUseCase.execute(
-        {
-          query,
-          options: { mode: 'hybrid', explain: false, clarification: false },
-          ...(structuredFilters.length > 0 ? { filters: structuredFilters } : {}),
-          ...(structuredPreferences.length > 0 ? { preferences: structuredPreferences } : {}),
-        },
-        requestId,
-        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
-      );
-
-      if (rawResponseWithContext.queryType !== 'search') {
-        return {
-          observation: 'Unexpected response type for pairing search.',
-          rawResult: rawResponseWithContext,
-          structuredOutput: { kind: 'tool_error', errorCode: 'UNEXPECTED_RESPONSE_TYPE', message: `expected search, got ${rawResponseWithContext.queryType}` },
-        };
-      }
-      const responseWithContext = closeFoodPairingMacroEvidence(rawResponseWithContext, parsed);
-      // Enrich with pairing context so the LLM gives a richer answer that
-      // explains WHY each wine pairs with the food (not just "here are results").
-      const baseObs = summarizeSearchResults(responseWithContext);
-      const hasSpicyPairingObjective = parsed.pairing_tags?.includes('spicy_food') === true;
-      const hasSweetHeatBalanceObjective = parsed.styles?.some((style) => style === 'off_dry' || style === 'sweet') === true;
-      const pairingHint = [
-        '',
-        `PAIRING_CONTEXT: These wines were matched for "${parsed.food}" pairing.`,
-        ...(parsed.styles !== undefined && parsed.styles.length > 0
-          ? [`PAIRING_OBJECTIVE_STYLES: ${parsed.styles.join(', ')}`]
-          : []),
-        ...(parsed.pairing_tags !== undefined && parsed.pairing_tags.length > 0
-          ? [`PAIRING_OBJECTIVE_TAGS: ${parsed.pairing_tags.join(', ')}`]
-          : []),
-        ...(hasSpicyPairingObjective || hasSweetHeatBalanceObjective
-          ? ['PAIRING_STYLE_GUIDANCE: For spicy food, explicitly preserve the heat-balance objective: off-dry or slightly sweet, refreshing acidity, and low tannin. If GROUNDING_JSON lacks sweetness/acidity/tannin for a candidate, say that field is unavailable instead of reframing the match as generic dry white.']
-          : []),
-        'When synthesizing your answer, explain WHY each wine pairs well with the food (acidity, tannin, body, flavour bridge).',
-        'Include practical serving suggestions (temperature, decanting) if relevant.',
-      ].join('\n');
-      return {
-        observation: `${pairingHint.trim()}\n${baseObs}`,
-        rawResult: responseWithContext,
-        structuredOutput: {
-          kind: 'food_pairing',
-          resultSet: responseWithContext.results,
-          resultCount: responseWithContext.results.length,
-          food: parsed.food,
-        },
-      };
-    }
-
-    default:
-      return {
-        observation: `Unknown tool: ${toolName}`,
-        rawResult: null,
-        structuredOutput: { kind: 'no_op', reason: `unknown tool: ${toolName}` },
-      };
   }
+
+  // Price post-filter: when agent specified a budget bound/range, drop results
+  // whose priceRange falls outside it. The search pipeline does not have a
+  // native price filter — price bounds are text hints — so out-of-range
+  // results can slip through. This post-filter gives the agent accurate
+  // budget-aware results.
+  if (parsed.min_price_krw !== undefined || parsed.max_price_krw !== undefined) {
+    response = applySearchToolBudgetResultPolicy(
+      response,
+      {
+        minKrw: parsed.min_price_krw,
+        maxKrw: parsed.max_price_krw,
+      },
+      { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+    ).response;
+  }
+
+  const alcoholPreference = applySearchToolAlcoholPreference(response, parsed.max_alcohol_pct);
+  response = alcoholPreference.response;
+
+  // Zero-result escalation: guide the agent to relax constraints one by one,
+  // or signal corpus exhaustion when the wine type has very few entries.
+  if (response.results.length === 0) {
+    const corpusLimited =
+      typeof parsed.wine_type === 'string'
+      && parsed.wine_type.length > 0
+      && (deps.corpusCardinality?.isCorpusLimited(parsed.wine_type) ?? false);
+    const tag = corpusLimited
+      ? `[RETRIEVAL_QUALITY: corpus_limited — this wine type has very few entries in the database]\n이 타입의 와인이 데이터베이스에 매우 적습니다. 검색어: "${parsed.query}". 재검색하지 말고, 가능한 범위에서 답변하거나 더 넓은 카테고리를 제안하세요.`
+      : `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`;
+    return {
+      observation: tag,
+      rawResult: response,
+      structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
+    };
+  }
+
+  // Multi-constraint hint: when 3+ constraint types are detected, remind the
+  // agent it can relax constraints if results are insufficient.
+  const summaryContext = {
+    requestedQuery: parsed.query,
+    requestedRetrievalMode: effectiveRetrievalMode,
+    requestedRecipientProfile: parsed.recipient_profile,
+  };
+  const exactLookupContractViolation = needsResolvedExactLabelContractGuard(response, summaryContext);
+  let obs = summarizeSearchResults(response, wantsDiversity, summaryContext);
+  const constraintHints = detectConstraintKeywords(parsed.query);
+  if (constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT) {
+    obs = appendObservationNote(
+      obs,
+      `[감지된 조건 ${constraintHints.length}개: ${constraintHints.join(', ')}. 결과가 부족하면 조건을 하나씩 제거하며 재검색하세요.]`,
+    );
+  }
+
+  // Corrective RAG quality tag: structured annotation that classifies retrieval
+  // quality so the agent can reliably decide whether to retry with relaxed constraints.
+  // "partial" = results returned but count is low (1–2) with multi-constraint query —
+  // agent should consider relaxing a NICE-TO-HAVE constraint before answering.
+  // "reliable" = ≥3 results or no multi-constraint pressure.
+  const qualityTag = (
+    response.results.length < MIN_RESULTS_FOR_RELIABLE_QUALITY &&
+    constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT
+  )
+    ? '[RETRIEVAL_QUALITY: partial — consider relaxing one NICE-TO-HAVE constraint before answering]'
+    : '[RETRIEVAL_QUALITY: reliable]';
+  obs = `${qualityTag}\n${obs}`;
+  if (isAccessibleOnlineTastingQuery(parsed.query)) {
+    obs = appendObservationNote(
+      obs,
+      '[ACCESSIBILITY_GROUNDING: User asked for wines all online-tasting participants can access. This corpus does not expose retailer inventory, supermarket listings, or real-time stock. Use only grounded wine/price/popularity fields; do not claim a specific store carries a bottle. Explicitly tell the user to confirm availability through their chosen retailer before the event.]',
+    );
+  }
+
+  // Price filter context: when a budget bound/range was applied, annotate
+  // the observation so the agent can explicitly cite the enforced range even
+  // when some per-wine prices are sparse in the index.
+  const priceFilterObservation = buildPriceFilterObservation(parsed);
+  if (priceFilterObservation !== undefined) {
+    obs = appendObservationNote(obs, priceFilterObservation);
+  }
+  if (parsed.max_alcohol_pct !== undefined && (alcoholPreference.demotedCount > 0 || alcoholPreference.unknownCount > 0)) {
+    obs = appendObservationNote(
+      obs,
+      `[ALCOHOL_PREFERENCE: ${parsed.max_alcohol_pct}% 이하를 우선 정렬했습니다. 검증된 초과 도수 ${alcoholPreference.demotedCount}개 결과는 뒤로 보냈고, 도수 정보가 없는 후보 ${alcoholPreference.unknownCount}개는 유지했습니다.]`,
+    );
+  }
+
+  return {
+    observation: obs,
+    rawResult: response,
+    structuredOutput: {
+      kind: 'search_result_set',
+      resultSet: exactLookupContractViolation !== undefined ? [] : response.results,
+      resultCount: exactLookupContractViolation !== undefined ? 0 : response.results.length,
+    },
+  };
+}
+
+async function handleLookupWine(
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+  options: AgentToolExecutionOptions | undefined,
+): Promise<AgentToolInnerResult> {
+  const parseResult = LookupWineInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+  if (!parseResult.success) {
+    return buildInvalidInputResult('lookup_wine', parseResult.error.issues.map((i) => i.message).join(', '));
+  }
+  const parsed = parseResult.data;
+
+  // High-precision identity resolution: force the entity route, no filters,
+  // clamp to the lookup cap. Routed through the shared helper so the mini-loop
+  // dispatcher uses the IDENTICAL primitive (no silent divergence — SOLID H2).
+  const response = await executeLookupAsEntitySearch({
+    searchUseCase: deps.searchUseCase,
+    query: parsed.query,
+    ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
+    requestId,
+    ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+  });
+
+  if (response.queryType !== 'search') {
+    return {
+      observation: 'Unexpected response type for wine lookup.',
+      rawResult: response,
+      structuredOutput: { kind: 'tool_error', errorCode: 'UNEXPECTED_RESPONSE_TYPE', message: `expected search, got ${response.queryType}` },
+    };
+  }
+
+  if (response.results.length === 0) {
+    // LSP-MED fix: lookup uses its OWN discriminator (`lookup_result_set`).
+    // search_result_set carries search-specific invariants (negation /
+    // quality tags / exact-lookup contract guards); reusing it for the
+    // lookup path silently invited those invariants to fire — see audit.
+    return {
+      observation: `[LOOKUP_QUALITY: not_found — 0 exact matches]\n"${parsed.query}"에 해당하는 와인을 찾지 못했습니다. 이름 철자를 확인하거나, 조건 탐색이 필요하면 search_wines 를 사용하세요.`,
+      rawResult: response,
+      structuredOutput: { kind: 'lookup_result_set', resultSet: [], resultCount: 0 },
+    };
+  }
+
+  const obs = summarizeSearchResults(response, false, {
+    requestedQuery: parsed.query,
+    requestedRetrievalMode: 'entity',
+  });
+  return {
+    observation: `[LOOKUP_RESULT: ${response.results.length} exact match(es)]\n${obs}`,
+    rawResult: response,
+    structuredOutput: {
+      kind: 'lookup_result_set',
+      resultSet: response.results,
+      resultCount: response.results.length,
+    },
+  };
+}
+
+async function handleCompareWines(
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+  options: AgentToolExecutionOptions | undefined,
+): Promise<AgentToolInnerResult> {
+  const parseResult = CompareInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+  if (!parseResult.success) {
+    return buildInvalidInputResult('compare_wines', parseResult.error.issues.map((i) => i.message).join(', '));
+  }
+  const parsed = parseResult.data;
+  if (deps.decomposedSearchExecute === undefined) {
+    return {
+      observation: 'Compare tool not available.',
+      rawResult: null,
+      structuredOutput: { kind: 'no_op', reason: 'decomposedSearchExecute port not wired' },
+    };
+  }
+  const sharedContextInput = stripSideSpecificCompareSharedConstraints(parsed);
+  const sharedFilters = buildStructuredFilters(sharedContextInput);
+  const sharedPreferences = buildStructuredPreferences(sharedContextInput);
+  const baseRetrievalQueries = buildCompareBaseRetrievalQueries(parsed);
+  const [sideAOverrides, sideBOverrides] = buildCompareSideOverrides(parsed);
+  const sideSpecificFilters = [
+    buildCompareSideOnlyFilters(sideAOverrides),
+    buildCompareSideOnlyFilters(sideBOverrides),
+  ] as const;
+  const retrievalSubQueries = [
+    buildStructuredQuery({
+      ...sharedContextInput,
+      query: baseRetrievalQueries[0],
+      grape_primary: sideAOverrides.grape_primary ?? sharedContextInput.grape_primary,
+      wine_type: sideAOverrides.wine_type ?? sharedContextInput.wine_type,
+      country: sideAOverrides.country ?? sharedContextInput.country,
+      region: sideAOverrides.region ?? sharedContextInput.region,
+      appellation: sideAOverrides.appellation ?? sharedContextInput.appellation,
+      vintage_min: sideAOverrides.vintage_min ?? sharedContextInput.vintage_min,
+      vintage_max: sideAOverrides.vintage_max ?? sharedContextInput.vintage_max,
+      preserveRepresentativeSearch: true,
+    }),
+    buildStructuredQuery({
+      ...sharedContextInput,
+      query: baseRetrievalQueries[1],
+      grape_primary: sideBOverrides.grape_primary ?? sharedContextInput.grape_primary,
+      wine_type: sideBOverrides.wine_type ?? sharedContextInput.wine_type,
+      country: sideBOverrides.country ?? sharedContextInput.country,
+      region: sideBOverrides.region ?? sharedContextInput.region,
+      appellation: sideBOverrides.appellation ?? sharedContextInput.appellation,
+      vintage_min: sideBOverrides.vintage_min ?? sharedContextInput.vintage_min,
+      vintage_max: sideBOverrides.vintage_max ?? sharedContextInput.vintage_max,
+      preserveRepresentativeSearch: true,
+    }),
+  ] as const;
+  const rawSubQueries = [parsed.query_a, parsed.query_b] as const;
+  const response = await deps.decomposedSearchExecute(
+    rawSubQueries,
+    'compare',
+    buildComparisonOriginalQuery(sharedContextInput),
+    requestId,
+    Date.now(),
+    sharedFilters.length > 0 || sharedPreferences.length > 0 || sideSpecificFilters.some((entries) => entries.length > 0)
+      ? {
+          ...(sharedFilters.length > 0 ? { filters: sharedFilters } : {}),
+          ...(sharedPreferences.length > 0 ? { preferences: sharedPreferences } : {}),
+          ...(sideSpecificFilters.some((entries) => entries.length > 0)
+            ? {
+                perSideFilters: sideSpecificFilters.map((entries) =>
+                  entries.length > 0 ? entries : undefined,
+                ) as [
+                  readonly NormalizedConstraint[] | undefined,
+                  readonly NormalizedConstraint[] | undefined,
+                ],
+              }
+            : {}),
+        }
+      : undefined,
+    options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,
+    retrievalSubQueries,
+  );
+  const rescuedResponse = await rescueExactComparisonResponse(
+    response,
+    deps,
+    requestId,
+    retrievalSubQueries,
+    sharedFilters,
+    sharedPreferences,
+    sideSpecificFilters,
+    [sideAOverrides, sideBOverrides] as const,
+    options,
+  );
+  return {
+    observation: summarizeComparison(rescuedResponse),
+    rawResult: rescuedResponse,
+    structuredOutput: { kind: 'comparison_result', response: rescuedResponse },
+  };
+}
+
+async function handleCheckDrinkingWindow(
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+  options: AgentToolExecutionOptions | undefined,
+): Promise<AgentToolInnerResult> {
+  const parseResult = DrinkingWindowInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+  if (!parseResult.success) {
+    return buildInvalidInputResult('check_drinking_window', parseResult.error.issues.map((i) => i.message).join(', '));
+  }
+  const parsed = parseResult.data;
+  const targetYear = parsed.target_year ?? new Date().getFullYear();
+  const entityId = createCanonicalEntityId(parsed.entity_id);
+  const groundedProjection = deps.groundedDrinkingWindowLookup?.(entityId);
+  if (groundedProjection !== undefined) {
+    const grounded = buildDrinkingWindowToolResult(groundedProjection, targetYear);
+    if (grounded.structuredOutput.kind !== 'no_op') {
+      return grounded;
+    }
+  }
+
+  if (deps.drinkingWindowEntityLookup !== undefined) {
+    const entity = await deps.drinkingWindowEntityLookup(entityId);
+    if (entity === undefined) {
+      return {
+        observation: `Wine ${parsed.entity_id} not found.`,
+        rawResult: null,
+        structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
+      };
+    }
+    return buildDrinkingWindowToolResultWithSearchFallback(
+      entity,
+      targetYear,
+      deps,
+      requestId,
+      options,
+    );
+  }
+
+  // Prefer direct entity lookup (O(1) Vespa GET) over the full search
+  // pipeline (planner → retrieval → ranking → decision). The search-as-lookup
+  // approach was fundamentally broken: it used the entity_id as a natural-language
+  // query, which ran NL parsing, fuzzy matching, and ranking on an opaque ID.
+  if (deps.entityLookup !== undefined) {
+    const doc = await deps.entityLookup(entityId);
+    if (doc === undefined) {
+      return {
+        observation: `Wine ${parsed.entity_id} not found.`,
+        rawResult: null,
+        structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found` },
+      };
+    }
+    return buildDrinkingWindowToolResultWithSearchFallback(
+      doc,
+      targetYear,
+      deps,
+      requestId,
+      options,
+    );
+  }
+
+  // Fallback: search-as-lookup when entityLookup port is not wired.
+  const searchResult = await deps.searchUseCase.execute(
+    { query: parsed.entity_id, options: { mode: 'entity', explain: false, clarification: false } },
+    requestId,
+    { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+  );
+  const firstResult = searchResult.queryType === 'search' ? searchResult.results[0] : undefined;
+  if (firstResult === undefined) {
+    return {
+      observation: `Wine ${parsed.entity_id} not found.`,
+      rawResult: null,
+      structuredOutput: { kind: 'tool_error', errorCode: 'ENTITY_NOT_FOUND', message: `entity ${parsed.entity_id} not found via search fallback` },
+    };
+  }
+  const dw = firstResult.drinkingWindow;
+  if (dw !== undefined) {
+    const statusLabelFallback = dw.currentlyDrinkable
+      ? `currently drinkable (peak: ${dw.drinkingWindowStart}–${dw.drinkingWindowEnd})`
+      : targetYear < dw.drinkingWindowStart
+        ? `not yet at peak — hold until ${dw.drinkingWindowStart}`
+        : `past peak (window closed ${dw.drinkingWindowEnd})`;
+    return {
+      observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}. As of ${targetYear}: ${statusLabelFallback}. Confidence: ${dw.confidence}`,
+      rawResult: dw,
+      structuredOutput: {
+        kind: 'drinking_window',
+        entityId: firstResult.entity.entityId,
+        window: dw,
+        targetYear,
+      },
+    };
+  }
+  return {
+    observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: no drinking window data available.`,
+    rawResult: null,
+    structuredOutput: { kind: 'no_op', reason: 'drinking window data absent on entity (search fallback)' },
+  };
+}
+
+async function handleGetFoodPairings(
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+  options: AgentToolExecutionOptions | undefined,
+): Promise<AgentToolInnerResult> {
+  const parseResult = FoodPairingInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+  if (!parseResult.success) {
+    return buildInvalidInputResult('get_food_pairings', parseResult.error.issues.map((i) => i.message).join(', '));
+  }
+  const parsed = parseResult.data;
+  const budgetKrw = resolveFoodPairingBudgetKrw(parsed, {
+    krwPerUsd: KRW_PER_USD_APPROXIMATE,
+    maxPriceKrwCap: MAX_PRICE_KRW_BOUND,
+  });
+  const queryBase = `wine pairing for ${parsed.food}`;
+  const query = appendStructuredQueryClauses(
+    queryBase,
+    [
+      ...(budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : []),
+      ...(parsed.styles !== undefined ? [...parsed.styles] : []),
+      ...(parsed.pairing_tags !== undefined ? [...parsed.pairing_tags] : []),
+    ],
+  );
+  const structuredFilters = buildFoodPairingStructuredFilters(parsed, AGENT_FILTER_VERSION);
+  const structuredPreferences = buildFoodPairingStructuredPreferences(parsed, AGENT_FILTER_VERSION);
+  const rawResponseWithContext = await deps.searchUseCase.execute(
+    {
+      query,
+      options: { mode: 'hybrid', explain: false, clarification: false },
+      ...(structuredFilters.length > 0 ? { filters: structuredFilters } : {}),
+      ...(structuredPreferences.length > 0 ? { preferences: structuredPreferences } : {}),
+    },
+    requestId,
+    { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+  );
+
+  if (rawResponseWithContext.queryType !== 'search') {
+    return {
+      observation: 'Unexpected response type for pairing search.',
+      rawResult: rawResponseWithContext,
+      structuredOutput: { kind: 'tool_error', errorCode: 'UNEXPECTED_RESPONSE_TYPE', message: `expected search, got ${rawResponseWithContext.queryType}` },
+    };
+  }
+  const responseWithContext = closeFoodPairingMacroEvidence(rawResponseWithContext, parsed);
+  // Enrich with pairing context so the LLM gives a richer answer that
+  // explains WHY each wine pairs with the food (not just "here are results").
+  const baseObs = summarizeSearchResults(responseWithContext);
+  const hasSpicyPairingObjective = parsed.pairing_tags?.includes('spicy_food') === true;
+  const hasSweetHeatBalanceObjective = parsed.styles?.some((style) => style === 'off_dry' || style === 'sweet') === true;
+  const pairingHint = [
+    '',
+    `PAIRING_CONTEXT: These wines were matched for "${parsed.food}" pairing.`,
+    ...(parsed.styles !== undefined && parsed.styles.length > 0
+      ? [`PAIRING_OBJECTIVE_STYLES: ${parsed.styles.join(', ')}`]
+      : []),
+    ...(parsed.pairing_tags !== undefined && parsed.pairing_tags.length > 0
+      ? [`PAIRING_OBJECTIVE_TAGS: ${parsed.pairing_tags.join(', ')}`]
+      : []),
+    ...(hasSpicyPairingObjective || hasSweetHeatBalanceObjective
+      ? ['PAIRING_STYLE_GUIDANCE: For spicy food, explicitly preserve the heat-balance objective: off-dry or slightly sweet, refreshing acidity, and low tannin. If GROUNDING_JSON lacks sweetness/acidity/tannin for a candidate, say that field is unavailable instead of reframing the match as generic dry white.']
+      : []),
+    'When synthesizing your answer, explain WHY each wine pairs well with the food (acidity, tannin, body, flavour bridge).',
+    'Include practical serving suggestions (temperature, decanting) if relevant.',
+  ].join('\n');
+  return {
+    observation: `${pairingHint.trim()}\n${baseObs}`,
+    rawResult: responseWithContext,
+    structuredOutput: {
+      kind: 'food_pairing',
+      resultSet: responseWithContext.results,
+      resultCount: responseWithContext.results.length,
+      food: parsed.food,
+    },
+  };
+}
+
+/**
+ * Per-tool handler registry. Static and module-scope so every dispatch is an
+ * O(1) hash lookup, and so adding a new tool is a 1-line registry edit + 1
+ * new handler. `satisfies Record<KnownAgentToolName, ToolHandler>` keeps the
+ * registry exhaustive at compile time — if `KNOWN_AGENT_TOOL_NAMES` grows
+ * without adding an entry here, TS fails.
+ */
+const TOOL_HANDLERS = {
+  search_wines: handleSearchWines,
+  lookup_wine: handleLookupWine,
+  compare_wines: handleCompareWines,
+  check_drinking_window: handleCheckDrinkingWindow,
+  get_food_pairings: handleGetFoodPairings,
+} as const satisfies Record<KnownAgentToolName, ToolHandler>;
+
+async function executeAgentToolInner(
+  toolName: string,
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+  options?: AgentToolExecutionOptions,
+): Promise<AgentToolInnerResult> {
+  if (!isKnownAgentToolName(toolName)) {
+    return {
+      observation: `Unknown tool: ${toolName}`,
+      rawResult: null,
+      structuredOutput: { kind: 'no_op', reason: `unknown tool: ${toolName}` },
+    };
+  }
+  const handler = TOOL_HANDLERS[toolName];
+  return handler(input, deps, requestId, options);
 }
 
 // ---------------------------------------------------------------------------

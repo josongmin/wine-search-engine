@@ -19,7 +19,10 @@ import {
   type LlmResult,
   type LlmAction,
 } from './agent-llm-output.js';
-import type { AgentToolAttempt } from '../../domain/agent/model/agent-tool-attempt-schema.js';
+import type {
+  AgentToolAttempt,
+  KnownAgentToolName,
+} from '../../domain/agent/model/agent-tool-attempt-schema.js';
 import {
   AGENT_LLM_STEP_TIMEOUT_MESSAGE,
   AgentPlannerPhaseResultPolicy,
@@ -64,9 +67,10 @@ const PLANNER_MAX_OUTPUT_TOKENS_LAST_STEP = 1_536;
  * can pass `AgentToolAttempt.tool` (which is `string` because the discriminated
  * union admits unknown tools) without a per-site cast.
  */
-const TOOLS_WITH_QUERY_ANCHOR: ReadonlySet<string> = new Set<
-  import('../../domain/agent/model/agent-tool-attempt-schema.js').KnownAgentToolName
->(['search_wines', 'lookup_wine']);
+const TOOLS_WITH_QUERY_ANCHOR: ReadonlySet<string> = new Set<KnownAgentToolName>([
+  'search_wines',
+  'lookup_wine',
+]);
 
 export interface PlannerPhaseResult {
   readonly stepStartMs: number;

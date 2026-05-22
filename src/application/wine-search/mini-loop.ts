@@ -52,7 +52,8 @@ import {
   buildToolOutcome,
   withTimeout,
 } from '../agent/agent-tool-execution-support.js';
-import { LOOKUP_WINE_LIMIT_MAX } from '../search/search-tool-contract.js';
+import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
+import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import {
   addTokenUsage,
   makeZeroTokenUsage,
@@ -661,23 +662,34 @@ async function invokeToolPort(
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
     case 'lookup_wine': {
-      // High-precision identity resolution: force the entity route, clamp to a
-      // tight result set, ignore any constraint filters the LLM may have added.
-      const query = typeof call.input['query'] === 'string' ? call.input['query'] : '';
-      const rawLimit = typeof call.input['limit'] === 'number' && Number.isFinite(call.input['limit'])
-        ? call.input['limit']
-        : LOOKUP_WINE_LIMIT_MAX;
+      // High-precision identity resolution. SOLID H2: routed through the
+      // shared `normalizeLookupWineInput` so the agent-tools branch and the
+      // mini-loop branch validate against the IDENTICAL schema (trim,
+      // placeholder rejection, query length). Before extraction, this case
+      // did a bare `typeof query === 'string'` check that silently accepted
+      // " " or "__TODO__" — see SOLID H2 audit notes.
+      const normalized = normalizeLookupWineInput(call.input);
+      if (!normalized.ok) {
+        return {
+          rawResult: null,
+          observation: `Tool "${call.tool}" failed: invalid input — ${normalized.message}`,
+        };
+      }
       const result = await ports.searchUseCase.execute(
-        { query, mode: 'entity', limit: Math.min(rawLimit, LOOKUP_WINE_LIMIT_MAX) },
+        { query: normalized.query, mode: 'entity', limit: normalized.clampedLimit },
         requestId,
         { abortSignal: signal },
       );
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
     case 'get_food_pairings': {
+      // rawResult mirrors the sibling shape: return the WHOLE FoodPairingResult
+      // (which carries `.food` + `.results`), not just the unwrapped results
+      // array. Observations stay shaped by formatSearchObservation(result.results)
+      // because the LLM only wants the per-wine summary, not the metadata.
       const pairingInput = adaptFoodPairingInput(call.input);
       const result = await ports.foodPairingUseCase.execute(pairingInput, requestId, { abortSignal: signal });
-      return { rawResult: result.results, observation: formatSearchObservation(result.results) };
+      return { rawResult: result, observation: formatSearchObservation(result.results) };
     }
     case 'compare_wines': {
       const comparisonInput = adaptComparisonInput(call.input);
@@ -688,6 +700,10 @@ async function invokeToolPort(
       const { entityId, targetYear } = adaptDrinkabilityInput(call.input);
       const probe = await ports.drinkabilityUseCase.probe(entityId, targetYear, requestId, { abortSignal: signal });
       if (probe === undefined) {
+        // "Not found" convention (all tools): rawResult=null + prefixed
+        // observation. Siblings (search_wines, get_food_pairings) emit
+        // `NO_MATCH:` via formatSearchObservation; we mirror that here so
+        // every tool's empty-result outcome looks the same to the LLM.
         return {
           rawResult: null,
           observation: `${MINI_LOOP_NO_MATCH_PREFIX}check_drinking_window: no drinkability projection for "${entityId}"`,
@@ -698,7 +714,7 @@ async function invokeToolPort(
     default: {
       return {
         rawResult: null,
-        observation: `Tool "${call.tool}" is not supported in the mini-loop. Use one of: search_wines, lookup_wine, get_food_pairings, check_drinking_window, compare_wines.`,
+        observation: `Tool "${call.tool}" is not supported in the mini-loop. Use one of: ${KNOWN_AGENT_TOOL_NAMES_DISPLAY}.`,
       };
     }
   }

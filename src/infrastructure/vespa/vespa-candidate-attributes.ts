@@ -96,12 +96,17 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
     const doc = await this.searchIndex.getDocument(entityId);
     if (doc === null) return undefined;
 
+    // doc.style is optional on RetrievalDocument (derived-style fallback for
+    // wines whose silver row didn't carry an authoritative style descriptor).
+    // SimilarityCandidate requires a string, so absent style degrades to '' —
+    // computeStyleDistance treats '' as a non-matching style without breaking
+    // the other similarity axes (region / grapes / body / sweetness / embed).
     return {
       region: doc.region,
       grapes: doc.grapes,
       body: doc.body,
       sweetness: doc.sweetness,
-      style: doc.style,
+      style: doc.style ?? '',
       ...(doc.embedding !== undefined ? { embedding: doc.embedding } : {}),
     };
   }

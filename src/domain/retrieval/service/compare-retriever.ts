@@ -42,7 +42,7 @@ export class CompareRetriever {
     readonly producer: string;
     readonly region: string;
     readonly grapes: readonly string[];
-    readonly style: string;
+    readonly style?: string | undefined;
     readonly appellation?: string | undefined;
     readonly country?: string | undefined;
   }): readonly string[] {

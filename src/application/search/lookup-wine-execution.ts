@@ -9,13 +9,19 @@
  * silently accept inputs the agent-tools path rejected — producing two
  * subtly different "lookup_wine" tools.
  *
- * Two exports:
+ * Three exports:
  *  - {@link LookupWineInputSchema} — the canonical, strict-with-repair Zod
  *    schema used by every dispatcher.
- *  - {@link executeLookupAsEntitySearch} — the dispatch primitive: forces
- *    `mode: 'entity'`, clamps `limit` to {@link LOOKUP_WINE_LIMIT_MAX},
- *    forwards the abort signal, and returns the raw
- *    {@link SearchExecutorResult}.
+ *  - {@link executeLookupAsEntitySearch} — the dispatch primitive for the
+ *    HTTP / batch path: takes a {@link SearchExecutorPort}, builds a
+ *    {@link SearchRequest} that forces `mode: 'entity'`, clamps `limit` to
+ *    {@link LOOKUP_WINE_LIMIT_MAX}, forwards the abort signal.
+ *  - {@link normalizeLookupWineInput} — pure input normalization (validate
+ *    via the schema, clamp the limit). Dispatchers whose port surface
+ *    differs from {@link SearchExecutorPort} (e.g. the mini-loop runner's
+ *    `SearchUseCasePort` which takes the flatter `SearchUseCaseInput` shape)
+ *    use this to inherit the SAME validation/clamp semantics without
+ *    coupling to the executor port.
  *
  * Layer rule (CLAUDE.md): application-layer module — may import from
  * `domain/` and `application/search/...` only. NOT from `interface/`.
@@ -28,6 +34,7 @@ import type { SearchExecutorPort, SearchExecutorResult } from './port/search-exe
 import {
   LOOKUP_WINE_LIMIT_MAX,
   buildSearchToolQueryField,
+  sanitizeOptionalToolNulls,
 } from './search-tool-contract.js';
 
 /**
@@ -38,8 +45,8 @@ import {
  * placeholder + max-length guards apply uniformly across every dispatcher
  * (legacy agent-tools, mini-loop, future tool runners). The `limit` field is
  * intentionally unbounded at the schema layer — an LLM emitting `limit: 5`
- * should not fail the entire tool call; {@link executeLookupAsEntitySearch}
- * clamps to {@link LOOKUP_WINE_LIMIT_MAX} at dispatch.
+ * should not fail the entire tool call; the dispatch helpers below clamp to
+ * {@link LOOKUP_WINE_LIMIT_MAX}.
  */
 export const LookupWineInputSchema = z.object({
   query: buildSearchToolQueryField({ maxLen: MAX_QUERY_LENGTH }),
@@ -51,7 +58,58 @@ export const LookupWineInputSchema = z.object({
 export type LookupWineInput = z.infer<typeof LookupWineInputSchema>;
 
 /**
- * Dispatch options for {@link executeLookupAsEntitySearch}.
+ * Successful normalization result. `clampedLimit` is always ≤
+ * {@link LOOKUP_WINE_LIMIT_MAX}; pass it directly to whatever entity-route
+ * dispatcher the caller uses.
+ */
+export interface NormalizedLookupWineInput {
+  readonly ok: true;
+  readonly query: string;
+  readonly clampedLimit: number;
+}
+
+/**
+ * Validation failure — the dispatcher should surface this as the
+ * `INVALID_INPUT` observation. Carrying the joined message keeps callers
+ * simple ("...failed with X").
+ */
+export interface InvalidLookupWineInput {
+  readonly ok: false;
+  readonly message: string;
+}
+
+export type LookupWineInputNormalizationResult =
+  | NormalizedLookupWineInput
+  | InvalidLookupWineInput;
+
+/**
+ * Validate raw LLM-emitted tool input and clamp the result limit. Returns a
+ * tagged union so callers do not have to re-implement the join-issues +
+ * clamp pattern.
+ *
+ * Use this from dispatchers whose underlying port shape does NOT match
+ * {@link SearchExecutorPort} (e.g. the mini-loop's `SearchUseCasePort`,
+ * which takes `SearchUseCaseInput` rather than `SearchRequest`).
+ */
+export function normalizeLookupWineInput(
+  rawInput: unknown,
+): LookupWineInputNormalizationResult {
+  const parseResult = LookupWineInputSchema.safeParse(sanitizeOptionalToolNulls(rawInput));
+  if (!parseResult.success) {
+    return {
+      ok: false,
+      message: parseResult.error.issues.map((issue) => issue.message).join(', '),
+    };
+  }
+  const parsed = parseResult.data;
+  const clampedLimit = Math.min(parsed.limit ?? LOOKUP_WINE_LIMIT_MAX, LOOKUP_WINE_LIMIT_MAX);
+  return { ok: true, query: parsed.query, clampedLimit };
+}
+
+/**
+ * Dispatch options for {@link executeLookupAsEntitySearch}. Public-API style
+ * (executor port + plain fields) so the legacy agent-tools call site reads
+ * naturally.
  */
 export interface ExecuteLookupAsEntitySearchOptions {
   readonly searchUseCase: SearchExecutorPort;
@@ -62,7 +120,8 @@ export interface ExecuteLookupAsEntitySearchOptions {
 }
 
 /**
- * Dispatch `lookup_wine` as a high-precision entity search.
+ * Dispatch `lookup_wine` as a high-precision entity search via
+ * {@link SearchExecutorPort}.
  *
  * Contract:
  *  - Forces `mode: 'entity'` (the entity-resolution route — identity, not

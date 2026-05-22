@@ -9,7 +9,7 @@
  *    IFF a `miniLoopToolBundle` was wired into its deps (otherwise it
  *    short-circuits to Synthesizer Layer 4 "degraded" — see the orchestrator's
  *    multi-step branch).
- *  - This file is the production bundle: four `ToolDefinition`s (one per
+ *  - This file is the production bundle: five `ToolDefinition`s (one per
  *    `KNOWN_AGENT_TOOL_NAMES`) plus the `MiniLoopToolPorts` that the runner's
  *    tool dispatcher invokes. Without this wiring the new architecture
  *    silently falls back to Layer 4 — verified by Track C's earlier report.
@@ -42,11 +42,12 @@
  */
 
 import { z } from 'zod';
-import type {
+import {
   KNOWN_AGENT_TOOL_NAMES,
-  KnownAgentToolName,
+  type KnownAgentToolName,
 } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import type { ToolDefinition } from '@domain/ai/port/structured-llm.port.js';
+import { LookupWineInputSchema } from '../search/lookup-wine-execution.js';
 import type { MiniLoopToolPorts } from './mini-loop-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -138,12 +139,11 @@ const SearchWinesInputSchema = z.object({
     .optional(),
 });
 
-// Identity lookup: just a wine name + optional small cap. No filters — the
-// dispatcher forces the entity route and clamps the limit. Permissive (rule 10).
-const LookupWineInputSchema = z.object({
-  query: ToolStringField,
-  limit: z.number().int().finite().min(TOOL_INPUT_STRING_MIN_LEN).optional(),
-});
+// Identity lookup: schema is the SSoT canonical `LookupWineInputSchema` from
+// `lookup-wine-execution.ts`. Before extraction (SOLID H2) this file declared
+// a permissive local copy that silently accepted inputs the agent-tools path
+// rejected. The shared schema enforces trim + placeholder + max-length and
+// stays permissive on `limit` (the dispatcher clamps to LOOKUP_WINE_LIMIT_MAX).
 
 const CompareWinesInputSchema = z.object({
   query_a: ToolStringField,
@@ -279,8 +279,8 @@ export function buildMiniLoopToolBundle(
 }
 
 // ---------------------------------------------------------------------------
-// Defensive parity assertion — if `KNOWN_AGENT_TOOL_NAMES` ever drifts from
-// the four production tools the mini-loop dispatcher knows about, the
+// Defensive parity assertions — if `KNOWN_AGENT_TOOL_NAMES` ever drifts from
+// the five production tools the mini-loop dispatcher knows about, the
 // `satisfies KnownAgentToolName` checks above already fail at compile time.
 // We still surface a runtime assert here so a future SSoT mutation that
 // somehow type-checks (e.g. a *broader* enum) still trips a test.
@@ -302,3 +302,13 @@ const _MINI_LOOP_TOOL_NAMES_SSOT_CHECK: ReadonlyArray<
   (typeof KNOWN_AGENT_TOOL_NAMES)[number]
 > = MINI_LOOP_TOOL_NAMES;
 void _MINI_LOOP_TOOL_NAMES_SSOT_CHECK;
+
+// Compile-time guarantee in the OTHER direction: every name in
+// `KNOWN_AGENT_TOOL_NAMES` must also appear in `MINI_LOOP_TOOL_NAMES`. The
+// subset-only check above silently passes when the SSoT *grows* (e.g. a new
+// `lookup_wine` is added to the SSoT but never wired into the mini-loop) —
+// which was the exact drift that hid the lookup_wine wiring gap. This
+// reverse assignment closes the loop: now BOTH directions trip the
+// type-checker on any drift.
+const _SsoT_subset_of_Mini: ReadonlyArray<(typeof MINI_LOOP_TOOL_NAMES)[number]> = KNOWN_AGENT_TOOL_NAMES;
+void _SsoT_subset_of_Mini;
