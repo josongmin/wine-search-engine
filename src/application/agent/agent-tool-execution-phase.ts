@@ -527,6 +527,12 @@ export class AgentToolExecutionPhase {
       const trimmedAnswer = parsed.answer.trim();
       if (trimmedAnswer.length > 0) {
         if (state.pendingRefinementRetry) {
+          // Clear the zombie-loop guard exactly when the directive is enqueued.
+          // The flag is a one-shot "planner answered instead of running the
+          // refinement-retry search" signal. Leaving it set lets the answer
+          // branch re-enter on the next iteration and re-enqueue the directive
+          // forever (zombie loop). See CLAUDE.md test-discipline rule 19.
+          state.pendingRefinementRetry = false;
           state.pendingPlannerDirective = { kind: 'relax_constraints_retry' };
           return false;
         }

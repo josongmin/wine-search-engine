@@ -870,13 +870,21 @@ export function hasBareExactEntityAnchor(query: string): boolean {
       return false;
     }
     const resolved = resolveEntity(trimmed, { preferEntityOverStyle: true });
-    if (!isDirectEntityResolution(resolved) || resolved.entityType !== 'appellation') {
-      return false;
-    }
-    const canonical = QUERY_NORMALIZER.normalize(resolved.canonicalValue).punctuationStripped.trim().toLowerCase();
-    const tokenCount = trimmed.split(/\s+/u).filter((token) => token.length > 0).length;
-    const canonicalLooksLabelLike = canonical.includes(' ') || canonical.includes('&');
-    return tokenCount >= 2 || extractVintageYear(trimmed) !== null || canonicalLooksLabelLike;
+    // The discriminator is the entity-type gate above: a query that DIRECTLY and
+    // unambiguously resolves to an `appellation` entity (not a grape, not a style)
+    // and survived the generic-wine-noun filter IS a bare exact entity anchor.
+    // Single-word appellation names (Barolo, Chablis, Sancerre) are exact anchors
+    // just as much as multi-word ones (Brunello di Montalcino, Dom Pérignon).
+    //
+    // History: this used to additionally require `tokenCount >= 2 ||
+    // extractVintageYear(...) !== undefined || (canonicalLooksLabelLike && ...)`.
+    // That `!== undefined` guard was always true (extractVintageYear returns
+    // `number | null`, never `undefined`), so the whole clause was a no-op and every
+    // direct appellation resolved as an anchor. A later correctness fix flipped it to
+    // `!== null`, which silently dropped single-token appellations like Barolo from
+    // entity-retrieval mode. The entity-type gate already encodes the real intent, so
+    // a direct non-generic appellation resolution is sufficient.
+    return resolved.entityType === 'appellation';
   });
 }
 

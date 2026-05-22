@@ -152,6 +152,16 @@ describe('Noisy runtime execution contract', () => {
     expect(response.engineDecision.decisionStatus).not.toBe('resolved');
   });
 
+  for (const q of ['sassizaia', 'sassicaja', 'sass', 'sassi', 'penfols one']) {
+    it(`PROBE ${q}`, async () => {
+      const r = await parts.container.searchUseCase.execute(
+        { query: q, options: { mode: 'auto', explain: true, clarification: false } },
+        `probe-${q.replace(/\s+/gu, '-')}`,
+      );
+      throw new Error(`PROBE q=${q} status=${r.engineDecision.decisionStatus} top=${String(r.results[0]?.entity.entityId)} route=${r.engineDecision.route} topology=${String(r.engineDecision.executionTopology)}`);
+    });
+  }
+
   it('hybrid override on short Korean prefix query preserves identity evidence and resolves', async () => {
     const response = await parts.container.searchUseCase.execute(
       {
