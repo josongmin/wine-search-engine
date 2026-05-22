@@ -99,7 +99,7 @@ const MAX_OBSERVATION_CHARS = 600;
  * prompt. The judge scores BOTH overall quality (`score`) and a focused
  * groundedness sub-score (`faithfulness`).
  */
-export const JUDGE_SYSTEM_PROMPT = [
+const JUDGE_SYSTEM_PROMPT = [
   'You are a strict evaluator of a wine-recommendation assistant.',
   'You receive: the user QUERY, the assistant ANSWER, and the GROUNDING',
   'observations (tool results the assistant could cite). Score the ANSWER.',
@@ -153,7 +153,6 @@ export const JudgeOutputSchema = z.object({
   reasoning: z.string(),
 });
 
-export type JudgeOutput = z.infer<typeof JudgeOutputSchema>;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -212,7 +211,7 @@ interface JudgeLogger {
   warn(obj: Record<string, unknown>, msg?: string): void;
 }
 
-export interface StructuredLlmJudgeDeps {
+interface StructuredLlmJudgeDeps {
   readonly structuredLlm: StructuredLlmPort;
   /** Defaults to {@link DEFAULT_JUDGE_MODEL}. */
   readonly model?: string;

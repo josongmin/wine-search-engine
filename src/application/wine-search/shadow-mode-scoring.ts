@@ -217,7 +217,7 @@ export type BenchScorerFn = (
   judgeReasoning?: string,
 ) => ScenarioResultLike;
 
-export interface ShadowModeScoringDeps {
+interface ShadowModeScoringDeps {
   /** The shadow-mode runner. Injected for testability. */
   readonly runner: Pick<ShadowModeRunner, 'runOnce'>;
   /** Pure scorer — same signature on both sides. */
@@ -236,7 +236,7 @@ export interface ShadowModeScoringDeps {
   readonly judge?: LlmJudge;
 }
 
-export interface ShadowModeScoringInput {
+interface ShadowModeScoringInput {
   readonly scenario: AgentBenchmarkScenarioLike;
   /** Overrides `scenario.query` when the caller wants to score a probe
    *  variant against the same scenario expectations. Optional. */
@@ -425,7 +425,6 @@ function projectWineSearchOutcome(
 // results) can route through the same module. Composition root pattern.
 // ---------------------------------------------------------------------------
 
-export { agentResultToScenarioExecution, wineSearchResultToScenarioExecution };
 
 /**
  * Score a single scenario using *raw* orchestrator outputs. Bypasses

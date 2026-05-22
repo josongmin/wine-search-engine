@@ -16,7 +16,7 @@ import { Transliterator } from '../../domain/alias/service/transliterator.js';
 const SHORT_BARE_ENTITY_QUERY_MAX_TOKENS = 4;
 const VINTAGE_TOKEN_PATTERN = /(?<![\p{L}\p{N}])(?:18|19|20)\d{2}(?:년산?|년대)?(?![\p{L}\p{N}])/gu;
 
-export interface SearchToolRetrievalCoreInput {
+interface SearchToolRetrievalCoreInput {
   readonly query: string;
   readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;

@@ -144,7 +144,7 @@ export interface GroundingFacts {
 }
 
 /** Discriminated-union tag for which rule fired on a given citation. */
-export type GroundingMatchRule =
+type GroundingMatchRule =
   | { readonly kind: 'exact_nfc_lower' }
   | { readonly kind: 'particle_stripped' }
   | { readonly kind: 'transliteration_pair' }
@@ -153,14 +153,14 @@ export type GroundingMatchRule =
   | { readonly kind: 'structured_field_present' };
 
 /** Per-claim trace entry: which rule matched (telemetry, no control-flow). */
-export interface GroundingMatchTrace {
+interface GroundingMatchTrace {
   /** Normalized citation surface. */
   readonly claim: string;
   /** The first rule that fired, or `null` if no rule matched. */
   readonly matchedRule: GroundingMatchRule | null;
 }
 
-export interface GroundingVerifyResult {
+interface GroundingVerifyResult {
   readonly grounded: boolean;
   /** Normalized surfaces of the claims that could not be grounded. */
   readonly ungroundedClaims: readonly string[];

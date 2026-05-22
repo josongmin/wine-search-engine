@@ -98,17 +98,17 @@ const VINTAGE_YEAR_RE = /(?<![\p{L}\p{N}])(?:18|19|20)\d{2}(?![\p{L}\p{N}])/u;
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface QueryAnalyzerLogger {
+interface QueryAnalyzerLogger {
   warn(payload: Record<string, unknown>, msg: string): void;
   info(payload: Record<string, unknown>, msg: string): void;
 }
 
-export interface QueryAnalyzerDeps {
+interface QueryAnalyzerDeps {
   readonly structuredLlm?: StructuredLlmPort;
   readonly logger: QueryAnalyzerLogger;
 }
 
-export interface AnalyzeInput {
+interface AnalyzeInput {
   readonly query: string;
   readonly requestId: string;
   readonly abortSignal?: AbortSignal;
@@ -487,7 +487,6 @@ function computeRecommendedBudget(args: {
 // Re-exports for callers that only need the schema types
 // ---------------------------------------------------------------------------
 export type { WineSearchAnalysis } from './wine-search-schemas.js';
-export { WineSearchAnalysisSchema } from './wine-search-schemas.js';
 
 // Reference Zod so the import is not pruned by TS noUnusedLocals.
 void z;

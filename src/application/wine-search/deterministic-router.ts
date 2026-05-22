@@ -366,7 +366,7 @@ function expandParallelSlots(
 // Public surface
 // ---------------------------------------------------------------------------
 
-export interface DeterministicRouterDeps {
+interface DeterministicRouterDeps {
   /** Wall-clock for resolving drinkability target year. Optional so tests
    *  can pin determinism without monkey-patching globals. */
   readonly now?: () => Date;

@@ -459,13 +459,13 @@ function serializeOutcomeResult(outcome: ToolOutcome): string {
 // Public deps + service
 // ---------------------------------------------------------------------------
 
-export interface SynthesisRunnerLogger {
+interface SynthesisRunnerLogger {
   warn(payload: Record<string, unknown>, msg: string): void;
   info(payload: Record<string, unknown>, msg: string): void;
   error(payload: Record<string, unknown>, msg: string): void;
 }
 
-export interface SynthesisRunnerDeps {
+interface SynthesisRunnerDeps {
   readonly structuredLlm: StructuredLlmPort;
   readonly logger?: SynthesisRunnerLogger;
   /** Override of the model used for synthesis (defaults to a
@@ -488,9 +488,9 @@ export interface SynthesisRunnerDeps {
  * the union here so the synthesis-runner module does not need to import from
  * the orchestrator result module (one-way dependency).
  */
-export type SynthesisBlockedKind = 'security_block' | 'unsupported_intent';
+type SynthesisBlockedKind = 'security_block' | 'unsupported_intent';
 
-export interface SynthesisRunInput {
+interface SynthesisRunInput {
   readonly query: string;
   readonly requestId: string;
   readonly analysis: WineSearchAnalysis;
@@ -1040,7 +1040,6 @@ export class SynthesisRunner {
 // Re-exports for callers that only need the runner module.
 // ---------------------------------------------------------------------------
 
-export { SynthesisAbortedError } from './synthesis-schemas.js';
 export type {
   AnswerLayer,
   AnswerResult,
@@ -1048,4 +1047,3 @@ export type {
   SynthesisAnswer,
 } from './synthesis-schemas.js';
 // Re-export schema only as value so tests can import directly.
-export { SynthesisAnswerSchema } from './synthesis-schemas.js';

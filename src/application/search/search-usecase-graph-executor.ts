@@ -155,7 +155,7 @@ export interface GraphRetrievalTelemetry {
   readonly dropLog?: readonly CandidateDropRecord[] | undefined;
 }
 
-export interface RetrievalExecutionResult {
+interface RetrievalExecutionResult {
   readonly candidates: readonly HybridCandidate[];
   readonly telemetry: GraphRetrievalTelemetry;
 }

@@ -172,14 +172,6 @@ export const SEARCH_TOOL_STYLE_HINT_VALUES = [
   'cellaring',
   'cellarworthy',
 ] as const;
-const SEARCH_TOOL_STYLE_EXAMPLES = SEARCH_TOOL_STYLE_HINT_VALUES.filter((value) =>
-  value !== 'off_dry'
-  && value !== 'presentation_forward'
-  && value !== 'ageworthy'
-  && value !== 'cellaring'
-  && value !== 'cellarworthy'
-);
-const SEARCH_TOOL_STYLES_EXAMPLE_VALUES = ['approachable', 'crowd_pleasing', 'sweet'] as const;
 const SEARCH_TOOL_SWEETNESS_DRY_MAX = 0.2;
 const SEARCH_TOOL_SWEETNESS_SWEET_MIN = 0.5;
 const SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN = 0.2;
@@ -377,63 +369,8 @@ export function buildFoodPairingFieldShape(
   } as const;
 }
 
-function quoteEnum(values: readonly string[]): string {
-  return values.map((value) => `"${value}"`).join(' | ');
-}
-
 export function buildFoodPairingColorSchemaDescription(): string {
   return `${FOOD_PAIRING_COLOR_DESCRIPTION} "both" is legacy compatibility only; mixed-color recommendation requests should prefer search_wines.`;
-}
-
-export function buildSearchWinesPromptContractLines(
-  usd50ApproxKrw: number,
-): readonly string[] {
-  return [
-    '- search_wines(query, limit?, retrieval_mode?, exclude_grapes?, exclude_regions?, exclude_wine_types?, min_price_krw?, max_price_krw?, max_alcohol_pct?, grape_primary?, wine_type?, country?, region?, vintage_min?, vintage_max?, appellation?, style?, styles?, certification?, occasion?, gift_suitability_min?, beginner_suitability_min?, producer_prestige_min?, popularity_min?, recipient_profile?, sweetness_min?, sweetness_max?, acidity_min?, acidity_max?, tannin_max?, drinking_window?, drinking_window_target_year?, want_diversity?) — main search. ALWAYS use structured params — they are applied as typed constraints / preference signals and are far more reliable than embedding semantics in query text. query = search INTENT only; structured params = typed CONSTRAINTS.',
-    `  - retrieval_mode: ${quoteEnum(SEARCH_TOOL_RETRIEVAL_MODES)} (only when you intentionally need a non-default route)`,
-    '  - query must preserve the user\'s original language and lexical anchor. If the user asked in Korean, keep search_wines.query in Korean. Do NOT translate or paraphrase it into broad English intent text. Put normalization and extra semantics into structured params/styles instead.',
-    '  - grape_primary: canonical grape name for explicit varietal requests ("까쇼"→"Cabernet Sauvignon", "피노 누아"→"Pinot Noir")',
-    `  - wine_type: ${quoteEnum(SEARCH_TOOL_WINE_TYPES)} (use for type constraints, e.g. 레드→"red", 화이트→"white")`,
-    '  - country: English name (e.g. "France", "Italy", "Chile", "United States", "Spain", "Australia")',
-    '  - region: canonical region name for top-level regions (e.g. "Bordeaux", "Burgundy", "Napa Valley", "Beaujolais")',
-    '  - vintage_min/vintage_max: year range (e.g. "2018-2020년산" → vintage_min:2018, vintage_max:2020)',
-    '  - appellation: specific appellation (e.g. "Pauillac", "Barolo", "Chianti Classico")',
-    `  - style: OPTIONAL single semantic style hint. Preserve the user meaning losslessly instead of collapsing it to generic body terms. Valid examples include ${SEARCH_TOOL_STYLE_EXAMPLES.map((value) => `"${value}"`).join(', ')}. Use "sweet" / "off_dry" for sweetness intent instead of vague prose.`,
-    `  - styles: OPTIONAL array of semantic style hints when the user asks for multiple simultaneous qualities. Example: non-expert gift query → styles:[${SEARCH_TOOL_STYLES_EXAMPLE_VALUES.map((value) => `"${value}"`).join(',')}]. Prefer styles over style when there are 2+ style meanings.`,
-    `  - occasion: OPTIONAL canonical situation tags such as ${quoteEnum(SEARCH_TOOL_OCCASION_VALUES)}. Use for gift/anniversary/date/housewarming/healing intent.`,
-    '  - gift_suitability_min: OPTIONAL [0,1] learned suitability floor for gifting queries (safe/formal/gift-worthy).',
-    '  - beginner_suitability_min: OPTIONAL [0,1] learned suitability floor for non-expert / approachable requests.',
-    '  - producer_prestige_min: OPTIONAL [0,1] indexed producer-prestige floor for explicit prestige/formal/classic intent (품격, 격식, 상사 선물, 고급스러운).',
-    '  - popularity_min: OPTIONAL [0,1] indexed recognizability / broad-market popularity floor for "participants can all buy it", widely available, supermarket-safe, or broadly recognizable recommendation intent.',
-    `  - recipient_profile: OPTIONAL ${RECIPIENT_PROFILE_VALUES.map((value) => `"${value}"`).join(' | ')} for explicit recipient/social situation semantics. For parents who have never tried wine, use "parents_first_time".`,
-    '  - sweetness_min/sweetness_max: OPTIONAL [0,1] indexed sweetness range for explicit off-dry / slightly sweet / not-too-sweet recommendation intent. Prefer this when the sweetness objective should not rewrite the lexical anchor.',
-    '  - acidity_min/acidity_max/tannin_max: OPTIONAL [0,1] sensory bounds for explicit bright / gentle-acidity / soft / low-tannin recommendation objectives.',
-    '  - drinking_window: OPTIONAL "now" when the user asks for currently drinkable / 지금 마시기 좋은 / 피크 후보. For compare_wines + drinkability, include drinking_window:"now" and still call check_drinking_window on both returned entity_ids.',
-    '  - drinking_window_target_year: OPTIONAL explicit year paired with drinking_window.',
-    '  - certification: "organic" or "biodynamic"',
-    '  - min_price_krw: KRW price floor ("1만원 이상"→10000)',
-    `  - max_price_krw: KRW price cap ("5만원"→50000, "가성비"→50000, "$50"→${usd50ApproxKrw})`,
-    '  - Price ranges: "1-2만원 사이" → min_price_krw:10000, max_price_krw:20000',
-    '  - Formal senior-colleague/promotion/retirement gifts require an explicit range when no user range is given: min_price_krw:50000 and max_price_krw:150000.',
-    '  - Top-level regions such as Bordeaux/Burgundy/Napa/Tuscany/Beaujolais should use region, not appellation. Use appellation only for subregions such as Pauillac, Margaux, Saint-Émilion, Barolo, Chianti.',
-    '  - Online/virtual tasting with all participants needing access: preserve the accessibility anchor in query, keep max_price_krw, use approachable/crowd_pleasing styles, and do not convert it to occasion:party unless the user explicitly says party.',
-    '  - max_alcohol_pct: ABV ceiling for low-alcohol requests ("도수 낮은" → 12); retrieval treats it as a preference, then post-result policy removes only verified over-ceiling wines and keeps unknown-ABV candidates as unverified',
-    '  - exclude_grapes: grapes to exclude, e.g. ["Cabernet Sauvignon","Merlot"] — applied as Vespa NOT filter',
-    '  - exclude_regions: countries/regions to exclude, e.g. ["France","Italy"] — applied as Vespa NOT filter',
-    '  - exclude_wine_types: wine types to exclude, e.g. ["red"] for "레드 말고" — applied as Vespa NOT filter',
-    '  - want_diversity: true when user wants varied options ("다양하게", "각각", "종류별로", "different styles")',
-  ];
-}
-
-export function buildFoodPairingsPromptContractLines(): readonly string[] {
-  return [
-    '- get_food_pairings(food, max_price?, max_price_krw?, color?, sweetness_target?, acidity_min?, tannin_max?, styles?, pairing_tags?) — food-wine pairing for a single wine color only.',
-    '  - Legacy shorthand: get_food_pairings(food, max_price?, max_price_krw?, color?). New calls should use the typed objective fields when the query provides them.',
-    '  - max_price is legacy USD input; prefer max_price_krw for new calls.',
-    `  - color must be one of ${quoteEnum(FOOD_PAIRING_COLORS.filter((color) => color !== 'both'))}. Never use both, mixed, any, or a multi-color shorthand here.`,
-    '  - Put explicit pairing objectives into typed fields: sweetness_target [0,1], acidity_min/tannin_max [0,10], styles, and pairing_tags. Do not bury these in food text.',
-    '  - For mixed red+white requests (e.g. couple sets, "both colors"), do NOT call get_food_pairings. Use search_wines with want_diversity=true or parallel search_wines calls instead.',
-  ];
 }
 
 function collectSearchToolStyleHints(input: {

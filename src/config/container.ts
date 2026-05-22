@@ -63,18 +63,6 @@ import type { DecomposedSearchUseCase } from '../application/search/decomposed-s
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { WineSearchOrchestrator as WineSearchOrchestratorImpl } from '../application/wine-search/wine-search-orchestrator.js';
 import type { WineSearchOrchestratorContract as WineSearchOrchestrator } from '../application/wine-search/wine-search-orchestrator.js';
-export {
-  getWiringManifest,
-  topologicalBuildOrder,
-  WIRING_MANIFEST,
-} from './container-wiring-manifest.js';
-export type {
-  ContainerPortId,
-  SubContainerId,
-  SubContainerSpec,
-  WiringManifest,
-} from './container-wiring-manifest.js';
-
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when an OpenAI credential or credential pool is set. */
   readonly chatLlm?: ChatLlmPort;

@@ -98,16 +98,16 @@ export const ORCHESTRATOR_MAX_QUERY_CHARS = WINE_SEARCH_MAX_QUERY_CHARS;
  *  phase (analyzer, router, runner/mini-loop, synthesizer) plus mini-loop
  *  inner steps gives a worst-case ≤ 32 for the deepest legitimate plan
  *  (mini-loop 3 steps × 8 anchor drinkability fan-outs). */
-export const ORCHESTRATOR_MAX_EXECUTION_STEPS = 64;
+const ORCHESTRATOR_MAX_EXECUTION_STEPS = 64;
 
 /** Soft cap on the tool-call set inside a single ExecutionStep. Aligned with
  *  `WINE_SEARCH_MAX_CONSTRAINTS` (32) so a single mini-loop turn cannot
  *  surface more tool calls than the analyzer can have constraints. */
-export const ORCHESTRATOR_MAX_TOOL_CALLS_PER_STEP = WINE_SEARCH_MAX_CONSTRAINTS;
+const ORCHESTRATOR_MAX_TOOL_CALLS_PER_STEP = WINE_SEARCH_MAX_CONSTRAINTS;
 
 /** Soft cap on the observation strings inside a single ExecutionStep. Same
  *  reasoning as tool calls — observations are 1:1 with calls. */
-export const ORCHESTRATOR_MAX_OBSERVATIONS_PER_STEP = WINE_SEARCH_MAX_CONSTRAINTS;
+const ORCHESTRATOR_MAX_OBSERVATIONS_PER_STEP = WINE_SEARCH_MAX_CONSTRAINTS;
 
 /** Maximum length of an ExecutionStep `summary` field — kept short because
  *  callers display it inline (HTTP debug, trace UI). */
@@ -115,7 +115,7 @@ export const ORCHESTRATOR_STEP_SUMMARY_MAX_CHARS = 512;
 
 /** Maximum length of an observation string surfaced into a step trace. Same
  *  bound as the mini-loop's `MINI_LOOP_RESULT_PREVIEW_CHARS` for parity. */
-export const ORCHESTRATOR_OBSERVATION_MAX_CHARS = 2_000;
+const ORCHESTRATOR_OBSERVATION_MAX_CHARS = 2_000;
 
 /** Maximum length of a tool-call input field (key OR value). Tool inputs are
  *  bounded — anything larger is suspect and we truncate at the boundary. */
@@ -124,13 +124,13 @@ export const ORCHESTRATOR_TOOL_INPUT_MAX_CHARS = 4_000;
 /** Maximum cumulative tool-outcome count emitted. Defends against runaway
  *  mini-loop traces. Aligned with `WINE_SEARCH_MAX_ANCHORS * 4` (32) since
  *  drinkability fans out one outcome per anchor across up to four turns. */
-export const ORCHESTRATOR_MAX_TOOL_OUTCOMES = 64;
+const ORCHESTRATOR_MAX_TOOL_OUTCOMES = 64;
 
 /** Maximum end-to-end wall-clock for a single `execute()` call. 60s aligns
  *  with the HTTP request budget cap (`DETERMINISTIC_ROUTER_MAX_PER_STEP_TIMEOUT_MS`)
  *  and gives synthesis room above the agent-config 25s ceiling. The Zod
  *  schema enforces `Number.isFinite` so NaN/Infinity cannot pass through. */
-export const ORCHESTRATOR_MAX_TOTAL_DURATION_MS = 600_000;
+const ORCHESTRATOR_MAX_TOTAL_DURATION_MS = 600_000;
 
 /** Default soft total-token cap used when callers do not override. Mirrors
  *  `DEFAULT_AGENT_CONFIG.maxTotalTokens`. */
@@ -180,21 +180,20 @@ export type TerminationKind = z.infer<typeof TerminationKindSchema>;
 /** Mirror of `TokenUsage` from `structured-llm.port.ts`. Every numeric uses
  *  `.int().finite()` and clamps to non-negative — adapters MUST coerce
  *  missing/NaN fields to 0. */
-export const OrchestratorTokenUsageSchema = z.object({
+const OrchestratorTokenUsageSchema = z.object({
   inputTokens: z.number().int().finite().min(0),
   outputTokens: z.number().int().finite().min(0),
   cacheReadTokens: z.number().int().finite().min(0),
   cacheCreationTokens: z.number().int().finite().min(0),
 }).strict();
 
-export const ExecutionStepSourceSchema = z.enum([
+const ExecutionStepSourceSchema = z.enum([
   'analyzer',
   'router',
   'runner',
   'mini_loop',
   'synthesizer',
 ]);
-export type ExecutionStepSource = z.infer<typeof ExecutionStepSourceSchema>;
 
 /**
  * Tool-call shape — matches the Anthropic Messages API `tool_use` block and

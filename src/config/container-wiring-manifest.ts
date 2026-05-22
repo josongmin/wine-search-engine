@@ -63,7 +63,7 @@ export type ContainerPortId =
   | 'watchlistRuntime'
   | 'watchlistService';
 
-export interface SubContainerSpec {
+interface SubContainerSpec {
   readonly id: SubContainerId;
   /** Sub-containers whose output is consumed as a constructor input. */
   readonly dependsOn: readonly SubContainerId[];
@@ -153,7 +153,7 @@ export const WIRING_MANIFEST: readonly SubContainerSpec[] = [
   },
 ] as const;
 
-export interface WiringManifest {
+interface WiringManifest {
   readonly subContainers: readonly SubContainerSpec[];
   readonly ports: readonly ContainerPortId[];
 }

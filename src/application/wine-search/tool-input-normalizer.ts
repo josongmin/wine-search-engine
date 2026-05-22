@@ -456,7 +456,7 @@ function dedupConstraintsByAttributeAndValue(
 // Public API
 // ---------------------------------------------------------------------------
 
-export interface ToolInputNormalizer {
+interface ToolInputNormalizer {
   /**
    * Apply the full search-input normalization pipeline. Composes (in order):
    *   1. applyExactMetadataNormalization

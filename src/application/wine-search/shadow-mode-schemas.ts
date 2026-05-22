@@ -47,7 +47,7 @@ export const SHADOW_MODE_ANSWER_PREVIEW_CHARS = 240;
 /** Length cap on the query preview surfaced in a report. Mirrors the
  *  Korean wine query upper bound used elsewhere in the application layer
  *  (`WINE_SEARCH_MAX_QUERY_CHARS`). */
-export const SHADOW_MODE_QUERY_PREVIEW_CHARS = 2_000;
+const SHADOW_MODE_QUERY_PREVIEW_CHARS = 2_000;
 
 /** Cap on the number of distinct divergence reasons recorded in a single
  *  diff. Five categories cover everything the diff currently emits
@@ -102,8 +102,7 @@ export const SHADOW_MODE_OBSERVATIONS_MAX = 256;
 // Orchestrator identity
 // ---------------------------------------------------------------------------
 
-export const ShadowModeOrchestratorIdSchema = z.enum(['legacy_agent', 'wine_search']);
-export type ShadowModeOrchestratorId = z.infer<typeof ShadowModeOrchestratorIdSchema>;
+const ShadowModeOrchestratorIdSchema = z.enum(['legacy_agent', 'wine_search']);
 
 // ---------------------------------------------------------------------------
 // Per-orchestrator outcome
@@ -117,13 +116,12 @@ export const ShadowModeOrchestratorStatusSchema = z.enum([
 ]);
 export type ShadowModeOrchestratorStatus = z.infer<typeof ShadowModeOrchestratorStatusSchema>;
 
-export const ShadowModeTokenUsageSchema = z.object({
+const ShadowModeTokenUsageSchema = z.object({
   inputTokens: z.number().int().finite().min(0),
   outputTokens: z.number().int().finite().min(0),
   cacheReadTokens: z.number().int().finite().min(0).optional(),
   cacheCreationTokens: z.number().int().finite().min(0).optional(),
 }).strict();
-export type ShadowModeTokenUsage = z.infer<typeof ShadowModeTokenUsageSchema>;
 
 export const ShadowModeOrchestratorOutcomeSchema = z.object({
   orchestrator: ShadowModeOrchestratorIdSchema,

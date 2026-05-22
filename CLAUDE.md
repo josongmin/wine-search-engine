@@ -85,7 +85,6 @@ Composite tsconfigs emit `.d.ts` to `.tsbuildcache/<name>/` (gitignored). dist/ 
 ## Quality bar
 
 - TypeScript: `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`.
-- Do not fix unrelated files in the same change set.
 - For optional object properties: **omit** keys instead of setting them to `undefined` when types use exact optional semantics.
 - Redis: use the **`redis`** npm package and `src/infrastructure/db/redis-client.ts` (`getRedisClient` is **async**).
 

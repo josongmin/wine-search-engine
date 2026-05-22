@@ -128,14 +128,14 @@ export type ExecutionOutcome =
 // Runner
 // ---------------------------------------------------------------------------
 
-export interface ExecutionRunnerDeps {
+interface ExecutionRunnerDeps {
   readonly searchUseCase: SearchUseCasePort;
   readonly comparisonUseCase?: ComparisonUseCasePort | undefined;
   readonly foodPairingUseCase?: FoodPairingUseCasePort | undefined;
   readonly drinkabilityUseCase?: DrinkabilityUseCasePort | undefined;
 }
 
-export interface ExecutionRunnerContext {
+interface ExecutionRunnerContext {
   readonly requestId: string;
   readonly abortSignal?: AbortSignal | undefined;
   /** Per-step timeout. Bounded at construction to keep a runaway plan from

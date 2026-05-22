@@ -73,7 +73,7 @@ const CUTOVER_RUNBOOK_PATH = 'docs/runbook-wine-search-cutover.md';
 // Driver interface
 // ---------------------------------------------------------------------------
 
-export interface ShadowModeDriver {
+interface ShadowModeDriver {
   /** Shadow-mode runner wired to the real legacy and new orchestrators. */
   readonly runner: ShadowModeRunner;
   /**
@@ -117,7 +117,7 @@ export interface ContainerBuildResult {
   close?(): Promise<void>;
 }
 
-export interface BuildShadowModeDriverOptions {
+interface BuildShadowModeDriverOptions {
   /**
    * Container builder override — defaults to the real composition root.
    * Tests pass a synthetic builder that returns a hand-crafted `Container`

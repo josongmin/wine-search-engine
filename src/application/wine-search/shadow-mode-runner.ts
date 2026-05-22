@@ -98,7 +98,7 @@ const noopLogger: ShadowModeLogger = {
   error: () => {},
 };
 
-export interface ShadowModeClock {
+interface ShadowModeClock {
   readonly now: () => number;
 }
 
@@ -110,14 +110,14 @@ const wallClock: ShadowModeClock = {
 // Runner
 // ---------------------------------------------------------------------------
 
-export interface ShadowModeRunnerDeps {
+interface ShadowModeRunnerDeps {
   readonly legacyOrchestrator: AgentOrchestrator;
   readonly wineSearchOrchestrator: WineSearchOrchestratorLike;
   readonly logger?: ShadowModeLogger;
   readonly clock?: ShadowModeClock;
 }
 
-export interface ShadowModeRunOnceInput {
+interface ShadowModeRunOnceInput {
   readonly query: string;
   readonly requestId: string;
   readonly scenarioId?: string;
@@ -359,7 +359,7 @@ export class ShadowModeRunner {
  * Sentinel error class so the per-side runners can distinguish a real
  * orchestrator error from our own timeout race.
  */
-export class ShadowModeTimeoutError extends Error {
+class ShadowModeTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ShadowModeTimeoutError';
@@ -563,7 +563,7 @@ function truncateObservation(input: string): string {
  * Adapt a per-side envelope from the legacy agent into the orchestrator-
  * agnostic `ShadowModeOrchestratorOutcome` shape consumed by the differ.
  */
-export function toLegacyOutcome(
+function toLegacyOutcome(
   envelope: PerSideEnvelope<AgentResult>,
 ): ShadowModeOrchestratorOutcome {
   const duration = Math.max(0, envelope.finishedAt - envelope.startedAt);
@@ -608,7 +608,7 @@ export function toLegacyOutcome(
  * Adapt a per-side envelope from the new orchestrator into the same
  * orchestrator-agnostic outcome shape.
  */
-export function toWineSearchOutcome(
+function toWineSearchOutcome(
   envelope: PerSideEnvelope<WineSearchResult>,
 ): ShadowModeOrchestratorOutcome {
   const duration = Math.max(0, envelope.finishedAt - envelope.startedAt);

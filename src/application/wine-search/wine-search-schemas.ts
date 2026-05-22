@@ -22,7 +22,7 @@
 import { z } from 'zod';
 import {
   NormalizedConstraintSchema,
-  type NormalizedConstraint,
+
 } from '@shared/types/index.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
@@ -34,7 +34,6 @@ import {
 // for `NormalizedConstraintSchema` now lives in `@shared/types`; this file
 // continues to expose it under its historical import path.
 export { NormalizedConstraintSchema };
-export type { NormalizedConstraint };
 
 /** Matches `MAX_AGENT_HTTP_QUERY_CHARS` in `src/interface/http/constants.ts`.
  *  Re-declared at module scope to keep this contract independent of the
@@ -68,12 +67,12 @@ export const WINE_SEARCH_MAX_PER_TOOL_CAP = 6;
 /** Comparison legs: at least 2 (binary comparison), capped at 4 — beyond 4
  *  legs decomposition quality collapses and the orchestrator falls back to
  *  flat search. */
-export const WINE_SEARCH_DECOMPOSITION_MIN_LEGS = 2;
-export const WINE_SEARCH_DECOMPOSITION_MAX_LEGS = 4;
+const WINE_SEARCH_DECOMPOSITION_MIN_LEGS = 2;
+const WINE_SEARCH_DECOMPOSITION_MAX_LEGS = 4;
 
 /** Parallel-slot bounds (e.g. "appetizer + main + dessert" pairing). */
-export const WINE_SEARCH_PARALLEL_SLOT_MIN_LIMIT = 1;
-export const WINE_SEARCH_PARALLEL_SLOT_MAX_LIMIT = 10;
+const WINE_SEARCH_PARALLEL_SLOT_MIN_LIMIT = 1;
+const WINE_SEARCH_PARALLEL_SLOT_MAX_LIMIT = 10;
 
 /** Vintage-year bounds — re-exported from the shared SSoT in
  *  `@shared/constants` (MIN/MAX_PRODUCED_VINTAGE_YEAR). Re-exposed under the

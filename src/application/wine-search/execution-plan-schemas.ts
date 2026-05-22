@@ -38,11 +38,11 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Lower bound for parallel-search slots — below this we use a single search. */
-export const DETERMINISTIC_ROUTER_MIN_SLOTS = 2;
+const DETERMINISTIC_ROUTER_MIN_SLOTS = 2;
 /** Upper bound aligned with `WINE_SEARCH_DECOMPOSITION_MAX_LEGS` (4). Beyond
  *  this the decomposition quality collapses and the runner would oversubscribe
  *  the downstream Vespa worker pool. */
-export const DETERMINISTIC_ROUTER_MAX_SLOTS = 4;
+const DETERMINISTIC_ROUTER_MAX_SLOTS = 4;
 /** Maximum number of drinkability-template anchor IDs we'll fan out. Aligns
  *  with `WINE_SEARCH_MAX_ANCHORS` (8). */
 export const DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS = WINE_SEARCH_MAX_ANCHORS;
@@ -52,7 +52,6 @@ export const DETERMINISTIC_ROUTER_DEFAULT_PER_STEP_TIMEOUT_MS = 8_000;
 /** Maximum per-step timeout. Bounded so a runaway analysis cannot pin a
  *  worker forever — matches the parallel-batch timeout in
  *  `agent-tool-execution-support.ts`. */
-export const DETERMINISTIC_ROUTER_MAX_PER_STEP_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // SearchUseCaseInput — the slice of `SearchRequest` the planner emits.
@@ -64,19 +63,17 @@ export const DETERMINISTIC_ROUTER_MAX_PER_STEP_TIMEOUT_MS = 60_000;
 // limit, and the representative-concept marker for comparison legs.
 // ---------------------------------------------------------------------------
 
-export const ExecutionSearchModeSchema = z.enum([
+const ExecutionSearchModeSchema = z.enum([
   'auto',
   'entity',
   'hybrid',
   'mixed',
 ]);
-export type ExecutionSearchMode = z.infer<typeof ExecutionSearchModeSchema>;
 
-export const RepresentativeConceptSchema = z.object({
+const RepresentativeConceptSchema = z.object({
   field: z.enum(['country', 'region', 'appellation', 'grape_primary', 'wine_type']),
   value: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),
 }).strict();
-export type RepresentativeConcept = z.infer<typeof RepresentativeConceptSchema>;
 
 /** Soft cap on result-set size requested from a single SearchUseCase call.
  *  Aligned with `WINE_SEARCH_PARALLEL_SLOT_MAX_LIMIT` (10). */
@@ -103,12 +100,11 @@ export type SearchUseCaseInput = z.infer<typeof SearchUseCaseInputSchema>;
 // underlying call signature.
 // ---------------------------------------------------------------------------
 
-export const ComparisonIntentSchema = z.enum([
+const ComparisonIntentSchema = z.enum([
   'compare',
   'recommend_one',
   'list_both',
 ]);
-export type ComparisonIntent = z.infer<typeof ComparisonIntentSchema>;
 
 export const ComparisonUseCaseInputSchema = z.object({
   originalQuery: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),
@@ -163,7 +159,7 @@ export type FoodPairingUseCaseInput = z.infer<typeof FoodPairingUseCaseInputSche
 // `check_drinking_window` calls from search results.
 // ---------------------------------------------------------------------------
 
-export const DrinkabilityTemplateSchema = z.object({
+const DrinkabilityTemplateSchema = z.object({
   /** Year to evaluate the drinking window against. */
   targetYear: z.number().int().finite()
     .min(WINE_SEARCH_MIN_VINTAGE_YEAR)
@@ -174,7 +170,6 @@ export const DrinkabilityTemplateSchema = z.object({
     .min(1)
     .max(DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS),
 }).strict();
-export type DrinkabilityTemplate = z.infer<typeof DrinkabilityTemplateSchema>;
 
 // ---------------------------------------------------------------------------
 // Multi-step handoff — describes a plan we hand off to the MiniLoop
@@ -182,8 +177,7 @@ export type DrinkabilityTemplate = z.infer<typeof DrinkabilityTemplateSchema>;
 // follow-up RFC); the router only emits the contract.
 // ---------------------------------------------------------------------------
 
-export const MultiStepInitialActionSchema = z.enum(['search', 'compare', 'pair']);
-export type MultiStepInitialAction = z.infer<typeof MultiStepInitialActionSchema>;
+const MultiStepInitialActionSchema = z.enum(['search', 'compare', 'pair']);
 
 export const MultiStepHandoffSchema = z.object({
   initialAction: MultiStepInitialActionSchema,
@@ -251,10 +245,3 @@ export type ExecutionPlan = z.infer<typeof ExecutionPlanSchema>;
 // Convenience type narrows (callers use these instead of inline `kind ===`)
 // ---------------------------------------------------------------------------
 
-export type SingleSearchPlan = Extract<ExecutionPlan, { kind: 'single-search' }>;
-export type ParallelSearchPlan = Extract<ExecutionPlan, { kind: 'parallel-search' }>;
-export type ComparisonPlan = Extract<ExecutionPlan, { kind: 'comparison' }>;
-export type FoodPairingThenSearchPlan = Extract<ExecutionPlan, { kind: 'food-pairing-then-search' }>;
-export type SearchThenDrinkabilityPlan = Extract<ExecutionPlan, { kind: 'search-then-drinkability' }>;
-export type MultiStepPlan = Extract<ExecutionPlan, { kind: 'multi-step' }>;
-export type RejectPlan = Extract<ExecutionPlan, { kind: 'reject' }>;

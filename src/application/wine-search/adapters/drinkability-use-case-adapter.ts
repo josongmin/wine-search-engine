@@ -57,14 +57,14 @@ const DRINKABILITY_SENSORY_MIDPOINT = 3;
  *  rich enough to drive the drinking-window predictor. Production wiring
  *  should pass the same lookup the agent-tools branch uses
  *  (`drinkingWindowEntityLookup` or `entityLookup`). */
-export interface DrinkabilityEntityLookupPort {
+interface DrinkabilityEntityLookupPort {
   (
     entityId: CanonicalEntityId,
     options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<RetrievalDocument | undefined>;
 }
 
-export interface DrinkabilityUseCaseAdapterDeps {
+interface DrinkabilityUseCaseAdapterDeps {
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
   readonly entityLookup: DrinkabilityEntityLookupPort;
 }

@@ -19,7 +19,7 @@ interface QueryEntrySecurityResult {
   readonly rejection?: QueryEntrySecurityRejection | undefined;
 }
 
-export interface QueryEntrySecurityCheck {
+interface QueryEntrySecurityCheck {
   readonly sanitizedQuery: string;
   readonly layer1Rejection: QueryEntrySecurityRejection | undefined;
   readonly layer2Result: Promise<QueryEntrySecurityResult>;

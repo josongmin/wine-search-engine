@@ -31,11 +31,11 @@ export const SYNTHESIS_MIN_ANSWER_CHARS = 1;
 export const SYNTHESIS_MAX_ANSWER_CHARS = 3000;
 
 /** Per-citation length cap. Citations are entity ids or short URLs. */
-export const SYNTHESIS_CITATION_MAX_CHARS = 256;
+const SYNTHESIS_CITATION_MAX_CHARS = 256;
 
 /** Maximum number of citations the LLM may emit. Mirrors the worst observed
  *  multi-result synthesis (compare across 4 legs * 2 citations each). */
-export const SYNTHESIS_MAX_CITATIONS = 12;
+const SYNTHESIS_MAX_CITATIONS = 12;
 
 /** Soft cap on the serialized grounding payload (user message) sent to the
  *  LLM. Excess outcomes are truncated with an explicit marker so the model

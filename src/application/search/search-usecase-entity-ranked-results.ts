@@ -76,7 +76,7 @@ function buildIdentityProvenanceSignalSnapshot(
   };
 }
 
-export function resolveIdentityExactnessTier(
+function resolveIdentityExactnessTier(
   rawCandidate: ResolverCandidate | undefined,
 ): IdentityExactnessTier {
   const aliasSignals = rawCandidate?.sourceSignals;
@@ -110,7 +110,7 @@ function findStrongestAliasMatch(
     : undefined;
 }
 
-export function buildIdentityLaneProvenance(
+function buildIdentityLaneProvenance(
   resolvedCandidate: EntityResolveResult['candidates'][number],
   rawCandidate: ResolverCandidate | undefined,
 ): IdentityLaneProvenance {
@@ -137,7 +137,7 @@ export function buildIdentityLaneProvenance(
   };
 }
 
-export function liftResolvedEntityCandidateToHybridCandidate(
+function liftResolvedEntityCandidateToHybridCandidate(
   resolvedCandidate: EntityResolveResult['candidates'][number],
   rawCandidate: ResolverCandidate | undefined,
   identityProvenance: IdentityLaneProvenance,

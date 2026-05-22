@@ -27,11 +27,6 @@ import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
 
-export interface SearchUseCaseAdapterContext {
-  readonly requestId: string;
-  readonly abortSignal?: AbortSignal | undefined;
-}
-
 /** Thrown when the underlying `SearchUseCase` returns a comparison response
  *  for what the runner expects to be a single-search call. */
 export class UnexpectedSearchAdapterResponseError extends DomainError {

@@ -162,7 +162,7 @@ const ORCHESTRATOR_ADMIT_GATE_ZERO_WIDTH_RE = /(?:\u200B|\u200C|\u200D|\uFEFF)/g
  * Clock seam — orchestrator uses `clock.now()` for `totalDurationMs` so
  * tests can pin determinism via a fake clock.
  */
-export interface OrchestratorClock {
+interface OrchestratorClock {
   readonly now: () => number;
 }
 
@@ -170,7 +170,7 @@ export interface OrchestratorClock {
  * Logger seam — accepts the small subset of `bootstrapLogger` the
  * orchestrator uses. Tests inject a vi.fn-backed stub.
  */
-export interface OrchestratorLogger {
+interface OrchestratorLogger {
   info(payload: Record<string, unknown>, msg: string): void;
   warn(payload: Record<string, unknown>, msg: string): void;
   error(payload: Record<string, unknown>, msg: string): void;
@@ -187,7 +187,7 @@ export interface OrchestratorMiniLoopToolBundle {
   readonly toolPorts: MiniLoopToolPorts;
 }
 
-export interface WineSearchOrchestratorDeps {
+interface WineSearchOrchestratorDeps {
   readonly queryAnalyzer: QueryAnalyzerService;
   readonly router: DeterministicRouter;
   readonly executionRunner: ExecutionRunner;
@@ -211,7 +211,6 @@ export interface WineSearchInput {
 
 export {
   type ExecutionStep,
-  type ExecutionStepSource,
   type WineSearchResult,
 } from './wine-search-result-schemas.js';
 

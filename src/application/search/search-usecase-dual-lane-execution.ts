@@ -31,7 +31,7 @@ import {
   type HybridCandidateRetrievalResult,
 } from './search-usecase-hybrid-candidates.js';
 
-export interface SearchUseCaseDualLaneExecutionResult {
+interface SearchUseCaseDualLaneExecutionResult {
   readonly executionTopology: 'dual_lane';
   readonly identityResolveResult: EntityResolveResult;
   readonly generalRetrievalResult: HybridCandidateRetrievalResult;
@@ -39,7 +39,7 @@ export interface SearchUseCaseDualLaneExecutionResult {
   readonly laneArtifacts: readonly DualLaneArtifact[];
 }
 
-export interface DualLaneHybridRouteExecutionResult {
+interface DualLaneHybridRouteExecutionResult {
   readonly dualLaneExecution: SearchUseCaseDualLaneExecutionResult;
   readonly routeExecution: DualLaneRouteResult;
 }
