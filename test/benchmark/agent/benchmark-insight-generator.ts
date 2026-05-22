@@ -12,6 +12,32 @@
  */
 
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
+import {
+  INSIGHT_OVERALL_GOOD,
+  INSIGHT_OVERALL_WARN,
+  INSIGHT_FAITHFULNESS_GOOD,
+  INSIGHT_FAITHFULNESS_WARN,
+  INSIGHT_CONTEXT_RELEVANCE_GOOD,
+  INSIGHT_CONTEXT_RELEVANCE_WARN,
+  INSIGHT_JUDGE_GOOD,
+  INSIGHT_JUDGE_WARN,
+  INSIGHT_ELA1_GOOD,
+  INSIGHT_ELA1_WARN,
+  INSIGHT_SCR_OVERALL_GOOD,
+  INSIGHT_SCR_OVERALL_WARN,
+  INSIGHT_SCR_INFERRED_LOWER_BOUND,
+  INSIGHT_SLOT_F1_GOOD,
+  INSIGHT_SLOT_F1_WARN,
+  INSIGHT_TIER6_GOOD,
+  INSIGHT_TIER6_WARN,
+  INSIGHT_MEAN_HARD_CONSTRAINTS_GOOD,
+  INSIGHT_MEAN_HARD_CONSTRAINTS_WARN,
+  LATENCY_SLA_P50_MS,
+  LATENCY_SLA_P95_MS,
+  MIN_ANNOTATION_SAMPLES as K_MIN_ANNOTATION_SAMPLES,
+  MIN_SCENARIOS_FOR_VARIANCE as K_MIN_SCENARIOS_FOR_VARIANCE,
+  TRIMMED_VS_RAW_INSIGHT_DELTA,
+} from './constants.js';
 
 // ─────────────────────────────────────────────────────────────────────
 // Tier 1: Deterministic insight rules
@@ -26,6 +52,14 @@ interface InsightRule {
 /** Minimal report slice needed for insight generation. */
 export interface BenchmarkReportSlice {
   readonly overallScore: number;
+  /**
+   * Geo-mean alias for `overallScore`. SOTA++ reliability addition (A2): the
+   * insight rule `trimmed_vs_raw_gap` compares this against
+   * `overallScoreTrimmedGeoMean5` and warns when they diverge >3pp.
+   */
+  readonly overallScoreGeoMean: number;
+  /** 5%-trimmed geo-mean of per-scenario overall. */
+  readonly overallScoreTrimmedGeoMean5: number;
   readonly overallCi95Lower: number;
   readonly overallCi95Upper: number;
   readonly executionEfficiency: number;
@@ -37,7 +71,12 @@ export interface BenchmarkReportSlice {
   readonly latencyP50Ms: number;
   readonly latencyP95Ms: number;
   readonly tier6SoleExtractionRate: number | null;
-  readonly meanHardConstraints: number;
+  /**
+   * Mean hard-constraints per query — `null` when no scenarios had constraint
+   * extraction. Was previously hardcoded `0`; now genuinely null-safe so
+   * insight rules skip cleanly instead of misfiring on a stub value.
+   */
+  readonly meanHardConstraints: number | null;
   readonly scrOverall: number | null;
   readonly scrHard: number | null;
   readonly scrSoft: number | null;
@@ -51,29 +90,29 @@ export interface BenchmarkReportSlice {
   readonly worstScenarios: readonly { id: number; tier: string; score: number; judge: number | null }[];
 }
 
-/** SLA and quality thresholds. */
+/**
+ * SLA and quality thresholds — sourced from `./constants.js` (SSoT). Local
+ * `THRESHOLDS` object kept for backward-compatible expression and quick scan,
+ * but every value is bound to the imported constant. Update the SSoT, not here.
+ */
 const THRESHOLDS = {
-  overall: { good: 0.85, warn: 0.75 },
-  faithful: { good: 0.85, warn: 0.70 },
-  ctxRelevance: { good: 0.80, warn: 0.65 },
-  judge: { good: 0.70, warn: 0.50 },
-  ela1: { good: 0.92, warn: 0.85 },
-  scrOverall: { good: 0.85, warn: 0.60 },
-  slotF1: { good: 0.85, warn: 0.60 },
-  latencyP50: 10_000,
-  latencyP95: 20_000,
-  tier6Rate: { good: 0.25, warn: 0.50 },
-  meanHardConstraints: { good: 2.5, warn: 1.5 },
+  overall: { good: INSIGHT_OVERALL_GOOD, warn: INSIGHT_OVERALL_WARN },
+  faithful: { good: INSIGHT_FAITHFULNESS_GOOD, warn: INSIGHT_FAITHFULNESS_WARN },
+  ctxRelevance: { good: INSIGHT_CONTEXT_RELEVANCE_GOOD, warn: INSIGHT_CONTEXT_RELEVANCE_WARN },
+  judge: { good: INSIGHT_JUDGE_GOOD, warn: INSIGHT_JUDGE_WARN },
+  ela1: { good: INSIGHT_ELA1_GOOD, warn: INSIGHT_ELA1_WARN },
+  scrOverall: { good: INSIGHT_SCR_OVERALL_GOOD, warn: INSIGHT_SCR_OVERALL_WARN },
+  slotF1: { good: INSIGHT_SLOT_F1_GOOD, warn: INSIGHT_SLOT_F1_WARN },
+  latencyP50: LATENCY_SLA_P50_MS,
+  latencyP95: LATENCY_SLA_P95_MS,
+  tier6Rate: { good: INSIGHT_TIER6_GOOD, warn: INSIGHT_TIER6_WARN },
+  meanHardConstraints: { good: INSIGHT_MEAN_HARD_CONSTRAINTS_GOOD, warn: INSIGHT_MEAN_HARD_CONSTRAINTS_WARN },
 } as const;
 
-/** ELA near-target band lower bound: warn-level floor up to the TAC-KBP good target. */
 const ELA_NEAR_TARGET_LOWER_BOUND = THRESHOLDS.ela1.warn;
-/** SCR inferred must not collapse below this floor, otherwise compositional rules likely not firing. */
-const SCR_INFERRED_LOWER_BOUND = 0.20;
-/** Minimum annotated scenarios required for stable SCR/ELA/Slot-F1 interpretation. */
-const MIN_ANNOTATION_SAMPLES = 10;
-/** Need enough worst-scenario samples before claiming judge variance patterns. */
-const MIN_SCENARIOS_FOR_VARIANCE = 5;
+const SCR_INFERRED_LOWER_BOUND = INSIGHT_SCR_INFERRED_LOWER_BOUND;
+const MIN_ANNOTATION_SAMPLES = K_MIN_ANNOTATION_SAMPLES;
+const MIN_SCENARIOS_FOR_VARIANCE = K_MIN_SCENARIOS_FOR_VARIANCE;
 
 const DETERMINISTIC_RULES: readonly InsightRule[] = [
   // ── Overall health ──
@@ -173,19 +212,45 @@ const DETERMINISTIC_RULES: readonly InsightRule[] = [
     },
   },
   // ── Mean hard constraints ──
+  // SOTA++ reliability fix: rule now requires meanHardConstraints !== null.
+  // Previously the runner shipped a hardcoded `0`, which silently fired
+  // `hard_constraints_low` on every run regardless of true retrieval filtering.
   {
     id: 'hard_constraints_low',
     severity: '🟡',
-    check: (r) => r.meanHardConstraints < THRESHOLDS.meanHardConstraints.warn
+    check: (r) => r.meanHardConstraints !== null && r.meanHardConstraints < THRESHOLDS.meanHardConstraints.warn
       ? `Mean hard constraints ${r.meanHardConstraints.toFixed(2)} — below warning threshold (${THRESHOLDS.meanHardConstraints.warn}). Retrieval is under-filtered — many queries get broad, imprecise results.`
       : null,
   },
   {
     id: 'hard_constraints_good',
     severity: '🟢',
-    check: (r) => r.meanHardConstraints >= THRESHOLDS.meanHardConstraints.good
+    check: (r) => r.meanHardConstraints !== null && r.meanHardConstraints >= THRESHOLDS.meanHardConstraints.good
       ? `Mean hard constraints ${r.meanHardConstraints.toFixed(2)} — retrieval is well-filtered.`
       : null,
+  },
+  // ── Raw vs trimmed geo-mean divergence (heavy-tail detector) ──
+  //
+  // SOTA++ reliability addition (A2): when |raw − trimmed| exceeds
+  // TRIMMED_VS_RAW_INSIGHT_DELTA, the raw aggregate is being dragged by
+  // left-tail critical failures. This rule surfaces the gap so operators
+  // know the headline overall score is structurally fragile.
+  //
+  // Trimmed is the more honest "agent quality" signal; the bottom 5% likely
+  // contain critical failures (counted separately via criticalFailureCount).
+  {
+    id: 'trimmed_vs_raw_gap',
+    severity: '🟡',
+    check: (r) => {
+      const gap = r.overallScoreTrimmedGeoMean5 - r.overallScoreGeoMean;
+      if (!Number.isFinite(gap) || gap < TRIMMED_VS_RAW_INSIGHT_DELTA) return null;
+      return (
+        `Trimmed geo-mean ${(r.overallScoreTrimmedGeoMean5 * 100).toFixed(1)}% exceeds raw ${(r.overallScoreGeoMean * 100).toFixed(1)}% by ${(gap * 100).toFixed(1)}pp — `
+        + `raw aggregate is dragged by the bottom 5% (likely critical failures). `
+        + `criticalFailureCount=${r.criticalFailureCount}. The trimmed value is the more honest agent-quality signal; `
+        + `treat the gap as an indicator that fixing the left-tail scenarios will move the headline number.`
+      );
+    },
   },
 ];
 
@@ -254,7 +319,7 @@ Slot F1 strict: ${report.slotF1Strict !== null ? (report.slotF1Strict * 100).toF
 Constraint evaluated: ${report.constraintEvaluatedCount}/${report.scenarioCount} scenarios
 
 Tier 6 sole-extraction rate: ${report.tier6SoleExtractionRate !== null ? (report.tier6SoleExtractionRate * 100).toFixed(0) + '%' : 'n/a'}
-Mean hard constraints: ${report.meanHardConstraints.toFixed(2)}
+Mean hard constraints: ${report.meanHardConstraints !== null ? report.meanHardConstraints.toFixed(2) : 'n/a'}
 Latency p50: ${report.latencyP50Ms}ms | p95: ${report.latencyP95Ms}ms
 Critical failures: ${report.criticalFailureCount}
 

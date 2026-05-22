@@ -38,6 +38,17 @@ import type { EvidenceRecord } from '../../../src/domain/evaluation/service/clai
 import { buildEvidenceRecordsFromFrames } from '../../../src/domain/evaluation/service/build-evidence-records-from-frames.js';
 import { parseObservations } from '../../../src/domain/evaluation/service/evidence-parser.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../../src/domain/shared/constants.js';
+import {
+  PENALTY_EXTRA_TOOL_PER_CALL as K_PENALTY_EXTRA_TOOL_PER_CALL,
+  PENALTY_EXTRA_TOOL_CAP as K_PENALTY_EXTRA_TOOL_CAP,
+  PENALTY_TOOL_DUPLICATE as K_PENALTY_TOOL_DUPLICATE,
+  PENALTY_TOOL_ORDER_VIOLATION as K_PENALTY_TOOL_ORDER_VIOLATION,
+  EXEC_TOOL_WEIGHT as K_EXEC_TOOL_WEIGHT,
+  EXEC_STEP_WEIGHT as K_EXEC_STEP_WEIGHT,
+  TERMINATION_FALLBACK_PARTIAL_CREDIT,
+  FAITHFULNESS_PER_SCENARIO_WARN,
+  TRIMMED_GEOMEAN_PROPORTION,
+} from './constants.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -288,6 +299,40 @@ export interface ScenarioScores {
    * byte-for-byte.
    */
   readonly csrInferredGraph: number | null;
+  /**
+   * Number of hard constraints the NL Mapper extracted for this query
+   * (`runConstraintExtraction(query).bundle.hard.length`). Used by the
+   * run-level `meanHardConstraints` aggregate (was previously hardcoded `0`
+   * with a TODO comment — see ConstraintExtractionMetricsInput docs).
+   *
+   * `null` when constraint extraction was not run for the scenario.
+   */
+  readonly extractedHardConstraintCount: number | null;
+}
+
+/**
+ * Provenance record attached to every aggregate metric in `BenchmarkReport.summary.provenance`.
+ *
+ * Each entry traces a reported aggregate back to:
+ *   - `aggregateName`  — the key under `summary.*` (e.g. "overallScore", "scrHard").
+ *   - `sourceField`    — the per-scenario field consumed (e.g. "scores.overall", "scores.scrHard").
+ *                        Use the magic string `'__scenario_count__'` for cardinality counters
+ *                        that don't derive from a scenario-level field.
+ *   - `derivationSummary` — one-line human-readable formula
+ *                        (e.g. "geo-mean over executed scenarios", "5%-trimmed geo-mean").
+ *
+ * Contract test (`test/regression/scorer-no-hardcoded-aggregate.regression.test.ts`)
+ * asserts:
+ *   1. Every numeric aggregate in `BenchmarkReport.summary` has a provenance entry.
+ *   2. `derivationSummary` MUST NOT contain the substring "TODO" — that was the
+ *      exact failure mode that hid `meanHardConstraints = 0` for sessions.
+ *   3. `sourceField` either references a real `ScenarioExecution`/`ScenarioScores`
+ *      field via dot-notation or equals the documented magic strings.
+ */
+export interface MetricProvenance {
+  readonly aggregateName: string;
+  readonly sourceField: string;
+  readonly derivationSummary: string;
 }
 
 export interface ScenarioResult {
@@ -371,6 +416,7 @@ const ZERO_SCORES: ScenarioScores = {
   csrSoft: null,
   csrInferred: null,
   csrInferredGraph: null,
+  extractedHardConstraintCount: null,
 };
 
 /**
@@ -519,16 +565,17 @@ export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> 
 // Penalty / scoring constants (extracted for visibility and testability)
 // ─────────────────────────────────────────────────────────────────────
 
-/** Tool accuracy: 10% penalty per unexpected tool call, capped at 50%. */
-const PENALTY_EXTRA_TOOL_PER_CALL = 0.1;
-const PENALTY_EXTRA_TOOL_CAP = 0.5;
-/** Tool accuracy: 30% penalty per over-duplicated expected tool. */
-const PENALTY_TOOL_DUPLICATE = 0.7;
-/** Tool accuracy: 50% penalty when expected tool order violated. */
-const PENALTY_TOOL_ORDER_VIOLATION = 0.5;
-/** Execution efficiency split: toolAccuracy × 0.6 + stepEfficiency × 0.4. */
-const EXEC_TOOL_WEIGHT = 0.6;
-const EXEC_STEP_WEIGHT = 0.4;
+/**
+ * Tool/step penalties — re-bound from `./constants.js` so the contract test
+ * sees a single source of truth. Renaming via `K_*` keeps the local symbols
+ * stable and avoids any churn at the call sites below.
+ */
+const PENALTY_EXTRA_TOOL_PER_CALL = K_PENALTY_EXTRA_TOOL_PER_CALL;
+const PENALTY_EXTRA_TOOL_CAP = K_PENALTY_EXTRA_TOOL_CAP;
+const PENALTY_TOOL_DUPLICATE = K_PENALTY_TOOL_DUPLICATE;
+const PENALTY_TOOL_ORDER_VIOLATION = K_PENALTY_TOOL_ORDER_VIOLATION;
+const EXEC_TOOL_WEIGHT = K_EXEC_TOOL_WEIGHT;
+const EXEC_STEP_WEIGHT = K_EXEC_STEP_WEIGHT;
 /** Structured check penalties — multiplied into answerQuality. */
 const PENALTY_PRICE_BAND_VIOLATED = 0.7;
 const PENALTY_VINTAGE_RANGE_VIOLATED = 0.7;
@@ -556,8 +603,10 @@ const PENALTY_REGEX_MISS = 0.5;
  * Intentionally non-fatal (not a critical-fail): judge can partially offset.
  */
 const PENALTY_MUST_NOT_MATCH = 0.50;
-/** Faithfulness: threshold below which a warning diagnostic fires. */
-const FAITHFULNESS_WARN_THRESHOLD = 0.5;
+/** Faithfulness: threshold below which a warning diagnostic fires.
+ *  Bound to `./constants.js` SSoT so a single edit drives all readers
+ *  (CLAUDE.md rule 30). */
+const FAITHFULNESS_WARN_THRESHOLD = FAITHFULNESS_PER_SCENARIO_WARN;
 /**
  * Korean wine type → English canonical. Used by scoreContextRelevance to check
  * that observations match the query's wine type. Module-scope (rule 16).
@@ -1101,6 +1150,21 @@ export interface ConstraintExtractionMetricsInput {
   readonly csrInferred: number | null;
   /** ADR-011 PR2 dual-emit: graph-aware inferred satisfaction. */
   readonly csrInferredGraph: number | null;
+  /**
+   * Number of HARD constraints the NL Mapper extracted for the query
+   * (e.g. `priceMaxKrw=50000`, `wineType=red`). Counted from
+   * `runConstraintExtraction(query).bundle.hard.length`.
+   *
+   * This is the per-scenario value that the run-level `meanHardConstraints`
+   * insight aggregates. The aggregate previously sat hardcoded at `0` with a
+   * TODO comment — every "Retrieval is under-filtered" warning that fired
+   * (insight rule `hard_constraints_low`) was a corrupted signal.
+   *
+   * `null` when constraint extraction was not run for the scenario (no
+   * `expectedConstraints` AND no `expectedEntities`); the run-level mean
+   * filters nulls so non-annotated scenarios neither inflate nor deflate it.
+   */
+  readonly extractedHardConstraintCount: number | null;
 }
 
 export function scoreScenario(
@@ -1377,6 +1441,7 @@ export function scoreScenario(
       csrSoft: constraintMetrics?.csrSoft ?? null,
       csrInferred: constraintMetrics?.csrInferred ?? null,
       csrInferredGraph: constraintMetrics?.csrInferredGraph ?? null,
+      extractedHardConstraintCount: constraintMetrics?.extractedHardConstraintCount ?? null,
     },
     ...(diagnostics.length > 0 ? { diagnostics, diagnosticStrings } : {}),
     judgeRequiredButSkipped,
@@ -2714,7 +2779,7 @@ function scoreTermination(
         code: 'FALLBACK_TERMINATION',
         message: 'fallback termination (max steps exhausted)',
       });
-      return 0.25;
+      return TERMINATION_FALLBACK_PARTIAL_CREDIT;
     }
     // Unknown / future enum value — push diagnostic so silent zeros are visible.
     diagnostics.push({
@@ -2741,7 +2806,7 @@ function scoreTermination(
       observed: reason,
       expected: exp.terminationReason,
     });
-    if (isFallbackMismatch) return 0.25;
+    if (isFallbackMismatch) return TERMINATION_FALLBACK_PARTIAL_CREDIT;
   }
   return ok ? 1 : 0;
 }
@@ -2979,4 +3044,70 @@ function weightedGeometricMean(
   // would clamp incorrectly. Let clamp01 handle any float rounding artefact.
   const raw = Math.exp(weightedLogSum / presentWeight);
   return clamp01(raw);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Aggregate helpers (run-level — used by runner.ts to build the report)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Unweighted geometric mean of a series of [0,1] values (e.g. per-scenario
+ * `overall` scores). Critical failures (0) survive intact — the geo-mean is
+ * intentionally dominated by them so a run-wide regression cannot hide behind
+ * good-scenario averages.
+ *
+ * Mirrors the EPS=1e-6 floor used by {@link weightedGeometricMean} so a single
+ * 0 maps to `Math.exp(log(1e-6))` ≈ 0 rather than `-Infinity`.
+ */
+export function aggregateGeoMean(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const EPS = 1e-6;
+  let logSum = 0;
+  for (const v of values) {
+    logSum += Math.log(Math.max(clamp01(v), EPS));
+  }
+  return clamp01(Math.exp(logSum / values.length));
+}
+
+/**
+ * 5%-trimmed geometric mean — robust to heavy-left-tailed score distributions
+ * dominated by a handful of critical failures (score=0).
+ *
+ * Implementation: sort ascending, drop ⌊TRIMMED_GEOMEAN_PROPORTION × N⌋ values
+ * from EACH tail, geo-mean the remainder. When the survivor set is empty
+ * (`N < ⌈1/TRIMMED_GEOMEAN_PROPORTION⌉` − e.g. N≤9 at 5% trim leaves zero
+ * survivors after symmetric trimming) we fall back to the untrimmed geo-mean
+ * to avoid reporting `0` for a small healthy run.
+ *
+ * Critical failures (raw 0 values) STAY counted via the discrete
+ * `criticalFailureCount` channel in the report — the bench surfaces both
+ * trimmed and raw aggregates AND the critical count side-by-side so trimming
+ * never squelches the security/correctness signal (CLAUDE.md execution baseline
+ * + metric-spec.md §A2).
+ *
+ * Compare against {@link aggregateGeoMean}: when |raw − trimmed| >
+ * `TRIMMED_VS_RAW_INSIGHT_DELTA`, the raw value is being dragged by the
+ * heavy tail and the insight rule `trimmed_vs_raw_gap` surfaces this in the
+ * benchmark summary.
+ */
+export function aggregateTrimmedGeoMean(
+  values: readonly number[],
+  proportion: number = TRIMMED_GEOMEAN_PROPORTION,
+): number {
+  if (values.length === 0) return 0;
+  if (!Number.isFinite(proportion) || proportion <= 0) {
+    return aggregateGeoMean(values);
+  }
+  const trimCount = Math.floor(values.length * proportion);
+  if (trimCount === 0) {
+    // Too few samples to trim symmetrically — fall back to raw.
+    return aggregateGeoMean(values);
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const survivors = sorted.slice(trimCount, sorted.length - trimCount);
+  if (survivors.length === 0) {
+    // Degenerate: trim window swallowed everything; fall back to raw.
+    return aggregateGeoMean(values);
+  }
+  return aggregateGeoMean(survivors);
 }
