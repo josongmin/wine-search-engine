@@ -374,6 +374,10 @@ export async function createContainer(
               // planner LLM RTT on simple-lookup queries by routing the
               // grounded answer through synthesis directly.
               fastAnswerBypassPlanner: config.agent.fastAnswerBypassPlanner,
+              // Verification-step guard: env-controlled via AGENT_REQUIRE_VERIFICATION_STEP.
+              // Without this line the env var was a silent no-op; the domain
+              // default (true) silently overrode any operator setting.
+              requireVerificationStep: config.agent.requireVerificationStep,
             },
           ),
         }

@@ -2120,12 +2120,32 @@ function observationIsToolTimeout(observation: string | undefined): boolean {
 }
 
 /**
- * Combined infra-fallback predicate: step-0 (LLM unavailable) OR tool-timeout
- * (backend latency). Both classes measure infra, not agent quality, and are
- * excluded from the geo-mean / CI / criticalFailureCount aggregates alike.
+ * Step-0 provider-error fallback: the agent terminated with `error` having
+ * executed ZERO steps. The only way an agent produces no steps and an error
+ * terminus is that the very FIRST LLM planning call failed before any tool ran
+ * — i.e. the provider was unavailable. The dominant cause observed under bench
+ * load is `CircuitBreakerOpenError: "openai-chat" is OPEN` (provider rate-limit
+ * tripped the breaker → subsequent calls fast-fail in ~400ms). This is provider
+ * infra, NOT agent quality: the agent never got to reason. A genuine agent/code
+ * error surfaces mid-run (stepCount > 0) and is NOT matched here.
+ *
+ * Treated identically to step-0 fallback / tool-timeout infra: excluded from
+ * overallScore / CI / criticalFailureCount, kept visible in `results[]`, and
+ * surfaced via a measurement-health count so provider throttling is observable
+ * rather than silently cratering random runs.
+ */
+export function isProviderErrorInfraFallback(r: ScenarioResult): boolean {
+  return r.terminationReason === 'error' && (r.stepCount ?? 0) === 0;
+}
+
+/**
+ * Combined infra-fallback predicate: step-0 fallback (LLM unavailable),
+ * tool-timeout (backend latency), OR step-0 provider-error (circuit breaker /
+ * provider rate-limit). All measure infra, not agent quality, and are excluded
+ * from the geo-mean / CI / criticalFailureCount aggregates alike.
  */
 export function isExcludedInfraFallback(r: ScenarioResult): boolean {
-  return isInfraFallbackResult(r) || isToolTimeoutInfraFallback(r);
+  return isInfraFallbackResult(r) || isToolTimeoutInfraFallback(r) || isProviderErrorInfraFallback(r);
 }
 
 export function buildReport(
