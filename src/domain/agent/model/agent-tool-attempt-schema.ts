@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const KNOWN_AGENT_TOOL_NAMES = [
   'search_wines',
+  'lookup_wine',
   'get_food_pairings',
   'check_drinking_window',
   'compare_wines',
@@ -75,6 +76,18 @@ export const SearchToolAttemptInputSchema = z.object({
   want_diversity: AttemptBooleanSchema.optional(),
 }).strict();
 
+/**
+ * High-precision entity lookup. Deliberately MINIMAL: just the wine
+ * name/identity and an optional small result cap. NO constraint filters — a
+ * lookup resolves "which exact wine is this", not "find wines matching X". If
+ * the LLM emits filter fields anyway, the strict-parse + repair path strips
+ * them (so a stray min_price_krw degrades to a pure lookup rather than failing).
+ */
+export const LookupWineAttemptInputSchema = z.object({
+  query: AttemptStringSchema.optional(),
+  limit: AttemptNumberSchema.optional(),
+}).strict();
+
 export const FoodPairingAttemptInputSchema = z.object({
   food: AttemptStringSchema.optional(),
   max_price: AttemptNumberSchema.optional(),
@@ -142,6 +155,7 @@ export const CompareWinesAttemptInputSchema = z.object({
 
 // ── Inferred types for each tool's validated input ───────────────────────────
 export type SearchToolAttemptInput = z.infer<typeof SearchToolAttemptInputSchema>;
+export type LookupWineAttemptInput = z.infer<typeof LookupWineAttemptInputSchema>;
 export type FoodPairingAttemptInput = z.infer<typeof FoodPairingAttemptInputSchema>;
 export type DrinkingWindowAttemptInput = z.infer<typeof DrinkingWindowAttemptInputSchema>;
 export type CompareWinesAttemptInput = z.infer<typeof CompareWinesAttemptInputSchema>;
@@ -149,6 +163,7 @@ export type CompareWinesAttemptInput = z.infer<typeof CompareWinesAttemptInputSc
 // ── Discriminated union: known tool + its typed input ────────────────────────
 export type KnownAgentToolAttempt =
   | { readonly tool: 'search_wines'; readonly input: SearchToolAttemptInput }
+  | { readonly tool: 'lookup_wine'; readonly input: LookupWineAttemptInput }
   | { readonly tool: 'get_food_pairings'; readonly input: FoodPairingAttemptInput }
   | { readonly tool: 'check_drinking_window'; readonly input: DrinkingWindowAttemptInput }
   | { readonly tool: 'compare_wines'; readonly input: CompareWinesAttemptInput };
@@ -164,6 +179,7 @@ export type AgentToolAttempt = KnownAgentToolAttempt | UnknownAgentToolAttempt;
 
 const KnownAgentToolInputAttemptSchemas = {
   search_wines: SearchToolAttemptInputSchema,
+  lookup_wine: LookupWineAttemptInputSchema,
   get_food_pairings: FoodPairingAttemptInputSchema,
   check_drinking_window: DrinkingWindowAttemptInputSchema,
   compare_wines: CompareWinesAttemptInputSchema,
@@ -200,7 +216,11 @@ function normalizeRawAttemptInput(
   if (isRecord(rawInput)) {
     return normalizeToolAttemptInput(rawInput);
   }
-  if (typeof rawInput === 'string' && rawInput.length > 0 && tool === 'search_wines') {
+  if (
+    typeof rawInput === 'string' &&
+    rawInput.length > 0 &&
+    (tool === 'search_wines' || tool === 'lookup_wine')
+  ) {
     return { query: rawInput };
   }
   return {};

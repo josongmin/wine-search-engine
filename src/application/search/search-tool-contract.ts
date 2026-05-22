@@ -28,6 +28,12 @@ export const SEARCH_TOOL_OCCASION_VALUES = [
 export const FOOD_PAIRING_COLORS = ['red', 'white', 'rosé', 'sparkling', 'both'] as const;
 export const SEARCH_TOOL_DESCRIPTION =
   'Search for wines by query. Returns matching wines with scores, attributes, and drinking windows.';
+export const LOOKUP_WINE_TOOL_DESCRIPTION =
+  'Look up a SPECIFIC wine by its name/identity (e.g. "Opus One 2018", "사씨카이아"). Returns the 1-3 most exact matches via high-precision entity resolution. Use this — NOT search_wines — when the user names a particular wine. No constraint filters (price/region/style) — those belong to search_wines.';
+/** Hard cap on lookup_wine results — identity resolution returns a tight set. */
+export const LOOKUP_WINE_LIMIT_MAX = 3;
+export const LOOKUP_WINE_QUERY_DESCRIPTION =
+  'The wine name / identity to resolve. Preserve the user\'s original language and exact lexical anchor (do not translate or paraphrase).';
 export const FOOD_PAIRINGS_TOOL_DESCRIPTION =
   'Find wines that pair well with a specific food. Optionally filter by price and wine color.';
 export const DRINKING_WINDOW_TOOL_DESCRIPTION =

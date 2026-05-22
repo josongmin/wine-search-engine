@@ -25,14 +25,16 @@ const SYNTHESIS_TIMEOUT_MS = 12_000;
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
 // RC3 high-fan-out collapse guard. When the agent collected this many grounded
-// search outcomes, a one-word answer like "좋습니다." is a synthesis COLLAPSE
-// (the model ignored the per-entity findings), not a legitimate terse reply —
-// reject it and retry with the structured per-entity directive. The minimum
-// acceptable answer length scales with the number of grounded outcomes
-// (groundedCount × MIN_CHARS_PER_OUTCOME) so a 3-vintage comparison must be at
-// least ~30 chars; below that the per-entity content provably cannot be present.
+// search outcomes, a NEAR-EMPTY one-word answer like "좋습니다." / "네." is a
+// synthesis COLLAPSE (the model ignored the per-entity findings), not a
+// legitimate reply — reject it and retry with the structured per-entity
+// directive. The signal is "near-empty" — an absolute small floor, NOT scaled
+// by outcome count: a concise but complete answer that names every entity can
+// still be short (e.g. "Wine 0, Wine 1, Wine 3 추천." ≈ 26 chars over 3+
+// outcomes). Scaling the floor by outcome count wrongly rejected such answers.
+// Only answers below HIGH_FAN_OUT_MIN_ANSWER_CHARS are treated as collapses.
 const HIGH_FAN_OUT_GROUNDED_OUTCOME_THRESHOLD = 3;
-const HIGH_FAN_OUT_MIN_CHARS_PER_OUTCOME = 10;
+const HIGH_FAN_OUT_MIN_ANSWER_CHARS = 12;
 
 function hasKoreanText(text: string): boolean {
   return /[\p{Script=Hangul}]/u.test(text);
@@ -346,18 +348,25 @@ export class AgentObservationSynthesisRunner {
     // both attempts collapse).
     const groundedCount = countGroundedSearchOutcomes(state.toolOutcomes);
     const isHighFanOut = groundedCount >= HIGH_FAN_OUT_GROUNDED_OUTCOME_THRESHOLD;
-    const minAnswerChars = isHighFanOut ? groundedCount * HIGH_FAN_OUT_MIN_CHARS_PER_OUTCOME : 0;
     const isCollapsedAnswer = (candidate: string): boolean =>
-      isHighFanOut && candidate.length < minAnswerChars;
+      isHighFanOut && candidate.length < HIGH_FAN_OUT_MIN_ANSWER_CHARS;
 
     const defaultMessages = buildObservationSynthesisMessages(
       query, obsSteps, state.toolOutcomes, requestId, onMalformedGrounding,
       { maxContextChars: effectiveConfig.maxContextChars },
     );
-    const structuredMessages = buildObservationSynthesisMessages(
-      query, obsSteps, state.toolOutcomes, requestId, onMalformedGrounding,
-      { maxContextChars: effectiveConfig.maxContextChars, structured: true },
-    );
+    // Structured retry messages are built LAZILY — only when a high-fan-out
+    // collapse triggers the structured retry below. The malformed-grounding
+    // frames were already warned exactly once during the default build above;
+    // re-running extraction with `onMalformedGrounding` here would double-count
+    // them (the grounding-fence contract expects one warning per malformed
+    // frame), so the lazy build uses a no-op malformed callback.
+    const noopMalformedGrounding: GroundingFenceWarn = () => {};
+    const buildStructuredMessages = (): ObservationSynthesisMessages =>
+      buildObservationSynthesisMessages(
+        query, obsSteps, state.toolOutcomes, requestId, noopMalformedGrounding,
+        { maxContextChars: effectiveConfig.maxContextChars, structured: true },
+      );
     const attemptSynthesis = async (
       maxOutputTokens: number,
       messageSet: ObservationSynthesisMessages,
@@ -412,7 +421,7 @@ export class AgentObservationSynthesisRunner {
         }
         if (isCollapsedAnswer(candidate)) {
           this.logger.warn(
-            { requestId, groundedCount, answerChars: candidate.length, minAnswerChars },
+            { requestId, groundedCount, answerChars: candidate.length, minAnswerChars: HIGH_FAN_OUT_MIN_ANSWER_CHARS },
             'high-fan-out synthesis collapsed into a near-empty answer — rejecting',
           );
           return undefined;
@@ -453,7 +462,7 @@ export class AgentObservationSynthesisRunner {
       try {
         // On high fan-out, attempt 1 was rejected as a collapse → retry with the
         // structured per-entity directive; otherwise retry the default prompt.
-        const retryMessages = isHighFanOut ? structuredMessages : defaultMessages;
+        const retryMessages = isHighFanOut ? buildStructuredMessages() : defaultMessages;
         this.logger.info({ requestId, obsSteps: obsSteps.length, structuredRetry: isHighFanOut }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2, retryMessages);
       } catch (synthErr2) {
