@@ -47,10 +47,10 @@ function makeStubToolPorts(): MiniLoopToolPorts {
 // ---------------------------------------------------------------------------
 
 describe('buildMiniLoopToolBundle', () => {
-  it('returns exactly four tool definitions (one per KNOWN_AGENT_TOOL_NAMES)', () => {
+  it('returns one tool definition per KNOWN_AGENT_TOOL_NAMES', () => {
     const bundle = buildMiniLoopToolBundle(makeStubToolPorts());
     expect(bundle.tools).toHaveLength(KNOWN_AGENT_TOOL_NAMES.length);
-    expect(bundle.tools).toHaveLength(4);
+    expect(bundle.tools).toHaveLength(5);
   });
 
   it('preserves the toolPorts identity (no cloning)', () => {

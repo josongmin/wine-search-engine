@@ -17,6 +17,10 @@ coverage/.tmp/
 *.tsbuildinfo
 .tsbuildinfo.build
 .tsbuildcache/
+# Emitted TS declaration files. Composite builds emit to .tsbuildcache/ (above);
+# any *.d.ts next to a *.ts source is a stale build artifact, not hand-written source.
+src/**/*.d.ts
+test/**/*.d.ts
 
 # Environment & secrets
 .env
