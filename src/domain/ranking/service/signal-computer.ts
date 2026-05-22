@@ -434,6 +434,22 @@ export class SignalComputer {
    * @returns Availability score in [0, 1], or undefined when unavailable.
    */
   computeAvailability(candidate: HybridCandidate): number | undefined {
+    // Exact-identity protected candidates (`known_item_lookup` /
+    // `exact_alias_match`) are the entity the user named explicitly. A
+    // named-entity lookup ("romanee conti", "Petrus 2000") must surface
+    // that wine regardless of stock — availability is a discovery-time
+    // preference, not a reason to bury an explicitly-requested entity.
+    // Without this, an out-of-stock exact match (availability=0) loses its
+    // ~0.07 availability weight and is overtaken by in-stock popularity
+    // neighbours despite having the strongest identity + semantic signal
+    // (e.g. `romanee conti` → romanee-conti-2019 dropping out of the
+    // hybrid top-5 under opus-one-2018). Treating the named entity as
+    // maximally "available to surface" keeps it ranked on its identity
+    // strength.
+    const protectedReason = candidate.retrievalProvenance?.protectedInclusionReason;
+    if (protectedReason === 'exact_alias_match' || protectedReason === 'known_item_lookup') {
+      return 1;
+    }
     if (candidate.availability === undefined) {
       return undefined;
     }
@@ -676,22 +692,6 @@ export class SignalComputer {
       giftSuitability: this.computeGiftSuitability(candidate),
       beginnerSuitability: this.computeBeginnerSuitability(candidate),
     };
-    // eslint-disable-next-line no-console
-    if (['romanee-conti-2019', 'opus-one-2018'].includes(String(candidate.entityId))) {
-      // eslint-disable-next-line no-console
-      console.error('SIG_DBG', {
-        id: String(candidate.entityId),
-        protected: candidate.retrievalProvenance?.protectedInclusionReason,
-        anchorRank: candidate.anchorRank,
-        entityIntegrity: result.entityIntegrity,
-        anchorSimilarity: result.anchorSimilarity,
-        semantic: result.semantic,
-        popularity: result.popularity,
-        producerPrestige: result.producerPrestige,
-        criticScore: result.criticScore,
-        availability: result.availability,
-      });
-    }
     return result;
   }
 
