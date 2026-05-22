@@ -1,0 +1,16 @@
+{
+  "scenarioId": 7,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Opus-One-like-but-cheaper. Recommendation must reference Opus One AND be lower-priced.",
+  "expectedClaims": {
+    "mustMention": ["opus one"],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "References Opus One for context",
+    "Recommends clearly cheaper alternatives"
+  ]
+}

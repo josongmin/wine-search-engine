@@ -1,0 +1,18 @@
+{
+  "scenarioId": 33,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Opus One vs Almaviva on 2019 vintage. Both producers + the vintage must surface.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "producer", "operator": "in", "value": ["Opus One", "Almaviva"] },
+      { "attribute": "vintage_year", "operator": "=", "value": 2019 }
+    ]
+  },
+  "expectedClaims": {
+    "mustMention": ["opus one", "almaviva"],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer"
+}

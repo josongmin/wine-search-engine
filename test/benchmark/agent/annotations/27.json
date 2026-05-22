@@ -1,0 +1,16 @@
+{
+  "scenarioId": 27,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Vintage range 2018-2020 + body + oaky.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "vintage_year", "operator": "range", "value": { "min": 2018, "max": 2020 } }
+    ],
+    "soft": [
+      { "attribute": "body", "operator": ">=", "value": 0.6 }
+    ]
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer"
+}

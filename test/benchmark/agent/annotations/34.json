@@ -1,0 +1,22 @@
+{
+  "scenarioId": 34,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Top 3 Burgundy Pinot Noir compare.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "region", "operator": "=", "value": "Burgundy" },
+      { "attribute": "grape_primary", "operator": "=", "value": "Pinot Noir" }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "부르고뉴", "canonical": "Burgundy", "type": "region" },
+    { "surface": "피노 누아르", "canonical": "Pinot Noir", "type": "grape_primary" }
+  ],
+  "expectedSteps": { "min": 2, "max": 5 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "At least 3 Pinot Noir options surfaced",
+    "All recommendations are from Burgundy"
+  ]
+}

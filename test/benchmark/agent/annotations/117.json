@@ -1,0 +1,21 @@
+{
+  "scenarioId": 117,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Opus One 2018 vs Almaviva 2019 drinking-window pick.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "producer", "operator": "in", "value": ["Opus One", "Almaviva"] }
+    ]
+  },
+  "expectedClaims": {
+    "mustMention": ["opus one", "almaviva"],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 2, "max": 5 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Drinking-window verification for both wines is shown",
+    "Pick is explicit with rationale"
+  ]
+}

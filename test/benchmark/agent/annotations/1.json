@@ -1,0 +1,23 @@
+{
+  "scenarioId": 1,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Exact-entity search for Opus One. Wine name must surface verbatim.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "producer", "operator": "=", "value": "Opus One" }
+    ]
+  },
+  "expectedEntities": [],
+  "expectedRetrievalIds": ["opus one"],
+  "expectedClaims": {
+    "mustMention": ["opus one"],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 2 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Answer mentions 'Opus One' verbatim",
+    "If the 2018 vintage is unavailable, the agent says so honestly"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "scenarioId": 26,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Italian wine in French style — country hard, style semantic soft.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "country", "operator": "=", "value": "Italy" }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "이탈리아", "canonical": "Italy", "type": "country" }
+  ],
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Recommendation is from Italy",
+    "Answer addresses the 'French style' descriptor (super-tuscan, etc.)"
+  ]
+}

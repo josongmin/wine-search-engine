@@ -174,3 +174,7 @@ models/**/*.gguf
 *.key
 !**/test/fixtures/**/*.pem
 test_edge_cases.mjs
+
+# Bench archive — large, frequent, per-run JSON dumps; keep .gitkeep only.
+data/bench-archive/*.json
+data/bench-archive/*.manifest.json

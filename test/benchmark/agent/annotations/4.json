@@ -1,0 +1,33 @@
+{
+  "scenarioId": 4,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Bordeaux vs Napa Cabernet comparison. Both regions and the grape must surface.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "region", "operator": "in", "value": ["Bordeaux", "Napa Valley"] },
+      { "attribute": "grape_primary", "operator": "=", "value": "Cabernet Sauvignon" }
+    ],
+    "soft": [
+      { "attribute": "country", "operator": "in", "value": ["France", "United States"] }
+    ],
+    "inferred": [
+      { "attribute": "grape_family", "operator": "in", "value": ["Cabernet", "Merlot"] }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "보르도", "canonical": "Bordeaux", "type": "region" },
+    { "surface": "나파", "canonical": "Napa Valley", "type": "region" },
+    { "surface": "카베르네", "canonical": "Cabernet Sauvignon", "type": "grape_primary" }
+  ],
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Compares Bordeaux and Napa Cabernet side-by-side (not just one)",
+    "Mentions at least one stylistic difference"
+  ]
+}

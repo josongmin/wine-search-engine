@@ -1,0 +1,27 @@
+{
+  "scenarioId": 29,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "High-acid + mineral white for oysters. Must be white wine; pairing must surface.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "wine_type", "operator": "=", "value": "white" }
+    ],
+    "soft": [
+      { "attribute": "acidity", "operator": ">=", "value": 0.7 }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "화이트", "canonical": "white", "type": "wine_type" }
+  ],
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Recommendation is a white wine",
+    "Oyster/seafood pairing is explicitly addressed"
+  ]
+}

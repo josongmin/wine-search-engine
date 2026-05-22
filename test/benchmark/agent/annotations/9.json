@@ -1,0 +1,25 @@
+{
+  "scenarioId": 9,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Barolo vs Barbaresco — both appellations and a winner pick required.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "appellation", "operator": "in", "value": ["Barolo", "Barbaresco"] }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "바롤로", "canonical": "Barolo", "type": "appellation" },
+    { "surface": "바르바레스코", "canonical": "Barbaresco", "type": "appellation" }
+  ],
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 4 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Compares both Barolo and Barbaresco",
+    "Picks one as winner with explicit reasoning"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "scenarioId": 3,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Steak pairing — wine recommendation must reference beef/steak explicitly.",
+  "expectedClaims": {
+    "mustMention": [],
+    "mustNotMention": []
+  },
+  "expectedSteps": { "min": 1, "max": 3 },
+  "expectedTerminationReason": "answer",
+  "expectedRubric": [
+    "Recommendation explicitly mentions steak or beef pairing",
+    "Wine recommended is a red (Cabernet, Malbec, Syrah, etc.)"
+  ]
+}

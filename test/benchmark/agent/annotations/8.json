@@ -1,0 +1,21 @@
+{
+  "scenarioId": 8,
+  "annotatedBy": "sota++ seed",
+  "annotatedAt": "2026-05-22T00:00:00Z",
+  "notes": "Italian red, high-rated, drinkable now. Drinking-window check must occur.",
+  "expectedConstraints": {
+    "hard": [
+      { "attribute": "country", "operator": "=", "value": "Italy" },
+      { "attribute": "wine_type", "operator": "=", "value": "red" }
+    ],
+    "soft": [
+      { "attribute": "critic_score", "operator": ">=", "value": 0.7 }
+    ]
+  },
+  "expectedEntities": [
+    { "surface": "이탈리아", "canonical": "Italy", "type": "country" },
+    { "surface": "레드", "canonical": "red", "type": "wine_type" }
+  ],
+  "expectedSteps": { "min": 2, "max": 4 },
+  "expectedTerminationReason": "answer"
+}

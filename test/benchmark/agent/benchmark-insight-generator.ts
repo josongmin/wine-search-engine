@@ -287,8 +287,12 @@ const DETERMINISTIC_RULES: readonly InsightRule[] = [
 
 /**
  * Run all deterministic insight rules and return formatted output lines.
+ *
+ * Exported for the bench self-test regression — synthetic reports feed in
+ * here and assert which rule ids fire / don't fire. Keeps the rule contract
+ * unit-testable without spinning up the real LLM analysis path.
  */
-function generateDeterministicInsights(report: BenchmarkReportSlice): readonly string[] {
+export function generateDeterministicInsights(report: BenchmarkReportSlice): readonly string[] {
   const lines: string[] = [];
   for (const rule of DETERMINISTIC_RULES) {
     const result = rule.check(report);
