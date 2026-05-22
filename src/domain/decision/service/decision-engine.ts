@@ -22,7 +22,11 @@ import {
   computeDynamicGapThreshold,
   type NumericGateMode,
 } from '../../query/model/threshold-profile.js';
-import { hasExactMatchCandidate, type DecisionInput } from '../model/decision-input.js';
+import {
+  hasExactMatchCandidate,
+  hasUniqueFuzzyIdentityWitness,
+  type DecisionInput,
+} from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
 import type { DecisionTrace } from '../model/decision-trace.js';
 import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
@@ -700,6 +704,19 @@ export class DecisionEngine {
 
     if (hasExactMatchCandidate(input.evidenceSummary)) {
       rulesApplied.push('CALIBRATION_TRUST_GATE_EXACT_IDENTITY');
+      return state;
+    }
+
+    // Unique high-similarity fuzzy identity substitute: a single clearly-
+    // resolvable typo with exactly one in-fixture target (e.g. "opuss one" →
+    // "opus one", Damerau-1, no runner-up) is a legitimate known-item lookup.
+    // The matcher already validated the surface above the fuzzy-trust floor and
+    // the resolver saw no competing candidate (singleton ⇒ calibratedGap
+    // undefined, no ambiguity). The NOISY_SHORT_QUERY_GUARD downstream remains
+    // the multi-candidate backstop: it only bypasses for singletons / wide-gap
+    // matches, so non-unique fuzzy matches still abstain there.
+    if (hasUniqueFuzzyIdentityWitness(input.evidenceSummary, input.resolveResult.decisionTrace)) {
+      rulesApplied.push('CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY');
       return state;
     }
 

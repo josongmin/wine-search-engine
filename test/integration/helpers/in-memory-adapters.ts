@@ -29,6 +29,7 @@ import type {
 } from '../../../src/domain/mixed/service/mixed-solver.js';
 import type { AnchorEntityData } from '../../../src/domain/mixed/service/anchor-profiler.js';
 import type { SimilarityCandidate } from '../../../src/domain/mixed/service/similarity-scorer.js';
+import { FUZZY_IDENTITY_TRUST_MIN_SIMILARITY } from '../../../src/domain/resolver/model/fuzzy-identity-trust.js';
 import type { AnchorProfile } from '../../../src/domain/mixed/model/anchor-profile.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { FeedbackStore, FeedbackFilter, AggregatedFeedbackStats } from '../../../src/domain/learning/port/feedback-store.port.js';
@@ -76,18 +77,20 @@ import {
  *    length, so "오푸스" (jamo len 6) clears; "마고" (jamo len 4) does not
  *    — that's intentional, matching production's policy of refusing
  *    fuzzy on very short surfaces.
- *  - `FUZZY_SIMILARITY_THRESHOLD = 0.8` is tighter than pg's effective
- *    threshold (multi-signal `max` rarely drops below ~0.85 on real
- *    typos), so the in-memory side is *stricter*, not looser. The
- *    in-memory stage is documented as a recall channel for tests, not a
- *    behavioral parity claim for production.
+ *  - `FUZZY_SIMILARITY_THRESHOLD` (= {@link FUZZY_IDENTITY_TRUST_MIN_SIMILARITY},
+ *    0.8) is tighter than pg's effective threshold (multi-signal `max` rarely
+ *    drops below ~0.85 on real typos), so the in-memory side is *stricter*, not
+ *    looser. It is the SSoT shared with the decision-layer fuzzy-identity trust
+ *    predicate (CLAUDE.md rule 30) so the matcher gate and the trust gate cannot
+ *    drift. The in-memory stage is documented as a recall channel for tests, not
+ *    a behavioral parity claim for production.
  *  - `FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8` is the haircut applied so a
  *    fuzzy candidate doesn't outscore an exact one. (production pg
  *    doesn't apply this factor explicitly — it relies on the Jaro-Winkler
  *    prefix bonus instead. The numerical asymmetry is documented; do not
  *    use the in-memory matcher's confidence as a proxy for production's.)
  */
-const FUZZY_SIMILARITY_THRESHOLD = 0.8;
+const FUZZY_SIMILARITY_THRESHOLD = FUZZY_IDENTITY_TRUST_MIN_SIMILARITY;
 const FUZZY_MIN_KEY_LENGTH = 5;
 const FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8;
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';

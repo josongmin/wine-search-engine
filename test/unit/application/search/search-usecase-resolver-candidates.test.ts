@@ -210,17 +210,16 @@ describe('buildResolverCandidatesFromGenerator', () => {
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.97);
   });
 
-  it('trusts a single-entity high-confidence prefix_exact anchor and mints exact identity evidence', async () => {
-    // Trust-the-matcher gate (search-usecase-resolver-candidates.ts
-    // isTrustedPrefixSingleEntityAnchor): a `prefix_exact` anchor that binds to
-    // exactly ONE entity at confidence >= 0.8 has already been validated by the
-    // alias matcher. Re-running the identity-key overlap check would compare the
-    // bare prefix ('opus') against the doc identity keys, find no overlap, and
-    // collapse the resolver to a raw ~0.05 score — pushing every clean Latin
-    // prefix query under T_resolve. Single-entity + >=0.8 keeps the bypass safe:
-    // a genuinely ambiguous prefix has >1 candidate entity (planner marks it
-    // ambiguous_short_form) and does NOT take this branch — see the adversarial
-    // low-confidence case below.
+  it('does NOT mint exact identity from a single-entity high-confidence prefix_exact anchor when the query is a STRICT prefix of the alias surface', async () => {
+    // Hallucination-guard contract (search-usecase-resolver-candidates.ts
+    // isStrictPrefixOfAnchorSurface): a bare short form that is only a STRICT,
+    // incomplete prefix of a real alias ('opus' ⊂ 'opus one') does NOT uniquely
+    // identify the entity, so the trust-the-matcher bypass MUST NOT engage even
+    // at confidence >= 0.8. The identity-safe projection then runs, finds the
+    // bare prefix is not a query-attested safe alias of 'Opus One', forces
+    // exactSignalAllowed=false, and the exact/normalized identity lanes stay
+    // zero. Downstream the calibration trust gate downgrades the verdict to
+    // 'ambiguous' — see the noisy-runtime regression for the end-to-end pin.
     const entityId = createEntityId('opus-one-2018');
     const lookup = makeBatchLookup(async () => ({
       entityId,
@@ -257,12 +256,54 @@ describe('buildResolverCandidatesFromGenerator', () => {
         matchScore: 0.95,
       }),
     ]);
-    // Trusted prefix → exact-like identity evidence is minted at anchor.confidence.
+    // Strict-prefix query → no exact-like identity is minted: the bare prefix
+    // is not a complete alias surface, so identity lanes collapse to zero.
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBe(0);
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(0);
+  });
+
+  it('mints exact-like identity from a single-entity high-confidence prefix_exact anchor when the query EQUALS the complete (short) alias surface', async () => {
+    // Positive companion to the strict-prefix guard above: when the normalized
+    // query EQUALS the anchor's complete normalized surface (e.g. a genuinely
+    // short single-token alias like 'barolo'), it is NOT a strict prefix, the
+    // trust-the-matcher bypass engages, and exact-like identity evidence is
+    // minted at anchor.confidence. This preserves clean short-alias lookups
+    // while the strict-prefix case ('opus' ⊂ 'opus one') stays ambiguous.
+    const entityId = createEntityId('barolo-appellation');
+    const lookup = makeBatchLookup(async () => ({
+      entityId,
+      entityType: 'appellation',
+      canonicalLabel: 'Barolo',
+      aliasesIdentitySafe: ['Barolo'],
+    } as unknown as RetrievalDocument));
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: 'barolo',
+        normalizedQuery: 'barolo',
+        anchors: [
+          {
+            surfaceForm: 'Barolo',
+            normalizedForm: 'barolo',
+            candidateEntityIds: [entityId],
+            lookupVariants: ['barolo'],
+            lookupStrategies: ['prefix_exact'],
+            confidence: 0.95,
+            source: 'alias',
+          },
+        ],
+      },
+      lookup,
+    );
+
+    expect(candidates).toHaveLength(1);
+    // Complete-surface query → exact-like identity minted at anchor.confidence.
     expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeCloseTo(0.95);
     expect(candidates[0]?.sourceSignals.canonicalNormalizedMatch).toBeCloseTo(0.95);
-    // Still not fuzzy, and not a full canonical-exact match (query 'opus' !== 'opus one').
     expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBe(0);
-    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(0);
+    // query 'barolo' === normalizedForm 'barolo' → full canonical-exact match.
+    expect(candidates[0]?.sourceSignals.canonicalExactMatch).toBe(1);
   });
 
   it('does NOT mint exact identity evidence from a low-confidence latin bare prefix anchor', async () => {

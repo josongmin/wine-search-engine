@@ -2,11 +2,13 @@ import type { ChatLlmPort, ChatMessage } from '../../domain/ai/port/chat-llm.por
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
+  buildConversationContextBlock,
   buildPlannerContinuationSystemMessage,
   buildPlannerSystemMessage,
   buildStepMessages,
   buildUserMessage,
 } from './agent-prompt.js';
+import type { ConversationContext } from '../../domain/agent/model/conversation-context.js';
 import type { AgentExecutionState, AgentPlannerDirective } from './agent-execution-state.js';
 import {
   CHARS_PER_TOKEN_ESTIMATE,
@@ -84,11 +86,19 @@ function buildPlannerLoopMessages(
   isLastStep: boolean,
   remainingSteps: number,
   maxContextChars: number,
+  conversationContext: ConversationContext | undefined,
 ): readonly ChatMessage[] {
   const renderedDirective = renderPlannerDirective(pendingPlannerDirective);
-  const baseUserContentRaw = renderedDirective !== undefined
-    ? `${renderedDirective}\n\n${query}`
-    : query;
+  // Multi-turn context is injected ONLY on the first planner step: continuation
+  // steps already carry the current run's tool observations, and re-sending the
+  // prior-turn block every step would waste tokens. Folded ABOVE the directive
+  // and query so the model reads prior context first, then the live question.
+  const contextBlock = steps.length === 0 && conversationContext !== undefined
+    ? buildConversationContextBlock(conversationContext)
+    : '';
+  const baseUserContentRaw = [contextBlock, renderedDirective ?? '', query]
+    .filter((part) => part.length > 0)
+    .join('\n\n');
   const baseUserContent = baseUserContentRaw.length > maxContextChars
     ? baseUserContentRaw.slice(0, maxContextChars)
     : baseUserContentRaw;
@@ -477,6 +487,7 @@ export class AgentPlannerPhaseRunner {
       isLastStep,
       remainingSteps,
       effectiveConfig.maxContextChars,
+      state.conversationContext,
     );
     state.pendingPlannerDirective = undefined;
 

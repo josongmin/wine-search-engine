@@ -13,6 +13,7 @@ import { stdin as defaultIn, stdout as defaultOut } from 'node:process';
 import type { Readable, Writable } from 'node:stream';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
+import type { ConversationContext } from '../../domain/agent/model/conversation-context.js';
 import { ReplSession } from './session.js';
 import { renderAnswer } from './render/render-answer.js';
 import { renderTrace } from './render/render-trace.js';
@@ -25,6 +26,7 @@ export interface AgentRunner {
     requestId: string,
     overrides?: Partial<Pick<AgentConfig, 'maxSteps' | 'perStepTimeoutMs' | 'agentTimeoutMs'>>,
     abortSignal?: AbortSignal,
+    conversationContext?: ConversationContext,
   ): Promise<AgentResult>;
 }
 
@@ -52,15 +54,17 @@ export async function processTurn(
   options: ReplOptions = {},
   abortSignal?: AbortSignal,
 ): Promise<ProcessTurnResult> {
-  const query = session.buildQuery(input);
+  // The query sent is the user's RAW input (clean, fully sanitizer-screened).
+  // Prior-turn context rides separately as a structured ConversationContext,
+  // captured before this turn is recorded so it reflects only earlier turns.
+  const query = input.trim();
   const requestId = randomUUID();
   const overrides = options.maxSteps !== undefined ? { maxSteps: options.maxSteps } : undefined;
+  const conversationContext = session.toConversationContext();
 
-  const result = await runner.execute(query, requestId, overrides, abortSignal);
+  const result = await runner.execute(query, requestId, overrides, abortSignal, conversationContext);
 
-  // Record the user's ORIGINAL words (not the context-stuffed query) so future
-  // turns don't recursively re-embed earlier context blocks.
-  session.record(input, result.answer);
+  session.record(input, result);
 
   const blocks = [renderAnswer(result)];
   if (options.trace === true) {

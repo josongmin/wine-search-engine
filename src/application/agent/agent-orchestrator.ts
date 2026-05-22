@@ -14,6 +14,7 @@ import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execu
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import { DEFAULT_AGENT_CONFIG } from '../../domain/agent/model/agent-config.js';
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
+import type { ConversationContext } from '../../domain/agent/model/conversation-context.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import {
   type AgentToolDeps,
@@ -88,6 +89,7 @@ export class AgentOrchestrator {
     requestId: string,
     overrides?: Partial<Pick<AgentConfig, 'maxSteps' | 'perStepTimeoutMs' | 'agentTimeoutMs'>>,
     abortSignal?: AbortSignal,
+    conversationContext?: ConversationContext,
   ): Promise<AgentResult> {
     const admissionResult = admitAgentRequest(
       { query, requestId },
@@ -107,6 +109,7 @@ export class AgentOrchestrator {
       requestId,
       baseConfig: this.config,
       overrides,
+      ...(conversationContext !== undefined ? { conversationContext } : {}),
     });
     const semanticContract = await this.semanticContractCompiler.compileIfNeeded({
       query,

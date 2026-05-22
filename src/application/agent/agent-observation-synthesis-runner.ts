@@ -24,6 +24,15 @@ const defaultLog = bootstrapLogger.child({ component: 'AgentObservationSynthesis
 const SYNTHESIS_TIMEOUT_MS = 12_000;
 const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
+// RC3 high-fan-out collapse guard. When the agent collected this many grounded
+// search outcomes, a one-word answer like "좋습니다." is a synthesis COLLAPSE
+// (the model ignored the per-entity findings), not a legitimate terse reply —
+// reject it and retry with the structured per-entity directive. The minimum
+// acceptable answer length scales with the number of grounded outcomes
+// (groundedCount × MIN_CHARS_PER_OUTCOME) so a 3-vintage comparison must be at
+// least ~30 chars; below that the per-entity content provably cannot be present.
+const HIGH_FAN_OUT_GROUNDED_OUTCOME_THRESHOLD = 3;
+const HIGH_FAN_OUT_MIN_CHARS_PER_OUTCOME = 10;
 
 function hasKoreanText(text: string): boolean {
   return /[\p{Script=Hangul}]/u.test(text);
@@ -74,6 +83,17 @@ function hasNoGroundedSearchResults(outcomes: readonly ToolOutcome[]): boolean {
     return false;
   }
   return !searchOutcomes.some(isSearchSuccessWithData);
+}
+
+/** Number of grounded (non-empty) search outcomes — drives the fan-out class. */
+function countGroundedSearchOutcomes(outcomes: readonly ToolOutcome[]): number {
+  let count = 0;
+  for (const outcome of outcomes) {
+    if (isSearchSuccessWithData(outcome)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function buildNoMatchSynthesisAnswer(query: string): string {
@@ -145,10 +165,10 @@ function extractGroundingForSynthesis(
 
 function buildObservationOnlyMessages(
   steps: readonly AgentStep[],
-  ctx: { readonly requestId: string },
+  ctx: { readonly requestId: string; readonly maxContextChars?: number },
   onMalformed: GroundingFenceWarn,
 ): readonly ChatMessage[] {
-  const messages: ChatMessage[] = [];
+  const candidates: ChatMessage[] = [];
 
   for (const step of steps) {
     if (step.actionPairs !== undefined) {
@@ -161,7 +181,7 @@ function buildObservationOnlyMessages(
         if (compact === undefined) {
           continue;
         }
-        messages.push({
+        candidates.push({
           role: 'user',
           content: `[Tool Result: ${pair.action.tool}]\n${compact}`,
         });
@@ -178,14 +198,33 @@ function buildObservationOnlyMessages(
       if (compact === undefined) {
         continue;
       }
-      messages.push({
+      candidates.push({
         role: 'user',
         content: `[Tool Result: ${step.action.tool}]\n${compact}`,
       });
     }
   }
 
-  return messages;
+  // Budget the observation context to maxContextChars: admit messages (in step
+  // order, so the earliest grounded observations win) until the running total
+  // would exceed the budget. Always keep at least one so synthesis never runs
+  // blind, and never truncate a message body — each kept message preserves its
+  // full GROUNDING_JSON payload. Unset/non-positive budget = no limit.
+  const budget = ctx.maxContextChars;
+  if (budget === undefined || budget <= 0 || candidates.length === 0) {
+    return candidates;
+  }
+  const budgeted: ChatMessage[] = [];
+  let runningChars = 0;
+  for (const message of candidates) {
+    const nextChars = runningChars + message.content.length;
+    if (budgeted.length > 0 && nextChars > budget) {
+      break;
+    }
+    budgeted.push(message);
+    runningChars = nextChars;
+  }
+  return budgeted;
 }
 
 function buildObservationSynthesisMessages(
@@ -194,8 +233,14 @@ function buildObservationSynthesisMessages(
   toolOutcomes: readonly ToolOutcome[],
   requestId: string,
   onMalformedGrounding: GroundingFenceWarn,
+  options?: { readonly maxContextChars?: number; readonly structured?: boolean },
 ): ObservationSynthesisMessages {
-  const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
+  // Structured retry sentinel (RC3): used after a high-fan-out synthesis
+  // COLLAPSE. It forces an answer that summarizes EACH wine/vintage so the
+  // per-entity findings cannot be flattened into a single content-free reply.
+  const synthSentinel = options?.structured === true
+    ? `[SYSTEM:${requestId}:STRUCTURED_FINAL_ANSWER_REQUIRED]\nYour previous answer collapsed the multiple grounded results into a single content-free reply. Produce a FINAL answer that summarizes EACH wine/vintage in the tool results above.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary","answer":"a per-entity summary in the user's language (Korean if query was Korean) that names EACH wine/vintage and its key attribute (region/price/drinking window)"}\nRules:\n- "answer" MUST reference every distinct wine/vintage from the tool results above by name.\n- Do NOT call any tool. Do NOT output "action" or "actions".`
+    : `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
   const nonSuccessToolOutcomes = toolOutcomes.filter((outcome) =>
     outcome.kind !== 'success'
     || outcome.errorMessage !== undefined
@@ -222,7 +267,14 @@ function buildObservationSynthesisMessages(
     messages: [
       buildSynthesisSystemMessage(),
       buildUserMessage(query),
-      ...buildObservationOnlyMessages(steps, { requestId }, onMalformedGrounding),
+      ...buildObservationOnlyMessages(
+        steps,
+        {
+          requestId,
+          ...(options?.maxContextChars !== undefined ? { maxContextChars: options.maxContextChars } : {}),
+        },
+        onMalformedGrounding,
+      ),
       ...(typedOutcomeMessage !== undefined ? [typedOutcomeMessage] : []),
       {
         role: 'user',
@@ -288,8 +340,28 @@ export class AgentObservationSynthesisRunner {
         'grounding JSON failed validation — dropping frame from synthesis prompt',
       );
     };
-    const { messages: synthMessages, sentinel: synthSentinel } = buildObservationSynthesisMessages(query, obsSteps, state.toolOutcomes, requestId, onMalformedGrounding);
-    const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
+    // RC3 high-fan-out class: when several grounded outcomes were collected, a
+    // one-word answer is a synthesis COLLAPSE — reject it and retry with the
+    // per-entity structured directive (leaving recovery to the orchestrator if
+    // both attempts collapse).
+    const groundedCount = countGroundedSearchOutcomes(state.toolOutcomes);
+    const isHighFanOut = groundedCount >= HIGH_FAN_OUT_GROUNDED_OUTCOME_THRESHOLD;
+    const minAnswerChars = isHighFanOut ? groundedCount * HIGH_FAN_OUT_MIN_CHARS_PER_OUTCOME : 0;
+    const isCollapsedAnswer = (candidate: string): boolean =>
+      isHighFanOut && candidate.length < minAnswerChars;
+
+    const defaultMessages = buildObservationSynthesisMessages(
+      query, obsSteps, state.toolOutcomes, requestId, onMalformedGrounding,
+      { maxContextChars: effectiveConfig.maxContextChars },
+    );
+    const structuredMessages = buildObservationSynthesisMessages(
+      query, obsSteps, state.toolOutcomes, requestId, onMalformedGrounding,
+      { maxContextChars: effectiveConfig.maxContextChars, structured: true },
+    );
+    const attemptSynthesis = async (
+      maxOutputTokens: number,
+      messageSet: ObservationSynthesisMessages,
+    ): Promise<string | undefined> => {
       if (abortSignal?.aborted) return undefined;
       const synthAbort = new AbortController();
       const propagateSynthAbort = (): void => { synthAbort.abort(); };
@@ -304,7 +376,7 @@ export class AgentObservationSynthesisRunner {
       }, SYNTHESIS_TIMEOUT_MS);
       try {
         const synthResult: LlmResult = await this.deps.chatLlm.complete({
-          messages: synthMessages,
+          messages: messageSet.messages,
           temperature: 0,
           maxOutputTokens,
           ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
@@ -314,7 +386,7 @@ export class AgentObservationSynthesisRunner {
           this.logger.warn({ requestId }, 'synthesis LLM returned malformed result');
           return undefined;
         }
-        state.totalInputTokens += estimateTokenCount(synthSentinel);
+        state.totalInputTokens += estimateTokenCount(messageSet.sentinel);
         state.totalOutputTokens += estimateTokenCount(synthResult.text);
         const parsedSynth = parseLlmJsonObject(synthResult.text);
         if (parsedSynth === null) {
@@ -335,7 +407,17 @@ export class AgentObservationSynthesisRunner {
           return undefined;
         }
         const candidate = answer.trim();
-        return candidate.length > 0 ? candidate : undefined;
+        if (candidate.length === 0) {
+          return undefined;
+        }
+        if (isCollapsedAnswer(candidate)) {
+          this.logger.warn(
+            { requestId, groundedCount, answerChars: candidate.length, minAnswerChars },
+            'high-fan-out synthesis collapsed into a near-empty answer — rejecting',
+          );
+          return undefined;
+        }
+        return candidate;
       } finally {
         abortSignal?.removeEventListener('abort', propagateSynthAbort);
         clearTimeout(synthTimer);
@@ -345,7 +427,7 @@ export class AgentObservationSynthesisRunner {
     let synthAnswer: string | undefined;
     let shouldRetrySynthesis = true;
     try {
-      synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
+      synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1, defaultMessages);
     } catch (synthErr1) {
       if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
         state.llmCircuitOpen = true;
@@ -369,8 +451,11 @@ export class AgentObservationSynthesisRunner {
       state.totalInputTokens + state.totalOutputTokens < effectiveConfig.maxTotalTokens
     ) {
       try {
-        this.logger.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
-        synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
+        // On high fan-out, attempt 1 was rejected as a collapse → retry with the
+        // structured per-entity directive; otherwise retry the default prompt.
+        const retryMessages = isHighFanOut ? structuredMessages : defaultMessages;
+        this.logger.info({ requestId, obsSteps: obsSteps.length, structuredRetry: isHighFanOut }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+        synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2, retryMessages);
       } catch (synthErr2) {
         if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
           state.llmCircuitOpen = true;

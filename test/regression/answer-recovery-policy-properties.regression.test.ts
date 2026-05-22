@@ -60,6 +60,7 @@ import {
 import { createAgentExecutionState } from '../../src/application/agent/agent-execution-state.js';
 import type { AgentExecutionState } from '../../src/application/agent/agent-execution-state.js';
 import type { AgentTerminationReason } from '../../src/domain/agent/model/agent-step.js';
+import { TERMINATION_REASON_PRIORITY } from '../../src/domain/agent/service/termination-state-machine.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -434,8 +435,16 @@ describe('AgentAnswerRecoveryPolicy property — P9 termination priority preserv
   it('higher-priority termination reasons are never downgraded by recovery', async () => {
     // We only assert non-downgrade for reasons strictly ABOVE 'fallback' (the
     // highest reason recovery is allowed to write). Equal-priority transitions
-    // are allowed by the state machine.
-    const HIGH_PRIORITY: readonly AgentTerminationReason[] = ['aborted', 'blocked', 'error', 'loop_detected', 'budget', 'timeout'];
+    // are allowed by the state machine. The set is DERIVED from the FSM's SSoT
+    // priority map so it can never drift from the source ranking — this is the
+    // hard-failure class (aborted/blocked/error/loop_detected). Resource limits
+    // (budget/timeout) rank BELOW completions by design (termination-state-
+    // machine.ts Class 2 > Class 3): a fallback answer that "came through
+    // anyway" legitimately supersedes them, so they are NOT in this set.
+    const fallbackPriority = TERMINATION_REASON_PRIORITY['fallback'];
+    const HIGH_PRIORITY: readonly AgentTerminationReason[] = (
+      Object.keys(TERMINATION_REASON_PRIORITY) as AgentTerminationReason[]
+    ).filter((reason) => TERMINATION_REASON_PRIORITY[reason] > fallbackPriority);
     await fc.assert(
       fc.asyncProperty(
         NEUTRAL_QUERY_ARB,

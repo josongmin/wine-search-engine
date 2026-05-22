@@ -4,6 +4,7 @@ import type { SearchResponseV1 } from '../../domain/response/model/search-respon
 import type { RetrievalDrinkingWindowProjection } from '../../domain/retrieval/model/retrieval-document.js';
 import type { AgentVerificationReason } from './agent-query-execution-contract.js';
 import type { SynthesisContext, ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
+import type { ConversationContext } from '../../domain/agent/model/conversation-context.js';
 
 export type AgentPlannerDirective =
   | { readonly kind: 'relax_constraints_retry' }
@@ -61,11 +62,21 @@ export interface AgentExecutionState {
   failedSynthesisAttempts: number;
   fallbackSearchUsed: boolean;
   answer: string;
+  /**
+   * Multi-turn conversation context supplied by a stateful caller (the agent
+   * CLI). Read-only for the run; injected into the FIRST planner step's user
+   * message so follow-ups can resolve referents against prior-turn entities.
+   * `undefined` for single-shot callers (HTTP route) — behavior is unchanged.
+   */
+  readonly conversationContext?: ConversationContext | undefined;
 }
 
-export function createAgentExecutionState(): AgentExecutionState {
+export function createAgentExecutionState(
+  conversationContext?: ConversationContext,
+): AgentExecutionState {
   return {
     steps: [],
+    ...(conversationContext !== undefined ? { conversationContext } : {}),
     toolOutcomes: [],
     collectedFrames: [],
     lastSearchResult: undefined,

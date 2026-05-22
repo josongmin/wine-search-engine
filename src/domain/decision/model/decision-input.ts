@@ -9,6 +9,7 @@ import type {
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
+import type { ResolverDecisionTrace } from '../../resolver/model/decision-trace.js';
 import type {
   DualLanePresence,
   IdentityExactnessTier,
@@ -201,6 +202,60 @@ export function hasExactMatchCandidate(summary?: EvidenceSummary): boolean {
   }
 
   return detail.exactnessTier === 'exact' || detail.exactnessTier === 'alias_exact';
+}
+
+/**
+ * Returns whether the resolver produced a UNIQUE high-similarity fuzzy identity
+ * match that is safe to treat as a trust substitute for the calibration trust
+ * gate.
+ *
+ * Distinct from {@link hasExactMatchCandidate}, which deliberately excludes
+ * fuzzy tiers (so `require_exact` policy callers keep abstaining on typos). A
+ * single clearly-resolvable typo with exactly ONE in-fixture target
+ * (e.g. `"opuss one"` → `"opus one"`, Damerau-1, unique) is recoverable; a
+ * fuzzy match with competing candidates inside the similarity band is NOT and
+ * must remain gated by the `NOISY_SHORT_QUERY_GUARD` multi-candidate backstop.
+ *
+ * Three conditions, all required:
+ *  1. the winner-aligned identity artifact is present (same precondition as
+ *     {@link hasExactMatchCandidate}), and its exactness tier is `alias_fuzzy`
+ *     — i.e. the matcher accepted the surface at or above
+ *     {@link FUZZY_IDENTITY_TRUST_MIN_SIMILARITY} but it is not an exact alias;
+ *  2. the resolver detected NO ambiguity among candidates
+ *     (`trace.ambiguityDetected === false`);
+ *  3. the candidate is a SINGLETON — there is no runner-up, so the calibrated
+ *     gap is structurally `undefined` (C2: never 0-as-absence). A defined gap
+ *     means a runner-up exists within scoring range, which is exactly the
+ *     non-unique case the noisy-short-query guard must still police.
+ *
+ * Uniqueness is derived purely from existing fields (`calibratedGap`,
+ * `ambiguityDetected`); no new resolver field is invented.
+ */
+export function hasUniqueFuzzyIdentityWitness(
+  summary: EvidenceSummary | undefined,
+  trace: ResolverDecisionTrace,
+): boolean {
+  const detail = summary?.identityEvidence;
+  if (detail === undefined) {
+    return false;
+  }
+
+  if (!hasWinnerIdentityArtifact(detail)) {
+    return false;
+  }
+
+  if (detail.exactnessTier !== 'alias_fuzzy') {
+    return false;
+  }
+
+  if (trace.ambiguityDetected) {
+    return false;
+  }
+
+  // Singleton ⇒ no runner-up ⇒ gap is undefined. A defined gap means a
+  // competing candidate exists within scoring range (non-unique fuzzy band):
+  // defer to the noisy-short-query guard instead of granting trust here.
+  return trace.calibratedGap === undefined;
 }
 
 /**

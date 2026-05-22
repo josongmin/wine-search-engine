@@ -33,6 +33,14 @@
  *      no-ops; downstream evidence/policy steps may still downgrade).
  *   4. The gate only applies to `state.status === 'resolved'` — already
  *      `ambiguous`/`failed` states are passed through unchanged.
+ *   5. `calibrationTrusted: false` + a UNIQUE alias_fuzzy identity (singleton:
+ *      no runner-up ⇒ calibratedGap undefined, and no detected ambiguity) →
+ *      preserved with `CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY`
+ *      (hallucination-guard contract: a single clearly-resolvable typo with
+ *      one in-fixture target is a legitimate known-item lookup). A NON-unique
+ *      alias_fuzzy (runner-up present ⇒ defined gap, or ambiguity detected)
+ *      still downgrades — multi-candidate fuzzy matches are policed by the
+ *      downstream NOISY_SHORT_QUERY_GUARD.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -97,6 +105,7 @@ function makeQueryPlan(): QueryPlanV1 {
 function makeResolveResult(
   C: number,
   calibrationTrusted: boolean,
+  uniqueness: { calibratedGap?: number | undefined; ambiguityDetected?: boolean } = {},
 ): EntityResolveResult {
   const entityId = createEntityId('entity-x');
   return {
@@ -118,11 +127,11 @@ function makeResolveResult(
     decisionTrace: {
       queryClass: 'short_entity',
       top1CalibratedScore: C,
-      top2CalibratedScore: undefined,
-      calibratedGap: undefined,
+      top2CalibratedScore: uniqueness.calibratedGap === undefined ? undefined : C - uniqueness.calibratedGap,
+      calibratedGap: uniqueness.calibratedGap,
       decisionConfidenceC: C,
       calibrationTrusted,
-      ambiguityDetected: false,
+      ambiguityDetected: uniqueness.ambiguityDetected ?? false,
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0.45, gapThreshold: 0.03 },
       outcomeReasonCodes: ['HYBRID_ROUTE'],
@@ -135,9 +144,14 @@ function makeInput(opts: {
   C: number;
   calibrationTrusted: boolean;
   exactnessTier: 'exact' | 'alias_exact' | 'alias_fuzzy' | 'none';
+  calibratedGap?: number | undefined;
+  ambiguityDetected?: boolean;
 }): DecisionInput {
   const queryPlan = makeQueryPlan();
-  const resolveResult = makeResolveResult(opts.C, opts.calibrationTrusted);
+  const resolveResult = makeResolveResult(opts.C, opts.calibrationTrusted, {
+    calibratedGap: opts.calibratedGap,
+    ...(opts.ambiguityDetected !== undefined ? { ambiguityDetected: opts.ambiguityDetected } : {}),
+  });
   const evidenceSummary: DecisionInput['evidenceSummary'] = {
     identityEvidencePresent: opts.exactnessTier !== 'none',
     identityEvidence: {
@@ -240,15 +254,70 @@ describe('DecisionEngine.applyCalibrationTrustGate', () => {
     expect(output.decisionTrace.rulesApplied).not.toContain('CALIBRATION_TRUST_GATE_EXACT_IDENTITY');
   });
 
-  it('treats alias_fuzzy identity as insufficient (downgrades like none)', async () => {
-    // alias_fuzzy is not in {exact, alias_exact}, so it does NOT substitute
-    // for calibration trust — the resolve still downgrades. This keeps
-    // phonetic-collision and fuzzy-only matches from masquerading as
-    // probability-calibrated decisions.
-    const input = makeInput({ C: 0.89, calibrationTrusted: false, exactnessTier: 'alias_fuzzy' });
+  it('treats a UNIQUE alias_fuzzy identity as a trust substitute (resolves)', async () => {
+    // New hallucination-guard contract: a single clearly-resolvable typo with
+    // exactly ONE in-fixture target ("opuss one" → "opus one", Damerau-1) is a
+    // legitimate known-item lookup. Uniqueness is structural — no runner-up
+    // (calibratedGap undefined ⇒ singleton) and no detected ambiguity — so the
+    // calibration trust gate treats it as trusted via
+    // hasUniqueFuzzyIdentityWitness. Multi-candidate fuzzy matches are still
+    // policed by the downstream NOISY_SHORT_QUERY_GUARD (see below).
+    // C=0.95 clears the NOISY_SHORT_QUERY_GUARD high-confidence floor (0.9);
+    // a singleton (gap undefined) at this confidence survives the downstream
+    // backstop, mirroring the real "opuss one" lookup (C≈1.0).
+    const input = makeInput({
+      C: 0.95,
+      calibrationTrusted: false,
+      exactnessTier: 'alias_fuzzy',
+      calibratedGap: undefined, // singleton: no runner-up
+      ambiguityDetected: false,
+    });
     const output = await engine.decide(input, TEST_SNAPSHOT);
 
-    expect(output.decisionStatus).toBe('ambiguous');
-    expect(output.decisionTrace.rulesApplied).toContain('CALIBRATION_TRUST_GATE_DOWNGRADE');
+    expect(output.decisionStatus).toBe('resolved');
+    expect(output.decisionTrace.rulesApplied).toContain('CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY');
+    expect(output.decisionTrace.rulesApplied).not.toContain('CALIBRATION_TRUST_GATE_DOWNGRADE');
+  });
+
+  it('treats a NON-unique alias_fuzzy identity (runner-up present) as insufficient (downgrades)', async () => {
+    // Guard companion: when a runner-up exists within scoring range the
+    // calibrated gap is DEFINED — the fuzzy match is no longer a unique
+    // witness, so it does NOT substitute for calibration trust and the resolve
+    // downgrades. This keeps phonetic-collision and multi-candidate fuzzy
+    // matches from masquerading as probability-calibrated decisions.
+    // A tiny defined gap (0.02) is below the gap threshold, so the numeric
+    // gate already withholds resolution before the trust gate runs. Either
+    // way the contract holds: the unique-fuzzy substitute MUST NOT fire and
+    // the verdict is not resolved.
+    const input = makeInput({
+      C: 0.89,
+      calibrationTrusted: false,
+      exactnessTier: 'alias_fuzzy',
+      calibratedGap: 0.02, // runner-up present → not unique
+      ambiguityDetected: false,
+    });
+    const output = await engine.decide(input, TEST_SNAPSHOT);
+
+    expect(output.decisionStatus).not.toBe('resolved');
+    expect(output.decisionTrace.rulesApplied).not.toContain('CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY');
+  });
+
+  it('treats an alias_fuzzy identity with detected ambiguity as insufficient (does not resolve)', async () => {
+    // Even a singleton (gap undefined) must NOT be trusted when the resolver
+    // flagged ambiguity — ambiguityDetected is an independent veto on the
+    // uniqueness witness. (Here the resolver-side ambiguity flag also makes the
+    // numeric gate emit ambiguous before the trust gate runs; either path keeps
+    // the verdict from resolving and never engages the unique-fuzzy substitute.)
+    const input = makeInput({
+      C: 0.89,
+      calibrationTrusted: false,
+      exactnessTier: 'alias_fuzzy',
+      calibratedGap: undefined,
+      ambiguityDetected: true,
+    });
+    const output = await engine.decide(input, TEST_SNAPSHOT);
+
+    expect(output.decisionStatus).not.toBe('resolved');
+    expect(output.decisionTrace.rulesApplied).not.toContain('CALIBRATION_TRUST_GATE_UNIQUE_FUZZY_IDENTITY');
   });
 });

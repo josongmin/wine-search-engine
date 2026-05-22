@@ -299,6 +299,31 @@ function isPhoneticOnlyStrategySet(strategies: ReadonlySet<string>): boolean {
   return true;
 }
 
+/**
+ * Structural discriminator for the trust-the-matcher prefix bypass.
+ *
+ * Returns true when `normalizedQuery` is a STRICT (incomplete) prefix of the
+ * anchor's normalized surface — i.e. the anchor surface starts with the query
+ * but the two are NOT equal. Both inputs are already normalized
+ * (`buildNormalizedQueryViews` / `anchor.normalizedForm`), so this is a pure
+ * surface-prefix test with no re-normalization.
+ *
+ * Hallucination-guard contract: a bare ambiguous short form that is only a
+ * strict prefix of a real alias (e.g. query `"opus"` ⊂ alias `"opus one"`)
+ * MUST NOT seal identity. When this returns true the trust bypass does NOT
+ * engage, so the candidate falls through to the identity-key overlap check,
+ * `exactSignalAllowed` becomes false, the tier collapses to none/fuzzy, and
+ * the calibration trust gate downgrades the verdict to `ambiguous`. A query
+ * that EQUALS a complete short alias surface (`normalizedQuery === normalizedForm`)
+ * is NOT a strict prefix and remains eligible for the bypass.
+ */
+function isStrictPrefixOfAnchorSurface(
+  normalizedQuery: string,
+  normalizedForm: string,
+): boolean {
+  return normalizedForm.startsWith(normalizedQuery) && normalizedQuery !== normalizedForm;
+}
+
 function buildSignals(
   rawQuery: string,
   normalizedQuery: string,
@@ -330,10 +355,19 @@ function buildSignals(
   // `ambiguous_short_form` in the planner, and this branch wouldn't
   // even be reached). The confidence floor matches the planner's
   // SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD floor (0.8).
+  //
+  // Hallucination-guard discriminator: the bypass engages ONLY when the
+  // normalized query is a COMPLETE alias surface, NOT a strict (incomplete)
+  // prefix of `anchor.normalizedForm`. A bare short form that is merely a
+  // strict prefix of a longer alias (`"opus"` ⊂ `"opus one"`) does not
+  // uniquely identify the entity — it must fall through to the identity-key
+  // overlap check and downgrade to `ambiguous`. See
+  // {@link isStrictPrefixOfAnchorSurface}.
   const isTrustedPrefixSingleEntityAnchor =
     strategies.has('prefix_exact') &&
     anchor.candidateEntityIds.length === 1 &&
-    anchor.confidence >= SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD;
+    anchor.confidence >= SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD &&
+    !isStrictPrefixOfAnchorSurface(normalizedQuery, anchor.normalizedForm);
 
   const identitySafeMatch = exactLike && !isTrustedPrefixSingleEntityAnchor
     ? anchorMatchesIdentitySafeProjection(rawQuery, normalizedQuery, anchor, doc)

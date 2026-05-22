@@ -860,6 +860,12 @@ export function hasBareExactEntityAnchor(query: string): boolean {
     queryViews.transliterated,
     ...queryViews.lookupVariants,
   ];
+  // Single-token-ness is a property of the INPUT query, computed once from its
+  // punctuation-stripped form — NOT per-candidate. A multi-token noise query
+  // has whitespace here, so it can never qualify as single-token even though a
+  // whitespace-collapsed `compact` lookup variant would. This keeps the
+  // cross-script signal (4) below from re-admitting multi-token noise.
+  const queryIsSingleToken = !/\s/u.test(queryViews.punctuationStripped.trim());
 
   return candidates.some((candidate) => {
     if (typeof candidate !== 'string') {
@@ -896,7 +902,18 @@ export function hasBareExactEntityAnchor(query: string): boolean {
     // only matched before via the always-true vintage no-op). We deliberately do NOT
     // use a `tokenCount >= 2` signal: a multi-token noise query (e.g. a Korean phrase
     // whose aliased substring resolves) would slip through it.
-    return trimmed === canonical || extractVintageYear(trimmed) !== null || canonicalLooksLabelLike;
+    //
+    //   4. the INPUT query is a SINGLE token (no internal whitespace) that resolves
+    //      DIRECTLY to an appellation — covers cross-script curated transliteration
+    //      aliases like "사씨카이아" → canonical "Sassicaia", where `trimmed !==
+    //      canonical` purely because the surface is Korean and the canonical is Latin
+    //      and there is no transliterated view to bridge them. Generalizes signal (1)
+    //      past the same-script case; multi-token noise always carries whitespace
+    //      (queryIsSingleToken=false) and so cannot match here.
+    return trimmed === canonical
+      || extractVintageYear(trimmed) !== null
+      || canonicalLooksLabelLike
+      || queryIsSingleToken;
   });
 }
 

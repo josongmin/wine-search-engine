@@ -283,6 +283,11 @@ function applyFallbackAnswer(
   state.answer = answer;
   state.fallbackApplied = true;
   state.fallbackLayer = layer;
+  // Route through the termination-priority FSM (SSoT): a hard failure
+  // (aborted/blocked/error/loop_detected) outranks the recovery completion and
+  // is preserved (P9), while a resource limit (budget/timeout) ranks BELOW
+  // completions by design — a fallback answer that "came through anyway"
+  // legitimately supersedes it (see termination-state-machine.ts Class 2 > 3).
   state.terminationReason = transitionTerminationReason(state.terminationReason, terminationReason);
   return answer;
 }

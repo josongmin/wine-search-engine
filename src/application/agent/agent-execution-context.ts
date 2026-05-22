@@ -3,6 +3,7 @@ import type { AgentResult } from '../../domain/agent/model/agent-result.js';
 import { StepBudget } from '../../domain/agent/service/step-budget.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
+import type { ConversationContext } from '../../domain/agent/model/conversation-context.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import {
   createAgentExecutionState,
@@ -29,6 +30,7 @@ interface AgentExecutionContextInput {
   readonly requestId: string;
   readonly baseConfig: AgentConfig;
   readonly overrides?: Partial<Pick<AgentConfig, 'maxSteps' | 'perStepTimeoutMs' | 'agentTimeoutMs'>> | undefined;
+  readonly conversationContext?: ConversationContext | undefined;
 }
 
 interface AgentExecutionContext {
@@ -91,7 +93,7 @@ export function admitAgentRequest(
 export function buildAgentExecutionContext(
   input: AgentExecutionContextInput,
 ): AgentExecutionContext {
-  const { query, requestId, baseConfig, overrides } = input;
+  const { query, requestId, baseConfig, overrides, conversationContext } = input;
   const adaptive = overrides?.maxSteps === undefined ? classifyQueryBudget(query) : undefined;
   const effectiveConfig = {
     ...baseConfig,
@@ -110,6 +112,6 @@ export function buildAgentExecutionContext(
     effectiveConfig,
     queryExecutionContract: buildAgentQueryExecutionContract(query),
     budget: new StepBudget(effectiveConfig),
-    state: createAgentExecutionState(),
+    state: createAgentExecutionState(conversationContext),
   };
 }

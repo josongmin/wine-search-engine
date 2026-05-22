@@ -443,8 +443,12 @@ describe('WineSearchOrchestrator — multi-step (mini-loop)', () => {
     const result = await orchestrator.execute(runInput({ query: '식전주 와인 추천' }));
     expect(WineSearchResultSchema.safeParse(result).success).toBe(true);
     expect(result.executionSteps.length).toBeGreaterThanOrEqual(4);
-    expect(result.tokenUsage.inputTokens).toBe(150);
-    expect(result.tokenUsage.outputTokens).toBe(70);
+    // The synthesizer makes TWO structured-LLM calls on a factual-claim intent:
+    // the primary synthesis + the S3 grounding-verify pass (synthesis-runner.ts
+    // applyGroundingVerify). The stub returns usage(150,70) for each call, so
+    // the accumulated synthesizer-phase usage is 2×: 300 input / 140 output.
+    expect(result.tokenUsage.inputTokens).toBe(300);
+    expect(result.tokenUsage.outputTokens).toBe(140);
   });
 
   it('multi-step plan without miniLoopToolBundle → degraded fallback (terminationReason=fallback)', async () => {
