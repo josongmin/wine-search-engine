@@ -53,13 +53,22 @@ export function evaluateAdmissionClosure(
 ): AdmissionClosureSummary {
   const admissionContext = deriveAdmissionContext(input);
   const topEntity = input.resolveResult.topEntity;
-  const identitySealSatisfied =
+  // Identity seal is required only when the planner / executionContext says
+  // it is. For list-shaped queries (preference / similar_items / recommendation)
+  // there is no winning entity whose identity could be sealed — the planner
+  // emits `requires_identity_seal: false` and the closure must honor that or
+  // every recommendation query rejects with EVIDENCE_INSUFFICIENT. The
+  // `constraintEvidence` and `anchorEvidence` rows below already follow
+  // this `!required || satisfied` pattern; we make identitySeal consistent.
+  const identitySealRequired = admissionContext.requires_identity_seal;
+  const identitySealEvidence =
     topEntity !== undefined &&
     String(topEntity.entityId).trim().length > 0 &&
     snapshot.threshold_profile_id === input.queryPlan.thresholdProfileId &&
     snapshot.policy_rule_version === input.queryPlan.policyRuleVersion &&
     snapshot.planner_version === input.queryPlan.plannerVersion &&
     input.provenanceContract.observed.identityEvidenceSatisfied;
+  const identitySealSatisfied = !identitySealRequired || identitySealEvidence;
   const constraintEvidenceSatisfied =
     !admissionContext.requires_constraint_evidence ||
     input.provenanceContract.observed.constraintEvidenceSatisfied;
@@ -69,7 +78,7 @@ export function evaluateAdmissionClosure(
 
   return {
     required: {
-      identitySeal: true,
+      identitySeal: identitySealRequired,
       constraintEvidence: admissionContext.requires_constraint_evidence,
       anchorEvidence: admissionContext.requires_anchor_evidence,
     },
@@ -261,9 +270,24 @@ export class AdmissionGate {
       }
     }
 
+    // `evidenceSufficient` is the policy-conditional identity check: when
+    // identity sealing is NOT required by admission_context (list-shaped
+    // queries — `pairing_search`, `similar_items`, `recommendation`, …),
+    // the strict identity-evidence presence is irrelevant — the resolved
+    // verdict isn't claiming an identity. Without this gate, every
+    // preference-mode resolved decision auto-rejects via the `clarify`
+    // outcome at line ~300 (`!evidenceSufficient → clarify`), even when
+    // the upstream EvidenceGate / CalibrationTrustGate explicitly let it
+    // through. The same `!required || satisfied` pattern is already used
+    // for `constraintEvidence` / `anchorEvidence` in
+    // `evaluateAdmissionClosure`; we apply it here so `decideAdmission`
+    // and the closure stay consistent.
+    const evidenceSufficientForAdmission =
+      !admissionContext.requires_identity_seal ||
+      input.provenanceContract.observed.identityEvidenceSatisfied;
     const policyOutcome = decideAdmission({
       confidence: input.resolveResult.decisionTrace.decisionConfidenceC,
-      evidenceSufficient: input.provenanceContract.observed.identityEvidenceSatisfied,
+      evidenceSufficient: evidenceSufficientForAdmission,
       ambiguityHigh: input.ambiguitySummary?.severity === 'high',
       routeHealthy: input.routeHealthy ?? true,
       executionMode: input.executionMode ?? 'authoritative',

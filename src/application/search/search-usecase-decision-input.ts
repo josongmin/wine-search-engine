@@ -55,6 +55,15 @@ interface BuildSearchDecisionInputParams {
     readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
     readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
     readonly winnerIdentityArtifact?: EntityLaneCandidateArtifact | undefined;
+    /**
+     * Constraint-extraction categories pulled from the compiled query
+     * (`CompiledWineQuery.query.constraintExtraction.categoriesCovered`).
+     * The V1 plan strips this in `PlannerV1Adapter`; callers thread it
+     * through `executionContext` so the decision-engine's preference-mode
+     * unlock + CalibrationTrustGate exploratory bypass can see the
+     * extractor's semantic signal.
+     */
+    readonly categoriesCovered?: readonly string[] | undefined;
   };
   readonly honestyContract?: {
     readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
@@ -494,6 +503,15 @@ export function buildSearchDecisionInput(
     ...(executionContext?.criticRewrites !== undefined
       && executionContext.criticRewrites.length > 0
       ? { criticRewrites: executionContext.criticRewrites }
+      : {}),
+    // T1.2 plan-V1 strips constraintExtraction; the post-route phase
+    // supplies categoriesCovered from `compiled.query.constraintExtraction
+    // .categoriesCovered` via executionContext. Empty list is dropped to
+    // keep DecisionInput diffs minimal when no semantic vocabulary matched
+    // (gibberish / pure-noise queries).
+    ...(executionContext?.categoriesCovered !== undefined
+      && executionContext.categoriesCovered.length > 0
+      ? { categoriesCovered: executionContext.categoriesCovered }
       : {}),
   };
 }

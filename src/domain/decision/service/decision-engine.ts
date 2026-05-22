@@ -517,6 +517,34 @@ export class DecisionEngine {
         };
       }
 
+      // Semantic-signal unlock: preference-mode queries ask for a list shaped
+      // by recognized constraint vocabulary (gift_suitability, beginner_*,
+      // occasion, style, …). When the constraint extractor matched ≥1
+      // category AND the resolver carries ≥1 candidate, the system has
+      // structurally identified semantic intent — the calibrated C is just
+      // a fuzzy-fit signal and using it as a hard floor turns a meaningful
+      // recommendation query into a clarification request. Benchmark #88
+      // (`와인 잘 모르는 사람…` → 4 categoriesCovered, real intent, C just
+      // under T_resolve) needs this path; a truly empty query has
+      // categoriesCovered=[] and falls through to the low-confidence
+      // fallback below.
+      const categoriesCovered = input.categoriesCovered ?? [];
+      const hasResolverCandidates = input.resolveResult.candidates.length > 0;
+      if (categoriesCovered.length > 0 && hasResolverCandidates) {
+        rulesApplied.push('NUMERIC_GATE_PREFERENCE_MODE');
+        rulesApplied.push('PREFERENCE_MODE_SEMANTIC_UNLOCK');
+        return {
+          status: 'resolved',
+          nextAction: 'return_result',
+          rulesApplied: [...rulesApplied],
+          finalReason:
+            `Preference-mode semantic-signal unlock: ${categoriesCovered.length} ` +
+            `constraint categor${categoriesCovered.length === 1 ? 'y' : 'ies'} ` +
+            `matched and ${input.resolveResult.candidates.length} candidate(s) present; ` +
+            `C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} treated as advisory.`,
+        };
+      }
+
       rulesApplied.push('NUMERIC_GATE_LOW_CONFIDENCE');
       const fallbackMode = input.policy.fallbackMode;
       if (fallbackMode === 'hybrid') {
@@ -672,6 +700,24 @@ export class DecisionEngine {
 
     if (hasExactMatchCandidate(input.evidenceSummary)) {
       rulesApplied.push('CALIBRATION_TRUST_GATE_EXACT_IDENTITY');
+      return state;
+    }
+
+    // Exploratory-mode substitute trust: when the route is a list-shaped one
+    // (recommendation / similar_items / compare_candidates / *_browse) AND
+    // the constraint extractor recognised ≥1 category, the resolved verdict
+    // is NOT an identity claim — it's "here is a list matching this
+    // semantic intent". The constraint extraction itself is the structural
+    // trust witness: gibberish queries have `categoriesCovered: []` and
+    // will not pass this gate. Without this bypass, the preference-mode
+    // semantic unlock added to applyNumericGate would be immediately
+    // reversed here.
+    const categoriesCovered = input.categoriesCovered ?? [];
+    if (
+      categoriesCovered.length > 0 &&
+      isExploratoryRetrievalMode(input.effectiveRetrievalMode)
+    ) {
+      rulesApplied.push('CALIBRATION_TRUST_GATE_EXPLORATORY_SEMANTIC');
       return state;
     }
 

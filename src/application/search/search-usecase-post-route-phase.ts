@@ -980,6 +980,8 @@ export async function runRankedRouteDecisionPhase(
     resolveResult: ctx.resolveResult,
     identityArtifacts: ctx.laneArtifacts.identity,
   });
+  const compiledCategoriesCovered =
+    ctx.compiled.query.constraintExtraction?.categoriesCovered;
   const decisionInputBase = buildSearchDecisionInput({
     plan: ctx.plan,
     resolveResult: ctx.resolveResult,
@@ -998,6 +1000,14 @@ export async function runRankedRouteDecisionPhase(
         : {}),
       ...(ctx.criticRewrites !== undefined && ctx.criticRewrites.length > 0
         ? { criticRewrites: ctx.criticRewrites }
+        : {}),
+      // PlannerV1Adapter strips constraintExtraction from V1; surface
+      // categoriesCovered from the compiled query so the decision-engine's
+      // preference-mode unlock + CalibrationTrustGate exploratory bypass
+      // can see the constraint extractor's semantic signal. Empty list
+      // dropped to keep diffs minimal on noise queries.
+      ...(compiledCategoriesCovered !== undefined && compiledCategoriesCovered.length > 0
+        ? { categoriesCovered: compiledCategoriesCovered }
         : {}),
     },
     honestyContract: toAdmissionHonestyContract(mergedRouteDegradation),
@@ -1413,6 +1423,8 @@ export async function runSearchPostRoutePhase(
       resolveResult: ctx.resolveResult,
       identityArtifacts: ctx.laneArtifacts.identity,
     });
+    const abstainCompiledCategoriesCovered =
+      ctx.compiled.query.constraintExtraction?.categoriesCovered;
     const abstainDecisionInput = buildSearchDecisionInput({
       plan: ctx.plan,
       resolveResult: ctx.resolveResult,
@@ -1431,6 +1443,10 @@ export async function runSearchPostRoutePhase(
           : {}),
         ...(ctx.criticRewrites !== undefined && ctx.criticRewrites.length > 0
           ? { criticRewrites: ctx.criticRewrites }
+          : {}),
+        ...(abstainCompiledCategoriesCovered !== undefined
+          && abstainCompiledCategoriesCovered.length > 0
+          ? { categoriesCovered: abstainCompiledCategoriesCovered }
           : {}),
       },
       honestyContract: toAdmissionHonestyContract(mergedRouteDegradation),

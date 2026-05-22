@@ -112,8 +112,27 @@ export class EvidenceGate {
       };
     }
 
-    // Rule 1: resolved + no identity evidence → downgrade
-    if (!provenanceContract.observed.identityEvidenceSatisfied) {
+    // Rule 1: resolved + identity evidence REQUIRED but missing → downgrade.
+    //
+    // The check used to fire on `!identityEvidenceSatisfied` regardless of
+    // whether identity sealing was actually required — but
+    // `observed.identityEvidenceSatisfied` here is computed strictly (raw
+    // evidence presence, not policy-conditional —
+    // `search-usecase-decision-input.ts` line ~446) and would always be
+    // false on a preference / recommendation route where there is no
+    // resolved entity by design. Gating on `policy.requireIdentitySeal`
+    // mirrors how `provenance-closure.ts` builds its OWN
+    // `identityEvidenceSatisfied` (`!policy.requireIdentitySeal ||
+    // hasIdentityEvidence`) and how the AdmissionGate keys its identity-
+    // seal check on `admission_context.requires_identity_seal`. For list-
+    // shaped queries (`pairing_search` / `similar_items` / etc.) the
+    // planner emits `requires_identity_seal: false`; the gate now honors
+    // that signal and lets the resolved verdict stand if the rest of the
+    // obligation set passes.
+    if (
+      provenanceContract.policy.requireIdentitySeal &&
+      !provenanceContract.observed.identityEvidenceSatisfied
+    ) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',

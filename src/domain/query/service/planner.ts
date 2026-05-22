@@ -824,13 +824,27 @@ export class Planner {
       ? 0
       : normalizedQuery.trim().split(/\s+/).length;
     if (tokenCount <= 2 && anchors.length > 0) {
-      // Multiple candidate entities for a short query -> ambiguous.
-      const totalCandidates = anchors.reduce(
-        (sum, a) => sum + a.candidateEntityIds.length,
-        0,
+      // Ambiguity here means "the query could resolve to MULTIPLE COMPETING
+      // ENTITIES", not "the candidate-generation path produced multiple
+      // anchor variants converging on the same entity". The latter is a
+      // RECALL-positive — different lookup strategies (prefix_exact +
+      // fuzzy + phonetic) all picking the same wine is evidence
+      // STRENGTHENING the resolution, not weakening it.
+      //
+      // Concretely this is what makes `opu` resolve: the 3-char prefix
+      // surfaces three anchor variants (prefix_exact at high confidence,
+      // plus lower-confidence fuzzy / transliterated fallbacks) all
+      // pointing to `opus-one-2018`. The previous gate counted only
+      // `totalCandidates` (≥3) + saw the lower-confidence siblings and
+      // misclassified the query as ambiguous_short_form, raising
+      // T_resolve to 0.65 with `CLARIFICATION_BIAS_0.15` and pushing the
+      // weighted-sum score under the bar. Requiring entity-level
+      // distinctness restores the structural intent.
+      const distinctEntityIds = new Set<string>(
+        anchors.flatMap((a) => a.candidateEntityIds.map((id) => String(id))),
       );
       if (
-        totalCandidates > 1
+        distinctEntityIds.size > 1
         && anchors.some((a) => a.confidence < SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD)
       ) {
         return 'ambiguous_short_form';

@@ -375,6 +375,27 @@ export interface DecisionInput {
    * a stable trace ref the response builder can use to anchor a claim.
    */
   readonly criticRewrites?: readonly DecisionInputCriticRewrite[] | undefined;
+
+  /**
+   * Constraint-extraction categories that the planner's NL-mapper recognised
+   * in the raw query (`gift_suitability`, `beginner_suitability`, `occasion`,
+   * `style`, `wine_type`, …).
+   *
+   * Threaded through from `CompiledWineQuery.query.constraintExtraction
+   * .categoriesCovered` by `search-usecase-post-route-phase`. The decision-
+   * engine uses non-empty `categoriesCovered` as the structural witness that
+   * a preference-mode / exploratory query carries real semantic intent
+   * (vs gibberish):
+   *
+   *  - `applyNumericGate` preference-mode branch grants a resolved verdict
+   *    even when C is just under T_resolve (PREFERENCE_MODE_SEMANTIC_UNLOCK).
+   *
+   *  - `applyCalibrationTrustGate` substitutes "exact identity evidence"
+   *    with "exploratory mode + ≥1 category" — for list-shaped queries
+   *    the constraint extraction IS the trust witness; identity
+   *    calibration has no meaning.
+   */
+  readonly categoriesCovered?: readonly string[] | undefined;
 }
 
 /**
