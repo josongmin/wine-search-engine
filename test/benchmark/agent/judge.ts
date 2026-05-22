@@ -16,6 +16,13 @@
 
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import type { AgentBenchmarkScenario } from './scenario.js';
+import {
+  collectGroundingFacts,
+  verifyAnswerGrounding,
+  normalizeClaimSurface,
+  type GroundingFacts,
+} from '../../../src/application/wine-search/synthesis-grounding-verify.js';
+import type { ToolOutcome } from '../../../src/domain/agent/model/tool-outcome.js';
 
 export interface JudgeResult {
   /** 0..1 score, or null when judge could not be evaluated (parse fail / API error / no rubric). */
@@ -25,6 +32,48 @@ export interface JudgeResult {
   /** Number of samples taken (for diagnostic). */
   readonly samples: number;
 }
+
+/**
+ * Provenance of a faithfulness score, for measurement-health telemetry.
+ *
+ * - `deterministic` — the structural grounding verifier found ALL extractable
+ *   claims grounded; the LLM faithfulness judge was skipped (its signal is
+ *   redundant for "are the cited entities present in grounding"). Authoritative.
+ * - `llm` — the deterministic verifier had no usable grounding facts (nothing to
+ *   verify structurally), so the LLM judge is the sole signal.
+ * - `hybrid` — the deterministic verifier found ungrounded claims; we fell to the
+ *   LLM judge for semantic nuance but recorded BOTH signals (see
+ *   `deterministicScore` / `faithDisagreement`).
+ */
+export type FaithfulnessSource = 'deterministic' | 'llm' | 'hybrid';
+
+/**
+ * Extended faithfulness result. Superset of `JudgeResult` — adds the
+ * deterministic-vs-LLM telemetry the runner surfaces per scenario.
+ */
+export interface FaithfulnessResult extends JudgeResult {
+  /** Which signal produced `score`. */
+  readonly faithfulnessSource: FaithfulnessSource;
+  /** Deterministic verifier score (1.0 grounded / 0.0 ungrounded), or null when no facts. */
+  readonly deterministicScore: number | null;
+  /** LLM judge score, or null when the LLM judge was skipped or failed. */
+  readonly llmScore: number | null;
+  /**
+   * True when deterministic and LLM signals BOTH exist and disagree by > 0.5.
+   * A high rate across a run is itself a measurement-health red flag.
+   */
+  readonly faithDisagreement: boolean;
+  /** Normalized claim surfaces the deterministic verifier could not ground. */
+  readonly ungroundedClaims: readonly string[];
+}
+
+/**
+ * Magnitude above which the deterministic and LLM faithfulness signals are
+ * considered to "disagree" for telemetry purposes. 0.5 is half the 0..1 range —
+ * e.g. deterministic=1.0 vs llm=0.0 (the exact judge↔judge contradiction this
+ * fix targets) is a disagreement; deterministic=1.0 vs llm=0.75 is not.
+ */
+const FAITH_DISAGREEMENT_THRESHOLD = 0.5;
 
 export interface JudgeEvidenceContext {
   readonly observations?: readonly string[];
@@ -455,6 +504,40 @@ const FAITHFULNESS_SYSTEM_PROMPT = `You are a faithfulness evaluator using NLI-s
 3. Score = entailed_count / (entailed_count + contradicted_count). Neutral claims are excluded.
    If no verifiable claims exist, score 1.0 (no contradictions).
 
+## What IS vs IS NOT a faithfulness violation (critical — read carefully)
+A faithfulness violation requires a SPECIFIC fabricated fact. Distinguish:
+
+(a) UNGROUNDED CLAIM (= violation): a specific wine name, region, vintage year, price,
+    grape, or producer stated in the answer that is ABSENT from (or contradicts) the
+    provided context. Example: answer recommends "Opus One 2015" but the context only
+    contains "Château Margaux" — "Opus One" is fabricated. CONTRADICTED.
+
+(b) REASONABLE SYNTHESIS (= NOT a violation, treat as ENTAILED): summarization,
+    comparison, ranking, hedged or qualified language, generic wine education, or
+    paraphrase that stays WITHIN the grounded facts. The answer is allowed to:
+      - summarize ("these are full-bodied reds")
+      - compare grounded wines ("A is richer than B")
+      - hedge ("this may pair well with steak")
+      - reformat names across scripts/transliterations (Korean ↔ Latin spelling of
+        the SAME grounded wine is NOT a new claim — e.g. "샤또 마고" and "Château
+        Margaux" are the same entity)
+      - omit detail or speak generally
+    None of these are violations. Do NOT penalize an answer for being a fluent
+    summary of grounded facts. Do NOT mark a claim CONTRADICTED merely because the
+    exact words differ from the context — only when the FACT differs.
+
+## Few-shot anchors
+Anchor 1 — GROUNDED (score 1.00):
+  Context: [Tool Result 1]: GROUNDING_JSON: {"wines":[{"canonical_label":"Château Margaux","region":"Bordeaux","vintage_year":2015}]}
+  Answer: "보르도의 샤또 마고 2015를 추천드립니다. 풀바디 레드로 스테이크와 잘 어울려요."
+  → "샤또 마고" = "Château Margaux" (same entity, transliteration), region Bordeaux ✓, vintage 2015 ✓.
+    Pairing is a reasonable synthesis. All claims entailed. score 1.00.
+
+Anchor 2 — HALLUCINATED (score 0.00):
+  Context: [Tool Result 1]: GROUNDING_JSON: {"wines":[{"canonical_label":"Château Margaux","region":"Bordeaux","vintage_year":2015}]}
+  Answer: "Opus One 2018, 캘리포니아 나파 밸리의 와인을 추천드립니다."
+  → "Opus One", "2018", "Napa Valley" are ALL absent from context — fabricated entity. score 0.00.
+
 ## Score Scale
 - 1.00: all verifiable claims entailed, zero contradictions
 - 0.75: most claims entailed, 1-2 neutral, zero contradictions
@@ -552,5 +635,148 @@ Score the faithfulness of the answer against the context.`;
     rationale: sampleCount > 1 ? `median of ${successful.length}/${sampleCount}: ${rationale}` : rationale,
     failed: false,
     samples: sampleCount,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Hybrid deterministic-first faithfulness (FIX 1)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract candidate label-shaped citations from the answer for the deterministic
+ * verifier's label-citation check.
+ *
+ * We do NOT run an NER — instead we surface the grounded canonical labels that
+ * literally appear in the normalized answer text. This is deliberately
+ * false-positive-free: a grounded label found in the answer is, by construction,
+ * a grounded claim, and the verifier will confirm it via `exact_nfc_lower` /
+ * `compound_subsumed_by_label`. The verifier's prose-vintage loop (loop 2) runs
+ * regardless of citations and is what catches fabricated vintage years.
+ *
+ * The net effect: the deterministic verdict is SOUND for "all extractable claims
+ * grounded" (it never falsely reports an answer as fully grounded — an
+ * un-extractable hallucinated name simply leaves the verdict to the LLM judge),
+ * which is exactly the authoritative direction this fix needs.
+ */
+function extractGroundedLabelCitations(answer: string, facts: GroundingFacts): readonly string[] {
+  if (facts.labels.size === 0) return [];
+  const normalizedAnswer = normalizeClaimSurface(answer);
+  const citations: string[] = [];
+  for (const label of facts.labels) {
+    if (label.length === 0) continue;
+    if (normalizedAnswer.includes(label)) {
+      citations.push(label);
+    }
+  }
+  return citations;
+}
+
+/**
+ * Hybrid deterministic-first faithfulness scoring.
+ *
+ * Order of authority:
+ *   1. Build `GroundingFacts` from the agent's typed tool outcomes (the same
+ *      structural grounding the synthesis runtime uses). If there are NO facts
+ *      (no GROUNDING_JSON envelopes / structured wine records), the deterministic
+ *      signal is unavailable → fall straight to the LLM judge (`source: 'llm'`).
+ *   2. Run the deterministic `verifyAnswerGrounding`. If it reports the answer
+ *      fully grounded → `score = 1.0` DETERMINISTICALLY (`source: 'deterministic'`),
+ *      skipping the LLM judge. The structural matcher is authoritative for
+ *      "are the cited entities + asserted vintages present in grounding" and is
+ *      not subject to the LLM judge's false-negative over-strictness (the bug:
+ *      `judge=1.00 faith=0.00`).
+ *   3. If the deterministic verifier finds ungrounded claims, fall to the LLM
+ *      judge for semantic nuance (it can catch hallucinations the structural
+ *      matcher cannot extract) but RECORD both signals (`source: 'hybrid'`,
+ *      `deterministicScore`, `llmScore`, `faithDisagreement`).
+ *
+ * `faithDisagreement` is true when deterministic and LLM both have a value and
+ * differ by > 0.5 — a run-level disagreement rate is a measurement-health metric.
+ */
+export async function judgeFaithfulnessHybrid(
+  judgeLlm: ChatLlmPort,
+  answer: string,
+  observations: readonly string[],
+  toolOutcomes: readonly ToolOutcome[],
+  samples: number = 1,
+): Promise<FaithfulnessResult> {
+  if (observations.length === 0 || answer.trim().length === 0) {
+    return {
+      score: null,
+      rationale: 'no context to evaluate faithfulness',
+      failed: false,
+      samples: 0,
+      faithfulnessSource: 'llm',
+      deterministicScore: null,
+      llmScore: null,
+      faithDisagreement: false,
+      ungroundedClaims: [],
+    };
+  }
+
+  const facts = collectGroundingFacts(toolOutcomes);
+
+  // Step 1 — deterministic verdict (only when grounding facts exist).
+  let deterministicScore: number | null = null;
+  let ungroundedClaims: readonly string[] = [];
+  if (facts.hasAnyFact) {
+    const citations = extractGroundedLabelCitations(answer, facts);
+    const verify = verifyAnswerGrounding(answer, citations, facts);
+    deterministicScore = verify.grounded ? 1.0 : 0.0;
+    ungroundedClaims = verify.ungroundedClaims;
+
+    // Step 2 — authoritative shortcut: all extractable claims grounded.
+    if (verify.grounded) {
+      return {
+        score: 1.0,
+        rationale: 'deterministic: all extractable claims grounded (label citations + asserted vintages present in grounding)',
+        failed: false,
+        samples: 0,
+        faithfulnessSource: 'deterministic',
+        deterministicScore: 1.0,
+        llmScore: null,
+        faithDisagreement: false,
+        ungroundedClaims: [],
+      };
+    }
+  }
+
+  // Step 3 — fall to LLM judge (either no facts, or deterministic found ungrounded claims).
+  const llm = await judgeFaithfulness(judgeLlm, answer, observations, samples);
+  const llmScore = llm.score;
+
+  const faithDisagreement =
+    deterministicScore !== null
+    && llmScore !== null
+    && Math.abs(deterministicScore - llmScore) > FAITH_DISAGREEMENT_THRESHOLD;
+
+  // When there were no grounding facts, the LLM is the sole signal.
+  if (deterministicScore === null) {
+    return {
+      ...llm,
+      faithfulnessSource: 'llm',
+      deterministicScore: null,
+      llmScore,
+      faithDisagreement: false,
+      ungroundedClaims: [],
+    };
+  }
+
+  // Hybrid: deterministic found ungrounded claims; LLM provides the final score
+  // for semantic nuance, but both signals are recorded for telemetry.
+  const ungroundedNote =
+    ungroundedClaims.length > 0
+      ? ` deterministic flagged ${ungroundedClaims.length} ungrounded: ${ungroundedClaims.slice(0, 3).join(', ')}.`
+      : '';
+  return {
+    score: llmScore,
+    rationale: `hybrid (det=0.00, llm=${llmScore !== null ? llmScore.toFixed(2) : 'null'}):${ungroundedNote} ${llm.rationale}`.trim(),
+    failed: llm.failed,
+    samples: llm.samples,
+    faithfulnessSource: 'hybrid',
+    deterministicScore,
+    llmScore,
+    faithDisagreement,
+    ungroundedClaims,
   };
 }

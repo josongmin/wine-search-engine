@@ -73,7 +73,7 @@ import {
   type ScenarioRunAggregates,
   type ScenarioAggregates,
 } from './scorer.js';
-import { judgeAnswerN, judgeFaithfulness } from './judge.js';
+import { judgeAnswerN, judgeFaithfulnessHybrid } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
 import { printBenchmarkInsights, type BenchmarkReportSlice } from './benchmark-insight-generator.js';
@@ -1306,6 +1306,13 @@ export interface BenchmarkReport {
    * but they drag down terminationCorrectness (25% partial credit) and the overall score.
    */
   readonly infraFallbackCount: number;
+  /**
+   * FIX 1 measurement-health: number of scenarios where the deterministic
+   * grounding verifier and the LLM faithfulness judge disagreed by > 0.5.
+   * A high count means the LLM faithfulness judge is producing false
+   * negatives (the judge=1.00/faith=0.00 contradiction this fix targets).
+   */
+  readonly faithDisagreementCount: number;
   /** Wall-clock breakdown for the whole CLI run (profiling). */
   readonly wallClock: BenchmarkWallClock;
   readonly results: readonly ScenarioResult[];
@@ -1537,6 +1544,10 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
   let judgeFailCount = 0;
   let judgeAttemptCount = 0;
+  // FIX 1: run-level measurement-health counter — how many scenarios had the
+  // deterministic and LLM faithfulness signals disagree by > 0.5. A high rate
+  // means the LLM faithfulness judge is unreliable (the bug this fix targets).
+  let faithDisagreementCount = 0;
   let scenarioWallMsSum = 0;
   let scenarioWallSampleCount = 0;
   let completedCount = 0;
@@ -1657,6 +1668,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         let judgeScore: number | undefined;
         let judgeReasoning: string | undefined;
         let faithScore: number | undefined;
+        // FIX 1 telemetry: deterministic-vs-LLM faithfulness provenance.
+        let faithfulnessSource: 'deterministic' | 'llm' | 'hybrid' | undefined;
+        let faithDisagreement = false;
+        let faithDeterministicScore: number | null = null;
+        let faithLlmScore: number | null = null;
         let claimDiagnostics: DiagnosticVector | undefined;
         if (judgeLlm !== null) {
           const judgePromises: Promise<void>[] = [];
@@ -1710,10 +1726,22 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             // isInfraFailure: leave faithScore undefined so scorer null-drops the dim
           } else if (observations.length > 0) {
             judgeAttemptCount++;
+            // FIX 1: hybrid deterministic-first faithfulness. The deterministic
+            // grounding verifier (synthesis-grounding-verify) is authoritative for
+            // "are the cited entities + asserted vintages present in grounding".
+            // When it reports fully grounded, faith=1.0 deterministically and the
+            // LLM judge is skipped — this resolves the judge=1.00/faith=0.00
+            // contradiction that flagged the LLM faithfulness judge as unreliable.
+            const hybridToolOutcomes = result.toolOutcomes ?? [];
             judgePromises.push(
-              judgeFaithfulness(judgeLlm, result.answer, observations, args.judgeSamples).then((r) => {
+              judgeFaithfulnessHybrid(judgeLlm, result.answer, observations, hybridToolOutcomes, args.judgeSamples).then((r) => {
                 if (r.score !== null) faithScore = r.score;
                 if (r.failed) judgeFailCount++;
+                faithfulnessSource = r.faithfulnessSource;
+                faithDisagreement = r.faithDisagreement;
+                faithDeterministicScore = r.deterministicScore;
+                faithLlmScore = r.llmScore;
+                if (r.faithDisagreement) faithDisagreementCount++;
               }),
             );
           }
@@ -1757,7 +1785,18 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         scenarioWallSampleCount++;
         const sc = scored.scores;
         const judgePart = judgeScore !== undefined ? ` judge=${judgeScore.toFixed(2)}` : '';
-        const faithPart = faithScore !== undefined ? ` faith=${faithScore.toFixed(2)}` : '';
+        // FIX 1 telemetry tag: source initial (d|l|h) + `!` on >0.5 disagreement,
+        // and on disagreement, the raw det/llm pair for measurement-health triage.
+        const faithSrcTag = faithfulnessSource !== undefined
+          ? `[${faithfulnessSource[0]}${faithDisagreement ? '!' : ''}${
+              faithDisagreement
+                ? `det=${faithDeterministicScore !== null ? faithDeterministicScore.toFixed(2) : 'n/a'}/llm=${faithLlmScore !== null ? faithLlmScore.toFixed(2) : 'n/a'}`
+                : ''
+            }]`
+          : '';
+        const faithPart = faithScore !== undefined
+          ? ` faith=${faithScore.toFixed(2)}${faithSrcTag}`
+          : '';
         const scrPart = constraintMetrics?.semanticConstraintRecall !== null && constraintMetrics?.semanticConstraintRecall !== undefined
           ? ` scr=${constraintMetrics.semanticConstraintRecall.toFixed(2)}`
           : '';
@@ -1889,7 +1928,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     );
   }
 
-  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock, infraFallbackCount);
+  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock, infraFallbackCount, faithDisagreementCount);
 }
 
 function filterScenarios(
@@ -1938,6 +1977,7 @@ export function buildReport(
   judgeAttemptCount: number,
   wallClock: BenchmarkWallClock,
   infraFallbackCount: number = 0,
+  faithDisagreementCount: number = 0,
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
 
@@ -2151,6 +2191,7 @@ export function buildReport(
     judgeFailCount,
     judgeAttemptCount,
     infraFallbackCount,
+    faithDisagreementCount,
     wallClock,
     results,
     summary: {
@@ -2436,6 +2477,20 @@ async function main(): Promise<void> {
     const failRate = judgeCallsTotal > 0 ? report.judgeFailCount / judgeCallsTotal : 0;
     const failSymbol = failRate >= 0.1 ? '⚠ ' : '  ';
     console.error(`  ${failSymbol}Judge fails: ${report.judgeFailCount}${failRate >= 0.1 ? ` (${(failRate * 100).toFixed(0)}% — scores may be unreliable, re-run or check API quota)` : ''}`);
+  }
+  if (report.faithDisagreementCount > 0) {
+    // FIX 1 measurement-health: deterministic-vs-LLM faithfulness disagreement.
+    // High rate ⇒ the LLM faithfulness judge is producing false negatives
+    // (the deterministic verifier sees the cited entities as grounded but the
+    // LLM judge does not). Hybrid scoring already prefers the deterministic
+    // signal when it fires; this counter surfaces residual judge unreliability.
+    const disagreeRate = report.executedCount > 0 ? report.faithDisagreementCount / report.executedCount : 0;
+    const sym = disagreeRate >= 0.1 ? '⚠ ' : '  ';
+    console.error(
+      `  ${sym}Faith disagreements: ${report.faithDisagreementCount} scenario(s)`
+      + ` (${(disagreeRate * 100).toFixed(0)}% — deterministic vs LLM faithfulness differ by >0.5;`
+      + ` LLM faithfulness judge may be over-strict)`,
+    );
   }
   if (report.judgeRequiredButSkippedCount > 0) {
     console.error(`  ⚠️  ${report.judgeRequiredButSkippedCount} scenario(s) require judge for reliable scoring (run without --no-judge for accurate results)`);
