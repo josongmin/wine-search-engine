@@ -89,6 +89,39 @@ describe('agent system prompt contract', () => {
     expect(prompt).toContain('Do NOT rewrite "와인 잘 모르는 사람한테 선물할 거" into English paraphrases');
   });
 
+  it('routes 2-side comparison intent to compare_wines by STRUCTURE, not keyword matching', () => {
+    const prompt = buildSystemMessage().content;
+
+    // The comparison rule must be intent/structure-driven, not a literal "vs"/"비교" keyword gate.
+    expect(prompt).toContain('COMPARISON INTENT (decide by STRUCTURE, not keywords)');
+    expect(prompt).toContain('the query names TWO distinct sides');
+    // Nested comparisons (embedded in price/pairing/drinking-window tasks) must still route to compare_wines.
+    expect(prompt).toContain('even when the comparison is embedded in a larger task');
+    expect(prompt).toContain('For EXACTLY 2 sides → call compare_wines');
+    // Must never collapse a 2-side comparison into a single merged search.
+    expect(prompt).toContain('NEVER collapse a 2-side comparison into a single merged search_wines call');
+    // 3+ sides → parallel search_wines.
+    expect(prompt).toContain('For 3+ sides → emit PARALLEL search_wines actions');
+    // Compare + drinkability batches both entity_ids.
+    expect(prompt).toContain('batches check_drinking_window for BOTH entity_ids');
+  });
+
+  it('documents side-specific *_a/*_b constraint placement on the compare_wines tool surface', () => {
+    const prompt = buildSystemMessage().content;
+
+    expect(prompt).toContain('SELECT THIS whenever the query contrasts TWO distinct sides');
+    expect(prompt).toContain('Put each side\'s distinguishing constraint in *_a/*_b');
+    expect(prompt).toContain('region_a/region_b for "나파 vs 보르도"');
+  });
+
+  it('requires every stated multi-constraint to reach the tool call on the first attempt', () => {
+    const prompt = buildSystemMessage().content;
+
+    expect(prompt).toContain('map EVERY stated constraint to its structured param in ONE call — drop NONE on the first attempt');
+    expect(prompt).toContain('do not silently leave a stated constraint out of the call');
+    expect(prompt).toContain('Progressive relaxation only AFTER a failed first attempt');
+  });
+
   it('forbids synthesizing an answer from invalid tool observations', () => {
     const prompt = buildSystemMessage().content;
 
