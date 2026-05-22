@@ -28,6 +28,7 @@ import {
   SEARCH_TOOL_MAX_STYLES,
   sanitizeOptionalToolNulls,
   validateSearchToolVintageRange,
+  LOOKUP_WINE_LIMIT_MAX,
 } from '../search/search-tool-contract.js';
 import {
   buildFoodPairingStructuredFilters,
@@ -213,6 +214,19 @@ const SearchInputObjectSchema = z.object({
  * in the dispatcher). Do not duplicate the bounds in tests — import this.
  */
 export const SearchInputSchema = z.preprocess(normalizeSingularStyleArrayInput, SearchInputObjectSchema);
+
+/**
+ * Runtime input contract for the `lookup_wine` tool. Deliberately minimal:
+ * a required wine name/identity + an optional small result cap (≤
+ * {@link LOOKUP_WINE_LIMIT_MAX}). No constraint filters — lookup is identity
+ * resolution, not filtered search. Exported for property/contract tests.
+ */
+export const LookupWineInputSchema = z.object({
+  query: buildSearchToolQueryField({ maxLen: SEARCH_QUERY_MAX_LEN }),
+  // No upper bound here on purpose: an LLM passing limit:5 should not hard-fail
+  // the whole tool call. The dispatcher clamps to LOOKUP_WINE_LIMIT_MAX.
+  limit: coercePositiveInt.pipe(z.number().int().min(1)).optional(),
+});
 
 const CompareInputObjectSchema = z.object({
   query_a: buildSearchToolQueryField({
@@ -1574,6 +1588,63 @@ async function executeAgentToolInner(
           kind: 'search_result_set',
           resultSet: exactLookupContractViolation !== undefined ? [] : response.results,
           resultCount: exactLookupContractViolation !== undefined ? 0 : response.results.length,
+        },
+      };
+    }
+
+    case 'lookup_wine': {
+      const parseResult = LookupWineInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+      if (!parseResult.success) {
+        const msg = parseResult.error.issues.map((i) => i.message).join(', ');
+        return {
+          observation: `Invalid input for lookup_wine: ${msg}`,
+          rawResult: null,
+          structuredOutput: { kind: 'tool_error', errorCode: 'INVALID_INPUT', message: msg },
+        };
+      }
+      const parsed = parseResult.data;
+      const limit = Math.min(parsed.limit ?? LOOKUP_WINE_LIMIT_MAX, LOOKUP_WINE_LIMIT_MAX);
+
+      // High-precision identity resolution: force the entity route, no filters.
+      // This is the dedicated "find THIS wine" primitive; constraint-filtered
+      // discovery belongs to search_wines.
+      const response = await deps.searchUseCase.execute(
+        {
+          query: parsed.query,
+          limit,
+          options: { mode: 'entity', explain: false, clarification: false },
+        },
+        requestId,
+        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+      );
+
+      if (response.queryType !== 'search') {
+        return {
+          observation: 'Unexpected response type for wine lookup.',
+          rawResult: response,
+          structuredOutput: { kind: 'tool_error', errorCode: 'UNEXPECTED_RESPONSE_TYPE', message: `expected search, got ${response.queryType}` },
+        };
+      }
+
+      if (response.results.length === 0) {
+        return {
+          observation: `[LOOKUP_QUALITY: not_found — 0 exact matches]\n"${parsed.query}"에 해당하는 와인을 찾지 못했습니다. 이름 철자를 확인하거나, 조건 탐색이 필요하면 search_wines 를 사용하세요.`,
+          rawResult: response,
+          structuredOutput: { kind: 'search_result_set', resultSet: [], resultCount: 0 },
+        };
+      }
+
+      const obs = summarizeSearchResults(response, false, {
+        requestedQuery: parsed.query,
+        requestedRetrievalMode: 'entity',
+      });
+      return {
+        observation: `[LOOKUP_RESULT: ${response.results.length} exact match(es)]\n${obs}`,
+        rawResult: response,
+        structuredOutput: {
+          kind: 'search_result_set',
+          resultSet: response.results,
+          resultCount: response.results.length,
         },
       };
     }

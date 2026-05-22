@@ -138,6 +138,13 @@ const SearchWinesInputSchema = z.object({
     .optional(),
 });
 
+// Identity lookup: just a wine name + optional small cap. No filters — the
+// dispatcher forces the entity route and clamps the limit. Permissive (rule 10).
+const LookupWineInputSchema = z.object({
+  query: ToolStringField,
+  limit: z.number().int().finite().min(TOOL_INPUT_STRING_MIN_LEN).optional(),
+});
+
 const CompareWinesInputSchema = z.object({
   query_a: ToolStringField,
   query_b: ToolStringField,
@@ -186,6 +193,9 @@ void ToolOptionalStringField;
 const SEARCH_WINES_DESCRIPTION =
   'Search the wine catalog. Use for finding wines by name, region, style, vintage, price, food pairing intent, or any combination. Accepts structured filters.';
 
+const LOOKUP_WINE_DESCRIPTION =
+  'Look up a SPECIFIC wine by name/identity (e.g. "Opus One 2018"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use search_wines for constraint-based discovery.';
+
 const COMPARE_WINES_DESCRIPTION =
   'Compare two wines side-by-side. Use ONLY for explicit head-to-head comparisons. Cannot batch with other tools — must run alone.';
 
@@ -204,6 +214,12 @@ export const SEARCH_WINES_TOOL_DEF: ToolDefinition = {
   name: 'search_wines' satisfies KnownAgentToolName,
   description: SEARCH_WINES_DESCRIPTION,
   inputSchema: SearchWinesInputSchema,
+};
+
+export const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
+  name: 'lookup_wine' satisfies KnownAgentToolName,
+  description: LOOKUP_WINE_DESCRIPTION,
+  inputSchema: LookupWineInputSchema,
 };
 
 export const COMPARE_WINES_TOOL_DEF: ToolDefinition = {
@@ -230,6 +246,7 @@ export const GET_FOOD_PAIRINGS_TOOL_DEF: ToolDefinition = {
  *  in tests. */
 const MINI_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
   SEARCH_WINES_TOOL_DEF,
+  LOOKUP_WINE_TOOL_DEF,
   COMPARE_WINES_TOOL_DEF,
   CHECK_DRINKING_WINDOW_TOOL_DEF,
   GET_FOOD_PAIRINGS_TOOL_DEF,
@@ -273,6 +290,7 @@ export function buildMiniLoopToolBundle(
  *  in tests. Always equals `KNOWN_AGENT_TOOL_NAMES` by construction. */
 export const MINI_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
   'search_wines',
+  'lookup_wine',
   'compare_wines',
   'check_drinking_window',
   'get_food_pairings',

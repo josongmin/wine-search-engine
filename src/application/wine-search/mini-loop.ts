@@ -52,6 +52,7 @@ import {
   buildToolOutcome,
   withTimeout,
 } from '../agent/agent-tool-execution-support.js';
+import { LOOKUP_WINE_LIMIT_MAX } from '../search/search-tool-contract.js';
 import {
   addTokenUsage,
   makeZeroTokenUsage,
@@ -113,6 +114,7 @@ const MINI_LOOP_SYSTEM_PROMPT = [
   '',
   'Available tools:',
   '  - search_wines: retrieve wines matching the query and constraints.',
+  '  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use instead of search_wines when the user names a particular wine.',
   '  - get_food_pairings: retrieve wines that pair with a food description.',
   '  - check_drinking_window: evaluate drinkability of a specific wine entity at a target year.',
   '  - compare_wines: compare two wine descriptors.',
@@ -658,6 +660,20 @@ async function invokeToolPort(
       const result = await ports.searchUseCase.execute(searchInput, requestId, { abortSignal: signal });
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
+    case 'lookup_wine': {
+      // High-precision identity resolution: force the entity route, clamp to a
+      // tight result set, ignore any constraint filters the LLM may have added.
+      const query = typeof call.input['query'] === 'string' ? call.input['query'] : '';
+      const rawLimit = typeof call.input['limit'] === 'number' && Number.isFinite(call.input['limit'])
+        ? call.input['limit']
+        : LOOKUP_WINE_LIMIT_MAX;
+      const result = await ports.searchUseCase.execute(
+        { query, mode: 'entity', limit: Math.min(rawLimit, LOOKUP_WINE_LIMIT_MAX) },
+        requestId,
+        { abortSignal: signal },
+      );
+      return { rawResult: result, observation: formatSearchObservation(result) };
+    }
     case 'get_food_pairings': {
       const pairingInput = adaptFoodPairingInput(call.input);
       const result = await ports.foodPairingUseCase.execute(pairingInput, requestId, { abortSignal: signal });
@@ -682,7 +698,7 @@ async function invokeToolPort(
     default: {
       return {
         rawResult: null,
-        observation: `Tool "${call.tool}" is not supported in the mini-loop. Use one of: search_wines, get_food_pairings, check_drinking_window, compare_wines.`,
+        observation: `Tool "${call.tool}" is not supported in the mini-loop. Use one of: search_wines, lookup_wine, get_food_pairings, check_drinking_window, compare_wines.`,
       };
     }
   }

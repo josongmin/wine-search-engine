@@ -58,6 +58,15 @@ export const TOOL_BATCH_POLICY: Readonly<Record<AgentToolName, BatchPolicyEntry>
     mustRunAlone: false,
     maxPerBatch: 4,
   },
+  lookup_wine: {
+    // Identity lookups are cheap and side-effect free; multiple may run in
+    // parallel (e.g. resolve two named wines at once). Kept separate from
+    // search_wines batches to keep the precise-lookup vs filtered-search
+    // distinction clean.
+    canRunWith: ['lookup_wine'],
+    mustRunAlone: false,
+    maxPerBatch: 4,
+  },
   compare_wines: {
     canRunWith: [],
     mustRunAlone: true,

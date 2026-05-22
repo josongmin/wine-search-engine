@@ -1349,6 +1349,16 @@ export interface BenchmarkReport {
    */
   readonly infraFallbackCount: number;
   /**
+   * FIX A3 measurement-health: number of EXECUTED scenarios excluded from the
+   * overallScore / CI / criticalFailureCount aggregates because a normal
+   * retrieval tool (search_wines / compare_wines / check_drinking_window /
+   * get_food_pairings) timed out on a slow Vespa/PG backend AFTER the LLM
+   * planned a valid query (stepCount > 0, terminationReason='fallback'). These
+   * are infra-latency failures, not agent-quality defects. Kept visible in
+   * `results[]`; surfaced here so backend latency is observable, not masked.
+   */
+  readonly toolTimeoutInfraFallbackCount: number;
+  /**
    * FIX 1 measurement-health: number of scenarios where the deterministic
    * grounding verifier and the LLM faithfulness judge disagreed by > 0.5.
    * A high count means the LLM faithfulness judge is producing false
@@ -2013,6 +2023,111 @@ export function isInfraFallbackResult(r: ScenarioResult): boolean {
   return r.terminationReason === 'fallback' && r.stepCount === 0;
 }
 
+/**
+ * Retrieval/data tools that hit external infra (Vespa / PG). A timeout on one
+ * of these is attributable to backend latency, NOT agent pathology — the agent
+ * planned a legitimate query; the backend was too slow to answer it. Knowledge-
+ * only or no-op tools are deliberately excluded: a timeout there would not be an
+ * infra-latency signal. Mirrors the tool switch in
+ * `src/application/agent/agent-tools.ts` (search_wines / compare_wines /
+ * check_drinking_window / get_food_pairings).
+ */
+const RETRIEVAL_INFRA_TOOLS: ReadonlySet<string> = new Set([
+  'search_wines',
+  'compare_wines',
+  'check_drinking_window',
+  'get_food_pairings',
+]);
+
+/**
+ * Deterministic single-tool-timeout observation marker written by
+ * `AgentToolExecutionResultPolicy.applySingleExecutionFailure` when a tool call
+ * raises a TIMEOUT error (`state.timeoutStats.tool += 1`). This is the in-band
+ * signal the runner can read from `AgentResult.steps` — `timeoutStats`/`failureTags`
+ * are reported only to the telemetry observer (no requestId, not on AgentResult),
+ * so the step-trace marker is the authoritative per-scenario tool-timeout evidence.
+ * SSoT: `[TIMEOUT] Tool "<name>" timed out. Try a different approach ...`.
+ */
+const TOOL_TIMEOUT_OBSERVATION_PREFIX = '[TIMEOUT] Tool "';
+
+/**
+ * FIX A3 — TOOL-TIMEOUT INFRA-FALLBACK detector (measurement integrity).
+ *
+ * The dev/staging Vespa cluster answers a normal query in ~1.6–2.7s, but under
+ * load a `search_wines` tool call can exceed the per-tool timeout (~21s observed)
+ * → the tool-execution policy records a `[TIMEOUT] Tool "..."` step and the run
+ * degrades to `terminationReason === 'fallback'` (telemetry `failureTags:
+ * ["tool_timeout"]`). A query that takes longer than the timeout on a ~1.6s-
+ * baseline cluster is infra latency BY DEFINITION — not an agent quality defect.
+ * Yet the scorer charges it as an agent failure (term≈25%, tool≈0%), depressing
+ * the geo-mean by an estimated 2–4pp and conflating infra with quality.
+ *
+ * Predicate (PRINCIPLED — only infra-attributable timeouts, never a blanket
+ * fallback exclusion):
+ *   1. `terminationReason === 'fallback'`  — synthesis produced a substitute
+ *      answer after the timeout (this is the observed terminal state).
+ *   2. `stepCount > 0`                      — the LLM planned at least one step;
+ *      step-0 fallbacks are handled by {@link isInfraFallbackResult}. A non-zero
+ *      step count means the LLM ran fine; only the tool I/O timed out — the
+ *      "llmStep === 0 / timeoutStats.tool > 0" case the task specifies as infra.
+ *   3. At least one step carries the deterministic single-tool-timeout marker
+ *      for a `RETRIEVAL_INFRA_TOOLS` tool whose input was well-formed (a non-
+ *      empty query object). A runaway / malformed query is NOT reclassified.
+ *
+ * Parallel-batch timeouts (`parallel_batch_timeout`) are intentionally NOT
+ * matched: that path sets `reasoningFailureDetected` (an agent-planning signal),
+ * so it stays counted as agent behavior. LLM-step timeouts produce no tool
+ * observation at all, so they can never satisfy condition (3) — agent slowness
+ * is never laundered as infra.
+ *
+ * Matched results are EXCLUDED from `overallScore` / CI / `criticalFailureCount`
+ * (identical treatment to step-0 infra fallbacks), stay visible in `results[]`,
+ * and are surfaced via `toolTimeoutInfraFallbackCount` + a measurement-health line.
+ */
+export function isToolTimeoutInfraFallback(r: ScenarioResult): boolean {
+  if (r.terminationReason !== 'fallback') return false;
+  // Step-0 fallbacks are the LLM-unavailable case handled by isInfraFallbackResult.
+  if ((r.stepCount ?? 0) === 0) return false;
+  const steps = r.steps;
+  if (steps === undefined || steps.length === 0) return false;
+
+  for (const step of steps) {
+    // Sequential tool call: single action + observation.
+    if (
+      step.action !== undefined
+      && RETRIEVAL_INFRA_TOOLS.has(step.action.tool)
+      && hasWellFormedToolInput(step.action.input)
+      && observationIsToolTimeout(step.observation)
+    ) {
+      return true;
+    }
+    // Parallel action pairs are NOT matched here: a parallel-batch timeout sets
+    // `reasoningFailureDetected` (agent-planning signal), and the per-call
+    // observation strings carry the batch marker, not the single-tool marker.
+  }
+  return false;
+}
+
+/** A retrieval tool input is well-formed when it is a non-empty object (a real
+ *  query the agent issued), not an empty/absent payload (a malformed call). */
+function hasWellFormedToolInput(input: Record<string, unknown> | undefined): boolean {
+  return input !== undefined && Object.keys(input).length > 0;
+}
+
+/** True iff the observation is the deterministic single-tool-timeout marker. */
+function observationIsToolTimeout(observation: string | undefined): boolean {
+  return observation !== undefined && observation.startsWith(TOOL_TIMEOUT_OBSERVATION_PREFIX);
+}
+
+/**
+ * Combined infra-fallback predicate: step-0 (LLM unavailable) OR tool-timeout
+ * (backend latency). Both classes measure infra, not agent quality, and are
+ * excluded from the geo-mean / CI / criticalFailureCount aggregates alike.
+ */
+export function isExcludedInfraFallback(r: ScenarioResult): boolean {
+  return isInfraFallbackResult(r) || isToolTimeoutInfraFallback(r);
+}
+
 export function buildReport(
   results: readonly ScenarioResult[],
   scenarios: readonly AgentBenchmarkScenario[],
@@ -2029,12 +2144,23 @@ export function buildReport(
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
 
-  // FIX A2 — INFRA-FALLBACK scenarios (step-0 fallback = LLM unavailable before
-  // the agent ran) measure a provider outage, not the agent. Exclude them from
-  // every aggregate (overallScore / CI / criticalFailureCount / RAGAS / byTier)
-  // the same way judgeRequiredButSkipped scenarios are excluded. They stay in
-  // `results[]` for visibility and are still surfaced via `infraFallbackCount`.
-  const executedNonInfra = executed.filter((r) => !isInfraFallbackResult(r));
+  // FIX A2/A3 — INFRA-FALLBACK scenarios measure backend infra, not the agent.
+  //   A2: step-0 fallback = LLM unavailable (rate-limit / timeout) before the
+  //       agent ran a single step.
+  //   A3: tool-timeout fallback = a normal retrieval tool (search_wines / …)
+  //       timed out on a slow Vespa/PG backend AFTER the LLM planned a valid
+  //       query (stepCount > 0). A query that exceeds the per-tool timeout on a
+  //       ~1.6s-baseline cluster is infra latency by definition.
+  // Both are excluded from every aggregate (overallScore / CI /
+  // criticalFailureCount / RAGAS / byTier) the same way judgeRequiredButSkipped
+  // scenarios are. They stay in `results[]` for visibility and are surfaced via
+  // `infraFallbackCount` (A2) and `toolTimeoutInfraFallbackCount` (A3).
+  const executedNonInfra = executed.filter((r) => !isExcludedInfraFallback(r));
+  // A3 measurement-health: how many EXECUTED scenarios were excluded as
+  // tool-timeout infra fallbacks. Computed over `executed` (not `executedNonInfra`)
+  // so the count reflects what was removed. Surfaced in the summary so Vespa
+  // latency is observable, never silently masked.
+  const toolTimeoutInfraFallbackCount = executed.filter(isToolTimeoutInfraFallback).length;
 
   // When judge is not available, judgeRequired scenarios cannot be reliably
   // scored — their overall score is unreliable (rubric criteria go unchecked).
@@ -2239,6 +2365,7 @@ export function buildReport(
     judgeFailCount,
     judgeAttemptCount,
     infraFallbackCount,
+    toolTimeoutInfraFallbackCount,
     faithDisagreementCount,
     wallClock,
     results,

@@ -67,6 +67,9 @@ import {
   SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION,
   SEARCH_TOOL_MAX_STYLES,
   SEARCH_TOOL_QUERY_DESCRIPTION,
+  LOOKUP_WINE_TOOL_DESCRIPTION,
+  LOOKUP_WINE_QUERY_DESCRIPTION,
+  LOOKUP_WINE_LIMIT_MAX,
   SEARCH_TOOL_RETRIEVAL_MODE_DESCRIPTION,
   SEARCH_TOOL_RETRIEVAL_MODES,
   SEARCH_TOOL_STYLE_DESCRIPTION,
@@ -106,6 +109,7 @@ const MAX_PRICE_KRW_BOUND = Number.MAX_SAFE_INTEGER;
 
 export const ClaudeToolNameSchema = z.enum([
   'search_wines',
+  'lookup_wine',
   'get_food_pairings',
   'check_drinking_window',
   'compare_wines',
@@ -429,6 +433,26 @@ export const WINE_SEARCH_TOOLS = [
         want_diversity: {
           type: 'boolean',
           description: SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION,
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'lookup_wine',
+    description: LOOKUP_WINE_TOOL_DESCRIPTION,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: LOOKUP_WINE_QUERY_DESCRIPTION,
+        },
+        limit: {
+          type: 'number',
+          description: `Max exact matches to return (1-${LOOKUP_WINE_LIMIT_MAX}).`,
+          minimum: 1,
+          maximum: LOOKUP_WINE_LIMIT_MAX,
         },
       },
       required: ['query'],

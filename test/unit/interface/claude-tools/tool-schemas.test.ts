@@ -42,20 +42,36 @@ describe('WINE_SEARCH_TOOLS', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('should contain exactly 4 tools', () => {
-    expect(WINE_SEARCH_TOOLS).toHaveLength(4);
+  it('should contain exactly 5 tools', () => {
+    expect(WINE_SEARCH_TOOLS).toHaveLength(5);
   });
 
-  it('should have all 4 required tools', () => {
+  it('should have all 5 required tools', () => {
     const names = WINE_SEARCH_TOOLS.map((t) => t.name);
     expect(names).toEqual(
       expect.arrayContaining([
         'search_wines',
+        'lookup_wine',
         'get_food_pairings',
         'check_drinking_window',
         'compare_wines',
       ]),
     );
+  });
+
+  describe('lookup_wine tool', () => {
+    const tool = WINE_SEARCH_TOOLS.find((t) => t.name === 'lookup_wine')!;
+
+    it('should exist with query required and no constraint filters', () => {
+      expect(tool).toBeDefined();
+      expect(tool.input_schema.required).toEqual(['query']);
+      // lookup is identity-only: must NOT expose search constraint filters.
+      const props = Object.keys(tool.input_schema.properties);
+      expect(props).toEqual(expect.arrayContaining(['query', 'limit']));
+      expect(props).not.toContain('min_price_krw');
+      expect(props).not.toContain('region');
+      expect(props).not.toContain('retrieval_mode');
+    });
   });
 
   describe('search_wines tool', () => {
