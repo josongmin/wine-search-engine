@@ -24,9 +24,6 @@ import {
   WatchlistDeliveriesRouteContract,
   WatchlistGetRouteContract,
   FeedbackSubmitRouteContract,
-  SearchV2RouteContract,
-  HybridV2RouteContract,
-  InterpretV2RouteContract,
 } from './route-contracts.js';
 import type { HttpRouteContractManifest, RegisteredHttpRouteContract } from './register-contract-route.js';
 import { toFiniteInteger } from '../../../domain/shared/utils/safe-number.js';
@@ -61,8 +58,17 @@ interface DeclaredHttpRouteContract {
  * History:
  *   1.0.0 — initial pinned surface (2026-05-21). 26 declared routes,
  *           OpenAPI 3 export + verify:http-contracts CI gate.
+ *   2.0.0 — remove /v2/search, /v2/search/hybrid, /v2/search/interpret
+ *           catalog entries (2026-05-23). These were never wired into
+ *           server.ts (only /v1/* routes are registered); the V2 response
+ *           format is served via content-negotiation on /v1/* with
+ *           `Accept: application/vnd.cuvee.human+json`. Declaring them in
+ *           the catalog falsely advertised endpoints that returned 404 to
+ *           any client following the OpenAPI export. MAJOR bump per policy
+ *           (route removed), but no real consumer impact since the URLs
+ *           never resolved. Remaining: 23 declared routes.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '1.0.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '2.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -85,9 +91,6 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
-  { method: 'POST', url: '/v2/search', contract: SearchV2RouteContract },
-  { method: 'POST', url: '/v2/search/hybrid', contract: HybridV2RouteContract },
-  { method: 'POST', url: '/v2/search/interpret', contract: InterpretV2RouteContract },
   { method: 'POST', url: '/v1/agent', contract: AgentRouteContract },
   { method: 'GET', url: '/v1/agent/benchmark-scenarios', contract: AgentBenchmarkScenariosRouteContract },
   { method: 'POST', url: '/v1/wine-search', contract: WineSearchRouteContract },
@@ -196,7 +199,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  'ebd5241ee536f8ad0367814ed05fee3f6a58796bcc59cb1c9731fb216c5e67da';
+  'a6970d1614eb195a9cf2ac6a2d8bcd30b6c390467ac762acd60876a4edd02971';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

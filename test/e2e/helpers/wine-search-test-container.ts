@@ -267,7 +267,7 @@ export async function buildAppWithoutWineSearch(): Promise<{
 }
 
 // Re-export the route deps type so test files can spy on its shape if needed.
-type { WineSearchRouteDeps };
+export type { WineSearchRouteDeps };
 
 // ---------------------------------------------------------------------------
 // Convenience stub builders — bypass the pre-existing runtime bug in

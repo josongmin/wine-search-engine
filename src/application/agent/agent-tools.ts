@@ -1730,13 +1730,18 @@ async function handleCompareWines(
     }),
   ] as const;
   const rawSubQueries = [parsed.query_a, parsed.query_b] as const;
+  const compareRetrievalMode = parsed.retrieval_mode;
+  const hasParentContext = sharedFilters.length > 0
+    || sharedPreferences.length > 0
+    || sideSpecificFilters.some((entries) => entries.length > 0)
+    || compareRetrievalMode !== undefined;
   const response = await deps.decomposedSearchExecute(
     rawSubQueries,
     'compare',
     buildComparisonOriginalQuery(sharedContextInput),
     requestId,
     Date.now(),
-    sharedFilters.length > 0 || sharedPreferences.length > 0 || sideSpecificFilters.some((entries) => entries.length > 0)
+    hasParentContext
       ? {
           ...(sharedFilters.length > 0 ? { filters: sharedFilters } : {}),
           ...(sharedPreferences.length > 0 ? { preferences: sharedPreferences } : {}),
@@ -1750,6 +1755,11 @@ async function handleCompareWines(
                 ],
               }
             : {}),
+          // Propagate caller-emitted retrieval_mode as the api_override for BOTH
+          // legs. Bench #117 RCA — without this the planner's `retrieval_mode:
+          // 'entity'` was silently dropped and exact-pair compares ran with the
+          // wrong execution mode. See `DecomposedSearchParentContext.retrievalMode`.
+          ...(compareRetrievalMode !== undefined ? { retrievalMode: compareRetrievalMode } : {}),
         }
       : undefined,
     options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : undefined,

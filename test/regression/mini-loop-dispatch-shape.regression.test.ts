@@ -1,0 +1,305 @@
+/**
+ * Regression: mini-loop tool dispatch shape (SOLID H1/H2 follow-up).
+ *
+ * Three invariants:
+ *   1. `lookup_wine` routes through the shared schema — empty / placeholder
+ *      query produces an INVALID_INPUT-style observation, no port call.
+ *   2. `get_food_pairings` returns the WHOLE FoodPairingResult as
+ *      `rawResult` (sibling shape), not the unwrapped results array. The
+ *      observation continues to be derived from `.results` so the LLM only
+ *      sees per-wine fields.
+ *   3. The default "unknown tool" observation reads the tool-name display
+ *      string from the SSoT (KNOWN_AGENT_TOOL_NAMES_DISPLAY), so adding a
+ *      new tool to the SSoT propagates here without an edit.
+ *
+ * The runner's `invokeToolPort` is not exported, so we exercise it via the
+ * public `MiniLoopRunner.run` entrypoint with a fake LLM port that emits the
+ * tool_use we want to test.
+ */
+
+import { describe, expect, it, vi } from 'vitest';
+import type { z } from 'zod';
+import type {
+  AnalyzeRequest,
+  AnalyzeResult,
+  ExecuteRequest,
+  ExecuteResult,
+  StructuredLlmPort,
+  SynthesizeRequest,
+  SynthesizeResult,
+  TokenUsage,
+  ToolDefinition,
+  ToolUseCall,
+} from '../../src/domain/ai/port/structured-llm.port.js';
+import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
+import {
+  MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+  MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+  MINI_LOOP_DEFAULT_MAX_STEPS,
+  MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+  MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+  MINI_LOOP_DEFAULT_PER_TOOL_CAP,
+  type MiniLoopInput,
+  type MiniLoopToolPorts,
+} from '../../src/application/wine-search/mini-loop-schemas.js';
+import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '../../src/domain/agent/model/agent-tool-attempt-schema.js';
+import type {
+  ComparisonUseCasePort,
+  DrinkabilityUseCasePort,
+  FoodPairingResult,
+  FoodPairingUseCasePort,
+  SearchUseCasePort,
+} from '../../src/application/wine-search/execution-runner.js';
+import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
+import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
+
+// ---------------------------------------------------------------------------
+// Fixtures (slim copies of the mini-loop.test.ts shared helpers — keeping
+// regression coverage self-contained).
+// ---------------------------------------------------------------------------
+
+function makeTokenUsage(input: number, output: number): TokenUsage {
+  return { inputTokens: input, outputTokens: output, cacheReadTokens: 0, cacheCreationTokens: 0 };
+}
+
+function makeSearchResponse(entityIds: readonly string[]): SearchResponseV1 {
+  return {
+    queryType: 'search',
+    engineDecision: { decisionStatus: 'resolved' } as unknown as SearchResponseV1['engineDecision'],
+    results: entityIds.map((id) => ({
+      entity: { entityId: id, canonicalLabel: `Wine ${id}` },
+    })) as unknown as SearchResponseV1['results'],
+    meta: { generatedAt: new Date().toISOString() } as unknown as SearchResponseV1['meta'],
+  };
+}
+
+function makeAnalysis(): WineSearchAnalysis {
+  return {
+    intent: 'search',
+    anchors: [],
+    normalizedConstraints: [],
+    contract: {
+      requiresDrinkabilityCheck: false,
+      requiresGroundedWineSearch: false,
+      hasEntityMetadataSignal: false,
+    },
+    expectedMultiStep: true,
+    recommendedBudget: { maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS, perToolCap: MINI_LOOP_DEFAULT_PER_TOOL_CAP },
+    hangulDominant: false,
+    preservedSurface: 'fixture-query',
+  };
+}
+
+function makeSearchPort(): SearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
+  const executeMock = vi.fn(() => Promise.resolve(makeSearchResponse(['w-1'])));
+  return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
+}
+
+function makeComparisonPort(): ComparisonUseCasePort {
+  return { execute: async () => { throw new Error('unused'); } };
+}
+
+function makeFoodPairingPort(
+  impl?: (input: unknown, reqId: string) => Promise<FoodPairingResult>,
+): FoodPairingUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
+  const executeMock = vi.fn(
+    impl ?? ((input: unknown) =>
+      Promise.resolve({
+        food: (input as { food: string }).food,
+        results: makeSearchResponse(['pair-wine-1', 'pair-wine-2']),
+      })),
+  );
+  return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
+}
+
+function makeDrinkabilityPort(): DrinkabilityUseCasePort {
+  return { probe: async () => undefined };
+}
+
+function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
+  return {
+    searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
+    comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
+    foodPairingUseCase: overrides?.foodPairingUseCase ?? makeFoodPairingPort(),
+    drinkabilityUseCase: overrides?.drinkabilityUseCase ?? makeDrinkabilityPort(),
+  };
+}
+
+interface StubLlm extends StructuredLlmPort {
+  readonly executeMock: ReturnType<typeof vi.fn>;
+}
+
+function makeStubLlm(
+  responses: ReadonlyArray<(req: ExecuteRequest) => Promise<ExecuteResult>>,
+): StubLlm {
+  let call = 0;
+  const executeMock = vi.fn(async (req: ExecuteRequest) => {
+    const handler = responses[call] ?? responses[responses.length - 1];
+    call += 1;
+    if (handler === undefined) throw new Error('no handler');
+    return handler(req);
+  });
+  return {
+    executeMock,
+    analyze: <TSchema extends z.ZodTypeAny>(_req: AnalyzeRequest<TSchema>):
+      Promise<AnalyzeResult<z.infer<TSchema>>> => { throw new Error('not used'); },
+    execute: (req: ExecuteRequest) => executeMock(req),
+    synthesize: <TSchema extends z.ZodTypeAny>(_req: SynthesizeRequest<TSchema>):
+      Promise<SynthesizeResult<z.infer<TSchema>>> => { throw new Error('not used'); },
+  };
+}
+
+function toolUse(name: string, input: Record<string, unknown>, id = 'tu-1'): ToolUseCall {
+  return { id, name, input };
+}
+
+function asToolUseResult(calls: readonly ToolUseCall[]): ExecuteResult {
+  return {
+    kind: 'tool_use',
+    calls,
+    usage: makeTokenUsage(120, 60),
+    durationMs: 5,
+    stopReason: 'tool_use',
+  };
+}
+
+function asTextResult(text: string): ExecuteResult {
+  return {
+    kind: 'text',
+    text,
+    usage: makeTokenUsage(100, 50),
+    durationMs: 5,
+    stopReason: 'end_turn',
+  };
+}
+
+function makePassthroughToolDef(name: string): ToolDefinition {
+  return {
+    name,
+    description: name,
+    inputSchema: {
+      parse: (x: unknown) => x,
+      safeParse: (x: unknown) => ({ success: true as const, data: x }),
+    } as unknown as ToolDefinition['inputSchema'],
+  };
+}
+
+function makeInput(overrides: Partial<MiniLoopInput>): MiniLoopInput {
+  return {
+    query: 'q',
+    analysis: makeAnalysis(),
+    requestId: 'req-mldsr-1',
+    tools: overrides.tools ?? [
+      makePassthroughToolDef('search_wines'),
+      makePassthroughToolDef('lookup_wine'),
+      makePassthroughToolDef('get_food_pairings'),
+      makePassthroughToolDef('check_drinking_window'),
+      makePassthroughToolDef('compare_wines'),
+      // Intentionally include a name that is NOT in KNOWN_AGENT_TOOL_NAMES so
+      // the unknown-tool default branch fires when the LLM emits it.
+      makePassthroughToolDef('mystery_tool'),
+    ],
+    toolPorts: overrides.toolPorts ?? makeToolPorts(),
+    perStepTimeoutMs: MINI_LOOP_DEFAULT_PER_STEP_TIMEOUT_MS,
+    agentTimeoutMs: MINI_LOOP_DEFAULT_AGENT_TIMEOUT_MS,
+    maxSteps: MINI_LOOP_DEFAULT_MAX_STEPS,
+    maxTotalTokens: MINI_LOOP_DEFAULT_MAX_TOTAL_TOKENS,
+    maxOutputTokens: MINI_LOOP_DEFAULT_MAX_OUTPUT_TOKENS,
+    perToolCap: MINI_LOOP_DEFAULT_PER_TOOL_CAP,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('mini-loop dispatch — lookup_wine uses shared normalizer (H2)', () => {
+  it('rejects an empty query with an invalid-input observation; never calls the search port', async () => {
+    const searchPort = makeSearchPort();
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: '' })]),
+      async () => asTextResult('Done.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const out = await runner.run(makeInput({
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+    }));
+
+    const firstStep = out.steps[0];
+    expect(firstStep?.kind).toBe('tool_use');
+    expect(firstStep?.observations[0]).toMatch(/invalid input/i);
+    // The mini-loop's lookup branch must use the shared normalizer's validation
+    // BEFORE invoking the search port.
+    expect(searchPort.executeMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a placeholder query (the bug the legacy mini-loop dispatcher missed)', async () => {
+    const searchPort = makeSearchPort();
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: '__TODO__' })]),
+      async () => asTextResult('Done.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const out = await runner.run(makeInput({
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+    }));
+
+    expect(out.steps[0]?.observations[0]).toMatch(/invalid input/i);
+    expect(searchPort.executeMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a valid lookup with mode=entity + clamped limit', async () => {
+    const searchPort = makeSearchPort();
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('lookup_wine', { query: 'Sassicaia', limit: 999 })]),
+      async () => asTextResult('Found.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    await runner.run(makeInput({
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+    }));
+
+    const [searchInput] = searchPort.executeMock.mock.calls[0] ?? [];
+    const search = searchInput as { query?: string; mode?: string; limit?: number };
+    expect(search?.query).toBe('Sassicaia');
+    expect(search?.mode).toBe('entity');
+    // Clamp to LOOKUP_WINE_LIMIT_MAX (3) — same clamp as the agent-tools path.
+    expect(search?.limit).toBe(3);
+  });
+});
+
+describe('mini-loop dispatch — get_food_pairings returns the whole result', () => {
+  it('rawResult is the full FoodPairingResult (has .food and .results)', async () => {
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('get_food_pairings', { food: 'steak' })]),
+      async () => asTextResult('Pair with red.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const out = await runner.run(makeInput({}));
+
+    const outcome = out.toolOutcomes.find((o) => o.tool === 'get_food_pairings');
+    expect(outcome).toBeDefined();
+    const raw = outcome?.result as { food?: string; results?: { results?: unknown[] } } | undefined;
+    expect(raw?.food).toBe('steak');
+    // Sibling shape (search_wines / compare_wines): rawResult is the full
+    // response, not an unwrapped sub-field. `.results` is the inner
+    // SearchResponseV1 with its own `.results[]`.
+    expect(raw?.results).toBeDefined();
+    expect(Array.isArray(raw?.results?.results)).toBe(true);
+  });
+});
+
+describe('mini-loop dispatch — unknown tool branch uses SSoT display string', () => {
+  it('default-case observation lists all known tools via KNOWN_AGENT_TOOL_NAMES_DISPLAY', async () => {
+    const llm = makeStubLlm([
+      async () => asToolUseResult([toolUse('mystery_tool', { foo: 'bar' })]),
+      async () => asTextResult('Sorry.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm });
+    const out = await runner.run(makeInput({}));
+
+    const obs = out.steps[0]?.observations[0] ?? '';
+    expect(obs).toContain('mystery_tool');
+    expect(obs).toContain(KNOWN_AGENT_TOOL_NAMES_DISPLAY);
+  });
+});

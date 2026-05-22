@@ -1066,6 +1066,22 @@ export class AgentToolExecutionPhase {
       }
     } catch (toolErr) {
       toolAbortController.abort();
+      // Verification-required recovery: when the contract has flagged this
+      // query as requiring a verify/synthesize step (e.g. comparison_search)
+      // AND no prior tool outcome has succeeded AND the verification latch
+      // is still off, a TIMEOUT on the first tool MUST NOT terminate the
+      // loop. Instead we surface the timeout as a recoverable observation
+      // and queue the verification_required directive so the planner can
+      // re-plan with a narrower / different tool call (e.g. lookup_wine +
+      // check_drinking_window for each side). Bench #15/#30 root cause:
+      // compare_wines timed out → loop went terminal → synthesis emitted a
+      // 1-tool "couldn't compute" answer, scoring tool=33% against the
+      // expected 3-tool plan.
+      const verificationRequirement = queryExecutionContract.requiresVerificationStep;
+      const allowTimeoutRecovery =
+        verificationRequirement !== undefined
+        && !state.verificationStepCompleted
+        && state.toolOutcomes.length === 0;
       const disposition = this.resultPolicy.applySingleExecutionFailure({
         err: toolErr,
         requestId,
@@ -1078,6 +1094,7 @@ export class AgentToolExecutionPhase {
         outputTokens,
         state,
         observationContext: plannerRepairObservation,
+        ...(allowTimeoutRecovery ? { allowTimeoutRecovery: true } : {}),
       });
       if (disposition.kind === 'terminal') {
         return true;
@@ -1085,6 +1102,27 @@ export class AgentToolExecutionPhase {
       log.error({ err: toolErr, requestId, tool: effectiveTool }, 'sequential tool execution failed');
       observation = disposition.observation;
       rawResult = disposition.rawResult;
+      // When the recovery path fired due to a verification-required
+      // timeout, queue the verification_required directive so the next
+      // planner round receives an explicit re-plan instruction. We do NOT
+      // latch `verificationStepCompleted` here — the latch fires only when
+      // the planner has been pushed through the verify gate once (in the
+      // answer-emission path). Latching here would prevent the verify gate
+      // from re-firing if the planner re-attempts an unverified answer.
+      const wasTimeout = (toolErr as { code?: string }).code === 'TIMEOUT';
+      // `allowTimeoutRecovery` aliases `verificationRequirement !== undefined`
+      // (TS narrows the requirement to non-undefined inside this guard), so no
+      // re-check is needed before dereferencing `.constraintCoverage`.
+      if (
+        allowTimeoutRecovery
+        && wasTimeout
+        && state.pendingPlannerDirective === undefined
+      ) {
+        state.pendingPlannerDirective = this.contractPolicy.buildVerificationRequiredDirective(
+          verificationRequirement,
+          verificationRequirement.constraintCoverage,
+        );
+      }
     } finally {
       toolAbortController.abort();
       abortSignal?.removeEventListener('abort', propagateToolAbort);

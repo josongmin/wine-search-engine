@@ -53,3 +53,30 @@ export function clamp(value: number, lo: number, hi: number): number {
   }
   return Math.max(lo, Math.min(hi, value));
 }
+
+/**
+ * Runtime guard for the [0, 1] invariant on probability / normalized score
+ * fields (`normalizedScore`, `relevanceScore`, calibrated confidence). Unlike
+ * {@link clamp01}, this **throws** on violation rather than silently masking
+ * the bug — use at domain construction boundaries where producing an
+ * out-of-range value is itself a contract violation worth surfacing.
+ *
+ * Returns the validated value so it composes inline:
+ *   `const s = assertScore01(rawSignal, 'normalizedScore');`
+ *
+ * Prefer this over `clamp01` at the **entry point** of a value into the
+ * domain (Vespa response mapping, calibrator output assembly, LLM JSON
+ * parse). Use `clamp01` only where a defensive normalization is intentional
+ * (e.g. mixing N independently-clamped signals).
+ */
+export function assertScore01(value: number, fieldName: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(
+      `${fieldName} must be a finite number in [0, 1]; got ${String(value)}. ` +
+        `This indicates an upstream scoring bug (NaN propagation, missing ` +
+        `normalization, or score-space confusion). Fix the source — do not ` +
+        `clamp at the boundary.`,
+    );
+  }
+  return value;
+}

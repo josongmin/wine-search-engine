@@ -38,6 +38,16 @@ export interface DecomposedSearchParentContext {
    * both legs.
    */
   readonly explain?: boolean | undefined;
+  /**
+   * Caller-provided execution mode override for BOTH legs (api_override
+   * semantics — mirrors `search_wines.retrieval_mode`). When set, each
+   * sub-search runs with this exact `options.mode` and the leg's auto-detected
+   * retrieval mode is bypassed. Bench #117 RCA: the planner reasonably emits
+   * `retrieval_mode: 'entity'` for exact-pair compares; without this override
+   * the inner search would run a hybrid/auto pipeline that scores low on the
+   * tight "Opus One 2018 vs Almaviva 2019" intent.
+   */
+  readonly retrievalMode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
 }
 
 export type DecomposedSearchExecutionOptions = RequestExecutionContext;

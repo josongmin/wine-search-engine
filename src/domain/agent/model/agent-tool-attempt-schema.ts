@@ -108,6 +108,12 @@ export const DrinkingWindowAttemptInputSchema = z.object({
 export const CompareWinesAttemptInputSchema = z.object({
   query_a: AttemptStringSchema.optional(),
   query_b: AttemptStringSchema.optional(),
+  // Parity with `search_wines`: the planner reasonably mirrors `retrieval_mode`
+  // across the search-family tools. Previously stripped via the strict-parse
+  // repair pass, which left the planner unable to ever pass the field — see
+  // bench #117 RCA (compare-wines-retrieval-mode-and-two-sided-constraints.regression).
+  // The enum source MUST stay shared with `search_wines` (SSoT — CLAUDE.md #25/#30).
+  retrieval_mode: AttemptStringSchema.optional(),
   exclude_grapes: AttemptStringArraySchema.optional(),
   exclude_regions: AttemptStringArraySchema.optional(),
   exclude_wine_types: AttemptStringArraySchema.optional(),

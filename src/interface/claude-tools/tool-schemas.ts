@@ -1,11 +1,12 @@
 /**
  * Claude Tool Schemas — HTTP/route surface for wine search tools.
  *
- * Defines 4 wine-specific tools in Claude API format:
+ * Defines 5 wine-specific tools in Claude API format:
  * 1. search_wines - Query wine inventory with mode selection
- * 2. get_food_pairings - Find wines that pair with foods
- * 3. check_drinking_window - Predict wine drinkability
- * 4. compare_wines - Compare two wines side-by-side
+ * 2. lookup_wine - High-precision exact lookup of one named wine (1-3 matches)
+ * 3. get_food_pairings - Find wines that pair with foods
+ * 4. check_drinking_window - Predict wine drinkability
+ * 5. compare_wines - Compare two wines side-by-side
  *
  * SSOT chain:
  *   search-tool-contract.ts  → descriptions, enums, bounds, field builders
@@ -102,18 +103,16 @@ import {
 } from '../../domain/shared/constants.js';
 import { coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
 import { MAX_WINE_TOOL_SEARCH_RESULTS } from '../http/constants.js';
+import { KNOWN_AGENT_TOOL_NAMES } from '../../domain/agent/model/agent-tool-attempt-schema.js';
 
 const SEARCH_TOOL_QUERY_MAX_LEN = MAX_QUERY_LENGTH;
 const ENTITY_ID_MAX_LEN = 500;
 const MAX_PRICE_KRW_BOUND = Number.MAX_SAFE_INTEGER;
 
-export const ClaudeToolNameSchema = z.enum([
-  'search_wines',
-  'lookup_wine',
-  'get_food_pairings',
-  'check_drinking_window',
-  'compare_wines',
-]);
+// Derived from the SSoT tool-name list (CLAUDE.md rule 30) so the HTTP wire
+// contract can never silently drift from the agent's known tools — adding or
+// renaming a tool in KNOWN_AGENT_TOOL_NAMES updates this enum automatically.
+export const ClaudeToolNameSchema = z.enum(KNOWN_AGENT_TOOL_NAMES);
 
 const ClaudeToolStringPropertySchema = z.object({
   type: z.literal('string'),
@@ -547,6 +546,11 @@ export const WINE_SEARCH_TOOLS = [
         query_b: {
           type: 'string',
           description: COMPARE_WINES_QUERY_B_DESCRIPTION,
+        },
+        retrieval_mode: {
+          type: 'string',
+          enum: [...SEARCH_TOOL_RETRIEVAL_MODES],
+          description: SEARCH_TOOL_RETRIEVAL_MODE_DESCRIPTION,
         },
         exclude_grapes: {
           type: 'array',

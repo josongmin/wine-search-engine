@@ -56,7 +56,7 @@ const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] as const;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/u;
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/u;
 const PROPERTY_RUNS = 100;
-const EXPECTED_ROUTE_COUNT = 26;
+const EXPECTED_ROUTE_COUNT = 23;
 
 describe('observability.http-contract-catalog — version + invariants', () => {
   it('HTTP_CONTRACT_CATALOG_VERSION matches SemVer 2.0 shape', () => {

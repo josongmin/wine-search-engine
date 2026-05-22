@@ -543,7 +543,10 @@ const PolicyDecisionRecordWireSchema = z.object({
 const CandidateDropChannelSchema = z.object({
   channel: z.enum(RETRIEVAL_CHANNELS),
   raw_score: z.number().finite(),
-  rank: z.number().int(),
+  // rank is the 1-indexed position at drop time; all other rank fields in
+  // this file use .positive(), keep consistent so 0/negative ranks can't
+  // reach the wire from a future bug.
+  rank: z.number().int().positive(),
 }).strict();
 
 const CandidateDropRecordWireSchema = z.object({

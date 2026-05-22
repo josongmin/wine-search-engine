@@ -37,7 +37,17 @@ export class DecomposedSearchUseCase {
 
   private resolveLegExecutionMode(
     leg: ComparisonDecompositionLegs[number],
+    /**
+     * Optional caller override (compare_wines.retrieval_mode → parentContext.retrievalMode).
+     * When provided, it bypasses the leg's auto-detected mode entirely — this is the
+     * api_override path, mirroring `search_wines.retrieval_mode` semantics. See
+     * `DecomposedSearchParentContext.retrievalMode` for the rationale.
+     */
+    overrideMode?: 'auto' | 'entity' | 'hybrid' | 'mixed',
   ): 'auto' | 'entity' | 'hybrid' | 'mixed' {
+    if (overrideMode !== undefined) {
+      return overrideMode;
+    }
     return leg.mode === 'entity' ? 'entity' : leg.retrievalMode;
   }
 
@@ -328,7 +338,7 @@ export class DecomposedSearchUseCase {
           options: {
             explain: parentContext?.explain ?? false,
             clarification: false,
-            mode: this.resolveLegExecutionMode(comparisonLegs[0]),
+            mode: this.resolveLegExecutionMode(comparisonLegs[0], parentContext?.retrievalMode),
           },
         },
         `${requestId}-a`,
@@ -359,7 +369,7 @@ export class DecomposedSearchUseCase {
           options: {
             explain: parentContext?.explain ?? false,
             clarification: false,
-            mode: this.resolveLegExecutionMode(comparisonLegs[1]),
+            mode: this.resolveLegExecutionMode(comparisonLegs[1], parentContext?.retrievalMode),
           },
         },
         `${requestId}-b`,

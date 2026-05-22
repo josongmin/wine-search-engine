@@ -295,9 +295,13 @@ export function buildSearchToolFieldShape(
 export function buildCompareToolFieldShape(
   options: CompareToolFieldShapeOptions,
 ){
+  // `retrieval_mode` is preserved (parity with `search_wines` — see bench #117
+  // RCA: planner LLMs reasonably mirror the field across search-family tools).
+  // `limit` and `want_diversity` are intentionally dropped — compare_wines is a
+  // fixed 2-side tool and diversity-shaping is a recommendation concern, not a
+  // comparison one.
   const {
     limit: _limit,
-    retrieval_mode: _retrievalMode,
     want_diversity: _wantDiversity,
     ...shared
   } = buildSearchToolFieldShape({

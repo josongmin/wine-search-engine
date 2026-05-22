@@ -49,6 +49,20 @@ interface ApplySingleFailureInput extends StepRecordInput {
   readonly tool: string;
   readonly input: Record<string, unknown>;
   readonly observationContext?: string | undefined;
+  /**
+   * When `true`, a TIMEOUT failure is converted into a RECOVERABLE
+   * disposition instead of a terminal one. The step is still recorded
+   * with a `[TIMEOUT]` observation and `timedOut: true` so the planner
+   * can see the failure; `state.timeoutStats.tool` is still incremented;
+   * but `state.terminationReason` is NOT transitioned to `'timeout'`.
+   *
+   * Reserved for queries that the contract has flagged as requiring a
+   * verify/synthesize re-plan (e.g. comparison_search) when no prior
+   * tool outcome has succeeded yet — giving the planner one structured
+   * retry within the remaining step budget. See bench #15 / #30 root
+   * cause analysis in `planner-compare-verify-continuation.regression.test.ts`.
+   */
+  readonly allowTimeoutRecovery?: boolean | undefined;
 }
 
 interface ApplyBatchFailureInput extends StepRecordInput {
@@ -208,17 +222,29 @@ export class AgentToolExecutionResultPolicy {
   }
 
   applySingleExecutionFailure(input: ApplySingleFailureInput): SingleToolFailureDisposition {
-    const { err, state, tool, observationContext } = input;
+    const { err, state, tool, observationContext, allowTimeoutRecovery } = input;
 
     if ((err as TimeoutErrorLike).code === 'TIMEOUT') {
       state.timeoutStats.tool += 1;
+      const timeoutObservation = this.applyObservationContext(
+        `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`,
+        observationContext,
+      );
+      if (allowTimeoutRecovery === true) {
+        // Structural recovery path: the caller (typically the
+        // verification-required compare/lookup contract) requested that
+        // we surface the timeout as a recoverable observation so the
+        // planner can re-plan within the remaining step budget. We do
+        // NOT transition terminationReason and we do NOT record the step
+        // here — the caller's fall-through path will record the step and
+        // toolOutcome using the returned observation, mirroring the
+        // legacy non-timeout `recoverable` branch.
+        return { kind: 'recoverable', observation: timeoutObservation, rawResult: null };
+      }
       state.terminationReason = transitionTerminationReason(state.terminationReason, 'timeout');
       this.recordSingleToolStep({
         ...input,
-        observation: this.applyObservationContext(
-          `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`,
-          observationContext,
-        ),
+        observation: timeoutObservation,
         rawResult: null,
         execError: false,
         timedOut: true,

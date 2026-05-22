@@ -83,6 +83,21 @@ export class AgentContractPolicy {
     if (state.toolOutcomes.length === 0) return false;
     if (state.pendingRefinementRetry) return false;
     if (state.pendingPlannerDirective !== undefined) return false;
+    // Verification-step contract gate: queries the contract has flagged as
+    // requiring a second verify/synthesize step (negation, comparison,
+    // multi_constraint, situation, nested_condition) must NOT bypass the
+    // planner until the verification latch has fired at least once. Without
+    // this gate, a bypass-enabled run could short-circuit straight to
+    // synthesis after the first tool outcome — skipping the directive that
+    // tells the planner to chain `check_drinking_window` for both sides of a
+    // compare, etc. (bench #15 / #30 root cause). Mirrors the
+    // `requiresVerificationStep` guard in `AgentToolExecutionPhase.run`.
+    if (
+      queryExecutionContract.requiresVerificationStep !== undefined
+      && !state.verificationStepCompleted
+    ) {
+      return false;
+    }
     if (queryExecutionContract.requiresGroundedWineSearch === true && state.toolOutcomes.length === 0) {
       return false;
     }

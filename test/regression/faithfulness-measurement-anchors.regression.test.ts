@@ -119,18 +119,21 @@ describe('faithfulness measurement anchors — grounded answers score ~1.0 deter
 });
 
 describe('faithfulness measurement anchors — planted hallucinations score ~0.0', () => {
-  it('fabricated vintage (2099 absent from grounding) → deterministic catches it, falls to LLM', async () => {
+  it('fabricated vintage (2099 absent from grounding) → deterministic catches it, partial coverage acts as floor', async () => {
     const outcome = groundingOutcome([MARGAUX]);
     // Answer asserts a vintage (2099) that is NOT in grounding (grounded: 2015).
+    // Label "Château Margaux" IS grounded → 1 grounded label-citation, 1
+    // ungrounded vintage claim → deterministic coverage = 1/2 = 0.5.
     const answer = 'Château Margaux 2099를 추천드립니다.';
     const r = await judgeFaithfulnessHybrid(makeFakeJudge(0.0), answer, [observationFor(outcome)], [outcome]);
     // Deterministic verifier flagged the fabricated vintage → not 1.0 deterministically.
     expect(r.faithfulnessSource).toBe('hybrid');
-    expect(r.deterministicScore).toBe(0.0);
-    // Hybrid final score is the LLM score (fake returns 0.0 for hallucination).
-    expect(r.score).toBe(0.0);
+    // L3 calibration: partial coverage replaces the old binary 0.0 verdict.
+    expect(r.deterministicScore).toBe(0.5);
+    // Floor = 0.5 (label grounded). LLM=0.0 cannot drag the score below 0.5.
+    expect(r.score).toBe(0.5);
     expect(r.llmScore).toBe(0.0);
-    // Both signals agree (0.0 vs 0.0) → no disagreement flag.
+    // |0.5 - 0.0| = 0.5 — at the boundary; strict `>` keeps it under threshold.
     expect(r.faithDisagreement).toBe(false);
     expect(r.ungroundedClaims).toContain('2099');
   });
@@ -147,13 +150,16 @@ describe('faithfulness measurement anchors — planted hallucinations score ~0.0
 });
 
 describe('faithfulness measurement anchors — disagreement telemetry', () => {
-  it('records faithDisagreement=true when deterministic=0.0 but LLM=1.0', async () => {
+  it('records faithDisagreement=true when deterministic vs LLM differ by > 0.5 (no labels grounded)', async () => {
+    // To exercise the disagreement path we need a det/llm pair that is > 0.5
+    // apart. With partial-coverage semantics, an answer that grounds NO labels
+    // (fully fabricated entity) yields det=0.0. A lenient LLM returning 1.0
+    // produces |0.0 - 1.0| = 1.0 > 0.5 → disagreement.
     const outcome = groundingOutcome([MARGAUX]);
-    // Fabricated vintage 2099 → deterministic 0.0. A LENIENT (over-permissive)
-    // fake LLM returns 1.0 — the inverse of the false-negative bug, exercising
-    // the disagreement-detection path symmetrically.
     const lenientJudge = makeFakeJudge(1.0, 1.0); // always 1.0
-    const answer = 'Château Margaux 2099를 추천드립니다.';
+    // "Opus One 2099" — both name AND vintage absent from grounding (only
+    // Château Margaux 2015 is grounded). Zero label citations grounded → det=0.0.
+    const answer = 'Opus One 2099를 추천드립니다.';
     const r = await judgeFaithfulnessHybrid(lenientJudge, answer, [observationFor(outcome)], [outcome]);
     expect(r.deterministicScore).toBe(0.0);
     expect(r.llmScore).toBe(1.0);
