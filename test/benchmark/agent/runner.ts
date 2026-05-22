@@ -1957,6 +1957,12 @@ function buildReport(
     const present = scores.filter((s): s is number => s !== null);
     return present.length > 0 ? present.reduce((sum, v) => sum + v, 0) / present.length : null;
   };
+  // SOTA++ L3 reliability fix: real `meanHardConstraints` aggregate (was hardcoded `0` with a TODO).
+  // Per-scenario hard constraint count comes from the scenario execution's tool outcomes.
+  const hardConstraintCounts: Array<number | null> = executedForAggregate.map((r) => {
+    const v = (r.execution as { hardConstraintCount?: number | null } | undefined)?.hardConstraintCount;
+    return typeof v === 'number' ? v : null;
+  });
   const scrOverallScores = executedForAggregate.map((r) => r.scores.semanticConstraintRecall);
   const scrHardScores = executedForAggregate.map((r) => r.scores.scrHard);
   const scrSoftScores = executedForAggregate.map((r) => r.scores.scrSoft);
@@ -2102,6 +2108,7 @@ function buildReport(
       claimProvenanceCoverage: claimProvenanceMean,
       claimHardFailCount,
       claimEvaluatedCount: claimEvaluated.length,
+      meanHardConstraints: nullableMean(hardConstraintCounts),
       scrOverall: nullableMean(scrOverallScores),
       scrHard: nullableMean(scrHardScores),
       scrSoft: nullableMean(scrSoftScores),
@@ -2601,7 +2608,7 @@ async function main(): Promise<void> {
       latencyP50Ms: s.latencyMs.p50,
       latencyP95Ms: s.latencyMs.p95,
       tier6SoleExtractionRate: null, // TODO: aggregate from query logs
-      meanHardConstraints: 0, // TODO: aggregate from query logs
+      meanHardConstraints: s.meanHardConstraints ?? 0,
       scrOverall: s.scrOverall ?? null,
       scrHard: s.scrHard ?? null,
       scrSoft: s.scrSoft ?? null,
