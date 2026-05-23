@@ -272,22 +272,33 @@ export class ExecutionRunner {
       throw new Error('foodPairingUseCase port not wired');
     }
     const foodPairingUseCase = this.deps.foodPairingUseCase;
-    const pairing = await this.runWithStepTimeout(
-      (signal) => foodPairingUseCase.execute(pairingInput, `${ctx.requestId}-pair`, { abortSignal: signal }),
-      ctx,
-      perStepTimeoutMs,
-      'food-pairing',
-    );
-    // Refresh abort check between steps — if the caller aborted while
-    // pairing was in flight we MUST NOT issue the follow-up search.
-    throwIfAborted(ctx.abortSignal, 'Execution runner aborted before chained search');
+    // F2: pair AND search are INDEPENDENT — both inputs are pre-baked at plan
+    // time, the search does NOT consume the pairing outcome. Running them
+    // sequentially (pre-F2) doubled wall-clock for the pair-then-search
+    // plan kind. Promise.all with shared abort matches the
+    // `runParallelSearch` shape.
+    //
+    // Abort propagation: the shared `ctx.abortSignal` already cascades into
+    // each `runWithStepTimeout` invocation's per-step controller, so caller
+    // cancellation aborts BOTH legs. We retain a pre-flight abort check so
+    // a signal that arrived between dispatchPlan and here short-circuits
+    // before issuing either call.
+    throwIfAborted(ctx.abortSignal, 'Execution runner aborted before pair+search fan-out');
 
-    const search = await this.runWithStepTimeout(
-      (signal) => this.deps.searchUseCase.execute(searchInput, `${ctx.requestId}-pair-search`, { abortSignal: signal }),
-      ctx,
-      perStepTimeoutMs,
-      'pair-then-search',
-    );
+    const [pairing, search] = await Promise.all([
+      this.runWithStepTimeout(
+        (signal) => foodPairingUseCase.execute(pairingInput, `${ctx.requestId}-pair`, { abortSignal: signal }),
+        ctx,
+        perStepTimeoutMs,
+        'food-pairing',
+      ),
+      this.runWithStepTimeout(
+        (signal) => this.deps.searchUseCase.execute(searchInput, `${ctx.requestId}-pair-search`, { abortSignal: signal }),
+        ctx,
+        perStepTimeoutMs,
+        'pair-then-search',
+      ),
+    ]);
     bootstrapLogger.info(logCtx, '[ExecutionRunner] food-pairing-then-search done');
     return {
       kind: 'food-pairing-result',

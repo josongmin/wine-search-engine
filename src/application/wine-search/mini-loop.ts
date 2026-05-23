@@ -334,23 +334,32 @@ export class MiniLoopRunner {
           continue;
         }
 
-        // 7b. Dispatch each call. Tool outcomes accumulate into the step.
+        // 7b. Dispatch each call IN PARALLEL. Each dispatch owns its own
+        // AbortController (chained to the shared abortSignal) and produces
+        // an independent ToolOutcome — no shared mutable state between
+        // dispatches. The shape mirrors ExecutionRunner.runParallelSearch.
+        // Stepping serially here (the pre-F1-fix loop) tripled wall-clock
+        // on multi-tool LLM turns (e.g. compare + 2× drinking_window).
+        // Ordering of observations/toolOutcomes is preserved by index so
+        // the chat-history append step downstream remains deterministic.
+        const dispatchResults = await Promise.all(
+          stepResult.toolCalls.map((call, i) =>
+            this.dispatchTool(
+              call,
+              input.toolPorts,
+              input.requestId,
+              state.steps.length,
+              i,
+              input.perStepTimeoutMs,
+              input.abortSignal,
+            ),
+          ),
+        );
         const observations: string[] = [];
         const toolOutcomes: ToolOutcome[] = [];
-        for (let i = 0; i < stepResult.toolCalls.length; i++) {
-          const call = stepResult.toolCalls[i];
-          if (call === undefined) continue;
-          const dispatched = await this.dispatchTool(
-            call,
-            input.toolPorts,
-            input.requestId,
-            state.steps.length,
-            i,
-            input.perStepTimeoutMs,
-            input.abortSignal,
-          );
-          observations.push(dispatched.observation);
-          toolOutcomes.push(dispatched.outcome);
+        for (const r of dispatchResults) {
+          observations.push(r.observation);
+          toolOutcomes.push(r.outcome);
         }
         // Persist into rolling state.
         for (const outcome of toolOutcomes) state.toolOutcomes.push(outcome);
@@ -1020,23 +1029,33 @@ function trimHistoryInPlace(history: ChatMessage[]): void {
   // Drop the oldest non-initial user message when total chars overflow.
   // First message (the user's original query) is preserved as the loop's
   // anchor.
+  //
+  // F6: was O(N²) — every `tail.shift()` was paired with a full re-sum of
+  // the remaining tail. We now maintain `total` incrementally and use a
+  // head-index pointer instead of repeated `shift()` (which is itself O(N)
+  // on arrays). Final write-back uses one slice + array assignment so the
+  // observable behaviour is unchanged.
   let total = 0;
   for (const m of history) total += m.content.length;
   if (total <= MINI_LOOP_MAX_HISTORY_CHARS) return;
 
-  // Keep the first message; trim from the front of the rest.
   const head = history[0];
   if (head === undefined) return;
-  const tail = history.slice(1);
-  while (tail.length > 0) {
-    total = head.content.length;
-    for (const m of tail) total += m.content.length;
-    if (total <= MINI_LOOP_MAX_HISTORY_CHARS) break;
-    tail.shift();
+
+  // Walk from index 1 onward; advance the cut point until the budget fits.
+  let cutFrom = 1;
+  while (cutFrom < history.length && total > MINI_LOOP_MAX_HISTORY_CHARS) {
+    const m = history[cutFrom];
+    if (m === undefined) break;
+    total -= m.content.length;
+    cutFrom += 1;
   }
+
+  // Materialise the kept range once.
+  const kept = cutFrom < history.length ? history.slice(cutFrom) : [];
   history.length = 0;
   history.push(head);
-  for (const m of tail) history.push(m);
+  for (const m of kept) history.push(m);
   if (history.length === 1) {
     history.push({ role: 'user', content: MINI_LOOP_HISTORY_TRUNCATION_TAIL });
   }

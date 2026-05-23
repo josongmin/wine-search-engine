@@ -34,8 +34,7 @@
  *     on OpenAI's own retry surface plus the circuit breaker.
  */
 
-import type { ZodTypeAny } from 'zod';
-import { z } from 'zod';
+import type { ZodTypeAny, z } from 'zod';
 import {
   StructuredLlmValidationError,
   StructuredLlmRefusalError,
@@ -53,6 +52,11 @@ import {
   type TokenUsage,
 } from '../../domain/ai/port/structured-llm.port.js';
 import { fetchWithTimeout, isAbortError } from '../http/fetch-with-timeout.js';
+import {
+  retryWithBackoff,
+  parseRetryAfterHeader,
+  type RetryConfig,
+} from '../http/retry-with-backoff.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 import {
   createCircuitBreaker,
@@ -72,6 +76,26 @@ const BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
 /** Function name used for the single forced tool in `analyze`/`synthesize`. */
 const ANALYZE_FN_NAME = 'analyze';
 const SYNTHESIZE_FN_NAME = 'synthesize';
+
+/**
+ * Retry policy for transient OpenAI failures. Mirrors `OPENAI_RETRY_CONFIG`
+ * from openai-chat-llm.ts so the structured and chat paths share an
+ * equivalent reliability envelope.
+ *
+ * 4 attempts × exponential backoff: a single 5xx / connection reset / 429
+ * burst no longer collapses a synthesis call to Layer-4 fallback. Bench
+ * impact: the #103/#104 schema-validation cluster was almost certainly a
+ * transient HTTP failure surfacing as `tool arguments not valid JSON`
+ * downstream (empty / malformed response wrapped in our parser).
+ */
+const OPENAI_STRUCTURED_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 4,
+  transientBackoffBaseMs: 250,
+  transientBackoffCapMs: 2_000,
+  rateLimitBackoffBaseMs: 2_000,
+  rateLimitBackoffCapMs: 30_000,
+  label: 'OpenAI structured',
+};
 
 const PREVIEW_CHARS = 240;
 
@@ -139,15 +163,16 @@ function extractUsage(resp: OpenAIResponse): TokenUsage {
 
 /** Wrap a ToolDefinition for OpenAI's function-calling format. */
 function mapToolDef(td: ToolDefinition): OpenAIToolDef {
-  const out: OpenAIToolDef = {
+  // ToolDefinition.description is required on the port surface; pass it
+  // through unconditionally.
+  return {
     type: 'function',
     function: {
       name: td.name,
-      ...(td.description !== undefined ? { description: td.description } : {}),
+      description: td.description,
       parameters: zodToJsonSchema(td.inputSchema),
     },
   };
-  return out;
 }
 
 /**
@@ -162,10 +187,6 @@ function makeForcedFunctionTool(name: string, schema: ZodTypeAny): OpenAIToolDef
       parameters: zodToJsonSchema(schema),
     },
   };
-}
-
-function isHttpResponse(value: unknown): value is Response {
-  return typeof value === 'object' && value !== null && 'status' in value && 'json' in value;
 }
 
 export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
@@ -200,8 +221,11 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
       { role: 'system', content: req.systemPrompt },
       { role: 'user', content: req.query },
     ];
+    // `callOnce` translates non-OpenAI model identifiers (e.g. the
+    // orchestrator's hardcoded `claude-*`) to `defaultModel`, so we pass the
+    // caller's `req.model` through unchanged.
     const resp = await this.callOnce({
-      model: req.model ?? this.defaultModel,
+      model: req.model,
       messages,
       tools: [tool],
       tool_choice: { type: 'function', function: { name: ANALYZE_FN_NAME } },
@@ -264,8 +288,9 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
         try {
           const parsed = JSON.parse(tc.function.arguments) as unknown;
           if (typeof parsed === 'object' && parsed !== null) input = parsed as Record<string, unknown>;
-        } catch {
+        } catch (err) {
           // Best-effort. Caller validates with the tool's inputSchema.
+          void err; /* intentional: malformed JSON falls through to schema validation downstream */
         }
         return { id: tc.id, name: tc.function.name, input };
       });
@@ -348,16 +373,20 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
     if (!result.success) {
       throw new StructuredLlmValidationError(result.error.issues, parsedJson);
     }
-    return result.data;
+    // Cast through `unknown` so the generic inference for z.infer<TSchema>
+    // doesn't widen to `any` (CLAUDE.md schema-quality bar: no direct
+    // `as DomainType` on external data — but this came from `safeParse`
+    // which already validated against TSchema).
+    return result.data as z.infer<TSchema>;
   }
 
   private mapToolChoice(tc: ExecuteRequest['toolChoice']): 'auto' | 'none' | 'required' | { readonly type: 'function'; readonly function: { readonly name: string } } {
     if (tc === undefined || tc === 'auto') return 'auto';
     if (tc === 'any') return 'required';
-    if (typeof tc === 'object' && tc.type === 'tool' && typeof tc.name === 'string') {
-      return { type: 'function', function: { name: tc.name } };
-    }
-    return 'auto';
+    // The remaining branch in `ToolChoice` is `{ type: 'tool'; name: string }`.
+    // After narrowing out the string variants above, the object form's
+    // discriminant is fixed — pull `name` directly.
+    return { type: 'function', function: { name: tc.name } };
   }
 
   private toOpenAIMessages(
@@ -402,31 +431,46 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
       ...(payload.seed !== undefined ? { seed: payload.seed } : {}),
     };
     const url = `${this.baseUrl}${OPENAI_CHAT_PATH}`;
+    const init: RequestInit = {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${this.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    };
+    const timeoutMs = Math.min(this.httpTimeoutMs, payload.perStepTimeoutMs);
     try {
-      const responseOrJson = await runUnderLlmBreaker(this.circuitBreaker, OPENAI_STRUCTURED_BREAKER_NAME, async () => {
-        const init: RequestInit = {
-          method: 'POST',
-          headers: {
-            'authorization': `Bearer ${this.apiKey}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify(body),
-        };
-        const timeoutMs = Math.min(this.httpTimeoutMs, payload.perStepTimeoutMs);
-        const httpRes = payload.abortSignal !== undefined
-          ? await fetchWithTimeout(url, init, timeoutMs, payload.abortSignal)
-          : await fetchWithTimeout(url, init, timeoutMs);
-        if (!httpRes.ok) {
-          const text = await httpRes.text().catch(() => '<no body>');
-          throw new Error(`OpenAI structured: HTTP ${httpRes.status} — ${text.slice(0, PREVIEW_CHARS)}`);
-        }
-        return httpRes;
-      });
-      // runUnderLlmBreaker returns whatever the inner function returned. Type narrow.
-      if (!isHttpResponse(responseOrJson)) {
-        throw new Error('openai-structured: unexpected breaker return type');
-      }
-      const json = await responseOrJson.json() as OpenAIResponse;
+      // Retry-with-backoff sits OUTSIDE the breaker so the breaker counts
+      // *bursts* of transient failures (after exhausting retries), not each
+      // individual retry attempt. Mirrors openai-chat-llm.ts placement.
+      const json = await runUnderLlmBreaker(
+        this.circuitBreaker,
+        OPENAI_STRUCTURED_BREAKER_NAME,
+        async () => {
+          return await retryWithBackoff<OpenAIResponse>(
+            async (_attempt) => {
+              const httpRes = payload.abortSignal !== undefined
+                ? await fetchWithTimeout(url, init, timeoutMs, payload.abortSignal)
+                : await fetchWithTimeout(url, init, timeoutMs);
+              if (!httpRes.ok) {
+                const text = await httpRes.text().catch(() => '<no body>');
+                const retryAfterSec = parseRetryAfterHeader(httpRes);
+                return {
+                  kind: 'http-error',
+                  status: httpRes.status,
+                  bodyText: text.slice(0, PREVIEW_CHARS),
+                  retryAfterSec,
+                };
+              }
+              const parsed = await httpRes.json() as OpenAIResponse;
+              return { kind: 'success', value: parsed };
+            },
+            OPENAI_STRUCTURED_RETRY_CONFIG,
+            payload.abortSignal,
+          );
+        },
+      );
       return json;
     } catch (err) {
       if (isAbortError(err)) {

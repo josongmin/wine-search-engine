@@ -191,6 +191,27 @@ const NATIVE_ENUM_MAX_VALUES = 256;
 
 export type JsonSchema = Record<string, unknown>;
 
+/**
+ * Module-scope WeakMap cache for `zodToJsonSchema`.
+ *
+ * Same Zod schema instance → same JsonSchema output, deterministically.
+ * Production tools / synthesis schemas are constructed ONCE at module init
+ * and reused across every LLM call (mini-loop turn × N tools, every synth
+ * request, every analyze). Without the cache the converter ran on every
+ * invocation; with it, the cost is amortised to one conversion per schema
+ * identity for the process lifetime.
+ *
+ * Keyed by `ZodTypeAny` instance, so a re-built schema (different identity)
+ * triggers a re-conversion — desired, because the JsonSchema would change.
+ *
+ * Only the top-level entry-point caches; recursive descents into nested
+ * schemas (`type: ZodArray.element`, `ZodObject.shape[*]`, etc.) still
+ * traverse on the cache miss to build the full schema, but those recursive
+ * results are anchored to the outer schema's cache entry via the returned
+ * object.
+ */
+const ZOD_TO_JSON_SCHEMA_CACHE = new WeakMap<ZodTypeAny, JsonSchema>();
+
 interface ZodStringCheck {
   readonly kind: string;
   readonly value?: number;
@@ -204,6 +225,20 @@ interface ZodNumberCheck {
 }
 
 export function zodToJsonSchema(schema: ZodTypeAny, depth = 0): JsonSchema {
+  // Top-level cache: avoid re-converting the same module-scope schemas on
+  // every LLM call. We cache only at the top entry (depth === 0); recursive
+  // descents always traverse so a nested re-wrap doesn't poison the cache.
+  if (depth === 0) {
+    const cached = ZOD_TO_JSON_SCHEMA_CACHE.get(schema);
+    if (cached !== undefined) return cached;
+    const computed = zodToJsonSchemaUncached(schema, 0);
+    ZOD_TO_JSON_SCHEMA_CACHE.set(schema, computed);
+    return computed;
+  }
+  return zodToJsonSchemaUncached(schema, depth);
+}
+
+function zodToJsonSchemaUncached(schema: ZodTypeAny, depth: number): JsonSchema {
   if (depth > ZOD_TO_JSON_SCHEMA_MAX_DEPTH) {
     // Bail out rather than recurse forever on a self-referential lazy schema.
     return {};

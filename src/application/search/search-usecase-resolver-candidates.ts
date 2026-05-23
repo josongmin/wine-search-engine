@@ -504,15 +504,48 @@ export async function buildResolverCandidatesFromGenerator(
     // batch returned successfully but some documents were absent.
     const unresolvedIds = [...allEntityIds].filter((id) => !docMap.has(id));
     if (unresolvedIds.length > 0) {
-      throw new DomainError(
-        'INTERNAL_INCONSISTENCY',
-        [
-          'partial_resolution_forbidden: entity candidate hydration incomplete',
-          `requested=${allEntityIds.size}`,
-          `resolved=${docMap.size}`,
-          `document_missing=[${describeEntityIds(unresolvedIds)}]`,
-        ].join(' | '),
-      );
+      // F8: Opt-in graceful mode for environments with known alias-overlay
+      // drift (PG alias table out of sync with Vespa index — see
+      // [[project-pte-bench-runner-and-openai-adapter]]). When
+      // `WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=1`, we LOG the unresolved set
+      // and proceed with the resolved subset instead of throwing. This
+      // mirrors the legacy ReAct agent's step-level tolerance — production
+      // default remains strict-reject because silent partial results are a
+      // correctness risk on a healthy snapshot.
+      //
+      // The flag is intentionally module-local + truthy-only (no Zod parse)
+      // so it cannot accidentally enable in production via a typo: the
+      // operator must set the exact `=1` string, and the audit log records
+      // the deviation on every fire.
+      const allowPartial = process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'] === '1';
+      if (allowPartial) {
+        // Operator acknowledgement is required AND logged — this is not a
+        // silent degradation. Downstream candidate construction will simply
+        // omit unresolved IDs (the existing loop already guards with
+        // `doc == null → continue`).
+        // eslint-disable-next-line no-console
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            event: 'partial_resolution_graceful',
+            requested: allEntityIds.size,
+            resolved: docMap.size,
+            missing: unresolvedIds.length,
+            sample: describeEntityIds(unresolvedIds.slice(0, 3)),
+            note: 'WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=1 — alias overlay drift tolerated, downstream will see partial results',
+          }),
+        );
+      } else {
+        throw new DomainError(
+          'INTERNAL_INCONSISTENCY',
+          [
+            'partial_resolution_forbidden: entity candidate hydration incomplete',
+            `requested=${allEntityIds.size}`,
+            `resolved=${docMap.size}`,
+            `document_missing=[${describeEntityIds(unresolvedIds)}]`,
+          ].join(' | '),
+        );
+      }
     }
   }
 
