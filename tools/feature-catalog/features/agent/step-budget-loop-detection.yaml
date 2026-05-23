@@ -14,7 +14,7 @@ maturity_rationale: |
   documented. 22K LOC test로 모든 edge case + 적대적 입력 (zip-bomb, padding) 커버.
   Immutable / replay-stable / atomic-commit pattern.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-10
 last_reviewed: 2026-05-21
 owner: core

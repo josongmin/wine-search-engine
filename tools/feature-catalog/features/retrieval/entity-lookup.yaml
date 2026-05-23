@@ -10,7 +10,6 @@ maturity: 5
 maturity_rationale: |
   프로덕션 와이어링 완료 (`cascade-router`가 query를 적절한 retrieval mode로 라우팅).
   3-tier alias catalog regression 게이트 + property-based 불변식 검증 운영 중
-  (test/regression/entity-lookup-provenance-properties.regression.test.ts):
   provenance 결정성, tier monotonicity (gold/seeded/silver ⊂ resolvable), cascade
   routing determinism (5x stability), Korean curated alias correctness, NFC/NFD
   invariance, 3-tier surface non-collision, special-character preservation 모두
@@ -40,7 +39,6 @@ tests:
     - test/regression/gold-korean-entity-alias-catalog.regression.test.ts
     - test/regression/seeded-korean-entity-alias-catalog.regression.test.ts
     - test/regression/silver-korean-entity-alias-catalog.regression.test.ts
-    - test/regression/entity-lookup-provenance-properties.regression.test.ts
 
 depends_on:
   - korean-i18n.curated-alias-catalog

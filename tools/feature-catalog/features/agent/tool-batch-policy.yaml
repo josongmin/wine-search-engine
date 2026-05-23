@@ -19,7 +19,7 @@ maturity_rationale: |
        unknown tool name "toString" 등이 Object.prototype 멤버로 새 들어가
        canRunWith.includes() crash → Object.hasOwn 가드 추가.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-11
 last_reviewed: 2026-05-21
 owner: core
@@ -28,13 +28,9 @@ surfaces:
   - "Internal (used by tool-execution-phase)"
 
 key_files:
-  - src/application/agent/tool-batch-policy.ts
 
 tests:
   regression:
-    - test/regression/agent-parallel-tools.regression.test.ts
-    - test/regression/e7-agent-contract-executor.regression.test.ts
-    - test/regression/tool-batch-policy-properties.regression.test.ts
 
 depends_on: []
 

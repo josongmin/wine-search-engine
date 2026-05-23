@@ -21,7 +21,6 @@ surfaces:
   - "Agent tool: check_drinking_window"
 
 key_files:
-  - src/application/agent/agent-tools.ts
   - src/application/drinking-window/drinking-window.usecase.ts
 
 tests:

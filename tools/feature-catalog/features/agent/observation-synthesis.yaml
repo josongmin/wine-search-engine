@@ -17,7 +17,7 @@ maturity_rationale: |
   를 다루는 regression suite 가 게이트로 추가됐다. 단위 11개 + regression 9개 합쳐
   20/20 통과. 남은 한계: hallucination metric (answer↔frame 일치도) 부재.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-09
 last_reviewed: 2026-05-21
 owner: core
@@ -26,18 +26,11 @@ surfaces:
   - "Internal (post-loop in react-orchestrator)"
 
 key_files:
-  - src/application/agent/agent-observation-synthesis-runner.ts
-  - src/application/agent/agent-grounding-observation-policy.ts
 
 tests:
   unit:
-    - test/unit/application/agent/agent-grounding-observation-policy.test.ts
-    - test/unit/application/agent/agent-observation-synthesis-runner.test.ts
   regression:
-    - test/regression/observation-synthesis-properties.regression.test.ts
-    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
     - test/regression/agent-result-evidence-frames-contract.regression.test.ts
-    - test/regression/observation-synthesis-grounding-fence.regression.test.ts
 
 depends_on:
   - infra.chat-llm-port

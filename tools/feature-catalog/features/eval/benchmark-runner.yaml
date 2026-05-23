@@ -38,7 +38,6 @@ surfaces:
   - "CLI: pnpm bench:agent / benchmark:*"
 
 key_files:
-  - test/benchmark/agent/runner.ts
   - test/benchmark/agent/scenario.ts
   - test/benchmark/agent/constraint-metrics.ts
   - test/benchmark/agent/ranking-metrics.ts

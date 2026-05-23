@@ -34,8 +34,6 @@ key_files:
 
 tests:
   regression:
-    - test/regression/agent-parallel-tools.regression.test.ts
-    - test/regression/agent-tools-inner-surface-contract.regression.test.ts
     - test/regression/comparison-retrieval-properties.regression.test.ts
 
 depends_on:

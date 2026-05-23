@@ -16,7 +16,7 @@ maturity_rationale: |
   wine_type/retrieval_mode enum 거부, oversized/empty query 거부, 한글 query NFC 보존.
   결정적 입력 contract (SearchInputSchema)가 LLM과 무관하게 fuzz로 검증되어 SOTA++ 도달.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-09
 last_reviewed: 2026-05-21
 owner: core
@@ -25,16 +25,10 @@ surfaces:
   - "Agent tool: search_wines"
 
 key_files:
-  - src/application/agent/agent-tools.ts
   - src/domain/agent/model/agent-tool-attempt-schema.ts
 
 tests:
   regression:
-    - test/regression/agent-tools-inner-surface-contract.regression.test.ts
-    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
-    - test/regression/agent-parallel-tools.regression.test.ts
-    - test/regression/agent-prompt-contract.regression.test.ts
-    - test/regression/search-wines-tool-contract-properties.regression.test.ts
 
 depends_on:
   - retrieval.hybrid-search

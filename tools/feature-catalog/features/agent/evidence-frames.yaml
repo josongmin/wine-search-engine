@@ -16,7 +16,7 @@ maturity_rationale: |
   token (Hangul/CJK 포함) 이 frame 의 observationSnapshot/structuredOutput 에 닫혀
   있는지 기계적으로 검증. ADR-009 bench/audit consumer 가 동일 shape 에 의존.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-11
 last_reviewed: 2026-05-21
 owner: core
@@ -32,7 +32,6 @@ key_files:
 
 tests:
   regression:
-    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
     - test/regression/agent-result-evidence-frames-contract.regression.test.ts
     - test/regression/build-tool-call-evidence-frame.regression.test.ts
     - test/regression/tool-call-evidence-frame-schema.regression.test.ts

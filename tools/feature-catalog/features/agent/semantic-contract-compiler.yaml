@@ -21,7 +21,7 @@ maturity_rationale: |
   케이스 (recommendation + food-pairing obligation) merge-through 검증, strict()
   unknown-key rejection, 빈/공백 query는 admission 단계에서 short-circuit.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-10
 last_reviewed: 2026-05-21
 owner: core
@@ -30,14 +30,10 @@ surfaces:
   - "Internal (pre-loop in react-orchestrator)"
 
 key_files:
-  - src/application/agent/agent-semantic-contract.ts
   - src/application/agent/agent-query-execution-contract.ts
 
 tests:
   regression:
-    - test/regression/agent-semantic-contract-token-accounting.regression.test.ts
-    - test/regression/agent-semantic-contract-validation-fence.regression.test.ts
-    - test/regression/agent-semantic-contract-properties.regression.test.ts
 
 depends_on:
   - infra.chat-llm-port

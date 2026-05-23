@@ -21,7 +21,7 @@ maturity_rationale: |
   남은 maturity 5 과제: adaptive timeout (현재 static), learned relaxation order,
   OOD confidence calibration — product/learning gap이지 code-hardening gap 아님.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-10
 last_reviewed: 2026-05-21
 owner: core
@@ -30,17 +30,11 @@ surfaces:
   - "Internal (terminal stage in react-orchestrator)"
 
 key_files:
-  - src/application/agent/agent-answer-recovery-policy.ts
   - src/application/agent/agent-situational-query-policy.ts
-  - src/application/agent/agent-grounding-observation-policy.ts
 
 tests:
   unit:
-    - test/unit/application/agent/agent-answer-recovery-policy.test.ts
-    - test/unit/application/agent/agent-grounding-observation-policy.test.ts
   regression:
-    - test/regression/empty-answer-fallback.regression.test.ts
-    - test/regression/answer-recovery-policy-properties.regression.test.ts
 
 depends_on:
   - tools.search-wines

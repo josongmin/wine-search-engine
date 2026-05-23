@@ -28,14 +28,11 @@ surfaces:
   - "Agent tool: compare_wines"
 
 key_files:
-  - src/application/agent/agent-tools.ts
   - src/application/search/compare-tool-shared-constraints.ts
   - src/domain/response/service/comparison-contrast.ts
 
 tests:
   regression:
-    - test/regression/agent-parallel-tools.regression.test.ts
-    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
     - test/regression/compare-wines-properties.regression.test.ts
 
 depends_on:

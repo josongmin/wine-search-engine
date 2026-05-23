@@ -22,7 +22,7 @@ maturity_rationale: |
   Anthropic native tool_use blocks로 마이그레이션 (technical debt, 기능 결함 아님 —
   parser 계약은 property로 완전히 고정됨).
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-09
 last_reviewed: 2026-05-21
 owner: core
@@ -31,18 +31,10 @@ surfaces:
   - "Internal (called from react-orchestrator)"
 
 key_files:
-  - src/application/agent/agent-planner-phase-runner.ts
-  - src/application/agent/agent-llm-output.ts
-  - src/application/agent/agent-prompt.ts
-  - src/application/agent/agent-planner-phase-result-policy.ts
 
 tests:
   unit:
-    - test/unit/application/agent/agent-planner-phase-result-policy.test.ts
   regression:
-    - test/regression/agent-prompt-contract.regression.test.ts
-    - test/regression/agent-runner-profile.regression.test.ts
-    - test/regression/react-planner-properties.regression.test.ts
 
 depends_on:
   - agent.semantic-contract-compiler

@@ -13,7 +13,7 @@ maturity_rationale: |
   방지 / termination state machine 모두 회귀 게이트. 그러나 14-단 sanitize 파이프라인 +
   40-site 분산 FSM 구조로 신규 변경 surface 크고 (post-audit) PtE 마이그레이션 권장 상태.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-09
 last_reviewed: 2026-05-21
 owner: core
@@ -22,21 +22,12 @@ surfaces:
   - "HTTP: POST /v1/agent"
 
 key_files:
-  - src/application/agent/agent-orchestrator.ts
-  - src/application/agent/agent-run-loop.ts
-  - src/application/agent/agent-run-loop-termination-policy.ts
 
 tests:
   unit:
-    - test/unit/application/agent/agent-orchestrator.test.ts
-    - test/unit/application/agent/agent-run-loop.test.ts
-    - test/unit/application/agent/agent-run-loop-termination-policy.test.ts
   regression:
     - test/regression/agent-termination-state-machine.regression.test.ts
-    - test/regression/agent-semantic-contract-token-accounting.regression.test.ts
-    - test/regression/agent-refinement-retry-no-zombie-loop.regression.test.ts
   e2e:
-    - test/e2e/agent-api.test.ts
 
 depends_on:
   - agent.react-planner

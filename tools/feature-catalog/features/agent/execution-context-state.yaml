@@ -22,7 +22,7 @@ maturity_rationale: |
   Korean query verbatim preservation, deterministic budget exhaustion, concurrent admission
   isolation. SOTA++ — property-based state-machine invariants over arbitrary event sequences.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-09
 last_reviewed: 2026-05-21
 owner: core
@@ -31,16 +31,12 @@ surfaces:
   - "Internal"
 
 key_files:
-  - src/application/agent/agent-execution-context.ts
-  - src/application/agent/agent-execution-state.ts
-  - src/application/agent/agent-run-loop-termination-policy.ts
   - src/domain/agent/service/termination-state-machine.ts
 
 tests:
   regression:
     - test/regression/agent-termination-state-machine.regression.test.ts
     - test/regression/agent-termination-state-machine-precedence.regression.test.ts
-    - test/regression/agent-execution-context-properties.regression.test.ts
 
 depends_on:
   - security.query-sanitizer

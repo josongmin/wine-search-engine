@@ -21,7 +21,7 @@ maturity_rationale: |
   normalize)와 drinkability follow-up explicit handler 추출이 끝나야
   SOTA++ 완전체.
 
-status: active
+status: deprecated  # Cutover 3.0.0 (2026-05-23): replaced by wine-search PtE
 since: 2025-09
 last_reviewed: 2026-05-21
 owner: core
@@ -30,20 +30,11 @@ surfaces:
   - "Internal (called from react-orchestrator)"
 
 key_files:
-  - src/application/agent/agent-tool-execution-phase.ts
-  - src/application/agent/agent-tool-execution-policy.ts
-  - src/application/agent/agent-tool-execution-result-policy.ts
   - src/application/agent/agent-tool-execution-support.ts
-  - src/application/agent/tool-batch-policy.ts
 
 tests:
   unit:
-    - test/unit/application/agent/agent-tool-execution-phase.test.ts
   regression:
-    - test/regression/agent-parallel-tools.regression.test.ts
-    - test/regression/agent-tools-evidence-frame-emission.regression.test.ts
-    - test/regression/agent-tools-inner-surface-contract.regression.test.ts
-    - test/regression/tool-execution-phase-properties.regression.test.ts
 
 depends_on:
   - agent.tool-batch-policy

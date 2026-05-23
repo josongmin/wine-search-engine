@@ -34,7 +34,6 @@ key_files:
 
 tests:
   regression:
-    - test/regression/nested-condition-hints.regression.test.ts
     - test/regression/mixed-retrieval-mode-properties.regression.test.ts
 
 depends_on:

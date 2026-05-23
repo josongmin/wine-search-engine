@@ -27,8 +27,6 @@ surfaces:
 key_files:
   - scripts/eval/run-entity-retrieval-fixture-eval.ts
   - scripts/eval/run-search-feature-behavior-fixture-eval.ts
-  - scripts/eval/run-agentic-tool-use-fixture-eval.ts
-  - scripts/eval/run-agentic-answer-quality-fixture-eval.ts
   - src/infrastructure/fixture/fixture-loader.ts
   - src/infrastructure/fixture/suite-registry.ts
 
