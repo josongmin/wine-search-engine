@@ -909,7 +909,7 @@ export class WineSearchOrchestrator {
   }
 
   private async finishRejectedAnalysis(
-    reason: 'empty_query' | 'too_long' | 'malformed' | 'blocked',
+    reason: 'empty_query' | 'too_long' | 'malformed' | 'blocked' | 'off_domain',
     state: OrchestratorState,
     startMs: number,
     queryHasHangul: boolean,
@@ -919,19 +919,27 @@ export class WineSearchOrchestrator {
     // S1 semantic split: `reason === 'blocked'` is the ONLY case set by the
     // analyzer's adversarial sanitizer (`classifyQueryBudget === 'adversarial'`).
     // Every other analyzer-rejection reason (`empty_query`, `too_long`,
-    // `malformed`) is a coverage/shape signal — emit `unsupported_intent`,
-    // NOT `policy_blocked=true`.
+    // `malformed`, `off_domain`) is a coverage/shape signal — emit
+    // `unsupported_intent`, NOT `policy_blocked=true`.
     const isSecurityBlock = reason === 'blocked';
     const blockedKind: TerminationKind = isSecurityBlock
       ? TERMINATION_KIND_SECURITY_BLOCK
       : TERMINATION_KIND_UNSUPPORTED_INTENT;
     const policyBlocked = isSecurityBlock;
+    // Termination semantics:
+    //   - SECURITY block → 'blocked' (the run was hard-failed by the policy
+    //     gate; downstream metrics should not credit it as a successful
+    //     answer).
+    //   - Non-security reject (off_domain / knowledge_only / empty_query
+    //     / too_long / malformed) → 'answer' — the agent DID respond with
+    //     a deterministic template (the unsupported_intent copy is a
+    //     legitimate answer, not a refusal). Bench scenarios like #20 /
+    //     #103 / #104 explicitly assert `terminationReason: 'answer'` for
+    //     these off-domain redirects; pre-fix they collapsed to 'blocked'
+    //     and lost the termination dimension.
     state.terminationReason = transitionTerminationReason(
       state.terminationReason,
-      // Both branches map to 'blocked' so the termination state machine
-      // surfaces a single hard-failure terminator. The S1 `terminationKind`
-      // discriminant on the final result disambiguates downstream.
-      'blocked',
+      isSecurityBlock ? 'blocked' : 'answer',
     );
 
     const synthesisStart = this.clock.now();

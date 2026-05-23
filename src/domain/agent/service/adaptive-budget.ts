@@ -63,22 +63,55 @@ const ADAPTIVE_BUDGET_SANITIZER = new QuerySanitizer();
 const REPETITIVE_INPUT_PATTERN_SHORT: RegExp = /(.{2,4})\1{15,}/u;
 const REPETITIVE_INPUT_PATTERN_LONG: RegExp = /(.{5,})\1{10,}/u;
 
+/**
+ * Korean post-positional particles (조사) that legitimately follow the
+ * off-domain subject. Pre-fix the lookahead `(?=$|[^\p{L}\p{N}])` rejected
+ * any letter-suffix, which falsely allowed "소주가 와인보다 낫냐"
+ * (소주 + 가 particle) to escape the off-domain classifier and fall
+ * through to `intent=search` — bench #104 root cause.
+ *
+ * The alternation is INSIDE the non-capturing group so the off-domain
+ * subject still anchors at a word boundary (start-of-string or non-letter
+ * prefix) but ENDS at either a true non-letter OR one of these particles
+ * followed by a non-letter.
+ */
+const KOREAN_PARTICLE_ALT = '(?:가|이|는|은|를|을|와|과|랑|이?랑|도|만|보다|에|에서|에게|한테|이?라도|이?나|보단|보담|이?라면)';
+const OFF_DOMAIN_TAIL = `(?:${KOREAN_PARTICLE_ALT})?(?=$|[^\\p{L}\\p{N}])`;
+
 const OFF_DOMAIN_PATTERNS: readonly RegExp[] = [
   // Non-wine subjects. Unicode-aware boundaries because \b is ASCII-only
   // and silently fails on Korean (한글 chars are not \w).
-  /(?:^|[^\p{L}\p{N}])(?:weather|날씨)(?=$|[^\p{L}\p{N}])/iu,
-  /(?:^|[^\p{L}\p{N}])(?:stock|주식|환율|exchange\s+rate)(?=$|[^\p{L}\p{N}])/iu,
-  /(?:^|[^\p{L}\p{N}])(?:맥주|beer|소주|whisky|위스키|vodka)(?=$|[^\p{L}\p{N}])/iu,
+  new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:weather|날씨)${OFF_DOMAIN_TAIL}`, 'iu'),
+  new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:stock|주식|환율|exchange\\s+rate)${OFF_DOMAIN_TAIL}`, 'iu'),
+  new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:맥주|beer|소주|whisky|위스키|vodka)${OFF_DOMAIN_TAIL}`, 'iu'),
   // Sports — numeric context not needed; these words are unambiguous off-domain
-  /(?:^|[^\p{L}\p{N}])(?:축구|football|야구|baseball|농구|basketball)(?=$|[^\p{L}\p{N}])/iu,
+  new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:축구|football|야구|baseball|농구|basketball)${OFF_DOMAIN_TAIL}`, 'iu'),
   // Crypto / finance — unambiguous off-domain
-  /(?:^|[^\p{L}\p{N}])(?:코인|bitcoin|crypto|암호화폐)(?=$|[^\p{L}\p{N}])/iu,
-  // Politics — "champagne region politics" should NOT trigger this because
-  // "politics" requires a word boundary; the pattern won't match mid-word.
-  // Note: "champagne region politics" WILL match — politics is a clear off-domain
-  // signal regardless of context in a wine search engine.
-  /(?:^|[^\p{L}\p{N}])(?:정치|politics|대통령|president|선거|election)(?=$|[^\p{L}\p{N}])/iu,
+  new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:코인|bitcoin|crypto|암호화폐)${OFF_DOMAIN_TAIL}`, 'iu'),
+  // Politics — clear off-domain signal regardless of context.
+  new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:정치|politics|대통령|president|선거|election)${OFF_DOMAIN_TAIL}`, 'iu'),
 ];
+
+/**
+ * Knowledge-only intent patterns — wine-domain questions that are EXPLANATORY
+ * rather than searchable (no tool call needed). The deterministic analyzer
+ * has no signal to distinguish "explain wine pricing" from "find a wine
+ * under 30k KRW" since both contain wine-domain keywords; the differentiator
+ * is the explanatory-verb / WH-question shape.
+ *
+ * Triggers on combinations like:
+ *   "와인 가격이 왜 이렇게 비싸? 설명해봐"   (#103)
+ *   "와인이란 무엇인가요"
+ *   "포도주는 어떻게 만들어지나요"
+ *   "explain how … is made"
+ *
+ * False-positive guard: requires BOTH a WH-cue (왜/어떻게/무엇/왜/explain/why)
+ * AND an explanation-action (설명/알려/얘기/말해/explain/tell me).
+ * Pure search queries like "왜 이 와인이 좋아?" still allow tool calls
+ * because they lack the explanation-action verb.
+ */
+const KNOWLEDGE_ONLY_WH_CUES = /(?:^|[^\p{L}\p{N}])(?:왜|어떻게|어째서|무엇|뭐|why|how|what)(?=$|[^\p{L}\p{N}]|[\s,.])/iu;
+const KNOWLEDGE_ONLY_ACTIONS = /(?:^|[^\p{L}\p{N}])(?:설명(?:해|좀)?(?:줘|봐|주세요)?|알려(?:줘|주세요)?|얘기해(?:줘|봐)?|말해(?:줘|봐)?|explain|tell\s+me)(?=$|[^\p{L}\p{N}])/iu;
 
 const COMPOUND_INDICATORS: readonly string[] = [
   '코스', 'course', '에피타이저', 'appetizer', '디저트', 'dessert',
@@ -111,7 +144,7 @@ const SITUATION_INDICATORS: readonly string[] = [
 
 interface AdaptiveBudget {
   readonly maxSteps: number;
-  readonly classification: 'specific_sku' | 'adversarial' | 'off_domain' | 'nested_condition' | 'situation_based' | 'compound' | 'default';
+  readonly classification: 'specific_sku' | 'adversarial' | 'off_domain' | 'knowledge_only' | 'nested_condition' | 'situation_based' | 'compound' | 'default';
   readonly reason: string;
 }
 
@@ -158,6 +191,20 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
         reason: `matched off-domain pattern: ${pattern.source.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
       };
     }
+  }
+
+  // 2b. Knowledge-only — wine-domain question that wants EXPLANATION, not
+  // search results. Bench #103 ("와인 가격이 왜 이렇게 비싸? 설명해봐") is
+  // the canonical case: contains 와인 keyword (so off_domain doesn't match)
+  // but the user wants prose about pricing factors, not a result set.
+  // Requires BOTH a WH-cue and an explanation-action so search queries with
+  // a WH-word ("왜 이 와인이 좋아?") still call tools.
+  if (KNOWLEDGE_ONLY_WH_CUES.test(trimmed) && KNOWLEDGE_ONLY_ACTIONS.test(trimmed)) {
+    return {
+      maxSteps: 1,
+      classification: 'knowledge_only',
+      reason: 'matched knowledge-only pattern: WH-cue + explanation-action',
+    };
   }
 
   // 3. Nested condition: 3+ constraint types in one query → needs more steps to decompose.

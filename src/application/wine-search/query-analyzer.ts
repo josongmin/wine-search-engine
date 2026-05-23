@@ -119,7 +119,19 @@ export type AnalysisOutcome =
   | { readonly kind: 'ok'; readonly analysis: WineSearchAnalysis }
   | {
       readonly kind: 'rejected';
-      readonly reason: 'empty_query' | 'too_long' | 'malformed' | 'blocked';
+      readonly reason:
+        | 'empty_query'
+        | 'too_long'
+        | 'malformed'
+        | 'blocked'
+        /**
+         * F-CritA: off-domain queries that the adaptive-budget classifier
+         * matched (e.g. weather, beer, sports, crypto). The orchestrator
+         * routes these through the unsupported_intent template (NOT the
+         * security-blocked template) so the user sees a polite domain
+         * redirect instead of a refusal-shaped response.
+         */
+        | 'off_domain';
     };
 
 // ---------------------------------------------------------------------------
@@ -183,8 +195,14 @@ export class QueryAnalyzerService {
     const normalized = normalizeHangulLexical(trimmed.normalize('NFKC'));
 
     // Adaptive-budget also performs sanitizer/off-domain classification.
-    // We treat `adversarial` as a hard block (refuse path); `off_domain`
-    // returns a degenerate analysis with intent=unknown and budget=1.
+    // We treat `adversarial` as a hard block (refuse path) and `off_domain`
+    // as a polite-redirect reject — the comment above was previously
+    // aspirational and the off-domain branch was missing, so beer / soju /
+    // weather / sports / politics queries fell through to the deterministic
+    // pipeline, got classified as `intent=search`, and the router emitted
+    // a single-search plan → tool call → `mustNotCallTools` violation on
+    // bench #20 / #104 / #109. The new branch short-circuits to the
+    // orchestrator's reject path which uses the unsupported_intent template.
     const budgetClass = classifyQueryBudget(normalized);
     if (budgetClass?.classification === 'adversarial') {
       this.logger.info(
@@ -192,6 +210,27 @@ export class QueryAnalyzerService {
         '[query-analyzer] adversarial input blocked by sanitizer',
       );
       return { kind: 'rejected', reason: 'blocked' };
+    }
+    if (budgetClass?.classification === 'off_domain') {
+      this.logger.info(
+        { requestId: input.requestId, reason: budgetClass.reason },
+        '[query-analyzer] off-domain query — redirecting via reject path',
+      );
+      return { kind: 'rejected', reason: 'off_domain' };
+    }
+    if (budgetClass?.classification === 'knowledge_only') {
+      // Knowledge-only intent — wine question that wants EXPLANATION (not
+      // tool results). Same reject path as off_domain so synthesizer's
+      // unsupported_intent template fires; the template's "I can help with
+      // wine searches" copy is appropriate here too because the agent's
+      // contract is search/recommendation, not free-form Q&A. A future
+      // wave can wire a dedicated knowledge-answer template if rubric
+      // tests demand it.
+      this.logger.info(
+        { requestId: input.requestId, reason: budgetClass.reason },
+        '[query-analyzer] knowledge-only query — routing via reject path',
+      );
+      return { kind: 'rejected', reason: 'off_domain' };
     }
 
     const hangulDominant = computeHangulDominant(normalized);

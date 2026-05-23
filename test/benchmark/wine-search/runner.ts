@@ -139,6 +139,15 @@ async function executeScenario(
 ): Promise<ExecuteOutcome> {
   const t0 = Date.now();
   try {
+    // gpt-5 reasoning models can comfortably take 15-30s per synthesis,
+    // and the default 10s perStepTimeoutMs collapses those calls to
+    // layer4 fallback (bench #117/#118 root cause when running on
+    // gpt-5-mini). Env-overridable so non-reasoning models keep the
+    // tight default.
+    const perStepTimeoutMs = Number.parseInt(
+      process.env['WINE_SEARCH_PER_STEP_TIMEOUT_MS'] ?? '',
+      10,
+    );
     const result = await orchestrator.execute({
       query: scenario.query,
       requestId,
@@ -147,6 +156,9 @@ async function executeScenario(
         : {}),
       ...(scenario.expectation.maxTotalTokens !== undefined
         ? { maxTotalTokens: scenario.expectation.maxTotalTokens }
+        : {}),
+      ...(Number.isFinite(perStepTimeoutMs) && perStepTimeoutMs > 0
+        ? { perStepTimeoutMs }
         : {}),
     });
     const projection = wineSearchResultToScenarioExecution(result);
@@ -288,13 +300,13 @@ async function main(): Promise<void> {
     const wallSec = (Date.now() - startedAt) / 1000;
     const overallScores: number[] = [];
     for (const r of scenarioResults) {
-      if (r.skipped === true || r.error !== undefined) continue;
+      if (r.skipped || r.error !== undefined) continue;
       const o = r.scores.overall;
       if (typeof o === 'number' && Number.isFinite(o)) overallScores.push(o);
     }
     const geoMean = aggregateGeoMean(overallScores);
     const criticalFails = scenarioResults.filter((r) =>
-      r.skipped !== true && r.error === undefined && (r.scores.overall ?? 0) === 0,
+      !r.skipped && r.error === undefined && (r.scores.overall ?? 0) === 0,
     ).length;
 
     console.log(
@@ -310,7 +322,7 @@ async function main(): Promise<void> {
     const perRunGeo = allRunResults.map((rs) => {
       const xs: number[] = [];
       for (const r of rs) {
-        if (r.skipped === true || r.error !== undefined) continue;
+        if (r.skipped || r.error !== undefined) continue;
         const o = r.scores.overall;
         if (typeof o === 'number' && Number.isFinite(o)) xs.push(o);
       }
