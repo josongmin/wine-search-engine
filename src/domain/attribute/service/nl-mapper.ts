@@ -372,6 +372,17 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   // Flavor / aroma
   ['과일향', { phrase: '과일향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'fruity', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['오크향', { phrase: '오크향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  // C4: bench-surfaced bare-spaced surfaces. The Map lookup is exact, so
+  // "오크 향" / "오크 향이 강한" must be enumerated rather than relying on
+  // the no-space `오크향` form. Same canonical mapping (`oaky`).
+  ['오크 향', { phrase: '오크 향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['오크 향이 강한', { phrase: '오크 향이 강한', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['오크 향이 진한', { phrase: '오크 향이 진한', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['oaky', { phrase: 'oaky', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  // dry/sweet — sweetness companion surfaces.
+  ['드라이한', { phrase: '드라이한', mappedAttribute: 'sweetness', operator: '<=', value: 0.2, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['드라이', { phrase: '드라이', mappedAttribute: 'sweetness', operator: '<=', value: 0.2, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['dry wine', { phrase: 'dry wine', mappedAttribute: 'sweetness', operator: '<=', value: 0.2, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['꽃향', { phrase: '꽃향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'floral', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['스파이시', { phrase: '스파이시', mappedAttribute: 'flavor_profile', operator: 'in', value: 'spicy', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['미네랄', { phrase: '미네랄', mappedAttribute: 'flavor_profile', operator: 'in', value: 'mineral', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
