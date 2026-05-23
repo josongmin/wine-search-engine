@@ -73,7 +73,8 @@ import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const ANTHROPIC_MESSAGES_PATH = '/v1/messages';
-const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+import { CLAUDE_HAIKU_MODEL_ID } from '../../domain/shared/constants/claude-models.js';
+const ANTHROPIC_DEFAULT_MODEL = CLAUDE_HAIKU_MODEL_ID;
 
 /** Virtual tool used by `analyze` / `synthesize` to coerce the model into
  *  emitting a single structured-output `tool_use` block. The name is opaque

@@ -122,7 +122,8 @@ const DIRECTIVE_ENTITY_ID_MAX_CHARS = 128;
  *  runner deps for tests / future routing.
  *  Format `claude-<family>-<gen>` per Anthropic Messages API spec — matches
  *  `claude-(opus|sonnet|haiku)-N-M`. `claude-4-sonnet-latest` is rejected with HTTP 400. */
-export const MINI_LOOP_DEFAULT_MODEL = 'claude-sonnet-4-6';
+import { CLAUDE_SONNET_MODEL_ID } from '@domain/shared/constants/claude-models.js';
+export const MINI_LOOP_DEFAULT_MODEL = CLAUDE_SONNET_MODEL_ID;
 
 // ---------------------------------------------------------------------------
 // AgentToolName re-export — convenience for runner consumers.

@@ -174,7 +174,11 @@ export const SearchToolInputSchema = z.object({
     defaultRetrievalMode: 'auto',
     maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
   }),
-}).strict().superRefine((data, ctx) => {
+  // CLAUDE.md rule 10 exception: NOT `.strict()` — Claude routinely emits
+  // extra fields (reasoning, confidence, metadata). Strict-fail would force a
+  // tool-error round-trip; instead we ignore unknown keys and validate only
+  // the fields we depend on.
+}).superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
 });
 
@@ -183,7 +187,8 @@ export const FoodPairingInputSchema = z.object({
     foodRequiredMessage: 'Food must not be empty',
     maxPriceKrwMax: MAX_PRICE_KRW_BOUND,
   }),
-}).strict();
+  // CLAUDE.md rule 10 exception: no `.strict()` for LLM tool-call input.
+});
 
 export const DrinkingWindowInputSchema = z.object({
   entity_id: buildEntityIdToolField({
@@ -193,7 +198,8 @@ export const DrinkingWindowInputSchema = z.object({
   target_year: coercePositiveInt.pipe(
     z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
   ).optional(),
-}).strict();
+  // CLAUDE.md rule 10 exception: no `.strict()` for LLM tool-call input.
+});
 
 export const CompareWinesInputSchema = z.object({
   query_a: buildSearchToolQueryField({
@@ -229,7 +235,8 @@ export const CompareWinesInputSchema = z.object({
   vintage_max_b: coercePositiveInt.pipe(
     z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
   ).optional(),
-}).strict().superRefine((data, ctx) => {
+  // CLAUDE.md rule 10 exception: no `.strict()` for LLM tool-call input.
+}).superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
   validateSearchToolVintageRange({
     vintage_min: data.vintage_min_a,

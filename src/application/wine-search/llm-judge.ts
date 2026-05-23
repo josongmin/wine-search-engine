@@ -61,7 +61,8 @@ const JUDGE_SCORE_MAX = 1;
  * Messages API accepts (a `*-latest` alias is rejected with HTTP 400 — see
  * synthesis-runner.ts DEFAULT_SYNTHESIS_MODEL note).
  */
-export const DEFAULT_JUDGE_MODEL = 'claude-haiku-4-5-20251001';
+import { CLAUDE_HAIKU_MODEL_ID } from '@domain/shared/constants/claude-models.js';
+export const DEFAULT_JUDGE_MODEL = CLAUDE_HAIKU_MODEL_ID;
 
 /**
  * Max output tokens for the judge. The judge emits a small JSON object

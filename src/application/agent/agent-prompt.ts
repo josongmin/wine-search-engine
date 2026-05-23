@@ -5,17 +5,9 @@
 import { resolveFoodPairingBudgetKrw } from '../search/food-pairing-tool-policy.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import type { ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
-import type { AgentStep } from '../../domain/agent/model/agent-step.js';
-import type {
-  ConversationContext,
-  ConversationTurnContext,
-  PriorEntityRef,
-} from '../../domain/agent/model/conversation-context.js';
 
 type AgentPromptMode = 'planner' | 'synthesis';
 const PROMPT_FALLBACK_50_USD_KRW = 50_000;
-const FULL_OBSERVATION_HISTORY_STEPS = 1;
-const COMPACT_HISTORY_OBSERVATION_MAX_CHARS = 320;
 
 function buildCompactSearchWinesPromptContractLines(usd50ApproxKrw: number): readonly string[] {
   return [
@@ -225,209 +217,14 @@ export function buildUserMessage(query: string): ChatMessage {
   return { role: 'user', content: query };
 }
 
-// ── Conversation context (multi-turn) ───────────────────────────────────────
-//
-// Budget constants for folding prior CLI turns into the FIRST planner step's
-// user message. All are module-scope named constants (no magic numbers in the
-// renderer). Mutual consistency (CLAUDE.md rule 22):
-//   CONVERSATION_CONTEXT_MAX_CHARS (1800) << DEFAULT_AGENT_CONFIG.maxContextChars
-//   (8000). The context block is injected only on step 0 and competes with the
-//   step-observation history (truncated separately to maxContextChars), so the
-//   ~1800-char (~600-token) ceiling leaves ample room for system prompt + query
-//   + observations within the ~10k-token/step budget.
-
-/** Most recent N turns eligible for injection (older turns are dropped). */
-const CONVERSATION_MAX_TURNS = 4;
-/** Entity rows kept for the most recent turn (the likely follow-up referent). */
-export const CONVERSATION_MAX_ENTITIES_RECENT = 8;
-/** Entity rows kept for each older turn. */
-export const CONVERSATION_MAX_ENTITIES_OLDER = 3;
-/** Per-turn answer-summary character cap. */
-const CONVERSATION_ANSWER_CLIP_CHARS = 240;
-/** Approx char allowance per included turn (label + answer summary + entity rows). */
-const CONVERSATION_PER_TURN_CHARS = 450;
-/** Hard ceiling on the entire rendered context block (≈ turns × per-turn budget). */
-export const CONVERSATION_CONTEXT_MAX_CHARS =
-  CONVERSATION_MAX_TURNS * CONVERSATION_PER_TURN_CHARS;
-
-const CONVERSATION_BLOCK_HEADER = '=== 이전 대화 맥락 (참고용; 실제 현재 질문은 맨 아래) ===';
-const CONVERSATION_BLOCK_FOOTER = '=== 이전 대화 맥락 끝 ===';
-const CONVERSATION_ELLIPSIS = '…';
-
-function clipPromptText(text: string, max: number): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= max) return trimmed;
-  return trimmed.slice(0, Math.max(0, max - CONVERSATION_ELLIPSIS.length)) + CONVERSATION_ELLIPSIS;
-}
-
-function renderPriorEntity(entity: PriorEntityRef, ordinal: number): string {
-  const facets: string[] = [entity.label];
-  if (entity.vintage !== undefined) facets.push(String(entity.vintage));
-  if (entity.producer !== undefined) facets.push(entity.producer);
-  if (entity.region !== undefined) facets.push(entity.region);
-  if (entity.wineType !== undefined) facets.push(entity.wineType);
-  if (entity.priceRange !== undefined) facets.push(entity.priceRange);
-  const head = `        ${ordinal}. ${facets.join(' · ')}`;
-  return entity.relevanceScore !== undefined
-    ? `${head} (rel ${entity.relevanceScore.toFixed(2)})`
-    : head;
-}
-
-function renderTurn(
-  turn: ConversationTurnContext,
-  recencyLabel: string,
-  entityCap: number,
-): string {
-  const lines: string[] = [];
-  lines.push(`${recencyLabel} 사용자: ${clipPromptText(turn.userQuery, CONVERSATION_ANSWER_CLIP_CHARS)}`);
-  if (turn.answerSummary.length > 0) {
-    lines.push(`      답변요약: ${clipPromptText(turn.answerSummary, CONVERSATION_ANSWER_CLIP_CHARS)}`);
-  }
-  if (turn.entities.length > 0) {
-    lines.push('      검색결과:');
-    const shown = turn.entities.slice(0, entityCap);
-    for (let i = 0; i < shown.length; i += 1) {
-      lines.push(renderPriorEntity(shown[i]!, i + 1));
-    }
-  }
-  return lines.join('\n');
-}
-
-/**
- * Render a compact prompt block from prior conversation turns, bounded to
- * `maxChars`. Returns '' for empty context (caller then injects nothing).
- *
- * Selection is a deterministic newest-first sliding window at TWO granularities:
- *  - the most recent turn keeps more entity rows than older turns (the follow-up
- *    referent is almost always in the latest result set);
- *  - turns are accumulated newest → oldest until the char budget is exhausted,
- *    then emitted oldest → newest so the model reads them chronologically.
- * This is conversation context management, not a scoring heuristic.
- */
-export function buildConversationContextBlock(
-  context: ConversationContext,
-  maxChars: number = CONVERSATION_CONTEXT_MAX_CHARS,
-): string {
-  if (context.turns.length === 0) return '';
-
-  // Newest-first slice of eligible turns.
-  const eligible = context.turns.slice(-CONVERSATION_MAX_TURNS);
-  const overhead = CONVERSATION_BLOCK_HEADER.length + CONVERSATION_BLOCK_FOOTER.length + 2;
-  const turnBudget = maxChars - overhead;
-  if (turnBudget <= 0) return '';
-
-  const rendered: string[] = [];
-  let used = 0;
-  for (let i = eligible.length - 1; i >= 0; i -= 1) {
-    const turn = eligible[i]!;
-    const fromNewest = eligible.length - 1 - i; // 0 == newest
-    const recencyLabel = `[T-${fromNewest + 1}]`;
-    const entityCap = fromNewest === 0
-      ? CONVERSATION_MAX_ENTITIES_RECENT
-      : CONVERSATION_MAX_ENTITIES_OLDER;
-    const entry = renderTurn(turn, recencyLabel, entityCap);
-    const cost = entry.length + 1; // newline join
-    if (used + cost > turnBudget) break;
-    rendered.push(entry);
-    used += cost;
-  }
-
-  if (rendered.length === 0) return '';
-  rendered.reverse();
-  return [CONVERSATION_BLOCK_HEADER, ...rendered, CONVERSATION_BLOCK_FOOTER].join('\n');
-}
-
-export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMessage[] {
-  const messages: ChatMessage[] = [];
-  const fullObservationStartIndex = Math.max(0, steps.length - FULL_OBSERVATION_HISTORY_STEPS);
-  const renderObservation = (observation: string, stepIndex: number): string =>
-    stepIndex >= fullObservationStartIndex
-      ? observation
-      : truncateObservation(observation, COMPACT_HISTORY_OBSERVATION_MAX_CHARS);
-
-  for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
-    const step = steps[stepIndex]!;
-    if (step.actionPairs !== undefined) {
-      // Parallel batch step (preferred path) — uses paired type to guarantee
-      // 1:1 action↔observation alignment; no index drift possible.
-      messages.push({
-        role: 'assistant',
-        content: JSON.stringify({
-          thought: step.thought,
-          actions: step.actionPairs.map((p) => ({ tool: p.action.tool, input: p.action.input })),
-        }),
-      });
-      for (const pair of step.actionPairs) {
-        messages.push({
-          role: 'user',
-          content: `[Tool Result: ${pair.action.tool}]\n${renderObservation(pair.observation, stepIndex)}`,
-        });
-      }
-    // eslint-disable-next-line @typescript-eslint/no-deprecated -- legacy path: actions/observations kept for backward-compat when actionPairs is absent
-    } else if (step.actions !== undefined) {
-      // Parallel batch step (legacy path — no actionPairs, fall back to parallel arrays).
-      messages.push({
-        role: 'assistant',
-        content: JSON.stringify({
-          thought: step.thought,
-          // eslint-disable-next-line @typescript-eslint/no-deprecated
-          actions: step.actions.map((a) => ({ tool: a.tool, input: a.input })),
-        }),
-      });
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      const observations = step.observations ?? [];
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      for (let i = 0; i < step.actions.length; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        const toolName = step.actions[i]?.tool ?? `tool_${i}`;
-        const obs = observations[i] ?? '(no result)';
-        messages.push({
-          role: 'user',
-          content: `[Tool Result: ${toolName}]\n${renderObservation(obs, stepIndex)}`,
-        });
-      }
-    } else if (step.action !== undefined) {
-      // Sequential single tool call
-      messages.push({
-        role: 'assistant',
-        content: JSON.stringify({
-          thought: step.thought,
-          action: { tool: step.action.tool, input: step.action.input },
-        }),
-      });
-      if (step.observation !== undefined) {
-        messages.push({
-          role: 'user',
-          content: `[Tool Result]\n${renderObservation(step.observation, stepIndex)}`,
-        });
-      }
-    } else if (step.answer !== undefined) {
-      messages.push({
-        role: 'assistant',
-        content: JSON.stringify({ thought: step.thought, answer: step.answer }),
-      });
-    }
-  }
-
-  return messages;
-}
-
-/**
- * Truncates observation text to fit within context budget.
- */
-/** Characters reserved for the truncation suffix string `\n... [truncated]`. */
-const TRUNCATION_SUFFIX_LEN = 20;
-
-export function truncateObservation(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  // When maxChars >= TRUNCATION_SUFFIX_LEN: cutAt = maxChars - suffix → output
-  // is exactly maxChars chars (postcondition satisfied).
-  // When maxChars < TRUNCATION_SUFFIX_LEN: the suffix alone would exceed maxChars,
-  // so we return just the raw slice capped at maxChars (no suffix appended) —
-  // the truncation is still visible because the text is shorter than the original.
-  if (maxChars < TRUNCATION_SUFFIX_LEN) {
-    return text.slice(0, maxChars);
-  }
-  const cutAt = maxChars - TRUNCATION_SUFFIX_LEN;
-  return text.slice(0, cutAt) + '\n... [truncated]';
-}
+// ── Re-exported from focused modules (SRP split) ────────────────────────────
+// Conversation-context rendering and step-transcript serialization were moved
+// to dedicated single-responsibility modules. Re-exported here so existing
+// import sites (planner-phase-runner, tests) keep working unchanged.
+export {
+  buildConversationContextBlock,
+  CONVERSATION_MAX_ENTITIES_RECENT,
+  CONVERSATION_MAX_ENTITIES_OLDER,
+  CONVERSATION_CONTEXT_MAX_CHARS,
+} from './agent-conversation-context-renderer.js';
+export { buildStepMessages, truncateObservation } from './agent-step-transcript.js';

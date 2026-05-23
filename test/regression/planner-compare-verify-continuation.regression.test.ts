@@ -93,6 +93,120 @@ describe('compare+verify continuation — contract requirement', () => {
   });
 });
 
+describe('compare+verify continuation — comparison_search re-plan narrowing (bench #30 RCA)', () => {
+  /**
+   * Bench #30 regression RCA: `comparison_search` historically ALWAYS forced a
+   * verify re-plan after the first observation, on the premise that a single
+   * observation cannot cover a two-sided compare. That premise holds for the
+   * one-sided `search_wines` case, but BREAKS for `compare_wines`, which
+   * natively returns both legs with per-leg `matched_constraints`. The
+   * unconditional re-fire forced #30 to chase empty search_wines after a
+   * clean two-sided compare, collapsing the answer to a "no results" fallback
+   * (judge=0, ans=20%, score 57.8% → 22.4%).
+   *
+   * SSoT for the narrowing lives in
+   * `AgentContractPolicy.shouldForceVerificationReplan`.
+   */
+  /**
+   * Compose a compare_wines outcome in the shape `collectCoveredMatchedConstraintKeys`
+   * actually parses — the decomposed-search response object with
+   * `entities[].topResult.constraints.matched[]`. Each matchedConstraints entry
+   * covers BOTH legs (mirroring a clean two-sided compare).
+   */
+  function makeCompareWinesSuccess(matchedConstraints: readonly string[]) {
+    const buildTopResult = () => ({
+      entityId: 'wine-x',
+      constraints: { matched: [...matchedConstraints] },
+    });
+    return {
+      stepId: 'req-cmp:0:0',
+      tool: 'compare_wines' as const,
+      kind: 'success' as const,
+      durationMs: 8,
+      result: {
+        queryType: 'comparison',
+        entities: [
+          { subQuery: 'A', topResult: buildTopResult(), resultCount: 1, resolutionStatus: 'unique', allResults: [] },
+          { subQuery: 'B', topResult: buildTopResult(), resultCount: 1, resolutionStatus: 'unique', allResults: [] },
+        ],
+      },
+    };
+  }
+
+  it('does NOT force re-plan when compare_wines succeeded AND all constraint atoms are covered', () => {
+    const contract = buildAgentQueryExecutionContract(COMPARE_DUAL_DW_QUERY);
+    const requirement = contract.requiresVerificationStep;
+    expect(requirement?.reason).toBe('comparison_search');
+    if (requirement === undefined) throw new Error('requirement undefined');
+
+    const policy = new AgentContractPolicy();
+    // The dual-drinking-window compare query's coverage atoms include
+    // `drinking_window` plus any region/grape coverage emitted by the
+    // contract — feed a compare_wines outcome that matches every atom.
+    const matchedKeys = requirement.constraintCoverage.map((a) => a.matchedConstraintKey);
+    const outcomes = [makeCompareWinesSuccess(matchedKeys)];
+
+    expect(policy.shouldForceVerificationReplan(requirement, outcomes)).toBeNull();
+  });
+
+  it('STILL forces re-plan when comparison_search query was answered with one-sided search_wines (no compare_wines)', () => {
+    const contract = buildAgentQueryExecutionContract(COMPARE_DUAL_DW_QUERY);
+    const requirement = contract.requiresVerificationStep;
+    if (requirement === undefined) throw new Error('requirement undefined');
+
+    const policy = new AgentContractPolicy();
+    // search_wines for a compare query: a single observation that — by
+    // intent of the always-fire rule — cannot cover both legs. The narrowing
+    // must NOT regress this case.
+    const outcomes = [{
+      stepId: 'req-cmp:0:0',
+      tool: 'search_wines' as const,
+      kind: 'success' as const,
+      durationMs: 8,
+      result: 'OK\nGROUNDING_JSON: {"queryType":"search","wines":[]}',
+    }];
+    const decision = policy.shouldForceVerificationReplan(requirement, outcomes);
+    expect(decision).not.toBeNull();
+  });
+
+  it('forces re-plan when compare_wines succeeded but some coverage atoms remain uncovered', () => {
+    const contract = buildAgentQueryExecutionContract(COMPARE_DUAL_DW_QUERY);
+    const requirement = contract.requiresVerificationStep;
+    if (requirement === undefined) throw new Error('requirement undefined');
+
+    const policy = new AgentContractPolicy();
+    // compare_wines outcome that covers NONE of the contract's atoms (e.g.
+    // missing drinking_window in the GROUNDING_JSON matched_constraints).
+    const outcomes = [makeCompareWinesSuccess([])];
+    const decision = policy.shouldForceVerificationReplan(requirement, outcomes);
+    expect(decision).not.toBeNull();
+    expect(decision?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('does NOT force re-plan when reason is comparison_search, compare_wines is the FAILED outcome (kind!=success)', () => {
+    // Failed compare_wines should NOT count as native coverage — fall back
+    // to the always-fire side so the planner gets a chance to recover.
+    const contract = buildAgentQueryExecutionContract(COMPARE_DUAL_DW_QUERY);
+    const requirement = contract.requiresVerificationStep;
+    if (requirement === undefined) throw new Error('requirement undefined');
+
+    const policy = new AgentContractPolicy();
+    const outcomes = [{
+      stepId: 'req-cmp:0:0',
+      tool: 'compare_wines' as const,
+      kind: 'error' as const,
+      durationMs: 8,
+      result: '',
+      errorCode: 'TIMEOUT' as const,
+      errorMessage: 'compare timed out',
+    }];
+    const decision = policy.shouldForceVerificationReplan(requirement, outcomes);
+    // Failed compare → no successful native compare_wines → always-fire still
+    // applies; re-plan forced.
+    expect(decision).not.toBeNull();
+  });
+});
+
 describe('compare+verify continuation — fast-answer bypass safety', () => {
   it('REFUSES fast-answer bypass when requiresVerificationStep is set and latch is OFF', () => {
     const contract = buildAgentQueryExecutionContract(COMPARE_VERIFY_QUERY);
@@ -260,11 +374,21 @@ describe('compare+verify continuation — single-tool timeout recovery', () => {
 });
 
 describe('compare+verify continuation — planner answer attempt after compare_wines fires verify gate', () => {
-  it('drops the candidate answer and queues verification_required for the bench #15 query', async () => {
+  // Post-bench-#30 narrowing: the verify gate after a successful compare_wines
+  // outcome now defers to constraint coverage, not the historical
+  // "comparison_search → always-fire" rule. These two cases pin the new gate
+  // shape end-to-end via `phase.run`.
+
+  it('COMMITS the candidate answer when compare_wines covered all coverage atoms (post-#30 narrowing)', async () => {
     const phase = makePhase({ searchUseCase: { execute: vi.fn() } as never });
     const contract = buildAgentQueryExecutionContract(COMPARE_VERIFY_QUERY);
     const state: AgentExecutionState = createAgentExecutionState();
-    // Seed a comparison-shaped tool outcome with no covering constraints.
+    // Build a compare_wines outcome whose `constraints.matched` covers every
+    // atom the contract is asking about — when the requirement has no atoms
+    // either, this is trivially satisfied.
+    const matchedKeys = contract.requiresVerificationStep?.constraintCoverage.map(
+      (a) => a.matchedConstraintKey,
+    ) ?? [];
     state.toolOutcomes.push({
       stepId: 'req:0:0',
       tool: 'compare_wines',
@@ -273,20 +397,55 @@ describe('compare+verify continuation — planner answer attempt after compare_w
       result: {
         queryType: 'comparison',
         entities: [
-          {
-            subQuery: '보르도 2015',
-            topResult: {
-              entity: { entityId: 'wine-2015' },
-              constraints: { matched: [], unmet: [], inferred: [] },
-            },
-          },
-          {
-            subQuery: '보르도 2016',
-            topResult: {
-              entity: { entityId: 'wine-2016' },
-              constraints: { matched: [], unmet: [], inferred: [] },
-            },
-          },
+          { subQuery: '보르도 2015', topResult: { entity: { entityId: 'wine-2015' }, constraints: { matched: [...matchedKeys] } } },
+          { subQuery: '보르도 2016', topResult: { entity: { entityId: 'wine-2016' }, constraints: { matched: [...matchedKeys] } } },
+        ],
+      },
+    });
+    const budget = new StepBudget({ ...DEFAULT_AGENT_CONFIG, maxSteps: 6 });
+
+    const shouldBreak = await phase.run(
+      'req-verify-commit',
+      { ...DEFAULT_AGENT_CONFIG, fastAnswerBypassPlanner: false },
+      budget,
+      state,
+      contract,
+      plannerAnswerOnly('Bordeaux 2015 vs 2016 비교 답변.'),
+    );
+
+    // Narrowing: with compare_wines successful AND no uncovered atoms, the
+    // gate now lets the answer commit instead of forcing a verify re-plan.
+    expect(shouldBreak).toBe(true);
+    expect(state.answer).toBe('Bordeaux 2015 vs 2016 비교 답변.');
+    expect(state.pendingPlannerDirective).toBeUndefined();
+  });
+
+  it('DROPS the candidate answer and queues verification_required when explicit coverage atoms remain uncovered', async () => {
+    const phase = makePhase({ searchUseCase: { execute: vi.fn() } as never });
+    // Inject a requirement with explicit coverage atoms so we deterministically
+    // exercise the "uncovered.length > 0" branch regardless of which atoms the
+    // deterministic contract emits for the bench query.
+    const baseContract = buildAgentQueryExecutionContract(COMPARE_VERIFY_QUERY);
+    const contract: AgentQueryExecutionContract = {
+      ...baseContract,
+      requiresVerificationStep: {
+        reason: 'comparison_search',
+        constraintCoverage: [
+          { key: 'drinking_window:now', matchedConstraintKey: 'drinking_window', description: 'currently drinkable' },
+        ],
+      },
+    };
+    const state: AgentExecutionState = createAgentExecutionState();
+    state.toolOutcomes.push({
+      stepId: 'req:0:0',
+      tool: 'compare_wines',
+      kind: 'success',
+      durationMs: 5,
+      result: {
+        queryType: 'comparison',
+        entities: [
+          { subQuery: '보르도 2015', topResult: { entity: { entityId: 'wine-2015' }, constraints: { matched: [] } } },
+          { subQuery: '보르도 2016', topResult: { entity: { entityId: 'wine-2016' }, constraints: { matched: [] } } },
         ],
       },
     });

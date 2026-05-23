@@ -346,12 +346,24 @@ describe('WINE_SEARCH_TOOLS', () => {
 });
 
 describe('Claude tool input schemas', () => {
-  it('search_wines should reject unknown fields at the boundary', () => {
+  it('search_wines should ACCEPT unknown fields (rule 10: LLMs emit extras like reasoning/confidence)', () => {
+    // Per CLAUDE.md rule 10 exception: LLM tool-input schemas MUST NOT be
+    // strict — Claude routinely emits extra fields (reasoning, confidence,
+    // metadata). Reject would force a tool-error round-trip; passing
+    // through silently is the documented contract.
     const parsed = SearchToolInputSchema.safeParse({
       query: 'Opus One 2018',
+      reasoning: 'user named a specific wine',
+      confidence: 0.92,
       unexpected: true,
     });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.query).toBe('Opus One 2018');
+      // Unknown fields are stripped from the parsed output (Zod default).
+      expect(parsed.data).not.toHaveProperty('reasoning');
+      expect(parsed.data).not.toHaveProperty('unexpected');
+    }
   });
 
   it('search_wines should normalize a single occasion tag to the canonical array shape', () => {
@@ -475,13 +487,23 @@ describe('Claude tool input schemas', () => {
     expect(parsed.success).toBe(false);
   });
 
-  it('compare_wines should reject unknown fields at the boundary', () => {
+  it('compare_wines should ACCEPT unknown fields (rule 10: LLMs emit extras)', () => {
+    // CLAUDE.md rule 10 exception — see search_wines test above.
     const parsed = CompareWinesInputSchema.safeParse({
       query_a: 'Opus One 2018',
       query_b: 'Sassicaia 2018',
+      reasoning: 'side-by-side request',
       extra: 'nope',
     });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.query_a).toBe('Opus One 2018');
+      expect(parsed.data.query_b).toBe('Sassicaia 2018');
+      expect(parsed.data).not.toHaveProperty('reasoning');
+      expect(parsed.data).not.toHaveProperty('extra');
+    } else {
+      throw new Error('compare_wines must accept extras per rule 10');
+    }
   });
 
   it('search_wines attempt schema should reject non-string-array exclude_grapes', () => {

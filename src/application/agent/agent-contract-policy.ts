@@ -218,6 +218,57 @@ export class AgentContractPolicy {
       (atom) => !coveredKeys.has(atom.matchedConstraintKey),
     );
   }
+
+  /**
+   * Final gate for "do we force the planner into a verify re-plan?".
+   *
+   * Composes `computeUncoveredConstraints` with a narrowing rule for
+   * `reason === 'comparison_search'`:
+   *
+   *   Historical behavior (pre-bench-#30): comparison_search ALWAYS re-fires,
+   *   on the premise that a single observation cannot cover a two-sided
+   *   compare. That premise holds when the planner answered a compare query
+   *   with a one-sided `search_wines` call — there one observation truly only
+   *   covers one leg — but it BREAKS for `compare_wines`, which by
+   *   construction returns BOTH legs in one observation with per-leg
+   *   `matched_constraints`. The unconditional re-fire forced #30 to chase
+   *   empty search_wines calls after a clean two-sided compare, collapsing the
+   *   answer to "no results" fallback (judge=0).
+   *
+   *   The narrowing: comparison_search still triggers re-plan when uncovered
+   *   atoms exist (general path). It ALSO still always-fires for compare
+   *   queries that were NOT answered with `compare_wines` (the original
+   *   one-sided concern). It NO LONGER always-fires when at least one
+   *   successful `compare_wines` outcome is present — there the standard
+   *   `uncovered.length > 0` gate is authoritative.
+   *
+   * @param requirement deterministic requirement from contract
+   * @param outcomes ordered tool outcomes (most recent last)
+   * @returns the uncovered atoms when re-plan should fire (possibly empty for
+   *   the one-sided compare narrowing); `null` when no re-plan is needed.
+   */
+  shouldForceVerificationReplan(
+    requirement: AgentVerificationRequirement,
+    outcomes: readonly ToolOutcome[],
+  ): readonly AgentConstraintCoverageAtom[] | null {
+    const uncovered = this.computeUncoveredConstraints(requirement, outcomes);
+    if (uncovered.length > 0) {
+      return uncovered;
+    }
+    if (requirement.reason === 'comparison_search') {
+      const hasNativeCompareOutcome = outcomes.some(
+        (o) => o.tool === 'compare_wines' && o.kind === 'success',
+      );
+      // One-sided compare (planner used search_wines for a compare query):
+      // single observation cannot cover both legs — still always-fire.
+      if (!hasNativeCompareOutcome) {
+        return uncovered;
+      }
+      // Native two-sided compare with clean coverage — fall through to
+      // "no re-plan" so the planner is free to commit the answer.
+    }
+    return null;
+  }
 }
 
 /**

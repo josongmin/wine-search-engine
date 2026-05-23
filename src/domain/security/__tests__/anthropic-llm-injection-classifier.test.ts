@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { CLAUDE_HAIKU_MODEL_ID } from '../../shared/constants/claude-models.js';
 import {
   AnthropicLLMInjectionClassifier,
   normalizeClassifierJsonText,
@@ -81,7 +82,7 @@ describe('AnthropicLLMInjectionClassifier', () => {
       expect.objectContaining({ apiKey: 'sk-test', timeout: 45_000, maxRetries: 0 }),
     );
     expect(anthropicMocks.messagesCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-haiku-4-5-20251001' }),
+      expect.objectContaining({ model: CLAUDE_HAIKU_MODEL_ID }),
       undefined,
     );
     expect(anthropicMocks.messagesCreate).toHaveBeenCalledTimes(1);

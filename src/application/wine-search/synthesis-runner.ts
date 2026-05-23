@@ -76,7 +76,8 @@ const defaultLog = bootstrapLogger.child({ component: 'SynthesisRunner' });
  * Format `claude-<family>-<gen>` per Anthropic Messages API spec (matches
  * `claude-(opus|sonnet|haiku)-N-M` — `claude-4-sonnet-latest` is rejected with HTTP 400).
  */
-const DEFAULT_SYNTHESIS_MODEL = 'claude-sonnet-4-6';
+import { CLAUDE_SONNET_MODEL_ID } from '@domain/shared/constants/claude-models.js';
+const DEFAULT_SYNTHESIS_MODEL = CLAUDE_SONNET_MODEL_ID;
 
 /** Marker for structured grounding payload appended by search tools. PORTED
  *  from `agent-answer-recovery-policy.ts` (single-source-of-truth would

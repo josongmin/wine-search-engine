@@ -11,8 +11,9 @@ import type {
 } from '../../domain/security/port/llm-injection-classifier.port.js';
 import { runUnderLlmBreaker } from '../ai/llm-circuit-breaker-classifier.js';
 
+import { CLAUDE_HAIKU_MODEL_ID } from '../../domain/shared/constants/claude-models.js';
 /** Snapshot IDs retire; keep aligned with scripts that call Anthropic (e.g. ETL). Override via ANTHROPIC_INJECTION_MODEL. */
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL = CLAUDE_HAIKU_MODEL_ID;
 
 const ANTHROPIC_SDK_TIMEOUT_MS = 45_000;
 const ANTHROPIC_CLASSIFIER_MAX_OUTPUT_TOKENS = 50;

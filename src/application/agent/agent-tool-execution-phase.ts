@@ -596,15 +596,19 @@ export class AgentToolExecutionPhase {
           && state.toolOutcomes.length >= 1
           && !state.verificationStepCompleted
         ) {
-          const uncovered = this.contractPolicy.computeUncoveredConstraints(
+          // SSoT: the narrowing for comparison_search (skip always-fire when
+          // compare_wines already covered both legs) lives in
+          // `AgentContractPolicy.shouldForceVerificationReplan`. Returning
+          // `null` means "no re-plan needed".
+          const uncoveredForReplan = this.contractPolicy.shouldForceVerificationReplan(
             verificationRequirement,
             state.toolOutcomes,
           );
-          if (uncovered.length > 0 || verificationRequirement.reason === 'comparison_search') {
+          if (uncoveredForReplan !== null) {
             state.reasoningFailureDetected = true;
             state.pendingPlannerDirective = this.contractPolicy.buildVerificationRequiredDirective(
               verificationRequirement,
-              uncovered,
+              uncoveredForReplan,
             );
             // Latch BEFORE the candidate is dropped so the second-pass answer
             // can commit even if some atoms remain uncovered (synthesis is

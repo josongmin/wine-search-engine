@@ -10,11 +10,12 @@ import { HttpEnvSchema } from './env-schemas/http.schema.js';
 import { KillSwitchEnvSchema } from './env-schemas/kill-switch.schema.js';
 import { RetrievalEnvSchema } from './env-schemas/retrieval.schema.js';
 import { VespaEnvSchema } from './env-schemas/vespa.schema.js';
+import { CLAUDE_HAIKU_MODEL_ID } from '../domain/shared/constants/claude-models.js';
 
 /** sysexits.h EX_CONFIG — invalid configuration at startup. */
 const SYSEXITS_EX_CONFIG = 78;
 /** Legacy Anthropic injection model when LLM_INJECTION_PROVIDER=anthropic. */
-const DEFAULT_ANTHROPIC_INJECTION_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_ANTHROPIC_INJECTION_MODEL = CLAUDE_HAIKU_MODEL_ID;
 
 /**
  * Schema for all environment variables required by the Wine Intelligence Engine.
