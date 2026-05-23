@@ -47,7 +47,6 @@ function createStubDeps(): HttpServerDeps {
       listDeliveries: vi.fn(),
       recordDeliveryLog: vi.fn(),
     },
-    agentOrchestrator: { execute: vi.fn() },
     wineSearch: {
       wineSearchOrchestrator: { execute: vi.fn() },
     },

@@ -59,15 +59,16 @@ interface DeclaredHttpRouteContract {
  *           OpenAPI 3 export + verify:http-contracts CI gate.
  *   2.0.0 — remove /v2/search, /v2/search/hybrid, /v2/search/interpret
  *           catalog entries (2026-05-23). These were never wired into
- *           server.ts (only /v1/* routes are registered); the V2 response
- *           format is served via content-negotiation on /v1/* with
- *           `Accept: application/vnd.cuvee.human+json`. Declaring them in
- *           the catalog falsely advertised endpoints that returned 404 to
- *           any client following the OpenAPI export. MAJOR bump per policy
- *           (route removed), but no real consumer impact since the URLs
- *           never resolved. Remaining: 23 declared routes.
+ *           server.ts; V2 served via content-negotiation on /v1/* with
+ *           `Accept: application/vnd.cuvee.human+json`. Remaining: 23.
+ *   3.0.0 — cutover from legacy ReAct agent to Plan-then-Execute
+ *           (2026-05-23). Removed `POST /v1/agent` (and its
+ *           AgentRouteContract); the canonical agentic endpoint is
+ *           `POST /v1/wine-search`. Bench parity was proven before
+ *           the cut. `/v1/agent/benchmark-scenarios` is kept (web lab
+ *           still uses it for scenario discovery). Remaining: 22.
  */
-export const HTTP_CONTRACT_CATALOG_VERSION = '2.0.0';
+export const HTTP_CONTRACT_CATALOG_VERSION = '3.0.0';
 
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
@@ -197,7 +198,7 @@ export function computeHttpContractCatalogFingerprint(
  * failing test.
  */
 export const HTTP_CONTRACT_CATALOG_FINGERPRINT =
-  'a6970d1614eb195a9cf2ac6a2d8bcd30b6c390467ac762acd60876a4edd02971';
+  '2405338c23cebd1f374cb25a842919e10fffbeeea45d8581cf2fc8903d82b06d';
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
   const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {

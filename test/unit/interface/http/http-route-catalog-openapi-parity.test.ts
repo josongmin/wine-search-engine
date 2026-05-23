@@ -57,14 +57,14 @@ describe('DeclaredHttpRouteContractCatalog ↔ OpenAPI bridge', () => {
     }
   });
 
-  it('keeps POST /v1/agent exposed through the exported route contract', () => {
-    const agentEntry = DeclaredHttpRouteContractCatalog.find(
-      (entry) => entry.method === 'POST' && entry.url === '/v1/agent',
+  it('keeps POST /v1/wine-search exposed through the exported route contract (canonical agentic entry point after 3.0.0 cutover)', () => {
+    const wineSearchEntry = DeclaredHttpRouteContractCatalog.find(
+      (entry) => entry.method === 'POST' && entry.url === '/v1/wine-search',
     );
-    expect(agentEntry?.contract.operationId).toBe('agent.execute');
+    expect(wineSearchEntry?.contract.operationId).toBe('wineSearch.execute');
 
     const doc = buildHttpRouteContractOpenApiBridge();
-    expect(doc.paths['/v1/agent']?.post?.operationId).toBe('agent.execute');
+    expect(doc.paths['/v1/wine-search']?.post?.operationId).toBe('wineSearch.execute');
   });
 
   it('no duplicate {method, url} pairs in the catalog (collision overwrites OpenAPI operation)', () => {
