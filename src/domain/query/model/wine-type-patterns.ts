@@ -24,7 +24,11 @@ export const WINE_TYPE_RULES: readonly (readonly [RegExp, WineTypeValue])[] = [
   [/(?:^|[^\p{L}\p{N}])(?:red|rouge|레드|적포도주)(?=$|[^\p{L}\p{N}])/iu, 'red'],
   [/(?:^|[^\p{L}\p{N}])(?:white|blanc|화이트|백포도주)(?=$|[^\p{L}\p{N}])/iu, 'white'],
   // Sparkling before rosé: "sparkling rosé" should resolve to sparkling (primary characteristic).
-  [/(?:^|[^\p{L}\p{N}])(?:sparkling|스파클링|champagne|샴페인|prosecco|프로세코|cava|카바|크레망)(?=$|[^\p{L}\p{N}])/iu, 'sparkling'],
+  // `발포성` ("effervescent / carbonated") is Korean's other common surface
+  // for sparkling wine; added 2026-05-23 after probe-search-quality showed
+  // "발포성 와인" returned generic reds (no constraint match → fall-through
+  // to text similarity).
+  [/(?:^|[^\p{L}\p{N}])(?:sparkling|스파클링|발포성|champagne|샴페인|prosecco|프로세코|cava|카바|크레망)(?=$|[^\p{L}\p{N}])/iu, 'sparkling'],
   // Use lookarounds (not \b) because \b is ASCII-aware and 'é' is not a word char,
   // which would break the trailing word boundary on "rosé".
   [/(?:^|[^\p{L}\p{N}])(?:ros[eé]|로제)(?=$|[^\p{L}\p{N}])/iu, 'rosé'],

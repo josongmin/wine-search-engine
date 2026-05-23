@@ -357,10 +357,16 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['평점 높은', { phrase: '평점 높은', mappedAttribute: 'critic_score', operator: '>=', value: 0.8, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['점수 높은', { phrase: '점수 높은', mappedAttribute: 'critic_score', operator: '>=', value: 0.8, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
-  // Alcohol
+  // Alcohol — `저알콜` / `저알코올` are common Korean surfaces for "low
+  // alcohol" but were previously missing from the catalog (probe-search-quality
+  // 2026-05-23: "저알콜 와인" → returned generic high-ABV reds). Same 12% cap
+  // as the existing "도수 낮은" variants — that's the de-facto industry
+  // threshold (any wine ≤12% ABV qualifies).
   ['도수 낮은', { phrase: '도수 낮은', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['도수 낮은 거', { phrase: '도수 낮은 거', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.84, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['알코올 도수 낮은', { phrase: '알코올 도수 낮은', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['저알콜', { phrase: '저알콜', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['저알코올', { phrase: '저알코올', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['low alcohol', { phrase: 'low alcohol', mappedAttribute: 'alcohol_pct', operator: '<=', value: 12, mappingConfidence: 0.86, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
   // Flavor / aroma
