@@ -13,38 +13,89 @@ const SOFT_PROMOTION_DEFAULT_CONFIDENCE_FLOOR = 0.8;
 /**
  * Mapping versions whose output is trustworthy enough to be promoted from a
  * soft signal into a Vespa retrieval filter. These are the deterministic
- * tier-1 (rule-based) and tier-2 (entity-resolver) outputs whose semantics
- * are fully audited. LLM-sourced or planner-inferred soft constraints stay
- * soft regardless of confidence — they have no replay-deterministic guarantee.
+ * tier-1 (rule-based + curated nl-mapper) and tier-2 (entity-resolver) outputs
+ * whose semantics are fully audited. LLM-sourced or planner-inferred soft
+ * constraints stay soft regardless of confidence — they have no
+ * replay-deterministic guarantee.
+ *
+ * `v1.0` is the curated DEFAULT_MAPPING_VERSION used by `nl-mapper.ts`. The
+ * nl-mapper vocabulary is a hand-audited static Map (`DEFAULT_MAPPINGS`) —
+ * every entry has a fixed (operator, value, confidence) tuple, identical to
+ * the deterministic guarantees of `rule-based-v1.0`. Excluding it from the
+ * trust list (the pre-C1b state) is what caused high-confidence Korean
+ * attribute extractions (e.g. "저알콜" → `alcohol_pct <= 12`) to never reach
+ * Vespa as a YQL filter — they were silently demoted to ranking-only boosts.
  */
 const SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS: ReadonlySet<string> = new Set([
   'rule-based-v1.0',
   'entity-resolver-v1.0',
+  'v1.0',
 ]);
 
 /**
- * Numeric soft attributes that get a clean lower-bound filter token during
- * promotion. For each, we emit ONLY the MIN bound (`<key>_min:<n>`) — never
- * the MAX bound — to avoid over-pruning recall for the unbounded-high end
- * of user intent (e.g. "good critic score" has no implicit ceiling; "fuller
- * body" has no implicit ceiling).
+ * Per-attribute promotion spec for SOFT constraints → Vespa filter tokens.
  *
- * Mapping is to existing sparse filter token keys defined in
+ * `minKey` / `maxKey` map a numeric soft constraint to the registered
+ * `<key>_min` / `<key>_max` filter token in
  * `src/infrastructure/vespa/mapping.ts` (FILTER_TOKEN_REGISTRY). We do NOT
  * duplicate the YQL translation here — emitting the registered token key
  * routes the constraint through the same buildSparseFilters path used for
  * hard constraints.
  *
- * `drinking_window` is intentionally excluded from this min-only map because
- * its semantic is two-sided (start ≤ year ≤ end) and there is no
- * single-bound translation that does not silently break recall on one half.
- * A future PR can wire drinking_window through `drinking_window_now:<year>`
- * once the soft-constraint value carries a concrete year.
+ * `stringKey` maps an `=` / `in` string-valued soft constraint to a Vespa
+ * `contains` filter token (registry entries like `flavor_profile`,
+ * `certification`).
+ *
+ * Attributes NOT in this table are intentionally excluded from promotion:
+ *  - `drinking_window` — two-sided semantic (start ≤ year ≤ end); no single
+ *    `_min`/`_max` translation that does not silently break recall on one half.
+ *  - `style` — multi-token compound regex (`style_matches:`); needs explicit
+ *    style-normalisation before YQL emission (see `case 'style'` in
+ *    `constraintToSparseFilterTokens`).
+ *  - `price_band` — categorical enum; soft preference signals only.
+ *  - `body` / `tannin` / `acidity` — sensory sliders for ranking; the
+ *    `body_min` promotion is intentionally MIN-only to avoid over-pruning
+ *    fuller-body recall, matching the historical SOTA++ default.
+ *
+ * Field-level promotion semantics:
+ *  - **MIN-only attributes** (`critic_score`, `body`, `producer_prestige`,
+ *    `gift_suitability`, `beginner_suitability`): a user asking for "high X"
+ *    has no implicit ceiling. Promoting a MAX would silently exclude the best
+ *    candidates. So `maxKey` is omitted for these.
+ *  - **Symmetric numeric attributes** (`alcohol_pct`, `sweetness`):
+ *    BOTH MIN and MAX bounds reflect explicit user intent — "저알콜"
+ *    (low alcohol) is a MAX ceiling, "high alcohol" hypothetically is a MIN
+ *    floor; "달콤한" sweetness is a MIN floor, "드라이" / "달지 않은" is a MAX
+ *    ceiling. Both directions must promote to actually filter.
+ *  - **String-contains attributes** (`flavor_profile`, `certification`):
+ *    `=` with a single string value → `<key>:<value>` (Vespa `contains`).
+ *    `in` with an array → `<key>_in:<v1>|<v2>` (multi-value OR).
  */
-const SOFT_PROMOTION_MIN_TOKEN_KEY: ReadonlyMap<string, string> = new Map([
-  ['critic_score', 'critic_score_min'],
-  ['body', 'body_min'],
-  ['producer_prestige', 'producer_prestige_min'],
+interface SoftPromotionSpec {
+  /** Vespa filter token key for `>=` / `=` numeric / `range.min` bounds. */
+  readonly minKey?: string;
+  /** Vespa filter token key for `<=` / `range.max` bounds. Undefined → MIN-only attribute. */
+  readonly maxKey?: string;
+  /** Vespa filter token base key for `=` / `in` string-contains. */
+  readonly stringKey?: string;
+}
+
+const SOFT_PROMOTION_TOKEN_SPEC: ReadonlyMap<string, SoftPromotionSpec> = new Map([
+  // MIN-only numeric attributes — historical SOTA++ default. MAX intentionally
+  // omitted to prevent over-pruning on the unbounded-high end of user intent.
+  ['critic_score',         { minKey: 'critic_score_min' }],
+  ['body',                 { minKey: 'body_min' }],
+  ['producer_prestige',    { minKey: 'producer_prestige_min' }],
+  ['gift_suitability',     { minKey: 'gift_suitability_min' }],
+  ['beginner_suitability', { minKey: 'beginner_suitability_min' }],
+  // Symmetric numeric attributes — BOTH directions are valid explicit intents.
+  // C1b regression: "저알콜" / "도수 낮은" / "드라이" / "달지 않은" must filter.
+  ['alcohol_pct', { minKey: 'alcohol_min', maxKey: 'alcohol_max' }],
+  ['alcohol',     { minKey: 'alcohol_min', maxKey: 'alcohol_max' }],
+  ['sweetness',   { minKey: 'sweetness_min', maxKey: 'sweetness_max' }],
+  // String-contains attributes — `=` / `in` operators only.
+  ['flavor_profile', { stringKey: 'flavor_profile' }],
+  ['certification',  { stringKey: 'certification' }],
 ]);
 
 /**
@@ -499,27 +550,36 @@ interface SoftPromotionOptions {
 }
 
 /**
- * P1.A — Confidence-gated promotion of SOFT constraints into Vespa filter tokens.
+ * P1.A + C1b — Confidence-gated promotion of SOFT constraints into Vespa
+ * filter tokens.
  *
  * The constraint-compiler keeps high-confidence preference signals
- * (`critic_score`, `body`, `producer_prestige`, …) in {@link ConstraintBundle.soft}
- * so the ranker can apply graceful penalties rather than 0-result hard cuts.
- * Historically these never reached YQL — meaning queries like "평점 좋은 와인"
- * never tightened retrieval below the full 7K-doc corpus.
+ * (`critic_score`, `body`, `alcohol_pct`, `sweetness`, `flavor_profile`, …)
+ * in {@link ConstraintBundle.soft} so the ranker can apply graceful penalties
+ * rather than 0-result hard cuts. Historically these never reached YQL —
+ * meaning queries like "평점 좋은 와인" (P1.A) and "저알콜 와인" (C1b)
+ * never tightened retrieval below the full corpus.
  *
  * This function performs a NARROW, principled promotion: each soft constraint
- * is converted into the same `<key>_min:` filter token used by hard constraints
- * IFF every gate passes:
+ * is converted into the same `<key>_min` / `<key>_max` / `<key>:` filter
+ * token used by hard constraints IFF every gate passes:
  *
  *   1. `confidence >= confidenceFloor` (default 0.8 — the tier-1/tier-2 floor)
- *   2. `mapping_version ∈ {rule-based-v1.0, entity-resolver-v1.0}`
- *      (no LLM-sourced or planner-inferred promotion)
- *   3. `attribute ∈ SOFT_PROMOTION_MIN_TOKEN_KEY` (only attributes with a
- *      clean MIN-only translation; drinking_window is two-sided and excluded)
- *   4. The operator/value combination yields a finite numeric MIN bound:
- *        - `=` / `>=` numeric value → use that value as the floor
- *        - `range` { min, max }      → use `min` as the floor
- *        - all other operators are skipped to avoid over-pruning
+ *   2. `mapping_version ∈ SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS`
+ *      (deterministic curated/rule-based/entity-resolver outputs only —
+ *      no LLM-sourced or planner-inferred promotion)
+ *   3. `attribute ∈ SOFT_PROMOTION_TOKEN_SPEC` (only attributes with an
+ *      explicit promotion spec — see {@link SoftPromotionSpec} for the
+ *      attribute-level MIN/MAX/string semantics)
+ *   4. The operator/value combination yields one of:
+ *        - `=` / `>=` numeric value → MIN floor (if `spec.minKey` defined)
+ *        - `<=` numeric value       → MAX ceiling (if `spec.maxKey` defined)
+ *        - `range` { min, max }     → MIN floor + MAX ceiling (each gated on its
+ *          spec key, so MIN-only attributes only emit the floor)
+ *        - `=` string value         → `<key>:<value>` contains
+ *        - `in` array of strings    → `<key>_in:<v1>|<v2>` multi-value OR
+ *        - `exclude` / `not_in`     → skipped (negation is hard-pathed in
+ *          `constraintToSparseFilterTokens` regardless of soft attribute)
  *
  * NEVER duplicates the YQL translation: the emitted token is consumed by
  * `buildSparseFilters` in `src/infrastructure/vespa/mapping.ts`, identical
@@ -541,44 +601,98 @@ export function softConstraintsToOptionalFilterTokens(
       || !SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS.has(c.mapping_version)) {
       continue;
     }
-    const tokenKey = SOFT_PROMOTION_MIN_TOKEN_KEY.get(c.attribute);
-    if (tokenKey === undefined) {
+    const spec = SOFT_PROMOTION_TOKEN_SPEC.get(c.attribute);
+    if (spec === undefined) {
       continue;
     }
-    const minValue = extractPromotionMinBound(c);
-    if (minValue === undefined) {
-      continue;
-    }
-    out.push(`${tokenKey}:${minValue}`);
+    out.push(...softConstraintToPromotionTokens(c, spec));
   }
   return out;
 }
 
 /**
- * Extracts the lower bound from a numeric soft constraint, or undefined when
- * the operator/value shape does not have a sensible MIN translation.
+ * Emits zero or more promotion tokens for a single soft constraint given its
+ * attribute's {@link SoftPromotionSpec}. Pure function — no I/O, no shared
+ * state — so callers may invoke it under cooperative-abort loops without
+ * stalling.
  *
- * Accepted shapes:
- *   - `=`     with finite number → that number
- *   - `>=`    with finite number → that number
- *   - `range` with { min, max }  → min (normalized: lo of min/max)
- *
- * Rejected shapes (return undefined — caller skips):
- *   - `<=`   (would be a MAX bound, not MIN — we never emit MAX in promotion)
- *   - `in` / `=` with non-numeric / array / string
- *   - `exclude` / `not_in`
+ * Each branch is gated on BOTH the operator/value shape and the presence of
+ * the corresponding spec key. This is what makes MIN-only attributes safe:
+ * even though "<=" syntactically supports a MAX bound, an attribute spec
+ * lacking `maxKey` (e.g. `critic_score`) will emit nothing for that operator.
  */
-function extractPromotionMinBound(c: NormalizedConstraint): number | undefined {
+function softConstraintToPromotionTokens(
+  c: NormalizedConstraint,
+  spec: SoftPromotionSpec,
+): readonly string[] {
   const { operator, value } = c;
+  const out: string[] = [];
+
   if (operator === '=' || operator === '>=') {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
+    if (typeof value === 'number' && Number.isFinite(value) && spec.minKey !== undefined) {
+      out.push(`${spec.minKey}:${value}`);
+      return out;
     }
-    return undefined;
+    // `=` with a string value → string-contains promotion (flavor_profile,
+    // certification). Strip pipe to prevent token-delimiter injection — pipe
+    // is the multi-value separator used by buildSparseFilters.
+    if (
+      operator === '='
+      && typeof value === 'string'
+      && value.length > 0
+      && spec.stringKey !== undefined
+    ) {
+      const safe = value.replace(/\|/g, '');
+      if (safe.length > 0) {
+        out.push(`${spec.stringKey}:${safe}`);
+      }
+      return out;
+    }
+    return out;
   }
+
+  if (operator === '<=') {
+    if (typeof value === 'number' && Number.isFinite(value) && spec.maxKey !== undefined) {
+      out.push(`${spec.maxKey}:${value}`);
+    }
+    return out;
+  }
+
   if (operator === 'range' && isNumericRange(value)) {
-    // Normalize reversed ranges so `{ min: 5, max: 2 }` still yields a sane lo.
-    return Math.min(value.min, value.max);
+    // Normalize reversed ranges so `{ min: 5, max: 2 }` still yields sane bounds.
+    const lo = Math.min(value.min, value.max);
+    const hi = Math.max(value.min, value.max);
+    if (spec.minKey !== undefined) {
+      out.push(`${spec.minKey}:${lo}`);
+    }
+    // MIN-only attributes (spec.maxKey undefined) intentionally emit ONLY the
+    // floor — historical SOTA++ default to avoid over-pruning on the
+    // unbounded-high end of "high X" intent.
+    if (spec.maxKey !== undefined) {
+      out.push(`${spec.maxKey}:${hi}`);
+    }
+    return out;
   }
-  return undefined;
+
+  if (operator === 'in' && Array.isArray(value) && spec.stringKey !== undefined) {
+    // Multi-value string `in` — emit pipe-delimited `_in` token. Buildsparsefilters
+    // turns this into a Vespa OR clause. Strip pipes from individual values to
+    // prevent the token-delimiter injection vector.
+    const normalized = value
+      .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+      .map((entry) => entry.replace(/\|/g, ''))
+      .filter((entry) => entry.length > 0);
+    if (normalized.length === 1) {
+      out.push(`${spec.stringKey}:${normalized[0]}`);
+      return out;
+    }
+    if (normalized.length > 1) {
+      out.push(`${spec.stringKey}_in:${normalized.join('|')}`);
+    }
+    return out;
+  }
+
+  // All other operator/value shapes (exclude, not_in, =/in with mismatched
+  // value type) intentionally skipped — caller falls through.
+  return out;
 }

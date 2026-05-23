@@ -949,6 +949,15 @@ const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
   // Numeric range filters — clamped before YQL interpolation
   ['body_min',              { type: 'num_gte', field: 'body',                    clamp: [0, 1],                          decimals: 3 }],
   ['body_max',              { type: 'num_lte', field: 'body',                    clamp: [0, 1],                          decimals: 3 }],
+  // C1b: sweetness was missing from FILTER_TOKEN_REGISTRY pre-fix even though
+  // the field exists in the Vespa schema (line ~303, `sweetness: number`).
+  // Without these tokens, soft promotion of curated nl-mapper extractions like
+  // "달지 않은" (sweetness <= 0.2) and "달달한" (sweetness >= 0.5) could never
+  // emit a Vespa filter — high-confidence sweetness intent silently degraded
+  // to ranking-only. Same [0,1] clamp as `body` (both are [0,1]-normalized
+  // sensory sliders per `scripts/etl/index-to-vespa.ts` deterministicEmbedding).
+  ['sweetness_min',         { type: 'num_gte', field: 'sweetness',               clamp: [0, 1],                          decimals: 3 }],
+  ['sweetness_max',         { type: 'num_lte', field: 'sweetness',               clamp: [0, 1],                          decimals: 3 }],
   ['acidity_min',           { type: 'num_gte', field: 'acidity',                 clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
   ['acidity_max',           { type: 'num_lte', field: 'acidity',                 clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
   ['tannin_min',            { type: 'num_gte', field: 'tannin',                  clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
