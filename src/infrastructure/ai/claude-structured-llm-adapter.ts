@@ -189,7 +189,7 @@ const ZOD_TO_JSON_SCHEMA_MAX_DEPTH = 32;
  *  schemas; this is a defensive bound on native-enum value extraction. */
 const NATIVE_ENUM_MAX_VALUES = 256;
 
-type JsonSchema = Record<string, unknown>;
+export type JsonSchema = Record<string, unknown>;
 
 interface ZodStringCheck {
   readonly kind: string;
@@ -203,7 +203,7 @@ interface ZodNumberCheck {
   readonly inclusive?: boolean;
 }
 
-function zodToJsonSchema(schema: ZodTypeAny, depth = 0): JsonSchema {
+export function zodToJsonSchema(schema: ZodTypeAny, depth = 0): JsonSchema {
   if (depth > ZOD_TO_JSON_SCHEMA_MAX_DEPTH) {
     // Bail out rather than recurse forever on a self-referential lazy schema.
     return {};

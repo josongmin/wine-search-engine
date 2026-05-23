@@ -49,6 +49,7 @@ import { FoodPairingUseCaseAdapter } from '../application/wine-search/adapters/f
 import { DrinkabilityUseCaseAdapter } from '../application/wine-search/adapters/drinkability-use-case-adapter.js';
 import { FoodPairingUseCase } from '../application/food-pairing/food-pairing.usecase.js';
 import { ClaudeStructuredLlmAdapter } from '../infrastructure/ai/claude-structured-llm-adapter.js';
+import { OpenAIStructuredLlmAdapter } from '../infrastructure/ai/openai-structured-llm-adapter.js';
 import type { SearchUseCase } from '../application/search/search.usecase.js';
 import type { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
@@ -133,20 +134,37 @@ function buildWineSearchContainerServices(
   core: Awaited<ReturnType<typeof buildCoreContainerServices>>,
   features: ReturnType<typeof buildFeatureContainerServices>,
 ): WineSearchContainerServices | undefined {
-  if (config.anthropic.apiKey === undefined) {
-    // Anthropic credential is REQUIRED for the wine-search agentic path
-    // (canonical entry point after the 3.0.0 cutover). Return undefined so
-    // the `/v1/wine-search` route is not registered; the rest of the search
-    // surface continues to work without LLM orchestration.
+  // Provider selection: WINE_SEARCH_LLM_PROVIDER=openai swaps the
+  // ClaudeStructuredLlmAdapter for the OpenAI equivalent. Required for the
+  // bench harness (test/benchmark/wine-search/runner.ts) when Anthropic
+  // credit is unavailable; production default remains Anthropic.
+  const useOpenAi = process.env['WINE_SEARCH_LLM_PROVIDER'] === 'openai';
+
+  if (useOpenAi) {
+    if (process.env['OPENAI_API_KEY'] === undefined || process.env['OPENAI_API_KEY'].length === 0) {
+      // The bench provider seam REQUIRES OPENAI_API_KEY when selected;
+      // failing loud is better than silently 404-ing /v1/wine-search.
+      return undefined;
+    }
+  } else if (config.anthropic.apiKey === undefined) {
+    // Anthropic credential is REQUIRED for the canonical agentic path.
     return undefined;
   }
 
-  // ── 1) Structured-LLM adapter (Anthropic native tool_use). Single
-  //      instance shared by analyzer (LLM fallback), mini-loop, synthesis.
-  const structuredLlm = new ClaudeStructuredLlmAdapter({
-    apiKey: config.anthropic.apiKey,
-    httpTimeoutMs: config.openai.httpTimeoutMs,
-  });
+  // ── 1) Structured-LLM adapter — selectable provider (Anthropic default,
+  //      OpenAI for bench unblock when Anthropic credit is unavailable).
+  const structuredLlm = useOpenAi
+    ? new OpenAIStructuredLlmAdapter({
+        apiKey: process.env['OPENAI_API_KEY'] as string,
+        httpTimeoutMs: config.openai.httpTimeoutMs,
+        ...(process.env['WINE_SEARCH_OPENAI_MODEL'] !== undefined && process.env['WINE_SEARCH_OPENAI_MODEL'].length > 0
+          ? { defaultModel: process.env['WINE_SEARCH_OPENAI_MODEL'] }
+          : {}),
+      })
+    : new ClaudeStructuredLlmAdapter({
+        apiKey: config.anthropic.apiKey as string,
+        httpTimeoutMs: config.openai.httpTimeoutMs,
+      });
 
   // ── 2) Use-case adapters. These translate runner-port input shapes into
   //      the existing application-layer request/response shapes. Runtime
