@@ -656,6 +656,10 @@ export class MiniLoopRunner {
     // no timeout, non-null result, has a documented TTL). Strip
     // non-deterministic fields before writing so repeat hits match
     // byte-for-byte where it matters for the LLM observation.
+    //
+    // Fire-and-forget: the set is fail-open by port contract; awaiting it
+    // would add p95 latency for zero benefit (the LLM only consumes
+    // `observation`/`outcome` — not the cache write ack).
     if (
       cacheKey !== undefined
       && this.toolResultCache !== undefined
@@ -666,11 +670,19 @@ export class MiniLoopRunner {
       const ttl = toolResultCacheTtlSeconds(call.tool);
       if (ttl !== undefined) {
         const sanitized = sanitizeResultForCache(rawResult);
-        await this.toolResultCache.set(
+        void this.toolResultCache.set(
           cacheKey,
           { result: sanitized, createdAt: Date.now() },
           ttl,
-        );
+        ).catch((err: unknown) => {
+          // Defensive — port contract guarantees no throw, but a buggy
+          // adapter MUST NOT surface into the dispatch result. Log once
+          // and move on.
+          this.logger.warn(
+            { err: err instanceof Error ? err.message : 'unknown', tool: call.tool },
+            '[MiniLoopRunner] tool cache write threw despite fail-open contract',
+          );
+        });
       }
     }
 

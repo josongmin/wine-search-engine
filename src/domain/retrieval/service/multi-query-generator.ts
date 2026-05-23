@@ -95,6 +95,18 @@ let multiQueryFailureLogged = false;
  *  allocation in the (common) entity_lookup case. */
 const EMPTY_REWRITES: readonly string[] = Object.freeze([]);
 
+/**
+ * Defensive ceiling on the LLM-emitted array length. We do NOT use
+ * `MULTI_QUERY_MAX_REWRITES` directly here because Zod's `.max()`
+ * REJECTS (raising `StructuredLlmValidationError`) rather than trims —
+ * and a 4-rewrite reply from an over-eager LLM shouldn't tank the
+ * entire fan-out. The cap-at-N trimming happens in the generator body.
+ * This bound is intentionally generous (defends against pathological
+ * 100-element outputs / prompt-injection attempts) but loose enough
+ * that normal over-eagerness is just trimmed.
+ */
+const MULTI_QUERY_ZOD_HARD_MAX = 20;
+
 /** Zod-validated LLM response. NOT `.strict()` — LLM tool output (rule 10
  *  exception). The `rewrites` array is bounded with `.max()` to defend
  *  against runaway hallucinations (schema-quality bar). */
@@ -106,7 +118,7 @@ export const MultiQueryRewriteResponseSchema = z.object({
         .min(1)
         .max(MULTI_QUERY_REWRITE_MAX_CHARS),
     )
-    .max(MULTI_QUERY_MAX_REWRITES),
+    .max(MULTI_QUERY_ZOD_HARD_MAX),
 });
 export type MultiQueryRewriteResponse = z.infer<typeof MultiQueryRewriteResponseSchema>;
 

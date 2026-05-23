@@ -165,12 +165,19 @@ describe('multi-query-generator', () => {
   });
 
   it('caps total rewrites at MULTI_QUERY_MAX_REWRITES even when LLM emits more', async () => {
-    // The Zod schema enforces .max(MULTI_QUERY_MAX_REWRITES) inside `analyze()`
-    // so we simulate the post-validation case: 3 rewrites returned (the cap).
-    // The generator must NOT exceed `MULTI_QUERY_MAX_REWRITES + 1` total.
+    // The Zod schema's `.max()` is intentionally loose (a hard
+    // anti-DoS ceiling). The generator body trims to
+    // MULTI_QUERY_MAX_REWRITES so an over-eager LLM emitting 5
+    // rewrites still produces 1 + 3 = 4 outputs (not 1 + 5).
     const analyze = vi.fn(async () => ({
       data: {
-        rewrites: ['variant alpha', 'variant beta', 'variant gamma'],
+        rewrites: [
+          'variant alpha',
+          'variant beta',
+          'variant gamma',
+          'variant delta',
+          'variant epsilon',
+        ],
       },
       usage: {
         inputTokens: 0,
@@ -185,8 +192,9 @@ describe('multi-query-generator', () => {
       model: TEST_MODEL,
     });
     const out = await gen.generate('exploratory query', 'exploratory');
-    expect(out.length).toBeLessThanOrEqual(MULTI_QUERY_MAX_REWRITES + 1);
+    expect(out).toHaveLength(MULTI_QUERY_MAX_REWRITES + 1);
     expect(out[0]).toBe('exploratory query');
+    expect(out.slice(1)).toEqual(['variant alpha', 'variant beta', 'variant gamma']);
   });
 
   it('drops empty/whitespace-only rewrites silently', async () => {
