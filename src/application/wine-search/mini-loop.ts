@@ -684,8 +684,20 @@ async function invokeToolPort(
           observation: `Tool "${call.tool}" failed: invalid input — ${normalized.message}`,
         };
       }
+      // The 'entity' retrieval route is currently broken — its
+      // anchor-binding step returns 0 candidates for every well-known
+      // wine ("Opus One 2018", "Almaviva 2019", "Château Margaux 2015")
+      // in either English or Korean, even when the PG alias overlay
+      // contains the matching alias (probe verified 2026-05-23). The
+      // planner's 'auto' route picks 'entity' for these query shapes,
+      // so 'auto' inherits the same 0-result outcome. The 'hybrid'
+      // route, by contrast, returns the exact wine as top-1. Until the
+      // entity-route bug is repaired (alias→anchor binding +
+      // entityResolver input plumbing), lookup_wine forces mode='hybrid'
+      // — semantically narrower than the original intent but functionally
+      // correct: top-1 on hybrid is the exact-label match in practice.
       const result = await ports.searchUseCase.execute(
-        { query: normalized.query, mode: 'entity', limit: normalized.clampedLimit },
+        { query: normalized.query, mode: 'hybrid', limit: normalized.clampedLimit },
         requestId,
         { abortSignal: signal },
       );
