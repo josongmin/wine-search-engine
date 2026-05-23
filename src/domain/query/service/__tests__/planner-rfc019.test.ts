@@ -31,6 +31,7 @@ class EmptyMappingTable implements MappingTablePort {
 const noAmbiguityDict: AmbiguityDictionary = {
   isKnownAmbiguous: () => Promise.resolve(false),
   getAmbiguityInfo: () => Promise.resolve(null),
+  getAmbiguityInfoBatch: () => Promise.resolve(new Map()),
 };
 
 function makePlanner(): Planner {

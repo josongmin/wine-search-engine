@@ -40,11 +40,13 @@ function makeMatchResult(
 const noAmbiguityDict: AmbiguityDictionary = {
   isKnownAmbiguous: () => Promise.resolve(false),
   getAmbiguityInfo: () => Promise.resolve(null),
+  getAmbiguityInfoBatch: () => Promise.resolve(new Map()),
 };
 
 const baroloAmbiguityDict: AmbiguityDictionary = {
   isKnownAmbiguous: (surface: string) => Promise.resolve(surface === 'barolo'),
   getAmbiguityInfo: () => Promise.resolve(null),
+  getAmbiguityInfoBatch: () => Promise.resolve(new Map()),
 };
 
 /** NLMapper stub that returns no constraints. */

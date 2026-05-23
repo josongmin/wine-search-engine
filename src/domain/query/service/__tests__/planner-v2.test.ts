@@ -92,6 +92,7 @@ function makeLlmConstraintExtractionTrace(
 const noAmbiguityDict: AmbiguityDictionary = {
   isKnownAmbiguous: () => Promise.resolve(false),
   getAmbiguityInfo: () => Promise.resolve(null),
+  getAmbiguityInfoBatch: () => Promise.resolve(new Map()),
 };
 
 const noOpNLMapper: NLMapper = {

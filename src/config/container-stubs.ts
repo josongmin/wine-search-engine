@@ -99,6 +99,12 @@ export class StubAmbiguityDictionary implements AmbiguityDictionary {
   ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
     return Promise.resolve(null);
   }
+
+  getAmbiguityInfoBatch(
+    _surfaceForms: readonly string[],
+  ): Promise<ReadonlyMap<string, { types: string[]; severity: 'low' | 'medium' | 'high' }>> {
+    return Promise.resolve(new Map());
+  }
 }
 
 export class StubAliasMatcher implements AliasMatcher {

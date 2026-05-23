@@ -1,4 +1,7 @@
-import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
+import type {
+  AmbiguityDictionary,
+  AmbiguityInfo,
+} from '../port/ambiguity-dictionary.port.js';
 import { GENERATED_KOREAN_BROAD_AMBIGUITY_SURFACES } from './generated/korean-broad-ambiguity-surfaces.js';
 
 export interface StaticAmbiguousSurfaceEntry {
@@ -91,6 +94,19 @@ export class StaticAmbiguityDictionary implements AmbiguityDictionary {
   ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
     return Promise.resolve(this.entries.get(normalizeSurface(surfaceForm)) ?? null);
   }
+
+  getAmbiguityInfoBatch(
+    surfaceForms: readonly string[],
+  ): Promise<ReadonlyMap<string, AmbiguityInfo>> {
+    const out = new Map<string, AmbiguityInfo>();
+    for (const form of surfaceForms) {
+      const hit = this.entries.get(normalizeSurface(form));
+      if (hit !== undefined) {
+        out.set(form, hit);
+      }
+    }
+    return Promise.resolve(out);
+  }
 }
 
 export class FallbackAmbiguityDictionary implements AmbiguityDictionary {
@@ -114,5 +130,25 @@ export class FallbackAmbiguityDictionary implements AmbiguityDictionary {
       return primaryInfo;
     }
     return this.fallback.getAmbiguityInfo(surfaceForm);
+  }
+
+  async getAmbiguityInfoBatch(
+    surfaceForms: readonly string[],
+  ): Promise<ReadonlyMap<string, AmbiguityInfo>> {
+    if (surfaceForms.length === 0) {
+      return new Map();
+    }
+    // Issue both lookups in parallel — the primary substrate (PG) and fallback
+    // (static) are independent, so we save a round-trip vs sequential await.
+    const [primaryMap, fallbackMap] = await Promise.all([
+      this.primary.getAmbiguityInfoBatch(surfaceForms),
+      this.fallback.getAmbiguityInfoBatch(surfaceForms),
+    ]);
+    // Primary wins on collisions — same precedence as the singular path.
+    const out = new Map<string, AmbiguityInfo>(fallbackMap);
+    for (const [form, info] of primaryMap) {
+      out.set(form, info);
+    }
+    return out;
   }
 }

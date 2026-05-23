@@ -30,6 +30,7 @@ class EmptyAliasMatcher implements AliasMatcher {
 const noAmbiguityDict: AmbiguityDictionary = {
   isKnownAmbiguous: async () => false,
   getAmbiguityInfo: async () => null,
+  getAmbiguityInfoBatch: async () => new Map(),
 };
 
 const noOpNLMapper: NLMapper = {

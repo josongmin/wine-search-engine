@@ -9,6 +9,7 @@ import {
 const noAmbiguityDict: AmbiguityDictionary = {
   isKnownAmbiguous: async () => false,
   getAmbiguityInfo: async () => null,
+  getAmbiguityInfoBatch: async () => new Map(),
 };
 
 describe('StaticAmbiguityDictionary', () => {
@@ -53,6 +54,15 @@ describe('FallbackAmbiguityDictionary', () => {
           ? { types: ['custom_runtime'], severity: 'medium' }
           : null
       ),
+      getAmbiguityInfoBatch: async (surfaces) => {
+        const m = new Map<string, { types: string[]; severity: 'low' | 'medium' | 'high' }>();
+        for (const s of surfaces) {
+          if (s === '펜폴즈') {
+            m.set(s, { types: ['custom_runtime'], severity: 'medium' });
+          }
+        }
+        return m;
+      },
     };
 
     const dictionary = new FallbackAmbiguityDictionary(

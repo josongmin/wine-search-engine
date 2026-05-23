@@ -1,3 +1,9 @@
+/** Ambiguity record returned for a single surface form. */
+export interface AmbiguityInfo {
+  readonly types: string[];
+  readonly severity: 'low' | 'medium' | 'high';
+}
+
 /**
  * Port for querying a dictionary of known ambiguous surface forms.
  *
@@ -18,10 +24,23 @@ export interface AmbiguityDictionary {
    * @param surfaceForm - The normalized surface form to look up.
    * @returns Ambiguity types and severity, or `null` if not known ambiguous.
    */
-  getAmbiguityInfo(
-    surfaceForm: string,
-  ): Promise<{
-    types: string[];
-    severity: 'low' | 'medium' | 'high';
-  } | null>;
+  getAmbiguityInfo(surfaceForm: string): Promise<AmbiguityInfo | null>;
+
+  /**
+   * Batch variant of {@link getAmbiguityInfo}. Returns a map keyed by the
+   * original surface form (no normalisation applied by the port). Surface
+   * forms that are NOT registered ambiguous are simply absent from the map.
+   *
+   * Performance rationale (C3): the planner calls this for every anchor when
+   * computing uncertainty. A sequential per-anchor await against a remote
+   * substrate (PG/RDS) caused 20+ second planner stalls on popular queries
+   * with many alias-matched anchors. The batch shape collapses N round-trips
+   * into a single one. Implementations MUST treat the input as a set
+   * (deduplicate internally) and MAY return an empty map when the underlying
+   * substrate is unavailable — same degradation contract as the singular
+   * `getAmbiguityInfo`.
+   */
+  getAmbiguityInfoBatch(
+    surfaceForms: readonly string[],
+  ): Promise<ReadonlyMap<string, AmbiguityInfo>>;
 }

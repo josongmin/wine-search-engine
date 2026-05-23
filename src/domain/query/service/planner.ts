@@ -20,7 +20,10 @@ import { DEFAULT_QUERY_BUDGET } from '../model/query-budget.js';
 import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 import { STYLE_SENSORY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
-import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
+import type {
+  AmbiguityDictionary,
+  AmbiguityInfo,
+} from '../port/ambiguity-dictionary.port.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { type AliasMatchResult, type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
@@ -500,11 +503,13 @@ export class Planner {
     const retrievalObjective = buildRetrievalObjective(constraints);
 
     // 7. Build expansions.
+    stageTimer?.start('planner.expansion_build');
     const baseExpansions = this.expansionBuilder.build(
       plannerSurfaceNormalized,
       intent,
       allAnchors,
     );
+    stageTimer?.end('planner.expansion_build');
 
     // Merge fuzzy-match results into lexical expansions.
     // TA4: also surface fuzzy hits as entity hypothesis sources in
@@ -527,6 +532,7 @@ export class Planner {
     };
 
     // 8. Compute uncertainty.
+    stageTimer?.start('planner.compute_uncertainty');
     const uncertainty = await this.computeUncertainty(
       normalizedQuery,
       allAnchors,
@@ -535,7 +541,9 @@ export class Planner {
       queryClass,
       retrievalMode,
       plannerSurfaceNormalized,
-    );
+    ).finally(() => {
+      stageTimer?.end('planner.compute_uncertainty');
+    });
     if (tracingEnabled) {
       plannerTrace.push(buildDecisionRecord(
         'uncertainty_estimation',
@@ -801,19 +809,25 @@ export class Planner {
     ) {
       return 'short_entity';
     }
-    // Check whether the full normalized query is itself a known ambiguous form.
-    const fullQueryAmbiguous =
-      await this.ambiguityDict.isKnownAmbiguous(normalizedQuery);
-    if (fullQueryAmbiguous) {
+    // Batch lookup: full query + all anchor surface forms in a single
+    // round-trip. The substrate (PG/RDS in production) replies with the set of
+    // forms it considers known-ambiguous; we then check the map locally without
+    // additional awaits. C3: was previously N+1 sequential awaits on the hot
+    // path, scaling badly with anchor count.
+    const surfaceFormsToCheck = [
+      normalizedQuery,
+      ...anchors.map((a) => a.normalizedForm),
+    ];
+    const ambiguousMap =
+      surfaceFormsToCheck.length > 0
+        ? await this.ambiguityDict.getAmbiguityInfoBatch(surfaceFormsToCheck)
+        : new Map<string, AmbiguityInfo>();
+
+    if (ambiguousMap.has(normalizedQuery)) {
       return 'ambiguous_short_form';
     }
-
-    // Check for known ambiguous terms.
     for (const anchor of anchors) {
-      const isAmbiguous = await this.ambiguityDict.isKnownAmbiguous(
-        anchor.normalizedForm,
-      );
-      if (isAmbiguous) {
+      if (ambiguousMap.has(anchor.normalizedForm)) {
         return 'ambiguous_short_form';
       }
     }
@@ -1224,8 +1238,20 @@ export class Planner {
       ambiguityQuerySurface !== undefined && ambiguityQuerySurface.trim().length > 0
         ? ambiguityQuerySurface
         : normalizedQuery;
-    const fullQueryInfo =
-      await this.ambiguityDict.getAmbiguityInfo(uncertaintyQuerySurface);
+
+    // C3: single batch lookup for the full-query surface + every anchor form.
+    // Previously these were 1 + N sequential awaits; on remote substrates this
+    // dominated planner wall-time for popular grape queries.
+    const uncertaintySurfaceForms = [
+      uncertaintyQuerySurface,
+      ...anchors.map((a) => a.normalizedForm),
+    ];
+    const uncertaintyAmbiguityMap =
+      uncertaintySurfaceForms.length > 0
+        ? await this.ambiguityDict.getAmbiguityInfoBatch(uncertaintySurfaceForms)
+        : new Map<string, AmbiguityInfo>();
+
+    const fullQueryInfo = uncertaintyAmbiguityMap.get(uncertaintyQuerySurface) ?? null;
     if (fullQueryInfo !== null) {
       ambiguityTypes.add(KNOWN_AMBIGUOUS_SURFACE_TYPE);
       for (const type of fullQueryInfo.types) {
@@ -1273,17 +1299,19 @@ export class Planner {
       };
     }
 
+    // Per-anchor aggregation uses the already-fetched batch map above — zero
+    // additional awaits. C3: was previously a per-anchor sequential
+    // `await getAmbiguityInfo(...)` loop, which on popular grape queries
+    // (50–200 alias-matched anchors against a remote PG/RDS substrate)
+    // accumulated 15–25 seconds of planner latency.
     for (const anchor of anchors) {
       // Multiple candidate entities -> ambiguous.
       if (anchor.candidateEntityIds.length > 1) {
         ambiguityTypes.add('multiple_candidates');
       }
 
-      // Check ambiguity dictionary.
-      const info = await this.ambiguityDict.getAmbiguityInfo(
-        anchor.normalizedForm,
-      );
-      if (info !== null) {
+      const info = uncertaintyAmbiguityMap.get(anchor.normalizedForm);
+      if (info !== undefined) {
         for (const type of info.types) {
           ambiguityTypes.add(type);
         }

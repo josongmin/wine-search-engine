@@ -115,6 +115,19 @@ export class InMemoryAmbiguityDictionary implements AmbiguityDictionary {
   ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
     return this.ambiguous.get(term.toLowerCase()) ?? null;
   }
+
+  async getAmbiguityInfoBatch(
+    surfaceForms: readonly string[],
+  ): Promise<ReadonlyMap<string, { types: string[]; severity: 'low' | 'medium' | 'high' }>> {
+    const out = new Map<string, { types: string[]; severity: 'low' | 'medium' | 'high' }>();
+    for (const form of surfaceForms) {
+      const hit = this.ambiguous.get(form.toLowerCase());
+      if (hit !== undefined) {
+        out.set(form, hit);
+      }
+    }
+    return out;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
