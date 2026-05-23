@@ -194,6 +194,13 @@ export type MultiStepHandoff = z.infer<typeof MultiStepHandoffSchema>;
 export const PlanRejectReasonSchema = z.enum([
   'analysis_rejected',
   'unsupported_intent',
+  /**
+   * F-FailClosed: the plan requires a tool the operator has disabled via
+   * `WINE_SEARCH_DISABLED_TOOLS`. ExecutionRunner returns this rather
+   * than dispatching a known-broken tool — keeps the bench rubric clean
+   * (no half-baked compare/pair/drinkability outputs).
+   */
+  'tool_unavailable',
 ]);
 export type PlanRejectReason = z.infer<typeof PlanRejectReasonSchema>;
 

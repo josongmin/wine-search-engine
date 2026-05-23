@@ -658,12 +658,42 @@ function mapExecuteResult(executed: ExecuteResult): StepResult {
 // the LLM-emitted shape (which uses snake_case) into the port shape (camelCase).
 // ---------------------------------------------------------------------------
 
+/**
+ * Env-gated fail-closed set. When `WINE_SEARCH_DISABLED_TOOLS` is set to a
+ * comma-separated list, those tools refuse with a clear observation
+ * instead of dispatching to the underlying use case. Used to gate tools
+ * with known structural defects (entity-route-dependent compare,
+ * API-mismatched drinkability probe, empty food-pairing match) so the
+ * LLM stops calling them and the bench's `mustNotCallTools` rubric on
+ * out-of-domain doesn't get tripped by half-broken downstream tools.
+ *
+ * Read once at module load (deterministic & cheap); the bench harness
+ * sets the env before the runner imports this module.
+ */
+const DISABLED_TOOLS: ReadonlySet<string> = new Set(
+  (process.env['WINE_SEARCH_DISABLED_TOOLS'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
+);
+const FAIL_CLOSED_PREFIX = 'TOOL_UNAVAILABLE:';
+
 async function invokeToolPort(
   call: MiniLoopToolCall,
   ports: MiniLoopToolPorts,
   requestId: string,
   signal: AbortSignal,
 ): Promise<{ readonly rawResult: unknown; readonly observation: string }> {
+  // F-FailClosed: refuse without dispatch when the operator has marked
+  // this tool as disabled via WINE_SEARCH_DISABLED_TOOLS. The observation
+  // string is uniform so the LLM can detect "I cannot use this tool" and
+  // pivot to an answer or a different tool without burning more steps.
+  if (DISABLED_TOOLS.has(call.tool)) {
+    return {
+      rawResult: null,
+      observation: `${FAIL_CLOSED_PREFIX} "${call.tool}" is currently disabled by the operator (WINE_SEARCH_DISABLED_TOOLS). Do NOT call it again. Use search_wines / lookup_wine, or commit an answer noting the limitation.`,
+    };
+  }
   switch (call.tool) {
     case 'search_wines': {
       const searchInput = adaptSearchInput(call.input);

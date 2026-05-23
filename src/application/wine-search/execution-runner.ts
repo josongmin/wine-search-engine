@@ -156,6 +156,23 @@ export class ExecutionRunner {
     try {
       throwIfAborted(ctx.abortSignal, 'Execution runner aborted before start');
 
+      // F-FailClosed: when the operator has disabled the tool that this
+      // plan-kind depends on, fall back to a single-search degradation
+      // (when possible) or a 'rejected' outcome. The disabled set is
+      // sourced once per process at module load — same env var the
+      // mini-loop dispatcher reads.
+      if (planRequiresDisabledTool(plan)) {
+        bootstrapLogger.warn(
+          { ...logCtx, planKind: plan.kind },
+          '[ExecutionRunner] plan requires a disabled tool — degrading via single-search fallback or rejecting',
+        );
+        const degraded = degradeDisabledPlan(plan);
+        if (degraded !== null) {
+          return await this.runSingleSearch(degraded, ctx, perStepTimeoutMs, logCtx);
+        }
+        return { kind: 'rejected', reason: 'tool_unavailable' };
+      }
+
       switch (plan.kind) {
         case 'single-search':
           return await this.runSingleSearch(plan.searchInput, ctx, perStepTimeoutMs, logCtx);
@@ -423,5 +440,53 @@ export class ExecutionRunner {
       return RUNNER_MAX_PER_STEP_TIMEOUT_MS;
     }
     return Math.floor(input);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// F-FailClosed helpers — env-gated, module-scope.
+// ---------------------------------------------------------------------------
+
+/** Env-gated disabled-tools set, read once per process. Mirrors mini-loop. */
+const RUNNER_DISABLED_TOOLS: ReadonlySet<string> = new Set(
+  (process.env['WINE_SEARCH_DISABLED_TOOLS'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
+);
+
+/** Plan-kind → underlying tool the disabled-set should consult. */
+function planRequiresDisabledTool(plan: ExecutionPlan): boolean {
+  if (RUNNER_DISABLED_TOOLS.size === 0) return false;
+  switch (plan.kind) {
+    case 'comparison':
+      return RUNNER_DISABLED_TOOLS.has('compare_wines');
+    case 'food-pairing-then-search':
+      return RUNNER_DISABLED_TOOLS.has('get_food_pairings');
+    case 'search-then-drinkability':
+      return RUNNER_DISABLED_TOOLS.has('check_drinking_window');
+    default:
+      return false;
+  }
+}
+
+/**
+ * For plan kinds whose dependency is disabled, emit a degraded
+ * `single-search` plan that still has a chance of producing a useful
+ * answer (the user's query intent is captured in the underlying
+ * `searchInput`). Returns `null` for `comparison`, where there is no
+ * single search query to fall back to — the orchestrator must surface
+ * the `tool_unavailable` reject directly.
+ */
+function degradeDisabledPlan(plan: ExecutionPlan): SearchUseCaseInput | null {
+  switch (plan.kind) {
+    case 'food-pairing-then-search':
+      return plan.searchInput;
+    case 'search-then-drinkability':
+      return plan.searchInput;
+    case 'comparison':
+      return null;
+    default:
+      return null;
   }
 }
