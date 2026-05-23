@@ -15,7 +15,6 @@ import { extractSearchConstraints } from '../../domain/query/service/search-cons
 import { hasComparisonMarkers } from '../../domain/query/service/anchor-extractor.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
 import type { ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
-import type { AgentSemanticContract } from './agent-semantic-contract.js';
 
 /**
  * Reason taxonomy for "this query MUST execute a second verify/synthesize step
@@ -110,7 +109,6 @@ export interface AgentQueryExecutionContract {
   } | undefined;
   readonly searchDefaults?: AgentSearchDefaults | undefined;
   readonly requiredParallelSearches?: readonly AgentSearchSlot[] | undefined;
-  readonly semanticContract?: AgentSemanticContract | undefined;
   readonly resultLimit?: number | undefined;
   /**
    * P0: when present, the agent loop MUST execute a second verify/synthesize

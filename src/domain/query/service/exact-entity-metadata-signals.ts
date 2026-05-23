@@ -7,11 +7,25 @@
  * - suffix stripping when the raw user query should collapse to the bare entity
  */
 
-/** Drinkability questions that still target a specific known wine. */
+/** Drinkability questions that still target a specific known wine.
+ *
+ * Korean inflection chain for `좋` (good / drinkable):
+ *   • 좋아 / 좋은            — bare affirmative & attributive
+ *   • 좋은지 / 좋은지도 / 좋은지만 — embedded-question forms (bench #15 / #117 RCA;
+ *                                  the original alternation missed these and
+ *                                  silently dropped the drinkability signal)
+ *   • 좋은가                 — interrogative
+ *   • 좋을 / 좋을까 / 좋을지  — speculative / embedded
+ *   • 좋습니까               — polite interrogative
+ *
+ * The leading `마시기` prefix anchors the match to drinkability context, so
+ * generic 좋은/좋아 in other clauses (e.g. "좋은 와인 추천해줘") cannot trigger.
+ * CLAUDE.md rule 8: `\b` is avoided — Unicode boundaries via `[\p{L}\p{N}]`.
+ */
 const DRINKABILITY_KEYWORDS: readonly RegExp[] = [
   /(?<!\p{L})(?<!\p{N})(?:drinkability|drinking\s+window|when\s+to\s+drink)(?!\p{L})(?!\p{N})/iu,
   /(?<!\p{L})(?<!\p{N})(?:currently\s+drinkable|drink\s+now|ready\s+to\s+drink)(?!\p{L})(?!\p{N})/iu,
-  /(?:^|[^\p{L}\p{N}])(?:마시기\s*좋(?:아|은|을|을까|을지)?|마실\s*시기|음용\s*시기|피크)(?=$|[^\p{L}\p{N}])/u,
+  /(?:^|[^\p{L}\p{N}])(?:마시기\s*좋(?:아|은(?:지(?:만|도)?|가)?|을(?:까|지)?|습니까)?|마실\s*시기|음용\s*시기|피크)(?=$|[^\p{L}\p{N}])/u,
   /(?:^|[^\p{L}\p{N}])(?:지금|현재)\s*마실\s*수\s*있(?:는|을|나|어)?(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
