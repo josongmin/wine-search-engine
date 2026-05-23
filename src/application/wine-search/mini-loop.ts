@@ -33,6 +33,7 @@
  *     otherwise (CLAUDE.md i18n discipline — see `mini-loop-schemas.ts`).
  */
 
+import { createHash } from 'node:crypto';
 import type { ChatMessage } from '@domain/ai/port/chat-llm.port.js';
 import type {
   ExecuteRequest,
@@ -54,6 +55,9 @@ import {
 } from '../agent/agent-tool-execution-support.js';
 import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
 import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '@domain/agent/model/agent-tool-attempt-schema.js';
+import { toolResultCacheTtlSeconds } from '@domain/shared/constants/tool-cache-ttl.js';
+import { stableStringify } from '@domain/shared/utils/stable-stringify.js';
+import type { ToolResultCachePort } from './port/tool-result-cache.port.js';
 import {
   addTokenUsage,
   makeZeroTokenUsage,
@@ -105,6 +109,11 @@ const MINI_LOOP_RESULT_PREVIEW_LIMIT = 5;
 /** Magnitude that triggers the "result preview truncated" suffix in the
  *  observation. */
 const MINI_LOOP_RESULT_PREVIEW_CHARS = 1_500;
+
+/** Truncated SHA-256 hex chars for cache-key input hash. 16 hex = 64 bits;
+ *  collision probability ≈ 10⁻¹⁰ at 100K cached entries. Matches the
+ *  truncation used in `redis-tool-result-cache.ts`. */
+const TOOL_CACHE_INPUT_HASH_HEX_CHARS = 16;
 
 // ---------------------------------------------------------------------------
 // System prompt — static so it benefits from prompt caching.
@@ -178,6 +187,15 @@ interface MiniLoopRunnerDeps {
   /** Override of the Anthropic model id used for `execute`. Defaults to
    *  `MINI_LOOP_DEFAULT_MODEL`. */
   readonly model?: string;
+  /**
+   * Optional Redis-backed memoization for (toolName, normalizedInput) →
+   * result. When wired, the dispatcher checks the cache before executing
+   * the tool and writes the result on miss. Absence (`undefined`) disables
+   * caching at the wiring boundary — same semantics as
+   * `WINE_SEARCH_TOOL_CACHE_ENABLED=0`. Cache failures are fail-open by
+   * contract (see `ToolResultCachePort`).
+   */
+  readonly toolResultCache?: ToolResultCachePort | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,11 +206,17 @@ export class MiniLoopRunner {
   private readonly structuredLlm: StructuredLlmPort;
   private readonly logger: MiniLoopRunnerLogger;
   private readonly model: string;
+  private readonly toolResultCache: ToolResultCachePort | undefined;
+  /** Resolved once at runner construction; mirror the existing
+   *  `DISABLED_TOOLS` pattern (snapshot env state at module/runner load). */
+  private readonly toolCacheEnabled: boolean;
 
   constructor(deps: MiniLoopRunnerDeps) {
     this.structuredLlm = deps.structuredLlm;
     this.logger = deps.logger ?? defaultLog;
     this.model = deps.model ?? MINI_LOOP_DEFAULT_MODEL;
+    this.toolResultCache = deps.toolResultCache;
+    this.toolCacheEnabled = readToolCacheEnabledEnv();
   }
 
   async run(input: MiniLoopInput): Promise<MiniLoopOutcome> {
@@ -342,6 +366,14 @@ export class MiniLoopRunner {
         // on multi-tool LLM turns (e.g. compare + 2× drinking_window).
         // Ordering of observations/toolOutcomes is preserved by index so
         // the chat-history append step downstream remains deterministic.
+        // Adaptive retrieval k — feeds `search_wines` as the DEFAULT `limit`
+        // when the LLM does not specify one. Sourced from
+        // `analysis.recommendedBudget.retrievalK` which the query-analyzer
+        // populated via `RETRIEVAL_K_BY_INTENT` (SSoT —
+        // `adaptive-budget.ts`). Undefined for legacy callers that did not
+        // populate the field; in that case the use case applies its own
+        // default (no behavior change vs the pre-lever baseline).
+        const adaptiveRetrievalKDefault = input.analysis.recommendedBudget.retrievalK;
         const dispatchResults = await Promise.all(
           stepResult.toolCalls.map((call, i) =>
             this.dispatchTool(
@@ -352,6 +384,7 @@ export class MiniLoopRunner {
               i,
               input.perStepTimeoutMs,
               input.abortSignal,
+              adaptiveRetrievalKDefault,
             ),
           ),
         );
@@ -522,8 +555,46 @@ export class MiniLoopRunner {
     toolPosition: number,
     perStepTimeoutMs: number,
     abortSignal: AbortSignal | undefined,
+    adaptiveRetrievalKDefault: number | undefined,
   ): Promise<{ readonly observation: string; readonly outcome: ToolOutcome }> {
     const startedAtMs = Date.now();
+
+    // ── Pre-flight cache check. Skipped when:
+    //    - cache port not wired,
+    //    - env flag disables caching,
+    //    - tool is in WINE_SEARCH_DISABLED_TOOLS (it would short-circuit to
+    //      TOOL_UNAVAILABLE anyway — pointless to cache).
+    //    - tool has no documented TTL (unknown tool — fail-safe: don't cache).
+    // The cache.get() call is fail-open by port contract; an exception is
+    // never raised into the dispatcher.
+    const cacheKey = shouldConsultCache(this.toolResultCache, this.toolCacheEnabled, call.tool)
+      ? { toolName: call.tool, normalizedInputHash: computeToolInputHash(call.input) }
+      : undefined;
+    if (cacheKey !== undefined && this.toolResultCache !== undefined) {
+      const hit = await this.toolResultCache.get(cacheKey);
+      if (hit !== null) {
+        // Cache hit — reuse the stored result. Tag the observation with a
+        // `[CACHE_HIT]` prefix so the judge / trace can distinguish cached
+        // turns from fresh executions. Observation is recomputed from the
+        // raw result (not stored) because the stored format normalizes
+        // away the textual preview.
+        const observation = `[CACHE_HIT] ${formatObservationForTool(call.tool, hit.result)}`;
+        const durationMs = Math.max(0, Date.now() - startedAtMs);
+        const outcome = buildToolOutcome(
+          requestId,
+          stepIndex,
+          toolPosition,
+          call.tool,
+          observation,
+          hit.result,
+          durationMs,
+          /* execError */ false,
+          /* timedOut */ false,
+          /* policyViolation */ false,
+        );
+        return { observation, outcome };
+      }
+    }
 
     // Chain abort.
     const local = new AbortController();
@@ -545,7 +616,7 @@ export class MiniLoopRunner {
     let timedOut = false;
     let execError = false;
     try {
-      const work = invokeToolPort(call, ports, requestId, local.signal);
+      const work = invokeToolPort(call, ports, requestId, local.signal, adaptiveRetrievalKDefault);
       const result = await withTimeout(
         work,
         perStepTimeoutMs,
@@ -580,6 +651,29 @@ export class MiniLoopRunner {
       timedOut,
       /* policyViolation */ false,
     );
+
+    // ── Cache write on miss. Only cache successful executions (no error,
+    // no timeout, non-null result, has a documented TTL). Strip
+    // non-deterministic fields before writing so repeat hits match
+    // byte-for-byte where it matters for the LLM observation.
+    if (
+      cacheKey !== undefined
+      && this.toolResultCache !== undefined
+      && !execError
+      && !timedOut
+      && rawResult !== null
+    ) {
+      const ttl = toolResultCacheTtlSeconds(call.tool);
+      if (ttl !== undefined) {
+        const sanitized = sanitizeResultForCache(rawResult);
+        await this.toolResultCache.set(
+          cacheKey,
+          { result: sanitized, createdAt: Date.now() },
+          ttl,
+        );
+      }
+    }
+
     return { observation, outcome };
   }
 }
@@ -678,11 +772,25 @@ const DISABLED_TOOLS: ReadonlySet<string> = new Set(
 );
 const FAIL_CLOSED_PREFIX = 'TOOL_UNAVAILABLE:';
 
+/**
+ * `adaptiveRetrievalKDefault` — the per-intent retrieval `k` derived from
+ * `analysis.recommendedBudget.retrievalK` (SSoT `RETRIEVAL_K_BY_INTENT`
+ * in `adaptive-budget.ts`). Applied as the DEFAULT `limit` for
+ * `search_wines` ONLY when the LLM-emitted tool input does NOT specify
+ * its own `limit`. The LLM may intentionally use a different value for a
+ * multi-hop reasoning step — we never override.
+ *
+ * `lookup_wine` is intentionally NOT threaded through the adaptive lever
+ * because the tool contract caps `limit` at `LOOKUP_WINE_LIMIT_MAX` (= 3)
+ * for high-precision identity resolution — broader recall would defeat
+ * the tool's purpose.
+ */
 async function invokeToolPort(
   call: MiniLoopToolCall,
   ports: MiniLoopToolPorts,
   requestId: string,
   signal: AbortSignal,
+  adaptiveRetrievalKDefault: number | undefined,
 ): Promise<{ readonly rawResult: unknown; readonly observation: string }> {
   // F-FailClosed: refuse without dispatch when the operator has marked
   // this tool as disabled via WINE_SEARCH_DISABLED_TOOLS. The observation
@@ -696,7 +804,7 @@ async function invokeToolPort(
   }
   switch (call.tool) {
     case 'search_wines': {
-      const searchInput = adaptSearchInput(call.input);
+      const searchInput = adaptSearchInput(call.input, adaptiveRetrievalKDefault);
       const result = await ports.searchUseCase.execute(searchInput, requestId, { abortSignal: signal });
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
@@ -771,19 +879,42 @@ async function invokeToolPort(
   }
 }
 
-function adaptSearchInput(raw: Record<string, unknown>): SearchUseCaseInput {
+/**
+ * Mini-loop's tool-input adapter for `search_wines`. Exported for direct
+ * regression testing of the adaptive-k vs LLM-limit precedence rule. The
+ * function is otherwise an implementation detail of `invokeToolPort` and
+ * callers outside the runner SHOULD NOT depend on it.
+ *
+ * @internal
+ */
+export function adaptSearchInput(
+  raw: Record<string, unknown>,
+  adaptiveRetrievalKDefault: number | undefined,
+): SearchUseCaseInput {
   const query = typeof raw['query'] === 'string' && raw['query'].length > 0
     ? raw['query']
     : '';
   // We intentionally keep the surface minimal — the runner trusts the
   // LLM's query and forwards filters/preferences when present. Bounds are
   // enforced downstream by the use case port itself.
+  //
+  // Adaptive `limit` precedence (SOTA cost/quality lever):
+  //   1. LLM-emitted `limit` (when present & finite) — the model may
+  //      intentionally narrow/widen for a multi-hop reasoning step. We
+  //      never override an explicit value.
+  //   2. `adaptiveRetrievalKDefault` from `recommendedBudget.retrievalK`
+  //      (SSoT `RETRIEVAL_K_BY_INTENT` in `adaptive-budget.ts`).
+  //   3. Omit the field — downstream use case applies its own default.
+  const llmLimit = typeof raw['limit'] === 'number' && Number.isFinite(raw['limit'])
+    ? raw['limit']
+    : undefined;
+  const resolvedLimit = llmLimit ?? adaptiveRetrievalKDefault;
   return {
     query,
     ...(Array.isArray(raw['filters']) ? { filters: raw['filters'] as SearchUseCaseInput['filters'] } : {}),
     ...(Array.isArray(raw['preferences']) ? { preferences: raw['preferences'] as SearchUseCaseInput['preferences'] } : {}),
     ...(typeof raw['mode'] === 'string' ? { mode: raw['mode'] as SearchUseCaseInput['mode'] } : {}),
-    ...(typeof raw['limit'] === 'number' && Number.isFinite(raw['limit']) ? { limit: raw['limit'] } : {}),
+    ...(resolvedLimit !== undefined ? { limit: resolvedLimit } : {}),
   };
 }
 
@@ -904,6 +1035,107 @@ function filterStrings(values: readonly unknown[]): string[] {
   const out: string[] = [];
   for (const v of values) {
     if (typeof v === 'string' && v.length > 0) out.push(v);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Tool-result cache helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Env-gated kill switch for the tool-result cache. Read ONCE per
+ * `MiniLoopRunner` construction (mirrors the `DISABLED_TOOLS` snapshot
+ * pattern higher up in this file). Default ON; set to `'0'` to disable
+ * entirely (e.g. for bench debugging).
+ */
+function readToolCacheEnabledEnv(): boolean {
+  const raw = process.env['WINE_SEARCH_TOOL_CACHE_ENABLED'];
+  if (raw === undefined) return true;
+  return raw !== '0';
+}
+
+/**
+ * True when the cache should be consulted/written for this tool call. The
+ * three short-circuits (no cache wired, env-disabled, fail-closed tool) are
+ * checked here so the dispatch site stays linear.
+ */
+function shouldConsultCache(
+  cache: ToolResultCachePort | undefined,
+  enabled: boolean,
+  toolName: string,
+): boolean {
+  if (cache === undefined) return false;
+  if (!enabled) return false;
+  if (DISABLED_TOOLS.has(toolName)) return false;
+  // A tool MUST have a documented TTL to participate. Unknown tools fall
+  // through silently (caller treats `undefined` as "do not cache").
+  if (toolResultCacheTtlSeconds(toolName) === undefined) return false;
+  return true;
+}
+
+/**
+ * Compute the truncated SHA-256 hex hash of a normalized tool input using
+ * the SSoT `stableStringify`. The output is identical across processes and
+ * matches what `RedisToolResultCache.computeInputHash` would produce.
+ */
+function computeToolInputHash(input: unknown): string {
+  const canonical = stableStringify(input);
+  return createHash('sha256').update(canonical).digest('hex').slice(0, TOOL_CACHE_INPUT_HASH_HEX_CHARS);
+}
+
+/**
+ * Per-tool, light-weight observation reformatter for cache hits. The cached
+ * record stores the raw result; the observation string is recomputed at
+ * read time so it matches the format the LLM saw on first execution.
+ */
+function formatObservationForTool(toolName: string, result: unknown): string {
+  switch (toolName) {
+    case 'search_wines':
+    case 'lookup_wine':
+      return formatSearchObservation(result);
+    case 'get_food_pairings': {
+      if (result !== null && typeof result === 'object') {
+        const record = result as Record<string, unknown>;
+        const inner = record['results'];
+        if (inner !== undefined) return formatSearchObservation(inner);
+      }
+      return formatGenericObservation(toolName, result);
+    }
+    default:
+      return formatGenericObservation(toolName, result);
+  }
+}
+
+/**
+ * Strip non-deterministic / request-bound fields from a tool result before
+ * caching. Fields known to vary across otherwise-identical calls (e.g.
+ * `meta.generatedAt` ISO timestamps, any embedded `requestId` /
+ * `request_id`) are removed so that subsequent cache hits return a stable
+ * payload. This is intentionally conservative — we only strip well-known
+ * sentinel fields; the per-tool projector grows on demand.
+ */
+function sanitizeResultForCache(result: unknown): unknown {
+  if (result === null || typeof result !== 'object') return result;
+  if (Array.isArray(result)) return result.map(sanitizeResultForCache);
+  const obj = result as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(obj)) {
+    // Drop top-level request-bound markers.
+    if (k === 'requestId' || k === 'request_id') continue;
+    const v = obj[k];
+    if (k === 'meta' && v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      // Drop `meta.generatedAt` — recomputed on every response (ISO ts).
+      const meta = v as Record<string, unknown>;
+      const cleanedMeta: Record<string, unknown> = {};
+      for (const mk of Object.keys(meta)) {
+        if (mk === 'generatedAt' || mk === 'generated_at') continue;
+        cleanedMeta[mk] = meta[mk];
+      }
+      out[k] = cleanedMeta;
+      continue;
+    }
+    out[k] = sanitizeResultForCache(v);
   }
   return out;
 }

@@ -304,21 +304,37 @@ export class StructuredLlmJudge implements LlmJudge {
 
   async evaluate(input: JudgeInput): Promise<JudgeResult> {
     const grounding = formatGrounding(input.groundingObservations);
-    const rubricBlock = input.rubric !== undefined && input.rubric.trim().length > 0
-      ? `\n\nScenario-specific rubric (apply on top of the general criteria):\n${input.rubric.trim()}`
-      : '';
+    // PREFIX-CACHE HARDENING: the per-scenario rubric used to be concatenated
+    // onto the system prompt (`${JUDGE_SYSTEM_PROMPT}${rubricBlock}`), which
+    // made the system slot vary per request and defeated implicit prefix
+    // caching on both Anthropic (when the rubric pushed the cache marker past
+    // the changing bytes) and OpenAI (whose 1024-token prefix-cache hash needs
+    // the FIRST N tokens to be byte-identical across calls).
+    //
+    // The rubric is now emitted as a USER message (PREPENDED so it precedes
+    // QUERY / ANSWER / GROUNDING — semantically it's a directive applied on
+    // top of the general criteria). The total content the LLM sees is
+    // unchanged; only the bytes move from `system` into `user`. JUDGE_SYSTEM_PROMPT
+    // is now byte-identical for every judge call → stable prefix.
+    const rubricTrimmed = input.rubric?.trim() ?? '';
+    const hasScenarioRubric = rubricTrimmed.length > 0;
 
-    const messages: readonly ChatMessage[] = [
-      { role: 'user', content: `QUERY:\n${input.query}` },
-      { role: 'user', content: `ANSWER:\n${input.answer}` },
-      { role: 'user', content: `GROUNDING:\n${grounding}` },
-    ];
+    const messages: ChatMessage[] = [];
+    if (hasScenarioRubric) {
+      messages.push({
+        role: 'user',
+        content: `Scenario-specific rubric (apply on top of the general criteria):\n${rubricTrimmed}`,
+      });
+    }
+    messages.push({ role: 'user', content: `QUERY:\n${input.query}` });
+    messages.push({ role: 'user', content: `ANSWER:\n${input.answer}` });
+    messages.push({ role: 'user', content: `GROUNDING:\n${grounding}` });
 
     try {
       const result = await this.structuredLlm.synthesize({
         messages,
         schema: JudgeOutputSchema,
-        systemPrompt: `${JUDGE_SYSTEM_PROMPT}${rubricBlock}`,
+        systemPrompt: JUDGE_SYSTEM_PROMPT,
         enablePromptCache: true,
         maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
         perStepTimeoutMs: JUDGE_PER_STEP_TIMEOUT_MS,

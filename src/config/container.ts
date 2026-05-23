@@ -48,8 +48,16 @@ import { ComparisonUseCaseAdapter } from '../application/wine-search/adapters/co
 import { FoodPairingUseCaseAdapter } from '../application/wine-search/adapters/food-pairing-use-case-adapter.js';
 import { DrinkabilityUseCaseAdapter } from '../application/wine-search/adapters/drinkability-use-case-adapter.js';
 import { FoodPairingUseCase } from '../application/food-pairing/food-pairing.usecase.js';
-import { ClaudeStructuredLlmAdapter } from '../infrastructure/ai/claude-structured-llm-adapter.js';
-import { OpenAIStructuredLlmAdapter } from '../infrastructure/ai/openai-structured-llm-adapter.js';
+import {
+  buildSharedStructuredLlm,
+  resolveMultiQueryRewriteModel,
+  type SharedStructuredLlmServices,
+} from './container-structured-llm.js';
+import { createMultiQueryGenerator } from '../domain/retrieval/service/multi-query-generator.js';
+import { createHydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
+import type { UseCaseExtensions } from './container-usecases.js';
+import { RedisToolResultCache } from '../infrastructure/cache/redis-tool-result-cache.js';
+import type { ToolResultCachePort } from '../application/wine-search/port/tool-result-cache.port.js';
 import type { SearchUseCase } from '../application/search/search.usecase.js';
 import type { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
@@ -130,41 +138,18 @@ export interface WineSearchContainerServices {
  *    single camelCase → snake_case re-case at the HTTP boundary.
  */
 function buildWineSearchContainerServices(
-  config: Config,
+  _config: Config,
   core: Awaited<ReturnType<typeof buildCoreContainerServices>>,
   features: ReturnType<typeof buildFeatureContainerServices>,
+  sharedStructuredLlm: SharedStructuredLlmServices | null,
 ): WineSearchContainerServices | undefined {
-  // Provider selection: WINE_SEARCH_LLM_PROVIDER=openai swaps the
-  // ClaudeStructuredLlmAdapter for the OpenAI equivalent. Required for the
-  // bench harness (test/benchmark/wine-search/runner.ts) when Anthropic
-  // credit is unavailable; production default remains Anthropic.
-  const useOpenAi = process.env['WINE_SEARCH_LLM_PROVIDER'] === 'openai';
-
-  if (useOpenAi) {
-    if (process.env['OPENAI_API_KEY'] === undefined || process.env['OPENAI_API_KEY'].length === 0) {
-      // The bench provider seam REQUIRES OPENAI_API_KEY when selected;
-      // failing loud is better than silently 404-ing /v1/wine-search.
-      return undefined;
-    }
-  } else if (config.anthropic.apiKey === undefined) {
-    // Anthropic credential is REQUIRED for the canonical agentic path.
+  // Reuse the shared StructuredLlmPort built at the composition root.
+  // Returns `undefined` when no credential was available (same gating
+  // semantics as the prior in-function adapter construction).
+  if (sharedStructuredLlm === null) {
     return undefined;
   }
-
-  // ── 1) Structured-LLM adapter — selectable provider (Anthropic default,
-  //      OpenAI for bench unblock when Anthropic credit is unavailable).
-  const structuredLlm = useOpenAi
-    ? new OpenAIStructuredLlmAdapter({
-        apiKey: process.env['OPENAI_API_KEY'] as string,
-        httpTimeoutMs: config.openai.httpTimeoutMs,
-        ...(process.env['WINE_SEARCH_OPENAI_MODEL'] !== undefined && process.env['WINE_SEARCH_OPENAI_MODEL'].length > 0
-          ? { defaultModel: process.env['WINE_SEARCH_OPENAI_MODEL'] }
-          : {}),
-      })
-    : new ClaudeStructuredLlmAdapter({
-        apiKey: config.anthropic.apiKey as string,
-        httpTimeoutMs: config.openai.httpTimeoutMs,
-      });
+  const { structuredLlm } = sharedStructuredLlm;
 
   // ── 2) Use-case adapters. These translate runner-port input shapes into
   //      the existing application-layer request/response shapes. Runtime
@@ -217,9 +202,21 @@ function buildWineSearchContainerServices(
     foodPairingUseCase: foodPairingAdapter,
     drinkabilityUseCase: drinkabilityAdapter,
   });
+  // ── Tool-result cache. Wired ONLY when the env flag is on (default ON);
+  //    runner-side enforcement also reads `WINE_SEARCH_TOOL_CACHE_ENABLED`,
+  //    but injecting `undefined` here is the cheaper short-circuit (skips
+  //    the runner's per-call shouldConsultCache check). The adapter is
+  //    fail-open by contract — if Redis is unavailable at runtime, every
+  //    get returns null and every set is a no-op (see
+  //    RedisToolResultCache).
+  const toolResultCache: ToolResultCachePort | undefined =
+    process.env['WINE_SEARCH_TOOL_CACHE_ENABLED'] === '0'
+      ? undefined
+      : new RedisToolResultCache();
   const miniLoopRunner = new MiniLoopRunner({
     structuredLlm,
     logger: wineSearchLogger,
+    ...(toolResultCache !== undefined ? { toolResultCache } : {}),
   });
   const synthesisRunner = new SynthesisRunner({
     structuredLlm,
@@ -262,12 +259,44 @@ function buildWineSearchContainerServices(
   return { wineSearchOrchestrator };
 }
 
+/**
+ * Multi-Query Rewrite + HyDE feature flag — read at module load.
+ * Default OFF (single-query baseline preserved). Flip to `true` to
+ * engage the generators; flipping requires a process restart.
+ */
+const MULTI_QUERY_FEATURE_FLAG_ENABLED =
+  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] === 'true';
+
 export async function createContainer(
   config: Config,
   runtime: RuntimeHandles = {},
 ): Promise<Container> {
   const core = await buildCoreContainerServices(config, runtime);
-  const features = buildFeatureContainerServices(config, core, runtime);
+
+  // Construct the shared StructuredLlmPort BEFORE feature services so
+  // the multi-query / HyDE generators (consumed by `SearchUseCase`) can
+  // share the same adapter instance with the wine-search orchestrator.
+  // Returns `null` when no credential is configured — both consumers
+  // degrade gracefully (skip features that need an LLM).
+  const sharedStructuredLlm = buildSharedStructuredLlm(config);
+
+  const useCaseExtensions: UseCaseExtensions = (() => {
+    if (sharedStructuredLlm === null) return {};
+    if (!MULTI_QUERY_FEATURE_FLAG_ENABLED) return {};
+    const rewriteModel = resolveMultiQueryRewriteModel();
+    return {
+      multiQueryGenerator: createMultiQueryGenerator({
+        structuredLlm: sharedStructuredLlm.structuredLlm,
+        model: rewriteModel,
+      }),
+      hydeGenerator: createHydeGenerator({
+        structuredLlm: sharedStructuredLlm.structuredLlm,
+        model: rewriteModel,
+      }),
+    };
+  })();
+
+  const features = buildFeatureContainerServices(config, core, runtime, useCaseExtensions);
   const watchlist = buildWatchlistContainerServices(config, runtime);
   const learning = buildLearningContainerServices(runtime);
   // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
@@ -285,7 +314,12 @@ export async function createContainer(
   // Plan-then-Execute wine-search slice. Returns `undefined` when the
   // `WINE_SEARCH_ENABLED` flag is off — the `/v1/wine-search` route is
   // simply not registered in that case (zero runtime cost).
-  const wineSearch = buildWineSearchContainerServices(config, core, features);
+  const wineSearch = buildWineSearchContainerServices(
+    config,
+    core,
+    features,
+    sharedStructuredLlm,
+  );
 
   return {
     ...learning,

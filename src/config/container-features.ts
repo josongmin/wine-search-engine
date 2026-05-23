@@ -17,7 +17,10 @@ import type {
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import { buildAdaptiveToolExecutor, buildEvalRunner } from './container-aux-features.js';
-import { buildUseCaseContainerServices } from './container-usecases.js';
+import {
+  buildUseCaseContainerServices,
+  type UseCaseExtensions,
+} from './container-usecases.js';
 
 interface FeatureContainerServices {
   readonly searchUseCase: SearchExecutorPort;
@@ -37,8 +40,9 @@ export function buildFeatureContainerServices(
   config: Config,
   core: CoreContainerServices,
   runtime: RuntimeHandles = {},
+  useCaseExtensions: UseCaseExtensions = {},
 ): FeatureContainerServices {
-  const useCases = buildUseCaseContainerServices(core, config);
+  const useCases = buildUseCaseContainerServices(core, config, useCaseExtensions);
   const adaptiveToolExecutor = buildAdaptiveToolExecutor(useCases);
   const evalRunner = buildEvalRunner(runtime.pool, useCases.searchUseCase);
 

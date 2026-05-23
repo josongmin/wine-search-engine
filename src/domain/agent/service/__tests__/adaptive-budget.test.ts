@@ -8,12 +8,26 @@ import { classifyQueryBudget } from '../adaptive-budget.js';
 describe('classifyQueryBudget — empty / trivial', () => {
   it('empty string → maxSteps=0', () => {
     const r = classifyQueryBudget('');
-    expect(r).toEqual({ maxSteps: 0, classification: 'default', reason: 'empty query' });
+    // intentClass + retrievalK added by the adaptive-k lever (SOTA cost/
+    // quality lever; SSoT `RETRIEVAL_K_BY_INTENT` in `adaptive-budget.ts`).
+    expect(r).toEqual({
+      maxSteps: 0,
+      classification: 'default',
+      reason: 'empty query',
+      intentClass: 'unknown',
+      retrievalK: 100,
+    });
   });
 
   it('whitespace-only → maxSteps=0', () => {
     const r = classifyQueryBudget('   ');
-    expect(r).toEqual({ maxSteps: 0, classification: 'default', reason: 'empty query' });
+    expect(r).toEqual({
+      maxSteps: 0,
+      classification: 'default',
+      reason: 'empty query',
+      intentClass: 'unknown',
+      retrievalK: 100,
+    });
   });
 });
 

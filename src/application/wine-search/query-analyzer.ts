@@ -37,7 +37,12 @@ import {
   hasDrinkabilityKeyword,
   hasEntityMetadataKeyword,
 } from '@domain/query/service/exact-entity-metadata-signals.js';
-import { classifyQueryBudget } from '@domain/agent/service/adaptive-budget.js';
+import {
+  RETRIEVAL_K_BY_INTENT,
+  RETRIEVAL_K_DEFAULT,
+  classifyQueryBudget,
+  type IntentClass,
+} from '@domain/agent/service/adaptive-budget.js';
 import {
   AnchorEntityTypeSchema,
   WineSearchAnalysisSchema,
@@ -284,9 +289,25 @@ export class QueryAnalyzerService {
       || requiredTool === 'get_food_pairings'
       || (contract.requiresDrinkabilityCheck && anchors.length > 0);
 
+    // The query-analyzer reconciles the adaptive-budget classification with
+    // the resolved QueryIntent: the classifier sees only raw lexical
+    // signals, whereas `intent` accounts for resolved pairing tags /
+    // anchors / decomposition. Examples that diverge:
+    //   - "스테이크에 어울리는 와인" → classifier=default, intent=pair
+    //     → must use `food_pairing` k (150), not the fallback (100).
+    //   - "오푸스원 vs 알마비바" → classifier=compound, intent=compare
+    //     → both project to `comparative` (k=20) — no override needed.
+    //   - "강한 레드 추천해줘" → classifier=default, intent=search
+    //     → keep fallback `unknown` k (100); the underlying anchors are
+    //       diffuse enough that wide-pool exploratory would over-recall.
+    const projectedIntentClass = projectIntentClass({
+      classifierIntentClass: budgetClass?.intentClass,
+      analyzerIntent: intent,
+    });
     const recommendedBudget = computeRecommendedBudget({
       adaptiveMaxSteps: budgetClass?.maxSteps,
       expectedMultiStep,
+      intentClass: projectedIntentClass,
     });
 
     // Zod-inferred WineSearchAnalysis uses *mutable* arrays even though the
@@ -503,6 +524,7 @@ function buildDecomposition(
 function computeRecommendedBudget(args: {
   readonly adaptiveMaxSteps: number | undefined;
   readonly expectedMultiStep: boolean;
+  readonly intentClass: IntentClass;
 }): RecommendedBudget {
   const adaptive = args.adaptiveMaxSteps;
   const base = adaptive !== undefined && Number.isFinite(adaptive)
@@ -519,7 +541,37 @@ function computeRecommendedBudget(args: {
   if (perToolCap < WINE_SEARCH_MIN_PER_TOOL_CAP) perToolCap = WINE_SEARCH_MIN_PER_TOOL_CAP;
   if (perToolCap > WINE_SEARCH_MAX_PER_TOOL_CAP) perToolCap = WINE_SEARCH_MAX_PER_TOOL_CAP;
 
-  return { maxSteps: clamped, perToolCap };
+  // Adaptive retrieval k — SSoT `RETRIEVAL_K_BY_INTENT`. Falls back to the
+  // documented default for any IntentClass not present in the map (defensive
+  // — every member of the union has a mapping today).
+  const retrievalK = RETRIEVAL_K_BY_INTENT.get(args.intentClass) ?? RETRIEVAL_K_DEFAULT;
+
+  return { maxSteps: clamped, perToolCap, retrievalK };
+}
+
+/**
+ * Reconcile the classifier's lexical IntentClass with the analyzer's
+ * QueryIntent. The classifier sees only the raw query; the analyzer also
+ * has resolved pairing tags, anchors, and decomposition. Both surfaces
+ * agree on the common cases; this function captures the few divergences
+ * that matter for the retrieval-k lever.
+ *
+ * Rules (in priority order):
+ *   1. `intent === 'pair'` → `food_pairing` — pairing tags are a strong
+ *      signal that's invisible to the lexical classifier.
+ *   2. `intent === 'compare'` → `comparative` — true even when the
+ *      classifier missed the compound signal (e.g. "X와 Y 어느 게 좋아?"
+ *      slips through the COMPOUND_INDICATORS keyword list).
+ *   3. Otherwise, respect the classifier's projection (or fall back to
+ *      `unknown` if it did not fire).
+ */
+function projectIntentClass(args: {
+  readonly classifierIntentClass: IntentClass | undefined;
+  readonly analyzerIntent: QueryIntent;
+}): IntentClass {
+  if (args.analyzerIntent === 'pair') return 'food_pairing';
+  if (args.analyzerIntent === 'compare') return 'comparative';
+  return args.classifierIntentClass ?? 'unknown';
 }
 
 // ---------------------------------------------------------------------------

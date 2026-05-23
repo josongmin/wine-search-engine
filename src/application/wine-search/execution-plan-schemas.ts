@@ -76,8 +76,15 @@ const RepresentativeConceptSchema = z.object({
 }).strict();
 
 /** Soft cap on result-set size requested from a single SearchUseCase call.
- *  Aligned with `WINE_SEARCH_PARALLEL_SLOT_MAX_LIMIT` (10). */
-const EXECUTION_PLAN_MAX_LIMIT = 100;
+ *  Aligned with `WINE_SEARCH_MAX_RETRIEVAL_K` so the analyzer-emitted
+ *  adaptive retrieval k (up to 500 for `exploratory` intent — SSoT
+ *  `RETRIEVAL_K_BY_INTENT` in `adaptive-budget.ts`) can flow through to the
+ *  use case `limit` arg without being clamped. The HTTP-facing response
+ *  cap (`MAX_SEARCH_RESULTS_PER_RESPONSE` = 200) still bounds the
+ *  user-visible result set; the plan-level `limit` controls the candidate
+ *  pool size used by the downstream reranker, which can legitimately
+ *  exceed the response cap. */
+const EXECUTION_PLAN_MAX_LIMIT = 500;
 
 export const SearchUseCaseInputSchema = z.object({
   query: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),

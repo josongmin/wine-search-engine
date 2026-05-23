@@ -1,6 +1,8 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
+import type { MultiQueryGenerator } from '../../domain/retrieval/service/multi-query-generator.js';
+import type { HydeGenerator } from '../../domain/retrieval/service/hyde-generator.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -138,6 +140,19 @@ export interface SearchUseCaseDeps {
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   /** Epic 14: Decomposed search for "A vs B" comparison queries. Optional. */
   readonly decomposedSearch?: DecomposedSearchUseCasePort | undefined;
+  /**
+   * Multi-Query Rewrite generator — pre-retrieval LLM fan-out of the
+   * semantic query into N variants. Optional; gated by the
+   * `WINE_SEARCH_MULTI_QUERY_ENABLED` env flag (default OFF). When
+   * present and enabled, threaded through the hybrid retrieval pipeline.
+   */
+  readonly multiQueryGenerator?: MultiQueryGenerator | undefined;
+  /**
+   * HyDE generator — produces a hypothetical wine description used as an
+   * additional semantic embedding query. Same gating as
+   * {@link multiQueryGenerator}.
+   */
+  readonly hydeGenerator?: HydeGenerator | undefined;
 }
 
 /**
@@ -841,6 +856,12 @@ export class SearchUseCase {
       entityLookup: this.deps.entityLookup,
       blocker: this.deps.blocker,
       ranker: this.deps.ranker,
+      ...(this.deps.multiQueryGenerator !== undefined
+        ? { multiQueryGenerator: this.deps.multiQueryGenerator }
+        : {}),
+      ...(this.deps.hydeGenerator !== undefined
+        ? { hydeGenerator: this.deps.hydeGenerator }
+        : {}),
     } as const;
 
     switch (compiled.execution.executionTopology) {

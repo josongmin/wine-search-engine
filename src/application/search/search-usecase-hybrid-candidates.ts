@@ -56,6 +56,15 @@ import { InMemoryBudgetLedger } from '../../domain/retrieval/service/budget-ledg
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import { createQueryRewriter } from '../../domain/retrieval/service/query-rewriter.js';
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
+import type {
+  IntentClass,
+  MultiQueryGenerator,
+} from '../../domain/retrieval/service/multi-query-generator.js';
+import type { HydeGenerator } from '../../domain/retrieval/service/hyde-generator.js';
+import {
+  expandSemanticQueriesForFanout,
+  mergeFanoutWithExisting,
+} from './multi-query-retrieval-fanout.js';
 import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
 import type { RewriteTrace } from '../../domain/retrieval/service/query-rewriter.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
@@ -104,6 +113,154 @@ export function projectRewritesForDecisionInput(
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
 const TYPED_RECOMMENDATION_DISCOVERY_VERSION = 'typed_recommendation_discovery_v1';
+
+/**
+ * Feature flag — enable Multi-Query Rewrite + HyDE pre-retrieval fan-out.
+ *
+ * Read at module load (process.env) so toggling requires a process
+ * restart. Default OFF until A/B telemetry confirms the recall/latency
+ * trade-off is favourable. When OFF, the multi-query/HyDE generators
+ * are never invoked even if wired into the ports object.
+ */
+const MULTI_QUERY_FANOUT_ENABLED =
+  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] === 'true';
+
+/**
+ * Map the planner's `QueryClass` + the compiled `effectiveRetrievalMode`
+ * to a Multi-Query intent class. This is the gating signal: only
+ * `food_pairing`, `exploratory`, `attribute_search` benefit from
+ * multi-query / HyDE — exact-match identity paths must NOT get rewritten
+ * (would dilute precision) and comparative paths use the specialized
+ * compare retriever which doesn't read semanticQueries at all.
+ */
+function classifyIntentForMultiQueryFanout(
+  plan: QueryPlanV1,
+  effectiveRetrievalMode: ExecutionRetrievalMode,
+): IntentClass {
+  // Comparative path — the specialized compare_candidates retriever
+  // returns above this point; if we reach the generic path with
+  // queryClass=comparison_query, fan-out is still wrong (the user is
+  // asking "A vs B" — rewriting either side changes the question).
+  if (
+    effectiveRetrievalMode === 'compare_candidates'
+    || plan.queryClass === 'comparison_query'
+  ) {
+    return 'comparative';
+  }
+
+  // Entity-lookup family — anchored or exact-form queries. Rewriting
+  // dilutes the entity-specific signal.
+  if (
+    plan.queryClass === 'exact_entity'
+    || plan.queryClass === 'short_entity'
+    || plan.queryClass === 'anchored_similarity'
+    || plan.queryClass === 'ambiguous_short_form'
+  ) {
+    return 'entity_lookup';
+  }
+
+  // Food-pairing — detected by any pairing constraint surfaced in the
+  // plan (rule-based or LLM-mapped). Pairing queries benefit most from
+  // HyDE because the user's food vocabulary rarely matches catalog
+  // tasting notes verbatim.
+  const allConstraints = [
+    ...plan.constraints.hard,
+    ...plan.constraints.soft,
+    ...plan.constraints.inferred,
+  ];
+  if (allConstraints.some((c) => c.attribute === 'pairing')) {
+    return 'food_pairing';
+  }
+
+  // Exploratory — natural-language preference queries.
+  if (plan.queryClass === 'semantic_preference') {
+    return 'exploratory';
+  }
+
+  // Everything else (pure_constraint, unknown) — attribute search.
+  return 'attribute_search';
+}
+
+/**
+ * Run Multi-Query + HyDE fan-out and rewrite the
+ * `HybridRetrievalInput.semanticQueries` / `semanticEmbeddingQueries`
+ * accordingly. Returns the input unchanged when the feature flag is
+ * OFF, generators are not wired, or the intent is gated out.
+ *
+ * Never throws — both generators degrade to no-ops on LLM failure.
+ */
+async function maybeExpandSemanticQueriesForFanout(
+  input: HybridRetrievalInput,
+  ports: HybridCandidateRetrievalPorts,
+  intent: IntentClass,
+): Promise<HybridRetrievalInput> {
+  if (!MULTI_QUERY_FANOUT_ENABLED) return input;
+  if (
+    ports.multiQueryGenerator === undefined
+    && ports.hydeGenerator === undefined
+  ) {
+    return input;
+  }
+  // Use the rawQuery (user-facing) as the LLM input, NOT the
+  // normalized form — the LLM benefits from the original phrasing,
+  // capitalisation, language markers, and punctuation when generating
+  // rewrites or a hypothetical document.
+  const queryForLlm = input.queryPlan.rawQuery;
+  if (typeof queryForLlm !== 'string' || queryForLlm.trim().length === 0) {
+    return input;
+  }
+
+  // Parallelise the two LLM calls — they're independent. Either failure
+  // degrades to a no-op for that generator (see generator impls).
+  const [rewriteResult, hydeResult] = await Promise.all([
+    ports.multiQueryGenerator !== undefined
+      ? ports.multiQueryGenerator.generate(queryForLlm, intent)
+      : Promise.resolve([queryForLlm] as readonly string[]),
+    ports.hydeGenerator !== undefined
+      ? ports.hydeGenerator.generate(queryForLlm, intent)
+      : Promise.resolve(null),
+  ]);
+
+  // Rewrites already include the original as element 0; drop it so we
+  // don't duplicate when merging with existing semantic queries.
+  const rewritesWithoutOriginal = rewriteResult.slice(1);
+
+  const fanout = expandSemanticQueriesForFanout({
+    query: queryForLlm,
+    rewrites: rewritesWithoutOriginal,
+    hydeDocument: hydeResult,
+  });
+
+  if (fanout.semanticQueries.length === 0) {
+    return input;
+  }
+
+  // Merge fanout output with the planner's existing semantic / lexical
+  // queries (which carry structured constraint expansions). The
+  // semantic-side gets all fanout entries; the lexical-side gets ONLY
+  // the rewrites (not the HyDE doc — it's a paragraph, not a lexical
+  // BM25 term).
+  const fanoutForLexical: readonly string[] = rewritesWithoutOriginal;
+
+  const mergedSemantic = mergeFanoutWithExisting(
+    fanout.semanticQueries,
+    input.semanticQueries,
+  );
+  const mergedSemanticEmbedding = mergeFanoutWithExisting(
+    fanout.semanticQueries,
+    input.semanticEmbeddingQueries ?? input.semanticQueries,
+  );
+  const mergedLexical = fanoutForLexical.length > 0
+    ? mergeFanoutWithExisting(fanoutForLexical, input.lexicalQueries)
+    : input.lexicalQueries;
+
+  return {
+    ...input,
+    semanticQueries: mergedSemantic,
+    semanticEmbeddingQueries: mergedSemanticEmbedding,
+    lexicalQueries: mergedLexical,
+  };
+}
 
 export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined {
   // Tiebreak by surfaceForm for deterministic anchor selection when confidence is equal.
@@ -168,6 +325,23 @@ export interface HybridCandidateRetrievalPorts {
    * branches (`relax` / `decompose` / `expand_synonym`) work without it.
    */
   readonly chatLlm?: ChatLlmPort | undefined;
+  /**
+   * Multi-Query Rewrite generator — pre-retrieval LLM fan-out of the
+   * semantic query into N variants. Gated by the
+   * `WINE_SEARCH_MULTI_QUERY_ENABLED` env flag (default OFF) so we can
+   * A/B and compare against the single-query baseline before defaulting
+   * on. When the flag is OFF, the generator is never invoked even when
+   * wired. See `multi-query-generator.ts`.
+   */
+  readonly multiQueryGenerator?: MultiQueryGenerator | undefined;
+  /**
+   * HyDE (Hypothetical Document Embeddings) generator — produces a
+   * hypothetical wine description that an ideal matching catalog entry
+   * would carry. Gated by the same `WINE_SEARCH_MULTI_QUERY_ENABLED`
+   * flag and the same intent filter as multi-query. Used for
+   * attribute/exploratory/food-pairing intents only.
+   */
+  readonly hydeGenerator?: HydeGenerator | undefined;
 }
 
 export interface HybridCandidateRetrievalResult {
@@ -1375,12 +1549,18 @@ export async function retrieveHybridCandidatesForPlan(
       break;
   }
 
-  const retrievalInput = buildHybridRetrievalInputForPlan(
+  const baseRetrievalInput = buildHybridRetrievalInputForPlan(
     plan,
     'hybrid',
     fallbackAnchorEntityId,
     compiled,
     requestContext,
+  );
+  const multiQueryIntent = classifyIntentForMultiQueryFanout(plan, effectiveMode);
+  const retrievalInput = await maybeExpandSemanticQueriesForFanout(
+    baseRetrievalInput,
+    ports,
+    multiQueryIntent,
   );
 
   if (

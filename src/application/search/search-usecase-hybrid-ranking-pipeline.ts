@@ -37,6 +37,8 @@ import {
 } from './search-usecase-route-dispatch.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
 import { liftEntityResolveResultToLaneArtifacts } from './search-usecase-entity-ranked-results.js';
+import type { MultiQueryGenerator } from '../../domain/retrieval/service/multi-query-generator.js';
+import type { HydeGenerator } from '../../domain/retrieval/service/hyde-generator.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { buildRelaxationLadder } from '../../domain/query/service/constraint-relaxation.js';
@@ -60,6 +62,14 @@ export interface HybridRankingRouteDeps {
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
   readonly ranker: RankingPort;
+  /** Multi-Query Rewrite generator threaded through to
+   *  {@link retrieveHybridCandidatesForPlan}. Optional — when absent the
+   *  generic hybrid path runs the single-query baseline (current
+   *  behaviour). Gated by `WINE_SEARCH_MULTI_QUERY_ENABLED`. */
+  readonly multiQueryGenerator?: MultiQueryGenerator | undefined;
+  /** HyDE generator — same wiring/gating semantics as
+   *  {@link multiQueryGenerator}. */
+  readonly hydeGenerator?: HydeGenerator | undefined;
 }
 
 export interface RankedRouteEntityResolutionDeps {
@@ -694,6 +704,12 @@ export async function executeHybridRouteRankingPipeline(
           candidatePool: deps.candidatePool,
           browseRetriever: deps.browseRetriever,
           compareRetriever: deps.compareRetriever,
+          ...(deps.multiQueryGenerator !== undefined
+            ? { multiQueryGenerator: deps.multiQueryGenerator }
+            : {}),
+          ...(deps.hydeGenerator !== undefined
+            ? { hydeGenerator: deps.hydeGenerator }
+            : {}),
         },
         resolveEntity,
         retrievalCompiled,

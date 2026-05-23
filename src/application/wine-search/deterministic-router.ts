@@ -180,17 +180,35 @@ function extractPriceBudgetKrw(
 /**
  * Build a `SearchUseCaseInput` from the base analysis, optionally narrowing
  * to an exact-metadata limit when the analysis flags a hard entity signal.
+ *
+ * Limit precedence:
+ *   1. Exact-metadata signal → `EXACT_METADATA_SEARCH_LIMIT` (= 1). The
+ *      tightest possible pool — we want the single canonical match.
+ *   2. Analyzer-emitted adaptive retrieval k
+ *      (`recommendedBudget.retrievalK`, SSoT `RETRIEVAL_K_BY_INTENT`). This
+ *      varies the pool size per intent class (entity_lookup=20, …,
+ *      exploratory=500). See `adaptive-budget.ts` for the rationale.
+ *   3. No limit field — downstream use case applies its own default.
+ *      Retained for backwards compat with fixtures that omit `retrievalK`
+ *      from `recommendedBudget`.
  */
 function buildSearchInputFromAnalysis(
   analysis: WineSearchAnalysis,
 ): SearchUseCaseInput {
   const filters = [...analysis.normalizedConstraints];
+  if (analysis.contract.hasEntityMetadataSignal) {
+    return {
+      query: analysis.preservedSurface,
+      ...(filters.length > 0 ? { filters } : {}),
+      limit: EXACT_METADATA_SEARCH_LIMIT,
+      mode: 'entity' as const,
+    };
+  }
+  const adaptiveK = analysis.recommendedBudget.retrievalK;
   return {
     query: analysis.preservedSurface,
     ...(filters.length > 0 ? { filters } : {}),
-    ...(analysis.contract.hasEntityMetadataSignal
-      ? { limit: EXACT_METADATA_SEARCH_LIMIT, mode: 'entity' as const }
-      : {}),
+    ...(adaptiveK !== undefined ? { limit: adaptiveK } : {}),
   };
 }
 

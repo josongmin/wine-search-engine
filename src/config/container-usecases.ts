@@ -1,4 +1,6 @@
 import { SearchUseCase } from '../application/search/search.usecase.js';
+import type { MultiQueryGenerator } from '../domain/retrieval/service/multi-query-generator.js';
+import type { HydeGenerator } from '../domain/retrieval/service/hyde-generator.js';
 import { ReplayUseCase } from '../application/search/replay.usecase.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
@@ -37,9 +39,22 @@ export interface UseCaseContainerServices {
   readonly batchSearchUseCase: BatchSearchUseCasePort;
 }
 
+/**
+ * Optional pre-retrieval LLM enrichment ports threaded through to
+ * {@link SearchUseCase}. Both fields are independently optional — the
+ * generators are gated by `WINE_SEARCH_MULTI_QUERY_ENABLED` AND the
+ * presence of a usable structured-LLM adapter; either condition's
+ * absence yields `undefined` here and the single-query baseline runs.
+ */
+export interface UseCaseExtensions {
+  readonly multiQueryGenerator?: MultiQueryGenerator | undefined;
+  readonly hydeGenerator?: HydeGenerator | undefined;
+}
+
 export function buildUseCaseContainerServices(
   core: CoreContainerServices,
   config: Config,
+  extensions: UseCaseExtensions = {},
 ): UseCaseContainerServices {
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
@@ -79,6 +94,12 @@ export function buildUseCaseContainerServices(
     cacheLookupRuntimeStateProvider: core.cacheLookupRuntimeStateProvider,
     ltrModels: core.ltrModels,
     decomposedSearch: decomposedAdapter,
+    ...(extensions.multiQueryGenerator !== undefined
+      ? { multiQueryGenerator: extensions.multiQueryGenerator }
+      : {}),
+    ...(extensions.hydeGenerator !== undefined
+      ? { hydeGenerator: extensions.hydeGenerator }
+      : {}),
   });
 
   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);

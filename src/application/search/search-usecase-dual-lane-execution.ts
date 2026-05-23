@@ -162,6 +162,12 @@ export async function executeDualLaneSearch(
       candidatePool: deps.candidatePool,
       browseRetriever: deps.browseRetriever,
       compareRetriever: deps.compareRetriever,
+      ...(deps.multiQueryGenerator !== undefined
+        ? { multiQueryGenerator: deps.multiQueryGenerator }
+        : {}),
+      ...(deps.hydeGenerator !== undefined
+        ? { hydeGenerator: deps.hydeGenerator }
+        : {}),
     },
     async (candidatePlan) =>
       candidatePlan === plan

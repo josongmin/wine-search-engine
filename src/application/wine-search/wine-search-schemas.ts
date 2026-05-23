@@ -64,6 +64,14 @@ export const WINE_SEARCH_BUDGET_MAX_STEPS = 10;
 export const WINE_SEARCH_MIN_PER_TOOL_CAP = 2;
 export const WINE_SEARCH_MAX_PER_TOOL_CAP = 6;
 
+/** Adaptive retrieval `k` bounds. Minimum 1 (degraded entity-lookup path
+ *  still must request at least one candidate). Maximum 500 matches the
+ *  widest `exploratory` value in `RETRIEVAL_K_BY_INTENT` (SSoT —
+ *  `src/domain/agent/service/adaptive-budget.ts`). The cap is intentionally
+ *  generous so the analyzer can emit the full SOTA range without clamping. */
+export const WINE_SEARCH_MIN_RETRIEVAL_K = 1;
+export const WINE_SEARCH_MAX_RETRIEVAL_K = 500;
+
 /** Comparison legs: at least 2 (binary comparison), capped at 4 — beyond 4
  *  legs decomposition quality collapses and the orchestrator falls back to
  *  flat search. */
@@ -164,6 +172,17 @@ export const RecommendedBudgetSchema = z.object({
   perToolCap: z.number().int()
     .min(WINE_SEARCH_MIN_PER_TOOL_CAP)
     .max(WINE_SEARCH_MAX_PER_TOOL_CAP),
+  /** Adaptive retrieval `k` (Vespa candidate-pool size). Optional for
+   *  backwards-compat with existing call sites and fixtures that only
+   *  populated step budgets. When absent, the deterministic router falls
+   *  back to its built-in default (no behavior change vs the pre-lever
+   *  baseline). The analyzer ALWAYS emits this field — SSoT
+   *  `RETRIEVAL_K_BY_INTENT` in `adaptive-budget.ts`. */
+  retrievalK: z.number().int()
+    .finite()
+    .min(WINE_SEARCH_MIN_RETRIEVAL_K)
+    .max(WINE_SEARCH_MAX_RETRIEVAL_K)
+    .optional(),
 }).strict();
 export type RecommendedBudget = z.infer<typeof RecommendedBudgetSchema>;
 

@@ -31,6 +31,27 @@ const MIN_STEPS_FOUR_PLUS_CONSTRAINTS = 8;
  */
 const MIN_STEPS_THREE_CONSTRAINTS = 6;
 
+/**
+ * Step budget for nested-condition queries that trip the regex-based
+ * indicator count (3+ distinct constraint families in the surface). Wider
+ * than `MIN_STEPS_THREE_CONSTRAINTS` because the regex path tolerates more
+ * lexical noise and may need an extra reasoning pass.
+ */
+const NESTED_CONDITION_INDICATOR_STEPS = 8;
+
+/**
+ * Step budget for situation-based queries (occasion + constraint). Six
+ * steps gives the agent room to disambiguate the occasion, run an initial
+ * search, and relax one constraint band if results are sparse.
+ */
+const SITUATION_BASED_STEPS = 6;
+
+/**
+ * Step budget for compound / multi-course queries. Same shape as the
+ * situation-based path: disambiguate course, search per course, relax.
+ */
+const COMPOUND_STEPS = 6;
+
 /** Truncate regex source in adaptive-budget log reasons (telemetry string cap). */
 const ADAPTIVE_BUDGET_PATTERN_REASON_CHARS = 40;
 /** Shorter preview for nested-condition reason strings. */
@@ -142,10 +163,162 @@ const SITUATION_INDICATORS: readonly string[] = [
   '분위기', 'mood', 'atmosphere', '로맨틱', 'romantic',
 ];
 
-interface AdaptiveBudget {
+/**
+ * IntentClass — the SOTA cost/quality lever for adaptive retrieval `k`.
+ *
+ * The Vespa-side retrieval cap is constant across all queries today; this
+ * lever varies the plan-level `limit` per intent so each query gets the
+ * smallest candidate pool that still meets its recall need:
+ *
+ *   - entity_lookup: only the top exact match matters — deep recall is waste.
+ *   - comparative: each leg behaves like an entity_lookup; aggregate small.
+ *   - attribute_search: needs a diverse pool for downstream reranking.
+ *   - food_pairing: similar to attribute, slightly tighter (color filters
+ *     already prune the candidate set upstream).
+ *   - exploratory: widest pool — personalization / serendipity favor recall.
+ *   - unknown: fallback when no intent signal fires.
+ *
+ * The values below are NOT heuristics — they encode the recall/cost
+ * trade-off per intent and are documented inline. Any change to a single
+ * value should be paired with a bench measurement showing the new
+ * recall@k vs latency curve.
+ */
+export type IntentClass =
+  | 'entity_lookup'
+  | 'comparative'
+  | 'attribute_search'
+  | 'food_pairing'
+  | 'exploratory'
+  | 'unknown';
+
+// ─── Per-IntentClass retrieval `k` values ──────────────────────────────────
+//
+// Each value is a domain-justified const (CLAUDE.md rule 15). Magic numbers
+// in scoring/retrieval logic are unauditable; named constants force the
+// reader to confront the recall/cost trade-off whenever the value changes.
+
+/** Specific SKU ("오푸스원", "Opus One 2018"): we want the top exact match;
+ *  deep recall is waste because the canonical wine is the only correct answer. */
+const RETRIEVAL_K_ENTITY_LOOKUP = 20;
+/** "A vs B": each leg behaves like an entity_lookup. 20 per leg lets the
+ *  canonical of each side surface without dragging in irrelevant neighbors. */
+const RETRIEVAL_K_COMPARATIVE = 20;
+/** "강한 레드" / "tannin-heavy cabernet": broad attribute filter, downstream
+ *  reranking needs a diverse pool. 200 keeps the rerank window meaningful
+ *  without exploding tail latency. */
+const RETRIEVAL_K_ATTRIBUTE_SEARCH = 200;
+/** "스테이크 와인": similar to attribute_search, slightly tighter because
+ *  color/style filters already prune the candidate set upstream. */
+const RETRIEVAL_K_FOOD_PAIRING = 150;
+/** "뭐 마실까" / "추천해줘": widest pool — personalization / serendipity
+ *  favor recall over precision. 500 is the empirical sweet spot before
+ *  reranker throughput becomes the bottleneck. */
+const RETRIEVAL_K_EXPLORATORY = 500;
+/** Fallback when no intent signal fires. Matches the legacy retrieval k
+ *  so unmapped intents behave as if the lever was off. */
+const RETRIEVAL_K_UNKNOWN = 100;
+
+/**
+ * SSoT (CLAUDE.md rule 30) for the retrieval `k` per intent class. The
+ * router reads this map via the `AdaptiveBudget.retrievalK` field; no other
+ * module should hard-code these magnitudes.
+ */
+export const RETRIEVAL_K_BY_INTENT: ReadonlyMap<IntentClass, number> = new Map([
+  ['entity_lookup', RETRIEVAL_K_ENTITY_LOOKUP],
+  ['comparative', RETRIEVAL_K_COMPARATIVE],
+  ['attribute_search', RETRIEVAL_K_ATTRIBUTE_SEARCH],
+  ['food_pairing', RETRIEVAL_K_FOOD_PAIRING],
+  ['exploratory', RETRIEVAL_K_EXPLORATORY],
+  ['unknown', RETRIEVAL_K_UNKNOWN],
+]);
+
+/** Default retrieval k for any unmapped / unknown intent class.
+ *  Mirrors `RETRIEVAL_K_BY_INTENT.get('unknown')` and is used as the
+ *  fallback when a classification has no IntentClass mapping. */
+export const RETRIEVAL_K_DEFAULT = RETRIEVAL_K_UNKNOWN;
+
+/**
+ * Map an adaptive-budget classification to an IntentClass. The classifier
+ * already encodes the query shape (specific entity vs attribute vs nested
+ * constraints vs gift/occasion vs compound multi-leg); we project that onto
+ * the SOTA k-tuning categories above.
+ *
+ * Why not a 1:1 enum rename? The classification enum carries control-flow
+ * meaning (`adversarial`, `off_domain`, `knowledge_only` are reject paths),
+ * whereas IntentClass is purely a retrieval-shape signal. Mixing them in
+ * one enum would couple the security/refuse logic to the recall lever.
+ */
+function classificationToIntentClass(
+  classification: AdaptiveBudgetClassification,
+): IntentClass {
+  switch (classification) {
+    case 'specific_sku':
+      return 'entity_lookup';
+    case 'compound':
+      // Compound queries are typically "A vs B" or multi-course flights.
+      // The comparative legs each behave like an entity_lookup and the
+      // multi-course case still wants tight per-leg pools (the diversity
+      // comes from multiple legs, not from oversampling each one).
+      return 'comparative';
+    case 'nested_condition':
+      // Multiple hard constraints (price + region + grape …) → broad
+      // attribute filter; reranking decides the final order.
+      return 'attribute_search';
+    case 'situation_based':
+      // Gift / birthday / occasion queries are open-ended discovery: the
+      // user is browsing, not filtering on a sharp attribute. The widest
+      // pool (exploratory) maximises serendipity / personalization recall.
+      // True food-pairing intent (pairing tags from `pair` QueryIntent)
+      // is projected to `food_pairing` separately by the analyzer.
+      return 'exploratory';
+    case 'adversarial':
+    case 'off_domain':
+    case 'knowledge_only':
+      // Reject paths — retrieval will not run. We still emit a defined
+      // IntentClass so downstream consumers do not see `undefined`; the
+      // tightest pool is appropriate because if retrieval is ever wired
+      // (e.g. for a partial-block degraded path) we want it bounded.
+      return 'entity_lookup';
+    case 'default':
+      return 'unknown';
+  }
+}
+
+type AdaptiveBudgetClassification =
+  | 'specific_sku'
+  | 'adversarial'
+  | 'off_domain'
+  | 'knowledge_only'
+  | 'nested_condition'
+  | 'situation_based'
+  | 'compound'
+  | 'default';
+
+export interface AdaptiveBudget {
   readonly maxSteps: number;
-  readonly classification: 'specific_sku' | 'adversarial' | 'off_domain' | 'knowledge_only' | 'nested_condition' | 'situation_based' | 'compound' | 'default';
+  readonly classification: AdaptiveBudgetClassification;
   readonly reason: string;
+  /** Intent-class projection of `classification` used by the retrieval
+   *  lever (SSoT `RETRIEVAL_K_BY_INTENT`). Kept alongside the existing
+   *  classification so consumers that need either dimension don't have to
+   *  re-derive it. */
+  readonly intentClass: IntentClass;
+  /** Per-intent retrieval `k` (Vespa candidate-pool size). Looked up from
+   *  `RETRIEVAL_K_BY_INTENT` via `intentClass`. */
+  readonly retrievalK: number;
+}
+
+/** Wrap a classification + reason + step count with the IntentClass and
+ *  retrievalK derived from the SSoT map. Centralised so every return path
+ *  in `classifyQueryBudget` agrees on the same projection. */
+function makeBudget(
+  maxSteps: number,
+  classification: AdaptiveBudgetClassification,
+  reason: string,
+): AdaptiveBudget {
+  const intentClass = classificationToIntentClass(classification);
+  const retrievalK = RETRIEVAL_K_BY_INTENT.get(intentClass) ?? RETRIEVAL_K_DEFAULT;
+  return { maxSteps, classification, reason, intentClass, retrievalK };
 }
 
 export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
@@ -160,36 +333,32 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   if (trimmed.length === 0) {
     // Empty query: agent should produce zero tool calls. The HTTP layer
     // would normally 400 this; benchmark scenario #21 expects 0 steps.
-    return { maxSteps: 0, classification: 'default', reason: 'empty query' };
+    return makeBudget(0, 'default', 'empty query');
   }
 
   // 1. Sanitizer-blocked queries — tightest budget. The sanitizer remains the
   // real block/deny layer; this classification only aligns the budget with it.
   const sanitizeResult = ADAPTIVE_BUDGET_SANITIZER.sanitize(trimmed);
   if (!sanitizeResult.safe) {
-    return {
-      maxSteps: 1,
-      classification: 'adversarial',
-      reason: `query sanitizer blocked input: ${sanitizeResult.reason.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
-    };
+    return makeBudget(
+      1,
+      'adversarial',
+      `query sanitizer blocked input: ${sanitizeResult.reason.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
+    );
   }
 
   if (REPETITIVE_INPUT_PATTERN_SHORT.test(trimmed) || REPETITIVE_INPUT_PATTERN_LONG.test(trimmed)) {
-    return {
-      maxSteps: 1,
-      classification: 'adversarial',
-      reason: 'repetitive input pattern',
-    };
+    return makeBudget(1, 'adversarial', 'repetitive input pattern');
   }
 
   // 2. Off-domain — also 1 step (refuse + redirect).
   for (const pattern of OFF_DOMAIN_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return {
-        maxSteps: 1,
-        classification: 'off_domain',
-        reason: `matched off-domain pattern: ${pattern.source.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
-      };
+      return makeBudget(
+        1,
+        'off_domain',
+        `matched off-domain pattern: ${pattern.source.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
+      );
     }
   }
 
@@ -200,21 +369,21 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   // Requires BOTH a WH-cue and an explanation-action so search queries with
   // a WH-word ("왜 이 와인이 좋아?") still call tools.
   if (KNOWLEDGE_ONLY_WH_CUES.test(trimmed) && KNOWLEDGE_ONLY_ACTIONS.test(trimmed)) {
-    return {
-      maxSteps: 1,
-      classification: 'knowledge_only',
-      reason: 'matched knowledge-only pattern: WH-cue + explanation-action',
-    };
+    return makeBudget(
+      1,
+      'knowledge_only',
+      'matched knowledge-only pattern: WH-cue + explanation-action',
+    );
   }
 
   // 3. Nested condition: 3+ constraint types in one query → needs more steps to decompose.
   const nestedHits = NESTED_CONDITION_INDICATORS.filter((re) => re.test(trimmed));
   if (nestedHits.length >= 3) {
-    return {
-      maxSteps: 8,
-      classification: 'nested_condition',
-      reason: `nested constraints: ${nestedHits.map((re) => re.source.slice(0, ADAPTIVE_BUDGET_NESTED_REASON_CHARS)).join(', ')}`,
-    };
+    return makeBudget(
+      NESTED_CONDITION_INDICATOR_STEPS,
+      'nested_condition',
+      `nested constraints: ${nestedHits.map((re) => re.source.slice(0, ADAPTIVE_BUDGET_NESTED_REASON_CHARS)).join(', ')}`,
+    );
   }
 
   // 3b. Situation-based: occasion/gift/atmosphere + at least one constraint.
@@ -222,21 +391,21 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   const situationHits = SITUATION_INDICATORS.filter((kw) => lowerTrimmed.includes(kw.toLowerCase()));
   const hasConstraint = NESTED_CONDITION_INDICATORS.some((re) => re.test(trimmed));
   if (situationHits.length >= 2 && hasConstraint) {
-    return {
-      maxSteps: 6,
-      classification: 'situation_based',
-      reason: `situation indicators: ${situationHits.slice(0, 3).join(', ')}; has constraint`,
-    };
+    return makeBudget(
+      SITUATION_BASED_STEPS,
+      'situation_based',
+      `situation indicators: ${situationHits.slice(0, 3).join(', ')}; has constraint`,
+    );
   }
 
   // 4. Compound / multi-course — generous budget for legitimate complex queries.
   const compoundHits = COMPOUND_INDICATORS.filter((kw) => trimmed.toLowerCase().includes(kw.toLowerCase()));
   if (compoundHits.length >= 2) {
-    return {
-      maxSteps: 6,
-      classification: 'compound',
-      reason: `compound indicators: ${compoundHits.slice(0, 3).join(', ')}`,
-    };
+    return makeBudget(
+      COMPOUND_STEPS,
+      'compound',
+      `compound indicators: ${compoundHits.slice(0, 3).join(', ')}`,
+    );
   }
 
   // 4. Specific SKU — proper noun + vintage year. Allow 3 steps so the agent
@@ -256,11 +425,7 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   const hasProperNoun = PROPER_NOUN_PATTERN.test(trimmed) || HANGUL_SKU_PATTERN.test(trimmed);
   // For vintage+lowercase queries, also check hasLowercaseProperNoun
   if ((hasProperNoun || hasLowercaseProperNoun) && VINTAGE_PATTERN.test(trimmed)) {
-    return {
-      maxSteps: 3,
-      classification: 'specific_sku',
-      reason: 'proper noun + vintage year detected',
-    };
+    return makeBudget(3, 'specific_sku', 'proper noun + vintage year detected');
   }
 
   // 4b. Specific SKU without vintage — a bare Latin proper noun (e.g. "Opus One",
@@ -282,11 +447,11 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   // FP tradeoff. 3-syllable pure-Hangul queries will fall to the default budget (which is fine).
   const isPureHangulSku = /^[\uAC00-\uD7A3]{4,}$/.test(trimmed);
   if ((PROPER_NOUN_PATTERN.test(trimmed) || hasLowercaseProperNoun || isPureHangulSku) && noCompoundHits && noSituationHits && noConstraint) {
-    return {
-      maxSteps: 3,
-      classification: 'specific_sku',
-      reason: 'proper noun (no vintage) — specific entity lookup',
-    };
+    return makeBudget(
+      3,
+      'specific_sku',
+      'proper noun (no vintage) — specific entity lookup',
+    );
   }
 
   // 5. Constraint count — use extractSearchConstraints to count explicit hard
@@ -302,18 +467,18 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   const constraintCount = exclusionCount + hasPrice + hasVintage;
 
   if (constraintCount >= CONSTRAINT_COUNT_FOR_ITERATIVE_REFINEMENT) {
-    return {
-      maxSteps: MIN_STEPS_FOUR_PLUS_CONSTRAINTS,
-      classification: 'nested_condition',
-      reason: `constraint count ${constraintCount} >= 4 — iterative refinement budget`,
-    };
+    return makeBudget(
+      MIN_STEPS_FOUR_PLUS_CONSTRAINTS,
+      'nested_condition',
+      `constraint count ${constraintCount} >= 4 — iterative refinement budget`,
+    );
   }
   if (constraintCount >= 3) {
-    return {
-      maxSteps: MIN_STEPS_THREE_CONSTRAINTS,
-      classification: 'nested_condition',
-      reason: `constraint count ${constraintCount} >= 3 — staged search budget`,
-    };
+    return makeBudget(
+      MIN_STEPS_THREE_CONSTRAINTS,
+      'nested_condition',
+      `constraint count ${constraintCount} >= 3 — staged search budget`,
+    );
   }
 
   // 6. No rule fired — let caller default.

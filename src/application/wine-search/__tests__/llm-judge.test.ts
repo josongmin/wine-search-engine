@@ -242,7 +242,15 @@ describe('StructuredLlmJudge.evaluate', () => {
     await judge.evaluate({ ...BASE_INPUT, rubric: 'Must name a specific vintage.', abortSignal: ctrl.signal });
     expect(capturedReq?.enablePromptCache).toBe(true);
     expect(capturedReq?.model).toBe(DEFAULT_JUDGE_MODEL);
-    expect(capturedReq?.systemPrompt).toContain('Must name a specific vintage.');
+    // Prefix-cache hardening: rubric moved from the systemPrompt into a USER
+    // message so the system slot remains byte-identical across judge calls.
+    // The total content the LLM sees is unchanged.
+    expect(capturedReq?.systemPrompt).not.toContain('Must name a specific vintage.');
+    const rubricTurn = capturedReq?.messages.find((m) =>
+      m.content.includes('Must name a specific vintage.'),
+    );
+    expect(rubricTurn).toBeDefined();
+    expect(rubricTurn?.role).toBe('user');
     expect(capturedReq?.abortSignal).toBe(ctrl.signal);
   });
 

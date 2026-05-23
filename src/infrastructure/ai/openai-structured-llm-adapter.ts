@@ -189,6 +189,28 @@ function makeForcedFunctionTool(name: string, schema: ZodTypeAny): OpenAIToolDef
   };
 }
 
+/**
+ * Deterministic, name-sorted ordering for the tools array passed to
+ * `chat/completions`. OpenAI's implicit prefix cache hashes the serialized
+ * request bytes; if a caller passes the same tool set in different array
+ * orderings across calls (which the `ExecuteRequest.tools` contract does not
+ * forbid), the request body bytes differ even though the model sees the same
+ * tool catalog. Sorting by `function.name` collapses both orderings to the
+ * same prefix bytes.
+ *
+ * Tool selection inside OpenAI is by `function.name` (not by index), so
+ * sorting is a semantic no-op for the model. The comparator is stable for
+ * equal names (which shouldn't happen — duplicate tool names are a caller
+ * bug — but defensive against it).
+ */
+function stableSortTools(tools: readonly OpenAIToolDef[]): OpenAIToolDef[] {
+  return [...tools].sort((a, b) => {
+    if (a.function.name < b.function.name) return -1;
+    if (a.function.name > b.function.name) return 1;
+    return 0;
+  });
+}
+
 export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
   private readonly apiKey: string;
   private readonly defaultModel: string;
@@ -217,6 +239,10 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
   ): Promise<AnalyzeResult<z.infer<TSchema>>> {
     const start = Date.now();
     const tool = makeForcedFunctionTool(ANALYZE_FN_NAME, req.schema);
+    // PREFIX-CACHE INVARIANT: system slot contains ONLY the static
+    // `req.systemPrompt`. All dynamic content (the user query) lives in the
+    // trailing user message. See `toOpenAIMessages` for the equivalent
+    // discipline applied to multi-turn `execute`/`synthesize` requests.
     const messages: OpenAIChatMessage[] = [
       { role: 'system', content: req.systemPrompt },
       { role: 'user', content: req.query },
@@ -258,10 +284,15 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
   async execute(req: ExecuteRequest): Promise<ExecuteResult> {
     const start = Date.now();
     const messages = this.toOpenAIMessages(req.messages, req.systemPrompt);
+    // PREFIX-CACHE INVARIANT: tools serialized in deterministic name-sorted
+    // order so the JSON bytes are identical across calls that pass the same
+    // tool set in arbitrary array order. OpenAI tool selection is by name (not
+    // index), so sorting is a semantic no-op for the model.
+    const tools = stableSortTools(req.tools.map(mapToolDef));
     const resp = await this.callOnce({
       model: req.model,
       messages,
-      tools: req.tools.map(mapToolDef),
+      tools,
       tool_choice: req.toolChoice === undefined
         ? 'auto'
         : this.mapToolChoice(req.toolChoice),
@@ -389,18 +420,42 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
     return { type: 'function', function: { name: tc.name } };
   }
 
+  /**
+   * Build the OpenAI messages array with a prefix-cache-stable shape:
+   *
+   *   [
+   *     { role: 'system', content: <STATIC `systemPrompt`> },  // identical every call
+   *     ...<DYNAMIC turns from `messages`>                      // varies per call
+   *   ]
+   *
+   * Defensive normalization: if a caller pushes a `role: 'system'` message
+   * inside `messages` (which would shadow / extend the static system slot and
+   * defeat OpenAI's implicit prefix cache when the inner system content varies
+   * per request), we DEMOTE that turn into a `role: 'user'` directive turn so
+   * the bytes flow AFTER the stable system prefix instead of corrupting it.
+   * Concretely: this rule keeps the system slot byte-identical for a given
+   * adapter mode + caller `systemPrompt`, which is the precondition for
+   * OpenAI's 1024-token prefix-cache hash to hit.
+   */
   private toOpenAIMessages(
     messages: readonly { readonly role: string; readonly content: unknown }[],
     systemPrompt: string,
   ): OpenAIChatMessage[] {
     const out: OpenAIChatMessage[] = [{ role: 'system', content: systemPrompt }];
     for (const m of messages) {
-      const role = m.role === 'user' || m.role === 'assistant' || m.role === 'tool' || m.role === 'system'
-        ? m.role
-        : 'user';
       const content = typeof m.content === 'string'
         ? m.content
         : JSON.stringify(m.content);
+      // Prefix-cache invariant: any inbound `system` role is downgraded to a
+      // trailing user directive. Same total content, stable system prefix.
+      if (m.role === 'system') {
+        out.push({ role: 'user', content: `[additional-system-directive]\n${content}` });
+        continue;
+      }
+      const role: OpenAIChatMessage['role'] =
+        m.role === 'user' || m.role === 'assistant' || m.role === 'tool'
+          ? m.role
+          : 'user';
       out.push({ role, content });
     }
     return out;
