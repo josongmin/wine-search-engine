@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { HttpRouteContract } from './route-contracts.js';
-import { AgentRouteContract } from './agent.contract.js';
 import { WineSearchRouteContract } from './wine-search.contract.js';
 import { AgentBenchmarkScenariosRouteContract } from './agent-benchmark-scenarios.route.js';
 import {
@@ -91,7 +90,6 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
-  { method: 'POST', url: '/v1/agent', contract: AgentRouteContract },
   { method: 'GET', url: '/v1/agent/benchmark-scenarios', contract: AgentBenchmarkScenariosRouteContract },
   { method: 'POST', url: '/v1/wine-search', contract: WineSearchRouteContract },
 ] as const;

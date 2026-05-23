@@ -31,7 +31,6 @@ import {
 import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
-import { registerAgentRoute } from './routes/agent.route.js';
 import { registerAgentBenchmarkScenariosRoute } from './routes/agent-benchmark-scenarios.route.js';
 import { registerWineSearchRoute } from './routes/wine-search.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
@@ -385,14 +384,10 @@ export async function createServer(
   registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
-  if (deps.agentOrchestrator !== undefined) {
-    registerAgentRoute(app, { agentOrchestrator: deps.agentOrchestrator });
-  }
   if (deps.wineSearch !== undefined) {
-    // Plan-then-Execute `/v1/wine-search` — registered only when the
-    // composition root produced a wineSearch slice (WINE_SEARCH_ENABLED=true
-    // and Anthropic credential available). Strangler-fig coexistence with
-    // the legacy `/v1/agent/*` surface above.
+    // Plan-then-Execute `/v1/wine-search` — the canonical agentic entry point
+    // after the 3.0.0 cutover (replaces legacy `/v1/agent` ReAct surface).
+    // Registration requires an Anthropic credential at startup.
     registerWineSearchRoute(app, {
       wineSearchOrchestrator: deps.wineSearch.wineSearchOrchestrator,
     });
