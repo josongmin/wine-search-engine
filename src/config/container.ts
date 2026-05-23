@@ -33,19 +33,10 @@ import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
-import { AgentOrchestrator } from '../application/agent/agent-orchestrator.js';
-import { getAgentExecutionMetricsCollector } from '../infrastructure/observability/agent-execution-metrics.js';
 import type { EntityDocumentLookupPort } from '../application/search/port/search-pipeline-deps.port.js';
-import { InMemoryCorpusCardinalityCache } from '../domain/retrieval/service/corpus-cardinality-cache.js';
-import {
-  buildComparisonDecompositionLegs,
-  buildComparisonDecompositionLegsForRetrieval,
-} from '../domain/query/service/decomposition-detector.js';
-// ── Plan-then-Execute (wine-search) wiring — strangler-fig coexistence
-// with the legacy AgentOrchestrator. Gated by `WINE_SEARCH_ENABLED`.
-// All construction lives inside `buildWineSearchContainerServices` so the
-// branch can be torn out cleanly when the legacy agent route retires.
-import { isWineSearchEnabled } from './wine-search-feature-flag.js';
+// ── Plan-then-Execute (wine-search) wiring — canonical agentic entry point
+// after the 3.0.0 cutover. Construction lives inside
+// `buildWineSearchContainerServices`.
 import { QueryAnalyzerService } from '../application/wine-search/query-analyzer.js';
 import { DeterministicRouter } from '../application/wine-search/deterministic-router.js';
 import { ExecutionRunner } from '../application/wine-search/execution-runner.js';
@@ -92,8 +83,6 @@ export interface Container extends LearningContainerServices {
   readonly feedbackIngestEnabled: boolean;
   readonly calibrationStore: CalibrationStore;
   readonly runtimeReadiness: RuntimeReadinessSnapshot;
-  /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort available. */
-  readonly agentOrchestrator?: AgentOrchestrator | undefined;
   /**
    * Plan-then-Execute wine-search orchestrator — present when
    * `WINE_SEARCH_ENABLED=true` and an Anthropic API key is configured.
@@ -144,16 +133,12 @@ function buildWineSearchContainerServices(
   core: Awaited<ReturnType<typeof buildCoreContainerServices>>,
   features: ReturnType<typeof buildFeatureContainerServices>,
 ): WineSearchContainerServices | undefined {
-  if (!isWineSearchEnabled()) {
-    return undefined;
-  }
   if (config.anthropic.apiKey === undefined) {
-    // Anthropic credential is REQUIRED for the structured-LLM path. Fail
-    // loudly so the operator can't enable the flag in a half-configured
-    // environment.
-    throw new Error(
-      'WINE_SEARCH_ENABLED=true but ANTHROPIC_API_KEY is not configured — set ANTHROPIC_API_KEY or unset WINE_SEARCH_ENABLED.',
-    );
+    // Anthropic credential is REQUIRED for the wine-search agentic path
+    // (canonical entry point after the 3.0.0 cutover). Return undefined so
+    // the `/v1/wine-search` route is not registered; the rest of the search
+    // surface continues to work without LLM orchestration.
+    return undefined;
   }
 
   // ── 1) Structured-LLM adapter (Anthropic native tool_use). Single
@@ -301,75 +286,6 @@ export async function createContainer(
     calibrationStore: core.calibrationStore,
     runtimeReadiness: core.runtimeReadiness,
     ...watchlist,
-    ...(config.agent.enabled && core.chatLlm !== undefined
-      ? /* agent orchestrator wired */ {
-          agentOrchestrator: new AgentOrchestrator(
-            {
-              chatLlm: core.chatLlm,
-              querySanitizer: core.querySanitizer,
-              executionObserver: getAgentExecutionMetricsCollector(),
-              toolDeps: {
-                searchUseCase: features.searchUseCase,
-                decomposedSearchExecute: async (
-                  subQueries,
-                  comparisonIntent,
-                  originalQuery,
-                  requestId,
-                  startTime,
-                  parentContext,
-                  options,
-                  retrievalSubQueries,
-                ) =>
-                  features.decomposedSearchUseCase.execute(
-                    subQueries as [string, string],
-                    retrievalSubQueries !== undefined
-                      ? buildComparisonDecompositionLegsForRetrieval(
-                          subQueries as [string, string],
-                          retrievalSubQueries as [string, string],
-                        )
-                      : buildComparisonDecompositionLegs(subQueries as [string, string]),
-                    comparisonIntent as 'compare' | 'recommend_one' | 'list_both',
-                    originalQuery,
-                    requestId,
-                    startTime,
-                    parentContext,
-                    options,
-                  ),
-                // Direct entity lookup by ID — bypasses the full search pipeline
-                // for check_drinking_window. Uses batch getDocuments() with a
-                // single-element array (T-E4-01: getDocument is deprecated).
-                entityLookup: async (id) => {
-                  const docs = await core.entityLookup.getDocuments([id]);
-                  return docs.get(id) ?? undefined;
-                },
-                ...(core.entityLookup.getDrinkingWindowDocuments !== undefined
-                  ? {
-                      drinkingWindowEntityLookup: async (id) => {
-                        const docs = await core.entityLookup.getDrinkingWindowDocuments!([id]);
-                        return docs.get(id) ?? undefined;
-                      },
-                    }
-                  : {}),
-                corpusCardinality: InMemoryCorpusCardinalityCache.empty(),
-              },
-            },
-            {
-              maxSteps: config.agent.maxSteps,
-              agentTimeoutMs: config.agent.agentTimeoutMs,
-              perStepTimeoutMs: config.agent.perStepTimeoutMs,
-              maxContextChars: 8_000,
-              // L1.C: fast-answer bypass toggle (default true). Saves one
-              // planner LLM RTT on simple-lookup queries by routing the
-              // grounded answer through synthesis directly.
-              fastAnswerBypassPlanner: config.agent.fastAnswerBypassPlanner,
-              // Verification-step guard: env-controlled via AGENT_REQUIRE_VERIFICATION_STEP.
-              // Without this line the env var was a silent no-op; the domain
-              // default (true) silently overrode any operator setting.
-              requireVerificationStep: config.agent.requireVerificationStep,
-            },
-          ),
-        }
-      : {}),
     ...(wineSearch !== undefined ? { wineSearch } : {}),
   };
 }

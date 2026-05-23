@@ -9,7 +9,6 @@ import type {
   ResolveUseCasePort,
 } from '../../../application/search/port/search-route-usecases.port.js';
 import type { WatchlistServicePort } from '../../../application/watchlist/watchlist.service.js';
-import type { AgentOrchestrator } from '../../../application/agent/agent-orchestrator.js';
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from '../../../config/container-tool-contracts.js';
 import type { FeedbackStore } from '../../../domain/learning/port/feedback-store.port.js';
@@ -72,7 +71,6 @@ export interface HttpServerDeps
   readonly autocompleteUseCase?: AutocompleteUseCasePort | undefined;
   readonly evalRunner: EvalRunnerContract | null;
   /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort is available. */
-  readonly agentOrchestrator?: AgentOrchestrator | undefined;
   /**
    * Plan-then-Execute wine-search slice — present when
    * `WINE_SEARCH_ENABLED=true` and an Anthropic credential is configured.
