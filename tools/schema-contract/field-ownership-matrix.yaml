@@ -82,10 +82,11 @@ fields:
     rationale: "Vivino payload exposes region/winery_region for almost all wines, but a small tail has only country. region-normalizer falls back to '' when normalisation fails."
 
   - field: grapes
-    source: silver(vivino-to-silver.ts)
-    coverage_required: 1.0
-    fail_action: must
-    rationale: "Array is always written (empty array allowed). toVespaFields inlines unconditionally."
+    source: silver(vivino-to-silver.ts via extractGrapes → payload.varietal parsing)
+    coverage_required: 0.38
+    fail_action: warn
+    rationale: "Field is always written (empty array allowed; toVespaFields inlines unconditionally), but actual NON-EMPTY coverage = 38% (4313/11367 in prod 2026-05-24). Vivino payload.grapes JSONB array is NEVER populated (0/10469 in Bronze); the only signal is payload.varietal (61% Bronze coverage) which silver parses. The 23pp Bronze→Vespa gap = silver transformRow drops (producer/wineType) + dedup variants. Wikidata grape backfill (Track C step8 candidate) is the planned lift past 80%."
+    ticket: "TODO-rfc018-grapes-wikidata-backfill"
 
   # ---------------------------------------------------------------------------
   # Full-text search fields
@@ -203,10 +204,11 @@ fields:
     rationale: "Required — deriveStyle throws if wineType is undefined. red/white/sparkling/dessert/fortified/rosé."
 
   - field: grape_primary
-    source: silver(vivino-to-silver.ts)
-    coverage_required: 0.9
+    source: silver(vivino-to-silver.ts via resolveDominantGrape — region table + grapes[0] fallback)
+    coverage_required: 0.38
     fail_action: warn
-    rationale: "Inferred from grapes[0] in most cases; absent when grapes[] is empty (rare)."
+    rationale: "Resolved by resolveDominantGrape: region/appellation lookup (Pomerol→Merlot, Pauillac→CabS, Barolo→Nebbiolo, ...) when grape list has >1 variety; falls back to grapes[0] otherwise. Coverage tracks the `grapes` field (38%) since empty list → null primary. The earlier `grapes[0]` blind selection produced wrong primaries for blends (e.g. Pomerol→Malbec); fixed 2026-05-24 — see test/regression/silver-resolve-dominant-grape.regression.test.ts."
+    ticket: "TODO-rfc018-grapes-wikidata-backfill"
 
   - field: country
     source: silver(vivino-to-silver.ts)

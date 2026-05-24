@@ -32,6 +32,7 @@ import type { DecisionTrace } from '../model/decision-trace.js';
 import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
 import { AdmissionGate } from './admission-gate.js';
 import { classifyEmptyCandidatePool } from './zero-hit-detector.js';
+import { classifyMultiVintageCluster } from './multi-vintage-cluster-detector.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
@@ -666,6 +667,39 @@ export class DecisionEngine {
         rulesApplied: [...rulesApplied],
         finalReason: `Calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}, gap=${deltaForLog} >= T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, no ambiguity.`,
       };
+    }
+
+    // Gate 1.5 (Wave 3++): same-entity-different-vintage cluster recovery.
+    //
+    // Pre-fix: "Sassicaia" → 3 candidates (Sassicaia 2018, 2001 Tenuta San
+    // Guido x2) → conformalSetSize=3, gap small → Gate 2 fires → clarify →
+    // bench scores 0 because the rubric expects the wine info.
+    //
+    // Post-fix: detect that the top-K candidates form a same-entity cluster
+    // (≥80% share the de-vintaged identity key). Resolve to the top
+    // rank-1 candidate within the cluster. The synthesizer is told a cluster
+    // was resolved so it can mention N other vintages exist.
+    //
+    // Gating: only fires when ambiguity would have triggered Gate 2 AND the
+    // intent/retrievalKind indicates entity-lookup (we don't want to resolve
+    // multi-candidate "Cabernet Sauvignon" attribute-search queries to a
+    // single wine — those are genuinely multi-entity).
+    const wouldHaveBeenAmbiguous = (conformalSetSize >= 2 || !gapMeetsThreshold) && C > 0;
+    const isEntityLookupShape =
+      input.retrievalKind === 'entity_lookup'
+      || input.effectiveRetrievalMode === 'entity_lookup'
+      || input.effectiveRetrievalMode === 'entity_resolution';
+    if (wouldHaveBeenAmbiguous && isEntityLookupShape && !A) {
+      const clusterClass = classifyMultiVintageCluster(input.resolveResult.candidates);
+      if (clusterClass.kind === 'same_entity_cluster') {
+        rulesApplied.push('MULTI_VINTAGE_CLUSTER_RESOLVED');
+        return {
+          status: 'resolved',
+          nextAction: 'return_result',
+          rulesApplied: [...rulesApplied],
+          finalReason: `Multi-vintage cluster (size=${clusterClass.clusterSize}) collapsed to rank-${clusterClass.resolvedTopRank} '${clusterClass.identityKey}'; would have been ambiguous (conformal=${conformalSetSize}, gap=${deltaForLog}) but candidates are the same wine across vintages.`,
+        };
+      }
     }
 
     // Gate 2: Ambiguous conditions — only when there is at least some signal

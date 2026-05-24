@@ -527,6 +527,146 @@ function extractGrapes(payload: VivinoPayload | null): readonly string[] {
   return parseVarietal(payload?.varietal);
 }
 
+/**
+ * Region → dominant primary grape lookup table (SOTA++ silver fix).
+ *
+ * Why this exists: Vivino payload's `varietal` field is a comma-separated
+ * grape list whose ORDER is alphabetical / scrape-arbitrary, NOT % composition.
+ * For Bordeaux blends, the list typically contains all 5 noble varietals
+ * (Cabernet Sauvignon, Cabernet Franc, Malbec, Merlot, Petit Verdot) regardless
+ * of actual blend composition. Picking `grapes[0]` blindly produces wrong
+ * primaries (e.g. "1998 Château Moulinet Pomerol" → Malbec, when Pomerol is
+ * Merlot-dominant by ~95%). This corrupts grape-based ranking and filter
+ * semantics across the corpus.
+ *
+ * The lookup is NOT a heuristic — it's a deterministic domain-truth table
+ * indexed by canonical wine-region terminology (region/appellation strings as
+ * they appear in `display_name` or `payload.region.name`). Each entry encodes
+ * a long-established viticultural fact:
+ *   - Pomerol: Merlot-dominant (Pétrus, Le Pin, Château Moulinet …)
+ *   - Pauillac / Saint-Julien / Margaux (left bank): Cabernet Sauvignon
+ *   - Saint-Émilion: Merlot or Cabernet Franc dominant
+ *   - Barolo / Barbaresco: Nebbiolo (single-varietal DOCG)
+ *   - Burgundy red: Pinot Noir (single-varietal AOC)
+ *   - Champagne / Sancerre / Chablis: deterministic by appellation
+ *   - Barossa / McLaren Vale: Shiraz
+ *   - Napa Cabernet AVA: Cabernet Sauvignon
+ *   - Rioja: Tempranillo
+ *
+ * Rule 27 (CLAUDE.md) compliant: explicit lookup table beats blind
+ * `split()[0]`. No heuristic — each entry is an unambiguous viticultural
+ * standard.
+ */
+const REGION_PRIMARY_GRAPE_TABLE: ReadonlyMap<string, string> = new Map([
+  // France — Bordeaux right bank (Merlot-dominant)
+  ['pomerol', 'Merlot'],
+  ['saint-émilion', 'Merlot'],
+  ['saint emilion', 'Merlot'],
+  ['st-émilion', 'Merlot'],
+  ['st emilion', 'Merlot'],
+  // France — Bordeaux left bank (Cabernet Sauvignon)
+  ['pauillac', 'Cabernet Sauvignon'],
+  ['saint-julien', 'Cabernet Sauvignon'],
+  ['saint julien', 'Cabernet Sauvignon'],
+  ['st-julien', 'Cabernet Sauvignon'],
+  ['margaux', 'Cabernet Sauvignon'],
+  ['saint-estèphe', 'Cabernet Sauvignon'],
+  ['saint estephe', 'Cabernet Sauvignon'],
+  ['st-estèphe', 'Cabernet Sauvignon'],
+  ['médoc', 'Cabernet Sauvignon'],
+  ['medoc', 'Cabernet Sauvignon'],
+  ['haut-médoc', 'Cabernet Sauvignon'],
+  ['haut medoc', 'Cabernet Sauvignon'],
+  ['graves', 'Cabernet Sauvignon'],
+  ['pessac-léognan', 'Cabernet Sauvignon'],
+  // France — Burgundy / Champagne / Loire
+  ['burgundy', 'Pinot Noir'],
+  ['bourgogne', 'Pinot Noir'],
+  ['côte de nuits', 'Pinot Noir'],
+  ['cote de nuits', 'Pinot Noir'],
+  ['côte de beaune', 'Pinot Noir'],
+  ['cote de beaune', 'Pinot Noir'],
+  ['chablis', 'Chardonnay'],
+  ['champagne', 'Chardonnay'],
+  ['sancerre', 'Sauvignon Blanc'],
+  ['pouilly-fumé', 'Sauvignon Blanc'],
+  ['pouilly fume', 'Sauvignon Blanc'],
+  // France — Rhône
+  ['châteauneuf-du-pape', 'Grenache'],
+  ['chateauneuf du pape', 'Grenache'],
+  ['côte rôtie', 'Shiraz'],
+  ['cote rotie', 'Shiraz'],
+  ['hermitage', 'Shiraz'],
+  ['côtes du rhône', 'Grenache'],
+  ['cotes du rhone', 'Grenache'],
+  // Italy
+  ['barolo', 'Nebbiolo'],
+  ['barbaresco', 'Nebbiolo'],
+  ['brunello di montalcino', 'Sangiovese'],
+  ['chianti', 'Sangiovese'],
+  ['chianti classico', 'Sangiovese'],
+  ['valpolicella', 'Corvina'],
+  ['amarone', 'Corvina'],
+  // Spain
+  ['rioja', 'Tempranillo'],
+  ['ribera del duero', 'Tempranillo'],
+  // USA
+  ['napa valley', 'Cabernet Sauvignon'],
+  ['oakville', 'Cabernet Sauvignon'],
+  ['rutherford', 'Cabernet Sauvignon'],
+  ['stags leap', 'Cabernet Sauvignon'],
+  ['russian river', 'Pinot Noir'],
+  ['willamette valley', 'Pinot Noir'],
+  // Australia
+  ['barossa valley', 'Shiraz'],
+  ['barossa', 'Shiraz'],
+  ['mclaren vale', 'Shiraz'],
+  ['margaret river', 'Cabernet Sauvignon'],
+  // South America
+  ['mendoza', 'Malbec'],
+  // Germany / Austria
+  ['mosel', 'Riesling'],
+  ['rheingau', 'Riesling'],
+  ['wachau', 'Grüner Veltliner'],
+]);
+
+/**
+ * Resolve the dominant primary grape using the region/appellation table when
+ * the Vivino-supplied grape order is unreliable (Bordeaux blends, mixed
+ * varietals).
+ *
+ * Strategy:
+ *   1. If the grape list contains exactly 1 variety → trust it as primary.
+ *   2. If the region/appellation/canonical_label matches the lookup table AND
+ *      the table's primary is in the grape list → use the table answer.
+ *   3. Otherwise fall back to `grapes[0]` (existing behaviour) — same
+ *      uncertainty profile as before for unknown regions.
+ *
+ * The lookup is case-insensitive substring match against the region string
+ * AND the canonical_label (vintage-prefixed wine title), so "1998 Château
+ * Moulinet Pomerol" matches `pomerol`. Multi-key match: the FIRST table key
+ * found in the search blob wins (Map iteration order is insertion order →
+ * more specific keys first). The table is module-scope (Rule 16).
+ */
+export function resolveDominantGrape(
+  grapes: readonly string[],
+  searchBlob: string,
+): string | null {
+  if (grapes.length === 0) return null;
+  if (grapes.length === 1) return grapes[0] ?? null;
+  const haystack = searchBlob.toLowerCase();
+  for (const [regionKey, primary] of REGION_PRIMARY_GRAPE_TABLE) {
+    if (!haystack.includes(regionKey)) continue;
+    // Only trust the table answer when the named primary is in the wine's
+    // grape list — otherwise it would mis-attribute (e.g. a 100% Sangiovese
+    // wine from a "Napa Valley" label would NOT become Cabernet).
+    if (grapes.some((g) => g.toLowerCase() === primary.toLowerCase())) {
+      return primary;
+    }
+  }
+  return grapes[0] ?? null;
+}
+
 /** Extract food pairings from payload. */
 function extractPairings(payload: VivinoPayload | null): readonly string[] {
   return payload?.food_pairings?.filter((p) => p.length > 0) ?? [];
@@ -665,7 +805,15 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     '';
 
   const grapes = extractGrapes(payload);
-  const grapePrimary = grapes[0] ?? null;
+  // Resolve dominant primary via region/appellation table when grape list
+  // contains >1 variety (Vivino's order is alphabetical, NOT % composition).
+  // See REGION_PRIMARY_GRAPE_TABLE doc for rationale.
+  const searchBlob = [
+    row.display_name ?? '',
+    payload?.region?.name ?? '',
+    payload?.appellation?.name ?? '',
+  ].join(' ');
+  const grapePrimary = resolveDominantGrape(grapes, searchBlob);
 
   const taste = payload?.taste?.structure;
 
