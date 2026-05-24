@@ -13,8 +13,16 @@
  * route/mode decisions downstream (E1-U2).
  *
  * T1.5 will remove this adapter once all consumers migrate to QueryPlanV2.
+ *
+ * Anchor-refresh hook (`anchorRefresh` constructor dep): wave-1 of the
+ * entity-route structural fix (memory `project_entity_route_broken`). When
+ * the compiled retrieval mode is `entity_lookup` and the planner produced
+ * zero anchors, this adapter re-queries the alias overlay via the injected
+ * callback to recover anchors before the entity route runs. Without this,
+ * the entity route silently returns 0 results for known aliases, which led
+ * to the now-removed `lookup_wine → mode='hybrid'` workaround.
  */
-import type { QueryPlanV1 } from '../domain/query/model/query-plan.js';
+import type { QueryPlanV1, QueryPlanV2 } from '../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../domain/query/model/compiled-wine-query.js';
 import type { Planner, PlannerContext } from '../domain/query/service/planner.js';
 import type {
@@ -23,12 +31,62 @@ import type {
 } from '../application/search/port/search-pipeline-deps.port.js';
 import { PolicyCompiler } from '../domain/query/service/policy-compiler.js';
 import { ExecutionCompiler } from '../domain/query/service/execution-compiler.js';
+import {
+  type AnchorRefreshAliasOverlayPort,
+  type AnchorRefreshResult,
+  refreshAnchorsFromAliasOverlay,
+} from '../domain/query/service/anchor-refresh.js';
+import type { AnchorCandidate } from '../domain/query/model/anchor-candidate.js';
+
+/**
+ * Callback shape for the optional anchor-refresh hook.
+ *
+ * Closes over the alias overlay (production: `core.aliasMatcher`). Returning
+ * the {@link AnchorRefreshResult} lets the adapter inspect the status and
+ * surface diagnostics without re-running the lookup itself.
+ */
+export type AnchorRefreshCallback = (input: {
+  readonly normalizedQuery: string;
+  readonly existingAnchors: readonly AnchorCandidate[];
+}) => Promise<AnchorRefreshResult>;
+
+/**
+ * Build an {@link AnchorRefreshCallback} from an alias-overlay port.
+ *
+ * Pulled out so container wiring can hand the closure to PlannerV1Adapter
+ * without the adapter knowing about the AliasMatcher interface.
+ */
+export function buildAnchorRefreshCallbackFromAliasOverlay(
+  overlay: AnchorRefreshAliasOverlayPort,
+): AnchorRefreshCallback {
+  return (input) => refreshAnchorsFromAliasOverlay(input, overlay);
+}
+
+export interface PlannerV1AdapterOptions {
+  /**
+   * Optional anchor-refresh callback. When present, the adapter will invoke
+   * it after the planner returns IF the compiled retrieval mode is
+   * `entity_lookup` AND no anchors were extracted. Refreshed anchors are
+   * merged into the plan (V1 + V2) and the plan is re-compiled so downstream
+   * consumers see a consistent (anchors, route, mode) tuple.
+   *
+   * Omit to disable the hook entirely — useful for tests or environments
+   * that bypass the alias overlay (e.g. snapshot-only fixtures).
+   */
+  readonly anchorRefresh?: AnchorRefreshCallback | undefined;
+}
 
 export class PlannerV1Adapter implements QueryPlannerPort {
   private readonly policyCompiler = new PolicyCompiler();
   private readonly executionCompiler = new ExecutionCompiler();
+  private readonly anchorRefresh: AnchorRefreshCallback | undefined;
 
-  constructor(private readonly planner: Planner) {}
+  constructor(
+    private readonly planner: Planner,
+    options?: PlannerV1AdapterOptions,
+  ) {
+    this.anchorRefresh = options?.anchorRefresh;
+  }
 
   /**
    * Returns V1-shaped plan only. NL `constraintExtraction` is **not** on QueryPlanV1;
@@ -49,7 +107,44 @@ export class PlannerV1Adapter implements QueryPlannerPort {
     context?: PlannerContext,
   ): Promise<{ v1: QueryPlanV1; compiled: CompiledWineQuery }> {
     const v2 = await this.planner.plan(query, context);
+    let { v1, compiled } = this.materializeFromV2(v2);
 
+    // Anchor refresh: entity-route safety net. Only fires when the compiler
+    // resolved to `entity_lookup` AND the planner produced zero anchors —
+    // the exact failure shape that previously forced lookup_wine through the
+    // hybrid workaround. Other modes intentionally proceed without anchors.
+    if (
+      this.anchorRefresh !== undefined
+      && compiled.execution.effectiveRetrievalMode === 'entity_lookup'
+      && v1.anchors.length === 0
+    ) {
+      const refreshResult = await this.anchorRefresh({
+        normalizedQuery: v1.normalizedQuery,
+        existingAnchors: v1.anchors,
+      });
+      if (refreshResult.status === 'refreshed') {
+        // Re-emit V1 + recompile with the refreshed anchor set so anchors,
+        // policy, and the compiled execution contract are mutually
+        // consistent. Re-compilation is cheap (no I/O) and avoids subtle
+        // bugs from updating one surface but not the other.
+        const refreshedV2: QueryPlanV2 = { ...v2, anchors: refreshResult.anchors };
+        ({ v1, compiled } = this.materializeFromV2(refreshedV2));
+      }
+      // status === 'no_match' → leave the original plan unchanged. The
+      // entity route will produce its usual empty-anchor outcome; the
+      // refresh attempt is observable via the lack of any anchor change.
+    }
+
+    return { v1, compiled };
+  }
+
+  /**
+   * Compile a {@link QueryPlanV2} into the {@link QueryPlanV1} +
+   * {@link CompiledWineQuery} pair. Extracted so the anchor-refresh path
+   * can re-run the compile with mutated anchors without duplicating the
+   * V2→V1 / policy / ExecutionCompiler wiring.
+   */
+  private materializeFromV2(v2: QueryPlanV2): { v1: QueryPlanV1; compiled: CompiledWineQuery } {
     const policy = this.policyCompiler.compile(
       v2.intent,
       v2.queryClass,

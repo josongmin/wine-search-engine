@@ -101,6 +101,8 @@ describe('E8: AuditExtension type', () => {
           afterHardFilter: 140,
           afterAssembly: 50,
         },
+        // Wave 2: `perChannel` is required on RrfFusionTrace.
+        perChannel: [],
       },
     };
     expect(ext.retrieval_fusion_trace?.rrfK).toBe(60);
@@ -423,6 +425,8 @@ describe('E8-18/19: retrieval_fusion_trace and abstain_policy_trace live wiring'
           afterHardFilter: 110,
           afterAssembly: 50,
         },
+        // Wave 2: `perChannel` is required on RrfFusionTrace.
+        perChannel: [],
       },
     };
     expect(ext.retrieval_fusion_trace?.fusionClass).toBe('browse');

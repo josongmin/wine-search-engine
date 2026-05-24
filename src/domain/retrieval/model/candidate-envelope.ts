@@ -138,8 +138,65 @@ export interface CandidateDropRecord {
 }
 
 /**
+ * Wave 2 — per-channel firing state for retrieval telemetry.
+ *
+ *  - `active`              — channel ran successfully and produced (possibly zero) hits.
+ *  - `dormant`             — channel was not selected for this query
+ *                            (e.g. learned_sparse with no production wiring, or
+ *                            anchor channel when no anchor is present). No call attempted.
+ *  - `circuit_breaker_open`— the downstream breaker was open at call time,
+ *                            so the channel skipped the request fast-fail.
+ *  - `timeout`             — channel call exceeded the per-channel timeout
+ *                            budget and was aborted.
+ *  - `error`               — channel call surfaced an infra error other than
+ *                            timeout / circuit-breaker-open.
+ *
+ * Operator semantics:
+ *  - `active`   ⇒ counts as a healthy fan-out lane.
+ *  - `dormant`  ⇒ EXPECTED off; do NOT alert.
+ *  - any other ⇒ degraded; alert candidate.
+ */
+export type RetrievalChannelFiringState =
+  | 'active'
+  | 'dormant'
+  | 'circuit_breaker_open'
+  | 'timeout'
+  | 'error';
+
+/**
+ * Wave 2 — per-channel telemetry row inside `RrfFusionTrace.perChannel`.
+ *
+ * One row per retrieval channel touched (or considered) for the request.
+ * Operators read this to answer the question:
+ *   "For request X, which channels fired, how many hits did each return,
+ *    and how much of the final fused ordering came from each?"
+ *
+ * Fields:
+ *  - `channel`            — canonical retrieval channel name (matches `CandidateChannel`).
+ *  - `firingState`        — see `RetrievalChannelFiringState` above.
+ *  - `hitCount`           — number of raw hits the channel returned (0 when dormant / failed).
+ *  - `topKInput`          — top-K cap the channel was invoked with (0 when not invoked).
+ *  - `fusionContribution` — sum of this channel's `rrfContribution`s across the
+ *                           top-K assembled candidates. Higher = this channel
+ *                           pulled more weight into the final ordering.
+ */
+export interface RetrievalChannelTrace {
+  readonly channel: CandidateChannel;
+  readonly firingState: RetrievalChannelFiringState;
+  readonly hitCount: number;
+  readonly topKInput: number;
+  readonly fusionContribution: number;
+}
+
+/**
  * E4: Request-level RRF fusion trace — one per query execution.
  * Attached to CandidateEnvelope at the list level.
+ *
+ * Wave 2: `perChannel` adds per-channel hit counts, firing-state and
+ * post-fusion contribution so operators can see WHICH channels fired
+ * vs. went dormant in a single request snapshot (the previous
+ * `candidateCount.beforeFusion` shape only carried raw hit counts and
+ * omitted both `learned_sparse` and firing-state).
  */
 export interface RrfFusionTrace {
   readonly queryClass: string;
@@ -157,6 +214,14 @@ export interface RrfFusionTrace {
     readonly afterHardFilter: number;
     readonly afterAssembly: number;
   };
+  /**
+   * Wave 2 — per-channel telemetry rows. Present on every fusion trace
+   * built by `CandidatePoolService.execute` so operators have a stable
+   * shape to read from. One row per channel considered for the request
+   * (typically: sparse_bm25, learned_sparse, dense_semantic,
+   * anchor_similarity).
+   */
+  readonly perChannel: readonly RetrievalChannelTrace[];
 }
 
 /**

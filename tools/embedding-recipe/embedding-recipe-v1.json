@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "model_id": "text-embedding-3-small-1024d",
+  "rationale": "Externalized embedding recipe (Wave 2 SOTA++). Includes sensory_summary (body/acidity/tannin/sweetness — 79-100% populated, previously lost), pairing tags, flavor profiles, and capped Korean aliases so '오푸스원' and 'Opus One' embed into the same neighborhood without round-tripping through the alias index. Field weights are realized as repeated tokens (Algolia/Elastic-style weighted concat): weight=1.0 → 1 copy, weight=0.5 → 1 copy emitted only when the field is present (no fractional copies — see field_weight_strategy). Bump 'version' when ANY field, prefix, weight, or strategy changes so the embedding reuse cache (semantic_summary equality) invalidates.",
+  "field_weight_strategy": "integer_repetition_floor",
+  "field_weight_strategy_note": "Each field with weight w contributes max(1, floor(w * MULTIPLIER)) repetitions when present. MULTIPLIER=1 keeps text short. We do NOT emit fractional copies (would yield non-deterministic outputs across calls). Fields with weight <= 0 are skipped entirely.",
+  "field_separator": ". ",
+  "fields": [
+    {
+      "name": "canonical_label",
+      "weight": 1.0,
+      "rationale": "Primary identity anchor — must dominate semantic space."
+    },
+    {
+      "name": "producer",
+      "weight": 1.0,
+      "prefix": "producer:",
+      "rationale": "Producer name disambiguates wines with overlapping labels (DOC fault domain)."
+    },
+    {
+      "name": "region",
+      "weight": 1.0,
+      "prefix": "region:",
+      "rationale": "Region carries strong stylistic prior (Bordeaux vs Napa Cabernet smell different)."
+    },
+    {
+      "name": "grape_primary",
+      "weight": 1.0,
+      "prefix": "grape:",
+      "rationale": "Primary grape is a first-class semantic axis."
+    },
+    {
+      "name": "search_text_en",
+      "weight": 1.0,
+      "rationale": "Curated English tasting prose — already SEO-aware and high-signal."
+    },
+    {
+      "name": "flavor_profiles",
+      "weight": 1.0,
+      "prefix": "taste:",
+      "rationale": "Flavor tags (black-fruit, oak, citrus) are explicit semantic anchors."
+    },
+    {
+      "name": "pairing_tags",
+      "weight": 1.0,
+      "prefix": "pairs:",
+      "rationale": "Food pairings encode meal-occasion intent that pure tasting notes miss."
+    },
+    {
+      "name": "sensory_summary",
+      "weight": 1.0,
+      "rationale": "Numeric grounding for body/acidity/tannin/sweetness — previously not embedded at all."
+    }
+  ],
+  "include_korean_aliases": true,
+  "korean_alias_max_count": 10,
+  "korean_alias_prefix": "ko:",
+  "korean_alias_separator": " / "
+}

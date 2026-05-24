@@ -7,6 +7,8 @@ import type {
   CandidateChannel,
   CandidateDropRecord,
   QueryViewMatch,
+  RetrievalChannelFiringState,
+  RetrievalChannelTrace,
   RrfFusionTrace,
 } from '../model/candidate-envelope.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
@@ -58,6 +60,24 @@ import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
+import { CircuitBreakerOpenError } from '../../shared/error/circuit-breaker-open-error.js';
+
+/**
+ * Wave 2 — classify a thrown error into the per-channel telemetry
+ * firing-state bucket. The buckets are deliberately narrow so dashboards
+ * can colour-code "expected dormant" vs "real infra failure" without
+ * inspecting log strings.
+ *
+ * Heuristic-free: every branch is driven by a typed class / standard
+ * DOM contract (CircuitBreakerOpenError, AbortError, plain Error).
+ */
+function classifyChannelError(err: unknown): 'circuit_breaker_open' | 'timeout' | 'error' {
+  if (err instanceof CircuitBreakerOpenError) return 'circuit_breaker_open';
+  // AbortError is the canonical Web-standard timeout marker — fetch + AbortSignal
+  // both surface `name === 'AbortError'` when the per-channel deadline fires.
+  if (err instanceof Error && err.name === 'AbortError') return 'timeout';
+  return 'error';
+}
 
 /** Default anchor confidence when plan omits explicit score (neutral). */
 const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
@@ -315,6 +335,14 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       readonly severity: 'error' | 'warning';
       readonly reason: string;
       readonly fallbackApplied: string;
+      /**
+       * Wave 2 — error classification for per-channel telemetry firing-state.
+       *  - 'circuit_breaker_open' → caller observed a CircuitBreakerOpenError.
+       *  - 'timeout'              → caller observed an AbortError / timeout signal.
+       *  - 'error'                → any other infra failure.
+       *  - undefined              → legacy callsite that did not classify; treated as 'error'.
+       */
+      readonly errorKind?: 'circuit_breaker_open' | 'timeout' | 'error' | undefined;
     };
 
     type LaneResult<THit> = {
@@ -382,6 +410,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
             severity: 'error',
             reason: sparseErr instanceof Error ? sparseErr.message : 'sparse search failed',
             fallbackApplied: 'dense-only retrieval',
+            errorKind: classifyChannelError(sparseErr),
           },
         };
       }
@@ -419,6 +448,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
             severity: 'error',
             reason: learnedErr instanceof Error ? learnedErr.message : 'learned sparse search failed',
             fallbackApplied: 'continue without learned sparse',
+            errorKind: classifyChannelError(learnedErr),
           },
         };
       }
@@ -512,6 +542,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
             severity: 'error',
             reason: denseErr instanceof Error ? denseErr.message : 'dense retrieval failed',
             fallbackApplied: 'sparse-only retrieval',
+            errorKind: classifyChannelError(denseErr),
           },
         };
       }
@@ -576,6 +607,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
             severity: 'warning',
             reason: anchorErr instanceof Error ? anchorErr.message : 'anchor embedding failed',
             fallbackApplied: 'no-anchor retrieval',
+            errorKind: classifyChannelError(anchorErr),
           },
         };
       }
@@ -874,6 +906,58 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       degradationCodes.push('no_matches');
     }
 
+    // Wave 2 — build per-channel telemetry rows. Operators read these
+    // to see, for a single request, which channels actually fired vs.
+    // sat dormant vs. failed, and how much each contributed to the
+    // final fused ordering.
+    //
+    // `fusionContribution` is summed from the assembled candidates'
+    // provenance rows (which already carry per-channel
+    // `rrfContribution`s built by `hybridCandidateToEnvelope`). That
+    // means the number measures contribution to the OUTPUT ordering,
+    // not raw fanout.
+    const fusionContributionByChannel = new Map<CandidateChannel, number>();
+    for (const envelope of assembled.candidates) {
+      for (const score of envelope.provenance.channelScores) {
+        const prior = fusionContributionByChannel.get(score.channel) ?? 0;
+        fusionContributionByChannel.set(score.channel, prior + score.rrfContribution);
+      }
+    }
+    const perChannel: readonly RetrievalChannelTrace[] = [
+      buildChannelTrace({
+        channel: 'sparse_bm25',
+        active: activeChannels.has('sparse_bm25'),
+        result: sparseResult,
+        hits: sparseHits,
+        topKInput: sparseTopN,
+        fusionContribution: fusionContributionByChannel.get('sparse_bm25') ?? 0,
+      }),
+      buildChannelTrace({
+        channel: 'learned_sparse',
+        active: activeChannels.has('learned_sparse'),
+        result: learnedSparseResult,
+        hits: learnedSparseHits,
+        topKInput: sparseTopN,
+        fusionContribution: fusionContributionByChannel.get('learned_sparse') ?? 0,
+      }),
+      buildChannelTrace({
+        channel: 'dense_semantic',
+        active: activeChannels.has('dense_semantic'),
+        result: denseResult,
+        hits: denseHits,
+        topKInput: denseTopN,
+        fusionContribution: fusionContributionByChannel.get('dense_semantic') ?? 0,
+      }),
+      buildChannelTrace({
+        channel: 'anchor_similarity',
+        active: activeChannels.has('anchor_similarity') && anchorProfile !== undefined,
+        result: anchorResult,
+        hits: anchorHits,
+        topKInput: denseTopN,
+        fusionContribution: fusionContributionByChannel.get('anchor_similarity') ?? 0,
+      }),
+    ];
+
     const fusionTrace: RrfFusionTrace = {
       queryClass: input.queryPlan.queryClass,
       fusionClass: fusionQueryClass,
@@ -894,6 +978,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         afterHardFilter: countAfterHardFilter,
         afterAssembly: assembled.candidates.length,
       },
+      perChannel,
     };
     const resultCandidates = assembled.candidates.map((candidate) => ({
       ...candidate.legacyCandidate,
@@ -1203,6 +1288,57 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       anchorConfidence: input.queryPlan.anchors[0]?.confidence ?? HYBRID_ANCHOR_CONFIDENCE_DEFAULT,
     };
   }
+}
+
+/**
+ * Wave 2 — derive a single `RetrievalChannelTrace` row from a channel's
+ * lane result. The mapping is deterministic and documented:
+ *
+ *  - When the channel was not selected for this request (`active=false`)
+ *    AND the lane was not invoked → `dormant`. This is the EXPECTED off
+ *    state; operators do NOT alert on it.
+ *  - When the lane reported `infra_failure` AND classified its error as
+ *    `circuit_breaker_open` / `timeout` → surface that exact kind.
+ *  - When the lane reported `infra_failure` from any other class →
+ *    `error` (still degraded, but not breaker-open / timeout).
+ *  - Otherwise (`ok` / `empty` / `disabled` with active=true and no
+ *    degradation) → `active`. `disabled` happens when the channel is
+ *    administratively gated (e.g. dense kill switch); we map it to
+ *    `dormant` so dashboards don't read "active 0 hits" for an
+ *    operator-disabled channel.
+ */
+function buildChannelTrace(input: {
+  readonly channel: CandidateChannel;
+  readonly active: boolean;
+  readonly result: {
+    readonly status: RetrievalLaneStatus;
+    readonly degraded: boolean;
+    readonly degradation?: {
+      readonly errorKind?: 'circuit_breaker_open' | 'timeout' | 'error' | undefined;
+    } | undefined;
+  };
+  readonly hits: ReadonlyArray<unknown>;
+  readonly topKInput: number;
+  readonly fusionContribution: number;
+}): RetrievalChannelTrace {
+  let firingState: RetrievalChannelFiringState;
+  if (input.result.status === 'disabled' || !input.active) {
+    firingState = 'dormant';
+  } else if (input.result.status === 'infra_failure') {
+    const kind = input.result.degradation?.errorKind ?? 'error';
+    firingState = kind;
+  } else {
+    firingState = 'active';
+  }
+  return {
+    channel: input.channel,
+    firingState,
+    hitCount: input.hits.length,
+    // When the channel did not run, the top-K it WOULD have used is
+    // meaningless to operators — report 0 to keep the row truthful.
+    topKInput: firingState === 'dormant' ? 0 : input.topKInput,
+    fusionContribution: input.fusionContribution,
+  };
 }
 
 function toExecutionLane<THit>(

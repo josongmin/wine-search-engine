@@ -90,7 +90,18 @@ export type DegradedReason =
    * is still ungrounded, the runner degrades to the deterministic Layer 2
    * template and tags the result with this reason.
    */
-  | 'ungrounded_claim';
+  | 'ungrounded_claim'
+  /**
+   * Wave 1 (Cluster F): the DecisionEngine emitted
+   * `failureReason: 'NO_CORPUS_MATCH'` — the planner extracted a
+   * high-confidence anchor but the resolver returned 0 candidates. The
+   * synthesizer emitted the deterministic `corpusGapAdmission` template
+   * (not in our catalogue / 카탈로그에서 찾지 못했어요). Distinct from
+   * `no_results` (which is the no-grounding path) and from
+   * `policy_blocked` (which is security / unsupported intent) so
+   * operators can monitor catalogue-coverage gaps as a separate signal.
+   */
+  | 'no_corpus_match';
 
 export interface AnswerResult {
   /** Non-empty answer string — invariant guaranteed by the runner's

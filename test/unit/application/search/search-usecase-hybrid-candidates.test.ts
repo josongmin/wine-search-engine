@@ -1529,6 +1529,8 @@ describe('retrieveHybridCandidatesForPlan', () => {
                 afterHardFilter: 1,
                 afterAssembly: 1,
               },
+              // Wave 2: `perChannel` is required on RrfFusionTrace.
+              perChannel: [],
             },
             dropLog: [{
               entityId: 'dropped-typed',
@@ -1561,6 +1563,10 @@ describe('retrieveHybridCandidatesForPlan', () => {
           afterHardFilter: 1,
           afterAssembly: 1,
         },
+        // Wave 2: `perChannel` is required on RrfFusionTrace and is
+        // populated by the candidate-pool. The mock trace mirrors the
+        // production shape (empty when the mock did not produce rows).
+        perChannel: [],
       });
       expect(result.hardFilterDropLog).toEqual([{
         entityId: 'dropped-typed',

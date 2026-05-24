@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyBaseLogger } from 'fastify';
+import { snapshotActivations } from './feature-activation-registry.js';
 
 /**
  * Per-HTTP-request pipeline debug context.
@@ -43,6 +44,11 @@ export function sanitizeQueryForDebug(raw: string, maxChars = 96): string {
 /**
  * Structured debug line for the search pipeline. No-ops unless the current request
  * had `debugRequest === true` (HTTP debug secret + matching header).
+ *
+ * Wave 2 — every emitted line carries `feature_activations`, a snapshot
+ * of the global feature-flag registry, so operators can correlate a
+ * pipeline event with the exact flag state at request time without
+ * cross-referencing a separate startup log line.
  */
 export function pipelineDebug(payload: Record<string, unknown>, msg: string): void {
   const ctx = storage.getStore();
@@ -51,6 +57,7 @@ export function pipelineDebug(payload: Record<string, unknown>, msg: string): vo
     {
       pipeline_debug: true,
       request_id: ctx.requestId,
+      feature_activations: snapshotActivations(),
       ...payload,
     },
     msg,

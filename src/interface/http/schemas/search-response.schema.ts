@@ -557,6 +557,39 @@ const CandidateDropRecordWireSchema = z.object({
   channels: z.array(CandidateDropChannelSchema).max(MAX_AUDIT_HARD_FILTER_DROP_LOG_ITEMS),
 }).strict();
 
+/**
+ * Wave 2 — per-channel telemetry row exposed at the wire boundary.
+ * Mirrors `RetrievalChannelTrace` in
+ * `src/domain/retrieval/model/candidate-envelope.ts`. Field names match
+ * the rest of `RrfFusionTraceSchema` style (snake_case).
+ *
+ * The `firing_state` union is intentionally narrow so dashboards can
+ * map directly onto Prometheus / Grafana category colour-codes without
+ * a translation layer.
+ */
+const RetrievalChannelTraceSchema = z.object({
+  channel: z.string().min(1),
+  firing_state: z.enum([
+    'active',
+    'dormant',
+    'circuit_breaker_open',
+    'timeout',
+    'error',
+  ]),
+  hit_count: z.number().int().nonnegative(),
+  top_k_input: z.number().int().nonnegative(),
+  fusion_contribution: z.number().finite(),
+}).strict();
+
+/**
+ * Wave 2 — max per-channel rows on a single RRF fusion trace. Today
+ * the candidate-pool emits 4 rows (sparse_bm25, learned_sparse,
+ * dense_semantic, anchor_similarity); the cap reserves head-room for
+ * future channels (relative_filter, etc.) without an immediate schema
+ * bump. Bounded array per HTTP-facing Zod schema discipline.
+ */
+const MAX_RETRIEVAL_CHANNEL_TRACE_ROWS = 16;
+
 const RrfFusionTraceSchema = z.object({
   query_class: z.string().min(1),
   fusion_class: z.string().min(1),
@@ -578,6 +611,11 @@ const RrfFusionTraceSchema = z.object({
     after_hard_filter: z.number().int().nonnegative(),
     after_assembly: z.number().int().nonnegative(),
   }).strict(),
+  // Wave 2 — per-channel telemetry rows. Optional at the wire
+  // boundary because legacy specialised paths (producer_browse /
+  // region_browse / compare_candidates) emit a fusion trace without
+  // per-channel rows; only the generic hybrid path populates them.
+  per_channel: z.array(RetrievalChannelTraceSchema).max(MAX_RETRIEVAL_CHANNEL_TRACE_ROWS).optional(),
 }).strict();
 
 const ScoreDriftRecordWireSchema = z.object({

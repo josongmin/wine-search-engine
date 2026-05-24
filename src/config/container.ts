@@ -261,11 +261,19 @@ function buildWineSearchContainerServices(
 
 /**
  * Multi-Query Rewrite + HyDE feature flag — read at module load.
- * Default OFF (single-query baseline preserved). Flip to `true` to
- * engage the generators; flipping requires a process restart.
+ *
+ * Wave 2: DEFAULT ON. The recall/precision telemetry from the gated
+ * rollout consistently showed positive recall lift with no measurable
+ * precision regression on the gated intents (food_pairing /
+ * exploratory / attribute_search), so we flip the default and require
+ * an explicit `WINE_SEARCH_MULTI_QUERY_ENABLED=false` opt-out.
+ *
+ * Any other value (unset, `'true'`, garbage / typo) → ENABLED. This is
+ * deliberate: a typo on the env var name must NOT silently disable the
+ * feature; operators must explicitly say `false` to disable.
  */
 const MULTI_QUERY_FEATURE_FLAG_ENABLED =
-  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] === 'true';
+  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] !== 'false';
 
 export async function createContainer(
   config: Config,

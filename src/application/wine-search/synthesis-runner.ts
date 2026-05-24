@@ -488,8 +488,33 @@ interface SynthesisRunnerDeps {
  * `wine-search-result-schemas.ts` (SSoT — CLAUDE.md rule 25/30); we re-declare
  * the union here so the synthesis-runner module does not need to import from
  * the orchestrator result module (one-way dependency).
+ *
+ * Wave 1 (Cluster F) corpus-gap admission is signalled SEPARATELY via
+ * {@link SynthesisRunInput.decisionStatus} — it is NOT a policy block (the
+ * query is wine-domain and well-formed; we simply lack the requested
+ * entity in our catalogue). See {@link SynthesisDecisionStatus} below.
  */
 type SynthesisBlockedKind = 'security_block' | 'unsupported_intent';
+
+/**
+ * Decision-engine outcome signal passed to the synthesizer so it can pick
+ * the right deterministic Korean / English template.
+ *
+ *  - `'no_corpus_match'` (Wave 1 Cluster F): the DecisionEngine emitted
+ *    `failureReason: 'NO_CORPUS_MATCH'` because the planner extracted a
+ *    high-confidence anchor but the resolver returned 0 candidates — the
+ *    requested entity is not in the catalogue. The synthesizer emits the
+ *    deterministic `corpusGapAdmission` template ("not in our catalogue —
+ *    would you like a similar recommendation?") instead of asking the
+ *    user to clarify an entity that does not exist.
+ *  - any other value → normal synthesis flow.
+ *
+ * Distinct from {@link SynthesisBlockedKind} because corpus-gap is NOT a
+ * policy block — it's an honest admission about catalogue coverage. Keeping
+ * the two discriminants separate prevents `policy_blocked=true` from
+ * incorrectly surfacing for catalogue gaps in HTTP metadata.
+ */
+export type SynthesisDecisionStatus = 'no_corpus_match';
 
 interface SynthesisRunInput {
   readonly query: string;
@@ -503,6 +528,15 @@ interface SynthesisRunInput {
    *  legacy single-template behavior for callers that have not yet been
    *  updated). */
   readonly blockedKind?: SynthesisBlockedKind;
+  /**
+   * Wave 1 (Cluster F) — Decision-engine outcome signal. When set to
+   * `'no_corpus_match'`, the synthesizer short-circuits to the
+   * deterministic `corpusGapAdmission` template (see
+   * {@link SynthesisDecisionStatus}). Distinct from `policyBlocked` because
+   * corpus-gap is NOT a policy block — `policy_blocked` MUST remain false
+   * in the HTTP envelope for catalogue-coverage gaps.
+   */
+  readonly decisionStatus?: SynthesisDecisionStatus;
   readonly perStepTimeoutMs: number;
   readonly maxOutputTokens: number;
   readonly abortSignal?: AbortSignal;
@@ -530,6 +564,14 @@ export class SynthesisRunner {
     this.throwIfAborted(input.abortSignal);
 
     const queryHasHangul = containsHangul(input.query);
+
+    // Branch 0 — Wave 1 (Cluster F) corpus-gap admission short-circuit.
+    // Evaluated BEFORE policyBlocked so a single signal carrying both flags
+    // (defensive) routes to the honest catalogue-coverage admission rather
+    // than the security/unsupported templates. No LLM call.
+    if (input.decisionStatus === 'no_corpus_match') {
+      return this.makeCorpusGapAdmissionResult(queryHasHangul);
+    }
 
     // Branch 1 — policy block short-circuit (no LLM call). The
     // `blockedKind` discriminator (S1) selects the Korean/English template.
@@ -880,6 +922,31 @@ export class SynthesisRunner {
       verificationAttempts: 0,
       tokenUsage: makeZeroTokenUsage(),
       degradedReason: 'policy_blocked',
+    };
+  }
+
+  /**
+   * Wave 1 (Cluster F) — corpus-gap admission template result.
+   *
+   * Emitted when the orchestrator passes `decisionStatus: 'no_corpus_match'`
+   * to the synthesizer. This is NOT a policy block (the query is
+   * well-formed and wine-domain); it's an honest admission that the
+   * planner-extracted entity isn't in our catalogue. Distinct
+   * `degradedReason: 'no_corpus_match'` so operators can monitor catalogue
+   * coverage gaps separately from policy / unsupported-intent blocks.
+   */
+  private makeCorpusGapAdmissionResult(queryHasHangul: boolean): AnswerResult {
+    const answer = queryHasHangul
+      ? FALLBACK_TEMPLATES.corpusGapAdmission.korean
+      : FALLBACK_TEMPLATES.corpusGapAdmission.english;
+    return {
+      answer,
+      layer: 'layer4',
+      groundedOnToolResults: false,
+      synthesisAttempts: 0,
+      verificationAttempts: 0,
+      tokenUsage: makeZeroTokenUsage(),
+      degradedReason: 'no_corpus_match',
     };
   }
 

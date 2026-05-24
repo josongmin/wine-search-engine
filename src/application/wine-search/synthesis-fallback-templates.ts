@@ -101,4 +101,18 @@ export const FALLBACK_TEMPLATES = {
     korean: '저는 와인 중심으로 도와드립니다. 실시간 날씨 같은 외부 정보는 현재 확인할 수 없으니, 날씨 API나 실시간 검색으로 확인해 주세요.',
     english: 'I specialize in wine. I cannot verify real-time weather here, so please check a weather API or live search.',
   },
+  /**
+   * Wave 1 (Cluster F) corpus-gap admission: the planner extracted a
+   * high-confidence anchor (e.g. "Sassicaia") but the resolver returned
+   * 0 candidates — the requested entity is not in our catalogue.
+   * Clarification cannot help here (the user did not under-specify; the
+   * entity does not exist in the corpus), so the synthesizer emits this
+   * honest admission instead of a "please clarify" prompt. The Korean copy
+   * nudges the user toward an actionable next step (recommendation /
+   * adjacent search) without pretending we have data we do not.
+   */
+  corpusGapAdmission: {
+    korean: '요청하신 와인은 현재 저희 카탈로그에서 찾지 못했어요. 비슷한 스타일의 와인을 추천해 드릴까요? 산지, 가격대, 음식 페어링 등을 알려주시면 도와드릴 수 있어요.',
+    english: 'We could not find that wine in our catalogue. Would you like us to recommend a similar wine instead? Share details like region, price range, or food pairing and we can help.',
+  },
 } as const;

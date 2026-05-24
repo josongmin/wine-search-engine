@@ -31,6 +31,7 @@ import type { DecisionOutput } from '../model/decision-output.js';
 import type { DecisionTrace } from '../model/decision-trace.js';
 import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
 import { AdmissionGate } from './admission-gate.js';
+import { classifyEmptyCandidatePool } from './zero-hit-detector.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
@@ -250,6 +251,38 @@ export class DecisionEngine {
       rulesApplied.push('AMBIGUITY_RAISE_THRESHOLD');
     }
 
+    // ── Step 1.7: Zero-hit detector (Wave 1 Cluster F) ─────────────
+    // Distinguish "user asked something specific that is not in the corpus"
+    // (corpus_gap) from "all candidates below confidence threshold"
+    // (low_confidence). The existing numeric-gate fallback routes both to
+    // clarify — but corpus_gap cannot be clarified away. Route it to a
+    // distinct admit_to_user terminal action so the synthesizer emits a
+    // deterministic "not in our catalogue" template instead of asking the
+    // user to disambiguate an entity that does not exist.
+    const corpusGapState = this.applyZeroHitDetector(input, rulesApplied);
+    if (corpusGapState !== null) {
+      bootstrapLogger.info(
+        {
+          queryClass: input.queryPlan.queryClass,
+          finalStatus: corpusGapState.status,
+          nextAction: corpusGapState.nextAction,
+          rulesApplied,
+          anchorCount: input.queryPlan.anchors.length,
+        },
+        '[DecisionEngine] zero-hit detector early return (corpus_gap)',
+      );
+      return this.buildOutput(
+        input,
+        corpusGapState,
+        thresholds,
+        snapshot,
+        rulesApplied,
+        'NO_CORPUS_MATCH',
+        undefined,
+        dynamicGapThreshold,
+      );
+    }
+
     // ── Step 2: Numeric gate (RFC-007 §6.2) ────────────────────────
     const numericState = this.applyNumericGate(input, effectiveThresholds, rulesApplied);
 
@@ -417,6 +450,49 @@ export class DecisionEngine {
     }
 
     return null;
+  }
+
+  /**
+   * Step 1.7: Zero-hit detector (Wave 1 Cluster F).
+   *
+   * Returns a terminal {@link DecisionState} when {@link classifyEmptyCandidatePool}
+   * identifies a `corpus_gap` — the resolver produced zero candidates AND the
+   * planner emitted at least one anchor at or above
+   * {@link CORPUS_GAP_ANCHOR_CONFIDENCE_FLOOR} (the user asked something
+   * specific). Returns `null` for `low_confidence` (caller's existing
+   * numeric-gate path handles it) and `normal` (candidates exist).
+   *
+   * Distinct from the numeric gate's low-confidence fallback: corpus_gap
+   * cannot be clarified away by the user — the entity is not in the
+   * catalogue. Routing to `admit_to_user` lets the synthesizer emit a
+   * deterministic "not in our catalogue" template instead of an unhelpful
+   * "please clarify" prompt.
+   *
+   * @returns A DecisionState when corpus_gap fires, or `null` to continue.
+   */
+  private applyZeroHitDetector(
+    input: DecisionInput,
+    rulesApplied: string[],
+  ): DecisionState | null {
+    const classification = classifyEmptyCandidatePool({
+      candidateCount: input.resolveResult.candidates.length,
+      anchors: input.queryPlan.anchors,
+    });
+
+    if (classification !== 'corpus_gap') {
+      return null;
+    }
+
+    rulesApplied.push('CORPUS_GAP_DETECTED');
+    return {
+      status: 'failed',
+      nextAction: 'admit_to_user',
+      rulesApplied: [...rulesApplied],
+      finalReason:
+        'Corpus gap: the planner extracted a high-confidence anchor but the resolver ' +
+        'returned 0 candidates — the requested entity is not in the catalogue. ' +
+        'Routed to admit_to_user (clarification cannot recover this).',
+    };
   }
 
   /**

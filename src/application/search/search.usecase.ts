@@ -143,8 +143,9 @@ export interface SearchUseCaseDeps {
   /**
    * Multi-Query Rewrite generator — pre-retrieval LLM fan-out of the
    * semantic query into N variants. Optional; gated by the
-   * `WINE_SEARCH_MULTI_QUERY_ENABLED` env flag (default OFF). When
-   * present and enabled, threaded through the hybrid retrieval pipeline.
+   * `WINE_SEARCH_MULTI_QUERY_ENABLED` env flag (Wave 2: default ON;
+   * set `=false` to disable). When present and enabled, threaded
+   * through the hybrid retrieval pipeline.
    */
   readonly multiQueryGenerator?: MultiQueryGenerator | undefined;
   /**

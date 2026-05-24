@@ -118,12 +118,16 @@ const TYPED_RECOMMENDATION_DISCOVERY_VERSION = 'typed_recommendation_discovery_v
  * Feature flag — enable Multi-Query Rewrite + HyDE pre-retrieval fan-out.
  *
  * Read at module load (process.env) so toggling requires a process
- * restart. Default OFF until A/B telemetry confirms the recall/latency
- * trade-off is favourable. When OFF, the multi-query/HyDE generators
- * are never invoked even if wired into the ports object.
+ * restart.
+ *
+ * Wave 2: DEFAULT ON. Only an explicit
+ * `WINE_SEARCH_MULTI_QUERY_ENABLED=false` opt-out disables the
+ * fan-out. Any other value (unset / `'true'` / typo) is treated as
+ * ENABLED so misconfiguration does not silently regress recall. Must
+ * stay in sync with the same flag read in `src/config/container.ts`.
  */
 const MULTI_QUERY_FANOUT_ENABLED =
-  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] === 'true';
+  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] !== 'false';
 
 /**
  * Map the planner's `QueryClass` + the compiled `effectiveRetrievalMode`
@@ -328,10 +332,9 @@ export interface HybridCandidateRetrievalPorts {
   /**
    * Multi-Query Rewrite generator — pre-retrieval LLM fan-out of the
    * semantic query into N variants. Gated by the
-   * `WINE_SEARCH_MULTI_QUERY_ENABLED` env flag (default OFF) so we can
-   * A/B and compare against the single-query baseline before defaulting
-   * on. When the flag is OFF, the generator is never invoked even when
-   * wired. See `multi-query-generator.ts`.
+   * `WINE_SEARCH_MULTI_QUERY_ENABLED` env flag (Wave 2: DEFAULT ON;
+   * explicit `=false` to disable). When the flag is OFF, the generator
+   * is never invoked even when wired. See `multi-query-generator.ts`.
    */
   readonly multiQueryGenerator?: MultiQueryGenerator | undefined;
   /**
@@ -1724,6 +1727,23 @@ export async function retrieveHybridCandidatesForPlan(
   // (they bypass the RRF fusion step entirely), so these are intentionally absent there.
   const retrievalFusionTrace = graphResult.retrievalTelemetry?.fusionTrace;
   const hardFilterDropLog = graphResult.retrievalTelemetry?.dropLog;
+  // Wave 2 — surface per-channel firing state into pipeline_debug so the
+  // bench / operator dashboards can see whether learned_sparse went
+  // dormant, whether a channel timed out, etc., in a single line per
+  // request. Emitted only when fusion trace is present (generic hybrid
+  // path); specialized browse/compare bypass RRF and therefore have no
+  // perChannel rows to surface.
+  if (retrievalFusionTrace !== undefined) {
+    pipelineDebug(
+      {
+        step: 'retrieval.hybrid_candidates.per_channel',
+        per_channel: retrievalFusionTrace.perChannel,
+        query_class: retrievalFusionTrace.queryClass,
+        fusion_class: retrievalFusionTrace.fusionClass,
+      },
+      'pipeline retrieval per-channel telemetry',
+    );
+  }
   const retrievalDegradationSignals = graphResult.retrievalTelemetry?.degradationSignals ?? [];
   const retrievalInternalReasons = [
     ...retrievalSignalsToReasons(retrievalDegradationSignals),

@@ -359,6 +359,9 @@ describe('E4: RrfFusionTrace', () => {
         afterHardFilter: 140,
         afterAssembly: 50,
       },
+      // Wave 2: `perChannel` is required on RrfFusionTrace. Empty array
+      // is valid for shape-only tests.
+      perChannel: [],
     };
     expect(trace.rrfK).toBe(60);
     expect(trace.channelWeights.sparse + trace.channelWeights.dense + trace.channelWeights.anchor)
@@ -377,6 +380,8 @@ describe('E4: RrfFusionTrace', () => {
         afterHardFilter: 95,
         afterAssembly: 30,
       },
+      // Wave 2: `perChannel` is required on RrfFusionTrace.
+      perChannel: [],
     };
     expect(trace.candidateCount.beforeFusion).toBeDefined();
     expect(trace.candidateCount.afterFusion).toBeDefined();

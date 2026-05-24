@@ -172,7 +172,8 @@
     "catalog:validate": "tsx tools/feature-catalog/bin/catalog.ts validate",
     "catalog:stats": "tsx tools/feature-catalog/bin/catalog.ts stats",
     "catalog:show": "tsx tools/feature-catalog/bin/catalog.ts show",
-    "catalog:roadmap": "tsx tools/feature-catalog/bin/catalog.ts roadmap"
+    "catalog:roadmap": "tsx tools/feature-catalog/bin/catalog.ts roadmap",
+    "schema-contract:validate": "tsx tools/schema-contract/validate.ts"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

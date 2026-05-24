@@ -66,7 +66,13 @@ export type SilentSkipKind =
   // `fallback_missing` fires when even the `general` row is absent.
   | 'refusal_threshold_provider_unavailable'
   | 'refusal_threshold_class_fallback'
-  | 'refusal_threshold_fallback_missing';
+  | 'refusal_threshold_fallback_missing'
+  // Constraint-validator (Wave 1, Cluster E): planner-emitted constraint
+  // would have been silently dropped at YQL emission time. `dropped` =
+  // attribute known to the domain but not representable in the chosen
+  // tier; `unrecognized` = attribute unknown to every compile path.
+  | 'constraint_validator_dropped'
+  | 'constraint_validator_unrecognized';
 
 export type LtrInferenceComponentScoreField =
   | 'semantic'
@@ -128,6 +134,8 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'refusal_threshold_provider_unavailable',
   'refusal_threshold_class_fallback',
   'refusal_threshold_fallback_missing',
+  'constraint_validator_dropped',
+  'constraint_validator_unrecognized',
 ] as const;
 
 const SILENT_SKIP_KIND_SET: ReadonlySet<string> = new Set(SILENT_SKIP_KINDS);

@@ -1,5 +1,8 @@
 import type { QueryPlannerPort, RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
-import { PlannerV1Adapter } from './planner-v1-adapter.js';
+import {
+  PlannerV1Adapter,
+  buildAnchorRefreshCallbackFromAliasOverlay,
+} from './planner-v1-adapter.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
@@ -97,6 +100,13 @@ export async function buildCoreContainerServices(
   // T1.2: Wrap the concrete Planner (returns QueryPlanV2) in the V1 adapter so
   // existing consumers continue to receive QueryPlanV1-shaped objects.
   // T1.5 will remove this adapter once all consumers migrate to QueryPlanV2.
+  //
+  // Wave 1 (entity-route anchor-refresh, memory `project_entity_route_broken`):
+  // hand the alias overlay through `anchorRefresh` so the adapter can recover
+  // anchors at execution time when the planner missed an alias the overlay
+  // holds. The callback is always wired in production because the alias
+  // matcher is always built (either PG-backed, snapshot-backed, or
+  // search-index-backed — see container-adapters.ts).
   const queryPlanner: QueryPlannerPort = new PlannerV1Adapter(
     await buildQueryPlanner(
       adapters,
@@ -106,6 +116,9 @@ export async function buildCoreContainerServices(
       config.openai.llmQueryInterpreterTimeoutMs,
       support.phraseCache,
     ),
+    {
+      anchorRefresh: buildAnchorRefreshCallbackFromAliasOverlay(adapters.aliasMatcher),
+    },
   );
   const entityResolver = buildEntityResolver(adapters, config);
   const candidatePool = buildCandidatePool(adapters, support, config);

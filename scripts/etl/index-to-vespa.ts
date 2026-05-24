@@ -38,6 +38,11 @@ import {
 } from './snapshot-entity-identity.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
+import {
+  getEmbeddingRecipe,
+  type EmbeddingRecipe,
+  type EmbeddingRecipeField,
+} from './embedding-recipe.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -451,18 +456,139 @@ export function deterministicEmbedding(
 
 /**
  * Build the embedding text for a document.
- * BGE-M3 document side: NO instruction prefix (query side adds prefix at search time).
+ *
+ * Recipe-driven (Wave 2 SOTA++): the field list, weights, prefixes, separator,
+ * and Korean-alias inclusion are all loaded from
+ * `tools/embedding-recipe/embedding-recipe-v1.json` and Zod-validated at
+ * module load time. See `embedding-recipe.ts`.
+ *
+ * Field-weight realisation: `integer_repetition_floor` strategy — a field with
+ * weight w that has a non-empty value contributes `max(1, floor(w))`
+ * repetitions, joined by the recipe-defined separator. Fields with weight 0
+ * (or missing values) contribute nothing. No fractional / probabilistic copies
+ * — the output must be byte-identical for the same input record.
+ *
+ * The recipe version is emitted as the first token (`recipe-vN`) so the
+ * `semantic_summary` equality check in `preparePreparedVespaFeedDocuments`
+ * invalidates the reuse cache whenever the recipe changes (bump `version`
+ * in the JSON to force a corpus-wide re-embed).
+ *
+ * BGE-M3 document side: NO instruction prefix (query side adds prefix at
+ * search time).
  */
 export function buildEmbedText(rec: EnrichedSilverRecord): string {
-  return [
-    rec.canonicalLabel,
-    rec.producer,
-    rec.region,
-    rec.grapePrimary,
-    rec.searchTextEn,
-  ]
-    .filter(Boolean)
-    .join('. ');
+  const recipe = getEmbeddingRecipe();
+  return buildEmbedTextWithRecipe(rec, recipe);
+}
+
+/**
+ * Pure variant exposed for tests — does not consult the cached recipe.
+ */
+export function buildEmbedTextWithRecipe(
+  rec: EnrichedSilverRecord,
+  recipe: EmbeddingRecipe,
+): string {
+  const parts: string[] = [`recipe-v${recipe.version}`];
+  for (const field of recipe.fields) {
+    const value = resolveRecipeFieldValue(rec, field);
+    if (value === undefined || value.length === 0) continue;
+    const formatted = field.prefix !== undefined
+      ? `${field.prefix} ${value}`
+      : value;
+    const copies = Math.max(1, Math.floor(field.weight));
+    for (let i = 0; i < copies; i += 1) {
+      parts.push(formatted);
+    }
+  }
+  if (recipe.include_korean_aliases) {
+    const koPart = buildKoreanAliasPart(rec, recipe);
+    if (koPart !== undefined) parts.push(koPart);
+  }
+  return parts.join(recipe.field_separator);
+}
+
+function buildKoreanAliasPart(
+  rec: EnrichedSilverRecord,
+  recipe: EmbeddingRecipe,
+): string | undefined {
+  if (recipe.korean_alias_max_count <= 0) return undefined;
+  const koAliases: string[] = [];
+  const seen = new Set<string>();
+  for (const alias of rec.aliases.noisyRecallProjection) {
+    if (!HANGUL_RE.test(alias)) continue;
+    const trimmed = alias.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    koAliases.push(trimmed);
+    if (koAliases.length >= recipe.korean_alias_max_count) break;
+  }
+  if (koAliases.length === 0) return undefined;
+  return `${recipe.korean_alias_prefix} ${koAliases.join(recipe.korean_alias_separator)}`;
+}
+
+/**
+ * Compute a deterministic numeric-grounding string from sensory fields.
+ * Only finite values are included; missing axes are omitted (not zero-filled,
+ * which would lie to the embedding model about the wine's profile).
+ *
+ * Format pinned: `body=0.80 acidity=0.60 tannin=0.50 sweetness=0.20`
+ * (two-decimal fixed precision, space-separated, ordered axes).
+ */
+const SENSORY_FRACTION_DIGITS = 2;
+export function buildSensorySummary(rec: EnrichedSilverRecord): string {
+  const axes: ReadonlyArray<{ readonly key: string; readonly value: number | null }> = [
+    { key: 'body', value: rec.body },
+    { key: 'acidity', value: rec.acidity },
+    { key: 'tannin', value: rec.tannin },
+    { key: 'sweetness', value: rec.sweetness },
+  ];
+  const parts: string[] = [];
+  for (const axis of axes) {
+    if (axis.value === null) continue;
+    if (!Number.isFinite(axis.value)) continue;
+    parts.push(`${axis.key}=${axis.value.toFixed(SENSORY_FRACTION_DIGITS)}`);
+  }
+  return parts.join(' ');
+}
+
+function resolveRecipeFieldValue(
+  rec: EnrichedSilverRecord,
+  field: EmbeddingRecipeField,
+): string | undefined {
+  switch (field.name) {
+    case 'canonical_label':
+      return nonEmptyOrUndefined(rec.canonicalLabel);
+    case 'producer':
+      return nonEmptyOrUndefined(rec.producer);
+    case 'region':
+      return nonEmptyOrUndefined(rec.region);
+    case 'grape_primary':
+      return nonEmptyOrUndefined(rec.grapePrimary ?? '');
+    case 'search_text_en':
+      return nonEmptyOrUndefined(rec.searchTextEn);
+    case 'flavor_profiles':
+      return rec.flavorProfiles.length > 0
+        ? rec.flavorProfiles.join(', ')
+        : undefined;
+    case 'pairing_tags':
+      return rec.pairingTags.length > 0
+        ? rec.pairingTags.join(', ')
+        : undefined;
+    case 'sensory_summary': {
+      const summary = buildSensorySummary(rec);
+      return summary.length > 0 ? summary : undefined;
+    }
+    default:
+      throw new Error(
+        `EmbeddingRecipe: unknown field '${field.name}' — add a resolver in resolveRecipeFieldValue() (index-to-vespa.ts).`,
+      );
+  }
+}
+
+function nonEmptyOrUndefined(value: string | null | undefined): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 /** Regex matching any Hangul syllable or Jamo character.

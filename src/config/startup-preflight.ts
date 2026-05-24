@@ -10,6 +10,7 @@
  */
 
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
+import { snapshotActivations } from '../domain/observability/feature-activation-registry.js';
 
 /**
  * Minimal config surface needed for pre-flight checks.
@@ -59,4 +60,13 @@ export function warnStartupMisconfigurations(config: StartupPreflightConfig): vo
       ' (set COHERE_API_KEY)',
     );
   }
+
+  // Wave 2 — single startup line summarising every registered SOTA
+  // feature flag's activation state. Operators read this first when
+  // diagnosing "is feature X actually on right now?" without having to
+  // grep N separate modules' env reads.
+  bootstrapLogger.info(
+    { feature_activations: snapshotActivations() },
+    'feature activation snapshot at startup',
+  );
 }

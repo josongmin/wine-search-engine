@@ -296,6 +296,13 @@ export const WineSearchDegradedReasonSchema = z.enum([
   // the grounding union; re-synth still ungrounded → degraded to the
   // deterministic layer ladder.
   'ungrounded_claim',
+  // Wave 1 (Cluster F): DecisionEngine emitted `NO_CORPUS_MATCH` because the
+  // planner had a high-confidence anchor but the resolver returned 0
+  // candidates. Synthesizer emitted the deterministic `corpusGapAdmission`
+  // template ("not in our catalogue"). Distinct from `no_results`
+  // (no-grounding path) and from `policy_blocked` (security / unsupported
+  // intent) so dashboards can monitor catalogue coverage gaps.
+  'no_corpus_match',
 ]);
 
 /** Query intent classifier output. Matches `QueryIntentSchema` in

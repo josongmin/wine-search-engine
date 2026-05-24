@@ -431,6 +431,15 @@ export class VespaClient {
     params?: Record<string, unknown>,
     signal?: AbortSignal,
     requestId?: string,
+    /**
+     * Override the per-request HTTP timeout. When undefined, defaults to
+     * `VESPA_SEARCH_TIMEOUT_MS` (hot retrieval path). Bulk-hydration call
+     * sites (getDocuments / batchFetchBySummary) pass
+     * `VESPA_BULK_HYDRATION_TIMEOUT_MS` to tolerate the wider latency on
+     * full-summary fetches over many ids. Sharing one timeout caused
+     * silent batch failures on every popular-anchor query.
+     */
+    timeoutMsOverride?: number,
   ): Promise<VespaQueryResponse> {
     return withRetry(async () => {
       const startedAt = performance.now();
@@ -453,7 +462,7 @@ export class VespaClient {
           },
           body: JSON.stringify(body),
         },
-        VESPA_SEARCH_TIMEOUT_MS,
+        timeoutMsOverride ?? VESPA_SEARCH_TIMEOUT_MS,
         signal,
       );
 

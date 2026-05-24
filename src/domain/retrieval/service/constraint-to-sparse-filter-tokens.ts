@@ -696,3 +696,105 @@ function softConstraintToPromotionTokens(
   // value type) intentionally skipped — caller falls through.
   return out;
 }
+
+/**
+ * Set of attribute names whose hard-constraint variants have an explicit `case`
+ * branch in {@link constraintToSparseFilterTokens} — i.e. the compile path
+ * KNOWS how to turn (attribute, operator, value) into one or more registered
+ * Vespa filter tokens when used as a hard constraint.
+ *
+ * Kept in lock-step with the `switch (attribute)` block above. Adding a new
+ * `case` branch REQUIRES adding the attribute here. The constraint validator
+ * (`constraint-validator.ts`) consumes this SSoT so unrecognized attributes
+ * can be detected at compile time rather than silently dropped at YQL
+ * emission time.
+ *
+ * Tokens emitted by the compile path are themselves validated against
+ * FILTER_TOKEN_REGISTRY in `mapping.ts` — this set names the planner-facing
+ * attribute, not the Vespa-facing token key.
+ */
+export const HARD_FILTERABLE_ATTRIBUTES: ReadonlySet<string> = new Set([
+  'wine_type',
+  'country',
+  'region',
+  'appellation',
+  'pairing',
+  'occasion',
+  'grape_primary',
+  'style',
+  'price_band',
+  'grape_family',
+  'flavor_profile',
+  'classification',
+  'certification',
+  'soil_type',
+  'producer_type',
+  'price',
+  'price_usd',
+  'vintage',
+  'vintage_year',
+  'alcohol',
+  'alcohol_pct',
+]);
+
+/**
+ * Set of attribute names that {@link softConstraintsToOptionalFilterTokens}
+ * KNOWS how to promote into Vespa filter tokens when the soft-constraint
+ * confidence/mapping-version gates pass. Derived from
+ * {@link SOFT_PROMOTION_TOKEN_SPEC} so the validator stays in sync with the
+ * promotion spec automatically.
+ *
+ * A constraint whose attribute is in {@link HARD_FILTERABLE_ATTRIBUTES} but
+ * NOT in this set is "hard-only": placing it in the soft bundle means the
+ * intent never reaches Vespa as a WHERE filter (it can only contribute to
+ * ranking via the soft-boost path in `retrieval-plan-builder.ts`).
+ */
+export const SOFT_PROMOTABLE_ATTRIBUTES: ReadonlySet<string> = new Set(
+  SOFT_PROMOTION_TOKEN_SPEC.keys(),
+);
+
+/**
+ * Classification of a constraint's representability as a Vespa sparse filter
+ * token, used by the constraint-validator to detect silent-drop bugs at
+ * compile time.
+ *
+ *  - `hard_filterable`     — the attribute has a `case` branch in
+ *                            {@link constraintToSparseFilterTokens}; placing
+ *                            this constraint in the hard bundle will produce
+ *                            registered Vespa filter tokens (provided the
+ *                            operator/value combination is supported).
+ *  - `soft_promotable`     — the attribute has an entry in
+ *                            {@link SOFT_PROMOTION_TOKEN_SPEC}; placing this
+ *                            constraint in the soft bundle CAN produce a
+ *                            Vespa filter token (if confidence and
+ *                            mapping_version gates pass).
+ *  - `unknown_attribute`   — the attribute appears in NEITHER set; the
+ *                            compile path will silently drop it. This is a
+ *                            planner / extractor bug — UNLESS the caller
+ *                            recognises the attribute as a ranking-only
+ *                            SOFT_CONSTRAINT_ATTRIBUTE (the validator
+ *                            consults that set explicitly).
+ */
+export type ConstraintRepresentability =
+  | 'hard_filterable'
+  | 'soft_promotable'
+  | 'unknown_attribute';
+
+/**
+ * Returns the {@link ConstraintRepresentability} classification for a single
+ * constraint attribute. Used by the constraint-validator.
+ *
+ * Pure function: no I/O, no shared state. Safe to call from compile-time
+ * audits and inside cooperative-abort loops.
+ */
+export function classifyConstraintRepresentability(
+  attribute: string,
+): ConstraintRepresentability {
+  // soft_promotable takes priority — promotion implies the attribute also
+  // appears in the hard switch (every SOFT_PROMOTION_TOKEN_SPEC key has a
+  // matching hard `case`), and the soft tier is the higher-information
+  // classification for the validator's purposes.
+  if (SOFT_PROMOTABLE_ATTRIBUTES.has(attribute)) return 'soft_promotable';
+  if (HARD_FILTERABLE_ATTRIBUTES.has(attribute)) return 'hard_filterable';
+  return 'unknown_attribute';
+}
