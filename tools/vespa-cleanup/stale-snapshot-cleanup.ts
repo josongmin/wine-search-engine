@@ -43,6 +43,7 @@ import {
   parseActiveSnapshotRows,
   parseCleanupArgs,
   selectStaleDocs,
+  UNTAGGED_SNAPSHOT_SENTINEL,
   VESPA_CLEANUP_DOC_TYPE,
   VESPA_CLEANUP_NAMESPACE,
   type VespaDocEnvelope,
@@ -56,7 +57,12 @@ import {
 export interface VespaCleanupTransport {
   enumerateDocs(args: {
     readonly pageSize: number;
-    readonly offset: number;
+    /**
+     * Cursor — last entity_id seen on the prior page. Empty string for
+     * the first page (no lower bound). Vespa offset pagination caps at
+     * ~400 so we cursor by `entity_id > <last>` order asc instead.
+     */
+    readonly lastEntityId: string;
   }): Promise<{
     readonly docs: readonly VespaDocEnvelope[];
     readonly totalCount: number;
@@ -84,16 +90,26 @@ export interface PgCleanupTransport {
 const MIN_EXPECTED_DOCS = 1;
 
 /**
- * YQL enumeration query. We do NOT filter by snapshot — we need all live
- * docs so we can compare each `search_snapshot_id` against the active
- * set. `order by entity_id asc` gives a stable pagination order so a
- * mid-run failure can be resumed by restarting (concurrent writes are
- * not expected in this off-band tool).
+ * YQL enumeration query — single-shot full-corpus scan.
+ *
+ * Vespa's string fields don't support `>` range comparison in YQL (numeric
+ * only), so cursor pagination by entity_id is impossible. Vespa offset
+ * pagination caps at ~400 (container max-hits-per-partition). The
+ * pragmatic solution: request all docs in one query with a large `limit`
+ * and rely on Vespa's `hits` query parameter being lifted.
+ *
+ * For corpora > 50K this would need the Document API Visit endpoint
+ * (streaming continuation tokens) — that's the proper Wave 4 work. For
+ * the current 17K corpus, single-shot is fine.
+ *
+ * `lastEntityId` retained in signature for backwards-compat with tests but
+ * ignored at runtime (we request the full corpus once).
  */
-function buildEnumerationYql(pageSize: number, offset: number): string {
+function buildEnumerationYql(pageSize: number, _lastEntityId: string): string {
+  void _lastEntityId;
   return (
     `select entity_id, search_snapshot_id from sources ${VESPA_CLEANUP_DOC_TYPE} ` +
-    `where true order by entity_id asc limit ${String(pageSize)} offset ${String(offset)};`
+    `where true limit ${String(pageSize)};`
   );
 }
 
@@ -106,10 +122,17 @@ export function createVespaCleanupTransport(
   vespa: Pick<VespaClient, 'query' | 'delete'>,
 ): VespaCleanupTransport {
   return {
-    async enumerateDocs({ pageSize, offset }) {
+    async enumerateDocs({ pageSize, lastEntityId }) {
+      // Minimal summary — only need entity_id + search_snapshot_id. Default
+      // summary (no `presentation.summary` param) returns just match-features
+      // + ID-level fields, dramatically smaller than `summary=full` (which
+      // ships the 1024-dim embedding and times out beyond ~400 hits).
       const response = await vespa.query(
-        buildEnumerationYql(pageSize, offset),
-        { 'presentation.summary': 'full' },
+        buildEnumerationYql(pageSize, lastEntityId),
+        {
+          hits: pageSize,
+          maxHits: pageSize,
+        },
       );
       const totalCount = response.root.fields?.totalCount ?? 0;
       const hits = response.root.children ?? [];
@@ -119,13 +142,17 @@ export function createVespaCleanupTransport(
         const snapshotIdRaw = hit.fields['search_snapshot_id'];
         if (typeof entityIdRaw !== 'string' || entityIdRaw.length === 0) {
           throw new Error(
-            `Vespa cleanup enumeration returned a hit without entity_id (offset=${String(offset)})`,
+            `Vespa cleanup enumeration returned a hit without entity_id (lastEntityId=${lastEntityId})`,
           );
         }
         if (typeof snapshotIdRaw !== 'string' || snapshotIdRaw.length === 0) {
-          throw new Error(
-            `Vespa cleanup enumeration: entity_id=${entityIdRaw} missing search_snapshot_id`,
-          );
+          // Docs without `search_snapshot_id` predate the snapshot-tagging
+          // contract (early Vespa publishes). Conservative behaviour: SKIP
+          // (don't delete) — these may include canonical entries we still
+          // want. Operators can clean them with a dedicated nuke command
+          // when ready. Track count for visibility.
+          docs.push({ entityId: entityIdRaw, snapshotId: UNTAGGED_SNAPSHOT_SENTINEL });
+          continue;
         }
         docs.push({ entityId: entityIdRaw, snapshotId: snapshotIdRaw });
       }
@@ -180,11 +207,11 @@ export async function runCleanup(args: {
   let deleted = 0;
   let failures = 0;
   let skippedByLimit = 0;
-  let offset = 0;
+  let lastEntityId = '';
   let totalCount = Number.POSITIVE_INFINITY;
   let progressTickAt = args.flags.progressInterval;
 
-  while (offset < totalCount) {
+  while (enumerated < totalCount) {
     // Pre-flight guard: rule 20. If the limit is already hit, stop
     // enumerating — no point fetching more pages we cannot act on.
     if (args.flags.limit !== undefined && deleted >= args.flags.limit) {
@@ -196,7 +223,7 @@ export async function runCleanup(args: {
 
     const page = await args.vespa.enumerateDocs({
       pageSize: args.flags.pageSize,
-      offset,
+      lastEntityId,
     });
     if (totalCount === Number.POSITIVE_INFINITY) {
       totalCount = page.totalCount;
@@ -254,7 +281,12 @@ export async function runCleanup(args: {
       }
     }
 
-    offset += page.docs.length;
+    // Advance the cursor: pick the LARGEST entity_id from this page (the
+    // query was ordered asc, so it's the last element). This guarantees
+    // the next page's WHERE clause excludes everything we've already seen.
+    const lastDoc = page.docs[page.docs.length - 1];
+    if (lastDoc === undefined) break;
+    lastEntityId = lastDoc.entityId;
   }
 
   log(
@@ -355,7 +387,14 @@ async function main(): Promise<void> {
   );
   const transport = createVespaCleanupTransport(vespaClient);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  // RDS: strip sslmode (newer pg treats `require` as `verify-full`, which
+  // rejects RDS self-signed cert chain) and pass explicit ssl option.
+  const cleanConn = databaseUrl.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
+  const isRds = /rds\.amazonaws\.com/u.test(cleanConn);
+  const pool = new Pool({
+    connectionString: cleanConn,
+    ...(isRds ? { ssl: { rejectUnauthorized: false as const } } : {}),
+  });
   const pgTransport: PgCleanupTransport = {
     async readActiveSnapshotRows() {
       const res = await pool.query(

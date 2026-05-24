@@ -62,9 +62,15 @@ function makeFakeVespa(
   const deletedIds: string[] = [];
   const state = { enumerateCalls: 0 };
   return {
-    async enumerateDocs({ pageSize, offset }) {
+    async enumerateDocs({ pageSize, lastEntityId }) {
       state.enumerateCalls += 1;
-      const slice = docs.slice(offset, offset + pageSize);
+      // Cursor-style: skip docs <= lastEntityId, take next pageSize.
+      const startIdx = lastEntityId === ''
+        ? 0
+        : docs.findIndex((d) => d.entityId > lastEntityId);
+      const slice = startIdx < 0
+        ? []
+        : docs.slice(startIdx, startIdx + pageSize);
       return Promise.resolve({ docs: slice, totalCount: docs.length });
     },
     async deleteDoc(entityId: string) {

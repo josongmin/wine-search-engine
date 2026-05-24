@@ -39,7 +39,7 @@ export const VESPA_CLEANUP_DOC_TYPE = 'wine_entity';
  * fits comfortably under Vespa's default per-query result limit. 400 also
  * lets the 17K-doc corpus complete in ~45 round trips.
  */
-export const DEFAULT_PAGE_SIZE = 400;
+export const DEFAULT_PAGE_SIZE = 1_500;
 
 /**
  * Default concurrency cap for parallel deletes.
@@ -64,7 +64,7 @@ export const DEFAULT_PROGRESS_INTERVAL = 500;
  * Vespa is configured to cap result windows; we still cross-check to catch
  * a misconfigured cluster returning unbounded responses (could OOM the CLI).
  */
-export const MAX_PAGE_SIZE = 10_000;
+export const MAX_PAGE_SIZE = 100_000;
 
 /**
  * Parsed CLI flags. All numeric flags are validated as positive integers
@@ -102,14 +102,23 @@ export interface VespaDocEnvelope {
 }
 
 /**
+ * Sentinel emitted by the enumerator for docs predating the
+ * `search_snapshot_id` tagging contract. Classifier treats them as `skip`
+ * — they are not eligible for stale cleanup until explicitly nuked.
+ */
+export const UNTAGGED_SNAPSHOT_SENTINEL = '__untagged-pre-snapshot-tagging__';
+
+/**
  * Diff verdict for a single Vespa doc.
  *
  *  - `keep` — doc's snapshot is in the protected set (active or explicit
  *    operator override). Must NOT be deleted.
  *  - `stale` — doc's snapshot is outside the protected set. Eligible for
  *    deletion (subject to `--dry-run` / `--limit`).
+ *  - `skip` — doc has no snapshot tag (legacy, pre-snapshot-tagging).
+ *    Conservatively preserved; not eligible for this cleanup pass.
  */
-export type DocVerdict = 'keep' | 'stale';
+export type DocVerdict = 'keep' | 'stale' | 'skip';
 
 export interface ClassifiedDoc {
   readonly doc: VespaDocEnvelope;
@@ -128,6 +137,9 @@ export function classifyDoc(
   doc: VespaDocEnvelope,
   protectedSnapshotIds: ReadonlySet<string>,
 ): ClassifiedDoc {
+  if (doc.snapshotId === UNTAGGED_SNAPSHOT_SENTINEL) {
+    return { doc, verdict: 'skip' };
+  }
   if (protectedSnapshotIds.has(doc.snapshotId)) {
     return { doc, verdict: 'keep' };
   }
