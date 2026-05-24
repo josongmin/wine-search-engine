@@ -182,3 +182,9 @@ test_edge_cases.mjs
 # Bench archive — large, frequent, per-run JSON dumps; keep .gitkeep only.
 data/bench-archive/*.json
 data/bench-archive/*.manifest.json
+
+# Transient ETL output artifacts (silver/aliases/appellation/prepared-feed dumps from full-corpus runs).
+data/silver-full*.ndjson
+data/silver-sample*.ndjson
+data/prepared-feed/
+tools/wikidata-backfill/cache/
