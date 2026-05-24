@@ -55,10 +55,7 @@
  * to avoid hot-path spam.
  */
 
-import type {
-  ConstraintBundle,
-  NormalizedConstraint,
-} from '../../shared/types/index.js';
+import type { NormalizedConstraint } from '../../shared/types/index.js';
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
@@ -144,15 +141,43 @@ function firstSeenKey(
 }
 
 /**
- * Walks a {@link ConstraintBundle} and produces a structured report
- * partitioning every constraint into accepted / dropped / unrecognized.
+ * Input shape for {@link validateConstraintBundle}. Intentionally NARROWER
+ * than the full {@link ConstraintBundle}: the validator is the compile-time
+ * gate for the **Vespa YQL emission path**, and only `hard` + `soft`
+ * constraints reach that path
+ * ({@link hardConstraintsToSparseFilterTokens} /
+ * {@link softConstraintsToOptionalFilterTokens} both take only those tiers).
+ *
+ * `ConstraintBundle.inferred` exists for downstream **evidence annotation**
+ * (see `annotateCandidateConstraintEvidenceBatch` in candidate-pool) — it
+ * does not become a Vespa filter token. Accepting the full bundle here
+ * would silently drop the `inferred` tier and create a false impression of
+ * coverage; the narrow input forces callers to make the scope explicit.
+ *
+ * If a future change ever routes inferred constraints into YQL filter
+ * emission, extend this shape with an `inferred` field AND walk it in
+ * {@link validateConstraintBundle} — never re-accept the full
+ * ConstraintBundle without the corresponding loop body.
+ */
+export interface ValidatableConstraintTiers {
+  readonly hard: ReadonlyArray<NormalizedConstraint>;
+  readonly soft: ReadonlyArray<NormalizedConstraint>;
+}
+
+/**
+ * Walks the YQL-emission constraint tiers (hard + soft) and produces a
+ * structured report partitioning every constraint into accepted / dropped
+ * / unrecognized.
  *
  * Pure function — no I/O, no logging side effects, no global state mutated.
  * Telemetry side effects live in {@link emitConstraintValidationTelemetry}
  * so callers (and tests) can run validation without firing logs.
+ *
+ * Scope is intentionally narrow — see {@link ValidatableConstraintTiers}
+ * for the rationale behind excluding the `inferred` tier.
  */
 export function validateConstraintBundle(
-  bundle: ConstraintBundle,
+  bundle: ValidatableConstraintTiers,
 ): ConstraintValidationReport {
   const accepted: ValidatedConstraintEntry[] = [];
   const dropped: DroppedConstraintEntry[] = [];

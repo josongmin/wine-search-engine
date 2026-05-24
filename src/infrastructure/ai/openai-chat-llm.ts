@@ -20,6 +20,10 @@ import {
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 import {
+  resolveCompletionTokens,
+  resolveReasoningEffort,
+} from './openai-reasoning-params.js';
+import {
   createOpenAiKeyPool,
   isOpenAiKeyPoolRotatableError,
   openAiKeyPoolExhaustedError,
@@ -200,7 +204,23 @@ export class OpenAiChatLlm implements ChatLlmPort {
       // GPT-5 series: temperature param not supported (only default=1 allowed) — omit entirely.
     }
     if (request.maxOutputTokens !== undefined) {
-      body[isGpt5Series ? 'max_completion_tokens' : 'max_tokens'] = request.maxOutputTokens;
+      // Reasoning models (gpt-5*, o-series): max_completion_tokens caps the
+      // SUM of (reasoning_tokens + output_tokens). Add env-configurable
+      // headroom (default 8K) so the caller's requested output budget is
+      // available AFTER the model burns its reasoning quota. Non-reasoning
+      // models keep the original semantics (max_tokens pass-through).
+      // See src/infrastructure/ai/openai-reasoning-params.ts for the spec.
+      body[isGpt5Series ? 'max_completion_tokens' : 'max_tokens'] =
+        isGpt5Series
+          ? resolveCompletionTokens(model, request.maxOutputTokens)
+          : request.maxOutputTokens;
+    }
+    // Reasoning effort: only meaningful for reasoning models. `chat` mode
+    // picks the `low` default. Omitted entirely for non-reasoning models —
+    // gpt-4o rejects the parameter outright.
+    const reasoningEffort = resolveReasoningEffort(model, 'chat');
+    if (reasoningEffort !== undefined) {
+      body['reasoning_effort'] = reasoningEffort;
     }
     if (request.seed !== undefined) {
       body['seed'] = request.seed;

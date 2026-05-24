@@ -15,7 +15,7 @@
  *
  * Append-only per CLAUDE.md regression-test discipline.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __resetFeatureActivationRegistryForTests,
@@ -26,15 +26,15 @@ const originalValue = process.env[FLAG];
 
 /**
  * Re-import the registry module so its module-load `registerFeature(...)`
- * calls re-execute and pick up the current `process.env` state. Without
- * this the registry would still report the state captured at the test
- * harness's first import.
+ * calls re-execute and pick up the current `process.env` state. We use
+ * `vi.resetModules()` (rather than a cache-busting query string, which
+ * Vite forbids for variable dynamic imports) so the module load runs
+ * fresh against the just-mutated env.
  */
 async function freshRegistry(): Promise<typeof import('../../src/domain/observability/feature-activation-registry.js')> {
   __resetFeatureActivationRegistryForTests();
-  return import(
-    `../../src/domain/observability/feature-activation-registry.js?multi-query=${Date.now()}-${Math.random()}`
-  );
+  vi.resetModules();
+  return import('../../src/domain/observability/feature-activation-registry.js');
 }
 
 /** Avoid the dynamic-delete lint while still cleaning the single env key. */

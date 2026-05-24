@@ -702,16 +702,39 @@ schema wine_entity {
     inputs {
       query(query_embedding) tensor<float>(x[1024])
       query(current_year) double: 2024
-      query(weight_lexical) double: 0.55
-      query(weight_semantic) double: 0.30
+      query(weight_lexical) double: 0.50
+      query(weight_semantic) double: 0.25
       query(weight_attribute) double: 0.15
       query(weight_popularity) double: 0.15
+      query(weight_learned_sparse) double: 0.10
       query(structured_query_terms_count) double: 0
       query(structured_query_strength) double: 0.0
       query(structured_region_boost) double: 0.0
       query(structured_country_boost) double: 0.0
       query(structured_grape_boost) double: 0.0
       query(filter_strength) double: 0.0
+      # Wave 2 SOTA++: SPLADE-style sparse encoding consumed by the
+      # learned-sparse fusion channel below. Empty when the application
+      # does not pass a sparse encoding — the channel naturally contributes
+      # 0 (sum of element-wise product over an empty mapped-tensor is 0).
+      query(sparse_query_embedding) tensor<float>(token{})
+    }
+
+    # Wave 2 SOTA++: learned-sparse (SPLADE) as a third retrieval signal,
+    # linearly fused with BM25 + dense + popularity. Matches the existing
+    # linear-blend pattern (vs RRF which would require multi-query rank
+    # capture across passes — that's an application-layer concern). When
+    # the application omits sparse_query_embedding OR the doc has no
+    # learned_sparse_weights, this contributes 0 — no NaN risk because
+    # the element-wise product over absent tokens is 0.
+    #
+    # Weight 0.10 calibration: BM25 already covers lexical recall; SPLADE
+    # adds learned token expansion (synonyms, morphological variants).
+    # Conservative start; can be raised after offline NDCG eval (BEIR
+    # benchmarks show +8-15% dense+sparse RRF over either alone — linear
+    # blend captures most of that lift).
+    function learned_sparse_score() {
+      expression: sum(query(sparse_query_embedding) * attribute(learned_sparse_weights))
     }
 
     first-phase {
@@ -719,6 +742,7 @@ schema wine_entity {
         query(weight_lexical) * bm25_normalized
         + query(weight_semantic) * closeness(field, embedding)
         + query(weight_popularity) * attribute(popularity_score)
+        + query(weight_learned_sparse) * learned_sparse_score
         + structured_query_bonus
       }
     }
@@ -769,6 +793,7 @@ schema wine_entity {
       bm25(flavor_profiles)
       bm25(classification)
       closeness(field, embedding)
+      learned_sparse_score
     }
   }
 

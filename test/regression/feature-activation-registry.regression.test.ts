@@ -17,7 +17,7 @@
  *
  * Append-only per CLAUDE.md regression-test discipline.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   registerFeature,
@@ -48,15 +48,14 @@ for (const key of ENV_KEYS) {
  * Without this the registry would already be populated by the test
  * harness's first import of any module that transitively pulls in
  * `feature-activation-registry.ts` (e.g. `request-pipeline-debug.ts`).
+ *
+ * We use `vi.resetModules()` instead of a cache-busting query string
+ * because Vite forbids variable dynamic imports.
  */
 async function loadRegistryWithFreshDefaults(): Promise<typeof import('../../src/domain/observability/feature-activation-registry.js')> {
   __resetFeatureActivationRegistryForTests();
-  // Drop the cached module so the top-level register calls re-run.
-  // The dynamic re-import is the only way to re-trigger module-load
-  // side-effects in Vitest's ESM mode.
-  return import(
-    `../../src/domain/observability/feature-activation-registry.js?fresh=${Date.now()}`
-  );
+  vi.resetModules();
+  return import('../../src/domain/observability/feature-activation-registry.js');
 }
 
 /**
@@ -159,18 +158,22 @@ describe('feature-activation-registry — env-driven state', () => {
 });
 
 describe('feature-activation-registry — registerFeature() semantics', () => {
-  it('a newly-registered feature appears in subsequent snapshots', async () => {
-    const mod = await loadRegistryWithFreshDefaults();
-    expect(mod.snapshotActivations()['my_new_feature']).toBeUndefined();
+  // These tests intentionally do NOT call `loadRegistryWithFreshDefaults`
+  // because `vi.resetModules()` would split the registered Map between
+  // the statically-imported `registerFeature` and the dynamically-imported
+  // `snapshotActivations`. Reset state via the test seam directly so both
+  // helpers continue to point at the same module instance.
+  it('a newly-registered feature appears in subsequent snapshots', () => {
+    __resetFeatureActivationRegistryForTests();
+    expect(snapshotActivations()['my_new_feature']).toBeUndefined();
 
     registerFeature('my_new_feature', () => 'experiment');
 
-    const snap = mod.snapshotActivations();
-    expect(snap['my_new_feature']).toBe('experiment');
+    expect(snapshotActivations()['my_new_feature']).toBe('experiment');
   });
 
-  it('re-registering the same name OVERWRITES (last-write-wins)', async () => {
-    await loadRegistryWithFreshDefaults();
+  it('re-registering the same name OVERWRITES (last-write-wins)', () => {
+    __resetFeatureActivationRegistryForTests();
 
     registerFeature('to_overwrite', () => 'on');
     expect(snapshotActivations()['to_overwrite']).toBe('on');
@@ -183,8 +186,8 @@ describe('feature-activation-registry — registerFeature() semantics', () => {
     expect(snapshotActivations()['to_overwrite']).toBe('experiment');
   });
 
-  it('__resetFeatureActivationRegistryForTests() clears all registrations', async () => {
-    await loadRegistryWithFreshDefaults();
+  it('__resetFeatureActivationRegistryForTests() clears all registrations', () => {
+    __resetFeatureActivationRegistryForTests();
     registerFeature('temp', () => 'on');
     expect(snapshotActivations()['temp']).toBe('on');
 

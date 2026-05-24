@@ -65,6 +65,11 @@ import {
   expandSemanticQueriesForFanout,
   mergeFanoutWithExisting,
 } from './multi-query-retrieval-fanout.js';
+// Multi-query flag SSoT lives in src/config/wine-search-feature-flags.ts
+// so the same constant gates the runtime fan-out here AND the generator
+// construction in `container.ts` (CLAUDE.md rule 30). Two independent
+// env reads would silently drift if either side were tightened in isolation.
+import { MULTI_QUERY_FEATURE_FLAG_ENABLED as MULTI_QUERY_FANOUT_ENABLED } from '../../config/wine-search-feature-flags.js';
 import type { DecisionInputCriticRewrite } from '../../domain/decision/model/decision-input.js';
 import type { RewriteTrace } from '../../domain/retrieval/service/query-rewriter.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
@@ -114,20 +119,6 @@ export function projectRewritesForDecisionInput(
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
 const TYPED_RECOMMENDATION_DISCOVERY_VERSION = 'typed_recommendation_discovery_v1';
 
-/**
- * Feature flag — enable Multi-Query Rewrite + HyDE pre-retrieval fan-out.
- *
- * Read at module load (process.env) so toggling requires a process
- * restart.
- *
- * Wave 2: DEFAULT ON. Only an explicit
- * `WINE_SEARCH_MULTI_QUERY_ENABLED=false` opt-out disables the
- * fan-out. Any other value (unset / `'true'` / typo) is treated as
- * ENABLED so misconfiguration does not silently regress recall. Must
- * stay in sync with the same flag read in `src/config/container.ts`.
- */
-const MULTI_QUERY_FANOUT_ENABLED =
-  process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] !== 'false';
 
 /**
  * Map the planner's `QueryClass` + the compiled `effectiveRetrievalMode`

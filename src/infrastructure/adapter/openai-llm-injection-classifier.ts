@@ -24,6 +24,11 @@ import {
   INJECTION_CLASSIFIER_SYSTEM_PROMPT,
   normalizeClassifierJsonText,
 } from './anthropic-llm-injection-classifier.js';
+import {
+  isReasoningModel,
+  resolveCompletionTokens,
+  resolveReasoningEffort,
+} from '../ai/openai-reasoning-params.js';
 
 const DEFAULT_OPENAI_INJECTION_MODEL = 'gpt-5.4-mini';
 const DEFAULT_OPENAI_INJECTION_HTTP_TIMEOUT_MS = 45_000;
@@ -154,14 +159,28 @@ export class OpenAiLLMInjectionClassifier implements LLMInjectionClassifierPort 
     apiKey: string,
     options?: LLMInjectionClassifierOptions,
   ): Promise<boolean> {
+    // Reasoning models burn tokens on internal reasoning before emitting
+    // the yes/no verdict — the legacy 50-token budget left ZERO room for
+    // output, manifesting as 45 s timeouts in the bench. resolveCompletionTokens
+    // adds an env-configurable reasoning headroom for gpt-5/o-series only.
+    const tokenLimit = isReasoningModel(this.model)
+      ? resolveCompletionTokens(this.model, OPENAI_CLASSIFIER_MAX_OUTPUT_TOKENS)
+      : OPENAI_CLASSIFIER_MAX_OUTPUT_TOKENS;
     const body: Record<string, unknown> = {
       model: this.model,
       messages: [
         { role: 'system', content: INJECTION_CLASSIFIER_SYSTEM_PROMPT },
         { role: 'user', content: query },
       ],
-      [tokenLimitKey(this.model)]: OPENAI_CLASSIFIER_MAX_OUTPUT_TOKENS,
+      [tokenLimitKey(this.model)]: tokenLimit,
     };
+    // Reasoning effort: classifier emits a single yes/no — `low` is the
+    // universally supported lowest value (some surfaces reject 'minimal').
+    // Non-reasoning models: helper returns undefined and the param is omitted.
+    const reasoningEffort = resolveReasoningEffort(this.model, 'classify');
+    if (reasoningEffort !== undefined) {
+      body['reasoning_effort'] = reasoningEffort;
+    }
 
     const text = await retryWithBackoff(
       async () => {

@@ -27,6 +27,10 @@ import {
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
+import {
+  VESPA_BULK_HYDRATION_BATCH_SIZE,
+  VESPA_BULK_HYDRATION_TIMEOUT_MS,
+} from './per-channel-timeouts.js';
 import type { VespaHit, VespaQueryResponse } from './vespa-client.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import {
@@ -77,7 +81,19 @@ const MAX_BULK_FETCH_IDS = 5000;
  * request within safe bounds while still being efficient for typical callers.
  * Results from multiple batches are concatenated in call order.
  */
-const FETCH_SUMMARY_BATCH_SIZE = 200;
+/**
+ * Batch size for bulk-hydration calls (getDocuments / batchFetchBySummary).
+ *
+ * Reduced from 200 → 50 (2026-05-24): full-summary fetches of 200 ids
+ * routinely exceeded the shared 3 s search timeout on Vespa Cloud, dropping
+ * the entire batch (`getDocuments: batch query failed`) and producing the
+ * deceptive "alias overlay drift" symptom in the PtE bench. Smaller batches
+ * + a dedicated 12 s bulk-hydration channel (see per-channel-timeouts.ts)
+ * together solve the timeout cluster.
+ *
+ * Override via env if cluster profile differs: `VESPA_BULK_HYDRATION_BATCH_SIZE=N`.
+ */
+const FETCH_SUMMARY_BATCH_SIZE = VESPA_BULK_HYDRATION_BATCH_SIZE;
 const ALIAS_PREFIX_TERMS_FIELD = 'alias_prefix_terms';
 
 interface VespaSearchIndexSchemaCapabilities {
@@ -416,6 +432,14 @@ export class VespaSearchIndex implements SearchIndexPort {
     params?: Record<string, unknown>,
     signal?: AbortSignal,
     requestId?: string,
+    /**
+     * Override the per-request HTTP timeout. Bulk-hydration call sites
+     * (getDocuments / batchFetchBySummary) pass
+     * `VESPA_BULK_HYDRATION_TIMEOUT_MS` to tolerate the wider latency on
+     * full-summary fetches over many ids; everything else (hot search)
+     * defaults to the tight `VESPA_SEARCH_TIMEOUT_MS`.
+     */
+    timeoutMsOverride?: number,
   ): Promise<VespaQueryResponse> {
     if (this.circuitBreaker.state === 'OPEN') {
       throw new CircuitBreakerOpenError(VESPA_SEARCH_BREAKER_NAME);
@@ -423,7 +447,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     let clientError: VespaHttpError | undefined;
     const result = await this.circuitBreaker.execute(async () => {
       try {
-        return await this.client.query(yql, params, signal, requestId);
+        return await this.client.query(yql, params, signal, requestId, timeoutMsOverride);
       } catch (err) {
         if (err instanceof VespaHttpError && err.isClientError && !err.isRateLimited) {
           clientError = err;
@@ -855,9 +879,17 @@ export class VespaSearchIndex implements SearchIndexPort {
     const settled = await Promise.allSettled(batches.map(async (batch) => {
       const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
       const yql = `select * from ${SCHEMA} where entity_id in (${idList}) limit ${batch.length}`;
-      const response = await this.queryUnderBreaker(yql, {
-        'presentation.summary': 'full',
-      });
+      // Bulk hydration uses the wider timeout channel — full-summary fetches
+      // over 50-id batches routinely exceed the hot-path 3 s ceiling on
+      // Vespa Cloud, and a timeout drops the entire batch (silent 0/N
+      // hydration). See per-channel-timeouts.ts.
+      const response = await this.queryUnderBreaker(
+        yql,
+        { 'presentation.summary': 'full' },
+        undefined,
+        undefined,
+        VESPA_BULK_HYDRATION_TIMEOUT_MS,
+      );
       const children = response.root.children ?? [];
       return children.map((hit, index) => {
         try {
@@ -1066,9 +1098,14 @@ export class VespaSearchIndex implements SearchIndexPort {
         `select ${selectFields}` +
         ` from ${SCHEMA} where entity_id in (${idList})` +
         ` limit ${batch.length}`;
-      const response = await this.queryUnderBreaker(yql, {
-        'presentation.summary': summaryName,
-      });
+      // Bulk hydration timeout channel — see per-channel-timeouts.ts.
+      const response = await this.queryUnderBreaker(
+        yql,
+        { 'presentation.summary': summaryName },
+        undefined,
+        undefined,
+        VESPA_BULK_HYDRATION_TIMEOUT_MS,
+      );
       const children = response.root.children ?? [];
       return children.map((hit, index) => {
         try {

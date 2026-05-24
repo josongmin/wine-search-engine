@@ -64,6 +64,12 @@ import {
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
 import { zodToJsonSchema, type JsonSchema } from './claude-structured-llm-adapter.js';
+import {
+  resolveCompletionTokens,
+  resolveReasoningEffort,
+  type OpenAICallMode,
+  type ReasoningEffort,
+} from './openai-reasoning-params.js';
 
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const OPENAI_CHAT_PATH = '/chat/completions';
@@ -251,6 +257,7 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
     // orchestrator's hardcoded `claude-*`) to `defaultModel`, so we pass the
     // caller's `req.model` through unchanged.
     const resp = await this.callOnce({
+      mode: 'analyze',
       model: req.model,
       messages,
       tools: [tool],
@@ -290,6 +297,7 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
     // index), so sorting is a semantic no-op for the model.
     const tools = stableSortTools(req.tools.map(mapToolDef));
     const resp = await this.callOnce({
+      mode: 'execute',
       model: req.model,
       messages,
       tools,
@@ -352,6 +360,7 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
     const tool = makeForcedFunctionTool(SYNTHESIZE_FN_NAME, req.schema);
     const messages = this.toOpenAIMessages(req.messages, req.systemPrompt);
     const resp = await this.callOnce({
+      mode: 'synthesize',
       model: req.model,
       messages,
       tools: [tool],
@@ -462,6 +471,7 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
   }
 
   private async callOnce(payload: {
+    readonly mode: OpenAICallMode;
     readonly model: string;
     readonly messages: readonly OpenAIChatMessage[];
     readonly tools: readonly OpenAIToolDef[];
@@ -471,18 +481,34 @@ export class OpenAIStructuredLlmAdapter implements StructuredLlmPort {
     readonly seed?: number;
     readonly abortSignal?: AbortSignal;
   }): Promise<OpenAIResponse> {
-    const body = {
-      // Caller passes models the orchestrator hardcoded for the Anthropic
-      // adapter (e.g. `claude-sonnet-4-6`). We translate any non-OpenAI model
-      // identifier to `defaultModel` so the OpenAI route accepts the call.
-      // This is the bench-unblock seam — production keeps using Anthropic.
-      model: payload.model.startsWith('claude-') || payload.model.startsWith('o1') || payload.model.length === 0
+    // Caller passes models the orchestrator hardcoded for the Anthropic
+    // adapter (e.g. `claude-sonnet-4-6`). We translate any non-OpenAI model
+    // identifier to `defaultModel` so the OpenAI route accepts the call.
+    // This is the bench-unblock seam — production keeps using Anthropic.
+    // NOTE: `o1` legacy bare string is treated as non-OpenAI; current
+    // o-series ids carry version suffixes (e.g. `o1-preview`, `o1-mini`)
+    // and are detected as reasoning models after translation.
+    const effectiveModel: string =
+      payload.model.startsWith('claude-') || payload.model === 'o1' || payload.model.length === 0
         ? this.defaultModel
-        : payload.model,
+        : payload.model;
+    // Reasoning models (gpt-5*, o1*, o3*, o4*) consume internal reasoning
+    // tokens BEFORE emitting visible output; max_completion_tokens caps the
+    // sum, so a caller asking for N output tokens hits finish_reason=length
+    // once reasoning eats the budget. resolveCompletionTokens adds an
+    // env-configurable headroom (default 8K) only for reasoning models.
+    const completionTokens = resolveCompletionTokens(effectiveModel, payload.max_completion_tokens);
+    const reasoningEffort: ReasoningEffort | undefined = resolveReasoningEffort(
+      effectiveModel,
+      payload.mode,
+    );
+    const body = {
+      model: effectiveModel,
       messages: payload.messages,
       tools: payload.tools,
       tool_choice: payload.tool_choice,
-      max_completion_tokens: payload.max_completion_tokens,
+      max_completion_tokens: completionTokens,
+      ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
       ...(payload.seed !== undefined ? { seed: payload.seed } : {}),
     };
     const url = `${this.baseUrl}${OPENAI_CHAT_PATH}`;

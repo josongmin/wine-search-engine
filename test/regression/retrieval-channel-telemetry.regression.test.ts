@@ -29,13 +29,18 @@ import type { SearchIndexPort, SparseHit, DenseHit } from '../../src/domain/retr
 import type { EmbeddingServicePort } from '../../src/domain/retrieval/port/embedding-service.port.js';
 
 function minimalPlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
+  // `semantic_preference` queryClass selects the LEARNED_SPARSE_HYBRID
+  // profile, whose channelMix includes `learned_sparse` — required to
+  // exercise the dormant / active firing-state branches for that
+  // channel in this regression. Other channels (sparse / dense) are
+  // present in every default profile.
   return {
     rawQuery: 'q',
     normalizedQuery: 'q',
     intent: 'semantic_discovery',
     route: 'hybrid',
     retrievalMode: 'semantic_hybrid',
-    queryClass: 'pure_constraint',
+    queryClass: 'semantic_preference',
     anchors: [],
     constraints: { hard: [], soft: [], inferred: [] },
     expansions: { lexical: ['red wine'], semantic: ['red wine'] },

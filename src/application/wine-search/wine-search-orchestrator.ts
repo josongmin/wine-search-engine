@@ -279,6 +279,33 @@ function makeInitialState(): OrchestratorState {
   };
 }
 
+/**
+ * Wave 3 SOTA++: extract the decision-engine's no-corpus-match signal from
+ * any tool outcome's `result.engineDecision.failureReason === 'NO_CORPUS_MATCH'`.
+ *
+ * Surfaces the partial-corpus-aware verdict (zero-hit-detector) to the
+ * synthesizer so the deterministic admission template fires instead of
+ * the LLM synthesis path attempting to fabricate an answer from nothing.
+ *
+ * Returns `undefined` when no tool outcome carries the signal. Tolerates
+ * arbitrary tool result shapes (the field may be deeply nested) — narrows
+ * via structural guards so the orchestrator never trusts an `as` cast on
+ * an unknown payload.
+ */
+function detectNoCorpusMatchFromToolOutcomes(
+  outcomes: readonly ToolOutcome[],
+): 'no_corpus_match' | undefined {
+  for (const outcome of outcomes) {
+    const result: unknown = (outcome as { readonly result?: unknown }).result;
+    if (result === null || typeof result !== 'object') continue;
+    const engineDecision: unknown = (result as Record<string, unknown>)['engineDecision'];
+    if (engineDecision === null || typeof engineDecision !== 'object') continue;
+    const failureReason: unknown = (engineDecision as Record<string, unknown>)['failureReason'];
+    if (failureReason === 'NO_CORPUS_MATCH') return 'no_corpus_match';
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
@@ -448,6 +475,14 @@ export class WineSearchOrchestrator {
     const dispatchKind = dispatchResult.terminationKind;
     let answer: AnswerResult;
     try {
+      // Wave 3 SOTA++: when any tool outcome carries the decision engine's
+      // explicit "no_corpus_match" signal (failureReason='NO_CORPUS_MATCH'
+      // emitted by zero-hit-detector), surface it to the synthesizer so the
+      // deterministic "not in our catalogue" template wins over the LLM
+      // synthesis path. The lift comes from telling the user the truth
+      // ("we don't have that wine") instead of asking them to clarify a
+      // query the system has zero evidence for.
+      const decisionStatus = detectNoCorpusMatchFromToolOutcomes(state.toolOutcomes);
       answer = await this.deps.synthesisRunner.run({
         query: input.query,
         requestId: input.requestId,
@@ -455,6 +490,7 @@ export class WineSearchOrchestrator {
         toolOutcomes: state.toolOutcomes,
         policyBlocked: dispatchKind !== undefined || dispatchResult.policyBlocked,
         ...(dispatchKind !== undefined ? { blockedKind: dispatchKind } : {}),
+        ...(decisionStatus !== undefined ? { decisionStatus } : {}),
         perStepTimeoutMs: baseConfig.perStepTimeoutMs,
         maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
         ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),

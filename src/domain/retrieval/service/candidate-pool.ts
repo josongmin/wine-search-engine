@@ -40,6 +40,10 @@ import {
   softConstraintsToOptionalFilterTokens,
 } from './constraint-to-sparse-filter-tokens.js';
 import {
+  validateConstraintBundle,
+  emitConstraintValidationTelemetry,
+} from './constraint-validator.js';
+import {
   extractSearchConstraints,
   searchConstraintsToFilterTokens,
 } from '../../query/service/search-constraint-extractor.js';
@@ -258,6 +262,18 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // use. This closes the gap where "평점 좋은 와인" / "지금 마실 수 있는" parsed as
     // soft and NEVER tightened Vespa retrieval — leaving the 7K-doc corpus
     // under-filtered and the candidate pool low-precision.
+    // Compile-time constraint validation BEFORE YQL emission. Surfaces
+    // (a) unrecognized attributes — planner emitted something the YQL
+    // layer cannot represent (silent drop pre-fix), and (b) intentionally
+    // ranking-only soft constraints (drinking_window / style / price_band)
+    // that flow into softBoosts but cannot promote to filters. Telemetry
+    // fires once per (tier, attribute, reason) per process via the module
+    // cache in constraint-validator.ts — hot-path safe.
+    const validationReport = validateConstraintBundle({
+      hard: input.hardConstraints,
+      soft: input.softConstraints,
+    });
+    emitConstraintValidationTelemetry(validationReport);
     const hardFilterTokens = hardConstraintsToSparseFilterTokens(input.hardConstraints);
     const promotedSoftFilterTokens = softConstraintsToOptionalFilterTokens(input.softConstraints);
     const filters = [
