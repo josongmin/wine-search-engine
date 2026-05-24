@@ -281,7 +281,7 @@ function inferTypeFromGrape(grapePrimary: string | null): WineType | null {
 // CLAUDE.md rule 8: \b is ASCII-only and fails on accented chars like 'é'. Use [\p{L}\p{N}] instead.
 const ROSE_WORD_BOUNDARY_RE = /(?:^|[^\p{L}\p{N}])ros[eé](?=$|[^\p{L}\p{N}])/iu;
 
-function detectWineType(wineStyle: string | null): WineType | null {
+export function detectWineType(wineStyle: string | null): WineType | null {
   if (!wineStyle) return null;
   const lower = wineStyle.toLowerCase();
   // Exact-key map first (highest precision)
@@ -297,6 +297,277 @@ function detectWineType(wineStyle: string | null): WineType | null {
     if (lower.includes(keyword)) return type;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Tier 1.2: Producer fallback chain — parse from display_name
+// ---------------------------------------------------------------------------
+
+/**
+ * Stop-words that mark the boundary between producer tokens and the wine label
+ * inside `display_name`. When we see one of these tokens we know the preceding
+ * 1–3 tokens form the producer (e.g. "1971 Gaja Gromis Barolo" → "Gaja Gromis").
+ *
+ * Two categories:
+ *   1. Wine style words (Barolo, Cabernet, Riesling, …) — the wine label
+ *      typically starts here.
+ *   2. Appellation / region words (Pauillac, Saint-Émilion, Napa, …) — the
+ *      wine label sometimes starts with a region after the producer.
+ *
+ * Rule 16: module-scope `Set` — no per-call allocation.
+ * All entries are lowercased; lookup is case-insensitive.
+ */
+const PRODUCER_PARSE_STOP_WORDS: ReadonlySet<string> = new Set([
+  // Wine styles / grape varieties that typically anchor the wine label
+  'barolo', 'barbaresco', 'brunello', 'chianti', 'amarone', 'valpolicella',
+  'cabernet', 'merlot', 'pinot', 'syrah', 'shiraz', 'malbec', 'grenache',
+  'sangiovese', 'nebbiolo', 'tempranillo', 'zinfandel', 'gamay', 'barbera',
+  'montepulciano', 'corvina', 'aglianico', 'touriga', 'tannat', 'pinotage',
+  'primitivo', 'chardonnay', 'riesling', 'sauvignon', 'gewürztraminer',
+  'gewurztraminer', 'viognier', 'sémillon', 'semillon', 'chenin', 'albariño',
+  'albarino', 'verdejo', 'grüner', 'gruner', 'moscato', 'muscat', 'trebbiano',
+  'vermentino', 'fiano', 'vernaccia', 'arneis', 'roussanne', 'marsanne',
+  'chablis', 'champagne', 'sancerre', 'pouilly-fumé', 'sauternes', 'tokaji',
+  'port', 'sherry', 'madeira', 'marsala', 'prosecco', 'cava', 'sekt',
+  'crémant', 'cremant', 'franciacorta', 'brut', 'blanc', 'blanco', 'bianco',
+  'rosé', 'rose', 'rouge', 'rosso', 'tinto',
+  // Appellation / region words that can anchor the label tail
+  'pauillac', 'margaux', 'saint-julien', 'saint-émilion', 'saint-emilion',
+  'pomerol', 'médoc', 'medoc', 'haut-médoc', 'graves', 'pessac-léognan',
+  'sauternes', 'bourgogne', 'burgundy', 'napa', 'rioja', 'mendoza', 'mosel',
+  'rheingau', 'wachau', 'barossa', 'mclaren', 'willamette', 'oakville',
+  'rutherford',
+]);
+
+/**
+ * Leading year prefix on Vivino display_names — e.g. "1971 Gaja Gromis Barolo".
+ * We support 18xx / 19xx / 20xx vintages. Pinned at module scope (Rule 16).
+ */
+const DISPLAY_NAME_LEADING_YEAR_RE = /^(?:18|19|20)\d{2}\s+/u;
+
+const PARSE_PRODUCER_MIN_LENGTH = 2;
+const PARSE_PRODUCER_MAX_TOKENS = 3;
+
+/**
+ * Last-ditch producer recovery: parse the producer from `display_name` when
+ * Bronze's `producer` column and `payload.winery.name` are both empty.
+ *
+ * Rationale: 10 of the 16 famous wines that drop at silver fall in this
+ * bucket — e.g. "1971 Gaja Gromis Barolo" has no producer/winery fields, but
+ * "Gaja" is clearly the producer.
+ *
+ * Algorithm:
+ *   1. Strip a leading 4-digit vintage prefix if present.
+ *   2. Walk tokens left-to-right; stop when we hit a known stop-word
+ *      (wine-style or appellation token). Keep 1..PARSE_PRODUCER_MAX_TOKENS
+ *      tokens before the stop word.
+ *   3. Reject results shorter than PARSE_PRODUCER_MIN_LENGTH characters or
+ *      all-uppercase noise (likely SKUs, not human-readable names).
+ *
+ * Returns `null` when no plausible producer prefix can be parsed (e.g.
+ * "Sassicaia 2018" — first token is a wine name, no producer prefix at all).
+ *
+ * Module-level export so the regression suite can pin individual cases.
+ */
+export function parseProducerFromDisplayName(
+  displayName: string | undefined | null,
+  vintageYear: number | null,
+): string | null {
+  if (!displayName) return null;
+  let trimmed = displayName.trim();
+  if (trimmed.length === 0) return null;
+
+  // Strip leading vintage year token (any 18xx/19xx/20xx, not just the row's
+  // vintage_year — Bronze sometimes mis-attributes year).
+  trimmed = trimmed.replace(DISPLAY_NAME_LEADING_YEAR_RE, '');
+  if (vintageYear !== null) {
+    const explicitYearRe = new RegExp(`^${vintageYear}\\s+`, 'u');
+    trimmed = trimmed.replace(explicitYearRe, '');
+  }
+  if (trimmed.length === 0) return null;
+
+  const tokens = trimmed.split(/\s+/u).filter((t) => t.length > 0);
+  if (tokens.length === 0) return null;
+
+  // Find the first token that is a stop word. Tokens before it form the
+  // producer.
+  let stopIdx = -1;
+  for (let i = 0; i < tokens.length; i++) {
+    const lower = tokens[i]!.toLowerCase();
+    if (PRODUCER_PARSE_STOP_WORDS.has(lower)) {
+      stopIdx = i;
+      break;
+    }
+  }
+
+  // No stop word found → entire string is presumed wine label (no producer
+  // prefix) → fail.
+  if (stopIdx <= 0) return null;
+
+  const producerTokens = tokens.slice(0, Math.min(stopIdx, PARSE_PRODUCER_MAX_TOKENS));
+  const candidate = producerTokens.join(' ').trim();
+
+  if (candidate.length < PARSE_PRODUCER_MIN_LENGTH) return null;
+  // Reject all-uppercase noise like SKUs ("LOT 123") but accept Unicode-rich
+  // proper names. We compare against the case-folded form to detect "no
+  // lowercase letters present".
+  if (candidate === candidate.toUpperCase() && candidate !== candidate.toLowerCase()) {
+    return null;
+  }
+
+  return candidate;
+}
+
+// ---------------------------------------------------------------------------
+// Tier 1.3: detectWineType display_name + flavor_profiles fallbacks
+// ---------------------------------------------------------------------------
+
+/**
+ * display_name → wineType keyword scan.
+ *
+ * Rationale: Vivino's `wine_style.name` field is empty for 100% of the bronze
+ * corpus (10,469 / 10,469 null) — `detectWineType(row.wine_style)` always
+ * returns null. Without a fallback, ~39% of rows that have no grape data
+ * are silently dropped. This fallback rescues records like
+ * "1987 Opus One Opus One" (no wine_style, no grape) by classifying off the
+ * wine label itself.
+ *
+ * Order matters — patterns are evaluated FIRST-MATCH-WINS so the most
+ * specific signal precedes the broader one. In particular `sparkling` MUST
+ * precede `white` (Champagne is a white sparkling) and the white branch's
+ * grape list MUST NOT include "Cabernet" because of "Cabernet Sauvignon".
+ *
+ * Regex uses Unicode-aware boundaries `[\p{L}\p{N}]` (CLAUDE.md rule 8 — `\b`
+ * is ASCII-only). All patterns at module scope (Rule 16).
+ *
+ * Returns null only when no pattern matches AND no default applies (we DO NOT
+ * default to 'red' here — that decision is left to the next fallback layer).
+ */
+const DISPLAY_NAME_SPARKLING_RE =
+  /(?:^|[^\p{L}\p{N}])(?:champagne|brut|prosecco|cava|sekt|crémant|cremant|franciacorta|sparkling)(?=$|[^\p{L}\p{N}])/iu;
+
+// IMPORTANT: ordering is significant — "Cabernet Sauvignon" must NOT trigger
+// the white branch. We require either an explicit white-only grape or the
+// word "blanc" / "white". "Sauvignon" alone (without "Blanc") is NOT in the
+// white list because Cabernet Sauvignon would false-positive.
+const DISPLAY_NAME_WHITE_RE =
+  /(?:^|[^\p{L}\p{N}])(?:riesling|chardonnay|sauvignon\s+blanc|pinot\s+grigio|pinot\s+gris|albariño|albarino|gewürztraminer|gewurztraminer|chenin\s+blanc|sancerre|chablis|pouilly-fum[eé]|white|blanc)(?=$|[^\p{L}\p{N}])/iu;
+
+const DISPLAY_NAME_ROSE_RE =
+  /(?:^|[^\p{L}\p{N}])(?:ros[eé]|blush)(?=$|[^\p{L}\p{N}])/iu;
+
+const DISPLAY_NAME_DESSERT_RE =
+  /(?:^|[^\p{L}\p{N}])(?:sauternes|tokaji|ice\s*wine|eiswein|trockenbeerenauslese|beerenauslese)(?=$|[^\p{L}\p{N}])/iu;
+
+const DISPLAY_NAME_FORTIFIED_RE =
+  /(?:^|[^\p{L}\p{N}])(?:port|porto|sherry|madeira|marsala|vermouth)(?=$|[^\p{L}\p{N}])/iu;
+
+// "Red" / "Rouge" / "Rosso" / "Tinto" lexical anchors. Used ONLY as the final
+// branch — never as a default. Bordeaux without explicit grape often does
+// default to red, but we surface that decision to the caller (third
+// fallback) rather than baking it in here.
+const DISPLAY_NAME_RED_RE =
+  /(?:^|[^\p{L}\p{N}])(?:red|rouge|rosso|tinto)(?=$|[^\p{L}\p{N}])/iu;
+
+export function inferWineTypeFromDisplayName(
+  displayName: string | undefined | null,
+): WineType | null {
+  if (!displayName) return null;
+  const text = displayName.trim();
+  if (text.length === 0) return null;
+
+  // Order = specificity (highest first). FIRST MATCH WINS.
+  if (DISPLAY_NAME_SPARKLING_RE.test(text)) return 'sparkling';
+  if (DISPLAY_NAME_DESSERT_RE.test(text)) return 'dessert';
+  if (DISPLAY_NAME_FORTIFIED_RE.test(text)) return 'fortified';
+  if (DISPLAY_NAME_ROSE_RE.test(text)) return 'rosé';
+  if (DISPLAY_NAME_WHITE_RE.test(text)) return 'white';
+  if (DISPLAY_NAME_RED_RE.test(text)) return 'red';
+  return null;
+}
+
+/**
+ * Flavor-profile-driven wine type inference.
+ *
+ * Vivino's `taste.flavor[].group` values come from a curated catalog —
+ * "black-fruit", "oak", "earthy", "citrus", "tropical", "floral", "toast",
+ * "biscuit", "apple", etc. The `extractFlavorProfiles` helper replaces
+ * hyphens with spaces, so the values reaching this function look like
+ * "black fruit", "tropical fruit", etc.
+ *
+ * This is the SAFEST signal among the fallbacks because the flavor catalog
+ * is wine-domain-curated, not heuristic. Rule of thumb (each requires ≥1 hit
+ * unless noted):
+ *   - sparkling: ≥2 of {toast, biscuit, apple}
+ *   - red: any of {black fruit, dark fruit, red fruit, oak, earthy, leather}
+ *   - white: any of {citrus, tropical, tropical fruit, floral, stone fruit}
+ *
+ * Returns null when no profile matches. Module-scope sets (Rule 16).
+ */
+const RED_FLAVOR_PROFILES: ReadonlySet<string> = new Set([
+  'black fruit', 'dark fruit', 'red fruit', 'oak', 'earthy', 'leather',
+  'spices', 'tobacco', 'cedar', 'cassis',
+]);
+
+const WHITE_FLAVOR_PROFILES: ReadonlySet<string> = new Set([
+  'citrus', 'tropical', 'tropical fruit', 'floral', 'stone fruit',
+  'green fruit', 'herbaceous',
+]);
+
+const SPARKLING_FLAVOR_PROFILES: ReadonlySet<string> = new Set([
+  'toast', 'biscuit', 'apple', 'yeast',
+]);
+
+const SPARKLING_FLAVOR_PROFILE_MIN_HITS = 2;
+
+export function inferWineTypeFromFlavorProfiles(
+  flavorProfiles: readonly string[] | undefined | null,
+): WineType | null {
+  if (!flavorProfiles || flavorProfiles.length === 0) return null;
+  const lowered = flavorProfiles.map((f) => f.toLowerCase().trim());
+
+  // Sparkling requires multiple co-occurring signatures — apples alone could
+  // be a white Riesling, but apples + toast + biscuit is unambiguously
+  // sparkling.
+  let sparklingHits = 0;
+  for (const flavor of lowered) {
+    if (SPARKLING_FLAVOR_PROFILES.has(flavor)) sparklingHits += 1;
+  }
+  if (sparklingHits >= SPARKLING_FLAVOR_PROFILE_MIN_HITS) return 'sparkling';
+
+  for (const flavor of lowered) {
+    if (RED_FLAVOR_PROFILES.has(flavor)) return 'red';
+  }
+  for (const flavor of lowered) {
+    if (WHITE_FLAVOR_PROFILES.has(flavor)) return 'white';
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Deep payload narrowing — payload.vintage.wine.winery.name path
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract `payload.vintage.wine.winery.name` from an unknown payload shape.
+ * Vivino occasionally nests the winery one level deeper than the top-level
+ * `payload.winery` slot; we narrow at runtime since the official
+ * `VivinoPayload` type does not declare this path.
+ *
+ * Returns the trimmed winery name or null.
+ */
+function extractVintageWineWineryName(payload: VivinoPayload | null): string | null {
+  if (!payload) return null;
+  const vintage: unknown = (payload as { readonly vintage?: unknown }).vintage;
+  if (vintage === null || typeof vintage !== 'object') return null;
+  const wine: unknown = (vintage as { readonly wine?: unknown }).wine;
+  if (wine === null || typeof wine !== 'object') return null;
+  const winery: unknown = (wine as { readonly winery?: unknown }).winery;
+  if (winery === null || typeof winery !== 'object') return null;
+  const name: unknown = (winery as { readonly name?: unknown }).name;
+  if (typeof name !== 'string') return null;
+  const trimmed = name.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -787,11 +1058,27 @@ export function transformRow(row: BronzeRow): PreSilver | null {
   if (!externalId) return null;
 
   const payload = row.payload;
-  const producer = row.producer?.trim() ?? payload?.winery?.name?.trim() ?? '';
-  if (!producer) return null; // can't index without producer
 
   const vintageYear =
     row.vintage_year ?? payload?.vintage?.year ?? null;
+
+  // ── Tier 1.2 — Producer fallback chain (4 steps, ordered by trust) ────────
+  //   1. row.producer                              (Bronze column)
+  //   2. payload.winery.name                       (top-level winery slot)
+  //   3. payload.vintage.wine.winery.name          (nested deeper)
+  //   4. parseProducerFromDisplayName(...)         (last-ditch lexical parse)
+  //
+  // Pre-fix: only steps 1-2 existed → ~10 of 16 famous wines silently dropped
+  // because both producer column and winery.name were null. Adding steps 3-4
+  // recovers Gaja early-vintage, Charles Krug, Lafite Carruades, Penfolds,
+  // Krug 등.
+  const producer =
+    row.producer?.trim() ??
+    payload?.winery?.name?.trim() ??
+    extractVintageWineWineryName(payload) ??
+    parseProducerFromDisplayName(row.display_name, vintageYear) ??
+    '';
+  if (!producer) return null; // can't index without producer
 
   const canonicalLabel = normalizeLabel(
     row.display_name,
@@ -818,9 +1105,21 @@ export function transformRow(row: BronzeRow): PreSilver | null {
   const taste = payload?.taste?.structure;
 
   // SOTA++: fizziness signal — if fizziness > 0.3, override to sparkling.
-  // v4 fix: detectWineType now returns null on no match. Cascade through grape-based
-  // inference (most reliable secondary signal); if we still cannot classify the
-  // wine, fail closed instead of synthesizing a default taxon.
+  // v4 fix: detectWineType now returns null on no match. Cascade through
+  // display-name keyword scan → flavor-profile signal → grape-based inference;
+  // if we still cannot classify the wine, fail closed instead of synthesizing
+  // a default taxon.
+  //
+  // Tier 1.3 — `payload.wine_style.name` is null for 100% of bronze rows
+  // (0 / 10,469 populated), so `detectWineType(row.wine_style)` is dead code
+  // without these fallbacks. Two new layers, in order of trust:
+  //   2. inferWineTypeFromDisplayName(row.display_name) — keyword scan over
+  //      the wine label. Picks up Champagne / Brut / Sancerre / Riesling …
+  //   3. inferWineTypeFromFlavorProfiles(extractFlavorProfiles(payload)) —
+  //      Vivino's curated `taste.flavor[].group` catalog. Safest signal
+  //      (domain-curated, not heuristic).
+  //   4. inferTypeFromGrape(grapePrimary) — existing fallback, gated on
+  //      varietal data being present.
   //
   // Scale note: Vivino taste.structure fields (acidity, tannin, sweetness, fizziness)
   // are returned on a 0–5 integer scale by the API.  The normalized (0–1) threshold
@@ -830,10 +1129,17 @@ export function transformRow(row: BronzeRow): PreSilver | null {
   // rosés.  Expand to fire for any non-sparkling base type so Blanc-de-Blancs, Cava
   // Rosé, etc. are correctly classified.
   const FIZZINESS_SPARKLING_THRESHOLD_RAW = 1.5; // 0.3 × 5 (raw 0–5 Vivino scale)
+  const flavorProfilesForType = extractFlavorProfiles(payload);
   const detectedWineType = (() => {
     let base = detectWineType(row.wine_style);
     if (base === null) {
-      // Secondary signal: infer from primary grape variety
+      base = inferWineTypeFromDisplayName(row.display_name);
+    }
+    if (base === null) {
+      base = inferWineTypeFromFlavorProfiles(flavorProfilesForType);
+    }
+    if (base === null) {
+      // Final fallback: infer from primary grape variety.
       base = inferTypeFromGrape(grapePrimary);
     }
     if (base === null) {
@@ -1079,11 +1385,25 @@ export async function run(): Promise<void> {
     const result = await pool.query<BronzeRow>(query, params);
     console.log(`  Bronze rows fetched: ${result.rows.length}`);
 
-    // Transform with drop reason tracking
+    // Transform with drop reason tracking.
+    //
+    // The pre-check mirrors the producer fallback chain inside `transformRow`
+    // (row.producer → winery.name → nested vintage.wine.winery.name →
+    // parseProducerFromDisplayName). Keeping them in lock-step ensures the
+    // `missing_producer` drop bucket reflects the same decision the transform
+    // would have made — otherwise we'd over-count missing_producer for rows
+    // that the deeper fallbacks actually rescue.
     const preSilver: PreSilver[] = [];
     const dropReasons: Record<string, number> = {};
     for (const row of result.rows) {
-      const producer = row.producer?.trim() ?? row.payload?.winery?.name?.trim() ?? '';
+      const vintageYearForCheck =
+        row.vintage_year ?? row.payload?.vintage?.year ?? null;
+      const producer =
+        row.producer?.trim() ??
+        row.payload?.winery?.name?.trim() ??
+        extractVintageWineWineryName(row.payload) ??
+        parseProducerFromDisplayName(row.display_name, vintageYearForCheck) ??
+        '';
       if (!row.external_id) {
         dropReasons['missing_external_id'] = (dropReasons['missing_external_id'] ?? 0) + 1;
         continue;
