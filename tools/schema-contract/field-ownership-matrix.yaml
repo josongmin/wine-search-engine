@@ -472,6 +472,8 @@ fields:
     coverage_required: 1.0
     fail_action: must
     rationale: "1024-dim float tensor. silverToRetrievalDoc requires an embedding for every document (fail-closed; no deterministic fallback in production). Without embedding the semantic / hybrid rank profiles cannot score the doc."
+    excluded_from_live_probe: true
+    excluded_from_live_probe_reason: "Not listed in `document-summary full` (wine_entity.sd:460) by design — embeddings are 1024-dim tensors omitted from response payloads. Coverage is enforced at ingest time and on prepared-feed mode; live Vespa probe reads via summary=full and would always observe 0%."
 
   - field: learned_sparse_weights
     source: silver(learned-sparse-spec.ts) — opt-in

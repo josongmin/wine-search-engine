@@ -443,6 +443,101 @@ describe('classifyFindings — coverage classification (RFC-018 §5)', () => {
   });
 });
 
+describe('classifyFindings — excluded_from_live_probe (RFC-018 §5 amendment)', () => {
+  // Fields like `embedding` are intentionally omitted from
+  // `document-summary full` in wine_entity.sd. The live Vespa probe always
+  // reads via summary=full, so those fields look 0% even when ingest is healthy.
+  // The matrix row may set `excluded_from_live_probe: true` (+ reason) to skip
+  // coverage enforcement ONLY in live mode — prepared-feed mode still enforces.
+
+  const excludedRow: FieldOwnershipRow = {
+    field: 'canonical_label',
+    source: 'derived(test)',
+    coverage_required: 1.0,
+    fail_action: 'must',
+    rationale: 'required',
+    excluded_from_live_probe: true,
+    excluded_from_live_probe_reason: 'omitted from document-summary full by design',
+  };
+
+  it('live mode + excluded_from_live_probe → COVERAGE_SKIPPED (no ERROR on that field)', () => {
+    const docs = [
+      buildDoc({ entity_id: 'a' }), // canonical_label missing — live probe simulation
+      buildDoc({ entity_id: 'b' }),
+    ];
+    const coverage = measureFieldCoverage(docs, ['canonical_label']);
+    expect(coverage.get('canonical_label')).toBe(0);
+    const findings = classifyFindings({
+      schemaFields: ['canonical_label'],
+      matrix: [excludedRow],
+      coverage,
+      coverageSource: 'live',
+    });
+    const failsForField = findings.filter((f) => f.field === 'canonical_label' && f.severity === 'ERROR');
+    expect(failsForField.length).toBe(0);
+    const skipped = findings.find((f) => f.kind === 'COVERAGE_SKIPPED' && f.field === 'canonical_label');
+    expect(skipped).toBeDefined();
+    expect(skipped?.message).toContain('omitted from document-summary full by design');
+  });
+
+  it('prepared-feed mode + excluded_from_live_probe → still enforces (ERROR)', () => {
+    const docs = [
+      buildDoc({ entity_id: 'a' }),
+      buildDoc({ entity_id: 'b' }),
+    ];
+    const coverage = measureFieldCoverage(docs, ['canonical_label']);
+    const findings = classifyFindings({
+      schemaFields: ['canonical_label'],
+      matrix: [excludedRow],
+      coverage,
+      coverageSource: 'prepared-feed',
+    });
+    const fail = findings.find((f) => f.kind === 'COVERAGE_FAIL' && f.field === 'canonical_label');
+    expect(fail).toBeDefined();
+    expect(fail?.severity).toBe('ERROR');
+  });
+
+  it('undefined coverageSource + excluded_from_live_probe → still enforces (defensive default)', () => {
+    const docs = [buildDoc({ entity_id: 'a' })];
+    const coverage = measureFieldCoverage(docs, ['canonical_label']);
+    const findings = classifyFindings({
+      schemaFields: ['canonical_label'],
+      matrix: [excludedRow],
+      coverage,
+      // coverageSource intentionally omitted — defaults to full enforcement
+    });
+    const fail = findings.find((f) => f.kind === 'COVERAGE_FAIL' && f.field === 'canonical_label');
+    expect(fail).toBeDefined();
+  });
+
+  it('matrix YAML: excluded_from_live_probe=true REQUIRES a reason', () => {
+    const yamlMissingReason = `
+fields:
+  - field: embedding
+    source: derived(test)
+    coverage_required: 1.0
+    fail_action: must
+    rationale: required
+    excluded_from_live_probe: true
+`;
+    expect(() => loadFieldOwnershipMatrix(yamlMissingReason, 'synthetic')).toThrow(
+      /excluded_from_live_probe_reason/u,
+    );
+  });
+
+  it('shipped matrix: every excluded_from_live_probe row carries a non-empty reason', () => {
+    const matrixSource = readFileSync(SHIPPED_MATRIX, 'utf-8');
+    const matrix = loadFieldOwnershipMatrix(matrixSource, SHIPPED_MATRIX);
+    const excludedRows = matrix.filter((row) => row.excluded_from_live_probe === true);
+    // Invariant: at least one (embedding); guarded so future removal triggers review.
+    expect(excludedRows.length).toBeGreaterThan(0);
+    for (const row of excludedRows) {
+      expect(row.excluded_from_live_probe_reason).toBeDefined();
+      expect(row.excluded_from_live_probe_reason?.length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('measureFieldCoverage — populated-value semantics', () => {
   it('treats empty string as not populated', () => {
     const coverage = measureFieldCoverage(

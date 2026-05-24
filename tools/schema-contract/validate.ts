@@ -63,7 +63,18 @@ const MatrixRowSchema = z.object({
   rationale: z.string().min(1),
   ticket: z.string().min(1).optional(),
   notes: z.string().min(1).optional(),
-}).strict();
+  // Some indexed fields are intentionally omitted from
+  // `document-summary full` (e.g. large tensors like `embedding`). The live
+  // Vespa probe fetches via summary=full, so those fields always read 0% on
+  // live mode even when ingest succeeded. Set this flag (with a reason) to
+  // skip coverage enforcement on live-probe mode ONLY — prepared-feed mode
+  // still enforces coverage since feeds carry every field.
+  excluded_from_live_probe: z.boolean().optional(),
+  excluded_from_live_probe_reason: z.string().min(1).optional(),
+}).strict().refine(
+  (row) => row.excluded_from_live_probe !== true || (row.excluded_from_live_probe_reason !== undefined && row.excluded_from_live_probe_reason.length > 0),
+  { message: 'excluded_from_live_probe=true requires excluded_from_live_probe_reason' },
+);
 
 const MatrixFileSchema = z.object({
   fields: z.array(MatrixRowSchema).min(1).max(500),
@@ -354,6 +365,9 @@ interface ClassifyArgs {
   readonly matrix: readonly FieldOwnershipRow[];
   readonly coverage: ReadonlyMap<string, number> | undefined;
   readonly scopeMisses?: readonly string[];
+  // 'live' = field excluded_from_live_probe rows are skipped with
+  // COVERAGE_SKIPPED. 'prepared-feed' / undefined = full enforcement.
+  readonly coverageSource?: 'live' | 'prepared-feed';
 }
 
 /**
@@ -394,6 +408,17 @@ export function classifyFindings(args: ClassifyArgs): readonly Finding[] {
     for (const row of args.matrix) {
       if (!schemaSet.has(row.field)) continue; // drift already reported
       const observed = args.coverage.get(row.field) ?? 0;
+      if (args.coverageSource === 'live' && row.excluded_from_live_probe === true) {
+        out.push({
+          kind: 'COVERAGE_SKIPPED',
+          field: row.field,
+          severity: 'INFO',
+          observed,
+          required: row.coverage_required,
+          message: `live-probe excluded — ${row.excluded_from_live_probe_reason ?? 'no reason given'}`,
+        });
+        continue;
+      }
       if (row.fail_action === 'optional') {
         out.push({
           kind: 'COVERAGE_SKIPPED',
@@ -628,11 +653,14 @@ export async function runValidator(args: CliArgs): Promise<RunResult> {
     scopeMisses = diffScope(seed, docs);
   }
 
+  const coverageSource: 'live' | 'prepared-feed' | undefined =
+    args.mode === 'live' ? 'live' : args.mode === 'prepared-feed' ? 'prepared-feed' : undefined;
   const classifyArgs: ClassifyArgs = {
     schemaFields,
     matrix,
     coverage,
     ...(scopeMisses !== undefined ? { scopeMisses } : {}),
+    ...(coverageSource !== undefined ? { coverageSource } : {}),
   };
   const findings = classifyFindings(classifyArgs);
   const summary = summarize(findings);
