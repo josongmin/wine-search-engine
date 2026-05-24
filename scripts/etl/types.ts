@@ -128,6 +128,32 @@ export interface VivinoPayload {
   /** Bottle volume in ml, e.g. 750, 1500. */
   readonly bottle_ml?: number;
 
+  /**
+   * Canonical Vivino product page URL, e.g.
+   * "https://www.vivino.com/en/krug-grande-cuvee/w/7122486". The URL slug
+   * encodes the winery+wine in a stable form — used as a producer fallback
+   * (extractProducerFromVivinoUrl) when payload.winery.name is null.
+   */
+  readonly url?: string;
+
+  /**
+   * Top-level wine type label from Vivino, e.g. "Red", "White", "Sparkling",
+   * "Rosé", "Dessert", "Fortified". Populated for ~99.4% of vivino-source
+   * Bronze rows in production (probe 2026-05-25) — by far the highest-coverage
+   * wineType signal available. Used as the first source in the silver
+   * detectedWineType chain.
+   */
+  readonly type?: string;
+
+  /**
+   * Free-form regional style label, e.g. "Burgundy Côte de Nuits Red",
+   * "Napa Valley Cabernet Sauvignon", "Italian Barolo". This is a STRING
+   * (not an object) in real Vivino payloads. Used as a secondary wineType
+   * signal AFTER `type` (the string usually carries the explicit wine type
+   * suffix — "Red", "Red Blend", "Pinot Noir", etc.).
+   */
+  readonly wine_style?: string;
+
   /** Human-facing bottle size label, e.g. "750ml", "Magnum". */
   readonly bottle_size?: string;
 

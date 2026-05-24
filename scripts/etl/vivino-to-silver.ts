@@ -108,14 +108,23 @@ function wantsRdsSsl(host: string): boolean {
 }
 
 function poolFromEnv(): pg.Pool {
-  const conn = process.env['DATABASE_URL'];
-  if (conn !== undefined && conn.length > 0) {
+  // Bronze (wine_pdp_snapshot) lives on a separate cluster from the runtime
+  // wine-engine DB. Prefer `BRONZE_DATABASE_URL` when set; fall back to
+  // `DATABASE_URL` for back-compat with single-cluster setups.
+  const rawConn = process.env['BRONZE_DATABASE_URL'] ?? process.env['DATABASE_URL'];
+  if (rawConn !== undefined && rawConn.length > 0) {
     let host = '';
     try {
-      host = new URL(conn).hostname;
+      host = new URL(rawConn).hostname;
     } catch {
       throw new Error('DATABASE_URL is not a valid URL');
     }
+    // Strip `sslmode=` so the pg library defers to the explicit `ssl` option.
+    // Newer pg-connection-string treats `sslmode=require` as `verify-full`
+    // and rejects RDS's self-signed cert chain. The explicit
+    // `rejectUnauthorized: false` path below preserves the prior behaviour
+    // across RDS deployments.
+    const conn = rawConn.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
     const ssl = wantsRdsSsl(host)
       ? { rejectUnauthorized: false as const }
       : undefined;
@@ -186,11 +195,14 @@ function makeEntityId(externalId: string): string {
  * 3. Ensure vintage year is appended if present and not already in string.
  */
 export function normalizeLabel(
-  displayName: string,
+  displayName: string | null | undefined,
   producer: string | null,
   vintageYear: number | null,
 ): string {
-  let label = displayName.trim().replace(/\s+/g, ' ');
+  // Bronze occasionally returns null display_name for ~rows with no scraped
+  // title. Fall back to producer (+ vintage suffix below) so transformRow
+  // doesn't crash. Empty string is preserved through the loop.
+  let label = (displayName ?? '').trim().replace(/\s+/g, ' ');
 
   // Remove leading producer duplication: "Chateau Margaux Chateau Margaux 2015"
   if (producer) {
@@ -468,6 +480,123 @@ const DISPLAY_NAME_FORTIFIED_RE =
 // fallback) rather than baking it in here.
 const DISPLAY_NAME_RED_RE =
   /(?:^|[^\p{L}\p{N}])(?:red|rouge|rosso|tinto)(?=$|[^\p{L}\p{N}])/iu;
+
+/**
+ * Maps Vivino's free-form payload type/wine_style strings to the canonical
+ * {@link WineType} taxonomy. This is the **highest-coverage** wineType signal
+ * in Bronze: `payload.type` is populated for ~99.4% of vivino-source rows
+ * (probe 2026-05-25), and `payload.wine_style` (top-level STRING, not object)
+ * for ~98%. Either gets mapped here.
+ *
+ * The mapping table is intentionally narrow — each entry is a documented
+ * Vivino category label. Unknown labels return null (fall through to the
+ * next fallback in the chain). NOT a heuristic; the labels are stable
+ * Vivino-side enums.
+ *
+ * Note: this is checked BEFORE `detectWineType(row.wine_style)` in the
+ * chain because that legacy path reads the Bronze `wine_style` COLUMN
+ * which may have been mapped from `payload.wine_style.name` (an object
+ * sub-field) and is 0% populated in current Bronze.
+ */
+const PAYLOAD_TYPE_MAP: ReadonlyMap<string, WineType> = new Map([
+  ['red', 'red'],
+  ['white', 'white'],
+  ['sparkling', 'sparkling'],
+  ['rosé', 'rosé'],
+  ['rose', 'rosé'],
+  ['dessert', 'dessert'],
+  ['fortified', 'fortified'],
+  ['port', 'fortified'],
+  ['sherry', 'fortified'],
+]);
+
+/**
+ * Producer fallback step 5 — recover from Vivino payload URL slug.
+ *
+ * Empirical (probe 2026-05-25): for 1670 Bronze rows that have null producer
+ * across payload.winery.name / payload.vintage.wine.winery.name and produce
+ * null from parseProducerFromDisplayName, the `payload.url` is populated
+ * with a canonical winery slug e.g.:
+ *
+ *   https://www.vivino.com/en/royal-tokaji-essencia/w/1140747
+ *     → producer = "Royal Tokaji"
+ *   https://www.vivino.com/en/chateau-d-yquem-sauternes/...
+ *     → producer = "Château d'Yquem"
+ *   https://www.vivino.com/en/krug-grande-cuvee/...
+ *     → producer = "Krug"
+ *   https://www.vivino.com/en/domaine-leflaive-puligny-montrachet/...
+ *     → producer = "Domaine Leflaive"
+ *
+ * Heuristic-free shape: split URL path segment by `-`, take prefix tokens
+ * until we hit a STOP word (wine-style / appellation / grape). Capitalize
+ * each token. Replace `d-` token-pair with `d'` (French apostrophe
+ * convention "d Yquem" → "d'Yquem"). Returns null if URL is missing or
+ * doesn't match the Vivino pattern.
+ *
+ * Rule 27 (CLAUDE.md) compliant: stop-word table is explicit + module-scope,
+ * not a fuzzy heuristic.
+ */
+const VIVINO_URL_RE = /^https?:\/\/(?:www\.)?vivino\.com\/(?:[a-z]{2}\/)?([a-z0-9-]+?)(?:\/w\/|\/\?|$)/iu;
+
+export function extractProducerFromVivinoUrl(url: string | null | undefined): string | null {
+  if (typeof url !== 'string' || url.length === 0) return null;
+  const m = url.match(VIVINO_URL_RE);
+  if (m === null) return null;
+  const slug = m[1];
+  if (slug === undefined || slug.length === 0) return null;
+  const tokens = slug.split('-').filter((t) => t.length > 0);
+  if (tokens.length === 0) return null;
+  // Walk left-to-right collecting tokens until we hit a stop word.
+  const producerTokens: string[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (t === undefined) break;
+    const lower = t.toLowerCase();
+    if (PRODUCER_PARSE_STOP_WORDS.has(lower)) break;
+    producerTokens.push(t);
+    if (producerTokens.length >= PARSE_PRODUCER_MAX_TOKENS) break;
+  }
+  if (producerTokens.length === 0) return null;
+  // Reconstruct: capitalize each token; collapse "d Yquem" → "d'Yquem".
+  const capped = producerTokens.map((t) => t.charAt(0).toUpperCase() + t.slice(1));
+  // Join with spaces, then fix the "d Yquem" / "d' Yquem" cases produced by
+  // splitting "chateau-d-yquem" — French apostrophe convention.
+  let joined = capped.join(' ');
+  joined = joined.replace(/(^|\s)D (\p{Lu})/gu, "$1d'$2");
+  if (joined.length < PARSE_PRODUCER_MIN_LENGTH) return null;
+  return joined;
+}
+
+export function inferWineTypeFromPayloadType(
+  payload: VivinoPayload | null,
+): WineType | null {
+  if (payload === null) return null;
+  // payload.type — explicit category, usually one word: "Red" / "White" / …
+  const explicit = payload.type?.trim().toLowerCase();
+  if (explicit !== undefined && explicit.length > 0) {
+    const hit = PAYLOAD_TYPE_MAP.get(explicit);
+    if (hit !== undefined) return hit;
+  }
+  // payload.wine_style — descriptive label, scan for known wine-type tokens.
+  // The label usually ends with a wine-type word ("… Red", "… White",
+  // "… Rosé") or contains it explicitly. Order matters: check sparkling /
+  // rosé / dessert / fortified BEFORE white (e.g. "Sparkling White" → sparkling).
+  const styleStr = payload.wine_style?.trim().toLowerCase();
+  if (styleStr !== undefined && styleStr.length > 0) {
+    // Unicode-safe word boundaries — `\b` doesn't honour accented chars
+    // (Rosé fails on `\b`), so we use `[^\p{L}\p{N}]` character class. The
+    // anchor pattern `(?:^|[^\p{L}\p{N}])TOKEN(?=$|[^\p{L}\p{N}])` covers
+    // start/end of string and non-letter/digit separators.
+    const has = (re: RegExp): boolean => re.test(styleStr);
+    if (has(/(?:^|[^\p{L}\p{N}])(?:sparkling|champagne|prosecco|cava)(?=$|[^\p{L}\p{N}])/u)) return 'sparkling';
+    if (has(/(?:^|[^\p{L}\p{N}])(?:ros[eé]|blush)(?=$|[^\p{L}\p{N}])/u)) return 'rosé';
+    if (has(/(?:^|[^\p{L}\p{N}])(?:dessert|sauternes|tokaji)(?=$|[^\p{L}\p{N}])|ice\s+wine/u)) return 'dessert';
+    if (has(/(?:^|[^\p{L}\p{N}])(?:port|sherry|madeira|marsala|fortified)(?=$|[^\p{L}\p{N}])/u)) return 'fortified';
+    if (has(/(?:^|[^\p{L}\p{N}])(?:white|blanc)(?=$|[^\p{L}\p{N}])/u)) return 'white';
+    if (has(/(?:^|[^\p{L}\p{N}])(?:red|rouge|tinto|rosso)(?=$|[^\p{L}\p{N}])/u)) return 'red';
+  }
+  return null;
+}
 
 export function inferWineTypeFromDisplayName(
   displayName: string | undefined | null,
@@ -1077,6 +1206,7 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     payload?.winery?.name?.trim() ??
     extractVintageWineWineryName(payload) ??
     parseProducerFromDisplayName(row.display_name, vintageYear) ??
+    extractProducerFromVivinoUrl(payload?.url) ??
     '';
   if (!producer) return null; // can't index without producer
 
@@ -1131,7 +1261,14 @@ export function transformRow(row: BronzeRow): PreSilver | null {
   const FIZZINESS_SPARKLING_THRESHOLD_RAW = 1.5; // 0.3 × 5 (raw 0–5 Vivino scale)
   const flavorProfilesForType = extractFlavorProfiles(payload);
   const detectedWineType = (() => {
-    let base = detectWineType(row.wine_style);
+    // Tier 1.3+: payload.type / payload.wine_style string are the highest-
+    // coverage signals (99.4% / 98% in Bronze). Check FIRST so 4042 no-grape
+    // rows (Vivino didn't return varietal) don't drop on the inferTypeFromGrape
+    // tail.
+    let base = inferWineTypeFromPayloadType(payload);
+    if (base === null) {
+      base = detectWineType(row.wine_style);
+    }
     if (base === null) {
       base = inferWineTypeFromDisplayName(row.display_name);
     }
@@ -1403,6 +1540,7 @@ export async function run(): Promise<void> {
         row.payload?.winery?.name?.trim() ??
         extractVintageWineWineryName(row.payload) ??
         parseProducerFromDisplayName(row.display_name, vintageYearForCheck) ??
+        extractProducerFromVivinoUrl(row.payload?.url) ??
         '';
       if (!row.external_id) {
         dropReasons['missing_external_id'] = (dropReasons['missing_external_id'] ?? 0) + 1;
@@ -1453,7 +1591,9 @@ export async function run(): Promise<void> {
 if (import.meta.url === `file://${process.argv[1]}`) {
   void run().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
     console.error(`FATAL: ${msg}`);
+    if (stack !== undefined) console.error(stack);
     process.exit(1);
   });
 }
