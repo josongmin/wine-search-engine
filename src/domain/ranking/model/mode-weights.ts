@@ -250,8 +250,14 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     availabilityWeight: 0.0,
     criticScoreWeight: 0.10,           // Quality signals for recommendations
     multilingualScoreWeight: 0.0,
-    giftSuitabilityWeight: 0.0,
-    beginnerSuitabilityWeight: 0.0,
+    // Track C learned facets (gift_suitability_score / beginner_suitability_score
+    // ~62% populated). Wired into recommendation 2026-05-25: bench v9 showed
+    // gift_refined scenarios at 30-41% scoring due to lack of "fit-for-occasion"
+    // signal. Conservative weights — these are SECONDARY ranking signals; main
+    // intent expressed via preferenceAlignment + softConstraint. Operator can
+    // tune via mode-weight overrides if recommendation skews too giftable.
+    giftSuitabilityWeight: 0.05,
+    beginnerSuitabilityWeight: 0.05,
   },
 
   // === Similar items: anchor-based similarity. Anchor-duplicate diversity

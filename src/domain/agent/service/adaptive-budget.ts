@@ -37,20 +37,23 @@ const MIN_STEPS_THREE_CONSTRAINTS = 6;
  * than `MIN_STEPS_THREE_CONSTRAINTS` because the regex path tolerates more
  * lexical noise and may need an extra reasoning pass.
  */
-const NESTED_CONDITION_INDICATOR_STEPS = 8;
+const NESTED_CONDITION_INDICATOR_STEPS = 10;
 
 /**
- * Step budget for situation-based queries (occasion + constraint). Six
+ * Step budget for situation-based queries (occasion + constraint). Eight
  * steps gives the agent room to disambiguate the occasion, run an initial
- * search, and relax one constraint band if results are sparse.
+ * search, run a second pass with relaxed constraints, and assemble a
+ * final answer. Bench v9 showed 33-45% scenarios in this tier were hitting
+ * `max_steps` at the legacy 6 cap.
  */
-const SITUATION_BASED_STEPS = 6;
+const SITUATION_BASED_STEPS = 8;
 
 /**
  * Step budget for compound / multi-course queries. Same shape as the
  * situation-based path: disambiguate course, search per course, relax.
+ * Bumped 6→8 (2026-05-25) for the same `max_steps` cluster as situation.
  */
-const COMPOUND_STEPS = 6;
+const COMPOUND_STEPS = 8;
 
 /** Truncate regex source in adaptive-budget log reasons (telemetry string cap). */
 const ADAPTIVE_BUDGET_PATTERN_REASON_CHARS = 40;

@@ -76,6 +76,12 @@ import {
   type AnswerResult,
 } from './synthesis-schemas.js';
 import type { SynthesisRunner } from './synthesis-runner.js';
+import {
+  extractCandidateFields,
+  type ComparisonFallbackCandidate,
+  type ComparisonLlmFallbackInput,
+  type ComparisonLlmFallbackResult,
+} from './comparison-llm-fallback.js';
 import type { QueryIntent, WineSearchAnalysis } from './wine-search-schemas.js';
 import {
   ORCHESTRATOR_ABORTED_ANSWER_ENGLISH,
@@ -138,6 +144,55 @@ const ORCHESTRATOR_DEFAULT_PER_TOOL_CAP = 2;
 const ORCHESTRATOR_ERROR_SUMMARY_MAX_CHARS = 120;
 
 /**
+ * Maximum number of candidates the orchestrator hands to the comparison
+ * LLM fallback per leg. The fallback runner itself caps at
+ * `MAX_CANDIDATES_PER_LEG = 5` inside the prompt; we pre-trim here so the
+ * structural extraction stays bounded even when a leg returns hundreds of
+ * results from a relaxed search. Kept symmetric (`5`) so both legs are
+ * weighed equally regardless of upstream result-set asymmetry.
+ */
+const ORCHESTRATOR_FALLBACK_MAX_CANDIDATES_PER_LEG = 5;
+
+/**
+ * Character budget for the synthetic "legQuery" hint surfaced to the
+ * comparison LLM fallback when the underlying tool outcome does not carry a
+ * structured sub-query (search_wines path). Kept small — the LLM consults
+ * the candidate fields, not the legQuery, for the actual verdict; the
+ * legQuery is only a routing hint.
+ */
+const ORCHESTRATOR_FALLBACK_LEG_QUERY_SLICE_CHARS = 80;
+
+/**
+ * Terminal mini-loop reasons that signal the comparison plan stalled before
+ * producing a verdict — exactly the symptoms the fallback is designed to
+ * rescue. Hand-picked union:
+ *  - `max_steps`     — exhausted the LLM-turn budget mid-comparison.
+ *  - `timeout`       — wall-clock cap fired (often before the synthesis turn).
+ *  - `loop_detected` — model thrashing in the compare→relax→compare cycle.
+ *  - `budget`        — token cap fired, same downstream effect as `max_steps`.
+ *  - `error`         — mini-loop step threw; we may still have candidate
+ *                       evidence from earlier successful turns.
+ *  - `fallback`      — multi-step plan requested but degraded to "no work
+ *                       done" (e.g. tool bundle absent at construction time).
+ */
+const COMPARISON_FALLBACK_STALL_REASONS: ReadonlySet<AgentTerminationReason> = new Set<AgentTerminationReason>([
+  'max_steps',
+  'timeout',
+  'loop_detected',
+  'budget',
+  'error',
+  'fallback',
+]);
+
+/**
+ * Step source used when the comparison fallback emits a result. Distinct
+ * from `'mini_loop'` so the trace shows the fallback's contribution as a
+ * separate phase. Matches the `ExecutionStep.source` enum that the
+ * `appendStep` helper passes through unchanged.
+ */
+const ORCHESTRATOR_FALLBACK_STEP_SOURCE = 'synthesizer' as const;
+
+/**
  * Zero-width characters that the JavaScript `String.prototype.trim()` does
  * NOT strip (they are not in the Unicode WhiteSpace property): ZWSP
  * (U+200B), ZWNJ (U+200C), ZWJ (U+200D), and BOM/ZWNBSP (U+FEFF). The
@@ -187,6 +242,26 @@ export interface OrchestratorMiniLoopToolBundle {
   readonly toolPorts: MiniLoopToolPorts;
 }
 
+/**
+ * Optional one-shot LLM fallback for comparison_nested queries that
+ * exhaust the mini-loop step budget. Injected as a pure function so the
+ * orchestrator doesn't depend on the structured-LLM port directly — the
+ * fallback runner closes over its own port instance at construction.
+ *
+ * When `undefined`, the stall-detection branch is a no-op (the synthesizer
+ * runs as before). When wired, the orchestrator calls it after every
+ * dispatch whose `terminationReason` matches one of the documented stall
+ * symptoms (see {@link COMPARISON_FALLBACK_STALL_REASONS}) for a query
+ * whose analysis intent is `'compare'`.
+ *
+ * SSoT: the fallback runner is implemented in
+ * `application/wine-search/comparison-llm-fallback.ts`; the orchestrator
+ * only knows the structural function signature.
+ */
+export type OrchestratorComparisonLlmFallback = (
+  input: ComparisonLlmFallbackInput,
+) => Promise<ComparisonLlmFallbackResult>;
+
 interface WineSearchOrchestratorDeps {
   readonly queryAnalyzer: QueryAnalyzerService;
   readonly router: DeterministicRouter;
@@ -197,6 +272,12 @@ interface WineSearchOrchestratorDeps {
   readonly clock?: OrchestratorClock | undefined;
   readonly defaultConfig?: Partial<AgentConfig> | undefined;
   readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle | undefined;
+  /**
+   * Optional one-shot LLM fallback for stalled comparison plans. When
+   * absent, the orchestrator never invokes the fallback path — the
+   * standard synthesizer ladder runs unchanged.
+   */
+  readonly comparisonLlmFallback?: OrchestratorComparisonLlmFallback | undefined;
 }
 
 export interface WineSearchInput {
@@ -463,6 +544,28 @@ export class WineSearchOrchestrator {
     if (dispatchResult.kind === 'aborted') {
       return this.finalizeAborted(state, startMs, queryHasHangul);
     }
+
+    // ── Phase 3.5: comparison LLM fallback (Wave-bench SOTA++ lever).
+    //
+    // When a comparison-flavored plan stalls (mini-loop max_steps, timeout,
+    // loop_detected, …) we have candidates retrieved but no verdict. Run a
+    // single grounded synthesis call to emit the verdict before falling
+    // through to the standard synthesizer ladder (which would otherwise
+    // collapse to Layer 2/4 and lose the comparison answer).
+    //
+    // Returns a finalized result and short-circuits when the fallback
+    // succeeds; returns `undefined` to let the standard synthesizer run.
+    const fallbackResult = await this.tryComparisonLlmFallback({
+      analysis,
+      planKind: plan.kind,
+      dispatchResult,
+      state,
+      input,
+      startMs,
+      queryHasHangul,
+      baseConfig,
+    });
+    if (fallbackResult !== undefined) return fallbackResult;
 
     // ── Phase 4: synthesizer (always runs).
     const synthesisPhaseStart = this.clock.now();
@@ -834,6 +937,148 @@ export class WineSearchOrchestrator {
     });
     state.terminationReason = transitionTerminationReason(state.terminationReason, 'fallback');
     return { kind: 'ok', terminationReason: 'fallback', policyBlocked: false };
+  }
+
+  // -------------------------------------------------------------------------
+  // Comparison LLM fallback — one-shot grounded synthesis for stalled
+  // comparison plans. Returns `undefined` when the fallback should NOT fire
+  // (wrong intent, not stalled, missing dep, declined for lack of candidates,
+  // or LLM failure). Returns a finalized {@link WineSearchResult} when the
+  // fallback DID produce a verdict — the caller short-circuits.
+  // -------------------------------------------------------------------------
+
+  private async tryComparisonLlmFallback(args: {
+    readonly analysis: WineSearchAnalysis;
+    readonly planKind: ExecutionPlan['kind'];
+    readonly dispatchResult: Extract<DispatchOutcome, { kind: 'ok' }>;
+    readonly state: OrchestratorState;
+    readonly input: WineSearchInput;
+    readonly startMs: number;
+    readonly queryHasHangul: boolean;
+    readonly baseConfig: AgentConfig;
+  }): Promise<WineSearchResult | undefined> {
+    const { analysis, planKind, dispatchResult, state, input, startMs, queryHasHangul, baseConfig } = args;
+    // Activation gate 1: feature must be wired.
+    if (this.deps.comparisonLlmFallback === undefined) return undefined;
+
+    // Activation gate 2: only stalled comparison-flavored plans.
+    const isComparisonIntent = analysis.intent === 'compare';
+    const isComparisonPlan = planKind === 'comparison' || planKind === 'multi-step' || planKind === 'parallel-search';
+    if (!isComparisonIntent && !isComparisonPlan) return undefined;
+    // The fallback's whole point is to rescue stalled / inconclusive plans.
+    // A successful 'answer' termination already produced a verdict (or will
+    // via the synthesizer); only stall reasons get the fallback budget.
+    if (!COMPARISON_FALLBACK_STALL_REASONS.has(dispatchResult.terminationReason)) return undefined;
+    if (dispatchResult.policyBlocked) return undefined;
+    if (dispatchResult.terminationKind !== undefined) return undefined;
+
+    // Activation gate 3: pre-flight abort.
+    if (isSignalAborted(input.abortSignal)) return undefined;
+
+    // Pull the two legs of candidates from the tool outcomes. When we can't
+    // identify two legs we decline — the fallback would degenerate into a
+    // single-leg "verdict" which is not a comparison.
+    const legs = extractComparisonLegs(state.toolOutcomes, input.query);
+    if (legs === undefined) {
+      this.logger.info(
+        {
+          requestId: input.requestId,
+          phase: 'comparison_llm_fallback',
+          reason: 'leg_extraction_failed',
+          toolOutcomeCount: state.toolOutcomes.length,
+        },
+        '[wine-search-orchestrator] comparison fallback declined: could not extract two legs',
+      );
+      return undefined;
+    }
+
+    const fallbackPhaseStart = this.clock.now();
+    let fallbackResult: ComparisonLlmFallbackResult;
+    try {
+      fallbackResult = await this.deps.comparisonLlmFallback({
+        query: input.query,
+        requestId: input.requestId,
+        originalRetrievalDocs: legs,
+        perStepTimeoutMs: baseConfig.perStepTimeoutMs,
+        maxOutputTokens: ORCHESTRATOR_DEFAULT_SYNTHESIS_MAX_OUTPUT_TOKENS,
+        hangulDominant: queryHasHangul,
+        ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
+      });
+    } catch (err) {
+      if (isAbortError(err) || isSignalAborted(input.abortSignal)) {
+        state.terminationReason = transitionTerminationReason(state.terminationReason, 'aborted');
+        return this.finalizeAborted(state, startMs, queryHasHangul);
+      }
+      this.logger.warn(
+        {
+          requestId: input.requestId,
+          phase: 'comparison_llm_fallback',
+          err: errorMessage(err).slice(0, ORCHESTRATOR_ERROR_SUMMARY_MAX_CHARS),
+        },
+        '[wine-search-orchestrator] comparison fallback threw — falling through to synthesizer',
+      );
+      return undefined;
+    }
+    const fallbackDurationMs = Math.max(0, this.clock.now() - fallbackPhaseStart);
+
+    if (fallbackResult.kind === 'declined_no_candidates') {
+      this.appendStep(state, {
+        source: ORCHESTRATOR_FALLBACK_STEP_SOURCE,
+        summary: `comparison_llm_fallback: declined (candidates=${String(fallbackResult.totalCandidates)})`,
+        durationMs: fallbackDurationMs,
+      });
+      return undefined;
+    }
+    if (fallbackResult.kind === 'failed') {
+      state.tokenUsage = addTokenUsage(state.tokenUsage, fallbackResult.tokenUsage);
+      this.appendStep(state, {
+        source: ORCHESTRATOR_FALLBACK_STEP_SOURCE,
+        summary: `comparison_llm_fallback: failed (${fallbackResult.reason})`,
+        durationMs: fallbackDurationMs,
+        tokenUsage: fallbackResult.tokenUsage,
+      });
+      return undefined;
+    }
+
+    // produced — commit the verdict as the final answer, overriding the
+    // synthesizer ladder entirely.
+    state.tokenUsage = addTokenUsage(state.tokenUsage, fallbackResult.output.tokenUsage);
+    this.appendStep(state, {
+      source: ORCHESTRATOR_FALLBACK_STEP_SOURCE,
+      summary: `comparison_llm_fallback: ok (chosen=${fallbackResult.output.chosenSide})`,
+      durationMs: fallbackDurationMs,
+      tokenUsage: fallbackResult.output.tokenUsage,
+    });
+    // Promote terminationReason to 'answer' — the fallback produced a real
+    // user-facing verdict. The state machine still enforces precedence
+    // (aborted/error dominate), so this is a no-op when an earlier hard
+    // failure was recorded.
+    state.terminationReason = transitionTerminationReason(state.terminationReason, 'answer');
+    this.logger.info(
+      {
+        requestId: input.requestId,
+        phase: 'comparison_llm_fallback',
+        chosenSide: fallbackResult.output.chosenSide,
+        durationMs: fallbackDurationMs,
+      },
+      '[wine-search-orchestrator] comparison fallback produced verdict',
+    );
+
+    const totalDurationMs = Math.max(0, this.clock.now() - startMs);
+    return assertWineSearchResult({
+      answer: fallbackResult.output.answer,
+      layer: 'primary',
+      groundedOnToolResults: true,
+      toolOutcomes: state.toolOutcomes,
+      executionSteps: state.steps,
+      toolCallCount: computeToolCallCount(state.steps),
+      tokenUsage: state.tokenUsage,
+      totalDurationMs,
+      terminationReason: state.terminationReason,
+      policyBlocked: false,
+      intent: analysis.intent,
+      planKind,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -1259,6 +1504,122 @@ function clipToolCallInput(input: Record<string, unknown>): Record<string, unkno
     }
   }
   return out;
+}
+
+/**
+ * Extract two legs of comparison candidates from a flat list of tool
+ * outcomes (mini-loop or runner output).
+ *
+ * Algorithm:
+ *  1. Prefer `compare_wines` outcomes whose result carries a structured
+ *     `entities: [..., ...]` tuple (the canonical comparison response
+ *     shape). Each `ComparisonEntity.allResults` becomes one leg.
+ *  2. Otherwise fall back to the FIRST TWO `search_wines` /
+ *     `get_food_pairings` outcomes — the mini-loop emits these in plan
+ *     order when the LLM decomposes a comparison into two sub-searches.
+ *
+ * Returns `undefined` when neither path produces two legs (e.g. only one
+ * search happened, the comparison tool was disabled, the outcomes carry no
+ * structured items). In that case the orchestrator declines the fallback
+ * and lets the synthesizer's standard ladder play out.
+ *
+ * Pure function — no side effects.
+ */
+function extractComparisonLegs(
+  outcomes: readonly ToolOutcome[],
+  originalQuery: string,
+): readonly { readonly leg: 'A' | 'B'; readonly legQuery: string; readonly candidates: readonly ComparisonFallbackCandidate[] }[] | undefined {
+  // 1. compare_wines path.
+  for (const outcome of outcomes) {
+    if (outcome.tool !== 'compare_wines') continue;
+    if (outcome.kind !== 'success' && outcome.kind !== 'partial_result') continue;
+    const result: unknown = (outcome as { readonly result?: unknown }).result;
+    if (result === null || typeof result !== 'object') continue;
+    const entities: unknown = (result as Record<string, unknown>)['entities'];
+    if (!Array.isArray(entities) || entities.length < 2) continue;
+    const entitiesList = entities as readonly unknown[];
+    const legAEntity: unknown = entitiesList[0];
+    const legBEntity: unknown = entitiesList[1];
+    if (legAEntity === null || typeof legAEntity !== 'object') continue;
+    if (legBEntity === null || typeof legBEntity !== 'object') continue;
+    const legA = projectComparisonEntityToLeg(legAEntity as Record<string, unknown>, 'A');
+    const legB = projectComparisonEntityToLeg(legBEntity as Record<string, unknown>, 'B');
+    if (legA === undefined || legB === undefined) continue;
+    return [legA, legB];
+  }
+
+  // 2. search_wines / get_food_pairings fallback path.
+  const searchOutcomes: ToolOutcome[] = [];
+  for (const outcome of outcomes) {
+    if (outcome.tool !== 'search_wines' && outcome.tool !== 'get_food_pairings') continue;
+    if (outcome.kind !== 'success' && outcome.kind !== 'partial_result') continue;
+    searchOutcomes.push(outcome);
+    if (searchOutcomes.length === 2) break;
+  }
+  if (searchOutcomes.length < 2) return undefined;
+  const [outcomeA, outcomeB] = searchOutcomes;
+  if (outcomeA === undefined || outcomeB === undefined) return undefined;
+  const legA = projectSearchOutcomeToLeg(outcomeA, originalQuery, 'A');
+  const legB = projectSearchOutcomeToLeg(outcomeB, originalQuery, 'B');
+  if (legA === undefined || legB === undefined) return undefined;
+  return [legA, legB];
+}
+
+function projectComparisonEntityToLeg(
+  entity: Record<string, unknown>,
+  label: 'A' | 'B',
+): { readonly leg: 'A' | 'B'; readonly legQuery: string; readonly candidates: readonly ComparisonFallbackCandidate[] } | undefined {
+  const subQuery = (entity['subQuery'] !== undefined && typeof entity['subQuery'] === 'string')
+    ? entity['subQuery']
+    : (entity['canonicalConcept'] !== undefined && typeof entity['canonicalConcept'] === 'string')
+      ? entity['canonicalConcept']
+      : `leg ${label}`;
+  const allResultsRaw: unknown = entity['allResults'];
+  // Prefer allResults (full evidence); fall back to topResult when present.
+  const rawList: unknown[] = Array.isArray(allResultsRaw)
+    ? allResultsRaw
+    : (entity['topResult'] !== null && typeof entity['topResult'] === 'object')
+      ? [entity['topResult']]
+      : [];
+  const candidates = rawList
+    .slice(0, ORCHESTRATOR_FALLBACK_MAX_CANDIDATES_PER_LEG)
+    .map((r) => extractCandidateFields(r))
+    .filter((c): c is ComparisonFallbackCandidate => Object.keys(c).length > 0);
+  if (candidates.length === 0) return undefined;
+  return { leg: label, legQuery: subQuery, candidates };
+}
+
+function projectSearchOutcomeToLeg(
+  outcome: ToolOutcome,
+  originalQuery: string,
+  label: 'A' | 'B',
+): { readonly leg: 'A' | 'B'; readonly legQuery: string; readonly candidates: readonly ComparisonFallbackCandidate[] } | undefined {
+  const result: unknown = (outcome as { readonly result?: unknown }).result;
+  if (result === null || typeof result !== 'object') return undefined;
+  // search_wines returns `{ results: [...] }`; get_food_pairings returns
+  // `{ results: { results: [...] } }` (the inner SearchResponse). We probe
+  // both shapes.
+  const direct = (result as Record<string, unknown>)['results'];
+  let resultsArray: unknown[] | undefined;
+  if (Array.isArray(direct)) {
+    resultsArray = direct;
+  } else if (direct !== null && typeof direct === 'object') {
+    const nested = (direct as Record<string, unknown>)['results'];
+    if (Array.isArray(nested)) resultsArray = nested;
+  }
+  if (resultsArray === undefined || resultsArray.length === 0) return undefined;
+
+  const candidates = resultsArray
+    .slice(0, ORCHESTRATOR_FALLBACK_MAX_CANDIDATES_PER_LEG)
+    .map((r) => extractCandidateFields(r))
+    .filter((c): c is ComparisonFallbackCandidate => Object.keys(c).length > 0);
+  if (candidates.length === 0) return undefined;
+
+  // The legQuery is a best-effort label — fall back to the original query
+  // sliced to a small budget. The LLM uses it as a hint about what the leg
+  // was retrieving, not as ground truth.
+  const legQuery = `${originalQuery.slice(0, ORCHESTRATOR_FALLBACK_LEG_QUERY_SLICE_CHARS)} — leg ${label}`;
+  return { leg: label, legQuery, candidates };
 }
 
 function makeBlockedAnalysisShell(query: string, queryHasHangul: boolean): WineSearchAnalysis {

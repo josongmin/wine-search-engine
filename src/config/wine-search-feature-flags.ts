@@ -27,3 +27,28 @@
  */
 export const MULTI_QUERY_FEATURE_FLAG_ENABLED: boolean =
   process.env['WINE_SEARCH_MULTI_QUERY_ENABLED'] !== 'false';
+
+/**
+ * One-shot LLM fallback for comparison_nested queries that exhaust the
+ * mini-loop's step budget.
+ *
+ * Bench v9 found 4 comparison_nested scenarios in the bottom 15 that all
+ * terminated with `terminationReason: 'max_steps'` because the multi-step
+ * compare→rank→drinkability→synthesize plan ran out of LLM turns before
+ * producing a verdict. When this flag is on (default), the orchestrator
+ * detects the stall, pulls the candidates the mini-loop already retrieved,
+ * and runs a single grounded synthesis call to emit a verdict — trading
+ * exploratory drilling for full-context one-shot reasoning.
+ *
+ * DEFAULT ON. Only an explicit `WINE_SEARCH_COMPARISON_LLM_FALLBACK_ENABLED=false`
+ * opt-out disables it. Any other value (unset / `'true'` / typo) is treated
+ * as ENABLED so a misconfiguration does not silently regress the bench.
+ *
+ * Consumers:
+ *   - `src/config/container.ts` — gates `ComparisonLlmFallback` wiring
+ *     into the orchestrator.
+ *   - `src/application/wine-search/wine-search-orchestrator.ts` — gates the
+ *     runtime stall-detection check.
+ */
+export const COMPARISON_LLM_FALLBACK_FEATURE_FLAG_ENABLED: boolean =
+  process.env['WINE_SEARCH_COMPARISON_LLM_FALLBACK_ENABLED'] !== 'false';
