@@ -839,6 +839,49 @@ function matchClaim(
  *   label names). Label-shaped citations are verified against grounded labels.
  * @param facts  the grounding union
  */
+/**
+ * Bench v14 RCA (GAP-1): detect whether the answer prose itself mentions any
+ * grounded label — via the same token-subsumption + alias-equivalence rules
+ * used by `verifyAnswerGrounding` for cited labels. Used by the synthesis
+ * runner to decide whether an empty-citations answer is a contract violation
+ * (N>=1 grounded wines exist but the answer recommends none).
+ *
+ * Detection rules (in order of cost; first hit returns true):
+ *  1. The answer's normalized prose contains all tokens of some grounded
+ *     label (multiset). Catches "Wine A is the grounded pick" against
+ *     `label="wine a"`.
+ *  2. The answer prose subsumes the tokens of an alias of some grounded
+ *     label (via `expandAlternates`). Catches "오푸스 원을 추천" against
+ *     `label="opus one"`.
+ *
+ * Returns `false` when grounding carries no label facts (we have no positive
+ * answer to anchor on).
+ */
+export function answerMentionsGroundedLabel(
+  answer: string,
+  facts: GroundingFacts,
+): boolean {
+  if (facts.labels.size === 0) return false;
+  const answerTokens = tokenize(normalizeClaimSurface(answer));
+  if (answerTokens.length === 0) return false;
+  for (const label of facts.labels) {
+    const labelTokens = tokenize(label);
+    if (labelTokens.length === 0) continue;
+    if (tokensSubsumed(labelTokens, answerTokens)) return true;
+    // Cross-walk via curated alias catalogs (Korean<->Latin aliases, typo
+    // variants). Catches surface mismatches like "오푸스 원" vs "opus one".
+    const aliasSurfaces = expandAlternates(label);
+    for (const alt of aliasSurfaces) {
+      if (alt === label) continue;
+      const altTokens = tokenize(alt);
+      if (altTokens.length > 0 && tokensSubsumed(altTokens, answerTokens)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function verifyAnswerGrounding(
   answer: string,
   citations: readonly string[] | undefined,

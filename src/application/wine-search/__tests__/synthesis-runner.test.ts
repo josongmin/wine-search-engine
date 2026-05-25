@@ -214,7 +214,13 @@ describe('SynthesisRunner — primary structured-LLM path', () => {
 
   it('Accented-Latin query (Côte-Rôtie) routes to English primary answer', async () => {
     const llm = makeStubLlm(async () => ({
-      data: { answer: 'Try a Côte-Rôtie Syrah from the northern Rhône.' },
+      // bench v14 RCA contract: an answer with N>=1 grounded wines MUST
+      // either cite a grounded label or mention one in prose. The model now
+      // names the grounded `Guigal Côte-Rôtie` explicitly.
+      data: {
+        answer: 'Try the Guigal Côte-Rôtie Syrah from the northern Rhône.',
+        citations: ['Guigal Côte-Rôtie'],
+      },
       usage: makeTokenUsage(95, 40),
       durationMs: 6,
     }));
@@ -239,8 +245,12 @@ describe('SynthesisRunner — validation retry', () => {
           { not: 'shaped right' },
         );
       }
+      // Citations are populated to satisfy the bench v14 RCA contract
+      // (N>=1 grounded wines → primary answer MUST cite at least one).
+      // The retry-attempts invariant is independent of citations; we keep
+      // them present so the new guard does not fire and inflate the count.
       return {
-        data: { answer: '재시도 후 성공한 답변입니다.' },
+        data: { answer: '와인 A를 추천 드립니다. 재시도 후 성공한 답변입니다.', citations: ['와인 A'] },
         usage: makeTokenUsage(50, 30),
         durationMs: 5,
       };
@@ -252,7 +262,7 @@ describe('SynthesisRunner — validation retry', () => {
     });
     expect(result.layer).toBe('primary');
     expect(result.synthesisAttempts).toBe(2);
-    expect(result.answer).toBe('재시도 후 성공한 답변입니다.');
+    expect(result.answer).toBe('와인 A를 추천 드립니다. 재시도 후 성공한 답변입니다.');
   });
 
   it('validation failure on both attempts → falls to layer 2 (top result template, Korean)', async () => {
@@ -503,7 +513,9 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
         );
       }
       return {
-        data: { answer: 'ok answer' },
+        // Citation populated to satisfy the bench v14 RCA contract — the
+        // test's invariant is token accounting, not citation policy.
+        data: { answer: 'X is a fine pick.', citations: ['X'] },
         usage: makeTokenUsage(40, 25),
         durationMs: 4,
       };

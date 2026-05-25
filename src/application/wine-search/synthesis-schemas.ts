@@ -37,9 +37,16 @@ const SYNTHESIS_CITATION_MAX_CHARS = 256;
  *  multi-result synthesis (compare across 4 legs * 2 citations each). */
 const SYNTHESIS_MAX_CITATIONS = 12;
 
-/** Soft cap on the serialized grounding payload (user message) sent to the
- *  LLM. Excess outcomes are truncated with an explicit marker so the model
- *  is aware the context was clipped. */
+/**
+ * @deprecated since bench v14 RCA (2026-05-26). The synthesizer no longer
+ * uses a single raw-stringify char budget — see
+ * `synthesis-grounding-payload.ts` for the structured replacement
+ * (`SYNTHESIS_GROUNDING_PAYLOAD_MAX_CHARS`,
+ * `SYNTHESIS_MAX_GROUNDING_WINES`). The old 6 000-char cap is preserved as
+ * a constant for backwards-compatible imports but is NOT consulted by the
+ * synthesis runner. Remove after one release once external imports are
+ * verified to have migrated.
+ */
 export const SYNTHESIS_MAX_GROUNDING_CHARS = 6000;
 
 // ---------------------------------------------------------------------------

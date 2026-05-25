@@ -17,11 +17,22 @@ maturity_rationale: |
   -api-hell-pipeline), integration test (wine-search.route.test.ts), bundle wiring
   test, feature flag test, +주변 application/wine-search/__tests__/. 4-단 PtE pipeline
   (query-analyzer → deterministic-router → execution-runner → synthesis-runner)
-  모두 Zod-strict. 5는 18K bench scenario parity 입증 + ReAct cutover 시 가능.
+  모두 Zod-strict.
+
+  2026-05-26 bench v14 RCA fix: synthesizer 가 raw `JSON.stringify(outcome.result)` 6000자
+  cut 으로 인해 grounding payload 가 `…[grounding truncated]` 마커로 거의 항상 대체되던
+  버그를 구조적으로 fix — 새 `synthesis-grounding-payload.ts` 가 compact
+  `grounded_wines (N):` 리스트 + `tool_outcomes (M):` 메타데이터로 분리 serialize. SYSTEM
+  prompt 에 contract 강화 ("when N>=1 you MUST cite at least one wine"). SynthesisRunner
+  에 contract-violation guard 추가: candidate citations=0 AND prose mentions no grounded
+  label → resynth 강제. 11개 회귀 케이스
+  (test/regression/synthesizer-grounding-truncation.regression.test.ts) 추가.
+
+  5는 18K bench scenario parity 입증 + ReAct cutover 시 가능.
 
 status: active
 since: 2026-04
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-26
 owner: core
 
 surfaces:
@@ -35,6 +46,8 @@ key_files:
   - src/application/wine-search/synthesis-runner.ts
   - src/application/wine-search/synthesis-schemas.ts
   - src/application/wine-search/synthesis-fallback-templates.ts
+  - src/application/wine-search/synthesis-grounding-payload.ts
+  - src/application/wine-search/synthesis-grounding-verify.ts
   - src/application/wine-search/wine-search-schemas.ts
 
 tests:
@@ -48,6 +61,9 @@ tests:
   unit:
     - src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
     - src/config/__tests__/wine-search-feature-flag.test.ts
+  regression:
+    - test/regression/synthesizer-grounding-truncation.regression.test.ts
+    - test/regression/synthesis-runner-unexpected-error-class.regression.test.ts
 
 depends_on:
   - infra.structured-llm-port
