@@ -4,7 +4,10 @@ import { vitestResolveAliases } from './aliases.js';
 export default defineConfig({
   test: {
     globals: true,
-    include: ['test/benchmark/agent/__tests__/**/*.ts'],
+    // Restrict to *.test.ts so shared fixture modules under __helpers__/ are
+    // not picked up as empty test suites (caused 1 spurious failed-suite after
+    // scorer.test.ts was split into per-dim files in the 2026-05-26 round B).
+    include: ['test/benchmark/agent/__tests__/**/*.test.ts'],
     pool: 'threads',
     poolOptions: {
       threads: {
