@@ -34,10 +34,6 @@ import type {
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { ToolCallEvidenceFrame } from '../../../src/domain/agent/model/tool-call-evidence-frame.js';
 import {
-  PENALTY_EXTRA_TOOL_PER_CALL as K_PENALTY_EXTRA_TOOL_PER_CALL,
-  PENALTY_EXTRA_TOOL_CAP as K_PENALTY_EXTRA_TOOL_CAP,
-  PENALTY_TOOL_DUPLICATE as K_PENALTY_TOOL_DUPLICATE,
-  PENALTY_TOOL_ORDER_VIOLATION as K_PENALTY_TOOL_ORDER_VIOLATION,
   EXEC_TOOL_WEIGHT as K_EXEC_TOOL_WEIGHT,
   EXEC_STEP_WEIGHT as K_EXEC_STEP_WEIGHT,
   FAITHFULNESS_PER_SCENARIO_WARN,
@@ -56,7 +52,6 @@ import {
 } from './scorer-text-extractors.js';
 import { scoreCostEfficiency } from './scorer-cost-efficiency.js';
 import { emitKoreanClrDiagnostic } from './scorer-korean-clr.js';
-import { countSemanticToolInvocations } from './scorer-tool-call-signatures.js';
 import {
   isHonestNoEvidenceAbstentionScenario,
   normalizeObservations,
@@ -66,10 +61,8 @@ import { scoreTermination } from './scorer-termination.js';
 import { scoreContextRecall } from './scorer-context-recall.js';
 import { evaluatePredicate, formatToolArgValue, getNestedValue } from './scorer-predicate-eval.js';
 import { scoreStepEfficiency } from './scorer-step-efficiency.js';
-import {
-  parseToolCallInput,
-  scoreContextRelevance,
-} from './scorer-context-relevance.js';
+import { scoreToolAccuracy } from './scorer-tool-accuracy.js';
+import { scoreContextRelevance } from './scorer-context-relevance.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -81,19 +74,7 @@ export interface ToolCallTrace {
 // moved to ./scorer-tool-call-signatures.ts during the 2026-05-25 decomposition.
 // Imported above; consumed by toolAccuracy scoring and formatToolArgValue.
 
-function isSearchWinesPartitionBatch(calls: readonly ToolCallTrace[]): boolean {
-  if (calls.length < 2 || !calls.every((call) => call.tool === 'search_wines')) {
-    return false;
-  }
-  const wineTypes = calls
-    .map((call) => parseToolCallInput(call)?.['wine_type'])
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim().toLowerCase());
-  if (wineTypes.length !== calls.length) {
-    return false;
-  }
-  return new Set(wineTypes).size === calls.length;
-}
+
 
 /**
  * Per-step trace captured from an AgentStep for triage / profiling.
@@ -612,15 +593,7 @@ export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> 
 // Penalty / scoring constants (extracted for visibility and testability)
 // ─────────────────────────────────────────────────────────────────────
 
-/**
- * Tool/step penalties — re-bound from `./constants.js` so the contract test
- * sees a single source of truth. Renaming via `K_*` keeps the local symbols
- * stable and avoids any churn at the call sites below.
- */
-const PENALTY_EXTRA_TOOL_PER_CALL = K_PENALTY_EXTRA_TOOL_PER_CALL;
-const PENALTY_EXTRA_TOOL_CAP = K_PENALTY_EXTRA_TOOL_CAP;
-const PENALTY_TOOL_DUPLICATE = K_PENALTY_TOOL_DUPLICATE;
-const PENALTY_TOOL_ORDER_VIOLATION = K_PENALTY_TOOL_ORDER_VIOLATION;
+/** executionEfficiency merge weights — SSoT in `./constants.js`. */
 const EXEC_TOOL_WEIGHT = K_EXEC_TOOL_WEIGHT;
 const EXEC_STEP_WEIGHT = K_EXEC_STEP_WEIGHT;
 /** Structured check penalties — multiplied into answerQuality. */
@@ -1033,186 +1006,7 @@ export function scoreScenario(
 // Dimension scorers
 // ─────────────────────────────────────────────────────────────────────
 
-function scoreToolAccuracy(
-  exp: ScenarioExpectation,
-  toolsUsed: readonly ToolCallTrace[],
-  diagnostics: Diagnostic[],
-  terminationReason?: string,
-  stepCount?: number,
-): number {
-  // When the agent never ran (step 0 + fallback), tool expectations cannot be
-  // evaluated — the LLM was unavailable (e.g. rate-limited), not the agent's fault.
-  // Return 1 with an info note so the dim doesn't punish infrastructure failures.
-  if (
-    terminationReason === 'fallback'
-    && (stepCount ?? 0) === 0
-    && exp.mustNotCallTools === undefined
-    && exp.expectedBlocked !== true
-  ) {
-    diagnostics.push({
-      dim: 'toolAccuracy',
-      severity: 'info',
-      code: 'TOOL_ACCURACY_SKIPPED_STEP0_FALLBACK',
-      message: 'tool accuracy not scored: agent never ran (step 0 fallback, LLM unavailable)',
-    });
-    return 1;
-  }
-  // Adversarial: mustNotCallTools is a CRITICAL hard fail.
-  if (exp.mustNotCallTools !== undefined && exp.mustNotCallTools.length > 0) {
-    const violated = exp.mustNotCallTools.filter((forbidden) =>
-      toolsUsed.some((t) => t.tool === forbidden),
-    );
-    if (violated.length > 0) {
-      diagnostics.push({
-        dim: 'toolAccuracy',
-        severity: 'critical',
-        code: 'MUST_NOT_CALL_VIOLATED',
-        message: `forbidden tools were called: ${violated.join(', ')}`,
-        observed: violated.join(','),
-      });
-      return 0;
-    }
-  }
 
-  if (exp.expectedBlocked === true) {
-    if (toolsUsed.length === 0) return 1;
-    diagnostics.push({
-      dim: 'toolAccuracy',
-      severity: 'critical',
-      code: 'EXPECTED_BLOCKED_BUT_RAN',
-      message: 'expectedBlocked=true but tool calls were observed',
-      observed: toolsUsed.length,
-      expected: 0,
-    });
-    return 0;
-  }
-
-  if (exp.tools === undefined || exp.tools.length === 0) {
-    // No tool expectations defined. Emit info diagnostic so scenario authors
-    // can see which scenarios are leaving toolAccuracy unconstrained.
-    // Only emit when mustNotCallTools and expectedBlocked are also absent —
-    // those paths already define tool behavior explicitly.
-    if (exp.mustNotCallTools === undefined && exp.expectedBlocked !== true) {
-      diagnostics.push({
-        dim: 'toolAccuracy',
-        severity: 'info',
-        code: 'TOOL_EXPECTATIONS_UNDEFINED',
-        message: 'scenario defines no tool expectations (tools[], mustNotCallTools, expectedBlocked); toolAccuracy not constrained — add expected tool calls to validate retrieval behavior',
-      });
-    }
-    return 1;
-  }
-  const expected = exp.tools;
-  const expectedNames = expected.map((t) => t.tool);
-
-  let matchedCount = 0;
-  for (const expTool of expected) {
-    const matchingCalls = toolsUsed.filter((t) => t.tool === expTool.tool);
-    if (matchingCalls.length === 0) {
-      diagnostics.push({
-        dim: 'toolAccuracy',
-        severity: 'warn',
-        code: 'EXPECTED_TOOL_MISSING',
-        message: `expected tool not called: ${expTool.tool}`,
-      });
-      continue;
-    }
-    if (expTool.inputContains !== undefined && expTool.inputContains.length > 0) {
-      const argMatch = matchingCalls.some((call) => {
-        const input = (call.input ?? '').toLowerCase();
-        return expTool.inputContains!.every((sub) => input.includes(sub.toLowerCase()));
-      });
-      if (!argMatch) {
-        diagnostics.push({
-          dim: 'toolAccuracy',
-          severity: 'warn',
-          code: 'INPUT_CONTAINS_UNSATISFIED',
-          message: `tool ${expTool.tool} called but inputContains unsatisfied`,
-        });
-        continue;
-      }
-    }
-    matchedCount++;
-  }
-  let score = matchedCount / expected.length;
-
-  if (exp.ordered === true && matchedCount === expected.length) {
-    const callOrder = toolsUsed.map((t) => t.tool);
-    let cursor = 0;
-    let inOrder = true;
-    for (const expectedName of expectedNames) {
-      const found = callOrder.indexOf(expectedName, cursor);
-      if (found === -1) {
-        inOrder = false;
-        break;
-      }
-      cursor = found + 1;
-    }
-    if (!inOrder) {
-      score *= PENALTY_TOOL_ORDER_VIOLATION;
-      diagnostics.push({
-        dim: 'toolAccuracy',
-        severity: 'warn',
-        code: 'TOOL_ORDER_VIOLATION',
-        message: 'expected tool order not respected',
-      });
-    }
-  }
-
-  const expectedSet = new Set(expectedNames);
-  const extraCalls = toolsUsed.filter((t) => !expectedSet.has(t.tool)).length;
-  if (extraCalls > 0) {
-    const penalty = Math.min(PENALTY_EXTRA_TOOL_CAP, extraCalls * PENALTY_EXTRA_TOOL_PER_CALL);
-    score *= 1 - penalty;
-    diagnostics.push({
-      dim: 'toolAccuracy',
-      severity: 'warn',
-      code: 'EXTRA_TOOL_CALLS',
-      message: `${extraCalls} extra/wrong tool call(s) (penalty ${(penalty * 100).toFixed(0)}%)`,
-      observed: extraCalls,
-    });
-  }
-
-  // v4: continuous ratio penalty replaces hard `> 2x AND > 2` cliff.
-  // The old threshold had a discontinuity: expectedReps=1, actualReps=2 → no penalty;
-  // actualReps=3 → sudden 30% penalty. The continuous model gives smooth degradation:
-  //   penalty = max(expectedReps / actualReps, PENALTY_TOOL_DUPLICATE)
-  // This caps at PENALTY_TOOL_DUPLICATE (0.7) for extreme duplication but gives
-  // graduated penalties for mild over-calling (e.g., 5 expected, 6 actual → 0.83).
-  // O(N) via pre-built Maps instead of O(N²) filter-per-tool.
-  const expectedCounts = new Map<string, number>();
-  for (const e of expected) {
-    expectedCounts.set(e.tool, (expectedCounts.get(e.tool) ?? 0) + 1);
-  }
-  const actualCallsByTool = new Map<string, ToolCallTrace[]>();
-  for (const t of toolsUsed) {
-    const calls = actualCallsByTool.get(t.tool) ?? [];
-    calls.push(t);
-    actualCallsByTool.set(t.tool, calls);
-  }
-  for (const [tool, expReps] of expectedCounts) {
-    const actualCalls = actualCallsByTool.get(tool) ?? [];
-    const actReps =
-      tool === 'search_wines' && expReps === 1 && isSearchWinesPartitionBatch(actualCalls)
-        ? expReps
-        : countSemanticToolInvocations(actualCalls);
-    if (actReps > expReps) {
-      const ratio = expReps / actReps; // 0 < ratio < 1
-      const penalty = Math.max(ratio, PENALTY_TOOL_DUPLICATE);
-      score *= penalty;
-      diagnostics.push({
-        dim: 'toolAccuracy',
-        severity: 'warn',
-        code: 'TOOL_DUPLICATE_CALLS',
-        message: `tool ${tool} called ${actualCalls.length}x (${actReps} semantic invocation(s), expected ${expReps}x, penalty ${((1 - penalty) * 100).toFixed(0)}%)`,
-        observed: actReps,
-        expected: expReps,
-      });
-    }
-  }
-
-  return clamp01(score);
-}
 
 
 

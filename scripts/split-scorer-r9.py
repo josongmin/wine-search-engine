@@ -227,6 +227,28 @@ import {{ parseToolCallInput }} from './scorer-context-relevance.js';
     src = insert_import_after_last_import(
         src, "import { scoreToolAccuracy } from './scorer-tool-accuracy.js';"
     )
+    # Tool-accuracy penalties moved — drop local re-binds and K_* imports
+    for line in [
+        "  PENALTY_EXTRA_TOOL_PER_CALL as K_PENALTY_EXTRA_TOOL_PER_CALL,\n",
+        "  PENALTY_EXTRA_TOOL_CAP as K_PENALTY_EXTRA_TOOL_CAP,\n",
+        "  PENALTY_TOOL_DUPLICATE as K_PENALTY_TOOL_DUPLICATE,\n",
+        "  PENALTY_TOOL_ORDER_VIOLATION as K_PENALTY_TOOL_ORDER_VIOLATION,\n",
+    ]:
+        src = src.replace(line, "")
+    for const_block in [
+        "const PENALTY_EXTRA_TOOL_PER_CALL = K_PENALTY_EXTRA_TOOL_PER_CALL;\n",
+        "const PENALTY_EXTRA_TOOL_CAP = K_PENALTY_EXTRA_TOOL_CAP;\n",
+        "const PENALTY_TOOL_DUPLICATE = K_PENALTY_TOOL_DUPLICATE;\n",
+        "const PENALTY_TOOL_ORDER_VIOLATION = K_PENALTY_TOOL_ORDER_VIOLATION;\n",
+    ]:
+        src = src.replace(const_block, "")
+    src = src.replace(
+        "/**\n * Tool/step penalties — re-bound from `./constants.js` so the contract test\n"
+        " * sees a single source of truth. Renaming via `K_*` keeps the local symbols\n"
+        " * stable and avoids any churn at the call sites below.\n"
+        " */\n",
+        "/** executionEfficiency merge weights — SSoT in `./constants.js`. */\n",
+    )
     # Remove parseToolCallInput from scorer imports if only used by isSearchWinesPartitionBatch
     src = src.replace(
         "import {\n  parseToolCallInput,\n  scoreContextRelevance,\n} from './scorer-context-relevance.js';",
