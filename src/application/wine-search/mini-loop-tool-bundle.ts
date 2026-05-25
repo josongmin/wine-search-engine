@@ -70,7 +70,6 @@ const TOOL_INPUT_STRING_MAX_LEN = 500;
 /** Hard cap on the `entity_id` field. Aligns with `ENTITY_ID_MAX_LEN` in
  *  agent-tools.ts (500). Same locally-duplicated constant rationale as
  *  above. */
-const TOOL_INPUT_ENTITY_ID_MAX_LEN = 500;
 
 /** Hard cap on the number of array elements in any tool input array (e.g.
  *  `styles`, `pairing_tags`). Matches `SEARCH_TOOL_MAX_STYLES` (16) — the
@@ -79,26 +78,14 @@ const TOOL_INPUT_MAX_ARRAY_ITEMS = 16;
 
 /** Allowed wine colors for the food-pairing tool. Mirrors
  *  `PairingColorSchema` in `execution-plan-schemas.ts`. */
-const FOOD_PAIRING_COLOR_VALUES = ['red', 'white', 'rosé', 'sparkling', 'both'] as const;
 
 /** Allowed search retrieval modes. Mirrors `ExecutionSearchModeSchema` in
  *  `execution-plan-schemas.ts`. */
 const SEARCH_MODE_VALUES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 
-/** Hard upper bound on `max_price_krw` in a tool input. Aligns with the
- *  agent-side `MAX_PRICE_KRW_BOUND` (100M KRW) — comfortably above any real
- *  wine price. */
-const TOOL_INPUT_MAX_PRICE_KRW = 100_000_000;
-
 /** Hard upper bound on `limit` in a search tool input. Aligns with the
  *  legacy agent-tool cap (`SEARCH_LIMIT_MAX = 20`). */
 const TOOL_INPUT_SEARCH_LIMIT_MAX = 20;
-
-/** Year range for `target_year` in `check_drinking_window`. Generous range
- *  covering historical vintages plus a forward horizon for future-window
- *  questions. */
-const TOOL_INPUT_TARGET_YEAR_MIN = 1900;
-const TOOL_INPUT_TARGET_YEAR_MAX = 2100;
 
 // ---------------------------------------------------------------------------
 // Shared Zod field builders — all permissive (rule 10), Korean-safe.
@@ -110,11 +97,6 @@ const ToolStringField = z
   .max(TOOL_INPUT_STRING_MAX_LEN);
 
 const ToolOptionalStringField = ToolStringField.optional();
-
-const ToolOptionalStringArrayField = z
-  .array(ToolStringField)
-  .max(TOOL_INPUT_MAX_ARRAY_ITEMS)
-  .optional();
 
 // ---------------------------------------------------------------------------
 // Tool input schemas.
@@ -145,39 +127,6 @@ const SearchWinesInputSchema = z.object({
 // rejected. The shared schema enforces trim + placeholder + max-length and
 // stays permissive on `limit` (the dispatcher clamps to LOOKUP_WINE_LIMIT_MAX).
 
-const CompareWinesInputSchema = z.object({
-  query_a: ToolStringField,
-  query_b: ToolStringField,
-});
-
-const CheckDrinkingWindowInputSchema = z.object({
-  entity_id: z
-    .string()
-    .min(TOOL_INPUT_STRING_MIN_LEN)
-    .max(TOOL_INPUT_ENTITY_ID_MAX_LEN),
-  target_year: z
-    .number()
-    .int()
-    .finite()
-    .min(TOOL_INPUT_TARGET_YEAR_MIN)
-    .max(TOOL_INPUT_TARGET_YEAR_MAX)
-    .optional(),
-});
-
-const GetFoodPairingsInputSchema = z.object({
-  food: ToolStringField,
-  color: z.enum(FOOD_PAIRING_COLOR_VALUES).optional(),
-  styles: ToolOptionalStringArrayField,
-  pairing_tags: ToolOptionalStringArrayField,
-  max_price_krw: z
-    .number()
-    .int()
-    .finite()
-    .min(TOOL_INPUT_STRING_MIN_LEN)
-    .max(TOOL_INPUT_MAX_PRICE_KRW)
-    .optional(),
-});
-
 // `z.object` permissive by default; assignment to `ToolOptionalStringField`
 // avoids `unused-import` noise if Korean discipline review revisits this
 // file. `ToolOptionalStringField` itself is used in optional combinators
@@ -196,15 +145,6 @@ const SEARCH_WINES_DESCRIPTION =
 const LOOKUP_WINE_DESCRIPTION =
   'Look up a SPECIFIC wine by name/identity (e.g. "Opus One 2018"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use search_wines for constraint-based discovery.';
 
-const COMPARE_WINES_DESCRIPTION =
-  'Compare two wines side-by-side. Use ONLY for explicit head-to-head comparisons. Cannot batch with other tools — must run alone.';
-
-const CHECK_DRINKING_WINDOW_DESCRIPTION =
-  'Check current/future drinkability for a specific wine. Provide an entity_id from a prior search_wines result; never invent ids.';
-
-const GET_FOOD_PAIRINGS_DESCRIPTION =
-  'Suggest wine pairings for a food description. Returns ranked wines. Accepts color, styles, budget.';
-
 // ---------------------------------------------------------------------------
 // Per-tool definitions — exported as module-scope `const`s so they have
 // stable referential identity across calls (rule 16 + prompt-cache hygiene).
@@ -222,24 +162,6 @@ const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
   inputSchema: LookupWineInputSchema,
 };
 
-export const COMPARE_WINES_TOOL_DEF: ToolDefinition = {
-  name: 'compare_wines' satisfies KnownAgentToolName,
-  description: COMPARE_WINES_DESCRIPTION,
-  inputSchema: CompareWinesInputSchema,
-};
-
-export const CHECK_DRINKING_WINDOW_TOOL_DEF: ToolDefinition = {
-  name: 'check_drinking_window' satisfies KnownAgentToolName,
-  description: CHECK_DRINKING_WINDOW_DESCRIPTION,
-  inputSchema: CheckDrinkingWindowInputSchema,
-};
-
-export const GET_FOOD_PAIRINGS_TOOL_DEF: ToolDefinition = {
-  name: 'get_food_pairings' satisfies KnownAgentToolName,
-  description: GET_FOOD_PAIRINGS_DESCRIPTION,
-  inputSchema: GetFoodPairingsInputSchema,
-};
-
 /** Frozen production tool list. Module-scope const so every
  *  `buildMiniLoopToolBundle` call returns the exact same array identity —
  *  prompt cache benefit on the Anthropic side and a simple equality check
@@ -247,9 +169,6 @@ export const GET_FOOD_PAIRINGS_TOOL_DEF: ToolDefinition = {
 const MINI_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
   SEARCH_WINES_TOOL_DEF,
   LOOKUP_WINE_TOOL_DEF,
-  COMPARE_WINES_TOOL_DEF,
-  CHECK_DRINKING_WINDOW_TOOL_DEF,
-  GET_FOOD_PAIRINGS_TOOL_DEF,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -291,9 +210,6 @@ export function buildMiniLoopToolBundle(
 export const MINI_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
   'search_wines',
   'lookup_wine',
-  'compare_wines',
-  'check_drinking_window',
-  'get_food_pairings',
 ];
 
 // Compile-time guarantee: every name in MINI_LOOP_TOOL_NAMES exists in the

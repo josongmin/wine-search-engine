@@ -73,7 +73,7 @@ function hasStructuredSetRetrievalPreferenceHints(
     || input.drinking_window_target_year !== undefined;
 }
 
-export function shouldPreserveRepresentativeAnchorOnlyQuery(
+function shouldPreserveRepresentativeAnchorOnlyQuery(
   input: SearchToolRetrievalCoreInput,
 ): boolean {
   if (input.preserveRepresentativeSearch === true) {
@@ -127,83 +127,6 @@ function shouldSuppressStructuredEntityLexicalDuplication(
   }
 
   return hasStructuredGeographyFilter(input) || hasStructuredSetRetrievalPreferenceHints(input);
-}
-
-export function shouldPreferTypedStructuredQuery(
-  input: SearchToolRetrievalCoreInput,
-): boolean {
-  if (shouldPreserveRepresentativeAnchorOnlyQuery(input)) {
-    return true;
-  }
-
-  const normalizedQuery = buildAgentQueryExecutionContract(input.query).hasEntityMetadataSignal
-    && isExactMetadataEntityLookupCandidate(input.query)
-    ? stripExactEntityLookupSuffix(input.query)
-    : input.query;
-  const queryViews = buildNormalizedQueryViews(normalizedQuery);
-  const pairingTags = [
-    ...new Set<PairingTag>([
-      ...extractAllPairingConstraints(input.query),
-      ...extractAllPairingConstraints(queryViews.punctuationStripped),
-      ...(queryViews.transliterated !== undefined
-        ? extractAllPairingConstraints(queryViews.transliterated)
-        : []),
-    ]),
-  ];
-  const occasionTerms = [
-    ...new Set(
-      (input.occasion ?? [])
-        .map(occasionTagToSemanticTerm)
-        .filter((term): term is string => typeof term === 'string' && term.length > 0),
-    ),
-  ];
-  const lookupQueries = [
-    ...new Set<string>([
-      queryViews.punctuationStripped,
-      ...(queryViews.transliterated !== undefined ? [queryViews.transliterated] : []),
-    ]),
-  ];
-
-  let hasStructuredEntityAnchor = false;
-  let hasUnrepresentedEntityAnchor = false;
-  for (const lookupQuery of lookupQueries) {
-    const resolvedSpans = resolveOverlaps(
-      parseSpans(lookupQuery).map((span) => ({
-        span,
-        resolved: resolveEntity(span.text, { preferEntityOverStyle: true }),
-      })),
-    )
-      .filter(
-        (
-          entry,
-        ): entry is {
-          span: Span;
-          resolved: NonNullable<ReturnType<typeof resolveEntity>>;
-        } => isDirectEntityResolution(entry.resolved),
-      );
-
-    for (const entry of resolvedSpans) {
-      if (
-        entry.resolved.entityType === 'wine_type'
-        && input.wine_type !== undefined
-      ) {
-        hasStructuredEntityAnchor = true;
-        continue;
-      }
-      if (isResolvedEntityRepresentedByStructuredFilters(entry.resolved, input)) {
-        hasStructuredEntityAnchor = true;
-        continue;
-      }
-      hasUnrepresentedEntityAnchor = true;
-    }
-  }
-
-  return shouldSuppressStructuredEntityLexicalDuplication(input, {
-    hasStructuredEntityAnchor,
-    hasUnrepresentedEntityAnchor,
-    pairingTagCount: pairingTags.length,
-    occasionTermCount: occasionTerms.length,
-  });
 }
 
 function pairingTagToSemanticTerm(tag: PairingTag): string {

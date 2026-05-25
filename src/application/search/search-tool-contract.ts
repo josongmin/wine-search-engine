@@ -8,7 +8,7 @@ import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 export const SEARCH_TOOL_WINE_TYPES = ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'] as const;
 export const SEARCH_TOOL_DRINKING_WINDOW_VALUES = ['now'] as const;
-export const SEARCH_TOOL_OCCASION_VALUES = [
+const SEARCH_TOOL_OCCASION_VALUES = [
   'gift',
   'celebration',
   'anniversary',
@@ -34,21 +34,14 @@ export const LOOKUP_WINE_TOOL_DESCRIPTION =
 export const LOOKUP_WINE_LIMIT_MAX = 3;
 export const LOOKUP_WINE_QUERY_DESCRIPTION =
   'The wine name / identity to resolve. Preserve the user\'s original language and exact lexical anchor (do not translate or paraphrase).';
-export const FOOD_PAIRINGS_TOOL_DESCRIPTION =
-  'Find wines that pair well with a specific food. Optionally filter by price and wine color.';
-export const DRINKING_WINDOW_TOOL_DESCRIPTION =
-  'Check if a wine is currently drinkable or predict its drinking window based on vintage and attributes.';
-export const COMPARE_WINES_TOOL_DESCRIPTION =
-  'Compare two wines side-by-side with rankings and attributes. Optional structured constraints apply identically to both sides.';
-
 const SEARCH_TOOL_FILTER_TEXT_MAX_LEN = 100;
 const SEARCH_TOOL_STYLE_HINT_MAX_LEN = 50;
 export const SEARCH_TOOL_MAX_STYLES = 5;
-export const FOOD_PAIRING_MAX_PAIRING_TAGS = 5;
+const FOOD_PAIRING_MAX_PAIRING_TAGS = 5;
 export const FOOD_PAIRING_SWEETNESS_TARGET_MIN = 0;
 export const FOOD_PAIRING_SWEETNESS_TARGET_MAX = 1;
-export const FOOD_PAIRING_SENSORY_SCALE_MIN = 0;
-export const FOOD_PAIRING_SENSORY_SCALE_MAX = 10;
+const FOOD_PAIRING_SENSORY_SCALE_MIN = 0;
+const FOOD_PAIRING_SENSORY_SCALE_MAX = 10;
 export const SEARCH_TOOL_MAX_EXCLUDE_FILTERS = 10;
 export const SEARCH_TOOL_VINTAGE_MIN = 1600;
 export const SEARCH_TOOL_VINTAGE_MAX = 2100;
@@ -128,50 +121,9 @@ export const SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
   'Optional target year for drinking_window. Defaults to the current calendar year when drinking_window is set.';
 export const SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION =
   'When true, prefer varied grapes, regions, or styles rather than near-duplicates.';
-export const FOOD_PAIRING_MAX_PRICE_KRW_DESCRIPTION =
-  'Optional maximum wine price in KRW (preferred over USD).';
-export const FOOD_PAIRING_MAX_PRICE_USD_DESCRIPTION =
-  'Optional maximum wine price in USD (legacy compatibility input, e.g. 50).';
-const FOOD_PAIRING_COLOR_DESCRIPTION =
-  'Optional wine color filter. Use "both" when red and white are both acceptable.';
-export const FOOD_PAIRING_FOOD_DESCRIPTION =
-  'Food item or dish to pair against (e.g. "grilled salmon", "pasta carbonara", "cheese platter").';
-export const FOOD_PAIRING_SWEETNESS_TARGET_DESCRIPTION =
-  'Optional typed sweetness target on the indexed [0,1] sweetness scale. Use only when the user gives an explicit sweetness objective; do not infer it from food alone.';
-export const FOOD_PAIRING_ACIDITY_MIN_DESCRIPTION =
-  'Optional minimum acidity on the indexed 0-10 sensory scale. Use for explicit high-acidity / bright / refreshing pairing objectives.';
-export const FOOD_PAIRING_TANNIN_MAX_DESCRIPTION =
-  'Optional maximum tannin on the indexed 0-10 sensory scale. Use for explicit low-tannin / soft-tannin pairing objectives.';
-export const FOOD_PAIRING_STYLES_DESCRIPTION =
-  'Optional semantic style hints for the pairing objective. Same semantics as search_wines.styles; prefer this over adding prose to food.';
-export const FOOD_PAIRING_PAIRING_TAGS_DESCRIPTION =
-  'Optional canonical pairing tags to match against indexed pairing metadata, e.g. ["spicy_food","salmon"]. Use only when the tag is explicitly known.';
-export const DRINKING_WINDOW_ENTITY_ID_DESCRIPTION =
-  'Wine entity ID copied from previous search results.';
-export const DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
-  'Optional year to check drinkability for (defaults to current year). Use for age predictions such as 2030.';
-export const COMPARE_WINES_QUERY_A_DESCRIPTION =
-  'First wine query anchor (e.g. "Château Margaux 2015"). Preserve the user phrase; put shared filters into structured fields.';
-export const COMPARE_WINES_QUERY_B_DESCRIPTION =
-  'Second wine query anchor (e.g. "Caymus Cabernet 2018"). Preserve the user phrase; put shared filters into structured fields.';
 const SEARCH_TOOL_PLACEHOLDER_PATTERN =
   /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
 
-export const SEARCH_TOOL_STYLE_HINT_VALUES = [
-  'dry',
-  'sweet',
-  'off_dry',
-  'oaked',
-  'light',
-  'chillable',
-  'screw_cap',
-  'approachable',
-  'crowd_pleasing',
-  'presentation_forward',
-  'ageworthy',
-  'cellaring',
-  'cellarworthy',
-] as const;
 const SEARCH_TOOL_SWEETNESS_DRY_MAX = 0.2;
 const SEARCH_TOOL_SWEETNESS_SWEET_MIN = 0.5;
 const SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN = 0.2;
@@ -371,10 +323,6 @@ export function buildFoodPairingFieldShape(
     styles: z.array(z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN)).max(SEARCH_TOOL_MAX_STYLES).optional(),
     pairing_tags: z.array(z.string().trim().min(1).max(SEARCH_TOOL_STYLE_HINT_MAX_LEN)).max(FOOD_PAIRING_MAX_PAIRING_TAGS).optional(),
   } as const;
-}
-
-export function buildFoodPairingColorSchemaDescription(): string {
-  return `${FOOD_PAIRING_COLOR_DESCRIPTION} "both" is legacy compatibility only; mixed-color recommendation requests should prefer search_wines.`;
 }
 
 function collectSearchToolStyleHints(input: {

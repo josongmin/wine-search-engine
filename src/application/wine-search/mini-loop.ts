@@ -77,8 +77,6 @@ import {
   type MiniLoopToolPorts,
 } from './mini-loop-schemas.js';
 import type {
-  ComparisonUseCaseInput,
-  FoodPairingUseCaseInput,
   SearchUseCaseInput,
 } from './execution-plan-schemas.js';
 
@@ -125,9 +123,6 @@ const MINI_LOOP_SYSTEM_PROMPT = [
   'Available tools:',
   '  - search_wines: retrieve wines matching the query and constraints.',
   '  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use instead of search_wines when the user names a particular wine.',
-  '  - get_food_pairings: retrieve wines that pair with a food description.',
-  '  - check_drinking_window: evaluate drinkability of a specific wine entity at a target year.',
-  '  - compare_wines: compare two wine descriptors.',
   '',
   'Hard rules:',
   '  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.',
@@ -849,35 +844,6 @@ async function invokeToolPort(
       );
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
-    case 'get_food_pairings': {
-      // rawResult mirrors the sibling shape: return the WHOLE FoodPairingResult
-      // (which carries `.food` + `.results`), not just the unwrapped results
-      // array. Observations stay shaped by formatSearchObservation(result.results)
-      // because the LLM only wants the per-wine summary, not the metadata.
-      const pairingInput = adaptFoodPairingInput(call.input);
-      const result = await ports.foodPairingUseCase.execute(pairingInput, requestId, { abortSignal: signal });
-      return { rawResult: result, observation: formatSearchObservation(result.results) };
-    }
-    case 'compare_wines': {
-      const comparisonInput = adaptComparisonInput(call.input);
-      const result = await ports.comparisonUseCase.execute(comparisonInput, requestId, { abortSignal: signal });
-      return { rawResult: result, observation: formatGenericObservation('compare_wines', result) };
-    }
-    case 'check_drinking_window': {
-      const { entityId, targetYear } = adaptDrinkabilityInput(call.input);
-      const probe = await ports.drinkabilityUseCase.probe(entityId, targetYear, requestId, { abortSignal: signal });
-      if (probe === undefined) {
-        // "Not found" convention (all tools): rawResult=null + prefixed
-        // observation. Siblings (search_wines, get_food_pairings) emit
-        // `NO_MATCH:` via formatSearchObservation; we mirror that here so
-        // every tool's empty-result outcome looks the same to the LLM.
-        return {
-          rawResult: null,
-          observation: `${MINI_LOOP_NO_MATCH_PREFIX}check_drinking_window: no drinkability projection for "${entityId}"`,
-        };
-      }
-      return { rawResult: probe, observation: formatGenericObservation('check_drinking_window', probe) };
-    }
     default: {
       return {
         rawResult: null,
@@ -926,49 +892,8 @@ export function adaptSearchInput(
   };
 }
 
-function adaptFoodPairingInput(raw: Record<string, unknown>): FoodPairingUseCaseInput {
-  const food = typeof raw['food'] === 'string' ? raw['food'] : '';
-  return {
-    food,
-    ...(typeof raw['color'] === 'string' ? { color: raw['color'] as FoodPairingUseCaseInput['color'] } : {}),
-    ...(Array.isArray(raw['styles'])
-      ? { styles: filterStrings(raw['styles']) }
-      : {}),
-    ...(Array.isArray(raw['pairing_tags'])
-      ? { pairingTags: filterStrings(raw['pairing_tags']) }
-      : {}),
-    ...(typeof raw['max_price_krw'] === 'number' && Number.isFinite(raw['max_price_krw'])
-      ? { maxPriceKrw: raw['max_price_krw'] }
-      : {}),
-  };
-}
 
-function adaptComparisonInput(raw: Record<string, unknown>): ComparisonUseCaseInput {
-  const queryA = typeof raw['query_a'] === 'string' ? raw['query_a'] : '';
-  const queryB = typeof raw['query_b'] === 'string' ? raw['query_b'] : '';
-  return {
-    originalQuery: `${queryA} vs ${queryB}`,
-    intent: 'compare',
-    legs: [
-      { surface: queryA, constraints: [] },
-      { surface: queryB, constraints: [] },
-    ],
-  };
-}
 
-function adaptDrinkabilityInput(raw: Record<string, unknown>): { readonly entityId: string; readonly targetYear: number } {
-  const entityId = typeof raw['entity_id'] === 'string' ? raw['entity_id'] : '';
-  const targetYearRaw = raw['target_year'];
-  // CLAUDE.md schema-quality bar: parseFloat / Number on external input
-  // must be guarded with Number.isFinite.
-  const parsedYear = typeof targetYearRaw === 'number'
-    ? targetYearRaw
-    : typeof targetYearRaw === 'string'
-      ? parseFloat(targetYearRaw)
-      : NaN;
-  const targetYear = Number.isFinite(parsedYear) ? parsedYear : new Date().getUTCFullYear();
-  return { entityId, targetYear };
-}
 
 // ---------------------------------------------------------------------------
 // Observation formatting — kept short to control token growth.
@@ -1039,13 +964,6 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
-function filterStrings(values: readonly unknown[]): string[] {
-  const out: string[] = [];
-  for (const v of values) {
-    if (typeof v === 'string' && v.length > 0) out.push(v);
-  }
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // Tool-result cache helpers
@@ -1102,14 +1020,6 @@ function formatObservationForTool(toolName: string, result: unknown): string {
     case 'search_wines':
     case 'lookup_wine':
       return formatSearchObservation(result);
-    case 'get_food_pairings': {
-      if (result !== null && typeof result === 'object') {
-        const record = result as Record<string, unknown>;
-        const inner = record['results'];
-        if (inner !== undefined) return formatSearchObservation(inner);
-      }
-      return formatGenericObservation(toolName, result);
-    }
     default:
       return formatGenericObservation(toolName, result);
   }
@@ -1167,18 +1077,10 @@ export function computeNextDirective(
   const lastSearchOutcome = (): ToolOutcome | undefined => {
     for (let i = outcomes.length - 1; i >= 0; i--) {
       const o = outcomes[i];
-      if (o !== undefined && (o.tool === 'search_wines' || o.tool === 'get_food_pairings')) return o;
+      if (o !== undefined && o.tool === 'search_wines') return o;
     }
     return undefined;
   };
-  const drinkabilityDone = (entityId: string): boolean =>
-    outcomes.some(
-      (o) =>
-        o.tool === 'check_drinking_window'
-        && (o.kind === 'success' || o.kind === 'partial_result')
-        && resultRefersToEntity(o.result, entityId),
-    );
-
   // 1. Grounded search required + no search yet.
   if (contract.requiresGroundedWineSearch && !hasOutcome('search_wines')) {
     return { kind: 'grounded_search_required', instruction: copy.groundedSearch };
@@ -1194,22 +1096,6 @@ export function computeNextDirective(
       tool: contract.requiredTool,
       instruction: copy.requiredTool(contract.requiredTool),
     };
-  }
-
-  // 3. Pending drinkability check after a search returned entity ids.
-  if (contract.requiresDrinkabilityCheck) {
-    const last = lastSearchOutcome();
-    if (last !== undefined && last.kind === 'success') {
-      const entityIds = extractEntityIds(last.result, MINI_LOOP_MAX_DRINKABILITY_ENTITY_IDS);
-      const missing = entityIds.filter((id) => !drinkabilityDone(id));
-      if (missing.length > 0) {
-        return {
-          kind: 'pending_drinkability_check',
-          entityIds: missing,
-          instruction: copy.pendingDrinkability(missing),
-        };
-      }
-    }
   }
 
   // 4. Relax constraints — fire when the last search returned 0 results
@@ -1269,30 +1155,7 @@ function alreadyRetriedRelax(state: RunnerStateView): boolean {
   return searchCount >= 2;
 }
 
-function extractEntityIds(result: unknown, max: number): readonly string[] {
-  if (result === null || typeof result !== 'object') return [];
-  const record = result as Record<string, unknown>;
-  const results = record['results'];
-  if (!Array.isArray(results)) return [];
-  const ids: string[] = [];
-  for (const item of results) {
-    if (item === null || typeof item !== 'object') continue;
-    const entity = (item as Record<string, unknown>)['entity'];
-    if (entity === null || typeof entity !== 'object') continue;
-    const entityRecord = entity as Record<string, unknown>;
-    const id = entityRecord['entityId'];
-    if (typeof id === 'string' && id.length > 0) ids.push(id);
-    if (ids.length >= max) break;
-  }
-  return ids;
-}
 
-function resultRefersToEntity(result: unknown, entityId: string): boolean {
-  if (result === null || typeof result !== 'object') return false;
-  const record = result as Record<string, unknown>;
-  if (typeof record['entityId'] === 'string' && record['entityId'] === entityId) return true;
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // History helpers
