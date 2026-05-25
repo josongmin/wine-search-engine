@@ -37,7 +37,6 @@ import type { ToolCallEvidenceFrame } from '../../../src/domain/agent/model/tool
 import type { EvidenceRecord } from '../../../src/domain/evaluation/service/claim-level-evaluator.js';
 import { buildEvidenceRecordsFromFrames } from '../../../src/domain/evaluation/service/build-evidence-records-from-frames.js';
 import { parseObservations } from '../../../src/domain/evaluation/service/evidence-parser.js';
-import { KRW_PER_USD_APPROXIMATE } from '../../../src/domain/shared/constants.js';
 import {
   PENALTY_EXTRA_TOOL_PER_CALL as K_PENALTY_EXTRA_TOOL_PER_CALL,
   PENALTY_EXTRA_TOOL_CAP as K_PENALTY_EXTRA_TOOL_CAP,
@@ -47,8 +46,19 @@ import {
   EXEC_STEP_WEIGHT as K_EXEC_STEP_WEIGHT,
   TERMINATION_FALLBACK_PARTIAL_CREDIT,
   FAITHFULNESS_PER_SCENARIO_WARN,
-  TRIMMED_GEOMEAN_PROPORTION,
 } from './constants.js';
+import {
+  clamp01,
+  DIMENSION_FLOOR,
+  NO_FLOOR_DIMS,
+  renormaliseWeights,
+  weightedGeometricMean,
+} from './scorer-aggregation.js';
+import {
+  extractKoreanPrices,
+  extractVintageYears,
+  extractProperNouns,
+} from './scorer-text-extractors.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -1196,20 +1206,6 @@ function summarizeContextAxisChecks(
   return `${axis} ${formatContextCheckSummary(checks, failed)}`;
 }
 
-/** Korean 만원 multiplier for price extraction. */
-const MAN_WON_MULTIPLIER = 10_000;
-/**
- * Approximate USD→KRW rate for price extraction.
- * v4: synced with production constant KRW_PER_USD_APPROXIMATE (src/domain/shared/constants.ts).
- * The scorer and production search pipeline must use the same rate — otherwise the
- * scorer rejects prices that the pipeline correctly surfaced (3.7% systematic bias
- * at the old 1,400 vs production's 1,350). If the shared constant changes, update here too.
- */
-const USD_TO_KRW_APPROX = KRW_PER_USD_APPROXIMATE;
-/** Approximate EUR→KRW rate for price extraction (€1 ≈ ₩1,500). */
-const EUR_TO_KRW_APPROX = 1_500;
-/** Approximate GBP→KRW rate for price extraction (£1 ≈ ₩1,700). */
-const GBP_TO_KRW_APPROX = 1_700;
 /** Fixed reference year for deterministic benchmark scoring of drink windows. */
 const BENCHMARK_REFERENCE_YEAR = 2026;
 
@@ -2204,109 +2200,12 @@ function parseDrinkingWindowFromObs(
   return null; // no drinking window data in observations
 }
 
-/** Extract Korean-style prices: "5만원", "100,000원", "50000원", "$50"
- * @internal exported for direct unit testing of the extractor. */
-export function extractKoreanPrices(text: string): number[] {
-  const prices: number[] = [];
-  // N만원 pattern (만 = 10,000)
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*만\s*원/gu)) {
-    prices.push(Number(m[1]) * MAN_WON_MULTIPLIER);
-  }
-  // Plain numbers + 원 (e.g. 50,000원 or 50000원)
-  for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/gu)) {
-    prices.push(Number(m[1]!.replace(/,/g, '')));
-  }
-  // Dollar amounts ($50 or $ 50.00)
-  for (const m of text.matchAll(/\$\s*(\d+(?:\.\d+)?)/gu)) {
-    prices.push(Number(m[1]) * USD_TO_KRW_APPROX);
-  }
-  // Euro amounts (€50 or € 50.00)
-  for (const m of text.matchAll(/€\s*(\d+(?:\.\d+)?)/gu)) {
-    prices.push(Number(m[1]) * EUR_TO_KRW_APPROX);
-  }
-  // Pound amounts (£50 or £ 50.00)
-  for (const m of text.matchAll(/£\s*(\d+(?:\.\d+)?)/gu)) {
-    prices.push(Number(m[1]) * GBP_TO_KRW_APPROX);
-  }
-  return prices;
-}
+// extractKoreanPrices / extractVintageYears / extractProperNouns + currency
+// constants + DRINK_WINDOW_CONTEXT_RE moved to ./scorer-text-extractors.ts
+// during the 2026-05-25 decomposition. Imported above; re-exported at the
+// bottom of this file to preserve the external surface.
 
-/** Drinking-window context keywords: a year preceded (within ~30 chars) by these
- * is likely a drinking-window endpoint, not a wine vintage. Used by
- * extractVintageYears to filter false positives like "best consumed 2025–2035"
- * or "drink: 2024-2038". */
-const DRINK_WINDOW_CONTEXT_RE = /(?:drink(?:ing)?|음용|마시기|peak|hold\s*until|closed|셀러링?|적기|through|까지|~)\s*(?:window|기간)?\s*:?\s*$/iu;
 
-/** Extract 4-digit years that look like wine vintages (1600-2099).
- *  Range extended from 1800 to 1600 to cover rare historic bottles
- *  (pre-phylloxera Bordeaux, Madeira, Tokaji) found in collector queries.
- *  Uses Unicode-safe boundaries instead of \b (CLAUDE.md rule 8).
- *
- *  v4: filters drinking-window years. A year whose left-context (30 chars) matches
- *  DRINK_WINDOW_CONTEXT_RE is likely a drinking window endpoint, not a vintage.
- *  Also filters the second year of a YYYY-YYYY or YYYY–YYYY dash pair when
- *  the gap is 5-30 years (plausible drinking window span). */
-/** @internal exported for direct unit testing of the extractor. */
-export function extractVintageYears(text: string): number[] {
-  const CONTEXT_LOOKBACK = 30;
-  const years: number[] = [];
-  const allMatches: { year: number; index: number }[] = [];
-  for (const m of text.matchAll(/(?:^|[^\p{L}\p{N}])(1[6-9]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/gu)) {
-    allMatches.push({ year: Number(m[1]), index: m.index });
-  }
-
-  for (let i = 0; i < allMatches.length; i++) {
-    const { year, index } = allMatches[i]!;
-    // Check left-context for drinking-window vocabulary
-    const leftContext = text.slice(Math.max(0, index - CONTEXT_LOOKBACK), index);
-    if (DRINK_WINDOW_CONTEXT_RE.test(leftContext)) continue;
-
-    // Check if this is the second year of a YYYY-YYYY dash pair (drinking window range)
-    if (i > 0) {
-      const prev = allMatches[i - 1]!;
-      const gap = year - prev.year;
-      const betweenText = text.slice(prev.index + 4, index).trim();
-      // Only filter if the gap looks like a drinking window (5-30 years)
-      // and the separator is a dash/endash
-      if (gap >= 5 && gap <= 30 && /^[-–]$/.test(betweenText)) continue;
-    }
-
-    years.push(year);
-  }
-  return years;
-}
-
-/**
- * Extract wine-name-like sequences from text. Handles ONLY Latin proper nouns
- * (capitalized multi-word). Korean transliterations of wine names are NOT
- * extracted because:
- *
- * 1. Wine database entries are Latin (Opus One, Château Margaux), and observations
- *    emit them in Latin. Korean transliterations in the agent answer ('오푸스 원')
- *    would need a transliteration map to match — neither side can do this
- *    reliably with a regex.
- * 2. The Korean Hangul-block extraction (`[\uAC00-\uD7A3]{2,}`) was producing
- *    massive false positives ('좋은와인입니다', '맛있습니다', '추천드립니다'),
- *    which required progressively more stopwords and predicate-suffix filters —
- *    the textbook regex-tightening trap.
- * 3. For mustCiteFromToolResults the Latin path catches the canonical wine names
- *    (e.g., the agent writes "Opus One"); for citation grounding of Korean-named
- *    wines, an LLM judge with the rubric "Every wine mentioned must have appeared
- *    in tool results" handles cross-script matching semantically.
- *
- * v4 STRUCTURAL FIX: removed Korean Hangul extraction + KOREAN_PROPER_NOUN_STOPWORDS
- * + KOREAN_PREDICATE_SUFFIX_RE filter. The function is now Latin-only and
- * deterministic. Korean wine name grounding is delegated to the judge's
- * mustCiteFromToolResults rubric criterion.
- */
-/** @internal exported for direct unit testing of the extractor. */
-export function extractProperNouns(text: string): string[] {
-  // Latin proper nouns: "Opus One", "Château Margaux", "Screaming Eagle"
-  // Unicode-aware boundary: \b is ASCII-only and silently fails on accented
-  // Latin names (Château, Côte). Use lookahead/lookbehind for non-word chars.
-  const latinMatches = text.match(/(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)(?=$|[\s,;:.)])/g);
-  return latinMatches ?? [];
-}
 
 /** Navigate a nested object by dot-path: "filters.priceMaxKrw" */
 function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
@@ -3066,173 +2965,23 @@ function emitKoreanClrDiagnostic(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Math helpers
-// ─────────────────────────────────────────────────────────────────────
+// Math + aggregate helpers (clamp01, renormaliseWeights, weightedGeometricMean,
+// aggregateGeoMean, aggregateTrimmedGeoMean, DIMENSION_FLOOR, NO_FLOOR_DIMS)
+// moved to ./scorer-aggregation.ts during the 2026-05-25 decomposition.
+// Re-exported below to preserve the external surface for runner.ts and tests.
+export {
+  renormaliseWeights,
+  weightedGeometricMean,
+  aggregateGeoMean,
+  aggregateTrimmedGeoMean,
+} from './scorer-aggregation.js';
 
-function clamp01(x: number): number {
-  if (!Number.isFinite(x)) return 0;
-  if (x < 0) return 0;
-  if (x > 1) return 1;
-  return x;
-}
-
-/**
- * Renormalise weights so they sum to 1.0. Used after merging partial
- * scenario overrides over tier defaults so users can set "terminationCorrectness: 0.80"
- * as a ratio-style boost without manually balancing the other dims.
- */
-export function renormaliseWeights(weights: Required<DimensionWeights>): Required<DimensionWeights> {
-  const sum = Object.values(weights).reduce((a, b) => a + b, 0);
-  if (sum <= 0 || !Number.isFinite(sum)) return weights;
-  if (Math.abs(sum - 1) < 1e-9) return weights;
-  const factor = 1 / sum;
-  const result: Record<string, number> = {};
-  for (const [key, value] of Object.entries(weights)) {
-    result[key] = value * factor;
-  }
-  return result as Required<DimensionWeights>;
-}
-
-/**
- * Weighted geometric mean with NULL-DROP for missing dimensions (SOTA++ v4).
- *
- * When a dimension's score is null (e.g. judge disabled, faithfulness unmeasured),
- * the dimension is EXCLUDED from the computation entirely — its weight is dropped
- * from the denominator and the remaining weights are renormalized.
- *
- * WHY null-drop, not fixed 0.5 imputation:
- * The 0.5 imputation approach created a systematic ~16% drag on --no-judge runs.
- * In that mode, judge=null AND faithfulness=null (no LLM judge → no faithfulness
- * scoring either). With DEFAULT_WEIGHTS judge=0.15 + faithfulness=0.10 = 0.25 of
- * total weight imputed at 0.5, even a perfect-scoring agent was capped at ~84%.
- * This made --no-judge scores incomparable with judge-enabled scores AND gave a
- * false impression of quality degradation.
- *
- * The null-drop approach eliminates this drag: null dims simply don't participate.
- * The remaining present dims are scored on their own merits with renormalized weights.
- *
- * Monotonicity: adding a real score for a previously-null dim ALWAYS changes the
- * overall in the direction determined by whether the new score is above or below
- * the present-dims geometric mean. This is the standard approach in RAGAS and
- * academic agent benchmarks (null metrics are excluded, not imputed).
- *
- * WHY this is NOT the same as the rejected "present-mean imputation":
- * The old approach imputed null dims with the present-only GEOMETRIC MEAN (a
- * computed VALUE that changed when other dims changed → coupling bug). Null-drop
- * does not impute any value — it removes the weight entirely. No coupling possible
- * because there is no imputed value to couple through.
- */
-/** Minimum score floor for non-critical dimensions before geo-mean computation.
- *  Prevents a single weak (but non-critical) dim from collapsing overall by >20x. */
-const DIMENSION_FLOOR = 0.05;
-
-/**
- * Dimensions that intentionally receive NO floor treatment before geo-mean.
- * These are primary outcome / safety dimensions where flooring would hide a
- * real failure signal instead of merely smoothing noisy measurement.
- * Defined at module scope: deterministic constant, no per-call allocation (rule 16).
- */
-const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>([
-  'executionEfficiency',
-  'terminationCorrectness',
-  'answerQuality',
-  // judge is intentionally NOT in NO_FLOOR_DIMS (v5): LLM judge scores are noisy
-  // even with N=3 median. A 0.00 judge collapses the geo-mean to ~12% which is
-  // disproportionate — the agent may have answered reasonably but the judge's rubric
-  // evaluation was overly strict. DIMENSION_FLOOR=0.05 caps the penalty at ~10x
-  // rather than ~1000x (log(0.05) vs log(1e-6)).
-  'costEfficiency',  // v4: 2x budget overshoot (score=0) is an engineering failure, not noise.
-                     // Flooring it to 0.05 reduced the log-space penalty by 10.8x.
-]);
-
-export function weightedGeometricMean(
-  dimScores: Record<string, number | null>,
-  weights: Record<string, number>,
-): number {
-  const EPS = 1e-6;
-  // Null-drop: only present (non-null) dims participate. Null dims are excluded
-  // entirely — their weight is NOT in the denominator.
-  let weightedLogSum = 0;
-  let presentWeight = 0;
-  for (const key of Object.keys(weights)) {
-    const w = weights[key]!;
-    const x = dimScores[key];
-    if (x === null || x === undefined) continue; // null-drop: skip entirely
-    weightedLogSum += w * Math.log(clamp01(x) + EPS);
-    presentWeight += w;
-  }
-  if (presentWeight === 0) return 0; // degenerate: no dims have scores
-  // Do NOT subtract EPS here — EPS was added to log() inputs only to prevent
-  // log(0)=-Infinity. Subtracting it from exp() output introduces a systematic
-  // negative bias: for a perfect score (x=1), exp(log(1+1e-6))−1e-6 ≈ 0, which
-  // would clamp incorrectly. Let clamp01 handle any float rounding artefact.
-  const raw = Math.exp(weightedLogSum / presentWeight);
-  return clamp01(raw);
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Aggregate helpers (run-level — used by runner.ts to build the report)
-// ─────────────────────────────────────────────────────────────────────
-
-/**
- * Unweighted geometric mean of a series of [0,1] values (e.g. per-scenario
- * `overall` scores). Critical failures (0) survive intact — the geo-mean is
- * intentionally dominated by them so a run-wide regression cannot hide behind
- * good-scenario averages.
- *
- * Mirrors the EPS=1e-6 floor used by {@link weightedGeometricMean} so a single
- * 0 maps to `Math.exp(log(1e-6))` ≈ 0 rather than `-Infinity`.
- */
-export function aggregateGeoMean(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const EPS = 1e-6;
-  let logSum = 0;
-  for (const v of values) {
-    logSum += Math.log(Math.max(clamp01(v), EPS));
-  }
-  return clamp01(Math.exp(logSum / values.length));
-}
-
-/**
- * 5%-trimmed geometric mean — robust to heavy-left-tailed score distributions
- * dominated by a handful of critical failures (score=0).
- *
- * Implementation: sort ascending, drop ⌊TRIMMED_GEOMEAN_PROPORTION × N⌋ values
- * from EACH tail, geo-mean the remainder. When the survivor set is empty
- * (`N < ⌈1/TRIMMED_GEOMEAN_PROPORTION⌉` − e.g. N≤9 at 5% trim leaves zero
- * survivors after symmetric trimming) we fall back to the untrimmed geo-mean
- * to avoid reporting `0` for a small healthy run.
- *
- * Critical failures (raw 0 values) STAY counted via the discrete
- * `criticalFailureCount` channel in the report — the bench surfaces both
- * trimmed and raw aggregates AND the critical count side-by-side so trimming
- * never squelches the security/correctness signal (CLAUDE.md execution baseline
- * + metric-spec.md §A2).
- *
- * Compare against {@link aggregateGeoMean}: when |raw − trimmed| >
- * `TRIMMED_VS_RAW_INSIGHT_DELTA`, the raw value is being dragged by the
- * heavy tail and the insight rule `trimmed_vs_raw_gap` surfaces this in the
- * benchmark summary.
- */
-export function aggregateTrimmedGeoMean(
-  values: readonly number[],
-  proportion: number = TRIMMED_GEOMEAN_PROPORTION,
-): number {
-  if (values.length === 0) return 0;
-  if (!Number.isFinite(proportion) || proportion <= 0) {
-    return aggregateGeoMean(values);
-  }
-  const trimCount = Math.floor(values.length * proportion);
-  if (trimCount === 0) {
-    // Too few samples to trim symmetrically — fall back to raw.
-    return aggregateGeoMean(values);
-  }
-  const sorted = [...values].sort((a, b) => a - b);
-  const survivors = sorted.slice(trimCount, sorted.length - trimCount);
-  if (survivors.length === 0) {
-    // Degenerate: trim window swallowed everything; fall back to raw.
-    return aggregateGeoMean(values);
-  }
-  return aggregateGeoMean(survivors);
-}
+// extractKoreanPrices / extractVintageYears / extractProperNouns + their
+// currency constants + DRINK_WINDOW_CONTEXT_RE moved to ./scorer-text-extractors.ts
+// during the 2026-05-25 decomposition. Re-exported below to preserve the
+// external surface (test/benchmark/agent/__tests__/scorer.test.ts).
+export {
+  extractKoreanPrices,
+  extractVintageYears,
+  extractProperNouns,
+} from './scorer-text-extractors.js';
