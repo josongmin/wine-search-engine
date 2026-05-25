@@ -5,11 +5,117 @@ import type {
   GeneralLaneCandidateArtifact,
   IdentityExactnessTier,
 } from '../model/dual-lane-artifact.js';
-import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import type {
+  HybridCandidate,
+  HybridCandidateBase,
+} from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 
 const MISSING_LANE_RANK = Number.POSITIVE_INFINITY;
+
+/**
+ * Fields where the merge policy is "prefer general lane, fall back to entity lane".
+ *
+ * These are propagated from the search index summary on either lane; when both
+ * lanes hydrated the same entity, the general lane (sparse/dense fusion) is the
+ * canonical substrate, so its values win.
+ *
+ * Constrained to `keyof HybridCandidateBase` so a typo (e.g. renaming a field
+ * on the type) becomes a compile error rather than a silent skip at runtime.
+ */
+const GENERAL_PREFERRED_KEYS = [
+  'canonicalLabel',
+  'producer',
+  'region',
+  'closure',
+  'searchTextEn',
+  'searchTextKo',
+  'semanticSummary',
+  'grapePrimary',
+  'grapes',
+  'style',
+  'priceBand',
+  'pairing',
+  'occasion',
+  'drinkingWindowStart',
+  'drinkingWindowEnd',
+  'drinkingWindowModelVersion',
+  'vintageYear',
+  'body',
+  'tannin',
+  'acidity',
+  'sweetness',
+  'finishLength',
+  'wineType',
+  'criticScoreNormalized',
+  'producerPrestige',
+  'popularityScore',
+  'availability',
+  'country',
+  'appellation',
+  'classification',
+  'alcoholPct',
+  'priceUsd',
+  'certifications',
+  'soilType',
+  'flavorProfiles',
+  'producerType',
+  'grapeFamily',
+  'regionHierarchy',
+  'priceBandNumeric',
+  'giftSuitabilityScore',
+  'beginnerSuitabilityScore',
+] as const satisfies readonly (keyof HybridCandidateBase)[];
+
+/**
+ * Fields propagated only from the general lane (retrieval-pass ranking signals).
+ *
+ * The entity lane is a synthetic resolver path with no sparse/dense ranks of
+ * its own, so these never come from the entity candidate.
+ */
+const GENERAL_ONLY_KEYS = [
+  'sparseRank',
+  'sparseRawScore',
+  'denseRank',
+  'denseRawScore',
+  'learnedSparseRank',
+  'learnedSparseRawScore',
+  'anchorRank',
+  'anchorRawScore',
+  'fusionRrfTotal',
+] as const satisfies readonly (keyof HybridCandidateBase)[];
+
+/**
+ * Assign `value` to `target[key]` only when defined.
+ *
+ * Honors `exactOptionalPropertyTypes`: the key is omitted entirely (not set to
+ * `undefined`) when the source value is missing, so downstream `in`/`hasOwn`
+ * checks behave correctly and structural types stay clean.
+ *
+ * The target is constrained to `Partial<T>` (rather than `Record<K, V>`) so
+ * callers can pass a heterogeneous accumulator whose key types vary; the value
+ * type is then derived from `T[K]`, keeping the assignment compile-checked.
+ */
+function setOptional<T, K extends keyof T>(
+  target: Partial<T>,
+  key: K,
+  value: T[K] | undefined,
+): void {
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
+/**
+ * Merge two optional values by preferring the first defined one.
+ *
+ * Trivial alias of `??` lifted to a named function so the merge intent reads
+ * uniformly across 40+ field assignments. `mergeOptional(a, b)` ≡ `a ?? b`.
+ */
+function mergeOptional<T>(a: T | undefined, b: T | undefined): T | undefined {
+  return a ?? b;
+}
 
 function uniqueStrings(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
@@ -38,13 +144,6 @@ function mergeSourceRecordRefs(
     }
   }
   return merged.size > 0 ? [...merged.values()] : undefined;
-}
-
-function pickFirstDefined<T>(
-  primary: T | undefined,
-  secondary: T | undefined,
-): T | undefined {
-  return primary ?? secondary;
 }
 
 function mergeRetrievalTrace(
@@ -117,155 +216,46 @@ function mergeCandidates(params: {
     : substrate.retrievalTrace;
   const entityPosteriorScore = params.entityArtifact?.identityProvenance.calibratedScore;
 
-  const mergedCandidate = {
+  // Required fields (always present) are constructed up-front. Optional fields
+  // are layered in via `setOptional`, which preserves `exactOptionalPropertyTypes`
+  // semantics by omitting keys whose values are undefined.
+  const mergedCandidate: Partial<HybridCandidateBase> & {
+    entityId: HybridCandidateBase['entityId'];
+    matchedConstraints: HybridCandidateBase['matchedConstraints'];
+    retrievalTrace: HybridCandidateBase['retrievalTrace'];
+  } = {
     entityId: substrate.entityId,
-    ...(pickFirstDefined(generalCandidate?.canonicalLabel, entityCandidate?.canonicalLabel) !== undefined
-      ? { canonicalLabel: pickFirstDefined(generalCandidate?.canonicalLabel, entityCandidate?.canonicalLabel) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.producer, entityCandidate?.producer) !== undefined
-      ? { producer: pickFirstDefined(generalCandidate?.producer, entityCandidate?.producer) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.region, entityCandidate?.region) !== undefined
-      ? { region: pickFirstDefined(generalCandidate?.region, entityCandidate?.region) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.closure, entityCandidate?.closure) !== undefined
-      ? { closure: pickFirstDefined(generalCandidate?.closure, entityCandidate?.closure) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.searchTextEn, entityCandidate?.searchTextEn) !== undefined
-      ? { searchTextEn: pickFirstDefined(generalCandidate?.searchTextEn, entityCandidate?.searchTextEn) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.searchTextKo, entityCandidate?.searchTextKo) !== undefined
-      ? { searchTextKo: pickFirstDefined(generalCandidate?.searchTextKo, entityCandidate?.searchTextKo) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.semanticSummary, entityCandidate?.semanticSummary) !== undefined
-      ? { semanticSummary: pickFirstDefined(generalCandidate?.semanticSummary, entityCandidate?.semanticSummary) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.grapePrimary, entityCandidate?.grapePrimary) !== undefined
-      ? { grapePrimary: pickFirstDefined(generalCandidate?.grapePrimary, entityCandidate?.grapePrimary) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.grapes, entityCandidate?.grapes) !== undefined
-      ? { grapes: pickFirstDefined(generalCandidate?.grapes, entityCandidate?.grapes) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.style, entityCandidate?.style) !== undefined
-      ? { style: pickFirstDefined(generalCandidate?.style, entityCandidate?.style) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.priceBand, entityCandidate?.priceBand) !== undefined
-      ? { priceBand: pickFirstDefined(generalCandidate?.priceBand, entityCandidate?.priceBand) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.pairing, entityCandidate?.pairing) !== undefined
-      ? { pairing: pickFirstDefined(generalCandidate?.pairing, entityCandidate?.pairing) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.occasion, entityCandidate?.occasion) !== undefined
-      ? { occasion: pickFirstDefined(generalCandidate?.occasion, entityCandidate?.occasion) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.drinkingWindowStart, entityCandidate?.drinkingWindowStart) !== undefined
-      ? { drinkingWindowStart: pickFirstDefined(generalCandidate?.drinkingWindowStart, entityCandidate?.drinkingWindowStart) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.drinkingWindowEnd, entityCandidate?.drinkingWindowEnd) !== undefined
-      ? { drinkingWindowEnd: pickFirstDefined(generalCandidate?.drinkingWindowEnd, entityCandidate?.drinkingWindowEnd) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.drinkingWindowModelVersion, entityCandidate?.drinkingWindowModelVersion) !== undefined
-      ? { drinkingWindowModelVersion: pickFirstDefined(generalCandidate?.drinkingWindowModelVersion, entityCandidate?.drinkingWindowModelVersion) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.vintageYear, entityCandidate?.vintageYear) !== undefined
-      ? { vintageYear: pickFirstDefined(generalCandidate?.vintageYear, entityCandidate?.vintageYear) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.body, entityCandidate?.body) !== undefined
-      ? { body: pickFirstDefined(generalCandidate?.body, entityCandidate?.body) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.tannin, entityCandidate?.tannin) !== undefined
-      ? { tannin: pickFirstDefined(generalCandidate?.tannin, entityCandidate?.tannin) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.acidity, entityCandidate?.acidity) !== undefined
-      ? { acidity: pickFirstDefined(generalCandidate?.acidity, entityCandidate?.acidity) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.sweetness, entityCandidate?.sweetness) !== undefined
-      ? { sweetness: pickFirstDefined(generalCandidate?.sweetness, entityCandidate?.sweetness) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.finishLength, entityCandidate?.finishLength) !== undefined
-      ? { finishLength: pickFirstDefined(generalCandidate?.finishLength, entityCandidate?.finishLength) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.wineType, entityCandidate?.wineType) !== undefined
-      ? { wineType: pickFirstDefined(generalCandidate?.wineType, entityCandidate?.wineType) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.criticScoreNormalized, entityCandidate?.criticScoreNormalized) !== undefined
-      ? { criticScoreNormalized: pickFirstDefined(generalCandidate?.criticScoreNormalized, entityCandidate?.criticScoreNormalized) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.producerPrestige, entityCandidate?.producerPrestige) !== undefined
-      ? { producerPrestige: pickFirstDefined(generalCandidate?.producerPrestige, entityCandidate?.producerPrestige) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.popularityScore, entityCandidate?.popularityScore) !== undefined
-      ? { popularityScore: pickFirstDefined(generalCandidate?.popularityScore, entityCandidate?.popularityScore) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.availability, entityCandidate?.availability) !== undefined
-      ? { availability: pickFirstDefined(generalCandidate?.availability, entityCandidate?.availability) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.country, entityCandidate?.country) !== undefined
-      ? { country: pickFirstDefined(generalCandidate?.country, entityCandidate?.country) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.appellation, entityCandidate?.appellation) !== undefined
-      ? { appellation: pickFirstDefined(generalCandidate?.appellation, entityCandidate?.appellation) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.classification, entityCandidate?.classification) !== undefined
-      ? { classification: pickFirstDefined(generalCandidate?.classification, entityCandidate?.classification) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.alcoholPct, entityCandidate?.alcoholPct) !== undefined
-      ? { alcoholPct: pickFirstDefined(generalCandidate?.alcoholPct, entityCandidate?.alcoholPct) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.priceUsd, entityCandidate?.priceUsd) !== undefined
-      ? { priceUsd: pickFirstDefined(generalCandidate?.priceUsd, entityCandidate?.priceUsd) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.certifications, entityCandidate?.certifications) !== undefined
-      ? { certifications: pickFirstDefined(generalCandidate?.certifications, entityCandidate?.certifications) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.soilType, entityCandidate?.soilType) !== undefined
-      ? { soilType: pickFirstDefined(generalCandidate?.soilType, entityCandidate?.soilType) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.flavorProfiles, entityCandidate?.flavorProfiles) !== undefined
-      ? { flavorProfiles: pickFirstDefined(generalCandidate?.flavorProfiles, entityCandidate?.flavorProfiles) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.producerType, entityCandidate?.producerType) !== undefined
-      ? { producerType: pickFirstDefined(generalCandidate?.producerType, entityCandidate?.producerType) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.grapeFamily, entityCandidate?.grapeFamily) !== undefined
-      ? { grapeFamily: pickFirstDefined(generalCandidate?.grapeFamily, entityCandidate?.grapeFamily) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.regionHierarchy, entityCandidate?.regionHierarchy) !== undefined
-      ? { regionHierarchy: pickFirstDefined(generalCandidate?.regionHierarchy, entityCandidate?.regionHierarchy) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.priceBandNumeric, entityCandidate?.priceBandNumeric) !== undefined
-      ? { priceBandNumeric: pickFirstDefined(generalCandidate?.priceBandNumeric, entityCandidate?.priceBandNumeric) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.giftSuitabilityScore, entityCandidate?.giftSuitabilityScore) !== undefined
-      ? { giftSuitabilityScore: pickFirstDefined(generalCandidate?.giftSuitabilityScore, entityCandidate?.giftSuitabilityScore) }
-      : {}),
-    ...(pickFirstDefined(generalCandidate?.beginnerSuitabilityScore, entityCandidate?.beginnerSuitabilityScore) !== undefined
-      ? { beginnerSuitabilityScore: pickFirstDefined(generalCandidate?.beginnerSuitabilityScore, entityCandidate?.beginnerSuitabilityScore) }
-      : {}),
-    ...(generalCandidate?.sparseRank !== undefined ? { sparseRank: generalCandidate.sparseRank } : {}),
-    ...(generalCandidate?.sparseRawScore !== undefined ? { sparseRawScore: generalCandidate.sparseRawScore } : {}),
-    ...(generalCandidate?.denseRank !== undefined ? { denseRank: generalCandidate.denseRank } : {}),
-    ...(generalCandidate?.denseRawScore !== undefined ? { denseRawScore: generalCandidate.denseRawScore } : {}),
-    ...(generalCandidate?.learnedSparseRank !== undefined ? { learnedSparseRank: generalCandidate.learnedSparseRank } : {}),
-    ...(generalCandidate?.learnedSparseRawScore !== undefined ? { learnedSparseRawScore: generalCandidate.learnedSparseRawScore } : {}),
-    ...(generalCandidate?.anchorRank !== undefined ? { anchorRank: generalCandidate.anchorRank } : {}),
-    ...(generalCandidate?.anchorRawScore !== undefined ? { anchorRawScore: generalCandidate.anchorRawScore } : {}),
-    ...(generalCandidate?.fusionRrfTotal !== undefined ? { fusionRrfTotal: generalCandidate.fusionRrfTotal } : {}),
-    ...(sourceRecordRefs !== undefined ? { sourceRecordRefs } : {}),
     matchedConstraints: uniqueStrings([
       ...(generalCandidate?.matchedConstraints ?? []),
       ...(entityCandidate?.matchedConstraints ?? []),
     ]),
-    ...(unmetHardConstraints !== undefined ? { unmetHardConstraints } : {}),
-    ...(matchedAtomRefs !== undefined ? { matchedAtomRefs } : {}),
-    ...(unmetAtomRefs !== undefined ? { unmetAtomRefs } : {}),
     retrievalTrace: trace,
-    ...(generalCandidate?.retrievalProvenance !== undefined
-      ? { retrievalProvenance: generalCandidate.retrievalProvenance }
-      : entityCandidate?.retrievalProvenance !== undefined
-        ? { retrievalProvenance: entityCandidate.retrievalProvenance }
-        : {}),
   };
+
+  // Category A: general-preferred fields with entity fallback.
+  for (const key of GENERAL_PREFERRED_KEYS) {
+    setOptional(
+      mergedCandidate,
+      key,
+      mergeOptional(generalCandidate?.[key], entityCandidate?.[key]),
+    );
+  }
+
+  // Category B: general-only ranking signals (entity lane has no rank).
+  for (const key of GENERAL_ONLY_KEYS) {
+    setOptional(mergedCandidate, key, generalCandidate?.[key]);
+  }
+
+  // Custom merge results (list union / record dedup).
+  setOptional(mergedCandidate, 'sourceRecordRefs', sourceRecordRefs);
+  setOptional(mergedCandidate, 'unmetHardConstraints', unmetHardConstraints);
+  setOptional(mergedCandidate, 'matchedAtomRefs', matchedAtomRefs);
+  setOptional(mergedCandidate, 'unmetAtomRefs', unmetAtomRefs);
+  setOptional(
+    mergedCandidate,
+    'retrievalProvenance',
+    mergeOptional(generalCandidate?.retrievalProvenance, entityCandidate?.retrievalProvenance),
+  );
 
   if (params.lanePresence === 'general_only') {
     return {

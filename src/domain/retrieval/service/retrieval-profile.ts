@@ -19,7 +19,7 @@ import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
  * Configuration profile that governs retrieval behaviour for a given
  * query family and route combination.
  */
-interface RetrievalProfile {
+export interface RetrievalProfile {
   /** Human-readable profile name — must be unique across profiles. */
   readonly name: string;
 
@@ -37,6 +37,22 @@ interface RetrievalProfile {
 
   /** Weight assigned to anchor-neighbourhood hits in the fusion. */
   readonly anchorWeight: number;
+
+  /**
+   * Optional weight assigned to learned-sparse (SPLADE) hits in the fusion.
+   *
+   * Profiles that activate the `learned_sparse` channel MUST set this so the
+   * 4-way sum (sparse + dense + anchor + learnedSparse) equals 1.0 — that
+   * invariant is what {@link validateRetrievalProfile} enforces at module
+   * load time. Profiles that do not include the `learned_sparse` channel
+   * omit this field entirely (treated as 0 in the invariant check).
+   *
+   * NOTE: The runtime fusion path in `fusion.ts` reads its learned-sparse
+   * weight from `per-class-fusion-config.ts` (FusionConfig.learnedSparseWeight),
+   * NOT from this field. This profile field exists for invariant declaration
+   * and observability — keep both registries in sync intentionally.
+   */
+  readonly learnedSparseWeight?: number;
 
   /** Maximum number of sparse hits to retrieve. */
   readonly sparseTopN: number;
@@ -210,6 +226,11 @@ const LEARNED_SPARSE_HYBRID: RetrievalProfile = {
   sparseWeight: 0.35,
   denseWeight: 0.45,
   anchorWeight: 0,
+  // 4-way sum: 0.35 + 0.45 + 0 + 0.20 = 1.0 (validated by validateRetrievalProfile).
+  // learned_sparse channel claims the remaining 0.20 budget so the SPLADE lane
+  // is explicitly weighted instead of silently absorbed by the lexical-family
+  // collapse in fusion.ts.
+  learnedSparseWeight: 0.20,
   sparseTopN: 100,
   denseTopN: 100,
   fusionK: RRF_DEFAULT_K,
@@ -234,6 +255,92 @@ const RELATIVE_FILTER: RetrievalProfile = {
   fusionK: RRF_DEFAULT_K,
   finalTopK: 80,
 } as const;
+
+// ---------------------------------------------------------------------------
+// Profile weight invariant
+// ---------------------------------------------------------------------------
+
+/**
+ * Tolerance for the 4-way weight sum invariant.
+ *
+ * Profile weights are authored as decimal literals (0.35, 0.45, …), and IEEE-754
+ * addition of those literals routinely produces sums that differ from 1.0 by a
+ * few ULPs (e.g. 0.1 + 0.2 = 0.30000000000000004). 1e-6 is loose enough to
+ * absorb that floating-point noise without admitting a real miscalibration.
+ */
+export const RETRIEVAL_PROFILE_WEIGHT_SUM_EPSILON = 1e-6;
+
+/**
+ * Validate that a {@link RetrievalProfile}'s lane weights are well-formed.
+ *
+ * Invariants:
+ *   1. Each of sparseWeight / denseWeight / anchorWeight / learnedSparseWeight
+ *      (treating omitted learnedSparseWeight as 0) is a finite non-negative
+ *      number.
+ *   2. The 4-way sum equals 1.0 within {@link RETRIEVAL_PROFILE_WEIGHT_SUM_EPSILON}.
+ *
+ * Throws {@link DomainError} with code `INTERNAL_INCONSISTENCY` on violation
+ * so misconfigured profiles surface at module load (via the IIFE below) rather
+ * than corrupting fusion silently.
+ */
+export function validateRetrievalProfile(
+  profile: RetrievalProfile,
+  profileName?: string,
+): void {
+  const label = profileName ?? profile.name;
+  const learnedSparseWeight = profile.learnedSparseWeight ?? 0;
+  const lanes: ReadonlyArray<readonly [string, number]> = [
+    ['sparseWeight', profile.sparseWeight],
+    ['denseWeight', profile.denseWeight],
+    ['anchorWeight', profile.anchorWeight],
+    ['learnedSparseWeight', learnedSparseWeight],
+  ];
+  for (const [name, w] of lanes) {
+    if (!Number.isFinite(w) || w < 0) {
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        `RetrievalProfile "${label}": ${name} must be a finite non-negative number, got ${w}`,
+      );
+    }
+  }
+  const sum =
+    profile.sparseWeight +
+    profile.denseWeight +
+    profile.anchorWeight +
+    learnedSparseWeight;
+  if (Math.abs(sum - 1.0) > RETRIEVAL_PROFILE_WEIGHT_SUM_EPSILON) {
+    throw new DomainError(
+      'INTERNAL_INCONSISTENCY',
+      `RetrievalProfile "${label}": lane weights must sum to 1.0 ± ${RETRIEVAL_PROFILE_WEIGHT_SUM_EPSILON}, got ${sum} ` +
+        `(sparse=${profile.sparseWeight}, dense=${profile.denseWeight}, anchor=${profile.anchorWeight}, learnedSparse=${learnedSparseWeight})`,
+    );
+  }
+}
+
+/**
+ * Every profile defined above is validated at module-load time. A miscalibrated
+ * profile (e.g. weights summing to 0.8) will throw immediately on first import,
+ * preventing the rest of the retrieval pipeline from booting with invalid
+ * weight invariants.
+ */
+const ALL_DEFINED_PROFILES: readonly RetrievalProfile[] = [
+  HYBRID_DEFAULT,
+  MIXED_ANCHOR,
+  RECOMMENDATION_ANCHOR,
+  EXACT_SAFE_FALLBACK,
+  ENTITY_ANCHOR_FIRST,
+  BROWSE_DEFAULT,
+  REGION_BROWSE,
+  COMPARE_DEFAULT,
+  LEARNED_SPARSE_HYBRID,
+  RELATIVE_FILTER,
+];
+
+(() => {
+  for (const profile of ALL_DEFINED_PROFILES) {
+    validateRetrievalProfile(profile);
+  }
+})();
 
 function isLegacyHeuristicRetrievalMode(retrievalMode: string): boolean {
   return retrievalMode === 'semantic_hybrid' || retrievalMode === 'hybrid_search';

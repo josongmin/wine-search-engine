@@ -186,6 +186,47 @@ export const RecommendedBudgetSchema = z.object({
 }).strict();
 export type RecommendedBudget = z.infer<typeof RecommendedBudgetSchema>;
 
+/**
+ * Outcome of the optional LLM-backed disambiguation fallback. The deterministic
+ * pipeline runs first; only when intent=`unknown` AND no anchors AND no
+ * constraints AND a `StructuredLlmPort` is wired does the analyzer call the
+ * LLM. The fallback can succeed, fail (timeout / refusal / validation /
+ * partial / circuit-open / unknown), or be skipped outright.
+ *
+ * Before this field existed, a fallback failure was silently "softened" to
+ * `intent='search'` without any downstream signal — orchestrator metrics and
+ * logs could not distinguish a confident `intent=search` from a deterministic
+ * `unknown` that got promoted only because the LLM blew up. This flag closes
+ * that observability gap. It is optional (omitted in legacy fixtures and
+ * direct schema-parse round-trips that don't go through the analyzer) so
+ * existing callers remain unaffected.
+ *
+ * Failure-reason taxonomy mirrors the `StructuredLlm*Error` classes in
+ * `@domain/ai/port/structured-llm.port.ts`:
+ *   - `'timeout'`          → `StructuredLlmTimeoutError`
+ *   - `'refusal'`          → `StructuredLlmRefusalError`
+ *   - `'validation'`       → `StructuredLlmValidationError`
+ *   - `'partial_output'`   → `StructuredLlmPartialOutputError`
+ *   - `'circuit_open'`     → `StructuredLlmCircuitOpenError`
+ *   - `'unknown'`          → any other thrown error
+ */
+export const LlmFallbackOutcomeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('not_attempted') }).strict(),
+  z.object({ kind: z.literal('success') }).strict(),
+  z.object({
+    kind: z.literal('failed_softened_to_search'),
+    failureReason: z.enum([
+      'timeout',
+      'refusal',
+      'validation',
+      'partial_output',
+      'circuit_open',
+      'unknown',
+    ]),
+  }).strict(),
+]);
+export type LlmFallbackOutcome = z.infer<typeof LlmFallbackOutcomeSchema>;
+
 export const WineSearchAnalysisSchema = z.object({
   intent: QueryIntentSchema,
   anchors: z.array(AnchorResolutionSchema).max(WINE_SEARCH_MAX_ANCHORS),
@@ -196,6 +237,11 @@ export const WineSearchAnalysisSchema = z.object({
   recommendedBudget: RecommendedBudgetSchema,
   hangulDominant: z.boolean(),
   preservedSurface: z.string().max(WINE_SEARCH_MAX_QUERY_CHARS),
+  /** Observability trace for the optional LLM fallback. See
+   *  {@link LlmFallbackOutcomeSchema} for branch semantics. Optional for
+   *  backward compatibility with existing fixtures and external callers; the
+   *  `QueryAnalyzerService` always populates it. */
+  llmFallbackOutcome: LlmFallbackOutcomeSchema.optional(),
 }).strict();
 export type WineSearchAnalysis = z.infer<typeof WineSearchAnalysisSchema>;
 

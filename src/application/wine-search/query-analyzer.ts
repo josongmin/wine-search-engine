@@ -18,7 +18,14 @@
  */
 
 import { z } from 'zod';
-import type { StructuredLlmPort } from '@domain/ai/port/structured-llm.port.js';
+import {
+  StructuredLlmCircuitOpenError,
+  StructuredLlmPartialOutputError,
+  StructuredLlmRefusalError,
+  StructuredLlmTimeoutError,
+  StructuredLlmValidationError,
+  type StructuredLlmPort,
+} from '@domain/ai/port/structured-llm.port.js';
 import type { NormalizedConstraint } from '@shared/types/index.js';
 import { containsHangul, normalizeHangulLexical } from '@shared/utils/hangul.js';
 import { parseSpans, resolveOverlaps } from '@domain/attribute/service/span-parser.js';
@@ -58,6 +65,7 @@ import {
   type AnchorEntityType,
   type AnchorResolution,
   type Decomposition,
+  type LlmFallbackOutcome,
   type QueryIntent,
   type RecommendedBudget,
   type WineSearchAnalysis,
@@ -327,25 +335,43 @@ export class QueryAnalyzerService {
     };
 
     // LLM fallback — fully ambiguous query AND a port is available.
+    //
+    // The `llmFallbackOutcome` field records exactly which branch executed so
+    // downstream observability can distinguish:
+    //   - 'not_attempted'              — deterministic signal present OR port absent
+    //   - 'success'                    — LLM returned a parseable analysis
+    //   - 'failed_softened_to_search'  — LLM call threw; we kept the
+    //                                    deterministic shell with intent='search'
+    // Before this field existed, the failure path silently masqueraded as a
+    // confident `intent='search'`, hiding LLM outages from orchestrator logs.
+    let llmFallbackOutcome: LlmFallbackOutcome = { kind: 'not_attempted' };
     if (
       candidate.intent === 'unknown'
       && candidate.anchors.length === 0
       && candidate.normalizedConstraints.length === 0
       && this.structuredLlm !== undefined
     ) {
-      const llmCandidate = await this.runLlmFallback(
+      const fallbackResult = await this.runLlmFallback(
         this.structuredLlm,
         input,
         candidate,
       );
-      if (llmCandidate !== undefined) {
-        candidate = llmCandidate;
+      if (fallbackResult.kind === 'success') {
+        candidate = fallbackResult.analysis;
+        llmFallbackOutcome = { kind: 'success' };
       } else {
         // Defensive default: keep the deterministic shell, promote intent to
-        // 'search' so downstream still has a routing target.
+        // 'search' so downstream still has a routing target. The outcome flag
+        // tells callers the intent was synthesized from a failure, not the
+        // LLM's actual classification.
         candidate = { ...candidate, intent: 'search' };
+        llmFallbackOutcome = {
+          kind: 'failed_softened_to_search',
+          failureReason: fallbackResult.failureReason,
+        };
       }
     }
+    candidate = { ...candidate, llmFallbackOutcome };
 
     const parsed = WineSearchAnalysisSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -369,7 +395,7 @@ export class QueryAnalyzerService {
     port: StructuredLlmPort,
     input: AnalyzeInput,
     deterministic: WineSearchAnalysis,
-  ): Promise<WineSearchAnalysis | undefined> {
+  ): Promise<LlmFallbackInternalResult> {
     try {
       const result = await port.analyze({
         query: input.query,
@@ -383,18 +409,56 @@ export class QueryAnalyzerService {
       // Always overwrite `preservedSurface` with the byte-identical original;
       // the LLM MUST NOT mutate this field even if it tries.
       return {
-        ...result.data,
-        preservedSurface: input.query,
-        hangulDominant: deterministic.hangulDominant,
+        kind: 'success',
+        analysis: {
+          ...result.data,
+          preservedSurface: input.query,
+          hangulDominant: deterministic.hangulDominant,
+        },
       };
     } catch (err) {
+      const failureReason = classifyFallbackFailure(err);
       this.logger.warn(
-        { requestId: input.requestId, err },
-        '[query-analyzer] LLM fallback failed — using deterministic default',
+        {
+          event: 'analyzer.llm_fallback_failed',
+          requestId: input.requestId,
+          failureReason,
+          err,
+        },
+        '[query-analyzer] LLM fallback failed — softening to intent=search',
       );
-      return undefined;
+      return { kind: 'failed', failureReason };
     }
   }
+}
+
+/** Internal disjoint result from {@link QueryAnalyzerService.runLlmFallback}.
+ *  The public observability surface is {@link LlmFallbackOutcome}; this shape
+ *  carries the resolved analysis on success so the caller can swap it in. */
+type LlmFallbackInternalResult =
+  | { readonly kind: 'success'; readonly analysis: WineSearchAnalysis }
+  | { readonly kind: 'failed'; readonly failureReason: LlmFallbackFailureReason };
+
+/** Branches in {@link LlmFallbackOutcome} of kind `failed_softened_to_search`. */
+type LlmFallbackFailureReason =
+  | 'timeout'
+  | 'refusal'
+  | 'validation'
+  | 'partial_output'
+  | 'circuit_open'
+  | 'unknown';
+
+/** Map a thrown error from the structured-LLM port to its observability
+ *  failure-reason label. The taxonomy mirrors the `StructuredLlm*Error`
+ *  classes; any non-matching error falls through to `'unknown'` so an opaque
+ *  exception still produces a categorized trace instead of an empty reason. */
+function classifyFallbackFailure(err: unknown): LlmFallbackFailureReason {
+  if (err instanceof StructuredLlmTimeoutError) return 'timeout';
+  if (err instanceof StructuredLlmRefusalError) return 'refusal';
+  if (err instanceof StructuredLlmValidationError) return 'validation';
+  if (err instanceof StructuredLlmPartialOutputError) return 'partial_output';
+  if (err instanceof StructuredLlmCircuitOpenError) return 'circuit_open';
+  return 'unknown';
 }
 
 /** Cap on logged Zod issues to keep payloads bounded. */

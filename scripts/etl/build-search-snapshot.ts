@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { z } from 'zod';
 import { parseNdjson } from './ndjson.js';
 import type { EnrichedSilverRecord, PriceBand, WineType } from './types.js';
 import { atomicWriteFile } from './etl-utils.js';
@@ -112,10 +113,109 @@ type SnapshotBuildRecord = EnrichedSilverRecord & {
   readonly sourceSystemOverride?: string | undefined;
 };
 
-const BENCHMARK_ANCHOR_SUITABILITY_GENERATED_AT = '2026-04-17T00:00:00.000Z';
-const BENCHMARK_ANCHOR_SUITABILITY_MODEL = 'gpt-5.4-mini';
-const BENCHMARK_ANCHOR_GIFT_PROMPT_VERSION = 'gift-suitability-scorer-v2';
-const BENCHMARK_ANCHOR_BEGINNER_PROMPT_VERSION = 'beginner-suitability-scorer-v2';
+/**
+ * Benchmark-anchor suitability artifact.
+ *
+ * Historically, gift/beginner suitability scores for the 6-7 benchmark
+ * anchor wines were inlined as a TypeScript literal in this file.
+ * That mixed catalog data with build code, blocked operator audit, and
+ * made model/prompt version changes invisible to git diff of `data/`.
+ *
+ * The data now lives in `data/benchmarks/anchor-suitability-v1.json`,
+ * loaded at runtime and validated against the Zod schema below.
+ * Bumping the model / prompt version is a single-file JSON change;
+ * code remains untouched.
+ *
+ * Path resolution: unlike build-generated artifacts (silver.ndjson, etc.)
+ * this artifact is git-tracked and authoritative under the repo. We honour
+ * the standard `WINE_DATA_DIR` / home-data-dir override via
+ * `resolveDataPath`, but if the resolved file is missing we fall back to
+ * the repo copy. That keeps the loader working in clean checkouts and
+ * test environments that have no `~/.wine-search-engine/data/benchmarks/`.
+ */
+const BENCHMARK_ANCHOR_SUITABILITY_VERSION = 'v1';
+
+const REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  '..',
+  '..',
+  'data',
+  'benchmarks',
+  'anchor-suitability-v1.json',
+);
+
+export const DEFAULT_BENCHMARK_ANCHOR_SUITABILITY_PATH = resolveDataPath(
+  'data/benchmarks/anchor-suitability-v1.json',
+);
+
+const BenchmarkAnchorSuitabilityScoreSchema = z.object({
+  score: z.number().finite().min(0).max(1),
+  evidenceAxes: z.array(z.string().min(1)).max(64),
+  snippet: z.string().min(1),
+  rationale: z.string().min(1),
+}).strict();
+
+const BenchmarkAnchorSuitabilityEntrySchema = z.object({
+  gift: BenchmarkAnchorSuitabilityScoreSchema,
+  beginner: BenchmarkAnchorSuitabilityScoreSchema,
+}).strict();
+
+const BenchmarkAnchorSuitabilityArtifactSchema = z.object({
+  version: z.literal(BENCHMARK_ANCHOR_SUITABILITY_VERSION),
+  generatedAt: z.string().datetime(),
+  model: z.string().min(1),
+  promptVersions: z.object({
+    gift: z.string().min(1),
+    beginner: z.string().min(1),
+  }).strict(),
+  entities: z.record(z.string().min(1), BenchmarkAnchorSuitabilityEntrySchema),
+}).strict();
+
+export type BenchmarkAnchorSuitabilityArtifact = z.infer<typeof BenchmarkAnchorSuitabilityArtifactSchema>;
+export type BenchmarkAnchorSuitabilityEntry = z.infer<typeof BenchmarkAnchorSuitabilityEntrySchema>;
+
+const benchmarkAnchorSuitabilityCache = new Map<string, BenchmarkAnchorSuitabilityArtifact>();
+
+/**
+ * Load + validate the benchmark anchor suitability artifact.
+ * Memoized per absolute path so a single build does not re-read/re-validate.
+ *
+ * If the caller does not pass an explicit path, the loader prefers the
+ * `WINE_DATA_DIR` / home-data-dir resolution (production convention) and
+ * silently falls back to the in-repo git-tracked copy when the resolved
+ * file is missing.
+ */
+export async function loadBenchmarkAnchorSuitabilityArtifact(
+  artifactPath?: string,
+): Promise<BenchmarkAnchorSuitabilityArtifact> {
+  const resolvedPath = artifactPath ?? resolveBenchmarkAnchorSuitabilityPath();
+  const cached = benchmarkAnchorSuitabilityCache.get(resolvedPath);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const raw = await fs.readFile(resolvedPath, 'utf8');
+  const parsedJson: unknown = JSON.parse(raw);
+  const result = BenchmarkAnchorSuitabilityArtifactSchema.safeParse(parsedJson);
+  if (!result.success) {
+    throw new Error(
+      `Benchmark anchor suitability artifact "${resolvedPath}" failed schema validation: ${result.error.message}`,
+    );
+  }
+  benchmarkAnchorSuitabilityCache.set(resolvedPath, result.data);
+  return result.data;
+}
+
+function resolveBenchmarkAnchorSuitabilityPath(): string {
+  if (existsSync(DEFAULT_BENCHMARK_ANCHOR_SUITABILITY_PATH)) {
+    return DEFAULT_BENCHMARK_ANCHOR_SUITABILITY_PATH;
+  }
+  return REPO_BENCHMARK_ANCHOR_SUITABILITY_PATH;
+}
+
+/** Test-only: reset memoization between cases. */
+export function _resetBenchmarkAnchorSuitabilityArtifactCache(): void {
+  benchmarkAnchorSuitabilityCache.clear();
+}
 
 const SILVER_WINE_TYPES: readonly WineType[] = [
   'red',
@@ -133,119 +233,6 @@ const SILVER_PRICE_BANDS: readonly PriceBand[] = [
   'luxury',
 ] as const;
 
-const BENCHMARK_ANCHOR_SUITABILITY: Readonly<Record<string, {
-  readonly gift: {
-    readonly score: number;
-    readonly evidenceAxes: readonly string[];
-    readonly snippet: string;
-    readonly rationale: string;
-  };
-  readonly beginner: {
-    readonly score: number;
-    readonly evidenceAxes: readonly string[];
-    readonly snippet: string;
-    readonly rationale: string;
-  };
-}>> = {
-  'chateau-margaux-2015': {
-    gift: {
-      score: 0.96,
-      evidenceAxes: ['occasion', 'classification', 'producer_prestige', 'pairing', 'flavor_profile', 'search_text'],
-      snippet: 'occasion_tags: celebration, investment wine, special dinner; classification: Premier Grand Cru Classé; producer_prestige: 0.98; pairing_tags: beef, lamb, duck; flavor_profiles: blackcurrant, violet, cedar, graphite, tobacco, espresso, truffle; search_text_en: Chateau Margaux 2015 Bordeaux Premier Grand Cru Classé Cabernet Sauvignon full body structured tannins complex finish blackcurrant violet cedar graphite',
-      rationale: 'Very strong gift suitability based on explicit catalog evidence: it is tagged for celebration and special dinner, carries a top-tier official classification, and has very high producer prestige. The flavor and search text describe a complex, structured, premium-style wine, which supports gifting for serious wine recipients. The score is kept below 100 because the catalog does not explicitly mention gift packaging or broader social gifting cues.',
-    },
-    beginner: {
-      score: 0.18,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'tannin', 'alcohol_pct', 'flavor_profiles', 'search_text_en'],
-      snippet: 'body 0.88; sweetness 0.04; acidity 0.72; tannin 0.82; alcohol_pct 13.5; flavor_profiles: blackcurrant, violet, cedar, graphite, tobacco, espresso, truffle; search_text_en: full body structured tannins complex finish',
-      rationale: 'This looks like a highly structured, dry red wine with very high body and tannin, plus notable acidity and complex, savory/aromatic descriptors. Those traits usually make a wine less immediately approachable for beginners. The low sweetness also suggests little softness from residual sugar. I’m keeping the score low because the catalog explicitly points to intensity and structure rather than easy-drinking simplicity.',
-    },
-  },
-  'romanee-conti-2015': {
-    gift: {
-      score: 0.98,
-      evidenceAxes: ['occasion', 'classification', 'producer'],
-      snippet: 'occasion_tags: investment wine, collector, ultimate celebration; classification: Grand Cru; producer: Domaine de la Romanée-Conti; producer_prestige: 1; search_text_en: ... world finest',
-      rationale: 'Extremely strong gift suitability based on explicit catalog evidence: it is tagged for collector/investment use and ultimate celebration, carries Grand Cru classification, and comes from Domaine de la Romanée-Conti with producer_prestige marked 1. The search text also describes it as \'world finest,\' reinforcing exceptional status. This is a highly prestigious, occasion-appropriate wine for a special gift.',
-    },
-    beginner: {
-      score: 0.28,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'tannin', 'alcohol_pct', 'flavor_profiles'],
-      snippet: 'body: 0.85; sweetness: 0.05; acidity: 0.82; tannin: 0.7; alcohol_pct: 13; flavor_profiles: red cherry, rose petal, earth, spice, truffle, incense, forest floor, dried violets',
-      rationale: 'The catalog shows a very full-bodied red with very low sweetness, high acidity, and fairly high tannin, which typically makes a wine less immediately easy for beginners. The flavor profile is complex and earthy/floral rather than simple or obviously soft, suggesting a more demanding style. Alcohol is moderate at 13%, which helps a little, but the overall structure points to low beginner-friendliness.',
-    },
-  },
-  'moet-brut-nv': {
-    gift: {
-      score: 0.88,
-      evidenceAxes: ['occasion', 'classification', 'producer_prestige', 'pairing', 'flavor_profile', 'wine_type', 'search_text'],
-      snippet: 'occasion_tags: celebration, casual dining, aperitif; classification: Champagne NV; producer_prestige: 0.82; pairing_tags: aperitif, seafood, light snacks; flavor_profiles: green apple, citrus, brioche, toast, pear, biscuit; wine_type: sparkling; search_text_en: ... entry level classic',
-      rationale: 'Strong gift suitability is supported by explicit celebration-oriented occasion tags, a recognized Champagne NV classification, and high producer prestige. The flavor profile and pairing tags suggest broad appeal and easy gifting versatility, while the sparkling wine type and classic search text reinforce a safe, widely appreciated choice. Score is high, though not maximal, because the catalog evidence does not explicitly mention premium packaging or special gift presentation.',
-    },
-    beginner: {
-      score: 0.62,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'flavor_profiles', 'search_text_en'],
-      snippet: 'body: 0.55; sweetness: 0.2; acidity: 0.8; flavor_profiles: green apple, citrus, brioche, toast, pear, biscuit; search_text_en: ... entry level classic',
-      rationale: 'This looks moderately beginner-friendly based on explicit catalog evidence: it has low sweetness, moderate body, and no tannin, which can make it approachable. However, the acidity is quite high, which may be less easy for some beginners. The flavor profile is familiar and descriptive rather than challenging, and the search text explicitly says \'entry level classic,\' supporting accessibility. I kept the score moderate rather than high because the high acidity is a notable hurdle.',
-    },
-  },
-  'yquem-2015': {
-    gift: {
-      score: 0.96,
-      evidenceAxes: ['occasion', 'classification', 'producer_prestige', 'pairing', 'flavor_profile', 'wine_type', 'search_text'],
-      snippet: 'occasion_tags: celebration, dessert course, collector; classification: Premier Cru Supérieur; producer_prestige: 1; pairing_tags: foie gras, blue cheese, fruit tart, crème brûlée; flavor_profiles: apricot, honey, botrytis, orange peel, vanilla, caramel, saffron; wine_type: dessert; search_text_en: ... greatest dessert wine',
-      rationale: 'This is highly gift-suitable based on explicit catalog evidence: it has strong celebratory and collector occasion tags, a top-tier official classification, and explicit producer prestige. The pairing and flavor language also signal a distinctive, luxurious dessert wine profile that fits gifting well. I am keeping the score below 100 because the catalog does not provide broader gift-specific context beyond these strong wine-quality and occasion signals.',
-    },
-    beginner: {
-      score: 0.72,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'wine type', 'flavor_profiles', 'alcohol_pct'],
-      snippet: 'body: 0.9; sweetness: 0.98; acidity: 0.78; tannin: 0; alcohol_pct: 14; wine_type: dessert; flavor_profiles: apricot, honey, botrytis, orange peel, vanilla, caramel, saffron',
-      rationale: 'This looks quite approachable for many beginners because it is explicitly very sweet, has no tannin, and is described with familiar dessert-like flavors such as apricot, honey, vanilla, and caramel. The high acidity suggests it should not feel cloying despite the sweetness. The main caution is that it is a dessert wine with 14% alcohol, so it may feel rich and intense rather than light or neutral. Overall, the explicit catalog evidence points to a fairly beginner-friendly style, especially for someone open to sweet wines.',
-    },
-  },
-  'sassicaia-2018': {
-    gift: {
-      score: 0.94,
-      evidenceAxes: ['classification', 'producer_prestige', 'occasion', 'pairing', 'flavor_profile', 'search_text'],
-      snippet: 'Bolgheri Sassicaia DOC; producer_prestige: 0.96; occasion_tags: special dinner, wine enthusiast; pairing_tags: beef, lamb, truffle, aged cheese; flavor_profiles: blackcurrant, cedar, herbs, tobacco, dark cherry, mint, graphite; search_text_en: Italian icon',
-      rationale: 'Very strong gift suitability based on explicit catalog evidence: an official DOC classification tied to Sassicaia, very high producer prestige, and occasion tags that directly signal gifting contexts like special dinner and wine enthusiast. The pairing and flavor language also suggest a serious, widely appreciated premium red. Score is high, though kept below 100 because the catalog does not explicitly mention gift packaging or broader celebratory positioning.',
-    },
-    beginner: {
-      score: 0.22,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'tannin', 'alcohol_pct', 'flavor_profiles', 'wine_type'],
-      snippet: 'body: 0.88; sweetness: 0.04; acidity: 0.74; tannin: 0.85; alcohol_pct: 14; wine_type: red; flavor_profiles: blackcurrant, cedar, herbs, tobacco, dark cherry, mint, graphite',
-      rationale: 'This looks like a challenging beginner wine based on explicit catalog data: it is very full-bodied, very dry, high in acidity, and especially high in tannin, with 14% alcohol. The flavor profile also suggests a more structured, savory style (cedar, herbs, tobacco, graphite) rather than an easy, soft, fruit-forward wine. I’m keeping the score low because the catalog evidence points to a wine that is likely less approachable for beginners.',
-    },
-  },
-  'masi-amarone-2015': {
-    gift: {
-      score: 0.88,
-      evidenceAxes: ['classification', 'producer_prestige', 'occasion', 'pairing', 'flavor_profile', 'wine_type', 'alcohol_pct', 'search_text'],
-      snippet: 'Amarone della Valpolicella DOCG; producer_prestige: 0.85; occasion_tags: special dinner, wine enthusiast; pairing_tags: beef, game, aged cheese, chocolate; flavor_profiles: dried cherry, chocolate, fig, dark plum, tobacco, star anise, coffee; wine_type: red; alcohol_pct: 15; search_text_en: ... rich',
-      rationale: 'Strong gift suitability is supported by multiple explicit catalog signals: a prestigious DOCG classification, high producer prestige, and occasion tags that directly indicate gifting contexts (special dinner, wine enthusiast). The pairing and flavor profile language suggests a rich, distinctive wine that suits celebratory or enthusiast-oriented gifting. The high alcohol level and Amarone style further reinforce a serious, premium red wine profile. Evidence is strong enough for a high score, though not maximal because there is no explicit gift/packaging or broader brand-recognition evidence beyond the provided prestige field.',
-    },
-    beginner: {
-      score: 0.18,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'tannin', 'alcohol_pct', 'flavor_profiles', 'search_text_en'],
-      snippet: 'body: 0.95; sweetness: 0.08; acidity: 0.65; tannin: 0.8; alcohol_pct: 15; flavor_profiles: dried cherry, chocolate, fig, dark plum, tobacco, star anise, coffee; search_text_en: rich',
-      rationale: 'This looks like a very full-bodied, dry, high-tannin, high-alcohol red with concentrated, savory/dark flavors. Those explicit traits usually make a wine less immediately approachable for beginners, especially the strong tannin and alcohol. The only beginner-friendly cue is the rich, fruit-driven flavor profile, but the overall structure suggests a challenging wine.',
-    },
-  },
-  'opus-one-2018': {
-    gift: {
-      score: 0.92,
-      evidenceAxes: ['occasion', 'classification', 'producer_prestige', 'pairing', 'flavor_profile', 'search_text'],
-      snippet: 'occasion_tags: celebration, special dinner, investment wine; classification: Napa Valley AVA; producer_prestige: 0.97; pairing_tags: beef, lamb, truffle, venison; flavor_profiles: blackcurrant, plum, dark cherry, graphite, tobacco, cedar, dark chocolate; search_text_en: Opus One 2018 Napa Valley Cabernet Sauvignon Merlot blend blackcurrant plum dark cherry graphite tobacco cedar dark chocolate Rothschild Mondavi',
-      rationale: 'Strong gift suitability is supported by explicit celebration and special-dinner occasion tags, very high producer prestige, and a formal Napa Valley AVA classification. The wine also has luxury-leaning search text and rich, classic flavor descriptors plus premium food-pairing tags, all of which make it a strong gifting choice. Score is high but not perfect because the catalog evidence does not explicitly mention gift packaging or a dedicated gifting designation.',
-    },
-    beginner: {
-      score: 0.28,
-      evidenceAxes: ['body', 'sweetness', 'acidity', 'tannin', 'alcohol_pct', 'flavor_profiles', 'wine_type', 'search_text_en'],
-      snippet: 'body: 0.88; sweetness: 0.06; acidity: 0.72; tannin: 0.84; alcohol_pct: 14.5; flavor_profiles: blackcurrant, plum, dark cherry, graphite, tobacco, cedar, dark chocolate; wine_type: red; search_text_en: Opus One 2018 Napa Valley Cabernet Sauvignon Merlot blend blackcurrant plum dark cherry graphite tobacco cedar dark chocolate Rothschild Mondavi',
-      rationale: 'This looks like a full-bodied, dry red with high tannin and fairly high acidity, which typically makes it less immediately easy for beginners. The flavor profile is also dominated by dark fruit plus graphite, tobacco, cedar, and dark chocolate, suggesting a structured, complex style rather than a soft or simple one. The catalog evidence supports a lower beginner-friendliness score, though not the absolute minimum because the wine is not described as extremely high-alcohol or overtly harsh.',
-    },
-  },
-};
 
 function assertSuitabilityCoverage(records: readonly EnrichedSilverRecord[]): void {
   const missingGift = records.filter((record) => record.giftSuitabilityClassification?.score == null);
@@ -412,6 +399,7 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
   }
 
   const { WINES } = await import('../seed-wines-real.js');
+  const suitabilityArtifact = await loadBenchmarkAnchorSuitabilityArtifact();
   const requiredSet = new Set(missingTargetIds);
   const records: SnapshotBuildRecord[] = [];
 
@@ -485,7 +473,7 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
         identitySafeProjection: identitySafeAliases,
         noisyRecallProjection: noisyRecallAliases,
       },
-    }));
+    }, suitabilityArtifact));
   }
 
   return records.sort((left, right) => left.sourceId.localeCompare(right.sourceId));
@@ -558,11 +546,14 @@ export function buildBeginnerSuitabilityContentHash(record: EnrichedSilverRecord
   ].join('\n')).digest('hex');
 }
 
-function attachBenchmarkAnchorSuitability(record: SnapshotBuildRecord): SnapshotBuildRecord {
+export function attachBenchmarkAnchorSuitability(
+  record: SnapshotBuildRecord,
+  artifact: BenchmarkAnchorSuitabilityArtifact,
+): SnapshotBuildRecord {
   if (record.benchmarkAnchorEntityId === undefined) {
     return record;
   }
-  const seed = BENCHMARK_ANCHOR_SUITABILITY[record.benchmarkAnchorEntityId];
+  const seed = artifact.entities[record.benchmarkAnchorEntityId];
   if (seed === undefined) {
     return record;
   }
@@ -571,14 +562,14 @@ function attachBenchmarkAnchorSuitability(record: SnapshotBuildRecord): Snapshot
     giftSuitabilityClassification: {
       score: seed.gift.score,
       fingerprint: {
-        modelId: BENCHMARK_ANCHOR_SUITABILITY_MODEL,
+        modelId: artifact.model,
         contentHash: buildGiftSuitabilityContentHash(record),
         version: GIFT_SUITABILITY_VERSION,
-        generatedAt: BENCHMARK_ANCHOR_SUITABILITY_GENERATED_AT,
+        generatedAt: artifact.generatedAt,
       },
       provenance: {
         source: 'llm_gift_suitability_scorer',
-        promptVersion: BENCHMARK_ANCHOR_GIFT_PROMPT_VERSION,
+        promptVersion: artifact.promptVersions.gift,
         evidenceAxes: seed.gift.evidenceAxes,
         snippet: seed.gift.snippet,
         rationale: seed.gift.rationale,
@@ -587,14 +578,14 @@ function attachBenchmarkAnchorSuitability(record: SnapshotBuildRecord): Snapshot
     beginnerSuitabilityClassification: {
       score: seed.beginner.score,
       fingerprint: {
-        modelId: BENCHMARK_ANCHOR_SUITABILITY_MODEL,
+        modelId: artifact.model,
         contentHash: buildBeginnerSuitabilityContentHash(record),
         version: BEGINNER_SUITABILITY_VERSION,
-        generatedAt: BENCHMARK_ANCHOR_SUITABILITY_GENERATED_AT,
+        generatedAt: artifact.generatedAt,
       },
       provenance: {
         source: 'llm_beginner_suitability_scorer',
-        promptVersion: BENCHMARK_ANCHOR_BEGINNER_PROMPT_VERSION,
+        promptVersion: artifact.promptVersions.beginner,
         evidenceAxes: seed.beginner.evidenceAxes,
         snippet: seed.beginner.snippet,
         rationale: seed.beginner.rationale,

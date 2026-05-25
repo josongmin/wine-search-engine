@@ -214,6 +214,24 @@ const ARRAY_DEFAULT_ATTRIBUTES: ReadonlySet<string> = new Set([
 // (CLAUDE.md rule 30 — cross-module constants live in a single module).
 
 // ---------------------------------------------------------------------------
+// Router-synthesized constraint confidence
+// ---------------------------------------------------------------------------
+//
+// PORT: agent-tool-execution-policy.ts (all `confidence: 1.0` literals on
+// router-synthesized constraints). These constraints are emitted by the
+// deterministic router / normalizer itself (rule-based, no LLM), so their
+// confidence is by definition maximal — they encode determinism, not an
+// uncertain extraction signal. CLAUDE.md rule 15 (no magic numbers): keep
+// the value as a single named module-scope const so every emit site shares
+// the same auditable invariant.
+
+/** Confidence assigned to constraints synthesized by the deterministic router
+ *  (or this normalizer on its behalf). These constraints are rule-based
+ *  (no LLM), so confidence is maximal — there is no extraction uncertainty
+ *  to report. */
+const ROUTER_SYNTHESIZED_CONSTRAINT_CONFIDENCE = 1.0;
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -313,7 +331,7 @@ function applyExactVintageBound(
     operator: '=',
     value: targetVintage,
     source_phrase: `${targetVintage}`,
-    confidence: 1.0,
+    confidence: ROUTER_SYNTHESIZED_CONSTRAINT_CONFIDENCE,
   };
   return [...others, vintageConstraint];
 }
@@ -421,7 +439,7 @@ function applyPerSlotBudget(
     operator: '<=',
     value: perSlotBudgetKrw,
     source_phrase: `${perSlotBudgetKrw}원 이하 (per slot)`,
-    confidence: 1.0,
+    confidence: ROUTER_SYNTHESIZED_CONSTRAINT_CONFIDENCE,
   };
   return [...others, slotBudget];
 }
@@ -554,7 +572,7 @@ export const DefaultToolInputNormalizer: ToolInputNormalizer = {
       operator: '=',
       value: slot.wineType,
       source_phrase: slot.wineType,
-      confidence: 1.0,
+      confidence: ROUTER_SYNTHESIZED_CONSTRAINT_CONFIDENCE,
     };
     let filtersWithSlot: readonly NormalizedConstraint[] = [
       ...filtersWithoutWineType,

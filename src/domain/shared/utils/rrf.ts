@@ -1,12 +1,59 @@
 /**
- * Standard smoothing constant for Reciprocal Rank Fusion.
+ * RRF K constants — single source of truth for every Reciprocal Rank Fusion
+ * smoothing constant used across the retrieval pipeline. Rule 30 SSoT:
+ * any caller that needs an RRF K MUST import from here (no private literals).
  *
- * k = 60 is the canonical value from Cormack et al. (2009), "Reciprocal Rank
- * Fusion outperforms Condorcet and individual Rank Learning Methods". It is
- * the default used across the retrieval pipeline unless a caller specifically
- * overrides it (e.g. channel-specific fusion tuning).
+ * Intuition:
+ *   - Lower K → exact / known-item bias. The rank-1 hit dominates because
+ *     `1/(k+1)` and `1/(k+2)` diverge sharply when k is small. Use this when
+ *     a single resolved entity (anchor, exact title match) should drive the
+ *     fused ranking.
+ *   - Higher K → diversity / browse bias. `1/(k+r)` flattens across r, so
+ *     long-tail hits retain more weight. Use this when the user is exploring
+ *     (pairing, semantic browse) and recall matters more than rank precision.
+ *
+ * Quantitative reference (rank-1 vs rank-10 score ratio):
+ *   k=10  → 1/11  ÷ 1/20  ≈ 1.82  (rank-1 carries 82% more weight)
+ *   k=30  → 1/31  ÷ 1/40  ≈ 1.29
+ *   k=40  → 1/41  ÷ 1/50  ≈ 1.22
+ *   k=60  → 1/61  ÷ 1/70  ≈ 1.15  (Cormack 2009 canonical)
+ *   k=80  → 1/81  ÷ 1/90  ≈ 1.11  (flattest — pairing tail kept alive)
  */
-export const RRF_DEFAULT_K = 60;
+export const RRF_K = {
+  /**
+   * ENTITY_EXACT (k=10) — anchor-first lookups where the planner resolved a
+   * single entity with high confidence. Maximize separation between the
+   * resolved anchor and tail candidates so the anchor wins the fusion output.
+   */
+  ENTITY_EXACT: 10,
+  /**
+   * TIGHT (k=30) — specific_wine / known-cuvée lookups. Rank-1 sparse hit
+   * should dominate the fused score without crushing rank 2-3 entirely.
+   */
+  TIGHT: 30,
+  /**
+   * COMPARE (k=40) — "X vs Y" flows where both anchors must appear and rank
+   * order remains meaningful for the side-by-side response.
+   */
+  COMPARE: 40,
+  /**
+   * DEFAULT (k=60) — Cormack et al. (2009) canonical value. The generic
+   * hybrid retrieval default unless a caller has class-specific tuning.
+   */
+  DEFAULT: 60,
+  /**
+   * LOOSE (k=80) — browse / food-pairing flows. Long-tail candidates carry
+   * real recall value; flatter rank weights preserve diversity.
+   */
+  LOOSE: 80,
+} as const satisfies Readonly<Record<string, number>>;
+
+/**
+ * Backward-compatible alias. The canonical Cormack et al. (2009) k=60 default
+ * used across the retrieval pipeline unless a caller specifically overrides it
+ * (e.g. channel-specific fusion tuning via {@link RRF_K}).
+ */
+export const RRF_DEFAULT_K = RRF_K.DEFAULT;
 
 /**
  * Single-rank RRF contribution: `1 / (k + rank)`.

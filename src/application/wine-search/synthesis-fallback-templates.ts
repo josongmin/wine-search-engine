@@ -14,7 +14,17 @@
  *
  * Korean/English selection is governed by `containsHangul()` on the user
  * query — see `@shared/utils/hangul`.
+ *
+ * In addition to L2/L3/L4 fallback strings, this module also owns the
+ * S3 grounding-verify RE-SYNTH DIRECTIVE template ({@link buildResynthDirective})
+ * and its bounding constants. Keeping every synthesis-stage prompt/template in
+ * one SSoT module makes it possible to (a) audit every LLM-facing string in
+ * one place, (b) version templates via {@link RESYNTH_DIRECTIVE_VERSION} when
+ * wording changes affect bench/golden behaviour, and (c) prevent template
+ * drift from inline-defined strings scattered across the runner.
  */
+
+import type { GroundingFacts } from './synthesis-grounding-verify.js';
 
 /**
  * Layer 3 grounding-preview slice cap: max characters of the last grounding
@@ -116,3 +126,91 @@ export const FALLBACK_TEMPLATES = {
     english: 'We could not find that wine in our catalogue. Would you like us to recommend a similar wine instead? Share details like region, price range, or food pairing and we can help.',
   },
 } as const;
+
+// ---------------------------------------------------------------------------
+// S3 grounding-verify: re-synth directive template (moved from
+// synthesis-runner.ts so every synthesis-stage LLM-facing string lives in
+// this SSoT module).
+// ---------------------------------------------------------------------------
+
+/**
+ * Template version for {@link buildResynthDirective}. Bumped whenever the
+ * directive wording changes in a way that could shift LLM behaviour (and
+ * therefore bench / golden-set scores). Consumers MAY log this with re-synth
+ * attempts so operators can correlate wording revisions with metrics.
+ */
+export const RESYNTH_DIRECTIVE_VERSION = 'v1' as const;
+
+/** Maximum number of ungrounded-claim surfaces named in the re-synth
+ *  directive. Bounds prompt growth on pathological answers. */
+export const RESYNTH_MAX_LISTED_CLAIMS = 5;
+
+/** Maximum number of grounded wine labels enumerated in the re-synth directive.
+ *  Bounds prompt growth while giving the model a concrete set to re-anchor on. */
+export const RESYNTH_MAX_LISTED_LABELS = 8;
+
+/** Maximum number of grounded regions sampled into the re-synth directive.
+ *  Kept small — regions are a re-anchoring hint, not an exhaustive listing. */
+export const RESYNTH_MAX_LISTED_REGIONS = 4;
+
+/** Maximum number of grounded grape varietals sampled into the re-synth
+ *  directive. Same bounding rationale as {@link RESYNTH_MAX_LISTED_REGIONS}. */
+export const RESYNTH_MAX_LISTED_GRAPES = 4;
+
+/**
+ * S3 grounding-verify: build the directive appended to the re-synth request
+ * when the primary answer asserted ungrounded claims.
+ *
+ * A3 hardening — the directive is now ADDITIVE, not purely subtractive. The
+ * old directive only told the model what NOT to say ("do not name any wine
+ * absent from the grounding"), which pushed re-synth toward thin/empty answers
+ * that then fell through to the Layer 2 deterministic template. We now ALSO
+ * enumerate the grounded wine labels (and a sample of regions/grapes) so the
+ * model can RE-ANCHOR on the real grounding instead of merely deleting the
+ * offending claim. The goal is a complete, grounded re-synth — a thin grounded
+ * answer still beats a template, so we steer the model toward the available
+ * facts rather than starving it.
+ *
+ * EXACT WORDING is load-bearing: the phrase "Grounding check failed:" anchors
+ * scorer/golden-set assertions, and the "GROUNDING_JSON" keyword aligns with
+ * the marker used by the structured-grounding preview parser. DO NOT
+ * paraphrase without bumping {@link RESYNTH_DIRECTIVE_VERSION}.
+ */
+export function buildResynthDirective(
+  ungroundedClaims: readonly string[],
+  facts: GroundingFacts,
+): string {
+  const listedUngrounded = ungroundedClaims.slice(0, RESYNTH_MAX_LISTED_CLAIMS).join(', ');
+  const groundedLabels = [...facts.labels].slice(0, RESYNTH_MAX_LISTED_LABELS);
+  // A3: expand the re-anchoring context — sample regions and grapes too so the
+  // model has more grounded fields to build a complete answer from, not just
+  // labels. Bounded to keep the directive prompt small.
+  const groundedRegions = [...facts.regions].slice(0, RESYNTH_MAX_LISTED_REGIONS);
+  const groundedGrapes = [...facts.grapes].slice(0, RESYNTH_MAX_LISTED_GRAPES);
+  const fieldSamples: string[] = [];
+  if (groundedRegions.length > 0) {
+    fieldSamples.push(`regions: ${groundedRegions.join(', ')}`);
+  }
+  if (groundedGrapes.length > 0) {
+    fieldSamples.push(`grapes: ${groundedGrapes.join(', ')}`);
+  }
+  const fieldSampleClause = fieldSamples.length > 0
+    ? ` Grounded fields you may draw on include — ${fieldSamples.join('; ')}.`
+    : '';
+  const groundedClause = groundedLabels.length > 0
+    ? ` The wines actually present in the grounding are: ${groundedLabels.join(', ')}. `
+      + 'Build your answer around THESE wines and their grounded fields '
+      + '(region, grape, vintage, price). Provide a complete, helpful recommendation '
+      + 'using only this grounded material — do not return an empty or one-line answer.'
+      + fieldSampleClause
+    : ' Use only the structured fields present in the tool outcomes (region, grape, '
+      + 'vintage, price); keep the answer complete and helpful.'
+      + fieldSampleClause;
+  return (
+    'Grounding check failed: your previous answer asserted facts not present in '
+    + `the tool outcomes (ungrounded: ${listedUngrounded}). Re-emit using ONLY fields in `
+    + 'GROUNDING_JSON / the provided tool outcomes. Do not name any wine, region, '
+    + 'grape, vintage, or price that is absent from the grounding.'
+    + groundedClause
+  );
+}

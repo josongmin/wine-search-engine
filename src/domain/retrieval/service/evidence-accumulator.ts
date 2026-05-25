@@ -137,41 +137,40 @@ export function accumulateEvidence(
       (c) => c.provenance.fusionProfile,
     )!;
 
-    // Union channels
+    // ----- Single-pass accumulator over group ---------------------------
+    //
+    // SOTA++ loop fusion: in ONE iteration of `group`, accumulate every
+    // per-contribution piece of state we need downstream. Previously this
+    // function walked `group` 4-5 times (channel union, rank-per-channel,
+    // constraint set + queryViewMatches, anchorConditioned via .some, sparse
+    // field merge). Each accumulator below is independent (no carry between
+    // members), so fusion is safe.
+    //
+    //   channelSet                 — union of canonical channels
+    //   bestRankPerChannel         — min(rank) per canonical channel
+    //   bestScorePerChannel        — best ChannelScoreEvidence per channel
+    //                                (RRF contribution → rank → rawScore tiebreaker)
+    //   constraintSet              — union of matchedFilterConstraints
+    //   failedSetsPerContribution  — per-contribution failed-hard set
+    //                                (intersected after the loop)
+    //   queryViewMatches (+keySet) — dedup'd queryViewMatches with canonical channel
+    //   anchorConditioned          — OR-reduce over provenance.anchorConditioned
+    //   mergedGrapeFamily / mergedFlavorProfiles / mergedRegionHierarchy /
+    //   mergedPriceBandNumeric     — best-value sparse-field merge. Canonical's
+    //                                value is authoritative; non-canonical fills
+    //                                only when canonical is undefined.
+    //
+    // NO early break: every accumulator above requires visiting EVERY group
+    // member (CLAUDE.md rule 17). Breaking would silently drop late
+    // contributions (a sparse field defined only on the last envelope, a
+    // channel that appears only on one contribution, etc.).
     const channelSet = new Set<CandidateChannel>();
-    for (const c of group) {
-      for (const ch of c.provenance.channels) {
-        const canonical = toCanonicalCandidateChannel(ch);
-        if (canonical !== null) {
-          channelSet.add(canonical);
-        }
-      }
-    }
-
-    // Best rank per channel (lowest rank = best)
     const bestRankPerChannel: Partial<Record<CandidateChannel, number>> = {};
-    const bestScorePerChannel = new Map<CandidateChannel, (typeof group)[number]['provenance']['channelScores'][number]>();
-    for (const c of group) {
-      for (const ev of c.provenance.channelScores) {
-        const canonical = toCanonicalCandidateChannel(ev.channel);
-        if (canonical === null) {
-          continue;
-        }
-        const current = bestRankPerChannel[canonical];
-        if (current === undefined || ev.rank < current) {
-          bestRankPerChannel[canonical] = ev.rank;
-        }
-        const normalizedEvidence = { ...ev, channel: canonical };
-        const bestEvidence = bestScorePerChannel.get(canonical);
-        if (
-          bestEvidence === undefined
-          || compareChannelEvidence(normalizedEvidence, bestEvidence) < 0
-        ) {
-          bestScorePerChannel.set(canonical, normalizedEvidence);
-        }
-      }
-    }
-
+    const bestScorePerChannel = new Map<
+      CandidateChannel,
+      (typeof group)[number]['provenance']['channelScores'][number]
+    >();
+    const constraintSet = new Set<string>();
     // Union matched filter constraints; intersection for failed hard constraints.
     //
     // matchedFilterConstraints: UNION — a constraint matched by any channel is
@@ -183,32 +182,107 @@ export function accumulateEvidence(
     // the entity should NOT be marked as failing the constraint. Union semantics
     // here would produce false failures and incorrectly evict candidates that at
     // least one retrieval path confirmed.
-    const constraintSet = new Set<string>();
-    // Collect per-contribution failed sets; intersect after the loop.
     const failedSetsPerContribution: Array<Set<string>> = [];
     const queryViewKeySet = new Set<string>();
     const queryViewMatches: Array<CandidateEnvelope['provenance']['queryViewMatches'][number]> = [];
+    let anchorConditioned = false;
+
+    // Sparse-field merge accumulators. Canonical's values are authoritative;
+    // we never overwrite a defined canonical value. Pre-seed from canonical so
+    // the in-loop merge only fills slots from non-canonical members.
+    let mergedGrapeFamily = canonical.legacyCandidate.grapeFamily;
+    let mergedFlavorProfiles = canonical.legacyCandidate.flavorProfiles;
+    let mergedRegionHierarchy = canonical.legacyCandidate.regionHierarchy;
+    let mergedPriceBandNumeric = canonical.legacyCandidate.priceBandNumeric;
+
     for (const c of group) {
-      for (const constraint of c.provenance.matchedFilterConstraints) {
+      const p = c.provenance;
+
+      // (1) Union channels (canonicalized)
+      for (const ch of p.channels) {
+        const canonChannel = toCanonicalCandidateChannel(ch);
+        if (canonChannel !== null) {
+          channelSet.add(canonChannel);
+        }
+      }
+
+      // (2) Best rank + best score evidence per canonical channel
+      //     (lowest rank = best)
+      for (const ev of p.channelScores) {
+        const canonChannel = toCanonicalCandidateChannel(ev.channel);
+        if (canonChannel === null) continue;
+        const currentRank = bestRankPerChannel[canonChannel];
+        if (currentRank === undefined || ev.rank < currentRank) {
+          bestRankPerChannel[canonChannel] = ev.rank;
+        }
+        const normalizedEvidence = { ...ev, channel: canonChannel };
+        const bestEvidence = bestScorePerChannel.get(canonChannel);
+        if (
+          bestEvidence === undefined
+          || compareChannelEvidence(normalizedEvidence, bestEvidence) < 0
+        ) {
+          bestScorePerChannel.set(canonChannel, normalizedEvidence);
+        }
+      }
+
+      // (3) Union matchedFilterConstraints
+      for (const constraint of p.matchedFilterConstraints) {
         constraintSet.add(constraint);
       }
-      failedSetsPerContribution.push(new Set(c.provenance.failedHardConstraints ?? []));
-      for (const match of c.provenance.queryViewMatches) {
-        const canonical = toCanonicalCandidateChannel(match.channel);
-        if (canonical === null) {
-          continue;
-        }
-        const normalizedMatch = { ...match, channel: canonical };
-        const key = `${normalizedMatch.viewName}\u0000${normalizedMatch.matchedText}\u0000${normalizedMatch.channel}`;
+
+      // (4) Per-contribution failed-hard set (intersected after the loop)
+      failedSetsPerContribution.push(new Set(p.failedHardConstraints ?? []));
+
+      // (5) Dedup'd queryViewMatches with canonical channel
+      for (const match of p.queryViewMatches) {
+        const canonChannel = toCanonicalCandidateChannel(match.channel);
+        if (canonChannel === null) continue;
+        const normalizedMatch = { ...match, channel: canonChannel };
+        const key = `${normalizedMatch.viewName} ${normalizedMatch.matchedText} ${normalizedMatch.channel}`;
         if (!queryViewKeySet.has(key)) {
           queryViewKeySet.add(key);
           queryViewMatches.push(normalizedMatch);
         }
       }
+
+      // (6) anchorConditioned: OR-reduce
+      if (p.anchorConditioned) {
+        anchorConditioned = true;
+      }
+
+      // (7) Sparse-field best-value merge. Skip cheaply if all four already
+      // filled. We do NOT break the outer loop — accumulators (1)-(6) still
+      // need every member.
+      if (
+        mergedGrapeFamily === undefined
+        || mergedFlavorProfiles === undefined
+        || mergedRegionHierarchy === undefined
+        || mergedPriceBandNumeric === undefined
+      ) {
+        const lc = c.legacyCandidate;
+        if (mergedGrapeFamily === undefined && lc.grapeFamily !== undefined) {
+          mergedGrapeFamily = lc.grapeFamily;
+        }
+        if (
+          mergedFlavorProfiles === undefined
+          && lc.flavorProfiles != null
+          && lc.flavorProfiles.length > 0
+        ) {
+          mergedFlavorProfiles = lc.flavorProfiles;
+        }
+        if (
+          mergedRegionHierarchy === undefined
+          && lc.regionHierarchy != null
+          && lc.regionHierarchy.length > 0
+        ) {
+          mergedRegionHierarchy = lc.regionHierarchy;
+        }
+        if (mergedPriceBandNumeric === undefined && lc.priceBandNumeric !== undefined) {
+          mergedPriceBandNumeric = lc.priceBandNumeric;
+        }
+      }
     }
 
-    // anchorConditioned: true if any
-    const anchorConditioned = group.some((c) => c.provenance.anchorConditioned);
     const channels = [...channelSet];
     const matchedFilterConstraints = [...constraintSet];
 
@@ -253,38 +327,6 @@ export function accumulateEvidence(
       fusionProfile: canonical.provenance.fusionProfile,
       fusionScore: canonical.provenance.fusionScore,
     };
-    // Best-value merge for sparse fields not projected by every retrieval channel.
-    // If the canonical envelope lacks grapeFamily / flavorProfiles / regionHierarchy /
-    // priceBandNumeric, fill them from the first group contribution that has them.
-    // We never overwrite a value already present on the canonical — it is authoritative.
-    let mergedGrapeFamily = canonical.legacyCandidate.grapeFamily;
-    let mergedFlavorProfiles = canonical.legacyCandidate.flavorProfiles;
-    let mergedRegionHierarchy = canonical.legacyCandidate.regionHierarchy;
-    let mergedPriceBandNumeric = canonical.legacyCandidate.priceBandNumeric;
-    for (const c of group) {
-      if (
-        mergedGrapeFamily === undefined
-        || mergedFlavorProfiles === undefined
-        || mergedRegionHierarchy === undefined
-        || mergedPriceBandNumeric === undefined
-      ) {
-        const lc = c.legacyCandidate;
-        if (mergedGrapeFamily === undefined && lc.grapeFamily !== undefined) {
-          mergedGrapeFamily = lc.grapeFamily;
-        }
-        if (mergedFlavorProfiles === undefined && lc.flavorProfiles != null && lc.flavorProfiles.length > 0) {
-          mergedFlavorProfiles = lc.flavorProfiles;
-        }
-        if (mergedRegionHierarchy === undefined && lc.regionHierarchy != null && lc.regionHierarchy.length > 0) {
-          mergedRegionHierarchy = lc.regionHierarchy;
-        }
-        if (mergedPriceBandNumeric === undefined && lc.priceBandNumeric !== undefined) {
-          mergedPriceBandNumeric = lc.priceBandNumeric;
-        }
-      } else {
-        break;
-      }
-    }
 
     const mergedEnvelope: CandidateEnvelope = {
       entityId,

@@ -917,6 +917,17 @@ type TokenSpec =
  *
  * Unknown tokens are blocked — they never reach Vespa.
  */
+// Exported SSoT surface — read-only views over FILTER_TOKEN_REGISTRY for
+// cross-module consumers (e.g. constraint-to-sparse-filter-tokens.ts,
+// regression parity tests). The internal `FILTER_TOKEN_REGISTRY` map remains
+// the single source of truth for YQL clause generation; external callers
+// must NEVER re-declare a parallel mapping. To enumerate field names or
+// validate token keys, import the exports below.
+//
+// - FILTER_TOKEN_KEYS:        set of every valid <key> in a `<key>:value` token
+// - FILTER_TOKEN_FIELDS:      set of every Vespa schema field referenced by registry
+//                             (excludes synthetic `grape_or`; includes both
+//                              drinking_window_start and drinking_window_end)
 const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
   // String equality / substring filters (attribute | index fields → contains)
   ['wine_type',        { type: 'contains',  field: 'wine_type' }],
@@ -1014,6 +1025,49 @@ const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
   'style_not', 'price_band_not', 'flavor_profile_not', 'classification_not',
   'certification_not', 'soil_type_not', 'producer_type_not', 'grape_family_not',
 ]);
+
+/**
+ * SSoT export: set of every registered filter-token key. Cross-module callers
+ * (constraint-to-sparse-filter-tokens.ts and its regression tests) consume
+ * this to validate that every key they emit is recognised by buildSparseFilters.
+ *
+ * Derived from FILTER_TOKEN_REGISTRY so adding a registry entry automatically
+ * widens the exported set — no parallel maintenance.
+ */
+export const FILTER_TOKEN_KEYS: ReadonlySet<string> = new Set(
+  FILTER_TOKEN_REGISTRY.keys(),
+);
+
+/**
+ * SSoT export: set of every Vespa schema field referenced by FILTER_TOKEN_REGISTRY.
+ * Used by the schema-parity regression test to assert every registered field
+ * actually exists in `vespa/app/schemas/wine_entity.sd`.
+ *
+ *  - `grape_or` token: synthetic — no single field; contributes both
+ *    `grape_primary` and `grapes` (via the registry entries that reference
+ *    those fields directly).
+ *  - `drinking_window_now` token: documents only the START field; the END
+ *    field (`drinking_window_end`) is hardcoded in buildSparseFilters' YQL
+ *    emission. Both are added explicitly below so the parity test catches
+ *    schema-side renames of either.
+ */
+export const FILTER_TOKEN_FIELDS: ReadonlySet<string> = (() => {
+  const fields = new Set<string>();
+  for (const spec of FILTER_TOKEN_REGISTRY.values()) {
+    if ('field' in spec) {
+      fields.add(spec.field);
+    }
+  }
+  // grape_or synthetic token covers both fields — registry entries
+  // 'grape_primary' and 'grapes_not' already add these, but assert explicitly
+  // so the parity invariant survives if those entries are ever removed.
+  fields.add('grape_primary');
+  fields.add('grapes');
+  // drinking_window_now spec.field is the start field; the end field is also
+  // emitted in YQL — add it so the parity test catches schema renames.
+  fields.add('drinking_window_end');
+  return fields;
+})();
 
 /**
  * Builds YQL AND filter clauses from an array of filter tokens for use in

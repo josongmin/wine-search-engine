@@ -3,14 +3,16 @@ import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
-import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
-import { dedupeSparseHitsByEntity } from './browse-diversity.js';
-import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
-import { extractHardConstraintsFromGraph } from '../../query/service/graph-slot-constraints.js';
 import { normalizeUnicode } from '../../shared/utils/unicode-normalize.js';
+import {
+  annotateAndApplyHardFilters,
+  resolveHardForFilter,
+  searchAndDedupSparse,
+  toSparseFilterTokens,
+} from './sparse-retrieval-pipeline.js';
 
 export class CompareRetriever {
   private readonly constraintFilter = new ConstraintFilter();
@@ -79,6 +81,11 @@ export class CompareRetriever {
    * This keeps comparison retrieval operational in production instead of
    * silently falling back to the generic candidate pool.
    *
+   * Shared pipeline steps (graph-aware hard-filter resolution, sparse-search
+   * + dedup, constraint-evidence annotation + hard-filter rejection) live in
+   * `sparse-retrieval-pipeline.ts`; only the compare-specific anchor query
+   * synthesis and anchor exclusion stay inline here.
+   *
    * @param anchorEntityId - The reference wine to compare against.
    * @param constraints - Optional constraints to refine the comparison set.
    * @param limit - Maximum candidates to retrieve.
@@ -99,26 +106,24 @@ export class CompareRetriever {
       return [];
     }
 
-    // ADR-014 Phase 1b.3b: graph-aware filter extraction. Trivial-graph
-    // emission is byte-identical to the pre-PR5 `constraints.hard` path.
-    const hardForFilter = graph !== undefined
-      ? extractHardConstraintsFromGraph(graph)
-      : constraints.hard;
-    const filters = [...hardConstraintsToSparseFilterTokens(hardForFilter)];
-    const rawHits = await this.searchIndex.sparseSearch(
-      lexicalQueries,
-      filters.length > 0 ? filters : undefined,
-      Math.max(limit * CompareRetriever.FETCH_MULTIPLIER, limit),
-    );
-    const hits = dedupeSparseHitsByEntity(rawHits)
+    const hardForFilter = resolveHardForFilter(constraints, graph);
+    const filters = toSparseFilterTokens(hardForFilter);
+    const dedupedHits = await searchAndDedupSparse({
+      client: this.searchIndex,
+      queries: lexicalQueries,
+      filters,
+      fetchLimit: Math.max(limit * CompareRetriever.FETCH_MULTIPLIER, limit),
+    });
+    const hits = dedupedHits
       .filter((hit) => hit.entityId !== anchorEntityId)
       .slice(0, limit);
 
-    const candidates = annotateCandidateConstraintEvidenceBatch(
-      CompareRetriever.hitsToCandidates(hits, lexicalQueries, filters),
+    return annotateAndApplyHardFilters({
+      candidates: CompareRetriever.hitsToCandidates(hits, lexicalQueries, filters),
       constraints,
       graph,
-    );
-    return this.constraintFilter.applyHardFilters(candidates, hardForFilter);
+      constraintFilter: this.constraintFilter,
+      hardForFilter,
+    });
   }
 }

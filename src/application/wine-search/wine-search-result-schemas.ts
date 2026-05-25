@@ -360,7 +360,7 @@ export interface WineSearchResult {
   /** Discriminator for the two distinct `terminationReason === 'blocked'`
    *  modes. See module docstring (S1 semantic split). */
   readonly terminationKind?: TerminationKind | undefined;
-  readonly degradedReason: AnswerResult['degradedReason'];
+  readonly degradedReason?: AnswerResult['degradedReason'];
   readonly intent: QueryIntent | 'rejected';
   readonly planKind: ExecutionPlan['kind'];
 }
@@ -430,7 +430,5 @@ export function assertWineSearchResult(value: unknown): WineSearchResult {
         .join('; ')}`,
     );
   }
-  // The Zod inference produces a structurally-equivalent shape; the cast is
-  // safe because both types are derived from the same schema.
-  return parsed.data as unknown as WineSearchResult;
+  return parsed.data;
 }

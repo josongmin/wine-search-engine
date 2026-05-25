@@ -673,41 +673,58 @@ export class WineSearchOrchestrator {
     state: OrchestratorState,
     baseConfig: AgentConfig,
   ): Promise<DispatchOutcome> {
-    if (plan.kind === 'reject') {
-      // Router-level reject = `unsupported_intent` (no anchors, no
-      // constraints, intent=unknown). It is NOT a security event, so
-      // `policyBlocked` is false. See S1 split in
-      // `wine-search-result-schemas.ts`.
-      state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
-      this.appendStep(state, {
-        source: 'runner',
-        summary: `rejected: ${plan.reason}`,
-        durationMs: 0,
-      });
-      this.logger.info(
-        {
-          requestId: input.requestId,
-          phase: 'router_reject',
-          reason: plan.reason,
+    // Dispatch switch — exhaustively narrows over `ExecutionPlanKind` (SSoT
+    // `EXECUTION_PLAN_KINDS` in `execution-plan-schemas.ts`). The
+    // `default: never` assertion forces a compile error if a new plan kind
+    // is added to the SSoT but not handled here (CLAUDE.md rule 30 — SSoT
+    // discipline; no silent "unknown plan" fall-through).
+    switch (plan.kind) {
+      case 'reject': {
+        // Router-level reject = `unsupported_intent` (no anchors, no
+        // constraints, intent=unknown). It is NOT a security event, so
+        // `policyBlocked` is false. See S1 split in
+        // `wine-search-result-schemas.ts`.
+        state.terminationReason = transitionTerminationReason(state.terminationReason, 'blocked');
+        this.appendStep(state, {
+          source: 'runner',
+          summary: `rejected: ${plan.reason}`,
+          durationMs: 0,
+        });
+        this.logger.info(
+          {
+            requestId: input.requestId,
+            phase: 'router_reject',
+            reason: plan.reason,
+            terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
+            anchors: analysis.anchors.length,
+            constraints: analysis.normalizedConstraints.length,
+          },
+          '[wine-search-orchestrator] router rejected → unsupported_intent',
+        );
+        return {
+          kind: 'ok',
+          terminationReason: 'blocked',
+          policyBlocked: false,
           terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
-          anchors: analysis.anchors.length,
-          constraints: analysis.normalizedConstraints.length,
-        },
-        '[wine-search-orchestrator] router rejected → unsupported_intent',
-      );
-      return {
-        kind: 'ok',
-        terminationReason: 'blocked',
-        policyBlocked: false,
-        terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
-      };
+        };
+      }
+      case 'multi-step':
+        return this.dispatchMultiStep(plan, analysis, input, state, baseConfig);
+      case 'single-search':
+      case 'parallel-search':
+      case 'comparison':
+      case 'food-pairing-then-search':
+      case 'search-then-drinkability':
+        return this.dispatchRunner(plan, input, state, baseConfig);
+      default: {
+        // Exhaustiveness check: if `EXECUTION_PLAN_KINDS` grows a new
+        // member, `plan` is no longer `never` here and `tsc` fails.
+        const _exhaustive: never = plan;
+        throw new Error(
+          `wine-search-orchestrator: unhandled plan kind in dispatch switch: ${JSON.stringify(_exhaustive)}`,
+        );
+      }
     }
-
-    if (plan.kind === 'multi-step') {
-      return this.dispatchMultiStep(plan, analysis, input, state, baseConfig);
-    }
-
-    return this.dispatchRunner(plan, input, state, baseConfig);
   }
 
   private async dispatchRunner(

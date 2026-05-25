@@ -173,6 +173,10 @@ export class ExecutionRunner {
         return { kind: 'rejected', reason: 'tool_unavailable' };
       }
 
+      // Exhaustive switch on `plan.kind` — discriminated against the SSoT
+      // `ExecutionPlanKind` (CLAUDE.md rule 30, `execution-plan-schemas.ts`).
+      // The `default: never` assertion fails at `tsc` if a new plan kind is
+      // added to the SSoT tuple but not handled here.
       switch (plan.kind) {
         case 'single-search':
           return await this.runSingleSearch(plan.searchInput, ctx, perStepTimeoutMs, logCtx);
@@ -203,6 +207,10 @@ export class ExecutionRunner {
         case 'reject':
           bootstrapLogger.info({ ...logCtx, reason: plan.reason }, '[ExecutionRunner] plan rejected');
           return { kind: 'rejected', reason: plan.reason };
+        default: {
+          const _exhaustive: never = plan;
+          throw new Error(`ExecutionRunner: unhandled plan kind in dispatch switch: ${JSON.stringify(_exhaustive)}`);
+        }
       }
     } catch (err) {
       const cause = err instanceof Error ? err : new Error(String(err));

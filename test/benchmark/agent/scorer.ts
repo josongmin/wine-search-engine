@@ -1051,7 +1051,7 @@ export {
 // extractKoreanPrices / extractVintageYears / extractProperNouns + their
 // currency constants + DRINK_WINDOW_CONTEXT_RE moved to ./scorer-text-extractors.ts
 // during the 2026-05-25 decomposition. Re-exported below to preserve the
-// external surface (test/benchmark/agent/__tests__/scorer.test.ts).
+// external surface (test/benchmark/agent/__tests__/scorer-*.test.ts).
 export {
   extractKoreanPrices,
   extractVintageYears,

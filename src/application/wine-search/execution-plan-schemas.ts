@@ -212,6 +212,38 @@ export const PlanRejectReasonSchema = z.enum([
 export type PlanRejectReason = z.infer<typeof PlanRejectReasonSchema>;
 
 // ---------------------------------------------------------------------------
+// ExecutionPlanKind — SSoT for the discriminated-union `kind` field.
+//
+// This tuple is the single source of truth (CLAUDE.md rule 30) for the set
+// of valid plan kinds. Every downstream caller — the router (which emits
+// plans), the runner (which dispatches via `switch (plan.kind)`), the
+// orchestrator (which inspects `plan.kind` for branching), and tests —
+// must import either `EXECUTION_PLAN_KINDS` (for runtime iteration) or
+// `ExecutionPlanKind` (for type narrowing), never re-spell the string
+// literals. Previously these literals appeared in 4+ files and would drift
+// silently when a new plan kind was added in one place but not another.
+//
+// `as const` keeps the literal type information so
+// `typeof EXECUTION_PLAN_KINDS[number]` collapses to the exact union of
+// the 7 literals.
+//
+// NOTE: order is load-bearing for `z.enum` — Zod surfaces the first entry
+// as the default in error messages. We list `single-search` first because
+// it is the 80% happy-path plan kind (see deterministic-router.ts rule 7).
+// ---------------------------------------------------------------------------
+
+export const EXECUTION_PLAN_KINDS = [
+  'single-search',
+  'parallel-search',
+  'comparison',
+  'food-pairing-then-search',
+  'search-then-drinkability',
+  'multi-step',
+  'reject',
+] as const;
+export type ExecutionPlanKind = typeof EXECUTION_PLAN_KINDS[number];
+
+// ---------------------------------------------------------------------------
 // ExecutionPlan — discriminated union
 // ---------------------------------------------------------------------------
 
@@ -254,6 +286,35 @@ export const ExecutionPlanSchema = z.discriminatedUnion('kind', [
   }).strict(),
 ]);
 export type ExecutionPlan = z.infer<typeof ExecutionPlanSchema>;
+
+// ---------------------------------------------------------------------------
+// Compile-time SSoT parity guard
+//
+// If `ExecutionPlanKind` (the SSoT tuple) and `ExecutionPlan['kind']` (the
+// Zod-inferred union) ever diverge — e.g. a new branch is added to the Zod
+// union but not to `EXECUTION_PLAN_KINDS`, or vice versa — these two
+// `Equals<>` checks fail at `tsc` time. This makes the SSoT invariant
+// type-system-enforced; no runtime test is needed for the "both shapes
+// agree" property (we still keep a runtime regression for the membership /
+// arity property under `__tests__/`).
+// ---------------------------------------------------------------------------
+
+// The canonical "type-level equality" trick: two types are equal iff a
+// generic function returning `T extends X ? 1 : 2` is assignable in both
+// directions. The phantom type parameter `T` is intentionally used only
+// inside the conditional — silence the lint rule that flags single-use
+// generics, since removing the phantom breaks the trick.
+type _AssertEqual<A, B> =
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
+  (<T>() => T extends A ? 1 : 2) extends
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
+  (<T>() => T extends B ? 1 : 2) ? true : false;
+
+// Forces a compile error if SSoT tuple and Zod union diverge.
+type _ExecutionPlanKindParityCheck =
+  _AssertEqual<ExecutionPlanKind, ExecutionPlan['kind']> extends true ? true : never;
+// Reference the alias so it is not stripped as unused.
+export type __ExecutionPlanKindParityProof = _ExecutionPlanKindParityCheck;
 
 // ---------------------------------------------------------------------------
 // Convenience type narrows (callers use these instead of inline `kind ===`)

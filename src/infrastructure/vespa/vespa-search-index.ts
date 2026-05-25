@@ -49,6 +49,12 @@ import {
 } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { isEligiblePrefixQuery } from '../../domain/query/service/alias-prefix-terms.js';
+import {
+  MAJOR_REGION_KEYWORDS,
+  MAJOR_COUNTRY_KEYWORDS,
+  MAJOR_GRAPE_KEYWORDS,
+  queryMentionsAny,
+} from './query-boost-vocabulary.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -95,6 +101,31 @@ const MAX_BULK_FETCH_IDS = 5000;
  */
 const FETCH_SUMMARY_BATCH_SIZE = VESPA_BULK_HYDRATION_BATCH_SIZE;
 const ALIAS_PREFIX_TERMS_FIELD = 'alias_prefix_terms';
+
+/**
+ * Diagnostic-rich result shape for {@link VespaSearchIndex.getDocumentsReport}.
+ *
+ * `docs` is keyed by `CanonicalEntityId` and ordered to match the caller-
+ * supplied id list, mirroring legacy `getDocuments` semantics.
+ *
+ * `missingIds` enumerates the requested ids for which no valid document was
+ * produced — caller-side policy code (e.g. fail-loud, retry, downgrade) can
+ * branch on this instead of recomputing the diff against the input list.
+ *
+ * `parseFailures` counts individual Vespa hits whose `fromVespaFields()`
+ * parse threw (`MalformedVespaDocumentError`); the affected ids are also
+ * reflected in `missingIds`.
+ *
+ * `batchFailures` counts batch-level Vespa query rejections (timeout, 5xx,
+ * circuit-breaker open). When `batchFailures > 0`, every id assigned to the
+ * failing batch will also appear in `missingIds`.
+ */
+export interface GetDocumentsReport {
+  readonly docs: ReadonlyMap<CanonicalEntityId, RetrievalDocument>;
+  readonly missingIds: readonly CanonicalEntityId[];
+  readonly parseFailures: number;
+  readonly batchFailures: number;
+}
 
 interface VespaSearchIndexSchemaCapabilities {
   readonly aliasPrefixTerms: boolean;
@@ -209,26 +240,19 @@ function buildStructuredQueryFeatureParams(
   filters: readonly string[],
 ): Record<string, number> {
   const structuredQueryCount = Math.max(0, queries.length - STRUCTURED_QUERY_BASELINE_COUNT);
-  const normalizedQueries = queries.map((query) => query.toLowerCase());
-  const regionBoostFromQuery = normalizedQueries.some((query) =>
-    query.includes('bordeaux')
-    || query.includes('burgundy')
-    || query.includes('napa')
-    || query.includes('champagne')
-    || query.includes('rioja')
+  // Vocabulary-driven word-boundary matching (Unicode-safe) replaces the
+  // legacy `query.includes(...)` substring checks. See
+  // `./query-boost-vocabulary.ts` for the SSoT keyword lists and the
+  // word-boundary contract — substring matching was producing false
+  // positives on compound tokens (`new_bordeaux_style`, `pinotage`, …).
+  const regionBoostFromQuery = queries.some(
+    (query) => queryMentionsAny(query, MAJOR_REGION_KEYWORDS),
   ) ? 1 : 0;
-  const countryBoostFromQuery = normalizedQueries.some((query) =>
-    query.includes('france')
-    || query.includes('italy')
-    || query.includes('spain')
-    || query.includes('usa')
+  const countryBoostFromQuery = queries.some(
+    (query) => queryMentionsAny(query, MAJOR_COUNTRY_KEYWORDS),
   ) ? 1 : 0;
-  const grapeBoostFromQuery = normalizedQueries.some((query) =>
-    query.includes('cabernet')
-    || query.includes('merlot')
-    || query.includes('pinot')
-    || query.includes('chardonnay')
-    || query.includes('riesling')
+  const grapeBoostFromQuery = queries.some(
+    (query) => queryMentionsAny(query, MAJOR_GRAPE_KEYWORDS),
   ) ? 1 : 0;
   const regionFilterCount = countStructuredFilterMatches(filters, ['region:', 'appellation:']);
   const countryFilterCount = countStructuredFilterMatches(filters, ['country:']);
@@ -863,11 +887,62 @@ export class VespaSearchIndex implements SearchIndexPort {
     }
   }
 
+  /**
+   * @deprecated Use {@link getDocumentsReport} for new callers — it surfaces
+   *   `missingIds`, `parseFailures`, and `batchFailures` so silent partial
+   *   data loss is observable and policy-actionable. This wrapper is
+   *   preserved for backward compatibility with existing callers that only
+   *   need the bare `ReadonlyMap` shape; it logs an aggregate warn line
+   *   whenever any parse or batch failure occurred.
+   */
   async getDocuments(
     entityIds: readonly CanonicalEntityId[],
   ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>> {
+    const report = await this.getDocumentsReport(entityIds);
+    if (report.parseFailures > 0 || report.batchFailures > 0) {
+      bootstrapLogger.warn(
+        {
+          requestedCount: entityIds.length,
+          returnedCount: report.docs.size,
+          missingCount: report.missingIds.length,
+          parseFailures: report.parseFailures,
+          batchFailures: report.batchFailures,
+        },
+        '[VespaSearchIndex] getDocuments: partial hydration — caller using legacy shape cannot see missingIds; consider migrating to getDocumentsReport',
+      );
+    }
+    return report.docs;
+  }
+
+  /**
+   * Batch-fetch documents and report partial-success diagnostics.
+   *
+   * Unlike the legacy {@link getDocuments}, the returned shape exposes
+   * `missingIds`, `parseFailures`, and `batchFailures` so callers can:
+   *  - enforce "all-or-nothing" semantics (fail loud when any id is missing);
+   *  - distinguish *malformed hit* (parse failure on a returned hit) from
+   *    *whole-batch failure* (Vespa query rejected or timed out);
+   *  - attribute downstream silent-skip metrics to the correct bucket.
+   *
+   * `missingIds` preserves the original `entityIds` order and lists every id
+   * for which no valid {@link RetrievalDocument} was produced, regardless of
+   * whether the cause was a parse failure, a batch-level failure, or simply
+   * "Vespa returned no hit for that id" (e.g. the document has been deleted
+   * or never indexed).
+   *
+   * `docs` preserves the original `entityIds` order, mirroring legacy
+   * `getDocuments` semantics for callers that mix-and-match the two APIs.
+   */
+  async getDocumentsReport(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<GetDocumentsReport> {
     if (entityIds.length === 0) {
-      return new Map<CanonicalEntityId, RetrievalDocument>();
+      return {
+        docs: new Map<CanonicalEntityId, RetrievalDocument>(),
+        missingIds: [],
+        parseFailures: 0,
+        batchFailures: 0,
+      };
     }
     if (entityIds.length > MAX_BULK_FETCH_IDS) {
       throw new Error(`getDocuments: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
@@ -891,40 +966,57 @@ export class VespaSearchIndex implements SearchIndexPort {
         VESPA_BULK_HYDRATION_TIMEOUT_MS,
       );
       const children = response.root.children ?? [];
-      return children.map((hit, index) => {
+      let parseFailures = 0;
+      const docs: RetrievalDocument[] = [];
+      for (let index = 0; index < children.length; index += 1) {
+        const hit = children[index];
+        if (hit === undefined) continue;
         try {
-          return fromVespaFields(hit.fields);
+          docs.push(fromVespaFields(hit.fields));
         } catch (err) {
+          parseFailures += 1;
           logDocumentParseFailure('getDocuments', err, hit.fields, index + 1);
           bootstrapLogger.warn(
             { batchSize: batch.length, entityIndex: index + 1 },
             '[VespaSearchIndex] getDocuments: skipping malformed hit and continuing',
           );
-          return null;
         }
-      }).filter((doc): doc is RetrievalDocument => doc !== null);
+      }
+      return { docs, parseFailures };
     }));
     const docs = new Map<CanonicalEntityId, RetrievalDocument>();
+    let parseFailures = 0;
+    let batchFailures = 0;
     for (const result of settled) {
       if (result.status === 'rejected') {
+        batchFailures += 1;
         bootstrapLogger.warn(
           { err: result.reason instanceof Error ? result.reason.message : String(result.reason) },
           '[VespaSearchIndex] getDocuments: batch query failed',
         );
         continue;
       }
-      for (const doc of result.value) {
+      parseFailures += result.value.parseFailures;
+      for (const doc of result.value.docs) {
         docs.set(doc.entityId, doc);
       }
     }
     const ordered = new Map<CanonicalEntityId, RetrievalDocument>();
+    const missingIds: CanonicalEntityId[] = [];
     for (const entityId of entityIds) {
       const doc = docs.get(entityId);
       if (doc !== undefined) {
         ordered.set(entityId, doc);
+      } else {
+        missingIds.push(entityId);
       }
     }
-    return ordered;
+    return {
+      docs: ordered,
+      missingIds,
+      parseFailures,
+      batchFailures,
+    };
   }
 
   async getDrinkingWindowDocuments(

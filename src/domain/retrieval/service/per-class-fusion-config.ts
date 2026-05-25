@@ -11,35 +11,11 @@
  * magic number is annotated with the heuristic it encodes.
  */
 
-// Rule 30 SSoT: k=60 is defined once in rrf.ts; import, do not redefine.
-import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
+// Rule 30 SSoT: every RRF K constant is defined once in rrf.ts; import the
+// RRF_K table, do not redefine locally. RRF_DEFAULT_K is preserved for
+// readability at the call-site (it pairs with the "canonical k" comments).
+import { RRF_DEFAULT_K, RRF_K } from '../../shared/utils/rrf.js';
 import type { QueryClass as DomainQueryClass } from '../../shared/types/query-class.js';
-
-/**
- * Tighter k for anchored/specific lookups — rank-1 hits should dominate
- * rank-2+ rather than being smeared across the tail.
- */
-const RRF_K_TIGHT = 30;
-
-/**
- * Tightest k for exact-entity anchor-first lookups — the resolved anchor
- * entity should appear at rank 1; any displacement costs proportionally more.
- * Arithmetic: at k=10, rank-1 score is 1/11 ≈ 0.091; rank-10 score is 1/20 = 0.05
- * — a rank-1 entity carries 82% more weight than a rank-10 entity in the same
- * channel, ensuring the anchor hit dominates the fusion output.
- */
-const RRF_K_ENTITY_EXACT = 10;
-
-/**
- * Slightly tighter k for compare flows where anchor rank is load-bearing.
- */
-const RRF_K_COMPARE = 40;
-
-/**
- * Looser k for pairing/open-ended queries where the long tail carries
- * meaningful recall and should not be crushed by rank-1.
- */
-const RRF_K_LOOSE = 80;
 
 /** Neutral weight baseline — channels contribute equally. */
 const WEIGHT_NEUTRAL = 1.0;
@@ -97,7 +73,7 @@ export const DEFAULT_FUSION_CONFIG: FusionConfig = {
  * because entity resolution is usually decisive for this class.
  */
 const FUSION_SPECIFIC_WINE: FusionConfig = {
-  rrfK: RRF_K_TIGHT,
+  rrfK: RRF_K.TIGHT,
   sparseWeight: WEIGHT_BOOST_STRONG,
   denseWeight: WEIGHT_HALF,
   anchorWeight: WEIGHT_BOOST_MILD,
@@ -118,7 +94,7 @@ const FUSION_SPECIFIC_WINE: FusionConfig = {
  *   dense  WEIGHT_HALF (0.5)       — ANN neighbourhood useful but must not swamp anchor
  */
 const FUSION_ENTITY_EXACT: FusionConfig = {
-  rrfK: RRF_K_ENTITY_EXACT,
+  rrfK: RRF_K.ENTITY_EXACT,
   sparseWeight: WEIGHT_BOOST_MILD,
   denseWeight: WEIGHT_HALF,
   anchorWeight: WEIGHT_BOOST_STRONG,
@@ -144,7 +120,7 @@ const FUSION_BROWSE: FusionConfig = {
  * meaningful for side-by-side comparisons.
  */
 const FUSION_COMPARE: FusionConfig = {
-  rrfK: RRF_K_COMPARE,
+  rrfK: RRF_K.COMPARE,
   sparseWeight: WEIGHT_BOOST_MILD,
   denseWeight: WEIGHT_NEUTRAL,
   anchorWeight: WEIGHT_BOOST_STRONG,
@@ -157,7 +133,7 @@ const FUSION_COMPARE: FusionConfig = {
  * Looser k because the long tail carries real pairing candidates.
  */
 const FUSION_PAIRING: FusionConfig = {
-  rrfK: RRF_K_LOOSE,
+  rrfK: RRF_K.LOOSE,
   sparseWeight: WEIGHT_DAMPED,
   denseWeight: WEIGHT_BOOST_STRONG,
   anchorWeight: WEIGHT_HALF,

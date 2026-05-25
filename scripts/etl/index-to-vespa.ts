@@ -216,9 +216,9 @@ async function embedBatchHttp(
 
   // Validate embedding dimensions match schema
   for (let i = 0; i < result.length; i++) {
-    if (result[i]!.length !== EMBEDDING_DIM) {
+    if (result[i]!.length !== EMBEDDING_DIMENSION) {
       throw new Error(
-        `Embedding dimension mismatch at index ${i}: expected ${EMBEDDING_DIM}, got ${result[i]!.length}`,
+        `Embedding dimension mismatch at index ${i}: expected ${EMBEDDING_DIMENSION}, got ${result[i]!.length}`,
       );
     }
   }
@@ -271,8 +271,10 @@ function parseArgs(argv: string[]): Args {
 // Deterministic embedding fallback (same formula as seed-wines-real.ts)
 // ---------------------------------------------------------------------------
 
-/** Embedding dimension — must match Vespa schema tensor<float>(x[DIM]). */
-const EMBEDDING_DIM = 1024;
+// Embedding dimension is the SSoT constant `EMBEDDING_DIMENSION`
+// (imported above from `@shared/constants/embedding`). Vespa schema
+// `tensor<float>(x[EMBEDDING_DIMENSION])` must match — verified by the
+// `embedding-dimension-ssot.regression.test.ts` parity test.
 
 export interface PreparedVespaFeedDocument {
   readonly id: string;
@@ -439,8 +441,8 @@ export function deterministicEmbedding(
     body, sweetness, acidity, tannin,
     1 - body, 1 - sweetness, 1 - acidity, 1 - tannin,
   ];
-  const embedding = new Array<number>(EMBEDDING_DIM).fill(0);
-  for (let i = 0; i < EMBEDDING_DIM; i++) {
+  const embedding = new Array<number>(EMBEDDING_DIMENSION).fill(0);
+  for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
     const f = features[i % features.length]!;
     const k = Math.floor(i / features.length);
     embedding[i] =

@@ -1,0 +1,76 @@
+id: retrieval.fusion-weight-calibration
+name: Per-class RRF Fusion Weight Calibration (sweep framework)
+category: retrieval
+summary: |
+  per-class-fusion-config.ts 의 sparse / dense / anchor weight prior 들을
+  data-driven 방식으로 calibrate 하기 위한 sweep harness. 현재는 framework
+  (weight grid + CalibrationRecord schema + CLI scaffold) 단계로,
+  실제 sweep 실행은 eval corpus + bench runner wiring 이후 별도 PR.
+
+maturity: 1
+maturity_rationale: |
+  Concept/Stub 단계 (maturity 1). 현재 landed 범위:
+    - SWEEP_WEIGHT_GRID 정의 (sparse 6 × dense 5 × anchor 5 ×
+      learnedSparse 1 = 150 grid points, production prior 모두 포함)
+    - enumerateGrid Cartesian-product generator (deterministic order)
+    - CalibrationRecord Zod schema v1 (queryClass, gridPoint, metrics,
+      evalCorpus, evalSampleSize) + .strict()
+    - CLI entrypoint (parseArgs / buildSweepPlan / --dry-run) — live
+      eval 경로는 의도적으로 throw 처리 (TODO(eval))
+    - 회귀 lock: production prior 누락 / 그리드 cardinality / queryClass
+      enum 1:1 / schema 'v1' 핀 (test/regression/
+      fusion-weight-sweep-framework.regression.test.ts)
+    - 스키마 단위 테스트: scripts/eval/fusion-weight-sweep/__tests__/
+      calibration-record.test.ts
+  미달 항목 (3+ 이상으로 올리려면 필요):
+    - actual sweep runner (bench/wine-search/runner.ts 호출 wiring)
+    - eval corpus 선정 (gold-set-v2 vs silver-korean-v1) +
+      reproducible seed
+    - PerClassFusionOverride port — 그리드 포인트별 weight 주입 seam
+    - select-best.ts (argmax-by-metric → patch generator)
+    - production wiring (calibrated value 를 per-class-fusion-config.ts
+      에 promote 하는 별도 PR)
+
+status: planned
+since: 2026-05
+last_reviewed: 2026-05-26
+owner: core
+
+surfaces:
+  - "CLI: scripts/eval/fusion-weight-sweep/index.ts (framework, --dry-run only)"
+
+key_files:
+  - scripts/eval/fusion-weight-sweep/index.ts
+  - scripts/eval/fusion-weight-sweep/weight-grid.ts
+  - scripts/eval/fusion-weight-sweep/calibration-record.ts
+  - src/domain/retrieval/service/per-class-fusion-config.ts
+
+tests:
+  unit:
+    - scripts/eval/fusion-weight-sweep/__tests__/calibration-record.test.ts
+  regression:
+    - test/regression/fusion-weight-sweep-framework.regression.test.ts
+
+depends_on:
+  - retrieval.hybrid-search
+  - retrieval.ranking-pipeline
+
+related_rfcs: []
+
+known_limitations:
+  - "Live eval not wired — `--dry-run` only; `runSweep` throws by design"
+  - "learnedSparseWeight axis pinned at [0.0] until SPLADE serving lands"
+  - "Production override seam (PerClassFusionOverride port) not yet introduced"
+
+next_steps:
+  - "Wire BenchmarkRunner (test/benchmark/wine-search/runner.ts) under each grid point"
+  - "Select eval corpus (gold-set-v2 or silver-korean-v1) + fix seed"
+  - "Introduce PerClassFusionOverride injection port so the sweep can vary weights without mutating per-class-fusion-config.ts"
+  - "Add `select-best.ts` argmax-by-metric promoter — emits patch for per-class-fusion-config.ts"
+  - "Expand learnedSparseWeight axis once SPLADE serving lands (Epic-16 / T16-6+)"
+
+tags:
+  - calibration
+  - sweep
+  - framework-only
+  - epic-16

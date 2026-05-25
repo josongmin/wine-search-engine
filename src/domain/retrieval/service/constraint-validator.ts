@@ -49,10 +49,13 @@
  *
  * ## Telemetry
  *
- * Every dropped or unrecognized constraint logs ONCE per process via a
- * module-scoped `Map` keyed by `(tier, attribute, reason)`. Subsequent
- * occurrences increment the silent-skip counter but stay silent in the log
- * to avoid hot-path spam.
+ * Every dropped or unrecognized constraint logs through a module-scoped
+ * `Map` keyed by `(tier, attribute, reason)`. The first sighting always
+ * logs; subsequent occurrences are re-logged whenever EITHER
+ * {@link FIRST_SEEN_TTL_MS} has elapsed since the last warn OR
+ * {@link FIRST_SEEN_COUNT_THRESHOLD} additional occurrences have piled up.
+ * The silent-skip counter increments on every call regardless of throttle
+ * state — it remains the SSoT for quantitative volume.
  */
 
 import type { NormalizedConstraint } from '../../shared/types/index.js';
@@ -125,12 +128,57 @@ export interface ConstraintValidationReport {
 }
 
 /**
- * Module-scoped first-seen cache for the telemetry log. The map key is a
- * stable triplet so a `(tier, attribute, reason)` combination is only
- * verbose-logged once per process. Counter increments still fire on every
- * call so operators retain quantitative visibility.
+ * Re-log throttle window for the first-seen cache. After the very first warn
+ * for a `(tier, attribute, reason)` triplet, the same triplet is re-logged
+ * only when AT LEAST ONE of two conditions trips:
+ *
+ *  - {@link FIRST_SEEN_TTL_MS} has elapsed since the previous warn — keeps
+ *    long-running processes from going permanently silent on a recurring
+ *    silent-drop. 1h chosen as the operator-pager / dashboard refresh
+ *    cadence: shorter would risk hot-path log spam during incident
+ *    backfills; longer would let a regressing planner go unreported for a
+ *    full ops shift.
+ *  - {@link FIRST_SEEN_COUNT_THRESHOLD} additional occurrences have piled
+ *    up since the previous warn — catches high-volume drops that out-pace
+ *    the TTL. 1000 chosen because the silent-skip counter is the
+ *    authoritative volume signal; the log only needs to fire often enough
+ *    that grep-based incident response still surfaces the event when the
+ *    counter dashboard is unavailable.
+ *
+ * Either condition independently triggers a re-warn; whichever trips first
+ * wins. The counter (`globalSilentSkipCounter`) increments on every call
+ * regardless of throttle state — it remains the SSoT for quantitative
+ * volume. The log is purely the qualitative "this is happening" surface.
  */
-const FIRST_SEEN_LOG_CACHE: Set<string> = new Set();
+const MS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+const FIRST_SEEN_TTL_MS = MS_PER_SECOND * SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
+const FIRST_SEEN_COUNT_THRESHOLD = 1000;
+
+/**
+ * Cache entry tracking when a `(tier, attribute, reason)` triplet was last
+ * logged and how many silent occurrences have accumulated since that log.
+ *
+ *  - `lastLoggedAt`: the timestamp (`Date.now()`) of the most recent warn
+ *    emission for this triplet. Used to evaluate the TTL window.
+ *  - `silentCount`: count of telemetry calls that observed this triplet
+ *    AFTER `lastLoggedAt` without emitting a log. Reset to 0 each time the
+ *    log fires; compared against {@link FIRST_SEEN_COUNT_THRESHOLD}.
+ */
+interface FirstSeenLogEntry {
+  lastLoggedAt: number;
+  silentCount: number;
+}
+
+/**
+ * Module-scoped first-seen cache for the telemetry log. The map key is a
+ * stable triplet `(tier, attribute, reason)` so a triplet is verbose-logged
+ * once per process AND then re-logged on every TTL/threshold trip. Counter
+ * increments still fire on every call so operators retain quantitative
+ * visibility through the silent-skip counter regardless of throttle state.
+ */
+const FIRST_SEEN_LOG_CACHE: Map<string, FirstSeenLogEntry> = new Map();
 
 function firstSeenKey(
   tier: ValidatedConstraintTier,
@@ -138,6 +186,51 @@ function firstSeenKey(
   reason: string,
 ): string {
   return `${tier}|${attribute}|${reason}`;
+}
+
+/**
+ * Returns `true` when the caller SHOULD emit a fresh warn for this triplet,
+ * AND mutates the cache to reflect the decision. Centralising the decision
+ * + bookkeeping in one helper keeps the dropped/unrecognized branches in
+ * {@link emitConstraintValidationTelemetry} symmetric.
+ *
+ *  - First-ever sighting of a triplet → emit, init entry with
+ *    `silentCount = 0`.
+ *  - Cached + TTL elapsed → emit, reset `lastLoggedAt = now`,
+ *    `silentCount = 0`.
+ *  - Cached + `silentCount + 1 >= FIRST_SEEN_COUNT_THRESHOLD` → emit,
+ *    keep original `lastLoggedAt` (so TTL is independent of count-driven
+ *    re-warns), reset `silentCount = 0`. Note we compare on the
+ *    POST-increment value so the threshold semantic is "every Nth
+ *    occurrence, starting with the Nth".
+ *  - Else → stay silent, `silentCount++`.
+ *
+ * `nowFn` is injected so unit tests can advance time deterministically
+ * without `vi.useFakeTimers()` (which leaks into other module-scoped
+ * timers).
+ */
+function shouldEmitFirstSeenLog(
+  key: string,
+  nowFn: () => number,
+): boolean {
+  const now = nowFn();
+  const entry = FIRST_SEEN_LOG_CACHE.get(key);
+  if (entry === undefined) {
+    FIRST_SEEN_LOG_CACHE.set(key, { lastLoggedAt: now, silentCount: 0 });
+    return true;
+  }
+  if (now - entry.lastLoggedAt >= FIRST_SEEN_TTL_MS) {
+    entry.lastLoggedAt = now;
+    entry.silentCount = 0;
+    return true;
+  }
+  const nextSilentCount = entry.silentCount + 1;
+  if (nextSilentCount >= FIRST_SEEN_COUNT_THRESHOLD) {
+    entry.silentCount = 0;
+    return true;
+  }
+  entry.silentCount = nextSilentCount;
+  return false;
 }
 
 /**
@@ -254,10 +347,12 @@ function classifyAndPartition(
  * Side effects:
  *  - For each `dropped` and `unrecognized` entry, increments
  *    {@link globalSilentSkipCounter} ALWAYS.
- *  - For each unique `(tier, attribute, reason)` triplet, emits a single
- *    `warn`-level log per process. Subsequent occurrences stay silent in
- *    the log to avoid hot-path spam. The counter remains authoritative for
- *    operator-facing volume.
+ *  - For each unique `(tier, attribute, reason)` triplet, emits a
+ *    `warn`/`error`-level log on first sighting AND on every TTL trip
+ *    ({@link FIRST_SEEN_TTL_MS}) or count threshold trip
+ *    ({@link FIRST_SEEN_COUNT_THRESHOLD}), whichever comes first.
+ *    Subsequent occurrences inside the throttle window stay silent in the
+ *    log. The counter remains authoritative for operator-facing volume.
  *
  * `unrecognized` entries are NOT thrown here; the caller decides whether
  * to fail closed (recommended for production) or degrade gracefully
@@ -266,11 +361,19 @@ function classifyAndPartition(
  * @param report     The report from {@link validateConstraintBundle}.
  * @param context    Optional contextual fields (queryClass, requestId, …)
  *                   appended to every log entry.
+ * @param options    Optional injection hooks. `nowFn` exists so unit tests
+ *                   can advance the throttle clock deterministically
+ *                   without resorting to `vi.useFakeTimers()` (which would
+ *                   leak into unrelated module-scoped timers). Production
+ *                   callers MUST NOT pass this; defaults to `Date.now`.
  */
 export function emitConstraintValidationTelemetry(
   report: ConstraintValidationReport,
   context?: Readonly<Record<string, string | number | undefined>>,
+  options?: { readonly nowFn?: () => number },
 ): void {
+  const nowFn = options?.nowFn ?? Date.now;
+
   for (const entry of report.dropped) {
     globalSilentSkipCounter.increment('constraint_validator_dropped', {
       tier: entry.tier,
@@ -278,8 +381,7 @@ export function emitConstraintValidationTelemetry(
       reason: entry.reason,
     });
     const key = firstSeenKey(entry.tier, entry.constraint.attribute, entry.reason);
-    if (!FIRST_SEEN_LOG_CACHE.has(key)) {
-      FIRST_SEEN_LOG_CACHE.add(key);
+    if (shouldEmitFirstSeenLog(key, nowFn)) {
       bootstrapLogger.warn(
         {
           event: 'constraint_validator.dropped',
@@ -304,8 +406,7 @@ export function emitConstraintValidationTelemetry(
       reason: entry.reason,
     });
     const key = firstSeenKey(entry.tier, entry.constraint.attribute, entry.reason);
-    if (!FIRST_SEEN_LOG_CACHE.has(key)) {
-      FIRST_SEEN_LOG_CACHE.add(key);
+    if (shouldEmitFirstSeenLog(key, nowFn)) {
       bootstrapLogger.error(
         {
           event: 'constraint_validator.unrecognized',

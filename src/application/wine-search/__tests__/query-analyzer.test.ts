@@ -223,6 +223,10 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     // deterministic pre-pass to guarantee byte-identity even if the LLM
     // tries to rewrite them.
     expect(result.analysis.preservedSurface).toBe('asdf');
+    // Observability: the analyzer records the LLM-fallback outcome so the
+    // orchestrator can tell a real LLM rescue apart from a deterministic
+    // analysis or a softened failure. See `llmFallbackOutcome` regression file.
+    expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'success' });
   });
 
   it('does NOT invoke structuredLlm when deterministic pipeline yields constraints', async () => {
@@ -244,6 +248,12 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     if (result.kind !== 'ok') return;
     expect(result.analysis.intent).toBe('search');
     expect(stub.analyzeMock).toHaveBeenCalledTimes(1);
+    // Failure path must surface the softening trace so observability can
+    // distinguish a real `intent=search` from a synthesized one.
+    expect(result.analysis.llmFallbackOutcome).toEqual({
+      kind: 'failed_softened_to_search',
+      failureReason: 'unknown',
+    });
   });
 
   it('works without structuredLlm provided (port optional)', async () => {
@@ -251,6 +261,8 @@ describe('QueryAnalyzerService — LLM fallback', () => {
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.analysis.intent).toBe('unknown');
+    // Port absent → fallback not invoked → outcome=not_attempted.
+    expect(result.analysis.llmFallbackOutcome).toEqual({ kind: 'not_attempted' });
   });
 });
 

@@ -48,8 +48,10 @@ import {
 } from '@shared/constants/constraint-attributes.js';
 import {
   DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS,
+  EXECUTION_PLAN_KINDS,
   type ComparisonUseCaseInput,
   type ExecutionPlan,
+  type ExecutionPlanKind,
   type FoodPairingUseCaseInput,
   type PairingColor,
   type SearchUseCaseInput,
@@ -77,6 +79,38 @@ const DRINKABILITY_DEFAULT_TARGET_YEAR_OFFSET = 0;
 // policy's `limit: 1` and was silently widening exact-metadata lookups; the
 // SSoT constant `EXACT_METADATA_SEARCH_LIMIT` (= 1) keeps both call sites in
 // agreement.
+
+/**
+ * Plan-kind named locals — sourced from the `EXECUTION_PLAN_KINDS` SSoT
+ * tuple in `execution-plan-schemas.ts`. Indexed access preserves each
+ * element's literal type (the SSoT tuple is `as const`), so each local is
+ * typed as its exact literal — assigning the wrong literal to e.g.
+ * `PLAN_KIND_COMPARISON` fails at `tsc`. This keeps router `return`
+ * expressions pinned to the SSoT: rename a kind there and every site here
+ * fails to type-check.
+ */
+const PLAN_KIND_SINGLE_SEARCH = EXECUTION_PLAN_KINDS[0];
+const PLAN_KIND_PARALLEL_SEARCH = EXECUTION_PLAN_KINDS[1];
+const PLAN_KIND_COMPARISON = EXECUTION_PLAN_KINDS[2];
+const PLAN_KIND_FOOD_PAIRING_THEN_SEARCH = EXECUTION_PLAN_KINDS[3];
+const PLAN_KIND_SEARCH_THEN_DRINKABILITY = EXECUTION_PLAN_KINDS[4];
+const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[5];
+const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[6];
+
+// Compile-time membership guard — each local must be a member of the
+// `ExecutionPlanKind` SSoT union. Catches an out-of-bounds tuple index
+// silently producing `undefined` (e.g. if a kind is removed from the
+// tuple). The `satisfies` clause forces TS to verify membership without
+// widening the literal types of the locals.
+void ({
+  PLAN_KIND_SINGLE_SEARCH,
+  PLAN_KIND_PARALLEL_SEARCH,
+  PLAN_KIND_COMPARISON,
+  PLAN_KIND_FOOD_PAIRING_THEN_SEARCH,
+  PLAN_KIND_SEARCH_THEN_DRINKABILITY,
+  PLAN_KIND_MULTI_STEP,
+  PLAN_KIND_REJECT,
+} satisfies Record<string, ExecutionPlanKind>);
 
 /** Multi-step initial-action mapping. Pulled out as a constant table so the
  *  routing logic itself stays declarative. */
@@ -411,7 +445,7 @@ export class DeterministicRouter {
       && analysis.normalizedConstraints.length === 0
       && !WINE_DOMAIN_KEYWORD_RE.test(analysis.preservedSurface)
     ) {
-      return { kind: 'reject', reason: 'unsupported_intent' };
+      return { kind: PLAN_KIND_REJECT, reason: 'unsupported_intent' };
     }
 
     // Rule 2 — comparison decomposition.
@@ -421,7 +455,7 @@ export class DeterministicRouter {
         analysis.decomposition,
       );
       if (comparisonInput !== undefined) {
-        return { kind: 'comparison', comparisonInput };
+        return { kind: PLAN_KIND_COMPARISON, comparisonInput };
       }
     }
 
@@ -430,7 +464,7 @@ export class DeterministicRouter {
       const { searches } = expandParallelSlots(analysis, analysis.decomposition);
       if (searches.length >= 2) {
         return {
-          kind: 'parallel-search',
+          kind: PLAN_KIND_PARALLEL_SEARCH,
           searches,
           slotHints: analysis.decomposition.slots,
         };
@@ -447,14 +481,14 @@ export class DeterministicRouter {
       const mergedSearch = mergePairingTagsIntoSearchInput(baseSearch, pairingInput);
       if (hasPriceConstraint(analysis.normalizedConstraints)) {
         return {
-          kind: 'food-pairing-then-search',
+          kind: PLAN_KIND_FOOD_PAIRING_THEN_SEARCH,
           pairingInput,
           searchInput: mergedSearch,
         };
       }
       // No budget signal — single-search lane carries the merged pairing
       // filters/preferences directly.
-      return { kind: 'single-search', searchInput: mergedSearch };
+      return { kind: PLAN_KIND_SINGLE_SEARCH, searchInput: mergedSearch };
     }
 
     // Rule 5 — drinkability on an anchored entity.
@@ -469,7 +503,7 @@ export class DeterministicRouter {
         DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS,
       );
       return {
-        kind: 'search-then-drinkability',
+        kind: PLAN_KIND_SEARCH_THEN_DRINKABILITY,
         searchInput,
         drinkabilityTemplate: {
           targetYear,
@@ -481,14 +515,14 @@ export class DeterministicRouter {
     // Rule 6 — multi-step (defer to MiniLoop).
     if (analysis.expectedMultiStep) {
       return {
-        kind: 'multi-step',
+        kind: PLAN_KIND_MULTI_STEP,
         handoff: this.buildMultiStepHandoff(analysis),
       };
     }
 
     // Rule 7 — single-search (the 80% path).
     return {
-      kind: 'single-search',
+      kind: PLAN_KIND_SINGLE_SEARCH,
       searchInput: buildSearchInputFromAnalysis(analysis),
     };
   }

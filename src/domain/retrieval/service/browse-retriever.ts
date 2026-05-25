@@ -2,19 +2,21 @@ import type { ConstraintBundle } from '../../shared/types/index.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
-import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
-import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
-import { extractHardConstraintsFromGraph } from '../../query/service/graph-slot-constraints.js';
 import {
   browseSparseFetchLimit,
-  dedupeSparseHitsByEntity,
   diversifyProducerBrowseHits,
   diversifyRegionBrowseHits,
   expandProducerBrowseLexicalQueries,
   expandRegionBrowseLexicalQueries,
 } from './browse-diversity.js';
+import {
+  annotateAndApplyHardFilters,
+  resolveHardForFilter,
+  searchAndDedupSparse,
+  toSparseFilterTokens,
+} from './sparse-retrieval-pipeline.js';
 
 /**
  * Maps sparse index hits to hybrid candidates for browse modes.
@@ -44,6 +46,11 @@ function sparseHitsToBrowseCandidates(
  *   (producer+grape+geo when available) and prestige/critic-aware ranking; region browse by
  *   per-producer caps + prestige/critic-informed ranking.
  * - Region browse issues multiple OR queries (path + segments) for recall on hierarchical paths.
+ *
+ * Shared pipeline steps (graph-aware hard-filter resolution, sparse-search +
+ * dedup, constraint-evidence annotation + hard-filter rejection) live in
+ * `sparse-retrieval-pipeline.ts`; only browse-specific lexical expansion and
+ * diversification stay inline here.
  */
 export class BrowseRetriever {
   private readonly constraintFilter = new ConstraintFilter();
@@ -60,30 +67,25 @@ export class BrowseRetriever {
     if (q.length === 0) {
       return [];
     }
-    // ADR-014 Phase 1b.3b: when a graph is present, hard-tier slot values
-    // are the authoritative filter source (the flat bundle silently drops
-    // OR/XOR context in hybrid graphs). Trivial-graph emission is
-    // byte-identical to the pre-PR5 `constraints.hard` path.
-    const hardForFilter = graph !== undefined
-      ? extractHardConstraintsFromGraph(graph)
-      : constraints.hard;
-    const filters = [...hardConstraintsToSparseFilterTokens(hardForFilter)];
+    const hardForFilter = resolveHardForFilter(constraints, graph);
+    const filters = toSparseFilterTokens(hardForFilter);
     const fetchLimit = browseSparseFetchLimit(limit);
     const lexical = expandProducerBrowseLexicalQueries(q);
     const queries = lexical.length > 0 ? [...lexical] : [q];
-    const rawHits = await this.searchIndex.sparseSearch(
+    const hits = await searchAndDedupSparse({
+      client: this.searchIndex,
       queries,
-      filters.length > 0 ? filters : undefined,
+      filters,
       fetchLimit,
-    );
-    const hits = dedupeSparseHitsByEntity(rawHits);
+    });
     const diversified = diversifyProducerBrowseHits(hits, limit);
-    const candidates = annotateCandidateConstraintEvidenceBatch(
-      sparseHitsToBrowseCandidates(diversified, 'producer_browse', queries, filters),
+    return annotateAndApplyHardFilters({
+      candidates: sparseHitsToBrowseCandidates(diversified, 'producer_browse', queries, filters),
       constraints,
       graph,
-    );
-    return this.constraintFilter.applyHardFilters(candidates, hardForFilter);
+      constraintFilter: this.constraintFilter,
+      hardForFilter,
+    });
   }
 
   async browseRegion(
@@ -96,25 +98,24 @@ export class BrowseRetriever {
     if (q.length === 0) {
       return [];
     }
-    const hardForFilter = graph !== undefined
-      ? extractHardConstraintsFromGraph(graph)
-      : constraints.hard;
-    const filters = [...hardConstraintsToSparseFilterTokens(hardForFilter)];
+    const hardForFilter = resolveHardForFilter(constraints, graph);
+    const filters = toSparseFilterTokens(hardForFilter);
     const queries = expandRegionBrowseLexicalQueries(q);
     const lexical = queries.length > 0 ? queries : [q];
     const fetchLimit = browseSparseFetchLimit(limit);
-    const rawHits = await this.searchIndex.sparseSearch(
-      lexical,
-      filters.length > 0 ? filters : undefined,
+    const hits = await searchAndDedupSparse({
+      client: this.searchIndex,
+      queries: lexical,
+      filters,
       fetchLimit,
-    );
-    const hits = dedupeSparseHitsByEntity(rawHits);
+    });
     const diversified = diversifyRegionBrowseHits(hits, limit);
-    const candidates = annotateCandidateConstraintEvidenceBatch(
-      sparseHitsToBrowseCandidates(diversified, 'region_browse', lexical, filters),
+    return annotateAndApplyHardFilters({
+      candidates: sparseHitsToBrowseCandidates(diversified, 'region_browse', lexical, filters),
       constraints,
       graph,
-    );
-    return this.constraintFilter.applyHardFilters(candidates, hardForFilter);
+      constraintFilter: this.constraintFilter,
+      hardForFilter,
+    });
   }
 }

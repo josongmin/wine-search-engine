@@ -35,6 +35,22 @@ import type {
   StructuredLlmPort,
 } from '../../ai/port/structured-llm.port.js';
 import type { IntentClass } from './multi-query-generator.js';
+import {
+  HYDE_DOC_MAX_CHARS,
+  HYDE_PROMPT_VERSION,
+  HYDE_SYSTEM_PROMPT,
+  HYDE_SYSTEM_PROMPT_FINGERPRINT,
+  type HydePromptVersion,
+} from './prompts/hyde-system-prompt.js';
+
+// Re-export prompt governance constants so downstream observability /
+// tracing / bench-replay code can read them from the generator module
+// without depending on the prompt subdirectory directly.
+export {
+  HYDE_PROMPT_VERSION,
+  HYDE_SYSTEM_PROMPT_FINGERPRINT,
+  type HydePromptVersion,
+};
 
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
@@ -53,11 +69,6 @@ const HYDE_TIMEOUT_MS = 5000;
 /** Max output tokens — sized for a 1-2 paragraph description. */
 const HYDE_MAX_OUTPUT_TOKENS = 400;
 
-/** Maximum length of the hypothetical doc, enforced by Zod. Roughly the
- *  size of an enriched wine description in the catalog so the embedded
- *  vector stays in-distribution with corpus documents. */
-const HYDE_DOC_MAX_CHARS = 800;
-
 /** Lower bound — anything shorter is unlikely to provide meaningful
  *  semantic signal beyond the original query. */
 const HYDE_DOC_MIN_CHARS = 40;
@@ -70,21 +81,8 @@ const HYDE_LLM_SEED = 5147;
 let hydeFailureLogged = false;
 
 // ---------------------------------------------------------------------------
-// Prompt (module-scope, not inlined at call site)
+// Prompt lives in ./prompts/hyde-system-prompt.ts (version + fingerprint).
 // ---------------------------------------------------------------------------
-
-const HYDE_SYSTEM_PROMPT = `You are a sommelier writing wine descriptions to seed a dense-vector retrieval index.
-
-Given a user's wine search query, write a SHORT hypothetical wine description (1-2 paragraphs, max ${HYDE_DOC_MAX_CHARS} characters) that an ideal matching wine in our catalog would carry. The description should read like a real catalog entry, NOT a recommendation to the user.
-
-Rules:
-1. Be CONCRETE — name plausible grapes, regions, vintages, flavor notes, tannin/acidity profile, body, food pairings as relevant to the query. DO NOT use words like "could", "might", "perhaps".
-2. Stay GENERIC if the query is broad. Do not invent a specific producer or SKU — describe a category-archetype wine.
-3. Match the query language. Korean query → Korean description. English → English. Mixed input → English unless the wine context is clearly Korean.
-4. NO marketing copy. NO second-person ("you'll love", "perfect for you"). NO closing sentences inviting purchase.
-5. NO headings, lists, or markdown. Plain prose only.
-
-Output strictly JSON matching: { "document": string }.`;
 
 const HYDE_TOOL_NAME = 'emit_hypothetical_document';
 const HYDE_TOOL_DESCRIPTION =
@@ -112,6 +110,13 @@ export interface HydeGenerator {
    * intents that skip HyDE, or on any LLM/validation failure.
    */
   generate(query: string, intent: IntentClass): Promise<string | null>;
+
+  /** Semantic version of the system prompt this generator is bound to.
+   *  Surface in tracing / bench-replay artefacts to detect drift. */
+  readonly promptVersion: HydePromptVersion;
+
+  /** Short deterministic content fingerprint of the prompt text. */
+  readonly promptFingerprint: string;
 }
 
 export interface HydeGeneratorDeps {
@@ -121,6 +126,8 @@ export interface HydeGeneratorDeps {
 
 export function createHydeGenerator(deps: HydeGeneratorDeps): HydeGenerator {
   return {
+    promptVersion: HYDE_PROMPT_VERSION,
+    promptFingerprint: HYDE_SYSTEM_PROMPT_FINGERPRINT,
     async generate(query, intent) {
       const trimmed = query.trim();
       if (trimmed.length === 0) return null;
