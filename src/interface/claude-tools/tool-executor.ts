@@ -6,10 +6,6 @@
  */
 
 import type { z } from 'zod';
-import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
-import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
-import { DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
-import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
 import {
@@ -18,26 +14,14 @@ import {
 } from '../../application/search/search-tool-contract.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
-import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
-import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { SearchResponseV2Machine } from '../../interface/http/schemas/search-response-v2.schema.js';
 import { buildMachineResponseV2 } from '../../interface/http/response-builders/machine-response-builder-v2.js';
-import {
-  buildFoodPairingStructuredFilters,
-  buildFoodPairingStructuredPreferences,
-  resolveFoodPairingBudgetKrw,
-} from '../../application/search/food-pairing-tool-policy.js';
 import {
   appendStructuredQueryClauses,
   buildSearchToolSoftClauses,
 } from '../../application/search/search-tool-query-policy.js';
 import { buildSearchToolRetrievalCoreQuery } from '../../application/search/search-tool-retrieval-core.js';
-import {
-  buildCompareBaseRetrievalQueries,
-  stripSideSpecificCompareSharedConstraints,
-} from '../../application/search/compare-tool-shared-constraints.js';
 import {
   applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
@@ -55,34 +39,13 @@ import {
   shouldRunTypedWineDiversityDiscovery,
   withWineTypeFilter,
 } from '../../application/search/search-tool-diversity.js';
-import {
-  CompareWinesInputSchema,
-  DrinkingWindowInputSchema,
-  FoodPairingInputSchema,
-  SearchToolInputSchema,
-} from './tool-schemas.js';
+import { SearchToolInputSchema } from './tool-schemas.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
-import { buildComparisonDecompositionLegsForRetrieval } from '../../domain/query/service/decomposition-detector.js';
 
-/** criticScoreNormalized is 0–1; predictor wants 0–100 proxy points. */
-const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
 const CLAUDE_TOOL_FILTER_MAPPING_VERSION = 'claude_tool_v1' as const;
 const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as const;
 
 type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
-type CompareToolInput = z.infer<typeof CompareWinesInputSchema>;
-interface CompareSideSearchOverrides {
-  readonly country?: string | undefined;
-  readonly region?: string | undefined;
-  readonly appellation?: string | undefined;
-  readonly grape_primary?: string | undefined;
-  readonly wine_type?: SearchToolInput['wine_type'] | undefined;
-  readonly vintage_min?: number | undefined;
-  readonly vintage_max?: number | undefined;
-}
-
-const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
-
 function formatValidationError(toolName: string, error: z.ZodError): { error: string } {
   return {
     error: `Invalid input for ${toolName}: ${error.issues.map((issue) => issue.message).join(', ')}`,
@@ -192,168 +155,8 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
   };
 }
 
-function buildCompareSideOverrides(
-  input: CompareToolInput,
-): readonly [CompareSideSearchOverrides, CompareSideSearchOverrides] {
-  return [
-    {
-      ...(input.country_a !== undefined ? { country: input.country_a } : {}),
-      ...(input.region_a !== undefined ? { region: input.region_a } : {}),
-      ...(input.appellation_a !== undefined ? { appellation: input.appellation_a } : {}),
-      ...(input.grape_primary_a !== undefined ? { grape_primary: input.grape_primary_a } : {}),
-      ...(input.wine_type_a !== undefined ? { wine_type: input.wine_type_a } : {}),
-      ...(input.vintage_min_a !== undefined ? { vintage_min: input.vintage_min_a } : {}),
-      ...(input.vintage_max_a !== undefined ? { vintage_max: input.vintage_max_a } : {}),
-    },
-    {
-      ...(input.country_b !== undefined ? { country: input.country_b } : {}),
-      ...(input.region_b !== undefined ? { region: input.region_b } : {}),
-      ...(input.appellation_b !== undefined ? { appellation: input.appellation_b } : {}),
-      ...(input.grape_primary_b !== undefined ? { grape_primary: input.grape_primary_b } : {}),
-      ...(input.wine_type_b !== undefined ? { wine_type: input.wine_type_b } : {}),
-      ...(input.vintage_min_b !== undefined ? { vintage_min: input.vintage_min_b } : {}),
-      ...(input.vintage_max_b !== undefined ? { vintage_max: input.vintage_max_b } : {}),
-    },
-  ] as const;
-}
 
-function buildCompareSideOnlyFilters(
-  overrides: CompareSideSearchOverrides,
-): readonly NormalizedConstraint[] {
-  const sideInput: SearchToolInput = {
-    query: '__side_specific__',
-    ...(overrides.country !== undefined ? { country: overrides.country } : {}),
-    ...(overrides.region !== undefined ? { region: overrides.region } : {}),
-    ...(overrides.appellation !== undefined ? { appellation: overrides.appellation } : {}),
-    ...(overrides.grape_primary !== undefined ? { grape_primary: overrides.grape_primary } : {}),
-    ...(overrides.wine_type !== undefined ? { wine_type: overrides.wine_type } : {}),
-    ...(overrides.vintage_min !== undefined ? { vintage_min: overrides.vintage_min } : {}),
-    ...(overrides.vintage_max !== undefined ? { vintage_max: overrides.vintage_max } : {}),
-  };
-  return buildSearchToolStructuredFilters(sideInput);
-}
 
-function buildCompareToolRequestContext(input: CompareToolInput): {
-  readonly parentContext?: {
-    readonly filters?: readonly NormalizedConstraint[] | undefined;
-    readonly preferences?: readonly NormalizedConstraint[] | undefined;
-    readonly perSideFilters?: readonly [
-      readonly NormalizedConstraint[] | undefined,
-      readonly NormalizedConstraint[] | undefined,
-    ] | undefined;
-  } | undefined;
-  readonly subQueries: readonly [string, string];
-  readonly originalQuery: string;
-} {
-  const sharedInput = stripSideSpecificCompareSharedConstraints(input);
-  const sharedSearchInput: SearchToolInput = {
-    query: sharedInput.query_a,
-    ...(sharedInput.exclude_grapes !== undefined ? { exclude_grapes: sharedInput.exclude_grapes } : {}),
-    ...(sharedInput.exclude_regions !== undefined ? { exclude_regions: sharedInput.exclude_regions } : {}),
-    ...(sharedInput.exclude_wine_types !== undefined ? { exclude_wine_types: sharedInput.exclude_wine_types } : {}),
-    ...(sharedInput.min_price_krw !== undefined ? { min_price_krw: sharedInput.min_price_krw } : {}),
-    ...(sharedInput.max_price_krw !== undefined ? { max_price_krw: sharedInput.max_price_krw } : {}),
-    ...(sharedInput.max_alcohol_pct !== undefined ? { max_alcohol_pct: sharedInput.max_alcohol_pct } : {}),
-    ...(sharedInput.grape_primary !== undefined ? { grape_primary: sharedInput.grape_primary } : {}),
-    ...(sharedInput.wine_type !== undefined ? { wine_type: sharedInput.wine_type } : {}),
-    ...(sharedInput.country !== undefined ? { country: sharedInput.country } : {}),
-    ...(sharedInput.region !== undefined ? { region: sharedInput.region } : {}),
-    ...(sharedInput.vintage_min !== undefined ? { vintage_min: sharedInput.vintage_min } : {}),
-    ...(sharedInput.vintage_max !== undefined ? { vintage_max: sharedInput.vintage_max } : {}),
-    ...(sharedInput.appellation !== undefined ? { appellation: sharedInput.appellation } : {}),
-    ...(sharedInput.style !== undefined ? { style: sharedInput.style } : {}),
-    ...(sharedInput.styles !== undefined ? { styles: sharedInput.styles } : {}),
-    ...(sharedInput.certification !== undefined ? { certification: sharedInput.certification } : {}),
-    ...(sharedInput.occasion !== undefined ? { occasion: sharedInput.occasion } : {}),
-    ...(sharedInput.gift_suitability_min !== undefined
-      ? { gift_suitability_min: sharedInput.gift_suitability_min }
-      : {}),
-    ...(sharedInput.beginner_suitability_min !== undefined
-      ? { beginner_suitability_min: sharedInput.beginner_suitability_min }
-      : {}),
-    ...(sharedInput.producer_prestige_min !== undefined
-      ? { producer_prestige_min: sharedInput.producer_prestige_min }
-      : {}),
-    ...(sharedInput.popularity_min !== undefined
-      ? { popularity_min: sharedInput.popularity_min }
-      : {}),
-    ...(sharedInput.recipient_profile !== undefined
-      ? { recipient_profile: sharedInput.recipient_profile }
-      : {}),
-    ...(sharedInput.sweetness_min !== undefined
-      ? { sweetness_min: sharedInput.sweetness_min }
-      : {}),
-    ...(sharedInput.sweetness_max !== undefined
-      ? { sweetness_max: sharedInput.sweetness_max }
-      : {}),
-    ...(sharedInput.acidity_min !== undefined
-      ? { acidity_min: sharedInput.acidity_min }
-      : {}),
-    ...(sharedInput.acidity_max !== undefined
-      ? { acidity_max: sharedInput.acidity_max }
-      : {}),
-    ...(sharedInput.tannin_max !== undefined
-      ? { tannin_max: sharedInput.tannin_max }
-      : {}),
-    ...(sharedInput.drinking_window !== undefined ? { drinking_window: sharedInput.drinking_window } : {}),
-    ...(sharedInput.drinking_window_target_year !== undefined
-      ? { drinking_window_target_year: sharedInput.drinking_window_target_year }
-      : {}),
-  };
-  const filters = buildSearchToolStructuredFilters(sharedSearchInput);
-  const preferences = buildSearchToolStructuredPreferences(sharedSearchInput);
-  const baseRetrievalQueries = buildCompareBaseRetrievalQueries(input);
-  const [sideAOverrides, sideBOverrides] = buildCompareSideOverrides(input);
-  const buildSubQuery = (query: string, sideOverrides: CompareSideSearchOverrides): string => {
-    const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery({
-      query,
-      grape_primary: sideOverrides.grape_primary ?? sharedInput.grape_primary,
-      wine_type: sideOverrides.wine_type ?? sharedInput.wine_type,
-      country: sideOverrides.country ?? sharedInput.country,
-      region: sideOverrides.region ?? sharedInput.region,
-      appellation: sideOverrides.appellation ?? sharedInput.appellation,
-      vintage_min: sideOverrides.vintage_min ?? sharedInput.vintage_min,
-      vintage_max: sideOverrides.vintage_max ?? sharedInput.vintage_max,
-      occasion: sharedInput.occasion,
-      preserveRepresentativeSearch: true,
-    });
-    const clauses = buildSearchToolSoftClauses(sharedInput);
-    return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
-  };
-  const originalQuery = appendStructuredQueryClauses(
-    `${input.query_a} vs ${input.query_b}`,
-    buildSearchToolSoftClauses(sharedInput),
-  );
-  const sideSpecificFilters = [
-    buildCompareSideOnlyFilters(sideAOverrides),
-    buildCompareSideOnlyFilters(sideBOverrides),
-  ] as const;
-  return {
-    ...(filters.length > 0 || preferences.length > 0 || sideSpecificFilters.some((entries) => entries.length > 0)
-      ? {
-          parentContext: {
-            ...(filters.length > 0 ? { filters } : {}),
-            ...(preferences.length > 0 ? { preferences } : {}),
-            ...(sideSpecificFilters.some((entries) => entries.length > 0)
-              ? {
-                  perSideFilters: sideSpecificFilters.map((entries) =>
-                    entries.length > 0 ? entries : undefined,
-                  ) as [
-                    readonly NormalizedConstraint[] | undefined,
-                    readonly NormalizedConstraint[] | undefined,
-                  ],
-                }
-              : {}),
-          },
-        }
-      : {}),
-    subQueries: [
-      buildSubQuery(baseRetrievalQueries[0], sideAOverrides),
-      buildSubQuery(baseRetrievalQueries[1], sideBOverrides),
-    ],
-    originalQuery,
-  };
-}
 
 /**
  * T6.3: Options for machine V2 response format migration seam.
@@ -379,33 +182,17 @@ export interface ToolExecutionV2Options {
 /**
  * Dependencies for WineToolExecutor.
  */
-/**
- * Port for fetching a single entity's document from the search index.
- * Used by check_drinking_window to look up wine attributes by entity_id.
- */
-interface EntityDocumentLookupPort {
-  getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
-}
-
 export interface WineToolExecutorDeps {
   /** Main search use case for wine queries */
   readonly searchUseCase: SearchExecutorPort;
-  /** Decomposed search for comparison queries */
-  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
-  /** Drinking window predictor */
-  readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
-  /** Entity lookup for drinking window tool (optional — degrades gracefully) */
-  readonly entityLookup?: EntityDocumentLookupPort | undefined;
 }
 
 /**
  * Tool executor for wine search engine.
  *
- * Dispatches Claude tool calls to appropriate use cases:
+ * Dispatches Claude tool calls to the wine search use case:
  * - search_wines -> SearchUseCase.execute(request, requestId)
- * - get_food_pairings -> SearchUseCase with dynamic query
- * - check_drinking_window -> DrinkingWindowUseCase.check()
- * - compare_wines -> DecomposedSearchUseCase.execute([queryA, queryB], 'compare', ...)
+ * - lookup_wine -> SearchUseCase with retrievalMode=entity
  *
  * All operations propagate requestId for request tracking.
  *
@@ -436,7 +223,7 @@ export class WineToolExecutor {
     input: unknown,
     requestId: string,
     v2Options?: ToolExecutionV2Options,
-  ): Promise<SearchResponseV1 | SearchResponseV2Machine | ComparisonSearchResponse | DrinkingWindowBlock | { error: string }> {
+  ): Promise<SearchResponseV1 | SearchResponseV2Machine | ComparisonSearchResponse | { error: string }> {
     switch (toolName) {
       case 'search_wines': {
         // T6.3: When useV2MachineFormat is explicitly true, bypass the V1
@@ -458,18 +245,6 @@ export class WineToolExecutor {
           });
         }
         return this.executeSearchWines(input, requestId);
-      }
-
-      case 'get_food_pairings': {
-        return this.executeFoodPairings(input, requestId);
-      }
-
-      case 'check_drinking_window': {
-        return this.executeDrinkingWindow(input, requestId);
-      }
-
-      case 'compare_wines': {
-        return this.executeCompareWines(input, requestId);
       }
 
       default: {
@@ -547,196 +322,6 @@ export class WineToolExecutor {
     ).response;
   }
 
-  /**
-   * Execute get_food_pairings tool.
-   *
-   * Transforms food + optional filters into a search query,
-   * then calls SearchUseCase.execute().
-   *
-   * Query format: "wine pairing for [food]" + optional color + price filters
-   *
-   * @param input - Raw input (validated against FoodPairingInputSchema)
-   * @param requestId - Parent request ID
-   * @returns SearchResponseV1 with paired wines, or an in-band `{ error }` result on validation failure
-   */
-  private async executeFoodPairings(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
-    const validation = parseToolInput('get_food_pairings', FoodPairingInputSchema, input);
-    if (!validation.success) {
-      return validation.result;
-    }
-    const validated = validation.data;
 
-    const budgetKrw = resolveFoodPairingBudgetKrw(validated, {
-      krwPerUsd: KRW_PER_USD_APPROXIMATE,
-      maxPriceKrwCap: Number.MAX_SAFE_INTEGER,
-    });
-    const query = appendStructuredQueryClauses(
-      `wine pairing for ${validated.food}`,
-      [
-        ...(budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : []),
-        ...(validated.styles !== undefined ? [...validated.styles] : []),
-        ...(validated.pairing_tags !== undefined ? [...validated.pairing_tags] : []),
-      ],
-    );
-    const filters = buildFoodPairingStructuredFilters(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
-    const preferences = buildFoodPairingStructuredPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
 
-    const request: SearchRequest = {
-      query,
-      options: {
-        mode: 'hybrid',
-        explain: false,
-        clarification: false,
-      },
-      ...(filters.length > 0 ? { filters } : {}),
-      ...(preferences.length > 0 ? { preferences } : {}),
-    };
-
-    return this.deps.searchUseCase.execute(request, requestId);
-  }
-
-  /**
-   * Execute check_drinking_window tool.
-   *
-   * Calls DrinkingWindowUseCase.check() with entity attributes pulled from
-   * the search index. Refuses to call the predictor with hardcoded defaults
-   * — every required ML feature must come from the indexed document.
-   *
-   * @param input - Raw input (validated against DrinkingWindowInputSchema)
-   * @param requestId - Parent request ID
-   * @returns DrinkingWindowBlock (or error if entity not found / incomplete)
-   */
-  private async executeDrinkingWindow(
-    input: unknown,
-    requestId: string,
-  ): Promise<DrinkingWindowBlock | { error: string }> {
-    const validation = parseToolInput('check_drinking_window', DrinkingWindowInputSchema, input);
-    if (!validation.success) {
-      return validation.result;
-    }
-    const validated = validation.data;
-    const targetYear = validated.target_year ?? new Date().getFullYear();
-
-    if (!this.deps.entityLookup) {
-      return { error: 'Entity lookup not available. Use search_wines first to get drinking window from results.' };
-    }
-
-    const entityId = createCanonicalEntityId(validated.entity_id);
-    const doc = await this.deps.entityLookup.getDocument(entityId);
-
-    if (!doc) {
-      return { error: `Entity ${validated.entity_id} not found in search index.` };
-    }
-
-    if (!doc.vintageYear) {
-      return { error: `Entity ${validated.entity_id} has no vintage year — cannot predict drinking window.` };
-    }
-
-    // Strict feature gating: refuse to call the predictor with fabricated
-    // defaults. The previous implementation passed hardcoded 0.5/0.85 and
-    // zero encodings, which fed garbage to the ONNX model and produced
-    // misleading "predictions".
-    const missing: string[] = [];
-    if (doc.tannin === undefined) missing.push('tannin');
-    if (doc.acidity === undefined) missing.push('acidity');
-    if (doc.criticScoreNormalized === undefined) missing.push('criticScoreNormalized');
-    if (doc.grapePrimaryEnc === undefined) missing.push('grapePrimaryEnc');
-    if (doc.regionEnc === undefined) missing.push('regionEnc');
-    if (doc.countryEnc === undefined) missing.push('countryEnc');
-    if (missing.length > 0) {
-      return {
-        error:
-          `Entity ${validated.entity_id} is missing ML features required for drinking-window prediction: ${missing.join(', ')}. ` +
-          'Reindex the entity or use search_wines for the indexed drinking-window field.',
-      };
-    }
-
-    toolLog.debug(
-      {
-        entityId: validated.entity_id,
-        vintage: doc.vintageYear,
-        targetYear,
-        requestId,
-      },
-      'check_drinking_window',
-    );
-
-    return this.deps.drinkingWindowUseCase.check({
-      vintage: doc.vintageYear,
-      grapePrimaryEnc: doc.grapePrimaryEnc!,
-      regionEnc: doc.regionEnc!,
-      countryEnc: doc.countryEnc!,
-      // body/tannin/acidity/sweetness are stored as [0,1] normalised floats.
-      // The predictor expects [1–5 ordinal] scale, so we expand here.
-      body: doc.body != null ? doc.body * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE : undefined,
-      tannin: doc.tannin! * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
-      acidity: doc.acidity! * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
-      sweetness: doc.sweetness != null ? doc.sweetness * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE : undefined,
-      // criticScoreNormalized is [0,1]; convert to the [0,100] proxy score
-      // expected by the predictor.
-      avgCriticProxyScore: doc.criticScoreNormalized! * DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE,
-      priorDrinkingWindowStart: doc.drinkingWindowStart,
-      priorDrinkingWindowEnd: doc.drinkingWindowEnd,
-      priorDrinkingWindowModelVersion: doc.drinkingWindowModelVersion,
-      grapePrimary: doc.grapePrimary,
-      grapes: doc.grapes,
-      grapeFamily: doc.grapeFamily,
-      producer: doc.producer,
-      country: doc.country,
-      region: doc.region,
-      appellation: doc.appellation,
-      regionHierarchy: doc.regionHierarchy,
-      wineType: doc.wineType,
-      style: doc.style,
-      classification: doc.classification,
-      oakTreatment: doc.oakTreatment,
-      producerPrestige: doc.producerPrestige,
-      ratingAvg: doc.ratingAvg,
-      ratingsCount: doc.ratingsCount,
-      reviewCount: doc.reviewCount,
-      ratingDistribution: doc.ratingDistribution,
-      wineryRatingCount: doc.wineryRatingCount,
-      priceUsd: doc.priceUsd,
-      bottleSizeMl: doc.bottleSizeMl,
-      bottleSize: doc.bottleSize,
-      closure: doc.closure,
-      certifications: doc.certifications,
-      producerType: doc.producerType,
-      soilType: doc.soilType,
-      finishLength: doc.finishLength,
-      alcoholPct: doc.alcoholPct,
-      targetYear,
-    });
-  }
-
-  /**
-   * Execute compare_wines tool.
-   *
-   * Calls DecomposedSearchUseCase.execute() with [query_a, query_b].
-   * Sets comparisonIntent to 'compare' and uses current time as startTime.
-   *
-   * @param input - Raw input (validated against CompareWinesInputSchema)
-   * @param requestId - Parent request ID
-   * @returns ComparisonSearchResponse, or an in-band `{ error }` result on validation failure
-   */
-  private async executeCompareWines(input: unknown, requestId: string): Promise<ComparisonSearchResponse | { error: string }> {
-    const validation = parseToolInput('compare_wines', CompareWinesInputSchema, input);
-    if (!validation.success) {
-      return validation.result;
-    }
-    const validated = validation.data;
-    const startTime = Date.now();
-    const compareRequest = buildCompareToolRequestContext(validated);
-    const rawSubQueries = [validated.query_a, validated.query_b] as const;
-
-    return this.deps.decomposedSearchUseCase.execute(
-      [...rawSubQueries],
-      buildComparisonDecompositionLegsForRetrieval(rawSubQueries, compareRequest.subQueries),
-      'compare',
-      compareRequest.originalQuery,
-      requestId,
-      startTime,
-      compareRequest.parentContext,
-    );
-  }
 }

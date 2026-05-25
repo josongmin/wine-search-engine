@@ -10,16 +10,11 @@ import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js
 import type { UseCaseContainerServices } from './container-usecases.js';
 
 export function buildAdaptiveToolExecutor(
-  useCases: Pick<
-    UseCaseContainerServices,
-    'searchUseCase' | 'decomposedSearchUseCase' | 'drinkingWindowUseCase'
-  >,
+  useCases: Pick<UseCaseContainerServices, 'searchUseCase'>,
 ): AdaptiveToolExecutorContract {
   return new AdaptiveToolExecutor(
     new WineToolExecutor({
       searchUseCase: useCases.searchUseCase,
-      decomposedSearchUseCase: useCases.decomposedSearchUseCase,
-      drinkingWindowUseCase: useCases.drinkingWindowUseCase,
     }),
   );
 }
