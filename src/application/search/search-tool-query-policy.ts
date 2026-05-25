@@ -26,7 +26,7 @@ function formatKrwAsManWon(krw: number): string {
   return Number.isInteger(manWon) ? String(manWon) : manWon.toString();
 }
 
-export function buildSearchToolPriceClauses(input: {
+function buildSearchToolPriceClauses(input: {
   readonly min_price_krw?: number | undefined;
   readonly max_price_krw?: number | undefined;
 }): readonly string[] {

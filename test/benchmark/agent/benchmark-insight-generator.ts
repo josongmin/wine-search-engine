@@ -4,14 +4,10 @@
  * Runs after benchmark scoring. Takes the full report and generates
  * actionable insights via LLM analysis + deterministic rule checks.
  *
- * Two-tier architecture:
- *   Tier 1: Deterministic rules — threshold violations, regressions, patterns
- *   Tier 2: LLM analysis — contextual interpretation, root cause hypotheses
- *
- * Output: human-readable insight block appended to stderr summary.
+ * Deterministic threshold rules for benchmark report slices (Tier 1).
+ * LLM contextual analysis entrypoint removed until a bench runner wires it again.
  */
 
-import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import {
   INSIGHT_OVERALL_GOOD,
   INSIGHT_OVERALL_WARN,
@@ -301,111 +297,4 @@ export function generateDeterministicInsights(report: BenchmarkReportSlice): rea
     }
   }
   return lines;
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Tier 2: LLM-powered contextual insight
-// ─────────────────────────────────────────────────────────────────────
-
-const INSIGHT_SYSTEM_PROMPT = `You are a wine search engine benchmark analyst. Given benchmark metrics, produce actionable insights.
-
-Rules:
-1. Focus on the 3 most impactful improvements.
-2. For each insight: state the problem, root cause hypothesis, and specific fix.
-3. Reference specific metrics by name (e.g., "SCR inferred 12.5%").
-4. Prioritize by user-visible impact, not engineering convenience.
-5. Be concise — max 5 lines per insight.
-6. Output in Korean (한국어) with technical terms in English.
-
-Output format:
-### 1. [제목]
-[문제] → [원인 가설] → [구체적 수정 방안]
-
-### 2. [제목]
-...
-
-### 3. [제목]
-...`;
-
-/**
- * Generate LLM-powered contextual insights from benchmark metrics.
- * Returns null if LLM is unavailable or call fails.
- */
-async function generateLlmInsights(
-  report: BenchmarkReportSlice,
-  llm: ChatLlmPort,
-): Promise<string | null> {
-  const metricsPrompt = `## Benchmark Metrics (v6-SOTA++)
-
-Overall: ${(report.overallScore * 100).toFixed(1)}% [CI ${(report.overallCi95Lower * 100).toFixed(1)}–${(report.overallCi95Upper * 100).toFixed(1)}%]
-Execution Efficiency: ${(report.executionEfficiency * 100).toFixed(1)}%
-Answer Quality: ${(report.answerQuality * 100).toFixed(1)}%
-Faithful: ${report.faithfulness !== null ? (report.faithfulness * 100).toFixed(1) + '%' : 'n/a'}
-Ctx Relevance: ${report.contextRelevance !== null ? (report.contextRelevance * 100).toFixed(1) + '%' : 'n/a'}
-Ctx Recall: ${report.contextRecall !== null ? (report.contextRecall * 100).toFixed(1) + '%' : 'n/a'}
-Judge: ${report.judge !== null ? (report.judge * 100).toFixed(1) + '%' : 'disabled'}
-
-SCR overall: ${report.scrOverall !== null ? (report.scrOverall * 100).toFixed(1) + '%' : 'n/a'}
-SCR hard: ${report.scrHard !== null ? (report.scrHard * 100).toFixed(1) + '%' : 'n/a'}
-SCR soft: ${report.scrSoft !== null ? (report.scrSoft * 100).toFixed(1) + '%' : 'n/a'}
-SCR inferred: ${report.scrInferred !== null ? (report.scrInferred * 100).toFixed(1) + '%' : 'n/a'}
-ELA@1: ${report.entityLinkingAccuracy !== null ? (report.entityLinkingAccuracy * 100).toFixed(1) + '%' : 'n/a'}
-Slot F1 strict: ${report.slotF1Strict !== null ? (report.slotF1Strict * 100).toFixed(1) + '%' : 'n/a'}
-Constraint evaluated: ${report.constraintEvaluatedCount}/${report.scenarioCount} scenarios
-
-Tier 6 sole-extraction rate: ${report.tier6SoleExtractionRate !== null ? (report.tier6SoleExtractionRate * 100).toFixed(0) + '%' : 'n/a'}
-Mean hard constraints: ${report.meanHardConstraints !== null ? report.meanHardConstraints.toFixed(2) : 'n/a'}
-Latency p50: ${report.latencyP50Ms}ms | p95: ${report.latencyP95Ms}ms
-Critical failures: ${report.criticalFailureCount}
-
-Worst 5 scenarios:
-${report.worstScenarios.map((s) => `  #${s.id} (${s.tier}) ${(s.score * 100).toFixed(1)}% judge=${s.judge?.toFixed(2) ?? 'n/a'}`).join('\n')}
-
-Produce 3 actionable insights.`;
-
-  try {
-    const result = await llm.complete({
-      messages: [
-        { role: 'system', content: INSIGHT_SYSTEM_PROMPT },
-        { role: 'user', content: metricsPrompt },
-      ],
-      temperature: 0.3,
-      maxOutputTokens: 800,
-    });
-    return result.text;
-  } catch (err) {
-    console.error(`  [INSIGHT-LLM] Error: ${err instanceof Error ? err.message.slice(0, 100) : String(err)}`);
-    return null;
-  }
-}
-
-/**
- * Print the full insight block to stderr.
- */
-export async function printBenchmarkInsights(
-  report: BenchmarkReportSlice,
-  llm?: ChatLlmPort,
-): Promise<void> {
-  console.error('\n  ────── insights ──────');
-
-  // Tier 1: Deterministic rules
-  const deterministicInsights = generateDeterministicInsights(report);
-  for (const line of deterministicInsights) {
-    console.error(line);
-  }
-
-  // Tier 2: LLM analysis (optional)
-  if (llm !== undefined) {
-    console.error('\n  ────── LLM analysis ──────');
-    const llmInsight = await generateLlmInsights(report, llm);
-    if (llmInsight !== null) {
-      for (const line of llmInsight.split('\n')) {
-        console.error(`  ${line}`);
-      }
-    } else {
-      console.error('  (LLM insight generation failed — skipped)');
-    }
-  }
-
-  console.error('');
 }

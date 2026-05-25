@@ -27,7 +27,7 @@ import type { Config } from './env.js';
  * orchestrator default — the multi-query/HyDE generators reuse the same
  * cheap-and-fast model.
  */
-export const DEFAULT_WINE_SEARCH_OPENAI_MODEL = 'gpt-5-mini';
+const DEFAULT_WINE_SEARCH_OPENAI_MODEL = 'gpt-5-mini';
 
 export interface SharedStructuredLlmServices {
   readonly structuredLlm: StructuredLlmPort;

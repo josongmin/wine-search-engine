@@ -8,9 +8,9 @@ import type { QueryPlannerPort } from '../../src/application/search/port/search-
 import type { ResponseBuilder } from '../../src/domain/response/service/response-builder.js';
 import type { NormalizedConstraint } from '../../src/domain/shared/types/index.js';
 import { buildRetrievalPlan } from '../../src/domain/retrieval/service/retrieval-plan-builder.js';
-import { logSearchEvent } from '../../src/observability/log-search-event.js';
+import { logSearchEvent } from '../../src/domain/observability/log-search-event.js';
 
-vi.mock('../../src/observability/log-search-event.js', () => ({
+vi.mock('../../src/domain/observability/log-search-event.js', () => ({
   logSearchEvent: vi.fn(),
 }));
 

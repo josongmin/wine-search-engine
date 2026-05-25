@@ -158,23 +158,12 @@ function inferComparisonIntent(
   return 'compare';
 }
 
-export function buildComparisonDecompositionLegs(
+function buildComparisonDecompositionLegs(
   subQueries: readonly [string, string],
 ): ComparisonDecompositionLegs {
   return [
     buildComparisonDecompositionLeg(subQueries[0]),
     buildComparisonDecompositionLeg(subQueries[1]),
-  ];
-}
-
-export function buildComparisonDecompositionLegsForRetrieval(
-  rawSubQueries: readonly [string, string],
-  retrievalSubQueries: readonly [string, string],
-): ComparisonDecompositionLegs {
-  const [left, right] = buildComparisonDecompositionLegs(rawSubQueries);
-  return [
-    { ...left, retrievalQuery: retrievalSubQueries[0] },
-    { ...right, retrievalQuery: retrievalSubQueries[1] },
   ];
 }
 

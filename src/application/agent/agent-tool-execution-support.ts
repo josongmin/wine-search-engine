@@ -1,13 +1,5 @@
-import type { AgentToolCallPair } from '../../domain/agent/model/agent-step.js';
-import type { DomainError } from '../../domain/shared/error/domain-error.js';
-import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
 import type { ExpectedOutputSchema, ToolOutcome, ToolOutcomeKind } from '../../domain/agent/model/tool-outcome.js';
 import { isAgentToolName } from '../../domain/agent/model/tool-outcome.js';
-
-const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
-const DEFAULT_SEARCH_TOOL_TIMEOUT_MS = 18_000;
-const DEFAULT_PARALLEL_BATCH_TIMEOUT_MS = 20_000;
-export const MAX_TOOLS_PER_BATCH = 4;
 
 function classifyToolOutcomeKind(
   observation: string,
@@ -151,17 +143,10 @@ export function buildToolOutcome(
   };
 }
 
-export function formatPolicyBlockedObservation(err: DomainError): string {
-  if (err instanceof PolicyBlockedError && err.rejection !== undefined) {
-    const { layer, reason } = err.rejection;
-    if (layer !== undefined || reason !== undefined) {
-      return `Policy blocked: ${err.message} [${layer ?? 'UNKNOWN_LAYER'}:${reason ?? 'UNKNOWN_REASON'}]`;
-    }
-  }
-  return `Policy blocked: ${err.message}`;
-}
 
-export interface TimeoutErrorLike extends Error {
+
+
+interface TimeoutErrorLike extends Error {
   readonly code?: string;
 }
 
@@ -185,37 +170,5 @@ export async function withTimeout<T>(work: Promise<T>, timeoutMs: number, messag
   }
 }
 
-export function getToolTimeoutMs(
-  tool: string,
-  configuredTimeoutMs?: number,
-): number {
-  if (configuredTimeoutMs !== undefined) {
-    return configuredTimeoutMs;
-  }
-  return tool === 'search_wines'
-    ? DEFAULT_SEARCH_TOOL_TIMEOUT_MS
-    : DEFAULT_TOOL_TIMEOUT_MS;
-}
 
-export function getParallelBatchTimeoutMs(
-  tools: readonly { readonly tool: string }[],
-  configuredTimeoutMs?: number,
-): number {
-  if (configuredTimeoutMs !== undefined) {
-    return configuredTimeoutMs;
-  }
-  if (tools.some((tool) => tool.tool === 'search_wines')) {
-    return DEFAULT_PARALLEL_BATCH_TIMEOUT_MS;
-  }
-  return DEFAULT_TOOL_TIMEOUT_MS;
-}
 
-export function buildObservationPairs(
-  calls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
-  observation: string,
-): { readonly actionPairs: AgentToolCallPair[]; readonly observations: string[] } {
-  return {
-    actionPairs: calls.map((action) => ({ action, observation })),
-    observations: calls.map(() => observation),
-  };
-}

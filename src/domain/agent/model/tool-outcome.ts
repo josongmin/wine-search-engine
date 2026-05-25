@@ -121,20 +121,3 @@ export interface SynthesisContext {
   readonly fallbackApplied: 'layer2' | 'layer3' | 'layer4' | null;
 }
 
-// ─── buildSynthesisContext ────────────────────────────────────────────────────
-
-/**
- * Build a SynthesisContext from tool outcomes and fallback state.
- *
- * Pure function — no side effects. Used by the orchestrator after all tool
- * steps complete, before synthesis LLM invocation.
- */
-export function buildSynthesisContext(
-  query: string,
-  steps: readonly ToolOutcome[],
-  reasoningFailure: boolean,
-  fallbackApplied: SynthesisContext['fallbackApplied'],
-): SynthesisContext {
-  const failedSteps = steps.filter((s) => s.kind !== 'success');
-  return { query, steps, failedSteps, reasoningFailure, fallbackApplied };
-}

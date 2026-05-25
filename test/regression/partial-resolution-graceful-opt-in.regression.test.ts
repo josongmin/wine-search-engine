@@ -26,7 +26,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
-import type { EntityDocumentLookupPort } from '../../src/application/search/port/entity-document-lookup.port.js';
+import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
 
 function makeDoc(id: string): RetrievalDocument {
   return {

@@ -18,7 +18,7 @@ import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
  * Initial model version sentinel before ONNX models are loaded.
  * load() replaces this with `onnx:<modelDir>` on success.
  */
-export const DRINKING_WINDOW_MODEL_VERSION = 'unloaded';
+const DRINKING_WINDOW_MODEL_VERSION = 'unloaded';
 
 /** Sensory body midpoint default when optional body is absent (ONNX feature encoding). */
 const SENSORY_BODY_MIDPOINT_DEFAULT = 2;

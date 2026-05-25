@@ -29,7 +29,7 @@ surfaces:
 
 key_files:
   - src/domain/retrieval/service/compare-retriever.ts
-  - src/application/search/compare-tool-shared-constraints.ts
+  - src/domain/query/service/decomposition-detector.ts
   - src/application/search/decomposed-search-adapter.ts
 
 tests:

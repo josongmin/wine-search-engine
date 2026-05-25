@@ -69,8 +69,8 @@ export const WINE_SEARCH_MAX_PER_TOOL_CAP = 6;
  *  widest `exploratory` value in `RETRIEVAL_K_BY_INTENT` (SSoT —
  *  `src/domain/agent/service/adaptive-budget.ts`). The cap is intentionally
  *  generous so the analyzer can emit the full SOTA range without clamping. */
-export const WINE_SEARCH_MIN_RETRIEVAL_K = 1;
-export const WINE_SEARCH_MAX_RETRIEVAL_K = 500;
+const WINE_SEARCH_MIN_RETRIEVAL_K = 1;
+const WINE_SEARCH_MAX_RETRIEVAL_K = 500;
 
 /** Comparison legs: at least 2 (binary comparison), capped at 4 — beyond 4
  *  legs decomposition quality collapses and the orchestrator falls back to

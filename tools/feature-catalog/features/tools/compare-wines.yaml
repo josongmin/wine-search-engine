@@ -28,8 +28,8 @@ surfaces:
   - "Agent tool: compare_wines"
 
 key_files:
-  - src/application/search/compare-tool-shared-constraints.ts
   - src/domain/response/service/comparison-contrast.ts
+  - src/domain/query/service/decomposition-detector.ts
 
 tests:
   regression:
