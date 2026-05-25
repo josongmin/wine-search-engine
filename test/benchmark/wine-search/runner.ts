@@ -29,6 +29,10 @@
  * no annotation/manifest/archive (those can be re-added wave by wave).
  */
 
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { loadConfig } from '../../../src/config/env.js';
 import { createContainer } from '../../../src/config/container.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
@@ -39,6 +43,121 @@ import type { AgentBenchmarkScenario } from '../agent/scenario.js';
 import { scoreScenario, aggregateGeoMean } from '../agent/scorer.js';
 import type { ScenarioExecution, ScenarioResult } from '../agent/scorer.js';
 import { judgeAnswerN, judgeFaithfulnessHybrid } from '../agent/judge.js';
+
+// ---------------------------------------------------------------------------
+// Per-scenario result dump (structural — for RCA-grade post-hoc analysis).
+//
+// The bench process emits only an Overall score to stdout; without persisted
+// per-scenario records there is no way to:
+//   - identify regressed scenarios after a model/agent change
+//   - cross-correlate fallback firing with score deltas
+//   - sample bottom-quartile failures for root-cause analysis
+//
+// Records are written as JSONL (one line per scenario) so they accumulate
+// even if the process is killed mid-run. A `summary.json` lands alongside
+// on clean completion.
+// ---------------------------------------------------------------------------
+const RESULTS_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  'results',
+);
+
+/**
+ * Per-record preview limit: only the first N characters of the answer
+ * and judge reasoning are persisted. Avoids JSONL blow-up on long
+ * synthesizer outputs while keeping enough text for grep-based RCA.
+ */
+const SCENARIO_RECORD_PREVIEW_CHARS = 600;
+
+/**
+ * Quartile divisor for the bottom-N% scenario list in summary.json.
+ * 4 = bottom quartile (lowest-scoring 25%).
+ */
+const BOTTOM_QUARTILE_DIVISOR = 4;
+
+interface ScenarioRecord {
+  readonly runIndex: number;
+  readonly id: number;
+  readonly tier: string;
+  readonly query: string;
+  readonly overallScore: number;
+  readonly judgeScore: number | null;
+  readonly faithfulnessScore: number | null;
+  readonly terminationReason: string | undefined;
+  /**
+   * Status of the comparison-LLM fallback for this scenario. Derived from
+   * `executionSteps` summary tags emitted by the orchestrator's
+   * `tryComparisonLlmFallback`. The 4 values map 1:1 to fallback verdicts:
+   *
+   *   - `not_invoked`           — gate did not fire (no fallback step emitted)
+   *   - `fired_ok`              — fallback produced a verdict (chosen=A|B)
+   *   - `declined_no_candidates`— gate fired but no candidates per leg
+   *   - `failed`                — gate fired but LLM call/parse failed
+   */
+  readonly comparisonFallback: 'not_invoked' | 'fired_ok' | 'declined_no_candidates' | 'failed';
+  readonly fallbackChosenSide?: 'A' | 'B';
+  readonly stepCount: number;
+  readonly toolCallCount: number;
+  readonly wallMs: number;
+  readonly error?: string;
+  readonly answerPreview?: string;
+  readonly judgeReasoningPreview?: string;
+}
+
+/**
+ * Detect comparison-fallback status from the execution-step trace. The
+ * orchestrator emits a single step with a summary prefix like
+ * `comparison_llm_fallback: ok (chosen=A)` / `declined (...)` / `failed (...)`.
+ * Scanning the most recent occurrence handles the case where the orchestrator
+ * is reworked to emit multiple fallback steps in a future wave.
+ */
+function detectComparisonFallback(steps: ReadonlyArray<{ readonly summary?: string }> | undefined): {
+  readonly status: ScenarioRecord['comparisonFallback'];
+  readonly chosenSide?: 'A' | 'B';
+} {
+  if (steps === undefined) return { status: 'not_invoked' };
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const summary = steps[i]?.summary ?? '';
+    if (!summary.startsWith('comparison_llm_fallback:')) continue;
+    if (summary.includes('ok (chosen=A)')) return { status: 'fired_ok', chosenSide: 'A' };
+    if (summary.includes('ok (chosen=B)')) return { status: 'fired_ok', chosenSide: 'B' };
+    if (summary.includes('declined')) return { status: 'declined_no_candidates' };
+    if (summary.includes('failed')) return { status: 'failed' };
+    return { status: 'not_invoked' };
+  }
+  return { status: 'not_invoked' };
+}
+
+function buildScenarioRecord(
+  runIndex: number,
+  result: ScenarioResult,
+  wallMs: number,
+): ScenarioRecord {
+  const fallback = detectComparisonFallback(result.steps);
+  const record: ScenarioRecord = {
+    runIndex,
+    id: result.id,
+    tier: result.tier,
+    query: result.query,
+    overallScore: result.scores.overall ?? 0,
+    judgeScore: result.scores.judge,
+    faithfulnessScore: result.scores.faithfulness,
+    ...(result.terminationReason !== undefined ? { terminationReason: result.terminationReason } : {}),
+    comparisonFallback: fallback.status,
+    ...(fallback.chosenSide !== undefined ? { fallbackChosenSide: fallback.chosenSide } : {}),
+    stepCount: result.stepCount ?? 0,
+    toolCallCount: result.toolCallCount ?? 0,
+    wallMs,
+    ...(result.error !== undefined ? { error: result.error } : {}),
+    ...(result.answer !== undefined
+      ? { answerPreview: result.answer.slice(0, SCENARIO_RECORD_PREVIEW_CHARS) }
+      : {}),
+    ...(result.judgeReasoning !== undefined
+      ? { judgeReasoningPreview: result.judgeReasoning.slice(0, SCENARIO_RECORD_PREVIEW_CHARS) }
+      : {}),
+  };
+  return record;
+}
 
 // ---------------------------------------------------------------------------
 // Profile: identical scenario set to the legacy quick-realdata loop so the
@@ -265,7 +384,18 @@ async function main(): Promise<void> {
     throw new Error('chatLlm undefined — judge cannot run. Check OPENAI_API_KEY.');
   }
 
+  // Per-run JSONL stream: one record per scenario as it completes. The
+  // suffix label allows operators to tag runs (e.g. "v11-expanded-gate")
+  // for offline diff. Stream-as-you-go survives kill-mid-run.
+  mkdirSync(RESULTS_DIR, { recursive: true });
+  const runLabel = process.env['WINE_SEARCH_BENCH_LABEL'] ?? 'unlabeled';
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const jsonlPath = join(RESULTS_DIR, `${stamp}_${runLabel}.jsonl`);
+  const summaryPath = join(RESULTS_DIR, `${stamp}_${runLabel}.summary.json`);
+  console.log(`[runner-wine-search] persisting per-scenario records to ${jsonlPath}`);
+
   const allRunResults: ScenarioResult[][] = [];
+  const allRecords: ScenarioRecord[] = [];
   for (let runIdx = 0; runIdx < args.runs; runIdx += 1) {
     if (args.runs > 1) console.log(`\n[run ${runIdx + 1}/${args.runs}]`);
 
@@ -293,6 +423,11 @@ async function main(): Promise<void> {
         process.stdout.write(
           `  [DONE] #${String(scenario.id).padEnd(4)} score=${(overall * 100).toFixed(1).padStart(5)}% ${(outcome.wallMs / 1000).toFixed(1)}s\n`,
         );
+
+        const record = buildScenarioRecord(runIdx, result, outcome.wallMs);
+        allRecords.push(record);
+        appendFileSync(jsonlPath, `${JSON.stringify(record)}\n`, 'utf8');
+
         return result;
       },
     );
@@ -333,6 +468,57 @@ async function main(): Promise<void> {
       `\n  Multi-run mean overall: ${(mean * 100).toFixed(1)}%   per-run: [${perRunGeo.map((g) => (g * 100).toFixed(1)).join('%, ')}%]`,
     );
   }
+
+  // Summary file: aggregate metrics + fallback distribution + bottom-quartile
+  // scenario list. This is the primary RCA artifact — operators can diff
+  // summary.json across runs without re-parsing the full JSONL.
+  const overallScores = allRecords
+    .filter((r) => r.error === undefined)
+    .map((r) => r.overallScore)
+    .filter((s) => Number.isFinite(s));
+  const geoMean = aggregateGeoMean(overallScores);
+  const fallbackBuckets = { not_invoked: 0, fired_ok: 0, declined_no_candidates: 0, failed: 0 };
+  const fallbackFiredScores: number[] = [];
+  const fallbackNotInvokedScores: number[] = [];
+  for (const r of allRecords) {
+    fallbackBuckets[r.comparisonFallback] += 1;
+    if (r.error !== undefined) continue;
+    if (r.comparisonFallback === 'fired_ok') fallbackFiredScores.push(r.overallScore);
+    else if (r.comparisonFallback === 'not_invoked') fallbackNotInvokedScores.push(r.overallScore);
+  }
+  const arithmeticMean = (xs: readonly number[]): number =>
+    xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+  const bottomQuartile = [...allRecords]
+    .filter((r) => r.error === undefined)
+    .sort((a, b) => a.overallScore - b.overallScore)
+    .slice(0, Math.max(1, Math.floor(allRecords.length / BOTTOM_QUARTILE_DIVISOR)));
+  const summary = {
+    runLabel,
+    timestamp: new Date().toISOString(),
+    scenarioCount: allRecords.length,
+    overallGeoMean: geoMean,
+    fallbackBuckets,
+    fallbackFiredCount: fallbackFiredScores.length,
+    fallbackFiredMean: arithmeticMean(fallbackFiredScores),
+    fallbackNotInvokedMean: arithmeticMean(fallbackNotInvokedScores),
+    bottomQuartileIds: bottomQuartile.map((r) => ({
+      id: r.id,
+      tier: r.tier,
+      score: r.overallScore,
+      fallback: r.comparisonFallback,
+      terminationReason: r.terminationReason,
+    })),
+  };
+  writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+  console.log(
+    `[runner-wine-search] summary written ${summaryPath}\n` +
+      `  fallback: not_invoked=${String(fallbackBuckets.not_invoked)} ` +
+      `fired_ok=${String(fallbackBuckets.fired_ok)} ` +
+      `declined=${String(fallbackBuckets.declined_no_candidates)} ` +
+      `failed=${String(fallbackBuckets.failed)}\n` +
+      `  mean(fired_ok)=${(arithmeticMean(fallbackFiredScores) * 100).toFixed(1)}%   ` +
+      `mean(not_invoked)=${(arithmeticMean(fallbackNotInvokedScores) * 100).toFixed(1)}%`,
+  );
 }
 
 main().catch((err: unknown) => {

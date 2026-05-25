@@ -77,6 +77,23 @@ export interface CleanupCliFlags {
   readonly pageSize: number;
   readonly limit?: number;
   readonly excludeSnapshots: readonly string[];
+  /**
+   * Auto-protect `previous_snapshot_id` from the pointer row. Defaults
+   * TRUE post-2026-05-25 incident (see {@link buildProtectedSet}).
+   * Operators that intentionally want to reap previous-snapshot leftovers
+   * can pass `--no-protect-previous`.
+   */
+  readonly protectPrevious: boolean;
+  /**
+   * Minimum number of documents that must already be tagged with the
+   * current `active_snapshot_id` before any deletion is allowed. Guards
+   * against the publish-then-cleanup race where the PG pointer flipped
+   * but Vespa indexing of the new active hasn't started/completed.
+   * Default is 1 — at least one new-active doc must exist, otherwise the
+   * cleanup tool will reap the entire corpus. `--min-active-tagged 0`
+   * disables this guard (NOT recommended).
+   */
+  readonly minActiveTagged: number;
 }
 
 /**
@@ -198,17 +215,36 @@ export function parseActiveSnapshotRows(
 }
 
 /**
- * Build the protected snapshot set: active id + any operator-supplied
- * `--exclude-snapshot` ids (deduplicated). `previous_snapshot_id` is NOT
- * automatically protected — operators must opt in explicitly via
- * `--exclude-snapshot`, because the cleanup tool is the mechanism for
- * reaping previous-snapshot leftovers in the first place.
+ * Build the protected snapshot set: active id + previous id (when present
+ * AND `protectPrevious` is true) + any operator-supplied
+ * `--exclude-snapshot` ids (deduplicated).
+ *
+ * `protectPrevious` defaults TRUE (post-incident hardening 2026-05-25):
+ * the original design forced operators to opt INTO previous-snapshot
+ * protection via `--exclude-snapshot`, which made publish-then-cleanup
+ * race a corpus-wipe footgun. Concrete failure mode: ETL publishes a new
+ * `active_snapshot_id` (PG pointer flip) BEFORE the new active's docs are
+ * actually indexed to Vespa; cleanup then sees the old corpus as
+ * uniformly stale-by-snapshot and reaps the entire corpus. By default
+ * preserving the previous snapshot keeps the corpus live until the new
+ * active is fully indexed. Operators that genuinely want to reap the
+ * previous snapshot can pass `--no-protect-previous`.
  */
 export function buildProtectedSet(
   activeSnapshotId: string,
   excludeSnapshots: readonly string[],
+  previousSnapshotId: string | null = null,
+  protectPrevious = true,
 ): ReadonlySet<string> {
   const set = new Set<string>([activeSnapshotId, ...excludeSnapshots]);
+  if (
+    protectPrevious
+    && previousSnapshotId !== null
+    && previousSnapshotId.length > 0
+    && previousSnapshotId !== activeSnapshotId
+  ) {
+    set.add(previousSnapshotId);
+  }
   return set;
 }
 
@@ -217,6 +253,13 @@ export function buildProtectedSet(
  * frozen flags object. Throws on unknown flags or malformed numerics so
  * a typo (`--batchsize 8`) does not silently fall back to defaults.
  */
+/**
+ * Default minimum active-tagged docs required before cleanup may proceed.
+ * 1 is the smallest possible non-empty corpus — anything lower allows the
+ * publish-then-cleanup race that wiped the entire corpus on 2026-05-25.
+ */
+const DEFAULT_MIN_ACTIVE_TAGGED = 1;
+
 export function parseCleanupArgs(argv: readonly string[]): CleanupCliFlags {
   let dryRun = false;
   let batchSize = DEFAULT_DELETE_CONCURRENCY;
@@ -224,6 +267,8 @@ export function parseCleanupArgs(argv: readonly string[]): CleanupCliFlags {
   let pageSize = DEFAULT_PAGE_SIZE;
   let limit: number | undefined;
   const excludeSnapshots: string[] = [];
+  let protectPrevious = true;
+  let minActiveTagged = DEFAULT_MIN_ACTIVE_TAGGED;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -253,6 +298,23 @@ export function parseCleanupArgs(argv: readonly string[]): CleanupCliFlags {
       }
       excludeSnapshots.push(value);
       i += 1;
+    } else if (arg === '--no-protect-previous') {
+      protectPrevious = false;
+    } else if (arg === '--min-active-tagged') {
+      // Accept 0 explicitly (disables the guard) via a dedicated parse
+      // path; `readPositiveIntFlag` rejects 0.
+      const raw = argv[i + 1];
+      if (raw === undefined) {
+        throw new Error('--min-active-tagged requires a numeric argument');
+      }
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed < 0 || String(parsed) !== raw) {
+        throw new Error(
+          `--min-active-tagged must be a non-negative integer, got ${JSON.stringify(raw)}`,
+        );
+      }
+      minActiveTagged = parsed;
+      i += 1;
     } else if (arg === '--help' || arg === '-h') {
       throw new Error('__HELP__');
     } else {
@@ -267,6 +329,8 @@ export function parseCleanupArgs(argv: readonly string[]): CleanupCliFlags {
     pageSize,
     ...(limit !== undefined ? { limit } : {}),
     excludeSnapshots,
+    protectPrevious,
+    minActiveTagged,
   };
 }
 

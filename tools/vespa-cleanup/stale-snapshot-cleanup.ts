@@ -68,6 +68,14 @@ export interface VespaCleanupTransport {
     readonly totalCount: number;
   }>;
   deleteDoc(entityId: string): Promise<void>;
+  /**
+   * Return the number of docs in Vespa tagged with the given
+   * `search_snapshot_id`. Used by the pre-flight guard to detect the
+   * publish-then-cleanup race that wiped the corpus on 2026-05-25 — when
+   * the PG pointer has flipped to a new active snapshot but Vespa
+   * indexing of that snapshot has not started/completed yet.
+   */
+  countDocsBySnapshot(snapshotId: string): Promise<number>;
 }
 
 /**
@@ -164,7 +172,28 @@ export function createVespaCleanupTransport(
       // the driver can fail loud on a 5xx (see runCleanup below).
       await vespa.delete(entityId);
     },
+    async countDocsBySnapshot(snapshotId) {
+      // `hits=0` makes Vespa skip rendering — we only need totalCount.
+      // `search_snapshot_id` is an attribute (not match: text), so use
+      // `contains` per the YQL matches-vs-contains SSoT lesson; `matches`
+      // would silently return 0 here. See [[feedback_vespa_yql_matches_vs_contains]].
+      const yql =
+        `select * from sources ${VESPA_CLEANUP_DOC_TYPE} ` +
+        `where search_snapshot_id contains "${escapeYqlStringLiteral(snapshotId)}";`;
+      const response = await vespa.query(yql, { hits: 0, maxHits: 0 });
+      return response.root.fields?.totalCount ?? 0;
+    },
   };
+}
+
+/**
+ * Escape a snapshot id for embedding in a YQL string literal. Snapshot
+ * ids are ETL-generated kebab/uuid-style identifiers, so this is a
+ * defensive belt-and-suspenders measure against a future generator
+ * change introducing a `"` or `\\` into the id.
+ */
+function escapeYqlStringLiteral(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 /**
@@ -192,12 +221,52 @@ export async function runCleanup(args: {
   const protectedSet = buildProtectedSet(
     pointer.active_snapshot_id,
     args.flags.excludeSnapshots,
+    pointer.previous_snapshot_id,
+    args.flags.protectPrevious,
   );
   log(
     `[cleanup] active_snapshot_id=${pointer.active_snapshot_id} ` +
+      `previous_snapshot_id=${pointer.previous_snapshot_id ?? '(none)'} ` +
       `protected={${[...protectedSet].join(', ')}} ` +
+      `protectPrevious=${String(args.flags.protectPrevious)} ` +
       `dryRun=${String(args.flags.dryRun)}`,
   );
+
+  // -------------------------------------------------------------------------
+  // Step 1.5: Pre-flight active-tagged-count guard.
+  //
+  // The 2026-05-25 incident wiped the entire 11K-doc corpus because the PG
+  // pointer flipped to a new `active_snapshot_id` BEFORE the new active's
+  // docs were indexed to Vespa. cleanup saw the old corpus tagged with the
+  // old snapshot, classified ALL of it as stale, and reaped everything.
+  //
+  // Guard: count how many Vespa docs are tagged with the current active
+  // snapshot id. If that count is below `minActiveTagged`, abort — the
+  // new active is not yet live in Vespa and any deletion would erase the
+  // serving corpus. Operators that genuinely want to reap during this
+  // window can pass `--min-active-tagged 0`.
+  // -------------------------------------------------------------------------
+  if (args.flags.minActiveTagged > 0) {
+    const activeTagged = await args.vespa.countDocsBySnapshot(
+      pointer.active_snapshot_id,
+    );
+    if (activeTagged < args.flags.minActiveTagged) {
+      throw new Error(
+        `[cleanup] aborting: only ${String(activeTagged)} doc(s) in Vespa are tagged ` +
+          `with active_snapshot_id=${pointer.active_snapshot_id}, ` +
+          `below --min-active-tagged=${String(args.flags.minActiveTagged)}. ` +
+          'This typically means the new active snapshot was published in PG ' +
+          'before the corresponding Vespa indexing finished. Running cleanup ' +
+          'now would treat every existing doc as stale and wipe the serving ' +
+          'corpus. Re-run after indexing completes, or pass ' +
+          '`--min-active-tagged 0` to override (NOT recommended).',
+      );
+    }
+    log(
+      `[cleanup] active-tagged docs in Vespa: ${String(activeTagged)} ` +
+        `(threshold ${String(args.flags.minActiveTagged)} ok)`,
+    );
+  }
 
   // -------------------------------------------------------------------------
   // Step 2: enumerate Vespa docs page by page, classify, delete stale.

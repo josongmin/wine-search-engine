@@ -640,6 +640,10 @@ export default tseslint.config(
       // injection lengths) that are intentional test parameters — not auditable thresholds.
       'test/benchmark/agent/scenarios.adversarial.ts',
       'test/benchmark/agent/scenarios.coverage.ts',
+      // PtE bench runner — same character as agent/runner.ts: scenario id literals
+      // + bench output formatting numbers (padEnd width, toFixed precision, percent
+      // multipliers). Lint noise here drowns out real signal.
+      'test/benchmark/wine-search/runner.ts',
     ],
     rules: {
       'no-magic-numbers': 'off',

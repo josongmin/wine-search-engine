@@ -79,6 +79,15 @@ function makeFakeVespa(
       }
       deletedIds.push(entityId);
     },
+    async countDocsBySnapshot(snapshotId: string) {
+      // Default: derive count from the test corpus so happy-path tests
+      // don't need to pass an explicit `countDocsBySnapshot` impl. Tests
+      // that exercise the publish-then-cleanup race override the
+      // `countDocsBySnapshot` method directly on the returned object.
+      let count = 0;
+      for (const d of docs) if (d.snapshotId === snapshotId) count += 1;
+      return Promise.resolve(count);
+    },
     deletedIds,
     getEnumerateCalls: () => state.enumerateCalls,
   };
@@ -90,6 +99,12 @@ const baseFlags = {
   progressInterval: DEFAULT_PROGRESS_INTERVAL,
   pageSize: DEFAULT_PAGE_SIZE,
   excludeSnapshots: [] as readonly string[],
+  // Post-2026-05-25 hardening defaults — see `buildProtectedSet` doc.
+  protectPrevious: true,
+  // Tests pass `minActiveTagged: 0` when they want to bypass the
+  // corpus-wipe guard (most enumeration/scoring tests are not about
+  // verifying the guard itself).
+  minActiveTagged: 0,
 };
 
 // ===========================================================================
@@ -129,6 +144,40 @@ describe('classifyDoc / selectStaleDocs (pure)', () => {
   it('buildProtectedSet dedups when active is also in excludes', () => {
     const set = buildProtectedSet(ACTIVE_SNAPSHOT, [ACTIVE_SNAPSHOT, STALE_SNAPSHOT_A]);
     expect(set.size).toBe(2);
+  });
+
+  // -----------------------------------------------------------------------
+  // Post-2026-05-25 hardening: buildProtectedSet auto-protects
+  // `previous_snapshot_id` by default. The corpus-wipe incident happened
+  // because the previous snapshot was NOT protected and ETL had not yet
+  // indexed the new active's docs.
+  // -----------------------------------------------------------------------
+  it('buildProtectedSet auto-protects previous_snapshot_id (default ON)', () => {
+    const set = buildProtectedSet(ACTIVE_SNAPSHOT, [], STALE_SNAPSHOT_A);
+    expect(set.has(ACTIVE_SNAPSHOT)).toBe(true);
+    expect(set.has(STALE_SNAPSHOT_A)).toBe(true);
+  });
+
+  it('buildProtectedSet skips previous when protectPrevious=false', () => {
+    const set = buildProtectedSet(ACTIVE_SNAPSHOT, [], STALE_SNAPSHOT_A, false);
+    expect(set.has(ACTIVE_SNAPSHOT)).toBe(true);
+    expect(set.has(STALE_SNAPSHOT_A)).toBe(false);
+  });
+
+  it('buildProtectedSet handles null previous (first publish)', () => {
+    const set = buildProtectedSet(ACTIVE_SNAPSHOT, [], null);
+    expect(set.size).toBe(1);
+    expect(set.has(ACTIVE_SNAPSHOT)).toBe(true);
+  });
+
+  it('buildProtectedSet ignores empty-string previous', () => {
+    const set = buildProtectedSet(ACTIVE_SNAPSHOT, [], '');
+    expect(set.size).toBe(1);
+  });
+
+  it('buildProtectedSet does NOT double-add when previous equals active', () => {
+    const set = buildProtectedSet(ACTIVE_SNAPSHOT, [], ACTIVE_SNAPSHOT);
+    expect(set.size).toBe(1);
   });
 });
 
@@ -224,6 +273,28 @@ describe('parseCleanupArgs', () => {
     expect(flags.pageSize).toBe(DEFAULT_PAGE_SIZE);
     expect(flags.limit).toBeUndefined();
     expect(flags.excludeSnapshots).toEqual([]);
+    // Post-2026-05-25 hardening defaults: previous-snapshot auto-protect
+    // ON, min-active-tagged guard requires >= 1.
+    expect(flags.protectPrevious).toBe(true);
+    expect(flags.minActiveTagged).toBe(1);
+  });
+
+  it('parses --no-protect-previous', () => {
+    expect(parseCleanupArgs(['--no-protect-previous']).protectPrevious).toBe(false);
+  });
+
+  it('parses --min-active-tagged N', () => {
+    expect(parseCleanupArgs(['--min-active-tagged', '100']).minActiveTagged).toBe(100);
+  });
+
+  it('parses --min-active-tagged 0 as explicit guard disable', () => {
+    expect(parseCleanupArgs(['--min-active-tagged', '0']).minActiveTagged).toBe(0);
+  });
+
+  it('throws on negative --min-active-tagged', () => {
+    expect(() => parseCleanupArgs(['--min-active-tagged', '-1'])).toThrow(
+      /non-negative integer/,
+    );
   });
 
   it('parses --dry-run', () => {
@@ -282,6 +353,130 @@ describe('parseCleanupArgs', () => {
 // ===========================================================================
 // runCleanup — end-to-end driver with mocked transports
 // ===========================================================================
+
+// ===========================================================================
+// 2026-05-25 incident regression — publish-then-cleanup race wipes corpus.
+//
+// Scenario: PG `active_search_snapshot.active_snapshot_id` flipped to a NEW
+// snapshot id, but Vespa indexing of that new snapshot has not begun (so
+// 0 docs are tagged with the new id). The old corpus (11K docs in prod) is
+// still tagged with the previous snapshot id. The original cleanup CLI
+// classified every old doc as `stale` and reaped the entire corpus.
+// ===========================================================================
+
+describe('runCleanup pre-flight guard (corpus-wipe race)', () => {
+  it('aborts when 0 docs are tagged with the new active snapshot', async () => {
+    const NEW_ACTIVE = 'newly-published-snapshot-id';
+    // Vespa still holds the previous corpus, none tagged with NEW_ACTIVE.
+    const docs: VespaDocEnvelope[] = [
+      makeDoc('e1', STALE_SNAPSHOT_A),
+      makeDoc('e2', STALE_SNAPSHOT_A),
+      makeDoc('e3', STALE_SNAPSHOT_A),
+    ];
+    const vespa = makeFakeVespa(docs);
+    const pg = makePg([
+      { active_snapshot_id: NEW_ACTIVE, previous_snapshot_id: STALE_SNAPSHOT_A },
+    ]);
+    // protectPrevious=false to isolate the count-guard from the
+    // previous-protect rule. minActiveTagged=1 (the default) — we expect
+    // the guard to fire because NEW_ACTIVE has 0 tagged docs.
+    await expect(
+      runCleanup({
+        vespa,
+        pg,
+        flags: { ...baseFlags, protectPrevious: false, minActiveTagged: 1 },
+        log: () => undefined,
+      }),
+    ).rejects.toThrow(/below --min-active-tagged|wipe the serving corpus/);
+    // Critical: zero deletes happened.
+    expect(vespa.deletedIds).toEqual([]);
+  });
+
+  it('proceeds when active-tagged count meets the threshold', async () => {
+    const docs: VespaDocEnvelope[] = [
+      makeDoc('e1', ACTIVE_SNAPSHOT),
+      makeDoc('e2', ACTIVE_SNAPSHOT),
+      makeDoc('e3', STALE_SNAPSHOT_A),
+    ];
+    const vespa = makeFakeVespa(docs);
+    const pg = makePg([
+      { active_snapshot_id: ACTIVE_SNAPSHOT, previous_snapshot_id: null },
+    ]);
+    const report = await runCleanup({
+      vespa,
+      pg,
+      flags: { ...baseFlags, minActiveTagged: 1 },
+      log: () => undefined,
+    });
+    expect(report.deleted).toBe(1);
+    expect(vespa.deletedIds).toEqual(['e3']);
+  });
+
+  it('minActiveTagged=0 disables the guard (explicit override)', async () => {
+    const NEW_ACTIVE = 'newly-published-snapshot-id';
+    const docs: VespaDocEnvelope[] = [
+      makeDoc('e1', STALE_SNAPSHOT_A),
+    ];
+    const vespa = makeFakeVespa(docs);
+    const pg = makePg([
+      { active_snapshot_id: NEW_ACTIVE, previous_snapshot_id: null },
+    ]);
+    // minActiveTagged=0 + protectPrevious=false → guard disabled,
+    // previous unprotected. The lone stale doc gets reaped.
+    const report = await runCleanup({
+      vespa,
+      pg,
+      flags: { ...baseFlags, protectPrevious: false, minActiveTagged: 0 },
+      log: () => undefined,
+    });
+    expect(report.deleted).toBe(1);
+  });
+
+  it('previous-snapshot auto-protect keeps the old corpus alive during race', async () => {
+    const NEW_ACTIVE = 'newly-published-snapshot-id';
+    const docs: VespaDocEnvelope[] = [
+      makeDoc('e1', NEW_ACTIVE), // one new-active doc — guard passes
+      makeDoc('e2', STALE_SNAPSHOT_A),
+      makeDoc('e3', STALE_SNAPSHOT_A),
+    ];
+    const vespa = makeFakeVespa(docs);
+    const pg = makePg([
+      { active_snapshot_id: NEW_ACTIVE, previous_snapshot_id: STALE_SNAPSHOT_A },
+    ]);
+    // Defaults: protectPrevious=true → STALE_SNAPSHOT_A is protected, so
+    // even though e2/e3 are tagged with it, they survive the cleanup.
+    const report = await runCleanup({
+      vespa,
+      pg,
+      flags: { ...baseFlags, minActiveTagged: 1 },
+      log: () => undefined,
+    });
+    expect(report.deleted).toBe(0);
+    expect(vespa.deletedIds).toEqual([]);
+    expect(report.stale).toBe(0);
+  });
+
+  it('--no-protect-previous + --min-active-tagged 0 reverts to legacy behavior', async () => {
+    // Reaping previous-snapshot leftovers is still possible — but
+    // operators must consciously opt out of BOTH safety nets.
+    const NEW_ACTIVE = 'newly-published-snapshot-id';
+    const docs: VespaDocEnvelope[] = [
+      makeDoc('e1', STALE_SNAPSHOT_A),
+      makeDoc('e2', STALE_SNAPSHOT_A),
+    ];
+    const vespa = makeFakeVespa(docs);
+    const pg = makePg([
+      { active_snapshot_id: NEW_ACTIVE, previous_snapshot_id: STALE_SNAPSHOT_A },
+    ]);
+    const report = await runCleanup({
+      vespa,
+      pg,
+      flags: { ...baseFlags, protectPrevious: false, minActiveTagged: 0 },
+      log: () => undefined,
+    });
+    expect(report.deleted).toBe(2);
+  });
+});
 
 describe('runCleanup driver', () => {
   it('deletes only docs outside the active snapshot', async () => {

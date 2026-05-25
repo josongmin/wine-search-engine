@@ -188,3 +188,5 @@ data/silver-full*.ndjson
 data/silver-sample*.ndjson
 data/prepared-feed/
 tools/wikidata-backfill/cache/
+test/benchmark/wine-search/results/*.json
+test/benchmark/wine-search/results/*.jsonl
