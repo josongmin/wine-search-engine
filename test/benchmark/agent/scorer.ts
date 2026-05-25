@@ -61,6 +61,10 @@ import {
 } from './scorer-text-extractors.js';
 import { scoreCostEfficiency } from './scorer-cost-efficiency.js';
 import { emitKoreanClrDiagnostic } from './scorer-korean-clr.js';
+import {
+  stableJsonStringify,
+  countSemanticToolInvocations,
+} from './scorer-tool-call-signatures.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -68,43 +72,9 @@ export interface ToolCallTrace {
   readonly input?: string;
 }
 
-function stableJsonStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJsonStringify(item)).join(',')}]`;
-  }
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${stableJsonStringify(nested)}`);
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function getToolCallSemanticSignature(call: ToolCallTrace): string | null {
-  if (typeof call.input !== 'string' || call.input.trim().length === 0) {
-    return null;
-  }
-  try {
-    return `${call.tool}:${stableJsonStringify(JSON.parse(call.input) as unknown)}`;
-  } catch {
-    return null;
-  }
-}
-
-function countSemanticToolInvocations(calls: readonly ToolCallTrace[]): number {
-  const signatureCounts = new Map<string, number>();
-  let opaqueCallCount = 0;
-  for (const call of calls) {
-    const signature = getToolCallSemanticSignature(call);
-    if (signature !== null) {
-      signatureCounts.set(signature, (signatureCounts.get(signature) ?? 0) + 1);
-      continue;
-    }
-    opaqueCallCount += 1;
-  }
-  return [...signatureCounts.values()].reduce((sum, count) => sum + count, opaqueCallCount);
-}
+// stableJsonStringify / getToolCallSemanticSignature / countSemanticToolInvocations
+// moved to ./scorer-tool-call-signatures.ts during the 2026-05-25 decomposition.
+// Imported above; consumed by toolAccuracy scoring and formatToolArgValue.
 
 function parseToolCallInput(call: ToolCallTrace): Record<string, unknown> | null {
   if (typeof call.input !== 'string' || call.input.trim().length === 0) {
