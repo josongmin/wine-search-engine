@@ -19,13 +19,6 @@ export interface AgentConfig {
   /** Parallel batch timeout (ms) for Promise.all tool batches. */
   readonly parallelBatchTimeoutMs?: number | undefined;
   /**
-   * P0 termination guard: when true (default), the planner is forced to issue a
-   * second-step verify/synthesize action for queries with hard reasoning
-   * obligations identified by `AgentQueryExecutionContract.requiresVerificationStep`.
-   * When false, the legacy "one tool + answer" path is preserved.
-   */
-  readonly requireVerificationStep?: boolean | undefined;
-  /**
    * L1.C structural latency lever: short-circuit the run loop after a single
    * tool call whose observation already satisfies every contract gate the
    * planner would itself enforce on emit-answer. The orchestrator's terminal
@@ -65,7 +58,6 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   perStepTimeoutMs: 10_000,
   maxContextChars: 8_000,
   maxTotalTokens: 50_000,
-  requireVerificationStep: true,
   // L1.C: structural one-RTT save on "simple lookup" paths. Currently OFF by
   // default — the bypass predicate (constraint-coverage satisfied) is
   // structurally sound, but in the present synthesis prompt shape it triggers

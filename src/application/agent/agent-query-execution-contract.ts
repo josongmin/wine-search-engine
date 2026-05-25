@@ -1,4 +1,3 @@
-import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import { QueryNormalizer } from '../../domain/query/service/query-normalizer.js';
 import { detectDecomposition } from '../../domain/query/service/decomposition-detector.js';
@@ -14,14 +13,13 @@ import { isDirectEntityResolution, resolveEntity } from '../../domain/attribute/
 import { extractSearchConstraints } from '../../domain/query/service/search-constraint-extractor.js';
 import { hasComparisonMarkers } from '../../domain/query/service/anchor-extractor.js';
 import { extractVintageYear } from '../../domain/shared/utils/vintage.js';
-import type { ToolOutcome } from '../../domain/agent/model/tool-outcome.js';
 
 /**
  * Reason taxonomy for "this query MUST execute a second verify/synthesize step
  * before the planner is allowed to commit a final answer". Derived deterministically
  * from existing detectors — see {@link buildVerificationStepRequirement}.
  */
-export type AgentVerificationReason =
+type AgentVerificationReason =
   | 'negation_constraint'
   | 'comparison_search'
   | 'multi_constraint'
@@ -34,7 +32,7 @@ export type AgentVerificationReason =
  * canonical field that downstream GROUNDING_JSON.wines[].matched_constraints
  * would reference if a returned wine satisfies it.
  */
-export interface AgentConstraintCoverageAtom {
+interface AgentConstraintCoverageAtom {
   /** Stable identifier for the obligation; used in directive observations. */
   readonly key: string;
   /** Field name on GROUNDING_JSON.wines[] (matched_constraints entry) that marks coverage. */
@@ -43,7 +41,7 @@ export interface AgentConstraintCoverageAtom {
   readonly description: string;
 }
 
-export interface AgentVerificationRequirement {
+interface AgentVerificationRequirement {
   readonly reason: AgentVerificationReason;
   readonly constraintCoverage: readonly AgentConstraintCoverageAtom[];
 }
@@ -118,7 +116,7 @@ export interface AgentQueryExecutionContract {
   readonly requiresVerificationStep?: AgentVerificationRequirement | undefined;
 }
 
-export interface AgentSearchDefaults {
+interface AgentSearchDefaults {
   readonly grape_primary?: string | undefined;
   readonly region?: string | undefined;
   readonly styles?: readonly string[] | undefined;
@@ -140,7 +138,7 @@ export interface AgentSearchDefaults {
   readonly popularity_min?: number | undefined;
 }
 
-export interface AgentSearchSlot {
+interface AgentSearchSlot {
   readonly wineType: 'red' | 'white' | 'rosé' | 'sparkling' | 'fortified' | 'dessert' | 'orange' | 'natural';
   readonly limit?: number | undefined;
 }
@@ -851,70 +849,6 @@ function isSpecificSkuLikeNormalized(query: string): boolean {
   );
 }
 
-export function hasBareExactEntityAnchor(query: string): boolean {
-  const queryViews = QUERY_NORMALIZER.normalize(query);
-  const candidates = [
-    queryViews.punctuationStripped,
-    queryViews.transliterated,
-    ...queryViews.lookupVariants,
-  ];
-  // Single-token-ness is a property of the INPUT query, computed once from its
-  // punctuation-stripped form — NOT per-candidate. A multi-token noise query
-  // has whitespace here, so it can never qualify as single-token even though a
-  // whitespace-collapsed `compact` lookup variant would. This keeps the
-  // cross-script signal (4) below from re-admitting multi-token noise.
-  const queryIsSingleToken = !/\s/u.test(queryViews.punctuationStripped.trim());
-
-  return candidates.some((candidate) => {
-    if (typeof candidate !== 'string') {
-      return false;
-    }
-    const trimmed = candidate.trim().toLowerCase();
-    if (trimmed.length === 0 || containsGenericWineNoun(trimmed)) {
-      return false;
-    }
-    const resolved = resolveEntity(trimmed, { preferEntityOverStyle: true });
-    if (!isDirectEntityResolution(resolved) || resolved.entityType !== 'appellation') {
-      return false;
-    }
-    const canonical = QUERY_NORMALIZER.normalize(resolved.canonicalValue).punctuationStripped.trim().toLowerCase();
-    const canonicalLooksLabelLike = canonical.includes(' ') || canonical.includes('&');
-    // A query is a bare exact entity anchor when it is, on its own, a tight reference
-    // to a specific appellation entity. Three sufficient signals:
-    //   1. the whole query IS the appellation name (`trimmed === canonical`) — covers
-    //      single-word appellations like "Barolo", "Chablis", "Sancerre";
-    //   2. it carries a vintage year (specific bottling);
-    //   3. its canonical label is multi-token / contains '&' (label-like) — covers
-    //      "Brunello di Montalcino", "Dom Pérignon".
-    //
-    // History: this clause used to be `tokenCount >= 2 || extractVintageYear(...) !==
-    // undefined || (canonicalLooksLabelLike && canonical !== trimmed)`. The `!==
-    // undefined` guard was always true (extractVintageYear returns `number | null`,
-    // never `undefined`), so the clause was a no-op and EVERY direct appellation
-    // resolution counted — including multi-token noise queries whose alias substring
-    // happened to resolve. A later correctness fix flipped it to `!== null`, which over-
-    // corrected and silently dropped single-token appellations like Barolo from entity-
-    // retrieval mode. The `trimmed === canonical` signal restores single-word anchors
-    // without re-admitting the multi-token-noise false positives (those have extra
-    // tokens around the alias, so `trimmed !== canonical` and are not label-like — they
-    // only matched before via the always-true vintage no-op). We deliberately do NOT
-    // use a `tokenCount >= 2` signal: a multi-token noise query (e.g. a Korean phrase
-    // whose aliased substring resolves) would slip through it.
-    //
-    //   4. the INPUT query is a SINGLE token (no internal whitespace) that resolves
-    //      DIRECTLY to an appellation — covers cross-script curated transliteration
-    //      aliases like "사씨카이아" → canonical "Sassicaia", where `trimmed !==
-    //      canonical` purely because the surface is Korean and the canonical is Latin
-    //      and there is no transliterated view to bridge them. Generalizes signal (1)
-    //      past the same-script case; multi-token noise always carries whitespace
-    //      (queryIsSingleToken=false) and so cannot match here.
-    return trimmed === canonical
-      || extractVintageYear(trimmed) !== null
-      || canonicalLooksLabelLike
-      || queryIsSingleToken;
-  });
-}
-
 function getStructuredSearchFilterKeys(input: Record<string, unknown>): readonly string[] {
   return Object.entries(input)
     .filter(([key, value]) =>
@@ -947,130 +881,4 @@ export function normalizeExactMetadataSearchInput(
   };
 }
 
-function getValueAtPath(input: unknown, path: string): unknown {
-  const segments = path.split('.');
-  let current: unknown = input;
-  for (const segment of segments) {
-    if (typeof current !== 'object' || current === null) {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
 
-function getCompletedDrinkabilityEntityIds(
-  steps: readonly AgentStep[],
-): ReadonlySet<string> {
-  const entityIds = new Set<string>();
-  for (const step of steps) {
-    if (step.action?.tool === 'check_drinking_window') {
-      const entityId = step.action.input['entity_id'];
-      if (typeof entityId === 'string' && entityId.trim().length > 0) {
-        entityIds.add(entityId);
-      }
-    }
-    for (const pair of step.actionPairs ?? []) {
-      if (pair.action.tool !== 'check_drinking_window') {
-        continue;
-      }
-      const entityId = pair.action.input['entity_id'];
-      if (typeof entityId === 'string' && entityId.trim().length > 0) {
-        entityIds.add(entityId);
-      }
-    }
-  }
-  return entityIds;
-}
-
-function getToolOutcomeStepGroupId(stepId: string): string {
-  const lastSeparator = stepId.lastIndexOf(':');
-  return lastSeparator >= 0 ? stepId.slice(0, lastSeparator) : stepId;
-}
-
-function extractPendingSearchDrinkabilityEntityIds(
-  toolOutcomes: readonly ToolOutcome[],
-  completed: ReadonlySet<string>,
-): readonly string[] {
-  let targetStepGroupId: string | undefined;
-  const entityIds: string[] = [];
-
-  for (let i = toolOutcomes.length - 1; i >= 0; i--) {
-    const outcome = toolOutcomes[i]!;
-    if (outcome.tool !== 'search_wines') {
-      if (targetStepGroupId !== undefined) {
-        break;
-      }
-      continue;
-    }
-
-    const stepGroupId = getToolOutcomeStepGroupId(outcome.stepId);
-    targetStepGroupId ??= stepGroupId;
-    if (stepGroupId !== targetStepGroupId) {
-      break;
-    }
-
-    const result = outcome.result;
-    if (typeof result !== 'object' || result === null) {
-      continue;
-    }
-    const record = result as Record<string, unknown>;
-    if (record['queryType'] !== 'search') {
-      continue;
-    }
-    const results = record['results'];
-    if (!Array.isArray(results) || results.length === 0) {
-      continue;
-    }
-    const [topResult] = results as readonly unknown[];
-    const entityId = getValueAtPath(topResult, 'entity.entityId');
-    if (
-      typeof entityId === 'string'
-      && entityId.length > 0
-      && !completed.has(entityId)
-      && !entityIds.includes(entityId)
-    ) {
-      entityIds.unshift(entityId);
-    }
-  }
-
-  return entityIds;
-}
-
-export function extractPendingDrinkabilityEntityIds(
-  contract: AgentQueryExecutionContract,
-  steps: readonly AgentStep[],
-  toolOutcomes: readonly ToolOutcome[],
-): readonly string[] {
-  if (!contract.requiresDrinkabilityCheck) {
-    return [];
-  }
-  const completed = getCompletedDrinkabilityEntityIds(steps);
-  for (let i = toolOutcomes.length - 1; i >= 0; i--) {
-    const outcome = toolOutcomes[i]!;
-    const result = outcome.result;
-    if (typeof result !== 'object' || result === null) {
-      continue;
-    }
-    const record = result as Record<string, unknown>;
-    if (outcome.tool === 'search_wines' && record['queryType'] === 'search') {
-      return extractPendingSearchDrinkabilityEntityIds(toolOutcomes, completed);
-    }
-    if (outcome.tool === 'compare_wines' && record['queryType'] === 'comparison') {
-      const entities = record['entities'];
-      if (!Array.isArray(entities)) {
-        return [];
-      }
-      const pending = entities
-        .map((entity) =>
-          getValueAtPath(entity, 'topResult.entity.entityId')
-          ?? getValueAtPath(entity, 'conceptAggregate.representativeResult.entity.entityId')
-          ?? getValueAtPath(entity, 'allResults.0.entity.entityId'),
-        )
-        .filter((entityId): entityId is string => typeof entityId === 'string' && entityId.length > 0)
-        .filter((entityId) => !completed.has(entityId));
-      return pending;
-    }
-  }
-  return [];
-}

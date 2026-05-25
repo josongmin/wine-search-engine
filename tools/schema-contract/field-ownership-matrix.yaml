@@ -314,27 +314,6 @@ fields:
     rationale: "Track C step1 generates GoldRecord.criticProxy.confidence but no ETL writer exists. Mirror of critic_proxy_score."
     ticket: "TODO-rfc018-critic-proxy-writer-missing"
 
-  - field: organic
-    source: unknown
-    coverage_required: 0.0
-    fail_action: warn
-    rationale: "Track C step2 enrich-certifications computes CertificationResult.organic but silverToIndexable flattens it into certifications[]='organic' instead of writing the boolean Vespa field. ETL writer must be added or .sd boolean must be removed."
-    ticket: "TODO-rfc018-cert-flags-writer-missing"
-
-  - field: biodynamic
-    source: unknown
-    coverage_required: 0.0
-    fail_action: warn
-    rationale: "Same as organic — flattened into certifications[] string array, boolean Vespa field never set."
-    ticket: "TODO-rfc018-cert-flags-writer-missing"
-
-  - field: certification_source
-    source: unknown
-    coverage_required: 0.0
-    fail_action: warn
-    rationale: "CertificationResult.certificationSource ('wikidata' | 'llm_inferred') is dropped during silverToIndexable. Provenance signal lost."
-    ticket: "TODO-rfc018-cert-source-writer-missing"
-
   - field: pairing_tags
     source: unknown
     coverage_required: 0.0
@@ -432,38 +411,17 @@ fields:
     fail_action: warn
     rationale: "Derived from grape_primary using authoritative lookup table (rule 27: no whitespace split). Undefined when multi-word variety is not in GRAPE_FAMILY_MAP."
 
-  - field: grape_hierarchy
-    source: unknown
-    coverage_required: 0.0
-    fail_action: warn
-    rationale: "Declared in .sd but no domain field exists in RetrievalDocument and no ETL writer exists. Dead substrate."
-    ticket: "TODO-rfc018-grape-hierarchy-no-writer"
-
   - field: region_hierarchy
     source: silver(region-normalizer.ts)
     coverage_required: 0.9
     fail_action: warn
     rationale: "Country / Region / Sub-region breadcrumb. Reconstructed from mangled region string by region-normalizer. Coverage high but not 100% due to malformed source data."
 
-  - field: producer_aliases
-    source: unknown
-    coverage_required: 0.0
-    fail_action: warn
-    rationale: "Declared in .sd but no domain field exists and no ETL writer. Producer aliases currently flow through aliases_noisy_recall instead. Dead substrate."
-    ticket: "TODO-rfc018-producer-aliases-no-writer"
-
   - field: price_band_numeric
     source: derived(index-to-vespa.ts via priceBandToNumeric)
     coverage_required: 1.0
     fail_action: must
     rationale: "Always derived from price_band (1=value, 2=mid, 3=premium, 4=luxury). priceBandToNumeric throws on unknown — never absent."
-
-  - field: flavor_profile_structured
-    source: unknown
-    coverage_required: 0.0
-    fail_action: warn
-    rationale: "Declared in .sd but no domain field exists and no ETL writer. Designed as pipe-separated encoding (body:0.6|acidity:0.7|…) — superseded by individual body/acidity/tannin/sweetness attributes. Dead substrate."
-    ticket: "TODO-rfc018-flavor-profile-structured-no-writer"
 
   # ---------------------------------------------------------------------------
   # Dense embedding + sparse + lineage

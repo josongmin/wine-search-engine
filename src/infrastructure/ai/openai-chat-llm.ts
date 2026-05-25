@@ -18,6 +18,7 @@ import {
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
+import { DEFAULT_BREAKER_FAILURE_THRESHOLD } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 import {
   resolveCompletionTokens,
@@ -35,7 +36,7 @@ const OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS = 240;
 
 /** Circuit breaker thresholds for the OpenAI chat endpoint — same tuning
  *  as Anthropic so both providers share an equivalent failure budget. */
-const OPENAI_CHAT_BREAKER_FAILURE_THRESHOLD = 5;
+const OPENAI_CHAT_BREAKER_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
 const OPENAI_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
 const OPENAI_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
 const OPENAI_CHAT_BREAKER_NAME = 'openai-chat';

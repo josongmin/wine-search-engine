@@ -219,21 +219,6 @@ schema wine_entity {
       indexing: summary | attribute
     }
 
-    # Organic certification flag (from Wikidata or tasting notes inference)
-    field organic type bool {
-      indexing: summary | attribute
-    }
-
-    # Biodynamic certification flag
-    field biodynamic type bool {
-      indexing: summary | attribute
-    }
-
-    # Source of certification data
-    field certification_source type string {
-      indexing: summary | attribute
-    }
-
     # Standardized food pairing tags
     field pairing_tags type array<string> {
       indexing: summary | attribute | index
@@ -311,12 +296,6 @@ schema wine_entity {
       index: enable-bm25
     }
 
-    # Structured grape variety hierarchy - array of family + variety pairs
-    field grape_hierarchy type array<string> {
-      indexing: summary | attribute | index
-      index: enable-bm25
-    }
-
     # Region hierarchy — enables hierarchical matching
     # Format: "Country / Region / Sub-region / District"
     field region_hierarchy type array<string> {
@@ -324,21 +303,8 @@ schema wine_entity {
       index: enable-bm25
     }
 
-    # Producer aliases — standardized producer name mappings
-    # E.g. "Château XYZ", "Domaine XYZ", "Castle XYZ"
-    field producer_aliases type array<string> {
-      indexing: summary | attribute | index
-      index: enable-bm25
-    }
-
     # Explicit price band numeric field for range queries
     field price_band_numeric type int {
-      indexing: summary | attribute
-    }
-
-    # Flavor profile categories — explicit enum instead of free text
-    # Encoded as pipe-separated: "body:0.6|acidity:0.7|tannin:0.8|sweetness:0.2"
-    field flavor_profile_structured type string {
       indexing: summary | attribute
     }
 

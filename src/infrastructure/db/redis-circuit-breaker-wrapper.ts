@@ -13,6 +13,7 @@
 
 import {
   createCircuitBreaker,
+  DEFAULT_BREAKER_FAILURE_THRESHOLD,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import { globalCircuitBreakerRegistry } from '../../domain/observability/circuit-breaker-registry.js';
@@ -37,7 +38,7 @@ const log = bootstrapLogger.child({ component: 'RedisCircuitBreakerWrapper' });
  *  Vespa/embedding because transient Redis hiccups are common during
  *  deployments and should not immediately kill the cache layer. */
 const REDIS_BREAKER_NAME = 'redis';
-const REDIS_FAILURE_THRESHOLD = 5;
+const REDIS_FAILURE_THRESHOLD = DEFAULT_BREAKER_FAILURE_THRESHOLD;
 const REDIS_RECOVERY_TIMEOUT_MS = 15_000;
 const REDIS_HALF_OPEN_MAX = 3;
 

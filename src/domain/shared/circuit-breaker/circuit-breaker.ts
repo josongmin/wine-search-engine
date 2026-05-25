@@ -8,6 +8,13 @@ import { CircuitBreakerOpenError } from '../error/circuit-breaker-open-error.js'
  * domain subtrees or from application/infrastructure layers.
  */
 
+/**
+ * Default failure threshold for external-call breakers (LLM, reranker, Redis).
+ * Adapters that need a different ceiling (e.g. cheap Vespa/embedding calls
+ * that should fast-fail at 3) keep their own constant inline.
+ */
+export const DEFAULT_BREAKER_FAILURE_THRESHOLD = 5;
+
 export type CircuitBreakerState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
 export interface CircuitBreakerOptions {

@@ -273,13 +273,6 @@ function buildConfig(parsed: EnvVars) {
        * synthesis instead of a second planner LLM RTT).
        */
       fastAnswerBypassPlanner: parsed.AGENT_FAST_ANSWER_BYPASS_PLANNER,
-      /**
-       * When true (default), the run loop must take an explicit verification
-       * step before terminating. Operators can disable the guard via
-       * AGENT_REQUIRE_VERIFICATION_STEP=false. Wired through to AgentConfig in
-       * the composition root (container.ts).
-       */
-      requireVerificationStep: parsed.AGENT_REQUIRE_VERIFICATION_STEP,
     },
 
     /**
