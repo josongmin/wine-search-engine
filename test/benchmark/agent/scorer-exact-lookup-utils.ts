@@ -96,3 +96,21 @@ export function formatObservedExactLookupSummary(
     : 'none';
   return `entity_ids=${entitySummary}; canonical_labels=${labelSummary}`;
 }
+
+/**
+ * Whether any of `canonicalLabels` (in their normalized surface form) contains
+ * the `needle` substring. Shared by exact-lookup contract scoring AND by
+ * context-relevance / context-recall — extracted here so all three callers
+ * agree on the same normalization rules.
+ */
+export function observedCanonicalIncludesNeedle(
+  canonicalLabels: readonly string[],
+  needle: string,
+  collapseWhitespace: boolean,
+): boolean {
+  const normalizedNeedle = normalizeExactLookupSurface(needle, collapseWhitespace);
+  if (normalizedNeedle.length === 0) return false;
+  return canonicalLabels.some((label) =>
+    normalizeExactLookupSurface(label, collapseWhitespace).includes(normalizedNeedle),
+  );
+}

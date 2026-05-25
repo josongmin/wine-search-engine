@@ -67,11 +67,21 @@ import {
   normalizeEvidenceText,
 } from './scorer-evidence-utils.js';
 import {
-  normalizeExactLookupSurface,
   collectObservedExactLookupValues,
   buildExactLookupNeedles,
   formatObservedExactLookupSummary,
+  observedCanonicalIncludesNeedle,
 } from './scorer-exact-lookup-utils.js';
+import {
+  CTX_WINE_TYPE_MAP,
+  CTX_COUNTRY_MAP,
+  CTX_REGION_MAP,
+} from './scorer-ctx-maps.js';
+import {
+  isHonestNoEvidenceAbstentionScenario,
+  normalizeObservations,
+} from './scorer-abstention.js';
+import { scoreExactLookupContract } from './scorer-exact-lookup-contract.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -181,39 +191,10 @@ export interface ScenarioExecution {
   readonly hardConstraintCount?: number | null | undefined;
 }
 
-/**
- * Single source of truth for joining observations into a searchable text block.
- *
- * Rules:
- *  - Separator is '\n' to preserve observation boundaries (a price at the end of
- *    obs N must not merge with text at the start of obs N+1).
- *  - NFKC normalization for consistent Korean/Unicode matching.
- *  - toLowerCase() for case-insensitive substring searches.
- *
- * ALL scorer functions that search observation text MUST call this helper instead
- * of rolling their own join logic.
- */
-export function normalizeObservations(observations: readonly string[]): string {
-  return observations.join('\n').toLowerCase().normalize('NFKC');
-}
-
-function hasExplicitNoEvidenceObservation(observations: readonly string[]): boolean {
-  const normalized = normalizeObservations(observations);
-  return normalized.includes('[retrieval_quality: unreliable — 0 results]')
-    || normalized.includes('[retrieval_quality: unreliable - 0 results]')
-    || normalized.includes('[retrieval_quality: corpus_limited')
-    || normalized.includes('resolution_not_confirmed')
-    || normalized.includes('검색 결과가 없습니다')
-    || normalized.includes('데이터베이스에 매우 적습니다');
-}
-
-function isHonestNoEvidenceAbstentionScenario(
-  exp: ScenarioExpectation,
-  execution: ScenarioExecution,
-): boolean {
-  return exp.allowHonestNoEvidenceAbstention === true
-    && hasExplicitNoEvidenceObservation(execution.observations);
-}
+// normalizeObservations / hasExplicitNoEvidenceObservation /
+// isHonestNoEvidenceAbstentionScenario moved to ./scorer-abstention.ts during
+// the 2026-05-25/26 decomposition (round 8.2). Imported above; re-exported below.
+export { normalizeObservations };
 
 export type DiagnosticSeverity = 'info' | 'warn' | 'critical';
 // v4: 'answerRelevancy' removed — dimension is always null, weight=0, no code emits
@@ -672,8 +653,8 @@ const EXEC_STEP_WEIGHT = K_EXEC_STEP_WEIGHT;
 const PENALTY_PRICE_BAND_VIOLATED = 0.7;
 const PENALTY_VINTAGE_RANGE_VIOLATED = 0.7;
 const PENALTY_DRINKING_WINDOW_MISMATCH = 0.8;
-const PENALTY_EXACT_LOOKUP_MISS = 0.35;
-const PENALTY_FAIL_CLOSED_VIOLATED = 0.35;
+// PENALTY_EXACT_LOOKUP_MISS / PENALTY_FAIL_CLOSED_VIOLATED moved to
+// ./scorer-exact-lookup-contract.ts during round 8.2.
 /** v4: raised from 0.9 → 0.7. A missing tool argument is a structural execution
  * failure (tool was called but lacked a required arg). The old 10% dock was far
  * too mild — milder than price band violations (30%) despite being a more
@@ -699,54 +680,9 @@ const PENALTY_MUST_NOT_MATCH = 0.50;
  *  Bound to `./constants.js` SSoT so a single edit drives all readers
  *  (CLAUDE.md rule 30). */
 const FAITHFULNESS_WARN_THRESHOLD = FAITHFULNESS_PER_SCENARIO_WARN;
-/**
- * Korean wine type → English canonical. Used by scoreContextRelevance to check
- * that observations match the query's wine type. Module-scope (rule 16).
- */
-const CTX_WINE_TYPE_MAP: ReadonlyArray<readonly [string, string]> = [
-  ['레드', 'red'],
-  ['화이트', 'white'],
-  ['스파클링', 'sparkling'],
-  ['로제', 'rosé'],
-];
-
-/**
- * Korean country name patterns → English canonical. Aligned with
- * KOREAN_COUNTRY_ALIASES in search-constraint-extractor.ts (rule 25: single
- * source of truth). Module-scope (rule 16).
- */
-const CTX_COUNTRY_MAP: ReadonlyArray<readonly [RegExp, string]> = [
-  [/프랑스/u, 'France'],
-  [/이탈리아/u, 'Italy'],
-  [/스페인/u, 'Spain'],
-  [/호주/u, 'Australia'],
-  [/칠레/u, 'Chile'],
-  [/미국/u, 'United States'],
-  [/아르헨티나/u, 'Argentina'],
-  [/독일/u, 'Germany'],
-  [/포르투갈/u, 'Portugal'],
-  [/뉴질랜드/u, 'New Zealand'],
-  [/남아공/u, 'South Africa'],
-  [/오스트리아/u, 'Austria'],
-];
-
-/**
- * Korean region name → lowercase English canonical. Used by scoreContextRelevance.
- * Aligned with entity-resolver.ts and nl-mapper.ts region entries (rule 25).
- * Module-scope (rule 16).
- */
-const CTX_REGION_MAP: ReadonlyArray<readonly [string, string]> = [
-  ['보르도', 'bordeaux'],
-  ['부르고뉴', 'burgundy'],
-  ['나파', 'napa'],
-  ['바롤로', 'barolo'],
-  ['토스카나', 'tuscany'],
-  ['리오하', 'rioja'],
-  ['샴페인', 'champagne'],
-  ['모젤', 'mosel'],
-  ['론', 'rhone'],
-  ['피에몬테', 'piedmont'],
-];
+// CTX_WINE_TYPE_MAP / CTX_COUNTRY_MAP / CTX_REGION_MAP moved to
+// ./scorer-ctx-maps.ts during the 2026-05-25/26 decomposition (round 8.1).
+// Imported above; consumed by scoreContextRelevance.
 
 type ContextRelevanceAxis = 'raw_alignment' | 'structured';
 
@@ -764,181 +700,6 @@ type ContextRelevanceCheck = {
 // normalizeExactLookupSurface / collectObservedExactLookupValues /
 // buildExactLookupNeedles moved to ./scorer-exact-lookup-utils.ts during
 // the 2026-05-25 decomposition. Imported above.
-
-function observedCanonicalIncludesNeedle(
-  canonicalLabels: readonly string[],
-  needle: string,
-  collapseWhitespace: boolean,
-): boolean {
-  const normalizedNeedle = normalizeExactLookupSurface(needle, collapseWhitespace);
-  if (normalizedNeedle.length === 0) return false;
-  return canonicalLabels.some((label) =>
-    normalizeExactLookupSurface(label, collapseWhitespace).includes(normalizedNeedle),
-  );
-}
-
-function observedForbiddenCanonicalHit(
-  canonicalLabels: readonly string[],
-  forbiddenAlias: string,
-  expectedNeedles: readonly string[],
-  collapseWhitespace: boolean,
-): boolean {
-  const normalizedForbidden = normalizeExactLookupSurface(forbiddenAlias, collapseWhitespace);
-  if (normalizedForbidden.length === 0) return false;
-  return canonicalLabels.some((label) => {
-    const normalizedLabel = normalizeExactLookupSurface(label, collapseWhitespace);
-    if (!normalizedLabel.includes(normalizedForbidden)) {
-      return false;
-    }
-    return !expectedNeedles.some((needle) => {
-      const normalizedExpected = normalizeExactLookupSurface(needle, collapseWhitespace);
-      return normalizedExpected.length > 0 && normalizedLabel.includes(normalizedExpected);
-    });
-  });
-}
-
-// formatObservedExactLookupSummary moved to ./scorer-exact-lookup-utils.ts.
-
-interface ExactLookupScore {
-  readonly exactLookupHit: number | null;
-  readonly failClosedAccuracy: number | null;
-  readonly multiplier: number;
-}
-
-function scoreExactLookupContract(
-  exp: ScenarioExpectation,
-  execution: ScenarioExecution,
-  diagnostics: Diagnostic[],
-): ExactLookupScore {
-  const exactLookup = exp.exactLookup;
-  if (exactLookup === undefined) {
-    return { exactLookupHit: null, failClosedAccuracy: null, multiplier: 1 };
-  }
-  if (isHonestNoEvidenceAbstentionScenario(exp, execution)) {
-    diagnostics.push({
-      dim: 'answerQuality',
-      severity: 'info',
-      code: 'EXACT_LOOKUP_SKIPPED_NO_EVIDENCE_ABSTENTION',
-      message: 'exact lookup contract not penalized: scenario explicitly allows honest abstention when retrieval returned no confirmable evidence',
-    });
-    return {
-      exactLookupHit: null,
-      failClosedAccuracy:
-        exactLookup.matchPolicy === 'must_not_exact_match'
-        || exactLookup.matchPolicy === 'optional_alias_or_fail_closed'
-          ? 1
-          : null,
-      multiplier: 1,
-    };
-  }
-
-  const records = buildContextEvidenceRecords(execution);
-  const observed = collectObservedExactLookupValues(records);
-  const hasAnyObservedExactCandidate = observed.entityIds.length > 0 || observed.canonicalLabels.length > 0;
-  const collapseWhitespace = exactLookup.allowSpaceNormalization !== false;
-  const expectedNeedles = buildExactLookupNeedles(exactLookup);
-  const canonicalHit = expectedNeedles.some((needle) =>
-    observedCanonicalIncludesNeedle(observed.canonicalLabels, needle, collapseWhitespace),
-  );
-  const entityHit = exactLookup.expectedEntityId !== undefined
-    && exactLookup.expectedEntityId !== null
-    && observed.entityIds.includes(exactLookup.expectedEntityId);
-  const matchedExactEntity = entityHit || canonicalHit;
-
-  const forbiddenEntityHit = (exactLookup.mustNotReturnEntityIds ?? []).find((entityId) =>
-    observed.entityIds.includes(entityId),
-  );
-  const forbiddenExpectedNeedles =
-    exactLookup.matchPolicy === 'exact_entity' ? expectedNeedles : [];
-  const forbiddenCanonicalHit = (exactLookup.mustNotReturnCanonicalAliases ?? []).find((alias) =>
-    observedForbiddenCanonicalHit(observed.canonicalLabels, alias, forbiddenExpectedNeedles, collapseWhitespace),
-  );
-
-  let multiplier = 1;
-  let exactLookupHit: number | null = null;
-  let failClosedAccuracy: number | null = null;
-
-  if (exactLookup.matchPolicy === 'exact_entity') {
-    exactLookupHit = matchedExactEntity ? 1 : 0;
-    if (!matchedExactEntity) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'EXACT_LOOKUP_MISS',
-        message: 'exact lookup contract missed the expected wine entity / canonical label',
-        observed: formatObservedExactLookupSummary(observed),
-        expected: expectedNeedles.join(' | '),
-      });
-      multiplier *= PENALTY_EXACT_LOOKUP_MISS;
-    }
-  } else if (exactLookup.matchPolicy === 'must_not_exact_match') {
-    failClosedAccuracy = hasAnyObservedExactCandidate ? 0 : 1;
-    if (hasAnyObservedExactCandidate) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'FAIL_CLOSED_EXACT_LOOKUP_VIOLATED',
-        message: 'ambiguous / non-entity exact-lookup query returned specific exact candidates instead of failing closed',
-        observed: formatObservedExactLookupSummary(observed),
-      });
-      multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
-    }
-  } else if (exactLookup.matchPolicy === 'must_not_return_guarded_entity') {
-    const hasGuardedContract =
-      (exactLookup.mustNotReturnEntityIds?.length ?? 0) > 0
-      || (exactLookup.mustNotReturnCanonicalAliases?.length ?? 0) > 0;
-    const guardedHit = forbiddenEntityHit !== undefined || forbiddenCanonicalHit !== undefined;
-    failClosedAccuracy = guardedHit || (!hasGuardedContract && hasAnyObservedExactCandidate) ? 0 : 1;
-    if (!hasGuardedContract && hasAnyObservedExactCandidate) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'FAIL_CLOSED_EXACT_LOOKUP_VIOLATED',
-        message: 'ambiguous exact-lookup query has no guarded entity list and returned specific exact candidates',
-        observed: formatObservedExactLookupSummary(observed),
-      });
-      multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
-    }
-  } else {
-    if (matchedExactEntity) {
-      exactLookupHit = 1;
-      failClosedAccuracy = 1;
-    } else if (!hasAnyObservedExactCandidate) {
-      exactLookupHit = 0;
-      failClosedAccuracy = 1;
-    } else {
-      exactLookupHit = 0;
-      failClosedAccuracy = 0;
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'OPTIONAL_ALIAS_OR_FAIL_CLOSED_VIOLATED',
-        message: 'policy-pending exact lookup neither matched the accepted alias target nor failed closed',
-        observed: formatObservedExactLookupSummary(observed),
-        expected: expectedNeedles.join(' | '),
-      });
-      multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
-    }
-  }
-
-  if (forbiddenEntityHit !== undefined || forbiddenCanonicalHit !== undefined) {
-    diagnostics.push({
-      dim: 'answerQuality',
-      severity: 'warn',
-      code: 'EXACT_LOOKUP_FORBIDDEN_MATCH',
-      message: 'exact lookup returned a forbidden nearby entity / canonical label',
-      observed: formatObservedExactLookupSummary(observed),
-      expected: `${forbiddenEntityHit ?? ''}${forbiddenEntityHit !== undefined && forbiddenCanonicalHit !== undefined ? ' | ' : ''}${forbiddenCanonicalHit ?? ''}`,
-    });
-    multiplier *= PENALTY_FAIL_CLOSED_VIOLATED;
-  }
-
-  return {
-    exactLookupHit,
-    failClosedAccuracy,
-    multiplier,
-  };
-}
 
 function evidenceTextIncludes(
   records: readonly EvidenceRecord[],
