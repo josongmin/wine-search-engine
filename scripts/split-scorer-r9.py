@@ -354,6 +354,40 @@ const PENALTY_UNCITED_WINE_NAMES = 0.5;
     src = insert_import_after_last_import(
         src, "import { scoreStructuredChecks } from './scorer-structured-checks.js';"
     )
+    src = src.replace(
+        "import { evaluatePredicate, formatToolArgValue, getNestedValue } from './scorer-predicate-eval.js';\n",
+        "",
+    )
+    # Drop top-level text-extractor imports when only used by structured checks (re-export at bottom)
+    src = src.replace(
+        "import {\n  extractKoreanPrices,\n  extractVintageYears,\n  extractProperNouns,\n} from './scorer-text-extractors.js';\n",
+        "",
+    )
+    # Clean orphaned penalty comment block left after constant removal
+    src = src.replace(
+        "/** Structured check penalties — multiplied into answerQuality. */\n"
+        "// PENALTY_EXACT_LOOKUP_MISS / PENALTY_FAIL_CLOSED_VIOLATED moved to\n"
+        "// ./scorer-exact-lookup-contract.ts during round 8.2.\n"
+        "/** v4: raised from 0.9 → 0.7. A missing tool argument is a structural execution\n"
+        " * failure (tool was called but lacked a required arg). The old 10% dock was far\n"
+        " * too mild — milder than price band violations (30%) despite being a more\n"
+        " * fundamental error. Now aligned with other structural check penalties. */\n"
+        "// v4: PENALTY_HEDGING_MISSING, PENALTY_REGISTER_MISMATCH, PENALTY_OVERCONFIDENT\n"
+        "// removed — these dimensions are now evaluated by the LLM judge exclusively.\n"
+        "// See scoreStructuredChecks comment block for the structural rationale.\n"
+        "/** Answer quality: 50% penalty per regex miss in answerMustMatch. */\n"
+        "/**\n"
+        " * Answer quality: 50% penalty per answerMustNotMatch hit.\n"
+        " * v4: rebalanced from 0.20 → 0.50. The old 80% dock was disproportionate —\n"
+        " * a polite Korean preamble (\"죄송합니다만...\") before a valid recommendation\n"
+        " * lost 80% of answerQuality, more than a missing tool argument (now 30%).\n"
+        " * At 50%, a single hit is a meaningful penalty but recoverable via judge;\n"
+        " * two hits stack to 0.25 (75% dock) which is proportional to double failure.\n"
+        " * Intentionally non-fatal (not a critical-fail): judge can partially offset.\n"
+        " */\n",
+        "// Per-dim penalties live in scorer-tool-accuracy, scorer-answer-quality,\n"
+        "// scorer-structured-checks, scorer-exact-lookup-contract (rounds 8–9).\n",
+    )
 
     # Remove dimension scorers section if only comments left
     src = re.sub(
