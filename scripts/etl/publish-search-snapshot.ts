@@ -68,11 +68,6 @@ interface Args {
   readonly runtimeNlMappingsPath: string;
   readonly allowMissingLtr: boolean;
   readonly skipIndex: boolean;
-  /**
-   * Skip the `vespa deploy` CLI step. Use when the application package
-   * is already deployed to the target cluster (self-hosted EC2 path).
-   */
-  readonly skipVespaDeploy: boolean;
   readonly fixtureRepoRoot?: string | undefined;
 }
 
@@ -152,7 +147,6 @@ function parseArgs(argv: readonly string[]): Args {
     runtimeNlMappingsPath,
     allowMissingLtr,
     skipIndex,
-    skipVespaDeploy,
     fixtureRepoRoot,
   };
 }
@@ -523,9 +517,28 @@ export function assertCriticalWineTypeCoverageForPublish(
   if (missing.length === 0) {
     return;
   }
+  // Operator ack escape hatch (post-2026-05-25): the upstream Bronze
+  // crawler may legitimately have collected only a subset of wine_types
+  // (e.g. red-only corpus for an early-data restore). The default behavior
+  // remains fail-loud because most publish runs SHOULD have full coverage
+  // and a missing type is usually an ETL bug; but a single-type corpus is
+  // a real operational state and the operator can acknowledge it
+  // explicitly by exporting `ETL_PUBLISH_SINGLE_WINE_TYPE_ACK=YES`. We
+  // log a WARN so the missing coverage shows up in the publish trail
+  // even when ack is set.
+  const ack = process.env['ETL_PUBLISH_SINGLE_WINE_TYPE_ACK'];
+  if (ack === 'YES') {
+    console.warn(
+      `[publish] WARNING: snapshot ${snapshotId} is missing critical wine_type coverage in ${source}: ${missing.join(', ')}. `
+      + `counts=${JSON.stringify(coverage)}. Proceeding because ETL_PUBLISH_SINGLE_WINE_TYPE_ACK=YES.`,
+    );
+    return;
+  }
   throw new Error(
     `Snapshot ${snapshotId} is missing critical wine_type coverage in ${source}: ${missing.join(', ')}. `
-    + `counts=${JSON.stringify(coverage)}`,
+    + `counts=${JSON.stringify(coverage)}. `
+    + 'If the corpus is intentionally single-wine_type (e.g. red-only restore), '
+    + 'set ETL_PUBLISH_SINGLE_WINE_TYPE_ACK=YES to acknowledge and proceed.',
   );
 }
 
