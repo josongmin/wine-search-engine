@@ -962,9 +962,30 @@ export class WineSearchOrchestrator {
     if (this.deps.comparisonLlmFallback === undefined) return undefined;
 
     // Activation gate 2: only stalled comparison-flavored plans.
+    //
+    // Expanded 2026-05-25 (bench v10 RCA): the original gate was
+    // `intent='compare' OR plan in {comparison, multi-step, parallel-search}`.
+    // Korean comparison-style queries ("둘 중 어떤 게", "A vs B 어느게 더
+    // 좋아") classify with `intent='search' | 'pair' | 'drinkability'`
+    // when the secondary axis (food pairing / drinkability) dominates the
+    // analyzer's intent vote. v10 showed comparison fallback fired for only
+    // 6/64 max_steps stalls — additive surface-form heuristics (Korean/
+    // English comparison cues) lift coverage without false promotion
+    // (legs extractor still requires ≥1 candidate per leg, which only
+    // happens for true two-sided compares).
+    //
+    // Word boundaries use `[^\p{L}\p{N}]` character class — `\b` is
+    // ASCII-only and silently fails on Korean/accented Latin (CLAUDE.md
+    // rule 8). The cue patterns intentionally exclude bare "vs " at sub-
+    // word positions (e.g. "vsop" cognac) by requiring non-letter context.
     const isComparisonIntent = analysis.intent === 'compare';
+    const isComparisonAdjacentIntent =
+      analysis.intent === 'pair' || analysis.intent === 'drinkability';
     const isComparisonPlan = planKind === 'comparison' || planKind === 'multi-step' || planKind === 'parallel-search';
-    if (!isComparisonIntent && !isComparisonPlan) return undefined;
+    const hasComparisonSurfaceCue =
+      /(?:^|[^\p{L}\p{N}])(?:vs|versus|compare|between)(?=$|[^\p{L}\p{N}])/iu.test(input.query)
+      || /비교|둘\s*중|어느|어떤\s*게|뭐가\s*(?:더|좋아)/u.test(input.query);
+    if (!isComparisonIntent && !isComparisonPlan && !isComparisonAdjacentIntent && !hasComparisonSurfaceCue) return undefined;
     // The fallback's whole point is to rescue stalled / inconclusive plans.
     // A successful 'answer' termination already produced a verdict (or will
     // via the synthesizer); only stall reasons get the fallback budget.
