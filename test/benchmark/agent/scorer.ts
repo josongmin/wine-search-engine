@@ -33,7 +33,6 @@ import type {
 } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { ToolCallEvidenceFrame } from '../../../src/domain/agent/model/tool-call-evidence-frame.js';
-import type { EvidenceRecord } from '../../../src/domain/evaluation/service/claim-level-evaluator.js';
 import {
   PENALTY_EXTRA_TOOL_PER_CALL as K_PENALTY_EXTRA_TOOL_PER_CALL,
   PENALTY_EXTRA_TOOL_CAP as K_PENALTY_EXTRA_TOOL_CAP,
@@ -62,27 +61,16 @@ import {
   countSemanticToolInvocations,
 } from './scorer-tool-call-signatures.js';
 import {
-  buildContextEvidenceRecords,
-  normalizeEvidenceText,
-} from './scorer-evidence-utils.js';
-import {
-  collectObservedExactLookupValues,
-  buildExactLookupNeedles,
-  formatObservedExactLookupSummary,
-  observedCanonicalIncludesNeedle,
-} from './scorer-exact-lookup-utils.js';
-import {
-  CTX_WINE_TYPE_MAP,
-  CTX_COUNTRY_MAP,
-  CTX_REGION_MAP,
-} from './scorer-ctx-maps.js';
-import {
   isHonestNoEvidenceAbstentionScenario,
   normalizeObservations,
 } from './scorer-abstention.js';
 import { scoreExactLookupContract } from './scorer-exact-lookup-contract.js';
 import { scoreTermination } from './scorer-termination.js';
 import { scoreContextRecall } from './scorer-context-recall.js';
+import {
+  parseToolCallInput,
+  scoreContextRelevance,
+} from './scorer-context-relevance.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -93,20 +81,6 @@ export interface ToolCallTrace {
 // stableJsonStringify / getToolCallSemanticSignature / countSemanticToolInvocations
 // moved to ./scorer-tool-call-signatures.ts during the 2026-05-25 decomposition.
 // Imported above; consumed by toolAccuracy scoring and formatToolArgValue.
-
-function parseToolCallInput(call: ToolCallTrace): Record<string, unknown> | null {
-  if (typeof call.input !== 'string' || call.input.trim().length === 0) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(call.input) as unknown;
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 function isSearchWinesPartitionBatch(calls: readonly ToolCallTrace[]): boolean {
   if (calls.length < 2 || !calls.every((call) => call.tool === 'search_wines')) {
@@ -685,15 +659,6 @@ const FAITHFULNESS_WARN_THRESHOLD = FAITHFULNESS_PER_SCENARIO_WARN;
 // ./scorer-ctx-maps.ts during the 2026-05-25/26 decomposition (round 8.1).
 // Imported above; consumed by scoreContextRelevance.
 
-type ContextRelevanceAxis = 'raw_alignment' | 'structured';
-
-type ContextRelevanceCheck = {
-  readonly passed: boolean;
-  readonly label: string;
-  readonly axis: ContextRelevanceAxis;
-  readonly hard?: boolean | undefined;
-};
-
 // buildContextEvidenceRecords + normalizeEvidenceText moved to
 // ./scorer-evidence-utils.ts during the 2026-05-25 decomposition. Imported
 // above; consumed by ≥6 per-dim scoring sites across this file.
@@ -702,194 +667,14 @@ type ContextRelevanceCheck = {
 // buildExactLookupNeedles moved to ./scorer-exact-lookup-utils.ts during
 // the 2026-05-25 decomposition. Imported above.
 
-function evidenceTextIncludes(
-  records: readonly EvidenceRecord[],
-  fields: readonly string[],
-  expected: string,
-): boolean {
-  const needle = normalizeEvidenceText(expected);
-  if (needle.length === 0) return false;
-  return records.some((record) =>
-    fields.some((field) => {
-      const value = record[field];
-      if (value === undefined || value === null) return false;
-      if (Array.isArray(value)) {
-        return value.some((entry) => normalizeEvidenceText(entry).includes(needle));
-      }
-      return normalizeEvidenceText(value).includes(needle);
-    }),
-  );
-}
+// 7 context-relevance helpers (evidenceTextIncludes, evidenceNumericValues,
+// collectStyleHintsFromToolInput, collectStructuredToolContextRelevanceChecks,
+// expectedEntityEvidenceFields, collectExpectedEntityContextRelevanceChecks,
+// formatContextCheckSummary, summarizeContextAxisChecks)
+// + types ContextRelevanceAxis / ContextRelevanceCheck moved to
+// ./scorer-context-relevance.ts (round 8.5).
 
-function evidenceNumericValues(
-  records: readonly EvidenceRecord[],
-  field: string,
-): readonly number[] {
-  return records
-    .map((record) => record[field])
-    .flatMap((value) => {
-      if (typeof value === 'number' && Number.isFinite(value)) return [value];
-      if (typeof value === 'string') {
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? [parsed] : [];
-      }
-      return [];
-    });
-}
-
-function collectStyleHintsFromToolInput(input: Record<string, unknown>): readonly string[] {
-  const styles = input['styles'];
-  if (Array.isArray(styles)) {
-    return styles.filter((style): style is string => typeof style === 'string');
-  }
-  const style = input['style'];
-  return typeof style === 'string' ? [style] : [];
-}
-
-function collectStructuredToolContextRelevanceChecks(
-  execution: ScenarioExecution,
-): readonly ContextRelevanceCheck[] {
-  const records = buildContextEvidenceRecords(execution);
-  if (records.length === 0) return [];
-
-  const checks: ContextRelevanceCheck[] = [];
-  for (const call of execution.toolsUsed) {
-    const input = parseToolCallInput(call);
-    if (input === null) continue;
-
-    const wineType = input['wine_type'];
-    if (typeof wineType === 'string') {
-      checks.push({
-        passed: evidenceTextIncludes(records, ['wine_type', 'style'], wineType),
-        label: `tool_wine_type_${wineType}`,
-        axis: 'structured',
-      });
-    }
-
-    const country = input['country'];
-    if (typeof country === 'string') {
-      checks.push({
-        passed: evidenceTextIncludes(records, ['country', 'region', 'appellation'], country),
-        label: `tool_country_${country}`,
-        axis: 'structured',
-      });
-    }
-
-    const appellation = input['appellation'];
-    if (typeof appellation === 'string') {
-      checks.push({
-        passed: evidenceTextIncludes(records, ['appellation', 'region'], appellation),
-        label: `tool_appellation_${appellation}`,
-        axis: 'structured',
-      });
-    }
-
-    const maxAlcoholPct = input['max_alcohol_pct'];
-    if (typeof maxAlcoholPct === 'number' && Number.isFinite(maxAlcoholPct)) {
-      const alcoholValues = evidenceNumericValues(records, 'alcohol_pct');
-      checks.push({
-        passed: alcoholValues.some((value) => value <= maxAlcoholPct),
-        label: `tool_alcohol_pct_lte_${maxAlcoholPct}`,
-        axis: 'structured',
-      });
-    }
-
-    for (const style of collectStyleHintsFromToolInput(input)) {
-      const normalizedStyle = normalizeEvidenceText(style).replace(/_/gu, ' ');
-      if (normalizedStyle === 'sweet') {
-        const sweetnessValues = evidenceNumericValues(records, 'sweetness');
-        checks.push({
-          passed:
-            evidenceTextIncludes(records, ['style', 'wine_type'], 'sweet')
-            || evidenceTextIncludes(records, ['wine_type'], 'dessert')
-            || sweetnessValues.some((value) => value >= 0.5),
-          label: 'tool_style_sweet',
-          axis: 'structured',
-        });
-        continue;
-      }
-      if (normalizedStyle === 'off dry') {
-        const sweetnessValues = evidenceNumericValues(records, 'sweetness');
-        checks.push({
-          passed:
-            evidenceTextIncludes(records, ['style'], 'off dry')
-            || sweetnessValues.some((value) => value >= 0.2 && value <= 0.6),
-          label: 'tool_style_off_dry',
-          axis: 'structured',
-        });
-        continue;
-      }
-      if (normalizedStyle === 'dry') {
-        const sweetnessValues = evidenceNumericValues(records, 'sweetness');
-        checks.push({
-          passed:
-            evidenceTextIncludes(records, ['style'], 'dry')
-            || sweetnessValues.some((value) => value <= 0.2),
-          label: 'tool_style_dry',
-          axis: 'structured',
-        });
-      }
-    }
-  }
-
-  return checks;
-}
-
-function expectedEntityEvidenceFields(
-  type: NonNullable<ScenarioExpectation['expectedEntities']>[number]['type'],
-): readonly string[] {
-  switch (type) {
-    case 'wine_type':
-      return ['wine_type', 'style', 'comparison_concept'];
-    case 'country':
-      return ['country', 'region', 'appellation', 'comparison_concept'];
-    case 'region':
-      return ['region', 'appellation', 'comparison_concept'];
-    case 'appellation':
-      return ['appellation', 'region', 'canonical_label', 'comparison_concept'];
-    case 'grape_primary':
-      return ['grapes', 'canonical_label', 'comparison_concept'];
-  }
-}
-
-function collectExpectedEntityContextRelevanceChecks(
-  exp: ScenarioExpectation,
-  execution: ScenarioExecution,
-): readonly ContextRelevanceCheck[] {
-  if (exp.expectedEntities === undefined || exp.expectedEntities.length === 0) {
-    return [];
-  }
-  const records = buildContextEvidenceRecords(execution);
-  if (records.length === 0) return [];
-
-  return exp.expectedEntities.map((entity) => ({
-    passed: evidenceTextIncludes(records, expectedEntityEvidenceFields(entity.type), entity.canonical),
-    label: `expected_entity_${entity.type}_${entity.canonical}`,
-    axis: 'raw_alignment',
-  }));
-}
-
-function formatContextCheckSummary(
-  checks: readonly ContextRelevanceCheck[],
-  failed: readonly string[],
-): string {
-  const passedCount = checks.length - failed.length;
-  return `passed ${passedCount}/${checks.length}; failed=${failed.length > 0 ? failed.join(', ') : 'none'}`;
-}
-
-function summarizeContextAxisChecks(
-  axis: ContextRelevanceAxis,
-  checks: readonly ContextRelevanceCheck[],
-): string {
-  if (checks.length === 0) {
-    return `${axis}=n/a`;
-  }
-  const failed = checks.filter((check) => !check.passed).map((check) => check.label);
-  return `${axis} ${formatContextCheckSummary(checks, failed)}`;
-}
-
-/** Fixed reference year for deterministic benchmark scoring of drink windows. */
-const BENCHMARK_REFERENCE_YEAR = 2026;
+// BENCHMARK_REFERENCE_YEAR moved to ./scorer-context-relevance.ts (round 8.5).
 
 // v4 removal: ANSWER_LENGTH_BONUS, ANSWER_TRIVIAL_PENALTY, ANSWER_WINE_RELEVANT_TERMS
 // were removed entirely. The length bonus (+0.05 for answers ≥100 chars with wine terms)
@@ -1849,38 +1634,7 @@ function scoreStructuredChecks(
  *
  * Returns null when no drinking window data found (check is skipped).
  */
-function parseDrinkingWindowFromObs(
-  obsText: string,
-  expected: 'now' | 'hold' | 'past',
-): boolean | null {
-  // Strategy 1: exact status phrases from check_drinking_window output
-  const STATUS_PHRASES: Record<string, RegExp> = {
-    now: /currently drinkable/i,
-    hold: /not yet at peak|hold until/i,
-    past: /past peak/i,
-  };
-  const anyStatusFound = Object.values(STATUS_PHRASES).some((re) => re.test(obsText));
-  if (anyStatusFound) {
-    return STATUS_PHRASES[expected]!.test(obsText);
-  }
-
-  // Strategy 2: parse "drink: YYYY-YYYY" year range and infer status.
-  // Use a fixed benchmark reference year so the same saved run scores the same
-  // way next year; otherwise this metric drifts with wall-clock time.
-  const drinkRangeRe = /\bdrink:\s*(\d{4})\s*[-–]\s*(\d{4})\b/gi;
-  let match: RegExpExecArray | null;
-  let foundAny = false;
-  while ((match = drinkRangeRe.exec(obsText)) !== null) {
-    foundAny = true;
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    const inferred = BENCHMARK_REFERENCE_YEAR < start ? 'hold' : BENCHMARK_REFERENCE_YEAR > end ? 'past' : 'now';
-    if (inferred === expected) return true;
-  }
-  if (foundAny) return false; // ranges found but none matched expected status
-
-  return null; // no drinking window data in observations
-}
+// parseDrinkingWindowFromObs moved to ./scorer-context-relevance.ts (round 8.5).
 
 // extractKoreanPrices / extractVintageYears / extractProperNouns + currency
 // constants + DRINK_WINDOW_CONTEXT_RE moved to ./scorer-text-extractors.ts
@@ -1950,268 +1704,8 @@ export function evaluatePredicate(
 // RAGAS Context Relevance (structured evidence, no LLM needed)
 // ─────────────────────────────────────────────────────────────────────
 
-/**
- * Evaluates whether tool results are relevant to the query's typed constraints
- * and hand-curated entity expectations.
- *
- * Unlike faithfulness (does the ANSWER cite the context?), context relevance
- * asks: did the RETRIEVAL return results that match what was asked? This
- * separates "search pipeline returned junk" from "agent hallucinated".
- *
- * Checks each available structured signal against typed evidence records:
- * - priceBandKrw: prices in observations within range?
- * - vintageRange: years in observations within range?
- * - drinkingWindowStatus: parsed drinking-window status present?
- * - expectedEntities: canonical entity evidence present on the right field axis?
- *
- * Returns null when no structured constraints exist or no observations.
- *
- * Renamed from scoreContextPrecision — the metric is now "contextRelevance"
- * to align with RAGAS v2 terminology.
- */
-function scoreContextRelevance(
-  scenario: AgentBenchmarkScenario,
-  exp: ScenarioExpectation,
-  execution: ScenarioExecution,
-  diagnostics: Diagnostic[],
-): number | null {
-  if (
-    execution.observations.length === 0
-    && (execution.evidenceFrames === undefined || execution.evidenceFrames.length === 0)
-  ) {
-    return null;
-  }
-  if (isHonestNoEvidenceAbstentionScenario(exp, execution)) {
-    diagnostics.push({
-      dim: 'contextRelevance',
-      severity: 'info',
-      code: 'CONTEXT_RELEVANCE_SKIPPED_NO_EVIDENCE_ABSTENTION',
-      message: 'context relevance not scored: scenario explicitly allows honest abstention when retrieval returned no confirmable evidence',
-    });
-    return null;
-  }
-  if (
-    exp.exactLookup?.matchPolicy === 'must_not_exact_match'
-    || exp.exactLookup?.matchPolicy === 'must_not_return_guarded_entity'
-  ) {
-    diagnostics.push({
-      dim: 'contextRelevance',
-      severity: 'info',
-      code: 'CONTEXT_RELEVANCE_SKIPPED_FAIL_CLOSED_EXACT_LOOKUP',
-      message: 'context relevance not scored: fail-closed exact lookup scenarios are evaluated by exactLookup/failClosedAccuracy',
-    });
-    return null;
-  }
-  const exactLookupRelevance = scoreExactLookupContextRelevance(exp, execution, diagnostics);
-  if (exactLookupRelevance !== null) {
-    return exactLookupRelevance;
-  }
-  // normalizeObservations() is the single source of truth for joining.
-  // Note: scoreContextRelevance uses the un-lowercased form for regex matching below,
-  // so we call join directly here but with the canonical '\n' separator.
-  const obsText = execution.observations.join('\n');
-
-  const checks: ContextRelevanceCheck[] = [];
-
-  // Price check: any prices mentioned in observations should be in range
-  if (exp.priceBandKrw !== undefined) {
-    const prices = extractKoreanPrices(obsText);
-    if (prices.length > 0) {
-      const inRange = prices.filter((p) => {
-        if (exp.priceBandKrw!.min !== undefined && p < exp.priceBandKrw!.min) return false;
-        if (exp.priceBandKrw!.max !== undefined && p > exp.priceBandKrw!.max) return false;
-        return true;
-      });
-      checks.push({ passed: inRange.length > 0, label: 'price_in_range', axis: 'structured' });
-    }
-  }
-
-  // Vintage check
-  if (exp.vintageRange !== undefined) {
-    const years = extractVintageYears(obsText);
-    if (years.length > 0) {
-      const inRange = years.filter((y) => {
-        if (exp.vintageRange!.min !== undefined && y < exp.vintageRange!.min) return false;
-        if (exp.vintageRange!.max !== undefined && y > exp.vintageRange!.max) return false;
-        return true;
-      });
-      checks.push({
-        passed: inRange.length > 0,
-        label: 'vintage_in_range',
-        axis: 'structured',
-        hard: true,
-      });
-    }
-  }
-
-  // Drinking window status check — v4: structured parsing replaces keyword heuristic.
-  // Observation text from agent-tools.ts has two deterministic formats:
-  //   search_wines:           "... | drink: YYYY-YYYY | ..."
-  //   check_drinking_window:  "... drinking window YYYY-YYYY. As of YEAR: currently drinkable ..."
-  // Parse these directly instead of keyword-matching free text (false positives on
-  // "peak", "aging", "young", "이르" which all appear in non-drinking-window contexts).
-  if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
-    const dwResult = parseDrinkingWindowFromObs(obsText, exp.drinkingWindowStatus);
-    if (dwResult !== null) {
-      checks.push({
-        passed: dwResult,
-        label: `dw_status_${exp.drinkingWindowStatus}`,
-        axis: 'structured',
-      });
-    }
-  }
-
-  // Cross-domain checks: wine_type, country, region.
-  // If the scenario query mentions a Korean term, verify the observation
-  // contains the corresponding English canonical value.
-  const queryNfkc = scenario.query.toLowerCase().normalize('NFKC');
-  const obsNfkc = normalizeObservations(execution.observations);
-
-  // Wine type check
-  for (const [korean, english] of CTX_WINE_TYPE_MAP) {
-    if (queryNfkc.includes(korean)) {
-      checks.push({
-        passed: obsNfkc.includes(english),
-        label: `wine_type_${english}`,
-        axis: 'raw_alignment',
-      });
-      break;
-    }
-  }
-
-  // Country check
-  for (const [pattern, canonical] of CTX_COUNTRY_MAP) {
-    if (pattern.test(queryNfkc)) {
-      checks.push({
-        passed: obsNfkc.includes(canonical.toLowerCase()),
-        label: `country_${canonical}`,
-        axis: 'raw_alignment',
-      });
-      break;
-    }
-  }
-
-  // Region check
-  for (const [korean, english] of CTX_REGION_MAP) {
-    if (queryNfkc.includes(korean)) {
-      checks.push({
-        passed: obsNfkc.includes(english),
-        label: `region_${english}`,
-        axis: 'raw_alignment',
-      });
-      break;
-    }
-  }
-
-  // RFC-020: expectedConstraints-based checks — if the scenario specifies
-  // ground-truth hard constraints for wine_type/country/region, verify the
-  // observation contains those values. These are SOFT checks (averaged, not
-  // hard-failing) because the value may appear implicitly in wine descriptions.
-  if (exp.expectedConstraints?.hard) {
-    for (const constraint of exp.expectedConstraints.hard) {
-      if (typeof constraint.value !== 'string') continue;
-      const valueLower = constraint.value.normalize('NFKC').toLowerCase();
-      if (constraint.attribute === 'wine_type' || constraint.attribute === 'country' || constraint.attribute === 'region' || constraint.attribute === 'appellation') {
-        checks.push({
-          passed: obsNfkc.includes(valueLower),
-          label: `${constraint.attribute}_constraint_${constraint.value}`,
-          axis: 'structured',
-        });
-      }
-    }
-  }
-
-  const structuredToolChecks = collectStructuredToolContextRelevanceChecks(execution);
-  checks.push(...structuredToolChecks);
-  checks.push(...collectExpectedEntityContextRelevanceChecks(exp, execution));
-
-  if (checks.length === 0) return null; // no constraints to evaluate
-
-  // P1-B fix: hard constraints remain fail-closed, but all non-hard checks are
-  // now partitioned into explicit axes. Structured passes must not wash out a
-  // miss on raw query/entity alignment, and vice versa.
-  const hardFailed = checks
-    .filter((check) => check.hard === true && !check.passed)
-    .map((check) => check.label);
-  const rawAlignmentChecks = checks.filter((check) => check.axis === 'raw_alignment');
-  const structuredChecks = checks.filter((check) => check.axis === 'structured' && check.hard !== true);
-  const axisScores = [
-    rawAlignmentChecks.length > 0
-      ? rawAlignmentChecks.filter((check) => check.passed).length / rawAlignmentChecks.length
-      : null,
-    structuredChecks.length > 0
-      ? structuredChecks.filter((check) => check.passed).length / structuredChecks.length
-      : null,
-  ].filter((value): value is number => value !== null);
-
-  const failed = checks.filter((check) => !check.passed).map((check) => check.label);
-  const score = hardFailed.length > 0
-    ? 0
-    : axisScores.length > 0
-      ? axisScores.reduce((sum, value) => sum + value, 0) / axisScores.length
-      : 1;
-
-  if (score < 1) {
-    const severity: DiagnosticSeverity = hardFailed.length > 0 ? 'critical' : 'warn';
-    const checkSummary = [
-      summarizeContextAxisChecks('raw_alignment', rawAlignmentChecks),
-      summarizeContextAxisChecks('structured', structuredChecks),
-      `hard_failed=${hardFailed.length > 0 ? hardFailed.join(', ') : 'none'}`,
-      `failed=${failed.length > 0 ? failed.join(', ') : 'none'}`,
-    ].join('; ');
-    diagnostics.push({
-      dim: 'contextRelevance',
-      severity,
-      code: hardFailed.length > 0 ? 'CONTEXT_HARD_CONSTRAINT_FAILED' : 'CONTEXT_RELEVANCE_LOW',
-      message: hardFailed.length > 0
-        ? `hard constraint(s) failed — retrieval returned out-of-range results: ${hardFailed.join(', ')} (${checkSummary})`
-        : `tool results did not match constraints (${checkSummary})`,
-      observed: score,
-      expected: 1,
-    });
-  }
-
-  return score;
-}
-
-function scoreExactLookupContextRelevance(
-  exp: ScenarioExpectation,
-  execution: ScenarioExecution,
-  diagnostics: Diagnostic[],
-): number | null {
-  const exactLookup = exp.exactLookup;
-  if (exactLookup === undefined || exactLookup.matchPolicy !== 'exact_entity') {
-    return null;
-  }
-
-  const records = buildContextEvidenceRecords(execution);
-  const observed = collectObservedExactLookupValues(records);
-  const expectedNeedles = buildExactLookupNeedles(exactLookup);
-  if (expectedNeedles.length === 0) {
-    return null;
-  }
-  const collapseWhitespace = exactLookup.allowSpaceNormalization !== false;
-  const canonicalHit = expectedNeedles.some((needle) =>
-    observedCanonicalIncludesNeedle(observed.canonicalLabels, needle, collapseWhitespace),
-  );
-  const entityHit = exactLookup.expectedEntityId !== undefined
-    && exactLookup.expectedEntityId !== null
-    && observed.entityIds.includes(exactLookup.expectedEntityId);
-
-  if (canonicalHit || entityHit) {
-    return 1;
-  }
-
-  diagnostics.push({
-    dim: 'contextRelevance',
-    severity: 'warn',
-    code: 'EXACT_LOOKUP_CONTEXT_RELEVANCE_LOW',
-    message: 'exact lookup tool context did not contain the expected entity / canonical aliases',
-    observed: formatObservedExactLookupSummary(observed),
-    expected: expectedNeedles.join(' | '),
-  });
-  return 0;
-}
+// scoreContextRelevance + scoreExactLookupContextRelevance moved to
+// ./scorer-context-relevance.ts (round 8.5).
 
 // ─────────────────────────────────────────────────────────────────────
 // RAGAS Context Recall (canonical-label keyword overlap, no LLM needed)
