@@ -56,7 +56,6 @@ import type { DeterministicRouter } from './deterministic-router.js';
 import type {
   ComparisonUseCaseInput,
   ExecutionPlan,
-  FoodPairingUseCaseInput,
   SearchUseCaseInput,
 } from './execution-plan-schemas.js';
 import type {
@@ -631,7 +630,6 @@ export class WineSearchOrchestrator {
       case 'single-search':
       case 'parallel-search':
       case 'comparison':
-      case 'food-pairing-then-search':
       case 'search-then-drinkability':
         return this.dispatchRunner(plan, input, state, baseConfig);
       default: {
@@ -686,7 +684,6 @@ export class WineSearchOrchestrator {
     switch (outcome.kind) {
       case 'search-result':
       case 'comparison-result':
-      case 'food-pairing-result':
       case 'parallel-results':
       case 'search-then-drinkability': {
         const { toolCalls, observations } = describeExecutionOutcome(outcome, plan);
@@ -1348,11 +1345,6 @@ function projectExecutionOutcomeAsToolOutcomes(
       return [makeToolOutcome('search_wines', outcome.result, now)];
     case 'comparison-result':
       return [makeToolOutcome('compare_wines', outcome.result, now)];
-    case 'food-pairing-result': {
-      const pair = makeToolOutcome('get_food_pairings', outcome.result, now);
-      if (outcome.then === undefined) return [pair];
-      return [pair, makeToolOutcome('search_wines', outcome.then.result, now)];
-    }
     case 'parallel-results':
       return outcome.results.map((r) => makeToolOutcome('search_wines', r, now));
     case 'search-then-drinkability': {
@@ -1396,8 +1388,6 @@ function describeExecutionOutcome(
       return planParallelToolCallSummary(plan);
     case 'comparison-result':
       return planComparisonToolCallSummary(plan);
-    case 'food-pairing-result':
-      return planFoodPairingToolCallSummary(plan);
     case 'search-then-drinkability':
       return planSearchToolCallSummary(plan);
   }
@@ -1434,18 +1424,6 @@ function planComparisonToolCallSummary(
   };
 }
 
-function planFoodPairingToolCallSummary(
-  plan: ExecutionPlan,
-): ExecutionStepShape {
-  if (plan.kind !== 'food-pairing-then-search') return {};
-  return {
-    toolCalls: [
-      { name: 'get_food_pairings', arguments: sampleFoodPairingInput(plan.pairingInput) },
-      { name: 'search_wines', arguments: sampleSearchInput(plan.searchInput) },
-    ],
-  };
-}
-
 function sampleSearchInput(input: SearchUseCaseInput): Record<string, unknown> {
   // Keep the trace lean — only the discriminating fields.
   return {
@@ -1460,14 +1438,6 @@ function sampleComparisonInput(input: ComparisonUseCaseInput): Record<string, un
   return {
     originalQuery: clipString(input.originalQuery, ORCHESTRATOR_TOOL_INPUT_MAX_CHARS),
     legs: input.legs.length,
-  };
-}
-
-function sampleFoodPairingInput(input: FoodPairingUseCaseInput): Record<string, unknown> {
-  return {
-    food: clipString(input.food, ORCHESTRATOR_TOOL_INPUT_MAX_CHARS),
-    ...(input.color !== undefined ? { color: input.color } : {}),
-    ...(input.maxPriceKrw !== undefined ? { maxPriceKrw: input.maxPriceKrw } : {}),
   };
 }
 

@@ -270,7 +270,6 @@ const PlanKindSchema = z.enum([
   'single-search',
   'parallel-search',
   'comparison',
-  'food-pairing-then-search',
   'search-then-drinkability',
   'multi-step',
   'reject',

@@ -21,7 +21,6 @@ import {
   buildMiniLoopToolBundle,
   CHECK_DRINKING_WINDOW_TOOL_DEF,
   COMPARE_WINES_TOOL_DEF,
-  GET_FOOD_PAIRINGS_TOOL_DEF,
   MINI_LOOP_TOOL_NAMES,
   SEARCH_WINES_TOOL_DEF,
 } from '../mini-loop-tool-bundle.js';
@@ -37,7 +36,6 @@ function makeStubToolPorts(): MiniLoopToolPorts {
   return {
     searchUseCase: { execute: async () => { throw new Error('unused in test'); } },
     comparisonUseCase: { execute: async () => { throw new Error('unused in test'); } },
-    foodPairingUseCase: { execute: async () => { throw new Error('unused in test'); } },
     drinkabilityUseCase: { probe: async () => undefined },
   } as MiniLoopToolPorts;
 }
@@ -219,50 +217,6 @@ describe('CHECK_DRINKING_WINDOW_TOOL_DEF', () => {
   });
 });
 
-describe('GET_FOOD_PAIRINGS_TOOL_DEF', () => {
-  it('has name "get_food_pairings" and a Zod inputSchema', () => {
-    expect(GET_FOOD_PAIRINGS_TOOL_DEF.name).toBe('get_food_pairings');
-    expect(GET_FOOD_PAIRINGS_TOOL_DEF.inputSchema).toBeInstanceOf(z.ZodType);
-  });
-
-  it('requires food', () => {
-    expect(
-      GET_FOOD_PAIRINGS_TOOL_DEF.inputSchema.safeParse({ food: 'steak' }).success,
-    ).toBe(true);
-    expect(
-      GET_FOOD_PAIRINGS_TOOL_DEF.inputSchema.safeParse({}).success,
-    ).toBe(false);
-  });
-
-  it('accepts Korean food descriptions', () => {
-    const parsed = GET_FOOD_PAIRINGS_TOOL_DEF.inputSchema.safeParse({
-      food: '한우 등심구이',
-      color: 'red',
-      styles: ['bold red', 'oaked'],
-      pairing_tags: ['grilled', 'rich'],
-      max_price_krw: 150_000,
-    });
-    expect(parsed.success).toBe(true);
-  });
-
-  it('rejects unknown color value', () => {
-    const parsed = GET_FOOD_PAIRINGS_TOOL_DEF.inputSchema.safeParse({
-      food: 'cheese',
-      color: 'purple',
-    });
-    expect(parsed.success).toBe(false);
-  });
-
-  it('is permissive — extra LLM-emitted keys ignored (rule 10)', () => {
-    const parsed = GET_FOOD_PAIRINGS_TOOL_DEF.inputSchema.safeParse({
-      food: 'lamb chops',
-      _reasoning: 'red wine pairs well with red meat',
-      confidence: 0.99,
-    });
-    expect(parsed.success).toBe(true);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Cross-cutting: no .strict() anywhere on the input schemas (rule 10)
 // ---------------------------------------------------------------------------
@@ -272,7 +226,6 @@ describe('CLAUDE.md rule 10 — LLM tool input schemas MUST NOT be strict', () =
     ['search_wines', SEARCH_WINES_TOOL_DEF, { query: 'q' }],
     ['compare_wines', COMPARE_WINES_TOOL_DEF, { query_a: 'a', query_b: 'b' }],
     ['check_drinking_window', CHECK_DRINKING_WINDOW_TOOL_DEF, { entity_id: 'x' }],
-    ['get_food_pairings', GET_FOOD_PAIRINGS_TOOL_DEF, { food: 'fish' }],
   ])('%s schema accepts a payload with an extra unknown key', (_name, def, baseInput) => {
     const parsed = def.inputSchema.safeParse({
       ...baseInput,

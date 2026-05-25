@@ -15,14 +15,11 @@ import {
   type ComparisonUseCasePort,
   type DrinkabilityProbe,
   type DrinkabilityUseCasePort,
-  type FoodPairingResult,
-  type FoodPairingUseCasePort,
   type SearchUseCasePort,
 } from '../execution-runner.js';
 import type {
   ComparisonUseCaseInput,
   ExecutionPlan,
-  FoodPairingUseCaseInput,
   SearchUseCaseInput,
 } from '../execution-plan-schemas.js';
 
@@ -86,20 +83,6 @@ function makeComparisonPort(
   ) => Promise<ComparisonSearchResponse>,
 ): ComparisonUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
   const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
-  return { executeMock, execute: executeMock };
-}
-
-function makeFoodPairingPort(
-  impl?: (
-    input: FoodPairingUseCaseInput,
-    reqId: string,
-    opts?: { readonly abortSignal?: AbortSignal | undefined },
-  ) => Promise<FoodPairingResult>,
-): FoodPairingUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(impl ?? ((input: FoodPairingUseCaseInput) => Promise.resolve({
-    food: input.food,
-    results: makeSearchResponse(['pair-e1']),
-  })));
   return { executeMock, execute: executeMock };
 }
 
@@ -278,44 +261,6 @@ describe('ExecutionRunner — parallel-search', () => {
     expect(out.kind).toBe('error');
     if (out.kind !== 'error') return;
     expect(out.cause.name).toBe('AbortError');
-  });
-});
-
-describe('ExecutionRunner — food-pairing-then-search chain', () => {
-  it('runs pairing first, then search, returns both', async () => {
-    const order: string[] = [];
-    const pair = makeFoodPairingPort(async (input) => {
-      order.push('pair');
-      return { food: input.food, results: makeSearchResponse(['pair-e1']) };
-    });
-    const search = makeSearchPort(async (input) => {
-      order.push(`search:${input.query}`);
-      return makeSearchResponse(['s1']);
-    });
-    const runner = new ExecutionRunner({ searchUseCase: search, foodPairingUseCase: pair });
-    const plan: ExecutionPlan = {
-      kind: 'food-pairing-then-search',
-      pairingInput: { food: '스테이크', maxPriceKrw: 50_000 },
-      searchInput: { query: '스테이크 + 와인 5만원 이하' },
-    };
-    const out = await runner.run(plan, { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS });
-    expect(out.kind).toBe('food-pairing-result');
-    if (out.kind !== 'food-pairing-result') return;
-    expect(out.result.food).toBe('스테이크');
-    expect(out.then?.kind).toBe('search-result');
-    expect(order).toEqual(['pair', 'search:스테이크 + 와인 5만원 이하']);
-  });
-
-  it('errors when foodPairingUseCase port not wired', async () => {
-    const search = makeSearchPort();
-    const runner = new ExecutionRunner({ searchUseCase: search });
-    const plan: ExecutionPlan = {
-      kind: 'food-pairing-then-search',
-      pairingInput: { food: 'steak' },
-      searchInput: { query: 'steak wine' },
-    };
-    const out = await runner.run(plan, { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS });
-    expect(out.kind).toBe('error');
   });
 });
 

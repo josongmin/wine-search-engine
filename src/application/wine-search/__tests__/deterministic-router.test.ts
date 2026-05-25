@@ -227,55 +227,7 @@ describe('DeterministicRouter — Rule 3: parallel-slot decomposition', () => {
   });
 });
 
-describe('DeterministicRouter — Rule 4: food-pairing', () => {
-  it('pair intent with budget → food-pairing-then-search', () => {
-    const router = makeRouter();
-    const plan = router.route(
-      baseAnalysis({
-        intent: 'pair',
-        preservedSurface: '스테이크 + 와인 5만원 이하',
-        hangulDominant: true,
-        contract: {
-          requiresDrinkabilityCheck: false,
-          requiresGroundedWineSearch: true,
-          hasEntityMetadataSignal: false,
-          requiredTool: 'get_food_pairings',
-        },
-        expectedMultiStep: true,
-        normalizedConstraints: [makeConstraint('max_price_krw', 50_000)],
-      }),
-    );
-    expect(plan.kind).toBe('food-pairing-then-search');
-    if (plan.kind !== 'food-pairing-then-search') return;
-    expect(plan.pairingInput.maxPriceKrw).toBe(50_000);
-    expect(plan.searchInput.filters?.some((c) => c.attribute === 'max_price_krw')).toBe(true);
-  });
-
-  it('pair intent without budget → single-search with pairing tags', () => {
-    const router = makeRouter();
-    const plan = router.route(
-      baseAnalysis({
-        intent: 'pair',
-        preservedSurface: '스테이크에 어울리는 와인',
-        hangulDominant: true,
-        contract: {
-          requiresDrinkabilityCheck: false,
-          requiresGroundedWineSearch: true,
-          hasEntityMetadataSignal: false,
-          requiredTool: 'get_food_pairings',
-        },
-        expectedMultiStep: true,
-        anchors: [{ surface: '레드', canonicalValue: 'red', entityType: 'style', confidence: 1 }],
-      }),
-    );
-    expect(plan.kind).toBe('single-search');
-    if (plan.kind !== 'single-search') return;
-    // The color from the anchor surfaced as a wine_type filter.
-    expect(plan.searchInput.filters?.some((c) => c.attribute === 'wine_type' && c.value === 'red')).toBe(true);
-  });
-});
-
-describe('DeterministicRouter — Rule 5: drinkability', () => {
+describe('DeterministicRouter — Rule 4: drinkability', () => {
   it('Opus One 2018 + drinkability + anchor → search-then-drinkability', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -438,16 +390,6 @@ describe('DeterministicRouter — determinism', () => {
           kind: 'parallel-slot',
           slots: [{ wineType: 'red' }, { wineType: 'white' }],
         },
-      }),
-      baseAnalysis({
-        intent: 'pair',
-        contract: {
-          requiresDrinkabilityCheck: false,
-          requiresGroundedWineSearch: true,
-          hasEntityMetadataSignal: false,
-          requiredTool: 'get_food_pairings',
-        },
-        normalizedConstraints: [makeConstraint('max_price_krw', 50_000)],
       }),
       baseAnalysis({
         intent: 'drinkability',

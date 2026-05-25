@@ -16,13 +16,10 @@
  *  2. decomposition.kind=comparison → comparison plan.
  *  3. decomposition.kind=parallel-slot → parallel-search plan (one search
  *     per slot, total budget split if present).
- *  4. requiredTool=get_food_pairings AND intent=pair:
- *      - budget signal present → food-pairing-then-search plan,
- *      - else → single-search plan with pairing-augmented input.
- *  5. requiresDrinkabilityCheck=true AND anchors.length>0 →
+ *  4. requiresDrinkabilityCheck=true AND anchors.length>0 →
  *     search-then-drinkability plan.
- *  6. expectedMultiStep=true (none of the above) → multi-step handoff.
- *  7. fallback → single-search plan (80% happy path).
+ *  5. expectedMultiStep=true (none of the above) → multi-step handoff.
+ *  6. fallback → single-search plan (80% happy path).
  *
  * NOTE: this router consumes the **already normalized** constraint set
  * produced by `QueryAnalyzerService`. The full sanitize pipeline in
@@ -52,13 +49,10 @@ import {
   type ComparisonUseCaseInput,
   type ExecutionPlan,
   type ExecutionPlanKind,
-  type FoodPairingUseCaseInput,
-  type PairingColor,
   type SearchUseCaseInput,
 } from './execution-plan-schemas.js';
 import type {
   AnalysisContract,
-  AnchorResolution,
   Decomposition,
   RecommendedBudget,
   WineSearchAnalysis,
@@ -92,10 +86,9 @@ const DRINKABILITY_DEFAULT_TARGET_YEAR_OFFSET = 0;
 const PLAN_KIND_SINGLE_SEARCH = EXECUTION_PLAN_KINDS[0];
 const PLAN_KIND_PARALLEL_SEARCH = EXECUTION_PLAN_KINDS[1];
 const PLAN_KIND_COMPARISON = EXECUTION_PLAN_KINDS[2];
-const PLAN_KIND_FOOD_PAIRING_THEN_SEARCH = EXECUTION_PLAN_KINDS[3];
-const PLAN_KIND_SEARCH_THEN_DRINKABILITY = EXECUTION_PLAN_KINDS[4];
-const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[5];
-const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[6];
+const PLAN_KIND_SEARCH_THEN_DRINKABILITY = EXECUTION_PLAN_KINDS[3];
+const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[4];
+const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[5];
 
 // Compile-time membership guard — each local must be a member of the
 // `ExecutionPlanKind` SSoT union. Catches an out-of-bounds tuple index
@@ -106,7 +99,6 @@ void ({
   PLAN_KIND_SINGLE_SEARCH,
   PLAN_KIND_PARALLEL_SEARCH,
   PLAN_KIND_COMPARISON,
-  PLAN_KIND_FOOD_PAIRING_THEN_SEARCH,
   PLAN_KIND_SEARCH_THEN_DRINKABILITY,
   PLAN_KIND_MULTI_STEP,
   PLAN_KIND_REJECT,
@@ -160,32 +152,6 @@ function isParallelSlotDecomposition(
   decomposition: Decomposition | undefined,
 ): decomposition is Extract<Decomposition, { kind: 'parallel-slot' }> {
   return decomposition !== undefined && decomposition.kind === 'parallel-slot';
-}
-
-function hasPriceConstraint(constraints: readonly NormalizedConstraint[]): boolean {
-  // Pre-flight check (CLAUDE.md rule 20): cheap test before any other work.
-  // Loop, not spread (rule 9 in spirit — even if Math.* isn't involved,
-  // we want predictable behavior on adversarial inputs).
-  for (const c of constraints) {
-    if (PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function extractPairingColorFromAnchors(
-  anchors: readonly AnchorResolution[],
-): PairingColor | undefined {
-  // Style anchors may surface a color hint (`red`, `white`, …). Style
-  // anchors carry the canonical value already lower-cased.
-  for (const a of anchors) {
-    if (a.entityType !== 'style') continue;
-    const v = a.canonicalValue.toLowerCase();
-    if (v === 'red' || v === 'white' || v === 'sparkling') return v;
-    if (v === 'rose' || v === 'rosé' || v === 'rosado') return 'rosé';
-  }
-  return undefined;
 }
 
 function extractPriceBudgetKrw(
@@ -259,87 +225,6 @@ function splitTotalBudgetAcrossSlots(
   if (slotCount <= 0 || !Number.isFinite(slotCount)) return undefined;
   if (!Number.isFinite(totalBudgetKrw) || totalBudgetKrw <= 0) return undefined;
   return Math.floor(totalBudgetKrw / slotCount);
-}
-
-/**
- * Apply the food-pairing tag merge into a base search input. The base input
- * receives `pairing` preferences from the LLM/observation step; this helper
- * normalizes the constraint shape so the runner can pass it straight to the
- * search use case.
- *
- * see: src/application/agent/agent-tools.ts:1899-1918 for the full
- * enrichment pipeline (color filter, structured preferences, query-suffix
- * clauses).
- */
-function mergePairingTagsIntoSearchInput(
-  base: SearchUseCaseInput,
-  pairing: FoodPairingUseCaseInput,
-): SearchUseCaseInput {
-  const pairingFilter: NormalizedConstraint | undefined =
-    pairing.color !== undefined && pairing.color !== 'both'
-      ? {
-        attribute: 'wine_type',
-        operator: '=',
-        value: pairing.color,
-        source_phrase: `food_pairing_color=${pairing.color}`,
-        confidence: 1.0,
-      }
-      : undefined;
-
-  const pairingPreference: NormalizedConstraint | undefined =
-    pairing.pairingTags !== undefined && pairing.pairingTags.length > 0
-      ? {
-        attribute: 'pairing',
-        operator: 'in',
-        value: [...pairing.pairingTags],
-        source_phrase: pairing.pairingTags.join(', '),
-        confidence: 1.0,
-      }
-      : undefined;
-
-  const stylePreferences: NormalizedConstraint[] =
-    pairing.styles !== undefined && pairing.styles.length > 0
-      ? [{
-        attribute: 'styles',
-        operator: 'in',
-        value: [...pairing.styles],
-        source_phrase: pairing.styles.join(', '),
-        confidence: 1.0,
-      }]
-      : [];
-
-  const nextFilters: NormalizedConstraint[] = [
-    ...(base.filters ?? []),
-    ...(pairingFilter !== undefined ? [pairingFilter] : []),
-  ];
-  const nextPreferences: NormalizedConstraint[] = [
-    ...(base.preferences ?? []),
-    ...(pairingPreference !== undefined ? [pairingPreference] : []),
-    ...stylePreferences,
-  ];
-
-  return {
-    ...base,
-    ...(nextFilters.length > 0 ? { filters: nextFilters } : {}),
-    ...(nextPreferences.length > 0 ? { preferences: nextPreferences } : {}),
-  };
-}
-
-/**
- * Build a `FoodPairingUseCaseInput` from analysis. We extract the food
- * surface from `preservedSurface` (rule-25 SSoT vocabulary lookup lives
- * upstream in the pairing-extractor — we don't re-derive it here).
- */
-function buildFoodPairingInputFromAnalysis(
-  analysis: WineSearchAnalysis,
-): FoodPairingUseCaseInput {
-  const color = extractPairingColorFromAnchors(analysis.anchors);
-  const budgetKrw = extractPriceBudgetKrw(analysis.normalizedConstraints);
-  return {
-    food: analysis.preservedSurface,
-    ...(color !== undefined ? { color } : {}),
-    ...(budgetKrw !== undefined ? { maxPriceKrw: budgetKrw } : {}),
-  };
 }
 
 /**
@@ -471,27 +356,7 @@ export class DeterministicRouter {
       }
     }
 
-    // Rule 4 — food-pairing.
-    if (
-      analysis.contract.requiredTool === 'get_food_pairings'
-      && analysis.intent === 'pair'
-    ) {
-      const pairingInput = buildFoodPairingInputFromAnalysis(analysis);
-      const baseSearch = buildSearchInputFromAnalysis(analysis);
-      const mergedSearch = mergePairingTagsIntoSearchInput(baseSearch, pairingInput);
-      if (hasPriceConstraint(analysis.normalizedConstraints)) {
-        return {
-          kind: PLAN_KIND_FOOD_PAIRING_THEN_SEARCH,
-          pairingInput,
-          searchInput: mergedSearch,
-        };
-      }
-      // No budget signal — single-search lane carries the merged pairing
-      // filters/preferences directly.
-      return { kind: PLAN_KIND_SINGLE_SEARCH, searchInput: mergedSearch };
-    }
-
-    // Rule 5 — drinkability on an anchored entity.
+    // Rule 4 — drinkability on an anchored entity.
     if (
       analysis.contract.requiresDrinkabilityCheck
       && analysis.anchors.length > 0
@@ -512,7 +377,7 @@ export class DeterministicRouter {
       };
     }
 
-    // Rule 6 — multi-step (defer to MiniLoop).
+    // Rule 5 — multi-step (defer to MiniLoop).
     if (analysis.expectedMultiStep) {
       return {
         kind: PLAN_KIND_MULTI_STEP,
@@ -520,7 +385,7 @@ export class DeterministicRouter {
       };
     }
 
-    // Rule 7 — single-search (the 80% path).
+    // Rule 6 — single-search (the 80% path).
     return {
       kind: PLAN_KIND_SINGLE_SEARCH,
       searchInput: buildSearchInputFromAnalysis(analysis),

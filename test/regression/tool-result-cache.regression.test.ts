@@ -53,8 +53,6 @@ import type {
   ComparisonUseCasePort,
   DrinkabilityProbe,
   DrinkabilityUseCasePort,
-  FoodPairingResult,
-  FoodPairingUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
@@ -131,14 +129,6 @@ function makeComparisonPort(): ComparisonUseCasePort & { readonly executeMock: R
   return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
 }
 
-function makeFoodPairingPort(): FoodPairingUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn((input: unknown) => Promise.resolve({
-    food: (input as { food: string }).food,
-    results: makeSearchResponse(['pair-wine-1']),
-  } as FoodPairingResult));
-  return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
-}
-
 function makeDrinkabilityPort(): DrinkabilityUseCasePort & { readonly probeMock: ReturnType<typeof vi.fn> } {
   const probeMock = vi.fn((entityId: string, targetYear: number) => Promise.resolve({
     entityId,
@@ -152,7 +142,6 @@ function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPort
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
-    foodPairingUseCase: overrides?.foodPairingUseCase ?? makeFoodPairingPort(),
     drinkabilityUseCase: overrides?.drinkabilityUseCase ?? makeDrinkabilityPort(),
   };
 }

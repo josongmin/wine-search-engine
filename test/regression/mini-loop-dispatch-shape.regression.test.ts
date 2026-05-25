@@ -46,8 +46,6 @@ import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '../../src/domain/agent/model/age
 import type {
   ComparisonUseCasePort,
   DrinkabilityUseCasePort,
-  FoodPairingResult,
-  FoodPairingUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
@@ -99,19 +97,6 @@ function makeComparisonPort(): ComparisonUseCasePort {
   return { execute: async () => { throw new Error('unused'); } };
 }
 
-function makeFoodPairingPort(
-  impl?: (input: unknown, reqId: string) => Promise<FoodPairingResult>,
-): FoodPairingUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(
-    impl ?? ((input: unknown) =>
-      Promise.resolve({
-        food: (input as { food: string }).food,
-        results: makeSearchResponse(['pair-wine-1', 'pair-wine-2']),
-      })),
-  );
-  return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
-}
-
 function makeDrinkabilityPort(): DrinkabilityUseCasePort {
   return { probe: async () => undefined };
 }
@@ -120,7 +105,6 @@ function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPort
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
-    foodPairingUseCase: overrides?.foodPairingUseCase ?? makeFoodPairingPort(),
     drinkabilityUseCase: overrides?.drinkabilityUseCase ?? makeDrinkabilityPort(),
   };
 }
@@ -265,27 +249,6 @@ describe('mini-loop dispatch — lookup_wine uses shared normalizer (H2)', () =>
     expect(search?.mode).toBe('entity');
     // Clamp to LOOKUP_WINE_LIMIT_MAX (3) — same clamp as the agent-tools path.
     expect(search?.limit).toBe(3);
-  });
-});
-
-describe('mini-loop dispatch — get_food_pairings returns the whole result', () => {
-  it('rawResult is the full FoodPairingResult (has .food and .results)', async () => {
-    const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('get_food_pairings', { food: 'steak' })]),
-      async () => asTextResult('Pair with red.'),
-    ]);
-    const runner = new MiniLoopRunner({ structuredLlm: llm });
-    const out = await runner.run(makeInput({}));
-
-    const outcome = out.toolOutcomes.find((o) => o.tool === 'get_food_pairings');
-    expect(outcome).toBeDefined();
-    const raw = outcome?.result as { food?: string; results?: { results?: unknown[] } } | undefined;
-    expect(raw?.food).toBe('steak');
-    // Sibling shape (search_wines / compare_wines): rawResult is the full
-    // response, not an unwrapped sub-field. `.results` is the inner
-    // SearchResponseV1 with its own `.results[]`.
-    expect(raw?.results).toBeDefined();
-    expect(Array.isArray(raw?.results?.results)).toBe(true);
   });
 });
 

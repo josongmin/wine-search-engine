@@ -33,7 +33,6 @@ import { withTimeout } from '../agent/agent-tool-execution-support.js';
 import type {
   ComparisonUseCaseInput,
   ExecutionPlan,
-  FoodPairingUseCaseInput,
   MultiStepHandoff,
   PlanRejectReason,
   SearchUseCaseInput,
@@ -71,19 +70,6 @@ export interface ComparisonUseCasePort {
   ): Promise<ComparisonSearchResponse>;
 }
 
-export interface FoodPairingResult {
-  readonly food: string;
-  readonly results: SearchResponseV1;
-}
-
-export interface FoodPairingUseCasePort {
-  execute(
-    input: FoodPairingUseCaseInput,
-    requestId: string,
-    options?: { readonly abortSignal?: AbortSignal | undefined },
-  ): Promise<FoodPairingResult>;
-}
-
 export interface DrinkabilityProbe {
   readonly entityId: string;
   readonly targetYear: number;
@@ -109,11 +95,6 @@ export interface DrinkabilityUseCasePort {
 export type ExecutionOutcome =
   | { readonly kind: 'search-result'; readonly result: SearchResponseV1 }
   | { readonly kind: 'comparison-result'; readonly result: ComparisonSearchResponse }
-  | {
-    readonly kind: 'food-pairing-result';
-    readonly result: FoodPairingResult;
-    readonly then?: { readonly kind: 'search-result'; readonly result: SearchResponseV1 } | undefined;
-  }
   | { readonly kind: 'parallel-results'; readonly results: readonly SearchResponseV1[] }
   | {
     readonly kind: 'search-then-drinkability';
@@ -131,7 +112,6 @@ export type ExecutionOutcome =
 interface ExecutionRunnerDeps {
   readonly searchUseCase: SearchUseCasePort;
   readonly comparisonUseCase?: ComparisonUseCasePort | undefined;
-  readonly foodPairingUseCase?: FoodPairingUseCasePort | undefined;
   readonly drinkabilityUseCase?: DrinkabilityUseCasePort | undefined;
 }
 
@@ -184,14 +164,6 @@ export class ExecutionRunner {
           return await this.runParallelSearch(plan.searches, ctx, perStepTimeoutMs, logCtx);
         case 'comparison':
           return await this.runComparison(plan.comparisonInput, ctx, perStepTimeoutMs, logCtx);
-        case 'food-pairing-then-search':
-          return await this.runFoodPairingThenSearch(
-            plan.pairingInput,
-            plan.searchInput,
-            ctx,
-            perStepTimeoutMs,
-            logCtx,
-          );
         case 'search-then-drinkability':
           return await this.runSearchThenDrinkability(
             plan.searchInput,
@@ -284,52 +256,6 @@ export class ExecutionRunner {
     );
     bootstrapLogger.info(logCtx, '[ExecutionRunner] comparison done');
     return { kind: 'comparison-result', result };
-  }
-
-  private async runFoodPairingThenSearch(
-    pairingInput: FoodPairingUseCaseInput,
-    searchInput: SearchUseCaseInput,
-    ctx: ExecutionRunnerContext,
-    perStepTimeoutMs: number,
-    logCtx: { readonly requestId: string; readonly planKind: ExecutionPlan['kind'] },
-  ): Promise<ExecutionOutcome> {
-    if (this.deps.foodPairingUseCase === undefined) {
-      throw new Error('foodPairingUseCase port not wired');
-    }
-    const foodPairingUseCase = this.deps.foodPairingUseCase;
-    // F2: pair AND search are INDEPENDENT — both inputs are pre-baked at plan
-    // time, the search does NOT consume the pairing outcome. Running them
-    // sequentially (pre-F2) doubled wall-clock for the pair-then-search
-    // plan kind. Promise.all with shared abort matches the
-    // `runParallelSearch` shape.
-    //
-    // Abort propagation: the shared `ctx.abortSignal` already cascades into
-    // each `runWithStepTimeout` invocation's per-step controller, so caller
-    // cancellation aborts BOTH legs. We retain a pre-flight abort check so
-    // a signal that arrived between dispatchPlan and here short-circuits
-    // before issuing either call.
-    throwIfAborted(ctx.abortSignal, 'Execution runner aborted before pair+search fan-out');
-
-    const [pairing, search] = await Promise.all([
-      this.runWithStepTimeout(
-        (signal) => foodPairingUseCase.execute(pairingInput, `${ctx.requestId}-pair`, { abortSignal: signal }),
-        ctx,
-        perStepTimeoutMs,
-        'food-pairing',
-      ),
-      this.runWithStepTimeout(
-        (signal) => this.deps.searchUseCase.execute(searchInput, `${ctx.requestId}-pair-search`, { abortSignal: signal }),
-        ctx,
-        perStepTimeoutMs,
-        'pair-then-search',
-      ),
-    ]);
-    bootstrapLogger.info(logCtx, '[ExecutionRunner] food-pairing-then-search done');
-    return {
-      kind: 'food-pairing-result',
-      result: pairing,
-      then: { kind: 'search-result', result: search },
-    };
   }
 
   private async runSearchThenDrinkability(
@@ -469,8 +395,6 @@ function planRequiresDisabledTool(plan: ExecutionPlan): boolean {
   switch (plan.kind) {
     case 'comparison':
       return RUNNER_DISABLED_TOOLS.has('compare_wines');
-    case 'food-pairing-then-search':
-      return RUNNER_DISABLED_TOOLS.has('get_food_pairings');
     case 'search-then-drinkability':
       return RUNNER_DISABLED_TOOLS.has('check_drinking_window');
     default:
@@ -488,8 +412,6 @@ function planRequiresDisabledTool(plan: ExecutionPlan): boolean {
  */
 function degradeDisabledPlan(plan: ExecutionPlan): SearchUseCaseInput | null {
   switch (plan.kind) {
-    case 'food-pairing-then-search':
-      return plan.searchInput;
     case 'search-then-drinkability':
       return plan.searchInput;
     case 'comparison':

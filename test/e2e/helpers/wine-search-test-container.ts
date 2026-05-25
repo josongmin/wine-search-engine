@@ -13,7 +13,6 @@
  *       - real `SearchUseCase` over in-memory fixture documents
  *       - real `DecomposedSearchUseCase` (used by ComparisonUseCaseAdapter)
  *       - real `DrinkingWindowUseCase`
- *       - `FoodPairingUseCase` constructed locally (same way the production
  *         composition root does it)
  *   - `SynthesisRunner` (calls the mock structured LLM)
  *   - `WineSearchOrchestrator` (top-level)
@@ -37,9 +36,7 @@ import { MiniLoopRunner } from '../../../src/application/wine-search/mini-loop.j
 import { SynthesisRunner } from '../../../src/application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../../../src/application/wine-search/adapters/search-use-case-adapter.js';
 import { ComparisonUseCaseAdapter } from '../../../src/application/wine-search/adapters/comparison-use-case-adapter.js';
-import { FoodPairingUseCaseAdapter } from '../../../src/application/wine-search/adapters/food-pairing-use-case-adapter.js';
 import { DrinkabilityUseCaseAdapter } from '../../../src/application/wine-search/adapters/drinkability-use-case-adapter.js';
-import { FoodPairingUseCase } from '../../../src/application/food-pairing/food-pairing.usecase.js';
 import { WineSearchOrchestrator } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { OrchestratorMiniLoopToolBundle } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { QueryAnalyzerService } from '../../../src/application/wine-search/query-analyzer.js';
@@ -53,7 +50,6 @@ import { buildStructuredLlmMock, type StructuredLlmMockOptions, type StructuredL
 import type {
   ComparisonUseCasePort,
   DrinkabilityUseCasePort,
-  FoodPairingUseCasePort,
   SearchUseCasePort,
 } from '../../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../../src/domain/response/model/search-response.js';
@@ -80,8 +76,6 @@ interface WineSearchTestContainerOptions {
   readonly searchUseCase?: SearchUseCasePort;
   /** Stub override for the ComparisonUseCasePort. */
   readonly comparisonUseCase?: ComparisonUseCasePort;
-  /** Stub override for the FoodPairingUseCasePort. */
-  readonly foodPairingUseCase?: FoodPairingUseCasePort;
   /** Stub override for the DrinkabilityUseCasePort. */
   readonly drinkabilityUseCase?: DrinkabilityUseCasePort;
   /**
@@ -172,11 +166,6 @@ export async function buildWineSearchTestContainer(
   const searchAdapter = new SearchUseCaseAdapter(searchUseCaseConcrete);
   const comparisonAdapter = new ComparisonUseCaseAdapter(decomposedSearchConcrete);
 
-  const foodPairingUseCase = new FoodPairingUseCase({
-    searchUseCase: container.searchUseCase,
-  });
-  const foodPairingAdapter = new FoodPairingUseCaseAdapter(foodPairingUseCase);
-
   const drinkabilityAdapter = new DrinkabilityUseCaseAdapter({
     drinkingWindowUseCase: container.drinkingWindowUseCase,
     entityLookup: async (id) => {
@@ -195,7 +184,6 @@ export async function buildWineSearchTestContainer(
   const executionRunner = new ExecutionRunner({
     searchUseCase: options.searchUseCase ?? searchAdapter,
     comparisonUseCase: options.comparisonUseCase ?? comparisonAdapter,
-    foodPairingUseCase: options.foodPairingUseCase ?? foodPairingAdapter,
     drinkabilityUseCase: options.drinkabilityUseCase ?? drinkabilityAdapter,
   });
   const miniLoopRunner = new MiniLoopRunner({ structuredLlm: llm, logger });

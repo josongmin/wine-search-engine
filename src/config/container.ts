@@ -51,9 +51,7 @@ import { buildMiniLoopToolBundle } from '../application/wine-search/mini-loop-to
 import { SynthesisRunner } from '../application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../application/wine-search/adapters/search-use-case-adapter.js';
 import { ComparisonUseCaseAdapter } from '../application/wine-search/adapters/comparison-use-case-adapter.js';
-import { FoodPairingUseCaseAdapter } from '../application/wine-search/adapters/food-pairing-use-case-adapter.js';
 import { DrinkabilityUseCaseAdapter } from '../application/wine-search/adapters/drinkability-use-case-adapter.js';
-import { FoodPairingUseCase } from '../application/food-pairing/food-pairing.usecase.js';
 import {
   buildSharedStructuredLlm,
   resolveMultiQueryRewriteModel,
@@ -168,15 +166,6 @@ function buildWineSearchContainerServices(
   const searchAdapter = new SearchUseCaseAdapter(searchUseCaseConcrete);
   const comparisonAdapter = new ComparisonUseCaseAdapter(decomposedSearchConcrete);
 
-  // FoodPairingUseCase is constructed here (not in container-usecases.ts)
-  // because it is currently consumed only by the wine-search lane. Once the
-  // legacy agent-tools branch adopts it directly, move construction up to
-  // `buildUseCaseContainerServices` so both lanes share one instance.
-  const foodPairingUseCase = new FoodPairingUseCase({
-    searchUseCase: features.searchUseCase,
-  });
-  const foodPairingAdapter = new FoodPairingUseCaseAdapter(foodPairingUseCase);
-
   // Drinkability lookup uses the full retrieval document (the drinkability
   // adapter requires the broader `RetrievalDocument` shape — see
   // `DrinkabilityEntityLookupPort` in
@@ -205,7 +194,6 @@ function buildWineSearchContainerServices(
   const executionRunner = new ExecutionRunner({
     searchUseCase: searchAdapter,
     comparisonUseCase: comparisonAdapter,
-    foodPairingUseCase: foodPairingAdapter,
     drinkabilityUseCase: drinkabilityAdapter,
   });
   // ── Tool-result cache. Wired ONLY when the env flag is on (default ON);
@@ -247,7 +235,6 @@ function buildWineSearchContainerServices(
   const miniLoopToolBundle = buildMiniLoopToolBundle({
     searchUseCase: searchAdapter,
     comparisonUseCase: comparisonAdapter,
-    foodPairingUseCase: foodPairingAdapter,
     drinkabilityUseCase: drinkabilityAdapter,
   });
 

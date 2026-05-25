@@ -62,7 +62,6 @@ import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-
 import type {
   ComparisonUseCasePort,
   DrinkabilityUseCasePort,
-  FoodPairingUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
@@ -484,15 +483,6 @@ function makeStubComparison(): ComparisonUseCasePort {
   };
 }
 
-function makeStubFoodPairing(): FoodPairingUseCasePort {
-  return {
-    execute: async () =>
-      ({ results: { queryType: 'search', results: [] } } as unknown as Awaited<
-        ReturnType<FoodPairingUseCasePort['execute']>
-      >),
-  };
-}
-
 function makeStubDrinkability(): DrinkabilityUseCasePort {
   return {
     probe: async () => undefined,
@@ -529,7 +519,6 @@ function buildHarness(options: HarnessOptions = {}): WineSearchOrchestrator {
   const executionRunner = new ExecutionRunner({
     searchUseCase: makeStubSearch(),
     comparisonUseCase: makeStubComparison(),
-    foodPairingUseCase: makeStubFoodPairing(),
     drinkabilityUseCase: makeStubDrinkability(),
   });
   const miniLoopRunner = new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger, model: MINILOOP_MODEL });
@@ -727,8 +716,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     const bundle = buildMiniLoopToolBundle({
       searchUseCase: makeStubSearch(),
       comparisonUseCase: makeStubComparison(),
-      foodPairingUseCase: makeStubFoodPairing(),
-      drinkabilityUseCase: makeStubDrinkability(),
+        drinkabilityUseCase: makeStubDrinkability(),
     });
     const analysis = makeAnalysis({
       intent: 'search',
@@ -885,8 +873,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     const bundle = buildMiniLoopToolBundle({
       searchUseCase: makeStubSearch(),
       comparisonUseCase: makeStubComparison(),
-      foodPairingUseCase: makeStubFoodPairing(),
-      drinkabilityUseCase: makeStubDrinkability(),
+        drinkabilityUseCase: makeStubDrinkability(),
     });
     const analysis = makeAnalysis({
       intent: 'search',
@@ -948,8 +935,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       executionRunner: new ExecutionRunner({
         searchUseCase: makeStubSearch(),
         comparisonUseCase: makeStubComparison(),
-        foodPairingUseCase: makeStubFoodPairing(),
-        drinkabilityUseCase: makeStubDrinkability(),
+            drinkabilityUseCase: makeStubDrinkability(),
       }),
       miniLoopRunner: new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger }),
       // SynthesisRunner with NO model override → uses DEFAULT_SYNTHESIS_MODEL.

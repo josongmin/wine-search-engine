@@ -127,41 +127,6 @@ export const ComparisonUseCaseInputSchema = z.object({
 export type ComparisonUseCaseInput = z.infer<typeof ComparisonUseCaseInputSchema>;
 
 // ---------------------------------------------------------------------------
-// FoodPairingUseCaseInput — the analysis-driven shape we pass into the
-// pairing tool. The pairing branch currently lives inside `agent-tools.ts`;
-// the runner adapts this shape to the underlying call.
-//
-// NOTE: see agent-tools.ts:1883-1958 (the `get_food_pairings` case) for the
-// full enrichment pipeline (style/tag observation hints). Porting that
-// observation-string builder into a standalone use case is a follow-up
-// task — this plan only carries the structured input.
-// ---------------------------------------------------------------------------
-
-export const PairingColorSchema = z.enum(['red', 'white', 'rosé', 'sparkling', 'both']);
-export type PairingColor = z.infer<typeof PairingColorSchema>;
-
-/** Hard upper bound for KRW budgets — matches MAX_PRICE_KRW_BOUND on the
- *  agent side. Re-declared because importing from the agent layer would
- *  couple wine-search to agent internals. The arithmetic agreement is
- *  guarded by Zod parse failure if either side raises its cap. */
-const FOOD_PAIRING_MAX_PRICE_KRW = 10_000_000;
-const FOOD_PAIRING_MAX_TAGS = 16;
-const FOOD_PAIRING_MAX_STYLES = 16;
-
-export const FoodPairingUseCaseInputSchema = z.object({
-  food: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),
-  color: PairingColorSchema.optional(),
-  styles: z.array(z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS))
-    .max(FOOD_PAIRING_MAX_STYLES)
-    .optional(),
-  pairingTags: z.array(z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS))
-    .max(FOOD_PAIRING_MAX_TAGS)
-    .optional(),
-  maxPriceKrw: z.number().int().finite().min(1).max(FOOD_PAIRING_MAX_PRICE_KRW).optional(),
-}).strict();
-export type FoodPairingUseCaseInput = z.infer<typeof FoodPairingUseCaseInputSchema>;
-
-// ---------------------------------------------------------------------------
 // Drinkability-template — describes how the runner builds
 // `check_drinking_window` calls from search results.
 // ---------------------------------------------------------------------------
@@ -236,7 +201,6 @@ export const EXECUTION_PLAN_KINDS = [
   'single-search',
   'parallel-search',
   'comparison',
-  'food-pairing-then-search',
   'search-then-drinkability',
   'multi-step',
   'reject',
@@ -265,11 +229,6 @@ export const ExecutionPlanSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('comparison'),
     comparisonInput: ComparisonUseCaseInputSchema,
-  }).strict(),
-  z.object({
-    kind: z.literal('food-pairing-then-search'),
-    pairingInput: FoodPairingUseCaseInputSchema,
-    searchInput: SearchUseCaseInputSchema,
   }).strict(),
   z.object({
     kind: z.literal('search-then-drinkability'),
