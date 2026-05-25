@@ -3,7 +3,6 @@ import type { Config } from './env.js';
 // constant gates BOTH container generator construction AND the runtime
 // fan-out check in `search-usecase-hybrid-candidates.ts` (CLAUDE.md rule 30).
 import {
-  COMPARISON_LLM_FALLBACK_FEATURE_FLAG_ENABLED,
   MULTI_QUERY_FEATURE_FLAG_ENABLED,
 } from './wine-search-feature-flags.js';
 import { buildCoreContainerServices } from './container-core.js';
@@ -50,7 +49,6 @@ import { ExecutionRunner } from '../application/wine-search/execution-runner.js'
 import { MiniLoopRunner } from '../application/wine-search/mini-loop.js';
 import { buildMiniLoopToolBundle } from '../application/wine-search/mini-loop-tool-bundle.js';
 import { SynthesisRunner } from '../application/wine-search/synthesis-runner.js';
-import { runComparisonLlmFallback } from '../application/wine-search/comparison-llm-fallback.js';
 import { SearchUseCaseAdapter } from '../application/wine-search/adapters/search-use-case-adapter.js';
 import { ComparisonUseCaseAdapter } from '../application/wine-search/adapters/comparison-use-case-adapter.js';
 import { FoodPairingUseCaseAdapter } from '../application/wine-search/adapters/food-pairing-use-case-adapter.js';
@@ -260,11 +258,6 @@ function buildWineSearchContainerServices(
   //       lever can be flipped without code change. When the flag is OFF
   //       we inject `undefined` and the orchestrator's stall-detection
   //       branch is a no-op (zero-cost when disabled).
-  const comparisonLlmFallback = COMPARISON_LLM_FALLBACK_FEATURE_FLAG_ENABLED
-    ? ((input: Parameters<typeof runComparisonLlmFallback>[0]) =>
-        runComparisonLlmFallback(input, structuredLlm, { logger: wineSearchLogger }))
-    : undefined;
-
   const wineSearchOrchestrator: WineSearchOrchestrator =
     new WineSearchOrchestratorImpl({
       queryAnalyzer,
@@ -274,7 +267,6 @@ function buildWineSearchContainerServices(
       synthesisRunner,
       miniLoopToolBundle,
       logger: bootstrapLogger,
-      ...(comparisonLlmFallback !== undefined ? { comparisonLlmFallback } : {}),
     });
 
   return { wineSearchOrchestrator };
