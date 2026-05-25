@@ -630,7 +630,6 @@ export class WineSearchOrchestrator {
       case 'single-search':
       case 'parallel-search':
       case 'comparison':
-      case 'search-then-drinkability':
         return this.dispatchRunner(plan, input, state, baseConfig);
       default: {
         // Exhaustiveness check: if `EXECUTION_PLAN_KINDS` grows a new
@@ -684,8 +683,7 @@ export class WineSearchOrchestrator {
     switch (outcome.kind) {
       case 'search-result':
       case 'comparison-result':
-      case 'parallel-results':
-      case 'search-then-drinkability': {
+      case 'parallel-results': {
         const { toolCalls, observations } = describeExecutionOutcome(outcome, plan);
         // Project the executor outcome into typed ToolOutcome records so the
         // synthesizer can ground on them. Without this projection
@@ -1332,7 +1330,7 @@ interface ExecutionStepShape {
 /**
  * Convert the ExecutionRunner's typed result envelope into the `ToolOutcome[]`
  * the synthesizer expects. Each branch builds one or more success-tagged
- * outcomes anchored on the underlying response. Drinkability fan-out and
+ * outcomes anchored on the underlying response.
  * parallel-search produce multiple outcomes; everything else yields one.
  */
 function projectExecutionOutcomeAsToolOutcomes(
@@ -1347,13 +1345,6 @@ function projectExecutionOutcomeAsToolOutcomes(
       return [makeToolOutcome('compare_wines', outcome.result, now)];
     case 'parallel-results':
       return outcome.results.map((r) => makeToolOutcome('search_wines', r, now));
-    case 'search-then-drinkability': {
-      const outcomes: ToolOutcome[] = [makeToolOutcome('search_wines', outcome.search, now)];
-      for (const probe of outcome.drinkability) {
-        outcomes.push(makeToolOutcome('check_drinking_window', probe, now));
-      }
-      return outcomes;
-    }
   }
 }
 
@@ -1388,15 +1379,13 @@ function describeExecutionOutcome(
       return planParallelToolCallSummary(plan);
     case 'comparison-result':
       return planComparisonToolCallSummary(plan);
-    case 'search-then-drinkability':
-      return planSearchToolCallSummary(plan);
   }
 }
 
 function planSearchToolCallSummary(
   plan: ExecutionPlan,
 ): ExecutionStepShape {
-  if (plan.kind === 'single-search' || plan.kind === 'search-then-drinkability') {
+  if (plan.kind === 'single-search') {
     const sample = sampleSearchInput(plan.searchInput);
     return { toolCalls: [{ name: 'search_wines', arguments: sample }] };
   }

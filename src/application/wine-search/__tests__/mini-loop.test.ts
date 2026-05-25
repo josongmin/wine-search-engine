@@ -34,7 +34,6 @@ import type {
 } from '@domain/ai/port/structured-llm.port.js';
 import { StructuredLlmTimeoutError } from '@domain/ai/port/structured-llm.port.js';
 import type { ComparisonSearchResponse } from '@domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '@domain/response/model/result-item.js';
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import {
   computeNextDirective,
@@ -56,8 +55,6 @@ import {
 } from '../mini-loop-schemas.js';
 import type {
   ComparisonUseCasePort,
-  DrinkabilityProbe,
-  DrinkabilityUseCasePort,
   SearchUseCasePort,
 } from '../execution-runner.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
@@ -87,7 +84,6 @@ function makeTokenUsage(input: number, output: number): TokenUsage {
 
 function makeAnalysis(opts?: {
   hangulDominant?: boolean;
-  requiresDrinkabilityCheck?: boolean;
   requiresGroundedWineSearch?: boolean;
   requiredTool?: WineSearchAnalysis['contract']['requiredTool'];
   constraints?: WineSearchAnalysis['normalizedConstraints'];
@@ -97,7 +93,7 @@ function makeAnalysis(opts?: {
     anchors: [],
     normalizedConstraints: opts?.constraints ?? [],
     contract: {
-      requiresDrinkabilityCheck: opts?.requiresDrinkabilityCheck ?? false,
+      requiresDrinkabilityCheck: false,
       requiresGroundedWineSearch: opts?.requiresGroundedWineSearch ?? false,
       hasEntityMetadataSignal: false,
       ...(opts?.requiredTool !== undefined ? { requiredTool: opts.requiredTool } : {}),
@@ -127,23 +123,6 @@ function makeComparisonResponse(): ComparisonSearchResponse {
   } as unknown as ComparisonSearchResponse;
 }
 
-function makeDrinkabilityProbe(entityId: string, year: number): DrinkabilityProbe {
-  return {
-    entityId,
-    targetYear: year,
-    window: {
-      drinkingWindowStart: year,
-      drinkingWindowEnd: year + 10,
-      peakYear: year + 3,
-      currentlyDrinkable: true,
-      confidence: 0.8,
-      evidenceLevel: 'predicted',
-      blockingEligible: false,
-      modelVersion: 'test-v1',
-    } as unknown as DrinkingWindowBlock,
-  };
-}
-
 function makeSearchPort(
   impl?: (input: unknown, reqId: string) => Promise<SearchResponseV1>,
 ): SearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
@@ -164,24 +143,10 @@ function makeComparisonPort(
   };
 }
 
-function makeDrinkabilityPort(
-  impl?: (entityId: string, targetYear: number) => Promise<DrinkabilityProbe | undefined>,
-): DrinkabilityUseCasePort & { readonly probeMock: ReturnType<typeof vi.fn> } {
-  const probeMock = vi.fn(
-    impl
-    ?? ((entityId: string, targetYear: number) => Promise.resolve(makeDrinkabilityProbe(entityId, targetYear))),
-  );
-  return {
-    probeMock,
-    probe: (entityId, targetYear, reqId, _opts) => probeMock(entityId, targetYear, reqId),
-  };
-}
-
 function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
-    drinkabilityUseCase: overrides?.drinkabilityUseCase ?? makeDrinkabilityPort(),
   };
 }
 
@@ -250,7 +215,6 @@ function makeToolDefs(): readonly ToolDefinition[] {
   } as unknown as ToolDefinition['inputSchema'];
   return [
     { name: 'search_wines', description: 'search', inputSchema: passthrough },
-    { name: 'check_drinking_window', description: 'check drinkability', inputSchema: passthrough },
     { name: 'get_food_pairings', description: 'food pairing', inputSchema: passthrough },
     { name: 'compare_wines', description: 'compare', inputSchema: passthrough },
   ];
@@ -295,37 +259,6 @@ describe('MiniLoopRunner — happy path', () => {
     expect(out.toolOutcomes).toHaveLength(1);
     expect(out.toolOutcomes[0]?.tool).toBe('search_wines');
     expect(out.toolOutcomes[0]?.kind).toBe('success');
-  });
-});
-
-describe('MiniLoopRunner — pending drinkability directive', () => {
-  it('search → drinkability check (driven by contract) → answer', async () => {
-    const drinkabilityPort = makeDrinkabilityPort();
-    // Single-entity search response so the directive resolves after one
-    // drinkability call.
-    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['wine-1'])));
-    const llm = makeStubLlm([
-      async () => asToolUseResult([toolUse('search_wines', { query: '2015 Bordeaux 지금 마실만한 것' })]),
-      async () => asToolUseResult([toolUse('check_drinking_window', { entity_id: 'wine-1', target_year: 2025 })]),
-      async () => asTextResult('wine-1 is in its drinking window.'),
-    ]);
-    const runner = new MiniLoopRunner({
-      structuredLlm: llm,
-      logger: makeLogger(),
-    });
-    const out = await runner.run(makeInput({
-      analysis: makeAnalysis({ requiresDrinkabilityCheck: true }),
-      toolPorts: makeToolPorts({
-        drinkabilityUseCase: drinkabilityPort,
-        searchUseCase: searchPort,
-      }),
-      maxSteps: 5,
-    }));
-
-    expect(out.terminationReason).toBe('answer');
-    expect(drinkabilityPort.probeMock).toHaveBeenCalled();
-    const drinkabilityOutcomes = out.toolOutcomes.filter((o) => o.tool === 'check_drinking_window');
-    expect(drinkabilityOutcomes.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -645,24 +578,6 @@ describe('computeNextDirective (pure function)', () => {
       selectDirectiveCopy(false),
     );
     expect(out).toBeUndefined();
-  });
-
-  it('returns pending_drinkability_check when drinkability contract not yet satisfied', () => {
-    const input = makeInput({
-      analysis: makeAnalysis({ requiresDrinkabilityCheck: true }),
-    });
-    const out = computeNextDirective(
-      input,
-      makeStateView([
-        { tool: 'search_wines', kind: 'success', result: makeSearchResponse(['wine-1', 'wine-2']) },
-      ]),
-      selectDirectiveCopy(false),
-    );
-    expect(out?.kind).toBe('pending_drinkability_check');
-    if (out?.kind === 'pending_drinkability_check') {
-      expect(out.entityIds).toContain('wine-1');
-      expect(out.entityIds).toContain('wine-2');
-    }
   });
 
   it('returns relax_constraints_retry only when not yet retried', () => {

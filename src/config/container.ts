@@ -51,7 +51,6 @@ import { buildMiniLoopToolBundle } from '../application/wine-search/mini-loop-to
 import { SynthesisRunner } from '../application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../application/wine-search/adapters/search-use-case-adapter.js';
 import { ComparisonUseCaseAdapter } from '../application/wine-search/adapters/comparison-use-case-adapter.js';
-import { DrinkabilityUseCaseAdapter } from '../application/wine-search/adapters/drinkability-use-case-adapter.js';
 import {
   buildSharedStructuredLlm,
   resolveMultiQueryRewriteModel,
@@ -143,7 +142,7 @@ export interface WineSearchContainerServices {
  */
 function buildWineSearchContainerServices(
   _config: Config,
-  core: Awaited<ReturnType<typeof buildCoreContainerServices>>,
+  _core: Awaited<ReturnType<typeof buildCoreContainerServices>>,
   features: ReturnType<typeof buildFeatureContainerServices>,
   sharedStructuredLlm: SharedStructuredLlmServices | null,
 ): WineSearchContainerServices | undefined {
@@ -166,20 +165,6 @@ function buildWineSearchContainerServices(
   const searchAdapter = new SearchUseCaseAdapter(searchUseCaseConcrete);
   const comparisonAdapter = new ComparisonUseCaseAdapter(decomposedSearchConcrete);
 
-  // Drinkability lookup uses the full retrieval document (the drinkability
-  // adapter requires the broader `RetrievalDocument` shape — see
-  // `DrinkabilityEntityLookupPort` in
-  // `application/wine-search/adapters/drinkability-use-case-adapter.ts`).
-  // The drinking-window projection is a narrower shape and intentionally
-  // NOT used here.
-  const drinkabilityAdapter = new DrinkabilityUseCaseAdapter({
-    drinkingWindowUseCase: features.drinkingWindowUseCase,
-    entityLookup: async (id) => {
-      const docs = await core.entityLookup.getDocuments([id]);
-      return docs.get(id) ?? undefined;
-    },
-  });
-
   // ── 3) Component construction. Logger derives one child per component so
   //      structured logs are filterable by component name.
   const wineSearchLogger = bootstrapLogger.child({ component: 'WineSearch' });
@@ -194,7 +179,6 @@ function buildWineSearchContainerServices(
   const executionRunner = new ExecutionRunner({
     searchUseCase: searchAdapter,
     comparisonUseCase: comparisonAdapter,
-    drinkabilityUseCase: drinkabilityAdapter,
   });
   // ── Tool-result cache. Wired ONLY when the env flag is on (default ON);
   //    runner-side enforcement also reads `WINE_SEARCH_TOOL_CACHE_ENABLED`,
@@ -235,7 +219,6 @@ function buildWineSearchContainerServices(
   const miniLoopToolBundle = buildMiniLoopToolBundle({
     searchUseCase: searchAdapter,
     comparisonUseCase: comparisonAdapter,
-    drinkabilityUseCase: drinkabilityAdapter,
   });
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled

@@ -227,53 +227,7 @@ describe('DeterministicRouter — Rule 3: parallel-slot decomposition', () => {
   });
 });
 
-describe('DeterministicRouter — Rule 4: drinkability', () => {
-  it('Opus One 2018 + drinkability + anchor → search-then-drinkability', () => {
-    const router = makeRouter();
-    const plan = router.route(
-      baseAnalysis({
-        intent: 'drinkability',
-        preservedSurface: 'Opus One 2018 지금 마실만한가',
-        anchors: [{ surface: 'Opus One', canonicalValue: 'Opus One', entityType: 'wine', confidence: 0.95 }],
-        contract: {
-          requiresDrinkabilityCheck: true,
-          requiresGroundedWineSearch: true,
-          hasEntityMetadataSignal: true,
-          requiredTool: 'check_drinking_window',
-          exactMetadataTargetVintage: 2018,
-        },
-      }),
-    );
-    expect(plan.kind).toBe('search-then-drinkability');
-    if (plan.kind !== 'search-then-drinkability') return;
-    expect(plan.drinkabilityTemplate.targetYear).toBe(FIXED_NOW.getFullYear());
-    expect(plan.drinkabilityTemplate.maxAnchors).toBeGreaterThanOrEqual(1);
-    // hasEntityMetadataSignal → exact-metadata limit applied.
-    expect(plan.searchInput.limit).toBeDefined();
-    expect(plan.searchInput.mode).toBe('entity');
-  });
-
-  it('drinkability flag without any anchor → falls through to multi-step or single-search', () => {
-    const router = makeRouter();
-    const plan = router.route(
-      baseAnalysis({
-        intent: 'drinkability',
-        preservedSurface: '지금 마시기 좋은 와인',
-        hangulDominant: true,
-        contract: {
-          requiresDrinkabilityCheck: true,
-          requiresGroundedWineSearch: true,
-          hasEntityMetadataSignal: false,
-        },
-        expectedMultiStep: true,
-      }),
-    );
-    // Rule 5 doesn't fire (anchors empty), Rule 6 kicks in.
-    expect(plan.kind).toBe('multi-step');
-  });
-});
-
-describe('DeterministicRouter — Rule 6: multi-step handoff', () => {
+describe('DeterministicRouter — Rule 4: multi-step handoff', () => {
   it('expectedMultiStep=true with no specific decomposition → multi-step', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -306,7 +260,7 @@ describe('DeterministicRouter — Rule 6: multi-step handoff', () => {
   });
 });
 
-describe('DeterministicRouter — Rule 7: single-search (default)', () => {
+describe('DeterministicRouter — Rule 5: single-search (default)', () => {
   it('Korean "부르고뉴 피노누아 추천" → single-search', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -389,17 +343,6 @@ describe('DeterministicRouter — determinism', () => {
         decomposition: {
           kind: 'parallel-slot',
           slots: [{ wineType: 'red' }, { wineType: 'white' }],
-        },
-      }),
-      baseAnalysis({
-        intent: 'drinkability',
-        anchors: [{ surface: 'X', canonicalValue: 'X', entityType: 'wine', confidence: 0.9 }],
-        contract: {
-          requiresDrinkabilityCheck: true,
-          requiresGroundedWineSearch: true,
-          hasEntityMetadataSignal: true,
-          requiredTool: 'check_drinking_window',
-          exactMetadataTargetVintage: 2018,
         },
       }),
       baseAnalysis({ intent: 'search', expectedMultiStep: true }),

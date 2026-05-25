@@ -51,8 +51,6 @@ import {
 } from '../../src/application/wine-search/mini-loop-schemas.js';
 import type {
   ComparisonUseCasePort,
-  DrinkabilityProbe,
-  DrinkabilityUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
@@ -129,20 +127,10 @@ function makeComparisonPort(): ComparisonUseCasePort & { readonly executeMock: R
   return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
 }
 
-function makeDrinkabilityPort(): DrinkabilityUseCasePort & { readonly probeMock: ReturnType<typeof vi.fn> } {
-  const probeMock = vi.fn((entityId: string, targetYear: number) => Promise.resolve({
-    entityId,
-    targetYear,
-    window: { drinkingWindowStart: targetYear, drinkingWindowEnd: targetYear + 10, currentlyDrinkable: true } as unknown as DrinkabilityProbe['window'],
-  }));
-  return { probeMock, probe: (entityId, targetYear, reqId, _opts) => probeMock(entityId, targetYear, reqId) };
-}
-
 function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
-    drinkabilityUseCase: overrides?.drinkabilityUseCase ?? makeDrinkabilityPort(),
   };
 }
 
@@ -191,7 +179,6 @@ function makeToolDefs(): readonly ToolDefinition[] {
   } as unknown as ToolDefinition['inputSchema'];
   return [
     { name: 'search_wines', description: 'search', inputSchema: passthrough },
-    { name: 'check_drinking_window', description: 'check drinkability', inputSchema: passthrough },
     { name: 'get_food_pairings', description: 'food pairing', inputSchema: passthrough },
     { name: 'compare_wines', description: 'compare', inputSchema: passthrough },
   ];

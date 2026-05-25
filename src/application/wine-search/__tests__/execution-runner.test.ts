@@ -8,13 +8,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { ComparisonSearchResponse } from '@domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '@domain/response/model/result-item.js';
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import {
   ExecutionRunner,
   type ComparisonUseCasePort,
-  type DrinkabilityProbe,
-  type DrinkabilityUseCasePort,
   type SearchUseCasePort,
 } from '../execution-runner.js';
 import type {
@@ -47,19 +44,6 @@ function makeComparisonResponse(): ComparisonSearchResponse {
   } as unknown as ComparisonSearchResponse;
 }
 
-function makeDrinkingWindowBlock(entityIdYear: number): DrinkingWindowBlock {
-  return {
-    drinkingWindowStart: entityIdYear,
-    drinkingWindowEnd: entityIdYear + 10,
-    peakYear: entityIdYear + 3,
-    currentlyDrinkable: true,
-    confidence: 0.8,
-    evidenceLevel: 'predicted',
-    blockingEligible: false,
-    modelVersion: 'test-v1',
-  } as unknown as DrinkingWindowBlock;
-}
-
 // ---------------------------------------------------------------------------
 // Stub ports
 // ---------------------------------------------------------------------------
@@ -84,26 +68,6 @@ function makeComparisonPort(
 ): ComparisonUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
   const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
   return { executeMock, execute: executeMock };
-}
-
-function makeDrinkabilityPort(
-  impl?: (
-    entityId: string,
-    targetYear: number,
-    reqId: string,
-    opts?: { readonly abortSignal?: AbortSignal | undefined },
-  ) => Promise<DrinkabilityProbe | undefined>,
-): DrinkabilityUseCasePort & { readonly probeMock: ReturnType<typeof vi.fn> } {
-  const probeMock = vi.fn(
-    impl
-    ?? ((entityId: string, targetYear: number) =>
-      Promise.resolve({
-        entityId,
-        targetYear,
-        window: makeDrinkingWindowBlock(targetYear),
-      })),
-  );
-  return { probeMock, probe: probeMock };
 }
 
 // ---------------------------------------------------------------------------
@@ -261,63 +225,6 @@ describe('ExecutionRunner — parallel-search', () => {
     expect(out.kind).toBe('error');
     if (out.kind !== 'error') return;
     expect(out.cause.name).toBe('AbortError');
-  });
-});
-
-describe('ExecutionRunner — search-then-drinkability', () => {
-  it('runs search then probes drinkability for up to maxAnchors results', async () => {
-    const search = makeSearchPort(async () => makeSearchResponse(['w1', 'w2', 'w3']));
-    const probe = makeDrinkabilityPort();
-    const runner = new ExecutionRunner({ searchUseCase: search, drinkabilityUseCase: probe });
-    const plan: ExecutionPlan = {
-      kind: 'search-then-drinkability',
-      searchInput: { query: 'Opus One' },
-      drinkabilityTemplate: { targetYear: 2026, maxAnchors: 2 },
-    };
-    const out = await runner.run(plan, { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS });
-    expect(out.kind).toBe('search-then-drinkability');
-    if (out.kind !== 'search-then-drinkability') return;
-    expect(out.drinkability).toHaveLength(2);
-    expect(probe.probeMock).toHaveBeenCalledTimes(2);
-    expect(out.drinkability[0]?.entityId).toBe('w1');
-    expect(out.drinkability[1]?.entityId).toBe('w2');
-  });
-
-  it('drops undefined probes (entity carries no drinkability)', async () => {
-    const search = makeSearchPort(async () => makeSearchResponse(['has-dw', 'no-dw']));
-    const probe = makeDrinkabilityPort(async (entityId, targetYear) => {
-      if (entityId === 'no-dw') return undefined;
-      return { entityId, targetYear, window: makeDrinkingWindowBlock(targetYear) };
-    });
-    const runner = new ExecutionRunner({ searchUseCase: search, drinkabilityUseCase: probe });
-    const out = await runner.run(
-      {
-        kind: 'search-then-drinkability',
-        searchInput: { query: 'q' },
-        drinkabilityTemplate: { targetYear: 2026, maxAnchors: 2 },
-      },
-      { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS },
-    );
-    expect(out.kind).toBe('search-then-drinkability');
-    if (out.kind !== 'search-then-drinkability') return;
-    expect(out.drinkability).toHaveLength(1);
-    expect(out.drinkability[0]?.entityId).toBe('has-dw');
-  });
-
-  it('without drinkabilityUseCase port → returns search with empty drinkability', async () => {
-    const search = makeSearchPort();
-    const runner = new ExecutionRunner({ searchUseCase: search });
-    const out = await runner.run(
-      {
-        kind: 'search-then-drinkability',
-        searchInput: { query: 'q' },
-        drinkabilityTemplate: { targetYear: 2026, maxAnchors: 2 },
-      },
-      { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS },
-    );
-    expect(out.kind).toBe('search-then-drinkability');
-    if (out.kind !== 'search-then-drinkability') return;
-    expect(out.drinkability).toEqual([]);
   });
 });
 

@@ -7,16 +7,15 @@
  *  - per-step timeout (Promise.race + AbortController),
  *  - abort propagation (caller's `abortSignal` chained to a local
  *    controller so timeouts can selectively cancel a single leg),
- *  - parallel fan-out for `parallel-search` and `search-then-drinkability`
- *    (Promise.all with shared abort),
+ *  - parallel fan-out for `parallel-search` (Promise.all with shared abort),
  *  - structured logging tagged with `requestId` + `planKind`,
  *  - mapping of caller errors into the `ExecutionOutcome` discriminated
  *    union (rejected / error / multi-step-required).
  *
  * The runner does **not** know about wire formats (HTTP, gRPC), use-case
  * deps wiring, or planning. It accepts ports — caller-side adapters wire
- * them to real `SearchUseCase` / `DecomposedSearchUseCase` /
- * `DrinkingWindowUseCase` instances. This is the same DI seam used
+ * them to real `SearchUseCase` / `DecomposedSearchUseCase` instances.
+ * This is the same DI seam used
  * throughout the application layer.
  *
  * NOTE: the runner reuses `withTimeout` from
@@ -27,7 +26,6 @@
 import { bootstrapLogger } from '@shared/bootstrap-logger.js';
 import { abortError, isAbortError, throwIfAborted } from '@shared/cooperative-abort.js';
 import type { ComparisonSearchResponse } from '@domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '@domain/response/model/result-item.js';
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import { withTimeout } from '../agent/agent-tool-execution-support.js';
 import type {
@@ -70,24 +68,6 @@ export interface ComparisonUseCasePort {
   ): Promise<ComparisonSearchResponse>;
 }
 
-export interface DrinkabilityProbe {
-  readonly entityId: string;
-  readonly targetYear: number;
-  readonly window: DrinkingWindowBlock;
-}
-
-export interface DrinkabilityUseCasePort {
-  /** Probe a single entity (from the search result set) for drinkability.
-   *  Returns `undefined` when the entity carries no drinkability
-   *  projection. The runner fans these out in parallel. */
-  probe(
-    entityId: string,
-    targetYear: number,
-    requestId: string,
-    options?: { readonly abortSignal?: AbortSignal | undefined },
-  ): Promise<DrinkabilityProbe | undefined>;
-}
-
 // ---------------------------------------------------------------------------
 // Outcome — discriminated union
 // ---------------------------------------------------------------------------
@@ -96,11 +76,6 @@ export type ExecutionOutcome =
   | { readonly kind: 'search-result'; readonly result: SearchResponseV1 }
   | { readonly kind: 'comparison-result'; readonly result: ComparisonSearchResponse }
   | { readonly kind: 'parallel-results'; readonly results: readonly SearchResponseV1[] }
-  | {
-    readonly kind: 'search-then-drinkability';
-    readonly search: SearchResponseV1;
-    readonly drinkability: readonly DrinkabilityProbe[];
-  }
   | { readonly kind: 'multi-step-required'; readonly handoff: MultiStepHandoff }
   | { readonly kind: 'rejected'; readonly reason: PlanRejectReason }
   | { readonly kind: 'error'; readonly cause: Error };
@@ -112,7 +87,6 @@ export type ExecutionOutcome =
 interface ExecutionRunnerDeps {
   readonly searchUseCase: SearchUseCasePort;
   readonly comparisonUseCase?: ComparisonUseCasePort | undefined;
-  readonly drinkabilityUseCase?: DrinkabilityUseCasePort | undefined;
 }
 
 interface ExecutionRunnerContext {
@@ -164,15 +138,6 @@ export class ExecutionRunner {
           return await this.runParallelSearch(plan.searches, ctx, perStepTimeoutMs, logCtx);
         case 'comparison':
           return await this.runComparison(plan.comparisonInput, ctx, perStepTimeoutMs, logCtx);
-        case 'search-then-drinkability':
-          return await this.runSearchThenDrinkability(
-            plan.searchInput,
-            plan.drinkabilityTemplate.targetYear,
-            plan.drinkabilityTemplate.maxAnchors,
-            ctx,
-            perStepTimeoutMs,
-            logCtx,
-          );
         case 'multi-step':
           bootstrapLogger.info(logCtx, '[ExecutionRunner] handoff to MiniLoop');
           return { kind: 'multi-step-required', handoff: plan.handoff };
@@ -258,71 +223,6 @@ export class ExecutionRunner {
     return { kind: 'comparison-result', result };
   }
 
-  private async runSearchThenDrinkability(
-    searchInput: SearchUseCaseInput,
-    targetYear: number,
-    maxAnchors: number,
-    ctx: ExecutionRunnerContext,
-    perStepTimeoutMs: number,
-    logCtx: { readonly requestId: string; readonly planKind: ExecutionPlan['kind'] },
-  ): Promise<ExecutionOutcome> {
-    const search = await this.runWithStepTimeout(
-      (signal) => this.deps.searchUseCase.execute(searchInput, ctx.requestId, { abortSignal: signal }),
-      ctx,
-      perStepTimeoutMs,
-      'search-leg',
-    );
-    throwIfAborted(ctx.abortSignal, 'Execution runner aborted before drinkability fan-out');
-
-    if (this.deps.drinkabilityUseCase === undefined) {
-      bootstrapLogger.warn(
-        logCtx,
-        '[ExecutionRunner] drinkabilityUseCase port not wired — returning search only',
-      );
-      return {
-        kind: 'search-then-drinkability',
-        search,
-        drinkability: [],
-      };
-    }
-
-    const drinkability = await this.fanOutDrinkability(
-      search,
-      targetYear,
-      maxAnchors,
-      ctx,
-      perStepTimeoutMs,
-    );
-    bootstrapLogger.info(
-      { ...logCtx, drinkabilityCount: drinkability.length },
-      '[ExecutionRunner] search-then-drinkability done',
-    );
-    return { kind: 'search-then-drinkability', search, drinkability };
-  }
-
-  private async fanOutDrinkability(
-    search: SearchResponseV1,
-    targetYear: number,
-    maxAnchors: number,
-    ctx: ExecutionRunnerContext,
-    perStepTimeoutMs: number,
-  ): Promise<readonly DrinkabilityProbe[]> {
-    if (this.deps.drinkabilityUseCase === undefined) {
-      return [];
-    }
-    const drinkabilityUseCase = this.deps.drinkabilityUseCase;
-    const probes = search.results.slice(0, maxAnchors).map((r, idx) =>
-      this.runWithStepTimeout(
-        (signal) => drinkabilityUseCase.probe(r.entity.entityId, targetYear, `${ctx.requestId}-dw${idx}`, { abortSignal: signal }),
-        ctx,
-        perStepTimeoutMs,
-        `drinkability[${idx}]`,
-      ),
-    );
-    const settled = await Promise.all(probes);
-    return settled.filter((p): p is DrinkabilityProbe => p !== undefined);
-  }
-
   // -------------------------------------------------------------------------
   // Per-step timeout / abort propagation
   //
@@ -395,8 +295,6 @@ function planRequiresDisabledTool(plan: ExecutionPlan): boolean {
   switch (plan.kind) {
     case 'comparison':
       return RUNNER_DISABLED_TOOLS.has('compare_wines');
-    case 'search-then-drinkability':
-      return RUNNER_DISABLED_TOOLS.has('check_drinking_window');
     default:
       return false;
   }
@@ -412,8 +310,6 @@ function planRequiresDisabledTool(plan: ExecutionPlan): boolean {
  */
 function degradeDisabledPlan(plan: ExecutionPlan): SearchUseCaseInput | null {
   switch (plan.kind) {
-    case 'search-then-drinkability':
-      return plan.searchInput;
     case 'comparison':
       return null;
     default:

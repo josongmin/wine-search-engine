@@ -29,7 +29,6 @@ import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-s
 import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
 import type {
   ComparisonUseCasePort,
-  DrinkabilityUseCasePort,
   SearchUseCasePort,
 } from './execution-runner.js';
 import type { WineSearchAnalysis } from './wine-search-schemas.js';
@@ -213,7 +212,6 @@ export interface MiniLoopStep {
 export interface MiniLoopToolPorts {
   readonly searchUseCase: SearchUseCasePort;
   readonly comparisonUseCase: ComparisonUseCasePort;
-  readonly drinkabilityUseCase: DrinkabilityUseCasePort;
 }
 
 // ---------------------------------------------------------------------------

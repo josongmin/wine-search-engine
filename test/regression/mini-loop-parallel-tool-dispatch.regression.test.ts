@@ -110,7 +110,6 @@ describe('mini-loop parallel tool dispatch (F1 regression)', () => {
       toolPorts: {
         searchUseCase: { execute: searchExecute },
         comparisonUseCase: { execute: vi.fn() },
-        drinkabilityUseCase: { probe: vi.fn() },
       } as never,
       perStepTimeoutMs: 2000,
       agentTimeoutMs: 5000,

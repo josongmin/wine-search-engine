@@ -16,10 +16,8 @@
  *  2. decomposition.kind=comparison → comparison plan.
  *  3. decomposition.kind=parallel-slot → parallel-search plan (one search
  *     per slot, total budget split if present).
- *  4. requiresDrinkabilityCheck=true AND anchors.length>0 →
- *     search-then-drinkability plan.
- *  5. expectedMultiStep=true (none of the above) → multi-step handoff.
- *  6. fallback → single-search plan (80% happy path).
+ *  4. expectedMultiStep=true (none of the above) → multi-step handoff.
+ *  5. fallback → single-search plan (80% happy path).
  *
  * NOTE: this router consumes the **already normalized** constraint set
  * produced by `QueryAnalyzerService`. The full sanitize pipeline in
@@ -34,7 +32,6 @@
  *  - normalizeParallelSlotOccasion     → agent-tool-execution-policy.ts:795
  *  - applyExactMetadataOverConstraint  → agent-tool-execution-policy.ts:108
  *  - applyExactVintageBounds           → agent-tool-execution-policy.ts:183
- *  - applyDrinkabilityStrip            → agent-tool-execution-policy.ts:294
  *  - mergeStyleArrayDefaults           → agent-tool-execution-policy.ts:507
  */
 
@@ -44,7 +41,6 @@ import {
   PRICE_CONSTRAINT_ATTRIBUTE_NAMES,
 } from '@shared/constants/constraint-attributes.js';
 import {
-  DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS,
   EXECUTION_PLAN_KINDS,
   type ComparisonUseCaseInput,
   type ExecutionPlan,
@@ -61,11 +57,6 @@ import type {
 // ---------------------------------------------------------------------------
 // Named constants (CLAUDE.md rule 15)
 // ---------------------------------------------------------------------------
-
-/** Default drinkability target year — the runner can override this via the
- *  request context if the user specifies a different target year. Anchored
- *  on "now" but injected here to keep planning deterministic per call. */
-const DRINKABILITY_DEFAULT_TARGET_YEAR_OFFSET = 0;
 
 // Exact-metadata over-constraint cap and price-attribute set are imported
 // from `@shared/constants/constraint-attributes.js` (SSoT — rule 30). The
@@ -86,9 +77,8 @@ const DRINKABILITY_DEFAULT_TARGET_YEAR_OFFSET = 0;
 const PLAN_KIND_SINGLE_SEARCH = EXECUTION_PLAN_KINDS[0];
 const PLAN_KIND_PARALLEL_SEARCH = EXECUTION_PLAN_KINDS[1];
 const PLAN_KIND_COMPARISON = EXECUTION_PLAN_KINDS[2];
-const PLAN_KIND_SEARCH_THEN_DRINKABILITY = EXECUTION_PLAN_KINDS[3];
-const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[4];
-const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[5];
+const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[3];
+const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[4];
 
 // Compile-time membership guard — each local must be a member of the
 // `ExecutionPlanKind` SSoT union. Catches an out-of-bounds tuple index
@@ -99,7 +89,6 @@ void ({
   PLAN_KIND_SINGLE_SEARCH,
   PLAN_KIND_PARALLEL_SEARCH,
   PLAN_KIND_COMPARISON,
-  PLAN_KIND_SEARCH_THEN_DRINKABILITY,
   PLAN_KIND_MULTI_STEP,
   PLAN_KIND_REJECT,
 } satisfies Record<string, ExecutionPlanKind>);
@@ -113,7 +102,6 @@ const MULTI_STEP_INITIAL_ACTION_BY_INTENT = new Map<
   ['search', 'search'],
   ['compare', 'compare'],
   ['pair', 'pair'],
-  ['drinkability', 'search'],
   ['unknown', 'search'],
 ]);
 
@@ -304,16 +292,19 @@ function expandParallelSlots(
 // ---------------------------------------------------------------------------
 
 interface DeterministicRouterDeps {
-  /** Wall-clock for resolving drinkability target year. Optional so tests
-   *  can pin determinism without monkey-patching globals. */
+  /** Optional wall-clock — unused since step 4-3 removed the drinkability
+   *  plan kind (the only time-dependent rule). Retained on the deps shape
+   *  for caller backward compatibility; future rules may consume it. */
   readonly now?: () => Date;
 }
 
 export class DeterministicRouter {
-  private readonly now: () => Date;
-
-  constructor(deps?: DeterministicRouterDeps) {
-    this.now = deps?.now ?? (() => new Date());
+  // eslint-disable-next-line @typescript-eslint/no-useless-constructor
+  constructor(_deps?: DeterministicRouterDeps) {
+    // No instance state — the router is currently a pure function dressed
+    // up as a class so DI callers can swap implementations. The optional
+    // deps shape (currently empty after step 4-3) is retained so existing
+    // call sites do not need to be touched.
   }
 
   route(analysis: WineSearchAnalysis): ExecutionPlan {
@@ -356,28 +347,7 @@ export class DeterministicRouter {
       }
     }
 
-    // Rule 4 — drinkability on an anchored entity.
-    if (
-      analysis.contract.requiresDrinkabilityCheck
-      && analysis.anchors.length > 0
-    ) {
-      const searchInput = buildSearchInputFromAnalysis(analysis);
-      const targetYear = this.resolveDrinkabilityTargetYear(analysis);
-      const maxAnchors = Math.min(
-        analysis.anchors.length,
-        DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS,
-      );
-      return {
-        kind: PLAN_KIND_SEARCH_THEN_DRINKABILITY,
-        searchInput,
-        drinkabilityTemplate: {
-          targetYear,
-          maxAnchors,
-        },
-      };
-    }
-
-    // Rule 5 — multi-step (defer to MiniLoop).
+    // Rule 4 — multi-step (defer to MiniLoop).
     if (analysis.expectedMultiStep) {
       return {
         kind: PLAN_KIND_MULTI_STEP,
@@ -385,26 +355,11 @@ export class DeterministicRouter {
       };
     }
 
-    // Rule 6 — single-search (the 80% path).
+    // Rule 5 — single-search (the 80% path).
     return {
       kind: PLAN_KIND_SINGLE_SEARCH,
       searchInput: buildSearchInputFromAnalysis(analysis),
     };
-  }
-
-  private resolveDrinkabilityTargetYear(
-    analysis: WineSearchAnalysis,
-  ): number {
-    // exact-metadata vintage takes precedence — "Opus One 2018 지금 마실
-    // 만한가" should anchor on now, not 2018.
-    const nowYear = this.now().getFullYear() + DRINKABILITY_DEFAULT_TARGET_YEAR_OFFSET;
-    if (analysis.contract.exactMetadataTargetVintage !== undefined) {
-      // The user named a specific vintage but asked about *current*
-      // drinkability — target year is "now", the vintage flows into the
-      // search filter, not the drinkability template.
-      return nowYear;
-    }
-    return nowYear;
   }
 
   private buildMultiStepHandoff(

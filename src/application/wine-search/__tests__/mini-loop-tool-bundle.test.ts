@@ -19,7 +19,6 @@ import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-s
 import type { MiniLoopToolPorts } from '../mini-loop-schemas.js';
 import {
   buildMiniLoopToolBundle,
-  CHECK_DRINKING_WINDOW_TOOL_DEF,
   COMPARE_WINES_TOOL_DEF,
   MINI_LOOP_TOOL_NAMES,
   SEARCH_WINES_TOOL_DEF,
@@ -36,7 +35,6 @@ function makeStubToolPorts(): MiniLoopToolPorts {
   return {
     searchUseCase: { execute: async () => { throw new Error('unused in test'); } },
     comparisonUseCase: { execute: async () => { throw new Error('unused in test'); } },
-    drinkabilityUseCase: { probe: async () => undefined },
   } as MiniLoopToolPorts;
 }
 
@@ -164,59 +162,6 @@ describe('COMPARE_WINES_TOOL_DEF', () => {
   });
 });
 
-describe('CHECK_DRINKING_WINDOW_TOOL_DEF', () => {
-  it('has name "check_drinking_window" and a Zod inputSchema', () => {
-    expect(CHECK_DRINKING_WINDOW_TOOL_DEF.name).toBe('check_drinking_window');
-    expect(CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema).toBeInstanceOf(z.ZodType);
-  });
-
-  it('requires entity_id', () => {
-    expect(
-      CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({ entity_id: 'wine-abc-2018' }).success,
-    ).toBe(true);
-    expect(
-      CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({}).success,
-    ).toBe(false);
-    expect(
-      CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({ target_year: 2025 }).success,
-    ).toBe(false);
-  });
-
-  it('accepts optional target_year inside the production range', () => {
-    expect(
-      CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({
-        entity_id: 'wine-abc-2018',
-        target_year: 2030,
-      }).success,
-    ).toBe(true);
-  });
-
-  it('rejects out-of-range target_year', () => {
-    expect(
-      CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({
-        entity_id: 'x',
-        target_year: 1700,
-      }).success,
-    ).toBe(false);
-    expect(
-      CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({
-        entity_id: 'x',
-        target_year: 3000,
-      }).success,
-    ).toBe(false);
-  });
-
-  it('is permissive — extra LLM-emitted keys ignored (rule 10)', () => {
-    const parsed = CHECK_DRINKING_WINDOW_TOOL_DEF.inputSchema.safeParse({
-      entity_id: 'wine-abc',
-      target_year: 2027,
-      _reasoning: 'user asked when to drink',
-      thought: 'window is open',
-    });
-    expect(parsed.success).toBe(true);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Cross-cutting: no .strict() anywhere on the input schemas (rule 10)
 // ---------------------------------------------------------------------------
@@ -225,7 +170,6 @@ describe('CLAUDE.md rule 10 — LLM tool input schemas MUST NOT be strict', () =
   it.each([
     ['search_wines', SEARCH_WINES_TOOL_DEF, { query: 'q' }],
     ['compare_wines', COMPARE_WINES_TOOL_DEF, { query_a: 'a', query_b: 'b' }],
-    ['check_drinking_window', CHECK_DRINKING_WINDOW_TOOL_DEF, { entity_id: 'x' }],
   ])('%s schema accepts a payload with an extra unknown key', (_name, def, baseInput) => {
     const parsed = def.inputSchema.safeParse({
       ...baseInput,

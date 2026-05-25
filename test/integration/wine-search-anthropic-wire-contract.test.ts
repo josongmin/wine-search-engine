@@ -61,7 +61,6 @@ import { buildMiniLoopToolBundle } from '../../src/application/wine-search/mini-
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
 import type {
   ComparisonUseCasePort,
-  DrinkabilityUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
@@ -483,12 +482,6 @@ function makeStubComparison(): ComparisonUseCasePort {
   };
 }
 
-function makeStubDrinkability(): DrinkabilityUseCasePort {
-  return {
-    probe: async () => undefined,
-  };
-}
-
 interface HarnessOptions {
   readonly queryAnalyzer?: Pick<QueryAnalyzerService, 'analyze'>;
   readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle;
@@ -519,7 +512,6 @@ function buildHarness(options: HarnessOptions = {}): WineSearchOrchestrator {
   const executionRunner = new ExecutionRunner({
     searchUseCase: makeStubSearch(),
     comparisonUseCase: makeStubComparison(),
-    drinkabilityUseCase: makeStubDrinkability(),
   });
   const miniLoopRunner = new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger, model: MINILOOP_MODEL });
   const synthesisRunner = new SynthesisRunner({
@@ -716,8 +708,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     const bundle = buildMiniLoopToolBundle({
       searchUseCase: makeStubSearch(),
       comparisonUseCase: makeStubComparison(),
-        drinkabilityUseCase: makeStubDrinkability(),
-    });
+        });
     const analysis = makeAnalysis({
       intent: 'search',
       expectedMultiStep: true,
@@ -873,8 +864,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
     const bundle = buildMiniLoopToolBundle({
       searchUseCase: makeStubSearch(),
       comparisonUseCase: makeStubComparison(),
-        drinkabilityUseCase: makeStubDrinkability(),
-    });
+        });
     const analysis = makeAnalysis({
       intent: 'search',
       expectedMultiStep: true,
@@ -935,8 +925,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       executionRunner: new ExecutionRunner({
         searchUseCase: makeStubSearch(),
         comparisonUseCase: makeStubComparison(),
-            drinkabilityUseCase: makeStubDrinkability(),
-      }),
+              }),
       miniLoopRunner: new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger }),
       // SynthesisRunner with NO model override → uses DEFAULT_SYNTHESIS_MODEL.
       synthesisRunner: new SynthesisRunner({ structuredLlm: adapter, logger: silentLogger }),

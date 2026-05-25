@@ -41,7 +41,7 @@ const PACKAGE_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // ---------------------------------------------------------------------------
 
 describe('EXECUTION_PLAN_KINDS — SSoT tuple shape', () => {
-  it('contains all 6 known plan kinds, in canonical order', () => {
+  it('contains all 5 known plan kinds, in canonical order', () => {
     // Order matters: the router rules table in `deterministic-router.ts`
     // and the dispatch switch in the orchestrator both rely on the
     // `'single-search'`-first convention (happy path = 80%).
@@ -49,14 +49,13 @@ describe('EXECUTION_PLAN_KINDS — SSoT tuple shape', () => {
       'single-search',
       'parallel-search',
       'comparison',
-      'search-then-drinkability',
       'multi-step',
       'reject',
     ]);
   });
 
-  it('has exactly 6 members (catches accidental additions/removals)', () => {
-    expect(EXECUTION_PLAN_KINDS.length).toBe(6);
+  it('has exactly 5 members (catches accidental additions/removals)', () => {
+    expect(EXECUTION_PLAN_KINDS.length).toBe(5);
   });
 
   it('every tuple member is non-empty and lower-kebab-case', () => {
@@ -106,12 +105,6 @@ describe('EXECUTION_PLAN_KINDS — Zod schema parity', () => {
               { surface: 'B', constraints: [] },
             ],
           },
-        };
-      case 'search-then-drinkability':
-        return {
-          kind,
-          searchInput: { query: 'Opus One 2018' },
-          drinkabilityTemplate: { targetYear: 2026, maxAnchors: 4 },
         };
       case 'multi-step':
         return {

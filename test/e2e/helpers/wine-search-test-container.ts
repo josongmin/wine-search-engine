@@ -36,7 +36,6 @@ import { MiniLoopRunner } from '../../../src/application/wine-search/mini-loop.j
 import { SynthesisRunner } from '../../../src/application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../../../src/application/wine-search/adapters/search-use-case-adapter.js';
 import { ComparisonUseCaseAdapter } from '../../../src/application/wine-search/adapters/comparison-use-case-adapter.js';
-import { DrinkabilityUseCaseAdapter } from '../../../src/application/wine-search/adapters/drinkability-use-case-adapter.js';
 import { WineSearchOrchestrator } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { OrchestratorMiniLoopToolBundle } from '../../../src/application/wine-search/wine-search-orchestrator.js';
 import type { QueryAnalyzerService } from '../../../src/application/wine-search/query-analyzer.js';
@@ -49,7 +48,6 @@ import type { DecomposedSearchUseCase } from '../../../src/application/search/de
 import { buildStructuredLlmMock, type StructuredLlmMockOptions, type StructuredLlmMock } from './anthropic-sdk-mock.js';
 import type {
   ComparisonUseCasePort,
-  DrinkabilityUseCasePort,
   SearchUseCasePort,
 } from '../../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../../src/domain/response/model/search-response.js';
@@ -76,8 +74,6 @@ interface WineSearchTestContainerOptions {
   readonly searchUseCase?: SearchUseCasePort;
   /** Stub override for the ComparisonUseCasePort. */
   readonly comparisonUseCase?: ComparisonUseCasePort;
-  /** Stub override for the DrinkabilityUseCasePort. */
-  readonly drinkabilityUseCase?: DrinkabilityUseCasePort;
   /**
    * When `false`, the helper builds the server WITHOUT registering the
    * /v1/wine-search route — used to test the feature-flag-off behavior
@@ -166,14 +162,6 @@ export async function buildWineSearchTestContainer(
   const searchAdapter = new SearchUseCaseAdapter(searchUseCaseConcrete);
   const comparisonAdapter = new ComparisonUseCaseAdapter(decomposedSearchConcrete);
 
-  const drinkabilityAdapter = new DrinkabilityUseCaseAdapter({
-    drinkingWindowUseCase: container.drinkingWindowUseCase,
-    entityLookup: async (id) => {
-      const docs = await parts.searchIndex.getDocuments([id]);
-      return docs.get(id) ?? undefined;
-    },
-  });
-
   // ── Build the Plan-then-Execute runners with our mock StructuredLlmPort.
   // The default `searchUseCase` is the real adapter (in-memory) so the test
   // is as production-like as possible; tests can swap in a stub to bypass
@@ -184,7 +172,6 @@ export async function buildWineSearchTestContainer(
   const executionRunner = new ExecutionRunner({
     searchUseCase: options.searchUseCase ?? searchAdapter,
     comparisonUseCase: options.comparisonUseCase ?? comparisonAdapter,
-    drinkabilityUseCase: options.drinkabilityUseCase ?? drinkabilityAdapter,
   });
   const miniLoopRunner = new MiniLoopRunner({ structuredLlm: llm, logger });
   const synthesisRunner = new SynthesisRunner({ structuredLlm: llm, logger });

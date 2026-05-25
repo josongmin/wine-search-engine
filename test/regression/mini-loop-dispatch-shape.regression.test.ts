@@ -45,7 +45,6 @@ import {
 import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '../../src/domain/agent/model/agent-tool-attempt-schema.js';
 import type {
   ComparisonUseCasePort,
-  DrinkabilityUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
@@ -97,15 +96,10 @@ function makeComparisonPort(): ComparisonUseCasePort {
   return { execute: async () => { throw new Error('unused'); } };
 }
 
-function makeDrinkabilityPort(): DrinkabilityUseCasePort {
-  return { probe: async () => undefined };
-}
-
 function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
     comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
-    drinkabilityUseCase: overrides?.drinkabilityUseCase ?? makeDrinkabilityPort(),
   };
 }
 
@@ -177,7 +171,6 @@ function makeInput(overrides: Partial<MiniLoopInput>): MiniLoopInput {
       makePassthroughToolDef('search_wines'),
       makePassthroughToolDef('lookup_wine'),
       makePassthroughToolDef('get_food_pairings'),
-      makePassthroughToolDef('check_drinking_window'),
       makePassthroughToolDef('compare_wines'),
       // Intentionally include a name that is NOT in KNOWN_AGENT_TOOL_NAMES so
       // the unknown-tool default branch fires when the LLM emits it.

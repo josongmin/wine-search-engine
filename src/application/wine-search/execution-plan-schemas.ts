@@ -26,11 +26,8 @@ import {
   NormalizedConstraintSchema,
   ParallelSlotSchema,
   RecommendedBudgetSchema,
-  WINE_SEARCH_MAX_ANCHORS,
   WINE_SEARCH_MAX_CONSTRAINTS,
   WINE_SEARCH_MAX_QUERY_CHARS,
-  WINE_SEARCH_MIN_VINTAGE_YEAR,
-  WINE_SEARCH_MAX_VINTAGE_YEAR,
 } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -43,9 +40,6 @@ const DETERMINISTIC_ROUTER_MIN_SLOTS = 2;
  *  this the decomposition quality collapses and the runner would oversubscribe
  *  the downstream Vespa worker pool. */
 const DETERMINISTIC_ROUTER_MAX_SLOTS = 4;
-/** Maximum number of drinkability-template anchor IDs we'll fan out. Aligns
- *  with `WINE_SEARCH_MAX_ANCHORS` (8). */
-export const DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS = WINE_SEARCH_MAX_ANCHORS;
 /** Default per-step timeout when the caller does not provide one. Matches
  *  the search-tool default in `agent-tool-execution-support.ts`. */
 export const DETERMINISTIC_ROUTER_DEFAULT_PER_STEP_TIMEOUT_MS = 8_000;
@@ -127,23 +121,6 @@ export const ComparisonUseCaseInputSchema = z.object({
 export type ComparisonUseCaseInput = z.infer<typeof ComparisonUseCaseInputSchema>;
 
 // ---------------------------------------------------------------------------
-// Drinkability-template — describes how the runner builds
-// `check_drinking_window` calls from search results.
-// ---------------------------------------------------------------------------
-
-const DrinkabilityTemplateSchema = z.object({
-  /** Year to evaluate the drinking window against. */
-  targetYear: z.number().int().finite()
-    .min(WINE_SEARCH_MIN_VINTAGE_YEAR)
-    .max(WINE_SEARCH_MAX_VINTAGE_YEAR),
-  /** Max results from the upstream search to probe. Bounded so a wide search
-   *  doesn't cause a fan-out of drinkability checks. */
-  maxAnchors: z.number().int().finite()
-    .min(1)
-    .max(DETERMINISTIC_ROUTER_MAX_DRINKABILITY_ANCHORS),
-}).strict();
-
-// ---------------------------------------------------------------------------
 // Multi-step handoff — describes a plan we hand off to the MiniLoop
 // orchestrator. The MiniLoop is implemented separately (see
 // follow-up RFC); the router only emits the contract.
@@ -201,7 +178,6 @@ export const EXECUTION_PLAN_KINDS = [
   'single-search',
   'parallel-search',
   'comparison',
-  'search-then-drinkability',
   'multi-step',
   'reject',
 ] as const;
@@ -229,11 +205,6 @@ export const ExecutionPlanSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('comparison'),
     comparisonInput: ComparisonUseCaseInputSchema,
-  }).strict(),
-  z.object({
-    kind: z.literal('search-then-drinkability'),
-    searchInput: SearchUseCaseInputSchema,
-    drinkabilityTemplate: DrinkabilityTemplateSchema,
   }).strict(),
   z.object({
     kind: z.literal('multi-step'),
