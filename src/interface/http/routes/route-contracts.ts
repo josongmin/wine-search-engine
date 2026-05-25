@@ -3,6 +3,7 @@ import {
   BatchSearchRequestSchema,
   BatchSearchResponseSchema,
 } from '../schemas/batch-search.schema.js';
+import { ComparisonSearchResponseSchema } from '../schemas/search-response.schema.js';
 import {
   HybridRequestSchema,
   InterpretRequestSchema,
@@ -13,8 +14,6 @@ import {
 } from '../schemas/search-request.schema.js';
 import {
   AutocompleteResponseSchema,
-  ComparisonSearchResponseSchema,
-  DrinkingWindowSchema,
   ErrorResponseSchema,
   InterpretResponseSchema,
   ResolveResponseSchema,
@@ -55,9 +54,6 @@ import {
 } from '../constants.js';
 import {
   ClaudeToolNameSchema,
-  CompareWinesInputSchema,
-  DrinkingWindowInputSchema,
-  FoodPairingInputSchema,
   SearchToolInputSchema,
 } from '../../claude-tools/tool-schemas.js';
 
@@ -106,10 +102,6 @@ export interface HttpRouteContract {
   /** Response type tag for x-response-type extension (e.g. 'human', 'interpret'). */
   readonly responseType?: string;
 }
-
-type RouteContractWithRequiredBody<T extends z.ZodTypeAny> = HttpRouteContract & {
-  readonly body: T;
-};
 
 function defineRouteContract<T extends HttpRouteContract>(contract: T): T {
   return Object.freeze(contract);
@@ -201,28 +193,11 @@ function withDefaultToolInput<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<T
   return z.preprocess((input) => input ?? {}, schema);
 }
 
-export const ClaudeToolsExecuteRequestSchema = z.discriminatedUnion('tool_name', [
-  z.object({
-    tool_name: z.literal('search_wines'),
-    tool_input: withDefaultToolInput(SearchToolInputSchema),
-    request_id: ClaudeToolsRequestIdSchema,
-  }).strict(),
-  z.object({
-    tool_name: z.literal('get_food_pairings'),
-    tool_input: withDefaultToolInput(FoodPairingInputSchema),
-    request_id: ClaudeToolsRequestIdSchema,
-  }).strict(),
-  z.object({
-    tool_name: z.literal('check_drinking_window'),
-    tool_input: withDefaultToolInput(DrinkingWindowInputSchema),
-    request_id: ClaudeToolsRequestIdSchema,
-  }).strict(),
-  z.object({
-    tool_name: z.literal('compare_wines'),
-    tool_input: withDefaultToolInput(CompareWinesInputSchema),
-    request_id: ClaudeToolsRequestIdSchema,
-  }).strict(),
-]);
+export const ClaudeToolsExecuteRequestSchema = z.object({
+  tool_name: z.literal('search_wines'),
+  tool_input: withDefaultToolInput(SearchToolInputSchema),
+  request_id: ClaudeToolsRequestIdSchema,
+}).strict();
 
 const ClaudeToolResultErrorSchema = z.object({
   error: z.string().min(1),
@@ -239,30 +214,7 @@ const ClaudeToolsSearchExecuteResponseSchema = z.object({
   ...ClaudeToolEnvelopeBaseSchema,
 }).strict();
 
-const ClaudeToolsFoodPairingsExecuteResponseSchema = z.object({
-  tool_name: z.literal('get_food_pairings'),
-  tool_result: z.union([SearchResponseSchema, ClaudeToolResultErrorSchema]),
-  ...ClaudeToolEnvelopeBaseSchema,
-}).strict();
-
-const ClaudeToolsDrinkingWindowExecuteResponseSchema = z.object({
-  tool_name: z.literal('check_drinking_window'),
-  tool_result: z.union([DrinkingWindowSchema, ClaudeToolResultErrorSchema]),
-  ...ClaudeToolEnvelopeBaseSchema,
-}).strict();
-
-const ClaudeToolsCompareExecuteResponseSchema = z.object({
-  tool_name: z.literal('compare_wines'),
-  tool_result: z.union([ComparisonSearchResponseSchema, ClaudeToolResultErrorSchema]),
-  ...ClaudeToolEnvelopeBaseSchema,
-}).strict();
-
-const ClaudeToolsExecuteResponseSchema = z.union([
-  ClaudeToolsSearchExecuteResponseSchema,
-  ClaudeToolsFoodPairingsExecuteResponseSchema,
-  ClaudeToolsDrinkingWindowExecuteResponseSchema,
-  ClaudeToolsCompareExecuteResponseSchema,
-]);
+const ClaudeToolsExecuteResponseSchema = ClaudeToolsSearchExecuteResponseSchema;
 
 // Claude tools error responses now use the shared RFC-014 envelope
 // (ErrorResponseSchema). The previously hand-rolled flat shape
@@ -359,7 +311,7 @@ export const RetrievalDegradationMetricsRouteContract = defineRouteContract({
 
 export type ClaudeToolsExecuteRequest = z.output<typeof ClaudeToolsExecuteRequestSchema>;
 
-export const ClaudeToolsExecuteRouteContract: RouteContractWithRequiredBody<typeof ClaudeToolsExecuteRequestSchema> = defineRouteContract({
+export const ClaudeToolsExecuteRouteContract = defineRouteContract({
   operationId: 'tools.execute',
   body: ClaudeToolsExecuteRequestSchema,
   responses: {

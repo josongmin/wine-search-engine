@@ -19,9 +19,9 @@ maturity_rationale: |
   관측(observation) 레이어에서 동작 — 무엇을 검색할지 바꾸는 side-aware *retrieval
   reranking* 은 아직 미구현이고, 검색된 top result에 대한 post-hoc 대조에 한정됨.
 
-status: active
+status: deprecated
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-26
 owner: core
 
 surfaces:

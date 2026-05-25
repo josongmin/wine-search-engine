@@ -18,9 +18,9 @@ maturity_rationale: |
   rule 30). 남은 maturity 5 과제: cross-leg balance scoring + comparison-aware
   reranking (product gap, 코어 retrieval 결함 아님).
 
-status: active
+status: deprecated
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-26
 owner: core
 
 surfaces:

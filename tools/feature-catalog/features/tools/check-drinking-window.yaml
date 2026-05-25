@@ -12,9 +12,9 @@ maturity_rationale: |
   Predictor 단위 테스트 + regression 게이트. target_year 파라미터는 정의되었으나
   실제 활용 미흡. confidence bound 부재.
 
-status: active
+status: deprecated
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-26
 owner: core
 
 surfaces:

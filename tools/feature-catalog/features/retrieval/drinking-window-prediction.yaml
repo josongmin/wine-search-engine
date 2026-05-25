@@ -32,9 +32,9 @@ maturity_rationale: |
   상수로 노출하고, critic/cellar 데이터 기반 cross-validation ground-truth 가
   여전히 미정량 상태다. 이 두 product gap 이 해소되어야 5.
 
-status: active
+status: deprecated
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-26
 owner: core
 
 surfaces:
