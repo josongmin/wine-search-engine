@@ -32,7 +32,7 @@ maturity_rationale: |
 
 status: active
 since: 2025-09
-last_reviewed: 2026-05-21
+last_reviewed: 2026-05-26
 owner: core
 
 surfaces:
@@ -42,13 +42,16 @@ key_files:
   - src/infrastructure/adapter/cached-alias-matcher.ts
   - src/domain/query/service/alias-lookup-plan.ts
   - src/domain/query/service/alias-match-confidence.ts
+  - src/domain/query/service/korean-wine-token-lexicon.ts
 
 tests:
   regression:
     - test/regression/alias-matcher-priority-cache.regression.test.ts
     - test/regression/alias-matcher-properties.regression.test.ts
+    - test/regression/korean-entity-lookup-tokenization.regression.test.ts
   unit:
     - test/unit/alias/transliterator.test.ts
+    - src/domain/query/service/__tests__/alias-lookup-plan.test.ts
 
 depends_on:
   - korean-i18n.curated-alias-catalog
