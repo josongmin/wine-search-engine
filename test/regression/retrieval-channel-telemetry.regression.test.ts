@@ -119,7 +119,7 @@ describe('retrieval channel telemetry', () => {
       new FusionService(),
       // No cacheService
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       // killSwitchLearning=false → learned_sparse channel is ACTIVE
       // (it just happens to return empty hits in this test).
       false,
@@ -185,7 +185,7 @@ describe('retrieval channel telemetry', () => {
       EMBED_SERVICE,
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
     );
     const result = await pool.execute(makeInput());
@@ -216,7 +216,7 @@ describe('retrieval channel telemetry', () => {
       EMBED_SERVICE,
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
     );
     const result = await pool.execute(makeInput());
@@ -247,7 +247,7 @@ describe('retrieval channel telemetry', () => {
       EMBED_SERVICE,
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       // killSwitchLearning=true → learned_sparse is GATED OFF at active-channel resolution
       true,
     );

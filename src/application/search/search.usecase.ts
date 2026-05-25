@@ -88,7 +88,7 @@ const MIXED_EMPTY_RESULTS_FALLBACK_REASON = 'mixed_constraint_guided_hybrid_fall
  * Per RFC-015, snapshots must carry actual version strings.
  */
 export interface SnapshotVersions {
-  /** ML model version identifiers, e.g. { embedding: "bge-m3-v1.2" }. */
+  /** ML model version identifiers, e.g. { embedding: "text-embedding-3-small-v1" }. */
   readonly modelVersions: Readonly<Record<string, string>>;
   /** Search index version identifiers, e.g. { wine_content: "2026-04-01" }. */
   readonly indexVersions: Readonly<Record<string, string>>;

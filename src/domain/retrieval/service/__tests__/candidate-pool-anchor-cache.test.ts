@@ -72,7 +72,7 @@ describe('CandidatePoolService anchor embedding cache (E3-T6)', () => {
       undefined,
       embeddingService,
       cacheService,
-      'bge-m3',
+      'text-embedding-3-small',
     );
 
     expect(result).toEqual([...FAKE_EMBEDDING]);
@@ -81,7 +81,7 @@ describe('CandidatePoolService anchor embedding cache (E3-T6)', () => {
     const getOrEmbedBatchMock = cacheService.getOrEmbedBatch as ReturnType<typeof vi.fn>;
     expect(getOrEmbedBatchMock).toHaveBeenCalledWith(
       [ANCHOR_SUMMARY],
-      'bge-m3',
+      'text-embedding-3-small',
       embeddingService,
     );
 
@@ -101,7 +101,7 @@ describe('CandidatePoolService anchor embedding cache (E3-T6)', () => {
       undefined,
       embeddingService,
       undefined, // no cacheService
-      'bge-m3',
+      'text-embedding-3-small',
     );
 
     expect(result).toEqual([...FAKE_EMBEDDING]);
@@ -130,7 +130,7 @@ describe('CandidatePoolService anchor embedding cache (E3-T6)', () => {
       precomputed,
       embeddingService,
       cacheService,
-      'bge-m3',
+      'text-embedding-3-small',
     );
 
     expect(result).toEqual([...precomputed]);
@@ -152,7 +152,7 @@ describe('CandidatePoolService anchor embedding cache (E3-T6)', () => {
     } as unknown as CacheService;
 
     await expect(
-      resolveAnchorEmbedding(ANCHOR_SUMMARY, undefined, embeddingService, cacheService, 'bge-m3'),
+      resolveAnchorEmbedding(ANCHOR_SUMMARY, undefined, embeddingService, cacheService, 'text-embedding-3-small'),
     ).rejects.toThrow('Anchor embedding returned empty vector from cache service');
   });
 });

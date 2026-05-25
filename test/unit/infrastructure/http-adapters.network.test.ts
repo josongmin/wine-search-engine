@@ -47,13 +47,13 @@ describe.skipIf(!CAN_BIND_LOOPBACK_HTTP)('HTTP adapters — real local network r
       response.end(JSON.stringify({
         object: 'list',
         data: [{ object: 'embedding', index: 0, embedding: [0.11, 0.22] }],
-        model: 'bge-m3-test',
+        model: 'text-embedding-3-small-test',
       }));
     });
 
     const service = new HttpEmbeddingService({
       url: server.baseUrl,
-      model: 'bge-m3-test',
+      model: 'text-embedding-3-small-test',
     });
 
     await expect(service.embed('opus one')).resolves.toEqual([0.11, 0.22]);
@@ -66,7 +66,7 @@ describe.skipIf(!CAN_BIND_LOOPBACK_HTTP)('HTTP adapters — real local network r
       }),
     });
     expect(JSON.parse(server.requests[0]!.body)).toEqual({
-      model: 'bge-m3-test',
+      model: 'text-embedding-3-small-test',
       input: 'opus one',
     });
   });

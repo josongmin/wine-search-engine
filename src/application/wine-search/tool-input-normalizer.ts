@@ -10,7 +10,7 @@
  *
  * Source-of-port (line numbers in `agent-tool-execution-policy.ts` at HEAD):
  *  - normalizeSearchInput ............................ lines 94-204
- *  - normalizeExactMetadataSearchInput ............... agent-query-execution-contract.ts:650
+ *  - normalizeExactMetadataSearchInput ............... search/query-execution-contract.ts:650
  *  - applyExactVintageBounds (inline) ................ lines 193-203
  *  - stripSearchDrinkabilityObjectiveFromQuery ....... lines 393-438
  *  - mergeStringArrayInput / applySearchDefaults ..... lines 469-537

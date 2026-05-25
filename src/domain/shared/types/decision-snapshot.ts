@@ -27,7 +27,7 @@ export function isCorruptedSnapshot(snapshot: unknown): boolean {
 export interface DecisionSnapshot {
   /** Stable snapshot identifier for cache/replay/audit comparisons. */
   readonly snapshot_id: string;
-  /** Version identifiers for each ML model involved (e.g. { embedding: "bge-m3-v1.2" }). */
+  /** Version identifiers for each ML model involved (e.g. { embedding: "text-embedding-3-small-v1" }). */
   readonly model_versions: Readonly<Record<string, string>>;
 
   /** Version identifiers for each search index (e.g. { wine_content: "2026-04-01" }). */

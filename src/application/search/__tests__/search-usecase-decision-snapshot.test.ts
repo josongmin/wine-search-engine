@@ -28,7 +28,7 @@ describe('buildDecisionSnapshotFromPlan', () => {
         plannerVersion: '1.0.0',
       } as never,
       {
-        modelVersions: { embedding: 'bge-m3' },
+        modelVersions: { embedding: 'text-embedding-3-small' },
         indexVersions: { wine_content: 'wine_content' },
         featureFlags: {
           killSwitchDenseRetrieval: false,

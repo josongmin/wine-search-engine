@@ -269,7 +269,7 @@ describe('CandidatePoolService — TRACK-A A4 anchor-first path', () => {
       embeddingService,
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       undefined,
       true, // killSwitchDenseRetrieval

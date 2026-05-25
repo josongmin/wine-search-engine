@@ -26,6 +26,7 @@ import {
   toCanonicalCandidateChannel,
 } from '../model/retrieval-channel.js';
 import { rrfContribution } from '../../shared/utils/rrf.js';
+import { EMBEDDING_MODEL } from '../../shared/constants/embedding.js';
 import { type FusionService, NEUTRAL_FUSION_WEIGHTS, type FusionWeights } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import {
@@ -156,7 +157,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     private readonly embeddingService: EmbeddingServicePort,
     private readonly fusionService: FusionService,
     private readonly cacheService?: CacheService | undefined,
-    private readonly embeddingModelId: string = 'bge-m3',
+    private readonly embeddingModelId: string = EMBEDDING_MODEL,
     private readonly killSwitchLearning: boolean = false,
     private readonly degradationObserver?: RetrievalDegradationObserver | undefined,
     /**

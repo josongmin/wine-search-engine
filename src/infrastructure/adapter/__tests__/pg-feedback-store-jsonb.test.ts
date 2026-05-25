@@ -20,7 +20,7 @@ describe('DecisionSnapshotJsonbSchema validation (loud failure)', () => {
     threshold_profile_id: 'default',
     planner_version: 'v3.0',
     response_contract_version: 'search_response_v1',
-    model_versions: { embedding: 'bge-m3-v1.2', reranker: 'cross-encoder-v2' },
+    model_versions: { embedding: 'text-embedding-3-small-v1.2', reranker: 'cross-encoder-v2' },
     index_versions: { wine_content: '2026-04-01' },
     feature_flags: { dense_retrieval: true, anchor_boost: false },
   };
@@ -29,7 +29,7 @@ describe('DecisionSnapshotJsonbSchema validation (loud failure)', () => {
     const parsed = parseDecisionSnapshotJsonb(validSnapshot, 'test');
     expect(parsed.snapshot_id).toBe('snap-abc-123');
     expect(parsed.policy_rule_version).toBe('v2.1');
-    expect(parsed.model_versions).toEqual({ embedding: 'bge-m3-v1.2', reranker: 'cross-encoder-v2' });
+    expect(parsed.model_versions).toEqual({ embedding: 'text-embedding-3-small-v1.2', reranker: 'cross-encoder-v2' });
     expect(parsed.index_versions).toEqual({ wine_content: '2026-04-01' });
     expect(parsed.feature_flags).toEqual({ dense_retrieval: true, anchor_boost: false });
     expect(parsed.response_contract_version).toBe('search_response_v1');
@@ -42,7 +42,7 @@ describe('DecisionSnapshotJsonbSchema validation (loud failure)', () => {
       threshold_profile_id: 'default',
       planner_version: 'v3.0',
       response_contract_version: 'search_response_v1',
-      model_versions: { embedding: 'bge-m3-v1.2' },
+      model_versions: { embedding: 'text-embedding-3-small-v1.2' },
       index_versions: {},
       feature_flags: {},
     };

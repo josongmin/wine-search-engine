@@ -80,7 +80,7 @@ export interface EmbeddingCacheKey {
   /** Normalized text being embedded (lowercase, trimmed). */
   readonly text: string;
 
-  /** Embedding model identifier (e.g., "bge-m3-wine-ft-v1"). */
+  /** Embedding model identifier (e.g., "text-embedding-3-small-v1"). */
   readonly modelId: string;
 
   /** Optional instruction prefix for structured embeddings. */

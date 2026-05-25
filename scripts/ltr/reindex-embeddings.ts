@@ -18,8 +18,10 @@
  * Usage:
  *   OPENAI_API_KEY=http://localhost:8000 npx tsx scripts/ltr/reindex-embeddings.ts
  *
- * Note: Instruction prefix "Represent this wine for retrieval: [doc text]"
- *       must be preserved for consistency with original BGE-M3 training.
+ * Note: Historical instruction prefix "Represent this wine for retrieval: [doc text]"
+ *       was kept for compatibility with a previous BGE-M3 self-hosted endpoint.
+ *       The current production embedding is OpenAI text-embedding-3-small —
+ *       this script is retained only for offline/local reindex experiments.
  */
 
 import 'dotenv/config';

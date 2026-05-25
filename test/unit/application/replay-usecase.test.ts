@@ -55,7 +55,7 @@ function makeReplayUseCaseWithVersions(searchUseCase: SearchUseCase): ReplayUseC
   return new ReplayUseCase({
     searchUseCase,
     snapshotVersions: {
-      modelVersions: { embedding: 'bge-m3-v1.2' },
+      modelVersions: { embedding: 'text-embedding-3-small-v1.2' },
       indexVersions: { wine_content: '2026-04-01' },
       featureFlags: {},
     },
@@ -85,7 +85,7 @@ describe('ReplayUseCase', () => {
       const inner = makeSearchUseCase();
       const useCase = makeReplayUseCaseWithVersions(inner);
       const requestSnapshot = buildDecisionSnapshotFromRuntimeVersions({
-        modelVersions: { embedding: 'bge-m3-v1.2' },
+        modelVersions: { embedding: 'text-embedding-3-small-v1.2' },
         indexVersions: { wine_content: '2026-04-01' },
       });
       const result = await useCase.execute(makeRequest(requestSnapshot), 'req-001b');
@@ -211,7 +211,7 @@ describe('ReplayUseCase', () => {
       const useCase = makeReplayUseCase(inner);
       const request = makeRequest({
         ...VALID_SNAPSHOT,
-        model_versions: { embedding: 'bge-m3-v1.2' },
+        model_versions: { embedding: 'text-embedding-3-small-v1.2' },
       });
       await expect(useCase.execute(request, 'req-005')).rejects.toMatchObject({
         code: 'SNAPSHOT_MISMATCH',

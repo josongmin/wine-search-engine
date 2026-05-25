@@ -2,7 +2,7 @@ import {
   buildAgentQueryExecutionContract,
   isExactMetadataEntityLookupCandidate,
   isSpecificSkuLikeQuery,
-} from '../agent/agent-query-execution-contract.js';
+} from './query-execution-contract.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { stripExactEntityLookupSuffix } from '../../domain/query/service/exact-entity-metadata-signals.js';
 import { extractAllPairingConstraints, type PairingTag } from '../../domain/query/service/pairing-extractor.js';

@@ -1,8 +1,8 @@
 /**
  * Port (driven side) for generating text embeddings.
  *
- * Implementations may target OpenAI, BGE-M3, or any embedding model
- * that produces fixed-dimension dense vectors.
+ * Implementations may target any embedding model that produces
+ * fixed-dimension dense vectors (current adapter: OpenAI text-embedding-3-small).
  */
 export interface EmbeddingServicePort {
   /**

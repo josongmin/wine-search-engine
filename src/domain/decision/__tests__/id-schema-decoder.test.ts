@@ -12,7 +12,7 @@ import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 
 function makeSnapshot(): DecisionSnapshot {
   return {
-    model_versions: { embedding: 'bge-m3' },
+    model_versions: { embedding: 'text-embedding-3-small' },
     index_versions: { wine_content: '2026-04-07' },
     policy_rule_version: 'policy-v1',
     threshold_profile_id: 'default-v2',

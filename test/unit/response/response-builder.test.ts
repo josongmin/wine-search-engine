@@ -15,7 +15,7 @@ import { createEntityId } from '../../../src/domain/shared/types/index.js';
 
 function makeDecisionSnapshot(): DecisionSnapshot {
   return {
-    model_versions: { embedding: 'bge-m3-v1' },
+    model_versions: { embedding: 'text-embedding-3-small-v1' },
     index_versions: { wine_content: '2026-04-01' },
     policy_rule_version: '1.0.0',
     threshold_profile_id: 'default-v1',

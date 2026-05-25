@@ -203,7 +203,7 @@ describe('Snapshot field mismatch (RFC-015)', () => {
     ['policy_rule_version mismatch', { ...MATCHING_SNAPSHOT, policy_rule_version: '9.9.9' }],
     ['threshold_profile_id mismatch', { ...MATCHING_SNAPSHOT, threshold_profile_id: 'custom-profile' }],
     ['planner_version mismatch', { ...MATCHING_SNAPSHOT, planner_version: '2.0.0' }],
-    ['model_versions mismatch', { ...MATCHING_SNAPSHOT, model_versions: { embedding: 'bge-m3-v2' } }],
+    ['model_versions mismatch', { ...MATCHING_SNAPSHOT, model_versions: { embedding: 'text-embedding-3-small-v2' } }],
     ['feature_flags mismatch (extra flag)', { ...MATCHING_SNAPSHOT, feature_flags: { experimental: true } }],
   ])('%s → 409 SNAPSHOT_MISMATCH', async (_label, decision_snapshot) => {
     const res = await post('/v1/search/replay', {

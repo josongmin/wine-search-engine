@@ -91,7 +91,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -114,7 +114,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -138,7 +138,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -161,7 +161,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -185,7 +185,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -215,7 +215,7 @@ describe('CandidatePoolService degradation observer', () => {
       embeddingService,
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -240,7 +240,7 @@ describe('CandidatePoolService degradation observer', () => {
       embeddingService,
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -274,7 +274,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );
@@ -322,7 +322,7 @@ describe('CandidatePoolService degradation observer', () => {
       createEmbeddingService(),
       new FusionService(),
       undefined,
-      'bge-m3',
+      'text-embedding-3-small',
       false,
       observer,
     );

@@ -4,7 +4,7 @@
  * and feeds RetrievalDocument records to Vespa.
  *
  * Handles:
- * - BGE-M3 instruction prefix (document side: no prefix)
+ * - OpenAI text-embedding-3-small (1024 dims via truncation; document side: no instruction prefix)
  * - Batch embedding generation
  * - Deterministic entity_id → Vespa upsert (idempotent)
  * - Real embedding only (fail closed; no deterministic fallback)
@@ -473,8 +473,8 @@ export function deterministicEmbedding(
  * invalidates the reuse cache whenever the recipe changes (bump `version`
  * in the JSON to force a corpus-wide re-embed).
  *
- * BGE-M3 document side: NO instruction prefix (query side adds prefix at
- * search time).
+ * Document side: NO instruction prefix (the OpenAI text-embedding-3-small
+ * adapter is symmetric — neither side prepends an instruction).
  */
 export function buildEmbedText(rec: EnrichedSilverRecord): string {
   const recipe = getEmbeddingRecipe();

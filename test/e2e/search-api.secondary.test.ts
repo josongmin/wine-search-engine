@@ -417,7 +417,7 @@ describe('POST /v1/search/replay', () => {
 
   it('mismatched snapshot returns 409 with SNAPSHOT_MISMATCH error', async () => {
     const mismatchedSnapshot = makeReplaySnapshot({
-      model_versions: { embedding: 'bge-m3-v2.0' },
+      model_versions: { embedding: 'text-embedding-3-small-v2.0' },
       policy_rule_version: '9.9.9',
       threshold_profile_id: 'custom',
       planner_version: '2.0.0',

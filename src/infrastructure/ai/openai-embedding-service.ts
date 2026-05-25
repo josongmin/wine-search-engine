@@ -23,7 +23,7 @@ import {
   type OpenAiKeySlot,
 } from './openai-key-pool.js';
 
-/** Default vector width for BGE-M3 / Vespa ANN field alignment. */
+/** Default vector width for the Vespa ANN field (matches EMBEDDING_DIMENSION SSoT). */
 const OPENAI_EMBEDDING_DEFAULT_DIMENSIONS = 1024;
 /** Truncate HTTP error bodies in thrown messages. */
 const OPENAI_EMBEDDING_HTTP_ERROR_PREVIEW_CHARS = 200;
@@ -101,7 +101,7 @@ interface OpenAiEmbeddingServiceOptions {
   readonly apiKeys?: readonly string[] | undefined;
   readonly model: string;
   readonly httpTimeoutMs: number;
-  /** Requested embedding dimension. Defaults to 1024 (BGE-M3 / Vespa schema). */
+  /** Requested embedding dimension. Defaults to 1024 to match Vespa schema (EMBEDDING_DIMENSION SSoT). */
   readonly dimensions?: number;
 }
 

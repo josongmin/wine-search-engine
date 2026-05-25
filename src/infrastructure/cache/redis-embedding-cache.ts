@@ -31,7 +31,7 @@ const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
  * Replaces the manual isArray + per-element loop validation that was previously
  * inlined in the get() method.
  *
- * Upper bound: 4096 dims covers all production models (bge-m3 = 1024, text-embedding-3-large = 3072).
+ * Upper bound: 4096 dims covers production OpenAI models (text-embedding-3-small at 1024 by truncation, text-embedding-3-large at 3072).
  */
 const MAX_EMBEDDING_DIMENSIONS = 4096;
 const EmbeddingVectorSchema = z.array(z.number().finite()).min(1).max(MAX_EMBEDDING_DIMENSIONS);
@@ -50,7 +50,7 @@ const EMBEDDING_STATS: GetValidatedStatsOptions = {
  * Redis embedding cache: Store dense vectors efficiently.
  *
  * Storage strategy:
- * - Key: Deterministic Redis key from EmbeddingCacheKey (e.g., "embedding:bge-m3:abc123")
+ * - Key: Deterministic Redis key from EmbeddingCacheKey (e.g., "embedding:text-embedding-3-small:abc123")
  * - Value: JSON-serialized Float32 array
  * - TTL: 7200s (embeddings very stable, only change on model upgrade)
  */

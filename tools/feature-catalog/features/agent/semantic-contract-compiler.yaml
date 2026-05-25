@@ -30,7 +30,7 @@ surfaces:
   - "Internal (pre-loop in react-orchestrator)"
 
 key_files:
-  - src/application/agent/agent-query-execution-contract.ts
+  - src/application/search/query-execution-contract.ts
 
 tests:
   regression:

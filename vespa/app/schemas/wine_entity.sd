@@ -309,9 +309,10 @@ schema wine_entity {
     }
 
     # -------------------------------------------------------------------------
-    # Dense embedding — 1024-dim float tensor (BGE-M3), HNSW ANN retrieval.
+    # Dense embedding — 1024-dim float tensor (OpenAI text-embedding-3-small,
+    # truncated from 1536), HNSW ANN retrieval.
     #
-    # HNSW parameters (BGE-M3 / BEIR validated):
+    # HNSW parameters (BEIR validated):
     #   max-links-per-node: 32   — M=32, optimal recall/latency trade-off
     #   neighbors-to-explore-at-insert: 400 — ef_construction, high-quality graph
     #
