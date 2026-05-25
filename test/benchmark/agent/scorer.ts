@@ -28,7 +28,6 @@
 
 import type {
   AgentBenchmarkScenario,
-  ExactLookupExpectation,
   ScenarioExpectation,
   TerminationReason,
 } from './scenario.js';
@@ -67,6 +66,12 @@ import {
   buildContextEvidenceRecords,
   normalizeEvidenceText,
 } from './scorer-evidence-utils.js';
+import {
+  normalizeExactLookupSurface,
+  collectObservedExactLookupValues,
+  buildExactLookupNeedles,
+  formatObservedExactLookupSummary,
+} from './scorer-exact-lookup-utils.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -756,51 +761,9 @@ type ContextRelevanceCheck = {
 // ./scorer-evidence-utils.ts during the 2026-05-25 decomposition. Imported
 // above; consumed by ≥6 per-dim scoring sites across this file.
 
-function normalizeExactLookupSurface(
-  value: string,
-  collapseWhitespace: boolean,
-): string {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/gu, '')
-    .normalize('NFKC');
-  return collapseWhitespace
-    ? normalized.replace(/\s+/gu, '')
-    : normalized.replace(/\s+/gu, ' ');
-}
-
-function collectObservedExactLookupValues(records: readonly EvidenceRecord[]): {
-  readonly entityIds: readonly string[];
-  readonly canonicalLabels: readonly string[];
-} {
-  const entityIds = new Set<string>();
-  const canonicalLabels = new Set<string>();
-  for (const record of records) {
-    const entityId = record['entity_id'];
-    if (typeof entityId === 'string' && entityId.trim().length > 0) {
-      entityIds.add(entityId.trim());
-    }
-    const canonicalLabel = record['canonical_label'];
-    if (typeof canonicalLabel === 'string' && canonicalLabel.trim().length > 0) {
-      canonicalLabels.add(canonicalLabel.trim());
-    }
-  }
-  return {
-    entityIds: [...entityIds],
-    canonicalLabels: [...canonicalLabels],
-  };
-}
-
-function buildExactLookupNeedles(exactLookup: ExactLookupExpectation): readonly string[] {
-  const rawNeedles = [
-    exactLookup.canonicalKo,
-    exactLookup.canonicalEn,
-    ...(exactLookup.acceptedCanonicalAliases ?? []),
-  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-  return [...new Set(rawNeedles)];
-}
+// normalizeExactLookupSurface / collectObservedExactLookupValues /
+// buildExactLookupNeedles moved to ./scorer-exact-lookup-utils.ts during
+// the 2026-05-25 decomposition. Imported above.
 
 function observedCanonicalIncludesNeedle(
   canonicalLabels: readonly string[],
@@ -834,17 +797,7 @@ function observedForbiddenCanonicalHit(
   });
 }
 
-function formatObservedExactLookupSummary(
-  observed: { readonly entityIds: readonly string[]; readonly canonicalLabels: readonly string[] },
-): string {
-  const entitySummary = observed.entityIds.length > 0
-    ? observed.entityIds.slice(0, 5).join(', ')
-    : 'none';
-  const labelSummary = observed.canonicalLabels.length > 0
-    ? observed.canonicalLabels.slice(0, 5).join(' | ')
-    : 'none';
-  return `entity_ids=${entitySummary}; canonical_labels=${labelSummary}`;
-}
+// formatObservedExactLookupSummary moved to ./scorer-exact-lookup-utils.ts.
 
 interface ExactLookupScore {
   readonly exactLookupHit: number | null;
