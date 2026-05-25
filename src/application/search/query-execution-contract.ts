@@ -47,7 +47,6 @@ interface AgentVerificationRequirement {
 }
 
 const QUERY_NORMALIZER = new QueryNormalizer();
-const EXACT_METADATA_ALLOWED_SEARCH_KEYS = new Set(['query', 'limit', 'retrieval_mode']);
 
 /**
  * Numeric defaults applied to {@link AgentSearchDefaults} when the query
@@ -849,36 +848,6 @@ function isSpecificSkuLikeNormalized(query: string): boolean {
   );
 }
 
-function getStructuredSearchFilterKeys(input: Record<string, unknown>): readonly string[] {
-  return Object.entries(input)
-    .filter(([key, value]) =>
-      !EXACT_METADATA_ALLOWED_SEARCH_KEYS.has(key) &&
-      value !== undefined &&
-      value !== null,
-    )
-    .map(([key]) => key);
-}
 
-export function normalizeExactMetadataSearchInput(
-  input: Record<string, unknown>,
-  preserveKeys: readonly string[] = [],
-): { readonly effectiveInput: Record<string, unknown>; readonly strippedFilterKeys: readonly string[] } {
-  const allowedKeys = new Set([...EXACT_METADATA_ALLOWED_SEARCH_KEYS, ...preserveKeys]);
-  const strippedFilterKeys = getStructuredSearchFilterKeys(input);
-  if (strippedFilterKeys.length === 0) {
-    return { effectiveInput: input, strippedFilterKeys };
-  }
-
-  const filteredEntries = Object.entries(input).filter(
-    ([key, value]) =>
-      allowedKeys.has(key) &&
-      value !== undefined &&
-      value !== null,
-  );
-  return {
-    effectiveInput: Object.fromEntries(filteredEntries),
-    strippedFilterKeys,
-  };
-}
 
 

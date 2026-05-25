@@ -142,7 +142,6 @@
     "docker:db:wait": "docker compose -f docker-compose.yml exec -T postgres pg_isready -U wine -d wine_engine",
     "bootstrap:smoke": "bash scripts/bootstrap-smoke.sh",
     "vivino:bronze": "tsx tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts",
-    "finetuning:prepare": "tsx scripts/fine-tune/prepare-finetuning-data.ts",
     "etl:transliteration": "tsx scripts/etl/generate-transliteration-aliases.ts",
     "etl:silver": "tsx scripts/etl/vivino-to-silver.ts",
     "etl:aliases": "tsx scripts/etl/generate-aliases.ts",

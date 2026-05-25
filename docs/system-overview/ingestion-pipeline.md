@@ -354,25 +354,14 @@ surface is normalization, noise stripping, and contamination detection.
 
 ---
 
-## 11. Fine-tuning·학습 데이터 (인덱스 인입과 인접)
+## 11. 임베딩 재색인·LTR 보조 (`scripts/ltr/`)
 
-| 경로 | 비고 |
-|------|------|
-| `scripts/fine-tune/prepare-finetuning-data.ts` | `pnpm run finetuning:prepare` |
-| `scripts/fine-tune/bge-m3-finetune.py` | Python 보조 |
-| `scripts/embedding/finetune-bge-m3.ts` | 실험용 엔트리 |
-
----
-
-## 12. 임베딩 재색인·LTR 보조 (`scripts/ltr/`)
+> **참고**: BGE-M3 self-host fine-tuning 인프라 (scripts/fine-tune/, ltr/finetune_*, distill_*) 는 2026-05-25 라운드에서 제거됨. 현재 production embedding 은 OpenAI text-embedding-3-small API.
 
 | 파일 | 역할 |
 |------|------|
-| `generate-triplets.ts` | 골든 → `data/triplets-train.jsonl` |
-| `reindex-embeddings.ts` | Vespa 문서 벡터만 갱신 |
+| `reindex-embeddings-openai.ts` | OpenAI API 로 Vespa 문서 벡터 갱신 (현역) |
 | `validate-embedding.ts` | Recall/NDCG 회귀 검증 |
-| `finetune_embedding.py` | `python scripts/ltr/finetune_embedding.py` |
-| `distill_cross_encoder.py` | `python scripts/ltr/distill_cross_encoder.py` |
 
 배치 `index-to-vespa`와 달리 **이미 채워진 인덱스**를 전제로 한 **운영·실험** 경로.
 
