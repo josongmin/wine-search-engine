@@ -29,7 +29,7 @@ tests:
 
 depends_on:
   - retrieval.hybrid-search
-  - infra.vespa-cloud
+  - infra.vespa-self-hosted
 
 related_rfcs:
   - docs/RFC-017.md

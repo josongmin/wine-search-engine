@@ -9,10 +9,10 @@
  * share the new active snapshot id, so prior snapshots accumulate
  * indefinitely.
  *
- * Required env (mTLS to Vespa Cloud):
- *   VESPA_URL              — e.g. https://bf75....aws-us-east-1c.dev.z.vespa-app.cloud
- *   VESPA_CERT_PATH        — local PEM cert path
- *   VESPA_KEY_PATH         — local PEM key path
+ * Required env (self-hosted Vespa):
+ *   VESPA_URL              — http://<config-or-container-host>:8080 for the
+ *                            self-hosted cluster. mTLS cert/key are NOT
+ *                            required for the self-hosted topology.
  *   DATABASE_URL           — wine-engine-pg DSN (has `active_search_snapshot`)
  *
  * Usage (dry-run first, then real):
@@ -26,6 +26,8 @@
  *   --page-size N             YQL enumeration window (default 400, max 10000)
  *   --limit N                 Cap total deletes (safety brake)
  *   --exclude-snapshot <id>   Additional snapshot id to keep (repeatable)
+ *   --no-protect-previous     Disable previous-snapshot auto-protect (NOT recommended)
+ *   --min-active-tagged N     Min active-tagged docs required before delete (default 1)
  *   --progress-interval N     Print progress every N deletes (default 500)
  */
 

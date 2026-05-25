@@ -39,12 +39,10 @@ import {
   ensurePreparedRollbackFeedAvailable,
   collectCriticalWineTypeCoverageFromEntities,
   collectCriticalWineTypeCoverageFromPreparedFeed,
-  deployVespaApplicationPackage,
   diffSnapshotVespaDocIds,
   loadPublishedRuntimeState,
   resolveAllowMissingLtrForPublish,
   resolvePublishFixtureRepoRoot,
-  resolveVespaApplicationPackagePath,
   FIXTURE_REPO_REQUIRED_ERROR,
 } from '../../../scripts/etl/publish-search-snapshot.js';
 import {
@@ -203,59 +201,25 @@ describe('assertPreparedRollbackFeedAvailable', () => {
   });
 });
 
-describe('deployVespaApplicationPackage', () => {
-  it('deploys and waits for the Vespa application package before indexing', async () => {
-    const dir = await makeTempDir();
-    const applicationPackagePath = path.join(dir, 'vespa', 'app');
-    await fs.mkdir(applicationPackagePath, { recursive: true });
-
-    const calls: Array<{ command: string; args: readonly string[]; cwd?: string | undefined }> = [];
-    await deployVespaApplicationPackage({
-      cwd: dir,
-      waitSeconds: 42,
-      runCommand: async (command, args, _errorLabel, options) => {
-        calls.push({ command, args: [...args], cwd: options?.cwd });
-      },
-    });
-
-    expect(calls).toEqual([
-      {
-        command: 'vespa',
-        args: ['deploy', applicationPackagePath, '--wait', '42'],
-        cwd: dir,
-      },
-      {
-        command: 'vespa',
-        args: ['status', '--wait', '42'],
-        cwd: dir,
-      },
-    ]);
-  });
-
-  it('fails when the Vespa application package path is missing', async () => {
-    const dir = await makeTempDir();
-    await expect(
-      deployVespaApplicationPackage({
-        applicationPackagePath: path.join(dir, 'missing', 'vespa', 'app'),
-        runCommand: vi.fn(),
-      }),
-    ).rejects.toThrow(/ENOENT|no such file or directory/i);
-  });
-
-  it('resolves the application package path from the workspace root', () => {
-    expect(resolveVespaApplicationPackagePath('/tmp/worktree')).toBe('/tmp/worktree/vespa/app');
-  });
-
-  it('keeps publish ordered as deploy first, index second', async () => {
+describe('publish flow does NOT shell out to `vespa` CLI', () => {
+  // 2026-05-25 regression — schema deploy via `vespa` CLI was removed
+  // because the CLI defaults to the Vespa Cloud target on developer
+  // machines, causing publish to silently hit cloud even when the data
+  // plane points at self-hosted EC2. Self-hosted is the only supported
+  // topology now; schema deploy is a separate operator step against
+  // the config server (`POST :19071/application/v2/tenant/default/
+  // prepareandactivate`).
+  it('publish source file has no `vespa deploy` CLI invocation', async () => {
     const scriptPath = fileURLToPath(
       new URL('../../../scripts/etl/publish-search-snapshot.ts', import.meta.url),
     );
     const source = await fs.readFile(scriptPath, 'utf8');
-    const deployIndex = source.indexOf('await deployVespaApplicationPackage();');
-    const indexerIndex = source.indexOf("console.log('📥 Indexing document plane into Vespa');");
-
-    expect(deployIndex).toBeGreaterThanOrEqual(0);
-    expect(indexerIndex).toBeGreaterThan(deployIndex);
+    // Allow the historical reference in the block comment that explains
+    // why the function was removed; reject any actual execution path
+    // (await + function call, spawn-style arg array).
+    expect(source).not.toMatch(/await\s+deployVespaApplicationPackage\s*\(/);
+    expect(source).not.toMatch(/['"]vespa['"]\s*,\s*\[\s*['"]deploy['"]/);
+    expect(source).not.toMatch(/['"]vespa['"]\s*,\s*\[\s*['"]status['"]/);
   });
 
   it('reconciles target-snapshot stale Vespa docs before readiness', async () => {

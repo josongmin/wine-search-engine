@@ -35,7 +35,7 @@ rationale 같은 메타 텍스트만 손볼 때는 bump 금지 (불필요한 임
    pnpm tsx --env-file=.env scripts/etl/index-to-vespa.ts --input data/silver-trackc.ndjson
    ```
    기존 prepared feed artifact가 있으면 `semantic_summary` 불일치로 자동 cache miss → 비용은 발생하지만 강제 옵션 없이도 재생성됩니다.
-5. Vespa schema 변경(있을 경우 동봉된 `wine_aware` rank profile fusion 등): `vespa deploy vespa/app/` 후
+5. Vespa schema 변경(있을 경우 동봉된 `wine_aware` rank profile fusion 등): self-hosted config-server REST 로 application package 업로드 (예: `cd vespa/app && zip -r /tmp/app.zip . && curl -sS -X POST --data-binary @/tmp/app.zip -H 'Content-Type: application/zip' http://<config-server>:19071/application/v2/tenant/default/prepareandactivate`). `vespa` CLI 는 사용자 머신에서 default cloud target 으로 가는 footgun 이 있어 self-hosted 토폴로지에선 사용하지 않는다.
 6. 수동 smoke probe:
    ```bash
    pnpm tsx tools/vespa-probe/probe-wine-aware-fusion.mts

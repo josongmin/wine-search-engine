@@ -27,7 +27,7 @@ tests:
 
 depends_on:
   - etl.track-c-enrichment
-  - infra.vespa-cloud
+  - infra.vespa-self-hosted
 
 related_rfcs: []
 

@@ -37,7 +37,7 @@ tests:
 
 depends_on:
   - etl.search-snapshot-build
-  - infra.vespa-cloud
+  - infra.vespa-self-hosted
 
 related_rfcs: []
 

@@ -39,11 +39,17 @@ Task 5 and Task 6 improve wine entity matching and embedding quality through sch
 
 ### Deployment
 
-After updating `wine_entity.sd`, Vespa must be re-deployed:
+After updating `wine_entity.sd`, the schema must be re-deployed to the
+self-hosted Vespa cluster via the config-server REST API (the `vespa` CLI
+is not used here — its default target on developer machines is Vespa
+Cloud, which silently misdirects ops away from the self-hosted cluster):
 
 ```bash
-# Deploy to Vespa
-vespa deploy vespa/app
+# Build the application package zip and POST it to the config server.
+cd vespa/app && zip -r /tmp/app.zip . \
+  && curl -sS -X POST --data-binary @/tmp/app.zip \
+       -H 'Content-Type: application/zip' \
+       http://<config-server>:19071/application/v2/tenant/default/prepareandactivate
 
 # Re-index wine documents with new fields
 pnpm run ingest  # Or appropriate re-indexing command

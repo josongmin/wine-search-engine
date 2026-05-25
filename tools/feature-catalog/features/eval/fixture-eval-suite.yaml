@@ -38,7 +38,7 @@ tests:
 
 depends_on:
   - infra.anthropic-chat-llm
-  - infra.vespa-cloud
+  - infra.vespa-self-hosted
 
 related_rfcs: []
 

@@ -68,6 +68,11 @@ interface Args {
   readonly runtimeNlMappingsPath: string;
   readonly allowMissingLtr: boolean;
   readonly skipIndex: boolean;
+  /**
+   * Skip the `vespa deploy` CLI step. Use when the application package
+   * is already deployed to the target cluster (self-hosted EC2 path).
+   */
+  readonly skipVespaDeploy: boolean;
   readonly fixtureRepoRoot?: string | undefined;
 }
 
@@ -75,13 +80,6 @@ interface CommandRunnerOptions {
   readonly cwd?: string | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
 }
-
-type CommandRunner = (
-  command: string,
-  args: readonly string[],
-  errorLabel: string,
-  options?: CommandRunnerOptions,
-) => Promise<void>;
 
 export function resolveAllowMissingLtrForPublish(
   cliAllowMissingLtr: boolean,
@@ -154,6 +152,7 @@ function parseArgs(argv: readonly string[]): Args {
     runtimeNlMappingsPath,
     allowMissingLtr,
     skipIndex,
+    skipVespaDeploy,
     fixtureRepoRoot,
   };
 }
@@ -214,38 +213,16 @@ async function runIndexer(
   );
 }
 
-const DEFAULT_VESPA_DEPLOY_WAIT_SECONDS = 600;
-
-export function resolveVespaApplicationPackagePath(cwd: string = process.cwd()): string {
-  return path.resolve(cwd, 'vespa/app');
-}
-
-export async function deployVespaApplicationPackage(args: {
-  readonly applicationPackagePath?: string | undefined;
-  readonly waitSeconds?: number | undefined;
-  readonly cwd?: string | undefined;
-  readonly runCommand?: CommandRunner | undefined;
-} = {}): Promise<void> {
-  const applicationPackagePath =
-    args.applicationPackagePath
-    ?? resolveVespaApplicationPackagePath(args.cwd);
-  await fs.access(applicationPackagePath);
-
-  const waitSeconds = args.waitSeconds ?? DEFAULT_VESPA_DEPLOY_WAIT_SECONDS;
-  const execute = args.runCommand ?? runCommand;
-  await execute(
-    'vespa',
-    ['deploy', applicationPackagePath, '--wait', String(waitSeconds)],
-    'vespa deploy',
-    { cwd: args.cwd },
-  );
-  await execute(
-    'vespa',
-    ['status', '--wait', String(waitSeconds)],
-    'vespa status',
-    { cwd: args.cwd },
-  );
-}
+// Vespa application-package deploy is OUT OF SCOPE for this script as of
+// 2026-05-25 (self-hosted-only topology). The schema / services.xml /
+// rank-profiles live in `vespa/app/` and are deployed to the config server
+// (port 19071) via direct REST POST or manual ops — NOT through this
+// publish flow. The previous `deployVespaApplicationPackage` helper
+// shelled out to the `vespa` CLI whose default target on developer
+// machines may route to a hosted environment rather than the configured
+// self-hosted cluster. Removed entirely to prevent that footgun. Schema
+// deploy is now an operator step run separately against the
+// self-hosted config server.
 
 function _buildStagingPath(activePath: string, snapshotId: string): string {
   const ext = path.extname(activePath);
@@ -1161,8 +1138,12 @@ async function run(): Promise<void> {
   const publishState = createSnapshotPublishStateMachine();
   try {
     try {
-      console.log('☁️ Activating Vespa application package before document indexing');
-      await deployVespaApplicationPackage();
+      // Schema / application-package deploy is OUT OF SCOPE for this
+      // script. Self-hosted Vespa schemas are deployed separately against
+      // the config server (typically `POST :19071/application/v2/tenant/
+      // default/prepareandactivate` with the `vespa/app/` zip). Keeping
+      // it out of this path prevents the `vespa` CLI default-cloud-target
+      // footgun that wiped the corpus on 2026-05-25.
       console.log('🧾 Materializing exact Vespa replay artifact');
       const manifestWithExactFeed = await materializeExactVespaFeedForSnapshot({
         manifest: built.manifest,

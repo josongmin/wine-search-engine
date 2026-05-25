@@ -1,0 +1,53 @@
+id: infra.vespa-self-hosted
+name: Vespa Self-Hosted HTTP Client
+category: infra
+summary: |
+  Vespa search / document API 저수준 HTTP client. self-hosted EC2 토폴로지,
+  native undici fetch, channel별 timeout (search 30s / doc 15s / get 10s),
+  retry + response Zod schema 검증.
+
+maturity: 4
+maturity_rationale: |
+  장기 안정 운영, minimal churn. comprehensive error recovery + channel-별
+  timeout + schema validation으로 malformed hit 캐치. 자체 호스팅 EC2
+  (vespa-wine-prod @ 3.36.134.165) 토폴로지 부담: SG ingress 화이트리스트
+  (client ISP IP churn 시 connect timeout), schema deploy 외부 운영
+  (config-server REST POST), 자체 SLA.
+
+status: active
+since: 2025-08
+last_reviewed: 2026-05-25
+owner: core
+
+surfaces:
+  - "Internal (search + document API)"
+
+key_files:
+  - src/infrastructure/vespa/vespa-client.ts
+  - src/infrastructure/vespa/vespa-search-index.ts
+  - src/infrastructure/vespa/mapping.ts
+
+tests: {}
+
+depends_on: []
+
+related_rfcs: []
+
+known_limitations:
+  - "Single-node EC2 — HA / failover 없음"
+  - "Schema deploy 자동화 없음 — operator가 별도 config-server REST POST"
+  - "Client SG ingress 수동 갱신 — ISP IP churn 시 connect timeout"
+  - "High QPS (>1K/s) connection pooling tuning 미진행"
+  - "Client-level query result caching 없음"
+
+next_steps:
+  - "Schema deploy 자동화 (config-server REST helper script)"
+  - "EC2 instance SSM agent enable — SSH 의존 없는 ops 가능하게"
+  - "10K QPS 대비 connection limit 튜닝"
+  - "Client-level result cache"
+
+tags:
+  - infrastructure
+  - search-backend
+  - self-hosted
+  - stable
