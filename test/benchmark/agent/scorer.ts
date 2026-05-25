@@ -59,6 +59,8 @@ import {
   extractVintageYears,
   extractProperNouns,
 } from './scorer-text-extractors.js';
+import { scoreCostEfficiency } from './scorer-cost-efficiency.js';
+import { emitKoreanClrDiagnostic } from './scorer-korean-clr.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -2826,144 +2828,6 @@ function scoreTermination(
   return ok ? 1 : 0;
 }
 
-/**
- * Cost dimension: max-overshoot model. Replaces the prior sqrt(dur×tok) which
- * collapsed cost to 0 when one term was 0. The new model penalises only the
- * worst-overshooting axis, so a 2x latency overshoot with perfect tokens
- * gets cost = 1 - 1.0 = 0 (was sqrt(0×1) = 0 — same result for extreme cases)
- * but a 1.5x latency overshoot with perfect tokens now gets cost = 0.5
- * (was sqrt(0.5×1) ≈ 0.71 — actually MORE punitive arithmetic, but FAIR
- * because we no longer multiply two independent overruns).
- */
-function scoreCostEfficiency(
-  exp: ScenarioExpectation,
-  execution: ScenarioExecution,
-  diagnostics: Diagnostic[],
-): number {
-  // Defaults raised post-audit. Observed real-mode p95 ~ 12s for happy paths
-  // and 25s for the comparison route — a 15s default was tighter than p95
-  // and falsely penalised legitimate runs. 25s is ~p99 of healthy execution
-  // and matches "user starts wondering if it's broken" UX threshold.
-  const DEFAULT_MAX_DURATION_MS = 25_000;
-  const DEFAULT_MAX_TOTAL_TOKENS = 12_000;
-  /** Overshoot ratio threshold for severe cost diagnostics. 1.0 means >2x budget.
-   *  v4: severity is always 'warn', never 'critical'. Cost overshoots are engineering
-   *  failures, not correctness/security failures. Using 'critical' caused the
-   *  criticalFailure short-circuit to collapse overall to 0 for a 2x token overshoot,
-   *  which is disproportionate — the cost dimension already scores 0 at that point,
-   *  penalizing via the geometric mean without needing a hard collapse. */
-  const SEVERE_OVERSHOOT_RATIO = 1.0;
-
-  const maxDuration = exp.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
-  const maxTokens = exp.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS;
-  const totalTokens = execution.totalTokens.input + execution.totalTokens.output;
-
-  // S1.1: score latency against agent WORK time (wall minus throttle backoff),
-  // not raw orchestrator duration. `agentWorkMs` is omitted by legacy callers
-  // -> fall back to `totalDurationMs`. `!= null` (not truthiness) so a
-  // legitimate agentWorkMs of 0 is honored rather than silently replaced
-  // (CLAUDE.md rule 26).
-  const effectiveDurationMs = execution.agentWorkMs != null
-    ? execution.agentWorkMs
-    : execution.totalDurationMs;
-
-  let durOvershoot = 0;
-  if (Number.isFinite(maxDuration) && effectiveDurationMs > maxDuration) {
-    durOvershoot = (effectiveDurationMs - maxDuration) / maxDuration;
-    diagnostics.push({
-      dim: 'costEfficiency',
-      severity: 'warn',
-      code: durOvershoot >= SEVERE_OVERSHOOT_RATIO ? 'LATENCY_BUDGET_BLOWN' : 'LATENCY_BUDGET_EXCEEDED',
-      message: `duration ${effectiveDurationMs}ms > budget ${maxDuration}ms`,
-      observed: effectiveDurationMs,
-      expected: maxDuration,
-    });
-  }
-
-  let tokOvershoot = 0;
-  if (Number.isFinite(maxTokens) && totalTokens > maxTokens) {
-    tokOvershoot = (totalTokens - maxTokens) / maxTokens;
-    diagnostics.push({
-      dim: 'costEfficiency',
-      severity: 'warn',
-      code: tokOvershoot >= SEVERE_OVERSHOOT_RATIO ? 'TOKEN_BUDGET_BLOWN' : 'TOKEN_BUDGET_EXCEEDED',
-      message: `tokens ${totalTokens} > budget ${maxTokens}`,
-      observed: totalTokens,
-      expected: maxTokens,
-    });
-  }
-
-  // max-overshoot model: penalty proportional to the worse-overshooting axis,
-  // not the geometric product of independent overshoots.
-  const worstOvershoot = Math.max(durOvershoot, tokOvershoot);
-  return Math.max(0, 1 - worstOvershoot);
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Korean Correct Language Rate (CLR) monitoring
-// ─────────────────────────────────────────────────────────────────────
-
-/**
- * Fraction of characters in `text` that are Hangul (Korean syllable blocks U+AC00–U+D7A3
- * plus Hangul Jamo U+1100–U+11FF and Compatibility Jamo U+3130–U+318F).
- * Used to decide whether a query / answer is "Korean-dominant".
- */
-function hangulCharFraction(text: string): number {
-  if (text.length === 0) return 0;
-  let count = 0;
-  for (const ch of text) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (
-      (cp >= 0xAC00 && cp <= 0xD7A3) || // syllable blocks
-      (cp >= 0x1100 && cp <= 0x11FF) || // Hangul Jamo
-      (cp >= 0x3130 && cp <= 0x318F)    // Compatibility Jamo
-    ) {
-      count++;
-    }
-  }
-  return count / text.length;
-}
-
-/**
- * Minimum Hangul fraction in a query to classify it as "Korean" for CLR purposes.
- * 0.20 = at least 1 in 5 chars is Hangul — a short mixed Korean/English query like
- * "보르도 Cabernet 추천" (26 chars, 8 Hangul ≈ 30%) passes the threshold.
- */
-const KOREAN_QUERY_HANGUL_THRESHOLD = 0.20;
-
-/**
- * Minimum Hangul fraction expected in a Korean-query answer. Below this threshold
- * the agent is considered to have code-switched to English.
- * 0.10 = 1 in 10 chars is Hangul — very permissive (wine names are English proper nouns).
- * Catches severe code-switching (pure-English answer to a Korean question).
- */
-const KOREAN_ANSWER_HANGUL_THRESHOLD = 0.10;
-
-/**
- * Emits a CLR_CODE_SWITCH diagnostic when a Korean query receives an English-heavy answer.
- * Severity is always 'warn' — code-switching is a UX issue, not a correctness failure.
- * This diagnostic does NOT affect scoring (no criticalFailure, no score multiplier).
- */
-function emitKoreanClrDiagnostic(
-  query: string,
-  answer: string,
-  diagnostics: Diagnostic[],
-): void {
-  const queryHangulFraction = hangulCharFraction(query);
-  if (queryHangulFraction < KOREAN_QUERY_HANGUL_THRESHOLD) return; // not a Korean query
-
-  const answerHangulFraction = hangulCharFraction(answer);
-  if (answerHangulFraction < KOREAN_ANSWER_HANGUL_THRESHOLD) {
-    diagnostics.push({
-      dim: 'answerQuality',
-      severity: 'warn',
-      code: 'CLR_CODE_SWITCH',
-      message: `Korean query received English-heavy answer (query Hangul=${(queryHangulFraction * 100).toFixed(0)}%, answer Hangul=${(answerHangulFraction * 100).toFixed(0)}%)`,
-      observed: answerHangulFraction,
-      expected: KOREAN_ANSWER_HANGUL_THRESHOLD,
-    });
-  }
-}
 
 // Math + aggregate helpers (clamp01, renormaliseWeights, weightedGeometricMean,
 // aggregateGeoMean, aggregateTrimmedGeoMean, DIMENSION_FLOOR, NO_FLOOR_DIMS)
