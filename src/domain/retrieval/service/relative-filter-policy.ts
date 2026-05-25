@@ -11,6 +11,9 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
+import {
+  RETRIEVAL_CHANNEL_RELATIVE_FILTER
+} from '../model/retrieval-channel.js';
 
 // ---------------------------------------------------------------------------
 // Input contract
@@ -115,7 +118,7 @@ function matchesAnchorAttributes(
  * 3. Filter the pool to candidates sharing at least one attribute with the anchor,
  *    excluding the anchor itself.
  * 4. Re-label each surviving candidate's `retrievalTrace.candidateSources` to
- *    include `'relative_filter'` if not already present.
+ *    include `RETRIEVAL_CHANNEL_RELATIVE_FILTER` if not already present.
  *
  * When the anchor entity is absent from the pool (not yet resolved or not
  * retrieved), the function returns the UNFILTERED candidate list as a graceful
@@ -149,14 +152,14 @@ export function applyRelativeFilter(
       return matchesAnchorAttributes(anchorAttrs, extractAttributes(c));
     })
     .map((c) => {
-      const alreadyLabelled = c.retrievalTrace.candidateSources.includes('relative_filter');
+      const alreadyLabelled = c.retrievalTrace.candidateSources.includes(RETRIEVAL_CHANNEL_RELATIVE_FILTER);
       if (alreadyLabelled) return c;
 
       return {
         ...c,
         retrievalTrace: {
           ...c.retrievalTrace,
-          candidateSources: [...c.retrievalTrace.candidateSources, 'relative_filter'] as readonly string[],
+          candidateSources: [...c.retrievalTrace.candidateSources, RETRIEVAL_CHANNEL_RELATIVE_FILTER] as readonly string[],
         },
       };
     });

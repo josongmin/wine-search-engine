@@ -11,7 +11,17 @@
 
 import type { QueryClass } from '../../shared/types/index.js';
 import { DomainError } from '../../shared/error/domain-error.js';
-import type { RetrievalChannel } from '../model/retrieval-channel.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_BROWSE_PRODUCER,
+  RETRIEVAL_CHANNEL_BROWSE_REGION,
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_RELATIVE_FILTER,
+  RETRIEVAL_CHANNEL_SPARSE_BM25,
+  type RetrievalChannel,
+} from '../model/retrieval-channel.js';
 import { resolveChannelMix, type QueryFamily } from './channel-mix-policy.js';
 import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 
@@ -74,7 +84,7 @@ export interface RetrievalProfile {
 /** Default profile for hybrid retrieval without an anchor. */
 const HYBRID_DEFAULT: RetrievalProfile = {
   name: 'hybrid_default',
-  channelMix: ['sparse_bm25', 'dense_semantic'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC],
   sparseWeight: 0.5,
   denseWeight: 0.5,
   anchorWeight: 0,
@@ -87,7 +97,7 @@ const HYBRID_DEFAULT: RetrievalProfile = {
 /** Profile for anchor-based ("wines like X") queries. */
 const MIXED_ANCHOR: RetrievalProfile = {
   name: 'mixed_anchor',
-  channelMix: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY],
   sparseWeight: 0.3,
   denseWeight: 0.3,
   anchorWeight: 0.4,
@@ -107,7 +117,7 @@ const MIXED_ANCHOR: RetrievalProfile = {
  */
 const RECOMMENDATION_ANCHOR: RetrievalProfile = {
   name: 'recommendation_anchor',
-  channelMix: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY],
   sparseWeight: 0.3,
   denseWeight: 0.3,
   anchorWeight: 0.4,
@@ -120,7 +130,7 @@ const RECOMMENDATION_ANCHOR: RetrievalProfile = {
 /** Conservative fallback for exact / short-entity queries. */
 const EXACT_SAFE_FALLBACK: RetrievalProfile = {
   name: 'exact_safe_fallback',
-  channelMix: ['sparse_bm25', 'dense_semantic'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC],
   sparseWeight: 0.7,
   denseWeight: 0.3,
   anchorWeight: 0,
@@ -155,7 +165,7 @@ const ENTITY_ANCHOR_FIRST_FINAL_TOP_K = 50;
 
 const ENTITY_ANCHOR_FIRST: RetrievalProfile = {
   name: 'entity_anchor_first',
-  channelMix: ['anchor_similarity', 'sparse_bm25', 'dense_semantic'],
+  channelMix: [RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY, RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC],
   sparseWeight: 0.3,
   denseWeight: 0.1,
   anchorWeight: 0.6,
@@ -171,7 +181,7 @@ const ENTITY_ANCHOR_FIRST: RetrievalProfile = {
  */
 const BROWSE_DEFAULT: RetrievalProfile = {
   name: 'browse_default',
-  channelMix: ['sparse_bm25', 'dense_semantic', 'browse_producer'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_BROWSE_PRODUCER],
   sparseWeight: 0.65,
   denseWeight: 0.35,
   anchorWeight: 0,
@@ -187,7 +197,7 @@ const BROWSE_DEFAULT: RetrievalProfile = {
  */
 const REGION_BROWSE: RetrievalProfile = {
   name: 'region_browse',
-  channelMix: ['sparse_bm25', 'dense_semantic', 'browse_region'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_BROWSE_REGION],
   sparseWeight: 0.65,
   denseWeight: 0.35,
   anchorWeight: 0,
@@ -203,7 +213,7 @@ const REGION_BROWSE: RetrievalProfile = {
  */
 const COMPARE_DEFAULT: RetrievalProfile = {
   name: 'compare_default',
-  channelMix: ['sparse_bm25', 'dense_semantic', 'compare_anchor'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_COMPARE_ANCHOR],
   sparseWeight: 0.3,
   denseWeight: 0.5,
   anchorWeight: 0.2,
@@ -217,12 +227,12 @@ const COMPARE_DEFAULT: RetrievalProfile = {
  * T4.3: Profile for learned-sparse hybrid retrieval (SPLADE + BM25 + dense).
  *
  * Activates the `learned_sparse` channel alongside BM25 and dense ANN.
- * Used when `retrievalMode === 'learned_sparse'` or when the query class
+ * Used when `retrievalMode === RETRIEVAL_CHANNEL_LEARNED_SPARSE` or when the query class
  * signals deep semantic intent (e.g. `semantic_preference`).
  */
 const LEARNED_SPARSE_HYBRID: RetrievalProfile = {
   name: 'learned_sparse_hybrid',
-  channelMix: ['sparse_bm25', 'learned_sparse', 'dense_semantic'],
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_LEARNED_SPARSE, RETRIEVAL_CHANNEL_DENSE_SEMANTIC],
   sparseWeight: 0.35,
   denseWeight: 0.45,
   anchorWeight: 0,
@@ -245,8 +255,8 @@ const LEARNED_SPARSE_HYBRID: RetrievalProfile = {
  * because the post-filter provides the attribute-match signal.
  */
 const RELATIVE_FILTER: RetrievalProfile = {
-  name: 'relative_filter',
-  channelMix: ['sparse_bm25', 'relative_filter'],
+  name: RETRIEVAL_CHANNEL_RELATIVE_FILTER,
+  channelMix: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_RELATIVE_FILTER],
   sparseWeight: 1.0,
   denseWeight: 0,
   anchorWeight: 0,
@@ -398,7 +408,7 @@ export class RetrievalProfileService {
     // retrievalMode can be an ExecutionRetrievalMode string OR the internal runtime
     // value 'relative', which CandidatePoolService.resolveRuntimeRetrievalMode() emits
     // when compare_candidates + an anchor entity are both present.
-    // NOTE: 'learned_sparse' is a RetrievalChannel string, NOT a valid ExecutionRetrievalMode
+    // NOTE: RETRIEVAL_CHANNEL_LEARNED_SPARSE is a RetrievalChannel string, NOT a valid ExecutionRetrievalMode
     // or runtime mode value — LEARNED_SPARSE_HYBRID is reached only via the
     // queryClass === 'semantic_preference' branch below, or via queryFamily policy.
     if (retrievalMode !== undefined) {
@@ -489,7 +499,7 @@ export class RetrievalProfileService {
         case 'region_browse':         return REGION_BROWSE;
         case 'exact_safe_fallback':   return EXACT_SAFE_FALLBACK;
         case 'entity_anchor_first':   return ENTITY_ANCHOR_FIRST;
-        case 'relative_filter':       return RELATIVE_FILTER;
+        case RETRIEVAL_CHANNEL_RELATIVE_FILTER:       return RELATIVE_FILTER;
         case 'hybrid_default':        return HYBRID_DEFAULT;
         // No default: fall through to legacy heuristics for unrecognised profiles
       }

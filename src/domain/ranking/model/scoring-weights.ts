@@ -4,9 +4,16 @@ import type {
   QueryClass,
 } from '../../shared/types/index.js';
 import {
-  type RetrievalChannel,
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_RELATIVE_FILTER,
+  RETRIEVAL_CHANNEL_SPARSE_BM25,
   preferCanonicalRetrievalChannelLabels,
+  type RetrievalChannel
 } from '../../retrieval/model/retrieval-channel.js';
+
 import type { RetrievalObjective } from '../../retrieval/model/retrieval-objective.js';
 
 /** Redistribute mass toward anchor similarity when anchor channel active. */
@@ -618,16 +625,16 @@ export function resolveChannelAwareWeights(
   const channelSet = new Set(preferCanonicalRetrievalChannelLabels(channels));
 
   const hasAnchorChannel =
-    channelSet.has('anchor_similarity') || channelSet.has('compare_anchor');
-  const hasLearnedSparse = channelSet.has('learned_sparse');
-  const hasRelativeFilter = channelSet.has('relative_filter');
+    channelSet.has(RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY) || channelSet.has(RETRIEVAL_CHANNEL_COMPARE_ANCHOR);
+  const hasLearnedSparse = channelSet.has(RETRIEVAL_CHANNEL_LEARNED_SPARSE);
+  const hasRelativeFilter = channelSet.has(RETRIEVAL_CHANNEL_RELATIVE_FILTER);
 
   // "Only sparse_bm25, no dense" — none of the dense/semantic family is present.
   const hasDenseChannel =
-    channelSet.has('dense_semantic') ||
-    channelSet.has('anchor_similarity') ||
-    channelSet.has('compare_anchor');
-  const onlySparseBm25 = channelSet.has('sparse_bm25') && !hasDenseChannel;
+    channelSet.has(RETRIEVAL_CHANNEL_DENSE_SEMANTIC) ||
+    channelSet.has(RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY) ||
+    channelSet.has(RETRIEVAL_CHANNEL_COMPARE_ANCHOR);
+  const onlySparseBm25 = channelSet.has(RETRIEVAL_CHANNEL_SPARSE_BM25) && !hasDenseChannel;
 
   // Start from base weights (mutable copy of the numeric knobs).
   let anchorSimilarity = baseWeights.anchorSimilarity;

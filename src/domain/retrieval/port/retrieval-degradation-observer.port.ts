@@ -6,14 +6,10 @@
  * implementations collect metrics; the domain only depends on this interface.
  */
 
+import type { RetrievalChannel } from '../model/retrieval-channel.js';
+
 export interface RetrievalDegradationSignal {
-  readonly component:
-    | 'sparse_bm25'
-    | 'learned_sparse'
-    | 'dense_semantic'
-    | 'anchor_similarity'
-    | 'embedding_combiner'
-    | 'relative_filter';
+  readonly component: RetrievalChannel | 'embedding_combiner';
   readonly severity: 'warning' | 'error';
   readonly reason: string;
   readonly fallbackApplied: string;

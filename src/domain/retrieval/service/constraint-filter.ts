@@ -1,6 +1,12 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { CandidateDropRecord } from '../model/candidate-envelope.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_SPARSE_BM25
+} from '../model/retrieval-channel.js';
 
 /**
  * Post-retrieval constraint gate.
@@ -126,28 +132,28 @@ export class ConstraintFilter {
         const channels: CandidateDropRecord['channels'][number][] = [];
         if (candidate.sparseRank !== undefined) {
           channels.push({
-            channel: 'sparse_bm25',
+            channel: RETRIEVAL_CHANNEL_SPARSE_BM25,
             rawScore: candidate.sparseRawScore ?? 0,
             rank: candidate.sparseRank,
           });
         }
         if (candidate.denseRank !== undefined) {
           channels.push({
-            channel: 'dense_semantic',
+            channel: RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
             rawScore: candidate.denseRawScore ?? 0,
             rank: candidate.denseRank,
           });
         }
         if (candidate.learnedSparseRank !== undefined) {
           channels.push({
-            channel: 'learned_sparse',
+            channel: RETRIEVAL_CHANNEL_LEARNED_SPARSE,
             rawScore: candidate.learnedSparseRawScore ?? 0,
             rank: candidate.learnedSparseRank,
           });
         }
         if (candidate.anchorRank !== undefined) {
           channels.push({
-            channel: 'anchor_similarity',
+            channel: RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
             rawScore: candidate.anchorRawScore ?? 0,
             rank: candidate.anchorRank,
           });

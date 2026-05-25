@@ -49,6 +49,7 @@ import {
 } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { isEligiblePrefixQuery } from '../../domain/query/service/alias-prefix-terms.js';
+import { RETRIEVAL_CHANNEL_LEARNED_SPARSE } from '../../domain/retrieval/model/retrieval-channel.js';
 import {
   MAJOR_REGION_KEYWORDS,
   MAJOR_COUNTRY_KEYWORDS,
@@ -830,7 +831,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       ` limit ${targetHits}`;
 
     const response = await this.queryUnderBreaker(yql, {
-      'ranking.profile': 'learned_sparse',
+      'ranking.profile': RETRIEVAL_CHANNEL_LEARNED_SPARSE,
       'presentation.summary': 'hit_summary',
       'input.query(sparse_query_embedding)': sparseQueryTensor,
     }, undefined, requestId);

@@ -1,3 +1,12 @@
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_BROWSE_PRODUCER,
+  RETRIEVAL_CHANNEL_BROWSE_REGION,
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_RELATIVE_FILTER,
+  RETRIEVAL_CHANNEL_SPARSE_BM25
+} from '../model/retrieval-channel.js';
 /**
  * T4.6: Channel mix policy — query family → retrieval profile mapping.
  *
@@ -45,19 +54,19 @@ interface ChannelMixDecision {
 // ---------------------------------------------------------------------------
 
 const PROFILE_CHANNEL_MIXES = {
-  hybrid_default: ['sparse_bm25', 'dense_semantic'] as const,
-  mixed_anchor: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'] as const,
-  recommendation_anchor: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'] as const,
-  compare_default: ['sparse_bm25', 'dense_semantic', 'compare_anchor'] as const,
+  hybrid_default: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC] as const,
+  mixed_anchor: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY] as const,
+  recommendation_anchor: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY] as const,
+  compare_default: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_COMPARE_ANCHOR] as const,
   // browse_default activates browse_producer so producer-browse dispatch is visible
   // in ChannelMixDecision.channelMix (mirrors the BROWSE_DEFAULT profile object).
-  browse_default: ['sparse_bm25', 'dense_semantic', 'browse_producer'] as const,
+  browse_default: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_BROWSE_PRODUCER] as const,
   // region_browse activates browse_region — distinct from producer browse.
-  region_browse: ['sparse_bm25', 'dense_semantic', 'browse_region'] as const,
-  exact_safe_fallback: ['sparse_bm25', 'dense_semantic'] as const,
+  region_browse: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC, RETRIEVAL_CHANNEL_BROWSE_REGION] as const,
+  exact_safe_fallback: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC] as const,
   // TRACK-A A4: anchor_similarity listed first to signal dispatch priority.
-  entity_anchor_first: ['anchor_similarity', 'sparse_bm25', 'dense_semantic'] as const,
-  relative_filter: ['sparse_bm25', 'relative_filter'] as const,
+  entity_anchor_first: [RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY, RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_DENSE_SEMANTIC] as const,
+  relative_filter: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_RELATIVE_FILTER] as const,
 } as const satisfies Record<string, readonly RetrievalChannel[]>;
 
 type ProfileName = keyof typeof PROFILE_CHANNEL_MIXES;

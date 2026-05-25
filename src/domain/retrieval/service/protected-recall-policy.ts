@@ -11,6 +11,9 @@
  */
 
 import type { CandidateEnvelope, ProtectedInclusionReason } from '../model/candidate-envelope.js';
+import {
+  RETRIEVAL_CHANNEL_SPARSE_BM25
+} from '../model/retrieval-channel.js';
 
 // ---------------------------------------------------------------------------
 // Classification result
@@ -47,7 +50,7 @@ export class DefaultProtectedRecallPolicy implements ProtectedRecallPolicy {
     // 1. known_item_lookup: sparse channel with rank 1
     //    This implies the entity was directly fetched by BM25 top-1 (near-exact match).
     const hasSparseRank1 = prov.channelScores.some(
-      (ev) => ev.channel === 'sparse_bm25' && ev.rank === 1,
+      (ev) => ev.channel === RETRIEVAL_CHANNEL_SPARSE_BM25 && ev.rank === 1,
     );
     if (hasSparseRank1) {
       return { protect: true, reason: 'known_item_lookup' };

@@ -39,6 +39,38 @@ export const RETRIEVAL_CHANNELS = [
 
 export type RetrievalChannel = (typeof RETRIEVAL_CHANNELS)[number];
 
+/**
+ * Named channel ids — prefer these over raw string literals at call sites
+ * (RetrievalChannel SSoT codemod). Values mirror {@link RETRIEVAL_CHANNELS}.
+ */
+export const RETRIEVAL_CHANNEL_SPARSE_BM25 = 'sparse_bm25' as const satisfies RetrievalChannel;
+/** SPLADE / learned sparse weights channel. */
+export const RETRIEVAL_CHANNEL_LEARNED_SPARSE = 'learned_sparse' as const satisfies RetrievalChannel;
+/** General bi-encoder ANN semantic channel. */
+export const RETRIEVAL_CHANNEL_DENSE_SEMANTIC = 'dense_semantic' as const satisfies RetrievalChannel;
+/** Anchor-neighborhood structural channel. */
+export const RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY = 'anchor_similarity' as const satisfies RetrievalChannel;
+/** Relative query filter structural channel. */
+export const RETRIEVAL_CHANNEL_RELATIVE_FILTER = 'relative_filter' as const satisfies RetrievalChannel;
+/** Producer-scoped browse channel. */
+export const RETRIEVAL_CHANNEL_BROWSE_PRODUCER = 'browse_producer' as const satisfies RetrievalChannel;
+/** Region-scoped browse channel. */
+export const RETRIEVAL_CHANNEL_BROWSE_REGION = 'browse_region' as const satisfies RetrievalChannel;
+/** Comparison against anchor entity channel. */
+export const RETRIEVAL_CHANNEL_COMPARE_ANCHOR = 'compare_anchor' as const satisfies RetrievalChannel;
+
+/** All named channel constants in {@link RETRIEVAL_CHANNELS} order. */
+export const RETRIEVAL_CHANNEL_CONSTANTS = [
+  RETRIEVAL_CHANNEL_SPARSE_BM25,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_RELATIVE_FILTER,
+  RETRIEVAL_CHANNEL_BROWSE_PRODUCER,
+  RETRIEVAL_CHANNEL_BROWSE_REGION,
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR,
+] as const;
+
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------

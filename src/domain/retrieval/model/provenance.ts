@@ -4,22 +4,20 @@
  * - offline eval slices
  * - ranking feature labels
  *
- * This is the shared vocabulary that T3.6 (Trace/observability alignment) will wire
- * into runtime logs and eval storage.
+ * Channel names delegate to {@link ./retrieval-channel.js} (SSoT) — do not
+ * duplicate the channel list here.
  */
 
-export const PROVENANCE_CHANNELS = [
-  'sparse_bm25',
-  'dense_semantic',
-  'learned_sparse',
-  'anchor_similarity',
-  'relative_filter',
-  'browse_producer',
-  'browse_region',
-  'compare_anchor',
-] as const;
+import {
+  RETRIEVAL_CHANNELS,
+  isRetrievalChannel,
+  type RetrievalChannel,
+} from './retrieval-channel.js';
 
-export type ProvenanceChannel = (typeof PROVENANCE_CHANNELS)[number];
+/** Alias of {@link RETRIEVAL_CHANNELS} for provenance / eval slice vocabulary. */
+export const PROVENANCE_CHANNELS = RETRIEVAL_CHANNELS;
+
+export type ProvenanceChannel = RetrievalChannel;
 
 export const PROVENANCE_QUERY_VIEWS = [
   'raw',
@@ -64,7 +62,7 @@ export interface EvalProvenanceSlice {
  * Type guard: check if a string is a valid ProvenanceChannel.
  */
 export function isProvenanceChannel(value: string): value is ProvenanceChannel {
-  return (PROVENANCE_CHANNELS as readonly string[]).includes(value);
+  return isRetrievalChannel(value);
 }
 
 /**

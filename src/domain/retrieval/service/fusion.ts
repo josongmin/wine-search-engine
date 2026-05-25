@@ -9,6 +9,12 @@ import type {
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_SPARSE_BM25,
+} from '../model/retrieval-channel.js';
+import {
   mergeRetrievalHitSummaries,
   normalizeRetrievalHitSummary,
   summaryToHybridCandidateFields,
@@ -249,10 +255,10 @@ export class FusionService {
       const anchorRawScore = anchorScoreMap.get(entityId);
 
       const candidateSources: string[] = [];
-      if (sparseRank !== undefined) candidateSources.push('sparse_bm25');
-      if (denseRank !== undefined) candidateSources.push('dense_semantic');
-      if (learnedSparseRank !== undefined) candidateSources.push('learned_sparse');
-      if (anchorRank !== undefined) candidateSources.push('anchor_similarity');
+      if (sparseRank !== undefined) candidateSources.push(RETRIEVAL_CHANNEL_SPARSE_BM25);
+      if (denseRank !== undefined) candidateSources.push(RETRIEVAL_CHANNEL_DENSE_SEMANTIC);
+      if (learnedSparseRank !== undefined) candidateSources.push(RETRIEVAL_CHANNEL_LEARNED_SPARSE);
+      if (anchorRank !== undefined) candidateSources.push(RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY);
 
       const trace: RetrievalTrace = {
         retrievalProfile: 'fusion',

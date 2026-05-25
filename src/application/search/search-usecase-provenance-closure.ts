@@ -9,6 +9,7 @@ import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candid
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ConstraintGraph } from '../../domain/query/model/constraint-graph.js';
 import { resolveRequiredAttributes } from '../../domain/query/service/graph-required-attributes.js';
+import { RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY } from '../../domain/retrieval/model/retrieval-channel.js';
 import {
   classifyGraphPresence,
   recordGraphPathDecision,
@@ -57,8 +58,8 @@ export function buildHybridCandidateCoverageStage(
   const anchorSignalTypes = unique(
     candidates.flatMap((candidate) =>
       candidate.anchorRank !== undefined ||
-      candidate.retrievalProvenance?.channels.includes('anchor_similarity') === true
-        ? ['anchor_similarity']
+      candidate.retrievalProvenance?.channels.includes(RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY) === true
+        ? [RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY]
         : []),
   );
   const hasIdentityEvidence = candidates.some((candidate) => {
@@ -99,8 +100,8 @@ export function buildRankedResultCoverageStage(
     ? []
     : unique(
         topResult.evidenceItems.flatMap((item) =>
-          item.type === 'anchor_similarity' || (topResult.componentScores.anchorSimilarity ?? 0) > 0
-            ? ['anchor_similarity']
+          item.type === RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY || (topResult.componentScores.anchorSimilarity ?? 0) > 0
+            ? [RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY]
             : [],
         ),
       );

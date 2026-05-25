@@ -15,6 +15,11 @@ import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
 import type { MatchDetail } from '../../domain/response/model/result-item.js';
+import {
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_SPARSE_BM25
+} from '../../domain/retrieval/model/retrieval-channel.js';
 
 const drinkingWindowLogger = bootstrapLogger.child({
   component: 'search-result-drinking-window',
@@ -66,8 +71,8 @@ function deriveMatchType(
   }
 
   const channels = new Set(result.retrievalProvenance?.channels ?? []);
-  const hasLexicalChannel = channels.has('sparse_bm25') || channels.has('learned_sparse');
-  const hasSemanticChannel = channels.has('dense_semantic');
+  const hasLexicalChannel = channels.has(RETRIEVAL_CHANNEL_SPARSE_BM25) || channels.has(RETRIEVAL_CHANNEL_LEARNED_SPARSE);
+  const hasSemanticChannel = channels.has(RETRIEVAL_CHANNEL_DENSE_SEMANTIC);
 
   if (hasSemanticChannel && !hasLexicalChannel) {
     return 'semantic';

@@ -8,6 +8,9 @@ import type { FailureReason } from '../model/failure-reason.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
 import { buildAdmissionAuthorityTraceRef } from './authority-trace.js';
 import { decideAdmission } from './admission-policy.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY
+} from '../../retrieval/model/retrieval-channel.js';
 
 /**
  * Result of the AdmissionGate closure check (RFC-016).
@@ -44,7 +47,7 @@ function hasAnchorSignalEvidence(input: DecisionInput): boolean {
     return true;
   }
 
-  return input.evidenceItems.some((item) => item.type === 'anchor_similarity');
+  return input.evidenceItems.some((item) => item.type === RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY);
 }
 
 export function evaluateAdmissionClosure(
@@ -209,7 +212,7 @@ export class AdmissionGate {
     // route with anchors):
     //   1. The coarse `anchorEvidencePresent` flag must be true.
     //   2. The evidence_items trail must contain at least one item whose
-    //      `type` is an anchor signal ('anchor_similarity', 'anchor_match',
+    //      `type` is an anchor signal (RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY, 'anchor_match',
     //      or 'anchor_preserved') — the boolean flag alone is not sufficient;
     //      the trail must be substantiated (RFC-011 §11).
     if (admissionContext.requires_anchor_evidence) {

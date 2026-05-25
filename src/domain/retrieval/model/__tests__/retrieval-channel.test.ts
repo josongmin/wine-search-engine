@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  RETRIEVAL_CHANNEL_CONSTANTS,
   RETRIEVAL_CHANNELS,
   isRetrievalChannel,
   toRetrievalChannel,
@@ -9,6 +10,10 @@ import {
 import { PHASE_TO_CHANNEL as CASCADE_PHASE_TO_CHANNEL } from '../../service/cascade-router.js';
 
 describe('RetrievalChannel vocabulary', () => {
+  it('RETRIEVAL_CHANNEL_CONSTANTS mirrors RETRIEVAL_CHANNELS', () => {
+    expect([...RETRIEVAL_CHANNEL_CONSTANTS]).toEqual([...RETRIEVAL_CHANNELS]);
+  });
+
   it('contains all expected channels', () => {
     expect(RETRIEVAL_CHANNELS).toContain('sparse_bm25');
     expect(RETRIEVAL_CHANNELS).toContain('learned_sparse');

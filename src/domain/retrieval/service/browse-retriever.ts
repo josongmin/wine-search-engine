@@ -12,6 +12,11 @@ import {
   expandRegionBrowseLexicalQueries,
 } from './browse-diversity.js';
 import {
+  RETRIEVAL_CHANNEL_BROWSE_PRODUCER,
+  RETRIEVAL_CHANNEL_BROWSE_REGION,
+  RETRIEVAL_CHANNEL_SPARSE_BM25,
+} from '../model/retrieval-channel.js';
+import {
   annotateAndApplyHardFilters,
   resolveHardForFilter,
   searchAndDedupSparse,
@@ -32,8 +37,8 @@ function sparseHitsToBrowseCandidates(
     lexicalQueries,
     filtersApplied,
     candidateSources: [
-      'sparse_bm25',
-      profile === 'producer_browse' ? 'browse_producer' : 'browse_region',
+      RETRIEVAL_CHANNEL_SPARSE_BM25,
+      profile === 'producer_browse' ? RETRIEVAL_CHANNEL_BROWSE_PRODUCER : RETRIEVAL_CHANNEL_BROWSE_REGION,
     ],
   });
 }

@@ -5,6 +5,9 @@ import type { UtilityScorer } from './utility-scorer.js';
 import type { SelectivePredictor } from './selective-predictor.js';
 import type { CalibrationEvaluator } from './calibration-evaluator.js';
 import type { EvidenceAuditor } from './evidence-auditor.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY
+} from '../../retrieval/model/retrieval-channel.js';
 
 /** Minimum delta vs overall to flag wrong-resolve regression on a slice. */
 const SLICE_WRONG_RESOLVE_RATE_DELTA_THRESHOLD = 0.05;
@@ -229,7 +232,7 @@ export class SliceEvaluator {
 
   /**
    * Computes the anchor preservation rate from evidence items.
-   * Looks for 'anchor_similarity' evidence types (the sole anchor evidence
+   * Looks for RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY evidence types (the sole anchor evidence
    * type produced by EvidenceMapper in production).
    *
    * "Has anchor evidence" = result contains any evidence item with type
@@ -243,14 +246,14 @@ export class SliceEvaluator {
     if (resolved.length === 0) return 0;
 
     const withAnchor = resolved.filter((r) =>
-      r.evidenceItems.some((e) => e.type === 'anchor_similarity'),
+      r.evidenceItems.some((e) => e.type === RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY),
     );
 
     if (withAnchor.length === 0) return 1.0;
 
     const preserved = withAnchor.filter((r) =>
       r.evidenceItems.some((e) => {
-        if (e.type !== 'anchor_similarity') return false;
+        if (e.type !== RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY) return false;
         const parsed = parseFloat(e.contribution);
         // isFinite rejects NaN AND Infinity — Infinity would always pass the
         // threshold check, inflating the anchor preservation metric.

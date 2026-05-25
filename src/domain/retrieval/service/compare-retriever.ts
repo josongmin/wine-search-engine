@@ -8,6 +8,10 @@ import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 import { normalizeUnicode } from '../../shared/utils/unicode-normalize.js';
 import {
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR,
+  RETRIEVAL_CHANNEL_SPARSE_BM25,
+} from '../model/retrieval-channel.js';
+import {
   annotateAndApplyHardFilters,
   resolveHardForFilter,
   searchAndDedupSparse,
@@ -35,7 +39,7 @@ export class CompareRetriever {
       retrievalProfile: 'compare_default',
       lexicalQueries,
       filtersApplied,
-      candidateSources: ['sparse_bm25', 'compare_anchor'],
+      candidateSources: [RETRIEVAL_CHANNEL_SPARSE_BM25, RETRIEVAL_CHANNEL_COMPARE_ANCHOR],
     });
   }
 

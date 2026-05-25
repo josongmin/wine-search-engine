@@ -34,6 +34,9 @@ import {
 } from '../../domain/ranking/service/ambiguous-branch.js';
 import type { EvidenceItem, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY
+} from '../../domain/retrieval/model/retrieval-channel.js';
 
 interface BuildSearchDecisionInputParams {
   readonly plan: QueryPlanV1;
@@ -337,7 +340,7 @@ export function buildSearchDecisionInput(
   const anchorSignalItems =
     topResult !== undefined && rankedTopResultMatchesTopEntity
       ? topResult.evidenceItems.filter(
-          (item) => item.type === 'anchor_similarity' && isPositiveEvidenceItem(item),
+          (item) => item.type === RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY && isPositiveEvidenceItem(item),
         )
       : [];
   const anchorSignalTypes =

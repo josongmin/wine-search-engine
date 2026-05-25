@@ -13,6 +13,10 @@ import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import type { InterpretResponseV2 } from '../../interface/http/schemas/search-response-v2.schema.js';
 import { preferCanonicalRetrievalChannelLabels } from '../../domain/retrieval/model/retrieval-channel.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR
+} from '../../domain/retrieval/model/retrieval-channel.js';
 
 export interface ExplainAdapterV2Input {
   readonly queryId: string;
@@ -38,7 +42,10 @@ export interface ExplainAdapterV2Input {
  * Channel name suffixes/substrings that indicate an anchor-conditioned retrieval
  * channel is active. Used to gate inclusion of "anchor_similarity" ranking signal.
  */
-const ANCHOR_CHANNELS = new Set(['anchor_similarity', 'compare_anchor']);
+const ANCHOR_CHANNELS: ReadonlySet<string> = new Set([
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_COMPARE_ANCHOR,
+]);
 
 function isAnchorChannel(channel: string): boolean {
   return ANCHOR_CHANNELS.has(channel);
@@ -145,7 +152,7 @@ export function buildInterpretResponseV2(input: ExplainAdapterV2Input): Interpre
     'semantic_similarity',
     'attribute_alignment',
     'popularity',
-    ...(hasAnchorChannel ? ['anchor_similarity'] : []),
+    ...(hasAnchorChannel ? [RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY] : []),
   ];
 
   const response: InterpretResponseV2 = {

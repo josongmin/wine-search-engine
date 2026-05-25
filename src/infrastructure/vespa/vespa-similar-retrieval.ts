@@ -5,6 +5,9 @@ import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.p
 import { summaryToHybridCandidateFields } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 import { hardConstraintsToSparseFilterTokens } from '../../domain/retrieval/service/constraint-to-sparse-filter-tokens.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY
+} from '../../domain/retrieval/model/retrieval-channel.js';
 
 /**
  * Vespa-backed implementation of {@link SimilarRetrievalPort}.
@@ -52,7 +55,7 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
           lexicalQueriesUsed: [],
           semanticQueriesUsed: [anchorProfile.canonicalLabel],
           filtersApplied: filters,
-          candidateSources: ['anchor_similarity'],
+          candidateSources: [RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY],
         },
         ...summaryToHybridCandidateFields(hit.summary),
       }),

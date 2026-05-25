@@ -1,3 +1,10 @@
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  RETRIEVAL_CHANNEL_RELATIVE_FILTER,
+  RETRIEVAL_CHANNEL_SPARSE_BM25
+} from '../model/retrieval-channel.js';
 /**
  * T4.1: Cascade router — channel-aware phases.
  *
@@ -18,7 +25,7 @@ import type { RetrievalChannel } from '../model/retrieval-channel.js';
  *
  * T4.1: Renamed 'anchor_neighborhood' → channel-aware name.
  * 'anchor_neighborhood' is kept as an alias for backward compat.
- * T4.3: Added 'learned_sparse' phase for SPLADE-style sparse retrieval.
+ * T4.3: Added RETRIEVAL_CHANNEL_LEARNED_SPARSE phase for SPLADE-style sparse retrieval.
  * T4.5: Added 'relative' phase for anchor-conditioned relative filter path.
  */
 export type RetrievalPhase =
@@ -31,15 +38,15 @@ export type RetrievalPhase =
 /**
  * T4.1: Channel-phase mapping.
  * Maps cascade phases to their canonical RetrievalChannel equivalents.
- * T4.3: 'learned_sparse' phase maps to the 'learned_sparse' lexical channel.
- * T4.5: 'relative' phase maps to the 'relative_filter' structural channel.
+ * T4.3: RETRIEVAL_CHANNEL_LEARNED_SPARSE phase maps to the RETRIEVAL_CHANNEL_LEARNED_SPARSE lexical channel.
+ * T4.5: 'relative' phase maps to the RETRIEVAL_CHANNEL_RELATIVE_FILTER structural channel.
  */
 export const PHASE_TO_CHANNEL: Readonly<Record<RetrievalPhase, RetrievalChannel | null>> = {
-  sparse: 'sparse_bm25',
-  learned_sparse: 'learned_sparse',
-  dense: 'dense_semantic',
-  anchor_neighborhood: 'anchor_similarity',
-  relative: 'relative_filter',
+  sparse: RETRIEVAL_CHANNEL_SPARSE_BM25,
+  learned_sparse: RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+  dense: RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+  anchor_neighborhood: RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+  relative: RETRIEVAL_CHANNEL_RELATIVE_FILTER,
 } as const;
 
 /**
@@ -330,7 +337,7 @@ export class CascadeRouter {
     );
     const allPhases: readonly RetrievalPhase[] = [
       'sparse',
-      'learned_sparse',
+      RETRIEVAL_CHANNEL_LEARNED_SPARSE,
       'dense',
       'anchor_neighborhood',
       'relative',

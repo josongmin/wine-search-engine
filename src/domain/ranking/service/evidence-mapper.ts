@@ -1,5 +1,8 @@
 import type { EvidenceItem, EvidenceStrength } from '../../shared/types/index.js';
 import type { ComponentScores } from '../model/ranked-result.js';
+import {
+  RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY
+} from '../../retrieval/model/retrieval-channel.js';
 
 /**
  * Evidence strength classification thresholds.
@@ -48,7 +51,7 @@ export class EvidenceMapper {
     if (scores.anchorSimilarity !== undefined) {
       this.addIfNonZero(items, {
         value: scores.anchorSimilarity,
-        type: 'anchor_similarity',
+        type: RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
         source: 'ranking_signal_computer',
         provenance: 'Similarity to anchor entity based on attributes and embedding',
       });
