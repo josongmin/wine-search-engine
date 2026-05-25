@@ -160,8 +160,8 @@ export const scenarioAnnotationSchema = z.object({
 
 export type ScenarioAnnotation = z.infer<typeof scenarioAnnotationSchema>;
 type AnnotationConstraintAtom = z.infer<typeof constraintAtomSchema>;
-type AnnotationExpectedClaims = z.infer<typeof expectedClaimsSchema>;
-type AnnotationExpectedSteps = z.infer<typeof expectedStepsSchema>;
+type _AnnotationExpectedClaims = z.infer<typeof expectedClaimsSchema>;
+type _AnnotationExpectedSteps = z.infer<typeof expectedStepsSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Parse helpers

@@ -71,7 +71,7 @@ interface ArchivableReport {
  *
  * Returns the absolute path of the archived report so callers can log it.
  */
-async function archiveBenchReport(
+async function _archiveBenchReport(
   report: ArchivableReport,
   reportJson: string,
   options?: {
@@ -145,7 +145,7 @@ export async function listArchiveManifests(
 }
 
 /** Reader for a full archived report. Returns null when the path is absent or malformed. */
-async function loadArchivedReport(reportPath: string): Promise<unknown> {
+async function _loadArchivedReport(reportPath: string): Promise<unknown> {
   try {
     const raw = await fs.readFile(reportPath, 'utf8');
     return JSON.parse(raw) as unknown;

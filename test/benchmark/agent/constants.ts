@@ -53,7 +53,7 @@ export const LATENCY_SLA_P95_MS = 20_000;
  *   Used to count `latencySla.timeoutCount`, NOT to abort the scenario
  *   (the orchestrator has its own agentTimeoutMs=120s).
  */
-const LATENCY_SLA_TIMEOUT_MS = 30_000;
+const _LATENCY_SLA_TIMEOUT_MS = 30_000;
 
 // ─────────────────────────────────────────────────────────────────────
 // Termination partial-credit factors — scorer.scoreTermination
@@ -241,7 +241,7 @@ export const MIN_SCENARIOS_FOR_VARIANCE = 5;
  *   N=5 (JUDGE_REQUIRED_SAMPLES below) reserved for judgeRequired scenarios
  *   where the judge is the PRIMARY signal.
  */
-const JUDGE_DEFAULT_SAMPLES = 3;
+const _JUDGE_DEFAULT_SAMPLES = 3;
 
 /**
  * Required LLM-judge sample count for scenarios with `judgeRequired: true`.
@@ -249,7 +249,7 @@ const JUDGE_DEFAULT_SAMPLES = 3;
  *   register), the noise floor must be lower. N=5 gives ~55% noise reduction
  *   vs single sample.
  */
-const JUDGE_REQUIRED_SAMPLES = 5;
+const _JUDGE_REQUIRED_SAMPLES = 5;
 
 // ─────────────────────────────────────────────────────────────────────
 // Faithfulness / context-recall warning thresholds — scorer.ts
@@ -313,4 +313,4 @@ export const EXEC_STEP_WEIGHT = 0.4;
  * @domainJustification All tier weight overrides MUST sum to 1.0 (within float
  *   epsilon); enforced by the weightInvariants test in scorer.test.ts.
  */
-const DIMENSION_WEIGHTS_TOTAL = 1.0;
+const _DIMENSION_WEIGHTS_TOTAL = 1.0;

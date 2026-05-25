@@ -59,7 +59,7 @@ interface AnnotationStore {
  * file MUST NOT crash the bench runner. The dimension that file would have
  * deterministically scored simply stays on the judge-only path.
  */
-function loadAnnotations(dir: string = DEFAULT_ANNOTATION_DIR): AnnotationStore {
+function _loadAnnotations(dir: string = DEFAULT_ANNOTATION_DIR): AnnotationStore {
   const byScenarioId = new Map<number, ScenarioAnnotation>();
   const failedPaths: string[] = [];
   let loaded = 0;

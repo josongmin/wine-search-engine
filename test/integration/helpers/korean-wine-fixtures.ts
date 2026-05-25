@@ -518,4 +518,4 @@ export const KOREAN_WINE_DOCUMENTS: readonly RetrievalDocument[] = KO_WINE_SEEDS
 export const KOREAN_WINE_ALIASES: readonly TestFixtureAlias[] = KO_WINE_SEEDS.flatMap(makeAliases);
 
 /** Stable entity-id list (for assertions / introspection). */
-const KOREAN_WINE_ENTITY_IDS: readonly EntityId[] = KO_WINE_SEEDS.map(entityIdFor);
+const _KOREAN_WINE_ENTITY_IDS: readonly EntityId[] = KO_WINE_SEEDS.map(entityIdFor);
