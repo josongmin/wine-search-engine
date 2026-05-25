@@ -500,6 +500,25 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
+  // Retail-channel hint (편의점/마트/백화점) — emit a soft preference so the
+  // ranker can still favour wines in that price band, but NEVER promote it
+  // to a hard YQL filter. Lower confidence than numeric to reflect that the
+  // user's stated band is approximate. Skipped when a numeric maxPriceKrw is
+  // already present (the extractor strips the hint in that case).
+  if (
+    searchConstraints.maxPriceKrw === undefined
+    && searchConstraints.softMaxPriceKrwHint !== undefined
+  ) {
+    soft.push({
+      attribute: 'max_price_krw',
+      operator: '<=',
+      value: searchConstraints.softMaxPriceKrwHint,
+      source_phrase: `약 ${searchConstraints.softMaxPriceKrwHint / KRW_PER_MAN_WON}만원 (retail-channel hint)`,
+      confidence: 0.55,
+      mapping_version: mv,
+    });
+  }
+
   // Vintage range constraints → hard (explicit vintage = hard requirement).
   // When min === max, emit a single `=` constraint (exact year: "2015년산")
   // instead of separate >= and <= — the scorer expects `=` for exact years.

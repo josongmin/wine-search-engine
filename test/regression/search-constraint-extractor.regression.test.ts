@@ -688,35 +688,49 @@ describe('search-constraint-extractor price parsing edge cases', () => {
 });
 
 describe('retail channel price mapping', () => {
-  it('R-CHANNEL-01: "편의점 와인" → maxPriceKrw=15000', () => {
+  // SOTA++ structural fix (v14 bench price_expression #70-73 RCA):
+  // retail-channel keywords now emit a SOFT softMaxPriceKrwHint (ranking
+  // signal), NOT a hard maxPriceKrw (YQL filter). On a long-tail corpus the
+  // hard cap silently returned zero retrieval results. See
+  // search-constraint-extractor.ts:`extractRetailChannelPrice` docstring.
+
+  it('R-CHANNEL-01: "편의점 와인" → softMaxPriceKrwHint=15000, no hard maxPriceKrw', () => {
     const c = extractSearchConstraints('편의점 와인 추천해줘');
-    expect(c.maxPriceKrw).toBe(15_000);
+    expect(c.softMaxPriceKrwHint).toBe(15_000);
+    expect(c.maxPriceKrw).toBeUndefined();
   });
 
-  it('R-CHANNEL-02: "편의점 수준으로" → maxPriceKrw=15000', () => {
+  it('R-CHANNEL-02: "편의점 수준으로" → softMaxPriceKrwHint=15000, no hard maxPriceKrw', () => {
     const c = extractSearchConstraints('편의점 수준으로 레드 와인');
-    expect(c.maxPriceKrw).toBe(15_000);
+    expect(c.softMaxPriceKrwHint).toBe(15_000);
+    expect(c.maxPriceKrw).toBeUndefined();
   });
 
-  it('R-CHANNEL-03: "마트 와인" → maxPriceKrw=30000', () => {
+  it('R-CHANNEL-03: "마트 와인" → softMaxPriceKrwHint=30000, no hard maxPriceKrw', () => {
     const c = extractSearchConstraints('마트 와인 추천');
-    expect(c.maxPriceKrw).toBe(30_000);
+    expect(c.softMaxPriceKrwHint).toBe(30_000);
+    expect(c.maxPriceKrw).toBeUndefined();
   });
 
-  it('R-CHANNEL-04: "대형마트" → maxPriceKrw=30000', () => {
+  it('R-CHANNEL-04: "대형마트" → softMaxPriceKrwHint=30000, no hard maxPriceKrw', () => {
     const c = extractSearchConstraints('대형마트에서 살 수 있는 와인');
-    expect(c.maxPriceKrw).toBe(30_000);
+    expect(c.softMaxPriceKrwHint).toBe(30_000);
+    expect(c.maxPriceKrw).toBeUndefined();
   });
 
-  it('R-CHANNEL-05: "백화점 와인" → maxPriceKrw=100000', () => {
+  it('R-CHANNEL-05: "백화점 와인" → softMaxPriceKrwHint=100000, no hard maxPriceKrw', () => {
     const c = extractSearchConstraints('백화점 와인 수준');
-    expect(c.maxPriceKrw).toBe(100_000);
+    expect(c.softMaxPriceKrwHint).toBe(100_000);
+    expect(c.maxPriceKrw).toBeUndefined();
   });
 
-  it('R-CHANNEL-06: numeric price overrides channel cap when both present', () => {
-    // "편의점에서 파는 8천원짜리" → numeric 8000 wins over channel cap 15000
+  it('R-CHANNEL-06: numeric price overrides channel hint when both present', () => {
+    // "편의점에서 파는 8천원짜리" → numeric 8000 sets hard maxPriceKrw AND
+    // strips the soft channel hint (numeric is the more specific / authoritative
+    // budget). Tests the merge-strip branch in extractSearchConstraints.
     const c = extractSearchConstraints('편의점에서 8천원 이하 와인');
     expect(c.maxPriceKrw).toBe(8_000);
+    expect(c.softMaxPriceKrwHint).toBeUndefined();
   });
 
   it('R-CHANNEL-07: "마트" does NOT match embedded in other words (false positive guard)', () => {
@@ -724,11 +738,38 @@ describe('retail channel price mapping', () => {
     // "마트" in "마트료시카" (matryoshka) should not match — it is preceded by no space
     // but our pattern requires word-level context. This is a false-positive guard test.
     const c = extractSearchConstraints('마트료시카 인형처럼 겹겹이 복잡한 와인');
-    // Pattern /(?:대형\s*)?마트(?:\s*(?:와인|수준|용))?/ requires 마트 to be followed by
-    // optional whitespace then 와인/수준/용 OR end-of-word. "마트료시카" has 료 after 마트
-    // which is neither 와인 nor 수준 nor 용, so the greedy match should NOT fire.
-    // If this fails it means the pattern is too loose and needs tightening.
     expect(c.maxPriceKrw).toBeUndefined();
+    expect(c.softMaxPriceKrwHint).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Structural guard — softMaxPriceKrwHint MUST NOT leak into YQL filter tokens
+  // -------------------------------------------------------------------------
+  it('R-CHANNEL-FILTER-01: searchConstraintsToFilterTokens does NOT emit price_usd_max for soft hint', () => {
+    const c = extractSearchConstraints('편의점 와인 추천해줘');
+    const tokens = searchConstraintsToFilterTokens(c);
+    // No price_usd_max / price_usd_min token — the soft hint is a ranking
+    // signal, not a Vespa hard filter. This is the critical invariant that
+    // unblocks bench scenarios #70/71/73 (zero-retrieval on tight cap).
+    expect(tokens.some((t) => t.startsWith('price_usd_max:'))).toBe(false);
+    expect(tokens.some((t) => t.startsWith('price_usd_min:'))).toBe(false);
+  });
+
+  it('R-CHANNEL-FILTER-02: numeric-price + retail-channel → only numeric emits hard YQL token', () => {
+    // "편의점에서 8천원 이하" — channel hint is stripped (numeric wins), so
+    // the only YQL token emitted is the numeric 8K cap.
+    const c = extractSearchConstraints('편의점에서 8천원 이하 와인');
+    const tokens = searchConstraintsToFilterTokens(c);
+    const priceTokens = tokens.filter((t) => t.startsWith('price_usd_max:'));
+    expect(priceTokens.length).toBe(1);
+  });
+
+  it('R-CHANNEL-FILTER-03: numeric-only KRW price still emits hard YQL token (regression)', () => {
+    // Ensures the hard-cap mechanism for explicit "X만원 이하" remains intact.
+    const c = extractSearchConstraints('5만원 이하 레드 와인');
+    expect(c.maxPriceKrw).toBe(50_000);
+    const tokens = searchConstraintsToFilterTokens(c);
+    expect(tokens.some((t) => t.startsWith('price_usd_max:'))).toBe(true);
   });
 });
 

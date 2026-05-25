@@ -164,6 +164,26 @@ export interface SearchConstraints {
    * Maps to `vintage_year <= vintageMax`.
    */
   readonly vintageMax?: number;
+
+  /**
+   * Soft KRW price-cap *hint* emitted by retail-channel keywords
+   * (편의점/마트/백화점). Unlike {@link maxPriceKrw}, this field is NOT
+   * promoted to a hard YQL `price_usd <=` filter — it is a ranking signal
+   * only. Retail-channel keywords describe an APPROXIMATE price tier the
+   * user is anchored on, not a strict upper bound; promoting them to hard
+   * filters silently drops every wine above the cap (e.g. corpus has 0
+   * wines under ~$11 ↔ 편의점 cap 15K KRW → zero retrieval, vague
+   * "도구 결과 비어있어" answer).
+   *
+   * Consumers (ranking / synthesis) MAY use this value to prefer
+   * lower-priced wines but MUST NOT inject it into Vespa as a hard filter.
+   *
+   * Numeric KRW expressions ("8천원 이하") still emit hard
+   * {@link maxPriceKrw}, which when present alongside this field takes
+   * precedence — the merge in `extractSearchConstraints` strips this hint
+   * whenever a numeric `maxPriceKrw` is also produced.
+   */
+  readonly softMaxPriceKrwHint?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -572,15 +592,25 @@ const RETAIL_CHANNEL_MAX_KRW: ReadonlyArray<readonly [RegExp, number]> = [
 ];
 
 /**
- * Extracts a price cap from Korean retail channel keywords BEFORE numeric parsing.
- * Returns {} if no channel keyword is found so numeric price extraction continues normally.
- * When a numeric price constraint is ALSO present in the query, numeric wins (caller merges
- * with later extractors; the numeric patterns are more specific).
+ * Extracts a SOFT price-cap *hint* from Korean retail-channel keywords.
+ *
+ * Returns `{}` if no channel keyword is found so numeric price extraction
+ * continues normally. When a numeric price constraint is ALSO present in the
+ * query, the numeric one takes precedence — the caller in
+ * {@link extractSearchConstraints} strips this hint whenever
+ * {@link SearchConstraints.maxPriceKrw} is set.
+ *
+ * Historical note: previously emitted `{ maxPriceKrw }` (hard), which caused
+ * "편의점 와인 수준으로" (15K cap) and "마트 와인" (30K cap) to inject a hard
+ * YQL `price_usd <=` filter — and on a long-tail corpus where almost no
+ * wines fall under ~$11, the filter silently returned zero results. The
+ * retail-channel signal is intent (a price band), not a strict upper bound,
+ * so it is now a soft hint consumed by ranking only.
  */
-function extractRetailChannelPrice(q: string): Pick<SearchConstraints, 'maxPriceKrw'> {
+function extractRetailChannelPrice(q: string): Pick<SearchConstraints, 'softMaxPriceKrwHint'> {
   for (const [pattern, maxKrw] of RETAIL_CHANNEL_MAX_KRW) {
     if (pattern.test(q)) {
-      return { maxPriceKrw: maxKrw };
+      return { softMaxPriceKrwHint: maxKrw };
     }
   }
   return {};
@@ -944,12 +974,22 @@ export function extractSearchConstraints(
     fxPrice.minPriceKrw !== undefined || fxPrice.maxPriceKrw !== undefined
       ? fxPrice
       : extractKrwPrice(q);
-  // Retail-channel keywords (편의점/마트/백화점) set a soft maxPriceKrw cap.
-  // Numeric price wins when present — it is always more specific than a channel label.
-  const channelPrice = extractRetailChannelPrice(q);
-  const price: Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> = {
-    ...channelPrice,
-    ...numericPrice, // numeric overrides channel when both present
+  // Retail-channel keywords (편의점/마트/백화점) emit a SOFT price-cap *hint*
+  // (softMaxPriceKrwHint), not a hard maxPriceKrw — see extractRetailChannelPrice
+  // docstring for the RCA. Numeric price wins when present and strips the hint
+  // (numeric users have already articulated a precise budget).
+  const channelHint = extractRetailChannelPrice(q);
+  // Drop the soft hint when a numeric maxPriceKrw is present so the merged
+  // bag carries a single authoritative price signal. exactOptionalPropertyTypes
+  // requires us to omit the key entirely instead of assigning undefined.
+  const effectiveChannelHint: Pick<SearchConstraints, 'softMaxPriceKrwHint'> =
+    numericPrice.maxPriceKrw !== undefined ? {} : channelHint;
+  const price: Pick<
+    SearchConstraints,
+    'minPriceKrw' | 'maxPriceKrw' | 'softMaxPriceKrwHint'
+  > = {
+    ...effectiveChannelHint,
+    ...numericPrice,
   };
   const vintage = extractVintage(q);
 
@@ -1029,6 +1069,15 @@ export function searchConstraintsToFilterTokens(
     const usd = krwToUsd(constraints.maxPriceKrw, port);
     tokens.push(`price_usd_max:${usd}`);
   }
+
+  // NOTE: `softMaxPriceKrwHint` is intentionally NOT emitted as a YQL token.
+  // Retail-channel keywords (편의점/마트/백화점) describe a price *intent*
+  // (ranking band), not a strict upper bound. Promoting them to a hard YQL
+  // filter previously silently produced zero retrieval results on long-tail
+  // corpora that lack wines in the 편의점 (~$11) band. The hint is consumed by
+  // ranking/synthesis only; if no downstream consumer reads it yet, it is
+  // simply an observed-but-not-yet-acted-on signal — strictly safer than the
+  // prior "hard filter silently drops everything" behaviour.
 
   if (constraints.vintageMin !== undefined) {
     tokens.push(`vintage_year_min:${constraints.vintageMin}`);

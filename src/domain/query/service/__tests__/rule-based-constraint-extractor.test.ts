@@ -242,6 +242,42 @@ describe('extractRuleBasedConstraints — BUG-P2 currency detection from matched
     const band = result.soft.find((c) => c.attribute === 'price_band');
     expect(band?.value).toBe('mid');
   });
+
+  // SOTA++ structural fix (v14 bench price_expression #70/71/73 RCA):
+  // retail-channel keywords (편의점/마트/백화점) emit a SOFT softMaxPriceKrwHint
+  // (ranking signal), not a hard maxPriceKrw (YQL filter). The hint is promoted
+  // to a SOFT NormalizedConstraint here with confidence 0.55 (lower than the
+  // 0.85 of numeric "X만원 이하") so the planner still sees the price band but
+  // the ranker doesn't strictly enforce it.
+
+  it('retail-channel "편의점 와인" → soft max_price_krw=15000 (hint, low confidence)', () => {
+    const result = extractRuleBasedConstraints('편의점 와인 추천');
+    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    expect(maxPrice).toBeDefined();
+    expect(maxPrice?.value).toBe(15_000);
+    // Lower confidence than numeric (0.85) — flags this as approximate.
+    expect(maxPrice?.confidence).toBeLessThan(0.85);
+    // No hard vintage_year — channel hint should never become hard.
+    expect(result.hard.find((c) => c.attribute === 'max_price_krw')).toBeUndefined();
+  });
+
+  it('retail-channel "백화점 와인 수준" → soft max_price_krw=100000 (hint)', () => {
+    const result = extractRuleBasedConstraints('백화점 와인 수준');
+    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    expect(maxPrice?.value).toBe(100_000);
+    expect(maxPrice?.confidence).toBeLessThan(0.85);
+  });
+
+  it('retail-channel with numeric price → numeric wins, hint suppressed', () => {
+    // "편의점에서 8천원 이하" — numeric is more specific.
+    const result = extractRuleBasedConstraints('편의점에서 8천원 이하 와인');
+    const maxPrices = result.soft.filter((c) => c.attribute === 'max_price_krw');
+    // Only ONE max_price_krw soft constraint: the numeric 8000, not the channel hint.
+    expect(maxPrices).toHaveLength(1);
+    expect(maxPrices[0]?.value).toBe(8_000);
+    // Numeric confidence is 0.85 (or higher), not the hint's 0.55.
+    expect(maxPrices[0]?.confidence).toBeGreaterThanOrEqual(0.85);
+  });
 });
 
 describe('extractRuleBasedConstraints — Korean connective form patterns (연결형 어미)', () => {
