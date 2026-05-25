@@ -65,6 +65,7 @@ import { scoreExactLookupContract } from './scorer-exact-lookup-contract.js';
 import { scoreTermination } from './scorer-termination.js';
 import { scoreContextRecall } from './scorer-context-recall.js';
 import { evaluatePredicate, formatToolArgValue, getNestedValue } from './scorer-predicate-eval.js';
+import { scoreStepEfficiency } from './scorer-step-efficiency.js';
 import {
   parseToolCallInput,
   scoreContextRelevance,
@@ -1213,37 +1214,7 @@ function scoreToolAccuracy(
   return clamp01(score);
 }
 
-function scoreStepEfficiency(
-  exp: ScenarioExpectation,
-  stepCount: number,
-  diagnostics: Diagnostic[],
-): number {
-  if (!Number.isFinite(stepCount) || stepCount < 0) {
-    diagnostics.push({
-      dim: 'stepEfficiency',
-      severity: 'critical',
-      code: 'INVALID_STEP_COUNT',
-      message: `invalid stepCount=${stepCount}`,
-      observed: stepCount,
-    });
-    return 0;
-  }
-  if (exp.maxSteps <= 0) {
-    return stepCount === 0 ? 1 : 0;
-  }
-  if (stepCount <= exp.maxSteps) return 1;
-  const overshoot = stepCount - exp.maxSteps;
-  const score = Math.max(0, 1 - overshoot / exp.maxSteps);
-  diagnostics.push({
-    dim: 'stepEfficiency',
-    severity: 'warn',
-    code: 'STEP_BUDGET_EXCEEDED',
-    message: `steps ${stepCount} > budget ${exp.maxSteps}`,
-    observed: stepCount,
-    expected: exp.maxSteps,
-  });
-  return score;
-}
+
 
 function scoreAnswerQuality(
   exp: ScenarioExpectation,
