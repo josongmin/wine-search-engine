@@ -1,0 +1,108 @@
+kind,symbol,location,action,reason
+export,MAX_TOOLS_PER_BATCH,…pplication/agent/agent-tool-execution-support.ts:10:14,review,knip unused; verify before delete
+export,formatPolicyBlockedObservation,…plication/agent/agent-tool-execution-support.ts:154:17,review,knip unused; verify before delete
+export,getToolTimeoutMs,…plication/agent/agent-tool-execution-support.ts:188:17,review,knip unused; verify before delete
+export,getParallelBatchTimeoutMs,…plication/agent/agent-tool-execution-support.ts:200:17,review,knip unused; verify before delete
+export,buildObservationPairs,…plication/agent/agent-tool-execution-support.ts:213:17,review,knip unused; verify before delete
+export,executeLookupAsEntitySearch,src/application/search/lookup-wine-execution.ts:139:23,review,knip unused; verify before delete
+export,SEARCH_TOOL_OCCASION_VALUES,src/application/search/search-tool-contract.ts:11:14,review,knip unused; verify before delete
+export,SEARCH_TOOL_STYLE_HINT_VALUES,src/application/search/search-tool-contract.ts:160:14,review,knip unused; verify before delete
+export,queryMentionsWineType,src/application/search/search-tool-diversity.ts:16:17,review,knip unused; verify before delete
+export,mergeSearchResponsesForDiversityDiscovery,src/application/search/search-tool-diversity.ts:161:17,review,knip unused; verify before delete
+export,buildSearchToolPriceClauses,…c/application/search/search-tool-query-policy.ts:29:17,review,knip unused; verify before delete
+export,shouldPreserveRepresentativeAnchorOnlyQuery,…application/search/search-tool-retrieval-core.ts:76:17,review,knip unused; verify before delete
+export,shouldPreferTypedStructuredQuery,…pplication/search/search-tool-retrieval-core.ts:132:17,review,knip unused; verify before delete
+export,WINE_SEARCH_MIN_RETRIEVAL_K,…c/application/wine-search/wine-search-schemas.ts:72:14,review,knip unused; verify before delete
+export,WINE_SEARCH_MAX_RETRIEVAL_K,…c/application/wine-search/wine-search-schemas.ts:73:14,review,knip unused; verify before delete
+export,DEFAULT_WINE_SEARCH_OPENAI_MODEL,src/config/container-structured-llm.ts:30:14,review,knip unused; verify before delete
+export,LookupWineAttemptInputSchema,…/domain/agent/model/agent-tool-attempt-schema.ts:86:14,review,knip unused; verify before delete
+export,parseKnownAgentToolAttemptInput,…domain/agent/model/agent-tool-attempt-schema.ts:277:17,review,knip unused; verify before delete
+export,parseKnownAgentToolAttemptInputWithRepair,…domain/agent/model/agent-tool-attempt-schema.ts:284:17,review,knip unused; verify before delete
+export,MAX_UNKNOWN_TOOL_INPUT_KEYS,…domain/agent/model/agent-tool-attempt-schema.ts:338:14,review,knip unused; verify before delete
+export,parseUnknownAgentToolAttemptInput,…domain/agent/model/agent-tool-attempt-schema.ts:340:17,review,knip unused; verify before delete
+export,buildSynthesisContext,src/domain/agent/model/tool-outcome.ts:132:17,review,knip unused; verify before delete
+export,HARD_FILTERABLE_ATTRIBUTES,…l/service/constraint-to-sparse-filter-tokens.ts:716:14,review,knip unused; verify before delete
+export,SOFT_PROMOTABLE_ATTRIBUTES,…l/service/constraint-to-sparse-filter-tokens.ts:752:14,review,knip unused; verify before delete
+export,HydeResponseSchema,src/domain/retrieval/service/hyde-generator.ts:95:14,review,knip unused; verify before delete
+export,HYDE_TOOL,src/domain/retrieval/service/hyde-generator.ts:184:14,review,knip unused; verify before delete
+export,MultiQueryRewriteResponseSchema,…main/retrieval/service/multi-query-generator.ts:113:14,review,knip unused; verify before delete
+export,MULTI_QUERY_TOOL,…main/retrieval/service/multi-query-generator.ts:246:14,review,knip unused; verify before delete
+export,getWineDataDir,src/domain/shared/utils/data-paths.ts:8:17,ignore,used in-file; knip ignoreExportsUsedInFile candidate
+export,withRequestCorrelation,src/infrastructure/db/pg-pool.ts:143:17,ignore,"gradual migration helper (documented opt-in), not yet wired"
+export,DRINKING_WINDOW_MODEL_VERSION,…c/infrastructure/ml/drinking-window-predictor.ts:21:14,review,knip unused; verify before delete
+export,printBenchmarkInsights,…/benchmark/agent/benchmark-insight-generator.ts:385:23,review,knip unused; verify before delete
+export,judgeAnswerN,test/benchmark/agent/judge.ts:199:23,review,knip unused; verify before delete
+export,STANDARD_SCENARIO_IDS,test/benchmark/agent/scenarios.ts:1211:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,MESSY_SEARCH_SCENARIO_IDS,test/benchmark/agent/scenarios.ts:1286:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,MESSY_QUERY_ROBUSTNESS_SCENARIO_IDS,test/benchmark/agent/scenarios.ts:1313:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_PROFILE_SCENARIO_IDS,test/benchmark/agent/scenarios.ts:1327:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_POSITIVE_CORE_PROFILE_S…,test/benchmark/agent/scenarios.ts:1331:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_HARD_NEGATIVE_PROFILE_S…,test/benchmark/agent/scenarios.ts:1335:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_POLICY_PENDING_PROFILE_…,test/benchmark/agent/scenarios.ts:1339:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_LARGE_PROFILE_SCENARIO_…,test/benchmark/agent/scenarios.ts:1343:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_LARGE_POSITIVE_PROFILE_…,test/benchmark/agent/scenarios.ts:1347:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,TRANSLITERATION_EXACT_LOOKUP_LARGE_HARD_NEGATIVE_PRO…,test/benchmark/agent/scenarios.ts:1351:14,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+export,hasExplicitNoEvidenceObservation,test/benchmark/agent/scorer-abstention.ts:41:17,review,knip unused; verify before delete
+export,inferGoldenKeywordsFromExpectation,test/benchmark/agent/scorer-context-recall.ts:55:17,review,knip unused; verify before delete
+export,scoreExactLookupContextRecall,test/benchmark/agent/scorer-context-recall.ts:86:17,review,knip unused; verify before delete
+export,scoreExactLookupContextRelevance,test/benchmark/agent/scorer-context-relevance.ts:315:17,review,knip unused; verify before delete
+export,getToolCallSemanticSignature,…t/benchmark/agent/scorer-tool-call-signatures.ts:36:17,review,knip unused; verify before delete
+export,normalizeObservations,test/benchmark/agent/scorer.ts:147:10,review,knip unused; verify before delete
+type,TimeoutErrorLike,src/application/agent/agent-tool-execution-support.ts:164:18,review,knip unused; verify before delete
+type,LookupWineInput,src/application/search/lookup-wine-execution.ts:58:13,review,knip unused; verify before delete
+type,NormalizedLookupWineInput,src/application/search/lookup-wine-execution.ts:65:18,review,knip unused; verify before delete
+type,InvalidLookupWineInput,src/application/search/lookup-wine-execution.ts:76:18,review,knip unused; verify before delete
+type,LookupWineInputNormalizationResult,src/application/search/lookup-wine-execution.ts:81:13,review,knip unused; verify before delete
+type,ExecuteLookupAsEntitySearchOptions,src/application/search/lookup-wine-execution.ts:114:18,review,knip unused; verify before delete
+type,MultiQueryFanoutInput,src/application/search/multi-query-retrieval-fanout.ts:28:18,review,knip unused; verify before delete
+type,MultiQueryFanoutResult,src/application/search/multi-query-retrieval-fanout.ts:40:18,review,knip unused; verify before delete
+type,AgentQueryExecutionContract,src/application/search/query-execution-contract.ts:91:18,review,knip unused; verify before delete
+type,ScenarioTerminationReason,src/application/wine-search/bench-scorer-adapter.ts:68:13,review,knip unused; verify before delete
+type,ScenarioToolCallTrace,src/application/wine-search/bench-scorer-adapter.ts:76:18,review,knip unused; verify before delete
+type,ScenarioExecutionLike,src/application/wine-search/bench-scorer-adapter.ts:82:18,review,knip unused; verify before delete
+type,__ExecutionPlanKindParityProof,src/application/wine-search/execution-plan-schemas.ts:317:13,review,knip unused; verify before delete
+type,JudgeInput,src/application/wine-search/llm-judge.ts:162:18,review,knip unused; verify before delete
+type,LlmJudge,src/application/wine-search/llm-judge.ts:207:18,review,knip unused; verify before delete
+type,SynthesisDecisionStatus,src/application/wine-search/synthesis-runner.ts:449:13,ignore,bench CLI entry / scenario registry — add knip entry or cross-file barrel
+type,OrchestratorComparisonLlmFallback,src/application/wine-search/wine-search-orchestrator.ts:261:13,review,knip unused; verify before delete
+type,AnchorRefreshCallback,src/config/planner-v1-adapter.ts:48:13,review,knip unused; verify before delete
+type,PlannerV1AdapterOptions,src/config/planner-v1-adapter.ts:65:18,review,knip unused; verify before delete
+type,SearchToolAttemptInput,src/domain/agent/model/agent-tool-attempt-schema.ts:163:13,review,knip unused; verify before delete
+type,LookupWineAttemptInput,src/domain/agent/model/agent-tool-attempt-schema.ts:164:13,review,knip unused; verify before delete
+type,FoodPairingAttemptInput,src/domain/agent/model/agent-tool-attempt-schema.ts:165:13,review,knip unused; verify before delete
+type,DrinkingWindowAttemptInput,src/domain/agent/model/agent-tool-attempt-schema.ts:166:13,review,knip unused; verify before delete
+type,CompareWinesAttemptInput,src/domain/agent/model/agent-tool-attempt-schema.ts:167:13,review,knip unused; verify before delete
+type,KnownAgentToolAttempt,src/domain/agent/model/agent-tool-attempt-schema.ts:170:13,review,knip unused; verify before delete
+type,UnknownAgentToolAttempt,src/domain/agent/model/agent-tool-attempt-schema.ts:178:18,review,knip unused; verify before delete
+type,AgentToolAttempt,src/domain/agent/model/agent-tool-attempt-schema.ts:184:13,review,knip unused; verify before delete
+type,AdaptiveBudget,src/domain/agent/service/adaptive-budget.ts:300:18,review,knip unused; verify before delete
+type,MultiVintageClusterClassification,src/domain/decision/service/multi-vintage-cluster-detector.ts:73:13,review,knip unused; verify before delete
+type,EmptyCandidatePoolClassification,src/domain/decision/service/zero-hit-detector.ts:61:13,review,knip unused; verify before delete
+type,ClassifyEmptyCandidatePoolInput,src/domain/decision/service/zero-hit-detector.ts:71:18,review,knip unused; verify before delete
+type,ContaminationResult,src/domain/ingestion/service/contamination-detector.ts:76:18,review,knip unused; verify before delete
+type,AnchorRefreshInput,src/domain/query/service/anchor-refresh.ts:53:18,review,knip unused; verify before delete
+type,RecipientProfileValue,src/domain/query/service/recipient-situation-profile.ts:33:13,review,knip unused; verify before delete
+type,RecipientProfileEvidenceAxis,src/domain/query/service/recipient-situation-profile.ts:35:13,review,knip unused; verify before delete
+type,ExtractSearchConstraintsOptions,src/domain/query/service/search-constraint-extractor.ts:43:18,review,knip unused; verify before delete
+type,ValidatedConstraintTier,src/domain/retrieval/service/constraint-validator.ts:71:13,review,knip unused; verify before delete
+type,DroppedConstraintReason,src/domain/retrieval/service/constraint-validator.ts:89:13,review,knip unused; verify before delete
+type,UnrecognizedConstraintReason,src/domain/retrieval/service/constraint-validator.ts:97:13,review,knip unused; verify before delete
+type,ValidatedConstraintEntry,src/domain/retrieval/service/constraint-validator.ts:100:18,review,knip unused; verify before delete
+type,DroppedConstraintEntry,src/domain/retrieval/service/constraint-validator.ts:106:18,review,knip unused; verify before delete
+type,UnrecognizedConstraintEntry,src/domain/retrieval/service/constraint-validator.ts:110:18,review,knip unused; verify before delete
+type,ConstraintValidationReport,src/domain/retrieval/service/constraint-validator.ts:114:18,review,knip unused; verify before delete
+type,ValidatableConstraintTiers,src/domain/retrieval/service/constraint-validator.ts:255:18,review,knip unused; verify before delete
+type,HydeResponse,src/domain/retrieval/service/hyde-generator.ts:101:13,review,knip unused; verify before delete
+type,HydeGeneratorDeps,src/domain/retrieval/service/hyde-generator.ts:122:18,review,knip unused; verify before delete
+type,MultiQueryRewriteResponse,src/domain/retrieval/service/multi-query-generator.ts:123:13,review,knip unused; verify before delete
+type,MultiQueryGeneratorDeps,src/domain/retrieval/service/multi-query-generator.ts:160:18,review,knip unused; verify before delete
+type,OpenAIStructuredLlmAdapterOptions,src/infrastructure/ai/openai-structured-llm-adapter.ts:109:18,review,knip unused; verify before delete
+type,DrinkingWindowInput,src/infrastructure/ml/drinking-window-predictor.ts:56:18,review,knip unused; verify before delete
+type,DrinkingWindowPrediction,src/infrastructure/ml/drinking-window-predictor.ts:78:18,review,knip unused; verify before delete
+type,GetDocumentsReport,src/infrastructure/vespa/vespa-search-index.ts:124:18,review,knip unused; verify before delete
+type,ExactLookupScore,test/benchmark/agent/scorer-exact-lookup-contract.ts:43:18,review,knip unused; verify before delete
+type,MetricProvenance,test/benchmark/agent/scorer.ts:275:18,review,knip unused; verify before delete
+type,ScenarioDelta,test/benchmark/agent/statistical-compare.ts:64:18,review,knip unused; verify before delete
+type,PairedBootstrapResult,test/benchmark/agent/statistical-compare.ts:80:18,review,knip unused; verify before delete
+type,VarianceDecomposition,test/benchmark/agent/variance-decomposition.ts:49:18,review,knip unused; verify before delete
+type,WineSearchRouteDeps,test/e2e/helpers/wine-search-test-container.ts:270:15,review,knip unused; verify before delete

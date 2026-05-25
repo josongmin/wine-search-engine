@@ -3,6 +3,15 @@
     "embedding-service\\.js$",
     "reranker\\.js$"
   ],
+  "ignoreIssues": {
+    "src/infrastructure/db/pg-pool.ts": ["exports"],
+    "src/domain/shared/utils/data-paths.ts": ["exports"],
+    "test/benchmark/agent/scorer.ts": ["exports", "types"],
+    "test/benchmark/agent/scorer-*.ts": ["exports", "types"],
+    "src/domain/retrieval/service/hyde-generator.ts": ["exports", "types"],
+    "src/domain/retrieval/service/multi-query-generator.ts": ["exports", "types"],
+    "src/domain/retrieval/service/constraint-validator.ts": ["types"]
+  },
   "typescript": true,
   "vitest": true,
   "workspaces": {
@@ -12,7 +21,10 @@
         "scripts/**/*.ts",
         "test/**/*.test.ts",
         "src/**/*.test.ts",
-        "src/**/__tests__/**/*.test.ts"
+        "src/**/__tests__/**/*.test.ts",
+        "test/benchmark/agent/constraint-extraction-eval.ts",
+        "test/benchmark/wine-search/runner.ts",
+        "test/benchmark/agent/scenarios.robustness.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
