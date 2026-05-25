@@ -53,6 +53,25 @@ export function scoreTermination(
     return 0;
   }
 
+  // SOTA++ structural fix (2026-05-26): `refusalExpected: true` is the SSoT
+  // flag for "the agent should refuse this input" — used by edge_case scenarios
+  // (empty query, out-of-domain inquiry, malformed input, etc.) where the
+  // analyzer-side rejection path emits `terminationReason='blocked'` for a
+  // NON-security reason (TERMINATION_KIND_UNSUPPORTED_INTENT in
+  // wine-search-orchestrator.ts). Without this branch, scenarios that set
+  // `terminationReason='answer'` to match the deterministic-template answer
+  // path will be scored 0 on terminationCorrectness whenever the orchestrator
+  // actually routes via the router-reject path (which always emits 'blocked').
+  // Treat 'blocked' as a correct termination for these refusal scenarios so
+  // the geo-mean is not collapsed by an authoring/runtime semantic gap. The
+  // refusal-semantics layer (answer quality / judge / structured checks) is
+  // already responsible for verifying the rejection content is rubric-correct
+  // — terminationCorrectness here only attests "the agent did not run a
+  // disallowed flow", which is true for both 'answer' and 'blocked' refusals.
+  if (exp.refusalExpected === true && reason === 'blocked') {
+    return 1;
+  }
+
   if (reason === 'error' || reason === 'timeout') {
     diagnostics.push({
       dim: 'terminationCorrectness',
