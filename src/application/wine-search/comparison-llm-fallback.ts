@@ -26,7 +26,7 @@
  *     detects a stalled comparison plan (`max_steps` + comparison signal).
  *   - It does NOT call any tools. The candidate set is whatever the mini-loop
  *     already pulled before stalling.
- *   - It returns `null` when fewer than {@link MIN_TOTAL_CANDIDATES_FOR_FALLBACK}
+ *   - It returns `null` when fewer than {@link MIN_CANDIDATES_PER_LEG_FOR_VERDICT}
  *     candidates exist across both legs — the underlying retrieval was broken
  *     and pretending the LLM can synthesize a verdict from nothing would
  *     fabricate facts (CLAUDE.md schema-quality bar).
@@ -72,17 +72,15 @@ const COMPARISON_FALLBACK_DEFAULT_MODEL = CLAUDE_SONNET_MODEL_ID;
  *  top representative wines without burying the LLM in tail noise. */
 const MAX_CANDIDATES_PER_LEG = 5;
 
-/** Minimum total candidates across both legs needed to attempt the fallback.
- *  Below this threshold the underlying retrieval has failed (both legs
- *  effectively empty); pretending the LLM can synthesize a verdict from
- *  nothing would fabricate facts. We surface `null` so the orchestrator can
- *  let the standard fallback ladder play out. */
-const MIN_TOTAL_CANDIDATES_FOR_FALLBACK = 1;
+/** A comparison verdict requires two sides, by definition. */
+const MIN_LEGS_FOR_COMPARISON = 2;
 
-/** Per-leg minimum so we always have something on BOTH sides when we DO
- *  proceed. When only one leg has candidates, a "comparison verdict" is
- *  meaningless — the LLM would either invent the other side or unilaterally
- *  pick the side it has data for. */
+/** Per-leg minimum so we always have something on BOTH sides when we proceed.
+ *  When only one leg has candidates, a "comparison verdict" is meaningless —
+ *  the LLM would either invent the other side or unilaterally pick the side
+ *  it has data for. This is the single source of truth for "do we have
+ *  enough to compare"; together with {@link MIN_LEGS_FOR_COMPARISON} it
+ *  implies a minimum total of 2 candidates. */
 const MIN_CANDIDATES_PER_LEG_FOR_VERDICT = 1;
 
 /** Maximum length of the LLM-emitted Korean / English answer. Mirrors
@@ -252,7 +250,7 @@ const defaultLog = bootstrapLogger.child({ component: 'ComparisonLlmFallback' })
  *    `'failed'` result kind so the caller can fall through cleanly.
  *  - Re-throws `AbortError` (the orchestrator owns abort propagation).
  *  - Returns `'declined_no_candidates'` when the candidate budget is too
- *    thin for a meaningful verdict (see {@link MIN_TOTAL_CANDIDATES_FOR_FALLBACK}).
+ *    thin for a meaningful verdict (see {@link MIN_CANDIDATES_PER_LEG_FOR_VERDICT}).
  */
 export async function runComparisonLlmFallback(
   input: ComparisonLlmFallbackInput,
@@ -273,9 +271,8 @@ export async function runComparisonLlmFallback(
     (leg) => leg.candidates.length >= MIN_CANDIDATES_PER_LEG_FOR_VERDICT,
   );
   if (
-    totalCandidates < MIN_TOTAL_CANDIDATES_FOR_FALLBACK
+    input.originalRetrievalDocs.length < MIN_LEGS_FOR_COMPARISON
     || !everyLegHasMinimum
-    || input.originalRetrievalDocs.length === 0
   ) {
     logger.info(
       {
