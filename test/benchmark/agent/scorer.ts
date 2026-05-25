@@ -35,8 +35,6 @@ import type {
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { ToolCallEvidenceFrame } from '../../../src/domain/agent/model/tool-call-evidence-frame.js';
 import type { EvidenceRecord } from '../../../src/domain/evaluation/service/claim-level-evaluator.js';
-import { buildEvidenceRecordsFromFrames } from '../../../src/domain/evaluation/service/build-evidence-records-from-frames.js';
-import { parseObservations } from '../../../src/domain/evaluation/service/evidence-parser.js';
 import {
   PENALTY_EXTRA_TOOL_PER_CALL as K_PENALTY_EXTRA_TOOL_PER_CALL,
   PENALTY_EXTRA_TOOL_CAP as K_PENALTY_EXTRA_TOOL_CAP,
@@ -65,6 +63,10 @@ import {
   stableJsonStringify,
   countSemanticToolInvocations,
 } from './scorer-tool-call-signatures.js';
+import {
+  buildContextEvidenceRecords,
+  normalizeEvidenceText,
+} from './scorer-evidence-utils.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -750,16 +752,9 @@ type ContextRelevanceCheck = {
   readonly hard?: boolean | undefined;
 };
 
-function buildContextEvidenceRecords(execution: ScenarioExecution): readonly EvidenceRecord[] {
-  if (execution.evidenceFrames !== undefined && execution.evidenceFrames.length > 0) {
-    return buildEvidenceRecordsFromFrames(execution.evidenceFrames);
-  }
-  return parseObservations(execution.observations);
-}
-
-function normalizeEvidenceText(value: unknown): string {
-  return String(value).trim().toLowerCase().normalize('NFKC');
-}
+// buildContextEvidenceRecords + normalizeEvidenceText moved to
+// ./scorer-evidence-utils.ts during the 2026-05-25 decomposition. Imported
+// above; consumed by ≥6 per-dim scoring sites across this file.
 
 function normalizeExactLookupSurface(
   value: string,
