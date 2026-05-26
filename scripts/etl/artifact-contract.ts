@@ -6,6 +6,8 @@ export const ETL_ARTIFACT_FILES = {
   ko: resolveDataPath('data/silver-ko.ndjson'),
   docquery: resolveDataPath('data/silver-docquery.ndjson'),
   trackc: resolveDataPath('data/silver-trackc.ndjson'),
+  trackcPartial: resolveDataPath('data/silver-trackc-partial.ndjson'),
+  trackcExperimental: resolveDataPath('data/silver-trackc-experimental.ndjson'),
   qualityReport: resolveDataPath('data/silver-quality-report.json'),
   ambiguityRegistry: resolveDataPath('data/ambiguity-registry.ndjson'),
   searchSnapshotsDir: resolveDataPath('data/search-snapshots'),
@@ -66,3 +68,29 @@ export const ETL_STAGE_FILE_GRAPH = {
 } as const;
 
 export const DEFAULT_INDEXABLE_ETL_INPUT = ETL_ARTIFACT_FILES.trackc;
+
+export type TrackCArtifactLane = 'canonical' | 'partial' | 'experimental';
+
+export function classifyTrackCArtifactPath(inputPath: string): TrackCArtifactLane | undefined {
+  if (inputPath === ETL_ARTIFACT_FILES.trackc) {
+    return 'canonical';
+  }
+  if (inputPath === ETL_ARTIFACT_FILES.trackcPartial) {
+    return 'partial';
+  }
+  if (inputPath === ETL_ARTIFACT_FILES.trackcExperimental) {
+    return 'experimental';
+  }
+  return undefined;
+}
+
+export function assertCanonicalTrackCArtifactInput(inputPath: string, stage: string): void {
+  const lane = classifyTrackCArtifactPath(inputPath);
+  if (lane === undefined || lane === 'canonical') {
+    return;
+  }
+  throw new Error(
+    `${stage} requires the canonical Track C artifact (${ETL_ARTIFACT_FILES.trackc}); `
+    + `received ${lane} artifact: ${inputPath}`,
+  );
+}

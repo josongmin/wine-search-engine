@@ -56,7 +56,6 @@ function makeRuntimeState(overrides: Partial<SearchSnapshotRuntimeState> = {}): 
     publishedAt: '2026-05-21T00:00:00.000Z',
     manifestPath: '/tmp/manifest.json',
     nlMappingsRuntimePath: '/tmp/nl-mappings.json',
-    allowMissingLtr: false,
     counts: {
       entities: 3,
       aliases: 4,
@@ -70,6 +69,13 @@ function makeRuntimeState(overrides: Partial<SearchSnapshotRuntimeState> = {}): 
       ambiguityRegistry: 'h-ambiguity',
       nlMappings: 'h-nl',
       activeLtrModels: 'h-ltr',
+    },
+    quality: {
+      status: 'canonical',
+      blockers: [],
+      bypasses: [],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
     },
     ...overrides,
   };

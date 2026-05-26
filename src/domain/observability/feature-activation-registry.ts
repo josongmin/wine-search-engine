@@ -109,13 +109,6 @@ registerFeature('tool_result_cache', () =>
   process.env['WINE_SEARCH_TOOL_CACHE_ENABLED'] === '0' ? 'off' : 'on',
 );
 
-/** Alias overlay partial-resolution graceful fallback. */
-registerFeature('alias_overlay_partial_resolution', () =>
-  // Default OFF (strict resolution). `'1'` opts into the graceful
-  // partial path. Mirrors `search-usecase-resolver-candidates.ts`.
-  process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'] === '1' ? 'on' : 'off',
-);
-
 /** Per-tool fail-closed vocabulary. */
 registerFeature('disabled_tools_fail_closed', () => {
   // Treated as ON when at least one tool name is present in the

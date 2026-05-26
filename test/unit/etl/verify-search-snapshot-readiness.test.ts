@@ -104,7 +104,6 @@ async function writeFixtureFiles(args?: {
       publishedAt: '2026-04-14T00:00:00.000Z',
       manifestPath,
       nlMappingsRuntimePath: nlMappingsPath,
-      allowMissingLtr: false,
       counts: {
         entities: args?.runtimeEntities ?? 10,
         aliases: 10,
@@ -118,6 +117,13 @@ async function writeFixtureFiles(args?: {
         ambiguityRegistry: 'ambiguity-hash',
         nlMappings: 'nl-hash',
         activeLtrModels: 'ltr-hash',
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     }, null, 2)}\n`,
   );

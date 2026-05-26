@@ -35,8 +35,9 @@ import {
   type EntityType as DomainEntityType,
   type ResolvedEntity,
 } from '@domain/attribute/service/entity-resolver.js';
-import { extractRuleBasedConstraints } from '@domain/query/service/rule-based-constraint-extractor.js';
-import { extractSearchConstraints } from '@domain/query/service/search-constraint-extractor.js';
+import { NLMapper } from '@domain/attribute/service/nl-mapper.js';
+import type { MappingTablePort } from '@domain/attribute/port/mapping-table.port.js';
+import { ConstraintCompiler } from '@domain/query/service/constraint-compiler.js';
 import { buildNormalizedQueryViews } from '@domain/query/service/query-normalizer.js';
 import { detectDecomposition } from '@domain/query/service/decomposition-detector.js';
 import { extractAllPairingConstraints } from '@domain/query/service/pairing-extractor.js';
@@ -59,11 +60,14 @@ import {
   WINE_SEARCH_MAX_CONSTRAINTS,
   WINE_SEARCH_MAX_PER_TOOL_CAP,
   WINE_SEARCH_MAX_QUERY_CHARS,
+  WINE_SEARCH_MAX_RESULT_LIMIT,
   WINE_SEARCH_MIN_PER_TOOL_CAP,
+  WINE_SEARCH_MIN_RESULT_LIMIT,
   type AnalysisContract,
   type AnalysisRequiredTool,
   type AnchorEntityType,
   type AnchorResolution,
+  type ConstraintTierBundle,
   type Decomposition,
   type LlmFallbackOutcome,
   type QueryIntent,
@@ -105,7 +109,32 @@ const ANCHOR_MIN_CONFIDENCE = 0.5;
 /** Vintage-year regex — Latin word boundaries built from Unicode-aware
  *  lookarounds (rule 8 / rule 24). */
 const VINTAGE_YEAR_RE = /(?<![\p{L}\p{N}])(?:18|19|20)\d{2}(?![\p{L}\p{N}])/u;
+/** Explicit user-facing result-count intents only. We intentionally keep this
+ *  narrow: `top3`, `탑3`, `상위 3개`. Broad patterns like bare `3개 추천` are
+ *  ambiguous and stay unstructured until a stronger SSoT exists. */
+const REQUESTED_RESULT_LIMIT_PATTERNS = [
+  /(?:^|[^\p{L}\p{N}])top\s*-?\s*([1-9]\d{0,2})(?=$|[^\p{L}\p{N}])/iu,
+  /(?:^|[^\p{L}\p{N}])탑\s*([1-9]\d{0,2})(?=$|[^\p{L}\p{N}])/u,
+  /(?:^|[^\p{L}\p{N}])상위\s*([1-9]\d{0,2})(?:\s*개)?(?=$|[^\p{L}\p{N}])/u,
+] as const;
 
+class EmptyMappingTablePort implements MappingTablePort {
+  findMapping(): Promise<null> {
+    return Promise.resolve(null);
+  }
+
+  findMappingsByAttribute(): Promise<readonly []> {
+    return Promise.resolve([]);
+  }
+
+  getCurrentVersion(): Promise<string> {
+    return Promise.resolve('v1.0');
+  }
+}
+
+const ANALYZER_CONSTRAINT_COMPILER = new ConstraintCompiler(
+  new NLMapper(new EmptyMappingTablePort()),
+);
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -249,11 +278,14 @@ export class QueryAnalyzerService {
     const hangulDominant = computeHangulDominant(normalized);
     const normalizedViews = buildNormalizedQueryViews(normalized);
 
-    // Run deterministic pipeline in parallel where independent. resolveEntity
-    // is synchronous so a Promise.all only matters for symmetry — order
-    // matters for downstream merges so we do these in two phases.
+    // Resolve anchors first, then reuse the compiler SSoT for constraints so
+    // analyzer output stays aligned with the live search pipeline.
     const anchors = extractAnchors(normalizedViews.collapsedWhitespace);
-    const constraints = extractConstraints(normalizedViews.collapsedWhitespace);
+    const constraintBundle = await extractConstraintBundle(
+      normalizedViews.collapsedWhitespace,
+      input.abortSignal,
+    );
+    const constraints = flattenConstraintBundle(constraintBundle);
     const pairingTags = extractAllPairingConstraints(normalizedViews.collapsedWhitespace);
     const decompositionOutcome = detectDecomposition(normalized);
 
@@ -270,6 +302,7 @@ export class QueryAnalyzerService {
     });
 
     const decomposition = buildDecomposition(decompositionOutcome);
+    const requestedResultLimit = extractRequestedResultLimit(normalizedViews.collapsedWhitespace);
 
     const requiredTool: AnalysisRequiredTool | undefined =
       pairingTags.length > 0
@@ -325,7 +358,13 @@ export class QueryAnalyzerService {
     let candidate: WineSearchAnalysis = {
       intent,
       anchors: [...anchors],
+      constraints: {
+        hard: [...constraintBundle.hard],
+        soft: [...constraintBundle.soft],
+        inferred: [...constraintBundle.inferred],
+      },
       normalizedConstraints: [...constraints],
+      ...(requestedResultLimit !== undefined ? { requestedResultLimit } : {}),
       ...(decomposition !== undefined ? { decomposition } : {}),
       contract,
       expectedMultiStep,
@@ -537,27 +576,55 @@ function extractAnchors(normalizedQuery: string): readonly AnchorResolution[] {
   return anchors;
 }
 
-function extractConstraints(normalizedQuery: string): readonly NormalizedConstraint[] {
-  const bundle = extractRuleBasedConstraints(normalizedQuery);
-  // The bundle exposes hard/soft/inferred. The contract surface is a flat
-  // list; downstream callers will re-classify via attribute name. We keep
-  // hard first to preserve priority semantics for any consumer that uses
-  // ordering for tie-breaking.
+async function extractConstraintBundle(
+  normalizedQuery: string,
+  abortSignal: AbortSignal | undefined,
+): Promise<ConstraintTierBundle> {
+  const result = await ANALYZER_CONSTRAINT_COMPILER.compile(
+    normalizedQuery,
+    abortSignal,
+  );
+  return {
+    hard: result.bundle.hard.slice(0, WINE_SEARCH_MAX_CONSTRAINTS),
+    soft: result.bundle.soft.slice(0, WINE_SEARCH_MAX_CONSTRAINTS),
+    inferred: result.bundle.inferred.slice(0, WINE_SEARCH_MAX_CONSTRAINTS),
+  };
+}
+
+function flattenConstraintBundle(bundle: ConstraintTierBundle): readonly NormalizedConstraint[] {
   const flat: NormalizedConstraint[] = [
     ...bundle.hard,
     ...bundle.soft,
     ...bundle.inferred,
   ];
+  return flat.length > WINE_SEARCH_MAX_CONSTRAINTS
+    ? flat.slice(0, WINE_SEARCH_MAX_CONSTRAINTS)
+    : flat;
+}
 
-  // `extractSearchConstraints` is also exercised inside `extractRuleBased…`,
-  // but its KRW price + vintage range are surfaced as soft entries already.
-  // We do NOT call it again here to avoid double-counting (verified by
-  // reading rule-based-constraint-extractor.ts lines 348-408).
-  void extractSearchConstraints; // referenced for traceability — see comment above
-  if (flat.length > WINE_SEARCH_MAX_CONSTRAINTS) {
-    return flat.slice(0, WINE_SEARCH_MAX_CONSTRAINTS);
+function extractRequestedResultLimit(normalizedQuery: string): number | undefined {
+  for (const pattern of REQUESTED_RESULT_LIMIT_PATTERNS) {
+    const match = pattern.exec(normalizedQuery);
+    if (match === null) {
+      continue;
+    }
+    const parsed = Number.parseInt(match[1] ?? '', 10);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+    return clampRequestedResultLimit(parsed);
   }
-  return flat;
+  return undefined;
+}
+
+function clampRequestedResultLimit(value: number): number {
+  if (value < WINE_SEARCH_MIN_RESULT_LIMIT) {
+    return WINE_SEARCH_MIN_RESULT_LIMIT;
+  }
+  if (value > WINE_SEARCH_MAX_RESULT_LIMIT) {
+    return WINE_SEARCH_MAX_RESULT_LIMIT;
+  }
+  return value;
 }
 
 function classifyIntent(args: {

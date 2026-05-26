@@ -18,7 +18,6 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
     publishedAt: '2026-04-17T00:00:00.000Z',
     manifestPath: path.join(runtimeStatePathDir, 'manifest.json'),
     nlMappingsRuntimePath: path.join(runtimeStatePathDir, 'nl-mappings.json'),
-    allowMissingLtr: false,
     counts: {
       entities: 10,
       aliases: 12,
@@ -32,6 +31,13 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
       activeLtrModels: 'ltr-hash',
+    },
+    quality: {
+      status: 'canonical',
+      blockers: [],
+      bypasses: [],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
     },
   };
 }

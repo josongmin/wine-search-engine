@@ -131,6 +131,41 @@ describe('QueryAnalyzerService — deterministic pipeline', () => {
     if (result.kind !== 'ok') return;
     expect(result.analysis.contract.requiresDrinkabilityCheck).toBe(true);
   });
+
+  it('situational beginner gift query — surfaces existing soft semantics structurally', async () => {
+    const result = await analyze('와인 입문자 선물용, 달달하면서 도수 낮은 거, 예쁜 라벨이면 좋겠다');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+
+    expect(result.analysis.intent).toBe('search');
+    expect(result.analysis.contract.requiredTool).toBe('search_wines');
+    expect(result.analysis.normalizedConstraints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+        expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
+        expect.objectContaining({ attribute: 'style', operator: 'in', value: ['presentation_forward'] }),
+        expect.objectContaining({ attribute: 'sweetness', operator: '>=', value: 0.5 }),
+        expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+        expect.objectContaining({ attribute: 'price_band', operator: '=', value: 'budget' }),
+        expect.objectContaining({ attribute: 'beginner_suitability', operator: '>=' }),
+        expect.objectContaining({ attribute: 'gift_suitability', operator: '>=' }),
+      ]),
+    );
+  });
+
+  it('explicit top-N query — extracts requestedResultLimit from Korean 탑N surface', async () => {
+    const result = await analyze('나파 카베르네 탑3');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.requestedResultLimit).toBe(3);
+  });
+
+  it('explicit top-N query clamps oversized requests to schema max', async () => {
+    const result = await analyze('부르고뉴 피노 누아르 top99');
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.analysis.requestedResultLimit).toBe(50);
+  });
 });
 
 describe('QueryAnalyzerService — input validation', () => {

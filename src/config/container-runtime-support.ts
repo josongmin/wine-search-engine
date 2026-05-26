@@ -264,13 +264,18 @@ export async function buildRuntimeSupportServices(
   let ltrRegistryIssue: RuntimeReadinessIssueKind | undefined = pool === undefined
     ? 'pg_pool_missing'
     : undefined;
-  let ltrRequired = false;
+  let ltrRequired = ltrServingEnabled;
   let runtimeLtrArtifactModels: ReadonlyMap<string, QueryClassWeights> | undefined;
   if (ltrServingEnabled && pool) {
     const ltrRegistry = new PgLtrModelRegistry(pool);
     try {
       const runtimeState = await loadSearchSnapshotRuntimeState();
-      ltrRequired = !runtimeState.allowMissingLtr;
+      if (runtimeState.quality.blockers.length > 0) {
+        bootstrapLogger.warn(
+          { blockers: runtimeState.quality.blockers },
+          '[Container] Search snapshot runtime state reports quality blockers',
+        );
+      }
     } catch (err) {
       bootstrapLogger.warn(
         { err },

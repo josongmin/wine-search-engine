@@ -65,6 +65,6 @@ describe('ETL artifact contract', () => {
     expect(TRACK_C_STEP1_FILE).toBe(ETL_ARTIFACT_FILES.trackc);
     expect(TRACK_C_STEP2_FILE).toBe(ETL_ARTIFACT_FILES.trackc);
     expect(TRACK_C_STEP3_FILE).toBe(ETL_ARTIFACT_FILES.trackc);
-    expect(DRINKING_WINDOW_FILE).toBe(ETL_ARTIFACT_FILES.trackc);
+    expect(DRINKING_WINDOW_FILE).toBe(ETL_ARTIFACT_FILES.trackcExperimental);
   });
 });

@@ -120,8 +120,11 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
     if (runtimeState.hashes.nlMappings !== manifest.hashes.nlMappings) {
       throw new Error(`NL mapping state/manifest hash mismatch: state=${runtimeState.hashes.nlMappings}, manifest=${manifest.hashes.nlMappings}`);
     }
-    if (runtimeState.counts.activeLtrModels <= 0 && !runtimeState.allowMissingLtr) {
-      throw new Error('Active LTR model count is zero and runtime state does not explicitly allow no-LTR mode');
+    if (runtimeState.counts.activeLtrModels <= 0) {
+      throw new Error('Active LTR model count is zero');
+    }
+    if (runtimeState.quality.blockers.length > 0) {
+      throw new Error(`Runtime quality blockers present: ${runtimeState.quality.blockers.join(', ')}`);
     }
   } finally {
     await pool.end();

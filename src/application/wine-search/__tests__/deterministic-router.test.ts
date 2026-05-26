@@ -243,6 +243,49 @@ describe('DeterministicRouter — Rule 4: single-search (default)', () => {
     expect(plan.kind).toBe('single-search');
   });
 
+  it('routes soft sensory constraints to preferences instead of hard filters', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'search',
+        preservedSurface: '풀바디 레드 와인 추천',
+        hangulDominant: true,
+        normalizedConstraints: [
+          makeConstraint('wine_type', 'red'),
+          makeConstraint('body', 'full'),
+        ],
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.filters).toEqual([
+      expect.objectContaining({ attribute: 'wine_type', value: 'red' }),
+    ]);
+    expect(plan.searchInput.preferences).toEqual([
+      expect.objectContaining({ attribute: 'body', value: 'full' }),
+    ]);
+  });
+
+  it('routes soft budget preference to preferences instead of hard filters', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'search',
+        preservedSurface: '와인 입문자 선물용',
+        hangulDominant: true,
+        normalizedConstraints: [
+          makeConstraint('price_band', 'budget'),
+        ],
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.filters).toBeUndefined();
+    expect(plan.searchInput.preferences).toEqual([
+      expect.objectContaining({ attribute: 'price_band', value: 'budget' }),
+    ]);
+  });
+
   it('exact-metadata signal → entity mode + limit', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -261,6 +304,21 @@ describe('DeterministicRouter — Rule 4: single-search (default)', () => {
     if (plan.kind !== 'single-search') return;
     expect(plan.searchInput.mode).toBe('entity');
     expect(plan.searchInput.limit).toBeGreaterThan(0);
+  });
+
+  it('requestedResultLimit overrides adaptive retrieval k for explicit top-N queries', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'search',
+        preservedSurface: '나파 카베르네 탑3',
+        requestedResultLimit: 3,
+        recommendedBudget: { maxSteps: 4, perToolCap: 3, retrievalK: 200 },
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.limit).toBe(3);
   });
 });
 

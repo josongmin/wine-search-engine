@@ -28,7 +28,6 @@ import {
 const ENV_KEYS = [
   'WINE_SEARCH_MULTI_QUERY_ENABLED',
   'WINE_SEARCH_TOOL_CACHE_ENABLED',
-  'WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION',
   'WINE_SEARCH_DISABLED_TOOLS',
   'WINE_SEARCH_REASONING_HEADROOM_TOKENS',
   'WINE_SEARCH_REASONING_EFFORT',
@@ -108,17 +107,6 @@ describe('feature-activation-registry — env-driven state', () => {
   it('`WINE_SEARCH_TOOL_CACHE_ENABLED` unset → tool_result_cache reports `on`', async () => {
     const mod = await loadRegistryWithFreshDefaults();
     expect(mod.snapshotActivations()['tool_result_cache']).toBe('on');
-  });
-
-  it('`WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=1` → alias_overlay_partial_resolution reports `on`', async () => {
-    process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'] = '1';
-    const mod = await loadRegistryWithFreshDefaults();
-    expect(mod.snapshotActivations()['alias_overlay_partial_resolution']).toBe('on');
-  });
-
-  it('unset → alias_overlay_partial_resolution reports `off`', async () => {
-    const mod = await loadRegistryWithFreshDefaults();
-    expect(mod.snapshotActivations()['alias_overlay_partial_resolution']).toBe('off');
   });
 
   it('`WINE_SEARCH_DISABLED_TOOLS=lookup_wine` → disabled_tools_fail_closed reports `on`', async () => {

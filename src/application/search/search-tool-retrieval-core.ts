@@ -230,6 +230,18 @@ function resolveCanonicalEntityTerms(
   return canonicals;
 }
 
+function buildRepresentativeConceptQuery(
+  canonicalEntityTerms: readonly string[],
+  normalizedQuery: string,
+): string {
+  const representativeAnchor = canonicalEntityTerms.length > 0
+    ? [...canonicalEntityTerms].sort((a, b) => b.length - a.length)[0]!
+    : normalizedQuery.trim();
+  return /(?:^|[^\p{L}\p{N}])wine(?=$|[^\p{L}\p{N}])/iu.test(representativeAnchor)
+    ? representativeAnchor
+    : `${representativeAnchor} wine`;
+}
+
 function isResolvedEntityRepresentedByStructuredFilters(
   entity: ReturnType<typeof resolveEntity>,
   input: SearchToolRetrievalCoreInput,
@@ -321,6 +333,9 @@ export function buildSearchToolRetrievalCoreQuery(
     const canonicalEntityTerms = resolveCanonicalEntityTerms(queryViews);
     if (queryContract.hasEntityMetadataSignal && isExactMetadataEntityLookupCandidate(input.query) && canonicalEntityTerms.length > 0) {
       return [...canonicalEntityTerms].sort((a, b) => b.length - a.length)[0]!;
+    }
+    if (input.preserveRepresentativeSearch === true && canonicalEntityTerms.length > 0) {
+      return buildRepresentativeConceptQuery(canonicalEntityTerms, normalizedQuery);
     }
     if (
       input.preserveRepresentativeSearch !== true

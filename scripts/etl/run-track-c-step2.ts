@@ -36,6 +36,7 @@ interface CertificationResult {
 
 interface EnrichedRecord extends SilverRecord {
   readonly certifications?: CertificationResult;
+  readonly certificationsExperimental?: CertificationResult;
 }
 
 export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
@@ -44,7 +45,7 @@ const BATCH_SIZE = 100;
 const FLUSH_INTERVAL = 5;
 
 async function main() {
-  console.log('Track C Step 2: Enrich Certifications (Wikidata + LLM)');
+  console.log('Track C Step 2: Enrich Certifications (verified + experimental provenance split)');
   console.log(`  Input: ${DATA_FILE}`);
 
   if (!fs.existsSync(DATA_FILE)) {
@@ -70,7 +71,7 @@ async function main() {
     const enrichedRecords: EnrichedRecord[] = [];
 
     let wikidataCount = 0;
-    let llmInferredCount = 0;
+    let keywordInferredCount = 0;
     let noneCount = 0;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
@@ -107,20 +108,42 @@ async function main() {
       for (const record of toDo) {
         const cert = certMap.get(record.externalId);
         if (cert) {
+          const canonicalCertification: CertificationResult = cert.certificationSource === 'wikidata_verified'
+            ? {
+                organic: cert.organic,
+                biodynamic: cert.biodynamic,
+                vegan: cert.vegan,
+                naturalWine: cert.naturalWine,
+                certificationSource: cert.certificationSource,
+                certificationConfidence: cert.certificationConfidence,
+              }
+            : {
+                organic: false,
+                biodynamic: false,
+                vegan: false,
+                naturalWine: false,
+                certificationSource: 'none',
+                certificationConfidence: 'none',
+              };
           enrichedRecords.push({
             ...record,
-            certifications: {
-              organic: cert.organic,
-              biodynamic: cert.biodynamic,
-              vegan: cert.vegan,
-              naturalWine: cert.naturalWine,
-              certificationSource: cert.certificationSource,
-              certificationConfidence: cert.certificationConfidence,
-            },
+            certifications: canonicalCertification,
+            ...(cert.certificationSource === 'keyword_inferred'
+              ? {
+                  certificationsExperimental: {
+                    organic: cert.organic,
+                    biodynamic: cert.biodynamic,
+                    vegan: cert.vegan,
+                    naturalWine: cert.naturalWine,
+                    certificationSource: cert.certificationSource,
+                    certificationConfidence: cert.certificationConfidence,
+                  },
+                }
+              : {}),
           });
 
-          if (cert.certificationSource === 'wikidata') wikidataCount++;
-          else if (cert.certificationSource === 'llm_inferred') llmInferredCount++;
+          if (cert.certificationSource === 'wikidata_verified') wikidataCount++;
+          else if (cert.certificationSource === 'keyword_inferred') keywordInferredCount++;
           else noneCount++;
           processed++;
         } else {
@@ -158,8 +181,8 @@ async function main() {
     console.log('='.repeat(60));
     console.log(`Total records: ${enrichedRecords.length}`);
     console.log(`New enrichments: ${processed}`);
-    console.log(`  - Wikidata: ${wikidataCount}`);
-    console.log(`  - LLM inferred: ${llmInferredCount}`);
+    console.log(`  - Wikidata verified: ${wikidataCount}`);
+    console.log(`  - Keyword inferred (experimental): ${keywordInferredCount}`);
     console.log(`  - None found: ${noneCount}`);
     console.log(`Already had certifications: ${skippedIdempotent}`);
     console.log(`Failed: ${failed}`);

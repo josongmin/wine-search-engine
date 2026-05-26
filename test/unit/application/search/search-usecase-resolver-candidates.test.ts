@@ -5,6 +5,7 @@ import type { CanonicalEntityId } from '../../../../src/domain/shared/types/inde
 import type { RetrievalDocument } from '../../../../src/domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityCandidateGeneratorInput } from '../../../../src/domain/resolver/model/entity-candidate-generator-input.js';
+import type { AliasType } from '../../../../src/domain/resolver/model/alias-match.js';
 
 /**
  * T-E4-01: Helper to build a batch-capable lookup port from a single-document
@@ -38,6 +39,7 @@ function makeGeneratorInput(): EntityCandidateGeneratorInput {
         normalizedForm: '오푸스원',
         candidateEntityIds: [createEntityId('opus-one-2018')],
         lookupStrategies: ['transliterated_exact'],
+        aliasType: 'translation',
         confidence: 0.97,
         source: 'alias',
       },
@@ -104,6 +106,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             normalizedForm: 'opus one',
             candidateEntityIds: [createEntityId('opus-one-2018')],
             lookupStrategies: ['fuzzy_char_ngram'],
+            aliasType: 'misspelling',
             confidence: 0.7,
             source: 'planner_heuristic',
           },
@@ -159,6 +162,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [grandVinId, secondWineId],
             lookupVariants: ['chateau margaux'],
             lookupStrategies: ['transliterated_exact'],
+            aliasType: 'translation',
             confidence: 0.97,
             source: 'alias',
           },
@@ -196,6 +200,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['오푸스ㅇ'],
             lookupStrategies: ['hangul_ime_completion', 'transliterated_fuzzy'],
+            aliasType: 'translation',
             confidence: 0.97,
             source: 'alias',
           },
@@ -240,6 +245,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['opus'],
             lookupStrategies: ['prefix_exact'],
+            aliasType: 'canonical',
             confidence: 0.95,
             source: 'alias',
           },
@@ -289,6 +295,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['barolo'],
             lookupStrategies: ['prefix_exact'],
+            aliasType: 'canonical',
             confidence: 0.95,
             source: 'alias',
           },
@@ -331,6 +338,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['opus'],
             lookupStrategies: ['prefix_exact'],
+            aliasType: 'canonical',
             confidence: 0.7,
             source: 'alias',
           },
@@ -366,6 +374,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['오퍼스'],
             lookupStrategies: ['transliterated_prefix'],
+            aliasType: 'translation',
             confidence: 0.95,
             source: 'alias',
           },
@@ -408,6 +417,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['오푸'],
             lookupStrategies: ['prefix_exact'],
+            aliasType: 'translation',
             confidence: 0.95,
             source: 'alias',
           },
@@ -442,6 +452,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
             candidateEntityIds: [entityId],
             lookupVariants: ['sassicaia'],
             lookupStrategies: ['exact'],
+            aliasType: 'canonical',
             confidence: 0.95,
             source: 'alias',
           },
@@ -511,6 +522,7 @@ describe('buildResolverCandidatesFromGenerator', () => {
           normalizedForm: '오푸스원',
           candidateEntityIds: [presentId, missingId],
           lookupStrategies: ['transliterated_exact'] as const,
+          aliasType: 'translation' as const,
           confidence: 0.93,
           source: 'alias' as const,
         },
@@ -566,46 +578,43 @@ describe('buildResolverCandidatesFromGenerator', () => {
       expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('derived_initialism');
     });
 
-    it('falls back to canonical when no aliasType and only exact-like strategies', async () => {
+    it('rejects anchors that omit aliasType even when strategy is exact-like', async () => {
       const entityId = createEntityId('chateau-margaux-2015');
       const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
       const lookup = makeBatchLookup(async () => doc);
-      const candidates = await buildResolverCandidatesFromGenerator(
+      await expect(buildResolverCandidatesFromGenerator(
         makeAnchorInput({
           candidateEntityIds: [entityId],
           lookupStrategies: ['exact'],
         }),
         lookup,
-      );
-      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('canonical');
+      )).rejects.toThrow(/anchor aliasType missing/);
     });
 
-    it('falls back to misspelling for substring strategy', async () => {
+    it('rejects anchors that omit aliasType for substring strategy', async () => {
       const entityId = createEntityId('chateau-margaux-2015');
       const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
       const lookup = makeBatchLookup(async () => doc);
-      const candidates = await buildResolverCandidatesFromGenerator(
+      await expect(buildResolverCandidatesFromGenerator(
         makeAnchorInput({
           candidateEntityIds: [entityId],
           lookupStrategies: ['substring'],
         }),
         lookup,
-      );
-      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('misspelling');
+      )).rejects.toThrow(/anchor aliasType missing/);
     });
 
-    it('falls back to phonetic when phonetic strategy and no aliasType', async () => {
+    it('rejects anchors that omit aliasType for phonetic strategy', async () => {
       const entityId = createEntityId('chateau-margaux-2015');
       const doc = { entityId, entityType: 'wine' as const, canonicalLabel: 'Château Margaux 2015' };
       const lookup = makeBatchLookup(async () => doc);
-      const candidates = await buildResolverCandidatesFromGenerator(
+      await expect(buildResolverCandidatesFromGenerator(
         makeAnchorInput({
           candidateEntityIds: [entityId],
           lookupStrategies: ['phonetic_fuzzy'],
         }),
         lookup,
-      );
-      expect(candidates[0]?.aliasMatches[0]?.aliasType).toBe('phonetic');
+      )).rejects.toThrow(/anchor aliasType missing/);
     });
 
     it('mixed anchors on same entity preserve per-anchor aliasType (canonical + derived_initialism coexist)', async () => {
@@ -685,6 +694,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test high',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['exact'],
+            aliasType: 'canonical',
             confidence: 0.9, // 높은 confidence
             source: 'alias',
           },
@@ -693,6 +703,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test low',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['fuzzy_char_ngram'],
+            aliasType: 'misspelling',
             confidence: 0.6, // 낮은 confidence
             source: 'planner_heuristic',
           },
@@ -712,6 +723,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test low',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['fuzzy_char_ngram'],
+            aliasType: 'misspelling',
             confidence: 0.6,
             source: 'planner_heuristic',
           },
@@ -720,6 +732,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test high',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['exact'],
+            aliasType: 'canonical',
             confidence: 0.9,
             source: 'alias',
           },
@@ -740,6 +753,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
       normalizedForm: 'opus one',
       candidateEntityIds: [createEntityId(entityId)],
       lookupStrategies: ['exact' as const],
+      aliasType: 'canonical' as AliasType,
       confidence: 0.85,
       source: 'alias' as const,
     };
@@ -778,6 +792,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test a',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['exact'],
+            aliasType: 'canonical',
             confidence: 0.5,
             source: 'alias',
           },
@@ -786,6 +801,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test b',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['exact'],
+            aliasType: 'canonical',
             confidence: 0.95, // 이것이 max 가 되어야 함
             source: 'alias',
           },
@@ -794,6 +810,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: 'test c',
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['exact'],
+            aliasType: 'canonical',
             confidence: 0.8,
             source: 'alias',
           },
@@ -825,6 +842,7 @@ describe('mergeSignals — 수학적 속성 (교환법칙 · 멱등법칙 · 3-a
             normalizedForm: `test ${i}`,
             candidateEntityIds: [createEntityId(entityId)],
             lookupStrategies: ['exact' as const],
+            aliasType: 'canonical' as AliasType,
             confidence: conf,
             source: 'alias' as const,
           })),

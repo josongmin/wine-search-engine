@@ -71,6 +71,8 @@ export const WINE_SEARCH_MAX_PER_TOOL_CAP = 6;
  *  generous so the analyzer can emit the full SOTA range without clamping. */
 const WINE_SEARCH_MIN_RETRIEVAL_K = 1;
 const WINE_SEARCH_MAX_RETRIEVAL_K = 500;
+export const WINE_SEARCH_MIN_RESULT_LIMIT = 1;
+export const WINE_SEARCH_MAX_RESULT_LIMIT = 50;
 
 /** Comparison legs: at least 2 (binary comparison), capped at 4 — beyond 4
  *  legs decomposition quality collapses and the orchestrator falls back to
@@ -186,6 +188,13 @@ export const RecommendedBudgetSchema = z.object({
 }).strict();
 export type RecommendedBudget = z.infer<typeof RecommendedBudgetSchema>;
 
+export const ConstraintTierBundleSchema = z.object({
+  hard: z.array(NormalizedConstraintSchema).max(WINE_SEARCH_MAX_CONSTRAINTS),
+  soft: z.array(NormalizedConstraintSchema).max(WINE_SEARCH_MAX_CONSTRAINTS),
+  inferred: z.array(NormalizedConstraintSchema).max(WINE_SEARCH_MAX_CONSTRAINTS),
+}).strict();
+export type ConstraintTierBundle = z.infer<typeof ConstraintTierBundleSchema>;
+
 /**
  * Outcome of the optional LLM-backed disambiguation fallback. The deterministic
  * pipeline runs first; only when intent=`unknown` AND no anchors AND no
@@ -230,7 +239,12 @@ export type LlmFallbackOutcome = z.infer<typeof LlmFallbackOutcomeSchema>;
 export const WineSearchAnalysisSchema = z.object({
   intent: QueryIntentSchema,
   anchors: z.array(AnchorResolutionSchema).max(WINE_SEARCH_MAX_ANCHORS),
+  constraints: ConstraintTierBundleSchema.optional(),
   normalizedConstraints: z.array(NormalizedConstraintSchema).max(WINE_SEARCH_MAX_CONSTRAINTS),
+  requestedResultLimit: z.number().int()
+    .min(WINE_SEARCH_MIN_RESULT_LIMIT)
+    .max(WINE_SEARCH_MAX_RESULT_LIMIT)
+    .optional(),
   decomposition: DecompositionSchema.optional(),
   contract: AnalysisContractSchema,
   expectedMultiStep: z.boolean(),

@@ -564,6 +564,69 @@ export function buildSearchToolStructuredPreferences(input: {
   return preferences;
 }
 
+export function buildSearchToolStructuredFilters(input: {
+  readonly exclude_grapes?: readonly string[] | undefined;
+  readonly exclude_regions?: readonly string[] | undefined;
+  readonly exclude_wine_types?: readonly (typeof SEARCH_TOOL_WINE_TYPES)[number][] | undefined;
+  readonly wine_type?: (typeof SEARCH_TOOL_WINE_TYPES)[number] | undefined;
+  readonly grape_primary?: string | undefined;
+  readonly country?: string | undefined;
+  readonly region?: string | undefined;
+  readonly vintage_min?: number | undefined;
+  readonly vintage_max?: number | undefined;
+  readonly appellation?: string | undefined;
+}, mappingVersion: string): readonly NormalizedConstraint[] {
+  const filters: NormalizedConstraint[] = [];
+  const push = (
+    attribute: string,
+    operator: NormalizedConstraint['operator'],
+    value: NormalizedConstraint['value'],
+    sourcePhrase: string,
+  ): void => {
+    filters.push({
+      attribute,
+      operator,
+      value,
+      source_phrase: sourcePhrase,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  };
+
+  for (const grape of input.exclude_grapes ?? []) {
+    push('grape_primary', 'exclude', grape, grape);
+  }
+  for (const region of input.exclude_regions ?? []) {
+    push('region', 'exclude', region, region);
+  }
+  for (const wineType of input.exclude_wine_types ?? []) {
+    push('wine_type', 'exclude', wineType, wineType);
+  }
+  if (input.wine_type !== undefined) {
+    push('wine_type', '=', input.wine_type, input.wine_type);
+  }
+  if (input.grape_primary !== undefined) {
+    push('grape_primary', '=', input.grape_primary, input.grape_primary);
+  }
+  if (input.country !== undefined) {
+    push('country', '=', input.country, input.country);
+  }
+  if (input.region !== undefined) {
+    push('region', '=', input.region, input.region);
+  }
+  if (input.vintage_min !== undefined) {
+    push('vintage_year', '>=', input.vintage_min, `${input.vintage_min}년 이후`);
+  }
+  if (input.vintage_max !== undefined) {
+    push('vintage_year', '<=', input.vintage_max, `${input.vintage_max}년 이전`);
+  }
+  if (input.appellation !== undefined) {
+    push('appellation', '=', input.appellation, input.appellation);
+  }
+
+  return filters;
+}
+
 export function buildSearchToolStyleQueryTerms(input: {
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;

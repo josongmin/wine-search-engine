@@ -18,6 +18,7 @@ import type { DecomposedSearchUseCase } from '../../../../src/application/search
 import type { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../../../src/domain/response/model/comparison-response.js';
+import { createCanonicalEntityId } from '../../../../src/domain/shared/types/index.js';
 
 describe('WineToolExecutor', () => {
   let mockSearchUseCase: SearchUseCase;
@@ -891,60 +892,63 @@ describe('WineToolExecutor', () => {
     });
 
     it('hydrates source-backed drinking-window priors from the entity document', async () => {
+      const entityId = createCanonicalEntityId('wine-123');
       const entityLookup = {
-        getDocument: vi.fn().mockResolvedValue({
-          entityId: 'wine-123',
-          entityType: 'wine',
-          canonicalLabel: 'Barolo Example 2018',
-          aliasesIdentitySafe: ['Barolo Example 2018'],
-          aliasesNoisyRecall: ['Barolo Example'],
-          producer: 'Giacomo Conterno',
-          region: 'Piemonte',
-          grapes: ['Nebbiolo'],
-          searchTextKo: '바롤로 예시',
-          searchTextEn: 'Barolo Example 2018',
-          semanticSummary: 'Structured Barolo',
-          style: 'structured red',
-          priceBand: 'luxury',
-          pairing: ['braised beef'],
-          availability: true,
-          popularityScore: 0.92,
-          vintageYear: 2018,
-          body: 0.8,
-          tannin: 0.9,
-          acidity: 0.7,
-          sweetness: 0.1,
-          criticScoreNormalized: 0.94,
-          grapePrimaryEnc: 11,
-          regionEnc: 22,
-          countryEnc: 33,
-          grapePrimary: 'Nebbiolo',
-          grapeFamily: 'Nebbiolo',
-          country: 'Italy',
-          appellation: 'Barolo DOCG',
-          regionHierarchy: ['Italy', 'Piemonte', 'Barolo'],
-          wineType: 'red',
-          classification: 'DOCG',
-          oakTreatment: 'large oak cask',
-          producerPrestige: 0.91,
-          ratingAvg: 4.6,
-          ratingsCount: 1287,
-          reviewCount: 211,
-          ratingDistribution: { '1': 2, '2': 10, '3': 115, '4': 540, '5': 620 },
-          wineryRatingCount: 8240,
-          priceUsd: 180,
-          bottleSizeMl: 750,
-          bottleSize: '750ml',
-          closure: 'Cork',
-          drinkingWindowStart: 2026,
-          drinkingWindowEnd: 2038,
-          drinkingWindowModelVersion: 'snapshot:on-index',
-          certifications: ['organic'],
-          producerType: 'domaine',
-          soilType: 'limestone',
-          finishLength: 0.92,
-          alcoholPct: 14.5,
-        }),
+        getDrinkingWindowDocuments: vi.fn().mockResolvedValue(new Map([
+          [entityId, {
+            entityId: 'wine-123',
+            entityType: 'wine',
+            canonicalLabel: 'Barolo Example 2018',
+            aliasesIdentitySafe: ['Barolo Example 2018'],
+            aliasesNoisyRecall: ['Barolo Example'],
+            producer: 'Giacomo Conterno',
+            region: 'Piemonte',
+            grapes: ['Nebbiolo'],
+            searchTextKo: '바롤로 예시',
+            searchTextEn: 'Barolo Example 2018',
+            semanticSummary: 'Structured Barolo',
+            style: 'structured red',
+            priceBand: 'luxury',
+            pairing: ['braised beef'],
+            availability: true,
+            popularityScore: 0.92,
+            vintageYear: 2018,
+            body: 0.8,
+            tannin: 0.9,
+            acidity: 0.7,
+            sweetness: 0.1,
+            criticScoreNormalized: 0.94,
+            grapePrimaryEnc: 11,
+            regionEnc: 22,
+            countryEnc: 33,
+            grapePrimary: 'Nebbiolo',
+            grapeFamily: 'Nebbiolo',
+            country: 'Italy',
+            appellation: 'Barolo DOCG',
+            regionHierarchy: ['Italy', 'Piemonte', 'Barolo'],
+            wineType: 'red',
+            classification: 'DOCG',
+            oakTreatment: 'large oak cask',
+            producerPrestige: 0.91,
+            ratingAvg: 4.6,
+            ratingsCount: 1287,
+            reviewCount: 211,
+            ratingDistribution: { '1': 2, '2': 10, '3': 115, '4': 540, '5': 620 },
+            wineryRatingCount: 8240,
+            priceUsd: 180,
+            bottleSizeMl: 750,
+            bottleSize: '750ml',
+            closure: 'Cork',
+            drinkingWindowStart: 2026,
+            drinkingWindowEnd: 2038,
+            drinkingWindowModelVersion: 'snapshot:on-index',
+            certifications: ['organic'],
+            producerType: 'domaine',
+            soilType: 'limestone',
+            finishLength: 0.92,
+            alcoholPct: 14.5,
+          }],
+        ])),
       };
       const richExecutor = new WineToolExecutor({
         searchUseCase: mockSearchUseCase,
@@ -969,7 +973,7 @@ describe('WineToolExecutor', () => {
         'req-123',
       );
 
-      expect(entityLookup.getDocument).toHaveBeenCalledWith('wine-123');
+      expect(entityLookup.getDrinkingWindowDocuments).toHaveBeenCalledWith([entityId]);
       expect(mockDrinkingWindowUseCase.check).toHaveBeenCalledWith({
         vintage: 2018,
         grapePrimaryEnc: 11,
@@ -1231,8 +1235,8 @@ describe('WineToolExecutor', () => {
         mockDecomposedSearchUseCase.execute,
       ).mock.calls.at(-1)!;
 
-      expect(comparisonLegs[0].retrievalQuery).toContain('Barolo wine');
-      expect(comparisonLegs[1].retrievalQuery).toContain('Brunello di Montalcino wine');
+      expect(comparisonLegs[0].retrievalQuery.toLowerCase()).toContain('barolo wine');
+      expect(comparisonLegs[1].retrievalQuery.toLowerCase()).toContain('brunello di montalcino wine');
       expect(parentContext?.preferences).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ attribute: 'drinking_window', operator: '=', value: 2026 }),

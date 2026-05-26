@@ -8,13 +8,19 @@
 import type { z } from 'zod';
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
+import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
+import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
+import type { EntityDocumentLookupPort } from '../../application/search/port/search-pipeline-deps.port.js';
 import {
+  buildSearchToolStructuredFilters as buildContractSearchToolStructuredFilters,
   buildSearchToolStructuredPreferences as buildContractSearchToolStructuredPreferences,
   sanitizeOptionalToolNulls,
 } from '../../application/search/search-tool-contract.js';
+import { normalizeLookupWineInput } from '../../application/search/lookup-wine-execution.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
+import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import type { SearchResponseV2Machine } from '../../interface/http/schemas/search-response-v2.schema.js';
 import { buildMachineResponseV2 } from '../../interface/http/response-builders/machine-response-builder-v2.js';
 import {
@@ -29,8 +35,13 @@ import {
   collectSearchToolNegationTerms,
 } from '../../application/search/search-tool-result-policy.js';
 import {
-  KRW_PER_USD_APPROXIMATE,
-} from '../../domain/shared/constants.js';
+  buildCompareWinesExecutionRequest,
+  buildDrinkingWindowRequest,
+  buildFoodPairingFilters,
+  buildFoodPairingPreferences,
+  buildFoodPairingQuery,
+} from '../../application/search/tool-execution-support.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import {
   SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
   SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
@@ -39,18 +50,40 @@ import {
   shouldRunTypedWineDiversityDiscovery,
   withWineTypeFilter,
 } from '../../application/search/search-tool-diversity.js';
-import { SearchToolInputSchema } from './tool-schemas.js';
-import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
+import {
+  CompareWinesInputSchema,
+  DrinkingWindowInputSchema,
+  FoodPairingInputSchema,
+  SearchToolInputSchema,
+} from './tool-schemas.js';
+import {
+  createCanonicalEntityId,
+  type NormalizedConstraint,
+} from '../../domain/shared/types/index.js';
 
 const CLAUDE_TOOL_FILTER_MAPPING_VERSION = 'claude_tool_v1' as const;
 const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as const;
+const FOOD_PAIRING_RETRIEVAL_MODE = 'hybrid' as const;
+const DEFAULT_SEARCH_LIMIT = 10;
 
 type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
+
+type StructuredFilterInput = Parameters<typeof buildContractSearchToolStructuredFilters>[0];
+type StructuredPreferenceInput = Parameters<typeof buildContractSearchToolStructuredPreferences>[0];
+type SearchToolQueryInput = Parameters<typeof buildSearchToolRetrievalCoreQuery>[0];
+
 function formatValidationError(toolName: string, error: z.ZodError): { error: string } {
   return {
     error: `Invalid input for ${toolName}: ${error.issues.map((issue) => issue.message).join(', ')}`,
   };
 }
+
+export type WineToolExecutorResult =
+  | SearchResponseV1
+  | SearchResponseV2Machine
+  | ComparisonSearchResponse
+  | DrinkingWindowBlock
+  | { error: string };
 
 function parseToolInput<T extends z.ZodTypeAny>(
   toolName: string,
@@ -70,65 +103,15 @@ function parseToolInput<T extends z.ZodTypeAny>(
   };
 }
 
-function pushSearchToolStructuredFilter(
-  filters: NormalizedConstraint[],
-  attribute: string,
-  operator: NormalizedConstraint['operator'],
-  value: NormalizedConstraint['value'],
-  sourcePhrase: string,
-): void {
-  filters.push({
-    attribute,
-    operator,
-    value,
-    source_phrase: sourcePhrase,
-    confidence: 1.0,
-    mapping_version: CLAUDE_TOOL_FILTER_MAPPING_VERSION,
-  });
+function buildSearchToolStructuredFilters(input: StructuredFilterInput): readonly NormalizedConstraint[] {
+  return buildContractSearchToolStructuredFilters(input, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
 }
 
-function buildSearchToolStructuredFilters(input: SearchToolInput): readonly NormalizedConstraint[] {
-  const filters: NormalizedConstraint[] = [];
-
-  for (const grape of input.exclude_grapes ?? []) {
-    pushSearchToolStructuredFilter(filters, 'grape_primary', 'exclude', grape, grape);
-  }
-  for (const region of input.exclude_regions ?? []) {
-    pushSearchToolStructuredFilter(filters, 'region', 'exclude', region, region);
-  }
-  for (const wineType of input.exclude_wine_types ?? []) {
-    pushSearchToolStructuredFilter(filters, 'wine_type', 'exclude', wineType, wineType);
-  }
-  if (input.wine_type !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'wine_type', '=', input.wine_type, input.wine_type);
-  }
-  if (input.grape_primary !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'grape_primary', '=', input.grape_primary, input.grape_primary);
-  }
-  if (input.country !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'country', '=', input.country, input.country);
-  }
-  if (input.region !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'region', '=', input.region, input.region);
-  }
-  if (input.vintage_min !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'vintage_year', '>=', input.vintage_min, `${input.vintage_min}년 이후`);
-  }
-  if (input.vintage_max !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'vintage_year', '<=', input.vintage_max, `${input.vintage_max}년 이전`);
-  }
-  if (input.appellation !== undefined) {
-    pushSearchToolStructuredFilter(filters, 'appellation', '=', input.appellation, input.appellation);
-  }
-
-  return filters;
-}
-
-function buildSearchToolStructuredPreferences(input: SearchToolInput): readonly NormalizedConstraint[] {
+function buildSearchToolStructuredPreferences(input: StructuredPreferenceInput): readonly NormalizedConstraint[] {
   return buildContractSearchToolStructuredPreferences(input, CLAUDE_TOOL_FILTER_MAPPING_VERSION);
 }
 
-function buildSearchToolQuery(input: SearchToolInput): string {
+function buildSearchToolQuery(input: SearchToolQueryInput): string {
   const clauses = buildSearchToolSoftClauses(input);
   const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
   if (clauses.length === 0) {
@@ -140,7 +123,7 @@ function buildSearchToolQuery(input: SearchToolInput): string {
 function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
   const filters = buildSearchToolStructuredFilters(input);
   const preferences = buildSearchToolStructuredPreferences(input);
-  const limit = input.limit ?? 10;
+  const limit = input.limit ?? DEFAULT_SEARCH_LIMIT;
   const retrievalMode = input.retrieval_mode ?? 'auto';
   return {
     query: buildSearchToolQuery(input),
@@ -154,9 +137,6 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
     ...(preferences.length > 0 ? { preferences } : {}),
   };
 }
-
-
-
 
 /**
  * T6.3: Options for machine V2 response format migration seam.
@@ -185,55 +165,31 @@ export interface ToolExecutionV2Options {
 export interface WineToolExecutorDeps {
   /** Main search use case for wine queries */
   readonly searchUseCase: SearchExecutorPort;
+  /** Optional decomposition use case for compare_wines. */
+  readonly decomposedSearchUseCase?: DecomposedSearchUseCasePort | undefined;
+  /** Optional drinking-window use case for check_drinking_window. */
+  readonly drinkingWindowUseCase?: DrinkingWindowUseCasePort | undefined;
+  /** Optional entity lookup used to hydrate check_drinking_window priors. */
+  readonly entityLookup?: EntityDocumentLookupPort | undefined;
 }
 
 /**
  * Tool executor for wine search engine.
  *
- * Dispatches Claude tool calls to the wine search use case:
- * - search_wines -> SearchUseCase.execute(request, requestId)
- * - lookup_wine -> SearchUseCase with retrievalMode=entity
- *
- * All operations propagate requestId for request tracking.
- *
- * T6.3: The execute method accepts an optional ToolExecutionV2Options argument.
- * When useV2MachineFormat: true, the search_wines result is projected to
- * SearchResponseV2Machine via buildMachineResponseV2. V1 behaviour is
- * unchanged when the option is absent.
+ * Dispatches Claude tool calls to the wine search use case.
  */
 export class WineToolExecutor {
   constructor(private readonly deps: WineToolExecutorDeps) {}
 
-  /**
-   * Execute a tool call with validated input.
-   *
-   * Dispatches to the appropriate use case based on toolName.
-   * Input is validated using Zod schemas before execution. Validation failures
-   * are returned as in-band `{ error }` tool results so HTTP/adapter callers
-   * keep a single success-shaped tool envelope instead of mixing throw vs return.
-   *
-   * @param toolName - Name of the tool to execute
-   * @param input - Raw input (will be validated against schema)
-   * @param requestId - Parent request ID for tracking
-   * @param v2Options - Optional V2 machine format migration seam (T6.3)
-   * @returns Tool result
-   */
   async execute(
     toolName: string,
     input: unknown,
     requestId: string,
     v2Options?: ToolExecutionV2Options,
-  ): Promise<SearchResponseV1 | SearchResponseV2Machine | ComparisonSearchResponse | { error: string }> {
+  ): Promise<WineToolExecutorResult> {
     switch (toolName) {
       case 'search_wines': {
-        // T6.3: When useV2MachineFormat is explicitly true, bypass the V1
-        // use case and build the V2 machine response directly from the
-        // caller-supplied ranked results. V1 path is unchanged otherwise.
-        // Guard on the flag value itself (not just presence) so an accidental
-        // falsy v2Options does not silently fall through to V2 projection.
         if (v2Options !== undefined) {
-          // Always validate the raw input even on the V2 path so that
-          // malformed query metadata is rejected, not silently dropped.
           const validation = parseToolInput('search_wines', SearchToolInputSchema, input);
           if (!validation.success) {
             return validation.result;
@@ -246,30 +202,26 @@ export class WineToolExecutor {
         }
         return this.executeSearchWines(input, requestId);
       }
-
-      default: {
+      case 'lookup_wine':
+        return this.executeLookupWine(input, requestId);
+      case 'get_food_pairings':
+        return this.executeFoodPairings(input, requestId);
+      case 'check_drinking_window':
+        return this.executeCheckDrinkingWindow(input);
+      case 'compare_wines':
+        return this.executeCompareWines(input, requestId);
+      default:
         return { error: `Unknown tool: ${toolName}` };
-      }
     }
   }
 
-  /**
-   * Execute search_wines tool.
-   *
-   * Calls SearchUseCase.execute() with validated input.
-   * CRITICAL: Always passes requestId as 2nd argument.
-   *
-   * @param input - Raw input (validated against SearchToolInputSchema)
-   * @param requestId - Parent request ID
-   * @returns SearchResponseV1 or an in-band `{ error }` tool result on validation failure
-   */
   private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
     const validation = parseToolInput('search_wines', SearchToolInputSchema, input);
     if (!validation.success) {
       return validation.result;
     }
     const validated = validation.data;
-    const normalizedLimit = validated.limit ?? 10;
+    const normalizedLimit = validated.limit ?? DEFAULT_SEARCH_LIMIT;
     const wantsDiversity =
       validated.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(validated.query);
     const effectiveLimit = wantsDiversity
@@ -322,6 +274,108 @@ export class WineToolExecutor {
     ).response;
   }
 
+  private async executeLookupWine(
+    input: unknown,
+    requestId: string,
+  ): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+    const normalized = normalizeLookupWineInput(input);
+    if (!normalized.ok) {
+      return { error: `Invalid input for lookup_wine: ${normalized.message}` };
+    }
+    return this.deps.searchUseCase.execute({
+      query: normalized.query,
+      limit: normalized.clampedLimit,
+      options: {
+        mode: 'entity',
+        explain: false,
+        clarification: false,
+      },
+    }, requestId);
+  }
 
+  private async executeFoodPairings(
+    input: unknown,
+    requestId: string,
+  ): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+    const validation = parseToolInput('get_food_pairings', FoodPairingInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    const validated = validation.data;
+    const request: SearchRequest = {
+      query: buildFoodPairingQuery(validated),
+      options: {
+        mode: FOOD_PAIRING_RETRIEVAL_MODE,
+        explain: false,
+        clarification: false,
+      },
+      ...(buildFoodPairingFilters(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION).length > 0
+        ? { filters: buildFoodPairingFilters(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION) }
+        : {}),
+      ...(buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION).length > 0
+        ? { preferences: buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION) }
+        : {}),
+    };
+    return this.deps.searchUseCase.execute(request, requestId);
+  }
 
+  private async executeCheckDrinkingWindow(
+    input: unknown,
+  ): Promise<DrinkingWindowBlock | { error: string }> {
+    const validation = parseToolInput('check_drinking_window', DrinkingWindowInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    if (this.deps.drinkingWindowUseCase === undefined) {
+      return { error: 'Drinking-window predictor not available.' };
+    }
+    const entityLookup = this.deps.entityLookup;
+    if (entityLookup?.getDrinkingWindowDocuments === undefined) {
+      return { error: 'Entity lookup not yet implemented or available for check_drinking_window.' };
+    }
+    const validated = validation.data;
+    const entityId = createCanonicalEntityId(validated.entity_id);
+    let documentRecord: Record<string, unknown> | undefined;
+    const docs = await entityLookup.getDrinkingWindowDocuments([entityId]);
+    const projection = docs.get(entityId);
+    if (projection !== undefined) {
+      documentRecord = projection as unknown as Record<string, unknown>;
+    }
+    if (documentRecord === undefined) {
+      return { error: `Entity lookup not available for entity_id=${validated.entity_id}` };
+    }
+    const targetYear = validated.target_year ?? new Date().getFullYear();
+    const request = buildDrinkingWindowRequest(documentRecord, targetYear);
+    if (request === null) {
+      return { error: `Entity ${validated.entity_id} is missing required drinking-window features.` };
+    }
+    return this.deps.drinkingWindowUseCase.check(request);
+  }
+
+  private async executeCompareWines(
+    input: unknown,
+    requestId: string,
+  ): Promise<ComparisonSearchResponse | { error: string }> {
+    const validation = parseToolInput('compare_wines', CompareWinesInputSchema, input);
+    if (!validation.success) {
+      return validation.result;
+    }
+    if (this.deps.decomposedSearchUseCase === undefined) {
+      return { error: 'Decomposed comparison use case not available.' };
+    }
+    const validated = validation.data;
+    const executionRequest = buildCompareWinesExecutionRequest(
+      validated,
+      CLAUDE_TOOL_FILTER_MAPPING_VERSION,
+    );
+    return this.deps.decomposedSearchUseCase.execute(
+      executionRequest.subQueries,
+      executionRequest.comparisonLegs,
+      executionRequest.comparisonIntent,
+      executionRequest.originalQuery,
+      requestId,
+      Date.now(),
+      executionRequest.parentContext,
+    );
+  }
 }

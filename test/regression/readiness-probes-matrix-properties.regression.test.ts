@@ -238,7 +238,7 @@ describe('readiness probe matrix — property-based invariants', () => {
       readonly ambiguityCount: number;
       readonly nlMappingCount: number;
       readonly activeLtrCount: number;
-      readonly allowMissingLtr: boolean;
+      readonly qualityBlockers: readonly string[];
       readonly corruptNlHash?: boolean;
     }): Promise<{ readonly statePath: string; readonly cleanup: () => Promise<void> }> {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'readiness-probes-prop-'));
@@ -261,7 +261,6 @@ describe('readiness probe matrix — property-based invariants', () => {
         publishedAt: '2026-01-01T00:00:00.000Z',
         manifestPath: path.join(dir, 'manifest.json'),
         nlMappingsRuntimePath: nlPath,
-        allowMissingLtr: opts.allowMissingLtr,
         counts: {
           entities: opts.entityCount,
           aliases: opts.aliasCount,
@@ -275,6 +274,13 @@ describe('readiness probe matrix — property-based invariants', () => {
           ambiguityRegistry: hashStableJson([{ probe: 'amb' }]),
           nlMappings: nlHash,
           activeLtrModels: hashStableJson([{ probe: 'ltr' }]),
+        },
+        quality: {
+          status: opts.qualityBlockers.length > 0 ? 'degraded' : 'canonical',
+          blockers: [...opts.qualityBlockers],
+          bypasses: [],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
         },
       };
       const statePath = path.join(dir, 'runtime-state.json');
@@ -296,7 +302,7 @@ describe('readiness probe matrix — property-based invariants', () => {
             ambiguityCount: fc.integer({ min: 0, max: 5 }),
             nlMappingCount: fc.integer({ min: 0, max: 5 }),
             activeLtrCount: fc.integer({ min: 0, max: 5 }),
-            allowMissingLtr: fc.boolean(),
+            qualityBlockers: fc.uniqueArray(fc.constantFrom('quality_blocker_a', 'quality_blocker_b'), { maxLength: 2 }),
             corruptNlHash: fc.boolean(),
           }),
           async (opts) => {
@@ -309,13 +315,15 @@ describe('readiness probe matrix — property-based invariants', () => {
               //   - aliases <= 0
               //   - nlMappings count mismatch OR <= 0
               //   - nlMappings hash mismatch
-              //   - activeLtr <= 0 AND allowMissingLtr === false
+              //   - activeLtr <= 0
+              //   - runtime quality blockers present
               const shouldBeDown = (
                 opts.entityCount <= 0
                 || opts.aliasCount <= 0
                 || opts.nlMappingCount <= 0
                 || opts.corruptNlHash
-                || (opts.activeLtrCount <= 0 && !opts.allowMissingLtr)
+                || opts.activeLtrCount <= 0
+                || opts.qualityBlockers.length > 0
               );
               if (shouldBeDown) {
                 expect(status).toBe('down');
@@ -339,7 +347,7 @@ describe('readiness probe matrix — property-based invariants', () => {
         ambiguityCount: 0,
         nlMappingCount: 0,
         activeLtrCount: 0,
-        allowMissingLtr: true,
+        qualityBlockers: [],
       });
       try {
         const status = await probeSearchSnapshotRuntimeState(fixture.statePath);

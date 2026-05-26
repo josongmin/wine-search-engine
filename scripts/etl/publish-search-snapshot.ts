@@ -33,7 +33,10 @@ import {
   type EntitySnapshotRecord,
   type SearchSnapshotManifest,
 } from './search-snapshot-schema.js';
-import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import {
+  ETL_ARTIFACT_FILES,
+  assertCanonicalTrackCArtifactInput,
+} from './artifact-contract.js';
 import {
   materializePreparedVespaFeedArtifact,
   type PreparedVespaFeedDocument,
@@ -66,7 +69,6 @@ interface Args {
   readonly nlMappings: string;
   readonly runtimeStatePath: string;
   readonly runtimeNlMappingsPath: string;
-  readonly allowMissingLtr: boolean;
   readonly skipIndex: boolean;
   readonly fixtureRepoRoot?: string | undefined;
 }
@@ -74,17 +76,6 @@ interface Args {
 interface CommandRunnerOptions {
   readonly cwd?: string | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
-}
-
-export function resolveAllowMissingLtrForPublish(
-  cliAllowMissingLtr: boolean,
-  previousRuntimeState?: Pick<
-    NonNullable<Awaited<ReturnType<typeof loadPublishedRuntimeState>>>,
-    'allowMissingLtr'
-  > | undefined,
-): boolean {
-  void previousRuntimeState;
-  return cliAllowMissingLtr;
 }
 
 type CriticalWineType = 'red' | 'white' | 'sparkling';
@@ -110,7 +101,6 @@ function parseArgs(argv: readonly string[]): Args {
   let nlMappings = ETL_ARTIFACT_FILES.nlMappings;
   let runtimeStatePath = resolveDataPath('data/runtime-search-snapshot.json');
   let runtimeNlMappingsPath = ETL_ARTIFACT_FILES.nlMappings;
-  let allowMissingLtr = false;
   let skipIndex = false;
   let fixtureRepoRoot: string | undefined;
   for (let i = 0; i < argv.length; i += 1) {
@@ -131,7 +121,7 @@ function parseArgs(argv: readonly string[]): Args {
       runtimeNlMappingsPath = argv[i + 1] ?? runtimeNlMappingsPath;
       i += 1;
     } else if (arg === '--allow-missing-ltr') {
-      allowMissingLtr = true;
+      throw new Error('--allow-missing-ltr has been removed; canonical snapshot publish now hard-fails on missing active LTR models');
     } else if (arg === '--skip-index') {
       skipIndex = true;
     } else if (arg === '--fixture-repo') {
@@ -145,7 +135,6 @@ function parseArgs(argv: readonly string[]): Args {
     nlMappings,
     runtimeStatePath,
     runtimeNlMappingsPath,
-    allowMissingLtr,
     skipIndex,
     fixtureRepoRoot,
   };
@@ -1004,7 +993,6 @@ async function ensureSnapshotBoundLtrModels(args: {
   readonly previousManifest?: SearchSnapshotManifest | undefined;
   readonly nextManifest: SearchSnapshotManifest;
   readonly snapshotRootDir: string;
-  readonly allowMissingLtr: boolean;
 }): Promise<void> {
   console.log(`🔍 Checking snapshot-bound LTR for ${args.nextManifest.snapshotId}`);
   const config = loadConfig();
@@ -1073,29 +1061,43 @@ async function ensureSnapshotBoundLtrModels(args: {
       }
     }
 
-    if (!args.allowMissingLtr) {
-      if (candidateSnapshotIds.length === 0) {
-        throw new Error(
-          `No active LTR models found for snapshot ${args.nextManifest.snapshotId}; train LTR for the snapshot or pass --allow-missing-ltr explicitly`,
-        );
-      }
+    if (candidateSnapshotIds.length === 0) {
       throw new Error(
-        `No compatible active snapshot-bound LTR source could be cloned into ${args.nextManifest.snapshotId}; retrain LTR for the new snapshot`,
+        `No active LTR models found for snapshot ${args.nextManifest.snapshotId}; train LTR for the snapshot before publish`,
       );
     }
+    throw new Error(
+      `No compatible active snapshot-bound LTR source could be cloned into ${args.nextManifest.snapshotId}; retrain LTR for the new snapshot`,
+    );
   } finally {
     await pool.end();
   }
 }
 
+function assertManifestQualityForCanonicalPublish(manifest: SearchSnapshotManifest): void {
+  if (manifest.quality.experimentalInputsPresent) {
+    throw new Error(
+      `Refusing canonical publish for ${manifest.snapshotId}: experimental inputs present`,
+    );
+  }
+  if (manifest.quality.blockers.length > 0) {
+    throw new Error(
+      `Refusing canonical publish for ${manifest.snapshotId}: quality blockers=${manifest.quality.blockers.join(', ')}`,
+    );
+  }
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  assertCanonicalTrackCArtifactInput(args.input, 'publish-search-snapshot');
   const built = await buildSearchSnapshot({
     input: args.input,
     outputDir: args.outputDir,
     nlMappings: args.nlMappings,
     fixtureRepoRoot: args.fixtureRepoRoot,
+    runtimeStatePath: args.runtimeStatePath,
   });
+  assertManifestQualityForCanonicalPublish(built.manifest);
   console.log(`🧱 Built search snapshot ${built.manifest.snapshotId}`);
 
   if (args.skipIndex) {
@@ -1116,21 +1118,6 @@ async function run(): Promise<void> {
     loadPublishedRuntimeState(args.runtimeStatePath),
     loadSnapshotEntityIds(built.manifest.artifacts.entitiesNdjson),
   ]);
-  const allowMissingLtr = resolveAllowMissingLtrForPublish(args.allowMissingLtr, previousRuntimeState);
-  // Wave 4 (fail-loud): allow-missing-ltr lets a publish proceed without any
-  // trained LTR model. In production this still requires an explicit operator ack.
-  if (allowMissingLtr) {
-    const ack = process.env['ETL_PUBLISH_LTR_BYPASS_ACK'];
-    const env = process.env['NODE_ENV'];
-    if (env === 'production' && ack !== 'YES') {
-      throw new Error(
-        '--allow-missing-ltr was enabled for publish without operator ack. '
-        + 'Set ETL_PUBLISH_LTR_BYPASS_ACK=YES to acknowledge that the published '
-        + 'snapshot will run with NO learned-to-rank model — search quality will '
-        + 'fall back to lexical-only ranking. Refusing fail-open.',
-      );
-    }
-  }
   const [previousRuntimeStateContents, previousRuntimeNlMappingsContents] = await Promise.all([
     readOptionalTextFile(args.runtimeStatePath),
     readOptionalTextFile(args.runtimeNlMappingsPath),
@@ -1182,7 +1169,6 @@ async function run(): Promise<void> {
         previousManifest: previousPreparedManifest,
         nextManifest: manifestWithExactFeed,
         snapshotRootDir,
-        allowMissingLtr,
       });
       console.log('📥 Indexing document plane into Vespa');
       await runIndexer(
@@ -1212,7 +1198,6 @@ async function run(): Promise<void> {
         manifestPath: built.manifestPath,
         runtimeStatePath: stagedRuntimeStatePath,
         runtimeNlMappingsPath: args.runtimeNlMappingsPath,
-        allowMissingLtr,
       });
       publishState.advance('runtime_substrates_published');
       console.log('✅ Verifying search snapshot readiness');

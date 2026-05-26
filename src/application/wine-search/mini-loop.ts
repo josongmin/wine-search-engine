@@ -54,9 +54,25 @@ import {
   withTimeout,
 } from '../agent/agent-tool-execution-support.js';
 import { normalizeLookupWineInput } from '../search/lookup-wine-execution.js';
+import {
+  buildSearchToolStructuredFilters,
+  buildSearchToolStructuredPreferences,
+  sanitizeOptionalToolNulls,
+} from '../search/search-tool-contract.js';
+import {
+  buildCompareWinesExecutionRequest,
+  buildDrinkingWindowRequest,
+  buildFoodPairingFilters,
+  buildFoodPairingPreferences,
+  buildFoodPairingQuery,
+} from '../search/tool-execution-support.js';
 import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import { toolResultCacheTtlSeconds } from '@domain/shared/constants/tool-cache-ttl.js';
 import { stableStringify } from '@domain/shared/utils/stable-stringify.js';
+import {
+  createCanonicalEntityId,
+  type NormalizedConstraint,
+} from '@shared/types/index.js';
 import type { ToolResultCachePort } from './port/tool-result-cache.port.js';
 import {
   addTokenUsage,
@@ -76,6 +92,12 @@ import {
   type MiniLoopToolCall,
   type MiniLoopToolPorts,
 } from './mini-loop-schemas.js';
+import {
+  CHECK_DRINKING_WINDOW_INPUT_SCHEMA,
+  COMPARE_WINES_INPUT_SCHEMA,
+  GET_FOOD_PAIRINGS_INPUT_SCHEMA,
+  SEARCH_WINES_INPUT_SCHEMA,
+} from './mini-loop-tool-bundle.js';
 import type {
   SearchUseCaseInput,
 } from './execution-plan-schemas.js';
@@ -123,6 +145,9 @@ const MINI_LOOP_SYSTEM_PROMPT = [
   'Available tools:',
   '  - search_wines: retrieve wines matching the query and constraints.',
   '  - lookup_wine: resolve ONE specific wine by name/identity (1-3 exact matches); use instead of search_wines when the user names a particular wine.',
+  '  - get_food_pairings: retrieve wines that fit a dish or ingredient pairing goal.',
+  '  - check_drinking_window: verify whether a specific wine is drinkable in a target year.',
+  '  - compare_wines: compare two wines or wine concepts side-by-side.',
   '',
   'Hard rules:',
   '  - Call AT MOST ONE tool per turn. If the user clearly asked for parallel work, prefer a single search with combined constraints.',
@@ -778,6 +803,17 @@ const DISABLED_TOOLS: ReadonlySet<string> = new Set(
     .filter((s) => s.length > 0),
 );
 const FAIL_CLOSED_PREFIX = 'TOOL_UNAVAILABLE:';
+const MINI_LOOP_TOOL_FILTER_MAPPING_VERSION = 'mini_loop_tool_v1' as const;
+
+function invalidToolInputObservation(
+  tool: string,
+  issues: readonly string[],
+): { readonly rawResult: null; readonly observation: string } {
+  return {
+    rawResult: null,
+    observation: `Tool "${tool}" failed: invalid input — ${issues.join(', ')}`,
+  };
+}
 
 /**
  * `adaptiveRetrievalKDefault` — the per-intent retrieval `k` derived from
@@ -806,12 +842,22 @@ async function invokeToolPort(
   if (DISABLED_TOOLS.has(call.tool)) {
     return {
       rawResult: null,
-      observation: `${FAIL_CLOSED_PREFIX} "${call.tool}" is currently disabled by the operator (WINE_SEARCH_DISABLED_TOOLS). Do NOT call it again. Use search_wines / lookup_wine, or commit an answer noting the limitation.`,
+      observation: `${FAIL_CLOSED_PREFIX} "${call.tool}" is currently disabled by the operator (WINE_SEARCH_DISABLED_TOOLS). Do NOT call it again. Use a different available tool, or commit an answer noting the limitation.`,
     };
   }
   switch (call.tool) {
     case 'search_wines': {
-      const searchInput = adaptSearchInput(call.input, adaptiveRetrievalKDefault);
+      const validation = SEARCH_WINES_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
+      if (!validation.success) {
+        return invalidToolInputObservation(
+          call.tool,
+          validation.error.issues.map((issue) => issue.message),
+        );
+      }
+      const searchInput = adaptSearchInput(
+        validation.data as Record<string, unknown>,
+        adaptiveRetrievalKDefault,
+      );
       const result = await ports.searchUseCase.execute(searchInput, requestId, { abortSignal: signal });
       return { rawResult: result, observation: formatSearchObservation(result) };
     }
@@ -843,6 +889,108 @@ async function invokeToolPort(
         { abortSignal: signal },
       );
       return { rawResult: result, observation: formatSearchObservation(result) };
+    }
+    case 'get_food_pairings': {
+      const validation = GET_FOOD_PAIRINGS_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
+      if (!validation.success) {
+        return invalidToolInputObservation(
+          call.tool,
+          validation.error.issues.map((issue) => issue.message),
+        );
+      }
+      const filters = buildFoodPairingFilters(
+        validation.data,
+        MINI_LOOP_TOOL_FILTER_MAPPING_VERSION,
+      );
+      const preferences = buildFoodPairingPreferences(
+        validation.data,
+        MINI_LOOP_TOOL_FILTER_MAPPING_VERSION,
+      );
+      const result = await ports.searchUseCase.execute(
+        {
+          query: buildFoodPairingQuery(validation.data),
+          ...(filters.length > 0 ? { filters: [...filters] } : {}),
+          ...(preferences.length > 0 ? { preferences: [...preferences] } : {}),
+          mode: 'hybrid',
+        },
+        requestId,
+        { abortSignal: signal },
+      );
+      return { rawResult: result, observation: formatSearchObservation(result) };
+    }
+    case 'check_drinking_window': {
+      const validation = CHECK_DRINKING_WINDOW_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
+      if (!validation.success) {
+        return invalidToolInputObservation(
+          call.tool,
+          validation.error.issues.map((issue) => issue.message),
+        );
+      }
+      if (ports.drinkingWindowUseCase === undefined) {
+        return {
+          rawResult: null,
+          observation: 'Tool "check_drinking_window" failed: Drinking-window predictor not available.',
+        };
+      }
+      const entityLookup = ports.entityLookup;
+      if (entityLookup?.getDrinkingWindowDocuments === undefined) {
+        return {
+          rawResult: null,
+          observation: 'Tool "check_drinking_window" failed: Entity lookup not yet implemented or available for check_drinking_window.',
+        };
+      }
+      const entityId = createCanonicalEntityId(validation.data.entity_id);
+      const docs = await entityLookup.getDrinkingWindowDocuments([entityId]);
+      const projection = docs.get(entityId);
+      if (projection === undefined) {
+        return {
+          rawResult: null,
+          observation: `Tool "check_drinking_window" failed: Entity lookup not available for entity_id=${validation.data.entity_id}`,
+        };
+      }
+      const targetYear = validation.data.target_year ?? new Date().getFullYear();
+      const request = buildDrinkingWindowRequest(
+        projection as unknown as Record<string, unknown>,
+        targetYear,
+      );
+      if (request === null) {
+        return {
+          rawResult: null,
+          observation: `Tool "check_drinking_window" failed: Entity ${validation.data.entity_id} is missing required drinking-window features.`,
+        };
+      }
+      const result = await ports.drinkingWindowUseCase.check(request);
+      return { rawResult: result, observation: formatGenericObservation(call.tool, result) };
+    }
+    case 'compare_wines': {
+      const validation = COMPARE_WINES_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));
+      if (!validation.success) {
+        return invalidToolInputObservation(
+          call.tool,
+          validation.error.issues.map((issue) => issue.message),
+        );
+      }
+      if (ports.decomposedSearchUseCase === undefined) {
+        return {
+          rawResult: null,
+          observation: 'Tool "compare_wines" failed: Decomposed comparison use case not available.',
+        };
+      }
+      const executionRequest = buildCompareWinesExecutionRequest(
+        validation.data,
+        MINI_LOOP_TOOL_FILTER_MAPPING_VERSION,
+      );
+      const result = await ports.decomposedSearchUseCase.execute(
+        executionRequest.subQueries,
+        executionRequest.comparisonLegs,
+        executionRequest.comparisonIntent,
+        executionRequest.originalQuery,
+        requestId,
+        Date.now(),
+        executionRequest.parentContext,
+        { abortSignal: signal },
+      );
+      return { rawResult: result, observation: formatGenericObservation(call.tool, result) };
     }
     default: {
       return {
@@ -883,13 +1031,45 @@ export function adaptSearchInput(
     ? raw['limit']
     : undefined;
   const resolvedLimit = llmLimit ?? adaptiveRetrievalKDefault;
+  const explicitFilters = Array.isArray(raw['filters'])
+    ? raw['filters'] as SearchUseCaseInput['filters']
+    : [];
+  const explicitPreferences = Array.isArray(raw['preferences'])
+    ? raw['preferences'] as SearchUseCaseInput['preferences']
+    : [];
+  const structuredFilters = buildSearchToolStructuredFilters(raw, MINI_LOOP_TOOL_FILTER_MAPPING_VERSION);
+  const structuredPreferences = buildSearchToolStructuredPreferences(raw, MINI_LOOP_TOOL_FILTER_MAPPING_VERSION);
+  const filters = mergeStructuredConstraints(explicitFilters, structuredFilters);
+  const preferences = mergeStructuredConstraints(explicitPreferences, structuredPreferences);
+  const resolvedMode = typeof raw['mode'] === 'string'
+    ? raw['mode']
+    : typeof raw['retrieval_mode'] === 'string'
+      ? raw['retrieval_mode']
+      : undefined;
   return {
     query,
-    ...(Array.isArray(raw['filters']) ? { filters: raw['filters'] as SearchUseCaseInput['filters'] } : {}),
-    ...(Array.isArray(raw['preferences']) ? { preferences: raw['preferences'] as SearchUseCaseInput['preferences'] } : {}),
-    ...(typeof raw['mode'] === 'string' ? { mode: raw['mode'] as SearchUseCaseInput['mode'] } : {}),
+    ...(filters.length > 0 ? { filters } : {}),
+    ...(preferences.length > 0 ? { preferences } : {}),
+    ...(resolvedMode !== undefined ? { mode: resolvedMode as SearchUseCaseInput['mode'] } : {}),
     ...(resolvedLimit !== undefined ? { limit: resolvedLimit } : {}),
   };
+}
+
+function mergeStructuredConstraints(
+  explicit: readonly NormalizedConstraint[] | undefined,
+  derived: readonly NormalizedConstraint[],
+): NormalizedConstraint[] {
+  const out: NormalizedConstraint[] = [];
+  const seen = new Set<string>();
+  const append = (constraint: NormalizedConstraint): void => {
+    const key = `${constraint.attribute}\u0000${constraint.operator}\u0000${stableStringify(constraint.value)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(constraint);
+  };
+  for (const constraint of explicit ?? []) append(constraint);
+  for (const constraint of derived) append(constraint);
+  return out;
 }
 
 
@@ -1019,6 +1199,7 @@ function formatObservationForTool(toolName: string, result: unknown): string {
   switch (toolName) {
     case 'search_wines':
     case 'lookup_wine':
+    case 'get_food_pairings':
       return formatSearchObservation(result);
     default:
       return formatGenericObservation(toolName, result);

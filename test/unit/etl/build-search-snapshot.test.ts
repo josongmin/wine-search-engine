@@ -297,7 +297,6 @@ describe('buildSearchSnapshot', () => {
         publishedAt: '2026-04-17T00:00:00.000Z',
         manifestPath: previousManifestPath,
         nlMappingsRuntimePath: path.join(dir, 'nl-mappings.json'),
-        allowMissingLtr: true,
         counts: {
           entities: 1,
           aliases: 0,
@@ -311,6 +310,13 @@ describe('buildSearchSnapshot', () => {
           ambiguityRegistry: 'ambiguity-hash',
           nlMappings: 'nl-hash',
           activeLtrModels: 'ltr-hash',
+        },
+        quality: {
+          status: 'degraded',
+          blockers: [],
+          bypasses: ['legacy_carry_forward_fixture'],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
         },
       })}\n`,
     );

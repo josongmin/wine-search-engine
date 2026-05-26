@@ -55,7 +55,13 @@ import {
 import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
+import type { DecomposedSearchUseCasePort } from '../../search/port/search-route-usecases.port.js';
+import type { DrinkingWindowUseCasePort } from '../../drinking-window/port/drinking-window-usecase.port.js';
+import type { EntityDocumentLookupPort } from '../../search/port/search-pipeline-deps.port.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
+import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
+import type { DrinkingWindowBlock } from '../../../domain/response/model/result-item.js';
+import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -124,9 +130,105 @@ function makeSearchPort(
   };
 }
 
+function makeComparisonResponse(): ComparisonSearchResponse {
+  return {
+    queryType: 'comparison',
+    originalQuery: 'Wine A vs Wine B',
+    comparisonIntent: 'compare',
+    entities: [
+      {
+        subQuery: 'Wine A',
+        topResult: null,
+        resultCount: 1,
+        resolutionStatus: 'resolved',
+        allResults: [],
+      },
+      {
+        subQuery: 'Wine B',
+        topResult: null,
+        resultCount: 1,
+        resolutionStatus: 'resolved',
+        allResults: [],
+      },
+    ],
+    overallStatus: 'resolved',
+    requestId: REQUEST_ID,
+    executionTimeMs: 10,
+  };
+}
+
+function makeDecomposedSearchPort(
+  impl?: (...args: unknown[]) => Promise<ComparisonSearchResponse>,
+): DecomposedSearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
+  const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
+  return {
+    executeMock,
+    execute: (...args) => executeMock(...args),
+  } as unknown as DecomposedSearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> };
+}
+
+function makeDrinkingWindowBlock(): DrinkingWindowBlock {
+  return {
+    targetYear: 2026,
+    status: 'optimal',
+    message: 'Ready to drink',
+    confidence: 'high',
+    confidenceScore: 0.9,
+    prediction: {
+      drinkingWindowStart: 2024,
+      drinkingWindowEnd: 2028,
+      peakYear: 2026,
+      confidence: 'high',
+      confidenceScore: 0.9,
+      modelVersion: 'test',
+    },
+  } as unknown as DrinkingWindowBlock;
+}
+
+function makeDrinkingWindowPort(
+  impl?: (request: unknown) => Promise<DrinkingWindowBlock>,
+): DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> } {
+  const checkMock = vi.fn(impl ?? (() => Promise.resolve(makeDrinkingWindowBlock())));
+  return {
+    checkMock,
+    check: (request) => checkMock(request),
+  } as unknown as DrinkingWindowUseCasePort & { readonly checkMock: ReturnType<typeof vi.fn> };
+}
+
+function makeEntityLookupPort(): EntityDocumentLookupPort & {
+  readonly getDrinkingWindowDocumentsMock: ReturnType<typeof vi.fn>;
+} {
+  const entityId = createCanonicalEntityId('wine-1');
+  const getDrinkingWindowDocumentsMock = vi.fn(async () =>
+    new Map([
+      [entityId, {
+        vintageYear: 2018,
+        grapePrimaryEnc: 11,
+        regionEnc: 22,
+        countryEnc: 33,
+        tannin: 0.6,
+        acidity: 0.5,
+        body: 0.7,
+      }],
+    ]),
+  );
+  return {
+    getDocuments: async () => new Map(),
+    getDrinkingWindowDocuments: (entityIds) => getDrinkingWindowDocumentsMock(entityIds),
+    getDrinkingWindowDocumentsMock,
+  };
+}
+
 function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
+    ...(overrides?.decomposedSearchUseCase !== undefined
+      ? { decomposedSearchUseCase: overrides.decomposedSearchUseCase }
+      : {}),
+    ...(overrides?.drinkingWindowUseCase !== undefined
+      ? { drinkingWindowUseCase: overrides.drinkingWindowUseCase }
+      : {}),
+    ...(overrides?.entityLookup !== undefined ? { entityLookup: overrides.entityLookup } : {}),
   };
 }
 
@@ -195,7 +297,9 @@ function makeToolDefs(): readonly ToolDefinition[] {
   } as unknown as ToolDefinition['inputSchema'];
   return [
     { name: 'search_wines', description: 'search', inputSchema: passthrough },
+    { name: 'lookup_wine', description: 'lookup', inputSchema: passthrough },
     { name: 'get_food_pairings', description: 'food pairing', inputSchema: passthrough },
+    { name: 'check_drinking_window', description: 'drinking window', inputSchema: passthrough },
     { name: 'compare_wines', description: 'compare', inputSchema: passthrough },
   ];
 }
@@ -291,6 +395,86 @@ describe('MiniLoopRunner — required tool directive', () => {
     expect(out.terminationReason).toBe('answer');
     expect(out.toolOutcomes.some((o) => o.tool === 'get_food_pairings')).toBe(true);
     expect(out.answer).toContain('Riesling pairs well');
+  });
+
+  it('dispatches get_food_pairings through searchUseCase with shared pairing assembly', async () => {
+    const searchPort = makeSearchPort(() => Promise.resolve(makeSearchResponse(['pair-1'])));
+    const llm = makeStubLlm([
+      async () => asToolUseResult([
+        toolUse('get_food_pairings', {
+          food: 'spicy Korean BBQ',
+          color: 'white',
+          styles: ['aromatic'],
+          pairing_tags: ['spicy'],
+        }),
+      ]),
+      async () => asTextResult('Riesling works here.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      analysis: makeAnalysis({ requiredTool: 'get_food_pairings' }),
+      toolPorts: makeToolPorts({ searchUseCase: searchPort }),
+      maxSteps: 4,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(searchPort.executeMock).toHaveBeenCalledTimes(1);
+    expect(searchPort.executeMock.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      query: expect.stringContaining('wine pairing for spicy Korean BBQ'),
+      mode: 'hybrid',
+    }));
+    expect(searchPort.executeMock.mock.calls[0]?.[0]?.filters).toEqual(
+      expect.arrayContaining([expect.objectContaining({ attribute: 'wine_type', value: 'white' })]),
+    );
+    expect(searchPort.executeMock.mock.calls[0]?.[0]?.preferences).toEqual(
+      expect.arrayContaining([expect.objectContaining({ attribute: 'pairing', value: ['spicy'] })]),
+    );
+  });
+});
+
+describe('MiniLoopRunner — extended tool dispatch', () => {
+  it('dispatches compare_wines through decomposedSearchUseCase', async () => {
+    const comparisonPort = makeDecomposedSearchPort();
+    const llm = makeStubLlm([
+      async () => asToolUseResult([
+        toolUse('compare_wines', { query_a: 'Opus One 2018', query_b: 'Almaviva 2019' }),
+      ]),
+      async () => asTextResult('Both are strong candidates.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      toolPorts: makeToolPorts({ decomposedSearchUseCase: comparisonPort }),
+      maxSteps: 4,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(comparisonPort.executeMock).toHaveBeenCalledTimes(1);
+    expect(comparisonPort.executeMock.mock.calls[0]?.[0]).toEqual(['Opus One 2018', 'Almaviva 2019']);
+    expect(out.toolOutcomes.some((o) => o.tool === 'compare_wines')).toBe(true);
+  });
+
+  it('dispatches check_drinking_window through entity lookup hydration and use case', async () => {
+    const drinkingWindowPort = makeDrinkingWindowPort();
+    const entityLookup = makeEntityLookupPort();
+    const llm = makeStubLlm([
+      async () => asToolUseResult([
+        toolUse('check_drinking_window', { entity_id: 'wine-1', target_year: 2026 }),
+      ]),
+      async () => asTextResult('2026 is a good window.'),
+    ]);
+    const runner = new MiniLoopRunner({ structuredLlm: llm, logger: makeLogger() });
+    const out = await runner.run(makeInput({
+      toolPorts: makeToolPorts({
+        drinkingWindowUseCase: drinkingWindowPort,
+        entityLookup,
+      }),
+      maxSteps: 4,
+    }));
+
+    expect(out.terminationReason).toBe('answer');
+    expect(entityLookup.getDrinkingWindowDocumentsMock).toHaveBeenCalledTimes(1);
+    expect(drinkingWindowPort.checkMock).toHaveBeenCalledTimes(1);
+    expect(out.toolOutcomes.some((o) => o.tool === 'check_drinking_window')).toBe(true);
   });
 });
 

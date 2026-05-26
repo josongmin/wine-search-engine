@@ -104,6 +104,20 @@ describe('DeterministicRouter — adaptive retrieval k flows into searchInput.li
     if (plan.kind !== 'single-search') return;
     expect(plan.searchInput.limit).toBeUndefined();
   });
+
+  it('requestedResultLimit=3 overrides adaptive retrieval k for explicit top-N intent', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        requestedResultLimit: 3,
+        recommendedBudget: { maxSteps: 4, perToolCap: 3, retrievalK: 200 },
+        preservedSurface: '나파 카베르네 탑3',
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.limit).toBe(3);
+  });
 });
 
 describe('DeterministicRouter — exact-metadata signal overrides adaptive k', () => {
@@ -181,5 +195,30 @@ describe('mini-loop adaptSearchInput — LLM-vs-adaptive limit precedence', () =
   it('LLM specifies non-finite limit (NaN) → adapter falls back to adaptive default', () => {
     const out = adaptSearchInput({ query: '카베르네', limit: Number.NaN }, 200);
     expect(out.limit).toBe(200);
+  });
+
+  it('maps structured search fields into filters/preferences instead of dropping them', () => {
+    const out = adaptSearchInput({
+      query: '선물용 와인',
+      wine_type: 'white',
+      country: 'France',
+      max_alcohol_pct: 12,
+      occasion: ['gift'],
+      styles: ['approachable', 'presentation_forward'],
+      retrieval_mode: 'hybrid',
+    }, 200);
+    expect(out.query).toBe('선물용 와인');
+    expect(out.mode).toBe('hybrid');
+    expect(out.limit).toBe(200);
+    expect(out.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'wine_type', operator: '=', value: 'white' }),
+      expect.objectContaining({ attribute: 'country', operator: '=', value: 'France' }),
+    ]));
+    expect(out.preferences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
+      expect.objectContaining({ attribute: 'occasion', operator: 'in', value: ['gift'] }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['approachable'] }),
+      expect.objectContaining({ attribute: 'style', operator: 'in', value: ['presentation_forward'] }),
+    ]));
   });
 });

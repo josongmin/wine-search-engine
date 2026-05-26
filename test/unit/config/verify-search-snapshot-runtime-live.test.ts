@@ -251,9 +251,9 @@ function mockVespaResponses(args?: {
 
 async function buildHappyRuntimeState(overrides?: {
   readonly snapshotId?: string;
-  readonly allowMissingLtr?: boolean;
   readonly activeLtrModels?: number;
   readonly activeLtrHash?: string;
+  readonly qualityBlockers?: readonly string[];
 }): Promise<LoadedSearchSnapshotRuntimeState> {
   const dir = await makeTempDir();
   const nlPath = path.join(dir, 'nl.json');
@@ -267,7 +267,6 @@ async function buildHappyRuntimeState(overrides?: {
     publishedAt: '2026-04-12T00:00:00.000Z',
     manifestPath: '/tmp/m.json',
     nlMappingsRuntimePath: nlPath,
-    allowMissingLtr: overrides?.allowMissingLtr ?? false,
     counts: {
       entities: 10,
       aliases: 10,
@@ -281,6 +280,13 @@ async function buildHappyRuntimeState(overrides?: {
       ambiguityRegistry: 'ambiguity',
       nlMappings: hashRuntimeNlMappings(nlPayload),
       activeLtrModels: overrides?.activeLtrHash ?? activeLtrHash,
+    },
+    quality: {
+      status: (overrides?.qualityBlockers?.length ?? 0) > 0 ? 'degraded' : 'canonical',
+      blockers: [...(overrides?.qualityBlockers ?? [])],
+      bypasses: [],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
     },
   };
 }
@@ -300,7 +306,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -314,6 +319,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -334,7 +346,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
     }
   });
 
-  it('passes when active LTR rows are absent and runtime explicitly allows missing LTR', async () => {
+  it('throws when active LTR rows are absent even if legacy no-LTR mode was set', async () => {
     const dir = await makeTempDir();
     const nlPath = path.join(dir, 'nl.json');
     const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
@@ -362,6 +374,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHashFromEmptyRows(),
       },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
+      },
     };
 
     const fetchSpy = mockVespaResponses();
@@ -374,8 +393,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           vespaUrl: 'http://vespa.test:8080',
           runtimeState,
         }),
-      ).resolves.toMatchObject({ snapshotId: 'snap-test-1' });
-      expect(pool.query).toHaveBeenCalledTimes(13);
+      ).rejects.toThrow(/Active LTR runtime count is zero/);
     } finally {
       fetchSpy.mockRestore();
     }
@@ -395,7 +413,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -409,6 +426,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -449,7 +473,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -463,6 +486,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -496,7 +526,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -510,6 +539,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -644,7 +680,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -658,6 +693,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -691,7 +733,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -705,6 +746,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -881,10 +929,9 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       }
     });
 
-    it('accepts legacy ltr_model_registry schemas without feature_schema_hash in no-LTR mode', async () => {
+    it('throws before legacy no-LTR compatibility can apply when active LTR rows are absent', async () => {
       const runtimeState = await buildHappyRuntimeState({
         snapshotId: 'snap-legacy',
-        allowMissingLtr: true,
         activeLtrModels: 0,
         activeLtrHash: activeLtrHashFromEmptyRows(),
       });
@@ -911,7 +958,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
             vespaUrl: 'http://vespa.test:8080',
             runtimeState,
           }),
-        ).resolves.toMatchObject({ snapshotId: 'snap-legacy', allowMissingLtr: true });
+        ).rejects.toThrow(/Active LTR runtime count is zero/);
       } finally {
         fetchSpy.mockRestore();
       }

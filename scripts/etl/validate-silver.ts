@@ -14,7 +14,10 @@ import { z } from 'zod';
 import type { EnrichedSilverRecord, SilverQualityReport } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { atomicWriteFile } from './etl-utils.js';
-import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import {
+  ETL_ARTIFACT_FILES,
+  classifyTrackCArtifactPath,
+} from './artifact-contract.js';
 
 // ---------------------------------------------------------------------------
 // Schema versioning + backward-compat policy
@@ -195,7 +198,7 @@ export const SILVER_QUALITY_GATES = {
   // explicitly running a partial coverage audit.
   minAlcoholPctCoverage: 0.50,       // ≥50% of records should have alcohol_pct
   minProducerPrestigeCoverage: 0.70, // ≥70% from winery_rating
-  minDrinkingWindowCoverage: 0.60,   // ≥60% from Track C step 4
+  minDrinkingWindowCoverage: 0.0,    // heuristic drinking-window stays experimental-only
   minCriticProxyCoverage: 0.80,      // ≥80% from Track C step 1
   minGiftSuitabilityCoverage: 0.70,  // ≥70% from Track C step 6
   minBeginnerSuitabilityCoverage: 0.70, // ≥70% from Track C step 7
@@ -385,7 +388,7 @@ export function validateSilverRecords(
     'drinkingWindow',
     gates.minDrinkingWindowCoverage,
     'drinkingWindow coverage',
-    'run Track C step 4 (drinking-window-backfill)',
+    'drinkingWindow is experimental-only and is not required for canonical validation',
   );
   gateCoverage(
     'giftSuitability',
@@ -454,6 +457,12 @@ export function validateSilverRecords(
 
 export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const trackCLane = classifyTrackCArtifactPath(args.input);
+  if (trackCLane === 'experimental' && !args.allowPartialCoverage) {
+    throw new Error(
+      `validate-silver refuses experimental Track C input without --allow-partial: ${args.input}`,
+    );
+  }
 
   console.log(`Validating Silver records from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');

@@ -36,7 +36,10 @@ import {
   loadGoldCanonicalLookupForBuild,
   resolveWineSnapshotEntity,
 } from './snapshot-entity-identity.js';
-import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import {
+  ETL_ARTIFACT_FILES,
+  assertCanonicalTrackCArtifactInput,
+} from './artifact-contract.js';
 import { hashStableJson } from '../../src/domain/shared/utils/stable-json.js';
 import {
   getEmbeddingRecipe,
@@ -688,6 +691,9 @@ type GoldRecord = EnrichedSilverRecord & {
  * e.g. {organic:true, biodynamic:false, vegan:true} → ["organic", "vegan"]
  */
 function buildCertificationTags(cert: CertificationResult): readonly string[] {
+  if (cert.certificationSource !== 'wikidata_verified') {
+    return [];
+  }
   const tags: string[] = [];
   if (cert.organic) tags.push('organic');
   if (cert.biodynamic) tags.push('biodynamic');
@@ -1433,6 +1439,7 @@ export async function run(): Promise<void> {
   }
 
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
+  assertCanonicalTrackCArtifactInput(args.input, 'index-to-vespa');
 
   console.log(`Reading enriched Silver from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');

@@ -99,14 +99,12 @@ interface Args {
   readonly manifestPath: string;
   readonly runtimeStatePath: string;
   readonly runtimeNlMappingsPath: string;
-  readonly allowMissingLtr: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
   let manifestPath = '';
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let runtimeNlMappingsPath = DEFAULT_RUNTIME_NL_MAPPINGS_PATH;
-  let allowMissingLtr = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--manifest' || arg === '-m') {
@@ -119,13 +117,13 @@ function parseArgs(argv: readonly string[]): Args {
       runtimeNlMappingsPath = argv[i + 1] ?? DEFAULT_RUNTIME_NL_MAPPINGS_PATH;
       i += 1;
     } else if (arg === '--allow-missing-ltr') {
-      allowMissingLtr = true;
+      throw new Error('--allow-missing-ltr has been removed; canonical runtime publish now hard-fails on missing active LTR models');
     }
   }
   if (manifestPath.length === 0) {
     throw new Error('--manifest is required');
   }
-  return { manifestPath, runtimeStatePath, runtimeNlMappingsPath, allowMissingLtr };
+  return { manifestPath, runtimeStatePath, runtimeNlMappingsPath };
 }
 
 function buildSnapshotArtifactPath(basePath: string, snapshotId: string): string {
@@ -702,8 +700,8 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         [manifest.snapshotId],
       );
       const activeLtrModels = Number(ltrActiveResult.rows[0]?.count ?? '0');
-      if (activeLtrModels <= 0 && !args.allowMissingLtr) {
-        throw new Error('Refusing to publish runtime substrates with zero active LTR models (pass --allow-missing-ltr only for explicit no-LTR mode)');
+      if (activeLtrModels <= 0) {
+        throw new Error('Refusing to publish runtime substrates with zero active LTR models');
       }
       const activeLtrHash = buildActiveLtrModelHash(
         ltrActiveResult.rows.map((row) => ({
@@ -725,7 +723,7 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         publishedAt: new Date().toISOString(),
         manifestPath: args.manifestPath,
         nlMappingsRuntimePath: runtimeNlMappingsPath,
-        allowMissingLtr: args.allowMissingLtr,
+        quality: manifest.quality,
         counts: {
           entities: entities.length,
           aliases: aliases.length,
@@ -784,7 +782,7 @@ async function run(): Promise<void> {
     console.log(`ambiguity_registry=${promotedState.counts.ambiguityRegistry}`);
     console.log(`nl_mappings=${promotedState.counts.nlMappings}`);
     console.log(`active_ltr_models=${promotedState.counts.activeLtrModels}`);
-    console.log(`allow_missing_ltr=${promotedState.allowMissingLtr}`);
+    console.log(`quality_status=${promotedState.quality.status}`);
   } catch (error) {
     try {
       await restoreRuntimeSubstrateArtifacts({

@@ -21,7 +21,7 @@ import { parseNdjson } from './ndjson.js';
 import { atomicWriteFileSync } from './etl-utils.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
-export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
+export const DATA_FILE = ETL_ARTIFACT_FILES.trackcExperimental;
 export const HEURISTIC_BACKFILL_OPT_IN_ENV = 'ALLOW_HEURISTIC_DRINKING_WINDOW_BACKFILL';
 
 interface DrinkingWindowInput {

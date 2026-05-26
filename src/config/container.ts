@@ -212,6 +212,9 @@ function buildWineSearchContainerServices(
   //       (CLAUDE.md rule 30 — SSoT for tool ports).
   const miniLoopToolBundle = buildMiniLoopToolBundle({
     searchUseCase: searchAdapter,
+    decomposedSearchUseCase: features.decomposedSearchUseCase,
+    drinkingWindowUseCase: features.drinkingWindowUseCase,
+    entityLookup: _core.entityLookup,
   });
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled

@@ -41,7 +41,6 @@ import {
   collectCriticalWineTypeCoverageFromPreparedFeed,
   diffSnapshotVespaDocIds,
   loadPublishedRuntimeState,
-  resolveAllowMissingLtrForPublish,
   resolvePublishFixtureRepoRoot,
   FIXTURE_REPO_REQUIRED_ERROR,
 } from '../../../scripts/etl/publish-search-snapshot.js';
@@ -90,6 +89,13 @@ function makeManifest(feedPath: string): SearchSnapshotManifest {
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
     },
+    quality: {
+      status: 'canonical',
+      blockers: [],
+      bypasses: [],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
+    },
   };
 }
 
@@ -124,6 +130,13 @@ function makeCoverageManifest(dir: string): SearchSnapshotManifest {
       aliases: 'aliases-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
+    },
+    quality: {
+      status: 'canonical',
+      blockers: [],
+      bypasses: [],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
     },
   };
 }
@@ -522,7 +535,6 @@ describe('runtime substrate promotion state machine', () => {
         publishedAt: '2026-04-14T00:00:00.000Z',
         manifestPath: '/tmp/manifest.json',
         nlMappingsRuntimePath: stagedNlMappingsPath,
-        allowMissingLtr: false,
         counts: {
           entities: 1,
           aliases: 1,
@@ -536,6 +548,13 @@ describe('runtime substrate promotion state machine', () => {
           ambiguityRegistry: 'ambiguity-hash',
           nlMappings: 'nl-hash',
           activeLtrModels: 'ltr-hash',
+        },
+        quality: {
+          status: 'canonical',
+          blockers: [],
+          bypasses: [],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
         },
       }, null, 2)}\n`,
     );
@@ -588,20 +607,5 @@ describe('resolvePublishFixtureRepoRoot', () => {
     expect(resolvePublishFixtureRepoRoot('/tmp/fixture-repo', undefined)).toBe(
       '/tmp/fixture-repo',
     );
-  });
-});
-
-describe('resolveAllowMissingLtrForPublish', () => {
-  it('does not inherit allowMissingLtr from the active runtime state when CLI flag is absent', () => {
-    expect(resolveAllowMissingLtrForPublish(false, { allowMissingLtr: true })).toBe(false);
-  });
-
-  it('keeps strict mode when neither CLI nor active runtime allow missing LTR', () => {
-    expect(resolveAllowMissingLtrForPublish(false, { allowMissingLtr: false })).toBe(false);
-    expect(resolveAllowMissingLtrForPublish(false, undefined)).toBe(false);
-  });
-
-  it('preserves explicit CLI allow-missing-ltr', () => {
-    expect(resolveAllowMissingLtrForPublish(true, { allowMissingLtr: false })).toBe(true);
   });
 });

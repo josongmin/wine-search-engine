@@ -40,6 +40,14 @@ export interface AmbiguityRegistrySnapshotRow {
   readonly severity: 'low' | 'medium' | 'high';
 }
 
+export interface SearchSnapshotQualitySummary {
+  readonly status: 'canonical' | 'degraded';
+  readonly blockers: readonly string[];
+  readonly bypasses: readonly string[];
+  readonly carryForwardBenchmarkCount: number;
+  readonly experimentalInputsPresent: boolean;
+}
+
 export interface SearchSnapshotManifest {
   readonly schemaVersion: typeof SEARCH_SNAPSHOT_SCHEMA_VERSION;
   readonly snapshotId: string;
@@ -71,6 +79,7 @@ export interface SearchSnapshotManifest {
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
   };
+  readonly quality: SearchSnapshotQualitySummary;
 }
 
 export interface SearchSnapshotArtifactHashes {
@@ -89,7 +98,8 @@ export interface SearchSnapshotRuntimeState {
   readonly publishedAt: string;
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
-  readonly allowMissingLtr: boolean;
+  readonly quality: SearchSnapshotQualitySummary;
+  readonly allowMissingLtr?: boolean | undefined;
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
@@ -150,6 +160,13 @@ export const SearchSnapshotManifestSchema = z.object({
     ambiguityRegistry: z.string().min(1),
     nlMappings: z.string().min(1),
   }).strict(),
+  quality: z.object({
+    status: z.enum(['canonical', 'degraded']),
+    blockers: z.array(z.string().min(1)),
+    bypasses: z.array(z.string().min(1)),
+    carryForwardBenchmarkCount: z.number().int().nonnegative(),
+    experimentalInputsPresent: z.boolean(),
+  }).strict(),
 }).strict();
 
 export const SearchSnapshotRuntimeStateSchema = z.object({
@@ -159,7 +176,14 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
   publishedAt: z.string().min(1),
   manifestPath: z.string().min(1),
   nlMappingsRuntimePath: z.string().min(1),
-  allowMissingLtr: z.boolean(),
+  quality: z.object({
+    status: z.enum(['canonical', 'degraded']),
+    blockers: z.array(z.string().min(1)),
+    bypasses: z.array(z.string().min(1)),
+    carryForwardBenchmarkCount: z.number().int().nonnegative(),
+    experimentalInputsPresent: z.boolean(),
+  }).strict().optional(),
+  allowMissingLtr: z.boolean().optional(),
   counts: z.object({
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
@@ -212,6 +236,15 @@ export function parseManifest(raw: string, _filePath: string): SearchSnapshotMan
   }
   if (hashes !== undefined && hashes['vespaFeed'] === undefined) {
     hashes['vespaFeed'] = hashes['documents'];
+  }
+  if (asRecord !== undefined && asRecord['quality'] === undefined) {
+    asRecord['quality'] = {
+      status: 'degraded',
+      blockers: [],
+      bypasses: ['legacy_manifest_no_quality_metadata'],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
+    };
   }
 
   return SearchSnapshotManifestSchema.parse(parsed);

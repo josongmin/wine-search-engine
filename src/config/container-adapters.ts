@@ -192,17 +192,10 @@ export async function buildCoreAdapterServices(
     ? await isAliasTableAvailable(pool)
     : false;
 
-  const inMemoryPgAliasMatcher = pool !== undefined && isPgAliasOverlayAvailable
+  const inMemoryAliasMatcher = pool !== undefined && isPgAliasOverlayAvailable
     && !config.killSwitch.aliasOverlay
     ? await SearchSnapshotAliasMatcher.loadFromPostgres(pool)
     : undefined;
-
-  // Fall back to search-snapshot artifacts when PostgreSQL overlay is
-  // unavailable at startup.
-  const inMemoryAliasMatcher =
-    !config.killSwitch.aliasOverlay && inMemoryPgAliasMatcher === undefined
-      ? await SearchSnapshotAliasMatcher.loadFromRuntimeState()
-      : inMemoryPgAliasMatcher;
 
   // Doc2Query generator (index-time only). Prefer the OpenAI-backed
   // implementation when a chat adapter is available so it inherits the
@@ -265,9 +258,6 @@ export async function buildCoreAdapterServices(
         return new CachedAliasMatcher(indexAliasMatcher);
       }
       if (!pool) {
-        if (inMemoryAliasMatcher !== undefined) {
-          return new CachedAliasMatcher(inMemoryAliasMatcher);
-        }
         bootstrapLogger.warn(
           {
             nodeEnv: config.nodeEnv,

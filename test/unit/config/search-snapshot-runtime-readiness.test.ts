@@ -39,6 +39,14 @@ async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'search-snapshot-readiness-'));
 }
 
+const CANONICAL_QUALITY = {
+  status: 'canonical',
+  blockers: [],
+  bypasses: [],
+  carryForwardBenchmarkCount: 0,
+  experimentalInputsPresent: false,
+} as const;
+
 describe('search snapshot runtime readiness', () => {
   beforeEach(() => {
     mockVerifySearchSnapshotRuntimeStateLive.mockReset();
@@ -60,7 +68,6 @@ describe('search snapshot runtime readiness', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/manifest.json',
       nlMappingsRuntimePath: nlMappingsPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -75,6 +82,7 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
         activeLtrModels: 'ltr-hash',
       },
+      quality: CANONICAL_QUALITY,
     }));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
@@ -94,7 +102,6 @@ describe('search snapshot runtime readiness', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/manifest.json',
       nlMappingsRuntimePath: nlMappingsPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -109,12 +116,13 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
         activeLtrModels: 'ltr-hash',
       },
+      quality: CANONICAL_QUALITY,
     }));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
 
-  it('returns up when zero active LTR models are present and missing LTR is explicitly allowed', async () => {
+  it('returns down when zero active LTR models are present even if legacy no-LTR mode was set', async () => {
     const dir = await makeTempDir();
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
     const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
@@ -143,9 +151,10 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
         activeLtrModels: 'ltr-hash',
       },
+      quality: CANONICAL_QUALITY,
     }));
 
-    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('up');
+    await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
 
   it('returns down when NL mappings hash does not match runtime state', async () => {
@@ -163,7 +172,6 @@ describe('search snapshot runtime readiness', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/manifest.json',
       nlMappingsRuntimePath: nlMappingsPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -178,6 +186,7 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: 'mismatched-hash',
         activeLtrModels: 'ltr-hash',
       },
+      quality: CANONICAL_QUALITY,
     }));
 
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
@@ -226,7 +235,7 @@ describe('search snapshot runtime readiness', () => {
 
   it('surfaces the no-active-LTR runtime state explicitly when no pool is available', async () => {
     mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
-      allowMissingLtr: false,
+      quality: CANONICAL_QUALITY,
       counts: {
         activeLtrModels: 0,
       },
@@ -240,7 +249,7 @@ describe('search snapshot runtime readiness', () => {
     const health = buildHealthRouteOptions(config, {});
 
     await expect(health.readiness?.search_snapshot_runtime?.check?.()).rejects.toThrow(
-      /Active LTR runtime count is zero without explicit no-LTR mode/,
+      /Active LTR runtime count is zero/,
     );
   });
 

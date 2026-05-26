@@ -2,7 +2,7 @@
  * MiniLoopToolBundle — unit tests.
  *
  * Verifies the production tool-bundle contract:
- *  - Bundle exposes exactly four tools (one per `KNOWN_AGENT_TOOL_NAMES`).
+ *  - Bundle exposes exactly five tools (one per `KNOWN_AGENT_TOOL_NAMES`).
  *  - Tool names match the SSoT enum EXACTLY (string equality, not just type).
  *  - `inputSchema` is a Zod schema (instanceof `ZodType`).
  *  - Each schema accepts the minimal required input plus Korean strings.
@@ -19,6 +19,10 @@ import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-s
 import type { MiniLoopToolPorts } from '../mini-loop-schemas.js';
 import {
   buildMiniLoopToolBundle,
+  CHECK_DRINKING_WINDOW_TOOL_DEF,
+  COMPARE_WINES_TOOL_DEF,
+  GET_FOOD_PAIRINGS_TOOL_DEF,
+  LOOKUP_WINE_TOOL_DEF,
   MINI_LOOP_TOOL_NAMES,
   SEARCH_WINES_TOOL_DEF,
 } from '../mini-loop-tool-bundle.js';
@@ -99,6 +103,21 @@ describe('SEARCH_WINES_TOOL_DEF', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('accepts structured search fields used by the agent-tools path', () => {
+    const parsed = SEARCH_WINES_TOOL_DEF.inputSchema.safeParse({
+      query: 'gift wine',
+      wine_type: 'white',
+      country: 'France',
+      max_alcohol_pct: 12,
+      occasion: ['gift'],
+      styles: ['approachable', 'presentation_forward'],
+      vintage_min: 2020,
+      vintage_max: 2022,
+      retrieval_mode: 'hybrid',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
   it('rejects empty query', () => {
     const parsed = SEARCH_WINES_TOOL_DEF.inputSchema.safeParse({ query: '' });
     expect(parsed.success).toBe(false);
@@ -127,6 +146,10 @@ describe('SEARCH_WINES_TOOL_DEF', () => {
 describe('CLAUDE.md rule 10 — LLM tool input schemas MUST NOT be strict', () => {
   it.each([
     ['search_wines', SEARCH_WINES_TOOL_DEF, { query: 'q' }],
+    ['lookup_wine', LOOKUP_WINE_TOOL_DEF, { query: 'Opus One 2018' }],
+    ['get_food_pairings', GET_FOOD_PAIRINGS_TOOL_DEF, { food: 'steak' }],
+    ['check_drinking_window', CHECK_DRINKING_WINDOW_TOOL_DEF, { entity_id: 'wine-1' }],
+    ['compare_wines', COMPARE_WINES_TOOL_DEF, { query_a: 'Wine A', query_b: 'Wine B' }],
   ])('%s schema accepts a payload with an extra unknown key', (_name, def, baseInput) => {
     const parsed = def.inputSchema.safeParse({
       ...baseInput,

@@ -220,7 +220,14 @@ export interface LoadedSearchSnapshotRuntimeState {
   readonly publishedAt: string;
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
-  readonly allowMissingLtr: boolean;
+  readonly quality: {
+    readonly status: 'canonical' | 'degraded';
+    readonly blockers: readonly string[];
+    readonly bypasses: readonly string[];
+    readonly carryForwardBenchmarkCount: number;
+    readonly experimentalInputsPresent: boolean;
+  };
+  readonly allowMissingLtr?: boolean | undefined;
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
@@ -287,6 +294,13 @@ type RuntimeStateShape = {
   readonly publishedAt?: unknown;
   readonly manifestPath?: unknown;
   readonly nlMappingsRuntimePath?: unknown;
+  readonly quality?: {
+    readonly status?: unknown;
+    readonly blockers?: unknown;
+    readonly bypasses?: unknown;
+    readonly carryForwardBenchmarkCount?: unknown;
+    readonly experimentalInputsPresent?: unknown;
+  };
   readonly allowMissingLtr?: unknown;
   readonly counts?: {
     readonly entities?: unknown;
@@ -324,7 +338,26 @@ function isFiniteCount(value: unknown): value is number {
 function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnapshotRuntimeState {
   const counts = parsed.counts;
   const hashes = parsed.hashes;
+  const quality = parsed.quality;
+  const normalizedQuality = quality === undefined
+    ? {
+        status: 'degraded' as const,
+        blockers: [] as string[],
+        bypasses: ['legacy_runtime_state_no_quality_metadata'],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
+      }
+    : quality;
   const ltrReleaseProvenance = parsed.ltrReleaseProvenance;
+  const hasValidQuality = (normalizedQuality.status === 'canonical' || normalizedQuality.status === 'degraded')
+    && Array.isArray(normalizedQuality.blockers)
+    && normalizedQuality.blockers.every((value) => typeof value === 'string' && value.length > 0)
+    && Array.isArray(normalizedQuality.bypasses)
+    && normalizedQuality.bypasses.every((value) => typeof value === 'string' && value.length > 0)
+    && typeof normalizedQuality.carryForwardBenchmarkCount === 'number'
+    && Number.isFinite(normalizedQuality.carryForwardBenchmarkCount)
+    && normalizedQuality.carryForwardBenchmarkCount >= 0
+    && typeof normalizedQuality.experimentalInputsPresent === 'boolean';
   const hasValidLtrReleaseProvenance = ltrReleaseProvenance === undefined || (
     typeof ltrReleaseProvenance.updatedAt === 'string'
     && ltrReleaseProvenance.updatedAt.length > 0
@@ -362,7 +395,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     || parsed.manifestPath.length === 0
     || typeof parsed.nlMappingsRuntimePath !== 'string'
     || parsed.nlMappingsRuntimePath.length === 0
-    || typeof parsed.allowMissingLtr !== 'boolean'
+    || !hasValidQuality
     || counts === undefined
     || !isFiniteCount(counts.entities)
     || !isFiniteCount(counts.aliases)
@@ -408,7 +441,16 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     publishedAt: parsed.publishedAt,
     manifestPath: parsed.manifestPath,
     nlMappingsRuntimePath: parsed.nlMappingsRuntimePath,
-    allowMissingLtr: parsed.allowMissingLtr,
+    quality: {
+      status: normalizedQuality.status as 'canonical' | 'degraded',
+      blockers: [...normalizedQuality.blockers as string[]],
+      bypasses: [...normalizedQuality.bypasses as string[]],
+      carryForwardBenchmarkCount: normalizedQuality.carryForwardBenchmarkCount as number,
+      experimentalInputsPresent: normalizedQuality.experimentalInputsPresent as boolean,
+    },
+    ...(typeof parsed.allowMissingLtr === 'boolean'
+      ? { allowMissingLtr: parsed.allowMissingLtr }
+      : {}),
     counts: {
       entities: counts.entities,
       aliases: counts.aliases,
@@ -988,12 +1030,14 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
     throw new Error(`NL mappings runtime count mismatch: runtime=${nlMappingsRuntime.count}, state=${runtimeState.counts.nlMappings}`);
   }
   const activeLtrCountMismatch = activeLtrCount !== runtimeState.counts.activeLtrModels;
-  const allowMissingActiveLtr = runtimeState.allowMissingLtr && activeLtrCount === 0;
-  if (activeLtrCountMismatch && !allowMissingActiveLtr) {
+  if (activeLtrCountMismatch) {
     throw new Error(`Active LTR runtime count mismatch: runtime=${activeLtrCount}/${activeLtrTotalCount}, state=${runtimeState.counts.activeLtrModels}`);
   }
-  if (activeLtrCount <= 0 && !runtimeState.allowMissingLtr) {
-    throw new Error('Active LTR runtime count is zero without explicit no-LTR mode');
+  if (activeLtrCount <= 0) {
+    throw new Error('Active LTR runtime count is zero');
+  }
+  if (runtimeState.quality.blockers.length > 0) {
+    throw new Error(`Runtime quality blockers present: ${runtimeState.quality.blockers.join(', ')}`);
   }
   if (vespaDocumentCount !== runtimeState.counts.entities) {
     throw new Error(
@@ -1016,7 +1060,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
         bias: row.bias,
       })),
   );
-  if (!allowMissingActiveLtr && activeLtrHash !== runtimeState.hashes.activeLtrModels) {
+  if (activeLtrHash !== runtimeState.hashes.activeLtrModels) {
     throw new Error(`Active LTR runtime hash mismatch: runtime=${activeLtrHash}, state=${runtimeState.hashes.activeLtrModels}`);
   }
   const currentFeatureSchemaHash = getCurrentFeatureSchemaHash();
@@ -1083,7 +1127,8 @@ export async function probeSearchSnapshotRuntimeState(
       || nlMappingsRuntime.count !== runtimeState.counts.nlMappings
       || nlMappingsRuntime.count <= 0
       || nlMappingsRuntime.hash !== runtimeState.hashes.nlMappings
-      || (!runtimeState.allowMissingLtr && runtimeState.counts.activeLtrModels <= 0)
+      || runtimeState.counts.activeLtrModels <= 0
+      || runtimeState.quality.blockers.length > 0
     ) {
       return 'down';
     }

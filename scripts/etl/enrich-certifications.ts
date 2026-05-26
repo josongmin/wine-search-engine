@@ -3,7 +3,7 @@
  *
  * Enriches wine records with organic/biodynamic certification flags using:
  * 1. Wikidata SPARQL (structured open data, free/CC0)
- * 2. LLM inference fallback (when Wikidata misses)
+ * 2. Keyword-derived experimental inference (when Wikidata misses)
  *
  * RFC: v0.2 Epic 12 (Data Enrichment)
  */
@@ -17,8 +17,8 @@ export interface CertificationEnrichment {
   readonly biodynamic: boolean;
   readonly vegan: boolean;
   readonly naturalWine: boolean;
-  readonly certificationSource: 'wikidata' | 'llm_inferred' | 'none';
-  readonly certificationConfidence: 'verified' | 'probable' | 'low';
+  readonly certificationSource: 'wikidata_verified' | 'keyword_inferred' | 'none';
+  readonly certificationConfidence: 'verified' | 'heuristic' | 'none';
 }
 
 /**
@@ -95,10 +95,10 @@ export async function queryWikidataCertification(
 }
 
 /**
- * Infer certification from tasting notes using simple keyword matching.
- * Fallback for when Wikidata misses a producer.
+ * Derive certification hints from tasting notes using explicit keyword matching.
+ * This is experimental provenance only, not canonical certification truth.
  */
-export function inferCertificationFromNotes(
+export function deriveCertificationFromNotes(
   tastingNotes: string,
 ): {
   organic: boolean;
@@ -118,7 +118,7 @@ export function inferCertificationFromNotes(
       notes,
     ),
     naturalWine:
-      /(?:^|[^\p{L}\p{N}])natural wine(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])natural ferment(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])minimal intervention(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])no[\s-]?added(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])natural|(?:^|[^\p{L}\p{N}])자연와인(?=$|[^\p{L}\p{N}])/u.test(
+      /(?:^|[^\p{L}\p{N}])natural wine(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])natural ferment(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])minimal intervention(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])no[\s-]?added sulfites?(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])자연와인(?=$|[^\p{L}\p{N}])/u.test(
         notes,
       ),
   };
@@ -142,13 +142,13 @@ export async function enrichWineCertifications(
       biodynamic: wikidata.biodynamic,
       vegan: false, // Not available from Wikidata
       naturalWine: false, // Not available from Wikidata
-      certificationSource: 'wikidata',
+      certificationSource: 'wikidata_verified',
       certificationConfidence: 'verified',
     };
   }
 
-  // Step 2: Fallback to LLM inference from notes
-  const inferred = inferCertificationFromNotes(tastingNotes);
+  // Step 2: Fallback to keyword-derived experimental signal
+  const inferred = deriveCertificationFromNotes(tastingNotes);
 
   if (
     inferred.organic ||
@@ -162,8 +162,8 @@ export async function enrichWineCertifications(
       biodynamic: inferred.biodynamic,
       vegan: inferred.vegan,
       naturalWine: inferred.naturalWine,
-      certificationSource: 'llm_inferred',
-      certificationConfidence: 'probable',
+      certificationSource: 'keyword_inferred',
+      certificationConfidence: 'heuristic',
     };
   }
 
@@ -175,7 +175,7 @@ export async function enrichWineCertifications(
     vegan: false,
     naturalWine: false,
     certificationSource: 'none',
-    certificationConfidence: 'low',
+    certificationConfidence: 'none',
   };
 }
 

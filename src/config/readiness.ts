@@ -169,8 +169,11 @@ async function probeRuntimeLtrArtifact(path: string): Promise<ReadinessStatus> {
 
 async function probeSearchSnapshotRuntimeWithoutPool(): Promise<ReadinessStatus> {
   const runtimeState = await loadSearchSnapshotRuntimeState();
-  if (!runtimeState.allowMissingLtr && runtimeState.counts.activeLtrModels <= 0) {
-    throw new Error('Active LTR runtime count is zero without explicit no-LTR mode');
+  if (runtimeState.counts.activeLtrModels <= 0) {
+    throw new Error('Active LTR runtime count is zero');
+  }
+  if (runtimeState.quality.blockers.length > 0) {
+    throw new Error(`Runtime quality blockers present: ${runtimeState.quality.blockers.join(', ')}`);
   }
   return 'up';
 }

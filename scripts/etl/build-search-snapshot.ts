@@ -37,6 +37,7 @@ import {
   SOURCE_SYSTEM_VIVINO_SILVER,
 } from '../../src/domain/shared/constants/source-systems.js';
 import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import { assertCanonicalTrackCArtifactInput } from './artifact-contract.js';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { loadRequiredFixtureTargetIds } from './verify-runtime-gold-catalog-coverage.js';
 import { hasHangul } from './build-alias-artifact.js';
@@ -111,6 +112,7 @@ export interface BuildSearchSnapshotResult {
 type SnapshotBuildRecord = EnrichedSilverRecord & {
   readonly benchmarkAnchorEntityId?: CanonicalEntityId | undefined;
   readonly sourceSystemOverride?: string | undefined;
+  readonly certificationsExperimental?: unknown;
 };
 
 /**
@@ -486,6 +488,12 @@ function resolveSourceSystemForRecord(record: EnrichedSilverRecord): string {
       : SOURCE_SYSTEM_VIVINO_SILVER);
 }
 
+function stripExperimentalSnapshotFields(record: SnapshotBuildRecord): SnapshotBuildRecord {
+  const { certificationsExperimental: _certificationsExperimental, ...canonical } = record;
+  void _certificationsExperimental;
+  return canonical;
+}
+
 function toRequiredSilverWineType(value: string | undefined, entityId: string): WineType {
   if (value !== undefined && (SILVER_WINE_TYPES as readonly string[]).includes(value)) {
     return value as WineType;
@@ -663,6 +671,7 @@ function buildArtifactsForRecords(args: {
 }
 
 export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapshotResult> {
+  assertCanonicalTrackCArtifactInput(args.input, 'build-search-snapshot');
   const [recordContent, nlMappingsRaw] = await Promise.all([
     fs.readFile(args.input, 'utf8'),
     fs.readFile(args.nlMappings, 'utf8'),
@@ -670,6 +679,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
 
   const parsed = parseNdjson<EnrichedSilverRecord>(recordContent, args.input);
   const baseRecords: SnapshotBuildRecord[] = [...parsed.records]
+    .map((record) => stripExperimentalSnapshotFields(record as SnapshotBuildRecord))
     .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   assertSuitabilityCoverage(baseRecords);
   const [goldLookup, sourceContinuityLookup, carryForwardRecords] = await Promise.all([
@@ -735,6 +745,13 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const contentHash = buildSearchSnapshotContentHash(hashes);
   const snapshotId = buildSearchSnapshotId(contentHash);
   const snapshotRoot = path.join(args.outputDir, snapshotId);
+  const quality = {
+    status: 'canonical' as const,
+    blockers: [] as string[],
+    bypasses: carryForwardRecords.length > 0 ? ['benchmark_carry_forward'] : [],
+    carryForwardBenchmarkCount: carryForwardRecords.length,
+    experimentalInputsPresent: false,
+  };
 
   const manifest: SearchSnapshotManifest = {
     schemaVersion: SEARCH_SNAPSHOT_SCHEMA_VERSION,
@@ -760,6 +777,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       nlMappings: nlMappings.mappingCount,
     },
     hashes,
+    quality,
   };
 
   const metadata = {
@@ -768,6 +786,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     sourceInputPath: args.input,
     counts: manifest.counts,
     hashes: manifest.hashes,
+    quality: manifest.quality,
   } as const;
 
   await fs.mkdir(snapshotRoot, { recursive: true });

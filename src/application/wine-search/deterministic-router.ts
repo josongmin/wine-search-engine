@@ -38,6 +38,7 @@ import type { NormalizedConstraint } from '@shared/types/index.js';
 import {
   EXACT_METADATA_SEARCH_LIMIT,
   PRICE_CONSTRAINT_ATTRIBUTE_NAMES,
+  SOFT_CONSTRAINT_ATTRIBUTES,
 } from '@shared/constants/constraint-attributes.js';
 import {
   EXECUTION_PLAN_KINDS,
@@ -162,32 +163,79 @@ function extractPriceBudgetKrw(
  * Limit precedence:
  *   1. Exact-metadata signal → `EXACT_METADATA_SEARCH_LIMIT` (= 1). The
  *      tightest possible pool — we want the single canonical match.
- *   2. Analyzer-emitted adaptive retrieval k
+ *   2. Explicit user-facing result cap
+ *      (`requestedResultLimit`, e.g. "탑3", "top 5"). This is a stronger
+ *      product intent than the adaptive retrieval default.
+ *   3. Analyzer-emitted adaptive retrieval k
  *      (`recommendedBudget.retrievalK`, SSoT `RETRIEVAL_K_BY_INTENT`). This
  *      varies the pool size per intent class (entity_lookup=20, …,
  *      exploratory=500). See `adaptive-budget.ts` for the rationale.
- *   3. No limit field — downstream use case applies its own default.
+ *   4. No limit field — downstream use case applies its own default.
  *      Retained for backwards compat with fixtures that omit `retrievalK`
  *      from `recommendedBudget`.
  */
 function buildSearchInputFromAnalysis(
   analysis: WineSearchAnalysis,
 ): SearchUseCaseInput {
-  const filters = [...analysis.normalizedConstraints];
+  const filters = getHardAnalysisConstraints(analysis);
+  const preferences = getSoftAnalysisConstraints(analysis);
   if (analysis.contract.hasEntityMetadataSignal) {
     return {
       query: analysis.preservedSurface,
       ...(filters.length > 0 ? { filters } : {}),
+      ...(preferences.length > 0 ? { preferences } : {}),
       limit: EXACT_METADATA_SEARCH_LIMIT,
       mode: 'entity' as const,
     };
   }
+  const requestedResultLimit = analysis.requestedResultLimit;
   const adaptiveK = analysis.recommendedBudget.retrievalK;
   return {
     query: analysis.preservedSurface,
     ...(filters.length > 0 ? { filters } : {}),
-    ...(adaptiveK !== undefined ? { limit: adaptiveK } : {}),
+    ...(preferences.length > 0 ? { preferences } : {}),
+    ...(requestedResultLimit !== undefined
+      ? { limit: requestedResultLimit }
+      : adaptiveK !== undefined
+        ? { limit: adaptiveK }
+        : {}),
   };
+}
+
+function isSoftAnalysisConstraint(constraint: NormalizedConstraint): boolean {
+  const isNegationOperator = constraint.operator === 'exclude' || constraint.operator === 'not_in';
+  return !isNegationOperator && SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute);
+}
+
+function getHardAnalysisConstraints(
+  analysis: WineSearchAnalysis,
+): NormalizedConstraint[] {
+  if (analysis.constraints !== undefined) {
+    return [...analysis.constraints.hard];
+  }
+  return analysis.normalizedConstraints.filter((constraint) => !isSoftAnalysisConstraint(constraint));
+}
+
+function getSoftAnalysisConstraints(
+  analysis: WineSearchAnalysis,
+): NormalizedConstraint[] {
+  if (analysis.constraints !== undefined) {
+    return [...analysis.constraints.soft, ...analysis.constraints.inferred];
+  }
+  return analysis.normalizedConstraints.filter(isSoftAnalysisConstraint);
+}
+
+function getAllAnalysisConstraints(
+  analysis: WineSearchAnalysis,
+): readonly NormalizedConstraint[] {
+  if (analysis.constraints !== undefined) {
+    return [
+      ...analysis.constraints.hard,
+      ...analysis.constraints.soft,
+      ...analysis.constraints.inferred,
+    ];
+  }
+  return analysis.normalizedConstraints;
 }
 
 /**
@@ -219,12 +267,13 @@ function expandParallelSlots(
   decomposition: Extract<Decomposition, { kind: 'parallel-slot' }>,
 ): { readonly searches: SearchUseCaseInput[] } {
   const slotCount = decomposition.slots.length;
-  const totalBudgetKrw = extractPriceBudgetKrw(analysis.normalizedConstraints);
+  const totalBudgetKrw = extractPriceBudgetKrw(getAllAnalysisConstraints(analysis));
   const perSlotBudgetKrw = splitTotalBudgetAcrossSlots(totalBudgetKrw, slotCount);
 
-  const baseFilters = analysis.normalizedConstraints.filter(
+  const baseFilters = getHardAnalysisConstraints(analysis).filter(
     (c) => !PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute),
   );
+  const basePreferences = getSoftAnalysisConstraints(analysis);
 
   const searches: SearchUseCaseInput[] = decomposition.slots.map((slot) => {
     const slotFilters: NormalizedConstraint[] = [
@@ -249,6 +298,7 @@ function expandParallelSlots(
     return {
       query: analysis.preservedSurface,
       filters: slotFilters,
+      ...(basePreferences.length > 0 ? { preferences: [...basePreferences] } : {}),
       ...(slot.limit !== undefined ? { limit: slot.limit } : {}),
     };
   });
@@ -287,7 +337,7 @@ export class DeterministicRouter {
     if (
       analysis.intent === 'unknown'
       && analysis.anchors.length === 0
-      && analysis.normalizedConstraints.length === 0
+      && getAllAnalysisConstraints(analysis).length === 0
       && !WINE_DOMAIN_KEYWORD_RE.test(analysis.preservedSurface)
     ) {
       return { kind: PLAN_KIND_REJECT, reason: 'unsupported_intent' };

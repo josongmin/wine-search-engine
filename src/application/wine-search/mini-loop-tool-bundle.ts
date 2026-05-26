@@ -29,12 +29,9 @@
  *
  * Tool input contracts:
  *  - Schemas align with what `MiniLoopRunner`'s `invokeToolPort` dispatcher
- *    accepts. The dispatcher reads `query`, `filters`, `preferences`,
- *    `mode`, `limit` for search; `food`, `color`, `styles`, `pairing_tags`,
- *    `max_price_krw` for pairing; `query_a`, `query_b` for comparison;
- *    `entity_id`, `target_year` for drinkability. We expose ONLY the minimal
- *    fields here so the schema is small (≈ token-efficient) — the LLM can
- *    still send extra keys (they're ignored by the dispatcher).
+ *    accepts. `search_wines` supports both direct `filters/preferences` and
+ *    the richer structured field surface (`max_alcohol_pct`, `occasion`,
+ *    `styles`, `wine_type`, `country`, ...), matching the agent-tools path.
  *
  * Korean discipline: all string fields use plain `z.string().min(1)` — no
  * ASCII-only constraints anywhere. Korean queries (e.g. "부르고뉴 피노누아")
@@ -48,6 +45,14 @@ import {
 } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import type { ToolDefinition } from '@domain/ai/port/structured-llm.port.js';
 import { LookupWineInputSchema } from '../search/lookup-wine-execution.js';
+import {
+  buildCompareToolFieldShape,
+  buildEntityIdToolField,
+  buildFoodPairingFieldShape,
+  buildSearchToolFieldShape,
+  buildSearchToolQueryField,
+  validateSearchToolVintageRange,
+} from '../search/search-tool-contract.js';
 import type { MiniLoopToolPorts } from './mini-loop-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -86,6 +91,10 @@ const SEARCH_MODE_VALUES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 /** Hard upper bound on `limit` in a search tool input. Aligns with the
  *  legacy agent-tool cap (`SEARCH_LIMIT_MAX = 20`). */
 const TOOL_INPUT_SEARCH_LIMIT_MAX = 20;
+const TOOL_INPUT_MAX_PRICE_KRW = Number.MAX_SAFE_INTEGER;
+const TOOL_INPUT_ENTITY_ID_MAX_LEN = 500;
+const TOOL_INPUT_VINTAGE_MIN = 1600;
+const TOOL_INPUT_VINTAGE_MAX = 2100;
 
 // ---------------------------------------------------------------------------
 // Shared Zod field builders — all permissive (rule 10), Korean-safe.
@@ -107,18 +116,73 @@ const ToolOptionalStringField = ToolStringField.optional();
 // are silently dropped on `.safeParse`).
 // ---------------------------------------------------------------------------
 
-const SearchWinesInputSchema = z.object({
-  query: ToolStringField,
+export const SEARCH_WINES_INPUT_SCHEMA = z.object({
+  query: buildSearchToolQueryField({
+    maxLen: TOOL_INPUT_STRING_MAX_LEN,
+    requiredMessage: 'Query must not be empty',
+  }),
+  ...buildSearchToolFieldShape({
+    limitMax: TOOL_INPUT_SEARCH_LIMIT_MAX,
+    maxPriceKrwMax: TOOL_INPUT_MAX_PRICE_KRW,
+  }),
   filters: z.array(z.unknown()).max(TOOL_INPUT_MAX_ARRAY_ITEMS).optional(),
   preferences: z.array(z.unknown()).max(TOOL_INPUT_MAX_ARRAY_ITEMS).optional(),
   mode: z.enum(SEARCH_MODE_VALUES).optional(),
-  limit: z
-    .number()
-    .int()
-    .finite()
-    .min(TOOL_INPUT_STRING_MIN_LEN)
-    .max(TOOL_INPUT_SEARCH_LIMIT_MAX)
-    .optional(),
+}).superRefine((data, ctx) => {
+  validateSearchToolVintageRange(data, ctx);
+});
+
+export const GET_FOOD_PAIRINGS_INPUT_SCHEMA = z.object(
+  buildFoodPairingFieldShape({
+    foodRequiredMessage: 'Food must not be empty',
+    maxPriceKrwMax: TOOL_INPUT_MAX_PRICE_KRW,
+  }),
+);
+
+export const CHECK_DRINKING_WINDOW_INPUT_SCHEMA = z.object({
+  entity_id: buildEntityIdToolField({
+    maxLen: TOOL_INPUT_ENTITY_ID_MAX_LEN,
+    requiredMessage: 'Entity ID must not be empty',
+  }),
+  target_year: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
+});
+
+export const COMPARE_WINES_INPUT_SCHEMA = z.object({
+  query_a: buildSearchToolQueryField({
+    maxLen: TOOL_INPUT_STRING_MAX_LEN,
+    requiredMessage: 'Query A must not be empty',
+  }),
+  query_b: buildSearchToolQueryField({
+    maxLen: TOOL_INPUT_STRING_MAX_LEN,
+    requiredMessage: 'Query B must not be empty',
+  }),
+  ...buildCompareToolFieldShape({
+    maxPriceKrwMax: TOOL_INPUT_MAX_PRICE_KRW,
+  }),
+  country_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  country_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  region_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  region_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  appellation_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  appellation_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  grape_primary_a: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  grape_primary_b: z.string().trim().min(1).max(TOOL_INPUT_STRING_MAX_LEN).optional(),
+  wine_type_a: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
+  wine_type_b: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
+  vintage_min_a: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
+  vintage_min_b: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
+  vintage_max_a: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
+  vintage_max_b: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
+}).superRefine((data, ctx) => {
+  validateSearchToolVintageRange(data, ctx);
+  validateSearchToolVintageRange({
+    vintage_min: data.vintage_min_a,
+    vintage_max: data.vintage_max_a,
+  }, ctx);
+  validateSearchToolVintageRange({
+    vintage_min: data.vintage_min_b,
+    vintage_max: data.vintage_max_b,
+  }, ctx);
 });
 
 // Identity lookup: schema is the SSoT canonical `LookupWineInputSchema` from
@@ -144,6 +208,12 @@ const SEARCH_WINES_DESCRIPTION =
 
 const LOOKUP_WINE_DESCRIPTION =
   'Look up a SPECIFIC wine by name/identity (e.g. "Opus One 2018"). Returns the 1-3 most exact matches via high-precision entity resolution. No filters — use search_wines for constraint-based discovery.';
+const GET_FOOD_PAIRINGS_DESCRIPTION =
+  'Find wines that pair with a dish or ingredient. Supports typed pairing objectives and optional color or budget hints.';
+const CHECK_DRINKING_WINDOW_DESCRIPTION =
+  'Check whether a specific wine is drinkable in a target year using hydrated source-backed priors when available.';
+const COMPARE_WINES_DESCRIPTION =
+  'Compare two wines or wine concepts side-by-side. Supports shared constraints plus side-specific geography, varietal, and vintage hints.';
 
 // ---------------------------------------------------------------------------
 // Per-tool definitions — exported as module-scope `const`s so they have
@@ -153,13 +223,31 @@ const LOOKUP_WINE_DESCRIPTION =
 export const SEARCH_WINES_TOOL_DEF: ToolDefinition = {
   name: 'search_wines' satisfies KnownAgentToolName,
   description: SEARCH_WINES_DESCRIPTION,
-  inputSchema: SearchWinesInputSchema,
+  inputSchema: SEARCH_WINES_INPUT_SCHEMA,
 };
 
-const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
+export const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
   name: 'lookup_wine' satisfies KnownAgentToolName,
   description: LOOKUP_WINE_DESCRIPTION,
   inputSchema: LookupWineInputSchema,
+};
+
+export const GET_FOOD_PAIRINGS_TOOL_DEF: ToolDefinition = {
+  name: 'get_food_pairings' satisfies KnownAgentToolName,
+  description: GET_FOOD_PAIRINGS_DESCRIPTION,
+  inputSchema: GET_FOOD_PAIRINGS_INPUT_SCHEMA,
+};
+
+export const CHECK_DRINKING_WINDOW_TOOL_DEF: ToolDefinition = {
+  name: 'check_drinking_window' satisfies KnownAgentToolName,
+  description: CHECK_DRINKING_WINDOW_DESCRIPTION,
+  inputSchema: CHECK_DRINKING_WINDOW_INPUT_SCHEMA,
+};
+
+export const COMPARE_WINES_TOOL_DEF: ToolDefinition = {
+  name: 'compare_wines' satisfies KnownAgentToolName,
+  description: COMPARE_WINES_DESCRIPTION,
+  inputSchema: COMPARE_WINES_INPUT_SCHEMA,
 };
 
 /** Frozen production tool list. Module-scope const so every
@@ -169,6 +257,9 @@ const LOOKUP_WINE_TOOL_DEF: ToolDefinition = {
 const MINI_LOOP_TOOL_DEFS: readonly ToolDefinition[] = Object.freeze([
   SEARCH_WINES_TOOL_DEF,
   LOOKUP_WINE_TOOL_DEF,
+  GET_FOOD_PAIRINGS_TOOL_DEF,
+  CHECK_DRINKING_WINDOW_TOOL_DEF,
+  COMPARE_WINES_TOOL_DEF,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -210,6 +301,9 @@ export function buildMiniLoopToolBundle(
 export const MINI_LOOP_TOOL_NAMES: readonly KnownAgentToolName[] = [
   'search_wines',
   'lookup_wine',
+  'get_food_pairings',
+  'check_drinking_window',
+  'compare_wines',
 ];
 
 // Compile-time guarantee: every name in MINI_LOOP_TOOL_NAMES exists in the

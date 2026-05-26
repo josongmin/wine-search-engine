@@ -17,6 +17,19 @@ describe('buildSearchToolRetrievalCoreQuery', () => {
     expect(query).not.toBe('barolo');
   });
 
+  it('keeps representative concept retrieval under soft drinkability preferences', () => {
+    const query = buildSearchToolRetrievalCoreQuery({
+      query: 'Barolo',
+      preserveRepresentativeSearch: true,
+      drinking_window: 'now',
+      drinking_window_target_year: 2026,
+    });
+
+    expect(query.toLowerCase()).toContain('barolo');
+    expect(query.toLowerCase()).toContain('wine');
+    expect(query).not.toBe('barolo');
+  });
+
   it('keeps the user lexical anchor when occasion expansion is additive', () => {
     const query = buildSearchToolRetrievalCoreQuery({
       query: '와인 잘 모르는 사람한테 선물할 거',

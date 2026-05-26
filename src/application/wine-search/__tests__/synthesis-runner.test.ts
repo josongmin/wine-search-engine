@@ -32,6 +32,8 @@ import type { WineSearchAnalysis } from '../wine-search-schemas.js';
 const REQUEST_ID = 'req-synth-0001';
 const PER_STEP_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_TOKENS = 1024;
+const ANTHROPIC_CREDIT_BALANCE_ERROR_MESSAGE =
+  'Anthropic API error: credit balance is too low';
 
 function makeLogger() {
   return {
@@ -48,6 +50,10 @@ function makeTokenUsage(input: number, output: number): TokenUsage {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   };
+}
+
+function makeAnthropicCreditBalanceError(): Error {
+  return new Error(ANTHROPIC_CREDIT_BALANCE_ERROR_MESSAGE);
 }
 
 function makeAnalysis(
@@ -566,6 +572,75 @@ describe('SynthesisRunner — token / timeout / circuit-open accounting', () => 
     expect(result.layer).toBe('layer2');
     expect(result.degradedReason).toBe('circuit_open');
     expect(result.synthesisAttempts).toBe(1);
+  });
+
+  it('generic Anthropic credit-balance error on both attempts → deterministic Layer 2 fallback', async () => {
+    const llm = makeStubLlm(async () => {
+      throw makeAnthropicCreditBalanceError();
+    });
+    const result = await run(llm, {
+      query: '나파 카베르네 추천',
+      hangulDominant: true,
+      toolOutcomes: [
+        makeSearchOutcome([
+          { canonicalLabel: 'Wine Credit', producer: 'Producer C', region: 'Napa Valley' },
+        ]),
+      ],
+    });
+    expect(llm.synthesizeMock).toHaveBeenCalledTimes(2);
+    expect(result.layer).toBe('layer2');
+    expect(result.groundedOnToolResults).toBe(true);
+    expect(result.degradedReason).toBe('unexpected_error');
+    expect(result.synthesisAttempts).toBe(2);
+    expect(result.answer).toBe(
+      FALLBACK_TEMPLATES.layer2.korean('Wine Credit', 'Producer C', 'Napa Valley'),
+    );
+  });
+
+  it('generic Anthropic credit-balance error on both attempts → deterministic Layer 3 fallback', async () => {
+    const llm = makeStubLlm(async () => {
+      throw makeAnthropicCreditBalanceError();
+    });
+    const result = await run(llm, {
+      query: '카베르네 추천',
+      hangulDominant: true,
+      toolOutcomes: [
+        makeGroundingObservation([
+          { canonical_label: 'Wine A', region: 'Napa', grapes: ['Cabernet Sauvignon'], price: '$50' },
+          { canonical_label: 'Wine B', region: 'Sonoma' },
+        ]),
+      ],
+    });
+    expect(llm.synthesizeMock).toHaveBeenCalledTimes(2);
+    expect(result.layer).toBe('layer3');
+    expect(result.groundedOnToolResults).toBe(true);
+    expect(result.degradedReason).toBe('unexpected_error');
+    expect(result.synthesisAttempts).toBe(2);
+    expect(result.answer).toContain('Wine A');
+    expect(result.answer).toContain('Wine B');
+  });
+
+  it('generic Anthropic credit-balance error on both attempts → deterministic Layer 4 fallback', async () => {
+    const llm = makeStubLlm(async () => {
+      throw makeAnthropicCreditBalanceError();
+    });
+    const result = await run(llm, {
+      query: 'Recommend something',
+      hangulDominant: false,
+      toolOutcomes: [{
+        stepId: 'q:0:0',
+        tool: 'search_wines',
+        kind: 'success',
+        durationMs: 12,
+        result: { opaque: true },
+      }],
+    });
+    expect(llm.synthesizeMock).toHaveBeenCalledTimes(2);
+    expect(result.layer).toBe('layer4');
+    expect(result.groundedOnToolResults).toBe(false);
+    expect(result.degradedReason).toBe('unexpected_error');
+    expect(result.synthesisAttempts).toBe(2);
+    expect(result.answer).toBe(FALLBACK_TEMPLATES.layer4.english);
   });
 });
 

@@ -41,6 +41,9 @@ export interface VivinoPayload {
     readonly name?: string;
     readonly country?: { readonly name?: string; readonly code?: string };
   };
+  readonly appellation?: {
+    readonly name?: string;
+  };
   readonly taste?: {
     readonly structure?: {
       readonly acidity?: number;
@@ -267,7 +270,7 @@ export interface SilverWineRecord {
   readonly ratingDistribution?: VivinoRatingDistribution | undefined;
   /** Winery portfolio-level ratings count when present in the source payload. */
   readonly wineryRatingCount?: number | undefined;
-  /** Price in USD (converted from source currency using approximate FX rates). */
+  /** Price in USD (converted from a checked-in versioned FX input). */
   readonly priceUsd: number | null;
   /** Price band derived from priceUsd. */
   readonly priceBand: PriceBand;

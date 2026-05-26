@@ -9,8 +9,8 @@ import { describe, it, expect } from 'vitest';
  * These tests pin the production wire-ups of foundation modules that were
  * previously test-only:
  *   - `per-class-fusion-config.ts` → `candidate-pool.ts` (Epic-16 / T16-2)
- *   - `query-difficulty-estimator.ts` → `candidate-pool.ts` (Epic-16 / T16-4,
- *     parallel / observability-only wire)
+ *   - candidate-pool live path remains free of query-difficulty-estimator sidecars
+ *     (T16-4 moved to offline / eval-only)
  *   - `stage-timer.ts` → `hybrid.usecase.ts` (already wired pre-session)
  *
  * The assertions scan source text rather than executing the full retrieval
@@ -63,14 +63,12 @@ describe('foundation wire-up (candidate-pool)', () => {
     );
   });
 
-  it('imports and invokes estimateQueryDifficulty in parallel with the cascade router', () => {
-    expect(source).toMatch(
+  it('does not invoke query-difficulty-estimator in the live candidate-pool path', () => {
+    expect(source).not.toMatch(
       /from '\.\/query-difficulty-estimator\.js'/,
     );
-    expect(source).toMatch(/estimateQueryDifficulty\(/);
-    // The parallel wire must emit an agreement log so sweeps can quantify
-    // drift before a full replacement.
-    expect(source).toMatch(/retrieval\.difficulty_parallel/);
+    expect(source).not.toMatch(/estimateQueryDifficulty\(/);
+    expect(source).not.toMatch(/event:\s*'retrieval\.difficulty_parallel'/);
   });
 });
 

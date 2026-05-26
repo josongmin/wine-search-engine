@@ -13,8 +13,11 @@
 
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import pg from 'pg';
 import type { PoolConfig } from 'pg';
+import { fileURLToPath } from 'node:url';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { createSourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 import { atomicWriteFile } from './etl-utils.js';
@@ -27,37 +30,15 @@ import type {
 } from './types.js';
 
 // ---------------------------------------------------------------------------
-// Approximate FX rates for non-USD currency normalisation.
-// Updated periodically — good enough for price band classification.
-// ---------------------------------------------------------------------------
-
-const FX_TO_USD: Record<string, number> = {
-  USD: 1.0,
-  EUR: 1.08,
-  GBP: 1.27,
-  AUD: 0.66,
-  CAD: 0.74,
-  CHF: 1.13,
-  JPY: 0.0067,
-  KRW: 0.00075,
-  SEK: 0.096,
-  DKK: 0.145,
-  NOK: 0.094,
-  NZD: 0.61,
-  ZAR: 0.055,
-  BRL: 0.20,
-  ARS: 0.0012,
-  CLP: 0.0011,
-  MXN: 0.058,
-  CNY: 0.14,
-};
-
-// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const SOURCE_ID = 'vivino';
 export const DEFAULT_OUTPUT = resolveDataPath('data/silver.ndjson');
+const FX_RATES_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'fx-rates-usd.v1.json',
+);
 
 const VIVINO_STYLE_MAP: Record<string, WineType> = {
   'red wine': 'red',
@@ -68,6 +49,45 @@ const VIVINO_STYLE_MAP: Record<string, WineType> = {
   'dessert wine': 'dessert',
   'fortified wine': 'fortified',
 };
+
+interface FxRatesCatalog {
+  readonly version: string;
+  readonly baseCurrency: 'USD';
+  readonly ratesToUsd: Readonly<Record<string, number>>;
+}
+
+let cachedFxCatalog: FxRatesCatalog | undefined;
+
+function loadFxRatesCatalog(): FxRatesCatalog {
+  if (cachedFxCatalog !== undefined) {
+    return cachedFxCatalog;
+  }
+  const parsed: unknown = JSON.parse(fs.readFileSync(FX_RATES_PATH, 'utf8'));
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`FX catalog at ${FX_RATES_PATH} must be an object`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record['baseCurrency'] !== 'USD' || typeof record['version'] !== 'string') {
+    throw new Error(`FX catalog at ${FX_RATES_PATH} is missing required metadata`);
+  }
+  const rawRates = record['ratesToUsd'];
+  if (typeof rawRates !== 'object' || rawRates === null || Array.isArray(rawRates)) {
+    throw new Error(`FX catalog at ${FX_RATES_PATH} must contain ratesToUsd object`);
+  }
+  const normalizedRates: Record<string, number> = {};
+  for (const [currency, value] of Object.entries(rawRates)) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      throw new Error(`FX catalog contains invalid rate for ${currency}`);
+    }
+    normalizedRates[currency.toUpperCase()] = value;
+  }
+  cachedFxCatalog = {
+    version: record['version'],
+    baseCurrency: 'USD',
+    ratesToUsd: normalizedRates,
+  };
+  return cachedFxCatalog;
+}
 
 // Vivino wine_style substrings → WineType (for region-style labels like "Napa Valley Cabernet Sauvignon")
 const VIVINO_STYLE_KEYWORD_MAP: Array<[string, WineType]> = [
@@ -793,12 +813,12 @@ export function cleanRegion(
 }
 
 /**
- * Converts a price from its source currency to USD using approximate FX rates.
+ * Converts a price from its source currency to USD using the versioned FX catalog.
  * Returns null for unknown currencies to avoid silently corrupting price data.
  */
 function toUsd(price: number, currency: string): number | null {
   const upper = currency.toUpperCase();
-  const rate = FX_TO_USD[upper];
+  const rate = loadFxRatesCatalog().ratesToUsd[upper];
   if (rate === undefined) return null;
   return price * rate;
 }
@@ -864,11 +884,45 @@ export function extractPriceUsd(
   return null;
 }
 
-/** Build English search text from payload fields. */
-function buildSearchText(
-  row: BronzeRow,
+function trimNonEmpty(value: string | null | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function splitSearchTextFragments(value: string): readonly string[] {
+  return value
+    .split(/(?:\.\s+|\n+)/u)
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment.length > 0);
+}
+
+function dedupeFragments(fragments: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const fragment of fragments) {
+    const key = fragment.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(fragment);
+  }
+  return output;
+}
+
+function mergeSearchTextFragments(
+  primary: readonly string[],
+  secondary: readonly string[],
+): readonly string[] {
+  return dedupeFragments([...primary, ...secondary]);
+}
+
+function buildDescriptiveSearchText(
   payload: VivinoPayload | null,
-): string {
+): readonly string[] {
   const parts: string[] = [];
 
   // Style description (richest tasting note source)
@@ -902,12 +956,66 @@ function buildSearchText(
   const grapeList = grapeNames.length > 0 ? grapeNames : parseVarietal(payload?.varietal);
   if (grapeList.length > 0) parts.push([...grapeList].join(', '));
 
-  // Canonical info for recall
-  if (row.producer) parts.push(row.producer);
-  if (row.region) parts.push(row.region);
-  if (row.country) parts.push(row.country);
+  return dedupeFragments(parts);
+}
 
-  return parts.join('. ').trim();
+function buildSearchTextFromPreSilver(
+  record: Pick<
+    PreSilver,
+    | 'canonicalLabel'
+    | 'producer'
+    | 'country'
+    | 'region'
+    | 'appellation'
+    | 'grapes'
+    | 'pairingTags'
+    | 'flavorProfiles'
+    | 'classification'
+    | 'oakTreatment'
+  >,
+  descriptiveFragments: readonly string[],
+): string {
+  const structuredFragments = dedupeFragments([
+    ...descriptiveFragments,
+    ...[
+      record.canonicalLabel,
+      record.producer,
+      record.appellation ?? undefined,
+      record.region,
+      record.country,
+      record.classification ?? undefined,
+      record.oakTreatment ?? undefined,
+    ].flatMap((value) => value === undefined ? [] : [value]),
+    ...(record.grapes.length > 0 ? [record.grapes.join(', ')] : []),
+    ...(record.flavorProfiles.length > 0 ? [record.flavorProfiles.join(', ')] : []),
+    ...(record.pairingTags.length > 0 ? [record.pairingTags.join(', ')] : []),
+  ]);
+  return structuredFragments.join('. ').trim();
+}
+
+function resolveAppellation(payload: VivinoPayload | null): string | null {
+  return trimNonEmpty(payload?.appellation?.name) ?? null;
+}
+
+function mergeStringArray(
+  primary: readonly string[],
+  secondary: readonly string[],
+): readonly string[] {
+  return dedupeFragments([...primary, ...secondary]);
+}
+
+function mergeNullableNumber<T extends number | null>(
+  primary: T,
+  secondary: T,
+): T {
+  return (primary ?? secondary) as T;
+}
+
+function mergeNullableString(
+  primary: string | null,
+  secondary: string | null,
+): string | null {
+  return primary ?? secondary;
 }
 
 /** Extract flavor profile tags from payload. */
@@ -1220,6 +1328,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     row.country?.trim() ??
     payload?.region?.country?.name?.trim() ??
     '';
+  const region = cleanRegion(row.region, payload?.winery_location);
+  const appellation = resolveAppellation(payload);
 
   const grapes = extractGrapes(payload);
   // Resolve dominant primary via region/appellation table when grape list
@@ -1346,6 +1456,20 @@ export function transformRow(row: BronzeRow): PreSilver | null {
       : undefined;
   const bottleSize = payload?.bottle_size?.trim();
   const closure = payload?.closure?.trim();
+  const classification = extractClassification(payload, row);
+  const oakTreatment = extractOakTreatment(payload);
+  const searchTextEn = buildSearchTextFromPreSilver({
+    canonicalLabel,
+    producer,
+    country,
+    region,
+    appellation,
+    grapes,
+    pairingTags: extractPairings(payload),
+    flavorProfiles: flavorProfilesForType,
+    classification,
+    oakTreatment,
+  }, buildDescriptiveSearchText(payload));
 
   return {
     sourceId: createSourceRecordId(makeEntityId(externalId)),
@@ -1354,8 +1478,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     producer,
     vintageYear,
     country,
-    region: cleanRegion(row.region, payload?.winery_location),
-    appellation: null, // Vivino rarely has appellation-level detail
+    region,
+    appellation,
     wineType: detectedWineType,
     grapePrimary,
     grapes,
@@ -1365,7 +1489,7 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     tannin: normalizeScale(taste?.tannin, 5),
     pairingTags: extractPairings(payload),
     flavorProfiles: extractFlavorProfiles(payload),
-    searchTextEn: buildSearchText(row, payload),
+    searchTextEn,
     // SCAN: pg driver returns NUMERIC columns as strings; guard with parseFloat + isFinite.
     // BronzeRow types rating as `number | null` but the real runtime value may be a string.
     ratingAvg: (() => {
@@ -1388,8 +1512,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     ...(closure !== undefined && closure.length > 0 ? { closure } : {}),
     producerPrestige,
     isTopRated,
-    classification: extractClassification(payload, row),
-    oakTreatment: extractOakTreatment(payload),
+    classification,
+    oakTreatment,
   };
 }
 
@@ -1401,18 +1525,37 @@ export function transformRow(row: BronzeRow): PreSilver | null {
  * When a newer scrape wins dedup but lacks SOTA++ fields (e.g. Vivino payload
  * structure changed), preserve the values from the losing scrape.
  */
-function mergeSOTAPlusFields(winner: PreSilver, fallback: PreSilver): PreSilver {
-  return {
+function mergeAuthoritativeFields(winner: PreSilver, fallback: PreSilver): PreSilver {
+  const descriptiveFragments = mergeSearchTextFragments(
+    splitSearchTextFragments(winner.searchTextEn),
+    splitSearchTextFragments(fallback.searchTextEn),
+  );
+  const merged: PreSilver = {
     ...winner,
-    alcoholPct: winner.alcoholPct ?? fallback.alcoholPct,
-    producerPrestige: winner.producerPrestige ?? fallback.producerPrestige,
+    country: winner.country.length > 0 ? winner.country : fallback.country,
+    region: winner.region.length > 0 ? winner.region : fallback.region,
+    appellation: mergeNullableString(winner.appellation, fallback.appellation),
+    grapePrimary: mergeNullableString(winner.grapePrimary, fallback.grapePrimary),
+    grapes: mergeStringArray(winner.grapes, fallback.grapes),
+    body: mergeNullableNumber(winner.body, fallback.body),
+    sweetness: mergeNullableNumber(winner.sweetness, fallback.sweetness),
+    acidity: mergeNullableNumber(winner.acidity, fallback.acidity),
+    tannin: mergeNullableNumber(winner.tannin, fallback.tannin),
+    pairingTags: mergeStringArray(winner.pairingTags, fallback.pairingTags),
+    flavorProfiles: mergeStringArray(winner.flavorProfiles, fallback.flavorProfiles),
+    ratingAvg: mergeNullableNumber(winner.ratingAvg, fallback.ratingAvg),
+    priceUsd: mergeNullableNumber(winner.priceUsd, fallback.priceUsd),
+    priceBand: winner.priceUsd !== null ? winner.priceBand : fallback.priceBand,
+    alcoholPct: mergeNullableNumber(winner.alcoholPct, fallback.alcoholPct),
+    producerPrestige: mergeNullableNumber(winner.producerPrestige, fallback.producerPrestige),
     isTopRated: winner.isTopRated || fallback.isTopRated,
-    classification: (winner.classification ?? fallback.classification) ?? null,
-    oakTreatment: (winner.oakTreatment ?? fallback.oakTreatment) ?? null,
-    // Prefer longer searchTextEn if winner's is empty (different scrape depth)
-    searchTextEn: winner.searchTextEn.length >= fallback.searchTextEn.length
-      ? winner.searchTextEn
-      : fallback.searchTextEn,
+    classification: mergeNullableString(winner.classification ?? null, fallback.classification ?? null),
+    oakTreatment: mergeNullableString(winner.oakTreatment ?? null, fallback.oakTreatment ?? null),
+    searchTextEn: '',
+  };
+  return {
+    ...merged,
+    searchTextEn: buildSearchTextFromPreSilver(merged, descriptiveFragments),
   };
 }
 
@@ -1447,12 +1590,11 @@ export function dedup(records: PreSilver[]): PreSilver[] {
     const rawNewTime = rec.scrapedAt ? new Date(rec.scrapedAt).getTime() : 0;
     const newTime = Number.isFinite(rawNewTime) ? rawNewTime : 0;
     if (newTime > existingTime) {
-      // Winner = rec; fill SOTA++ gaps from existing
-      byKey.set(key, mergeSOTAPlusFields(rec, existing));
+      byKey.set(key, mergeAuthoritativeFields(rec, existing));
       continue;
     }
     if (newTime === existingTime && rec.ratingsCount > existing.ratingsCount) {
-      byKey.set(key, mergeSOTAPlusFields(rec, existing));
+      byKey.set(key, mergeAuthoritativeFields(rec, existing));
       continue;
     }
     if (
@@ -1460,7 +1602,7 @@ export function dedup(records: PreSilver[]): PreSilver[] {
       rec.ratingsCount === existing.ratingsCount &&
       rec.searchTextEn.length > existing.searchTextEn.length
     ) {
-      byKey.set(key, mergeSOTAPlusFields(rec, existing));
+      byKey.set(key, mergeAuthoritativeFields(rec, existing));
     }
   }
 

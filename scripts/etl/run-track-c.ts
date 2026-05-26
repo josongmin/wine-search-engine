@@ -6,10 +6,10 @@
  * Consumes `data/silver-docquery.ndjson`, seeds `data/silver-trackc.ndjson`,
  * and executes the full Track C enrichment pipeline in sequence:
  * 1. generate-critic-proxy.ts - LLM-based critic proxy scores
- * 2. enrich-certifications.ts - Wikidata SPARQL + LLM fallback for certs
+ * 2. enrich-certifications.ts - verified Wikidata + experimental keyword provenance
  * 3. generate-pairings.ts - Claude-based food pairing taxonomy normalization
  * 4. run-track-c-step4-occasion.ts - ontology-constrained occasion classification
- * 5. drinking-window-backfill.ts - heuristic stub (opt-in only)
+ * 5. drinking-window-backfill.ts - heuristic stub (experimental artifact only, opt-in)
  * 6. run-track-c-step6-gift-suitability.ts - LLM-based gift suitability scoring
  * 7. run-track-c-step7-beginner-suitability.ts - LLM-based beginner suitability scoring
  *
@@ -34,6 +34,7 @@ import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 export const TRACK_C_SOURCE_FILE = ETL_ARTIFACT_FILES.docquery;
 export const TRACK_C_OUTPUT_FILE = ETL_ARTIFACT_FILES.trackc;
+export const TRACK_C_EXPERIMENTAL_FILE = ETL_ARTIFACT_FILES.trackcExperimental;
 export const TRACK_C_SOURCE_STATE_FILE = resolveDataPath('.silver-trackc.source-state.json');
 const LOCK_FILE = resolveDataPath('.etl-track-c.lock');
 const MIN_RECORDS_FOR_TRACK_C = 100; // fail fast: don't spend LLM credits on tiny datasets
@@ -45,6 +46,8 @@ export interface TrackCStepDefinition {
   readonly field: string;
   /** Minimum coverage ratio required before the step is considered passable. */
   readonly requiredCoverage?: number;
+  readonly outputPath?: string;
+  readonly optInEnv?: string;
 }
 
 export const TRACK_C_STEP_DEFINITIONS: readonly TrackCStepDefinition[] = [
@@ -58,7 +61,7 @@ export const TRACK_C_STEP_DEFINITIONS: readonly TrackCStepDefinition[] = [
   {
     num: 2,
     script: 'run-track-c-step2.ts',
-    desc: 'Enrich Certifications (Wikidata + LLM)',
+    desc: 'Enrich Certifications (Verified + Experimental Provenance)',
     field: 'certifications',
     requiredCoverage: 1,
   },
@@ -79,9 +82,11 @@ export const TRACK_C_STEP_DEFINITIONS: readonly TrackCStepDefinition[] = [
   {
     num: 5,
     script: 'drinking-window-backfill.ts',
-    desc: 'Drinking Window Backfill (Heuristic Stub, Opt-In)',
+    desc: 'Drinking Window Backfill (Experimental Heuristic Stub, Opt-In)',
     field: 'drinkingWindow',
-    requiredCoverage: 1,
+    requiredCoverage: 0,
+    outputPath: TRACK_C_EXPERIMENTAL_FILE,
+    optInEnv: 'ALLOW_HEURISTIC_DRINKING_WINDOW_BACKFILL',
   },
   {
     num: 6,
@@ -205,12 +210,19 @@ function seedTrackCWorkingCopy(fromStep: number): void {
   }
 }
 
+function ensureExperimentalTrackCSeeded(): void {
+  fs.copyFileSync(TRACK_C_OUTPUT_FILE, TRACK_C_EXPERIMENTAL_FILE);
+}
+
 /**
  * Checks field coverage across ALL records (not just the first sample).
  * Returns the fraction of records that have the field defined and non-null.
  */
-function fieldCoverage(fieldName: string): { present: number; total: number; ratio: number } {
-  const content = fs.readFileSync(TRACK_C_OUTPUT_FILE, 'utf-8');
+function fieldCoverage(
+  fieldName: string,
+  outputPath: string,
+): { present: number; total: number; ratio: number } {
+  const content = fs.readFileSync(outputPath, 'utf-8');
   const lines = content.trim().split('\n').filter((line) => line.length > 0);
   let present = 0;
   for (const line of lines) {
@@ -260,6 +272,8 @@ async function runStep(
   description: string,
   outputField: string,
   minimumCoverage: number,
+  outputPath: string,
+  optInEnv?: string,
 ): Promise<boolean> {
   console.log(`\n${'='.repeat(70)}`);
   console.log(`Step ${stepNum}: ${description}`);
@@ -270,12 +284,23 @@ async function runStep(
     console.error(`  Script not found: ${scriptPath}`);
     return false;
   }
+  if (optInEnv !== undefined) {
+    const enabled = process.env[optInEnv]?.trim();
+    if (enabled !== '1' && enabled !== 'true') {
+      console.log(`  Skipped: experimental step requires ${optInEnv}=1`);
+      return true;
+    }
+  }
+  if (outputPath === TRACK_C_EXPERIMENTAL_FILE) {
+    ensureExperimentalTrackCSeeded();
+  }
 
   // Backup before step execution so checkpointed partial writes can be rolled back.
-  const backupPath = await backupFile(TRACK_C_OUTPUT_FILE);
+  const backupPath = await backupFile(outputPath);
 
   console.log(`  Script: ${scriptName}`);
-  console.log(`  Before: ${getRecordCount(TRACK_C_OUTPUT_FILE)} records, ${getFileSize(TRACK_C_OUTPUT_FILE)}`);
+  console.log(`  Output: ${outputPath}`);
+  console.log(`  Before: ${getRecordCount(outputPath)} records, ${getFileSize(outputPath)}`);
 
   try {
     console.log(`  Running step ${stepNum}...`);
@@ -289,7 +314,7 @@ async function runStep(
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     // Validate output field across ALL records (not just first sample)
-    const coverage = fieldCoverage(outputField);
+    const coverage = fieldCoverage(outputField, outputPath);
     try {
       assertTrackCFieldCoverageIsComplete(
         outputField,
@@ -298,7 +323,7 @@ async function runStep(
       );
     } catch {
       if (backupPath !== null) {
-        fs.copyFileSync(backupPath, TRACK_C_OUTPUT_FILE);
+        fs.copyFileSync(backupPath, outputPath);
       }
       console.error(
         `  Step ${stepNum} completed but output field "${outputField}" failed coverage check (` +
@@ -312,11 +337,11 @@ async function runStep(
       `Field "${outputField}": ${coverage.present}/${coverage.total} records ` +
       `(${(coverage.ratio * 100).toFixed(1)}%)`,
     );
-    console.log(`  After: ${getRecordCount(TRACK_C_OUTPUT_FILE)} records, ${getFileSize(TRACK_C_OUTPUT_FILE)}`);
+    console.log(`  After: ${getRecordCount(outputPath)} records, ${getFileSize(outputPath)}`);
     return true;
   } catch (error) {
     if (backupPath !== null) {
-      fs.copyFileSync(backupPath, TRACK_C_OUTPUT_FILE);
+      fs.copyFileSync(backupPath, outputPath);
     }
     console.error(
       `  Step ${stepNum} failed:`,
@@ -396,6 +421,8 @@ async function main() {
         step.desc,
         step.field,
         step.requiredCoverage ?? 1,
+        step.outputPath ?? TRACK_C_OUTPUT_FILE,
+        step.optInEnv,
       );
       results.push({
         step: step.num,

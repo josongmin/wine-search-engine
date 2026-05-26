@@ -8,21 +8,12 @@
  * - Mark fallback in result for transparency
  */
 
-import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
-import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
-import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
-import type { SearchResponseV2Machine } from '../../interface/http/schemas/search-response-v2.schema.js';
-import { type WineToolExecutor } from './tool-executor.js';
+import type { WineToolExecutor, WineToolExecutorResult } from './tool-executor.js';
 
 /**
  * All possible tool results including the V2 machine format (T6.3).
  */
-type AnyToolResult =
-  | SearchResponseV1
-  | SearchResponseV2Machine
-  | ComparisonSearchResponse
-  | DrinkingWindowBlock
-  | { error: string };
+type AnyToolResult = WineToolExecutorResult;
 
 /**
  * Result from executeWithFallback, includes fallback tracking.

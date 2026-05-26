@@ -41,7 +41,6 @@ import {
   mapDomainQueryClassToFusionQueryClass,
 } from './per-class-fusion-config.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
-import { estimateQueryDifficulty } from './query-difficulty-estimator.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import {
   hardConstraintsToSparseFilterTokens,
@@ -217,41 +216,6 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       input.hardConstraints.length + input.softConstraints.length,
     );
 
-    // Epic-16 / T16-4 parallel wire-up: compute query difficulty via the
-    // deterministic estimator alongside the CascadeRouter's signal-based
-    // difficulty. The two estimators consume different signal shapes and
-    // cannot be substituted 1:1 without risk — this emits an agreement
-    // log so sweeps can quantify drift before a full replacement. No
-    // behavior change: the cascade continues to use dispatchDecision.
-    {
-      const normalizedQuery = input.queryPlan.normalizedQuery;
-      const tokenCount = normalizedQuery.trim().length === 0
-        ? 0
-        : normalizedQuery.trim().split(/\s+/).length;
-      const estimate = estimateQueryDifficulty({
-        normalizedQuery,
-        tokenCount,
-        hasAnchor: anchorConfidence > 0,
-        anchorConfidence,
-        hasNumericConstraint:
-          input.hardConstraints.length + input.softConstraints.length > 0,
-        // RFC-005 query classes do not surface a negation signal yet;
-        // pass false so the estimator never short-circuits to 'hard' on
-        // this axis. Revisit when a negation extractor lands.
-        hasNegation: false,
-      });
-      bootstrapLogger.debug(
-        {
-          event: 'retrieval.difficulty_parallel',
-          cascade_difficulty: dispatchDecision.difficulty,
-          estimator_difficulty: estimate.difficulty,
-          estimator_score: estimate.score,
-          agree: dispatchDecision.difficulty === estimate.difficulty,
-          query_class: input.queryPlan.queryClass,
-        },
-        'cascade vs estimator difficulty',
-      );
-    }
     const activeChannels = this.resolveActiveChannels(profile.channelMix, dispatchDecision, input, retrievalMode);
     const allPhases: RetrievalPhase[] = [
       'sparse',

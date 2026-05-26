@@ -1,25 +1,10 @@
 /**
- * Regression: `partial_resolution_forbidden` is opt-in-graceful via
- * `WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=1` (F8).
- *
- * Pre-fix: ANY unresolved entity in the hydration set threw a hard
- * `INTERNAL_INCONSISTENCY` DomainError. The PtE bench's 8 critical-fails
- * (#117-#124) traced to PG alias-overlay drift, NOT to wrong agent code —
- * the strict mode short-circuited otherwise-recoverable scenarios into
- * Layer-4 fallback.
- *
- * The opt-in flag lets bench/operator environments with known data drift
- * proceed with the resolved subset (legacy ReAct's tolerance) while
- * production remains strict-reject by default.
+ * Regression: partial resolver hydration is permanently fail-closed.
  *
  * Contract pinned here:
- *  1. Flag UNSET / not exactly `'1'` → strict reject (existing behaviour).
- *  2. Flag === `'1'` → log + proceed with the resolved subset.
- *  3. Empty unresolved set is a no-op regardless of flag.
- *
- * The graceful path is verified via a structural call into
- * `buildResolverCandidatesFromGenerator` with a mock entityLookup that
- * returns partial results.
+ *  1. Any unresolved entity id throws `partial_resolution_forbidden`.
+ *  2. Legacy env toggles do NOT re-enable graceful subset resolution.
+ *  3. Fully resolved hydration remains unaffected.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -43,8 +28,12 @@ function makeDoc(id: string): RetrievalDocument {
 function makeAnchor(ids: readonly string[]) {
   return {
     surfaceForm: 'x',
+    normalizedForm: 'x',
     confidence: 0.9,
     candidateEntityIds: ids.map((s) => createEntityId(s)),
+    lookupStrategies: ['exact'],
+    aliasType: 'canonical',
+    source: 'alias',
   } as never;
 }
 
@@ -61,7 +50,7 @@ function makePartialLookup(presentIds: readonly string[]): EntityDocumentLookupP
   } as never;
 }
 
-describe('partial_resolution graceful opt-in (F8 regression)', () => {
+describe('partial_resolution is strict fail-closed', () => {
   const originalFlag = process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'];
 
   beforeEach(() => {
@@ -86,9 +75,8 @@ describe('partial_resolution graceful opt-in (F8 regression)', () => {
     ).rejects.toThrow(/partial_resolution_forbidden/);
   });
 
-  it('GRACEFUL (WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=1): proceeds with resolved subset, logs warning', async () => {
+  it('ignores legacy WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=1 and still rejects partial hydration', async () => {
     process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'] = '1';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const input = {
       anchors: [makeAnchor(['e1', 'e2'])],
       rawQuery: 'q',
@@ -97,35 +85,12 @@ describe('partial_resolution graceful opt-in (F8 regression)', () => {
       preloadedDocs: null,
     } as never;
     const lookup = makePartialLookup(['e1']);
-
-    // The graceful path returns successfully (just the resolved subset).
-    const result = await buildResolverCandidatesFromGenerator(input, lookup);
-    // exactly one resolved candidate (e1); e2 was dropped.
-    expect(result.length).toBe(1);
-    // Audit log fired with the deviation summary.
-    const warnedWithEvent = warnSpy.mock.calls.some(([msg]) =>
-      typeof msg === 'string' && msg.includes('partial_resolution_graceful')
+    await expect(buildResolverCandidatesFromGenerator(input, lookup)).rejects.toThrow(
+      /partial_resolution_forbidden/,
     );
-    expect(warnedWithEvent).toBe(true);
-    warnSpy.mockRestore();
   });
 
-  it('REJECTS typo values: WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION=true is NOT honoured (must be exactly "1")', async () => {
-    process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'] = 'true';
-    const input = {
-      anchors: [makeAnchor(['e1', 'e2'])],
-      rawQuery: 'q',
-      normalizedQuery: 'q',
-      blockerOnlyIds: [],
-      preloadedDocs: null,
-    } as never;
-    const lookup = makePartialLookup(['e1']);
-    await expect(
-      buildResolverCandidatesFromGenerator(input, lookup),
-    ).rejects.toThrow(/partial_resolution_forbidden/);
-  });
-
-  it('NO-OP: empty unresolved set (all ids found) is unaffected by the flag', async () => {
+  it('all ids found remains unaffected', async () => {
     process.env['WINE_SEARCH_ALLOW_PARTIAL_RESOLUTION'] = '1';
     const input = {
       anchors: [makeAnchor(['e1', 'e2'])],
