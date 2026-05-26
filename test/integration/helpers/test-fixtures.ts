@@ -468,6 +468,7 @@ export const TEST_ALIASES: readonly TestAlias[] = [
   { surfaceForm: 'Romanée-Conti 2019', entityId: ROMANEE_CONTI_ID, confidence: 1.0 },
   { surfaceForm: 'DRC', entityId: ROMANEE_CONTI_ID, confidence: 0.88 },
   { surfaceForm: 'romanee conti', entityId: ROMANEE_CONTI_ID, confidence: 0.94 },
+  { surfaceForm: 'romanee', entityId: ROMANEE_CONTI_ID, confidence: 0.89 },
 
   // Sassicaia
   { surfaceForm: 'Sassicaia 2018', entityId: SASSICAIA_ID, confidence: 1.0 },
@@ -565,7 +566,7 @@ export const TEST_DOCUMENTS: readonly RetrievalDocument[] = [
     entityType: 'wine',
     canonicalLabel: 'Romanée-Conti 2019',
     aliasesIdentitySafe: ['Romanée-Conti 2019', 'romanee-conti 2019', 'Romanée-Conti', 'romanee-conti'],
-    aliasesNoisyRecall: ['DRC', '로마네꽁티', 'romanee conti'],
+    aliasesNoisyRecall: ['DRC', '로마네꽁티', 'romanee conti', 'romanee'],
     producer: 'Domaine de la Romanée-Conti',
     region: 'Burgundy',
     grapes: ['Pinot Noir'],

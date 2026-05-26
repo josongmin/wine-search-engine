@@ -71,22 +71,51 @@ export function buildStructuredQueryExpansions(
   const semantic: string[] = [];
   const wineTypeContext = resolveWineTypeContextFromConstraints(plan.constraints.hard);
   for (const constraint of plan.constraints.hard) {
-    const phrases = retrievalValueToPhrases(constraint.attribute, constraint.value, wineTypeContext);
-    if (phrases.length > 0) {
-      lexical.push(...phrases);
-      if (isSemanticRetrievalExpansionAttribute(constraint.attribute)) {
-        semantic.push(...phrases);
+    const lexicalPhrases = retrievalValueToPhrases(
+      constraint.attribute,
+      constraint.value,
+      wineTypeContext,
+      constraint.operator,
+      'lexical',
+    );
+    if (lexicalPhrases.length > 0) {
+      lexical.push(...lexicalPhrases);
+    }
+    if (isSemanticRetrievalExpansionAttribute(constraint.attribute)) {
+      const semanticPhrases = retrievalValueToPhrases(
+        constraint.attribute,
+        constraint.value,
+        wineTypeContext,
+        constraint.operator,
+        'semantic',
+      );
+      if (semanticPhrases.length > 0) {
+        semantic.push(...semanticPhrases);
       }
     }
   }
   for (const boost of [...retrievalPlan.softBoosts, ...retrievalPlan.inferredBoosts]) {
-    const phrases = retrievalValueToPhrases(boost.attribute, boost.value, wineTypeContext);
-    if (phrases.length === 0) {
-      continue;
+    const lexicalPhrases = retrievalValueToPhrases(
+      boost.attribute,
+      boost.value,
+      wineTypeContext,
+      boost.operator,
+      'lexical',
+    );
+    if (lexicalPhrases.length > 0) {
+      lexical.push(...lexicalPhrases);
     }
-    lexical.push(...phrases);
     if (isSemanticRetrievalExpansionAttribute(boost.attribute)) {
-      semantic.push(...phrases);
+      const semanticPhrases = retrievalValueToPhrases(
+        boost.attribute,
+        boost.value,
+        wineTypeContext,
+        boost.operator,
+        'semantic',
+      );
+      if (semanticPhrases.length > 0) {
+        semantic.push(...semanticPhrases);
+      }
     }
   }
   for (const hint of plan.expansions.ambiguousEntityHints ?? []) {
@@ -160,6 +189,8 @@ export function retrievalValueToPhrases(
   attribute: string,
   value: unknown,
   wineTypeContext?: WineTypeValue,
+  operator?: NormalizedConstraint['operator'],
+  channel: 'lexical' | 'semantic' = 'lexical',
 ): readonly string[] {
   if (attribute === 'recipient_profile') {
     if (typeof value === 'string') {
@@ -176,13 +207,30 @@ export function retrievalValueToPhrases(
     }
   }
 
-  const softIntentPhrases = softIntentRetrievalPhrases(attribute, value, wineTypeContext);
+  const softIntentPhrases = softIntentRetrievalPhrases(attribute, value, wineTypeContext, channel);
   if (softIntentPhrases !== undefined) {
     return softIntentPhrases;
   }
 
+  if (shouldSuppressGenericNumericRetrievalPhrase(operator, value)) {
+    return [];
+  }
+
   const phrase = retrievalValueToPhrase(value);
   return phrase !== undefined ? [phrase] : [];
+}
+
+function shouldSuppressGenericNumericRetrievalPhrase(
+  operator: NormalizedConstraint['operator'] | undefined,
+  value: unknown,
+): boolean {
+  if (operator === 'range') {
+    return true;
+  }
+  if ((operator === '>=' || operator === '<=') && typeof value === 'number') {
+    return true;
+  }
+  return false;
 }
 
 function retrievalValueToPhrase(value: unknown): string | undefined {

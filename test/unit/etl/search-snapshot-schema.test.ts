@@ -33,7 +33,7 @@ describe('search-snapshot-schema helpers', () => {
     );
   });
 
-  it('upgrades legacy manifests with missing vespa feed fields', () => {
+  it('upgrades manifests with missing vespa feed fields while preserving required canonical fields', () => {
     const manifestPath = '/tmp/search-snapshots/search-snapshot:v1:legacy/manifest.json';
     const parsed = parseManifest(JSON.stringify({
       schemaVersion: 'search_snapshot.v1',
@@ -69,6 +69,13 @@ describe('search-snapshot-schema helpers', () => {
           totalDocCount: 42,
           populatedDocRatio: 0,
         },
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     }), manifestPath);
 

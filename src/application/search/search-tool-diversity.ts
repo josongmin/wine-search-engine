@@ -213,7 +213,8 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
   readonly searchUseCase: SearchExecutorPort;
   readonly requestId: string;
   readonly fallbackRequest: SearchRequest;
-  readonly effectiveLimit: number;
+  readonly candidateGatherLimit: number;
+  readonly returnLimit: number;
   readonly shouldRun: boolean;
   readonly buildTypedRequest: (wineType: WineTypeValue) => SearchRequest;
   readonly abortSignal?: AbortSignal | undefined;
@@ -221,6 +222,13 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
   readonly corpusCardinality?: CorpusCardinalityCache | undefined;
   /** StageTimer for pipeline latency breakdown. Threaded to search execute options. */
   readonly stageTimer?: StageTimer | undefined;
+  /**
+   * Optional search-only post-processor applied BEFORE diversity merge/truncation.
+   * This lets explicit negation / budget / alcohol constraints prune invalid
+   * candidates without starving later valid branch hits behind a pre-filter
+   * diversity cut.
+   */
+  readonly resultPolicy?: ((response: SearchResponseV1) => SearchResponseV1) | undefined;
 }): Promise<SearchExecutorResult> {
   const fallbackExecOpts = {
     ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
@@ -231,11 +239,14 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
     : undefined;
 
   if (!input.shouldRun) {
-    return input.searchUseCase.execute(
+    const result = await input.searchUseCase.execute(
       input.fallbackRequest,
       input.requestId,
       fallbackExecOpts,
     );
+    return result.queryType === 'search' && input.resultPolicy !== undefined
+      ? input.resultPolicy(result)
+      : result;
   }
 
   // Filter out wine types whose corpus is too small for meaningful diversity discovery.
@@ -247,11 +258,14 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
 
   if (eligibleTypes.length === 0) {
     // All types below threshold — fall back to untyped search
-    return input.searchUseCase.execute(
+    const result = await input.searchUseCase.execute(
       input.fallbackRequest,
       input.requestId,
       fallbackExecOpts,
     );
+    return result.queryType === 'search' && input.resultPolicy !== undefined
+      ? input.resultPolicy(result)
+      : result;
   }
 
   const typedSettled = await Promise.allSettled(
@@ -279,20 +293,27 @@ export async function executeSearchWithTypedWineDiversityDiscovery(input: {
       continue;
     }
     if (settled.value.result.queryType === 'search') {
-      successfulTypedResponses.push(settled.value.result);
+      successfulTypedResponses.push(
+        input.resultPolicy !== undefined
+          ? input.resultPolicy(settled.value.result)
+          : settled.value.result,
+      );
     }
   }
   if (successfulTypedResponses.length > 0) {
     return mergeSearchResponsesForDiversityDiscovery(
       successfulTypedResponses,
       input.requestId,
-      input.effectiveLimit,
+      input.returnLimit,
     );
   }
 
-  return input.searchUseCase.execute(
+  const result = await input.searchUseCase.execute(
     input.fallbackRequest,
     input.requestId,
     fallbackExecOpts,
   );
+  return result.queryType === 'search' && input.resultPolicy !== undefined
+    ? input.resultPolicy(result)
+    : result;
 }

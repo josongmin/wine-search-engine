@@ -220,8 +220,11 @@ function createComparePlan(anchorEntityId: string) {
     anchors: [{
       surfaceForm: 'Opus One',
       normalizedForm: 'opus one',
+      lookupStrategies: ['exact'],
+      aliasType: 'canonical',
       confidence: 0.98,
       candidateEntityIds: [anchorEntityId],
+      source: 'alias',
     }] as QueryPlanV1['anchors'],
   });
 }

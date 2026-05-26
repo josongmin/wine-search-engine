@@ -400,6 +400,7 @@ describe('executeHybridRouteRankingPipeline', () => {
         normalizedForm: 'opus one',
         candidateEntityIds: [anchorEntityId],
         lookupStrategies: ['exact'],
+        aliasType: 'canonical',
         confidence: 0.99,
         source: 'alias',
       }],

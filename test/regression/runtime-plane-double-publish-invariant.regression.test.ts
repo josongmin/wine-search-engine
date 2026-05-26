@@ -54,9 +54,13 @@ describe('Runtime plane double-publish append-only invariant', () => {
     expect(match?.[1]).toBe('DO NOTHING');
   });
 
-  it('assertSnapshotNotAlreadyPublished is invoked before any INSERT', () => {
-    const assertPos = src.indexOf('assertSnapshotNotAlreadyPublished(client, manifest.snapshotId)');
+  it('assertSnapshotNotAlreadyPublished is invoked before any INSERT and gates the explicit refresh path', () => {
+    const assertCall = src.match(
+      /assertSnapshotNotAlreadyPublished\(\s*client,\s*manifest\.snapshotId,\s*\{\s*allowExistingActiveSnapshot:\s*args\.refreshActiveRuntimeSubstrates,\s*\}\s*\)/,
+    );
+    const assertPos = assertCall == null ? -1 : src.indexOf(assertCall[0]);
     const firstInsertPos = src.search(/INSERT INTO entities \(/);
+    expect(assertCall).not.toBeNull();
     expect(assertPos).toBeGreaterThan(-1);
     expect(firstInsertPos).toBeGreaterThan(-1);
     expect(assertPos).toBeLessThan(firstInsertPos);

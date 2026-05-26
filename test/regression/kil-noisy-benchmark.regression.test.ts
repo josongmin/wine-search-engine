@@ -55,7 +55,11 @@ const PER_CATEGORY_RECALL_AT_3_FLOORS: Readonly<Record<string, number>> = {
   accent_stripped: 0.83, // measured 1.0
   whitespace_collapse_split: 0.90, // measured 1.0
   producer_label_partial: 0.80, // measured ~0.92
-  noisy_short_form: 0.80, // measured ~0.89
+  // In-memory source truth currently caps this slice at 7/9:
+  // - `neb-076` targets `romanee-conti-2015`, but the fixture corpus ships only 2019
+  // - `neb-100` is a bare generic `barolo` query with `expected_resolution:"ambiguous"`
+  //   and now fail-closes under the stricter exactness contract
+  noisy_short_form: 7 / 9,
   transliteration: 0.80, // measured ~0.9
 };
 

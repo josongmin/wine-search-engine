@@ -46,13 +46,14 @@ describe('GET /v1/claude-tools', () => {
 
     const body = JSON.parse(res.body) as Record<string, unknown>;
     expect(Array.isArray(body.tools)).toBe(true);
-    expect(body.tools).toHaveLength(4);
+    expect(body.tools).toHaveLength(5);
     expect(body.request_id).toBe(headerRequestId);
 
     const toolNames = (body.tools as Array<Record<string, unknown>>).map((tool) => tool.name);
     expect(toolNames).toEqual(
       expect.arrayContaining([
         'search_wines',
+        'lookup_wine',
         'get_food_pairings',
         'check_drinking_window',
         'compare_wines',
@@ -140,7 +141,34 @@ describe('POST /v1/claude-tools', () => {
     expect(body.error.message).toMatch(/placeholder/i);
   });
 
-  it('rejects unexpected tool_input fields with RFC-014 validation error (400)', async () => {
+  it('executes lookup_wine and returns a schema-valid search result', async () => {
+    const res = await postJson(server.app, '/v1/claude-tools', {
+      tool_name: 'lookup_wine',
+      tool_input: {
+        query: 'Opus One 2018',
+        limit: 2,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    const headerRequestId = getHeader(res, 'x-request-id');
+    expect(headerRequestId).toBeTruthy();
+    expect(body.request_id).toBe(headerRequestId);
+    expect(body.tool_name).toBe('lookup_wine');
+
+    const toolResult = body.tool_result;
+    const parsed = SearchResponseSchema.safeParse(toolResult);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+    expect(parsed.data.query_type).toBe('search');
+    expect(Array.isArray(parsed.data.results)).toBe(true);
+    expect(getSearchRequestId(parsed.data)).toBeTruthy();
+  });
+
+  it('tolerates unexpected tool_input fields and strips them before execution', async () => {
     const res = await postJson(server.app, '/v1/claude-tools', {
       tool_name: 'search_wines',
       tool_input: {
@@ -149,15 +177,11 @@ describe('POST /v1/claude-tools', () => {
       },
     });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(200);
     const headerRequestId = getHeader(res, 'x-request-id');
     expect(headerRequestId).toBeTruthy();
-
-    const body = res.json() as {
-      error: { code: string; message: string; request_id: string };
-    };
-    expect(body.error.code).toBe('VALIDATION_ERROR');
-    expect(body.error.request_id).toBe(headerRequestId);
-    expect(body.error.message).toContain('unexpected');
+    const body = res.json() as Record<string, unknown>;
+    expect(body.request_id).toBe(headerRequestId);
+    expect(body.tool_name).toBe('search_wines');
   });
 });

@@ -68,9 +68,9 @@ export const SEARCH_TOOL_EXCLUDE_REGIONS_DESCRIPTION =
 export const SEARCH_TOOL_EXCLUDE_WINE_TYPES_DESCRIPTION =
   'Optional wine types to exclude via exact index-level NOT filters (e.g. ["red"] for "레드 말고").';
 export const SEARCH_TOOL_MIN_PRICE_KRW_DESCRIPTION =
-  'Optional minimum price in KRW (e.g. 10000 for 1만원 하한). Use together with max_price_krw for price ranges.';
+  'Optional minimum price in KRW (e.g. 10000 for 1만원 하한). Use together with max_price_krw for price ranges. When set, results with missing or unparseable prices are excluded rather than relaxed back in.';
 export const SEARCH_TOOL_MAX_PRICE_KRW_DESCRIPTION =
-  'Optional maximum price in KRW (e.g. 50000 for 5만원).';
+  'Optional maximum price in KRW (e.g. 50000 for 5만원). Treated as an explicit ceiling on returned results; wines with missing or unparseable prices are excluded rather than treated as budget-safe.';
 export const SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION =
   'Optional low-alcohol ceiling as ABV percent (e.g. 12 for low-alcohol / 도수 낮은 와인). Used as a retrieval preference and excludes only results whose ABV is explicitly verified above the ceiling; unknown ABV candidates remain marked as unverified.';
 export const SEARCH_TOOL_GRAPE_PRIMARY_DESCRIPTION =
@@ -407,6 +407,8 @@ function collectSearchToolStylePreferenceConstraints(input: {
 }
 
 export function buildSearchToolStructuredPreferences(input: {
+  readonly min_price_krw?: number | undefined;
+  readonly max_price_krw?: number | undefined;
   readonly max_alcohol_pct?: number | undefined;
   readonly style?: string | undefined;
   readonly styles?: readonly string[] | undefined;
@@ -425,6 +427,33 @@ export function buildSearchToolStructuredPreferences(input: {
   readonly drinking_window_target_year?: number | undefined;
 }, mappingVersion: string): readonly NormalizedConstraint[] {
   const preferences: NormalizedConstraint[] = [];
+  const priceMinUsd = input.min_price_krw !== undefined
+    ? Math.round((input.min_price_krw / KRW_PER_USD_APPROXIMATE) * 100) / 100
+    : undefined;
+  const priceMaxUsd = input.max_price_krw !== undefined
+    ? Math.round((input.max_price_krw / KRW_PER_USD_APPROXIMATE) * 100) / 100
+    : undefined;
+
+  if (priceMinUsd !== undefined) {
+    preferences.push({
+      attribute: 'price_usd',
+      operator: '>=',
+      value: priceMinUsd,
+      source_phrase: `${input.min_price_krw}원 이상`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
+  if (priceMaxUsd !== undefined) {
+    preferences.push({
+      attribute: 'price_usd',
+      operator: '<=',
+      value: priceMaxUsd,
+      source_phrase: `${input.max_price_krw}원 이하`,
+      confidence: 1.0,
+      mapping_version: mappingVersion,
+    });
+  }
 
   if (input.max_alcohol_pct !== undefined) {
     preferences.push({

@@ -6,7 +6,7 @@
  */
 
 import type { z } from 'zod';
-import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
+import type { SearchExecutorPort, SearchExecutorResult } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
 import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
 import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
@@ -43,7 +43,6 @@ import {
 } from '../../application/search/tool-execution-support.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import {
-  SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
   SEARCH_TOOL_DIVERSITY_MIN_LIMIT,
   SEARCH_TOOL_WANTS_DIVERSITY_RE,
   executeSearchWithTypedWineDiversityDiscovery,
@@ -112,7 +111,10 @@ function buildSearchToolStructuredPreferences(input: StructuredPreferenceInput):
 }
 
 function buildSearchToolQuery(input: SearchToolQueryInput): string {
-  const clauses = buildSearchToolSoftClauses(input);
+  const clauses = buildSearchToolSoftClauses({
+    ...input,
+    grape_primary: undefined,
+  });
   const retrievalCoreQuery = buildSearchToolRetrievalCoreQuery(input);
   if (clauses.length === 0) {
     return retrievalCoreQuery;
@@ -135,6 +137,40 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
     },
     ...(filters.length > 0 ? { filters } : {}),
     ...(preferences.length > 0 ? { preferences } : {}),
+  };
+}
+
+function applySearchWinesResultPolicies(
+  response: SearchResponseV1,
+  input: SearchToolInput,
+): SearchResponseV1 {
+  const negationFiltered = applySearchToolNegationResultPolicy(
+    response,
+    collectSearchToolNegationTerms(input),
+  );
+  const budgetFiltered = applySearchToolBudgetResultPolicy(
+    negationFiltered.response,
+    {
+      minKrw: input.min_price_krw,
+      maxKrw: input.max_price_krw,
+    },
+    { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+  ).response;
+  return applySearchToolAlcoholResultPolicy(
+    budgetFiltered,
+    input.max_alcohol_pct,
+  ).response;
+}
+
+function requireSearchOnlyToolResult(
+  toolName: 'search_wines' | 'lookup_wine' | 'get_food_pairings',
+  response: SearchExecutorResult,
+): SearchResponseV1 | { error: string } {
+  if (response.queryType === 'search') {
+    return response;
+  }
+  return {
+    error: `${toolName} received a comparison-style response from the search executor. Use compare_wines for comparison queries.`,
   };
 }
 
@@ -215,29 +251,30 @@ export class WineToolExecutor {
     }
   }
 
-  private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+  private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | { error: string }> {
     const validation = parseToolInput('search_wines', SearchToolInputSchema, input);
     if (!validation.success) {
       return validation.result;
     }
     const validated = validation.data;
-    const normalizedLimit = validated.limit ?? DEFAULT_SEARCH_LIMIT;
+    const returnLimit = validated.limit ?? DEFAULT_SEARCH_LIMIT;
     const wantsDiversity =
       validated.want_diversity === true || SEARCH_TOOL_WANTS_DIVERSITY_RE.test(validated.query);
-    const effectiveLimit = wantsDiversity
-      ? Math.max(normalizedLimit, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
-      : normalizedLimit;
+    const candidateGatherLimit = wantsDiversity
+      ? Math.max(returnLimit, SEARCH_TOOL_DIVERSITY_MIN_LIMIT)
+      : returnLimit;
     const structuredFilters = buildSearchToolStructuredFilters(validated);
     const fallbackRequest = buildSearchToolRequest({
       ...validated,
-      limit: effectiveLimit,
+      limit: candidateGatherLimit,
     });
 
     const response = await executeSearchWithTypedWineDiversityDiscovery({
       searchUseCase: this.deps.searchUseCase,
       requestId,
       fallbackRequest,
-      effectiveLimit,
+      candidateGatherLimit,
+      returnLimit,
       shouldRun: shouldRunTypedWineDiversityDiscovery({
         query: validated.query,
         wantsDiversity,
@@ -245,44 +282,31 @@ export class WineToolExecutor {
       }),
       buildTypedRequest: (wineType) => ({
         ...fallbackRequest,
-        limit: SEARCH_TOOL_DIVERSITY_LIMIT_PER_TYPE,
+        limit: candidateGatherLimit,
         filters: withWineTypeFilter(
           structuredFilters,
           wineType,
           CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION,
         ),
       }),
+      resultPolicy: (searchResponse) => applySearchWinesResultPolicies(searchResponse, validated),
     });
-    if (response.queryType !== 'search') {
-      return response;
+    const searchResponse = requireSearchOnlyToolResult('search_wines', response);
+    if ('error' in searchResponse) {
+      return searchResponse;
     }
-    const negationFiltered = applySearchToolNegationResultPolicy(
-      response,
-      collectSearchToolNegationTerms(validated),
-    );
-    const budgetFiltered = applySearchToolBudgetResultPolicy(
-      negationFiltered.response,
-      {
-        minKrw: validated.min_price_krw,
-        maxKrw: validated.max_price_krw,
-      },
-      { krwPerUsd: KRW_PER_USD_APPROXIMATE },
-    ).response;
-    return applySearchToolAlcoholResultPolicy(
-      budgetFiltered,
-      validated.max_alcohol_pct,
-    ).response;
+    return searchResponse;
   }
 
   private async executeLookupWine(
     input: unknown,
     requestId: string,
-  ): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+  ): Promise<SearchResponseV1 | { error: string }> {
     const normalized = normalizeLookupWineInput(input);
     if (!normalized.ok) {
       return { error: `Invalid input for lookup_wine: ${normalized.message}` };
     }
-    return this.deps.searchUseCase.execute({
+    const response = await this.deps.searchUseCase.execute({
       query: normalized.query,
       limit: normalized.clampedLimit,
       options: {
@@ -291,12 +315,13 @@ export class WineToolExecutor {
         clarification: false,
       },
     }, requestId);
+    return requireSearchOnlyToolResult('lookup_wine', response);
   }
 
   private async executeFoodPairings(
     input: unknown,
     requestId: string,
-  ): Promise<SearchResponseV1 | ComparisonSearchResponse | { error: string }> {
+  ): Promise<SearchResponseV1 | { error: string }> {
     const validation = parseToolInput('get_food_pairings', FoodPairingInputSchema, input);
     if (!validation.success) {
       return validation.result;
@@ -316,7 +341,8 @@ export class WineToolExecutor {
         ? { preferences: buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION) }
         : {}),
     };
-    return this.deps.searchUseCase.execute(request, requestId);
+    const response = await this.deps.searchUseCase.execute(request, requestId);
+    return requireSearchOnlyToolResult('get_food_pairings', response);
   }
 
   private async executeCheckDrinkingWindow(

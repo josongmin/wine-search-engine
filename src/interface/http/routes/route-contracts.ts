@@ -3,7 +3,6 @@ import {
   BatchSearchRequestSchema,
   BatchSearchResponseSchema,
 } from '../schemas/batch-search.schema.js';
-import { ComparisonSearchResponseSchema } from '../schemas/search-response.schema.js';
 import {
   HybridRequestSchema,
   InterpretRequestSchema,
@@ -14,6 +13,8 @@ import {
 } from '../schemas/search-request.schema.js';
 import {
   AutocompleteResponseSchema,
+  ComparisonSearchResponseSchema,
+  DrinkingWindowSchema,
   ErrorResponseSchema,
   InterpretResponseSchema,
   ResolveResponseSchema,
@@ -54,6 +55,10 @@ import {
 } from '../constants.js';
 import {
   ClaudeToolNameSchema,
+  CompareWinesInputSchema,
+  DrinkingWindowInputSchema,
+  FoodPairingInputSchema,
+  LookupWineInputSchema,
   SearchToolInputSchema,
 } from '../../claude-tools/tool-schemas.js';
 
@@ -76,7 +81,7 @@ const READINESS_REASON_MAX_LEN = 512;
 /** Upper bound on probe `errorClass` (typically `Error.constructor.name`). */
 const READINESS_ERROR_CLASS_MAX_LEN = 128;
 const RETRIEVAL_DEGRADATION_ALERTS_MAX = 20;
-/** Upper bound for Claude tools list. Currently 4 tools; 100 prevents unbounded growth from misconfigured servers. */
+/** Upper bound for Claude tools list. Currently 5 tools; 100 prevents unbounded growth from misconfigured servers. */
 const CLAUDE_TOOLS_LIST_MAX = 100;
 /** Health/readiness checks: ~6 known checks (pg, redis, vespa, llm, embedding, reranker) + headroom. */
 const READINESS_CHECKS_MAX = 20;
@@ -193,11 +198,43 @@ function withDefaultToolInput<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<T
   return z.preprocess((input) => input ?? {}, schema);
 }
 
-export const ClaudeToolsExecuteRequestSchema = z.object({
+const ClaudeToolsSearchExecuteRequestSchema = z.object({
   tool_name: z.literal('search_wines'),
   tool_input: withDefaultToolInput(SearchToolInputSchema),
   request_id: ClaudeToolsRequestIdSchema,
 }).strict();
+
+const ClaudeToolsLookupExecuteRequestSchema = z.object({
+  tool_name: z.literal('lookup_wine'),
+  tool_input: withDefaultToolInput(LookupWineInputSchema),
+  request_id: ClaudeToolsRequestIdSchema,
+}).strict();
+
+const ClaudeToolsFoodPairingExecuteRequestSchema = z.object({
+  tool_name: z.literal('get_food_pairings'),
+  tool_input: withDefaultToolInput(FoodPairingInputSchema),
+  request_id: ClaudeToolsRequestIdSchema,
+}).strict();
+
+const ClaudeToolsDrinkingWindowExecuteRequestSchema = z.object({
+  tool_name: z.literal('check_drinking_window'),
+  tool_input: withDefaultToolInput(DrinkingWindowInputSchema),
+  request_id: ClaudeToolsRequestIdSchema,
+}).strict();
+
+const ClaudeToolsCompareExecuteRequestSchema = z.object({
+  tool_name: z.literal('compare_wines'),
+  tool_input: withDefaultToolInput(CompareWinesInputSchema),
+  request_id: ClaudeToolsRequestIdSchema,
+}).strict();
+
+export const ClaudeToolsExecuteRequestSchema = z.discriminatedUnion('tool_name', [
+  ClaudeToolsSearchExecuteRequestSchema,
+  ClaudeToolsLookupExecuteRequestSchema,
+  ClaudeToolsFoodPairingExecuteRequestSchema,
+  ClaudeToolsDrinkingWindowExecuteRequestSchema,
+  ClaudeToolsCompareExecuteRequestSchema,
+]);
 
 const ClaudeToolResultErrorSchema = z.object({
   error: z.string().min(1),
@@ -214,7 +251,37 @@ const ClaudeToolsSearchExecuteResponseSchema = z.object({
   ...ClaudeToolEnvelopeBaseSchema,
 }).strict();
 
-const ClaudeToolsExecuteResponseSchema = ClaudeToolsSearchExecuteResponseSchema;
+const ClaudeToolsLookupExecuteResponseSchema = z.object({
+  tool_name: z.literal('lookup_wine'),
+  tool_result: z.union([SearchResponseSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsFoodPairingExecuteResponseSchema = z.object({
+  tool_name: z.literal('get_food_pairings'),
+  tool_result: z.union([SearchResponseSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsDrinkingWindowExecuteResponseSchema = z.object({
+  tool_name: z.literal('check_drinking_window'),
+  tool_result: z.union([DrinkingWindowSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsCompareExecuteResponseSchema = z.object({
+  tool_name: z.literal('compare_wines'),
+  tool_result: z.union([ComparisonSearchResponseSchema, ClaudeToolResultErrorSchema]),
+  ...ClaudeToolEnvelopeBaseSchema,
+}).strict();
+
+const ClaudeToolsExecuteResponseSchema = z.discriminatedUnion('tool_name', [
+  ClaudeToolsSearchExecuteResponseSchema,
+  ClaudeToolsLookupExecuteResponseSchema,
+  ClaudeToolsFoodPairingExecuteResponseSchema,
+  ClaudeToolsDrinkingWindowExecuteResponseSchema,
+  ClaudeToolsCompareExecuteResponseSchema,
+]);
 
 // Claude tools error responses now use the shared RFC-014 envelope
 // (ErrorResponseSchema). The previously hand-rolled flat shape
@@ -246,7 +313,7 @@ const ClaudeToolManifestResponseSchema = z.object({
 }).strict();
 
 const ClaudeToolsListResponseSchema = z.object({
-  // Bounded to CLAUDE_TOOLS_LIST_MAX — there are currently 4 tools; this cap
+  // Bounded to CLAUDE_TOOLS_LIST_MAX — there are currently 5 tools; this cap
   // prevents unbounded growth from misconfigured or malicious server responses.
   tools: z.array(ClaudeToolManifestResponseSchema).max(CLAUDE_TOOLS_LIST_MAX),
   request_id: z.string().min(1),
@@ -311,7 +378,7 @@ export const RetrievalDegradationMetricsRouteContract = defineRouteContract({
 
 export type ClaudeToolsExecuteRequest = z.output<typeof ClaudeToolsExecuteRequestSchema>;
 
-export const ClaudeToolsExecuteRouteContract = defineRouteContract({
+export const ClaudeToolsExecuteRouteContract: HttpRouteContract = defineRouteContract({
   operationId: 'tools.execute',
   body: ClaudeToolsExecuteRequestSchema,
   responses: {

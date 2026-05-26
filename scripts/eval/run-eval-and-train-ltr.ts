@@ -428,7 +428,10 @@ async function runEvaluationAndTraining(
 
     // Step 1: Load evaluation cases
     console.log('\n📖 Step 1: Loading evaluation cases from database...');
-    const goldSetStore = new PgGoldSetStore(pool);
+    const goldSetStore = new PgGoldSetStore(pool, {
+      snapshotId: searchSnapshotId,
+      runtimeStatePath: args.runtimeStatePath,
+    });
     const cases = await goldSetStore.getCases();
     console.log(`   ✓ Loaded ${cases.length} evaluation cases`);
 

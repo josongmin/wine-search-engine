@@ -16,7 +16,7 @@ interface SearchToolNegationInput {
 
 interface SearchToolBudgetFilterResult {
   readonly response: SearchResponseV1;
-  readonly mode: 'unchanged' | 'strict' | 'lenient_fallback';
+  readonly mode: 'unchanged' | 'strict';
 }
 
 interface SearchToolAlcoholFilterResult {
@@ -28,7 +28,6 @@ interface SearchToolAlcoholFilterResult {
 interface SearchToolNegationFilterResult {
   readonly response: SearchResponseV1;
   readonly filteredCount: number;
-  readonly fallbackToUnfiltered: boolean;
 }
 
 function extractSearchToolNegationTerms(query: string): readonly string[] {
@@ -70,7 +69,7 @@ export function applySearchToolNegationResultPolicy(
   negTerms: readonly string[],
 ): SearchToolNegationFilterResult {
   if (negTerms.length === 0) {
-    return { response, filteredCount: 0, fallbackToUnfiltered: false };
+    return { response, filteredCount: 0 };
   }
 
   const negRegs = negTerms.map((term) => {
@@ -98,19 +97,17 @@ export function applySearchToolNegationResultPolicy(
   });
 
   if (filtered.length === response.results.length) {
-    return { response, filteredCount: 0, fallbackToUnfiltered: false };
+    return { response, filteredCount: 0 };
   }
   if (filtered.length === 0) {
     return {
-      response,
+      response: { ...response, results: [] },
       filteredCount: response.results.length,
-      fallbackToUnfiltered: true,
     };
   }
   return {
     response: { ...response, results: filtered },
     filteredCount: response.results.length - filtered.length,
-    fallbackToUnfiltered: false,
   };
 }
 
@@ -160,22 +157,9 @@ export function applySearchToolBudgetResultPolicy(
 
   const strict = response.results.filter((result) => {
     const priceKrw = parseSearchToolPriceRangeAsKrw(result.entity.priceRange, options.krwPerUsd);
-    if (priceKrw === undefined) return false;
-    if (priceKrw === null) return true;
+    if (priceKrw === undefined || priceKrw === null) return false;
     return matchesBudget(priceKrw);
   });
-
-  if (strict.length === 0 && response.results.length > 0) {
-    const lenient = response.results.filter((result) => {
-      const priceKrw = parseSearchToolPriceRangeAsKrw(result.entity.priceRange, options.krwPerUsd);
-      if (priceKrw === undefined || priceKrw === null) return true;
-      return matchesBudget(priceKrw);
-    });
-    return {
-      response: { ...response, results: lenient },
-      mode: 'lenient_fallback',
-    };
-  }
 
   if (strict.length < response.results.length) {
     return {
@@ -200,7 +184,10 @@ export function applySearchToolAlcoholResultPolicy(
     return alcoholPct !== undefined && alcoholPct <= maxAlcoholPct;
   });
   const unknownAlcohol = response.results.filter((result) => result.entity.alcoholPct === undefined);
-  const filtered = [...verifiedWithinLimit, ...unknownAlcohol];
+  const filtered = response.results.filter((result) => {
+    const alcoholPct = result.entity.alcoholPct;
+    return alcoholPct === undefined || alcoholPct <= maxAlcoholPct;
+  });
 
   if (filtered.length === response.results.length) {
     return {

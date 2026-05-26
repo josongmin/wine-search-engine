@@ -39,6 +39,7 @@ const STRUCTURED_SET_RETRIEVAL_PREFERENCE_ATTRIBUTES = new Set([
   'gift_suitability',
   'occasion',
   'price_band',
+  'price_usd',
   'popularity_score',
   'producer_prestige',
   'style',

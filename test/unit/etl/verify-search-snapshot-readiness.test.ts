@@ -100,6 +100,13 @@ async function writeFixtureFiles(args?: {
         carryForwardBenchmarkCount: 0,
         experimentalInputsPresent: false,
       },
+      fieldAvailability: {
+        appellation: {
+          populatedDocCount: 8,
+          totalDocCount: 10,
+          populatedDocRatio: 0.8,
+        },
+      },
     }, null, 2)}\n`,
   );
   await fs.writeFile(
@@ -131,6 +138,13 @@ async function writeFixtureFiles(args?: {
         bypasses: [],
         carryForwardBenchmarkCount: 0,
         experimentalInputsPresent: false,
+      },
+      fieldAvailability: {
+        appellation: {
+          populatedDocCount: 8,
+          totalDocCount: 10,
+          populatedDocRatio: 0.8,
+        },
       },
     }, null, 2)}\n`,
   );

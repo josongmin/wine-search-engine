@@ -405,6 +405,58 @@ describe('vivino-to-silver helpers', () => {
     });
   });
 
+  describe('dedup searchTextEn authority merge', () => {
+    it('rebuilds searchTextEn from authoritative fields without leaking stale structured fragments', () => {
+      const winner = {
+        sourceId: 'vivino:1' as never,
+        externalId: 'ext-1',
+        canonicalLabel: 'Winner Wine 2020',
+        producer: 'Winner Winery',
+        vintageYear: 2020,
+        country: 'France',
+        region: 'Bordeaux',
+        appellation: 'Pauillac',
+        wineType: 'red' as const,
+        grapePrimary: 'Cabernet Sauvignon',
+        grapes: ['Cabernet Sauvignon'],
+        body: null,
+        sweetness: null,
+        acidity: null,
+        tannin: null,
+        pairingTags: ['beef'],
+        flavorProfiles: ['black fruit'],
+        searchTextEn: 'dark cassis. Winner Wine 2020. Winner Winery. Pauillac. Bordeaux. France. Cabernet Sauvignon. black fruit. beef',
+        ratingAvg: 4.5,
+        ratingsCount: 10,
+        priceUsd: 50,
+        scrapedAt: '2024-01-02T00:00:00Z',
+        alcoholPct: null,
+        producerPrestige: null,
+        isTopRated: false,
+      };
+      const fallback = {
+        ...winner,
+        region: 'Napa Valley',
+        country: 'United States',
+        appellation: 'Oakville',
+        grapes: ['Merlot'],
+        pairingTags: ['lamb'],
+        flavorProfiles: ['earthy'],
+        searchTextEn: 'cedar and graphite. Winner Wine 2020. Winner Winery. Oakville. Napa Valley. United States. Merlot. earthy. lamb',
+        scrapedAt: '2024-01-01T00:00:00Z',
+      };
+
+      const [merged] = dedup([fallback, winner]);
+      expect(merged?.searchTextEn).toContain('dark cassis');
+      expect(merged?.searchTextEn).toContain('cedar and graphite');
+      expect(merged?.searchTextEn).toContain('Pauillac');
+      expect(merged?.searchTextEn).toContain('Bordeaux');
+      expect(merged?.searchTextEn).not.toContain('Oakville');
+      expect(merged?.searchTextEn).not.toContain('Napa Valley');
+      expect(merged?.searchTextEn).not.toContain('United States');
+    });
+  });
+
   describe('dedup', () => {
     const makeDedupRecord = (
       overrides: Partial<NonNullable<Parameters<typeof dedup>[0][number]>> = {},

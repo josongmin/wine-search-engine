@@ -60,6 +60,20 @@ describe('T-010 assertSnapshotNotAlreadyPublished', () => {
     );
   });
 
+  it('allows same active snapshot only when explicit runtime refresh is requested', async () => {
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ active_snapshot_id: 'snap-dup', previous_snapshot_id: null }],
+      }),
+    };
+
+    await expect(
+      assertSnapshotNotAlreadyPublished(client as never, 'snap-dup', {
+        allowExistingActiveSnapshot: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('surfaces snapshot id and guidance in error message', async () => {
     const client = {
       query: vi.fn().mockResolvedValue({
@@ -114,6 +128,17 @@ describe('T-010 publish-runtime-substrates append-only contract', () => {
     );
     expect(src).toContain('assertSnapshotArtifactLearnedFacetCoverage(manifest)');
     expect(src).toContain('assertLearnedFacetCoverageForPublish(');
+  });
+
+  it('uses the in-transaction client for LTR schema capability probes', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const src = readFileSync(
+      fileURLToPath(new URL('../../scripts/etl/publish-runtime-substrates.ts', import.meta.url)),
+      'utf-8',
+    );
+    expect(src).toContain('pgTableHasColumn(\n        client,');
+    expect(src).not.toContain('pgTableHasColumn(\n        pool,');
   });
 
   it('has no TRUNCATE TABLE calls in publish path', async () => {

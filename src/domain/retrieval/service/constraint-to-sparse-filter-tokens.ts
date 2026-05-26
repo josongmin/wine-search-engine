@@ -93,6 +93,7 @@ const SOFT_PROMOTION_TOKEN_SPEC: ReadonlyMap<string, SoftPromotionSpec> = new Ma
   ['alcohol_pct', { minKey: 'alcohol_min', maxKey: 'alcohol_max' }],
   ['alcohol',     { minKey: 'alcohol_min', maxKey: 'alcohol_max' }],
   ['sweetness',   { minKey: 'sweetness_min', maxKey: 'sweetness_max' }],
+  ['price_usd',   { minKey: 'price_usd_min', maxKey: 'price_usd_max' }],
   // String-contains attributes — `=` / `in` operators only.
   ['flavor_profile', { stringKey: 'flavor_profile' }],
   ['certification',  { stringKey: 'certification' }],
@@ -388,7 +389,8 @@ function constraintToSparseFilterTokens(
     }
     case 'price_band': {
       // price_band stores single-token enums ("value", "mid", "premium", "luxury").
-      // Normalise synonyms before emitting the filter token.
+      // Positive price-band intent is candidate-shaping / bounded lexical expansion,
+      // not a hard retrieval filter. Keep only exclusion operators here.
       //
       // Exclusion operators must normalise synonyms before emitting the NOT token.
       // Without normalisation, `price_band exclude "expensive"` emits `price_band_not:expensive`
@@ -410,22 +412,6 @@ function constraintToSparseFilterTokens(
         if (normalised.length === 0) return [];
         if (normalised.length === 1) return [`price_band_not:${normalised[0]}`];
         return [`price_band_not_in:${normalised.join('|')}`];
-      }
-      if (operator === '=' && typeof value === 'string' && value.length > 0) {
-        const normalised = PRICE_BAND_NORMALISATION_MAP.get(value.toLowerCase()) ?? value.toLowerCase();
-        if (normalised.length === 0) return [];
-        return [`price_band:${normalised}`];
-      }
-      if (operator === 'in' && Array.isArray(value)) {
-        // Multi-value price_band: normalise each synonym and emit pipe-delimited _in token.
-        const normalised = value
-          .filter((v): v is string => typeof v === 'string' && v.length > 0)
-          .map((v) => PRICE_BAND_NORMALISATION_MAP.get(v.toLowerCase()) ?? v.toLowerCase())
-          .map((v) => v.replace(/\|/g, '')) // strip pipe to prevent token-delimiter injection
-          .filter((v) => v.length > 0);
-        if (normalised.length === 0) return [];
-        if (normalised.length === 1) return [`price_band:${normalised[0]}`];
-        return [`price_band_in:${normalised.join('|')}`];
       }
       return [];
     }

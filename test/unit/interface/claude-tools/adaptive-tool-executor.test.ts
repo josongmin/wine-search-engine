@@ -208,6 +208,24 @@ describe('AdaptiveToolExecutor', () => {
       expect(executeSpyOn).toHaveBeenCalledTimes(2);
     });
 
+    it('should apply fallback when retrieval_mode is null because canonical parsing defaults it to auto', async () => {
+      const executeSpyOn = vi.spyOn(baseExecutor, 'execute');
+      executeSpyOn
+        .mockResolvedValueOnce(mockEmptySearchResponse)
+        .mockResolvedValueOnce(mockNonEmptySearchResponse);
+
+      const result = await adaptiveExecutor.executeWithFallback(
+        'search_wines',
+        { query: 'test wine', retrieval_mode: null },
+        'req-null-mode',
+      );
+
+      expect(result.fallbackApplied).toBe('mixed');
+      expect(executeSpyOn).toHaveBeenCalledTimes(2);
+      const [, fallbackInput] = executeSpyOn.mock.calls[1]!;
+      expect((fallbackInput as { retrieval_mode?: unknown }).retrieval_mode).toBe('mixed');
+    });
+
     it('should return original empty result if fallback also returns empty', async () => {
       const executeSpyOn = vi.spyOn(baseExecutor, 'execute');
       executeSpyOn

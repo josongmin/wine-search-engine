@@ -99,12 +99,14 @@ interface Args {
   readonly manifestPath: string;
   readonly runtimeStatePath: string;
   readonly runtimeNlMappingsPath: string;
+  readonly refreshActiveRuntimeSubstrates: boolean;
 }
 
 function parseArgs(argv: readonly string[]): Args {
   let manifestPath = '';
   let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
   let runtimeNlMappingsPath = DEFAULT_RUNTIME_NL_MAPPINGS_PATH;
+  let refreshActiveRuntimeSubstrates = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--manifest' || arg === '-m') {
@@ -116,6 +118,8 @@ function parseArgs(argv: readonly string[]): Args {
     } else if (arg === '--runtime-nl-mappings') {
       runtimeNlMappingsPath = argv[i + 1] ?? DEFAULT_RUNTIME_NL_MAPPINGS_PATH;
       i += 1;
+    } else if (arg === '--refresh-active-runtime-substrates') {
+      refreshActiveRuntimeSubstrates = true;
     } else if (arg === '--allow-missing-ltr') {
       throw new Error('--allow-missing-ltr has been removed; canonical runtime publish now hard-fails on missing active LTR models');
     }
@@ -123,7 +127,7 @@ function parseArgs(argv: readonly string[]): Args {
   if (manifestPath.length === 0) {
     throw new Error('--manifest is required');
   }
-  return { manifestPath, runtimeStatePath, runtimeNlMappingsPath };
+  return { manifestPath, runtimeStatePath, runtimeNlMappingsPath, refreshActiveRuntimeSubstrates };
 }
 
 function buildSnapshotArtifactPath(basePath: string, snapshotId: string): string {
@@ -406,6 +410,9 @@ export async function assertEntityIdentitySignatureConsistency(
 export async function assertSnapshotNotAlreadyPublished(
   client: Pick<PoolClient, 'query'>,
   snapshotId: string,
+  options?: {
+    readonly allowExistingActiveSnapshot?: boolean;
+  },
 ): Promise<void> {
   const res = await client.query<{ active_snapshot_id: string; previous_snapshot_id: string | null }>(
     `SELECT active_snapshot_id, previous_snapshot_id FROM active_search_snapshot WHERE id = 1`,
@@ -417,6 +424,9 @@ export async function assertSnapshotNotAlreadyPublished(
     return;
   }
   if (row.active_snapshot_id === snapshotId) {
+    if (options?.allowExistingActiveSnapshot === true) {
+      return;
+    }
     throw new Error(
       `Snapshot ${snapshotId} is already the active snapshot; refusing to re-publish. ` +
       `Use a fresh snapshot_id (re-run manifest) or rollback first.`,
@@ -545,7 +555,9 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
       // a pointer-swap only (see active_search_snapshot). Read path filters
       // by the active snapshot_id. Old snapshots are reaped by a separate
       // GC step after the pointer has been promoted off of them.
-      await assertSnapshotNotAlreadyPublished(client, manifest.snapshotId);
+      await assertSnapshotNotAlreadyPublished(client, manifest.snapshotId, {
+        allowExistingActiveSnapshot: args.refreshActiveRuntimeSubstrates,
+      });
       await client.query(
         `WITH input AS (
            SELECT *
@@ -661,7 +673,7 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
       });
 
       const ltrFeatureSchemaHashSupported = await pgTableHasColumn(
-        pool,
+        client,
         'ltr_model_registry',
         'feature_schema_hash',
       );

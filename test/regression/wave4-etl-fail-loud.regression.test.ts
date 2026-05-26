@@ -6,8 +6,8 @@
  *         requireFixtureRepo=true throws when no fixture is found.
  *  - H14 / index-to-vespa.runIndexer: maxFailureRate>0 requires
  *         ETL_INDEX_PARTIAL_FAILURE_ACK=YES.
- *  - H15 / publish-search-snapshot.run: --allow-missing-ltr in production
- *         requires ETL_PUBLISH_LTR_BYPASS_ACK=YES.
+ *  - H15 / publish-search-snapshot.run: --allow-missing-ltr is removed;
+ *         canonical publish hard-fails on missing active LTR models.
  */
 import { describe, expect, it } from 'vitest';
 import { loadGoldCanonicalLookupForBuild } from '../../scripts/etl/snapshot-entity-identity.js';
@@ -56,17 +56,16 @@ describe('Wave 4 / H14: index-to-vespa partial-failure ack source check', () => 
   });
 });
 
-describe('Wave 4 / H15: publish-search-snapshot allow-missing-ltr ack source check', () => {
-  it('refuses --allow-missing-ltr in production without ETL_PUBLISH_LTR_BYPASS_ACK', async () => {
+describe('Wave 4 / H15: publish-search-snapshot allow-missing-ltr removal source check', () => {
+  it('rejects --allow-missing-ltr outright under the canonical publish contract', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const src = readFileSync(
       fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
       'utf-8',
     );
-    expect(src).toMatch(/ETL_PUBLISH_LTR_BYPASS_ACK/);
-    expect(src).toMatch(/--allow-missing-ltr was enabled for publish without operator ack/);
-    expect(src).toMatch(/fall back to lexical-only ranking/);
+    expect(src).toMatch(/--allow-missing-ltr has been removed/);
+    expect(src).toMatch(/canonical snapshot publish now hard-fails on missing active LTR models/);
   });
 });
 
@@ -89,7 +88,7 @@ describe('Wave 4 / cross-cutting: fail-loud principles', () => {
       fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
       'utf-8',
     );
-    expect(src).toMatch(/fall back to lexical-only ranking/);
-    expect(src).toMatch(/Refusing fail-open/);
+    expect(src).toMatch(/--allow-missing-ltr has been removed/);
+    expect(src).toMatch(/Refusing canonical publish/);
   });
 });

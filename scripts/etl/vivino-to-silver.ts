@@ -959,6 +959,37 @@ function buildDescriptiveSearchText(
   return dedupeFragments(parts);
 }
 
+function buildStructuredSearchTextFragmentsFromPreSilver(
+  record: Pick<
+    PreSilver,
+    | 'canonicalLabel'
+    | 'producer'
+    | 'country'
+    | 'region'
+    | 'appellation'
+    | 'grapes'
+    | 'pairingTags'
+    | 'flavorProfiles'
+    | 'classification'
+    | 'oakTreatment'
+  >,
+): readonly string[] {
+  return dedupeFragments([
+    ...[
+      record.canonicalLabel,
+      record.producer,
+      record.appellation ?? undefined,
+      record.region,
+      record.country,
+      record.classification ?? undefined,
+      record.oakTreatment ?? undefined,
+    ].flatMap((value) => value === undefined ? [] : [value]),
+    ...(record.grapes.length > 0 ? [record.grapes.join(', ')] : []),
+    ...(record.flavorProfiles.length > 0 ? [record.flavorProfiles.join(', ')] : []),
+    ...(record.pairingTags.length > 0 ? [record.pairingTags.join(', ')] : []),
+  ]);
+}
+
 function buildSearchTextFromPreSilver(
   record: Pick<
     PreSilver,
@@ -975,22 +1006,34 @@ function buildSearchTextFromPreSilver(
   >,
   descriptiveFragments: readonly string[],
 ): string {
-  const structuredFragments = dedupeFragments([
+  const fragments = dedupeFragments([
     ...descriptiveFragments,
-    ...[
-      record.canonicalLabel,
-      record.producer,
-      record.appellation ?? undefined,
-      record.region,
-      record.country,
-      record.classification ?? undefined,
-      record.oakTreatment ?? undefined,
-    ].flatMap((value) => value === undefined ? [] : [value]),
-    ...(record.grapes.length > 0 ? [record.grapes.join(', ')] : []),
-    ...(record.flavorProfiles.length > 0 ? [record.flavorProfiles.join(', ')] : []),
-    ...(record.pairingTags.length > 0 ? [record.pairingTags.join(', ')] : []),
+    ...buildStructuredSearchTextFragmentsFromPreSilver(record),
   ]);
-  return structuredFragments.join('. ').trim();
+  return fragments.join('. ').trim();
+}
+
+function extractDescriptiveFragmentsFromPreSilver(
+  record: Pick<
+    PreSilver,
+    | 'canonicalLabel'
+    | 'producer'
+    | 'country'
+    | 'region'
+    | 'appellation'
+    | 'grapes'
+    | 'pairingTags'
+    | 'flavorProfiles'
+    | 'classification'
+    | 'oakTreatment'
+    | 'searchTextEn'
+  >,
+): readonly string[] {
+  const structured = new Set(
+    buildStructuredSearchTextFragmentsFromPreSilver(record).map((fragment) => fragment.toLowerCase()),
+  );
+  return splitSearchTextFragments(record.searchTextEn)
+    .filter((fragment) => !structured.has(fragment.toLowerCase()));
 }
 
 function resolveAppellation(payload: VivinoPayload | null): string | null {
@@ -1527,8 +1570,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
  */
 function mergeAuthoritativeFields(winner: PreSilver, fallback: PreSilver): PreSilver {
   const descriptiveFragments = mergeSearchTextFragments(
-    splitSearchTextFragments(winner.searchTextEn),
-    splitSearchTextFragments(fallback.searchTextEn),
+    extractDescriptiveFragmentsFromPreSilver(winner),
+    extractDescriptiveFragmentsFromPreSilver(fallback),
   );
   const merged: PreSilver = {
     ...winner,

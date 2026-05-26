@@ -137,8 +137,13 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   if (octets !== null) {
     return octetsArePrivateOrReserved(octets[0], octets[1]);
   }
-  // IPv6 (collapsed forms accepted; check well-known prefixes)
   const lower = ip.toLowerCase();
+  // Only run IPv6 prefix checks when the input is actually IPv6-shaped.
+  // Without this guard, public hostnames like "fca.a.aa" or
+  // "fedoraproject.org" are misclassified as private because they begin with
+  // fc/fd/fe even though they are not IP literals.
+  if (!lower.includes(':')) return false;
+  // IPv6 (collapsed forms accepted; check well-known prefixes)
   if (lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd')) return true;
   // Link-local fe80::/10 AND site-local fec0::/10 (deprecated but still
   // reachable): the /10 covers fe80–febf, i.e. the 'fe' high byte with the

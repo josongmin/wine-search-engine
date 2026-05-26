@@ -2,10 +2,10 @@
  * Unit tests for Claude tool schemas.
  *
  * Validates:
- * - WINE_SEARCH_TOOLS constant contains exactly 4 tools
+ * - WINE_SEARCH_TOOLS constant contains exactly 5 tools
  * - Each tool has required fields: name, description, input_schema
  * - Input schema format is valid for Claude API
- * - All 4 tools are present: search_wines, get_food_pairings, check_drinking_window, compare_wines
+ * - All 5 tools are present: search_wines, lookup_wine, get_food_pairings, check_drinking_window, compare_wines
  * - Tool properties have correct types and constraints
  */
 

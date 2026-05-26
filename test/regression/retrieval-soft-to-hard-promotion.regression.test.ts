@@ -74,6 +74,13 @@ describe('P1.A — softConstraintsToOptionalFilterTokens', () => {
       expect(tokens.some((t) => t.includes('_max:'))).toBe(false);
     });
 
+    it('price_usd <= 37.04 with high confidence promotes to price_usd_max:37.04', () => {
+      const tokens = softConstraintsToOptionalFilterTokens([
+        makeSoft('price_usd', '<=', 37.04),
+      ]);
+      expect(tokens).toContain('price_usd_max:37.04');
+    });
+
     it('range with reversed bounds normalizes so MIN-of-bounds is emitted', () => {
       // { min: 0.9, max: 0.4 } → lo = 0.4, that's the MIN-only emission.
       const tokens = softConstraintsToOptionalFilterTokens([

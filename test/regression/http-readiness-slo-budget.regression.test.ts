@@ -138,30 +138,47 @@ describe('/ready SLO budget invariants', () => {
 
   describe('parallel execution (Google SRE: probes share a wall-clock budget)', () => {
     it('runs all probes in parallel — total latency ~= slowest probe, NOT sum', async () => {
-      // Three probes each take 100ms. Sequential execution would be ~300ms;
-      // parallel execution is ~100ms. We assert the response arrives well
-      // inside the sum, which proves parallel scheduling. We use a generous
-      // upper bound to keep this stable on slow CI hosts but tight enough
-      // to fail loudly on accidental serialization.
-      const PROBE_LATENCY_MS = 100;
+      // Three probes each take 200ms. Sequential execution would be ~600ms;
+      // parallel execution is ~200ms plus route overhead. Under full-suite
+      // load, absolute wall-clock can drift, so the structural proof is:
+      //   1. all probes start near-simultaneously
+      //   2. end-to-end latency stays below the sequential floor
+      const PROBE_LATENCY_MS = 200;
       const PROBE_COUNT = 3;
-      const SEQUENTIAL_FLOOR_MS = PROBE_LATENCY_MS * PROBE_COUNT; // 300
-      const CI_GENEROSITY_MS = 50;
-      const PARALLEL_CEILING_MS = PROBE_LATENCY_MS + CI_GENEROSITY_MS + 100; // 250
+      const SEQUENTIAL_FLOOR_MS = PROBE_LATENCY_MS * PROBE_COUNT; // 600
+      const startTimes: number[] = [];
 
       app = await buildAppWith({
-        synthetic_a: { required: true, check: () => delayedStatus('up', PROBE_LATENCY_MS) },
-        synthetic_b: { required: true, check: () => delayedStatus('up', PROBE_LATENCY_MS) },
-        synthetic_c: { required: true, check: () => delayedStatus('up', PROBE_LATENCY_MS) },
+        synthetic_a: {
+          required: true,
+          check: () => {
+            startTimes.push(Date.now());
+            return delayedStatus('up', PROBE_LATENCY_MS);
+          },
+        },
+        synthetic_b: {
+          required: true,
+          check: () => {
+            startTimes.push(Date.now());
+            return delayedStatus('up', PROBE_LATENCY_MS);
+          },
+        },
+        synthetic_c: {
+          required: true,
+          check: () => {
+            startTimes.push(Date.now());
+            return delayedStatus('up', PROBE_LATENCY_MS);
+          },
+        },
       });
       const start = Date.now();
       const res = await app.inject({ method: 'GET', url: '/ready' });
       const elapsedMs = Date.now() - start;
       expect(res.statusCode).toBe(200);
-      // Defensive: this is the actual SLO assertion.
-      expect(elapsedMs).toBeLessThan(PARALLEL_CEILING_MS);
-      // Sanity: if this ever passes while elapsed >= sequential floor,
-      // something has serialized the probes.
+      expect(startTimes).toHaveLength(PROBE_COUNT);
+      const startSpreadMs = Math.max(...startTimes) - Math.min(...startTimes);
+      expect(startSpreadMs).toBeLessThan(100);
+      // If probes ever serialize, elapsed time converges toward the sum.
       expect(elapsedMs).toBeLessThan(SEQUENTIAL_FLOOR_MS);
     });
   });

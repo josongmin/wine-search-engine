@@ -21,6 +21,7 @@ export type SoftIntentPrimaryStrategy =
 export interface SoftIntentStrategy {
   readonly attribute: SoftIntentAttribute;
   readonly primaryStrategy: SoftIntentPrimaryStrategy;
+  readonly lexicalExpansion: boolean;
   readonly semanticExpansion: boolean;
   readonly candidateShaping: boolean;
   readonly typedRecommendationDiscovery: boolean;
@@ -46,6 +47,7 @@ const SOFT_INTENT_STRATEGY_TABLE = {
   style: {
     attribute: 'style',
     primaryStrategy: 'retrieval_expansion',
+    lexicalExpansion: true,
     semanticExpansion: true,
     candidateShaping: true,
     typedRecommendationDiscovery: true,
@@ -53,6 +55,7 @@ const SOFT_INTENT_STRATEGY_TABLE = {
   occasion: {
     attribute: 'occasion',
     primaryStrategy: 'retrieval_expansion',
+    lexicalExpansion: true,
     semanticExpansion: true,
     candidateShaping: true,
     typedRecommendationDiscovery: true,
@@ -60,6 +63,7 @@ const SOFT_INTENT_STRATEGY_TABLE = {
   price_band: {
     attribute: 'price_band',
     primaryStrategy: 'candidate_shaping',
+    lexicalExpansion: true,
     semanticExpansion: false,
     candidateShaping: true,
     typedRecommendationDiscovery: true,
@@ -67,6 +71,7 @@ const SOFT_INTENT_STRATEGY_TABLE = {
   gift_suitability: {
     attribute: 'gift_suitability',
     primaryStrategy: 'candidate_shaping',
+    lexicalExpansion: true,
     semanticExpansion: true,
     candidateShaping: true,
     typedRecommendationDiscovery: true,
@@ -74,6 +79,7 @@ const SOFT_INTENT_STRATEGY_TABLE = {
   beginner_suitability: {
     attribute: 'beginner_suitability',
     primaryStrategy: 'candidate_shaping',
+    lexicalExpansion: true,
     semanticExpansion: true,
     candidateShaping: true,
     typedRecommendationDiscovery: true,
@@ -81,6 +87,7 @@ const SOFT_INTENT_STRATEGY_TABLE = {
   drinking_window: {
     attribute: 'drinking_window',
     primaryStrategy: 'ranking_only',
+    lexicalExpansion: false,
     semanticExpansion: false,
     candidateShaping: false,
     typedRecommendationDiscovery: false,
@@ -168,7 +175,17 @@ export function softIntentRetrievalPhrases(
   attribute: string,
   value: unknown,
   wineTypeContext?: WineTypeValue,
+  channel: 'lexical' | 'semantic' = 'lexical',
 ): readonly string[] | undefined {
+  const strategy = resolveSoftIntentStrategy(attribute);
+  if (strategy !== undefined) {
+    const channelEnabled = channel === 'lexical'
+      ? strategy.lexicalExpansion
+      : strategy.semanticExpansion;
+    if (!channelEnabled) {
+      return [];
+    }
+  }
   switch (attribute) {
     case 'style':
       if (typeof value === 'string') {

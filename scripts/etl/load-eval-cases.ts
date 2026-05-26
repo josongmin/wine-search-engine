@@ -14,6 +14,16 @@ import {
   OFFLINE_EVAL_SILVER_CORPUS,
   requireFixtureCorpusPath,
 } from '../eval/fixture-corpus-paths.js';
+import { isSourceRecordStylePublicEntityId } from '../../src/domain/shared/constants/public-entity-id-namespace.js';
+import {
+  DEFAULT_RUNTIME_STATE_PATH,
+  loadSearchSnapshotRuntimeState,
+} from '../../src/infrastructure/health/search-snapshot-readiness.js';
+import {
+  hasLegacyEvalExpectedEntityId,
+  resolveLegacyEvalExpectedEntityIds,
+  type LegacyEvalExpectedEntityIdRef,
+} from '../../src/infrastructure/adapter/eval-expected-entity-id-resolution.js';
 
 interface GoldenQuery {
   qid: string;
@@ -42,6 +52,13 @@ interface GoldenQuery {
 }
 
 type LabelTier = 'gold' | 'silver' | 'bronze';
+
+interface CliArgs {
+  readonly inputPath: string;
+  readonly connectionString: string;
+  readonly snapshotId?: string;
+  readonly runtimeStatePath: string;
+}
 
 /**
  * Maps annotation_tier to label tier, per RFC-009 §4.
@@ -140,6 +157,10 @@ function goldenQueryToEvalCase(gq: GoldenQuery): {
 async function loadEvalCases(
   inputPath: string,
   connectionString: string,
+  options: {
+    readonly snapshotId?: string;
+    readonly runtimeStatePath: string;
+  },
 ): Promise<void> {
   const pool = new Pool({ connectionString });
 
@@ -170,6 +191,8 @@ async function loadEvalCases(
     let successCount = 0;
     let errorCount = 0;
     const errors: string[] = [];
+    const parsedCases: Array<ReturnType<typeof goldenQueryToEvalCase>> = [];
+    const legacyRefs: LegacyEvalExpectedEntityIdRef[] = [];
 
     for await (const line of rl) {
       lineNum++;
@@ -181,27 +204,13 @@ async function loadEvalCases(
       try {
         const gq: GoldenQuery = JSON.parse(line);
         const evalCase = goldenQueryToEvalCase(gq);
-
-        await pool.query(
-          `INSERT INTO eval_cases (
-            case_id, query, query_class, expected_entity_id, expected_status,
-            label_tier, annotator_agreement, slice_tags, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          ON CONFLICT (case_id) DO NOTHING`,
-          [
-            evalCase.case_id,
-            evalCase.query,
-            evalCase.query_class,
-            evalCase.expected_entity_id,
-            evalCase.expected_status,
-            evalCase.label_tier,
-            evalCase.annotator_agreement,
-            evalCase.slice_tags,
-            evalCase.created_at,
-          ],
-        );
-
-        successCount++;
+        parsedCases.push(evalCase);
+        if (evalCase.expected_entity_id != null && isSourceRecordStylePublicEntityId(evalCase.expected_entity_id)) {
+          legacyRefs.push({
+            caseId: evalCase.case_id,
+            expectedEntityId: evalCase.expected_entity_id,
+          });
+        }
       } catch (error) {
         errorCount++;
         const msg = error instanceof Error ? error.message : String(error);
@@ -210,6 +219,44 @@ async function loadEvalCases(
     }
 
     await input.close();
+
+    const effectiveSnapshotId = hasLegacyEvalExpectedEntityId(legacyRefs)
+      ? (
+        options.snapshotId
+        ?? (await loadSearchSnapshotRuntimeState(options.runtimeStatePath)).snapshotId
+      )
+      : undefined;
+    const resolvedLegacyIds = effectiveSnapshotId == null
+      ? new Map<string, string>()
+      : await resolveLegacyEvalExpectedEntityIds(pool, effectiveSnapshotId, legacyRefs);
+
+    for (const evalCase of parsedCases) {
+      const expectedEntityId = evalCase.expected_entity_id == null
+        ? null
+        : isSourceRecordStylePublicEntityId(evalCase.expected_entity_id)
+          ? (resolvedLegacyIds.get(evalCase.expected_entity_id) ?? null)
+          : evalCase.expected_entity_id;
+
+      await pool.query(
+        `INSERT INTO eval_cases (
+          case_id, query, query_class, expected_entity_id, expected_status,
+          label_tier, annotator_agreement, slice_tags, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (case_id) DO NOTHING`,
+        [
+          evalCase.case_id,
+          evalCase.query,
+          evalCase.query_class,
+          expectedEntityId,
+          evalCase.expected_status,
+          evalCase.label_tier,
+          evalCase.annotator_agreement,
+          evalCase.slice_tags,
+          evalCase.created_at,
+        ],
+      );
+      successCount++;
+    }
 
     // Summary
     console.log(`✓ Loaded ${successCount} eval cases into eval_cases table`);
@@ -242,20 +289,56 @@ async function loadEvalCases(
   }
 }
 
+function parseArgs(argv: readonly string[]): CliArgs {
+  let inputPath = requireFixtureCorpusPath(
+    OFFLINE_EVAL_SILVER_CORPUS,
+    'load-eval-cases default input resolution',
+  );
+  let connectionString = process.env.DATABASE_URL || 'postgresql://localhost/wine-search';
+  let snapshotId: string | undefined;
+  let runtimeStatePath = DEFAULT_RUNTIME_STATE_PATH;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--input') {
+      inputPath = argv[index + 1] ?? inputPath;
+      index += 1;
+    } else if (arg === '--connection-string') {
+      connectionString = argv[index + 1] ?? connectionString;
+      index += 1;
+    } else if (arg === '--snapshot-id') {
+      snapshotId = argv[index + 1] ?? snapshotId;
+      index += 1;
+    } else if (arg === '--runtime-state-path') {
+      runtimeStatePath = argv[index + 1] ?? runtimeStatePath;
+      index += 1;
+    }
+  }
+
+  return {
+    inputPath,
+    connectionString,
+    snapshotId,
+    runtimeStatePath,
+  };
+}
+
 /**
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const inputPath = requireFixtureCorpusPath(
-    OFFLINE_EVAL_SILVER_CORPUS,
-    'load-eval-cases default input resolution',
-  );
-  const connectionString = process.env.DATABASE_URL || 'postgresql://localhost/wine-search';
+  const args = parseArgs(process.argv.slice(2));
 
-  console.log(`Loading eval cases from: ${inputPath}`);
-  console.log(`Database: ${connectionString.replace(/:.+@/, ':***@')}`);
+  console.log(`Loading eval cases from: ${args.inputPath}`);
+  console.log(`Database: ${args.connectionString.replace(/:.+@/, ':***@')}`);
+  if (args.snapshotId != null) {
+    console.log(`Snapshot: ${args.snapshotId}`);
+  }
 
-  await loadEvalCases(inputPath, connectionString);
+  await loadEvalCases(args.inputPath, args.connectionString, {
+    snapshotId: args.snapshotId,
+    runtimeStatePath: args.runtimeStatePath,
+  });
   console.log('✓ Eval baseline loaded');
 }
 

@@ -77,6 +77,13 @@ function makeRuntimeState(overrides: Partial<SearchSnapshotRuntimeState> = {}): 
       carryForwardBenchmarkCount: 0,
       experimentalInputsPresent: false,
     },
+    fieldAvailability: {
+      appellation: {
+        populatedDocCount: 2,
+        totalDocCount: 3,
+        populatedDocRatio: 2 / 3,
+      },
+    },
     ...overrides,
   };
 }
@@ -261,6 +268,12 @@ describe('Runtime substrates publication — atomic cutover (file IO)', () => {
 });
 
 describe('Runtime substrates publication — adjacency invariants', () => {
+  it('publisher source exposes refresh-active-runtime-substrates and removes allow-missing-ltr bypasses', () => {
+    expect(PUBLISHER_SRC).toMatch(/--refresh-active-runtime-substrates/);
+    expect(PUBLISHER_SRC).toMatch(/allowExistingActiveSnapshot:\s*args\.refreshActiveRuntimeSubstrates/);
+    expect(PUBLISHER_SRC).toMatch(/--allow-missing-ltr has been removed/);
+  });
+
   it('mixed Korean + English substrate items both pass NFC normalization', () => {
     const items = ['Opus One', '오퍼스원', 'Château Margaux', '샤토 마고'];
     for (const item of items) {

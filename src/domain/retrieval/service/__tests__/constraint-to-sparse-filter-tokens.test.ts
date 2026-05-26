@@ -120,6 +120,20 @@ describe('hardConstraintsToSparseFilterTokens — IDX-05: drinking_window SOFT',
 // NOTE: stringEq() DOES emit tokens for positive operators — these tests document
 // that behaviour and serve as canaries if the routing contract changes.
 describe('hardConstraintsToSparseFilterTokens — string SOFT attrs exclusion routing', () => {
+  it('price_band = value produces NO YQL filter token (positive price intent is soft)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('price_band', '=', 'premium'),
+    ]);
+    expect(tokens.filter((t) => t.startsWith('price_band:'))).toHaveLength(0);
+  });
+
+  it('price_band in [...] produces NO positive YQL filter tokens', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('price_band', 'in', ['budget', 'premium']),
+    ]);
+    expect(tokens.filter((t) => t.startsWith('price_band:') || t.startsWith('price_band_in:'))).toHaveLength(0);
+  });
+
   // Exclusion operators must still produce hard NOT-filter tokens (intentional design).
   it('style exclude produces a hard NOT-filter token (intended)', () => {
     const tokens = hardConstraintsToSparseFilterTokens([

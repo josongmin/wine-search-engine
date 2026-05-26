@@ -60,6 +60,15 @@ describe('search-usecase-hybrid-retrieval-input soft-intent strategy', () => {
     expect(retrievalValueToPhrases('drinking_window', 'now')).toEqual([]);
   });
 
+  it('does not lexicalize numeric range constraints into bare number phrases', () => {
+    expect(
+      retrievalValueToPhrases('price_usd', { min: 20, max: 50 }, undefined, 'range'),
+    ).toEqual([]);
+    expect(
+      retrievalValueToPhrases('vintage_year', 2018, undefined, '>='),
+    ).toEqual([]);
+  });
+
   it('runs typed recommendation discovery for beginner-suitability soft intent without explicit wine type', () => {
     const plan = makePlan({
       constraints: {

@@ -5,16 +5,17 @@
  *
  * Request:
  * {
- *   "tool_name": "search_wines",
- *   "tool_input": { "query": "...", ... },
+ *   "tool_name": "search_wines" | "lookup_wine" | "get_food_pairings" |
+ *                "check_drinking_window" | "compare_wines",
+ *   "tool_input": { ... },
  *   "request_id": "..." (optional, generated if not provided)
  * }
  *
  * Response:
  * {
- *   "tool_name": "search_wines",
+ *   "tool_name": "...",
  *   "tool_result": { ... },
- *   "fallback_applied": "mixed" (optional),
+ *   "fallback_applied": "mixed" (search_wines only, optional),
  *   "request_id": "..."
  * }
  */

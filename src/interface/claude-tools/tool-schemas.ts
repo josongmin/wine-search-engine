@@ -77,6 +77,7 @@ export {
   FoodPairingAttemptInputSchema,
   SearchToolAttemptInputSchema,
 } from '../../domain/agent/model/agent-tool-attempt-schema.js';
+export { LookupWineInputSchema } from '../../application/search/lookup-wine-execution.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,

@@ -275,6 +275,7 @@ describe('WineToolExecutor', () => {
         expect.objectContaining({ attribute: 'region', operator: 'exclude', value: 'Italy' }),
       ]));
       expect(request.preferences).toEqual(expect.arrayContaining([
+        expect.objectContaining({ attribute: 'price_usd', operator: '<=', value: 37.04 }),
         expect.objectContaining({ attribute: 'alcohol_pct', operator: '<=', value: 12 }),
         expect.objectContaining({ attribute: 'style', operator: 'in', value: ['chillable'] }),
       ]));
@@ -300,6 +301,23 @@ describe('WineToolExecutor', () => {
           value: 'Cabernet Sauvignon',
         }),
       ]));
+    });
+
+    it('should not duplicate grape_primary into both retrieval core and soft lexical clauses', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
+
+      await executor.execute(
+        'search_wines',
+        {
+          query: '와인 추천',
+          grape_primary: 'Pinot Noir',
+        },
+        'req-grape-dedupe-123',
+      );
+
+      const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls.at(-1)!;
+      const occurrences = request.query.match(/Pinot Noir/gu) ?? [];
+      expect(occurrences).toHaveLength(1);
     });
 
     it('should forward occasion and learned suitability constraints into SearchRequest preferences', async () => {
@@ -530,9 +548,9 @@ describe('WineToolExecutor', () => {
       expect(calls[0]?.[1]).toBe('req-diverse-123:diversity:white');
       expect(calls[1]?.[1]).toBe('req-diverse-123:diversity:sparkling');
       expect(calls[2]?.[1]).toBe('req-diverse-123:diversity:red');
-      expect(calls[0]?.[0].limit).toBe(3);
-      expect(calls[1]?.[0].limit).toBe(3);
-      expect(calls[2]?.[0].limit).toBe(3);
+      expect(calls[0]?.[0].limit).toBe(5);
+      expect(calls[1]?.[0].limit).toBe(5);
+      expect(calls[2]?.[0].limit).toBe(5);
       expect(calls[0]?.[0].filters).toEqual([
         expect.objectContaining({
           attribute: 'wine_type',
@@ -578,6 +596,43 @@ describe('WineToolExecutor', () => {
       ]);
     });
 
+    it('respects the caller limit after typed diversity discovery merges branch results', async () => {
+      vi.mocked(mockSearchUseCase.execute)
+        .mockResolvedValueOnce(
+          makeSearchResponse('white-1', 'white', 0.88, {
+            results: [
+              { ...mockSearchResponse.results[0]!, entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'white-1', canonicalLabel: 'White 1', wineType: 'white' }, relevanceScore: 0.88 },
+              { ...mockSearchResponse.results[0]!, entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'white-2', canonicalLabel: 'White 2', wineType: 'white' }, relevanceScore: 0.86 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          makeSearchResponse('sparkling-1', 'sparkling', 0.93, {
+            results: [
+              { ...mockSearchResponse.results[0]!, entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'sparkling-1', canonicalLabel: 'Sparkling 1', wineType: 'sparkling' }, relevanceScore: 0.93 },
+              { ...mockSearchResponse.results[0]!, entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'sparkling-2', canonicalLabel: 'Sparkling 2', wineType: 'sparkling' }, relevanceScore: 0.91 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          makeSearchResponse('red-1', 'red', 0.9, {
+            results: [
+              { ...mockSearchResponse.results[0]!, entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'red-1', canonicalLabel: 'Red 1', wineType: 'red' }, relevanceScore: 0.9 },
+              { ...mockSearchResponse.results[0]!, entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'red-2', canonicalLabel: 'Red 2', wineType: 'red' }, relevanceScore: 0.87 },
+            ],
+          }),
+        );
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: '선물용 다양하게 추천', want_diversity: true, limit: 1 },
+        'req-diverse-limit-123',
+      ) as SearchResponseV1;
+
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0]?.entity.entityId).toBe('sparkling-1');
+    });
+
     it('applies the same budget post-filter policy as agent search tools', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
         ...mockSearchResponse,
@@ -610,6 +665,109 @@ describe('WineToolExecutor', () => {
       ) as SearchResponseV1;
 
       expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-cheap']);
+    });
+
+    it('fails closed on explicit budget when every candidate is unknown, malformed, or over budget', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
+        ...mockSearchResponse,
+        results: [
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-missing',
+              canonicalLabel: 'Missing Price',
+              priceRange: undefined,
+            },
+          },
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-malformed',
+              canonicalLabel: 'Malformed Price',
+              priceRange: 'POA',
+            },
+          },
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-over',
+              canonicalLabel: 'Over Budget',
+              priceRange: '100000원',
+            },
+          },
+        ],
+      });
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: '5만원 이하', max_price_krw: 50_000 },
+        'req-budget-fail-closed-123',
+      ) as SearchResponseV1;
+
+      expect(result.results).toEqual([]);
+    });
+
+    it('applies budget before diversity truncation so surviving in-budget branch hits are returned', async () => {
+      vi.mocked(mockSearchUseCase.execute)
+        .mockResolvedValueOnce({
+          ...mockSearchResponse,
+          results: [
+            {
+              ...mockSearchResponse.results[0]!,
+              entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'white-over', canonicalLabel: 'White Over', wineType: 'white', priceRange: '$125', producer: 'White Producer A', region: 'White Region A', grapes: ['White Grape A'] },
+              relevanceScore: 0.97,
+            },
+            {
+              ...mockSearchResponse.results[0]!,
+              entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'white-under', canonicalLabel: 'White Under', wineType: 'white', priceRange: '$20', producer: 'White Producer B', region: 'White Region B', grapes: ['White Grape B'] },
+              relevanceScore: 0.78,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ...mockSearchResponse,
+          results: [
+            {
+              ...mockSearchResponse.results[0]!,
+              entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'sparkling-over', canonicalLabel: 'Sparkling Over', wineType: 'sparkling', priceRange: '$120', producer: 'Sparkling Producer A', region: 'Sparkling Region A', grapes: ['Sparkling Grape A'] },
+              relevanceScore: 0.99,
+            },
+            {
+              ...mockSearchResponse.results[0]!,
+              entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'sparkling-under', canonicalLabel: 'Sparkling Under', wineType: 'sparkling', priceRange: '$20', producer: 'Sparkling Producer B', region: 'Sparkling Region B', grapes: ['Sparkling Grape B'] },
+              relevanceScore: 0.8,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ...mockSearchResponse,
+          results: [
+            {
+              ...mockSearchResponse.results[0]!,
+              entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'red-over', canonicalLabel: 'Red Over', wineType: 'red', priceRange: '$130', producer: 'Red Producer A', region: 'Red Region A', grapes: ['Red Grape A'] },
+              relevanceScore: 0.98,
+            },
+            {
+              ...mockSearchResponse.results[0]!,
+              entity: { ...mockSearchResponse.results[0]!.entity, entityId: 'red-under', canonicalLabel: 'Red Under', wineType: 'red', priceRange: '$20', producer: 'Red Producer B', region: 'Red Region B', grapes: ['Red Grape B'] },
+              relevanceScore: 0.79,
+            },
+          ],
+        });
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: '선물용 다양하게 추천', want_diversity: true, limit: 2, max_price_krw: 50_000 },
+        'req-diverse-budget-123',
+      ) as SearchResponseV1;
+
+      expect(result.results.map((item) => item.entity.entityId)).toEqual([
+        'sparkling-under',
+        'red-under',
+      ]);
     });
 
     it('applies alcohol post-filter for known over-ceiling candidates', async () => {
@@ -689,6 +847,40 @@ describe('WineToolExecutor', () => {
       expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-cab']);
     });
 
+    it('fails closed when explicit negation removes every returned candidate', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
+        ...mockSearchResponse,
+        results: [
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-merlot-1',
+              canonicalLabel: 'Merlot Estate',
+              grapes: ['Merlot'],
+            },
+          },
+          {
+            ...mockSearchResponse.results[0]!,
+            entity: {
+              ...mockSearchResponse.results[0]!.entity,
+              entityId: 'wine-merlot-2',
+              canonicalLabel: 'Merlot Reserve',
+              grapes: ['Merlot'],
+            },
+          },
+        ],
+      });
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: 'red wine not Merlot' },
+        'req-negation-fail-closed-123',
+      ) as SearchResponseV1;
+
+      expect(result.results).toEqual([]);
+    });
+
     it('should skip typed diversity discovery when wine_type is already explicit', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockSearchResponse);
 
@@ -735,6 +927,20 @@ describe('WineToolExecutor', () => {
       const result = await executor.execute('search_wines', { query: '__TO_BE_FILLED__' }, 'req-123');
       expect(result).toEqual({
         error: expect.stringMatching(/placeholder/i),
+      });
+    });
+
+    it('fails closed when the search executor returns a comparison response', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockComparisonResponse);
+
+      const result = await executor.execute(
+        'search_wines',
+        { query: 'Opus One vs Caymus' },
+        'req-search-comparison-drift-123',
+      );
+
+      expect(result).toEqual({
+        error: 'search_wines received a comparison-style response from the search executor. Use compare_wines for comparison queries.',
       });
     });
   });

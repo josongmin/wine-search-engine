@@ -310,15 +310,11 @@ describe('DoS guard: per-file size cap', () => {
   it('readJsonFile rejects files larger than MAX_FIXTURE_JSON_BYTES with a typed error', async () => {
     const root = makeRepoRoot();
     try {
-      // Build a JSON file just over the cap. Use a giant string field.
+      // Exercise the throwing public path (`loadSuite`) directly. Keep case
+      // files untouched so this test does not emit incidental "Failed to read
+      // case file" warnings from the nullable `loadCase` surface.
       const padding = 'a'.repeat(MAX_FIXTURE_JSON_BYTES + 1024);
-      const body = JSON.stringify({ ...MIN_CASE, notes: padding });
-      writeCaseFile(root, 'exact-entity-ko', 'eek-001.json', body);
       const loader = new FixtureLoader(root);
-      const result = await loader.loadCase('eek-001');
-      // loadCase logs+returns null on read failure — loadSuite throws.
-      // The size guard must surface SOMETHING — confirm via loadSuite which throws.
-      void result;
       writeSuiteFile(root, 'exact-entity-ko', JSON.stringify({
         ...JSON.parse(VALID_SUITE_BODY),
         description: padding,

@@ -9,6 +9,8 @@
  */
 
 import type { WineToolExecutor, WineToolExecutorResult } from './tool-executor.js';
+import { SearchToolInputSchema } from './tool-schemas.js';
+import { sanitizeOptionalToolNulls } from '../../application/search/search-tool-contract.js';
 
 /**
  * All possible tool results including the V2 machine format (T6.3).
@@ -68,16 +70,19 @@ export class AdaptiveToolExecutor {
   ): Promise<AdaptiveToolResult<AnyToolResult>> {
     // Execute base tool (no v2Options — V1 path)
     const result = await this.baseExecutor.execute(toolName, input, requestId);
+    const normalizedSearchInput = toolName === 'search_wines'
+      ? this.normalizeSearchToolInput(input)
+      : null;
 
     // Check if we should apply fallback
     if (
       toolName === 'search_wines' &&
       this.isEmptyResult(result) &&
-      this.isModeAuto(input)
+      this.isModeAuto(normalizedSearchInput)
     ) {
       // Construct fallback input with mode='mixed'
       const fallbackInput = {
-        ...(typeof input === 'object' && input !== null ? input : {}),
+        ...(normalizedSearchInput ?? {}),
         retrieval_mode: 'mixed',
       };
 
@@ -162,5 +167,10 @@ export class AdaptiveToolExecutor {
 
     // Mode is auto if undefined or explicitly 'auto'
     return mode === undefined || mode === 'auto';
+  }
+
+  private normalizeSearchToolInput(input: unknown): Record<string, unknown> | null {
+    const parsed = SearchToolInputSchema.safeParse(sanitizeOptionalToolNulls(input));
+    return parsed.success ? parsed.data as Record<string, unknown> : null;
   }
 }

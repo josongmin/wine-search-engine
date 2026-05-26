@@ -1,20 +1,22 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
-const columnCapabilityCache = new WeakMap<Pool, Map<string, Promise<boolean>>>();
+type Queryable = Pick<Pool, 'query'> | Pick<PoolClient, 'query'>;
+
+const columnCapabilityCache = new WeakMap<object, Map<string, Promise<boolean>>>();
 
 function makeCapabilityKey(tableName: string, columnName: string): string {
   return `${tableName}::${columnName}`;
 }
 
 export async function pgTableHasColumn(
-  pool: Pool,
+  queryable: Queryable,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
-  let poolCache = columnCapabilityCache.get(pool);
+  let poolCache = columnCapabilityCache.get(queryable as object);
   if (poolCache === undefined) {
     poolCache = new Map<string, Promise<boolean>>();
-    columnCapabilityCache.set(pool, poolCache);
+    columnCapabilityCache.set(queryable as object, poolCache);
   }
 
   const cacheKey = makeCapabilityKey(tableName, columnName);
@@ -23,7 +25,7 @@ export async function pgTableHasColumn(
     return cached;
   }
 
-  const probe = pool.query<{ present: boolean }>(
+  const probe = queryable.query<{ present: boolean }>(
     `SELECT EXISTS (
        SELECT 1
        FROM information_schema.columns

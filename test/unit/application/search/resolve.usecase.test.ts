@@ -156,6 +156,7 @@ describe('ResolveUseCase', () => {
             normalizedForm: '오푸스원',
             candidateEntityIds: [createEntityId('opus-one-2018')],
             lookupStrategies: ['transliterated_exact'],
+            aliasType: 'translation',
             confidence: 0.98,
             source: 'alias',
           },
@@ -420,6 +421,7 @@ describe('ResolveUseCase', () => {
               normalizedForm: '오퍼스원 2019',
               candidateEntityIds: [sharedId], // sharedId already in anchor
               lookupStrategies: ['transliterated_exact'],
+              aliasType: 'translation',
               confidence: 0.95,
               source: 'alias',
             }],

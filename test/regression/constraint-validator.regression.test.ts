@@ -136,6 +136,19 @@ describe('validateConstraintBundle — Wave 1 Cluster E', () => {
     expect(report.dropped.every((d) => d.reason === 'soft_tier_not_promotable')).toBe(true);
   });
 
+  it('marks hard price_band equality as dropped when the compile path emits no positive tokens', () => {
+    const report = validateConstraintBundle({
+      hard: [makeConstraint('price_band', '=', 'premium')],
+      soft: [],
+      inferred: [],
+    });
+    expect(report.accepted).toHaveLength(0);
+    expect(report.unrecognized).toHaveLength(0);
+    expect(report.dropped).toHaveLength(1);
+    expect(report.dropped[0]?.constraint.attribute).toBe('price_band');
+    expect(report.dropped[0]?.reason).toBe('hard_tier_not_filterable');
+  });
+
   it('accepts soft constraints whose attribute IS in SOFT_PROMOTION_TOKEN_SPEC (critic_score)', () => {
     const report = validateConstraintBundle({
       hard: [],

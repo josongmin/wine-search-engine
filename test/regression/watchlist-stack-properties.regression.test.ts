@@ -188,7 +188,15 @@ describe('SSRF guard — public hosts allowed', () => {
       { numRuns: NUM_RUNS },
     );
     // Concrete public hostnames never block.
-    for (const h of ['api.example.com', 'wine-search.io', 'host123.svc.cluster', 'cdn-3.akamai.net']) {
+    for (const h of [
+      'api.example.com',
+      'wine-search.io',
+      'host123.svc.cluster',
+      'cdn-3.akamai.net',
+      'fca.a.aa',
+      'fedoraproject.org',
+      'fcm.googleapis.com',
+    ]) {
       expect(isPrivateOrReservedIp(h)).toBe(false);
     }
   });

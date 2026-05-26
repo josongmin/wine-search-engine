@@ -4,6 +4,15 @@ import type { EvalCase, LabelTier } from '../../domain/evaluation/model/eval-cas
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
+import { isSourceRecordStylePublicEntityId } from '../../domain/shared/constants/public-entity-id-namespace.js';
+import {
+  DEFAULT_RUNTIME_STATE_PATH,
+  loadSearchSnapshotRuntimeState,
+} from '../health/search-snapshot-readiness.js';
+import {
+  resolveLegacyEvalExpectedEntityIds,
+  type LegacyEvalExpectedEntityIdRef,
+} from './eval-expected-entity-id-resolution.js';
 
 function toDecisionStatus(value: string): DecisionStatus {
   if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;
@@ -27,7 +36,7 @@ interface EvalCaseRow {
   created_at: Date;
 }
 
-function rowToEvalCase(row: EvalCaseRow): EvalCase {
+function rowToEvalCase(row: EvalCaseRow, expectedEntityId: string | null): EvalCase {
   const base = {
     caseId: row.case_id,
     query: row.query,
@@ -40,14 +49,58 @@ function rowToEvalCase(row: EvalCaseRow): EvalCase {
   const withAgreement = row.annotator_agreement != null
     ? { ...base, annotatorAgreement: row.annotator_agreement }
     : base;
-  if (row.expected_entity_id != null) {
-    return { ...withAgreement, expectedEntityId: createCanonicalEntityId(row.expected_entity_id) };
+  if (expectedEntityId != null) {
+    return { ...withAgreement, expectedEntityId: createCanonicalEntityId(expectedEntityId) };
   }
   return withAgreement;
 }
 
+interface PgGoldSetStoreOptions {
+  readonly snapshotId?: string;
+  readonly runtimeStatePath?: string;
+}
+
 export class PgGoldSetStore implements GoldSetStore {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly options: PgGoldSetStoreOptions = {},
+  ) {}
+
+  private async resolveSnapshotId(): Promise<string> {
+    if (this.options.snapshotId != null && this.options.snapshotId.length > 0) {
+      return this.options.snapshotId;
+    }
+    const runtimeState = await loadSearchSnapshotRuntimeState(
+      this.options.runtimeStatePath ?? DEFAULT_RUNTIME_STATE_PATH,
+    );
+    return runtimeState.snapshotId;
+  }
+
+  private async hydrateRows(rows: readonly EvalCaseRow[]): Promise<readonly EvalCase[]> {
+    const legacyRefs: LegacyEvalExpectedEntityIdRef[] = rows
+      .filter((row) => row.expected_entity_id != null && isSourceRecordStylePublicEntityId(row.expected_entity_id))
+      .map((row) => ({
+        caseId: row.case_id,
+        expectedEntityId: row.expected_entity_id as string,
+      }));
+
+    const resolvedLegacyIds = legacyRefs.length > 0
+      ? await resolveLegacyEvalExpectedEntityIds(
+        this.pool,
+        await this.resolveSnapshotId(),
+        legacyRefs,
+      )
+      : new Map<string, string>();
+
+    return rows.map((row) => {
+      const expectedEntityId = row.expected_entity_id == null
+        ? null
+        : isSourceRecordStylePublicEntityId(row.expected_entity_id)
+          ? (resolvedLegacyIds.get(row.expected_entity_id) ?? null)
+          : row.expected_entity_id;
+      return rowToEvalCase(row, expectedEntityId);
+    });
+  }
 
   async getCases(filter?: GoldSetFilter): Promise<readonly EvalCase[]> {
     const conditions: string[] = [];
@@ -76,7 +129,7 @@ export class PgGoldSetStore implements GoldSetStore {
       `SELECT * FROM eval_cases ${where} ORDER BY created_at ASC`,
       params,
     );
-    return result.rows.map(rowToEvalCase);
+    return await this.hydrateRows(result.rows);
   }
 
   async addCase(evalCase: EvalCase): Promise<void> {

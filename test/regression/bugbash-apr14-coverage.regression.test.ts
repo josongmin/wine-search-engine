@@ -36,6 +36,8 @@ function makeAnchor(
     surfaceForm: 'opus one',
     normalizedForm: 'opus one',
     candidateEntityIds: entityIds,
+    lookupStrategies: ['exact'],
+    aliasType: 'canonical',
     confidence: 0.9,
     source: 'alias',
     ...overrides,

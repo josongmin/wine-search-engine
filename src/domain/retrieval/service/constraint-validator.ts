@@ -64,6 +64,7 @@ import { bootstrapLogger } from '../../shared/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../observability/silent-skip-counters.js';
 import {
   classifyConstraintRepresentability,
+  hardConstraintsToSparseFilterTokens,
   type ConstraintRepresentability,
 } from './constraint-to-sparse-filter-tokens.js';
 import {
@@ -302,16 +303,26 @@ function classifyAndPartition(
   const representability = classifyConstraintRepresentability(constraint.attribute);
   const softIntentStrategy = resolveSoftIntentStrategy(constraint.attribute);
   const entry: ValidatedConstraintEntry = { constraint, tier, representability };
+  const emitsHardFilterTokens = tier === 'hard'
+    ? hardConstraintsToSparseFilterTokens([constraint]).length > 0
+    : false;
 
   if (tier === 'hard') {
-    if (representability === 'hard_filterable' || representability === 'soft_promotable') {
+    if (
+      (representability === 'hard_filterable' || representability === 'soft_promotable')
+      && emitsHardFilterTokens
+    ) {
       // soft_promotable attributes (e.g. critic_score_min via SOFT_PROMOTION_TOKEN_SPEC)
       // are accepted in the hard tier too — the compile path treats them as
       // hard constraints when placed in `bundle.hard`.
       accepted.push(entry);
       return;
     }
-    if (SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)) {
+    if (
+      SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)
+      || representability === 'hard_filterable'
+      || representability === 'soft_promotable'
+    ) {
       // Hard-placed ranking-only attribute → drop (planner mis-classified
       // a soft signal as a hard constraint; the compile path will silently
       // emit zero tokens).

@@ -261,6 +261,13 @@ describe('readiness probe matrix — property-based invariants', () => {
         publishedAt: '2026-01-01T00:00:00.000Z',
         manifestPath: path.join(dir, 'manifest.json'),
         nlMappingsRuntimePath: nlPath,
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 0,
+            totalDocCount: Math.max(opts.entityCount, 0),
+            populatedDocRatio: 0,
+          },
+        },
         counts: {
           entities: opts.entityCount,
           aliases: opts.aliasCount,

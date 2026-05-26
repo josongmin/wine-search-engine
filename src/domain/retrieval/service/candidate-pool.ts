@@ -2,6 +2,7 @@ import type { SearchIndexPort, DenseHit, SparseHit } from '../port/search-index.
 import type { EmbeddingServicePort } from '../port/embedding-service.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type {
   CandidateEnvelope,
   CandidateChannel,
@@ -52,7 +53,7 @@ import {
 } from './constraint-validator.js';
 import {
   extractSearchConstraints,
-  searchConstraintsToFilterTokens,
+  krwToUsd,
 } from '../../query/service/search-constraint-extractor.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { CandidateAssembler, type AssemblyPolicy } from './candidate-assembly.js';
@@ -120,6 +121,58 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
 const QUERY_EXPANSION_MAX_TERMS = 32;
 /** Weight increment per repeated token occurrence in expansion stats. */
 const QUERY_EXPANSION_TERM_WEIGHT_STEP = 0.25;
+
+const PRICE_CONSTRAINT_ATTRIBUTES: ReadonlySet<string> = new Set([
+  'price',
+  'price_usd',
+]);
+
+function hasStructuredPriceConstraint(constraints: readonly NormalizedConstraint[]): boolean {
+  return constraints.some((constraint) => PRICE_CONSTRAINT_ATTRIBUTES.has(constraint.attribute));
+}
+
+function buildRawQueryPriceConstraints(rawQuery: string): readonly NormalizedConstraint[] {
+  if (rawQuery.length === 0) {
+    return [];
+  }
+  const extracted = extractSearchConstraints(rawQuery);
+  const constraints: NormalizedConstraint[] = [];
+  if (extracted.minPriceKrw !== undefined && extracted.maxPriceKrw !== undefined) {
+    constraints.push({
+      attribute: 'price_usd',
+      operator: 'range',
+      value: {
+        min: krwToUsd(extracted.minPriceKrw),
+        max: krwToUsd(extracted.maxPriceKrw),
+      },
+      source_phrase: 'raw_query_price_extractor',
+      confidence: 1,
+      mapping_version: 'raw-query-price-extractor-v1',
+    });
+    return constraints;
+  }
+  if (extracted.minPriceKrw !== undefined) {
+    constraints.push({
+      attribute: 'price_usd',
+      operator: '>=',
+      value: krwToUsd(extracted.minPriceKrw),
+      source_phrase: 'raw_query_price_extractor',
+      confidence: 1,
+      mapping_version: 'raw-query-price-extractor-v1',
+    });
+  }
+  if (extracted.maxPriceKrw !== undefined) {
+    constraints.push({
+      attribute: 'price_usd',
+      operator: '<=',
+      value: krwToUsd(extracted.maxPriceKrw),
+      source_phrase: 'raw_query_price_extractor',
+      confidence: 1,
+      mapping_version: 'raw-query-price-extractor-v1',
+    });
+  }
+  return constraints;
+}
 // W0-2: Removed LEARNED_SPARSE_CHANNEL_ENABLED compile-time flag.
 // The single source of truth is now `killSwitchLearning` (constructor arg) wired
 // from `config.killSwitch.learning`. This enables SPLADE / learned_sparse
@@ -242,15 +295,25 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // that flow into softBoosts but cannot promote to filters. Telemetry
     // fires once per (tier, attribute, reason) per process via the module
     // cache in constraint-validator.ts — hot-path safe.
+    const supplementalRawPriceConstraints = !hasStructuredPriceConstraint([
+      ...input.hardConstraints,
+      ...input.softConstraints,
+    ])
+      ? buildRawQueryPriceConstraints(input.queryPlan.rawQuery)
+      : [];
+    const effectiveHardConstraints = [
+      ...input.hardConstraints,
+      ...supplementalRawPriceConstraints,
+    ];
     const validationReport = validateConstraintBundle({
-      hard: input.hardConstraints,
+      hard: effectiveHardConstraints,
       soft: input.softConstraints,
     });
     emitConstraintValidationTelemetry(validationReport, {
       query_class: input.queryPlan.queryClass,
       request_id: input.requestContext?.requestId,
     });
-    const hardFilterTokens = hardConstraintsToSparseFilterTokens(input.hardConstraints);
+    const hardFilterTokens = hardConstraintsToSparseFilterTokens(effectiveHardConstraints);
     const promotedSoftFilterTokens = softConstraintsToOptionalFilterTokens(input.softConstraints);
     const filters = [
       ...hardFilterTokens,
@@ -260,8 +323,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // S4.1 — soft→hard promotion observability. Without this, bench logs
     // cannot tell whether P1's confidence-gated promotion actually fired or
     // whether the promoted soft filters reached the Vespa YQL filter set.
-    // We log BEFORE the KRW price-token augmentation below so the count
-    // reflects ONLY the promotion path (not raw-query price extraction).
+    // We log BEFORE any downstream sparse/dense dispatch so the promotion
+    // count stays attributable to the soft-constraint path only.
     // Emitted as an `event`-tagged structured log to mirror the existing
     // `retrieval.difficulty_parallel` / search_execution observability shape.
     bootstrapLogger.debug(
@@ -280,22 +343,6 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       'soft→hard constraint promotion',
     );
 
-    // KRW price constraints from the raw query surface (e.g. "5만원대", "3만원 이하").
-    // extractSearchConstraints parses Korean price expressions that the planner's
-    // NormalizedConstraint system does not yet capture. The resulting
-    // price_usd_min / price_usd_max tokens are understood by buildSparseFilters
-    // and buildDenseFilters in mapping.ts and applied as hard YQL filters.
-    const rawQuery = input.queryPlan.rawQuery;
-    if (rawQuery.length > 0) {
-      const krwConstraints = extractSearchConstraints(rawQuery);
-      const krwTokens = searchConstraintsToFilterTokens(krwConstraints);
-      // Only add price tokens — exclusion/vintage tokens are already handled
-      // via hardConstraints. Adding them twice would produce duplicate YQL clauses.
-      const priceTokens = krwTokens.filter(
-        (t) => t.startsWith('price_usd_min:') || t.startsWith('price_usd_max:'),
-      );
-      filters.push(...priceTokens);
-    }
     const anchorDocument = await this.loadAnchorDocumentIfNeeded(input, activeChannels, retrievalMode);
     const anchorProfile = this.resolveAnchorProfile(input, anchorDocument);
 
