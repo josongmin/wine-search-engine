@@ -77,7 +77,7 @@ describe('SearchSnapshotAliasMatcher', () => {
     ]);
 
     const exact = await matcher.findMatches('opus one');
-    const lexicalShortForm = await matcher.findMatches('opus');
+    const wholeTokenExpansion = await matcher.findMatches('opus');
     const latinPrefix = await matcher.findMatches('opu');
     const compact = await matcher.findMatches('opusone');
     const koreanTypoPrefix = await matcher.findMatches('오퍼스');
@@ -86,8 +86,7 @@ describe('SearchSnapshotAliasMatcher', () => {
 
     expect(exact[0]?.lookupStrategy).toBe('exact');
     expect(exact[0]?.surfaceForm).toBe('Opus One');
-    expect(lexicalShortForm[0]?.lookupStrategy).toBe('lexical_exact');
-    expect(lexicalShortForm[0]?.surfaceForm).toBe('Opus One');
+    expect(wholeTokenExpansion).toEqual([]);
     expect(latinPrefix[0]?.lookupStrategy).toBe('prefix_exact');
     expect(latinPrefix[0]?.surfaceForm).toBe('Opus One');
     expect(compact[0]?.lookupStrategy).toBe('compact_exact');
@@ -279,6 +278,13 @@ describe('SearchSnapshotAliasMatcher', () => {
           ambiguityRegistry: 'h5',
           nlMappings: 'h6',
         },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
+        },
       })}\n`,
       'utf8',
     );
@@ -304,6 +310,13 @@ describe('SearchSnapshotAliasMatcher', () => {
           ambiguityRegistry: 'h5',
           nlMappings: 'h6',
           activeLtrModels: 'h7',
+        },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
         },
         quality: {
           status: 'canonical',
@@ -381,6 +394,13 @@ describe('SearchSnapshotAliasMatcher', () => {
           ambiguityRegistry: 'h5',
           nlMappings: 'h6',
         },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
+        },
       })}\n`,
       'utf8',
     );
@@ -406,6 +426,13 @@ describe('SearchSnapshotAliasMatcher', () => {
           ambiguityRegistry: 'h5',
           nlMappings: 'h6',
           activeLtrModels: 'h7',
+        },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
         },
         quality: {
           status: 'canonical',

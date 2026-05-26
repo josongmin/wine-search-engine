@@ -7,6 +7,13 @@ import {
   buildAliasLookupPlan,
   isPhoneticAliasSurfaceCompatible,
 } from '../../domain/query/service/alias-lookup-plan.js';
+import {
+  buildAliasPrefixTerms,
+  isEligiblePrefixQuery,
+  isDisallowedWholeLeadingTokenExpansion,
+  matchesAliasPrefixTerm,
+} from '../../domain/query/service/alias-prefix-terms.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
@@ -50,6 +57,7 @@ const MAX_FUZZY_CANDIDATES = 200;
 const COMPACT_FUZZY_DISTANCE_RATIO = 0.25;
 const MIN_CHAR_NGRAM_OVERLAP = 0.45;
 const MIN_BIGRAM_OVERLAP = 0.6;
+const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 const LATIN_VOWEL_RE = /[aeiouy]/g;
 const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
   [/sch/g, 'ch'],
@@ -134,6 +142,12 @@ function charNgramOverlap(a: string, b: string, size: number = 3): number {
 
 function compactForLookup(value: string): string {
   return value.replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function tokenizeForLookup(value: string): readonly string[] {
+  return buildNormalizedQueryViews(value).punctuationStripped
+    .split(/\s+/u)
+    .filter(Boolean);
 }
 
 /**
@@ -235,10 +249,16 @@ function resolveExactLookupStrategy(
   plan: MatchPlan,
   row: Pick<AliasRow, 'normalized_value' | 'surface_form'>,
 ): string | undefined {
+  const candidateViews = buildAliasLookupPlan(row.normalized_value).views;
   const transliteratedSet = new Set(plan.transliteratedList);
   const compactSet = new Set(plan.compactList);
   const phoneticSet = new Set(plan.phoneticList);
   const exactSet = new Set(plan.tokenList);
+  const queryPrefixTerms = buildAliasPrefixTerms([plan.views.strict]).filter((token) => isEligiblePrefixQuery(token));
+  const transliteratedPrefixTerms = plan.views.transliterated !== undefined
+    ? buildAliasPrefixTerms([plan.views.transliterated]).filter((token) => isEligiblePrefixQuery(token))
+    : [];
+  const candidatePrefixTerms = buildAliasPrefixTerms([row.surface_form, row.normalized_value]);
 
   const normalizedLower = row.normalized_value.toLowerCase();
   const compactValue = compactForLookup(row.normalized_value);
@@ -253,6 +273,30 @@ function resolveExactLookupStrategy(
   }
   if (exactSet.has(row.normalized_value)) {
     return 'exact';
+  }
+  const queryTokens = tokenizeForLookup(plan.views.vintageStripped);
+  if (
+    queryTokens.length === 1 &&
+    queryTokens[0] !== undefined &&
+    queryTokens[0].length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH &&
+    tokenizeForLookup(candidateViews.vintageStripped).includes(queryTokens[0]) &&
+    !isDisallowedWholeLeadingTokenExpansion(plan.views.vintageStripped, candidateViews.vintageStripped)
+  ) {
+    return 'lexical_exact';
+  }
+  if (
+    transliteratedPrefixTerms.some((term) =>
+      candidatePrefixTerms.some((candidateTerm) => matchesAliasPrefixTerm(term, candidateTerm))
+    )
+  ) {
+    return 'transliterated_prefix';
+  }
+  if (
+    queryPrefixTerms.some((term) =>
+      candidatePrefixTerms.some((candidateTerm) => matchesAliasPrefixTerm(term, candidateTerm))
+    )
+  ) {
+    return 'prefix_exact';
   }
   // Phonetic promotion uses Double Metaphone (Philips 2000) as the
   // *decision* signal, even though the SQL recall channel still uses the
@@ -271,7 +315,7 @@ function resolveExactLookupStrategy(
       ? 'phonetic_exact'
       : undefined;
   }
-  return 'lexical_exact';
+  return undefined;
 }
 
 /**

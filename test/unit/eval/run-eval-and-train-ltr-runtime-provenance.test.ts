@@ -32,6 +32,13 @@ function runtimeStatePayload(runtimeStatePathDir: string, snapshotId: string) {
       nlMappings: 'nl-hash',
       activeLtrModels: 'ltr-hash',
     },
+    fieldAvailability: {
+      appellation: {
+        populatedDocCount: 8,
+        totalDocCount: 10,
+        populatedDocRatio: 0.8,
+      },
+    },
     quality: {
       status: 'canonical',
       blockers: [],

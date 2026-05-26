@@ -63,6 +63,13 @@ describe('search-snapshot-schema helpers', () => {
         ambiguityRegistry: 'ambiguity-hash',
         nlMappings: 'nl-hash',
       },
+      fieldAvailability: {
+        appellation: {
+          populatedDocCount: 0,
+          totalDocCount: 42,
+          populatedDocRatio: 0,
+        },
+      },
     }), manifestPath);
 
     expect(parsed.artifacts.vespaFeedNdjson).toBe(

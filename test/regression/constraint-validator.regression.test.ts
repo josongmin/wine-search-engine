@@ -216,7 +216,23 @@ describe('emitConstraintValidationTelemetry — Wave 1 Cluster E', () => {
     expect(payload['attribute']).toBe('price_band');
     expect(payload['tier']).toBe('soft');
     expect(payload['reason']).toBe('soft_tier_not_promotable');
+    expect(payload['strategy_primary']).toBe('candidate_shaping');
     expect(payload['query_class']).toBe('short_entity');
+  });
+
+  it('surfaces verification-only unsupported reason for drinking_window', () => {
+    const warnSpy = vi.spyOn(bootstrapLogger, 'warn').mockImplementation(() => undefined);
+
+    const report = validateConstraintBundle({
+      hard: [],
+      soft: [makeConstraint('drinking_window', 'range', { min: 2024, max: 2030 })],
+      inferred: [],
+    });
+    emitConstraintValidationTelemetry(report);
+
+    const payload = warnSpy.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload['strategy_primary']).toBe('ranking_only');
+    expect(payload['retrieval_unsupported_reason']).toBe('post_search_verification_only');
   });
 
   it('emits an error-level log for unrecognized constraints with event=constraint_validator.unrecognized', () => {

@@ -18,13 +18,19 @@ function trimDeduped(values: Iterable<string>): readonly string[] {
   return ordered;
 }
 
+function tokenizeSurface(value: string): readonly string[] {
+  return buildNormalizedQueryViews(value)
+    .punctuationStripped
+    .split(/\s+/u)
+    .filter(Boolean);
+}
+
 function addNormalizedSurfaceTerms(target: Set<string>, surface: string): void {
   const views = buildNormalizedQueryViews(surface);
   for (const value of [
     views.strict,
     views.punctuationStripped,
     views.vintageStripped,
-    views.compact,
   ]) {
     const trimmed = value.trim();
     if (trimmed.length === 0) {
@@ -68,4 +74,58 @@ export function buildAliasPrefixTerms(
     }
   }
   return trimDeduped(terms);
+}
+
+/**
+ * True iff the query consumed the entire leading token of a multi-token alias
+ * but nothing beyond it (`chateau` -> `chateau margaux`, `opus` -> `opus one`).
+ *
+ * This is too broad to count as identity-bearing exact-like evidence.
+ */
+export function isDisallowedWholeLeadingTokenExpansion(
+  querySurface: string,
+  candidateSurface: string,
+): boolean {
+  const queryTokens = tokenizeSurface(querySurface);
+  const candidateTokens = tokenizeSurface(candidateSurface);
+  return (
+    queryTokens.length === 1
+    && candidateTokens.length > 1
+    && queryTokens[0] !== undefined
+    && candidateTokens[0] === queryTokens[0]
+  );
+}
+
+/**
+ * True iff `queryTerm` should be allowed to prefix-match `candidateTerm` in
+ * the exact-like alias-prefix substrate.
+ *
+ * Structural guard:
+ * - Allow genuine incomplete prefixes (`opu` -> `opus one`)
+ * - Reject broad whole-token expansions where the query already consumed the
+ *   full leading token of a multi-token alias (`chateau` -> `chateau margaux`,
+ *   `opus` -> `opus one`)
+ *
+ * Rationale: the latter are category/family collisions, not precise identity
+ * evidence. Exact / compact-exact / fuzzy channels already cover the real
+ * identity-bearing cases.
+ */
+export function matchesAliasPrefixTerm(
+  queryTerm: string,
+  candidateTerm: string,
+): boolean {
+  const trimmedQuery = queryTerm.trim();
+  const trimmedCandidate = candidateTerm.trim();
+  if (trimmedQuery.length === 0 || trimmedCandidate.length === 0) {
+    return false;
+  }
+  if (!trimmedCandidate.startsWith(trimmedQuery)) {
+    return false;
+  }
+
+  if (isDisallowedWholeLeadingTokenExpansion(trimmedQuery, trimmedCandidate)) {
+    return false;
+  }
+
+  return true;
 }

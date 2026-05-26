@@ -117,6 +117,11 @@ describe('buildSearchSnapshot', () => {
     expect(result.manifest.counts.documents).toBe(1);
     expect(result.manifest.counts.vespaFeed).toBe(0);
     expect(result.manifest.counts.entities).toBe(1);
+    expect(result.manifest.fieldAvailability.appellation).toEqual({
+      populatedDocCount: 1,
+      totalDocCount: 1,
+      populatedDocRatio: 1,
+    });
     expect(result.manifest.hashes.entities).toMatch(/^[a-f0-9]{64}$/);
     expect(result.manifest.artifacts.vespaFeedNdjson).toMatch(/vespa-feed\.ndjson$/);
     await expect(fs.access(result.manifest.artifacts.vespaFeedNdjson)).rejects.toThrow();
@@ -286,6 +291,13 @@ describe('buildSearchSnapshot', () => {
           ambiguityRegistry: 'ambiguity-hash',
           nlMappings: 'nl-hash',
         },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
+        },
       })}\n`,
     );
     await fs.writeFile(
@@ -310,6 +322,13 @@ describe('buildSearchSnapshot', () => {
           ambiguityRegistry: 'ambiguity-hash',
           nlMappings: 'nl-hash',
           activeLtrModels: 'ltr-hash',
+        },
+        fieldAvailability: {
+          appellation: {
+            populatedDocCount: 1,
+            totalDocCount: 1,
+            populatedDocRatio: 1,
+          },
         },
         quality: {
           status: 'degraded',

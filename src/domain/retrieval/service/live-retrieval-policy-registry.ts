@@ -13,7 +13,8 @@ import {
 import type { QueryClass as DomainQueryClass } from '../../shared/types/query-class.js';
 import { RRF_DEFAULT_K, RRF_K } from '../../shared/utils/rrf.js';
 
-export const LIVE_RETRIEVAL_POLICY_VERSION = '2026-05-26-live-policy-v1' as const;
+export const LIVE_RETRIEVAL_POLICY_CONFIG_HASH = '1cb62630de449ff5a51c1c80f484871b39f950aeba926b8a08139135ebd72bbf' as const;
+export const LIVE_RETRIEVAL_POLICY_VERSION = '2026-05-26-live-policy-v2-1cb62630' as const;
 
 const WEIGHT_NEUTRAL = 1.0;
 const WEIGHT_DAMPED = 0.8;

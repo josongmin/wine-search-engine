@@ -562,6 +562,22 @@ describe('Planner – suggestedRetrievalMode matches expected mode', () => {
     expect(plan.suggestedRetrievalMode).toBeDefined();
     expect(typeof plan.suggestedRetrievalMode).toBe('string');
   });
+
+  it('single-candidate entity_fuzzy still uses entity_resolution, not exploratory attribute_search', async () => {
+    const planner = new Planner(
+      noAmbiguityDict,
+      new AnchorExtractor(new ExactAliasMatcher(new Map([
+        ['margxaux', [makeMatchResult('Château Margaux 2015', 0.78, ['chateau-margaux-2015'])]],
+      ]))),
+      new ExpansionBuilder(),
+      noOpNLMapper,
+    );
+
+    const plan = await planner.plan('margxaux');
+
+    expect(plan.intent).toBe('entity_fuzzy');
+    expect(plan.suggestedRetrievalMode).toBe('entity_resolution');
+  });
 });
 
 // ── planV2ToUnderstandingSnapshot ─────────────────────────────────────────────

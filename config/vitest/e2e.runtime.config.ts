@@ -9,6 +9,7 @@ export default defineConfig({
     include: [
       'test/e2e/user-journeys.test.ts',
       'test/e2e/golden-set.test.ts',
+      'test/e2e/query-family-release-gate.test.ts',
       'test/e2e/specialized-modes-quality.test.ts',
     ],
     testTimeout: 30_000,

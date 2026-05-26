@@ -45,7 +45,7 @@ describe('SearchIndexAliasMatcher', () => {
     expect(matches[0]?.lookupStrategy).toContain('index_exact');
   });
 
-  it('matches whole-token short lexical entity forms against multi-token canonical labels', async () => {
+  it('rejects whole-token short lexical entity forms against multi-token canonical labels', async () => {
     const searchIndex = new InMemorySearchIndex();
     const doc = makeDoc();
     await searchIndex.upsertDocument(doc);
@@ -53,9 +53,7 @@ describe('SearchIndexAliasMatcher', () => {
     const matcher = new SearchIndexAliasMatcher(searchIndex);
     const matches = await matcher.findMatches('opus');
 
-    expect(matches.length).toBeGreaterThan(0);
-    expect(matches[0]?.entityIds).toContain(doc.entityId);
-    expect(matches[0]?.lookupStrategy).toContain('index_lexical_exact');
+    expect(matches).toEqual([]);
   });
 
   it('matches latin entity prefixes through the dedicated prefix substrate', async () => {

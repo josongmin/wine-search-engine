@@ -24,6 +24,10 @@ import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { abortError } from '../../domain/shared/cooperative-abort.js';
 import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
+import {
+  isAppellationHardFilterAvailable,
+  type SearchSnapshotFieldAvailability,
+} from '../../domain/shared/types/search-field-availability.js';
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
 const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
@@ -34,6 +38,7 @@ const STRUCTURED_SET_RETRIEVAL_PREFERENCE_ATTRIBUTES = new Set([
   'closure',
   'gift_suitability',
   'occasion',
+  'price_band',
   'popularity_score',
   'producer_prestige',
   'style',
@@ -95,48 +100,31 @@ function representativeConstraintKey(
 /**
  * C2-Downstream — `appellation` hard-constraint demotion.
  *
- * **RCA**: The Vespa `wine_entity` schema declares `appellation` as
- * `summary | attribute | index` (see `vespa/app/schemas/wine_entity.sd:153`),
- * but the live ETL leaves the field empty on every indexed document. Direct
- * Vespa probe (`appellation matches "."` → 0 hits over 11,367 documents)
- * confirms the field is structurally unpopulated across the entire corpus.
+ * The old blanket demotion was correct only while the indexed corpus had
+ * effectively zero `appellation` coverage. That is no longer a safe code
+ * constant: ETL/build now preserve the field and publish a snapshot-level
+ * `fieldAvailability.appellation` metric. Demotion is therefore conditional:
  *
- * Consequently any hard YQL clause emitted from a planner-extracted
- * `appellation='<value>'` constraint (e.g. "바롤로" → `appellation contains
- * "Barolo"`) collapses the candidate pool to zero — even though the same
- * appellation token IS present in `canonical_label` and `region` for ~755
- * documents (Barolo case). The Vespa data lives in the wrong field, and
- * until the ETL backfills `appellation`, hard-filtering on it is
- * fail-closed.
+ * - availability present + ratio above gate => keep hard filter semantics
+ * - availability absent or below gate => demote to soft to avoid zero-hit collapse
  *
- * **Fix**: demote planner-emitted `appellation` hard constraints to soft
- * preferences. Soft constraints flow into the ranking/scoring layer and
- * into expansion (lexical + semantic) terms, so the appellation value
- * still informs retrieval — but it no longer gates the candidate pool to
- * zero. The compositional-inference fallback (region=Piedmont,
- * country=Italy, grape=Nebbiolo for Barolo) provides the strong identity
- * signal hard-retrieval needs.
- *
- * **Scope**: only `appellation`. region/country/wine_type/grape_primary
- * fields ARE populated in the index, so their hard-filter semantics stay.
- *
- * **Compatibility**: structured `request.filters` containing appellation
- * are also demoted — the same Vespa data limitation applies regardless of
- * source (planner NL extraction vs agent structured input).
- *
- * Remove this function (and its call site) once the ETL backfills the
- * Vespa `appellation` field on the indexed corpus.
+ * This preserves fail-closed behaviour for stale / incomplete runtimes while
+ * allowing exact appellation retrieval once the substrate is actually ready.
  */
 const APPELLATION_DEMOTION_MAPPING_VERSION = 'c2-downstream-appellation-demotion-v1';
 
 function applyAppellationDataAvailabilityDemotion(
   plan: QueryPlanV1,
   compiled: CompiledWineQuery,
+  fieldAvailability?: SearchSnapshotFieldAvailability,
 ): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
   const appellationHard = plan.constraints.hard.filter(
     (constraint) => constraint.attribute === 'appellation',
   );
-  if (appellationHard.length === 0) {
+  if (
+    appellationHard.length === 0
+    || isAppellationHardFilterAvailable(fieldAvailability)
+  ) {
     return { plan, compiled };
   }
 
@@ -261,6 +249,14 @@ function requestHasStructuredSetRetrievalPreference(
   );
 }
 
+function planHasStructuredSetRetrievalPreference(
+  plan: QueryPlanV1,
+): boolean {
+  return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
+    STRUCTURED_SET_RETRIEVAL_PREFERENCE_ATTRIBUTES.has(constraint.attribute),
+  );
+}
+
 function requestHasStructuredSetRetrievalFilter(
   request: SearchRequest,
 ): boolean {
@@ -280,6 +276,7 @@ function applyStructuredSetRetrievalContext(
     || compiled.execution.effectiveRoute !== 'entity'
     || (
       !requestHasStructuredSetRetrievalPreference(request)
+      && !planHasStructuredSetRetrievalPreference(plan)
       && !requestHasStructuredSetRetrievalFilter(request)
     )
   ) {
@@ -355,6 +352,7 @@ export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
   readonly requestId: string;
   readonly startTime: number;
   readonly snapshotVersions: SnapshotVersionInjection;
+  readonly fieldAvailability?: SearchSnapshotFieldAvailability | undefined;
   readonly securityGateDeps: SearchSecurityGateDeps;
   readonly queryPlanner: QueryPlannerPort;
   readonly responseBuilder: ResponseBuilderPort;
@@ -634,15 +632,14 @@ export async function runSearchPreRoutePhase(
       ctx.request,
     ));
 
-    // C2-Downstream: Vespa `appellation` field is structurally empty on
-    // every indexed document (verified via direct YQL probe — `appellation
-    // matches "."` → 0/11,367 hits). Hard-filtering on it collapses recall
-    // to zero for bare-appellation queries like "바롤로" / "Pauillac" /
-    // "Brunello". Demote to soft so lexical (BM25 on canonical_label /
-    // region) and compositional-inference (region=Piedmont, country=Italy
-    // for Barolo) recover the candidate pool. Remove once the ETL
-    // backfills the appellation field.
-    ({ plan, compiled } = applyAppellationDataAvailabilityDemotion(plan, compiled));
+    // C2-Downstream: snapshot-published field availability is now the
+    // authority. Blanket demotion is stale; only demote when the active
+    // runtime reports insufficient `appellation` coverage.
+    ({ plan, compiled } = applyAppellationDataAvailabilityDemotion(
+      plan,
+      compiled,
+      ctx.fieldAvailability,
+    ));
 
     logSearchEvent({
       runtime_correlation_ref: ctx.requestId,

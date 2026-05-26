@@ -13,6 +13,7 @@ import {
   SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
   SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
 } from '../../domain/shared/constants/public-entity-id-namespace.js';
+import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/search-field-availability.js';
 
 const VespaCountResponseSchema = z.object({
   root: z.object({
@@ -227,6 +228,7 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly carryForwardBenchmarkCount: number;
     readonly experimentalInputsPresent: boolean;
   };
+  readonly fieldAvailability: SearchSnapshotFieldAvailability;
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
@@ -300,6 +302,13 @@ type RuntimeStateShape = {
     readonly carryForwardBenchmarkCount?: unknown;
     readonly experimentalInputsPresent?: unknown;
   };
+  readonly fieldAvailability?: {
+    readonly appellation?: {
+      readonly populatedDocCount?: unknown;
+      readonly totalDocCount?: unknown;
+      readonly populatedDocRatio?: unknown;
+    };
+  };
   readonly counts?: {
     readonly entities?: unknown;
     readonly aliases?: unknown;
@@ -337,6 +346,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   const counts = parsed.counts;
   const hashes = parsed.hashes;
   const quality = parsed.quality;
+  const fieldAvailability = parsed.fieldAvailability;
   const ltrReleaseProvenance = parsed.ltrReleaseProvenance;
   const hasValidQuality = quality !== undefined
     && (quality.status === 'canonical' || quality.status === 'degraded')
@@ -373,6 +383,14 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       || ltrReleaseProvenance.activationStatus === 'shadow_only'
     )
   );
+  const hasValidFieldAvailability = fieldAvailability !== undefined
+    && fieldAvailability.appellation !== undefined
+    && isFiniteCount(fieldAvailability.appellation.populatedDocCount)
+    && isFiniteCount(fieldAvailability.appellation.totalDocCount)
+    && typeof fieldAvailability.appellation.populatedDocRatio === 'number'
+    && Number.isFinite(fieldAvailability.appellation.populatedDocRatio)
+    && fieldAvailability.appellation.populatedDocRatio >= 0
+    && fieldAvailability.appellation.populatedDocRatio <= 1;
   if (
     parsed.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION
     || typeof parsed.snapshotId !== 'string'
@@ -386,6 +404,7 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     || typeof parsed.nlMappingsRuntimePath !== 'string'
     || parsed.nlMappingsRuntimePath.length === 0
     || !hasValidQuality
+    || !hasValidFieldAvailability
     || counts === undefined
     || !isFiniteCount(counts.entities)
     || !isFiniteCount(counts.aliases)
@@ -437,6 +456,13 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
       bypasses: [...quality.bypasses as string[]],
       carryForwardBenchmarkCount: quality.carryForwardBenchmarkCount as number,
       experimentalInputsPresent: quality.experimentalInputsPresent as boolean,
+    },
+    fieldAvailability: {
+      appellation: {
+        populatedDocCount: fieldAvailability.appellation.populatedDocCount as number,
+        totalDocCount: fieldAvailability.appellation.totalDocCount as number,
+        populatedDocRatio: fieldAvailability.appellation.populatedDocRatio as number,
+      },
     },
     counts: {
       entities: counts.entities,

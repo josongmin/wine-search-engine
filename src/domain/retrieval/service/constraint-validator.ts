@@ -66,6 +66,10 @@ import {
   classifyConstraintRepresentability,
   type ConstraintRepresentability,
 } from './constraint-to-sparse-filter-tokens.js';
+import {
+  resolveSoftIntentStrategy,
+  type SoftIntentPrimaryStrategy,
+} from '../../query/service/soft-intent-strategy-table.js';
 
 /** Which bundle tier the constraint was sourced from. */
 export type ValidatedConstraintTier = 'hard' | 'soft';
@@ -105,6 +109,8 @@ export interface ValidatedConstraintEntry {
 
 export interface DroppedConstraintEntry extends ValidatedConstraintEntry {
   readonly reason: DroppedConstraintReason;
+  readonly strategyPrimary?: SoftIntentPrimaryStrategy | undefined;
+  readonly retrievalUnsupportedReason?: string | undefined;
 }
 
 export interface UnrecognizedConstraintEntry extends ValidatedConstraintEntry {
@@ -294,6 +300,7 @@ function classifyAndPartition(
   unrecognized: UnrecognizedConstraintEntry[],
 ): void {
   const representability = classifyConstraintRepresentability(constraint.attribute);
+  const softIntentStrategy = resolveSoftIntentStrategy(constraint.attribute);
   const entry: ValidatedConstraintEntry = { constraint, tier, representability };
 
   if (tier === 'hard') {
@@ -308,7 +315,18 @@ function classifyAndPartition(
       // Hard-placed ranking-only attribute → drop (planner mis-classified
       // a soft signal as a hard constraint; the compile path will silently
       // emit zero tokens).
-      dropped.push({ ...entry, reason: 'hard_tier_not_filterable' });
+      dropped.push({
+        ...entry,
+        reason: 'hard_tier_not_filterable',
+        ...(softIntentStrategy !== undefined
+          ? {
+              strategyPrimary: softIntentStrategy.primaryStrategy,
+              ...(softIntentStrategy.retrievalUnsupportedReason !== undefined
+                ? { retrievalUnsupportedReason: softIntentStrategy.retrievalUnsupportedReason }
+                : {}),
+            }
+          : {}),
+      });
       return;
     }
     unrecognized.push({ ...entry, reason: 'attribute_not_in_compile_path' });
@@ -326,7 +344,18 @@ function classifyAndPartition(
     // `softBoosts` in retrieval-plan-builder, but it will NEVER become a
     // Vespa WHERE-clause filter. Surface this so callers can attach a
     // fallback-penalty signal if desired.
-    dropped.push({ ...entry, reason: 'soft_tier_not_promotable' });
+    dropped.push({
+      ...entry,
+      reason: 'soft_tier_not_promotable',
+      ...(softIntentStrategy !== undefined
+        ? {
+            strategyPrimary: softIntentStrategy.primaryStrategy,
+            ...(softIntentStrategy.retrievalUnsupportedReason !== undefined
+              ? { retrievalUnsupportedReason: softIntentStrategy.retrievalUnsupportedReason }
+              : {}),
+          }
+        : {}),
+    });
     return;
   }
   if (representability === 'hard_filterable') {
@@ -334,7 +363,18 @@ function classifyAndPartition(
     // will silently no-op unless the attribute also has a SOFT_PROMOTION_TOKEN_SPEC
     // entry (caught by the soft_promotable branch above). Mark as dropped so
     // callers see the silent-no-op surface.
-    dropped.push({ ...entry, reason: 'soft_tier_not_promotable' });
+    dropped.push({
+      ...entry,
+      reason: 'soft_tier_not_promotable',
+      ...(softIntentStrategy !== undefined
+        ? {
+            strategyPrimary: softIntentStrategy.primaryStrategy,
+            ...(softIntentStrategy.retrievalUnsupportedReason !== undefined
+              ? { retrievalUnsupportedReason: softIntentStrategy.retrievalUnsupportedReason }
+              : {}),
+          }
+        : {}),
+    });
     return;
   }
   unrecognized.push({ ...entry, reason: 'attribute_not_in_compile_path' });
@@ -390,6 +430,8 @@ export function emitConstraintValidationTelemetry(
           operator: entry.constraint.operator,
           reason: entry.reason,
           representability: entry.representability,
+          strategy_primary: entry.strategyPrimary,
+          retrieval_unsupported_reason: entry.retrievalUnsupportedReason,
           mapping_version: entry.constraint.mapping_version,
           source_phrase: entry.constraint.source_phrase,
           ...(context ?? {}),

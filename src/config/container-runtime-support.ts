@@ -24,6 +24,10 @@ import { DeterministicDrinkingWindowPredictor } from '../infrastructure/ml/deter
 import { loadSearchSnapshotRuntimeState } from '../infrastructure/health/search-snapshot-readiness.js';
 import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
 import { isLtrServingEnabled } from './ltr-serving-mode.js';
+import {
+  DEFAULT_SEARCH_SNAPSHOT_FIELD_AVAILABILITY,
+  type SearchSnapshotFieldAvailability,
+} from '../domain/shared/types/search-field-availability.js';
 
 /** Consecutive cache failures before opening circuit (matches CacheService default). */
 const CACHE_CIRCUIT_BREAKER_THRESHOLD_DEFAULT = 5;
@@ -96,6 +100,7 @@ export interface RuntimeSupportServices {
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly phraseCache?: PhraseCachePort | undefined;
   readonly runtimeReadiness: RuntimeReadinessSnapshot;
+  readonly fieldAvailability: SearchSnapshotFieldAvailability;
 }
 
 export type RuntimeReadinessIssueKind =
@@ -266,23 +271,24 @@ export async function buildRuntimeSupportServices(
     : undefined;
   let ltrRequired = ltrServingEnabled;
   let runtimeLtrArtifactModels: ReadonlyMap<string, QueryClassWeights> | undefined;
-  if (ltrServingEnabled && pool) {
-    const ltrRegistry = new PgLtrModelRegistry(pool);
-    try {
-      const runtimeState = await loadSearchSnapshotRuntimeState();
-      if (runtimeState.quality.blockers.length > 0) {
-        bootstrapLogger.warn(
-          { blockers: runtimeState.quality.blockers },
-          '[Container] Search snapshot runtime state reports quality blockers',
-        );
-      }
-    } catch (err) {
+  let fieldAvailability: SearchSnapshotFieldAvailability = DEFAULT_SEARCH_SNAPSHOT_FIELD_AVAILABILITY;
+  try {
+    const runtimeState = await loadSearchSnapshotRuntimeState();
+    fieldAvailability = runtimeState.fieldAvailability;
+    if (runtimeState.quality.blockers.length > 0) {
       bootstrapLogger.warn(
-        { err },
-        '[Container] Search snapshot runtime state unavailable; LTR requiredness unknown',
+        { blockers: runtimeState.quality.blockers },
+        '[Container] Search snapshot runtime state reports quality blockers',
       );
     }
-
+  } catch (err) {
+    bootstrapLogger.warn(
+      { err },
+      '[Container] Search snapshot runtime state unavailable; using fail-safe field availability defaults',
+    );
+  }
+  if (ltrServingEnabled && pool) {
+    const ltrRegistry = new PgLtrModelRegistry(pool);
     try {
       ltrRegistrySearchSnapshotId = (await resolveActiveSnapshot(pool, { bypassCache: true })).activeSnapshotId;
     } catch (err) {
@@ -479,5 +485,6 @@ export async function buildRuntimeSupportServices(
     drinkingWindowPredictor,
     ...(phraseCache !== undefined ? { phraseCache } : {}),
     runtimeReadiness,
+    fieldAvailability,
   };
 }

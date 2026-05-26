@@ -17,6 +17,7 @@ import type { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { CacheLookupRuntimeState } from '../application/search/search-usecase-cache-lookup.js';
+import type { SearchSnapshotFieldAvailability } from '../domain/shared/types/search-field-availability.js';
 import type {
   BlockingUseCasePort,
   BrowseRetrieverPort,
@@ -74,6 +75,7 @@ export interface CoreContainerServices {
   readonly cacheLookupRuntimeStateProvider: () => CacheLookupRuntimeState;
   readonly ltrModels?: RuntimeSupportServices['ltrModels'];
   readonly runtimeReadiness: RuntimeSupportServices['runtimeReadiness'];
+  readonly fieldAvailability: SearchSnapshotFieldAvailability;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly calibrationStore: CalibrationStore;
   /**

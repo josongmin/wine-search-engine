@@ -21,6 +21,7 @@ function makePlan(overrides: Partial<QueryPlanV1>): QueryPlanV1 {
         surfaceForm: 'Opus One',
         normalizedForm: 'opus one',
         candidateEntityIds: ['wine-1'],
+        aliasType: 'canonical',
         confidence: 0.95,
         source: 'alias',
       },

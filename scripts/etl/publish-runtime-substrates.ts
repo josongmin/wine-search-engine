@@ -724,6 +724,7 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         manifestPath: args.manifestPath,
         nlMappingsRuntimePath: runtimeNlMappingsPath,
         quality: manifest.quality,
+        fieldAvailability: manifest.fieldAvailability,
         counts: {
           entities: entities.length,
           aliases: aliases.length,

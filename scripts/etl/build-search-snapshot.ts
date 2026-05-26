@@ -45,6 +45,7 @@ import {
   BEGINNER_SUITABILITY_VERSION,
   GIFT_SUITABILITY_VERSION,
 } from '../../src/domain/attribute/service/ontology-normalizer.js';
+import type { SearchSnapshotFieldAvailability } from '../../src/domain/shared/types/search-field-availability.js';
 
 export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
@@ -114,6 +115,22 @@ type SnapshotBuildRecord = EnrichedSilverRecord & {
   readonly sourceSystemOverride?: string | undefined;
   readonly certificationsExperimental?: unknown;
 };
+
+function buildFieldAvailability(
+  records: readonly SnapshotBuildRecord[],
+): SearchSnapshotFieldAvailability {
+  const totalDocCount = records.length;
+  const populatedDocCount = records.filter((record) =>
+    typeof record.appellation === 'string' && record.appellation.trim().length > 0,
+  ).length;
+  return {
+    appellation: {
+      populatedDocCount,
+      totalDocCount,
+      populatedDocRatio: totalDocCount > 0 ? populatedDocCount / totalDocCount : 0,
+    },
+  };
+}
 
 /**
  * Benchmark-anchor suitability artifact.
@@ -750,6 +767,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const contentHash = buildSearchSnapshotContentHash(hashes);
   const snapshotId = buildSearchSnapshotId(contentHash);
   const snapshotRoot = path.join(args.outputDir, snapshotId);
+  const fieldAvailability = buildFieldAvailability(finalRecords);
   const quality = {
     status: 'canonical' as const,
     blockers: [] as string[],
@@ -782,6 +800,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
       nlMappings: nlMappings.mappingCount,
     },
     hashes,
+    fieldAvailability,
     quality,
   };
 
@@ -791,6 +810,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     sourceInputPath: args.input,
     counts: manifest.counts,
     hashes: manifest.hashes,
+    fieldAvailability: manifest.fieldAvailability,
     quality: manifest.quality,
   } as const;
 

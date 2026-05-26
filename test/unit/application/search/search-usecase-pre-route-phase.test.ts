@@ -744,4 +744,88 @@ describe('runSearchPreRoutePhase', () => {
     expect(queryPlanner.plan).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('upgrades planner-soft price_band intent from entity route to hybrid recommendation route', async () => {
+    const plan = {
+      rawQuery: '가성비 좋은 와인',
+      normalizedQuery: '가성비 좋은 와인',
+      intent: 'facet_search' as const,
+      route: 'entity' as const,
+      retrievalMode: 'attribute_search' as const,
+      queryClass: 'unknown',
+      anchors: [],
+      constraints: {
+        hard: [],
+        soft: [
+          {
+            attribute: 'price_band',
+            operator: '=',
+            value: 'budget',
+            source_phrase: '가성비',
+            confidence: 0.9,
+            mapping_version: 'rule-based-v1.0',
+          },
+        ],
+        inferred: [],
+      },
+      expansions: { lexical: [], semantic: [] },
+      policy: {} as QueryPlanV1['policy'],
+      uncertainty: {} as QueryPlanV1['uncertainty'],
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    } as QueryPlanV1;
+    const result = await runSearchPreRoutePhase({
+      request: { query: '가성비 좋은 와인' },
+      requestId: 'price-band-upgrade',
+      startTime: Date.now(),
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner: {
+        plan: vi.fn().mockResolvedValue(plan),
+        planWithCompiled: vi.fn().mockResolvedValue({
+          v1: plan,
+          compiled: {
+            query: {
+              rawQuery: plan.rawQuery,
+              normalizedQuery: plan.normalizedQuery,
+              intent: plan.intent,
+              queryClass: plan.queryClass,
+              anchors: plan.anchors,
+              constraints: plan.constraints,
+              expansions: plan.expansions,
+              uncertainty: plan.uncertainty,
+              plannerVersion: plan.plannerVersion,
+              policyRuleVersion: plan.policyRuleVersion,
+              thresholdProfileId: plan.thresholdProfileId,
+            },
+            execution: {
+              effectiveRoute: 'entity',
+              effectiveRetrievalMode: 'attribute_search',
+              routeSource: 'planner',
+              budget: { maxCandidates: 20, enablePrecisionRerank: true },
+              provenancePolicy: {
+                requireIdentitySeal: false,
+                requireConstraintEvidence: false,
+                requireAnchorEvidence: false,
+              },
+            },
+          },
+        }),
+      },
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch: undefined,
+    });
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(result.plan.route).toBe('hybrid');
+    expect(result.plan.retrievalMode).toBe('recommendation');
+    expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
+    expect(result.compiled.execution.effectiveRetrievalMode).toBe('recommendation');
+  });
 });

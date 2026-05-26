@@ -48,6 +48,8 @@ import { Transliterator } from '../../../src/domain/alias/service/transliterator
 import {
   buildAliasPrefixTerms,
   isEligiblePrefixQuery,
+  isDisallowedWholeLeadingTokenExpansion,
+  matchesAliasPrefixTerm,
 } from '../../../src/domain/query/service/alias-prefix-terms.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
 import { buildHangulJamoKey } from '../../../src/domain/shared/utils/hangul.js';
@@ -239,7 +241,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
         }
       }
       for (const prefixQuery of prefixQueries) {
-        if (prefixTerms.some((term) => term.startsWith(prefixQuery))) {
+        if (prefixTerms.some((term) => matchesAliasPrefixTerm(prefixQuery, term))) {
           score += 1;
           matchedFields.add('alias_prefix_terms');
         }
@@ -646,7 +648,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
       if (
         transliteratedPrefixTerms.some((term) =>
-          candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term))
+          candidatePrefixTerms.some((candidateTerm) => matchesAliasPrefixTerm(term, candidateTerm))
         )
       ) {
         transliteratedPrefixResults.push({
@@ -662,7 +664,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
       if (
         queryPrefixTerms.some((term) =>
-          candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term))
+          candidatePrefixTerms.some((candidateTerm) => matchesAliasPrefixTerm(term, candidateTerm))
         )
       ) {
         prefixResults.push({
@@ -719,16 +721,22 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     for (const [normalized, entries] of this.aliases) {
       const queryTokens = views.punctuationStripped.split(/\s+/).filter(Boolean);
       const aliasTokens = this.punctuationStripped(normalized).split(/\s+/).filter(Boolean);
+      const queryWholePhrase = ` ${views.punctuationStripped.trim()} `;
+      const aliasWholePhrase = ` ${this.punctuationStripped(normalized).trim()} `;
 
-      // Case 1: Query contains the alias as substring
+      // Case 1: Query contains the alias as a whole phrase, not an arbitrary
+      // character substring ("ma" inside "margaux" must not fire).
       const isSubstringMatch =
-        views.strict.includes(normalized) ||
-        views.punctuationStripped.includes(this.punctuationStripped(normalized));
+        queryWholePhrase.includes(aliasWholePhrase);
 
       // Case 2: Query tokens are prefix of alias tokens (e.g., "david arthur" matches "david arthur cabernet sauvignon")
       const isTokenPrefixMatch = queryTokens.length > 0 &&
         queryTokens.length <= aliasTokens.length &&
-        queryTokens.every((qt, i) => aliasTokens[i] === qt);
+        queryTokens.every((qt, i) => aliasTokens[i] === qt) &&
+        !isDisallowedWholeLeadingTokenExpansion(
+          views.punctuationStripped,
+          this.punctuationStripped(normalized),
+        );
 
       if (isSubstringMatch || isTokenPrefixMatch) {
         const entityIds = entries.map((e) => e.entityId);

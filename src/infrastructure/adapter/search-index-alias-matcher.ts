@@ -6,6 +6,8 @@ import type {
 import {
   buildAliasPrefixTerms,
   isEligiblePrefixQuery,
+  isDisallowedWholeLeadingTokenExpansion,
+  matchesAliasPrefixTerm,
 } from '../../domain/query/service/alias-prefix-terms.js';
 import {
   resolveAliasMatchConfidence,
@@ -181,7 +183,8 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
     queryTokens.length === 1 &&
     queryTokens[0] !== undefined &&
     queryTokens[0].length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH &&
-    tokenizeForLookup(candidateVintage).includes(queryTokens[0])
+    tokenizeForLookup(candidateVintage).includes(queryTokens[0]) &&
+    !isDisallowedWholeLeadingTokenExpansion(queryVintage, candidateVintage)
   ) {
     return {
       strategy: 'lexical_exact',
@@ -189,14 +192,14 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
     };
   }
 
-  if (transliteratedPrefixTerms.some((term) => candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term)))) {
+  if (transliteratedPrefixTerms.some((term) => candidatePrefixTerms.some((candidateTerm) => matchesAliasPrefixTerm(term, candidateTerm)))) {
     return {
       strategy: 'transliterated_prefix',
       normalizedForm: candidateViews.strict,
     };
   }
 
-  if (queryPrefixTerms.some((term) => candidatePrefixTerms.some((candidateTerm) => candidateTerm.startsWith(term)))) {
+  if (queryPrefixTerms.some((term) => candidatePrefixTerms.some((candidateTerm) => matchesAliasPrefixTerm(term, candidateTerm)))) {
     return {
       strategy: 'prefix_exact',
       normalizedForm: candidateViews.strict,

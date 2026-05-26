@@ -120,6 +120,30 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
     if (runtimeState.hashes.nlMappings !== manifest.hashes.nlMappings) {
       throw new Error(`NL mapping state/manifest hash mismatch: state=${runtimeState.hashes.nlMappings}, manifest=${manifest.hashes.nlMappings}`);
     }
+    if (
+      runtimeState.fieldAvailability.appellation.populatedDocCount
+      !== manifest.fieldAvailability.appellation.populatedDocCount
+    ) {
+      throw new Error(
+        `Appellation field-availability count mismatch: state=${runtimeState.fieldAvailability.appellation.populatedDocCount}, manifest=${manifest.fieldAvailability.appellation.populatedDocCount}`,
+      );
+    }
+    if (
+      runtimeState.fieldAvailability.appellation.totalDocCount
+      !== manifest.fieldAvailability.appellation.totalDocCount
+    ) {
+      throw new Error(
+        `Appellation field-availability total mismatch: state=${runtimeState.fieldAvailability.appellation.totalDocCount}, manifest=${manifest.fieldAvailability.appellation.totalDocCount}`,
+      );
+    }
+    if (
+      runtimeState.fieldAvailability.appellation.populatedDocRatio
+      !== manifest.fieldAvailability.appellation.populatedDocRatio
+    ) {
+      throw new Error(
+        `Appellation field-availability ratio mismatch: state=${runtimeState.fieldAvailability.appellation.populatedDocRatio}, manifest=${manifest.fieldAvailability.appellation.populatedDocRatio}`,
+      );
+    }
     if (runtimeState.counts.activeLtrModels <= 0) {
       throw new Error('Active LTR model count is zero');
     }

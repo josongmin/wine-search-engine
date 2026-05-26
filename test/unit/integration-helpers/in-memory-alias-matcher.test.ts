@@ -59,15 +59,13 @@ describe('InMemoryAliasMatcher — aliasType emission', () => {
     expect(compact?.aliasType).toBe('canonical');
   });
 
-  it('aliasType propagates through prefix_exact match path', async () => {
+  it('aliasType propagates through genuine prefix_exact match path', async () => {
     const matcher = new InMemoryAliasMatcher();
     matcher.addAlias('Opus One', createEntityId('opus-one-2018'), 0.97, 'curated');
     matcher.addAlias('OO', createEntityId('opus-one-2018'), 0.5, 'derived_initialism');
 
-    // Query 'opus' triggers the prefix stage; both curated 'opus one' and
-    // derived 'oo' should emit their distinct aliasTypes (they sit under
-    // different normalized keys).
-    const matches = await matcher.findMatches('opus');
+    // Query 'opu' is an incomplete prefix and stays eligible for prefix_exact.
+    const matches = await matcher.findMatches('opu');
     const types = matches.map((m) => m.aliasType).filter(Boolean);
     expect(types).toContain('canonical');
   });

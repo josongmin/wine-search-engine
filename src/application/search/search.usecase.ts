@@ -78,6 +78,7 @@ import {
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { executeDualLaneHybridRoute } from './search-usecase-dual-lane-execution.js';
+import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/search-field-availability.js';
 
 export type { SearchRequest } from './search-request.dto.js';
 
@@ -123,6 +124,7 @@ export interface SearchUseCaseDeps {
   readonly mixedSolver: MixedSolverPort;
   /** Drinking window predictor for wine aging insights (Epic 15). */
   readonly drinkingWindow?: DrinkingWindowUseCasePort | undefined;
+  readonly fieldAvailability?: SearchSnapshotFieldAvailability | undefined;
   /** Version strings for RFC-015 snapshot population. */
   readonly snapshotVersions?: SnapshotVersions | undefined;
   /** Layer 1: Static pattern-based injection sanitizer (Epic 16.1). Required. */
@@ -282,6 +284,7 @@ export class SearchUseCase {
       requestId,
       startTime,
       snapshotVersions: this.deps.snapshotVersions,
+      fieldAvailability: this.deps.fieldAvailability,
       securityGateDeps: {
         querySanitizer: this.deps.querySanitizer,
         injectionJudge: this.deps.injectionJudge,

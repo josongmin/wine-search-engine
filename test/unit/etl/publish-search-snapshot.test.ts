@@ -57,6 +57,14 @@ async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'publish-search-snapshot-'));
 }
 
+const FIELD_AVAILABILITY = {
+  appellation: {
+    populatedDocCount: 1,
+    totalDocCount: 1,
+    populatedDocRatio: 1,
+  },
+} as const;
+
 function makeManifest(feedPath: string): SearchSnapshotManifest {
   return {
     schemaVersion: 'search_snapshot.v1',
@@ -89,6 +97,7 @@ function makeManifest(feedPath: string): SearchSnapshotManifest {
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
     },
+    fieldAvailability: FIELD_AVAILABILITY,
     quality: {
       status: 'canonical',
       blockers: [],
@@ -130,6 +139,13 @@ function makeCoverageManifest(dir: string): SearchSnapshotManifest {
       aliases: 'aliases-hash',
       ambiguityRegistry: 'ambiguity-hash',
       nlMappings: 'nl-hash',
+    },
+    fieldAvailability: {
+      appellation: {
+        populatedDocCount: 3,
+        totalDocCount: 3,
+        populatedDocRatio: 1,
+      },
     },
     quality: {
       status: 'canonical',
@@ -549,6 +565,7 @@ describe('runtime substrate promotion state machine', () => {
           nlMappings: 'nl-hash',
           activeLtrModels: 'ltr-hash',
         },
+        fieldAvailability: FIELD_AVAILABILITY,
         quality: {
           status: 'canonical',
           blockers: [],

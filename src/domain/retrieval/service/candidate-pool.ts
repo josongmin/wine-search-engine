@@ -237,7 +237,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // Compile-time constraint validation BEFORE YQL emission. Surfaces
     // (a) unrecognized attributes — planner emitted something the YQL
     // layer cannot represent (silent drop pre-fix), and (b) intentionally
-    // ranking-only soft constraints (drinking_window / style / price_band)
+    // strategy-governed soft intents (for example drinking_window post-search
+    // verification, or candidate-shaping-only price_band / style paths)
     // that flow into softBoosts but cannot promote to filters. Telemetry
     // fires once per (tier, attribute, reason) per process via the module
     // cache in constraint-validator.ts — hot-path safe.
@@ -245,7 +246,10 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       hard: input.hardConstraints,
       soft: input.softConstraints,
     });
-    emitConstraintValidationTelemetry(validationReport);
+    emitConstraintValidationTelemetry(validationReport, {
+      query_class: input.queryPlan.queryClass,
+      request_id: input.requestContext?.requestId,
+    });
     const hardFilterTokens = hardConstraintsToSparseFilterTokens(input.hardConstraints);
     const promotedSoftFilterTokens = softConstraintsToOptionalFilterTokens(input.softConstraints);
     const filters = [

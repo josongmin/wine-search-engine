@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildAliasPrefixTerms, isEligiblePrefixQuery } from '../alias-prefix-terms.js';
+import {
+  buildAliasPrefixTerms,
+  isEligiblePrefixQuery,
+  matchesAliasPrefixTerm,
+} from '../alias-prefix-terms.js';
 
 describe('alias-prefix-terms', () => {
   it('builds whole-identity surface prefixes plus curated Korean variants', () => {
@@ -9,7 +13,6 @@ describe('alias-prefix-terms', () => {
       expect.arrayContaining([
         'opus one 2018',
         'opus one',
-        'opusone2018',
         '오푸스원',
       ]),
     );
@@ -29,5 +32,15 @@ describe('alias-prefix-terms', () => {
     expect(isEligiblePrefixQuery('opu')).toBe(true);
     expect(isEligiblePrefixQuery('오')).toBe(false);
     expect(isEligiblePrefixQuery('오푸')).toBe(true);
+  });
+
+  it('rejects whole-leading-token expansion for multi-token aliases', () => {
+    expect(matchesAliasPrefixTerm('chateau', 'chateau margaux')).toBe(false);
+    expect(matchesAliasPrefixTerm('opus', 'opus one')).toBe(false);
+  });
+
+  it('keeps genuine incomplete prefix matches', () => {
+    expect(matchesAliasPrefixTerm('opu', 'opus one')).toBe(true);
+    expect(matchesAliasPrefixTerm('marg', 'margaux 2015')).toBe(true);
   });
 });

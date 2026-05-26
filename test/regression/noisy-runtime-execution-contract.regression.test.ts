@@ -56,7 +56,7 @@ describe('Noisy runtime execution contract', () => {
     },
   );
 
-  it('auto noisy hybrid recovery resolves on dual-lane with aligned lane projection', async () => {
+  it('auto noisy vintage-bearing typo resolves on the entity route via fuzzy identity recovery', async () => {
     const response = await parts.container.searchUseCase.execute(
       {
         query: 'Chateau Margxaux 2015',
@@ -68,15 +68,15 @@ describe('Noisy runtime execution contract', () => {
     expect(response.engineDecision.decisionStatus).toBe('resolved');
     expect(response.results[0]?.entity.entityId).toBe('chateau-margaux-2015');
     expectExecutionContractProjection(response, {
-      route: 'hybrid',
-      topology: 'dual_lane',
+      route: 'entity',
+      topology: 'entity_only',
     });
-    expect(response.engineDecision.laneTrace?.identity.participated).toBe(true);
-    expect(response.engineDecision.laneTrace?.identity.resolveStatus).toBe('ambiguous');
-    expect(response.engineDecision.laneTrace?.general.participated).toBe(true);
-    expect(response.engineDecision.laneTrace?.general.artifactCount).toBeGreaterThan(0);
-    expect(response.engineDecision.laneTrace?.fused.resolveStatus).toBe('resolved');
-    expect(response.meta.provenanceTrace?.gateDecisions.decision).toBe('decision_gate_resolved');
+    expect(response.engineDecision.laneTrace).toMatchObject({
+      identity: { participated: true, resolveStatus: 'resolved' },
+      general: { participated: false, artifactCount: 0 },
+      fused: { participated: false, artifactCount: 0 },
+    });
+    expect(response.meta.provenanceTrace?.gateDecisions.decision).toBeUndefined();
   });
 
   it('auto single-typo Latin query resolves on the entity route via fuzzy identity recovery', async () => {

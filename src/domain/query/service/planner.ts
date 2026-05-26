@@ -710,7 +710,7 @@ export class Planner {
    *
    * Mode selection logic (from Epic 7):
    *  - entity_exact → entity_lookup
-   *  - entity_fuzzy + multiple_candidates → entity_resolution
+   *  - entity_fuzzy + anchor present      → entity_resolution
    *  - comparison_search → compare_candidates
    *  - mixed_query + anchor → similar_items
    *  - pairing_search → recommendation
@@ -729,9 +729,6 @@ export class Planner {
     );
     const hasAnyAnchor = anchors.some(
       (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
-    );
-    const hasMultipleCandidates = anchors.some(
-      (a) => a.candidateEntityIds.length > 1,
     );
 
     // Comparison search: multiple anchors or explicit comparison intent
@@ -758,8 +755,13 @@ export class Planner {
       return 'region_browse';
     }
 
-    // Ambiguous entity: single anchor with multiple candidate entities
-    if (intent === 'entity_fuzzy' && hasMultipleCandidates) {
+    // Fuzzy known-item recovery stays on the identity-resolution lane even
+    // when the current anchor set collapses to a single candidate. The
+    // downstream decision gate treats `attribute_search` as exploratory and
+    // rightfully refuses approximate sealing there; routing fuzzy entity
+    // recovery through `entity_resolution` keeps the retrieval-mode contract
+    // aligned with the user's actual question: "which entity did I mean?".
+    if (intent === 'entity_fuzzy' && hasAnyAnchor) {
       return 'entity_resolution';
     }
 

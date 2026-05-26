@@ -9,26 +9,27 @@ import type { ResponseBuilder } from '../../src/domain/response/service/response
 import type { NormalizedConstraint } from '../../src/domain/shared/types/index.js';
 import { buildRetrievalPlan } from '../../src/domain/retrieval/service/retrieval-plan-builder.js';
 import { logSearchEvent } from '../../src/domain/observability/log-search-event.js';
+import type { SearchSnapshotFieldAvailability } from '../../src/domain/shared/types/search-field-availability.js';
 
 vi.mock('../../src/domain/observability/log-search-event.js', () => ({
   logSearchEvent: vi.fn(),
 }));
 
-/**
- * C2-Downstream regression — bare-appellation queries (e.g. "바롤로",
- * "Pauillac", "Brunello") must NOT emit a hard `appellation` YQL filter.
- *
- * RCA: Vespa `wine_entity` schema declares `appellation` as
- * `summary | attribute | index`, but the live ETL leaves the field empty
- * on every indexed document (`appellation matches "."` → 0/11,367 hits).
- * Hard-filtering on it collapses the candidate pool to zero. The
- * pre-route phase must demote planner-extracted appellation hard
- * constraints to soft so lexical/semantic retrieval recovers candidates
- * via the populated `canonical_label` / `region` fields.
- *
- * Append-only regression: removing the demotion (or moving it to a
- * conditional branch that misses these queries) must fail this test.
- */
+const LOW_APPELLATION_AVAILABILITY: SearchSnapshotFieldAvailability = {
+  appellation: {
+    populatedDocCount: 0,
+    totalDocCount: 100,
+    populatedDocRatio: 0,
+  },
+};
+
+const HIGH_APPELLATION_AVAILABILITY: SearchSnapshotFieldAvailability = {
+  appellation: {
+    populatedDocCount: 83,
+    totalDocCount: 100,
+    populatedDocRatio: 0.83,
+  },
+};
 
 const APPELLATION_DEMOTION_MAPPING_VERSION = 'c2-downstream-appellation-demotion-v1';
 
@@ -103,7 +104,11 @@ function buildCompiledForPlan(plan: QueryPlanV1) {
   };
 }
 
-async function runPreRouteFor(plan: QueryPlanV1, request: SearchRequest) {
+async function runPreRouteFor(
+  plan: QueryPlanV1,
+  request: SearchRequest,
+  fieldAvailability?: SearchSnapshotFieldAvailability,
+) {
   const compiled = buildCompiledForPlan(plan);
   const queryPlanner: QueryPlannerPort = {
     plan: vi.fn(async () => plan),
@@ -118,6 +123,7 @@ async function runPreRouteFor(plan: QueryPlanV1, request: SearchRequest) {
     queryPlanner,
     responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
     constraintSAT: new ConstraintSAT(),
+    fieldAvailability,
     cacheService: undefined,
     decomposedSearch: undefined,
   });
@@ -134,9 +140,9 @@ describe('C2-Downstream regression: appellation hard → soft demotion', () => {
     ['Brunello', 'Brunello di Montalcino'],
     ['브루넬로', 'Brunello di Montalcino'],
   ])('%s → appellation=%s', (rawQuery, canonical) => {
-    it('demotes appellation hard constraint to soft', async () => {
+    it('demotes appellation hard constraint to soft when runtime availability is below gate', async () => {
       const plan = buildPlanWithAppellationHard(rawQuery, canonical);
-      const result = await runPreRouteFor(plan, { query: rawQuery });
+      const result = await runPreRouteFor(plan, { query: rawQuery }, LOW_APPELLATION_AVAILABILITY);
       expect(result.outcome).toBe('continue');
       if (result.outcome !== 'continue') return;
 
@@ -166,6 +172,19 @@ describe('C2-Downstream regression: appellation hard → soft demotion', () => {
       expect(result.compiled.execution.provenancePolicy.requireConstraintEvidence).toBe(false);
       expect(result.plan.admission_context?.requires_constraint_evidence).toBe(false);
     });
+
+    it('preserves appellation hard constraint when runtime availability is above gate', async () => {
+      const plan = buildPlanWithAppellationHard(rawQuery, canonical);
+      const result = await runPreRouteFor(plan, { query: rawQuery }, HIGH_APPELLATION_AVAILABILITY);
+      expect(result.outcome).toBe('continue');
+      if (result.outcome !== 'continue') return;
+
+      expect(result.plan.constraints.hard.some((c) => c.attribute === 'appellation')).toBe(true);
+      expect(result.plan.constraints.soft.some((c) => c.attribute === 'appellation')).toBe(false);
+      expect(
+        result.compiled.query.constraints.hard.some((c) => c.attribute === 'appellation'),
+      ).toBe(true);
+    });
   });
 
   it('preserves other hard constraints alongside the appellation demotion', async () => {
@@ -181,7 +200,7 @@ describe('C2-Downstream regression: appellation hard → soft demotion', () => {
         inferred: [],
       },
     };
-    const result = await runPreRouteFor(plan, { query: 'Barolo red wine' });
+    const result = await runPreRouteFor(plan, { query: 'Barolo red wine' }, LOW_APPELLATION_AVAILABILITY);
     expect(result.outcome).toBe('continue');
     if (result.outcome !== 'continue') return;
 
@@ -203,7 +222,7 @@ describe('C2-Downstream regression: appellation hard → soft demotion', () => {
         inferred: [],
       },
     };
-    const result = await runPreRouteFor(plan, { query: 'Italian wine' });
+    const result = await runPreRouteFor(plan, { query: 'Italian wine' }, LOW_APPELLATION_AVAILABILITY);
     expect(result.outcome).toBe('continue');
     if (result.outcome !== 'continue') return;
     expect(result.plan.constraints.hard.map((c) => c.attribute)).toEqual(['country']);
@@ -228,7 +247,7 @@ describe('C2-Downstream regression: appellation hard → soft demotion', () => {
     const result = await runPreRouteFor(planNoAppellation, {
       query: 'Barolo',
       filters: [agentAppellationFilter],
-    });
+    }, LOW_APPELLATION_AVAILABILITY);
     expect(result.outcome).toBe('continue');
     if (result.outcome !== 'continue') return;
     expect(result.plan.constraints.hard.some((c) => c.attribute === 'appellation')).toBe(false);

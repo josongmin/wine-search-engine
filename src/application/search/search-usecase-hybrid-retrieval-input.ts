@@ -8,9 +8,10 @@ import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-pla
 import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import {
-  expandSemanticStyleRetrievalTerms,
-  resolveSemanticStyleEvidenceProfile,
-} from '../../domain/query/service/semantic-style-query-terms.js';
+  isSemanticSoftIntentAttribute,
+  softIntentRetrievalPhrases,
+  shouldRunTypedRecommendationDiscoveryForSoftIntent,
+} from '../../domain/query/service/soft-intent-strategy-table.js';
 import { recipientProfileToRetrievalTerms } from '../../domain/query/service/recipient-situation-profile.js';
 import type { WineTypeValue } from '../../domain/query/model/wine-type-patterns.js';
 
@@ -148,12 +149,11 @@ function isSemanticRetrievalExpansionAttribute(attribute: string): boolean {
     || attribute === 'closure'
     || attribute === 'grape_family'
     || attribute === 'grape_primary'
-    || attribute === 'style'
     || attribute === 'flavor_profile'
     || attribute === 'certification'
     || attribute === 'pairing'
-    || attribute === 'occasion'
-    || attribute === 'recipient_profile';
+    || attribute === 'recipient_profile'
+    || isSemanticSoftIntentAttribute(attribute);
 }
 
 export function retrievalValueToPhrases(
@@ -161,14 +161,6 @@ export function retrievalValueToPhrases(
   value: unknown,
   wineTypeContext?: WineTypeValue,
 ): readonly string[] {
-  if (
-    attribute === 'gift_suitability'
-    || attribute === 'beginner_suitability'
-    || attribute === 'drinking_window'
-  ) {
-    return [];
-  }
-
   if (attribute === 'recipient_profile') {
     if (typeof value === 'string') {
       return recipientProfileToRetrievalTerms(value);
@@ -184,16 +176,9 @@ export function retrievalValueToPhrases(
     }
   }
 
-  if (attribute === 'style') {
-    if (typeof value === 'string') {
-      return expandSemanticStyleRetrievalTerms({ style: value, wineType: wineTypeContext });
-    }
-    if (Array.isArray(value)) {
-      return expandSemanticStyleRetrievalTerms({
-        styles: value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0),
-        wineType: wineTypeContext,
-      });
-    }
+  const softIntentPhrases = softIntentRetrievalPhrases(attribute, value, wineTypeContext);
+  if (softIntentPhrases !== undefined) {
+    return softIntentPhrases;
   }
 
   const phrase = retrievalValueToPhrase(value);
@@ -248,11 +233,9 @@ function hasGiftOccasionPreference(plan: QueryPlanV1): boolean {
   );
 }
 
-function hasRecommendationSemanticStylePreference(plan: QueryPlanV1): boolean {
+function hasTypedRecommendationSoftIntent(plan: QueryPlanV1): boolean {
   return [...plan.constraints.soft, ...plan.constraints.inferred].some((constraint) =>
-    constraint.attribute === 'style'
-    && constraintValueToStrings(constraint.value)
-      .some((value) => resolveSemanticStyleEvidenceProfile(value.trim().toLowerCase()) !== undefined),
+    shouldRunTypedRecommendationDiscoveryForSoftIntent(constraint.attribute, constraint.value),
   );
 }
 
@@ -266,7 +249,9 @@ export function shouldRunTypedRecommendationDiscovery(plan: QueryPlanV1): boolea
   if (hasExplicitWineTypeConstraint(plan.constraints.hard)) {
     return false;
   }
-  return hasGiftOccasionPreference(plan) || hasRecommendationSemanticStylePreference(plan) || hasClosurePreference(plan);
+  return hasGiftOccasionPreference(plan)
+    || hasTypedRecommendationSoftIntent(plan)
+    || hasClosurePreference(plan);
 }
 
 export function shouldRunAmbiguousEntityBranchExploration(plan: QueryPlanV1): boolean {

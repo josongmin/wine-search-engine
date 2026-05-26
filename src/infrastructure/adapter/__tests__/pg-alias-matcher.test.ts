@@ -141,6 +141,23 @@ describe('PgAliasMatcher', () => {
     expect(pool.queries).toHaveLength(1);
   });
 
+  it('rejects whole-token leading expansion against multi-token aliases', async () => {
+    const pool = new MockPool([
+      [
+        {
+          entity_id: 'entity-opus-one',
+          surface_form: 'Opus One',
+          normalized_value: 'opus one',
+          confidence: 0.92,
+        },
+      ],
+    ]);
+    const matcher = new PgAliasMatcher(pool as never);
+
+    await expect(matcher.findMatches('opus')).resolves.toEqual([]);
+    expect(pool.queries).toHaveLength(1);
+  });
+
   it('falls back to compact char-level fuzzy recall for near-miss noisy aliases', async () => {
     const pool = new MockPool([
       [],

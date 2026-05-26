@@ -12,6 +12,8 @@ import {
 import {
   buildAliasPrefixTerms,
   isEligiblePrefixQuery,
+  isDisallowedWholeLeadingTokenExpansion,
+  matchesAliasPrefixTerm,
 } from '../../domain/query/service/alias-prefix-terms.js';
 import {
   resolveAliasMatchConfidence,
@@ -441,12 +443,13 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
           token.length >= MIN_WHOLE_TOKEN_LOOKUP_LENGTH
           && !token.includes(' ')
           && tokenizeForLookup(alias.normalizedValue).includes(token)
+          && !isDisallowedWholeLeadingTokenExpansion(token, alias.normalizedValue)
         ));
       const hasTransliteratedPrefixMatch = transliteratedPrefixTokens.some((token) =>
-        prefixTerms.some((term) => term.startsWith(token))
+        prefixTerms.some((term) => matchesAliasPrefixTerm(token, term))
       );
       const hasPrefixMatch = prefixTokens.some((token) =>
-        prefixTerms.some((term) => term.startsWith(token))
+        prefixTerms.some((term) => matchesAliasPrefixTerm(token, term))
       );
       // Phonetic *promotion* accepts EITHER the legacy compact-vowel
       // skeleton OR a Double Metaphone keyset overlap. Decoupling

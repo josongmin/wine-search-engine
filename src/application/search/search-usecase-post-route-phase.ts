@@ -62,7 +62,10 @@ import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js'
 import type { DeterminismFingerprintParams } from '../../domain/shared/utils/determinism-fingerprint.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import { RRF_DEFAULT_K } from '../../domain/shared/utils/rrf.js';
-import { LIVE_RETRIEVAL_POLICY_VERSION } from '../../domain/retrieval/service/live-retrieval-policy-registry.js';
+import {
+  LIVE_RETRIEVAL_POLICY_CONFIG_HASH,
+  LIVE_RETRIEVAL_POLICY_VERSION,
+} from '../../domain/retrieval/service/live-retrieval-policy-registry.js';
 import {
   getFusionConfig,
   mapDomainQueryClassToFusionQueryClass,
@@ -75,6 +78,7 @@ import { pipelineDebug } from '../../domain/observability/request-pipeline-debug
 import { logSearchEvent } from '../../domain/observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import { SOFT_INTENT_STRATEGY_VERSION } from '../../domain/query/service/soft-intent-strategy-table.js';
 import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
@@ -603,6 +607,8 @@ function buildDeterminismFingerprintParams(
   const modeWeights = getModeWeights(effectiveRetrievalMode);
   const fusionConfigHash = deterministicHash(
     LIVE_RETRIEVAL_POLICY_VERSION,
+    LIVE_RETRIEVAL_POLICY_CONFIG_HASH,
+    SOFT_INTENT_STRATEGY_VERSION,
     String(RRF_DEFAULT_K),
     fusionQueryClass,
     String(fusionConfig.rrfK),

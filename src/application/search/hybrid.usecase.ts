@@ -37,6 +37,7 @@ import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { createStageTimer } from '../../domain/shared/stage-timer.js';
+import type { SearchSnapshotFieldAvailability } from '../../domain/shared/types/search-field-availability.js';
 /**
  * Dependencies injected into the HybridUseCase.
  */
@@ -57,6 +58,7 @@ interface HybridUseCaseDeps {
   readonly responseBuilder: ResponseBuilderPort;
   readonly snapshotVersions?: SnapshotVersions | undefined;
   readonly drinkingWindow?: DrinkingWindowUseCasePort | undefined;
+  readonly fieldAvailability?: SearchSnapshotFieldAvailability | undefined;
   /** Shared public query entry guard: Layer 1 sanitizer is required. */
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
@@ -115,6 +117,7 @@ export class HybridUseCase {
       requestId,
       startTime,
       snapshotVersions: this.deps.snapshotVersions,
+      fieldAvailability: this.deps.fieldAvailability,
       securityGateDeps: {
         querySanitizer: this.deps.querySanitizer,
         injectionJudge: this.deps.injectionJudge,

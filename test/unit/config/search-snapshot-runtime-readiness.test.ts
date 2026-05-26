@@ -47,6 +47,14 @@ const CANONICAL_QUALITY = {
   experimentalInputsPresent: false,
 } as const;
 
+const FIELD_AVAILABILITY = {
+  appellation: {
+    populatedDocCount: 8,
+    totalDocCount: 10,
+    populatedDocRatio: 0.8,
+  },
+} as const;
+
 describe('search snapshot runtime readiness', () => {
   beforeEach(() => {
     mockVerifySearchSnapshotRuntimeStateLive.mockReset();
@@ -82,6 +90,7 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
         activeLtrModels: 'ltr-hash',
       },
+      fieldAvailability: FIELD_AVAILABILITY,
       quality: CANONICAL_QUALITY,
     }));
 
@@ -116,6 +125,7 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
         activeLtrModels: 'ltr-hash',
       },
+      fieldAvailability: FIELD_AVAILABILITY,
       quality: CANONICAL_QUALITY,
     }));
 
@@ -150,6 +160,7 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: hashRuntimeNlMappings(nlMappingsPayload),
         activeLtrModels: 'ltr-hash',
       },
+      fieldAvailability: FIELD_AVAILABILITY,
       quality: CANONICAL_QUALITY,
     }));
 
@@ -185,6 +196,7 @@ describe('search snapshot runtime readiness', () => {
         nlMappings: 'mismatched-hash',
         activeLtrModels: 'ltr-hash',
       },
+      fieldAvailability: FIELD_AVAILABILITY,
       quality: CANONICAL_QUALITY,
     }));
 
