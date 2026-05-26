@@ -25,11 +25,9 @@
 
 import { bootstrapLogger } from '@shared/bootstrap-logger.js';
 import { abortError, isAbortError, throwIfAborted } from '@shared/cooperative-abort.js';
-import type { ComparisonSearchResponse } from '@domain/response/model/comparison-response.js';
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import { withTimeout } from '../agent/agent-tool-execution-support.js';
 import type {
-  ComparisonUseCaseInput,
   ExecutionPlan,
   MultiStepHandoff,
   PlanRejectReason,
@@ -60,21 +58,12 @@ export interface SearchUseCasePort {
   ): Promise<SearchResponseV1>;
 }
 
-export interface ComparisonUseCasePort {
-  execute(
-    input: ComparisonUseCaseInput,
-    requestId: string,
-    options?: { readonly abortSignal?: AbortSignal | undefined },
-  ): Promise<ComparisonSearchResponse>;
-}
-
 // ---------------------------------------------------------------------------
 // Outcome — discriminated union
 // ---------------------------------------------------------------------------
 
 export type ExecutionOutcome =
   | { readonly kind: 'search-result'; readonly result: SearchResponseV1 }
-  | { readonly kind: 'comparison-result'; readonly result: ComparisonSearchResponse }
   | { readonly kind: 'parallel-results'; readonly results: readonly SearchResponseV1[] }
   | { readonly kind: 'multi-step-required'; readonly handoff: MultiStepHandoff }
   | { readonly kind: 'rejected'; readonly reason: PlanRejectReason }
@@ -86,7 +75,6 @@ export type ExecutionOutcome =
 
 interface ExecutionRunnerDeps {
   readonly searchUseCase: SearchUseCasePort;
-  readonly comparisonUseCase?: ComparisonUseCasePort | undefined;
 }
 
 interface ExecutionRunnerContext {
@@ -110,23 +98,6 @@ export class ExecutionRunner {
     try {
       throwIfAborted(ctx.abortSignal, 'Execution runner aborted before start');
 
-      // F-FailClosed: when the operator has disabled the tool that this
-      // plan-kind depends on, fall back to a single-search degradation
-      // (when possible) or a 'rejected' outcome. The disabled set is
-      // sourced once per process at module load — same env var the
-      // mini-loop dispatcher reads.
-      if (planRequiresDisabledTool(plan)) {
-        bootstrapLogger.warn(
-          { ...logCtx, planKind: plan.kind },
-          '[ExecutionRunner] plan requires a disabled tool — degrading via single-search fallback or rejecting',
-        );
-        const degraded = degradeDisabledPlan(plan);
-        if (degraded !== null) {
-          return await this.runSingleSearch(degraded, ctx, perStepTimeoutMs, logCtx);
-        }
-        return { kind: 'rejected', reason: 'tool_unavailable' };
-      }
-
       // Exhaustive switch on `plan.kind` — discriminated against the SSoT
       // `ExecutionPlanKind` (CLAUDE.md rule 30, `execution-plan-schemas.ts`).
       // The `default: never` assertion fails at `tsc` if a new plan kind is
@@ -136,8 +107,6 @@ export class ExecutionRunner {
           return await this.runSingleSearch(plan.searchInput, ctx, perStepTimeoutMs, logCtx);
         case 'parallel-search':
           return await this.runParallelSearch(plan.searches, ctx, perStepTimeoutMs, logCtx);
-        case 'comparison':
-          return await this.runComparison(plan.comparisonInput, ctx, perStepTimeoutMs, logCtx);
         case 'multi-step':
           bootstrapLogger.info(logCtx, '[ExecutionRunner] handoff to MiniLoop');
           return { kind: 'multi-step-required', handoff: plan.handoff };
@@ -203,26 +172,6 @@ export class ExecutionRunner {
     return { kind: 'parallel-results', results };
   }
 
-  private async runComparison(
-    input: ComparisonUseCaseInput,
-    ctx: ExecutionRunnerContext,
-    perStepTimeoutMs: number,
-    logCtx: { readonly requestId: string; readonly planKind: ExecutionPlan['kind'] },
-  ): Promise<ExecutionOutcome> {
-    if (this.deps.comparisonUseCase === undefined) {
-      throw new Error('comparisonUseCase port not wired');
-    }
-    const comparisonUseCase = this.deps.comparisonUseCase;
-    const result = await this.runWithStepTimeout(
-      (signal) => comparisonUseCase.execute(input, ctx.requestId, { abortSignal: signal }),
-      ctx,
-      perStepTimeoutMs,
-      'comparison',
-    );
-    bootstrapLogger.info(logCtx, '[ExecutionRunner] comparison done');
-    return { kind: 'comparison-result', result };
-  }
-
   // -------------------------------------------------------------------------
   // Per-step timeout / abort propagation
   //
@@ -277,42 +226,3 @@ export class ExecutionRunner {
   }
 }
 
-// ---------------------------------------------------------------------------
-// F-FailClosed helpers — env-gated, module-scope.
-// ---------------------------------------------------------------------------
-
-/** Env-gated disabled-tools set, read once per process. Mirrors mini-loop. */
-const RUNNER_DISABLED_TOOLS: ReadonlySet<string> = new Set(
-  (process.env['WINE_SEARCH_DISABLED_TOOLS'] ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0),
-);
-
-/** Plan-kind → underlying tool the disabled-set should consult. */
-function planRequiresDisabledTool(plan: ExecutionPlan): boolean {
-  if (RUNNER_DISABLED_TOOLS.size === 0) return false;
-  switch (plan.kind) {
-    case 'comparison':
-      return RUNNER_DISABLED_TOOLS.has('compare_wines');
-    default:
-      return false;
-  }
-}
-
-/**
- * For plan kinds whose dependency is disabled, emit a degraded
- * `single-search` plan that still has a chance of producing a useful
- * answer (the user's query intent is captured in the underlying
- * `searchInput`). Returns `null` for `comparison`, where there is no
- * single search query to fall back to — the orchestrator must surface
- * the `tool_unavailable` reject directly.
- */
-function degradeDisabledPlan(plan: ExecutionPlan): SearchUseCaseInput | null {
-  switch (plan.kind) {
-    case 'comparison':
-      return null;
-    default:
-      return null;
-  }
-}

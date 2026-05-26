@@ -50,7 +50,6 @@ import { MiniLoopRunner } from '../application/wine-search/mini-loop.js';
 import { buildMiniLoopToolBundle } from '../application/wine-search/mini-loop-tool-bundle.js';
 import { SynthesisRunner } from '../application/wine-search/synthesis-runner.js';
 import { SearchUseCaseAdapter } from '../application/wine-search/adapters/search-use-case-adapter.js';
-import { ComparisonUseCaseAdapter } from '../application/wine-search/adapters/comparison-use-case-adapter.js';
 import {
   buildSharedStructuredLlm,
   resolveMultiQueryRewriteModel,
@@ -62,7 +61,6 @@ import type { UseCaseExtensions } from './container-usecases.js';
 import { RedisToolResultCache } from '../infrastructure/cache/redis-tool-result-cache.js';
 import type { ToolResultCachePort } from '../application/wine-search/port/tool-result-cache.port.js';
 import type { SearchUseCase } from '../application/search/search.usecase.js';
-import type { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { bootstrapLogger } from '../domain/shared/bootstrap-logger.js';
 import { WineSearchOrchestrator as WineSearchOrchestratorImpl } from '../application/wine-search/wine-search-orchestrator.js';
 import type { WineSearchOrchestratorContract as WineSearchOrchestrator } from '../application/wine-search/wine-search-orchestrator.js';
@@ -160,10 +158,7 @@ function buildWineSearchContainerServices(
   //      (see container-usecases.ts), so the structural cast at the seam is
   //      safe and audit-traceable.
   const searchUseCaseConcrete = features.searchUseCase as unknown as SearchUseCase;
-  const decomposedSearchConcrete =
-    features.decomposedSearchUseCase as unknown as DecomposedSearchUseCase;
   const searchAdapter = new SearchUseCaseAdapter(searchUseCaseConcrete);
-  const comparisonAdapter = new ComparisonUseCaseAdapter(decomposedSearchConcrete);
 
   // ── 3) Component construction. Logger derives one child per component so
   //      structured logs are filterable by component name.
@@ -178,7 +173,6 @@ function buildWineSearchContainerServices(
   const router = new DeterministicRouter({ now: () => new Date() });
   const executionRunner = new ExecutionRunner({
     searchUseCase: searchAdapter,
-    comparisonUseCase: comparisonAdapter,
   });
   // ── Tool-result cache. Wired ONLY when the env flag is on (default ON);
   //    runner-side enforcement also reads `WINE_SEARCH_TOOL_CACHE_ENABLED`,
@@ -218,7 +212,6 @@ function buildWineSearchContainerServices(
   //       (CLAUDE.md rule 30 — SSoT for tool ports).
   const miniLoopToolBundle = buildMiniLoopToolBundle({
     searchUseCase: searchAdapter,
-    comparisonUseCase: comparisonAdapter,
   });
 
   // ── 4b) Comparison LLM fallback. One-shot grounded synthesis for stalled

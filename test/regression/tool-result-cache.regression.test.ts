@@ -36,7 +36,6 @@ import type {
   ToolDefinition,
   ToolUseCall,
 } from '../../src/domain/ai/port/structured-llm.port.js';
-import type { ComparisonSearchResponse } from '../../src/domain/response/model/comparison-response.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import { MiniLoopRunner } from '../../src/application/wine-search/mini-loop.js';
 import {
@@ -50,7 +49,6 @@ import {
   type MiniLoopToolPorts,
 } from '../../src/application/wine-search/mini-loop-schemas.js';
 import type {
-  ComparisonUseCasePort,
   SearchUseCasePort,
 } from '../../src/application/wine-search/execution-runner.js';
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
@@ -119,18 +117,9 @@ function makeSearchPort(
   };
 }
 
-function makeComparisonPort(): ComparisonUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(() => Promise.resolve({
-    queryType: 'comparison',
-    meta: { generatedAt: new Date().toISOString() } as unknown as ComparisonSearchResponse['meta'],
-  } as unknown as ComparisonSearchResponse));
-  return { executeMock, execute: (input, reqId, _opts) => executeMock(input, reqId) };
-}
-
 function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
-    comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
   };
 }
 

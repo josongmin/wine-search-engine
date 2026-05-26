@@ -134,53 +134,7 @@ describe('DeterministicRouter — Rule 1: analysis-rejected guard', () => {
   });
 });
 
-describe('DeterministicRouter — Rule 2: comparison decomposition', () => {
-  it('Bordeaux 2015 vs Burgundy 2018 → comparison', () => {
-    const router = makeRouter();
-    const plan = router.route(
-      baseAnalysis({
-        intent: 'compare',
-        preservedSurface: 'Bordeaux 2015 vs Burgundy 2018',
-        expectedMultiStep: true,
-        decomposition: {
-          kind: 'comparison',
-          legs: [
-            { surface: 'Bordeaux 2015', constraints: [makeConstraint('region', 'Bordeaux'), makeConstraint('vintage', 2015)] },
-            { surface: 'Burgundy 2018', constraints: [makeConstraint('region', 'Burgundy'), makeConstraint('vintage', 2018)] },
-          ],
-        },
-      }),
-    );
-    expect(plan.kind).toBe('comparison');
-    if (plan.kind !== 'comparison') return;
-    expect(plan.comparisonInput.legs).toHaveLength(2);
-    expect(plan.comparisonInput.legs[0].surface).toBe('Bordeaux 2015');
-    expect(plan.comparisonInput.intent).toBe('compare');
-    expect(ExecutionPlanSchema.parse(plan)).toBeTruthy();
-  });
-
-  it('Korean comparison 보르도 2015 vs 부르고뉴 2018 → comparison', () => {
-    const router = makeRouter();
-    const plan = router.route(
-      baseAnalysis({
-        intent: 'compare',
-        preservedSurface: '보르도 2015 vs 부르고뉴 2018',
-        hangulDominant: true,
-        expectedMultiStep: true,
-        decomposition: {
-          kind: 'comparison',
-          legs: [
-            { surface: '보르도 2015', constraints: [makeConstraint('region', '보르도')] },
-            { surface: '부르고뉴 2018', constraints: [makeConstraint('region', '부르고뉴')] },
-          ],
-        },
-      }),
-    );
-    expect(plan.kind).toBe('comparison');
-  });
-});
-
-describe('DeterministicRouter — Rule 3: parallel-slot decomposition', () => {
+describe('DeterministicRouter — Rule 2: parallel-slot decomposition', () => {
   it('appetizer + main → parallel-search with 2 slots', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -227,7 +181,7 @@ describe('DeterministicRouter — Rule 3: parallel-slot decomposition', () => {
   });
 });
 
-describe('DeterministicRouter — Rule 4: multi-step handoff', () => {
+describe('DeterministicRouter — Rule 3: multi-step handoff', () => {
   it('expectedMultiStep=true with no specific decomposition → multi-step', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -260,7 +214,7 @@ describe('DeterministicRouter — Rule 4: multi-step handoff', () => {
   });
 });
 
-describe('DeterministicRouter — Rule 5: single-search (default)', () => {
+describe('DeterministicRouter — Rule 4: single-search (default)', () => {
   it('Korean "부르고뉴 피노누아 추천" → single-search', () => {
     const router = makeRouter();
     const plan = router.route(
@@ -327,17 +281,6 @@ describe('DeterministicRouter — determinism', () => {
     const router = makeRouter();
     const samples: WineSearchAnalysis[] = [
       baseAnalysis({ intent: 'unknown' }),
-      baseAnalysis({
-        intent: 'compare',
-        expectedMultiStep: true,
-        decomposition: {
-          kind: 'comparison',
-          legs: [
-            { surface: 'A', constraints: [] },
-            { surface: 'B', constraints: [] },
-          ],
-        },
-      }),
       baseAnalysis({
         intent: 'search',
         decomposition: {

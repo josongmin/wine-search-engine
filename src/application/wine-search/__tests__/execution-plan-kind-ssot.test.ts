@@ -41,21 +41,20 @@ const PACKAGE_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // ---------------------------------------------------------------------------
 
 describe('EXECUTION_PLAN_KINDS — SSoT tuple shape', () => {
-  it('contains all 5 known plan kinds, in canonical order', () => {
+  it('contains all 4 known plan kinds, in canonical order', () => {
     // Order matters: the router rules table in `deterministic-router.ts`
     // and the dispatch switch in the orchestrator both rely on the
     // `'single-search'`-first convention (happy path = 80%).
     expect([...EXECUTION_PLAN_KINDS]).toEqual([
       'single-search',
       'parallel-search',
-      'comparison',
       'multi-step',
       'reject',
     ]);
   });
 
-  it('has exactly 5 members (catches accidental additions/removals)', () => {
-    expect(EXECUTION_PLAN_KINDS.length).toBe(5);
+  it('has exactly 4 members (catches accidental additions/removals)', () => {
+    expect(EXECUTION_PLAN_KINDS.length).toBe(4);
   });
 
   it('every tuple member is non-empty and lower-kebab-case', () => {
@@ -93,18 +92,6 @@ describe('EXECUTION_PLAN_KINDS — Zod schema parity', () => {
         return {
           kind,
           searches: [{ query: 'wine A' }, { query: 'wine B' }],
-        };
-      case 'comparison':
-        return {
-          kind,
-          comparisonInput: {
-            originalQuery: 'A vs B',
-            intent: 'compare',
-            legs: [
-              { surface: 'A', constraints: [] },
-              { surface: 'B', constraints: [] },
-            ],
-          },
         };
       case 'multi-step':
         return {

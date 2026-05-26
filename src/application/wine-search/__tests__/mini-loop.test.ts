@@ -33,7 +33,6 @@ import type {
   ToolUseCall,
 } from '@domain/ai/port/structured-llm.port.js';
 import { StructuredLlmTimeoutError } from '@domain/ai/port/structured-llm.port.js';
-import type { ComparisonSearchResponse } from '@domain/response/model/comparison-response.js';
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import {
   computeNextDirective,
@@ -54,7 +53,6 @@ import {
   type MiniLoopToolPorts,
 } from '../mini-loop-schemas.js';
 import type {
-  ComparisonUseCasePort,
   SearchUseCasePort,
 } from '../execution-runner.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
@@ -116,13 +114,6 @@ function makeSearchResponse(entityIds: readonly string[]): SearchResponseV1 {
   };
 }
 
-function makeComparisonResponse(): ComparisonSearchResponse {
-  return {
-    queryType: 'comparison',
-    meta: { generatedAt: new Date().toISOString() } as unknown as ComparisonSearchResponse['meta'],
-  } as unknown as ComparisonSearchResponse;
-}
-
 function makeSearchPort(
   impl?: (input: unknown, reqId: string) => Promise<SearchResponseV1>,
 ): SearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
@@ -133,20 +124,9 @@ function makeSearchPort(
   };
 }
 
-function makeComparisonPort(
-  impl?: (input: unknown, reqId: string) => Promise<ComparisonSearchResponse>,
-): ComparisonUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
-  return {
-    executeMock,
-    execute: (input, reqId, _opts) => executeMock(input, reqId),
-  };
-}
-
 function makeToolPorts(overrides?: Partial<MiniLoopToolPorts>): MiniLoopToolPorts {
   return {
     searchUseCase: overrides?.searchUseCase ?? makeSearchPort(),
-    comparisonUseCase: overrides?.comparisonUseCase ?? makeComparisonPort(),
   };
 }
 

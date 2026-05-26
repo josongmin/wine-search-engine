@@ -19,7 +19,6 @@ import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-s
 import type { MiniLoopToolPorts } from '../mini-loop-schemas.js';
 import {
   buildMiniLoopToolBundle,
-  COMPARE_WINES_TOOL_DEF,
   MINI_LOOP_TOOL_NAMES,
   SEARCH_WINES_TOOL_DEF,
 } from '../mini-loop-tool-bundle.js';
@@ -34,7 +33,6 @@ import {
 function makeStubToolPorts(): MiniLoopToolPorts {
   return {
     searchUseCase: { execute: async () => { throw new Error('unused in test'); } },
-    comparisonUseCase: { execute: async () => { throw new Error('unused in test'); } },
   } as MiniLoopToolPorts;
 }
 
@@ -122,46 +120,6 @@ describe('SEARCH_WINES_TOOL_DEF', () => {
   });
 });
 
-describe('COMPARE_WINES_TOOL_DEF', () => {
-  it('has name "compare_wines" and a Zod inputSchema', () => {
-    expect(COMPARE_WINES_TOOL_DEF.name).toBe('compare_wines');
-    expect(COMPARE_WINES_TOOL_DEF.inputSchema).toBeInstanceOf(z.ZodType);
-  });
-
-  it('requires both query_a AND query_b', () => {
-    expect(
-      COMPARE_WINES_TOOL_DEF.inputSchema.safeParse({ query_a: 'A', query_b: 'B' }).success,
-    ).toBe(true);
-    expect(
-      COMPARE_WINES_TOOL_DEF.inputSchema.safeParse({ query_a: 'A' }).success,
-    ).toBe(false);
-    expect(
-      COMPARE_WINES_TOOL_DEF.inputSchema.safeParse({ query_b: 'B' }).success,
-    ).toBe(false);
-    expect(
-      COMPARE_WINES_TOOL_DEF.inputSchema.safeParse({}).success,
-    ).toBe(false);
-  });
-
-  it('accepts Korean queries on both sides', () => {
-    const parsed = COMPARE_WINES_TOOL_DEF.inputSchema.safeParse({
-      query_a: '샤또 마고 2015',
-      query_b: '오퍼스 원 2018',
-    });
-    expect(parsed.success).toBe(true);
-  });
-
-  it('is permissive — extra LLM-emitted keys ignored (rule 10)', () => {
-    const parsed = COMPARE_WINES_TOOL_DEF.inputSchema.safeParse({
-      query_a: 'wine 1',
-      query_b: 'wine 2',
-      _reasoning: 'side-by-side flavor profile',
-      stopReason: 'tool_use',
-    });
-    expect(parsed.success).toBe(true);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Cross-cutting: no .strict() anywhere on the input schemas (rule 10)
 // ---------------------------------------------------------------------------
@@ -169,7 +127,6 @@ describe('COMPARE_WINES_TOOL_DEF', () => {
 describe('CLAUDE.md rule 10 — LLM tool input schemas MUST NOT be strict', () => {
   it.each([
     ['search_wines', SEARCH_WINES_TOOL_DEF, { query: 'q' }],
-    ['compare_wines', COMPARE_WINES_TOOL_DEF, { query_a: 'a', query_b: 'b' }],
   ])('%s schema accepts a payload with an extra unknown key', (_name, def, baseInput) => {
     const parsed = def.inputSchema.safeParse({
       ...baseInput,

@@ -269,7 +269,6 @@ const DegradedReasonSchema = z.enum([
 const PlanKindSchema = z.enum([
   'single-search',
   'parallel-search',
-  'comparison',
   'multi-step',
   'reject',
 ]);

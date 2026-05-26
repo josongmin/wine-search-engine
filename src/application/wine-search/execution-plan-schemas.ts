@@ -22,7 +22,6 @@
 import { z } from 'zod';
 import {
   AnalysisContractSchema,
-  ComparisonLegSchema,
   NormalizedConstraintSchema,
   ParallelSlotSchema,
   RecommendedBudgetSchema,
@@ -94,31 +93,6 @@ export const SearchUseCaseInputSchema = z.object({
 }).strict();
 export type SearchUseCaseInput = z.infer<typeof SearchUseCaseInputSchema>;
 
-// ---------------------------------------------------------------------------
-// ComparisonUseCaseInput — feeds DecomposedSearchUseCase.execute(...) via the
-// runner. We expose only the structurally minimal fields (two legs +
-// optional shared filters/preferences) and let the runner translate to the
-// underlying call signature.
-// ---------------------------------------------------------------------------
-
-const ComparisonIntentSchema = z.enum([
-  'compare',
-  'recommend_one',
-  'list_both',
-]);
-
-export const ComparisonUseCaseInputSchema = z.object({
-  originalQuery: z.string().min(1).max(WINE_SEARCH_MAX_QUERY_CHARS),
-  intent: ComparisonIntentSchema,
-  legs: z.tuple([ComparisonLegSchema, ComparisonLegSchema]),
-  sharedFilters: z.array(NormalizedConstraintSchema)
-    .max(WINE_SEARCH_MAX_CONSTRAINTS)
-    .optional(),
-  sharedPreferences: z.array(NormalizedConstraintSchema)
-    .max(WINE_SEARCH_MAX_CONSTRAINTS)
-    .optional(),
-}).strict();
-export type ComparisonUseCaseInput = z.infer<typeof ComparisonUseCaseInputSchema>;
 
 // ---------------------------------------------------------------------------
 // Multi-step handoff — describes a plan we hand off to the MiniLoop
@@ -177,7 +151,6 @@ export type PlanRejectReason = z.infer<typeof PlanRejectReasonSchema>;
 export const EXECUTION_PLAN_KINDS = [
   'single-search',
   'parallel-search',
-  'comparison',
   'multi-step',
   'reject',
 ] as const;
@@ -201,10 +174,6 @@ export const ExecutionPlanSchema = z.discriminatedUnion('kind', [
       .min(DETERMINISTIC_ROUTER_MIN_SLOTS)
       .max(DETERMINISTIC_ROUTER_MAX_SLOTS)
       .optional(),
-  }).strict(),
-  z.object({
-    kind: z.literal('comparison'),
-    comparisonInput: ComparisonUseCaseInputSchema,
   }).strict(),
   z.object({
     kind: z.literal('multi-step'),

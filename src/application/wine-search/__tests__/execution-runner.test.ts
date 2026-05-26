@@ -7,15 +7,12 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { ComparisonSearchResponse } from '@domain/response/model/comparison-response.js';
 import type { SearchResponseV1 } from '@domain/response/model/search-response.js';
 import {
   ExecutionRunner,
-  type ComparisonUseCasePort,
   type SearchUseCasePort,
 } from '../execution-runner.js';
 import type {
-  ComparisonUseCaseInput,
   ExecutionPlan,
   SearchUseCaseInput,
 } from '../execution-plan-schemas.js';
@@ -37,13 +34,6 @@ function makeSearchResponse(entityIds: readonly string[] = []): SearchResponseV1
   };
 }
 
-function makeComparisonResponse(): ComparisonSearchResponse {
-  return {
-    queryType: 'comparison',
-    meta: { generatedAt: new Date().toISOString() } as unknown as ComparisonSearchResponse['meta'],
-  } as unknown as ComparisonSearchResponse;
-}
-
 // ---------------------------------------------------------------------------
 // Stub ports
 // ---------------------------------------------------------------------------
@@ -56,17 +46,6 @@ function makeSearchPort(
   ) => Promise<SearchResponseV1>,
 ): SearchUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
   const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeSearchResponse(['e1', 'e2']))));
-  return { executeMock, execute: executeMock };
-}
-
-function makeComparisonPort(
-  impl?: (
-    input: ComparisonUseCaseInput,
-    reqId: string,
-    opts?: { readonly abortSignal?: AbortSignal | undefined },
-  ) => Promise<ComparisonSearchResponse>,
-): ComparisonUseCasePort & { readonly executeMock: ReturnType<typeof vi.fn> } {
-  const executeMock = vi.fn(impl ?? (() => Promise.resolve(makeComparisonResponse())));
   return { executeMock, execute: executeMock };
 }
 
@@ -86,47 +65,6 @@ describe('ExecutionRunner — plan-kind dispatch', () => {
     expect(out.kind).toBe('search-result');
     expect(search.executeMock).toHaveBeenCalledTimes(1);
     expect(search.executeMock.mock.calls[0]?.[0]).toEqual({ query: '와인' });
-  });
-
-  it('comparison → invokes comparisonUseCase once', async () => {
-    const search = makeSearchPort();
-    const compare = makeComparisonPort();
-    const runner = new ExecutionRunner({ searchUseCase: search, comparisonUseCase: compare });
-    const plan: ExecutionPlan = {
-      kind: 'comparison',
-      comparisonInput: {
-        originalQuery: 'A vs B',
-        intent: 'compare',
-        legs: [
-          { surface: 'A', constraints: [] },
-          { surface: 'B', constraints: [] },
-        ],
-      },
-    };
-    const out = await runner.run(plan, { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS });
-    expect(out.kind).toBe('comparison-result');
-    expect(compare.executeMock).toHaveBeenCalledTimes(1);
-    expect(search.executeMock).not.toHaveBeenCalled();
-  });
-
-  it('comparison plan without wired port → error outcome', async () => {
-    const search = makeSearchPort();
-    const runner = new ExecutionRunner({ searchUseCase: search });
-    const plan: ExecutionPlan = {
-      kind: 'comparison',
-      comparisonInput: {
-        originalQuery: 'A vs B',
-        intent: 'compare',
-        legs: [
-          { surface: 'A', constraints: [] },
-          { surface: 'B', constraints: [] },
-        ],
-      },
-    };
-    const out = await runner.run(plan, { requestId: REQUEST_ID, perStepTimeoutMs: PER_STEP_TIMEOUT_MS });
-    expect(out.kind).toBe('error');
-    if (out.kind !== 'error') return;
-    expect(out.cause.message).toMatch(/comparisonUseCase port not wired/);
   });
 
   it('reject plan → rejected outcome, no use case called', async () => {

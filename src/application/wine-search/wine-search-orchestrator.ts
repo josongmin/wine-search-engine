@@ -54,7 +54,6 @@ import { containsHangul } from '@shared/utils/hangul.js';
 
 import type { DeterministicRouter } from './deterministic-router.js';
 import type {
-  ComparisonUseCaseInput,
   ExecutionPlan,
   SearchUseCaseInput,
 } from './execution-plan-schemas.js';
@@ -186,22 +185,6 @@ export interface OrchestratorMiniLoopToolBundle {
   readonly toolPorts: MiniLoopToolPorts;
 }
 
-/**
- * Optional one-shot LLM fallback for comparison_nested queries that
- * exhaust the mini-loop step budget. Injected as a pure function so the
- * orchestrator doesn't depend on the structured-LLM port directly — the
- * fallback runner closes over its own port instance at construction.
- *
- * When `undefined`, the stall-detection branch is a no-op (the synthesizer
- * runs as before). When wired, the orchestrator calls it after every
- * dispatch whose `terminationReason` matches one of the documented stall
- * symptoms (see {@link COMPARISON_FALLBACK_STALL_REASONS}) for a query
- * whose analysis intent is `'compare'`.
- *
- * SSoT: the fallback runner is implemented in
- * `application/wine-search/comparison-llm-fallback.ts`; the orchestrator
- * only knows the structural function signature.
- */
 interface WineSearchOrchestratorDeps {
   readonly queryAnalyzer: QueryAnalyzerService;
   readonly router: DeterministicRouter;
@@ -212,11 +195,6 @@ interface WineSearchOrchestratorDeps {
   readonly clock?: OrchestratorClock | undefined;
   readonly defaultConfig?: Partial<AgentConfig> | undefined;
   readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle | undefined;
-  /**
-   * Optional one-shot LLM fallback for stalled comparison plans. When
-   * absent, the orchestrator never invokes the fallback path — the
-   * standard synthesizer ladder runs unchanged.
-   */
 }
 
 export interface WineSearchInput {
@@ -629,7 +607,6 @@ export class WineSearchOrchestrator {
         return this.dispatchMultiStep(plan, analysis, input, state, baseConfig);
       case 'single-search':
       case 'parallel-search':
-      case 'comparison':
         return this.dispatchRunner(plan, input, state, baseConfig);
       default: {
         // Exhaustiveness check: if `EXECUTION_PLAN_KINDS` grows a new
@@ -682,7 +659,6 @@ export class WineSearchOrchestrator {
   ): DispatchOutcome {
     switch (outcome.kind) {
       case 'search-result':
-      case 'comparison-result':
       case 'parallel-results': {
         const { toolCalls, observations } = describeExecutionOutcome(outcome, plan);
         // Project the executor outcome into typed ToolOutcome records so the
@@ -868,14 +844,6 @@ export class WineSearchOrchestrator {
     state.terminationReason = transitionTerminationReason(state.terminationReason, 'fallback');
     return { kind: 'ok', terminationReason: 'fallback', policyBlocked: false };
   }
-
-  // -------------------------------------------------------------------------
-  // Comparison LLM fallback — one-shot grounded synthesis for stalled
-  // comparison plans. Returns `undefined` when the fallback should NOT fire
-  // (wrong intent, not stalled, missing dep, declined for lack of candidates,
-  // or LLM failure). Returns a finalized {@link WineSearchResult} when the
-  // fallback DID produce a verdict — the caller short-circuits.
-  // -------------------------------------------------------------------------
 
   // -------------------------------------------------------------------------
   // Admit gate (port of `admitAgentRequest`) — no QuerySanitizer here; the
@@ -1341,8 +1309,6 @@ function projectExecutionOutcomeAsToolOutcomes(
   switch (outcome.kind) {
     case 'search-result':
       return [makeToolOutcome('search_wines', outcome.result, now)];
-    case 'comparison-result':
-      return [makeToolOutcome('compare_wines', outcome.result, now)];
     case 'parallel-results':
       return outcome.results.map((r) => makeToolOutcome('search_wines', r, now));
   }
@@ -1377,8 +1343,6 @@ function describeExecutionOutcome(
       return planSearchToolCallSummary(plan);
     case 'parallel-results':
       return planParallelToolCallSummary(plan);
-    case 'comparison-result':
-      return planComparisonToolCallSummary(plan);
   }
 }
 
@@ -1404,15 +1368,6 @@ function planParallelToolCallSummary(
   };
 }
 
-function planComparisonToolCallSummary(
-  plan: ExecutionPlan,
-): ExecutionStepShape {
-  if (plan.kind !== 'comparison') return {};
-  return {
-    toolCalls: [{ name: 'compare_wines', arguments: sampleComparisonInput(plan.comparisonInput) }],
-  };
-}
-
 function sampleSearchInput(input: SearchUseCaseInput): Record<string, unknown> {
   // Keep the trace lean — only the discriminating fields.
   return {
@@ -1420,13 +1375,6 @@ function sampleSearchInput(input: SearchUseCaseInput): Record<string, unknown> {
     ...(input.filters !== undefined ? { filterCount: input.filters.length } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.limit !== undefined ? { limit: input.limit } : {}),
-  };
-}
-
-function sampleComparisonInput(input: ComparisonUseCaseInput): Record<string, unknown> {
-  return {
-    originalQuery: clipString(input.originalQuery, ORCHESTRATOR_TOOL_INPUT_MAX_CHARS),
-    legs: input.legs.length,
   };
 }
 

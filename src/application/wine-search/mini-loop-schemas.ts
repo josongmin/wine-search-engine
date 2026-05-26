@@ -27,10 +27,7 @@ import type { AgentToolName } from '@domain/agent/model/tool-outcome.js';
 import type { ToolOutcome } from '@domain/agent/model/tool-outcome.js';
 import { KNOWN_AGENT_TOOL_NAMES } from '@domain/agent/model/agent-tool-attempt-schema.js';
 import { AGENT_DIRECTIVE_COPY } from '@domain/agent/copy/directive-copy.js';
-import type {
-  ComparisonUseCasePort,
-  SearchUseCasePort,
-} from './execution-runner.js';
+import type { SearchUseCasePort } from './execution-runner.js';
 import type { WineSearchAnalysis } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -211,7 +208,6 @@ export interface MiniLoopStep {
 
 export interface MiniLoopToolPorts {
   readonly searchUseCase: SearchUseCasePort;
-  readonly comparisonUseCase: ComparisonUseCasePort;
 }
 
 // ---------------------------------------------------------------------------

@@ -13,11 +13,10 @@
  * Routing rules (deterministic, in priority order):
  *  1. analysis-rejected guard — no anchors AND no constraints AND
  *     intent=unknown → reject.
- *  2. decomposition.kind=comparison → comparison plan.
- *  3. decomposition.kind=parallel-slot → parallel-search plan (one search
+ *  2. decomposition.kind=parallel-slot → parallel-search plan (one search
  *     per slot, total budget split if present).
- *  4. expectedMultiStep=true (none of the above) → multi-step handoff.
- *  5. fallback → single-search plan (80% happy path).
+ *  3. expectedMultiStep=true (none of the above) → multi-step handoff.
+ *  4. fallback → single-search plan (80% happy path).
  *
  * NOTE: this router consumes the **already normalized** constraint set
  * produced by `QueryAnalyzerService`. The full sanitize pipeline in
@@ -42,7 +41,6 @@ import {
 } from '@shared/constants/constraint-attributes.js';
 import {
   EXECUTION_PLAN_KINDS,
-  type ComparisonUseCaseInput,
   type ExecutionPlan,
   type ExecutionPlanKind,
   type SearchUseCaseInput,
@@ -76,9 +74,8 @@ import type {
  */
 const PLAN_KIND_SINGLE_SEARCH = EXECUTION_PLAN_KINDS[0];
 const PLAN_KIND_PARALLEL_SEARCH = EXECUTION_PLAN_KINDS[1];
-const PLAN_KIND_COMPARISON = EXECUTION_PLAN_KINDS[2];
-const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[3];
-const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[4];
+const PLAN_KIND_MULTI_STEP = EXECUTION_PLAN_KINDS[2];
+const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[3];
 
 // Compile-time membership guard — each local must be a member of the
 // `ExecutionPlanKind` SSoT union. Catches an out-of-bounds tuple index
@@ -88,7 +85,6 @@ const PLAN_KIND_REJECT = EXECUTION_PLAN_KINDS[4];
 void ({
   PLAN_KIND_SINGLE_SEARCH,
   PLAN_KIND_PARALLEL_SEARCH,
-  PLAN_KIND_COMPARISON,
   PLAN_KIND_MULTI_STEP,
   PLAN_KIND_REJECT,
 } satisfies Record<string, ExecutionPlanKind>);
@@ -129,12 +125,6 @@ const WINE_DOMAIN_KEYWORD_RE =
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
-
-function isComparisonDecomposition(
-  decomposition: Decomposition | undefined,
-): decomposition is Extract<Decomposition, { kind: 'comparison' }> {
-  return decomposition !== undefined && decomposition.kind === 'comparison';
-}
 
 function isParallelSlotDecomposition(
   decomposition: Decomposition | undefined,
@@ -213,27 +203,6 @@ function splitTotalBudgetAcrossSlots(
   if (slotCount <= 0 || !Number.isFinite(slotCount)) return undefined;
   if (!Number.isFinite(totalBudgetKrw) || totalBudgetKrw <= 0) return undefined;
   return Math.floor(totalBudgetKrw / slotCount);
-}
-
-/**
- * Convert a deterministic comparison-leg into a runner-ready leg by
- * preserving the analysis-emitted surface and constraints.
- */
-function buildComparisonInputFromAnalysis(
-  analysis: WineSearchAnalysis,
-  decomposition: Extract<Decomposition, { kind: 'comparison' }>,
-): ComparisonUseCaseInput | undefined {
-  if (decomposition.legs.length < 2) return undefined;
-  const [legA, legB] = decomposition.legs;
-  if (legA === undefined || legB === undefined) return undefined;
-  return {
-    originalQuery: analysis.preservedSurface,
-    intent: 'compare',
-    legs: [legA, legB],
-    ...(analysis.normalizedConstraints.length > 0
-      ? { sharedFilters: [...analysis.normalizedConstraints] }
-      : {}),
-  };
 }
 
 /**
@@ -324,18 +293,7 @@ export class DeterministicRouter {
       return { kind: PLAN_KIND_REJECT, reason: 'unsupported_intent' };
     }
 
-    // Rule 2 — comparison decomposition.
-    if (isComparisonDecomposition(analysis.decomposition)) {
-      const comparisonInput = buildComparisonInputFromAnalysis(
-        analysis,
-        analysis.decomposition,
-      );
-      if (comparisonInput !== undefined) {
-        return { kind: PLAN_KIND_COMPARISON, comparisonInput };
-      }
-    }
-
-    // Rule 3 — parallel-slot decomposition.
+    // Rule 2 — parallel-slot decomposition.
     if (isParallelSlotDecomposition(analysis.decomposition)) {
       const { searches } = expandParallelSlots(analysis, analysis.decomposition);
       if (searches.length >= 2) {
@@ -347,7 +305,7 @@ export class DeterministicRouter {
       }
     }
 
-    // Rule 4 — multi-step (defer to MiniLoop).
+    // Rule 3 — multi-step (defer to MiniLoop).
     if (analysis.expectedMultiStep) {
       return {
         kind: PLAN_KIND_MULTI_STEP,
@@ -355,7 +313,7 @@ export class DeterministicRouter {
       };
     }
 
-    // Rule 5 — single-search (the 80% path).
+    // Rule 4 — single-search (the 80% path).
     return {
       kind: PLAN_KIND_SINGLE_SEARCH,
       searchInput: buildSearchInputFromAnalysis(analysis),

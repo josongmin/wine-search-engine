@@ -59,10 +59,7 @@ import type {
 } from '../../src/application/wine-search/wine-search-orchestrator.js';
 import { buildMiniLoopToolBundle } from '../../src/application/wine-search/mini-loop-tool-bundle.js';
 import type { WineSearchAnalysis } from '../../src/application/wine-search/wine-search-schemas.js';
-import type {
-  ComparisonUseCasePort,
-  SearchUseCasePort,
-} from '../../src/application/wine-search/execution-runner.js';
+import type { SearchUseCasePort } from '../../src/application/wine-search/execution-runner.js';
 import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import {
   buildAnthropicFetchCapture,
@@ -471,17 +468,6 @@ function makeStubSearch(): SearchUseCasePort {
   };
 }
 
-function makeStubComparison(): ComparisonUseCasePort {
-  return {
-    execute: async () =>
-      ({
-        legs: [
-          { leg: 'a', response: makeStubSearch() },
-        ],
-      } as unknown as Awaited<ReturnType<ComparisonUseCasePort['execute']>>),
-  };
-}
-
 interface HarnessOptions {
   readonly queryAnalyzer?: Pick<QueryAnalyzerService, 'analyze'>;
   readonly miniLoopToolBundle?: OrchestratorMiniLoopToolBundle;
@@ -511,7 +497,6 @@ function buildHarness(options: HarnessOptions = {}): WineSearchOrchestrator {
   const router = new DeterministicRouter({ now: () => new Date('2026-05-21T00:00:00.000Z') });
   const executionRunner = new ExecutionRunner({
     searchUseCase: makeStubSearch(),
-    comparisonUseCase: makeStubComparison(),
   });
   const miniLoopRunner = new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger, model: MINILOOP_MODEL });
   const synthesisRunner = new SynthesisRunner({
@@ -707,8 +692,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
 
     const bundle = buildMiniLoopToolBundle({
       searchUseCase: makeStubSearch(),
-      comparisonUseCase: makeStubComparison(),
-        });
+          });
     const analysis = makeAnalysis({
       intent: 'search',
       expectedMultiStep: true,
@@ -863,8 +847,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
 
     const bundle = buildMiniLoopToolBundle({
       searchUseCase: makeStubSearch(),
-      comparisonUseCase: makeStubComparison(),
-        });
+          });
     const analysis = makeAnalysis({
       intent: 'search',
       expectedMultiStep: true,
@@ -924,8 +907,7 @@ describe('Anthropic wire-contract (real adapter, mocked fetch)', () => {
       router: new DeterministicRouter({ now: () => new Date('2026-05-21T00:00:00.000Z') }),
       executionRunner: new ExecutionRunner({
         searchUseCase: makeStubSearch(),
-        comparisonUseCase: makeStubComparison(),
-              }),
+                  }),
       miniLoopRunner: new MiniLoopRunner({ structuredLlm: adapter, logger: silentLogger }),
       // SynthesisRunner with NO model override → uses DEFAULT_SYNTHESIS_MODEL.
       synthesisRunner: new SynthesisRunner({ structuredLlm: adapter, logger: silentLogger }),
