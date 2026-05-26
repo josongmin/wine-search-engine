@@ -25,7 +25,7 @@ describe('scoreToolAccuracy', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 5,
-        tools: [{ tool: 'search_wines' }, { tool: 'compare_wines' }],
+        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
       }),
       makeExecution({ toolsUsed: [tool('search_wines')] }),
       undefined,
@@ -66,7 +66,7 @@ describe('scoreToolAccuracy', () => {
       makeScenario({
         maxSteps: 5,
         ordered: true,
-        tools: [{ tool: 'search_wines' }, { tool: 'compare_wines' }],
+        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
       }),
       makeExecution({
         toolsUsed: [tool('compare_wines'), tool('search_wines')],
@@ -150,7 +150,7 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }, { tool: 'compare_wines' }],
+        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
       }),
       makeExecution({
         stepCount: 6,
@@ -171,7 +171,7 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 10,
-        tools: [{ tool: 'search_wines' }, { tool: 'compare_wines' }],
+        tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
       }),
       makeExecution({
         stepCount: 4,

@@ -850,7 +850,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     query: 'Pinot Noir vs Nebbiolo 어떤 게 더 좋아?',
     description: 'English grape names + Korean question',
     expectation: {
-      tools: [{ tool: 'compare_wines' }],
+      tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
       maxDurationMs: 40_000,
       maxTotalTokens: 8_000,
