@@ -92,6 +92,7 @@ import {
   type MiniLoopToolCall,
   type MiniLoopToolPorts,
 } from './mini-loop-schemas.js';
+import { getCanonicalNormalizedConstraints } from './wine-search-schemas.js';
 import {
   CHECK_DRINKING_WINDOW_INPUT_SCHEMA,
   COMPARE_WINES_INPUT_SCHEMA,
@@ -1307,7 +1308,7 @@ function hasRelaxableConstraints(analysis: MiniLoopInput['analysis']): boolean {
   // WineSearchAnalysis schema marks must-have via `mustHave: true` on each
   // NormalizedConstraint. Anything without `mustHave === true` is
   // relaxable.
-  return analysis.normalizedConstraints.some((c) => {
+  return getCanonicalNormalizedConstraints(analysis).some((c) => {
     const record = c as Record<string, unknown>;
     return record['mustHave'] !== true;
   });
@@ -1315,7 +1316,7 @@ function hasRelaxableConstraints(analysis: MiniLoopInput['analysis']): boolean {
 
 function collectRelaxableAttributes(analysis: MiniLoopInput['analysis']): readonly string[] {
   const attrs: string[] = [];
-  for (const c of analysis.normalizedConstraints) {
+  for (const c of getCanonicalNormalizedConstraints(analysis)) {
     const record = c as Record<string, unknown>;
     if (record['mustHave'] === true) continue;
     const attribute = record['attribute'];

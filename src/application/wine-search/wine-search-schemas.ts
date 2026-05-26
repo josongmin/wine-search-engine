@@ -24,6 +24,7 @@ import {
   NormalizedConstraintSchema,
 
 } from '@shared/types/index.js';
+import { SOFT_CONSTRAINT_ATTRIBUTES } from '@shared/constants/constraint-attributes.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -258,6 +259,62 @@ export const WineSearchAnalysisSchema = z.object({
   llmFallbackOutcome: LlmFallbackOutcomeSchema.optional(),
 }).strict();
 export type WineSearchAnalysis = z.infer<typeof WineSearchAnalysisSchema>;
+
+function isSoftTierConstraint(constraint: z.infer<typeof NormalizedConstraintSchema>): boolean {
+  const isNegationOperator = constraint.operator === 'exclude' || constraint.operator === 'not_in';
+  return !isNegationOperator && SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute);
+}
+
+export function flattenConstraintTierBundle(
+  bundle: ConstraintTierBundle,
+): readonly z.infer<typeof NormalizedConstraintSchema>[] {
+  return [
+    ...bundle.hard,
+    ...bundle.soft,
+    ...bundle.inferred,
+  ];
+}
+
+export function classifyLegacyNormalizedConstraints(
+  constraints: readonly z.infer<typeof NormalizedConstraintSchema>[],
+): ConstraintTierBundle {
+  const hard: z.infer<typeof NormalizedConstraintSchema>[] = [];
+  const soft: z.infer<typeof NormalizedConstraintSchema>[] = [];
+  for (const constraint of constraints) {
+    if (isSoftTierConstraint(constraint)) {
+      soft.push(constraint);
+      continue;
+    }
+    hard.push(constraint);
+  }
+  return {
+    hard,
+    soft,
+    inferred: [],
+  };
+}
+
+export function getCanonicalConstraintTierBundle(
+  analysis: Pick<WineSearchAnalysis, 'constraints' | 'normalizedConstraints'>,
+): ConstraintTierBundle {
+  if (analysis.constraints === undefined) {
+    return classifyLegacyNormalizedConstraints(analysis.normalizedConstraints);
+  }
+  const canonicalCount =
+    analysis.constraints.hard.length
+    + analysis.constraints.soft.length
+    + analysis.constraints.inferred.length;
+  if (canonicalCount === 0 && analysis.normalizedConstraints.length > 0) {
+    return classifyLegacyNormalizedConstraints(analysis.normalizedConstraints);
+  }
+  return analysis.constraints;
+}
+
+export function getCanonicalNormalizedConstraints(
+  analysis: Pick<WineSearchAnalysis, 'constraints' | 'normalizedConstraints'>,
+): readonly z.infer<typeof NormalizedConstraintSchema>[] {
+  return flattenConstraintTierBundle(getCanonicalConstraintTierBundle(analysis));
+}
 
 // NOTE: The structural assignability check for `NormalizedConstraintSchema`
 // vs `NormalizedConstraint` lives next to the schema in

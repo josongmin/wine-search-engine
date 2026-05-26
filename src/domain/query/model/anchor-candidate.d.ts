@@ -1,4 +1,5 @@
 import type { CanonicalEntityId } from '../../shared/types/index.js';
+import type { AliasType } from '../../alias/model/alias.js';
 /**
  * A candidate anchor entity extracted from the query surface form.
  *
@@ -27,6 +28,18 @@ export interface AnchorCandidate {
      * This is provenance only and should not drive deterministic planner logic.
      */
     readonly lookupStrategies?: readonly string[] | undefined;
+    /**
+     * Domain alias type (RFC-003 §4) of the underlying alias record(s).
+     *
+     * Carried through from {@link AliasMatchResult.aliasType}. When the
+     * AnchorExtractor merger combines multiple matches for the same
+     * (surfaceForm, normalizedForm, entityIds) key, this carries the dominant
+     * type — defined as the higher-trust type per
+     * {@link mergeAliasTypes}. The resolver scorer reads this directly to
+     * apply type-specific caps (RFC-006 §5.4), avoiding string-decoration
+     * round-trips through `lookupStrategy`.
+     */
+    readonly aliasType?: AliasType | undefined;
     /**
      * Anchor confidence in [0, 1].
      * This is NOT a calibrated decision confidence C.

@@ -23,7 +23,6 @@ import { describe, it, expect } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVICE_DIR = join(__dirname, '..');
-const FUSION_CONFIG = join(SERVICE_DIR, 'per-class-fusion-config.ts');
 const HYBRID_USECASE = join(
   __dirname,
   '..',
@@ -41,7 +40,6 @@ function read(path: string): string {
 
 describe('foundation wire-up (candidate-pool)', () => {
   const source = read(join(SERVICE_DIR, 'candidate-pool.ts'));
-  const fusionConfigSource = read(FUSION_CONFIG);
 
   it('imports getFusionConfig from per-class-fusion-config', () => {
     expect(source).toMatch(/from '\.\/per-class-fusion-config\.js'/);
@@ -57,10 +55,9 @@ describe('foundation wire-up (candidate-pool)', () => {
     expect(source).toMatch(/fusionService\.fuse\([\s\S]*?effectiveFusionK/);
   });
 
-  it('maps RFC-005 short_entity onto specific_wine fusion class', () => {
-    expect(fusionConfigSource).toMatch(
-      /case 'short_entity':[\s\S]*?return 'specific_wine'/,
-    );
+  it('maps RFC-005 short_entity onto specific_wine fusion class', async () => {
+    const mod = await import('../per-class-fusion-config.js');
+    expect(mod.mapDomainQueryClassToFusionQueryClass('short_entity')).toBe('specific_wine');
   });
 
   it('does not invoke query-difficulty-estimator in the live candidate-pool path', () => {

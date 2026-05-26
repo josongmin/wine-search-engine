@@ -120,10 +120,10 @@ pnpm vitest run src/application/wine-search/__tests__/query-analyzer.test.ts src
 
 ## 머지 전 체크리스트
 
-- [ ] analyzer/planner tier SSOT가 단일화됨
-- [ ] 속성별 retrieval strategy가 문서/코드/테스트에서 일치
-- [ ] `soft_tier_not_promotable`가 intentional omission인지 gap인지 구분 가능
-- [ ] heuristic prior / fallback surface의 live-vs-experimental disposition이 명시됨
+- [x] analyzer/planner tier SSOT가 단일화됨
+- [x] 속성별 retrieval strategy가 문서/코드/테스트에서 일치
+- [x] `soft_tier_not_promotable`가 intentional omission인지 gap인지 구분 가능
+- [x] heuristic prior / fallback surface의 live-vs-experimental disposition이 명시됨
 
 ## DoD
 

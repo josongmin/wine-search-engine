@@ -74,7 +74,11 @@ import {
   type AnswerResult,
 } from './synthesis-schemas.js';
 import type { SynthesisRunner } from './synthesis-runner.js';
-import type { QueryIntent, WineSearchAnalysis } from './wine-search-schemas.js';
+import {
+  getCanonicalNormalizedConstraints,
+  type QueryIntent,
+  type WineSearchAnalysis,
+} from './wine-search-schemas.js';
 import {
   ORCHESTRATOR_ABORTED_ANSWER_ENGLISH,
   ORCHESTRATOR_ABORTED_ANSWER_KOREAN,
@@ -592,7 +596,7 @@ export class WineSearchOrchestrator {
             reason: plan.reason,
             terminationKind: TERMINATION_KIND_UNSUPPORTED_INTENT,
             anchors: analysis.anchors.length,
-            constraints: analysis.normalizedConstraints.length,
+            constraints: getCanonicalNormalizedConstraints(analysis).length,
           },
           '[wine-search-orchestrator] router rejected → unsupported_intent',
         );
@@ -1277,6 +1281,7 @@ function makeBlockedAnalysisShell(query: string, queryHasHangul: boolean): WineS
   return {
     intent: 'unknown',
     anchors: [],
+    constraints: { hard: [], soft: [], inferred: [] },
     normalizedConstraints: [],
     contract: {
       requiresDrinkabilityCheck: false,

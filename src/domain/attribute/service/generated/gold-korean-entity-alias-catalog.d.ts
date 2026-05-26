@@ -10,7 +10,7 @@
  * - exportToDefaultMappings=false so wine-SKU labels never leak into
  *   structured planner constraints
  */
-export interface GoldKoreanEntityAliasCatalogEntry {
+interface GoldKoreanEntityAliasCatalogEntry {
     readonly surface: string;
     readonly mappedAttribute: 'appellation';
     readonly canonicalValue: string;
@@ -20,4 +20,5 @@ export interface GoldKoreanEntityAliasCatalogEntry {
     readonly exportToDefaultMappings: false;
 }
 export declare const GOLD_KOREAN_ENTITY_ALIAS_CATALOG: readonly GoldKoreanEntityAliasCatalogEntry[];
+export {};
 //# sourceMappingURL=gold-korean-entity-alias-catalog.d.ts.map

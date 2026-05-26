@@ -203,7 +203,7 @@ function buildGeneratorInput(
       rec.priceUsd !== null && rec.priceUsd !== undefined
         ? Number(rec.priceUsd)
         : null,
-    priceBand: rec.priceBand,
+    ...(rec.priceBand !== undefined ? { priceBand: rec.priceBand } : {}),
     vintageYear: rec.vintageYear ?? null,
     alcoholPct: rec.alcoholPct ?? null,
     flavorProfiles: rec.flavorProfiles ?? [],
@@ -232,7 +232,7 @@ function fingerprintMaterial(input: Doc2QueryInput): string {
     input.body !== null ? input.body.toFixed(3) : 'null',
     input.tannin !== null ? input.tannin.toFixed(3) : 'null',
     input.priceUsd !== null ? input.priceUsd.toFixed(2) : '',
-    input.priceBand,
+    input.priceBand ?? '',
     input.vintageYear !== null ? String(input.vintageYear) : '',
     input.alcoholPct !== null ? input.alcoholPct.toFixed(2) : '',
     input.flavorProfiles.join(','),

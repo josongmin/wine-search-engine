@@ -452,7 +452,9 @@ async function loadBenchmarkAnchorCatalogRecords(missingTargetIds: readonly stri
       ratingAvg: null,
       ratingsCount: 0,
       priceUsd: doc.priceUsd ?? null,
-      priceBand: toRequiredSilverPriceBand(doc.priceBand, doc.entityId),
+      ...(toOptionalSilverPriceBand(doc.priceBand, doc.entityId) !== undefined
+        ? { priceBand: toOptionalSilverPriceBand(doc.priceBand, doc.entityId) }
+        : {}),
       popularityScore: doc.popularityScore ?? 0,
       scrapedAt: null,
       alcoholPct: doc.alcoholPct ?? null,
@@ -501,8 +503,11 @@ function toRequiredSilverWineType(value: string | undefined, entityId: string): 
   throw new Error(`benchmark anchor ${entityId} has invalid wineType=${JSON.stringify(value)}`);
 }
 
-function toRequiredSilverPriceBand(value: string | undefined, entityId: string): PriceBand {
-  if (value !== undefined && (SILVER_PRICE_BANDS as readonly string[]).includes(value)) {
+function toOptionalSilverPriceBand(value: string | undefined, entityId: string): PriceBand | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if ((SILVER_PRICE_BANDS as readonly string[]).includes(value)) {
     return value as PriceBand;
   }
   throw new Error(`benchmark anchor ${entityId} has invalid priceBand=${JSON.stringify(value)}`);
@@ -526,7 +531,7 @@ export function buildGiftSuitabilityContentHash(record: EnrichedSilverRecord): s
     record.country,
     record.region,
     record.wineType,
-    record.priceBand,
+    record.priceBand ?? '',
     record.searchTextEn,
     record.pairingTags.join('|'),
     record.flavorProfiles.join('|'),
@@ -542,7 +547,7 @@ export function buildBeginnerSuitabilityContentHash(record: EnrichedSilverRecord
     record.canonicalLabel,
     record.producer,
     record.wineType,
-    record.priceBand,
+    record.priceBand ?? '',
     String(record.body ?? ''),
     String(record.sweetness ?? ''),
     String(record.acidity ?? ''),

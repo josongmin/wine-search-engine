@@ -62,6 +62,7 @@ import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js'
 import type { DeterminismFingerprintParams } from '../../domain/shared/utils/determinism-fingerprint.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import { RRF_DEFAULT_K } from '../../domain/shared/utils/rrf.js';
+import { LIVE_RETRIEVAL_POLICY_VERSION } from '../../domain/retrieval/service/live-retrieval-policy-registry.js';
 import {
   getFusionConfig,
   mapDomainQueryClassToFusionQueryClass,
@@ -601,6 +602,7 @@ function buildDeterminismFingerprintParams(
   );
   const modeWeights = getModeWeights(effectiveRetrievalMode);
   const fusionConfigHash = deterministicHash(
+    LIVE_RETRIEVAL_POLICY_VERSION,
     String(RRF_DEFAULT_K),
     fusionQueryClass,
     String(fusionConfig.rrfK),

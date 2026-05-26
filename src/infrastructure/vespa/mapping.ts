@@ -587,7 +587,9 @@ export function fromVespaFields(
     ...(summary.style !== undefined && summary.style !== ''
       ? { style: summary.style }
       : {}),
-    priceBand: getRequiredString(fields, 'price_band'),
+    ...(getOptionalString(fields, 'price_band') !== undefined
+      ? { priceBand: getOptionalString(fields, 'price_band') }
+      : {}),
     pairing: summary.pairing ?? [],
     ...(summary.occasion !== undefined ? { occasion: [...summary.occasion] } : {}),
     availability: getRequiredBoolean(fields, 'availability'),

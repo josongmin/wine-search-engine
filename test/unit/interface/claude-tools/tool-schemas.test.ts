@@ -24,6 +24,7 @@ import {
 } from '../../../../src/interface/claude-tools/tool-schemas.js';
 import { KNOWN_AGENT_TOOL_NAMES } from '../../../../src/domain/agent/model/agent-tool-attempt-schema.js';
 import {
+  buildSearchToolStructuredPreferences,
   buildCompareToolFieldShape,
   buildFoodPairingFieldShape,
   buildSearchToolFieldShape,
@@ -199,6 +200,22 @@ describe('WINE_SEARCH_TOOLS', () => {
       expect(props.max_alcohol_pct?.description).toContain('low-alcohol');
       expect(props.max_alcohol_pct?.minimum).toBe(0.1);
       expect(props.max_alcohol_pct?.maximum).toBe(100);
+    });
+
+    it('should describe drinking_window as verification-only rather than retrieval filtering', () => {
+      const props = tool.input_schema.properties as Record<string, any>;
+      expect(props.drinking_window?.description).toContain('post-search verification only');
+      expect(props.drinking_window?.description).toContain('NOT a canonical retrieval filter');
+      expect(props.drinking_window_target_year?.description).toContain('not retrieval filtering');
+    });
+
+    it('does not lower drinking_window into canonical retrieval preferences', () => {
+      const preferences = buildSearchToolStructuredPreferences({
+        drinking_window: 'now',
+        drinking_window_target_year: 2026,
+      }, 'test-mv');
+
+      expect(preferences).toEqual([]);
     });
   });
 

@@ -9,7 +9,7 @@
  * - exportToDefaultMappings=false so non-ontology wine labels never leak into
  *   structured planner constraints
  */
-export interface SeededKoreanEntityAliasCatalogEntry {
+interface SeededKoreanEntityAliasCatalogEntry {
     readonly surface: string;
     readonly mappedAttribute: 'appellation';
     readonly canonicalValue: string;
@@ -19,4 +19,5 @@ export interface SeededKoreanEntityAliasCatalogEntry {
     readonly exportToDefaultMappings: false;
 }
 export declare const SEEDED_KOREAN_ENTITY_ALIAS_CATALOG: readonly SeededKoreanEntityAliasCatalogEntry[];
+export {};
 //# sourceMappingURL=seeded-korean-entity-alias-catalog.d.ts.map

@@ -22,6 +22,8 @@ import type { ExecutionRetrievalMode } from './engine-execution-contract.js';
  * constant fixes the structural asymmetry.
  */
 const EXPLORATORY_RETRIEVAL_MODES: ReadonlySet<ExecutionRetrievalMode> = new Set<ExecutionRetrievalMode>([
+  'attribute_search',
+  'constraint_filter',
   'compare_candidates',
   'recommendation',
   'similar_items',

@@ -200,19 +200,20 @@ function hasHangul(s: string): boolean {
   return HANGUL_REGEX.test(s);
 }
 
-function describePriceKrw(priceUsd: number | null, priceBand: string): string {
-  if (priceUsd === null) return priceBand;
+function describePriceKrw(priceUsd: number | null, priceBand: string | undefined): string {
+  if (priceUsd === null) return priceBand ?? 'price unavailable';
+  const bandSuffix = priceBand !== undefined ? ` (${priceBand})` : '';
   const krw = Math.round(priceUsd * USD_TO_KRW);
   if (krw < KRW_TIER_LOW) {
-    return `약 ${Math.round(krw / WON_PER_CHEON)}천원 (${priceBand})`;
+    return `약 ${Math.round(krw / WON_PER_CHEON)}천원${bandSuffix}`;
   }
   if (krw < KRW_TIER_MID) {
-    return `약 ${Math.round(krw / WON_PER_MAN)}만원 (${priceBand})`;
+    return `약 ${Math.round(krw / WON_PER_MAN)}만원${bandSuffix}`;
   }
   if (krw < KRW_TIER_HIGH) {
-    return `약 ${Math.round(krw / WON_PER_MAN)}만원 (${priceBand})`;
+    return `약 ${Math.round(krw / WON_PER_MAN)}만원${bandSuffix}`;
   }
-  return `약 ${(krw / WON_PER_MAN).toFixed(0)}만원 (${priceBand})`;
+  return `약 ${(krw / WON_PER_MAN).toFixed(0)}만원${bandSuffix}`;
 }
 
 function styleDescriptor(body: number | null, tannin: number | null): string {
@@ -351,7 +352,7 @@ function buildSourceDocText(input: Doc2QueryInput): string {
     input.country,
     input.grapePrimary ?? '',
     input.grapes.join(' '),
-    input.priceBand,
+    input.priceBand ?? '',
     input.flavorProfiles.join(' '),
     input.pairingTags.join(' '),
     ...input.koreanAliases,

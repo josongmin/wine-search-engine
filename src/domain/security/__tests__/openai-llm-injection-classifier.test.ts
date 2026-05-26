@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenAiLLMInjectionClassifier } from '../../../infrastructure/adapter/openai-llm-injection-classifier.js';
+import {
+  resolveCompletionTokens,
+  resolveReasoningEffort,
+} from '../../../infrastructure/ai/openai-reasoning-params.js';
 
 describe('OpenAiLLMInjectionClassifier', () => {
   beforeEach(() => {
@@ -53,7 +57,14 @@ describe('OpenAiLLMInjectionClassifier', () => {
       throw new Error('expected serialized OpenAI request body to be a string');
     }
     const body: unknown = JSON.parse(rawBody);
-    expect(body).toMatchObject({ model: 'gpt-5.4-mini', max_completion_tokens: 50 });
+    expect(body).toMatchObject({
+      model: 'gpt-5.4-mini',
+      max_completion_tokens: resolveCompletionTokens('gpt-5.4-mini', 50),
+    });
+    const expectedReasoningEffort = resolveReasoningEffort('gpt-5.4-mini', 'classify');
+    if (expectedReasoningEffort !== undefined) {
+      expect(body).toMatchObject({ reasoning_effort: expectedReasoningEffort });
+    }
   });
 
   it('classifies parsed injection results', async () => {

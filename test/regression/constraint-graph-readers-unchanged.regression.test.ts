@@ -39,6 +39,8 @@
  *   - `browse-retriever.ts`, `compare-retriever.ts` (graph-slot filter extraction)
  *   - `search-usecase-hybrid-candidates.ts` (specialized retriever call-sites
  *     pass compiled.constraintGraph)
+ *   - `search-usecase-hybrid-retrieval-input.ts` (threads compiled.constraintGraph
+ *     into the HybridRetrievalInput substrate for candidate-pool annotator parity)
  *
  * Phase 1c (ADR-013 PR4): BundleSelector + graph-aware executor —
  *   - `assignment-solver.ts` (pure K≤5 Hungarian-style exact solver)
@@ -125,6 +127,7 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/retrieval\/service\/browse-retriever\.ts$/,
   /src\/domain\/retrieval\/service\/compare-retriever\.ts$/,
   /src\/domain\/retrieval\/model\/retrieval-input\.ts$/,
+  /src\/application\/search\/search-usecase-hybrid-retrieval-input\.ts$/,
   /src\/application\/search\/port\/search-pipeline-deps\.port\.ts$/,
   // Phase 1c (ADR-013 PR4): BundleSelector + graph-aware executor.
   /src\/domain\/retrieval\/service\/assignment-solver\.ts$/,

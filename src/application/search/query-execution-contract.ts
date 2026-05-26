@@ -663,7 +663,7 @@ function buildVerificationStepRequirement(
     coverage.push({
       key: 'drinking_window:now',
       matchedConstraintKey: 'drinking_window',
-      description: 'currently drinkable',
+      description: 'currently drinkable (post-search verification only; not a retrieval filter)',
     });
   }
 
@@ -847,7 +847,6 @@ function isSpecificSkuLikeNormalized(query: string): boolean {
     && isSpecificSkuLikeQuery(candidate),
   );
 }
-
 
 
 

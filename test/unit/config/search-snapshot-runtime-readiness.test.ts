@@ -122,7 +122,7 @@ describe('search snapshot runtime readiness', () => {
     await expect(probeSearchSnapshotRuntimeState(runtimeStatePath)).resolves.toBe('down');
   });
 
-  it('returns down when zero active LTR models are present even if legacy no-LTR mode was set', async () => {
+  it('returns down when zero active LTR models are present', async () => {
     const dir = await makeTempDir();
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
     const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
@@ -136,7 +136,6 @@ describe('search snapshot runtime readiness', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/manifest.json',
       nlMappingsRuntimePath: nlMappingsPath,
-      allowMissingLtr: true,
       counts: {
         entities: 10,
         aliases: 10,

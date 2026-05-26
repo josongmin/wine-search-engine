@@ -99,7 +99,6 @@ export interface SearchSnapshotRuntimeState {
   readonly manifestPath: string;
   readonly nlMappingsRuntimePath: string;
   readonly quality: SearchSnapshotQualitySummary;
-  readonly allowMissingLtr?: boolean | undefined;
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
@@ -182,8 +181,7 @@ export const SearchSnapshotRuntimeStateSchema = z.object({
     bypasses: z.array(z.string().min(1)),
     carryForwardBenchmarkCount: z.number().int().nonnegative(),
     experimentalInputsPresent: z.boolean(),
-  }).strict().optional(),
-  allowMissingLtr: z.boolean().optional(),
+  }).strict(),
   counts: z.object({
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
@@ -237,16 +235,6 @@ export function parseManifest(raw: string, _filePath: string): SearchSnapshotMan
   if (hashes !== undefined && hashes['vespaFeed'] === undefined) {
     hashes['vespaFeed'] = hashes['documents'];
   }
-  if (asRecord !== undefined && asRecord['quality'] === undefined) {
-    asRecord['quality'] = {
-      status: 'degraded',
-      blockers: [],
-      bypasses: ['legacy_manifest_no_quality_metadata'],
-      carryForwardBenchmarkCount: 0,
-      experimentalInputsPresent: false,
-    };
-  }
-
   return SearchSnapshotManifestSchema.parse(parsed);
 }
 

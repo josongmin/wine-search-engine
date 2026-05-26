@@ -105,9 +105,9 @@ pnpm exec tsx scripts/etl/verify-search-snapshot-readiness.ts --runtime-state /U
 
 ## 머지 전 체크리스트
 
-- [ ] readiness와 quality가 문서/코드/테스트에서 분리됨
-- [ ] missing LTR 상태가 explicit quality degraded/fail
-- [ ] carry-forward usage visibility가 추가됨
+- [x] readiness와 quality가 문서/코드/테스트에서 분리됨
+- [x] missing LTR 상태가 explicit quality degraded/fail
+- [x] carry-forward usage visibility가 추가됨
 
 ## DoD
 

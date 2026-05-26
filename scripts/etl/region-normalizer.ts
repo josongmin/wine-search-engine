@@ -43,16 +43,18 @@
  *   - `regionHierarchy`   = the ordered path with exact consecutive/duplicate
  *                            segments removed (order preserved).
  *
- * ## Appellation: intentionally NOT derived (documented gap, not a guess)
+ * ## Appellation: intentionally NOT derived from region breadcrumbs
  *
- * The Silver `appellation` field is 0% populated and there is no authoritative
- * appellation source in the record. The breadcrumb path is positional only:
- * its leaf may be a region (e.g. "Marlborough") or an appellation (e.g.
+ * The canonical Silver `appellation` field is now sourced upstream from the
+ * authoritative payload slot (`payload.appellation.name`) when present.
+ * This normalizer does NOT attempt to synthesize or backfill appellation from
+ * the flat `region` breadcrumb. The breadcrumb path is positional only: its
+ * leaf may be a region (e.g. "Marlborough") or an appellation (e.g.
  * "Ribera del Duero"), and distinguishing the two requires a gazetteer the
- * pipeline does not have. Assigning "appellation" purely from path DEPTH would
+ * pipeline does not have. Assigning `appellation` purely from path depth would
  * be a content guess, which the project execution baseline forbids. We
- * therefore leave `appellation` undefined and surface the gap rather than
- * fabricating it. (See report: requires upstream authoritative data.)
+ * therefore leave `appellation` undefined here and preserve only the
+ * authoritative payload-derived appellation from upstream ETL stages.
  */
 
 /** Canonical breadcrumb separator used by the upstream scrape. */
@@ -63,8 +65,8 @@ export const REGION_BREADCRUMB_SEPARATOR = ' / ';
  *
  * `region` is always present (the most-specific node, or the untouched clean
  * input). `hierarchy` is present only when the input was a breadcrumb with more
- * than one distinct node. `appellation` is always undefined — see module header
- * for why it is intentionally not derived.
+ * than one distinct node. `appellation` is always undefined here — upstream ETL
+ * is the only authoritative source for that field.
  */
 export interface NormalizedRegion {
   /** Canonical, most-specific region node. */

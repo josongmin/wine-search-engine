@@ -38,7 +38,6 @@ import type { NormalizedConstraint } from '@shared/types/index.js';
 import {
   EXACT_METADATA_SEARCH_LIMIT,
   PRICE_CONSTRAINT_ATTRIBUTE_NAMES,
-  SOFT_CONSTRAINT_ATTRIBUTES,
 } from '@shared/constants/constraint-attributes.js';
 import {
   EXECUTION_PLAN_KINDS,
@@ -51,6 +50,10 @@ import type {
   Decomposition,
   RecommendedBudget,
   WineSearchAnalysis,
+} from './wine-search-schemas.js';
+import {
+  getCanonicalConstraintTierBundle,
+  getCanonicalNormalizedConstraints,
 } from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -202,40 +205,23 @@ function buildSearchInputFromAnalysis(
   };
 }
 
-function isSoftAnalysisConstraint(constraint: NormalizedConstraint): boolean {
-  const isNegationOperator = constraint.operator === 'exclude' || constraint.operator === 'not_in';
-  return !isNegationOperator && SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute);
-}
-
 function getHardAnalysisConstraints(
   analysis: WineSearchAnalysis,
 ): NormalizedConstraint[] {
-  if (analysis.constraints !== undefined) {
-    return [...analysis.constraints.hard];
-  }
-  return analysis.normalizedConstraints.filter((constraint) => !isSoftAnalysisConstraint(constraint));
+  return [...getCanonicalConstraintTierBundle(analysis).hard];
 }
 
 function getSoftAnalysisConstraints(
   analysis: WineSearchAnalysis,
 ): NormalizedConstraint[] {
-  if (analysis.constraints !== undefined) {
-    return [...analysis.constraints.soft, ...analysis.constraints.inferred];
-  }
-  return analysis.normalizedConstraints.filter(isSoftAnalysisConstraint);
+  const bundle = getCanonicalConstraintTierBundle(analysis);
+  return [...bundle.soft, ...bundle.inferred];
 }
 
 function getAllAnalysisConstraints(
   analysis: WineSearchAnalysis,
 ): readonly NormalizedConstraint[] {
-  if (analysis.constraints !== undefined) {
-    return [
-      ...analysis.constraints.hard,
-      ...analysis.constraints.soft,
-      ...analysis.constraints.inferred,
-    ];
-  }
-  return analysis.normalizedConstraints;
+  return getCanonicalNormalizedConstraints(analysis);
 }
 
 /**

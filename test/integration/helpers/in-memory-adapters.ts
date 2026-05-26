@@ -779,10 +779,12 @@ export class InMemoryAliasMatcher implements AliasMatcher {
    * each alias's same-script fuzzy key via Damerau-Levenshtein (OSA)
    * similarity. Cross-script pairs are skipped (jamo vs Latin is meaningless).
    *
-   * Emits `lookupStrategy: 'fuzzy_char_ngram'` and intentionally sets NO
-   * `aliasType` — the downstream `inferAliasType` maps the fuzzy strategy to
-   * the `misspelling` tier, which is the correct match-quality semantic even
-   * when the underlying alias record is curated/canonical.
+   * Emits `lookupStrategy: 'fuzzy_char_ngram'` with
+   * `aliasType: 'misspelling'`.
+   *
+   * The canonical server path is now fail-closed on missing aliasType, so the
+   * in-memory matcher must emit the semantic tier directly instead of
+   * relying on downstream strategy inference.
    */
   private findFuzzyMatches(normalizedQuery: string): AliasMatchResult[] {
     // Script-aware fuzzy key: Hangul → jamo-decomposed string (a single
@@ -790,10 +792,10 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     // KIL typo recovery is a *string* problem (Damerau edit distance), not a
     // semantic one — this is the same lexical mechanism for both scripts.
     //
-    // Emits `lookupStrategy: 'fuzzy_char_ngram'` with no `aliasType`. The
-    // resolver's `inferAliasType` maps that strategy to the `misspelling`
-    // tier. Decision-engine behaviour on the resulting match is calibrated,
-    // not absolute: a single unambiguous typo (one in-fixture candidate
+    // Emits `lookupStrategy: 'fuzzy_char_ngram'` with
+    // `aliasType: 'misspelling'`. Decision-engine behaviour on the resulting
+    // match is calibrated, not absolute: a single unambiguous typo (one
+    // in-fixture candidate
     // within similarity threshold, large gap to the next) can saturate
     // `C → 1.0` and bypass `NOISY_SHORT_QUERY_GUARD` via the explicit
     // `NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE` rule
@@ -832,6 +834,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         entityIds,
         matchConfidence: maxConfidence * similarity * FUZZY_MATCH_CONFIDENCE_FACTOR,
         lookupStrategy: 'fuzzy_char_ngram',
+        aliasType: 'misspelling',
       });
     }
 
@@ -953,6 +956,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       entityIds: [match.doc.entityId],
       matchConfidence: match.score,
       lookupStrategy: 'smart_document',
+      aliasType: 'catalog_noise_alias',
     }));
   }
 
@@ -1137,6 +1141,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       entityIds: [...match.entityIds],
       matchConfidence: match.matchConfidence,
       lookupStrategy: 'hangul_ime_completion+transliterated_fuzzy',
+      aliasType: 'misspelling',
     }));
   }
 

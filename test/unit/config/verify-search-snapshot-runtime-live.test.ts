@@ -346,7 +346,7 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
     }
   });
 
-  it('throws when active LTR rows are absent even if legacy no-LTR mode was set', async () => {
+  it('throws when active LTR rows are absent', async () => {
     const dir = await makeTempDir();
     const nlPath = path.join(dir, 'nl.json');
     const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
@@ -359,7 +359,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: true,
       counts: {
         entities: 10,
         aliases: 10,
@@ -579,7 +578,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         publishedAt: '2026-04-12T00:00:00.000Z',
         manifestPath: '/tmp/m.json',
         nlMappingsRuntimePath: nlPath,
-        allowMissingLtr: false,
         counts: {
           entities: 10,
           aliases: 10,
@@ -593,6 +591,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           ambiguityRegistry: 'ambiguity',
           nlMappings: hashRuntimeNlMappings(nlPayload),
           activeLtrModels: activeLtrHash,
+        },
+        quality: {
+          status: 'canonical',
+          blockers: [],
+          bypasses: [],
+          carryForwardBenchmarkCount: 0,
+          experimentalInputsPresent: false,
         },
       };
     }
@@ -786,7 +791,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -800,6 +804,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 
@@ -833,7 +844,6 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
       publishedAt: '2026-04-12T00:00:00.000Z',
       manifestPath: '/tmp/m.json',
       nlMappingsRuntimePath: nlPath,
-      allowMissingLtr: false,
       counts: {
         entities: 10,
         aliases: 10,
@@ -847,6 +857,13 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
         ambiguityRegistry: 'ambiguity',
         nlMappings: hashRuntimeNlMappings(nlPayload),
         activeLtrModels: activeLtrHash,
+      },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
       },
     };
 

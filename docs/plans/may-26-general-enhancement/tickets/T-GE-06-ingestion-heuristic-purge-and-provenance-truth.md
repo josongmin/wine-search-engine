@@ -121,10 +121,10 @@ pnpm vitest run test/unit/etl/vivino-to-silver.test.ts test/unit/etl/validate-si
 
 ## 머지 전 체크리스트
 
-- [ ] provenance label이 실제 derivation과 일치
-- [ ] heuristic step이 canonical required coverage를 점유하지 않음
-- [ ] approximate / length-based merge가 explicit contract를 가짐
-- [ ] validation guidance와 actual step numbering이 일치
+- [x] provenance label이 실제 derivation과 일치
+- [x] heuristic step이 canonical required coverage를 점유하지 않음
+- [x] approximate / length-based merge가 explicit contract를 가짐
+- [x] validation guidance와 actual step numbering이 일치
 
 ## DoD
 

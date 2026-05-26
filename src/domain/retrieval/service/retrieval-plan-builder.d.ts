@@ -59,17 +59,56 @@ export interface RetrievalPlan {
     readonly planVersion: string;
 }
 /**
+ * Inferred constraints are weaker than explicit soft constraints by design.
+ * Their boost weight is the originating confidence scaled by this factor.
+ *
+ * EXPORTED so tests assert against the SOURCE value (not a test-local copy) —
+ * a divergent test constant would let a silent weight regression pass.
+ * Must be in (0,1]: 0 would erase inferred signal entirely; >1 would make
+ * inferred boosts *stronger* than soft, inverting the tier semantics.
+ */
+export declare const INFERRED_CONSTRAINT_WEIGHT_MULTIPLIER = 0.7;
+/**
+ * Upper bound on the number of boost signals emitted per tier (soft / inferred).
+ *
+ * A retrieval plan is a bounded artifact: the ranker applies every boost as a
+ * weighted-sum term per candidate, so an unbounded boost list is both a
+ * latency hazard (O(candidates × boosts)) and an audit hazard (an adversarial
+ * or buggy upstream could emit thousands of constraints). The cap is generous
+ * relative to the largest legitimate constraint bundle observed (≤ ~20 atoms
+ * across hard/soft/inferred) so it never clips real intent, while bounding the
+ * worst case. Excess boosts are dropped DETERMINISTICALLY — highest weight
+ * first, then by stable comparator — so the strongest signals always survive.
+ */
+export declare const MAX_BOOSTS_PER_TIER = 64;
+/**
+ * Lower/upper bounds for any boost weight emitted in a plan. The {@link BoostSignal}
+ * contract documents `weight ∈ [0,1]`; upstream `confidence` is NOT guaranteed
+ * to be finite or in-range (LLM-sourced constraints can emit 1.5, NaN, -0.2).
+ * Every weight is clamped to [WEIGHT_MIN, WEIGHT_MAX] so the documented
+ * invariant actually holds and downstream weighted sums never see NaN/∞.
+ */
+export declare const BOOST_WEIGHT_MIN = 0;
+export declare const BOOST_WEIGHT_MAX = 1;
+/**
  * Build a structured retrieval plan from a constraint bundle.
  *
  * Hard constraints → existing filter tokens (unchanged path).
- * Soft constraints → boost signals with weight proportional to confidence.
- * Inferred constraints → boost signals AND sensory priors (if applicable).
+ * Soft constraints → boost signals with weight = clamped confidence.
+ * Inferred constraints → boost signals (weight × multiplier) AND sensory
+ * priors (when the attribute is numeric-sensory).
+ *
+ * Determinism / SOTA invariants enforced here:
+ *  - **Order-independence**: boosts are sorted by a content-only comparator,
+ *    so permuting the input arrays never changes the output.
+ *  - **Bounded fan-out**: each tier is capped at {@link MAX_BOOSTS_PER_TIER},
+ *    dropping the WEAKEST signals first (deterministic).
+ *  - **Weight invariant**: every weight is clamped to [0,1] — NaN/∞/out-of-range
+ *    confidences can never leak into downstream weighted sums.
+ *  - **NFC preservation**: Korean/accented string values are NFC-normalized so
+ *    the same logical query always produces the same plan.
  */
 export declare function buildRetrievalPlan(bundle: ConstraintBundle): RetrievalPlan;
 /** Plan version constant (for trace). */
 export declare function retrievalPlanVersion(): string;
-export declare const INFERRED_CONSTRAINT_WEIGHT_MULTIPLIER = 0.7;
-export declare const MAX_BOOSTS_PER_TIER = 64;
-export declare const BOOST_WEIGHT_MIN = 0;
-export declare const BOOST_WEIGHT_MAX = 1;
 //# sourceMappingURL=retrieval-plan-builder.d.ts.map

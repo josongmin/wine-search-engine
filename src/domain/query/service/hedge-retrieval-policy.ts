@@ -20,31 +20,9 @@ interface HedgeRetrievalDecision {
   readonly reason: string;
 }
 
-/**
- * Confidence at or above which the primary intent is treated as certain and
- * no hedging is performed. Calibrated as an initial guess; will be tuned with
- * click-through data once the learned model is online.
- */
 const HEDGE_HIGH_CONFIDENCE = 0.85;
-
-/**
- * Confidence below which the primary intent is treated as unreliable on its
- * own, and we pull in the top alternative path to hedge. Initial guess; will
- * be re-calibrated with click-through data.
- */
 const HEDGE_LOW_CONFIDENCE = 0.6;
-
-/**
- * Confidence gap between primary and top alternative under which we consider
- * the two tied and hedge even when the primary is above the low-confidence
- * threshold. Initial guess; will be tuned with click data.
- */
 const HEDGE_TIE_WINDOW = 0.1;
-
-/**
- * Maximum number of intents a single hedge decision can fan out to. We cap at
- * 2 to avoid uncontrolled fan-out of retrieval calls.
- */
 const HEDGE_MAX_INTENTS = 2;
 
 export function decideHedgeRetrieval(

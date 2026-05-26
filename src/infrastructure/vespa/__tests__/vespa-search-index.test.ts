@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import { VespaHttpError, type VespaClient } from '../vespa-client.js';
 import type { VespaQueryResponse } from '../vespa-client.js';
+import { VESPA_BULK_HYDRATION_BATCH_SIZE } from '../per-channel-timeouts.js';
 import { VespaSearchIndex } from '../vespa-search-index.js';
 
 /** Builds a minimal VespaQueryResponse returning given entity IDs as hits. */
@@ -108,8 +109,7 @@ describe('VespaSearchIndex', () => {
       const index = new VespaSearchIndex(client);
       await index.fetchWithHitSummary(ids);
 
-      // 250 IDs with batch size 200 → 2 calls (200 + 50)
-      expect(callCount).toBe(2);
+      expect(callCount).toBe(Math.ceil(ids.length / VESPA_BULK_HYDRATION_BATCH_SIZE));
     });
 
     it('splits >200 entity IDs in fetchWithFeatureSummary as well', async () => {
@@ -130,8 +130,7 @@ describe('VespaSearchIndex', () => {
       const index = new VespaSearchIndex(client);
       await index.fetchWithFeatureSummary(ids);
 
-      // 205 IDs with batch size 200 → 2 calls (200 + 5)
-      expect(callCount).toBe(2);
+      expect(callCount).toBe(Math.ceil(ids.length / VESPA_BULK_HYDRATION_BATCH_SIZE));
     });
 
     it('returns empty array without calling Vespa when entity list is empty', async () => {
@@ -384,6 +383,7 @@ describe('VespaSearchIndex', () => {
     expect(client.query).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ 'presentation.summary': 'hit_summary' }),
+      undefined,
       undefined,
       undefined,
     );

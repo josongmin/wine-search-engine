@@ -137,8 +137,20 @@ function buildWinnerIdentityEvidence(params: {
   readonly identityResolveResult?: EntityResolveResult | null | undefined;
   readonly winnerDualLaneArtifact?: DualLaneArtifact | undefined;
   readonly winnerIdentityArtifact?: EntityLaneCandidateArtifact | undefined;
+  readonly allowIdentityArtifactTrust: boolean;
 }): NonNullable<EvidenceSummary['identityEvidence']> {
   const resolveTopEntity = params.resolveResult.topEntity;
+  if (!params.allowIdentityArtifactTrust) {
+    return {
+      source: 'identity_artifact',
+      resolveTopEntityPresent: resolveTopEntity !== undefined,
+      winnerIdentityArtifactPresent: false,
+      winnerIdentityArtifactMatchesResolveResult: false,
+      exactnessTier: 'none',
+      identityEvidenceRefCount: 0,
+    };
+  }
+
   const winnerEntityId = resolveTopEntity?.entityId;
   const winnerInIdentityResolveResult =
     winnerEntityId !== undefined
@@ -179,6 +191,30 @@ function buildWinnerIdentityEvidence(params: {
     identityEvidenceRefCount,
     ...(lanePresence !== undefined ? { lanePresence } : {}),
   };
+}
+
+function shouldProjectIdentityArtifactTrust(params: {
+  readonly effectiveRoute: QueryRoute;
+  readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+  readonly retrievalKind?:
+    | 'entity_lookup'
+    | 'generic_hybrid'
+    | 'specialized_hybrid'
+    | 'mixed_similarity'
+    | undefined;
+}): boolean {
+  if (params.retrievalKind === 'entity_lookup') {
+    return true;
+  }
+  if (
+    params.effectiveRetrievalMode === undefined
+    && params.retrievalKind === undefined
+  ) {
+    return true;
+  }
+  return params.effectiveRoute === 'entity'
+    || params.effectiveRetrievalMode === 'entity_lookup'
+    || params.effectiveRetrievalMode === 'entity_resolution';
 }
 
 function buildRankingBranchGroups(
@@ -257,11 +293,17 @@ export function buildSearchDecisionInput(
   } = params;
   const topResult = rankedResults?.[0];
   const topEntity = resolveResult.topEntity;
+  const allowIdentityArtifactTrust = shouldProjectIdentityArtifactTrust({
+    effectiveRoute,
+    effectiveRetrievalMode: executionContext?.effectiveRetrievalMode,
+    retrievalKind: executionContext?.retrievalKind,
+  });
   const identityEvidence = buildWinnerIdentityEvidence({
     resolveResult,
     identityResolveResult,
     winnerDualLaneArtifact: executionContext?.winnerDualLaneArtifact,
     winnerIdentityArtifact: executionContext?.winnerIdentityArtifact,
+    allowIdentityArtifactTrust,
   });
   const identityEvidenceRefCount = identityEvidence.identityEvidenceRefCount;
 

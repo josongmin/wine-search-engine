@@ -93,6 +93,13 @@ async function writeFixtureFiles(args?: {
         ambiguityRegistry: 'ambiguity-hash',
         nlMappings: 'nl-hash',
       },
+      quality: {
+        status: 'canonical',
+        blockers: [],
+        bypasses: [],
+        carryForwardBenchmarkCount: 0,
+        experimentalInputsPresent: false,
+      },
     }, null, 2)}\n`,
   );
   await fs.writeFile(

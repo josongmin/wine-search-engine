@@ -186,8 +186,8 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
    */
   readonly style?: string;
 
-  /** Price band label (e.g. "$20-$30", "premium"). */
-  readonly priceBand: string;
+  /** Price band label (e.g. "$20-$30", "premium") when available. */
+  readonly priceBand?: string | undefined;
 
   /** Food pairing suggestions. */
   readonly pairing: readonly string[];

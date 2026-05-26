@@ -103,9 +103,9 @@ pnpm exec tsx scripts/etl/validate-silver.ts --input data/silver-trackc.ndjson
 
 ## 머지 전 체크리스트
 
-- [ ] canonical `trackc` artifact meaning이 단일함
-- [ ] partial artifact가 build path에 못 들어감
-- [ ] validate/build가 같은 completeness truth를 사용함
+- [x] canonical `trackc` artifact meaning이 단일함
+- [x] partial artifact가 build path에 못 들어감
+- [x] validate/build가 같은 completeness truth를 사용함
 
 ## DoD
 

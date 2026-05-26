@@ -34,7 +34,9 @@
  *      - `contract.requiresDrinkabilityCheck` → drinkability strip from query
  *      - `contract.exactMetadataTargetVintage` → vintage bounds (eq)
  *      - `decomposition.parallel-slot` → slot expansion + total-budget split
- *      - `normalizedConstraints[]` → defaults to merge into search input
+ *      - `constraints.{hard,soft,inferred}` → defaults to merge into search input
+ *        (legacy `normalizedConstraints[]` is read only through the compatibility
+ *        adapter in `wine-search-schemas.ts`)
  *  - We do NOT port the LLM-output cleanup branches (e.g.
  *    normalizeExactLookupEntitySearchInput's curated-anchor surface rewrite
  *    against the LLM's raw query — in the new arch the analyzer emits
@@ -66,7 +68,11 @@ import {
 import type {
   SearchUseCaseInput,
 } from './execution-plan-schemas.js';
-import type { WineSearchAnalysis } from './wine-search-schemas.js';
+import {
+  getCanonicalConstraintTierBundle,
+  getCanonicalNormalizedConstraints,
+  type WineSearchAnalysis,
+} from './wine-search-schemas.js';
 
 // ---------------------------------------------------------------------------
 // Vintage-year bounds — re-exported from the SSoT (CLAUDE.md rule 25/30).
@@ -193,12 +199,11 @@ const OCCASION_PRESERVED_IN_PARALLEL_SLOTS: ReadonlySet<string> = new Set(['gift
 // PORT: agent-tool-execution-policy.ts:507-535 (applySearchDefaults +
 // mergeStringArrayInput).
 //
-// In the new arch the analyzer emits constraints directly on
-// `analysis.normalizedConstraints`. We treat constraints from the analysis
-// as the SSoT and merge them into the search input only when the input
-// hasn't already carried them through. This avoids double-application by
-// the runner (which already snapshots analysis.normalizedConstraints into
-// the search input via `buildSearchInputFromAnalysis`).
+// In the new arch the analyzer emits tiered constraints directly on
+// `analysis.constraints`. We treat that bundle as the SSoT and merge it into
+// the search input only when the input hasn't already carried the same
+// constraint through. Legacy `normalizedConstraints` is consumed only through
+// the compatibility adapter in `wine-search-schemas.ts`.
 
 /** Constraint attributes considered "array-merge" defaults — semantics: if
  *  the input already has constraints on this attribute, we DEDUP by `value`
@@ -410,7 +415,7 @@ function findTotalBudgetForParallelSlots(
 ): number | undefined {
   if (analysis.decomposition?.kind !== 'parallel-slot') return undefined;
   if (analysis.decomposition.slots.length < 2) return undefined;
-  for (const c of analysis.normalizedConstraints) {
+  for (const c of getCanonicalNormalizedConstraints(analysis)) {
     if (c.attribute !== 'max_price_krw' && c.attribute !== 'price_krw') continue;
     if (typeof c.value === 'number' && Number.isFinite(c.value) && c.value > 0) {
       return Math.floor(c.value);
@@ -530,11 +535,11 @@ interface ToolInputNormalizer {
   ): SearchUseCaseInput;
 
   /**
-   * Merge analysis-driven defaults into the search input. Constraints from
-   * `analysis.normalizedConstraints` that are not already present (by
-   * (attribute, operator, value) key) are appended. No-op when the analysis
-   * carries no constraints OR when the input is an exact-metadata lookup
-   * (defaults would re-introduce over-constraints).
+   * Merge analysis-driven defaults into the search input. Hard constraints are
+   * merged into `filters`; soft/inferred constraints are merged into
+   * `preferences`. No-op when the analysis carries no constraints OR when the
+   * input is an exact-metadata lookup (defaults would re-introduce
+   * over-constraints).
    */
   applyAnalysisDefaults(
     input: SearchUseCaseInput,
@@ -642,24 +647,47 @@ export const DefaultToolInputNormalizer: ToolInputNormalizer = {
   },
 
   applyAnalysisDefaults(input, analysis) {
-    if (analysis.normalizedConstraints.length === 0) return input;
+    const constraintBundle = getCanonicalConstraintTierBundle(analysis);
+    const hasAnyDefaults =
+      constraintBundle.hard.length > 0
+      || constraintBundle.soft.length > 0
+      || constraintBundle.inferred.length > 0;
+    if (!hasAnyDefaults) return input;
     // Suppress defaults on exact-metadata lookups — they would re-introduce
     // the over-constraint filters we just stripped.
     if (analysis.contract.hasEntityMetadataSignal) return input;
 
-    const existing = input.filters ?? [];
-    // Build a key set of (attribute, operator, valueKey) entries currently
-    // present so we don't duplicate.
-    const merged = dedupConstraintsByAttributeAndValue([
-      ...existing,
-      ...analysis.normalizedConstraints,
+    const existingFilters = input.filters ?? [];
+    const existingPreferences = input.preferences ?? [];
+    const mergedFilters = dedupConstraintsByAttributeAndValue([
+      ...existingFilters,
+      ...constraintBundle.hard,
+    ]);
+    const mergedPreferences = dedupConstraintsByAttributeAndValue([
+      ...existingPreferences,
+      ...constraintBundle.soft,
+      ...constraintBundle.inferred,
     ]);
 
-    // For array-default attributes (styles, occasion), dedupConstraintsByAttributeAndValue
-    // already handles uniqueness by value. The result preserves the input's
-    // original constraint ordering (first-seen wins).
-    if (merged.length === existing.length) return input;
-    return { ...input, filters: [...merged] };
+    if (
+      mergedFilters.length === existingFilters.length
+      && mergedPreferences.length === existingPreferences.length
+    ) {
+      return input;
+    }
+
+    const {
+      filters: _ignoredFilters,
+      preferences: _ignoredPreferences,
+      ...rest
+    } = input;
+    void _ignoredFilters;
+    void _ignoredPreferences;
+    return {
+      ...rest,
+      ...(mergedFilters.length > 0 ? { filters: [...mergedFilters] } : {}),
+      ...(mergedPreferences.length > 0 ? { preferences: [...mergedPreferences] } : {}),
+    };
   },
 };
 

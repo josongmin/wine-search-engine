@@ -57,6 +57,7 @@ function makeAnalysis(overrides: Partial<WineSearchAnalysis> = {}): WineSearchAn
   return {
     intent: 'search',
     anchors: [],
+    constraints: { hard: [], soft: [], inferred: [] },
     normalizedConstraints: [],
     contract: {
       requiresDrinkabilityCheck: false,
@@ -361,6 +362,24 @@ describe('applyAnalysisDefaults', () => {
     const out = DefaultToolInputNormalizer.applyAnalysisDefaults(input, analysis);
     expect(out.filters).toHaveLength(2);
   });
+
+  it('merges tiered defaults into filters and preferences when flat legacy constraints are empty', () => {
+    const input = makeInput({ query: '선물용 프랑스 와인' });
+    const analysis = makeAnalysis({
+      constraints: {
+        hard: [makeConstraint('country', 'France')],
+        soft: [makeConstraint('sweetness_min', 0.5, '>=')],
+        inferred: [makeConstraint('occasion', 'gift')],
+      },
+      normalizedConstraints: [],
+    });
+    const out = DefaultToolInputNormalizer.applyAnalysisDefaults(input, analysis);
+    expect(out.filters).toEqual([makeConstraint('country', 'France')]);
+    expect(out.preferences).toEqual([
+      makeConstraint('sweetness_min', 0.5, '>='),
+      makeConstraint('occasion', 'gift'),
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -521,6 +540,22 @@ describe('_internalFindTotalBudgetForParallelSlots', () => {
       normalizedConstraints: [makeConstraint('max_price_krw', 200_000, '<=')],
     });
     expect(_internalFindTotalBudgetForParallelSlots(analysis)).toBe(200_000);
+  });
+
+  it('reads tiered max_price_krw when flat legacy constraints are empty', () => {
+    const analysis = makeAnalysis({
+      constraints: {
+        hard: [makeConstraint('max_price_krw', 120_000, '<=')],
+        soft: [],
+        inferred: [],
+      },
+      normalizedConstraints: [],
+      decomposition: {
+        kind: 'parallel-slot',
+        slots: [{ wineType: 'red' }, { wineType: 'white' }],
+      },
+    });
+    expect(_internalFindTotalBudgetForParallelSlots(analysis)).toBe(120_000);
   });
 });
 

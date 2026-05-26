@@ -68,9 +68,7 @@ function hasStructuredSetRetrievalPreferenceHints(
     || input.acidity_min !== undefined
     || input.acidity_max !== undefined
     || input.tannin_max !== undefined
-    || (input.occasion?.length ?? 0) > 0
-    || input.drinking_window !== undefined
-    || input.drinking_window_target_year !== undefined;
+    || (input.occasion?.length ?? 0) > 0;
 }
 
 function shouldPreserveRepresentativeAnchorOnlyQuery(

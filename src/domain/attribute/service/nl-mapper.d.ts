@@ -10,6 +10,16 @@ interface DefaultEntityAliasMapping {
     readonly mappingConfidence: number;
 }
 /**
+ * Read-only snapshot of every (lookup key → NLMapping) pair in the built-in
+ * vocabulary. Exposed for regression / property tests that audit the vocabulary
+ * as a whole (NFC stability, duplicate detection, Korean substring-collision
+ * sweeps). Production lookups continue to go through {@link NLMapper.mapPhrase}.
+ *
+ * The returned array is a snapshot, sorted by lookup key for deterministic
+ * iteration — so any property assertion that depends on order is reproducible.
+ */
+export declare function listDefaultMappingEntries(): readonly (readonly [string, NLMapping])[];
+/**
  * Returns resolver-compatible entity aliases sourced from DEFAULT_MAPPINGS.
  *
  * This keeps NL mapper phrase coverage and Entity Resolver coverage in sync so

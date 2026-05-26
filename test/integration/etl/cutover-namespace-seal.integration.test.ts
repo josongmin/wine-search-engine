@@ -163,7 +163,6 @@ function buildRuntimeState(args: {
     publishedAt: '2026-04-12T00:00:00.000Z',
     manifestPath: '/tmp/m.json',
     nlMappingsRuntimePath: args.nlPath,
-    allowMissingLtr: false,
     counts: {
       entities: 2,
       aliases: 2,
@@ -177,6 +176,13 @@ function buildRuntimeState(args: {
       ambiguityRegistry: 'r-ignored',
       nlMappings: hashText(`${stableJsonStringify(args.nlPayload)}\n`),
       activeLtrModels: activeLtrHash,
+    },
+    quality: {
+      status: 'canonical',
+      blockers: [],
+      bypasses: [],
+      carryForwardBenchmarkCount: 0,
+      experimentalInputsPresent: false,
     },
   };
 }

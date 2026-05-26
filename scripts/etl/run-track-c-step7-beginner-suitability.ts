@@ -54,7 +54,7 @@ function fingerprintMaterial(record: EnrichedSilverRecord): string {
     record.canonicalLabel,
     record.producer,
     record.wineType,
-    record.priceBand,
+    record.priceBand ?? '',
     String(record.body ?? ''),
     String(record.sweetness ?? ''),
     String(record.acidity ?? ''),

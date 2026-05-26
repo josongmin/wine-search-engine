@@ -289,14 +289,23 @@ describe('vivino-to-silver helpers', () => {
       expect(result).toBeNull();
     });
 
-    it('drops rows that would require a synthetic price band', () => {
+    it('keeps rows when trusted FX-backed price is unavailable and omits price band', () => {
       const row: BronzeRow = {
         ...baseRow,
         price: null,
         currency: null,
       };
       const result = transformRow(row);
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.priceUsd).toBeNull();
+      expect(result!.priceBand).toBeUndefined();
+    });
+
+    it('keeps rows when price currency is unknown and omits price band', () => {
+      const result = transformRow({ ...baseRow, currency: 'XYZ' });
+      expect(result).not.toBeNull();
+      expect(result!.priceUsd).toBeNull();
+      expect(result!.priceBand).toBeUndefined();
     });
 
     // ── Bug fix regression: fizziness threshold scale (Bug 1) ─────────────────
@@ -397,11 +406,42 @@ describe('vivino-to-silver helpers', () => {
   });
 
   describe('dedup', () => {
+    const makeDedupRecord = (
+      overrides: Partial<NonNullable<Parameters<typeof dedup>[0][number]>> = {},
+    ): NonNullable<Parameters<typeof dedup>[0][number]> => ({
+      sourceId: 'vivino:test',
+      externalId: 'a',
+      canonicalLabel: 'Test Wine 2020',
+      producer: 'Test Winery',
+      vintageYear: 2020,
+      country: 'USA',
+      region: 'Napa Valley',
+      wineType: 'red',
+      grapePrimary: null,
+      grapes: [],
+      body: null,
+      sweetness: null,
+      acidity: null,
+      tannin: null,
+      pairingTags: [],
+      flavorProfiles: [],
+      searchTextEn: 'test',
+      ratingAvg: null,
+      ratingsCount: 10,
+      priceUsd: null,
+      popularityScore: 0,
+      scrapedAt: null,
+      alcoholPct: null,
+      producerPrestige: null,
+      isTopRated: false,
+      ...overrides,
+    });
+
     it('deduplicates by (externalId, vintageYear)', () => {
       const records = [
-        { externalId: 'a', vintageYear: 2020, ratingsCount: 10, scrapedAt: '2024-01-01', searchTextEn: 'test' },
-        { externalId: 'a', vintageYear: 2020, ratingsCount: 20, scrapedAt: '2024-01-01', searchTextEn: 'test longer' },
-      ] as Parameters<typeof dedup>[0];
+        makeDedupRecord({ ratingsCount: 10, scrapedAt: '2024-01-01', searchTextEn: 'test' }),
+        makeDedupRecord({ ratingsCount: 20, scrapedAt: '2024-01-01', searchTextEn: 'test longer' }),
+      ];
       const result = dedup(records);
       expect(result).toHaveLength(1);
       expect(result[0]!.ratingsCount).toBe(20); // higher ratings count wins on same timestamp
@@ -409,9 +449,9 @@ describe('vivino-to-silver helpers', () => {
 
     it('keeps records with different vintages', () => {
       const records = [
-        { externalId: 'a', vintageYear: 2019, ratingsCount: 10, scrapedAt: null, searchTextEn: '' },
-        { externalId: 'a', vintageYear: 2020, ratingsCount: 10, scrapedAt: null, searchTextEn: '' },
-      ] as Parameters<typeof dedup>[0];
+        makeDedupRecord({ vintageYear: 2019, scrapedAt: null, searchTextEn: '' }),
+        makeDedupRecord({ vintageYear: 2020, scrapedAt: null, searchTextEn: '' }),
+      ];
       const result = dedup(records);
       expect(result).toHaveLength(2);
     });
@@ -419,9 +459,9 @@ describe('vivino-to-silver helpers', () => {
     // ── Round 2 audit regression: NaN-safe dedup ──────────────────────────────
     it('handles invalid scrapedAt dates without dropping records', () => {
       const records = [
-        { externalId: 'a', vintageYear: 2020, ratingsCount: 10, scrapedAt: 'not-a-date', searchTextEn: 'first' },
-        { externalId: 'a', vintageYear: 2020, ratingsCount: 20, scrapedAt: '2024-06-01', searchTextEn: 'second' },
-      ] as Parameters<typeof dedup>[0];
+        makeDedupRecord({ ratingsCount: 10, scrapedAt: 'not-a-date', searchTextEn: 'first' }),
+        makeDedupRecord({ ratingsCount: 20, scrapedAt: '2024-06-01', searchTextEn: 'second' }),
+      ];
       const result = dedup(records);
       expect(result).toHaveLength(1);
       // Valid date should win over invalid

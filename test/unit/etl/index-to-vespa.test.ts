@@ -597,7 +597,7 @@ describe('taxonomy field ingest contract', () => {
   });
 
   it('maps priceBand label to price_band_numeric ordinal', () => {
-    const cases: Array<[EnrichedSilverRecord['priceBand'], number]> = [
+    const cases: Array<[NonNullable<EnrichedSilverRecord['priceBand']>, number]> = [
       ['value', 1],
       ['mid', 2],
       ['premium', 3],
@@ -611,6 +611,20 @@ describe('taxonomy field ingest contract', () => {
       expect(doc.priceBandNumeric).toBe(expected);
       expect(fields['price_band_numeric']).toBe(expected);
     }
+  });
+
+  it('omits priceBand fields when the silver record has no trusted price band', () => {
+    const record = makeEnrichedRecord({ priceUsd: null, priceBand: undefined });
+    const doc = silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+    );
+    const fields = toVespaFields(doc);
+
+    expect(doc.priceBand).toBeUndefined();
+    expect(doc.priceBandNumeric).toBeUndefined();
+    expect(fields).not.toHaveProperty('price_band');
+    expect(fields).not.toHaveProperty('price_band_numeric');
   });
 
   it('propagates finishLength from silver record to Vespa finish_length', () => {

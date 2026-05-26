@@ -39,6 +39,16 @@ interface FilterableDoc {
   readonly occasion?: readonly string[] | undefined;
   readonly vintageYear?: number | undefined;
   readonly alcoholPct?: number | undefined;
+  readonly body?: number | undefined;
+  readonly tannin?: number | undefined;
+  readonly acidity?: number | undefined;
+  readonly sweetness?: number | undefined;
+  readonly finishLength?: number | undefined;
+  readonly criticScoreNormalized?: number | undefined;
+  readonly producerPrestige?: number | undefined;
+  readonly priceUsd?: number | undefined;
+  readonly giftSuitabilityScore?: number | undefined;
+  readonly beginnerSuitabilityScore?: number | undefined;
 }
 
 /**
@@ -60,7 +70,54 @@ export function hybridCandidateToFilterableDoc(
     ...(candidate.grapes !== undefined ? { grapes: candidate.grapes } : {}),
     ...(candidate.vintageYear !== undefined ? { vintageYear: candidate.vintageYear } : {}),
     ...(candidate.alcoholPct !== undefined ? { alcoholPct: candidate.alcoholPct } : {}),
+    ...(candidate.body !== undefined ? { body: candidate.body } : {}),
+    ...(candidate.tannin !== undefined ? { tannin: candidate.tannin } : {}),
+    ...(candidate.acidity !== undefined ? { acidity: candidate.acidity } : {}),
+    ...(candidate.sweetness !== undefined ? { sweetness: candidate.sweetness } : {}),
+    ...(candidate.finishLength !== undefined ? { finishLength: candidate.finishLength } : {}),
+    ...(candidate.criticScoreNormalized !== undefined
+      ? { criticScoreNormalized: candidate.criticScoreNormalized }
+      : {}),
+    ...(candidate.producerPrestige !== undefined ? { producerPrestige: candidate.producerPrestige } : {}),
+    ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
+    ...(candidate.giftSuitabilityScore !== undefined
+      ? { giftSuitabilityScore: candidate.giftSuitabilityScore }
+      : {}),
+    ...(candidate.beginnerSuitabilityScore !== undefined
+      ? { beginnerSuitabilityScore: candidate.beginnerSuitabilityScore }
+      : {}),
   };
+}
+
+const SENSORY_RAW_SCALE_MAX = 5;
+
+function clamp01(value: number): number {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+function normalizeSensory01(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value <= 1) {
+    return Math.max(0, value);
+  }
+  return clamp01(value / SENSORY_RAW_SCALE_MAX);
+}
+
+function normalizeUnitInterval(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  if (value <= 1) {
+    return Math.max(0, value);
+  }
+  if (value <= 100) {
+    return clamp01(value / 100);
+  }
+  return value;
 }
 
 interface ParsedFilter {
@@ -212,6 +269,26 @@ function evaluateFilter(doc: FilterableDoc, filter: ParsedFilter): boolean {
 
 function numericFieldValue(doc: FilterableDoc, key: string): number | undefined {
   switch (key) {
+    case 'body':
+      return normalizeSensory01(doc.body);
+    case 'tannin':
+      return normalizeSensory01(doc.tannin);
+    case 'acidity':
+      return normalizeSensory01(doc.acidity);
+    case 'sweetness':
+      return normalizeSensory01(doc.sweetness);
+    case 'finish_length':
+      return normalizeSensory01(doc.finishLength);
+    case 'critic_score':
+      return normalizeUnitInterval(doc.criticScoreNormalized);
+    case 'producer_prestige':
+      return normalizeUnitInterval(doc.producerPrestige);
+    case 'price_usd':
+      return doc.priceUsd;
+    case 'gift_suitability':
+      return normalizeUnitInterval(doc.giftSuitabilityScore);
+    case 'beginner_suitability':
+      return normalizeUnitInterval(doc.beginnerSuitabilityScore);
     case 'vintage_year':
       return doc.vintageYear;
     case 'alcohol':

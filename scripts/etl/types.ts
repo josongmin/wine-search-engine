@@ -272,8 +272,8 @@ export interface SilverWineRecord {
   readonly wineryRatingCount?: number | undefined;
   /** Price in USD (converted from a checked-in versioned FX input). */
   readonly priceUsd: number | null;
-  /** Price band derived from priceUsd. */
-  readonly priceBand: PriceBand;
+  /** Price band derived from priceUsd when a trusted FX-backed price is available. */
+  readonly priceBand?: PriceBand | undefined;
   /** Popularity score in [0, 1], log-normalized across corpus. */
   readonly popularityScore: number;
   /** Scraped timestamp for temporal ordering. */
@@ -587,8 +587,8 @@ export interface IndexableWineRecord {
    * rather than synthesised from the coarse wineType.
    */
   readonly style?: string;
-  /** Price band label (e.g. "premium"). */
-  readonly priceBand: string;
+  /** Price band label (e.g. "premium") when price normalization succeeded. */
+  readonly priceBand?: string | undefined;
   /** Food pairing suggestions. */
   readonly pairing: readonly string[];
   /** Occasion tags. */

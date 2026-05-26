@@ -1210,6 +1210,82 @@ describe('buildSearchDecisionInput', () => {
     expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
   });
 
+  it('does not project identity-artifact exactness on non-identity retrieval modes', () => {
+    const eid = createEntityId('exploratory-ranked');
+    const plan = {
+      ...minimalPlan('hybrid'),
+      queryClass: 'pure_constraint',
+    };
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: 'Exploratory Wine', calibratedScore: 0.95 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: 'Exploratory Wine',
+        calibratedScore: 0.95,
+        rank: 1,
+        evidenceRefs: ['identity:exploratory'],
+      }],
+      decisionTrace: makeDecisionTrace({
+        queryClass: 'pure_constraint',
+        top1CalibratedScore: 0.95,
+        top2CalibratedScore: 0.4,
+        calibratedGap: 0.55,
+        decisionConfidenceC: 0.95,
+      }),
+    });
+
+    const input = buildSearchDecisionInput({
+      plan,
+      resolveResult: resolverResult,
+      identityResolveResult: resolverResult,
+      rankedResults: [makeRankedResult({ entityId: eid, canonicalLabel: 'Exploratory Wine' })],
+      effectiveRoute: 'hybrid',
+      executionContext: {
+        effectiveRetrievalMode: 'attribute_search',
+        retrievalKind: 'generic_hybrid',
+        winnerDualLaneArtifact: {
+          entityId: eid,
+          canonicalLabel: 'Exploratory Wine',
+          lanePresence: 'corroborated',
+          identityProvenance: {
+            source: 'entity_resolver',
+            entityId: eid,
+            exactnessTier: 'exact',
+            calibratedScore: 0.95,
+            resolverRank: 1,
+            canonicalLabel: 'Exploratory Wine',
+            evidenceRefs: ['identity:exploratory'],
+            sourceSignals: {
+              canonicalExactMatch: 1,
+              canonicalNormalizedMatch: 1,
+              aliasExactMatch: 0,
+              aliasFuzzyMatch: 0,
+              editDistanceScore: 0,
+            },
+          },
+          fusedCandidate: {
+            entityId: eid,
+            canonicalLabel: 'Exploratory Wine',
+            matchedConstraints: [],
+            identityExactnessTier: 'exact',
+            lanePresence: 'corroborated',
+            retrievalTrace: {
+              retrievalProfile: 'test',
+              lexicalQueriesUsed: [],
+              semanticQueriesUsed: [],
+              filtersApplied: [],
+              candidateSources: [],
+            },
+          },
+        },
+      },
+    });
+
+    expect(input.evidenceSummary.identityEvidencePresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.winnerIdentityArtifactPresent).toBe(false);
+    expect(input.evidenceSummary.identityEvidence?.exactnessTier).toBe('none');
+  });
+
   it('does not mint identity evidence for synthetic ranked routes with only negative ranked evidence', () => {
     const eid = createEntityId('synthetic-negative-ranked');
     const plan = minimalPlan('hybrid');

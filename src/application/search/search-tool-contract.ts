@@ -116,9 +116,9 @@ export const SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION =
 export const SEARCH_TOOL_TANNIN_MAX_DESCRIPTION =
   'Optional maximum indexed tannin on the [0,1] sensory scale. Use for explicit soft / low-tannin / gentle-mouthfeel recommendation intent.';
 export const SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION =
-  'Optional typed drinking-window objective. Use "now" when the user asks for currently drinkable / 지금 마시기 좋은 / 피크인 후보; still call check_drinking_window afterward for exact verification.';
+  'Optional typed drinking-window objective. Use "now" for currently drinkable / 지금 마시기 좋은 / 피크인 후보, but treat it as post-search verification only: it is NOT a canonical retrieval filter or ranking signal. Still call check_drinking_window afterward for exact verification.';
 export const SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
-  'Optional target year for drinking_window. Defaults to the current calendar year when drinking_window is set.';
+  'Optional target year for drinking_window. Defaults to the current calendar year when drinking_window is set. This target year is for post-search verification, not retrieval filtering.';
 export const SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION =
   'When true, prefer varied grapes, regions, or styles rather than near-duplicates.';
 const SEARCH_TOOL_PLACEHOLDER_PATTERN =
@@ -547,19 +547,9 @@ export function buildSearchToolStructuredPreferences(input: {
       mapping_version: mappingVersion,
     });
   }
-  if (input.drinking_window !== undefined || input.drinking_window_target_year !== undefined) {
-    const targetYear = input.drinking_window_target_year ?? new Date().getFullYear();
-    preferences.push({
-      attribute: 'drinking_window',
-      operator: '=',
-      value: targetYear,
-      source_phrase: input.drinking_window === 'now'
-        ? `drinking_window:now@${targetYear}`
-        : `drinking_window@${targetYear}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
-  }
+  // drinking_window is verification-only. Search retrieval must not pretend to
+  // satisfy it through canonical filtering or ranking when the exact truth
+  // lives in check_drinking_window / indexed window evidence.
 
   return preferences;
 }

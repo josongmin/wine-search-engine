@@ -100,8 +100,8 @@ pnpm vitest run test/unit/etl/vivino-to-silver.test.ts
 ## 머지 전 체크리스트
 
 - [ ] `typecheck:etl` green
-- [ ] `appellation` 정책이 type/transform/output/consumer에서 동일
-- [ ] `as any` 우회 없음
+- [x] `appellation` 정책이 type/transform/output/consumer에서 동일
+- [x] `as any` 우회 없음
 
 ## DoD
 

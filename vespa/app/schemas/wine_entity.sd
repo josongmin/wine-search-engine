@@ -377,6 +377,7 @@ schema wine_entity {
     summary vintage_year {}
     summary search_text_en {}
     summary search_text_ko {}
+    summary semantic_summary {}
     summary producer_prestige {}
     summary style {}
     summary price_band {}
@@ -389,8 +390,11 @@ schema wine_entity {
     summary finish_length {}
     summary wine_type {}
     summary critic_score_normalized {}
+    summary popularity_score {}
+    summary availability {}
     summary country {}
     summary classification {}
+    summary closure {}
     summary alcohol_pct {}
     summary drinking_window_start {}
     summary drinking_window_end {}

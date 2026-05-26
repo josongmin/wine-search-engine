@@ -40,8 +40,8 @@ export interface Doc2QueryInput {
   /** Tannin score in [0, 1], or null when the source corpus lacks a measurement. */
   readonly tannin: number | null;
   readonly priceUsd: number | null;
-  /** 'value' | 'mid' | 'premium' | 'luxury'. */
-  readonly priceBand: string;
+  /** 'value' | 'mid' | 'premium' | 'luxury' when price normalization succeeded. */
+  readonly priceBand?: string | undefined;
   readonly vintageYear: number | null;
   readonly alcoholPct: number | null;
   readonly flavorProfiles: readonly string[];

@@ -227,7 +227,6 @@ export interface LoadedSearchSnapshotRuntimeState {
     readonly carryForwardBenchmarkCount: number;
     readonly experimentalInputsPresent: boolean;
   };
-  readonly allowMissingLtr?: boolean | undefined;
   readonly counts: {
     readonly entities: number;
     readonly aliases: number;
@@ -301,7 +300,6 @@ type RuntimeStateShape = {
     readonly carryForwardBenchmarkCount?: unknown;
     readonly experimentalInputsPresent?: unknown;
   };
-  readonly allowMissingLtr?: unknown;
   readonly counts?: {
     readonly entities?: unknown;
     readonly aliases?: unknown;
@@ -339,25 +337,17 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
   const counts = parsed.counts;
   const hashes = parsed.hashes;
   const quality = parsed.quality;
-  const normalizedQuality = quality === undefined
-    ? {
-        status: 'degraded' as const,
-        blockers: [] as string[],
-        bypasses: ['legacy_runtime_state_no_quality_metadata'],
-        carryForwardBenchmarkCount: 0,
-        experimentalInputsPresent: false,
-      }
-    : quality;
   const ltrReleaseProvenance = parsed.ltrReleaseProvenance;
-  const hasValidQuality = (normalizedQuality.status === 'canonical' || normalizedQuality.status === 'degraded')
-    && Array.isArray(normalizedQuality.blockers)
-    && normalizedQuality.blockers.every((value) => typeof value === 'string' && value.length > 0)
-    && Array.isArray(normalizedQuality.bypasses)
-    && normalizedQuality.bypasses.every((value) => typeof value === 'string' && value.length > 0)
-    && typeof normalizedQuality.carryForwardBenchmarkCount === 'number'
-    && Number.isFinite(normalizedQuality.carryForwardBenchmarkCount)
-    && normalizedQuality.carryForwardBenchmarkCount >= 0
-    && typeof normalizedQuality.experimentalInputsPresent === 'boolean';
+  const hasValidQuality = quality !== undefined
+    && (quality.status === 'canonical' || quality.status === 'degraded')
+    && Array.isArray(quality.blockers)
+    && quality.blockers.every((value) => typeof value === 'string' && value.length > 0)
+    && Array.isArray(quality.bypasses)
+    && quality.bypasses.every((value) => typeof value === 'string' && value.length > 0)
+    && typeof quality.carryForwardBenchmarkCount === 'number'
+    && Number.isFinite(quality.carryForwardBenchmarkCount)
+    && quality.carryForwardBenchmarkCount >= 0
+    && typeof quality.experimentalInputsPresent === 'boolean';
   const hasValidLtrReleaseProvenance = ltrReleaseProvenance === undefined || (
     typeof ltrReleaseProvenance.updatedAt === 'string'
     && ltrReleaseProvenance.updatedAt.length > 0
@@ -442,15 +432,12 @@ function validateRuntimeStateShape(parsed: RuntimeStateShape): LoadedSearchSnaps
     manifestPath: parsed.manifestPath,
     nlMappingsRuntimePath: parsed.nlMappingsRuntimePath,
     quality: {
-      status: normalizedQuality.status as 'canonical' | 'degraded',
-      blockers: [...normalizedQuality.blockers as string[]],
-      bypasses: [...normalizedQuality.bypasses as string[]],
-      carryForwardBenchmarkCount: normalizedQuality.carryForwardBenchmarkCount as number,
-      experimentalInputsPresent: normalizedQuality.experimentalInputsPresent as boolean,
+      status: quality.status as 'canonical' | 'degraded',
+      blockers: [...quality.blockers as string[]],
+      bypasses: [...quality.bypasses as string[]],
+      carryForwardBenchmarkCount: quality.carryForwardBenchmarkCount as number,
+      experimentalInputsPresent: quality.experimentalInputsPresent as boolean,
     },
-    ...(typeof parsed.allowMissingLtr === 'boolean'
-      ? { allowMissingLtr: parsed.allowMissingLtr }
-      : {}),
     counts: {
       entities: counts.entities,
       aliases: counts.aliases,

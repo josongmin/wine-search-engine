@@ -11,12 +11,12 @@
 
 | Ticket | 주제 | 상태 | 선행 |
 |---|---|---|---|
-| `T-GE-01` | Vivino payload / silver contract / appellation | open | 없음 |
-| `T-GE-02` | Track C completeness / artifact truth | open | `T-GE-01` |
-| `T-GE-03` | text substrate / region normalization parity | open | `T-GE-01` |
-| `T-GE-06` | ingestion heuristic purge / provenance truth | open | `T-GE-02`, `T-GE-03` |
-| `T-GE-04` | snapshot publish quality gates / LTR closure | open | `T-GE-02`, `T-GE-03`, `T-GE-06` |
-| `T-GE-05` | retrieval semantics / analyzer-planner tier SSOT | open | `T-GE-04`, `T-GE-06` |
+| `T-GE-01` | Vivino payload / silver contract / appellation | done | 없음 |
+| `T-GE-02` | Track C completeness / artifact truth | done | `T-GE-01` |
+| `T-GE-03` | text substrate / region normalization parity | done | `T-GE-01` |
+| `T-GE-06` | ingestion heuristic purge / provenance truth | done | `T-GE-02`, `T-GE-03` |
+| `T-GE-04` | snapshot publish quality gates / LTR closure | done | `T-GE-02`, `T-GE-03`, `T-GE-06` |
+| `T-GE-05` | retrieval semantics / analyzer-planner tier SSOT | done | `T-GE-04`, `T-GE-06` |
 
 ## Wave
 

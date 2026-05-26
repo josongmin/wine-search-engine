@@ -1423,7 +1423,7 @@ export function transformRow(row: BronzeRow): PreSilver | null {
   const priceUsd = extractPriceUsd(rowPrice, row.currency, payload?.merchant_prices, payload?.bottle_ml);
   const priceBandValue = priceBand(priceUsd);
 
-  if (detectedWineType === null || priceBandValue === null) {
+  if (detectedWineType === null) {
     return null;
   }
 
@@ -1503,7 +1503,7 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     ...(ratingDistribution !== undefined ? { ratingDistribution } : {}),
     ...(wineryRatingCount !== undefined ? { wineryRatingCount } : {}),
     priceUsd,
-    priceBand: priceBandValue,
+    ...(priceBandValue !== null ? { priceBand: priceBandValue } : {}),
     scrapedAt: row.scraped_at,
     // SOTA++ new fields
     alcoholPct: parseAlcohol(payload?.alcohol),
@@ -1545,7 +1545,9 @@ function mergeAuthoritativeFields(winner: PreSilver, fallback: PreSilver): PreSi
     flavorProfiles: mergeStringArray(winner.flavorProfiles, fallback.flavorProfiles),
     ratingAvg: mergeNullableNumber(winner.ratingAvg, fallback.ratingAvg),
     priceUsd: mergeNullableNumber(winner.priceUsd, fallback.priceUsd),
-    priceBand: winner.priceUsd !== null ? winner.priceBand : fallback.priceBand,
+    ...(winner.priceUsd !== null
+      ? (winner.priceBand !== undefined ? { priceBand: winner.priceBand } : {})
+      : (fallback.priceBand !== undefined ? { priceBand: fallback.priceBand } : {})),
     alcoholPct: mergeNullableNumber(winner.alcoholPct, fallback.alcoholPct),
     producerPrestige: mergeNullableNumber(winner.producerPrestige, fallback.producerPrestige),
     isTopRated: winner.isTopRated || fallback.isTopRated,

@@ -113,17 +113,17 @@ describe('classifyQueryBudget — off_domain', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('classifyQueryBudget — nested_condition', () => {
-  it('3+ constraint types → nested_condition, maxSteps=8', () => {
+  it('3+ constraint types → nested_condition, maxSteps=10', () => {
     // price + color + food = 3 constraints
     const r = classifyQueryBudget('3만원 이하 레드 와인 스테이크 페어링');
     expect(r?.classification).toBe('nested_condition');
-    expect(r?.maxSteps).toBe(8);
+    expect(r?.maxSteps).toBe(10);
   });
 
   it('price + color + region + style = 4 constraints → nested_condition', () => {
     const r = classifyQueryBudget('이탈리아 레드 타닌 강한 거 5만원 이하');
     expect(r?.classification).toBe('nested_condition');
-    expect(r?.maxSteps).toBe(8);
+    expect(r?.maxSteps).toBe(10);
   });
 
   it('only 2 constraint types → NOT nested_condition', () => {
@@ -135,7 +135,7 @@ describe('classifyQueryBudget — nested_condition', () => {
   it('price + grape + style = 3 → nested_condition', () => {
     const r = classifyQueryBudget('카베르네 드라이한 거 $50 이하');
     expect(r?.classification).toBe('nested_condition');
-    expect(r?.maxSteps).toBe(8);
+    expect(r?.maxSteps).toBe(10);
   });
 });
 
@@ -144,11 +144,11 @@ describe('classifyQueryBudget — nested_condition', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('classifyQueryBudget — situation_based', () => {
-  it('2+ situation indicators + constraint → situation_based, maxSteps=6', () => {
+  it('2+ situation indicators + constraint → situation_based, maxSteps=8', () => {
     // gift + birthday + price constraint
     const r = classifyQueryBudget('생일 선물용 와인 5만원 이하');
     expect(r?.classification).toBe('situation_based');
-    expect(r?.maxSteps).toBe(6);
+    expect(r?.maxSteps).toBe(8);
   });
 
   it('1 situation indicator only → NOT situation_based', () => {
@@ -172,16 +172,16 @@ describe('classifyQueryBudget — situation_based', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('classifyQueryBudget — compound', () => {
-  it('2+ compound indicators → compound, maxSteps=6', () => {
+  it('2+ compound indicators → compound, maxSteps=8', () => {
     const r = classifyQueryBudget('에피타이저 디저트 코스 와인 추천');
     expect(r?.classification).toBe('compound');
-    expect(r?.maxSteps).toBe(6);
+    expect(r?.maxSteps).toBe(8);
   });
 
   it('comparison keyword pair → compound', () => {
     const r = classifyQueryBudget('바롤로 비교 vs 브루넬로');
     expect(r?.classification).toBe('compound');
-    expect(r?.maxSteps).toBe(6);
+    expect(r?.maxSteps).toBe(8);
   });
 
   it('single compound indicator → NOT compound', () => {

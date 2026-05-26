@@ -49,7 +49,7 @@ const PRICE_BAND_VALUES = ['value', 'mid', 'premium', 'luxury'] as const;
 
 // Required keys that, when omitted, MUST yield a validation failure at that
 // key's path. (schema_version is intentionally excluded — it is optional with
-// a default; appellation is .nullable().optional().)
+// a default; appellation and priceBand are optional.)
 const REQUIRED_KEYS = [
   'sourceId',
   'externalId',
@@ -71,7 +71,6 @@ const REQUIRED_KEYS = [
   'ratingAvg',
   'ratingsCount',
   'priceUsd',
-  'priceBand',
   'popularityScore',
   'scrapedAt',
   'alcoholPct',
@@ -101,7 +100,7 @@ interface RawSilverRecord {
   ratingAvg: number | null;
   ratingsCount: number;
   priceUsd: number | null;
-  priceBand: string;
+  priceBand?: string;
   popularityScore: number;
   scrapedAt: string | null;
   alcoholPct: number | null;

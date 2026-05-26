@@ -56,7 +56,7 @@ function fingerprintMaterial(record: EnrichedSilverRecord): string {
     record.country,
     record.region,
     record.wineType,
-    record.priceBand,
+    record.priceBand ?? '',
     record.searchTextEn,
     record.pairingTags.join('|'),
     record.flavorProfiles.join('|'),

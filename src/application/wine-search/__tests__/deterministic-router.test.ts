@@ -30,6 +30,7 @@ function baseAnalysis(overrides: Partial<WineSearchAnalysis> = {}): WineSearchAn
   return {
     intent: 'search',
     anchors: [],
+    constraints: { hard: [], soft: [], inferred: [] },
     normalizedConstraints: [],
     contract: {
       requiresDrinkabilityCheck: false,
@@ -179,6 +180,32 @@ describe('DeterministicRouter — Rule 2: parallel-slot decomposition', () => {
     const slot0BudgetFilter = plan.searches[0]?.filters?.find((c) => c.attribute === 'max_price_krw');
     expect(slot0BudgetFilter?.value).toBe(50_000);
   });
+
+  it('uses tiered constraints for parallel-slot budget split when legacy flat constraints are empty', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        intent: 'search',
+        preservedSurface: '총 12만원 레드+화이트',
+        hangulDominant: true,
+        expectedMultiStep: true,
+        constraints: {
+          hard: [makeConstraint('max_price_krw', 120_000, '<=')],
+          soft: [],
+          inferred: [],
+        },
+        normalizedConstraints: [],
+        decomposition: {
+          kind: 'parallel-slot',
+          slots: [{ wineType: 'red' }, { wineType: 'white' }],
+        },
+      }),
+    );
+    expect(plan.kind).toBe('parallel-search');
+    if (plan.kind !== 'parallel-search') return;
+    const slot0BudgetFilter = plan.searches[0]?.filters?.find((c) => c.attribute === 'max_price_krw');
+    expect(slot0BudgetFilter?.value).toBe(60_000);
+  });
 });
 
 describe('DeterministicRouter — Rule 3: multi-step handoff', () => {
@@ -319,6 +346,25 @@ describe('DeterministicRouter — Rule 4: single-search (default)', () => {
     expect(plan.kind).toBe('single-search');
     if (plan.kind !== 'single-search') return;
     expect(plan.searchInput.limit).toBe(3);
+  });
+
+  it('emits filters and preferences from tiered constraints when legacy flat constraints are empty', () => {
+    const router = makeRouter();
+    const plan = router.route(
+      baseAnalysis({
+        preservedSurface: '프랑스 달달한 와인',
+        constraints: {
+          hard: [makeConstraint('country', 'France')],
+          soft: [makeConstraint('sweetness_min', 0.5, '>=')],
+          inferred: [],
+        },
+        normalizedConstraints: [],
+      }),
+    );
+    expect(plan.kind).toBe('single-search');
+    if (plan.kind !== 'single-search') return;
+    expect(plan.searchInput.filters).toEqual([makeConstraint('country', 'France')]);
+    expect(plan.searchInput.preferences).toEqual([makeConstraint('sweetness_min', 0.5, '>=')]);
   });
 });
 

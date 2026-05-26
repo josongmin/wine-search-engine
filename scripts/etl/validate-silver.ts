@@ -67,7 +67,7 @@ const NORMALISED_MAX = 1;
  * Per-record Zod schema for SilverWineRecord.
  *
  * Required fields: sourceId, externalId, canonicalLabel, producer, country,
- * region, wineType, grapes, ratingsCount, priceBand, popularityScore.
+ * region, wineType, grapes, ratingsCount, popularityScore.
  *
  * `schema_version` is optional; when absent it defaults to the oldest known
  * version (backward-compat). When present, it MUST be a known version string.
@@ -104,7 +104,7 @@ export const SilverWineRecordSchema = z
     ratingAvg: z.number().finite().min(0).max(5).nullable(),
     ratingsCount: z.number().int().min(0),
     priceUsd: z.number().finite().min(0).nullable(),
-    priceBand: z.enum(PRICE_BAND_VALUES),
+    priceBand: z.enum(PRICE_BAND_VALUES).optional(),
     popularityScore: z
       .number()
       .finite()

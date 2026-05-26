@@ -139,7 +139,7 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
         value: SlotValue;
         confidence: number;
         attribute: string;
-        operator: "=" | "<=" | ">=" | "range" | "in" | "exclude" | "not_in";
+        operator: ">=" | "=" | "<=" | "range" | "in" | "exclude" | "not_in";
         kind: "slot";
         nodeId: string;
         atomRef: string;
@@ -149,7 +149,7 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
         value: SlotValue;
         confidence: number;
         attribute: string;
-        operator: "=" | "<=" | ">=" | "range" | "in" | "exclude" | "not_in";
+        operator: ">=" | "=" | "<=" | "range" | "in" | "exclude" | "not_in";
         kind: "slot";
         nodeId: string;
         atomRef: string;
@@ -231,15 +231,15 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
         to: z.ZodString;
         reason: z.ZodEnum<["meal_course", "pairing", "variety"]>;
     }, "strict", z.ZodTypeAny, {
-        reason: "pairing" | "meal_course" | "variety";
         kind: "complements";
         from: string;
         to: string;
+        reason: "pairing" | "meal_course" | "variety";
     }, {
-        reason: "pairing" | "meal_course" | "variety";
         kind: "complements";
         from: string;
         to: string;
+        reason: "pairing" | "meal_course" | "variety";
     }>, z.ZodObject<{
         kind: z.ZodLiteral<"depends_on">;
         from: z.ZodString;
@@ -286,13 +286,13 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
     llmModel: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
     graphSchemaVersion: "constraint_graph_v1" | "constraint_graph_v1.1";
-    origin: "deterministic_from_atoms" | "planner_emitted" | "hybrid";
+    origin: "hybrid" | "deterministic_from_atoms" | "planner_emitted";
     rootNodeId: string;
     nodes: ({
         value: SlotValue;
         confidence: number;
         attribute: string;
-        operator: "=" | "<=" | ">=" | "range" | "in" | "exclude" | "not_in";
+        operator: ">=" | "=" | "<=" | "range" | "in" | "exclude" | "not_in";
         kind: "slot";
         nodeId: string;
         atomRef: string;
@@ -323,10 +323,10 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
         to: string;
         resource: "price_total" | "time" | "count";
     } | {
-        reason: "pairing" | "meal_course" | "variety";
         kind: "complements";
         from: string;
         to: string;
+        reason: "pairing" | "meal_course" | "variety";
     } | {
         kind: "depends_on";
         from: string;
@@ -345,13 +345,13 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
     llmModel?: string | undefined;
 }, {
     graphSchemaVersion: "constraint_graph_v1" | "constraint_graph_v1.1";
-    origin: "deterministic_from_atoms" | "planner_emitted" | "hybrid";
+    origin: "hybrid" | "deterministic_from_atoms" | "planner_emitted";
     rootNodeId: string;
     nodes: ({
         value: SlotValue;
         confidence: number;
         attribute: string;
-        operator: "=" | "<=" | ">=" | "range" | "in" | "exclude" | "not_in";
+        operator: ">=" | "=" | "<=" | "range" | "in" | "exclude" | "not_in";
         kind: "slot";
         nodeId: string;
         atomRef: string;
@@ -382,10 +382,10 @@ export declare const ConstraintGraphSchema: z.ZodObject<{
         to: string;
         resource: "price_total" | "time" | "count";
     } | {
-        reason: "pairing" | "meal_course" | "variety";
         kind: "complements";
         from: string;
         to: string;
+        reason: "pairing" | "meal_course" | "variety";
     } | {
         kind: "depends_on";
         from: string;

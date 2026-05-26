@@ -44,12 +44,25 @@ function makePlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
 }
 
 function makeAnchor(overrides: Partial<AnchorCandidate> = {}): AnchorCandidate {
+  const lookupStrategies = overrides.lookupStrategies ?? [];
+  const inferredAliasType = overrides.aliasType
+    ?? (lookupStrategies.includes('phonetic_exact')
+      ? 'phonetic'
+      : lookupStrategies.includes('transliterated_exact')
+        ? 'translation'
+        : lookupStrategies.includes('phonetic_fuzzy')
+          || lookupStrategies.includes('fuzzy_char_ngram')
+          || lookupStrategies.includes('transliterated_fuzzy')
+          || lookupStrategies.includes('substring')
+          ? 'misspelling'
+          : 'canonical');
   return {
     surfaceForm: 'opus one',
     normalizedForm: 'opus one',
     candidateEntityIds: ['wine-opus-one-2019'],
     confidence: 0.8,
     source: 'alias',
+    aliasType: inferredAliasType,
     ...overrides,
   };
 }
@@ -875,12 +888,25 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
     entityId: string,
     overrides: Partial<AnchorCandidate> = {},
   ): AnchorCandidate {
+    const lookupStrategies = overrides.lookupStrategies ?? [];
+    const inferredAliasType = overrides.aliasType
+      ?? (lookupStrategies.includes('phonetic_exact')
+        ? 'phonetic'
+        : lookupStrategies.includes('transliterated_exact')
+          ? 'translation'
+          : lookupStrategies.includes('phonetic_fuzzy')
+            || lookupStrategies.includes('fuzzy_char_ngram')
+            || lookupStrategies.includes('transliterated_fuzzy')
+            || lookupStrategies.includes('substring')
+            ? 'misspelling'
+            : 'canonical');
     return {
       surfaceForm: entityId,
       normalizedForm: entityId,
       candidateEntityIds: [createEntityId(entityId)],
       confidence: 0.85,
       source: 'alias',
+      aliasType: inferredAliasType,
       ...overrides,
     };
   }

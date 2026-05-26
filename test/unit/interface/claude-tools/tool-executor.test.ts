@@ -1215,7 +1215,7 @@ describe('WineToolExecutor', () => {
       );
     });
 
-    it('should forward shared drinking-window objective to comparison legs', async () => {
+    it('does not forward shared drinking-window objective into comparison retrieval context', async () => {
       vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
         mockComparisonResponse,
       );
@@ -1237,11 +1237,9 @@ describe('WineToolExecutor', () => {
 
       expect(comparisonLegs[0].retrievalQuery.toLowerCase()).toContain('barolo wine');
       expect(comparisonLegs[1].retrievalQuery.toLowerCase()).toContain('brunello di montalcino wine');
-      expect(parentContext?.preferences).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ attribute: 'drinking_window', operator: '=', value: 2026 }),
-        ]),
-      );
+      expect(
+        parentContext?.preferences?.some((preference) => preference.attribute === 'drinking_window') ?? false,
+      ).toBe(false);
     });
 
     it('should propagate shared grape_primary filters into comparison legs and parent context', async () => {

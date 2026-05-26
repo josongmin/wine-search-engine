@@ -50,7 +50,22 @@ export declare function resolveGrapeAlias(grape: string): string;
  * Check if two grape names are synonyms of the same canonical variety.
  */
 export declare function grapesEquivalent(a: string, b: string): boolean;
-/** Canonical wine types. */
+/**
+ * Canonical wine types.
+ *
+ * Fortified/aromatized expansion (2026-05, S3): Korean and English aliases for
+ * Port (포트와인/포트), Sherry (셰리/쉐리), Vermouth (베르무트/베르뭇), Madeira
+ * (마데이라), Marsala (마살라). All map to the canonical `fortified`
+ * wine-type so the entity resolver routes them through the wine-domain
+ * pipeline (preventing the OOD-alcohol redirect and avoiding the
+ * unsupported-intent reject path documented in S3).
+ *
+ * Note: 토카이 (Tokaji) is intentionally NOT registered here because the gold
+ * catalog already maps it to the higher-precision appellation
+ * "Royal Tokaji Aszú 6 Puttonyos 2017" (verified by
+ * gold-korean-entity-alias-catalog.regression.test.ts). Adding 토카이 here
+ * would shadow that appellation mapping.
+ */
 export declare const WINE_TYPE_ALIASES: ReadonlyMap<string, string>;
 /**
  * Normalize a wine type string to canonical form.
