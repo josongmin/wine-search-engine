@@ -131,11 +131,16 @@ function buildSearchToolStructuredPreferences(
   return buildContractSearchToolStructuredPreferences(input, mappingVersion);
 }
 
+export function resolveFoodPairingBudgetKrw(
+  input: Pick<FoodPairingToolInputLike, 'max_price' | 'max_price_krw'>,
+): number | undefined {
+  return input.max_price_krw
+    ?? (input.max_price !== undefined ? Math.round(input.max_price * KRW_PER_USD_APPROXIMATE) : undefined);
+}
+
 export function buildFoodPairingQuery(input: FoodPairingToolInputLike): string {
   const clauses = [`wine pairing for ${input.food}`];
-  const budgetKrw =
-    input.max_price_krw
-    ?? (input.max_price !== undefined ? Math.round(input.max_price * KRW_PER_USD_APPROXIMATE) : undefined);
+  const budgetKrw = resolveFoodPairingBudgetKrw(input);
   if (budgetKrw !== undefined) {
     clauses.push(`${budgetKrw}원 이하`);
   }
@@ -164,8 +169,10 @@ export function buildFoodPairingPreferences(
   input: FoodPairingToolInputLike,
   mappingVersion: string,
 ): readonly NormalizedConstraint[] {
+  const maxPriceKrw = resolveFoodPairingBudgetKrw(input);
   const preferences: NormalizedConstraint[] = [
     ...buildSearchToolStructuredPreferences({
+      ...(maxPriceKrw !== undefined ? { max_price_krw: maxPriceKrw } : {}),
       styles: input.styles,
     }, mappingVersion),
   ];
@@ -176,6 +183,7 @@ export function buildFoodPairingPreferences(
       value: input.sweetness_target,
       source_phrase: `sweetness_target=${input.sweetness_target}`,
       confidence: 1.0,
+      soft_promotion_authority: 'allow',
       mapping_version: mappingVersion,
     });
   }
@@ -186,6 +194,7 @@ export function buildFoodPairingPreferences(
       value: input.acidity_min,
       source_phrase: `acidity_min=${input.acidity_min}`,
       confidence: 1.0,
+      soft_promotion_authority: 'allow',
       mapping_version: mappingVersion,
     });
   }
@@ -196,6 +205,7 @@ export function buildFoodPairingPreferences(
       value: input.tannin_max,
       source_phrase: `tannin_max=${input.tannin_max}`,
       confidence: 1.0,
+      soft_promotion_authority: 'allow',
       mapping_version: mappingVersion,
     });
   }
@@ -206,6 +216,7 @@ export function buildFoodPairingPreferences(
       value: [...input.pairing_tags],
       source_phrase: input.pairing_tags.join(', '),
       confidence: 1.0,
+      soft_promotion_authority: 'allow',
       mapping_version: mappingVersion,
     });
   }
@@ -275,10 +286,6 @@ function buildComparisonSharedInput(input: CompareWinesToolInputLike): CompareSh
     ...(input.acidity_min !== undefined ? { acidity_min: input.acidity_min } : {}),
     ...(input.acidity_max !== undefined ? { acidity_max: input.acidity_max } : {}),
     ...(input.tannin_max !== undefined ? { tannin_max: input.tannin_max } : {}),
-    ...(input.drinking_window !== undefined ? { drinking_window: input.drinking_window } : {}),
-    ...(input.drinking_window_target_year !== undefined
-      ? { drinking_window_target_year: input.drinking_window_target_year }
-      : {}),
   };
 }
 

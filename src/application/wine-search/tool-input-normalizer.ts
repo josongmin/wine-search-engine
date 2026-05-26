@@ -58,6 +58,10 @@
 import type { NormalizedConstraint } from '@shared/types/index.js';
 import { containsHangul } from '@shared/utils/hangul.js';
 import {
+  convertConstraintUsdToApproxKrw,
+  convertKrwToConstraintUsd,
+} from '@shared/utils/canonical-price.js';
+import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
 } from '@shared/constants.js';
@@ -416,13 +420,19 @@ function findTotalBudgetForParallelSlots(
   if (analysis.decomposition?.kind !== 'parallel-slot') return undefined;
   if (analysis.decomposition.slots.length < 2) return undefined;
   for (const c of getCanonicalNormalizedConstraints(analysis)) {
-    if (c.attribute !== 'max_price_krw' && c.attribute !== 'price_krw') continue;
+    if (!PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute)) continue;
     if (typeof c.value === 'number' && Number.isFinite(c.value) && c.value > 0) {
+      if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
+        return convertConstraintUsdToApproxKrw(c.value);
+      }
       return Math.floor(c.value);
     }
     if (typeof c.value === 'object' && !Array.isArray(c.value)) {
       const maxVal = (c.value as { readonly max?: number }).max;
       if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
+        if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
+          return convertConstraintUsdToApproxKrw(maxVal);
+        }
         return Math.floor(maxVal);
       }
     }
@@ -430,21 +440,22 @@ function findTotalBudgetForParallelSlots(
   return undefined;
 }
 
-/** Apply (or replace) a single `max_price_krw` `<=` constraint on a filter
- *  list. Drops any pre-existing min/max_price_krw constraints. */
+/** Apply (or replace) a single canonical `price_usd` `<=` constraint on a
+ *  filter list. Drops any pre-existing price constraints. */
 function applyPerSlotBudget(
   filters: readonly NormalizedConstraint[] | undefined,
   perSlotBudgetKrw: number,
 ): readonly NormalizedConstraint[] {
   const others = (filters ?? []).filter(
-    (c) => c.attribute !== 'max_price_krw' && c.attribute !== 'min_price_krw',
+    (c) => !PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute),
   );
   const slotBudget: NormalizedConstraint = {
-    attribute: 'max_price_krw',
+    attribute: 'price_usd',
     operator: '<=',
-    value: perSlotBudgetKrw,
+    value: convertKrwToConstraintUsd(perSlotBudgetKrw),
     source_phrase: `${perSlotBudgetKrw}원 이하 (per slot)`,
     confidence: ROUTER_SYNTHESIZED_CONSTRAINT_CONFIDENCE,
+    soft_promotion_authority: 'allow',
   };
   return [...others, slotBudget];
 }

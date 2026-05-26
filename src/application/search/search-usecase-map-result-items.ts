@@ -393,6 +393,7 @@ export async function mapRankedResultsToResultItems(
         ...(r.priceBand !== undefined || r.priceUsd !== undefined
           ? { priceRange: r.priceUsd !== undefined ? `$${r.priceUsd}` : r.priceBand }
           : {}),
+        ...(r.priceUsd !== undefined ? { priceUsd: r.priceUsd } : {}),
         ...(r.style !== undefined ? { style: r.style } : {}),
         ...(r.wineType !== undefined ? { wineType: r.wineType } : {}),
         ...(r.classification !== undefined ? { classification: r.classification } : {}),

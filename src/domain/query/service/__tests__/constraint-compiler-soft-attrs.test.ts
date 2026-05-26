@@ -515,16 +515,16 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
     );
   });
 
-  it('extracts explicit USD ceiling as max_price_krw through the compiler path', async () => {
+  it('extracts explicit USD ceiling as canonical price_usd through the compiler path', async () => {
     const compiler = new ConstraintCompiler(new DefaultNLMapper(new NullMappingTablePort()));
     const result = await compiler.compile('best Bordeaux under 100 dollars');
 
     expect(result.bundle.soft).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          attribute: 'max_price_krw',
+          attribute: 'price_usd',
           operator: '<=',
-          value: 135_000,
+          value: 100,
         }),
       ]),
     );

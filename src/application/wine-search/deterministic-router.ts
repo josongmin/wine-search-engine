@@ -36,6 +36,10 @@
 
 import type { NormalizedConstraint } from '@shared/types/index.js';
 import {
+  convertConstraintUsdToApproxKrw,
+  convertKrwToConstraintUsd,
+} from '@shared/utils/canonical-price.js';
+import {
   EXACT_METADATA_SEARCH_LIMIT,
   PRICE_CONSTRAINT_ATTRIBUTE_NAMES,
 } from '@shared/constants/constraint-attributes.js';
@@ -140,14 +144,20 @@ function extractPriceBudgetKrw(
   constraints: readonly NormalizedConstraint[],
 ): number | undefined {
   for (const c of constraints) {
-    if (c.attribute !== 'max_price_krw' && c.attribute !== 'price_krw') continue;
+    if (!PRICE_CONSTRAINT_ATTRIBUTE_NAMES.has(c.attribute)) continue;
     const v = c.value;
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+      if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
+        return convertConstraintUsdToApproxKrw(v);
+      }
       return Math.floor(v);
     }
     if (typeof v === 'object' && !Array.isArray(v)) {
       const maxVal = (v as { readonly max?: number }).max;
       if (typeof maxVal === 'number' && Number.isFinite(maxVal) && maxVal > 0) {
+        if (c.attribute === 'price_usd' || c.attribute === 'max_price_usd' || c.attribute === 'min_price_usd') {
+          return convertConstraintUsdToApproxKrw(maxVal);
+        }
         return Math.floor(maxVal);
       }
     }
@@ -270,14 +280,16 @@ function expandParallelSlots(
         value: slot.wineType,
         source_phrase: slot.wineType,
         confidence: 1.0,
+        soft_promotion_authority: 'allow',
       },
       ...(perSlotBudgetKrw !== undefined
         ? [{
-          attribute: 'max_price_krw',
+          attribute: 'price_usd',
           operator: '<=' as const,
-          value: perSlotBudgetKrw,
+          value: convertKrwToConstraintUsd(perSlotBudgetKrw),
           source_phrase: `${perSlotBudgetKrw}원 이하 (per slot)`,
           confidence: 1.0,
+          soft_promotion_authority: 'allow' as const,
         }]
         : []),
     ];

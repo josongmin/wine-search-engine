@@ -471,7 +471,10 @@ describe('runSearchPreRoutePhase', () => {
       expect(result.compiled.query.constraints.hard).toEqual([]);
       expect(result.compiled.query.constraints.soft).toEqual([baroloConstraint]);
       expect(result.compiled.execution.provenancePolicy.requireConstraintEvidence).toBe(false);
-      expect(result.compiled.constraintGraph).toBeUndefined();
+      expect(result.compiled.constraintGraph?.origin).toBe('deterministic_from_atoms');
+      expect(result.compiled.constraintGraph?.nodes.some((node) =>
+        'attribute' in node && node.attribute === 'appellation',
+      )).toBe(true);
     }
   });
 

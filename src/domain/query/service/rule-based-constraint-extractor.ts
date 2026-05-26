@@ -3,6 +3,7 @@ import {
   KRW_PER_MAN_WON,
   KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
+import { convertKrwToConstraintUsd } from '../../shared/utils/canonical-price.js';
 import { WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
   extractSearchConstraints,
@@ -480,9 +481,9 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   // the user asked for "5만원 이하").
   if (searchConstraints.maxPriceKrw !== undefined) {
     soft.push({
-      attribute: 'max_price_krw',
+      attribute: 'price_usd',
       operator: '<=',
-      value: searchConstraints.maxPriceKrw,
+      value: convertKrwToConstraintUsd(searchConstraints.maxPriceKrw),
       source_phrase: `${searchConstraints.maxPriceKrw / KRW_PER_MAN_WON}만원 이하`,
       confidence: 0.85,
       mapping_version: mv,
@@ -491,9 +492,9 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
 
   if (searchConstraints.minPriceKrw !== undefined) {
     soft.push({
-      attribute: 'min_price_krw',
+      attribute: 'price_usd',
       operator: '>=',
-      value: searchConstraints.minPriceKrw,
+      value: convertKrwToConstraintUsd(searchConstraints.minPriceKrw),
       source_phrase: `${searchConstraints.minPriceKrw / KRW_PER_MAN_WON}만원 이상`,
       confidence: 0.85,
       mapping_version: mv,
@@ -510,9 +511,9 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     && searchConstraints.softMaxPriceKrwHint !== undefined
   ) {
     soft.push({
-      attribute: 'max_price_krw',
+      attribute: 'price_usd',
       operator: '<=',
-      value: searchConstraints.softMaxPriceKrwHint,
+      value: convertKrwToConstraintUsd(searchConstraints.softMaxPriceKrwHint),
       source_phrase: `약 ${searchConstraints.softMaxPriceKrwHint / KRW_PER_MAN_WON}만원 (retail-channel hint)`,
       confidence: 0.55,
       mapping_version: mv,

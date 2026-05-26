@@ -376,7 +376,7 @@ describe('end-to-end: Korean exclusion query → YQL NOT filter', () => {
   it('soft price constraint from 5만원 이하 is included in bundle', () => {
     const bundle = extractRuleBasedConstraints('5만원 이하 화이트 와인');
     const priceConstraint = bundle.soft.find(
-      (c) => c.attribute === 'max_price_krw' && c.operator === '<=',
+      (c) => c.attribute === 'price_usd' && c.operator === '<=',
     );
     expect(priceConstraint).toBeDefined();
     expect(typeof priceConstraint?.value).toBe('number');
@@ -394,18 +394,18 @@ describe('end-to-end: Korean exclusion query → YQL NOT filter', () => {
 });
 
 describe('rule-based soft slot extraction regression', () => {
-  it('extracts max_price_krw soft constraint from "5만원 이하"', () => {
+  it('extracts canonical price_usd ceiling soft constraint from "5만원 이하"', () => {
     const bundle = extractRuleBasedConstraints('5만원 이하 화이트 와인');
-    const c = bundle.soft.find((item) => item.attribute === 'max_price_krw' && item.operator === '<=');
+    const c = bundle.soft.find((item) => item.attribute === 'price_usd' && item.operator === '<=');
     expect(c).toBeDefined();
-    expect(c?.value).toBe(50_000);
+    expect(c?.value).toBe(37.04);
   });
 
-  it('extracts min_price_krw soft constraint from "10만원 이상"', () => {
+  it('extracts canonical price_usd floor soft constraint from "10만원 이상"', () => {
     const bundle = extractRuleBasedConstraints('10만원 이상 레드 와인');
-    const c = bundle.soft.find((item) => item.attribute === 'min_price_krw' && item.operator === '>=');
+    const c = bundle.soft.find((item) => item.attribute === 'price_usd' && item.operator === '>=');
     expect(c).toBeDefined();
-    expect(c?.value).toBe(100_000);
+    expect(c?.value).toBe(74.07);
   });
 
   it('extracts tannin low soft constraint from Korean intent', () => {

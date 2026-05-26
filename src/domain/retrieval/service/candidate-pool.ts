@@ -128,7 +128,10 @@ const PRICE_CONSTRAINT_ATTRIBUTES: ReadonlySet<string> = new Set([
 ]);
 
 function hasStructuredPriceConstraint(constraints: readonly NormalizedConstraint[]): boolean {
-  return constraints.some((constraint) => PRICE_CONSTRAINT_ATTRIBUTES.has(constraint.attribute));
+  return constraints.some((constraint) =>
+    PRICE_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)
+    && constraint.soft_promotion_authority === 'allow'
+  );
 }
 
 function buildRawQueryPriceConstraints(rawQuery: string): readonly NormalizedConstraint[] {

@@ -398,7 +398,7 @@ describe('POST /v1/search/interpret + Accept human — V2 interpret response sha
 
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    expect(body['applied_constraints']).toEqual(['hard:grape_primary', 'soft:max_price_krw']);
+    expect(body['applied_constraints']).toEqual(['hard:grape_primary', 'soft:price_usd']);
   });
 
   it('surfaces compare_anchor for anchor-vs-catalog comparison queries', async () => {

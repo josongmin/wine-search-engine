@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { NormalizedConstraint } from '@shared/types/index.js';
+import { convertKrwToConstraintUsd } from '@shared/utils/canonical-price.js';
 import { DeterministicRouter } from '../deterministic-router.js';
 import { ExecutionPlanSchema } from '../execution-plan-schemas.js';
 import type { WineSearchAnalysis } from '../wine-search-schemas.js';
@@ -177,8 +178,9 @@ describe('DeterministicRouter — Rule 2: parallel-slot decomposition', () => {
     );
     expect(plan.kind).toBe('parallel-search');
     if (plan.kind !== 'parallel-search') return;
-    const slot0BudgetFilter = plan.searches[0]?.filters?.find((c) => c.attribute === 'max_price_krw');
-    expect(slot0BudgetFilter?.value).toBe(50_000);
+    const slot0BudgetFilter = plan.searches[0]?.filters?.find((c) => c.attribute === 'price_usd');
+    expect(slot0BudgetFilter?.value).toBe(convertKrwToConstraintUsd(50_000));
+    expect(slot0BudgetFilter?.soft_promotion_authority).toBe('allow');
   });
 
   it('uses tiered constraints for parallel-slot budget split when legacy flat constraints are empty', () => {
@@ -203,8 +205,9 @@ describe('DeterministicRouter — Rule 2: parallel-slot decomposition', () => {
     );
     expect(plan.kind).toBe('parallel-search');
     if (plan.kind !== 'parallel-search') return;
-    const slot0BudgetFilter = plan.searches[0]?.filters?.find((c) => c.attribute === 'max_price_krw');
-    expect(slot0BudgetFilter?.value).toBe(60_000);
+    const slot0BudgetFilter = plan.searches[0]?.filters?.find((c) => c.attribute === 'price_usd');
+    expect(slot0BudgetFilter?.value).toBe(convertKrwToConstraintUsd(60_000));
+    expect(slot0BudgetFilter?.soft_promotion_authority).toBe('allow');
   });
 });
 

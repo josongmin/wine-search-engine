@@ -40,9 +40,7 @@ import {
   SEARCH_TOOL_ACIDITY_MIN_DESCRIPTION,
   SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION,
   SEARCH_TOOL_TANNIN_MAX_DESCRIPTION,
-  SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
-  SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
-  SEARCH_TOOL_DRINKING_WINDOW_VALUES,
+  SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS,
   SEARCH_TOOL_GRAPE_PRIMARY_DESCRIPTION,
   SEARCH_TOOL_MAX_ALCOHOL_PCT_DESCRIPTION,
   SEARCH_TOOL_MAX_EXCLUDE_FILTERS,
@@ -167,6 +165,23 @@ const ClaudeToolInputSchemaSchema = z.object({
   required: z.array(z.string().min(1)),
 }).strict();
 
+function rejectUnsupportedSearchFamilyFields<T extends z.ZodTypeAny>(schema: T) {
+  return z.unknown().superRefine((value, ctx) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return;
+    }
+    for (const field of SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(value, field)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} is not supported for this tool. Use check_drinking_window instead.`,
+        });
+      }
+    }
+  }).pipe(schema);
+}
+
 export const ClaudeToolDefinitionSchema = z.object({
   name: ClaudeToolNameSchema,
   description: z.string().min(1),
@@ -175,7 +190,7 @@ export const ClaudeToolDefinitionSchema = z.object({
 
 type ClaudeToolDefinition = z.infer<typeof ClaudeToolDefinitionSchema>;
 
-export const SearchToolInputSchema = z.object({
+const SearchToolInputSchemaBase = z.object({
   query: buildSearchToolQueryField({
     maxLen: SEARCH_TOOL_QUERY_MAX_LEN,
     requiredMessage: 'Query must not be empty',
@@ -193,6 +208,7 @@ export const SearchToolInputSchema = z.object({
 }).superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
 });
+export const SearchToolInputSchema = rejectUnsupportedSearchFamilyFields(SearchToolInputSchemaBase);
 
 export const FoodPairingInputSchema = z.object({
   ...buildFoodPairingFieldShape({
@@ -213,7 +229,7 @@ export const DrinkingWindowInputSchema = z.object({
   // CLAUDE.md rule 10 exception: no `.strict()` for LLM tool-call input.
 });
 
-export const CompareWinesInputSchema = z.object({
+const CompareWinesInputSchemaBase = z.object({
   query_a: buildSearchToolQueryField({
     maxLen: SEARCH_TOOL_QUERY_MAX_LEN,
     requiredMessage: 'Query A must not be empty',
@@ -259,6 +275,7 @@ export const CompareWinesInputSchema = z.object({
     vintage_max: data.vintage_max_b,
   }, ctx);
 });
+export const CompareWinesInputSchema = rejectUnsupportedSearchFamilyFields(CompareWinesInputSchemaBase);
 
 /**
  * WINE_SEARCH_TOOLS: 5 wine-specific tools for Claude integration.
@@ -436,17 +453,6 @@ export const WINE_SEARCH_TOOLS = [
           description: SEARCH_TOOL_TANNIN_MAX_DESCRIPTION,
           minimum: FOOD_PAIRING_SWEETNESS_TARGET_MIN,
           maximum: FOOD_PAIRING_SWEETNESS_TARGET_MAX,
-        },
-        drinking_window: {
-          type: 'string',
-          enum: [...SEARCH_TOOL_DRINKING_WINDOW_VALUES],
-          description: SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
-        },
-        drinking_window_target_year: {
-          type: 'number',
-          description: SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
-          minimum: SEARCH_TOOL_VINTAGE_MIN,
-          maximum: SEARCH_TOOL_VINTAGE_MAX,
         },
         want_diversity: {
           type: 'boolean',
@@ -722,17 +728,6 @@ export const WINE_SEARCH_TOOLS = [
           description: SEARCH_TOOL_TANNIN_MAX_DESCRIPTION,
           minimum: 0,
           maximum: 1,
-        },
-        drinking_window: {
-          type: 'string',
-          enum: [...SEARCH_TOOL_DRINKING_WINDOW_VALUES],
-          description: SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION,
-        },
-        drinking_window_target_year: {
-          type: 'number',
-          description: SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION,
-          minimum: SEARCH_TOOL_VINTAGE_MIN,
-          maximum: SEARCH_TOOL_VINTAGE_MAX,
         },
         country_a: {
           type: 'string',

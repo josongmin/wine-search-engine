@@ -41,8 +41,6 @@ interface SearchToolRetrievalCoreInput {
   readonly acidity_max?: number | undefined;
   readonly tannin_max?: number | undefined;
   readonly occasion?: readonly string[] | undefined;
-  readonly drinking_window?: 'now' | undefined;
-  readonly drinking_window_target_year?: number | undefined;
   /**
    * Concept comparison legs need representative-set retrieval ("Barolo wine"),
    * not a collapsed bare canonical lookup ("barolo").

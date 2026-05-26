@@ -101,7 +101,7 @@ export interface AgentQueryExecutionContract {
   readonly totalBudgetKrw?: number | undefined;
   readonly requiredTool?: 'get_food_pairings' | undefined;
   readonly foodPairing?: {
-    readonly food: string;
+    readonly rawQuery: string;
     readonly pairingTags: readonly PairingTag[];
   } | undefined;
   readonly searchDefaults?: AgentSearchDefaults | undefined;
@@ -574,7 +574,7 @@ function buildFoodPairingContract(
   }
 
   return {
-    food: query.trim(),
+    rawQuery: query.trim(),
     pairingTags,
   };
 }
@@ -670,14 +670,14 @@ function buildVerificationStepRequirement(
   if (searchDefaults?.min_price_krw !== undefined || searchConstraints.minPriceKrw !== undefined) {
     coverage.push({
       key: 'price:min',
-      matchedConstraintKey: 'min_price_krw',
+      matchedConstraintKey: 'price_usd',
       description: 'min price floor',
     });
   }
   if (searchDefaults?.max_price_krw !== undefined || searchConstraints.maxPriceKrw !== undefined) {
     coverage.push({
       key: 'price:max',
-      matchedConstraintKey: 'max_price_krw',
+      matchedConstraintKey: 'price_usd',
       description: 'max price ceiling',
     });
   }
@@ -847,6 +847,5 @@ function isSpecificSkuLikeNormalized(query: string): boolean {
     && isSpecificSkuLikeQuery(candidate),
   );
 }
-
 
 

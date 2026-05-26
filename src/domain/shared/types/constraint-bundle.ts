@@ -2,6 +2,7 @@
  * Operators supported for normalized constraints.
  */
 export type ConstraintOperator = '=' | '<=' | '>=' | 'range' | 'in' | 'exclude' | 'not_in';
+export type SoftPromotionAuthority = 'allow' | 'deny';
 
 /**
  * A single normalized constraint extracted from a user query.
@@ -21,6 +22,12 @@ export interface NormalizedConstraint {
 
   /** Confidence score in [0, 1] that this constraint was correctly extracted. */
   readonly confidence: number;
+
+  /**
+   * Explicit authority bit for promoting a SOFT constraint into a retrieval
+   * filter token. Omitted means deny-by-default.
+   */
+  readonly soft_promotion_authority?: SoftPromotionAuthority | undefined;
 
   /**
    * Version of the mapping table that produced this constraint (RFC-004, RFC-005).

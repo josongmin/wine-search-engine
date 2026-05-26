@@ -103,6 +103,8 @@ export interface EntitySummary {
 
   /** Human-readable price band (e.g. "$20-$30"). */
   readonly priceRange?: string | undefined;
+  /** Canonical numeric price used by machine-side filters and verification. */
+  readonly priceUsd?: number | undefined;
 
   /** Gift suitability score in [0, 1]. */
   readonly giftSuitabilityScore?: number | undefined;

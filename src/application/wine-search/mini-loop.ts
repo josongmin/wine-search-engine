@@ -59,14 +59,17 @@ import {
   buildSearchToolStructuredPreferences,
   sanitizeOptionalToolNulls,
 } from '../search/search-tool-contract.js';
+import { applySearchToolBudgetResultPolicy } from '../search/search-tool-result-policy.js';
 import {
   buildCompareWinesExecutionRequest,
   buildDrinkingWindowRequest,
   buildFoodPairingFilters,
   buildFoodPairingPreferences,
   buildFoodPairingQuery,
+  resolveFoodPairingBudgetKrw,
 } from '../search/tool-execution-support.js';
 import { KNOWN_AGENT_TOOL_NAMES_DISPLAY } from '@domain/agent/model/agent-tool-attempt-schema.js';
+import { KRW_PER_USD_APPROXIMATE } from '@domain/shared/constants.js';
 import { toolResultCacheTtlSeconds } from '@domain/shared/constants/tool-cache-ttl.js';
 import { stableStringify } from '@domain/shared/utils/stable-stringify.js';
 import {
@@ -917,7 +920,12 @@ async function invokeToolPort(
         requestId,
         { abortSignal: signal },
       );
-      return { rawResult: result, observation: formatSearchObservation(result) };
+      const filteredResult = applySearchToolBudgetResultPolicy(
+        result,
+        { maxKrw: resolveFoodPairingBudgetKrw(validation.data) },
+        { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+      ).response;
+      return { rawResult: filteredResult, observation: formatSearchObservation(filteredResult) };
     }
     case 'check_drinking_window': {
       const validation = CHECK_DRINKING_WINDOW_INPUT_SCHEMA.safeParse(sanitizeOptionalToolNulls(call.input));

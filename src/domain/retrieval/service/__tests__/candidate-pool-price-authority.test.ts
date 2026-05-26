@@ -95,6 +95,7 @@ describe('CandidatePoolService price authority', () => {
       value: 30,
       source_phrase: 'structured',
       confidence: 1,
+      soft_promotion_authority: 'allow' as const,
       mapping_version: 'test-v1',
     };
     const queryPlan = {

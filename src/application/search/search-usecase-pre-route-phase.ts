@@ -24,6 +24,9 @@ import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { abortError } from '../../domain/shared/cooperative-abort.js';
 import { PolicyBlockedError } from '../../domain/shared/error/policy-blocked.js';
+import { buildTrivialGraphFromAtoms } from '../../domain/query/service/build-trivial-graph-from-atoms.js';
+import { isConstraintGraphEmitEnabled } from '../../domain/query/service/constraint-graph-flags.js';
+import { liftBundleToAtoms } from '../../domain/shared/types/constraint-atom.js';
 import {
   isAppellationHardFilterAvailable,
   type SearchSnapshotFieldAvailability,
@@ -98,6 +101,43 @@ function representativeConstraintKey(
   ]);
 }
 
+function rebuildCompiledForConstraintMutation(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
+  const admissionContext = {
+    requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
+    requires_constraint_evidence: plan.constraints.hard.length > 0,
+    requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
+  } as const;
+  const nextPlan: QueryPlanV1 = {
+    ...plan,
+    admission_context: admissionContext,
+  };
+  const { constraintGraph: _droppedStaleGraph, ...compiledSansGraph } = compiled;
+  const regeneratedGraph = isConstraintGraphEmitEnabled()
+    ? buildTrivialGraphFromAtoms(liftBundleToAtoms(plan.constraints))
+    : undefined;
+  const nextCompiled: CompiledWineQuery = {
+    ...compiledSansGraph,
+    query: {
+      ...compiled.query,
+      constraints: plan.constraints,
+      retrievalPlan: buildRetrievalPlan(plan.constraints),
+      retrievalObjective: buildRetrievalObjective(plan.constraints),
+    },
+    execution: {
+      ...compiled.execution,
+      provenancePolicy: {
+        ...compiled.execution.provenancePolicy,
+        requireConstraintEvidence: admissionContext.requires_constraint_evidence,
+      },
+    },
+    ...(regeneratedGraph !== undefined ? { constraintGraph: regeneratedGraph } : {}),
+  };
+  return { plan: nextPlan, compiled: nextCompiled };
+}
+
 /**
  * C2-Downstream — `appellation` hard-constraint demotion.
  *
@@ -153,34 +193,10 @@ function applyAppellationDataAvailabilityDemotion(
     hard,
     soft: [...plan.constraints.soft, ...newSoft],
   };
-  const admissionContext = {
-    requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
-    requires_constraint_evidence: hard.length > 0,
-    requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
-  } as const;
-  const nextPlan: QueryPlanV1 = {
+  return rebuildCompiledForConstraintMutation({
     ...plan,
     constraints,
-    admission_context: admissionContext,
-  };
-  const nextCompiled: CompiledWineQuery = {
-    query: {
-      ...compiled.query,
-      constraints,
-      retrievalPlan: buildRetrievalPlan(constraints),
-      retrievalObjective: buildRetrievalObjective(constraints),
-    },
-    execution: {
-      ...compiled.execution,
-      provenancePolicy: {
-        ...compiled.execution.provenancePolicy,
-        requireConstraintEvidence: admissionContext.requires_constraint_evidence,
-      },
-    },
-    ...(compiled.plannerTrace !== undefined ? { plannerTrace: compiled.plannerTrace } : {}),
-  };
-
-  return { plan: nextPlan, compiled: nextCompiled };
+  }, compiled);
 }
 
 function applyRepresentativeConceptContext(
@@ -212,34 +228,10 @@ function applyRepresentativeConceptContext(
     hard,
     soft: [...plan.constraints.soft, ...demotedSoft],
   };
-  const admissionContext = {
-    requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
-    requires_constraint_evidence: hard.length > 0,
-    requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
-  } as const;
-  const nextPlan: QueryPlanV1 = {
+  return rebuildCompiledForConstraintMutation({
     ...plan,
     constraints,
-    admission_context: admissionContext,
-  };
-  const nextCompiled: CompiledWineQuery = {
-    query: {
-      ...compiled.query,
-      constraints,
-      retrievalPlan: buildRetrievalPlan(constraints),
-      retrievalObjective: buildRetrievalObjective(constraints),
-    },
-    execution: {
-      ...compiled.execution,
-      provenancePolicy: {
-        ...compiled.execution.provenancePolicy,
-        requireConstraintEvidence: admissionContext.requires_constraint_evidence,
-      },
-    },
-    ...(compiled.plannerTrace !== undefined ? { plannerTrace: compiled.plannerTrace } : {}),
-  };
-
-  return { plan: nextPlan, compiled: nextCompiled };
+  }, compiled);
 }
 
 function requestHasStructuredSetRetrievalPreference(
@@ -594,31 +586,7 @@ export async function runSearchPreRoutePhase(
     }
 
     if (structuredConstraintsMerged) {
-      const admissionContext = {
-        requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
-        requires_constraint_evidence: plan.constraints.hard.length > 0,
-        requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
-      } as const;
-      plan = {
-        ...plan,
-        admission_context: admissionContext,
-      };
-      compiled = {
-        ...compiled,
-        query: {
-          ...compiled.query,
-          constraints: plan.constraints,
-          retrievalPlan: buildRetrievalPlan(plan.constraints),
-          retrievalObjective: buildRetrievalObjective(plan.constraints),
-        },
-        execution: {
-          ...compiled.execution,
-          provenancePolicy: {
-            ...compiled.execution.provenancePolicy,
-            requireConstraintEvidence: admissionContext.requires_constraint_evidence,
-          },
-        },
-      };
+      ({ plan, compiled } = rebuildCompiledForConstraintMutation(plan, compiled));
     }
 
     ({ plan, compiled } = applyRepresentativeConceptContext(

@@ -49,6 +49,7 @@ import {
   buildCompareToolFieldShape,
   buildEntityIdToolField,
   buildFoodPairingFieldShape,
+  SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS,
   buildSearchToolFieldShape,
   buildSearchToolQueryField,
   validateSearchToolVintageRange,
@@ -116,7 +117,24 @@ const ToolOptionalStringField = ToolStringField.optional();
 // are silently dropped on `.safeParse`).
 // ---------------------------------------------------------------------------
 
-export const SEARCH_WINES_INPUT_SCHEMA = z.object({
+function rejectUnsupportedSearchFamilyFields<T extends z.ZodTypeAny>(schema: T) {
+  return z.unknown().superRefine((value, ctx) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return;
+    }
+    for (const field of SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(value, field)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} is not supported for this tool. Use check_drinking_window instead.`,
+        });
+      }
+    }
+  }).pipe(schema);
+}
+
+const SEARCH_WINES_INPUT_SCHEMA_BASE = z.object({
   query: buildSearchToolQueryField({
     maxLen: TOOL_INPUT_STRING_MAX_LEN,
     requiredMessage: 'Query must not be empty',
@@ -131,6 +149,7 @@ export const SEARCH_WINES_INPUT_SCHEMA = z.object({
 }).superRefine((data, ctx) => {
   validateSearchToolVintageRange(data, ctx);
 });
+export const SEARCH_WINES_INPUT_SCHEMA = rejectUnsupportedSearchFamilyFields(SEARCH_WINES_INPUT_SCHEMA_BASE);
 
 export const GET_FOOD_PAIRINGS_INPUT_SCHEMA = z.object(
   buildFoodPairingFieldShape({
@@ -147,7 +166,7 @@ export const CHECK_DRINKING_WINDOW_INPUT_SCHEMA = z.object({
   target_year: z.number().int().min(TOOL_INPUT_VINTAGE_MIN).max(TOOL_INPUT_VINTAGE_MAX).optional(),
 });
 
-export const COMPARE_WINES_INPUT_SCHEMA = z.object({
+const COMPARE_WINES_INPUT_SCHEMA_BASE = z.object({
   query_a: buildSearchToolQueryField({
     maxLen: TOOL_INPUT_STRING_MAX_LEN,
     requiredMessage: 'Query A must not be empty',
@@ -184,6 +203,7 @@ export const COMPARE_WINES_INPUT_SCHEMA = z.object({
     vintage_max: data.vintage_max_b,
   }, ctx);
 });
+export const COMPARE_WINES_INPUT_SCHEMA = rejectUnsupportedSearchFamilyFields(COMPARE_WINES_INPUT_SCHEMA_BASE);
 
 // Identity lookup: schema is the SSoT canonical `LookupWineInputSchema` from
 // `lookup-wine-execution.ts`. Before extraction (SOLID H2) this file declared

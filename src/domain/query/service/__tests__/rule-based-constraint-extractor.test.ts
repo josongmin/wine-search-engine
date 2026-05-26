@@ -13,9 +13,9 @@ import { extractRuleBasedConstraints } from '../rule-based-constraint-extractor.
 describe('extractRuleBasedConstraints — price "under" pattern (BUG-14)', () => {
   it('matches plain ASCII "under $50"', () => {
     const result = extractRuleBasedConstraints('under $50 red wine');
-    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    const maxPrice = result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=');
     expect(maxPrice).toBeDefined();
-    expect(maxPrice?.value).toBe(67_500);
+    expect(maxPrice?.value).toBe(50);
     expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
@@ -56,16 +56,16 @@ describe('extractRuleBasedConstraints — price "under" pattern (BUG-14)', () =>
 
   it('matches "under $50" followed by space then Korean', () => {
     const result = extractRuleBasedConstraints('under $50 와인');
-    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    const maxPrice = result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=');
     expect(maxPrice).toBeDefined();
-    expect(maxPrice?.value).toBe(67_500);
+    expect(maxPrice?.value).toBe(50);
     expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
   it('does not match "under $50" when digit immediately follows (e.g. "under $505")', () => {
     const result = extractRuleBasedConstraints('under $505');
-    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
-    expect(maxPrice?.value).toBe(681_750);
+    const maxPrice = result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=');
+    expect(maxPrice?.value).toBe(505);
     expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
@@ -205,11 +205,11 @@ describe('extractRuleBasedConstraints — BUG-P1 regression: early return discar
   });
 
   it('wine_type is preserved even when query also has a valid price match', () => {
-    // "French red wine under $50" → wine_type=red, country=France preserved alongside max_price_krw
+    // "French red wine under $50" → wine_type=red, country=France preserved alongside price_usd
     const result = extractRuleBasedConstraints('french red wine under $50');
     expect(result.hard.find((c) => c.attribute === 'wine_type')?.value).toBe('red');
     expect(result.hard.find((c) => c.attribute === 'country')?.value).toBe('France');
-    expect(result.soft.find((c) => c.attribute === 'max_price_krw')?.value).toBe(67_500);
+    expect(result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=')?.value).toBe(50);
     expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 });
@@ -229,8 +229,8 @@ describe('extractRuleBasedConstraints — BUG-P2 currency detection from matched
   it('만원 pattern extracts KRW price correctly', () => {
     // "5만원 이하" → exact canonical KRW ceiling, not a coarse price band.
     const result = extractRuleBasedConstraints('5만원 이하 와인');
-    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
-    expect(maxPrice?.value).toBe(50_000);
+    const maxPrice = result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=');
+    expect(maxPrice?.value).toBe(37.04);
     expect(result.soft.find((c) => c.attribute === 'price_band')).toBeUndefined();
   });
 
@@ -250,31 +250,31 @@ describe('extractRuleBasedConstraints — BUG-P2 currency detection from matched
   // 0.85 of numeric "X만원 이하") so the planner still sees the price band but
   // the ranker doesn't strictly enforce it.
 
-  it('retail-channel "편의점 와인" → soft max_price_krw=15000 (hint, low confidence)', () => {
+  it('retail-channel "편의점 와인" → soft price_usd ceiling from KRW hint (low confidence)', () => {
     const result = extractRuleBasedConstraints('편의점 와인 추천');
-    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
+    const maxPrice = result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=');
     expect(maxPrice).toBeDefined();
-    expect(maxPrice?.value).toBe(15_000);
+    expect(maxPrice?.value).toBe(11.11);
     // Lower confidence than numeric (0.85) — flags this as approximate.
     expect(maxPrice?.confidence).toBeLessThan(0.85);
     // No hard vintage_year — channel hint should never become hard.
-    expect(result.hard.find((c) => c.attribute === 'max_price_krw')).toBeUndefined();
+    expect(result.hard.find((c) => c.attribute === 'price_usd')).toBeUndefined();
   });
 
-  it('retail-channel "백화점 와인 수준" → soft max_price_krw=100000 (hint)', () => {
+  it('retail-channel "백화점 와인 수준" → soft price_usd ceiling from KRW hint', () => {
     const result = extractRuleBasedConstraints('백화점 와인 수준');
-    const maxPrice = result.soft.find((c) => c.attribute === 'max_price_krw');
-    expect(maxPrice?.value).toBe(100_000);
+    const maxPrice = result.soft.find((c) => c.attribute === 'price_usd' && c.operator === '<=');
+    expect(maxPrice?.value).toBe(74.07);
     expect(maxPrice?.confidence).toBeLessThan(0.85);
   });
 
   it('retail-channel with numeric price → numeric wins, hint suppressed', () => {
     // "편의점에서 8천원 이하" — numeric is more specific.
     const result = extractRuleBasedConstraints('편의점에서 8천원 이하 와인');
-    const maxPrices = result.soft.filter((c) => c.attribute === 'max_price_krw');
-    // Only ONE max_price_krw soft constraint: the numeric 8000, not the channel hint.
+    const maxPrices = result.soft.filter((c) => c.attribute === 'price_usd' && c.operator === '<=');
+    // Only ONE price_usd soft constraint: the numeric 8000 KRW ceiling, not the channel hint.
     expect(maxPrices).toHaveLength(1);
-    expect(maxPrices[0]?.value).toBe(8_000);
+    expect(maxPrices[0]?.value).toBe(5.93);
     // Numeric confidence is 0.85 (or higher), not the hint's 0.55.
     expect(maxPrices[0]?.confidence).toBeGreaterThanOrEqual(0.85);
   });

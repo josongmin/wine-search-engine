@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { NormalizedConstraint } from '@shared/types/index.js';
+import { convertKrwToConstraintUsd } from '@shared/utils/canonical-price.js';
 import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
@@ -427,8 +428,9 @@ describe('normalizeParallelSlotInput', () => {
       { wineType: 'red' },
       2,
     );
-    const budget = (out.filters ?? []).find((c) => c.attribute === 'max_price_krw');
-    expect(budget?.value).toBe(50_000);
+    const budget = (out.filters ?? []).find((c) => c.attribute === 'price_usd');
+    expect(budget?.value).toBe(convertKrwToConstraintUsd(50_000));
+    expect(budget?.soft_promotion_authority).toBe('allow');
   });
 
   it('adds wine_type filter from the slot', () => {
@@ -678,10 +680,12 @@ describe('normalizeSearchInput — end-to-end composition', () => {
     );
     expect(redSlot.query).not.toContain('화이트');
     expect(whiteSlot.query).not.toContain('레드');
-    const redBudget = (redSlot.filters ?? []).find((c) => c.attribute === 'max_price_krw');
-    const whiteBudget = (whiteSlot.filters ?? []).find((c) => c.attribute === 'max_price_krw');
-    expect(redBudget?.value).toBe(50_000);
-    expect(whiteBudget?.value).toBe(50_000);
+    const redBudget = (redSlot.filters ?? []).find((c) => c.attribute === 'price_usd');
+    const whiteBudget = (whiteSlot.filters ?? []).find((c) => c.attribute === 'price_usd');
+    expect(redBudget?.value).toBe(convertKrwToConstraintUsd(50_000));
+    expect(whiteBudget?.value).toBe(convertKrwToConstraintUsd(50_000));
+    expect(redBudget?.soft_promotion_authority).toBe('allow');
+    expect(whiteBudget?.soft_promotion_authority).toBe('allow');
     // wine_type set per slot.
     expect((redSlot.filters ?? []).find((c) => c.attribute === 'wine_type')?.value).toBe('red');
     expect((whiteSlot.filters ?? []).find((c) => c.attribute === 'wine_type')?.value).toBe('white');

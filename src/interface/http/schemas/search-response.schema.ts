@@ -121,6 +121,7 @@ export const EntitySummarySchema = z.object({
   vintage: z.number().int().optional(),
   grapes: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_GRAPES).optional(),
   price_range: z.string().min(1).optional(),
+  price_usd: z.number().finite().min(0).optional(),
   // Extended sensory / classification fields (added in RFC-019 Phase 7).
   style: z.string().min(1).optional(),
   wine_type: z.string().min(1).optional(),

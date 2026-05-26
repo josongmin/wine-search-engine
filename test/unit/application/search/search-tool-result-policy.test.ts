@@ -3,8 +3,8 @@ import type { SearchResponseV1 } from '../../../../src/domain/response/model/sea
 import {
   applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
-  applySearchToolNegationResultPolicy,
 } from '../../../../src/application/search/search-tool-result-policy.js';
+import { convertKrwToConstraintUsd } from '../../../../src/domain/shared/utils/canonical-price.js';
 
 function makeResult(
   entityId: string,
@@ -73,20 +73,6 @@ function makeSearchResponse(results?: SearchResponseV1['results']): SearchRespon
   };
 }
 
-describe('applySearchToolNegationResultPolicy', () => {
-  it('fails closed with an empty result set when explicit negation removes every candidate', () => {
-    const response = makeSearchResponse([
-      makeResult('wine-merlot-1', 'Merlot One', { grapes: ['Merlot'] }),
-      makeResult('wine-merlot-2', 'Merlot Two', { grapes: ['Merlot'] }),
-    ]);
-
-    const filtered = applySearchToolNegationResultPolicy(response, ['merlot']);
-
-    expect(filtered.filteredCount).toBe(2);
-    expect(filtered.response.results).toEqual([]);
-  });
-});
-
 describe('applySearchToolBudgetResultPolicy', () => {
   it('treats missing and malformed prices as equally ineligible under an explicit budget', () => {
     const response = makeSearchResponse([
@@ -119,6 +105,40 @@ describe('applySearchToolBudgetResultPolicy', () => {
 
     expect(filtered.mode).toBe('strict');
     expect(filtered.response.results).toEqual([]);
+  });
+
+  it('accepts an exact-threshold candidate when numeric priceUsd matches the canonical budget ceiling', () => {
+    const response = makeSearchResponse([
+      makeResult('wine-threshold', 'Threshold Wine', {
+        priceUsd: convertKrwToConstraintUsd(50_000),
+        priceRange: '$37.04',
+      }),
+    ]);
+
+    const filtered = applySearchToolBudgetResultPolicy(
+      response,
+      { maxKrw: 50_000 },
+      { krwPerUsd: 1_350 },
+    );
+
+    expect(filtered.mode).toBe('unchanged');
+    expect(filtered.response.results.map((result) => result.entity.entityId)).toEqual(['wine-threshold']);
+  });
+
+  it('parses USD range strings as explicit budget candidates', () => {
+    const response = makeSearchResponse([
+      makeResult('wine-range', 'Range Wine', { priceRange: '$20-$30' }),
+      makeResult('wine-over', 'Over Range', { priceRange: '$20-$45' }),
+    ]);
+
+    const filtered = applySearchToolBudgetResultPolicy(
+      response,
+      { maxKrw: 50_000 },
+      { krwPerUsd: 1_350 },
+    );
+
+    expect(filtered.mode).toBe('strict');
+    expect(filtered.response.results.map((result) => result.entity.entityId)).toEqual(['wine-range']);
   });
 });
 

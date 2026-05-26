@@ -6,7 +6,7 @@ import type {
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { ConstraintGraph } from '../../query/model/constraint-graph.js';
 import { GEOGRAPHY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
-import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
+import { convertConstraintUsdToApproxKrw } from '../../shared/utils/canonical-price.js';
 import {
   normalizeConstraintComparableArray,
   normalizeConstraintComparableString,
@@ -65,13 +65,6 @@ function geographyContains(attrValue: string, constraintValue: string): boolean 
 function geographyExcludesAll(attrValue: string, constraintValues: readonly string[]): boolean {
   const norm = normalizeString(attrValue);
   return constraintValues.every((cv) => !norm.includes(normalizeString(cv)));
-}
-
-function priceUsdToApproxKrw(priceUsd: number | undefined): number | undefined {
-  if (priceUsd === undefined || !Number.isFinite(priceUsd)) {
-    return undefined;
-  }
-  return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
 }
 
 function normalizeWineType(value: string): string {
@@ -260,7 +253,7 @@ function resolveCandidateValue(
       return candidate.priceUsd;
     case 'max_price_krw':
     case 'min_price_krw':
-      return priceUsdToApproxKrw(candidate.priceUsd);
+      return candidate.priceUsd === undefined ? undefined : convertConstraintUsdToApproxKrw(candidate.priceUsd);
     case 'drinking_window':
       return candidate.drinkingWindowStart !== undefined && candidate.drinkingWindowEnd !== undefined
         ? candidate.drinkingWindowStart

@@ -17,12 +17,11 @@ describe('buildSearchToolRetrievalCoreQuery', () => {
     expect(query).not.toBe('barolo');
   });
 
-  it('keeps representative concept retrieval under soft drinkability preferences', () => {
+  it('keeps representative concept retrieval under explicit representative search', () => {
     const query = buildSearchToolRetrievalCoreQuery({
       query: 'Barolo',
       preserveRepresentativeSearch: true,
-      drinking_window: 'now',
-      drinking_window_target_year: 2026,
+      max_alcohol_pct: 12,
     });
 
     expect(query.toLowerCase()).toContain('barolo');

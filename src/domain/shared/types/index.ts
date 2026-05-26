@@ -13,6 +13,7 @@ export {
   type ConstraintOperator,
   type NormalizedConstraint,
   type ConstraintBundle,
+  type SoftPromotionAuthority,
 } from './constraint-bundle.js';
 export {
   NormalizedConstraintSchema,

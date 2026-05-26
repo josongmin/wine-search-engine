@@ -1,13 +1,12 @@
 import { z } from 'zod';
-import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import { coerceFiniteNumber, coerceNonNegativeInt, coercePositiveInt } from '../../domain/shared/utils/zod-coerce.js';
 import { resolveSemanticStyleQueryTerms } from '../../domain/query/service/semantic-style-query-terms.js';
 import { RECIPIENT_PROFILE_VALUES } from '../../domain/query/service/recipient-situation-profile.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
+import { convertKrwToConstraintUsd } from '../../domain/shared/utils/canonical-price.js';
 
 export const SEARCH_TOOL_RETRIEVAL_MODES = ['auto', 'entity', 'hybrid', 'mixed'] as const;
 export const SEARCH_TOOL_WINE_TYPES = ['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural'] as const;
-export const SEARCH_TOOL_DRINKING_WINDOW_VALUES = ['now'] as const;
 const SEARCH_TOOL_OCCASION_VALUES = [
   'gift',
   'celebration',
@@ -115,12 +114,12 @@ export const SEARCH_TOOL_ACIDITY_MAX_DESCRIPTION =
   'Optional maximum indexed acidity on the [0,1] sensory scale. Use for explicit low-acid / not-too-sharp / gentle-acidity recommendation intent.';
 export const SEARCH_TOOL_TANNIN_MAX_DESCRIPTION =
   'Optional maximum indexed tannin on the [0,1] sensory scale. Use for explicit soft / low-tannin / gentle-mouthfeel recommendation intent.';
-export const SEARCH_TOOL_DRINKING_WINDOW_DESCRIPTION =
-  'Optional typed drinking-window objective. Use "now" for currently drinkable / 지금 마시기 좋은 / 피크인 후보, but treat it as post-search verification only: it is NOT a canonical retrieval filter or ranking signal. Still call check_drinking_window afterward for exact verification.';
-export const SEARCH_TOOL_DRINKING_WINDOW_TARGET_YEAR_DESCRIPTION =
-  'Optional target year for drinking_window. Defaults to the current calendar year when drinking_window is set. This target year is for post-search verification, not retrieval filtering.';
 export const SEARCH_TOOL_WANT_DIVERSITY_DESCRIPTION =
   'When true, prefer varied grapes, regions, or styles rather than near-duplicates.';
+export const SEARCH_FAMILY_UNSUPPORTED_TOOL_FIELDS = [
+  'drinking_window',
+  'drinking_window_target_year',
+] as const;
 const SEARCH_TOOL_PLACEHOLDER_PATTERN =
   /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
 
@@ -238,8 +237,6 @@ export function buildSearchToolFieldShape(
     acidity_min: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
     acidity_max: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
     tannin_max: coerceFiniteNumber.pipe(z.number().min(FOOD_PAIRING_SWEETNESS_TARGET_MIN).max(FOOD_PAIRING_SWEETNESS_TARGET_MAX)).optional(),
-    drinking_window: z.enum(SEARCH_TOOL_DRINKING_WINDOW_VALUES).optional(),
-    drinking_window_target_year: coercePositiveInt.pipe(z.number().int().min(SEARCH_TOOL_VINTAGE_MIN).max(SEARCH_TOOL_VINTAGE_MAX)).optional(),
     want_diversity: z.boolean().optional(),
   } as const;
 }
@@ -300,7 +297,7 @@ interface FoodPairingFieldShapeOptions {
 export function buildFoodPairingFieldShape(
   options: FoodPairingFieldShapeOptions,
 ){
-  const maxPriceUsdMax = Math.ceil(options.maxPriceKrwMax / KRW_PER_USD_APPROXIMATE);
+  const maxPriceUsdMax = Math.ceil(convertKrwToConstraintUsd(options.maxPriceKrwMax));
   return {
     food: buildRequiredTrimmedString({
       maxLen: FOOD_PAIRING_FOOD_MAX_LEN,
@@ -341,67 +338,41 @@ function collectSearchToolStylePreferenceConstraints(input: {
   readonly styles?: readonly string[] | undefined;
 }, mappingVersion: string): readonly NormalizedConstraint[] {
   const preferences: NormalizedConstraint[] = [];
+  const push = (
+    attribute: string,
+    operator: NormalizedConstraint['operator'],
+    value: NormalizedConstraint['value'],
+    sourcePhrase: string,
+  ): void => {
+    preferences.push({
+      attribute,
+      operator,
+      value,
+      source_phrase: sourcePhrase,
+      confidence: 1.0,
+      soft_promotion_authority: 'allow',
+      mapping_version: mappingVersion,
+    });
+  };
   for (const styleHint of collectSearchToolStyleHints(input)) {
     if (styleHint === 'screw_cap') {
-      preferences.push({
-        attribute: 'closure',
-        operator: '=',
-        value: 'screw cap',
-        source_phrase: 'screw_cap',
-        confidence: 1.0,
-        mapping_version: mappingVersion,
-      });
+      push('closure', '=', 'screw cap', 'screw_cap');
       continue;
     }
     if (styleHint === 'sweet') {
-      preferences.push({
-        attribute: 'sweetness',
-        operator: '>=',
-        value: SEARCH_TOOL_SWEETNESS_SWEET_MIN,
-        source_phrase: 'sweet',
-        confidence: 1.0,
-        mapping_version: mappingVersion,
-      });
+      push('sweetness', '>=', SEARCH_TOOL_SWEETNESS_SWEET_MIN, 'sweet');
       continue;
     }
     if (styleHint === 'dry') {
-      preferences.push({
-        attribute: 'sweetness',
-        operator: '<=',
-        value: SEARCH_TOOL_SWEETNESS_DRY_MAX,
-        source_phrase: 'dry',
-        confidence: 1.0,
-        mapping_version: mappingVersion,
-      });
+      push('sweetness', '<=', SEARCH_TOOL_SWEETNESS_DRY_MAX, 'dry');
       continue;
     }
     if (styleHint === 'off_dry') {
-      preferences.push({
-        attribute: 'sweetness',
-        operator: '>=',
-        value: SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN,
-        source_phrase: 'off_dry',
-        confidence: 1.0,
-        mapping_version: mappingVersion,
-      });
-      preferences.push({
-        attribute: 'sweetness',
-        operator: '<=',
-        value: SEARCH_TOOL_SWEETNESS_OFF_DRY_MAX,
-        source_phrase: 'off_dry',
-        confidence: 1.0,
-        mapping_version: mappingVersion,
-      });
+      push('sweetness', '>=', SEARCH_TOOL_SWEETNESS_OFF_DRY_MIN, 'off_dry');
+      push('sweetness', '<=', SEARCH_TOOL_SWEETNESS_OFF_DRY_MAX, 'off_dry');
       continue;
     }
-    preferences.push({
-      attribute: 'style',
-      operator: 'in',
-      value: [styleHint],
-      source_phrase: styleHint,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('style', 'in', [styleHint], styleHint);
   }
   return preferences;
 }
@@ -423,162 +394,76 @@ export function buildSearchToolStructuredPreferences(input: {
   readonly acidity_min?: number | undefined;
   readonly acidity_max?: number | undefined;
   readonly tannin_max?: number | undefined;
-  readonly drinking_window?: (typeof SEARCH_TOOL_DRINKING_WINDOW_VALUES)[number] | undefined;
-  readonly drinking_window_target_year?: number | undefined;
 }, mappingVersion: string): readonly NormalizedConstraint[] {
   const preferences: NormalizedConstraint[] = [];
   const priceMinUsd = input.min_price_krw !== undefined
-    ? Math.round((input.min_price_krw / KRW_PER_USD_APPROXIMATE) * 100) / 100
+    ? convertKrwToConstraintUsd(input.min_price_krw)
     : undefined;
   const priceMaxUsd = input.max_price_krw !== undefined
-    ? Math.round((input.max_price_krw / KRW_PER_USD_APPROXIMATE) * 100) / 100
+    ? convertKrwToConstraintUsd(input.max_price_krw)
     : undefined;
 
-  if (priceMinUsd !== undefined) {
+  const push = (
+    attribute: string,
+    operator: NormalizedConstraint['operator'],
+    value: NormalizedConstraint['value'],
+    sourcePhrase: string,
+  ): void => {
     preferences.push({
-      attribute: 'price_usd',
-      operator: '>=',
-      value: priceMinUsd,
-      source_phrase: `${input.min_price_krw}원 이상`,
+      attribute,
+      operator,
+      value,
+      source_phrase: sourcePhrase,
       confidence: 1.0,
+      soft_promotion_authority: 'allow',
       mapping_version: mappingVersion,
     });
+  };
+
+  if (priceMinUsd !== undefined) {
+    push('price_usd', '>=', priceMinUsd, `${input.min_price_krw}원 이상`);
   }
   if (priceMaxUsd !== undefined) {
-    preferences.push({
-      attribute: 'price_usd',
-      operator: '<=',
-      value: priceMaxUsd,
-      source_phrase: `${input.max_price_krw}원 이하`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('price_usd', '<=', priceMaxUsd, `${input.max_price_krw}원 이하`);
   }
 
   if (input.max_alcohol_pct !== undefined) {
-    preferences.push({
-      attribute: 'alcohol_pct',
-      operator: '<=',
-      value: input.max_alcohol_pct,
-      source_phrase: `${input.max_alcohol_pct}% 이하`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('alcohol_pct', '<=', input.max_alcohol_pct, `${input.max_alcohol_pct}% 이하`);
   }
   preferences.push(...collectSearchToolStylePreferenceConstraints(input, mappingVersion));
   if (input.occasion !== undefined && input.occasion.length > 0) {
-    preferences.push({
-      attribute: 'occasion',
-      operator: 'in',
-      value: [...input.occasion],
-      source_phrase: input.occasion.join(', '),
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('occasion', 'in', [...input.occasion], input.occasion.join(', '));
   }
   if (input.gift_suitability_min !== undefined) {
-    preferences.push({
-      attribute: 'gift_suitability',
-      operator: '>=',
-      value: input.gift_suitability_min,
-      source_phrase: `gift_suitability>=${input.gift_suitability_min}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('gift_suitability', '>=', input.gift_suitability_min, `gift_suitability>=${input.gift_suitability_min}`);
   }
   if (input.beginner_suitability_min !== undefined) {
-    preferences.push({
-      attribute: 'beginner_suitability',
-      operator: '>=',
-      value: input.beginner_suitability_min,
-      source_phrase: `beginner_suitability>=${input.beginner_suitability_min}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('beginner_suitability', '>=', input.beginner_suitability_min, `beginner_suitability>=${input.beginner_suitability_min}`);
   }
   if (input.producer_prestige_min !== undefined) {
-    preferences.push({
-      attribute: 'producer_prestige',
-      operator: '>=',
-      value: input.producer_prestige_min,
-      source_phrase: `producer_prestige>=${input.producer_prestige_min}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('producer_prestige', '>=', input.producer_prestige_min, `producer_prestige>=${input.producer_prestige_min}`);
   }
   if (input.popularity_min !== undefined) {
-    preferences.push({
-      attribute: 'popularity_score',
-      operator: '>=',
-      value: input.popularity_min,
-      source_phrase: `popularity_score>=${input.popularity_min}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('popularity_score', '>=', input.popularity_min, `popularity_score>=${input.popularity_min}`);
   }
   if (input.recipient_profile !== undefined) {
-    preferences.push({
-      attribute: 'recipient_profile',
-      operator: '=',
-      value: input.recipient_profile,
-      source_phrase: `recipient_profile:${input.recipient_profile}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('recipient_profile', '=', input.recipient_profile, `recipient_profile:${input.recipient_profile}`);
   }
   if (input.sweetness_min !== undefined) {
-    preferences.push({
-      attribute: 'sweetness',
-      operator: '>=',
-      value: input.sweetness_min,
-      source_phrase: `sweetness>=${input.sweetness_min}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('sweetness', '>=', input.sweetness_min, `sweetness>=${input.sweetness_min}`);
   }
   if (input.sweetness_max !== undefined) {
-    preferences.push({
-      attribute: 'sweetness',
-      operator: '<=',
-      value: input.sweetness_max,
-      source_phrase: `sweetness<=${input.sweetness_max}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('sweetness', '<=', input.sweetness_max, `sweetness<=${input.sweetness_max}`);
   }
   if (input.acidity_min !== undefined) {
-    preferences.push({
-      attribute: 'acidity',
-      operator: '>=',
-      value: input.acidity_min,
-      source_phrase: `acidity>=${input.acidity_min}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('acidity', '>=', input.acidity_min, `acidity>=${input.acidity_min}`);
   }
   if (input.acidity_max !== undefined) {
-    preferences.push({
-      attribute: 'acidity',
-      operator: '<=',
-      value: input.acidity_max,
-      source_phrase: `acidity<=${input.acidity_max}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('acidity', '<=', input.acidity_max, `acidity<=${input.acidity_max}`);
   }
   if (input.tannin_max !== undefined) {
-    preferences.push({
-      attribute: 'tannin',
-      operator: '<=',
-      value: input.tannin_max,
-      source_phrase: `tannin<=${input.tannin_max}`,
-      confidence: 1.0,
-      mapping_version: mappingVersion,
-    });
+    push('tannin', '<=', input.tannin_max, `tannin<=${input.tannin_max}`);
   }
-  // drinking_window is verification-only. Search retrieval must not pretend to
-  // satisfy it through canonical filtering or ranking when the exact truth
-  // lives in check_drinking_window / indexed window evidence.
 
   return preferences;
 }
@@ -608,6 +493,7 @@ export function buildSearchToolStructuredFilters(input: {
       value,
       source_phrase: sourcePhrase,
       confidence: 1.0,
+      soft_promotion_authority: 'allow',
       mapping_version: mappingVersion,
     });
   };

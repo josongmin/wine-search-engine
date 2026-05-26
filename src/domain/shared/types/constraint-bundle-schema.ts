@@ -89,6 +89,7 @@ export const NormalizedConstraintSchema = z.object({
   value: NormalizedConstraintValueSchema,
   source_phrase: z.string().max(NORMALIZED_CONSTRAINT_MAX_STRING_CHARS),
   confidence: z.number().finite().min(0).max(1),
+  soft_promotion_authority: z.enum(['allow', 'deny']).optional(),
   mapping_version: z.string().max(NORMALIZED_CONSTRAINT_MAX_STRING_CHARS).optional(),
 }).strict();
 

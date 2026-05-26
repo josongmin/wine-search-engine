@@ -31,8 +31,6 @@ import { buildSearchToolRetrievalCoreQuery } from '../../application/search/sear
 import {
   applySearchToolAlcoholResultPolicy,
   applySearchToolBudgetResultPolicy,
-  applySearchToolNegationResultPolicy,
-  collectSearchToolNegationTerms,
 } from '../../application/search/search-tool-result-policy.js';
 import {
   buildCompareWinesExecutionRequest,
@@ -40,6 +38,7 @@ import {
   buildFoodPairingFilters,
   buildFoodPairingPreferences,
   buildFoodPairingQuery,
+  resolveFoodPairingBudgetKrw,
 } from '../../application/search/tool-execution-support.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import {
@@ -144,12 +143,8 @@ function applySearchWinesResultPolicies(
   response: SearchResponseV1,
   input: SearchToolInput,
 ): SearchResponseV1 {
-  const negationFiltered = applySearchToolNegationResultPolicy(
-    response,
-    collectSearchToolNegationTerms(input),
-  );
   const budgetFiltered = applySearchToolBudgetResultPolicy(
-    negationFiltered.response,
+    response,
     {
       minKrw: input.min_price_krw,
       maxKrw: input.max_price_krw,
@@ -342,7 +337,15 @@ export class WineToolExecutor {
         : {}),
     };
     const response = await this.deps.searchUseCase.execute(request, requestId);
-    return requireSearchOnlyToolResult('get_food_pairings', response);
+    const searchResponse = requireSearchOnlyToolResult('get_food_pairings', response);
+    if ('error' in searchResponse) {
+      return searchResponse;
+    }
+    return applySearchToolBudgetResultPolicy(
+      searchResponse,
+      { maxKrw: resolveFoodPairingBudgetKrw(validated) },
+      { krwPerUsd: KRW_PER_USD_APPROXIMATE },
+    ).response;
   }
 
   private async executeCheckDrinkingWindow(

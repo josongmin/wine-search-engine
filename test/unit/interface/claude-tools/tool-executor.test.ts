@@ -813,7 +813,7 @@ describe('WineToolExecutor', () => {
       expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-low', 'wine-unknown']);
     });
 
-    it('applies negation post-filter to raw query exclusions before returning results', async () => {
+    it('does not run bag-of-words negation post-filter on raw query text', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
         ...mockSearchResponse,
         results: [
@@ -844,10 +844,10 @@ describe('WineToolExecutor', () => {
         'req-negation-123',
       ) as SearchResponseV1;
 
-      expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-cab']);
+      expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-merlot', 'wine-cab']);
     });
 
-    it('fails closed when explicit negation removes every returned candidate', async () => {
+    it('does not fail closed on raw query negation terms without typed exclude filters', async () => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue({
         ...mockSearchResponse,
         results: [
@@ -878,7 +878,7 @@ describe('WineToolExecutor', () => {
         'req-negation-fail-closed-123',
       ) as SearchResponseV1;
 
-      expect(result.results).toEqual([]);
+      expect(result.results.map((item) => item.entity.entityId)).toEqual(['wine-merlot-1', 'wine-merlot-2']);
     });
 
     it('should skip typed diversity discovery when wine_type is already explicit', async () => {
@@ -920,6 +920,17 @@ describe('WineToolExecutor', () => {
       );
       expect(result).toEqual({
         error: expect.stringContaining('Invalid input for search_wines'),
+      });
+    });
+
+    it('returns in-band error when drinking_window is passed to search_wines', async () => {
+      const result = await executor.execute(
+        'search_wines',
+        { query: 'Barolo', drinking_window: 'now', drinking_window_target_year: 2026 },
+        'req-123',
+      );
+      expect(result).toEqual({
+        error: expect.stringContaining('drinking_window is not supported for this tool'),
       });
     });
 
@@ -1421,12 +1432,8 @@ describe('WineToolExecutor', () => {
       );
     });
 
-    it('does not forward shared drinking-window objective into comparison retrieval context', async () => {
-      vi.mocked(mockDecomposedSearchUseCase.execute).mockResolvedValue(
-        mockComparisonResponse,
-      );
-
-      await executor.execute(
+    it('returns in-band error when drinking_window is passed to compare_wines', async () => {
+      const result = await executor.execute(
         'compare_wines',
         {
           query_a: 'Barolo',
@@ -1436,16 +1443,10 @@ describe('WineToolExecutor', () => {
         },
         'compare-req-drinkability-123',
       );
-
-      const [, comparisonLegs, , , , , parentContext] = vi.mocked(
-        mockDecomposedSearchUseCase.execute,
-      ).mock.calls.at(-1)!;
-
-      expect(comparisonLegs[0].retrievalQuery.toLowerCase()).toContain('barolo wine');
-      expect(comparisonLegs[1].retrievalQuery.toLowerCase()).toContain('brunello di montalcino wine');
-      expect(
-        parentContext?.preferences?.some((preference) => preference.attribute === 'drinking_window') ?? false,
-      ).toBe(false);
+      expect(result).toEqual({
+        error: expect.stringContaining('drinking_window is not supported for this tool'),
+      });
+      expect(mockDecomposedSearchUseCase.execute).not.toHaveBeenCalled();
     });
 
     it('should propagate shared grape_primary filters into comparison legs and parent context', async () => {

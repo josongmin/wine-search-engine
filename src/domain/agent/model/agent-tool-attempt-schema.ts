@@ -53,8 +53,6 @@ export const SearchToolAttemptInputSchema = z.object({
   acidity_min: AttemptNumberSchema.optional(),
   acidity_max: AttemptNumberSchema.optional(),
   tannin_max: AttemptNumberSchema.optional(),
-  drinking_window: AttemptStringSchema.optional(),
-  drinking_window_target_year: AttemptNumberSchema.optional(),
   want_diversity: AttemptBooleanSchema.optional(),
 }).strict();
 
@@ -125,8 +123,6 @@ export const CompareWinesAttemptInputSchema = z.object({
   acidity_min: AttemptNumberSchema.optional(),
   acidity_max: AttemptNumberSchema.optional(),
   tannin_max: AttemptNumberSchema.optional(),
-  drinking_window: AttemptStringSchema.optional(),
-  drinking_window_target_year: AttemptNumberSchema.optional(),
 }).strict();
 
 export function isKnownAgentToolName(tool: string): tool is KnownAgentToolName {

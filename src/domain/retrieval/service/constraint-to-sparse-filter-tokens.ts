@@ -11,28 +11,6 @@ import type { NormalizedConstraint } from '../../shared/types/index.js';
 const SOFT_PROMOTION_DEFAULT_CONFIDENCE_FLOOR = 0.8;
 
 /**
- * Mapping versions whose output is trustworthy enough to be promoted from a
- * soft signal into a Vespa retrieval filter. These are the deterministic
- * tier-1 (rule-based + curated nl-mapper) and tier-2 (entity-resolver) outputs
- * whose semantics are fully audited. LLM-sourced or planner-inferred soft
- * constraints stay soft regardless of confidence — they have no
- * replay-deterministic guarantee.
- *
- * `v1.0` is the curated DEFAULT_MAPPING_VERSION used by `nl-mapper.ts`. The
- * nl-mapper vocabulary is a hand-audited static Map (`DEFAULT_MAPPINGS`) —
- * every entry has a fixed (operator, value, confidence) tuple, identical to
- * the deterministic guarantees of `rule-based-v1.0`. Excluding it from the
- * trust list (the pre-C1b state) is what caused high-confidence Korean
- * attribute extractions (e.g. "저알콜" → `alcohol_pct <= 12`) to never reach
- * Vespa as a YQL filter — they were silently demoted to ranking-only boosts.
- */
-const SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS: ReadonlySet<string> = new Set([
-  'rule-based-v1.0',
-  'entity-resolver-v1.0',
-  'v1.0',
-]);
-
-/**
  * Per-attribute promotion spec for SOFT constraints → Vespa filter tokens.
  *
  * `minKey` / `maxKey` map a numeric soft constraint to the registered
@@ -551,9 +529,8 @@ interface SoftPromotionOptions {
  * token used by hard constraints IFF every gate passes:
  *
  *   1. `confidence >= confidenceFloor` (default 0.8 — the tier-1/tier-2 floor)
- *   2. `mapping_version ∈ SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS`
- *      (deterministic curated/rule-based/entity-resolver outputs only —
- *      no LLM-sourced or planner-inferred promotion)
+ *   2. `soft_promotion_authority === 'allow'`
+ *      (explicit trusted authority from the caller/builder — deny by default)
  *   3. `attribute ∈ SOFT_PROMOTION_TOKEN_SPEC` (only attributes with an
  *      explicit promotion spec — see {@link SoftPromotionSpec} for the
  *      attribute-level MIN/MAX/string semantics)
@@ -583,8 +560,7 @@ export function softConstraintsToOptionalFilterTokens(
     if (!Number.isFinite(c.confidence) || c.confidence < floor) {
       continue;
     }
-    if (c.mapping_version === undefined
-      || !SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS.has(c.mapping_version)) {
+    if (c.soft_promotion_authority !== 'allow') {
       continue;
     }
     const spec = SOFT_PROMOTION_TOKEN_SPEC.get(c.attribute);
