@@ -61,30 +61,43 @@ REGISTRY_HOST="${REPOSITORY_URI%%/*}"
 tmpfile="$(mktemp)"
 trap 'rm -f "$tmpfile"' EXIT
 
-cat > "$tmpfile" <<EOF
-{
-  "commands": [
+IMAGE_URI="$IMAGE_URI" \
+REGISTRY_HOST="$REGISTRY_HOST" \
+REGION="$REGION" \
+CONTAINER_NAME="$CONTAINER_NAME" \
+HOST_PORT="$HOST_PORT" \
+APP_PORT="$APP_PORT" \
+ENV_FILE="$ENV_FILE" \
+HEALTH_PATH="$HEALTH_PATH" \
+python - "$tmpfile" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+commands = [
     "set -eu",
-    "IMAGE_URI='${IMAGE_URI}'",
-    "REGISTRY_HOST='${REGISTRY_HOST}'",
-    "AWS_REGION='${REGION}'",
-    "CONTAINER_NAME='${CONTAINER_NAME}'",
-    "HOST_PORT='${HOST_PORT}'",
-    "APP_PORT='${APP_PORT}'",
-    "ENV_FILE='${ENV_FILE}'",
-    "HEALTH_PATH='${HEALTH_PATH}'",
-    "if [ ! -f \\\"\\\$ENV_FILE\\\" ]; then echo Missing env file: \\\"\\\$ENV_FILE\\\" >&2; exit 1; fi",
-    "aws ecr get-login-password --region \\\"\\\$AWS_REGION\\\" | docker login --username AWS --password-stdin \\\"\\\$REGISTRY_HOST\\\"",
-    "docker pull \\\"\\\$IMAGE_URI\\\"",
-    "docker rm -f \\\"\\\$CONTAINER_NAME\\\" >/dev/null 2>&1 || true",
-    "docker run -d --name \\\"\\\$CONTAINER_NAME\\\" --restart unless-stopped --env-file \\\"\\\$ENV_FILE\\\" -e PORT=\\\"\\\$APP_PORT\\\" -p 127.0.0.1:\\\"\\\$HOST_PORT\\\":\\\"\\\$APP_PORT\\\" \\\"\\\$IMAGE_URI\\\"",
-    "for i in 1 2 3 4 5 6 7 8 9 10; do if curl -fsS \\\"http://127.0.0.1:\\\$HOST_PORT\\\$HEALTH_PATH\\\" >/dev/null; then exit 0; fi; sleep 3; done",
-    "echo Health check failed: http://127.0.0.1:\\\$HOST_PORT\\\$HEALTH_PATH >&2",
-    "docker logs --tail 200 \\\"\\\$CONTAINER_NAME\\\" >&2 || true",
-    "exit 1"
-  ]
-}
-EOF
+    f"IMAGE_URI='{os.environ['IMAGE_URI']}'",
+    f"REGISTRY_HOST='{os.environ['REGISTRY_HOST']}'",
+    f"AWS_REGION='{os.environ['REGION']}'",
+    f"CONTAINER_NAME='{os.environ['CONTAINER_NAME']}'",
+    f"HOST_PORT='{os.environ['HOST_PORT']}'",
+    f"APP_PORT='{os.environ['APP_PORT']}'",
+    f"ENV_FILE='{os.environ['ENV_FILE']}'",
+    f"HEALTH_PATH='{os.environ['HEALTH_PATH']}'",
+    'if [ ! -f "$ENV_FILE" ]; then echo "Missing env file: $ENV_FILE" >&2; exit 1; fi',
+    'aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY_HOST"',
+    'docker pull "$IMAGE_URI"',
+    'docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true',
+    'docker run -d --name "$CONTAINER_NAME" --restart unless-stopped --env-file "$ENV_FILE" -e PORT="$APP_PORT" -p 127.0.0.1:"$HOST_PORT":"$APP_PORT" "$IMAGE_URI"',
+    'for i in 1 2 3 4 5 6 7 8 9 10; do if curl -fsS "http://127.0.0.1:$HOST_PORT$HEALTH_PATH" >/dev/null; then exit 0; fi; sleep 3; done',
+    'echo "Health check failed: http://127.0.0.1:$HOST_PORT$HEALTH_PATH" >&2',
+    'docker logs --tail 200 "$CONTAINER_NAME" >&2 || true',
+    'exit 1',
+]
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump({"commands": commands}, fh)
+PY
 
 command_id="$(
   aws ssm send-command \
