@@ -343,12 +343,14 @@ describe('HTTP server route registration', () => {
     }
   });
 
-  it('protects /metrics/agent with X-Debug-Key when debug secret is configured', async () => {
-    const debugSecret = 'metrics-debug-secret';
+  it('protects /metrics/agent with the dedicated metrics secret, not httpDebugSecret (R6 H11 least-privilege)', async () => {
+    const metricsSecret = 'metrics-debug-secret';
+    const httpDebugOnlySecret = 'http-debug-secret-different';
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',
       nodeEnv: 'test',
-      httpDebugSecret: debugSecret,
+      metricsDebugSecret: metricsSecret,
+      httpDebugSecret: httpDebugOnlySecret,
     });
 
     try {
@@ -359,10 +361,18 @@ describe('HTTP server route registration', () => {
       });
       expect(forbidden.statusCode).toBe(403);
 
+      // Least-privilege: the debug-logging secret MUST NOT unlock metrics.
+      const withHttpDebugKey = await app.inject({
+        method: 'GET',
+        url: '/metrics/agent',
+        headers: { 'x-debug-key': httpDebugOnlySecret },
+      });
+      expect(withHttpDebugKey.statusCode).toBe(403);
+
       const allowed = await app.inject({
         method: 'GET',
         url: '/metrics/agent',
-        headers: { 'x-debug-key': debugSecret },
+        headers: { 'x-debug-key': metricsSecret },
       });
       expect(allowed.statusCode).toBe(200);
       expect(allowed.json()).toMatchObject({

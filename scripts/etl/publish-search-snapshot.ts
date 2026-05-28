@@ -1199,6 +1199,9 @@ async function run(): Promise<void> {
         manifestPath: built.manifestPath,
         runtimeStatePath: stagedRuntimeStatePath,
         runtimeNlMappingsPath: args.runtimeNlMappingsPath,
+        // Full publish always builds a fresh snapshot id; re-publishing over the
+        // current active snapshot stays guarded (operator must rollback first).
+        refreshActiveRuntimeSubstrates: false,
       });
       publishState.advance('runtime_substrates_published');
       console.log('✅ Verifying search snapshot readiness');

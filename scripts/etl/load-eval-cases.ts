@@ -366,7 +366,7 @@ async function loadEvalCases(
 
       await pool.query(
         upsert.sql,
-        upsert.bindCase(evalCase, expectedEntityId, sourceCorpusHash),
+        [...upsert.bindCase(evalCase, expectedEntityId, sourceCorpusHash)],
       );
       successCount++;
     }
@@ -431,7 +431,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   return {
     inputPath,
     connectionString,
-    snapshotId,
+    ...(snapshotId !== undefined ? { snapshotId } : {}),
     runtimeStatePath,
   };
 }
@@ -449,7 +449,7 @@ async function main(): Promise<void> {
   }
 
   await loadEvalCases(args.inputPath, args.connectionString, {
-    snapshotId: args.snapshotId,
+    ...(args.snapshotId !== undefined ? { snapshotId: args.snapshotId } : {}),
     runtimeStatePath: args.runtimeStatePath,
   });
   console.log('✓ Eval baseline loaded');

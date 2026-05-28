@@ -260,6 +260,15 @@ export interface SilverWineRecord {
   readonly flavorProfiles: readonly string[];
   /** English tasting notes for full-text search + semantic embedding. */
   readonly searchTextEn: string;
+  /**
+   * Korean full-text search string, populated by the offline enrichment phase
+   * (`enrich-phase1.py`). Optional because base/synthetic records may not carry
+   * a Korean projection. Note: the Vespa indexer derives its own Hangul text
+   * from aliases and intentionally ignores this prebuilt value (see
+   * `index-to-vespa.ts` / `buildSearchTextKo`); this field is preserved through
+   * silver reconciliation for data fidelity, not as an index input.
+   */
+  readonly searchTextKo?: string | undefined;
   /** Vivino average rating (original 1-5 scale). */
   readonly ratingAvg: number | null;
   /** Vivino ratings count (raw). */

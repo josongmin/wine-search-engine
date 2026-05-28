@@ -37,7 +37,7 @@ const OPS_ROUTE_PREFIXES: readonly string[] = ['/metrics/'];
 /** HTTP status at/above which a response is treated as a server-side failure. */
 const SERVER_ERROR_STATUS_THRESHOLD = 500;
 
-function isOpsRoute(route: string): boolean {
+export function isOpsRoute(route: string): boolean {
   if (OPS_ROUTE_EXACT.has(route)) {
     return true;
   }
@@ -77,26 +77,36 @@ export function registerRequestContext(app: FastifyInstance): void {
 
     reply.header('X-Request-Id', requestId);
 
-    request.log.info(
-      { requestId, method: request.method, route: safeRoutePath(request) },
-      'request_start',
-    );
+    const route = safeRoutePath(request);
+    const startFields = { requestId, method: request.method, route };
+    // High-frequency probe routes log at debug to avoid flooding (R6 H7).
+    if (isOpsRoute(route)) {
+      request.log.debug(startFields, 'request_start');
+    } else {
+      request.log.info(startFields, 'request_start');
+    }
     done();
   });
 
   app.addHook('onResponse', (request, reply, done) => {
     const latencyMs = Date.now() - request.startTime;
-
-    request.log.info(
-      {
-        requestId: request.requestId,
-        method: request.method,
-        route: safeRoutePath(request),
-        statusCode: reply.statusCode,
-        latencyMs,
-      },
-      'request_end',
-    );
+    const route = safeRoutePath(request);
+    const endFields = {
+      requestId: request.requestId,
+      method: request.method,
+      route,
+      statusCode: reply.statusCode,
+      latencyMs,
+    };
+    // Server-side failures always surface at warn, regardless of route.
+    // Routine ops-probe traffic drops to debug; everything else stays at info.
+    if (reply.statusCode >= SERVER_ERROR_STATUS_THRESHOLD) {
+      request.log.warn(endFields, 'request_end');
+    } else if (isOpsRoute(route)) {
+      request.log.debug(endFields, 'request_end');
+    } else {
+      request.log.info(endFields, 'request_end');
+    }
     done();
   });
 }

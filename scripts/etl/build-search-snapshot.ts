@@ -48,7 +48,7 @@ import {
   GIFT_SUITABILITY_VERSION,
 } from '../../src/domain/attribute/service/ontology-normalizer.js';
 import {
-  SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES,
+  type SearchFieldAvailabilityMetric,
   type SearchSnapshotFieldAvailability,
 } from '../../src/domain/shared/types/search-field-availability.js';
 import {
@@ -130,31 +130,23 @@ function buildFieldAvailability(
   records: readonly SnapshotBuildRecord[],
 ): SearchSnapshotFieldAvailability {
   const totalDocCount = records.length;
-  const appellationPopulatedDocCount = records.filter((record) =>
-    typeof record.appellation === 'string' && record.appellation.trim().length > 0,
-  ).length;
-  const fieldAvailability: SearchSnapshotFieldAvailability = {
-    appellation: {
-      populatedDocCount: appellationPopulatedDocCount,
-      totalDocCount,
-      populatedDocRatio: totalDocCount > 0 ? appellationPopulatedDocCount / totalDocCount : 0,
-    },
-    body: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
-    sweetness: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
-    acidity: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
-    tannin: { populatedDocCount: 0, totalDocCount, populatedDocRatio: 0 },
+  const toMetric = (populatedDocCount: number): SearchFieldAvailabilityMetric => ({
+    populatedDocCount,
+    totalDocCount,
+    populatedDocRatio: totalDocCount > 0 ? populatedDocCount / totalDocCount : 0,
+  });
+  const countWhere = (predicate: (record: SnapshotBuildRecord) => boolean): number =>
+    records.filter(predicate).length;
+
+  return {
+    appellation: toMetric(countWhere((record) =>
+      typeof record.appellation === 'string' && record.appellation.trim().length > 0,
+    )),
+    body: toMetric(countWhere((record) => record.body != null)),
+    sweetness: toMetric(countWhere((record) => record.sweetness != null)),
+    acidity: toMetric(countWhere((record) => record.acidity != null)),
+    tannin: toMetric(countWhere((record) => record.tannin != null)),
   };
-
-  for (const attribute of SEARCH_SNAPSHOT_SENSORY_FIELD_AVAILABILITY_ATTRIBUTES) {
-    const populatedDocCount = records.filter((record) => record[attribute] != null).length;
-    fieldAvailability[attribute] = {
-      populatedDocCount,
-      totalDocCount,
-      populatedDocRatio: totalDocCount > 0 ? populatedDocCount / totalDocCount : 0,
-    };
-  }
-
-  return fieldAvailability;
 }
 
 /**
@@ -714,7 +706,7 @@ async function buildArtifactsForRecords(args: {
   }
   entityArtifact.sort((left, right) => left.entityId.localeCompare(right.entityId));
   const approvedAbbreviationOverlay = await loadApprovedAbbreviationAliasOverlay(
-    entityArtifact.map((entity) => entity.entityId),
+    [...entityIdBySourceId.values()],
   );
   const aliasArtifact = buildAliasArtifact(
     args.records,

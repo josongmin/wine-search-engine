@@ -46,7 +46,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   }
 
   return {
-    snapshotId,
+    ...(snapshotId !== undefined ? { snapshotId } : {}),
     runtimeStatePath,
     dryRun,
   };
