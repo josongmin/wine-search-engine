@@ -78,11 +78,13 @@ export interface ReadinessCheck {
 export interface HealthRouteOptions {
   readonly readiness?: Readonly<Record<string, ReadinessCheck>>;
   /**
-   * Optional secret to gate /metrics/* endpoints (expects matching X-Debug-Key).
+   * Dedicated secret to gate /metrics/* endpoints (expects matching X-Debug-Key).
    *
-   * When METRICS_DEBUG_SECRET is unset or empty, the metrics endpoints are OPEN
-   * (intended for local dev / read-only deploys). Set the secret to gate
-   * metrics behind the X-Debug-Key header in production.
+   * Fail-closed (R6 H11, least-privilege): when this secret is unset or empty
+   * the /metrics/* endpoints are DISABLED — every request gets 403. There is no
+   * fallback to HTTP_DEBUG_SECRET, so a single shared secret cannot unlock both
+   * debug logging and operational metrics. To expose metrics, configure a
+   * distinct METRICS_DEBUG_SECRET and send it via the X-Debug-Key header.
    */
   readonly metricsDebugSecret?: string | undefined;
   /**

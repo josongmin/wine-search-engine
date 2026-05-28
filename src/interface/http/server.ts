@@ -84,6 +84,16 @@ export interface ServerOptions {
    */
   readonly httpDebugSecret?: string | undefined;
   /**
+   * Dedicated secret gating the operational `/metrics/*` endpoints
+   * (`X-Debug-Key` must match). Kept SEPARATE from `httpDebugSecret`
+   * (least-privilege, R6 H11): a single shared secret must NOT simultaneously
+   * unlock debug logging, operational metrics, and replay traces. When omitted,
+   * `createServer` reads `METRICS_DEBUG_SECRET` directly; if that env var is also
+   * unset/empty the metrics endpoints stay DISABLED (fail-closed). There is no
+   * fallback to `httpDebugSecret`.
+   */
+  readonly metricsDebugSecret?: string | undefined;
+  /**
    * Maximum time (ms) to wait for a TCP connection to be established before closing it.
    * @default 10000
    */
@@ -368,9 +378,19 @@ export async function createServer(
   });
 
   // Register routes
+  //
+  // Least-privilege (R6 H11): the operational /metrics/* endpoints are gated by
+  // their OWN secret (METRICS_DEBUG_SECRET), never by httpDebugSecret. A single
+  // shared secret must not unlock debug logging + metrics + replay traces at
+  // once. Resolution order: explicit option → METRICS_DEBUG_SECRET env →
+  // (none) leaves metrics DISABLED/fail-closed. No fallback to httpDebugSecret.
+  const resolvedMetricsDebugSecret =
+    options?.metricsDebugSecret ?? process.env['METRICS_DEBUG_SECRET']?.trim();
   registerHealthRoutes(app, {
     ...(options?.health ?? {}),
-    ...(options?.httpDebugSecret !== undefined ? { metricsDebugSecret: options.httpDebugSecret } : {}),
+    ...(resolvedMetricsDebugSecret !== undefined && resolvedMetricsDebugSecret.length > 0
+      ? { metricsDebugSecret: resolvedMetricsDebugSecret }
+      : {}),
   });
   registerClaudeToolsRoute(app, deps);
   registerSearchRoute(app, deps);

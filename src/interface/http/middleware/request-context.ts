@@ -20,6 +20,35 @@ import '../fastify-augmentations.js';
  * Without the v4/v5 path, every log line falls back to a path-with-IDs string,
  * silently leaking IDs into observability and inflating log cardinality.
  */
+/**
+ * Operational probe routes that are polled at high frequency by load balancers,
+ * orchestrators (k8s liveness/readiness), and metrics scrapers. Logging two
+ * `info` lines (request_start + request_end) per poll floods structured logs
+ * and inflates log-volume cost without observability value (R6 H7). For these
+ * routes we drop the routine start/end lines to `debug`; genuine failures
+ * (5xx) are still surfaced at `warn` regardless of route.
+ *
+ * Matched against `safeRoutePath` (route template, query-stripped) so it is
+ * stable across Fastify versions and never depends on raw user input.
+ */
+const OPS_ROUTE_EXACT: ReadonlySet<string> = new Set(['/health', '/ready']);
+const OPS_ROUTE_PREFIXES: readonly string[] = ['/metrics/'];
+
+/** HTTP status at/above which a response is treated as a server-side failure. */
+const SERVER_ERROR_STATUS_THRESHOLD = 500;
+
+function isOpsRoute(route: string): boolean {
+  if (OPS_ROUTE_EXACT.has(route)) {
+    return true;
+  }
+  for (const prefix of OPS_ROUTE_PREFIXES) {
+    if (route.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function safeRoutePath(request: {
   url: string;
   routerPath?: string | undefined;
