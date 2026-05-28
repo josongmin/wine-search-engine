@@ -110,8 +110,15 @@ describe('buildSparseFilters — string contains tokens', () => {
     expect(buildSparseFilters(['country:France'])).toBe(' AND country contains "France"');
   });
 
-  it('region:Napa → region contains "Napa"', () => {
-    expect(buildSparseFilters(['region:Napa'])).toBe(' AND region contains "Napa"');
+  it('region:Napa → multi-field OR over (region | appellation | region_hierarchy)', () => {
+    // Region positive lookup expands across the three index fields so a planner
+    // emitting `region:Napa` matches docs whose Napa data lives on appellation
+    // (e.g. "Napa Valley AVA") or region_hierarchy. Without the expansion, the
+    // raw `region` field alone misses ~20% of Napa wines (data placement varies
+    // across the ingest sources).
+    expect(buildSparseFilters(['region:Napa'])).toBe(
+      ' AND (region contains "Napa" OR appellation contains "Napa" OR region_hierarchy contains "Napa")',
+    );
   });
 
   it('appellation:Pomerol → appellation contains "Pomerol"', () => {
@@ -340,8 +347,10 @@ describe('buildSparseFilters — FILTER_TOKEN_REGISTRY completeness (every token
   it('country → country contains', () => {
     expect(buildSparseFilters(['country:France'])).toBe(' AND country contains "France"');
   });
-  it('region → region contains', () => {
-    expect(buildSparseFilters(['region:Napa'])).toBe(' AND region contains "Napa"');
+  it('region → multi-field OR over (region | appellation | region_hierarchy)', () => {
+    expect(buildSparseFilters(['region:Napa'])).toBe(
+      ' AND (region contains "Napa" OR appellation contains "Napa" OR region_hierarchy contains "Napa")',
+    );
   });
   it('appellation → appellation contains', () => {
     expect(buildSparseFilters(['appellation:Pomerol'])).toBe(' AND appellation contains "Pomerol"');
@@ -464,8 +473,10 @@ describe('buildSparseFilters — FILTER_TOKEN_REGISTRY completeness (every token
   it('country_not → !(country contains)', () => {
     expect(buildSparseFilters(['country_not:France'])).toBe(' AND !(country contains "France")');
   });
-  it('region_not → !(region contains)', () => {
-    expect(buildSparseFilters(['region_not:Mosel'])).toBe(' AND !(region contains "Mosel")');
+  it('region_not → !(multi-field OR) — same expansion as positive, negated', () => {
+    expect(buildSparseFilters(['region_not:Mosel'])).toBe(
+      ' AND !(region contains "Mosel" OR appellation contains "Mosel" OR region_hierarchy contains "Mosel")',
+    );
   });
   it('appellation_not → !(appellation contains)', () => {
     expect(buildSparseFilters(['appellation_not:Pomerol'])).toBe(' AND !(appellation contains "Pomerol")');
@@ -526,10 +537,17 @@ describe('buildSparseFilters — _not_in field remapping (multi-value)', () => {
     expect(result).toContain('!(producer_type contains "cooperative")');
   });
 
-  it('region_not_in:Napa|Sonoma → !(region ...) twice', () => {
+  it('region_not_in:Napa|Sonoma → two !(multi-field OR) clauses', () => {
+    // Each excluded region produces an independent NOT-clause that fans out
+    // across (region | appellation | region_hierarchy) — same expansion shape
+    // as the single-value region_not path.
     const result = buildSparseFilters(['region_not_in:Napa|Sonoma']);
-    expect(result).toContain('!(region contains "Napa")');
-    expect(result).toContain('!(region contains "Sonoma")');
+    expect(result).toContain(
+      '!(region contains "Napa" OR appellation contains "Napa" OR region_hierarchy contains "Napa")',
+    );
+    expect(result).toContain(
+      '!(region contains "Sonoma" OR appellation contains "Sonoma" OR region_hierarchy contains "Sonoma")',
+    );
   });
 });
 

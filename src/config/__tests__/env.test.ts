@@ -177,6 +177,16 @@ describe('parseEnv invariants', () => {
     );
   });
 
+  it('defaults SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME to true', () => {
+    const config = parseEnv({});
+    expect(config.searchSnapshot.requireActiveLtrForRuntime).toBe(true);
+  });
+
+  it('honors SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME=false', () => {
+    const config = parseEnv({ SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: 'false' });
+    expect(config.searchSnapshot.requireActiveLtrForRuntime).toBe(false);
+  });
+
   it('production without OPENAI_API_KEY throws by default (Layer 2 security invariant)', () => {
     expect(() => parseEnv({ NODE_ENV: 'production', PG_PASSWORD: 'secret' })).toThrowError(
       /requires an openai API key \(Layer 2/,

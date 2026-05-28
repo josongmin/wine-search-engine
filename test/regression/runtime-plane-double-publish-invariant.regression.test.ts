@@ -55,8 +55,14 @@ describe('Runtime plane double-publish append-only invariant', () => {
   });
 
   it('assertSnapshotNotAlreadyPublished is invoked before any INSERT and gates the explicit refresh path', () => {
+    // Publisher signature was refactored: bare `client` / `manifest` became
+    // `args.client` / `args.manifest`, and the `allowExistingActiveSnapshot`
+    // flag is now a top-level arg rather than the legacy
+    // `refreshActiveRuntimeSubstrates` path. The append-only invariant being
+    // protected — the assertion must fire before any INSERT — is unchanged;
+    // only the call shape moved.
     const assertCall = src.match(
-      /assertSnapshotNotAlreadyPublished\(\s*client,\s*manifest\.snapshotId,\s*\{\s*allowExistingActiveSnapshot:\s*args\.refreshActiveRuntimeSubstrates,\s*\}\s*\)/,
+      /assertSnapshotNotAlreadyPublished\(\s*args\.client,\s*args\.manifest\.snapshotId,\s*\{\s*allowExistingActiveSnapshot:\s*args\.allowExistingActiveSnapshot,\s*\}\s*\)/,
     );
     const assertPos = assertCall == null ? -1 : src.indexOf(assertCall[0]);
     const firstInsertPos = src.search(/INSERT INTO entities \(/);

@@ -156,6 +156,11 @@ function buildConfig(
       runAtStartup: parsed.EVAL_RUN_AT_STARTUP,
     },
 
+    /** Search snapshot readiness policy overrides for eval and isolation lanes. */
+    searchSnapshot: {
+      requireActiveLtrForRuntime: parsed.SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME,
+    },
+
     /** PostgreSQL connection settings. */
     pg: {
       connectionString: parsed.DATABASE_URL,

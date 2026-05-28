@@ -215,84 +215,35 @@ describe('hardConstraintsToSparseFilterTokens', () => {
     expect(tokens).toEqual([]);
   });
 
-  // --- price_band normalisation (REGRESSION: Vespa enum values are "value"/"mid"/"premium"/"luxury",
-  //     NOT "budget"/"affordable"/"cheap" etc.) ---
+  // --- price_band: positive operators are deliberately NOT hard-filter tokens.
+  // Per the canonicalize-search-contract commit (211aa1de): positive
+  // price-band intent is candidate-shaping / bounded lexical expansion, not a
+  // hard retrieval filter — a user saying "give me an affordable wine" should
+  // shape ranking, not strictly prune the corpus. Only exclusion operators
+  // produce hard NOT-filters from this emitter. See `case 'price_band'` in
+  // constraint-to-sparse-filter-tokens.ts.
 
-  it('price_band "budget" → price_band:value (enum normalisation)', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'budget' }),
-    ]);
-    expect(tokens).toEqual(['price_band:value']);
+  it('price_band "=" returns [] — deferred to candidate-shaping path', () => {
+    for (const synonym of ['budget', 'affordable', 'cheap', 'mid-range', 'high-end', 'fine', 'premium']) {
+      const tokens = hardConstraintsToSparseFilterTokens([
+        c({ attribute: 'price_band', operator: '=', value: synonym }),
+      ]);
+      expect(tokens).toEqual([]);
+    }
   });
 
-  it('price_band "affordable" → price_band:value', () => {
+  it('price_band "in" returns [] — deferred to candidate-shaping path', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'affordable' }),
+      c({ attribute: 'price_band', operator: 'in', value: ['budget', 'premium'] }),
     ]);
-    expect(tokens).toEqual(['price_band:value']);
+    expect(tokens).toEqual([]);
   });
 
-  it('price_band "cheap" → price_band:value', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'cheap' }),
-    ]);
-    expect(tokens).toEqual(['price_band:value']);
-  });
-
-  it('price_band "mid-range" → price_band:mid', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'mid-range' }),
-    ]);
-    expect(tokens).toEqual(['price_band:mid']);
-  });
-
-  it('price_band "high-end" → price_band:premium', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'high-end' }),
-    ]);
-    expect(tokens).toEqual(['price_band:premium']);
-  });
-
-  it('price_band "fine" → price_band:luxury', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'fine' }),
-    ]);
-    expect(tokens).toEqual(['price_band:luxury']);
-  });
-
-  it('price_band "premium" (canonical) → price_band:premium (passthrough)', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: '=', value: 'premium' }),
-    ]);
-    expect(tokens).toEqual(['price_band:premium']);
-  });
-
-  it('price_band exclusion → uses stringEq path (price_band_not:)', () => {
+  it('price_band exclusion → uses stringEq path (price_band_not:) with synonym normalisation', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       c({ attribute: 'price_band', operator: 'exclude', value: 'luxury' }),
     ]);
     expect(tokens).toEqual(['price_band_not:luxury']);
-  });
-
-  it('price_band operator=in with array → normalises each value and emits price_band_in:', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: 'in', value: ['budget', 'premium'] }),
-    ]);
-    expect(tokens).toEqual(['price_band_in:value|premium']);
-  });
-
-  it('price_band operator=in with single array value → emits plain price_band: (no _in)', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: 'in', value: ['budget'] }),
-    ]);
-    expect(tokens).toEqual(['price_band:value']);
-  });
-
-  it('price_band operator=in normalises synonyms in each value', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
-      c({ attribute: 'price_band', operator: 'in', value: ['affordable', 'high-end', 'fine'] }),
-    ]);
-    expect(tokens).toEqual(['price_band_in:value|premium|luxury']);
   });
 
   it('price_band not_in with array → stringEq path', () => {

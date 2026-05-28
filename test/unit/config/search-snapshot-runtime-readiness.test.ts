@@ -310,6 +310,35 @@ describe('search snapshot runtime readiness', () => {
     expect(mockVerifySearchSnapshotRuntimeStateLive).not.toHaveBeenCalled();
   });
 
+  it('allows an active-LTR-zero runtime to pass search_snapshot_runtime when the isolated override is set', async () => {
+    mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
+      snapshotId: 'search-snapshot:v1:test',
+      contentHash: 'abc123',
+      quality: CANONICAL_QUALITY,
+      counts: {
+        activeLtrModels: 0,
+      },
+    });
+
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: 'false',
+      KILL_SWITCH_INJECTION_JUDGE: 'true',
+    });
+
+    const health = buildHealthRouteOptions(config, {
+      pool: {
+        query: async () => ({
+          rows: [{ active_snapshot_id: 'search-snapshot:v1:test', content_hash: 'abc123' }],
+        }),
+      } as never,
+    });
+
+    await expect(health.readiness?.search_snapshot_runtime?.check?.()).resolves.toBe('up');
+    expect(mockLoadSearchSnapshotRuntimeState).toHaveBeenCalledTimes(1);
+    expect(mockVerifySearchSnapshotRuntimeStateLive).not.toHaveBeenCalled();
+  });
+
   it('keeps search_snapshot_runtime up but marks search_snapshot_ltr down when no pool is available and no active LTR exists', async () => {
     mockLoadSearchSnapshotRuntimeState.mockResolvedValue({
       quality: CANONICAL_QUALITY,

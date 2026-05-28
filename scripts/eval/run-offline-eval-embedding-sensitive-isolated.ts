@@ -23,7 +23,7 @@ interface IsolatedArgs {
   readonly forwardedRunnerArgs: readonly string[];
 }
 
-const DEFAULT_STARTUP_TIMEOUT_MS = 45_000;
+const DEFAULT_STARTUP_TIMEOUT_MS = 120_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_RUNNER_TIMEOUT_MS = 8 * 60_000;
 const LOG_DIR = '/tmp';
@@ -112,6 +112,7 @@ export function buildEmbeddingIsolatedRuntimeSpecs(args: {
         PORT: String(args.denseOnPort),
         KILL_SWITCH_INJECTION_JUDGE: 'true',
         WINE_SEARCH_MULTI_QUERY_ENABLED: 'false',
+        SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: 'false',
       },
       logPath: buildLogPath('dense_on', args.denseOnPort),
     },
@@ -124,6 +125,7 @@ export function buildEmbeddingIsolatedRuntimeSpecs(args: {
         KILL_SWITCH_INJECTION_JUDGE: 'true',
         WINE_SEARCH_MULTI_QUERY_ENABLED: 'false',
         KILL_SWITCH_DENSE_RETRIEVAL: 'true',
+        SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: 'false',
       },
       logPath: buildLogPath('dense_off', args.denseOffPort),
     },
@@ -214,6 +216,37 @@ interface SpawnedRuntime {
   get tail(): string;
 }
 
+function sleepMs(ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(false);
+    }, ms);
+    timer.unref?.();
+  });
+}
+
+async function stopProcessWithTimeout(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null) {
+    return true;
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    return false;
+  }
+  return await Promise.race<boolean>([
+    new Promise<boolean>((resolve) => {
+      child.once('exit', () => resolve(true));
+      child.once('error', () => resolve(false));
+    }),
+    sleepMs(timeoutMs).then(() => false),
+  ]);
+}
+
 function spawnRuntime(spec: RuntimeSpec): SpawnedRuntime {
   const logStream = fs.createWriteStream(spec.logPath, { flags: 'w' });
   let tail = '';
@@ -285,18 +318,14 @@ async function stopRuntime(runtime: SpawnedRuntime): Promise<void> {
   if (runtime.child.exitCode !== null) {
     return;
   }
-  runtime.child.kill('SIGTERM');
-  const exited = await Promise.race<boolean>([
-    new Promise<boolean>((resolve) => {
-      runtime.child.once('exit', () => resolve(true));
-    }),
-    sleep(5_000).then(() => false),
-  ]);
-  if (!exited && runtime.child.exitCode === null) {
-    runtime.child.kill('SIGKILL');
-    await new Promise<void>((resolve) => {
-      runtime.child.once('exit', () => resolve());
-    });
+  const softExit = await stopProcessWithTimeout(runtime.child, 'SIGTERM', 5_000);
+  if (!softExit && runtime.child.exitCode === null) {
+    const hardExit = await stopProcessWithTimeout(runtime.child, 'SIGKILL', 2_000);
+    if (!hardExit) {
+      console.warn(
+        `failed to terminate isolated runtime child pid=${runtime.child.pid}; leaving process to OS cleanup`,
+      );
+    }
   }
 }
 

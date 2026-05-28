@@ -107,4 +107,15 @@ export const FeaturesEnvSchema = z.object({
    * When unset, learned LTR is skipped unless registry data is available from PG.
    */
   RUNTIME_LTR_MODELS_PATH: z.string().min(1).optional(),
+
+  /** Search-snapshot readiness strictness for runtime (vs LTR) activation checks.
+   * Default ON for production and smoke tests: active LTR count must be present
+   * before search_snapshot_runtime is marked up. In eval isolation lanes where
+   * the same snapshot is reused in an LTR-less mode, turn this OFF to avoid
+   * startup fail-close on an orthogonal signal.
+   */
+  SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .default('true'),
 });

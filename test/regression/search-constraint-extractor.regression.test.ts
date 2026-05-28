@@ -304,9 +304,15 @@ describe('buildSparseFilters — NOT filter YQL generation', () => {
     expect(yql).toContain('!(country contains "France")');
   });
 
-  it('generates !(region contains "Bordeaux") from region_not token', () => {
+  it('generates a NOT-clause excluding Bordeaux from the region_not token', () => {
+    // The mapping layer expanded `region` lookups to fan out over
+    // (region | appellation | region_hierarchy) for recall reasons. The
+    // regression invariant being preserved here is: a `region_not:Bordeaux`
+    // token MUST translate into a YQL clause that negates Bordeaux somewhere
+    // — the EXACT shape of the OR-expansion is owned by the Vespa mapping unit
+    // tests (vespa-mapping-sparse-filters.test.ts).
     const yql = buildSparseFilters(['region_not:Bordeaux']);
-    expect(yql).toContain('!(region contains "Bordeaux")');
+    expect(yql).toMatch(/!\([^)]*\bregion contains "Bordeaux"/);
   });
 
   it('generates !(style matches "oaked") from style_not token', () => {

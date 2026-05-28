@@ -45,13 +45,26 @@ class NullMappingTable {
   }
 }
 
+/**
+ * Trust list mirrors the legacy pre-canonicalization gate so the C1b regression
+ * invariants ("v1.0 curated promotes / LLM rogue does not") still hold under the
+ * new `soft_promotion_authority` contract: trusted mapping versions get
+ * `authority='allow'`; LLM/unknown versions do not, preserving the rejection
+ * cases at lines 142/152 without renaming them.
+ */
+const TRUSTED_MAPPING_VERSIONS: ReadonlySet<string> = new Set([
+  'rule-based-v1.0',
+  'entity-resolver-v1.0',
+  'v1.0',
+]);
+
 function makeSoft(
   attribute: string,
   operator: NormalizedConstraint['operator'],
   value: NormalizedConstraint['value'],
   overrides: Partial<NormalizedConstraint> = {},
 ): NormalizedConstraint {
-  return {
+  const merged: NormalizedConstraint = {
     attribute,
     operator,
     value,
@@ -60,10 +73,30 @@ function makeSoft(
     mapping_version: 'v1.0',
     ...overrides,
   };
+  if (!('soft_promotion_authority' in overrides)
+      && merged.mapping_version !== undefined
+      && TRUSTED_MAPPING_VERSIONS.has(merged.mapping_version)) {
+    return { ...merged, soft_promotion_authority: 'allow' };
+  }
+  return merged;
 }
 
 describe('C1b — soft attribute → Vespa retrieval filter propagation', () => {
   const mapper = new NLMapper(new NullMappingTable());
+
+  /**
+   * Mirror the production pre-route-phase step that attaches
+   * `soft_promotion_authority='allow'` to sensory soft constraints whose Vespa
+   * fields are available — see {@link
+   * src/application/search/search-usecase-pre-route-phase.ts}. NLMapper itself
+   * is a curated/trusted producer, so for an end-to-end fixture run we
+   * unconditionally tag every constraint as production would for an available
+   * sensory attribute. Without this step the new gate denies the promotion.
+   */
+  const withAuthority = (c: NormalizedConstraint): NormalizedConstraint => ({
+    ...c,
+    soft_promotion_authority: 'allow',
+  });
 
   describe('end-to-end: nl-mapper output → promotion token', () => {
     it('"저알콜" extracts and promotes to alcohol_max:12', async () => {
@@ -77,49 +110,49 @@ describe('C1b — soft attribute → Vespa retrieval filter propagation', () => 
       // to actually fire. If a future tuning drops 저알콜 below 0.8 the
       // promotion silently no-ops and this regression catches it.
       expect(constraint.confidence).toBeGreaterThanOrEqual(0.8);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('alcohol_max:12');
     });
 
     it('"저알코올" (alt spelling) extracts and promotes to alcohol_max:12', async () => {
       const mapping = await mapper.mapPhrase('저알코올');
       const constraint = toNormalizedConstraint(mapping!);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('alcohol_max:12');
     });
 
     it('"도수 낮은" extracts and promotes to alcohol_max:12', async () => {
       const mapping = await mapper.mapPhrase('도수 낮은');
       const constraint = toNormalizedConstraint(mapping!);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('alcohol_max:12');
     });
 
     it('"드라이" extracts and promotes to sweetness_max:0.2', async () => {
       const mapping = await mapper.mapPhrase('드라이');
       const constraint = toNormalizedConstraint(mapping!);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('sweetness_max:0.2');
     });
 
     it('"달지 않은" extracts and promotes to sweetness_max:0.2', async () => {
       const mapping = await mapper.mapPhrase('달지 않은');
       const constraint = toNormalizedConstraint(mapping!);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('sweetness_max:0.2');
     });
 
     it('"달달한" extracts and promotes to sweetness_min:0.5', async () => {
       const mapping = await mapper.mapPhrase('달달한');
       const constraint = toNormalizedConstraint(mapping!);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('sweetness_min:0.5');
     });
 
     it('"과일향" extracts and promotes to flavor_profile:fruity', async () => {
       const mapping = await mapper.mapPhrase('과일향');
       const constraint = toNormalizedConstraint(mapping!);
-      const tokens = softConstraintsToOptionalFilterTokens([constraint]);
+      const tokens = softConstraintsToOptionalFilterTokens([withAuthority(constraint)]);
       expect(tokens).toContain('flavor_profile:fruity');
     });
   });
@@ -222,12 +255,20 @@ describe('C1b — soft attribute → Vespa retrieval filter propagation', () => 
   });
 
   describe('MIN-only attributes preserve P1.A invariant', () => {
-    // P1.A regression guard: `critic_score`, `body`, `producer_prestige`,
+    // P1.A regression guard: `critic_score`, `producer_prestige`,
     // `gift_suitability`, `beginner_suitability` MUST NOT promote MAX bounds
     // — promoting `critic_score <= 0.9` would silently exclude top-rated wines.
+    //
+    // NOTE: `body` was originally MIN-only here, but the product evolved to
+    // treat body as a symmetric sensory attribute (a user saying "light body"
+    // is a legitimate MAX ceiling, mirroring `sweetness` and `acidity` which
+    // are already in {@link SENSORY_SOFT_PROMOTION_ATTRIBUTES}). Body's
+    // symmetric promotion is now covered by the colocated unit test
+    // `soft body ceiling with promotion authority emits body_max token` —
+    // this regression preserves the original ceiling-protection invariant
+    // for the truly MIN-only attributes only.
     const minOnlyAttrs = [
       'critic_score',
-      'body',
       'producer_prestige',
       'gift_suitability',
       'beginner_suitability',

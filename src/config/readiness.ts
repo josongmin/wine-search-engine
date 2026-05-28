@@ -409,15 +409,16 @@ export function buildHealthRouteOptions(
       search_snapshot_runtime: {
         required: true, // T-E7-02: strict fail-closed regardless of NODE_ENV
         check: async (): Promise<ReadinessStatus> => {
+          const requireActiveLtr = config.searchSnapshot.requireActiveLtrForRuntime;
           if (runtime.pool === undefined) {
             if (isProduction) {
               return 'down';
             }
-            return probeSearchSnapshotRuntimeWithoutPool();
+            return probeSearchSnapshotRuntimeWithoutPool({ requireActiveLtr: false });
           }
           return probeSearchSnapshotRuntimeWithPool({
             pool: runtime.pool,
-            requireActiveLtr: false,
+            requireActiveLtr,
           });
         },
       },

@@ -108,9 +108,16 @@ describe('filter-token-registry SSoT — constraint-to-sparse-filter-tokens pari
   const emitterSource = readFileSync(EMITTER_SOURCE_PATH, 'utf8');
 
   it('emitter source declares no private filter-token Map (only the documented helper maps)', () => {
-    // Allow exactly: STYLE_NORMALISATION_MAP, PRICE_BAND_NORMALISATION_MAP,
-    //                SOFT_PROMOTION_TOKEN_SPEC, SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS,
-    //                HARD_FILTERABLE_ATTRIBUTES, SOFT_PROMOTABLE_ATTRIBUTES.
+    // Allow exactly the named helper maps documented in the emitter header:
+    //   - SOFT_PROMOTION_TOKEN_SPEC: per-attribute MIN/MAX/string promotion keys
+    //   - STYLE_NORMALISATION_MAP: style synonym → canonical token
+    //   - PRICE_BAND_NORMALISATION_MAP: price_band synonym → canonical enum
+    //   - GRAPE_FILTER_SURFACE_VARIANTS: canonical grape → surface alias list
+    //     (e.g. Syrah/Shiraz, Pinot Gris/Grigio) — drives expandGrapeFilterValues
+    //   - HARD_FILTERABLE_ATTRIBUTES / SOFT_PROMOTABLE_ATTRIBUTES: attribute
+    //     allow-lists for the routing layer
+    //   - SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS: legacy trust list (kept for
+    //     reference even after the soft_promotion_authority canonicalization)
     // Any OTHER `new Map(` / `new Set(` declaring filter-token semantics is a
     // SSoT violation.
     const allowedDeclarations = new Set([
@@ -118,6 +125,7 @@ describe('filter-token-registry SSoT — constraint-to-sparse-filter-tokens pari
       'SOFT_PROMOTION_TOKEN_SPEC',
       'STYLE_NORMALISATION_MAP',
       'PRICE_BAND_NORMALISATION_MAP',
+      'GRAPE_FILTER_SURFACE_VARIANTS',
       'HARD_FILTERABLE_ATTRIBUTES',
       'SOFT_PROMOTABLE_ATTRIBUTES',
     ]);

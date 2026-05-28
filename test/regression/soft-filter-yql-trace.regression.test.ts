@@ -31,13 +31,25 @@ import {
 } from '../../src/infrastructure/vespa/mapping.js';
 import type { NormalizedConstraint } from '../../src/domain/shared/types/index.js';
 
+/**
+ * Trust list mirrors the legacy pre-canonicalization gate so the S4.3
+ * regression invariants still hold under the new `soft_promotion_authority`
+ * contract — trusted mapping versions get `authority='allow'`; LLM/unknown
+ * versions do not.
+ */
+const TRUSTED_MAPPING_VERSIONS: ReadonlySet<string> = new Set([
+  'rule-based-v1.0',
+  'entity-resolver-v1.0',
+  'v1.0',
+]);
+
 function makeSoft(
   attribute: string,
   operator: NormalizedConstraint['operator'],
   value: NormalizedConstraint['value'],
   overrides: Partial<NormalizedConstraint> = {},
 ): NormalizedConstraint {
-  return {
+  const merged: NormalizedConstraint = {
     attribute,
     operator,
     value,
@@ -46,6 +58,12 @@ function makeSoft(
     mapping_version: 'rule-based-v1.0',
     ...overrides,
   };
+  if (!('soft_promotion_authority' in overrides)
+      && merged.mapping_version !== undefined
+      && TRUSTED_MAPPING_VERSIONS.has(merged.mapping_version)) {
+    return { ...merged, soft_promotion_authority: 'allow' };
+  }
+  return merged;
 }
 
 describe('S4.3 — soft constraint promotion reaches Vespa YQL', () => {

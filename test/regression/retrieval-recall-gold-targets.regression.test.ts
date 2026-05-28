@@ -86,6 +86,9 @@ describe('S4.4 — data-vs-code: promotion fields are absent from the seeded cor
       source_phrase: '평점 좋은',
       confidence: 0.85,
       mapping_version: 'rule-based-v1.0',
+      // Authority='allow' mirrors what pre-route-phase attaches in production
+      // for trusted curated outputs — see search-usecase-pre-route-phase.ts.
+      soft_promotion_authority: 'allow',
     };
     // Promotion CODE works — see soft-filter-yql-trace for the full YQL trace.
     expect(softConstraintsToOptionalFilterTokens([soft])).toContain('critic_score_min:0.7');

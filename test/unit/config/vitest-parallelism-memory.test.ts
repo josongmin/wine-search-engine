@@ -26,16 +26,21 @@ describe('config/vitest parallelism tuning', () => {
   });
 
   afterEach(() => {
-    const restore = (key: string, value: string | undefined): void => {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    };
-    restore('VITEST_FILE_PARALLELISM', snapshotFileParallelism);
-    restore('VITEST_MAX_CONCURRENCY', snapshotMaxConcurrency);
-    restore('VITEST_MAX_THREADS', snapshotMaxThreads);
+    if (snapshotFileParallelism === undefined) {
+      delete process.env.VITEST_FILE_PARALLELISM;
+    } else {
+      process.env.VITEST_FILE_PARALLELISM = snapshotFileParallelism;
+    }
+    if (snapshotMaxConcurrency === undefined) {
+      delete process.env.VITEST_MAX_CONCURRENCY;
+    } else {
+      process.env.VITEST_MAX_CONCURRENCY = snapshotMaxConcurrency;
+    }
+    if (snapshotMaxThreads === undefined) {
+      delete process.env.VITEST_MAX_THREADS;
+    } else {
+      process.env.VITEST_MAX_THREADS = snapshotMaxThreads;
+    }
   });
 
   it('resolveFileParallelism defaults when env is unset', () => {

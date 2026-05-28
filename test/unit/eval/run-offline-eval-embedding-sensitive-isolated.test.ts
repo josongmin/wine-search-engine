@@ -29,6 +29,7 @@ describe('embedding-sensitive isolated runner', () => {
       PORT: '3006',
       KILL_SWITCH_INJECTION_JUDGE: 'true',
       WINE_SEARCH_MULTI_QUERY_ENABLED: 'false',
+      SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: 'false',
     });
     expect(denseOn?.env['KILL_SWITCH_DENSE_RETRIEVAL']).toBeUndefined();
 
@@ -39,6 +40,7 @@ describe('embedding-sensitive isolated runner', () => {
       KILL_SWITCH_INJECTION_JUDGE: 'true',
       WINE_SEARCH_MULTI_QUERY_ENABLED: 'false',
       KILL_SWITCH_DENSE_RETRIEVAL: 'true',
+      SEARCH_SNAPSHOT_REQUIRE_ACTIVE_LTR_FOR_RUNTIME: 'false',
     });
   });
 

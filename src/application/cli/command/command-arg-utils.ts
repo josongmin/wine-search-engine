@@ -16,7 +16,7 @@ export function expectFlagValue(
 
 export function parsePositiveInteger(value: string, flag: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
     throw CliError.usage(`Invalid ${flag} "${value}" (expected a positive integer)`);
   }
   return parsed;

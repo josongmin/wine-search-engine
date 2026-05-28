@@ -22,13 +22,26 @@ import { describe, it, expect } from 'vitest';
 import { softConstraintsToOptionalFilterTokens } from '../../src/domain/retrieval/service/constraint-to-sparse-filter-tokens.js';
 import type { NormalizedConstraint } from '../../src/domain/shared/types/index.js';
 
+/**
+ * Trust list mirrors the legacy pre-canonicalization gate so existing test
+ * names that reference mapping_version still express the right invariant on
+ * the new `soft_promotion_authority` contract: trusted (rule-based / curated /
+ * entity-resolver) mapping versions get `authority='allow'`; LLM-sourced or
+ * unknown versions do not, and continue to be rejected at the gate.
+ */
+const TRUSTED_MAPPING_VERSIONS: ReadonlySet<string> = new Set([
+  'rule-based-v1.0',
+  'entity-resolver-v1.0',
+  'v1.0',
+]);
+
 function makeSoft(
   attribute: string,
   operator: NormalizedConstraint['operator'],
   value: NormalizedConstraint['value'],
   overrides: Partial<NormalizedConstraint> = {},
 ): NormalizedConstraint {
-  return {
+  const merged: NormalizedConstraint = {
     attribute,
     operator,
     value,
@@ -37,6 +50,12 @@ function makeSoft(
     mapping_version: 'rule-based-v1.0',
     ...overrides,
   };
+  if (!('soft_promotion_authority' in overrides)
+      && merged.mapping_version !== undefined
+      && TRUSTED_MAPPING_VERSIONS.has(merged.mapping_version)) {
+    return { ...merged, soft_promotion_authority: 'allow' };
+  }
+  return merged;
 }
 
 describe('P1.A — softConstraintsToOptionalFilterTokens', () => {
