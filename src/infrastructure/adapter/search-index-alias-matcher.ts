@@ -222,7 +222,12 @@ function classifyMatch(query: string, candidate: string): ClassifiedMatch | null
   return null;
 }
 
-function buildSearchQueries(query: string): readonly string[] {
+function buildSearchQueries(
+  query: string,
+  options?: {
+    readonly includeNestedSpanQueries?: boolean | undefined;
+  },
+): readonly string[] {
   const queryViews = buildNormalizedQueryViews(query);
   const imeRomanizedPrefix = Transliterator.romanizeWineTermPrefix(query);
   const ordered: string[] = [];
@@ -248,9 +253,11 @@ function buildSearchQueries(query: string): readonly string[] {
     add(baseQuery);
   }
 
-  for (const baseQuery of baseQueries) {
-    for (const span of parseSpans(baseQuery)) {
-      add(span.text);
+  if (options?.includeNestedSpanQueries !== false) {
+    for (const baseQuery of baseQueries) {
+      for (const span of parseSpans(baseQuery)) {
+        add(span.text);
+      }
     }
   }
 
@@ -410,9 +417,13 @@ export class SearchIndexAliasMatcher implements AliasMatcher {
 
     const mergedSearchQueries = trimDedupedQueries(
       trimmedQueries.flatMap((query) =>
-        this.options.surfaceOnly === true || options?.scope === 'surface'
+        this.options.surfaceOnly === true
+          || options?.scope === 'surface'
+          || options?.recallMode === 'surface_only'
           ? buildSurfaceOnlySearchQueries(query)
-          : buildSearchQueries(query)),
+          : buildSearchQueries(query, {
+            includeNestedSpanQueries: options?.scope !== 'span',
+          })),
     );
     if (mergedSearchQueries.length === 0) {
       for (const query of trimmedQueries) {

@@ -13,6 +13,7 @@ import type { Pool } from 'pg';
 import type { ThresholdStore } from '../../domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../domain/query/model/threshold-profile.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 
 const log = bootstrapLogger.child({ component: 'PgThresholdStore' });
 
@@ -59,8 +60,10 @@ function rowToProfile(row: ThresholdProfileRow, context: string): ThresholdProfi
 export class PgThresholdStore implements ThresholdStore {
   constructor(private readonly pool: Pool) {}
 
-  async getProfile(id: string): Promise<ThresholdProfileV1 | null> {
-    const result = await this.pool.query<ThresholdProfileRow>(
+  async getProfile(id: string, signal?: AbortSignal): Promise<ThresholdProfileV1 | null> {
+    const result = await runAbortablePgQuery<ThresholdProfileRow>(
+      this.pool,
+      signal,
       `SELECT * FROM threshold_profiles WHERE profile_id = $1`,
       [id],
     );
@@ -68,8 +71,10 @@ export class PgThresholdStore implements ThresholdStore {
     return row != null ? rowToProfile(row, 'getProfile') : null;
   }
 
-  async getDefault(): Promise<ThresholdProfileV1> {
-    const result = await this.pool.query<ThresholdProfileRow>(
+  async getDefault(signal?: AbortSignal): Promise<ThresholdProfileV1> {
+    const result = await runAbortablePgQuery<ThresholdProfileRow>(
+      this.pool,
+      signal,
       `SELECT * FROM threshold_profiles WHERE is_default = TRUE LIMIT 1`,
     );
     const row = result.rows[0];
@@ -89,8 +94,10 @@ export class PgThresholdStore implements ThresholdStore {
     );
   }
 
-  async save(profile: ThresholdProfileV1): Promise<void> {
-    await this.pool.query(
+  async save(profile: ThresholdProfileV1, signal?: AbortSignal): Promise<void> {
+    await runAbortablePgQuery(
+      this.pool,
+      signal,
       `INSERT INTO threshold_profiles (profile_id, profile_data, is_default, updated_at)
        VALUES ($1, $2, $3, NOW())
        ON CONFLICT (profile_id) DO UPDATE SET

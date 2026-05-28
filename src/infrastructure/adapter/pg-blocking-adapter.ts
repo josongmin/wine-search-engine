@@ -9,6 +9,8 @@ import {
 } from '../db/active-snapshot-resolver.js';
 import { globalSilentSkipCounter } from '../../domain/observability/silent-skip-counters.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
+import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 
 interface CandidateRow {
   entity_id: string;
@@ -78,6 +80,7 @@ export class PgBlockingAdapter implements BlockingPort {
     query: string,
     normalizedQuery: string,
     limit: number = PgBlockingAdapter.DEFAULT_LIMIT,
+    signal?: AbortSignal,
   ): Promise<readonly EntityId[]> {
     // Strategy 1: exact normalized_value match (highest recall, fastest)
     // Strategy 2: prefix match on normalized_value
@@ -118,7 +121,9 @@ export class PgBlockingAdapter implements BlockingPort {
     const prefixPatterns = lookupVariants.map((variant) => `${escapeLikePattern(variant)}%`);
     let result: { rows: CandidateRow[] };
     try {
-      result = await this.pool.query<CandidateRow>(
+      result = await runAbortablePgQuery<CandidateRow>(
+        this.pool,
+        signal,
         `WITH exact_match AS (
           SELECT entity_id, 1 AS priority
           FROM aliases
@@ -190,6 +195,11 @@ export class PgBlockingAdapter implements BlockingPort {
         ],
       );
     } catch (err: unknown) {
+      // Caller-driven cancellation is not a substrate failure — propagate it
+      // without polluting the alias-query-failure counter.
+      if (isAbortError(err)) {
+        throw err;
+      }
       const code = readPgSqlState(err);
       if (code !== '42P01') {
         globalSilentSkipCounter.increment('blocker_alias_query_failure', {

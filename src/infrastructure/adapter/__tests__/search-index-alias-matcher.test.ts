@@ -222,6 +222,39 @@ describe('SearchIndexAliasMatcher', () => {
     );
   });
 
+  it('surface-only recall mode does not expand span fallback queries for request-scoped generic misses', async () => {
+    const searchIndex = {
+      sparseSearch: vi.fn(async () => []),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    await matcher.findMatchesBatch(['wine for cheese'], {
+      scope: 'span',
+      recallMode: 'surface_only',
+    });
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(searchIndex.sparseSearch.mock.calls[0]?.[0]).toEqual(
+      expect.not.arrayContaining(['wine', 'for', 'cheese']),
+    );
+  });
+
+  it('does not recursively re-expand explicit span-scope queries into smaller nested spans', async () => {
+    const searchIndex = {
+      sparseSearch: vi.fn(async () => []),
+    } satisfies Pick<SearchIndexPort, 'sparseSearch'>;
+
+    const matcher = new SearchIndexAliasMatcher(searchIndex as SearchIndexPort);
+    await matcher.findMatchesBatch(['united states'], {
+      scope: 'span',
+    });
+
+    expect(searchIndex.sparseSearch).toHaveBeenCalledTimes(1);
+    expect(searchIndex.sparseSearch.mock.calls[0]?.[0]).toEqual(
+      expect.not.arrayContaining(['united', 'states']),
+    );
+  });
+
   it('drops punctuation-only fallback queries before sparseSearch so Vespa never sees NullItem YQL', async () => {
     const backingIndex = new InMemorySearchIndex();
     await backingIndex.upsertDocument(makeDoc());

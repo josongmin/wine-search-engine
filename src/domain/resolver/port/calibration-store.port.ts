@@ -73,17 +73,22 @@ export interface CalibrationStore {
    * Retrieves calibration parameters for a given query class.
    *
    * @param queryClass - The query class to retrieve parameters for.
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
    * @returns The calibration parameters, or `null` if none have been trained.
    */
-  getCalibrationParams(queryClass: QueryClass): Promise<CalibrationParams | null>;
+  getCalibrationParams(
+    queryClass: QueryClass,
+    signal?: AbortSignal,
+  ): Promise<CalibrationParams | null>;
 
   /**
    * Persists calibration parameters for a given query class.
    *
    * @param queryClass - The query class these parameters apply to.
    * @param params - The calibration parameters to save.
+   * @param signal - Optional {@link AbortSignal}; aborts the write query (WSE-01).
    */
-  save(queryClass: QueryClass, params: CalibrationParams): Promise<void>;
+  save(queryClass: QueryClass, params: CalibrationParams, signal?: AbortSignal): Promise<void>;
 
   /**
    * Loads calibration parameters only when they are fresh enough to be
@@ -101,10 +106,12 @@ export interface CalibrationStore {
    * @param queryClass - The query class to retrieve parameters for.
    * @param ttlDays - Maximum age (in days) the params may have for trust.
    * @param now - Optional clock injection for tests; defaults to `new Date()`.
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
    */
   loadIfFresh(
     queryClass: QueryClass,
     ttlDays: number,
     now?: Date,
+    signal?: AbortSignal,
   ): Promise<FreshCalibrationLoadResult>;
 }

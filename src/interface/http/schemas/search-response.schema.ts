@@ -45,6 +45,7 @@ import {
   MAX_NORMALIZED_QUERY_VIEW_STRINGS,
   MAX_QUERY_BUDGET_CANDIDATES,
   MAX_QUERY_BUDGET_DENSE_CALLS,
+  MAX_STAGE_TIMINGS_KEYS,
   MAX_QUERY_BUDGET_LATENCY_MS,
   MAX_QUERY_BUDGET_RERANK_LIMIT,
   MAX_RESOLVE_CANDIDATES,
@@ -1041,7 +1042,12 @@ export const SearchResponseSchema = z.object({
   meta: SearchResponseMetaSchema,
   // Stage-timing breakdown is emitted by the pipeline and surfaced for
   // latency observability / replay diagnostics.
-  stage_timings: z.record(z.number().finite().nonnegative()).optional(),
+  stage_timings: z
+    .record(z.number().finite().nonnegative())
+    .refine((r) => Object.keys(r).length <= MAX_STAGE_TIMINGS_KEYS, {
+      message: `stage_timings exceeds ${String(MAX_STAGE_TIMINGS_KEYS)} keys`,
+    })
+    .optional(),
   retrieval_mode: z.enum([
     'entity_lookup',
     'attribute_search',

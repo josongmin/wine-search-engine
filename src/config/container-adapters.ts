@@ -16,6 +16,7 @@ import { SearchSnapshotAliasMatcher } from '../infrastructure/adapter/search-sna
 import { SnapshotScopedSearchIndex } from '../infrastructure/adapter/snapshot-scoped-search-index.js';
 import { CachedAliasMatcher } from '../infrastructure/adapter/cached-alias-matcher.js';
 import { LazyFuzzyMatcher } from '../infrastructure/adapter/lazy-fuzzy-matcher.js';
+import { UnavailableFastFailSearchIndex } from '../infrastructure/adapter/unavailable-fast-fail-search-index.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
 import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-service.js';
@@ -166,6 +167,7 @@ export async function buildCoreAdapterServices(
         snapshotId: runtimeHandles.searchSnapshotId,
       })
     : watchlistAwareSearchIndex;
+  const failFastSearchIndex: SearchIndexPort = new UnavailableFastFailSearchIndex(searchIndex);
 
   const embeddingService: EmbeddingServicePort = (() => {
     if (config.killSwitch.denseRetrieval) {
@@ -235,7 +237,7 @@ export async function buildCoreAdapterServices(
       : undefined;
 
   return {
-    searchIndex,
+    searchIndex: failFastSearchIndex,
     embeddingService,
     doc2queryGenerator,
     ...(chatLlm !== undefined ? { chatLlm } : {}),
@@ -275,7 +277,7 @@ export async function buildCoreAdapterServices(
         }
       : {}),
     aliasMatcher: ((): AliasMatcher => {
-      const indexAliasMatcher = new SearchIndexAliasMatcher(searchIndex, {
+      const indexAliasMatcher = new SearchIndexAliasMatcher(failFastSearchIndex, {
         // When the PG/snapshot alias overlay is available, the search-index
         // matcher is a degraded exact fallback only. Keep it on full-surface
         // variants so generic browse/semantic queries do not explode into
@@ -326,9 +328,9 @@ export async function buildCoreAdapterServices(
       return new CachedAliasMatcher(indexAliasMatcher);
     })(),
     mappingTable: await FileMappingTableAdapter.create(),
-    anchorResolver: new VespaAnchorResolver(searchIndex),
-    similarRetrieval: new VespaSimilarRetrieval(searchIndex),
-    candidateAttributes: new VespaCandidateAttributes(searchIndex),
+    anchorResolver: new VespaAnchorResolver(failFastSearchIndex),
+    similarRetrieval: new VespaSimilarRetrieval(failFastSearchIndex),
+    candidateAttributes: new VespaCandidateAttributes(failFastSearchIndex),
     learnedMatcher:
       config.learnedMatcher.url !== undefined
         ? new HttpLearnedMatcherAdapter({

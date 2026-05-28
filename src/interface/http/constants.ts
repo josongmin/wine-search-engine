@@ -250,6 +250,21 @@ export const MAX_AGENT_HTTP_QUERY_CHARS = MAX_QUERY_LENGTH;
 /** Agent route: hard cap on ReAct steps (matches Zod schema max). */
 export const MAX_AGENT_STEPS_CAP = 10;
 
+/**
+ * Max keys in a response `stage_timings` map — one entry per instrumented
+ * pipeline stage (~30 distinct stage labels today; headroom for future stages).
+ * Guards against unbounded response growth (schema bar: every record needs a cap).
+ */
+export const MAX_STAGE_TIMINGS_KEYS = 64;
+
+/**
+ * Max keys in a tool-call `arguments` object. Tool inputs are a bounded field
+ * set (the widest tool schema is ~27 fields); the cap guards a runaway LLM from
+ * emitting unbounded keys while leaving headroom for reasoning/metadata fields
+ * that LLMs routinely add (which is why the tool-input schema is non-strict).
+ */
+export const MAX_TOOL_CALL_ARGUMENT_KEYS = 64;
+
 /** Claude tool `search_wines` result limit (Zod max, aligns with browse UX). */
 export const MAX_WINE_TOOL_SEARCH_RESULTS = 50;
 

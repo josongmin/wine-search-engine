@@ -10,15 +10,18 @@ summary: |
   (HTTP routes) behind one facade contract, so the surface and `--json` output
   are target-independent.
 
-maturity: 3
+maturity: 4
 maturity_rationale: |
   Kernel + auth/profile plane + typed facades (local+remote) + raw api + bin
   packaging are wired and covered by 24 unit files / 171 cases: a local↔remote
   parity gate, a deterministic smoke proof rail, a renderer matrix, and
-  facade/command/arg-utils tests. typecheck/build/lint green. Held at 3 (not 4)
-  because the `local` target has only been proven with fake-port/fake-fetch
-  units — never executed against live PG/Redis/Vespa — and shell completion is
-  deferred.
+  facade/command/arg-utils tests. typecheck/build/lint green. The `local` target
+  is now live-verified against real infra (2026-05-29): `search run --target
+  local "opus one 2018"` resolved end-to-end via RDS (exit 0, single_entity),
+  and `search hybrid --target local` returned 20 results via the Vespa retrieval
+  channel (sg temporarily opened to the runner IP, then reverted). Not 5 because
+  `wine-search` (PtE/Anthropic) and remote-target live calls are not yet part of
+  an automated live smoke, and shell completion is deferred.
 
 status: active
 since: 2026-05
@@ -58,13 +61,14 @@ related_rfcs:
   - docs/plans/may-28-cli/architecture-decision.md
 
 known_limitations:
-  - "`local` target (in-process container ports) is unit-tested with fakes but never run against live PG/Redis/Vespa — live local execution unverified."
+  - "Live verification of the `local` target was a manual one-off (RDS entity-lookup + Vespa hybrid on 2026-05-29); there is no automated live/CI smoke yet — unit coverage uses fakes."
+  - "`wine-search` (PtE/Anthropic) and remote-target HTTP calls have not been exercised live."
   - "`api call` is remote-only; on the local target it returns a usage error (exit 2). Local raw HTTP is intentionally unsupported."
   - "Shell completion is not supported in v1 (explicit deferral, no parser swap)."
   - "Local search/hybrid facade reuses deepKeysToSnake from the HTTP layer for wire parity — an intentional one-way infra->interface import edge."
 
 next_steps:
-  - "Run live `wine search run --target local` + `api call GET /health` against real infra; promote to maturity 4 once verified."
+  - "Add an opt-in live smoke lane (gated, real infra) covering `search run`/`hybrid` local + a remote `api call`; promote toward 5 once automated."
   - "Evaluate shell-completion support as a follow-up ticket."
 
 tags:

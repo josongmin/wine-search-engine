@@ -90,6 +90,18 @@ import {
 const FUZZY_SIMILARITY_THRESHOLD = FUZZY_IDENTITY_TRUST_MIN_SIMILARITY;
 const FUZZY_MIN_KEY_LENGTH = 5;
 const FUZZY_MATCH_CONFIDENCE_FACTOR = 0.8;
+
+/**
+ * Max `.confidence` over entries via a loop. Rule 9: never `Math.max(...spread)`
+ * — spreading a large array onto the call stack overflows past ~65K elements.
+ */
+function maxConfidenceOf(entries: readonly { readonly confidence: number }[]): number {
+  let max = Number.NEGATIVE_INFINITY;
+  for (const e of entries) {
+    if (e.confidence > max) max = e.confidence;
+  }
+  return max;
+}
 import type { NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
 
 const IN_MEMORY_EMBEDDING_DIM = 1024;
@@ -594,7 +606,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       }
 
       const entityIds = entries.map((entry) => entry.entityId);
-      const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      const maxConfidence = maxConfidenceOf(entries);
       const aliasType = this.pickAliasTypeForEntries(entries);
       compactResults.push({
         surfaceForm: entries[0]?.surfaceForm ?? normalized,
@@ -622,7 +634,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         }
 
         const entityIds = entries.map((entry) => entry.entityId);
-        const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+        const maxConfidence = maxConfidenceOf(entries);
         const aliasType = this.pickAliasTypeForEntries(entries);
         transliteratedResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
@@ -663,7 +675,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         ...entries.map((entry) => entry.surfaceForm),
       ]);
       const entityIds = entries.map((entry) => entry.entityId);
-      const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      const maxConfidence = maxConfidenceOf(entries);
       const aliasType = this.pickAliasTypeForEntries(entries);
 
       if (
@@ -718,7 +730,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         }
 
         const entityIds = entries.map((entry) => entry.entityId);
-        const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+        const maxConfidence = maxConfidenceOf(entries);
         const aliasType = this.pickAliasTypeForEntries(entries);
         phoneticResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
@@ -760,7 +772,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
 
       if (isSubstringMatch || isTokenPrefixMatch) {
         const entityIds = entries.map((e) => e.entityId);
-        const maxConfidence = Math.max(...entries.map((e) => e.confidence));
+        const maxConfidence = maxConfidenceOf(entries);
         const aliasType = this.pickAliasTypeForEntries(entries);
         substringResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
@@ -855,7 +867,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       }
 
       const entityIds = entries.map((entry) => entry.entityId);
-      const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      const maxConfidence = maxConfidenceOf(entries);
       results.push({
         surfaceForm: entries[0]?.surfaceForm ?? normalized,
         normalizedForm: normalized,

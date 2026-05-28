@@ -51,8 +51,11 @@
 
 import { z } from 'zod';
 import {
+  HTTP_DEFAULT_REQUEST_TIMEOUT_MS,
   MAX_AGENT_HTTP_QUERY_CHARS,
   MAX_AGENT_STEPS_CAP,
+  MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS,
+  MAX_TOOL_CALL_ARGUMENT_KEYS,
 } from '../constants.js';
 
 // ---------------------------------------------------------------------------
@@ -139,7 +142,11 @@ const WineSearchStepSourceSchema = z.enum([
  *  every internal tool input schema. */
 export const WineSearchToolCallSchema = z.object({
   name: z.string().min(1).max(STEP_SUMMARY_MAX_CHARS),
-  arguments: z.record(z.unknown()),
+  arguments: z
+    .record(z.unknown())
+    .refine((a) => Object.keys(a).length <= MAX_TOOL_CALL_ARGUMENT_KEYS, {
+      message: `tool call arguments exceed ${String(MAX_TOOL_CALL_ARGUMENT_KEYS)} keys`,
+    }),
 }).strict();
 export type WineSearchToolCallBody = z.infer<typeof WineSearchToolCallSchema>;
 
@@ -157,10 +164,15 @@ const REQUEST_PER_STEP_TIMEOUT_MIN_MS = 1_000;
 const REQUEST_PER_STEP_TIMEOUT_MAX_MS = 60_000;
 /** Lower bound on overall agent timeout. */
 const REQUEST_AGENT_TIMEOUT_MIN_MS = 1_000;
-/** Upper bound on overall agent timeout. 120 s is the practical client
- *  patience ceiling for a single search call; longer requests should be
- *  decomposed by the client. */
-const REQUEST_AGENT_TIMEOUT_MAX_MS = 120_000;
+/**
+ * Upper bound on overall agent timeout. MUST NOT exceed the Fastify server
+ * `requestTimeout` (`HTTP_DEFAULT_REQUEST_TIMEOUT_MS`): the server hard-kills
+ * any request past that budget, so a larger agent timeout is unachievable and
+ * makes the contract lie (rule 22 — mutually consistent limits). Derived from
+ * the server timeout so the two can never drift; see
+ * `test/integration/http/routes/wine-search-timeout-consistency.test.ts`.
+ */
+const REQUEST_AGENT_TIMEOUT_MAX_MS = HTTP_DEFAULT_REQUEST_TIMEOUT_MS;
 /** Lower bound on the per-request total token budget. Below 1k tokens the
  *  system prompt alone exhausts the budget. */
 const REQUEST_TOTAL_TOKEN_MIN = 1_000;
@@ -368,7 +380,7 @@ export const WineSearchResponseSchema = z.object({
     tool_call_count: z.number().int().finite().min(0),
   }).strict(),
   meta: z.object({
-    request_id: z.string(),
+    request_id: z.string().min(1).max(MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS),
     total_duration_ms: z.number().int().finite().min(0),
     total_tokens: TokenUsageSchema,
     intent: WineSearchQueryIntentSchema,

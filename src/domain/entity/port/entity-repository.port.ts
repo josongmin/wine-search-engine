@@ -20,16 +20,23 @@ import type { EntityType } from '../model/entity-type.js';
  * Implementations live in the infrastructure layer.
  */
 export interface EntityRepository {
-  /** Find an entity by its unique id, scoped to the active snapshot. */
-  findById(id: CanonicalEntityId): Promise<Entity | null>;
+  /**
+   * Find an entity by its unique id, scoped to the active snapshot.
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
+   */
+  findById(id: CanonicalEntityId, signal?: AbortSignal): Promise<Entity | null>;
 
-  /** Find an entity by its deterministic identity signature, scoped to the active snapshot. */
-  findBySignature(signature: string): Promise<Entity | null>;
+  /**
+   * Find an entity by its deterministic identity signature, scoped to the active snapshot.
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
+   */
+  findBySignature(signature: string, signal?: AbortSignal): Promise<Entity | null>;
 
   /**
    * Find entities by type within the active snapshot.
    * @param type - The entity type to filter on.
    * @param limit - Maximum number of results (default implementation-defined).
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
    */
-  findByType(type: EntityType, limit?: number): Promise<readonly Entity[]>;
+  findByType(type: EntityType, limit?: number, signal?: AbortSignal): Promise<readonly Entity[]>;
 }

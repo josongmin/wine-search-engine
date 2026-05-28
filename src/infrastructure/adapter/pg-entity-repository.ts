@@ -9,6 +9,7 @@ import {
   parseEntityAttributesJsonb,
 } from './jsonb-schemas.js';
 import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 
 const ROW_TO_ENTITY_CALLER = 'PgEntityRepository.rowToEntity';
 
@@ -105,9 +106,11 @@ export class PgEntityRepository implements EntityRepository {
     return activeSnapshotId;
   }
 
-  async findById(id: CanonicalEntityId): Promise<Entity | null> {
+  async findById(id: CanonicalEntityId, signal?: AbortSignal): Promise<Entity | null> {
     const activeSnapshotId = await this.resolveActiveSnapshotId();
-    const result = await this.pool.query<EntityRow>(
+    const result = await runAbortablePgQuery<EntityRow>(
+      this.pool,
+      signal,
       'SELECT * FROM entities WHERE entity_id = $1 AND search_snapshot_id = $2',
       [id, activeSnapshotId],
     );
@@ -115,9 +118,11 @@ export class PgEntityRepository implements EntityRepository {
     return row ? rowToEntity(row) : null;
   }
 
-  async findBySignature(signature: string): Promise<Entity | null> {
+  async findBySignature(signature: string, signal?: AbortSignal): Promise<Entity | null> {
     const activeSnapshotId = await this.resolveActiveSnapshotId();
-    const result = await this.pool.query<EntityRow>(
+    const result = await runAbortablePgQuery<EntityRow>(
+      this.pool,
+      signal,
       'SELECT * FROM entities WHERE identity_signature = $1 AND search_snapshot_id = $2',
       [signature, activeSnapshotId],
     );
@@ -125,9 +130,15 @@ export class PgEntityRepository implements EntityRepository {
     return row ? rowToEntity(row) : null;
   }
 
-  async findByType(type: EntityType, limit: number = ENTITY_FETCH_DEFAULT_LIMIT): Promise<readonly Entity[]> {
+  async findByType(
+    type: EntityType,
+    limit: number = ENTITY_FETCH_DEFAULT_LIMIT,
+    signal?: AbortSignal,
+  ): Promise<readonly Entity[]> {
     const activeSnapshotId = await this.resolveActiveSnapshotId();
-    const result = await this.pool.query<EntityRow>(
+    const result = await runAbortablePgQuery<EntityRow>(
+      this.pool,
+      signal,
       'SELECT * FROM entities WHERE entity_type = $1 AND search_snapshot_id = $2 ORDER BY created_at DESC LIMIT $3',
       [type, activeSnapshotId, limit],
     );

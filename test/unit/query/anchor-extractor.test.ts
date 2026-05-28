@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { AnchorExtractor } from '../../../src/domain/query/service/anchor-extractor.js';
 import type {
+  AliasRecallMode,
   AliasLookupOptions,
   AliasLookupScope,
   AliasMatcher,
@@ -30,7 +31,7 @@ class StubAliasMatcher implements AliasMatcher {
 }
 
 class RecordingAliasMatcher implements AliasMatcher {
-  readonly calls: { query: string; scope: AliasLookupScope }[] = [];
+  readonly calls: { query: string; scope: AliasLookupScope; recallMode?: AliasRecallMode }[] = [];
 
   async findMatches(
     normalizedQuery: string,
@@ -39,6 +40,7 @@ class RecordingAliasMatcher implements AliasMatcher {
     this.calls.push({
       query: normalizedQuery,
       scope: options?.scope ?? 'span',
+      ...(options?.recallMode !== undefined ? { recallMode: options.recallMode } : {}),
     });
     return [];
   }
@@ -189,6 +191,21 @@ describe('AnchorExtractor', () => {
 
       expect(baseQueries).toContain('mediumbodyunitedstatesunitedstatesred');
       expect(spanQueries).not.toContain('mediumbodyunitedstatesunitedstatesred');
+    });
+
+    it('downgrades deterministic constraint-owned atomic spans to surface-only recall', async () => {
+      const matcher = new RecordingAliasMatcher();
+      const extractor = new AnchorExtractor(matcher);
+
+      await extractor.extract('medium body united states / united states red');
+
+      const spanCalls = matcher.calls.filter((call) => call.scope === 'span');
+      expect(spanCalls).toEqual([
+        expect.objectContaining({
+          query: '/',
+          scope: 'span',
+        }),
+      ]);
     });
   });
 });

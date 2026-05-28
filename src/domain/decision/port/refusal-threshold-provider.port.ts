@@ -39,6 +39,10 @@ export interface RefusalThresholdProvider {
    * to apply their own caching policy (in-process TTL, snapshot pinning, …)
    * so callers may invoke this on every request without amortising the cost
    * themselves.
+   *
+   * @param signal - Optional {@link AbortSignal}; when it aborts during a cache
+   *   miss, the underlying PostgreSQL query is cancelled (WSE-01). A cache hit
+   *   ignores the signal because no I/O is performed.
    */
-  loadThresholds(): Promise<RefusalThresholdLookup>;
+  loadThresholds(signal?: AbortSignal): Promise<RefusalThresholdLookup>;
 }

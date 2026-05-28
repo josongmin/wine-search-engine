@@ -15,16 +15,18 @@ export interface AmbiguityDictionary {
   /**
    * Checks whether the given surface form is a known ambiguous term.
    * @param surfaceForm - The normalized surface form to check.
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
    * @returns `true` if the term is registered as ambiguous.
    */
-  isKnownAmbiguous(surfaceForm: string): Promise<boolean>;
+  isKnownAmbiguous(surfaceForm: string, signal?: AbortSignal): Promise<boolean>;
 
   /**
    * Retrieves detailed ambiguity information for a surface form.
    * @param surfaceForm - The normalized surface form to look up.
+   * @param signal - Optional {@link AbortSignal}; aborts the lookup query (WSE-01).
    * @returns Ambiguity types and severity, or `null` if not known ambiguous.
    */
-  getAmbiguityInfo(surfaceForm: string): Promise<AmbiguityInfo | null>;
+  getAmbiguityInfo(surfaceForm: string, signal?: AbortSignal): Promise<AmbiguityInfo | null>;
 
   /**
    * Batch variant of {@link getAmbiguityInfo}. Returns a map keyed by the
@@ -42,5 +44,6 @@ export interface AmbiguityDictionary {
    */
   getAmbiguityInfoBatch(
     surfaceForms: readonly string[],
+    signal?: AbortSignal,
   ): Promise<ReadonlyMap<string, AmbiguityInfo>>;
 }

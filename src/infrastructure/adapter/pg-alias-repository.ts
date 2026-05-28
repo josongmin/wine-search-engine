@@ -3,6 +3,7 @@ import type { AliasRepository } from '../../domain/alias/port/alias-repository.p
 import type { Alias, AliasScope, AliasType } from '../../domain/alias/model/alias.js';
 import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 
 function toAliasType(value: string): AliasType {
   if (
@@ -68,7 +69,11 @@ function rowToAlias(row: AliasRow): Alias {
 export class PgAliasRepository implements AliasRepository {
   constructor(private readonly pool: Pool) {}
 
-  async findByValue(value: string, scope?: AliasScope): Promise<readonly Alias[]> {
+  async findByValue(
+    value: string,
+    scope?: AliasScope,
+    signal?: AbortSignal,
+  ): Promise<readonly Alias[]> {
     const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
     let query: string;
     let params: unknown[];
@@ -85,22 +90,32 @@ export class PgAliasRepository implements AliasRepository {
       params = [value, activeSnapshotId];
     }
 
-    const result = await this.pool.query<AliasRow>(query, params);
+    const result = await runAbortablePgQuery<AliasRow>(this.pool, signal, query, params);
     return result.rows.map(rowToAlias);
   }
 
-  async findByEntity(entityId: CanonicalEntityId): Promise<readonly Alias[]> {
+  async findByEntity(
+    entityId: CanonicalEntityId,
+    signal?: AbortSignal,
+  ): Promise<readonly Alias[]> {
     const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
-    const result = await this.pool.query<AliasRow>(
+    const result = await runAbortablePgQuery<AliasRow>(
+      this.pool,
+      signal,
       `SELECT * FROM aliases WHERE entity_id = $1 AND search_snapshot_id = $2 ORDER BY confidence DESC`,
       [entityId, activeSnapshotId],
     );
     return result.rows.map(rowToAlias);
   }
 
-  async findByNormalizedValue(normalized: string): Promise<readonly Alias[]> {
+  async findByNormalizedValue(
+    normalized: string,
+    signal?: AbortSignal,
+  ): Promise<readonly Alias[]> {
     const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
-    const result = await this.pool.query<AliasRow>(
+    const result = await runAbortablePgQuery<AliasRow>(
+      this.pool,
+      signal,
       `SELECT * FROM aliases
        WHERE normalized_value = $1 AND search_snapshot_id = $2 AND is_suppressed = FALSE
        ORDER BY confidence DESC`,
@@ -112,6 +127,7 @@ export class PgAliasRepository implements AliasRepository {
   findFuzzyCandidates: AliasRepository['findFuzzyCandidates'] = async (
     normalized,
     scope,
+    signal,
   ) => {
     const prefixLength = Math.max(1, Math.ceil(normalized.length / 2));
     const prefix = normalized.slice(0, prefixLength);
@@ -128,7 +144,7 @@ export class PgAliasRepository implements AliasRepository {
 
     query += ' ORDER BY confidence DESC LIMIT 50';
 
-    const result = await this.pool.query<AliasRow>(query, params);
+    const result = await runAbortablePgQuery<AliasRow>(this.pool, signal, query, params);
     return result.rows.map(rowToAlias);
   };
 }

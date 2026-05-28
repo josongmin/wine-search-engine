@@ -191,6 +191,28 @@ describe('SearchSnapshotAliasMatcher', () => {
     ]);
   });
 
+  it('can force atomic span lookups to stay surface-only without opening broad recall indexes', async () => {
+    const matcher = new SearchSnapshotAliasMatcher([
+      {
+        aliasId: 'a1',
+        entityId: 'wine:opus-one',
+        value: 'Opus One',
+        normalizedValue: 'opus one',
+        sourceTrust: 1,
+        confidencePrior: 0.97,
+      },
+    ]);
+    const internalState = matcher as unknown as {
+      broadRecallIndexesBuilt: boolean;
+    };
+
+    await expect(matcher.findMatches('opu', {
+      scope: 'span',
+      recallMode: 'surface_only',
+    })).resolves.toEqual([]);
+    expect(internalState.broadRecallIndexesBuilt).toBe(false);
+  });
+
   it('resolves Hangul syllable prefixes against curated Korean transliteration surfaces', async () => {
     const matcher = new SearchSnapshotAliasMatcher([
       {

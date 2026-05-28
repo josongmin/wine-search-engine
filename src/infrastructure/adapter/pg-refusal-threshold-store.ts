@@ -26,6 +26,8 @@ import type {
   RefusalThresholdLookup,
   RefusalThresholdProvider,
 } from '../../domain/decision/port/refusal-threshold-provider.port.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
+import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 
 const log = bootstrapLogger.child({ component: 'PgRefusalThresholdStore' });
 
@@ -116,13 +118,13 @@ export class PgRefusalThresholdStore implements RefusalThresholdProvider {
     this.now = options.now ?? Date.now;
   }
 
-  async loadThresholds(): Promise<RefusalThresholdLookup> {
+  async loadThresholds(signal?: AbortSignal): Promise<RefusalThresholdLookup> {
     const cached = this.cache;
     if (cached !== undefined && this.now() - cached.fetchedAtMs < this.ttlMs) {
       return cached.lookup;
     }
 
-    const lookup = await this.fetch();
+    const lookup = await this.fetch(signal);
     // Only cache successful loads; cache invalidation on failure forces the
     // next request to retry the DB so transient outages self-heal once the
     // database recovers, rather than being pinned to an `unavailable` for
@@ -135,10 +137,12 @@ export class PgRefusalThresholdStore implements RefusalThresholdProvider {
     return lookup;
   }
 
-  private async fetch(): Promise<RefusalThresholdLookup> {
+  private async fetch(signal?: AbortSignal): Promise<RefusalThresholdLookup> {
     let rows: readonly unknown[];
     try {
-      const result = await this.pool.query(
+      const result = await runAbortablePgQuery(
+        this.pool,
+        signal,
         `SELECT
            query_class,
            threshold,
@@ -152,6 +156,12 @@ export class PgRefusalThresholdStore implements RefusalThresholdProvider {
       );
       rows = result.rows;
     } catch (err) {
+      // A caller-driven abort is NOT a provider outage — re-throw so it reaches
+      // the HTTP error path instead of masquerading as `unavailable`, which
+      // would silently skip the admission-gate confidence check.
+      if (isAbortError(err)) {
+        throw err;
+      }
       log.warn({ err }, 'failed to load refusal_thresholds — degrading to unavailable');
       return {
         status: 'unavailable',

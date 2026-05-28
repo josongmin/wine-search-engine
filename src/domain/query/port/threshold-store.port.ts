@@ -10,19 +10,25 @@ export interface ThresholdStore {
   /**
    * Retrieves a threshold profile by its unique ID.
    * @param id - The profile identifier.
+   * @param signal - Optional {@link AbortSignal}; when it aborts, the underlying
+   *   PostgreSQL query is cancelled (WSE-01).
    * @returns The profile, or `null` if not found.
    */
-  getProfile(id: string): Promise<ThresholdProfileV1 | null>;
+  getProfile(id: string, signal?: AbortSignal): Promise<ThresholdProfileV1 | null>;
 
   /**
    * Retrieves the default threshold profile.
    * Implementations must guarantee this never returns null.
+   * @param signal - Optional {@link AbortSignal}; when it aborts, the underlying
+   *   PostgreSQL query is cancelled (WSE-01).
    */
-  getDefault(): Promise<ThresholdProfileV1>;
+  getDefault(signal?: AbortSignal): Promise<ThresholdProfileV1>;
 
   /**
    * Persists a threshold profile, overwriting any existing profile with the same ID.
    * @param profile - The profile to save.
+   * @param signal - Optional {@link AbortSignal}; when it aborts, the underlying
+   *   PostgreSQL query is cancelled (WSE-01).
    */
-  save(profile: ThresholdProfileV1): Promise<void>;
+  save(profile: ThresholdProfileV1, signal?: AbortSignal): Promise<void>;
 }

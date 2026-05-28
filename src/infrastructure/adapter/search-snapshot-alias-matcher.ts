@@ -383,7 +383,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     return this.surfaceForms;
   }
 
-  async findMatchesBatch(
+  findMatchesBatch(
     normalizedQueries: readonly string[],
     options?: AliasLookupOptions,
   ): Promise<ReadonlyMap<string, readonly AliasMatchResult[]>> {
@@ -395,7 +395,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     return Promise.resolve(matches);
   }
 
-  async findMatches(
+  findMatches(
     normalizedQuery: string,
     options?: AliasLookupOptions,
   ): Promise<readonly AliasMatchResult[]> {
@@ -432,6 +432,8 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
     let prefixTokens: readonly string[] = [];
     let transliteratedPrefixTokens: readonly string[] = [];
     const lookupScope = options?.scope ?? 'span';
+    const recallMode = options?.recallMode;
+    const allowBroadRecall = lookupScope === 'span' && recallMode !== 'surface_only';
     const candidateAliases = new Map<string, IndexedAliasRecord>();
     const grouped = new Map<string, GroupedAliasMatch>();
 
@@ -449,7 +451,7 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
           candidateAliases.set(alias.aliasId, alias);
         }
       }
-      if (lookupScope === 'span') {
+      if (allowBroadRecall) {
         if (isAtomicAliasQuery) {
           this.ensureBroadRecallIndexes();
         }

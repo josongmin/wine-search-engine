@@ -5,6 +5,7 @@ import type {
 } from '../../domain/query/port/ambiguity-dictionary.port.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 import {
   ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,
   isActiveSnapshotSubstrateBootstrapAllowed,
@@ -43,7 +44,7 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
     private readonly snapshotIdOverride?: string,
   ) {}
 
-  async isKnownAmbiguous(surfaceForm: string): Promise<boolean> {
+  async isKnownAmbiguous(surfaceForm: string, signal?: AbortSignal): Promise<boolean> {
     const snap = await this.resolveActiveSnapshotOrNull();
     if (snap === null) return false;
     const result = await this.queryAmbiguity(
@@ -51,18 +52,20 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
         SELECT 1 FROM ambiguity_registry WHERE normalized_form = $1 AND search_snapshot_id = $2
       ) AS exists`,
       [surfaceForm, snap.activeSnapshotId],
+      signal,
     );
     const row0 = result.rows[0];
     const existsRaw: unknown = row0 != null ? Reflect.get(row0, 'exists') : undefined;
     return existsRaw === true;
   }
 
-  async getAmbiguityInfo(surfaceForm: string): Promise<AmbiguityInfo | null> {
+  async getAmbiguityInfo(surfaceForm: string, signal?: AbortSignal): Promise<AmbiguityInfo | null> {
     const snap = await this.resolveActiveSnapshotOrNull();
     if (snap === null) return null;
     const result = await this.queryAmbiguity(
       `SELECT * FROM ambiguity_registry WHERE normalized_form = $1 AND search_snapshot_id = $2`,
       [surfaceForm, snap.activeSnapshotId],
+      signal,
     );
     const row = result.rows[0];
     if (row == null) return null;
@@ -75,6 +78,7 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
    */
   async getAmbiguityInfoBatch(
     surfaceForms: readonly string[],
+    signal?: AbortSignal,
   ): Promise<ReadonlyMap<string, AmbiguityInfo>> {
     if (surfaceForms.length === 0) {
       return new Map();
@@ -93,6 +97,7 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
        FROM ambiguity_registry
        WHERE normalized_form = ANY($1::text[]) AND search_snapshot_id = $2`,
       [distinctForms, snap.activeSnapshotId],
+      signal,
     );
 
     const out = new Map<string, AmbiguityInfo>();
@@ -147,9 +152,10 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
   private async queryAmbiguity(
     sql: string,
     params: readonly unknown[],
+    signal?: AbortSignal,
   ): Promise<{ rows: QueryResultRow[] }> {
     try {
-      return await this.pool.query(sql, [...params]);
+      return await runAbortablePgQuery(this.pool, signal, sql, params);
     } catch (err: unknown) {
       const code = readPgSqlState(err);
       if (code !== '42P01') {

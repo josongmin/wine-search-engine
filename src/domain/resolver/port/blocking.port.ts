@@ -17,7 +17,14 @@ export interface BlockingPort {
    * @param query - The original user query string.
    * @param normalizedQuery - Lowercased, accent-stripped, whitespace-collapsed form.
    * @param limit - Maximum number of candidates to return (default: implementation-defined).
+   * @param signal - Optional {@link AbortSignal}; when it aborts, the underlying
+   *   PostgreSQL blocking query is cancelled (WSE-01).
    * @returns Entity IDs that are plausible matches, ordered by blocking score descending.
    */
-  block(query: string, normalizedQuery: string, limit?: number): Promise<readonly CanonicalEntityId[]>;
+  block(
+    query: string,
+    normalizedQuery: string,
+    limit?: number,
+    signal?: AbortSignal,
+  ): Promise<readonly CanonicalEntityId[]>;
 }

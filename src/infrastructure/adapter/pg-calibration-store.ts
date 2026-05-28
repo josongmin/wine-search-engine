@@ -8,6 +8,7 @@ import type { QueryClass } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
 import { MS_PER_DAY } from '../../domain/shared/utils/time-units.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 
 const log = bootstrapLogger.child({ component: 'PgCalibrationStore' });
 
@@ -79,8 +80,13 @@ function rowToCalibrationParams(row: CalibrationRow): CalibrationParams | null {
 export class PgCalibrationStore implements CalibrationStore {
   constructor(private readonly pool: Pool) {}
 
-  async getCalibrationParams(queryClass: QueryClass): Promise<CalibrationParams | null> {
-    const result = await this.pool.query<CalibrationRow>(
+  async getCalibrationParams(
+    queryClass: QueryClass,
+    signal?: AbortSignal,
+  ): Promise<CalibrationParams | null> {
+    const result = await runAbortablePgQuery<CalibrationRow>(
+      this.pool,
+      signal,
       `SELECT query_class, method, params, ece, trained_at,
               fitted_at, dataset_hash, sample_size
          FROM calibration_params
@@ -91,8 +97,10 @@ export class PgCalibrationStore implements CalibrationStore {
     return row != null ? rowToCalibrationParams(row) : null;
   }
 
-  async save(queryClass: QueryClass, params: CalibrationParams): Promise<void> {
-    await this.pool.query(
+  async save(queryClass: QueryClass, params: CalibrationParams, signal?: AbortSignal): Promise<void> {
+    await runAbortablePgQuery(
+      this.pool,
+      signal,
       `INSERT INTO calibration_params (
          query_class, method, params, ece, trained_at,
          fitted_at, dataset_hash, sample_size
@@ -133,6 +141,7 @@ export class PgCalibrationStore implements CalibrationStore {
     queryClass: QueryClass,
     ttlDays: number,
     now: Date = new Date(),
+    signal?: AbortSignal,
   ): Promise<FreshCalibrationLoadResult> {
     if (!Number.isFinite(ttlDays) || ttlDays <= 0) {
       throw new Error(
@@ -140,7 +149,7 @@ export class PgCalibrationStore implements CalibrationStore {
       );
     }
 
-    const params = await this.getCalibrationParams(queryClass);
+    const params = await this.getCalibrationParams(queryClass, signal);
     if (params === null) {
       return { trusted: false, reason: 'missing', params: null };
     }
