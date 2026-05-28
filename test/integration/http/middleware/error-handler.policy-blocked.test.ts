@@ -34,6 +34,20 @@ describe('errorHandler policy-blocked contract', () => {
       z.object({ query: z.string().min(1) }).parse({});
     });
 
+    app.get('/validation-error-many', async () => {
+      // 8 required fields, all missing → 8 issues (exceeds the message cap of 5).
+      z.object({
+        a: z.string(),
+        b: z.string(),
+        c: z.string(),
+        d: z.string(),
+        e: z.string(),
+        f: z.string(),
+        g: z.string(),
+        h: z.string(),
+      }).parse({});
+    });
+
     app.get('/snapshot-mismatch', async () => {
       throw new SnapshotMismatchError(
         {
@@ -124,6 +138,23 @@ describe('errorHandler policy-blocked contract', () => {
         retryable: false,
       },
     });
+  });
+
+  it('truncates the VALIDATION_ERROR message to the first N issues with an overflow suffix (R6 H6)', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/validation-error-many',
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json();
+    expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    // 8 issues, cap 5 → 3 truncated, surfaced as a count not the raw issues.
+    expect(body.error.message).toContain('... (3 more)');
+    // The 6th+ issue paths (f/g/h) must NOT be echoed into the client message.
+    expect(body.error.message).not.toContain('h:');
+    expect(body.error.message).not.toContain('g:');
   });
 
   it('maps SnapshotMismatchError to a validated 409 error contract', async () => {

@@ -55,12 +55,10 @@ tests:
     - test/e2e/wine-search-api.test.ts
     - test/e2e/wine-search-api-hell-http.test.ts
     - test/e2e/wine-search-api-hell-adversarial.test.ts
-    - test/e2e/wine-search-api-hell-pipeline.test.ts
   integration:
     - test/integration/http/routes/wine-search.route.test.ts
   unit:
     - src/config/__tests__/wine-search-tool-bundle-wiring.test.ts
-    - src/config/__tests__/wine-search-feature-flag.test.ts
   regression:
     - test/regression/synthesizer-grounding-truncation.regression.test.ts
     - test/regression/synthesis-runner-unexpected-error-class.regression.test.ts

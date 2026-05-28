@@ -26,10 +26,6 @@ surfaces:
   - "Internal learning loop"
 
 key_files:
-  - src/domain/feedback/service/online-quality-monitor.ts
-  - src/domain/feedback/service/position-debias.ts
-  - src/domain/feedback/service/training-data-extractor.ts
-  - src/domain/feedback/service/auto-rollback-decision.ts
   - src/domain/learning/service/feedback-processor.ts
   - src/domain/learning/service/alias-proposer.ts
   - src/domain/learning/service/promotion-gate.ts

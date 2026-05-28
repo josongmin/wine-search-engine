@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
-import { resolveMaxThreads, vitestMemorySchedulerOptions } from './parallelism.js';
+import { IO_BOUND_THREAD_CAP, resolveMaxThreads, vitestMemorySchedulerOptions } from './parallelism.js';
 
-const maxIntegrationThreads = resolveMaxThreads(1);
+const maxIntegrationThreads = resolveMaxThreads(IO_BOUND_THREAD_CAP);
 
 export default defineConfig({
   test: {
-    ...vitestMemorySchedulerOptions(),
+    ...vitestMemorySchedulerOptions('io'),
     globals: true,
     include: [
       'test/integration/**/*.test.ts',

@@ -23,6 +23,7 @@ import {
   HTTP_STATUS_SERVICE_UNAVAILABLE,
   HTTP_STATUS_TOO_MANY_REQUESTS,
   HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE,
+  MAX_VALIDATION_ISSUES_IN_MESSAGE,
   RETRY_AFTER_SECONDS_BLOCKING_MISS,
 } from '../constants.js';
 
@@ -309,16 +310,20 @@ export function errorHandler(
 
   // ZodError — request validation failure
   if (error instanceof ZodError) {
-    const issues = error.issues
-      .map((i) => `${i.path.join('.')}: ${i.message}`)
-      .join('; ');
+    const formatted = error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+    // Full list to the structured log; truncate the client-facing message so a
+    // many-issue batch request cannot bloat the envelope (R6 H6).
+    const fullIssues = formatted.join('; ');
+    const shown = formatted.slice(0, MAX_VALIDATION_ISSUES_IN_MESSAGE).join('; ');
+    const overflow = formatted.length - MAX_VALIDATION_ISSUES_IN_MESSAGE;
+    const messageIssues = overflow > 0 ? `${shown}; ... (${String(overflow)} more)` : shown;
 
-    request.log.warn({ requestId, issues }, 'validation_error');
+    request.log.warn({ requestId, issues: fullIssues }, 'validation_error');
 
     const body = buildSearchErrorResponse(
       requestId,
       'VALIDATION_ERROR',
-      `Request validation failed: ${issues}`,
+      `Request validation failed: ${messageIssues}`,
       null,
       false,
     );

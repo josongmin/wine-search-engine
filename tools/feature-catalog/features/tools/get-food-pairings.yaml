@@ -30,7 +30,6 @@ surfaces:
   - "Agent tool: get_food_pairings"
 
 key_files:
-  - src/application/search/food-pairing-tool-policy.ts
   - src/application/search/search-tool-query-policy.ts
 
 tests:

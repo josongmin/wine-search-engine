@@ -30,7 +30,6 @@ key_files:
 tests:
   unit:
   regression:
-    - test/regression/agent-result-evidence-frames-contract.regression.test.ts
 
 depends_on:
   - infra.chat-llm-port

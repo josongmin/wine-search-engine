@@ -11,6 +11,15 @@ import { MAX_QUERY_LENGTH } from '../../domain/shared/constants.js';
 /** Subject string from X-Authenticated-Subject; matches header/log safety. */
 export const MAX_AUTHENTICATED_SUBJECT_CHARS = 128;
 
+/**
+ * Max Zod issues echoed into a VALIDATION_ERROR envelope `message`. A batch
+ * request can produce dozens of issues; joining them all pushes the message
+ * toward MAX_ERROR_ENVELOPE_MESSAGE_CHARS and inflates response/log size (R6 H6).
+ * The full issue list still goes to the structured log; clients get the first
+ * few plus a "(N more)" suffix.
+ */
+export const MAX_VALIDATION_ISSUES_IN_MESSAGE = 5;
+
 /** RFC-014 error envelope: request_id max length in JSON body. */
 export const MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS = 256;
 

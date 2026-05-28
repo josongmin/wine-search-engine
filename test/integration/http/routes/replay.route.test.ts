@@ -94,6 +94,41 @@ describe('POST /v1/search/replay', () => {
     await app.close();
   });
 
+  it('fails closed (403) in production when HTTP_DEBUG_SECRET is unset (R6 M9)', async () => {
+    const savedNodeEnv = process.env['NODE_ENV'];
+    const savedSecret = process.env['HTTP_DEBUG_SECRET'];
+    process.env['NODE_ENV'] = 'production';
+    delete process.env['HTTP_DEBUG_SECRET'];
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/search/replay',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          query: 'Opus One 2018',
+          decision_snapshot: buildReplaySnapshot(),
+          expected_response_hash: 'expected-hash',
+        },
+      });
+
+      expect(response.statusCode).toBe(403);
+      const body = response.json();
+      expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+      expect(body.error.code).toBe('REPLAY_FORBIDDEN');
+    } finally {
+      if (savedNodeEnv === undefined) {
+        delete process.env['NODE_ENV'];
+      } else {
+        process.env['NODE_ENV'] = savedNodeEnv;
+      }
+      if (savedSecret === undefined) {
+        delete process.env['HTTP_DEBUG_SECRET'];
+      } else {
+        process.env['HTTP_DEBUG_SECRET'] = savedSecret;
+      }
+    }
+  });
+
   it('maps DeterminismViolationError to 409 with the RFC-014 error contract', async () => {
     mockDeps.replayUseCase.execute = vi.fn().mockRejectedValue(
       new DeterminismViolationError('expected-hash', 'actual-hash'),

@@ -32,7 +32,6 @@ key_files:
 
 tests:
   regression:
-    - test/regression/agent-result-evidence-frames-contract.regression.test.ts
     - test/regression/build-tool-call-evidence-frame.regression.test.ts
     - test/regression/tool-call-evidence-frame-schema.regression.test.ts
     - test/regression/tool-call-evidence-frame-v1-to-v1-1-migration.regression.test.ts

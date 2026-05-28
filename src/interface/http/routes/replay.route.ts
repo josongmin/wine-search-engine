@@ -27,7 +27,11 @@ import { HTTP_STATUS_FORBIDDEN, HTTP_STATUS_OK } from '../constants.js';
 function hasReplayAuthorization(request: FastifyRequest): boolean {
   const secret = process.env['HTTP_DEBUG_SECRET']?.trim();
   if (secret === undefined || secret.length === 0) {
-    return true;
+    // No secret configured: allow in dev/test for local convenience, but FAIL
+    // CLOSED in production — an unconfigured secret must never silently expose
+    // this diagnostic endpoint (snapshot enumeration / arbitrary replay) to
+    // anonymous callers (R6 M9).
+    return process.env['NODE_ENV'] !== 'production';
   }
   return request.debugRequest;
 }
