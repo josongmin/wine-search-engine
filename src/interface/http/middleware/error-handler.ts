@@ -17,6 +17,7 @@ import {
   HTTP_STATUS_CONFLICT,
   HTTP_STATUS_FORBIDDEN,
   HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_NOT_FOUND,
   HTTP_STATUS_PAYLOAD_TOO_LARGE,
   HTTP_STATUS_REQUEST_TIMEOUT,
   HTTP_STATUS_SERVICE_UNAVAILABLE,
@@ -120,6 +121,26 @@ function isDomainErrorRetryable(code: string): boolean {
  *
  * Always includes request_id in the response.
  */
+/**
+ * Not-found handler for the Fastify server.
+ *
+ * Fastify's built-in 404 response (`{statusCode,error,message}`) does NOT
+ * conform to the RFC-014 envelope and omits `request_id`, so every client SDK
+ * that parses the envelope breaks on an unknown path. This handler returns the
+ * canonical `{error:{request_id,code,message,failure_reason,retryable}}` shape.
+ */
+export function notFoundHandler(request: FastifyRequest, reply: FastifyReply): void {
+  const requestId = getRequestId(request);
+  const body = buildSearchErrorResponse(
+    requestId,
+    'NOT_FOUND',
+    'The requested resource was not found.',
+    null,
+    false,
+  );
+  sendSearchErrorResponse(request, reply, HTTP_STATUS_NOT_FOUND, body);
+}
+
 export function errorHandler(
   error: FastifyError | Error,
   request: FastifyRequest,

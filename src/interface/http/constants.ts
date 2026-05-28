@@ -6,6 +6,7 @@
 
 // Rule 30: time-unit constants must come from the SSoT module, not be recomputed.
 import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../domain/shared/utils/time-units.js';
+import { MAX_QUERY_LENGTH } from '../../domain/shared/constants.js';
 
 /** Subject string from X-Authenticated-Subject; matches header/log safety. */
 export const MAX_AUTHENTICATED_SUBJECT_CHARS = 128;
@@ -238,8 +239,13 @@ export const MAX_CURRENCY_CODE_CHARS = 3;
 /** Feedback POST: entity reference string (may include namespaced ids). */
 export const MAX_FEEDBACK_ENTITY_REF_CHARS = 512;
 
-/** Agent endpoint: natural-language query bound (LLM context / abuse guard). */
-export const MAX_AGENT_HTTP_QUERY_CHARS = 2000;
+/**
+ * Agent endpoint: natural-language query bound (LLM context / abuse guard).
+ * Aliases the domain SSoT `MAX_QUERY_LENGTH` — the agent query is screened by
+ * the same ReDoS-guarded sanitizer, so it MUST share that ceiling rather than
+ * duplicate the literal (the two silently drifted before; SSoT rule 30).
+ */
+export const MAX_AGENT_HTTP_QUERY_CHARS = MAX_QUERY_LENGTH;
 
 /** Agent route: hard cap on ReAct steps (matches Zod schema max). */
 export const MAX_AGENT_STEPS_CAP = 10;

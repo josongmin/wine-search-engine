@@ -73,6 +73,7 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'http.reranker.parse_error',
   'http.reranker.timeout',
   'hybrid.execute.ranked',
+  'hybrid.execute.stage_timings',
   'hybrid.execute.start',
   'interpret.planner.done',
   'post_route.enter',
@@ -96,13 +97,21 @@ const EXPECTED_SORTED_STEP_VALUES: readonly string[] = [
   'retrieval.candidate_pool.assembled',
   'retrieval.candidate_pool.fallback',
   'retrieval.compare_candidates',
+  'retrieval.compare_candidates.error',
+  'retrieval.constraint_relaxation.aborted',
+  'retrieval.constraint_relaxation.attempt',
+  'retrieval.constraint_relaxation.skipped_due_to_budget',
+  'retrieval.constraint_relaxation.success',
   'retrieval.critic.budget_exhausted',
   'retrieval.critic.decision',
   'retrieval.critic.retries_exhausted',
   'retrieval.critic.rewriter_declined',
+  'retrieval.hybrid_candidates.per_channel',
   'retrieval.hybrid_candidates.start',
   'retrieval.producer_browse',
+  'retrieval.producer_browse.error',
   'retrieval.region_browse',
+  'retrieval.region_browse.error',
   'route.entity.corrective_retry.candidates',
   'route.entity.corrective_retry.start',
   'route.entity.only.done',
@@ -150,9 +159,17 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.DISPATCH_HYBRID_COMPLETE:
     case PipelineDebugStep.DISPATCH_MIXED_COMPLETE:
     case PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_START:
+    case PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_PER_CHANNEL:
     case PipelineDebugStep.RETRIEVAL_PRODUCER_BROWSE:
+    case PipelineDebugStep.RETRIEVAL_PRODUCER_BROWSE_ERROR:
     case PipelineDebugStep.RETRIEVAL_REGION_BROWSE:
+    case PipelineDebugStep.RETRIEVAL_REGION_BROWSE_ERROR:
     case PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES:
+    case PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES_ERROR:
+    case PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_SKIPPED_BUDGET:
+    case PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_ABORTED:
+    case PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_ATTEMPT:
+    case PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_SUCCESS:
     case PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_FALLBACK:
     case PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_ASSEMBLED:
     case PipelineDebugStep.RETRIEVAL_CRITIC_BUDGET_EXHAUSTED:
@@ -173,6 +190,7 @@ function exhaustiveLabel(step: PipelineDebugStepId): string {
     case PipelineDebugStep.CACHE_SET_SKIPPED:
     case PipelineDebugStep.HYBRID_EXECUTE_START:
     case PipelineDebugStep.HYBRID_EXECUTE_RANKED:
+    case PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS:
     case PipelineDebugStep.BATCH_SEARCH_START:
     case PipelineDebugStep.RESOLVE_USE_CASE_START:
     case PipelineDebugStep.RESOLVE_CONSTRAINT_SAT_CONTRADICTED:

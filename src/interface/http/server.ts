@@ -12,7 +12,7 @@ import {
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerHttpDebugMode } from './middleware/http-debug-mode.js';
 import { registerRequestContext } from './middleware/request-context.js';
-import { errorHandler } from './middleware/error-handler.js';
+import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import { registerSearchRoute } from './routes/search.route.js';
 import { registerInternalBenchmarkRoute } from './routes/internal-benchmark.route.js';
@@ -356,6 +356,8 @@ export async function createServer(
 
   // Register global error handler
   app.setErrorHandler(errorHandler);
+  // Register RFC-014 envelope 404 handler (Fastify's default 404 is not envelope-shaped).
+  app.setNotFoundHandler(notFoundHandler);
 
   // Start event-loop heartbeat for /health liveness check.
   // The interval is cleared when the server closes so the process can exit cleanly.

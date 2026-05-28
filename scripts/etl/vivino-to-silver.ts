@@ -20,6 +20,11 @@ import type { PoolConfig } from 'pg';
 import { fileURLToPath } from 'node:url';
 import { resolveDataPath } from '../../src/domain/shared/utils/data-paths.js';
 import { createSourceRecordId } from '../../src/domain/shared/types/entity-id.js';
+import {
+  KRW_PER_USD_APPROXIMATE,
+  USD_PER_EUR_APPROXIMATE,
+  USD_PER_GBP_APPROXIMATE,
+} from '../../src/domain/shared/constants.js';
 import { atomicWriteFile } from './etl-utils.js';
 import type {
   BronzeRow,
@@ -81,6 +86,15 @@ function loadFxRatesCatalog(): FxRatesCatalog {
     }
     normalizedRates[currency.toUpperCase()] = value;
   }
+  // FX SSoT override: USD/EUR/GBP/KRW are owned by domain/shared/constants.ts.
+  // The json only supplies "exotic" currencies (JPY, AUD, …). Injecting the
+  // domain-derived rates here guarantees index-side conversion agrees with the
+  // query-side FxRatePort — without it the two drift (the 0.00075 vs 1/1350
+  // KRW bug). See test/regression/fx-rate-ssot-parity.regression.test.ts.
+  normalizedRates['USD'] = 1;
+  normalizedRates['EUR'] = USD_PER_EUR_APPROXIMATE;
+  normalizedRates['GBP'] = USD_PER_GBP_APPROXIMATE;
+  normalizedRates['KRW'] = 1 / KRW_PER_USD_APPROXIMATE;
   cachedFxCatalog = {
     version: record['version'],
     baseCurrency: 'USD',

@@ -20,6 +20,7 @@ import type {
   SubqueryNode,
 } from '../../domain/query/model/constraint-graph.js';
 import { pipelineDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import type {
   BrowseRetrieverPort,
   CandidatePoolPort,
@@ -1052,7 +1053,7 @@ export async function retrieveHybridCandidatesForPlan(
             : 'producer_browse_fallback';
           degradationReasons.add(reason);
           pipelineDebug(
-            { step: 'retrieval.producer_browse.error', reason, err_name: err instanceof Error ? err.name : 'unknown' },
+            { step: PipelineDebugStep.RETRIEVAL_PRODUCER_BROWSE_ERROR, reason, err_name: err instanceof Error ? err.name : 'unknown' },
             'pipeline producer_browse degraded',
           );
         }
@@ -1114,7 +1115,7 @@ export async function retrieveHybridCandidatesForPlan(
             : 'region_browse_fallback';
           degradationReasons.add(reason);
           pipelineDebug(
-            { step: 'retrieval.region_browse.error', reason, err_name: err instanceof Error ? err.name : 'unknown' },
+            { step: PipelineDebugStep.RETRIEVAL_REGION_BROWSE_ERROR, reason, err_name: err instanceof Error ? err.name : 'unknown' },
             'pipeline region_browse degraded',
           );
         }
@@ -1179,7 +1180,7 @@ export async function retrieveHybridCandidatesForPlan(
               : 'compare_candidates_fallback';
             degradationReasons.add(reason);
             pipelineDebug(
-              { step: 'retrieval.compare_candidates.error', reason, err_name: err instanceof Error ? err.name : 'unknown' },
+              { step: PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES_ERROR, reason, err_name: err instanceof Error ? err.name : 'unknown' },
               'pipeline compare_candidates degraded',
             );
           }
@@ -1381,7 +1382,7 @@ export async function retrieveHybridCandidatesForPlan(
   if (retrievalFusionTrace !== undefined) {
     pipelineDebug(
       {
-        step: 'retrieval.hybrid_candidates.per_channel',
+        step: PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_PER_CHANNEL,
         per_channel: retrievalFusionTrace.perChannel,
         query_class: retrievalFusionTrace.queryClass,
         fusion_class: retrievalFusionTrace.fusionClass,

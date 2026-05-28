@@ -470,9 +470,6 @@ schema wine_entity {
     summary critic_proxy_score {}
     summary critic_proxy_tier {}
     summary critic_proxy_confidence {}
-    summary organic {}
-    summary biodynamic {}
-    summary certification_source {}
     summary pairing_tags {}
     summary flavor_profiles {}
     summary classification {}
@@ -485,11 +482,8 @@ schema wine_entity {
     summary soil_type {}
     summary producer_type {}
     summary grape_family {}
-    summary grape_hierarchy {}
     summary region_hierarchy {}
-    summary producer_aliases {}
     summary price_band_numeric {}
-    summary flavor_profile_structured {}
     summary gift_suitability_score {}
     summary beginner_suitability_score {}
     summary source_record_refs_json {}

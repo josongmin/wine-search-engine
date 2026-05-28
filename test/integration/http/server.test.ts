@@ -72,6 +72,37 @@ describe('HTTP server route registration', () => {
     }
   });
 
+  it('returns an RFC-014 envelope for unknown routes (not Fastify default 404)', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+    });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/v1/this-route-does-not-exist' });
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.body) as {
+        error?: {
+          request_id?: unknown;
+          code?: unknown;
+          message?: unknown;
+          failure_reason?: unknown;
+          retryable?: unknown;
+        };
+        statusCode?: unknown;
+      };
+      // RFC-014 envelope shape — NOT Fastify's default {statusCode,error,message}.
+      expect(body.statusCode).toBeUndefined();
+      expect(body.error?.code).toBe('NOT_FOUND');
+      expect(typeof body.error?.request_id).toBe('string');
+      expect(body.error?.request_id).not.toBe('');
+      expect(typeof body.error?.message).toBe('string');
+      expect(body.error?.failure_reason).toBeNull();
+      expect(body.error?.retryable).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('exposes the Claude tools endpoint through the server', async () => {
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',

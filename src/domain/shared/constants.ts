@@ -52,10 +52,31 @@ export const MAX_PRODUCED_VINTAGE_YEAR = 2200;
 export const DETERMINISTIC_DRINKING_WINDOW_MIN_VINTAGE_YEAR = 1800;
 
 /**
- * Approximate KRW per USD for NL price extraction (soft filters only; no FX API).
- * Mid-2025 reference rate; aligns rule-based and search-constraint extractors.
+ * FX single source of truth.
+ *
+ * This module is the ONE place FX rates are defined. Both the query side
+ * (`FxRatePort` → NL price extraction) and the index side (ETL
+ * `vivino-to-silver` FX catalog) MUST derive from these anchors so that a
+ * "€50 이하" query and a €50-priced wine resolve to the SAME USD value.
+ *
+ * Anchors (mid-2025 reference rates; soft filters only, no live FX API):
+ *   - KRW per USD = 1350
+ *   - USD per EUR = 1.08
+ *   - USD per GBP = 1.27
+ *
+ * The cross rates (KRW per EUR/GBP) are DERIVED, never hand-written, because
+ * `KRW_PER_EUR = KRW_PER_USD × USD_PER_EUR` is exactly the identity that makes
+ * query-side and index-side conversions agree. Hand-writing them (the historic
+ * 1470/1720) silently broke boundary-price matching. See
+ * `test/regression/fx-rate-ssot-parity.regression.test.ts`.
  */
 export const KRW_PER_USD_APPROXIMATE = 1350;
+
+/** USD per 1 EUR. Anchor — `vivino-to-silver` indexes EUR prices with this. */
+export const USD_PER_EUR_APPROXIMATE = 1.08;
+
+/** USD per 1 GBP. Anchor — `vivino-to-silver` indexes GBP prices with this. */
+export const USD_PER_GBP_APPROXIMATE = 1.27;
 
 /**
  * KRW in one Korean "만원" (10,000 won) unit — used in 만원/천원 parsers.
@@ -74,15 +95,14 @@ export const KRW_PER_CHEON_WON = 1_000;
 export const KRW_PER_EOK_WON = 100_000_000;
 
 /**
- * Approximate KRW per EUR for NL price extraction (soft filters only; no FX API).
- * Mid-2025 reference rate (EUR/KRW ≈ 1:1470). Used for mixed-currency queries
- * like "€50 이하 와인". Source: ECB/KRX mid-market rate 2025-Q1 average.
+ * KRW per EUR — DERIVED from the anchors (KRW_PER_USD × USD_PER_EUR ≈ 1458).
+ * Do not hand-write: the derivation is what guarantees that "€50 이하" (query
+ * side) and a €50-priced wine (index side) collapse to the same USD value.
  */
-export const KRW_PER_EUR_APPROXIMATE = 1_470;
+export const KRW_PER_EUR_APPROXIMATE = KRW_PER_USD_APPROXIMATE * USD_PER_EUR_APPROXIMATE;
 
 /**
- * Approximate KRW per GBP for NL price extraction (soft filters only; no FX API).
- * Mid-2025 reference rate (GBP/KRW ≈ 1:1720). Used for "£30 이하" price queries.
- * Source: BOE/KRX mid-market rate 2025-Q1 average.
+ * KRW per GBP — DERIVED from the anchors (KRW_PER_USD × USD_PER_GBP ≈ 1714.5).
+ * See {@link KRW_PER_EUR_APPROXIMATE} for why this must stay derived.
  */
-export const KRW_PER_GBP_APPROXIMATE = 1_720;
+export const KRW_PER_GBP_APPROXIMATE = KRW_PER_USD_APPROXIMATE * USD_PER_GBP_APPROXIMATE;

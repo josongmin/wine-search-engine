@@ -34,6 +34,7 @@ import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../domain/observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { createStageTimer } from '../../domain/shared/stage-timer.js';
@@ -233,7 +234,7 @@ export class HybridUseCase {
     stageTimer.end('hybrid.total');
     pipelineDebug(
       {
-        step: 'hybrid.execute.stage_timings',
+        step: PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS,
         stages: stageTimer.snapshot(),
       },
       'pipeline hybrid stage timings',

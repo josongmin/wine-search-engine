@@ -552,3 +552,59 @@ describe('source_record_refs_json (entity lineage)', () => {
     expect(proj.sourceRecordRefs).toEqual([...lineage]);
   });
 });
+
+describe('learned_sparse_weights write cap (read/write parity)', () => {
+  // The read side (parseSparseWeightsTensor) drops the WHOLE tensor when cell
+  // count exceeds MAX_SPARSE_TENSOR_CELLS (10_000). Without a matching write
+  // cap, an oversized doc was indexed but read back as nothing — silent loss.
+  const CAP = 10_000;
+
+  function makeSparseDoc(entryCount: number): RetrievalDocument {
+    const entries = Array.from({ length: entryCount }, (_, i) => ({
+      token: `t${String(i).padStart(6, '0')}`,
+      // Strictly increasing weight so "kept = highest-weight" is checkable.
+      weight: i + 1,
+    }));
+    return makeDocument({
+      learnedSparseWeights: {
+        entries,
+        weightSum: entries.reduce((s, e) => s + e.weight, 0),
+        modelId: 'splade-test',
+        schemaVersion: 1,
+      },
+    });
+  }
+
+  it('caps an oversized tensor on write to MAX_SPARSE_TENSOR_CELLS cells', () => {
+    const fields = toVespaFields(makeSparseDoc(CAP + 1));
+    const tensor = fields['learned_sparse_weights'] as { cells: unknown[] };
+    expect(tensor.cells).toHaveLength(CAP);
+  });
+
+  it('keeps the highest-weight cells when truncating', () => {
+    const fields = toVespaFields(makeSparseDoc(CAP + 5));
+    const tensor = fields['learned_sparse_weights'] as {
+      cells: { address: { token: string }; value: number }[];
+    };
+    let minKept = Number.POSITIVE_INFINITY;
+    for (const c of tensor.cells) {
+      if (c.value < minKept) minKept = c.value;
+    }
+    // The 5 lowest weights (1..5) must have been dropped, so the smallest
+    // surviving weight is strictly greater than 5.
+    expect(minKept).toBeGreaterThan(5);
+  });
+
+  it('a capped tensor round-trips (read side no longer drops it)', () => {
+    const fields = toVespaFields(makeSparseDoc(CAP + 1));
+    const roundTripped = fromVespaFields(fields);
+    expect(roundTripped.learnedSparseWeights).toBeDefined();
+    expect(roundTripped.learnedSparseWeights!.entries).toHaveLength(CAP);
+  });
+
+  it('leaves an at-cap tensor untouched', () => {
+    const fields = toVespaFields(makeSparseDoc(CAP));
+    const tensor = fields['learned_sparse_weights'] as { cells: unknown[] };
+    expect(tensor.cells).toHaveLength(CAP);
+  });
+});

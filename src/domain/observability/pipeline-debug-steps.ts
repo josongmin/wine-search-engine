@@ -39,9 +39,17 @@ export const PipelineDebugStep = {
 
   // Retrieval / ranking
   RETRIEVAL_HYBRID_CANDIDATES_START: 'retrieval.hybrid_candidates.start',
+  RETRIEVAL_HYBRID_CANDIDATES_PER_CHANNEL: 'retrieval.hybrid_candidates.per_channel',
   RETRIEVAL_PRODUCER_BROWSE: 'retrieval.producer_browse',
+  RETRIEVAL_PRODUCER_BROWSE_ERROR: 'retrieval.producer_browse.error',
   RETRIEVAL_REGION_BROWSE: 'retrieval.region_browse',
+  RETRIEVAL_REGION_BROWSE_ERROR: 'retrieval.region_browse.error',
   RETRIEVAL_COMPARE_CANDIDATES: 'retrieval.compare_candidates',
+  RETRIEVAL_COMPARE_CANDIDATES_ERROR: 'retrieval.compare_candidates.error',
+  RETRIEVAL_CONSTRAINT_RELAXATION_SKIPPED_BUDGET: 'retrieval.constraint_relaxation.skipped_due_to_budget',
+  RETRIEVAL_CONSTRAINT_RELAXATION_ABORTED: 'retrieval.constraint_relaxation.aborted',
+  RETRIEVAL_CONSTRAINT_RELAXATION_ATTEMPT: 'retrieval.constraint_relaxation.attempt',
+  RETRIEVAL_CONSTRAINT_RELAXATION_SUCCESS: 'retrieval.constraint_relaxation.success',
   RETRIEVAL_CANDIDATE_POOL_FALLBACK: 'retrieval.candidate_pool.fallback',
   RETRIEVAL_CANDIDATE_POOL_ASSEMBLED: 'retrieval.candidate_pool.assembled',
   RETRIEVAL_CRITIC_BUDGET_EXHAUSTED: 'retrieval.critic.budget_exhausted',
@@ -66,6 +74,7 @@ export const PipelineDebugStep = {
   // Hybrid use case
   HYBRID_EXECUTE_START: 'hybrid.execute.start',
   HYBRID_EXECUTE_RANKED: 'hybrid.execute.ranked',
+  HYBRID_EXECUTE_STAGE_TIMINGS: 'hybrid.execute.stage_timings',
 
   // Batch
   BATCH_SEARCH_START: 'batch.search.start',
@@ -162,12 +171,21 @@ export const PIPELINE_STAGE_STEPS: Readonly<Record<PipelineStage, readonly Pipel
   hybrid_execution: [
     PipelineDebugStep.HYBRID_EXECUTE_START,
     PipelineDebugStep.HYBRID_EXECUTE_RANKED,
+    PipelineDebugStep.HYBRID_EXECUTE_STAGE_TIMINGS,
   ],
   retrieval: [
     PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_START,
+    PipelineDebugStep.RETRIEVAL_HYBRID_CANDIDATES_PER_CHANNEL,
     PipelineDebugStep.RETRIEVAL_PRODUCER_BROWSE,
+    PipelineDebugStep.RETRIEVAL_PRODUCER_BROWSE_ERROR,
     PipelineDebugStep.RETRIEVAL_REGION_BROWSE,
+    PipelineDebugStep.RETRIEVAL_REGION_BROWSE_ERROR,
     PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES,
+    PipelineDebugStep.RETRIEVAL_COMPARE_CANDIDATES_ERROR,
+    PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_SKIPPED_BUDGET,
+    PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_ABORTED,
+    PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_ATTEMPT,
+    PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_SUCCESS,
     PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_FALLBACK,
     PipelineDebugStep.RETRIEVAL_CANDIDATE_POOL_ASSEMBLED,
     PipelineDebugStep.RETRIEVAL_CRITIC_BUDGET_EXHAUSTED,

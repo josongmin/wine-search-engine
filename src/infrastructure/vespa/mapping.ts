@@ -465,8 +465,22 @@ export function toVespaFields(
   // Skip when entries is empty — an empty tensor cell array is a no-op in Vespa
   // and causes parseSparseWeightsTensor to return undefined on roundtrip anyway.
   if (doc.learnedSparseWeights !== undefined && doc.learnedSparseWeights.entries.length > 0) {
+    // Mirror the read-side MAX_SPARSE_TENSOR_CELLS guard: a tensor larger than
+    // the cap is dropped wholesale by parseSparseWeightsTensor on roundtrip, so
+    // writing one would silently index a vector that reads back as nothing.
+    // Keep the highest-weight cells (deterministic tie-break on token) so a
+    // legitimately oversized doc still carries its strongest signal.
+    const entries = doc.learnedSparseWeights.entries;
+    const capped =
+      entries.length > MAX_SPARSE_TENSOR_CELLS
+        ? [...entries]
+            .sort((a, b) =>
+              b.weight - a.weight || (a.token < b.token ? -1 : a.token > b.token ? 1 : 0),
+            )
+            .slice(0, MAX_SPARSE_TENSOR_CELLS)
+        : entries;
     fields['learned_sparse_weights'] = {
-      cells: doc.learnedSparseWeights.entries.map((e) => ({
+      cells: capped.map((e) => ({
         address: { token: e.token },
         value: e.weight,
       })),

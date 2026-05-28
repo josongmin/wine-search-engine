@@ -46,11 +46,19 @@ structured logs. The TS type definition is in `src/domain/observability/pipeline
 | Step | Fields | Source |
 |------|--------|--------|
 | `retrieval.hybrid_candidates.start` | `retrieval_mode`, `query_class` | `search-usecase-hybrid-candidates.ts` |
+| `retrieval.hybrid_candidates.per_channel` | _(per-channel candidate counts)_ | `search-usecase-hybrid-candidates.ts` |
 | `retrieval.producer_browse` | `candidate_count`, `retrieval_provenance_satisfied` (optional), `retrieval_provenance_missing` (optional) | `search-usecase-hybrid-candidates.ts` |
+| `retrieval.producer_browse.error` | `reason`, `err_name` | `search-usecase-hybrid-candidates.ts` |
 | `retrieval.region_browse` | `candidate_count`, `retrieval_provenance_satisfied` (optional), `retrieval_provenance_missing` (optional) | `search-usecase-hybrid-candidates.ts` |
+| `retrieval.region_browse.error` | `reason`, `err_name` | `search-usecase-hybrid-candidates.ts` |
 | `retrieval.compare_candidates` | `candidate_count`, `retrieval_provenance_satisfied` (optional), `retrieval_provenance_missing` (optional) | `search-usecase-hybrid-candidates.ts` |
+| `retrieval.compare_candidates.error` | `reason`, `err_name` | `search-usecase-hybrid-candidates.ts` |
 | `retrieval.candidate_pool.fallback` | _(none)_ | `search-usecase-hybrid-candidates.ts` |
 | `retrieval.candidate_pool.assembled` | _(varies by candidate pool implementation)_ | `candidate-pool.ts` |
+| `retrieval.constraint_relaxation.skipped_due_to_budget` | `relaxed_attributes` | `search-usecase-hybrid-ranking-pipeline.ts` |
+| `retrieval.constraint_relaxation.aborted` | `relaxed_attributes` | `search-usecase-hybrid-ranking-pipeline.ts` |
+| `retrieval.constraint_relaxation.attempt` | `relaxed_attributes`, `original_hard_count`, `new_hard_count` | `search-usecase-hybrid-ranking-pipeline.ts` |
+| `retrieval.constraint_relaxation.success` | `relaxed_attributes`, `result_count` | `search-usecase-hybrid-ranking-pipeline.ts` |
 
 ### Stage 5: Anchor resolution (hybrid path)
 
@@ -104,6 +112,7 @@ structured logs. The TS type definition is in `src/domain/observability/pipeline
 |------|--------|--------|
 | `hybrid.execute.start` | `query_class`, `retrieval_mode` | `hybrid.usecase.ts` |
 | `hybrid.execute.ranked` | `ranked_count`, `latency_ms` | `hybrid.usecase.ts` |
+| `hybrid.execute.stage_timings` | _(per-stage `latency_ms` map)_ | `hybrid.usecase.ts` |
 
 ### Batch
 

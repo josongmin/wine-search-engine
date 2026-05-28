@@ -1,0 +1,74 @@
+id: tools.product-cli
+name: Product CLI (wine command)
+category: tools
+summary: |
+  Universal `wine <group> <command>` operator CLI: a thin shell over
+  application/container ports. A shared kernel (registry, global args, command
+  context, exit-code contract) drives auth, typed product commands
+  (search/entity/wine-search), and a raw `api call` surface. Each command runs
+  against a `local` target (in-process createContainer ports) or `remote`
+  (HTTP routes) behind one facade contract, so the surface and `--json` output
+  are target-independent.
+
+maturity: 3
+maturity_rationale: |
+  Kernel + auth/profile plane + typed facades (local+remote) + raw api + bin
+  packaging are wired and covered by 24 unit files / 171 cases: a local↔remote
+  parity gate, a deterministic smoke proof rail, a renderer matrix, and
+  facade/command/arg-utils tests. typecheck/build/lint green. Held at 3 (not 4)
+  because the `local` target has only been proven with fake-port/fake-fetch
+  units — never executed against live PG/Redis/Vespa — and shell completion is
+  deferred.
+
+status: active
+since: 2026-05
+last_reviewed: 2026-05-29
+owner: core
+
+surfaces:
+  - "CLI: wine auth status|path|refresh|doctor|login|whoami"
+  - "CLI: wine search run|hybrid / wine entity resolve|autocomplete / wine wine-search run"
+  - "CLI: wine api call|openapi (--target local|remote, --output json|table|yaml|raw)"
+
+key_files:
+  - src/interface/cli/main.ts
+  - src/interface/cli/run-cli.ts
+  - src/interface/cli/command-registry.ts
+  - src/interface/cli/render/render-command-result.ts
+  - src/config/cli-container.ts
+  - src/application/cli/command/cli-command.ts
+  - src/infrastructure/cli/auth/codex-auth-facade.ts
+  - src/infrastructure/cli/local/local-search-facade.ts
+  - src/infrastructure/cli/remote/remote-http-client.ts
+
+tests:
+  unit:
+    - src/interface/cli/__tests__/run-cli.test.ts
+    - src/interface/cli/__tests__/cli-smoke-rail.test.ts
+    - src/interface/cli/render/__tests__/render-command-result.test.ts
+    - src/infrastructure/cli/__tests__/local-remote-parity.test.ts
+    - src/infrastructure/cli/auth/__tests__/codex-auth-facade.test.ts
+    - src/infrastructure/cli/remote/__tests__/remote-http-client.test.ts
+    - src/application/cli/command/__tests__/api-call-command.test.ts
+
+depends_on: []
+
+related_rfcs:
+  - docs/plans/may-28-cli/rfc.md
+  - docs/plans/may-28-cli/architecture-decision.md
+
+known_limitations:
+  - "`local` target (in-process container ports) is unit-tested with fakes but never run against live PG/Redis/Vespa — live local execution unverified."
+  - "`api call` is remote-only; on the local target it returns a usage error (exit 2). Local raw HTTP is intentionally unsupported."
+  - "Shell completion is not supported in v1 (explicit deferral, no parser swap)."
+  - "Local search/hybrid facade reuses deepKeysToSnake from the HTTP layer for wire parity — an intentional one-way infra->interface import edge."
+
+next_steps:
+  - "Run live `wine search run --target local` + `api call GET /health` against real infra; promote to maturity 4 once verified."
+  - "Evaluate shell-completion support as a follow-up ticket."
+
+tags:
+  - cli
+  - operator-tooling
+  - codex-auth
+  - local-remote

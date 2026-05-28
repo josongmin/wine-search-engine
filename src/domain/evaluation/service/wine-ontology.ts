@@ -7,7 +7,12 @@
  * Module-scope Maps per CLAUDE.md rule 16 (deterministic collections at module scope).
  */
 
-import { KRW_PER_USD_APPROXIMATE, KRW_PER_MAN_WON } from '../../shared/constants.js';
+import {
+  KRW_PER_USD_APPROXIMATE,
+  KRW_PER_MAN_WON,
+  USD_PER_EUR_APPROXIMATE,
+  USD_PER_GBP_APPROXIMATE,
+} from '../../shared/constants.js';
 
 /** Fold a string for accent-insensitive lookup: NFD decomposition + diacritic removal. */
 function foldKey(s: string): string {
@@ -335,10 +340,9 @@ export function normalizeWineType(wineType: string): string {
 // Price normalization (Korean 만원 → number)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Approximate EUR→USD exchange factor for price matching (not live FX). */
-const EUR_TO_USD = 1.08;
-/** Approximate GBP→USD for fractional currency conversion. */
-const GBP_TO_USD = 1.27;
+/** EUR→USD / GBP→USD from the FX SSoT (`domain/shared/constants.ts`). */
+const EUR_TO_USD = USD_PER_EUR_APPROXIMATE;
+const GBP_TO_USD = USD_PER_GBP_APPROXIMATE;
 
 /**
  * Parse a Korean price expression to KRW number.

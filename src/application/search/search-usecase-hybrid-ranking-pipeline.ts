@@ -758,7 +758,7 @@ export async function executeHybridRouteRankingPipeline(
       if (remainingLatencyBudgetMs !== undefined && remainingLatencyBudgetMs <= 0) {
         pipelineDebug(
           {
-            step: 'retrieval.constraint_relaxation.skipped_due_to_budget',
+            step: PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_SKIPPED_BUDGET,
             relaxed_attributes: step.relaxedAttributes,
           },
           'pipeline constraint relaxation skipped due to exhausted request budget',
@@ -770,7 +770,7 @@ export async function executeHybridRouteRankingPipeline(
       // MAX_RELAXATION_STEPS=4 can add 4 full round-trips to zero-result queries.
       if (requestContext?.abortSignal?.aborted === true) {
         pipelineDebug(
-          { step: 'retrieval.constraint_relaxation.aborted', relaxed_attributes: step.relaxedAttributes },
+          { step: PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_ABORTED, relaxed_attributes: step.relaxedAttributes },
           'pipeline constraint relaxation aborted by request signal',
         );
         abortedDuringRelaxation = true;
@@ -779,7 +779,7 @@ export async function executeHybridRouteRankingPipeline(
 
       pipelineDebug(
         {
-          step: 'retrieval.constraint_relaxation.attempt',
+          step: PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_ATTEMPT,
           relaxed_attributes: step.relaxedAttributes,
           original_hard_count: plan.constraints.hard.length,
           new_hard_count: step.constraints.hard.length,
@@ -820,7 +820,7 @@ export async function executeHybridRouteRankingPipeline(
         stageTimer?.end('hybrid.constraint_relaxation');
         pipelineDebug(
           {
-            step: 'retrieval.constraint_relaxation.success',
+            step: PipelineDebugStep.RETRIEVAL_CONSTRAINT_RELAXATION_SUCCESS,
             relaxed_attributes: step.relaxedAttributes,
             result_count: relaxedRanked.rankedResults.length,
           },
