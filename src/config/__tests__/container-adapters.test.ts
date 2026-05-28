@@ -10,7 +10,9 @@ import { parseEnv } from '../env.js';
 import { CachedReranker } from '../../infrastructure/ai/cached-reranker.js';
 import { OpenAiEmbeddingService } from '../../infrastructure/ai/openai-embedding-service.js';
 import { VespaSearchIndex } from '../../infrastructure/vespa/vespa-search-index.js';
+import { VespaNetworkError } from '../../infrastructure/vespa/vespa-client.js';
 import type { SparseHit } from '../../domain/retrieval/port/search-index.port.js';
+import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 
 describe('buildCoreAdapterServices', () => {
@@ -158,6 +160,34 @@ describe('buildCoreAdapterServices', () => {
     } finally {
       loadSpy.mockRestore();
       sparseSearchSpy.mockRestore();
+    }
+  });
+
+  it('shares the fast-fail Vespa unavailability latch between alias fallback and retrieval', async () => {
+    const sparseSearchSpy = vi
+      .spyOn(VespaSearchIndex.prototype, 'sparseSearch')
+      .mockRejectedValue(new VespaNetworkError(
+        'Vespa request timed out after 3000ms',
+        new Error('connect ETIMEDOUT'),
+      ));
+    const denseSearchSpy = vi
+      .spyOn(VespaSearchIndex.prototype, 'denseSearch')
+      .mockResolvedValue([]);
+
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      WEBHOOK_SECRET: 'watchlist-secret-1234',
+    });
+
+    try {
+      const adapters = await buildCoreAdapterServices(config, {});
+      await expect(adapters.aliasMatcher.findMatches('medium body united states')).resolves.toEqual([]);
+      await expect(adapters.searchIndex.denseSearch([0.1, 0.2, 0.3])).rejects.toBeInstanceOf(CircuitBreakerOpenError);
+      expect(sparseSearchSpy).toHaveBeenCalledTimes(1);
+      expect(denseSearchSpy).not.toHaveBeenCalled();
+    } finally {
+      sparseSearchSpy.mockRestore();
+      denseSearchSpy.mockRestore();
     }
   });
 

@@ -91,6 +91,10 @@ function classifyChannelError(err: unknown): 'circuit_breaker_open' | 'timeout' 
   return 'error';
 }
 
+function isSearchSubstrateUnavailable(searchIndex: SearchIndexPort): boolean {
+  return searchIndex.getSearchAvailabilityState?.() === 'unavailable';
+}
+
 /** Default anchor confidence when plan omits explicit score (neutral). */
 const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
 
@@ -409,6 +413,20 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       if (!activeChannels.has(RETRIEVAL_CHANNEL_SPARSE_BM25)) {
         return { hits: [], status: 'disabled', degraded: false };
       }
+      if (isSearchSubstrateUnavailable(this.searchIndex)) {
+        return {
+          hits: [],
+          status: 'infra_failure',
+          degraded: true,
+          degradation: {
+            component: RETRIEVAL_CHANNEL_SPARSE_BM25,
+            severity: 'error',
+            reason: 'search substrate unavailable (circuit breaker open)',
+            fallbackApplied: 'dense-only retrieval',
+            errorKind: 'circuit_breaker_open',
+          },
+        };
+      }
       // TA4: Merge entity hypothesis terms from fuzzy match into lexical queries.
       // These are fuzzy-entity surface forms forwarded from the planner's anchor-miss
       // path — they provide an entity-first BM25 seed separate from query expansion.
@@ -465,6 +483,20 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       if (!activeChannels.has(RETRIEVAL_CHANNEL_LEARNED_SPARSE)) {
         return { hits: [], status: 'disabled', degraded: false };
       }
+      if (isSearchSubstrateUnavailable(this.searchIndex)) {
+        return {
+          hits: [],
+          status: 'infra_failure',
+          degraded: true,
+          degradation: {
+            component: RETRIEVAL_CHANNEL_LEARNED_SPARSE,
+            severity: 'error',
+            reason: 'search substrate unavailable (circuit breaker open)',
+            fallbackApplied: 'continue without learned sparse',
+            errorKind: 'circuit_breaker_open',
+          },
+        };
+      }
       try {
         const hits = await this.searchIndex.searchLearnedSparse(
           buildLearnedSparseQueryWeights(input),
@@ -516,6 +548,20 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       }
       if (!(activeChannels.has(RETRIEVAL_CHANNEL_DENSE_SEMANTIC) && embeddingQueries.length > 0)) {
         return { hits: [], status: 'disabled', degraded: false };
+      }
+      if (isSearchSubstrateUnavailable(this.searchIndex)) {
+        return {
+          hits: [],
+          status: 'infra_failure',
+          degraded: true,
+          degradation: {
+            component: RETRIEVAL_CHANNEL_DENSE_SEMANTIC,
+            severity: 'error',
+            reason: 'search substrate unavailable (circuit breaker open)',
+            fallbackApplied: 'sparse-only retrieval',
+            errorKind: 'circuit_breaker_open',
+          },
+        };
       }
       try {
         const embeddings = this.cacheService
@@ -598,6 +644,20 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       }
       if (!(activeChannels.has(RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY) && anchorProfile !== undefined)) {
         return { hits: [], status: 'disabled', degraded: false };
+      }
+      if (isSearchSubstrateUnavailable(this.searchIndex)) {
+        return {
+          hits: [],
+          status: 'infra_failure',
+          degraded: true,
+          degradation: {
+            component: RETRIEVAL_CHANNEL_ANCHOR_SIMILARITY,
+            severity: 'warning',
+            reason: 'search substrate unavailable (circuit breaker open)',
+            fallbackApplied: 'no-anchor retrieval',
+            errorKind: 'circuit_breaker_open',
+          },
+        };
       }
       try {
         // BUG-04: use cacheService.getOrEmbedBatch() when available so the

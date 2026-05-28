@@ -5,7 +5,7 @@ import type { CanonicalEntityId } from '../../../../src/domain/shared/types/inde
 import type { RetrievalDocument } from '../../../../src/domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { EntityCandidateGeneratorInput } from '../../../../src/domain/resolver/model/entity-candidate-generator-input.js';
-import type { AliasType } from '../../../../src/domain/resolver/model/alias-match.js';
+import type { AliasType } from '../../../../src/domain/alias/model/alias.js';
 
 /**
  * T-E4-01: Helper to build a batch-capable lookup port from a single-document

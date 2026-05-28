@@ -39,7 +39,7 @@ describe('UnavailableFastFailSearchIndex', () => {
   it('opens on Vespa transport failure and fast-fails subsequent retrieval calls', async () => {
     const inner = createSearchIndexStub();
     inner.sparseSearch.mockRejectedValueOnce(
-      new VespaNetworkError('Vespa request timed out after 3000ms', new Error('connect ETIMEDOUT')),
+      new VespaNetworkError('Vespa request timed out after 3000ms', new Error('connect ETIMEDOUT'), true),
     );
     const searchIndex = new UnavailableFastFailSearchIndex(inner);
 
@@ -67,7 +67,7 @@ describe('UnavailableFastFailSearchIndex', () => {
   it('carries alias lookup transport failure forward to later retrieval calls on the same shared search index', async () => {
     const inner = createSearchIndexStub();
     inner.sparseSearch.mockRejectedValueOnce(
-      new VespaNetworkError('Vespa request timed out after 3000ms', new Error('connect ETIMEDOUT')),
+      new VespaNetworkError('Vespa request timed out after 3000ms', new Error('connect ETIMEDOUT'), true),
     );
     const searchIndex = new UnavailableFastFailSearchIndex(inner);
     const aliasMatcher = new SearchIndexAliasMatcher(searchIndex);
@@ -86,7 +86,7 @@ describe('UnavailableFastFailSearchIndex', () => {
     const inner = createSearchIndexStub();
     inner.sparseSearch
       .mockRejectedValueOnce(
-        new VespaNetworkError('Vespa request timed out after 3000ms', new Error('connect ETIMEDOUT')),
+        new VespaNetworkError('Vespa request timed out after 3000ms', new Error('connect ETIMEDOUT'), true),
       )
       .mockResolvedValueOnce([]);
     const searchIndex = new UnavailableFastFailSearchIndex(inner, {

@@ -38,10 +38,12 @@ function minimalPlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
 
 function createSearchIndex(overrides?: Partial<SearchIndexPort>): SearchIndexPort {
   return {
+    getSearchAvailabilityState: () => 'available',
     sparseSearch: vi.fn(async () => []),
     denseSearch: vi.fn(async () => []),
     searchLearnedSparse: vi.fn(async () => []),
     getDocument: vi.fn(async () => null),
+    getDocuments: vi.fn(async () => new Map()),
     upsertDocument: vi.fn(async () => {}),
     bulkUpsert: vi.fn(async () => {}),
     ...overrides,
@@ -213,5 +215,31 @@ describe('CandidatePoolService — killSwitchDenseRetrieval pre-flight guard', (
 
     expect(embeddingService.embedBatch).toHaveBeenCalled();
     expect(searchIndex.denseSearch).toHaveBeenCalled();
+  });
+
+  it('does NOT call sparseSearch/embedBatch/denseSearch when search substrate is already unavailable', async () => {
+    const embeddingService = createEmbeddingService();
+    const searchIndex = createSearchIndex({
+      getSearchAvailabilityState: () => 'unavailable',
+    });
+
+    const pool = new CandidatePoolService(
+      searchIndex,
+      embeddingService,
+      new FusionService(),
+      undefined,
+      'text-embedding-3-small',
+      false,
+      undefined,
+      false,
+    );
+
+    const result = await pool.execute(createInput());
+
+    expect(searchIndex.sparseSearch).not.toHaveBeenCalled();
+    expect(embeddingService.embedBatch).not.toHaveBeenCalled();
+    expect(searchIndex.denseSearch).not.toHaveBeenCalled();
+    expect(result.lanes?.sparse?.status).toBe('infra_failure');
+    expect(result.lanes?.dense?.status).toBe('infra_failure');
   });
 });

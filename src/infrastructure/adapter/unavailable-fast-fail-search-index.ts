@@ -34,7 +34,7 @@ function classifySearchIndexError(error: unknown): SearchIndexFailureKind {
     return 'service_failure';
   }
   if (error instanceof VespaNetworkError) {
-    return error.isAborted ? 'abort' : 'service_failure';
+    return 'service_failure';
   }
   if (error instanceof VespaHttpError) {
     return error.isClientError && !error.isRateLimited
@@ -42,7 +42,7 @@ function classifySearchIndexError(error: unknown): SearchIndexFailureKind {
       : 'service_failure';
   }
   if (error instanceof Error && error.name === 'AbortError') {
-    return 'abort';
+    return 'service_failure';
   }
   return 'caller_fault';
 }
@@ -75,6 +75,10 @@ export class UnavailableFastFailSearchIndex implements SearchIndexPort {
 
   searchLearnedSparse(...args: Parameters<SearchIndexPort['searchLearnedSparse']>) {
     return this.runGuardedSearch('searchLearnedSparse', () => this.inner.searchLearnedSparse(...args));
+  }
+
+  getSearchAvailabilityState(): 'available' | 'unavailable' {
+    return this.breaker.state === 'OPEN' ? 'unavailable' : 'available';
   }
 
   getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null> {
@@ -110,39 +114,42 @@ export class UnavailableFastFailSearchIndex implements SearchIndexPort {
     operation: 'sparseSearch' | 'denseSearch' | 'searchLearnedSparse',
     fn: () => Promise<T>,
   ): Promise<T> {
+    const previousState = this.breaker.state;
     let passthroughError: unknown;
     const passthrough = Symbol(`${operation}_passthrough`);
-    const result = await this.breaker.execute(async () => {
-      try {
-        return await fn();
-      } catch (error) {
-        const kind = classifySearchIndexError(error);
-        if (kind === 'service_failure') {
-          throw error;
+    try {
+      const result = await this.breaker.execute(async () => {
+        try {
+          return await fn();
+        } catch (error) {
+          const kind = classifySearchIndexError(error);
+          if (kind === 'service_failure') {
+            throw error;
+          }
+          passthroughError = error;
+          return passthrough;
         }
-        passthroughError = error;
-        return passthrough;
+      });
+
+      if (passthroughError !== undefined) {
+        throw passthroughError instanceof Error
+          ? passthroughError
+          : new Error('search index passthrough failure was not an Error instance');
       }
-    });
 
-    if (passthroughError !== undefined) {
-      throw passthroughError;
+      return result as T;
+    } catch (error) {
+      if (previousState !== 'OPEN' && this.breaker.state === 'OPEN') {
+        log.warn(
+          {
+            breakerName: this.breakerName,
+            operation,
+            err: error,
+          },
+          'search index transport breaker opened; subsequent retrieval calls will fast-fail',
+        );
+      }
+      throw error;
     }
-
-    if (this.breaker.state === 'OPEN') {
-      log.warn(
-        {
-          breakerName: this.breakerName,
-          operation,
-        },
-        'search index transport breaker opened; subsequent retrieval calls will fast-fail',
-      );
-    }
-
-    if (result === passthrough) {
-      throw new Error(`${operation}: passthrough sentinel escaped invariant`);
-    }
-
-    return result as T;
   }
 }

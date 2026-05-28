@@ -53,6 +53,8 @@ tests:
     - src/infrastructure/cli/auth/__tests__/codex-auth-facade.test.ts
     - src/infrastructure/cli/remote/__tests__/remote-http-client.test.ts
     - src/application/cli/command/__tests__/api-call-command.test.ts
+  e2e:
+    - test/e2e/cli-process.test.ts
 
 depends_on: []
 
@@ -68,7 +70,7 @@ known_limitations:
   - "Local search/hybrid facade reuses deepKeysToSnake from the HTTP layer for wire parity — an intentional one-way infra->interface import edge."
 
 next_steps:
-  - "Add an opt-in live smoke lane (gated, real infra) covering `search run`/`hybrid` local + a remote `api call`; promote toward 5 once automated."
+  - "A gated black-box e2e exists (test/e2e/cli-process.test.ts: offline matrix always-on + WINE_CLI_LIVE_E2E=1 live `search run`). Next: wire the live block into a scheduled CI lane and extend it to Vespa hybrid + a remote-target `api call`."
   - "Evaluate shell-completion support as a follow-up ticket."
 
 tags:

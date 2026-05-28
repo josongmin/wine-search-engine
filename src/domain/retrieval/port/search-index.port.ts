@@ -160,6 +160,16 @@ export interface DenseHit extends RetrievalSummaryCarrier {
  */
 export interface SearchIndexPort {
   /**
+   * Optional hot-path availability hint for search-plane callers.
+   *
+   * Implementations that maintain an external-dependency breaker may surface
+   * whether search calls should be skipped entirely for the current process.
+   * Callers must treat absence as "unknown/available" and preserve the normal
+   * search attempt path.
+   */
+  getSearchAvailabilityState?(): 'available' | 'unavailable';
+
+  /**
    * Execute a sparse (BM25 / lexical) search.
    *
    * @param queries - One or more query strings to match against text fields.
