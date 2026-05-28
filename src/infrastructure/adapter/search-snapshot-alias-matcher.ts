@@ -29,12 +29,12 @@ import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import type { AliasType } from '../../domain/alias/model/alias.js';
 import { parseAliasType, ALIAS_TYPES } from '../../domain/alias/model/alias.js';
 import { pickHigherTrustAliasType } from '../../domain/alias/service/conflict-resolver.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 import {
   DEFAULT_RUNTIME_STATE_PATH,
   loadSearchSnapshotRuntimeState,
 } from '../health/search-snapshot-readiness.js';
 import {
-  isActiveSnapshotSubstrateBootstrapAllowed,
   resolveActiveSnapshot,
 } from '../db/active-snapshot-resolver.js';
 
@@ -85,6 +85,14 @@ const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 const EMPTY_DM_KEYSET: ReadonlySet<string> = new Set<string>();
 
 const LATIN_VOWEL_RE = /[aeiouy]/g;
+type ConnectablePool = Pool & {
+  connect: Pool['connect'];
+};
+
+function hasConnect(pool: Pool): pool is ConnectablePool {
+  return typeof pool.connect === 'function';
+}
+
 const SnapshotAliasRecordSchema = z.object({
   aliasId: z.string().min(1),
   entityId: z.string().min(1),
@@ -121,6 +129,19 @@ function tokenizeForLookup(value: string): readonly string[] {
 
 function normalizeStoredAliasValue(value: string): string {
   return buildNormalizedQueryViews(value).strict;
+}
+
+function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort('PostgreSQL alias overlay load timeout');
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+    },
+  };
 }
 
 function phoneticCompactForLookup(value: string): string {
@@ -241,17 +262,39 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
   static async loadFromPostgres(
     pool: Pool,
     snapshotIdOverride?: string,
+    options?: { readonly queryTimeoutMs?: number },
   ): Promise<SearchSnapshotAliasMatcher | undefined> {
+    const queryTimeoutMs = options?.queryTimeoutMs;
+    const resolveActiveSnapshotOptions = queryTimeoutMs === undefined
+      ? undefined
+      : { queryTimeoutMs };
+    const timed = queryTimeoutMs === undefined ? undefined : createTimeoutSignal(queryTimeoutMs);
     try {
       const activeSnapshotId = snapshotIdOverride
-        ?? (await resolveActiveSnapshot(pool)).activeSnapshotId;
-      const { rows } = await pool.query<PgAliasRecord>(
-        `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
-         FROM aliases
-         WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
-         ORDER BY confidence DESC`,
-        [activeSnapshotId],
-      );
+        ?? (await resolveActiveSnapshot(pool, {
+          ...resolveActiveSnapshotOptions,
+        })).activeSnapshotId;
+      let rowsResult: { rows: ReadonlyArray<PgAliasRecord> };
+      if (timed === undefined || !hasConnect(pool)) {
+        rowsResult = await pool.query<PgAliasRecord>(
+          `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
+           FROM aliases
+           WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
+           ORDER BY confidence DESC`,
+          [activeSnapshotId],
+        );
+      } else {
+        rowsResult = await runAbortablePgQuery<PgAliasRecord>(
+          pool,
+          timed.signal,
+          `SELECT alias_id, entity_id, surface_form, normalized_value, source_trust, confidence, alias_type
+           FROM aliases
+           WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
+           ORDER BY confidence DESC`,
+          [activeSnapshotId],
+        );
+      }
+      const rows = rowsResult.rows;
       const aliases: SnapshotAliasRecord[] = rows
         .filter((row) => (
           typeof row.alias_id === 'string' &&
@@ -298,9 +341,6 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
       );
       return matcher;
     } catch (error: unknown) {
-      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
-        throw error;
-      }
       bootstrapLogger.warn(
         {
           err: error,
@@ -308,6 +348,8 @@ export class SearchSnapshotAliasMatcher implements AliasMatcher {
         '[Container] PostgreSQL alias overlay unavailable; falling back to search-index runtime substrate',
       );
       return undefined;
+    } finally {
+      timed?.clear();
     }
   }
 

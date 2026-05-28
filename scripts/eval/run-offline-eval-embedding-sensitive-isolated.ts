@@ -23,7 +23,7 @@ interface IsolatedArgs {
   readonly forwardedRunnerArgs: readonly string[];
 }
 
-const DEFAULT_STARTUP_TIMEOUT_MS = 120_000;
+const DEFAULT_STARTUP_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_RUNNER_TIMEOUT_MS = 8 * 60_000;
 const LOG_DIR = '/tmp';
@@ -216,6 +216,11 @@ interface SpawnedRuntime {
   get tail(): string;
 }
 
+interface ReadyFailureState {
+  port: number;
+  reason: string;
+}
+
 function sleepMs(ms: number): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -233,8 +238,16 @@ async function stopProcessWithTimeout(
   if (child.exitCode !== null) {
     return true;
   }
+  const pid = child.pid;
+  if (pid === undefined) {
+    return false;
+  }
   try {
-    child.kill(signal);
+    if (process.platform === 'win32') {
+      child.kill(signal);
+    } else {
+      process.kill(-pid, signal);
+    }
   } catch {
     return false;
   }
@@ -259,6 +272,7 @@ function spawnRuntime(spec: RuntimeSpec): SpawnedRuntime {
         ...process.env,
         ...spec.env,
       },
+      detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -286,6 +300,7 @@ async function waitForReady(runtime: SpawnedRuntime, args: {
   readonly pollIntervalMs: number;
 }): Promise<void> {
   const deadline = Date.now() + args.startupTimeoutMs;
+  let lastFailure: ReadyFailureState | undefined;
   while (Date.now() < deadline) {
     if (runtime.child.exitCode !== null) {
       throw new Error(
@@ -298,19 +313,51 @@ async function waitForReady(runtime: SpawnedRuntime, args: {
         signal: AbortSignal.timeout(1_000),
       });
       if (response.ok) {
-        const payload = await response.json() as { ready?: boolean };
+        const payload = await response.json() as {
+          readonly ready?: boolean;
+          readonly checks?: Readonly<Record<
+            string,
+            {
+              readonly status?: string;
+              readonly required?: boolean;
+              readonly reason?: string;
+              readonly error_class?: string;
+            }
+          >>;
+        };
         if (payload.ready === true) {
           return;
         }
+        const requiredDownChecks = Object.entries(payload.checks ?? {})
+          .filter(([, check]) => check.required === true && check.status === 'down')
+          .map(([name, check]) => {
+            const checkReason = check.reason ?? check.error_class;
+            return checkReason === undefined ? `${name}:down` : `${name}:${checkReason}`;
+          });
+        lastFailure = {
+          port: runtime.spec.port,
+          reason:
+            requiredDownChecks.length > 0
+              ? requiredDownChecks.slice(0, 3).join('; ')
+              : 'ready=false',
+        };
+        // fall through to retry within startup budget
+      } else {
+        lastFailure = {
+          port: runtime.spec.port,
+          reason: `ready-http-${response.status}`,
+        };
       }
     } catch {
       // ignore transient startup errors and keep polling within budget
     }
     await sleep(args.pollIntervalMs);
   }
+
+  const failureHint = lastFailure !== undefined ? ` (last_fail=${lastFailure.reason})` : '';
   throw new Error(
     `isolated runtime ${runtime.spec.name} did not reach /ready within ${args.startupTimeoutMs}ms. ` +
-    `log=${runtime.spec.logPath}\n${runtime.tail}`,
+    `log=${runtime.spec.logPath}${failureHint}\n${runtime.tail}`,
   );
 }
 

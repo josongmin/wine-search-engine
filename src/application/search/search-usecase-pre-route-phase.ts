@@ -20,6 +20,10 @@ import { pipelineDebug } from '../../domain/observability/request-pipeline-debug
 import { PipelineDebugStep } from '../../domain/observability/pipeline-debug-steps.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
+import {
+  buildCallerControlledPrimitivePlan,
+  isCallerControlledPrimitiveSearchRequest,
+} from './search-usecase-caller-controlled-plan.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import { buildRetrievalObjective } from '../../domain/retrieval/model/retrieval-objective.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
@@ -418,164 +422,183 @@ export async function runSearchPreRoutePhase(
     sanitizedQuery: string,
     plannerAbortSignal: AbortSignal | undefined,
   ): Promise<SearchPreRoutePhaseResult> => {
+    const callerControlledPrimitiveSearch =
+      isCallerControlledPrimitiveSearchRequest(ctx.request);
     if (ctx.decomposedSearch) {
-      ctx.stageTimer?.start('pre_route.decomposition.detect');
-      const decomposition = (() => {
-        try {
-          return analyzeQueryDecomposition(sanitizedQuery);
-        } finally {
-          ctx.stageTimer?.end('pre_route.decomposition.detect');
-        }
-      })();
-      if (isValidDecomposition(decomposition.outcome)) {
-        const decomposedSearchTimeoutMs = resolveDecomposedSearchTimeoutMs(
-          ctx.request,
-          ctx.startTime,
+      if (callerControlledPrimitiveSearch) {
+        pipelineDebug(
+          {
+            step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
+            skipped_due_to_caller_authority: true,
+          },
+          'pipeline pre_route decomposition skipped for caller-controlled primitive search',
         );
-        if (decomposedSearchTimeoutMs <= 0) {
-          pipelineDebug(
-            {
-              step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
-              decomposition_strategy: decomposition.hint.strategy,
-              skipped_due_to_budget: true,
-            },
-            'pipeline pre_route decomposed search skipped due to exhausted request budget',
-          );
-        } else {
-          const timeoutSignal = Symbol('timeout');
-          const abortController = new AbortController();
-          const decomposedAbortSignal =
-            plannerAbortSignal !== undefined
-              ? AbortSignal.any([plannerAbortSignal, abortController.signal])
-              : abortController.signal;
-          let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-          const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
-            timeoutHandle = setTimeout(() => {
-              abortController.abort();
-              resolve(timeoutSignal);
-            }, decomposedSearchTimeoutMs);
-          });
-          ctx.stageTimer?.start('pre_route.decomposition.execute');
-          const decomposedSearchPromise = ctx.decomposedSearch.execute(
-            decomposition.outcome.subQueries,
-            decomposition.outcome.comparisonLegs,
-            decomposition.outcome.comparisonIntent,
-            sanitizedQuery,
-            ctx.requestId,
-            ctx.startTime,
-            {
-              ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
-              ...(ctx.request.sessionContext !== undefined
-                ? { sessionContext: ctx.request.sessionContext }
-                : {}),
-              ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
-              ...(ctx.request.filters !== undefined && ctx.request.filters.length > 0
-                ? { filters: ctx.request.filters }
-                : {}),
-              ...(ctx.request.preferences !== undefined && ctx.request.preferences.length > 0
-                ? { preferences: ctx.request.preferences }
-                : {}),
-              // Forward explain so a comparison-route caller (options.explain=true)
-              // gets counterfactuals on both sub-search legs.
-              ...(ctx.request.options?.explain === true ? { explain: true } : {}),
-            },
-            {
-              abortSignal: decomposedAbortSignal,
-              ...(ctx.executionPrincipal !== undefined
-                ? { executionPrincipal: ctx.executionPrincipal }
-                : {}),
-            },
-          ).catch((err: unknown) => {
-            // After timeout fires we abort the controller. Any subsequent rejection
-            // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
-            // would otherwise become an unhandledRejection because nothing is
-            // awaiting the inner promise post-race. Swallow ALL errors after abort.
-            if (abortController.signal.aborted) {
-              return timeoutSignal;
-            }
-            throw err;
-          }).finally(() => {
-            ctx.stageTimer?.end('pre_route.decomposition.execute');
-          });
-          let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
+      } else {
+        ctx.stageTimer?.start('pre_route.decomposition.detect');
+        const decomposition = (() => {
           try {
-            decomposedResponse = await Promise.race([
-              decomposedSearchPromise,
-              timeoutPromise,
-            ]) as typeof timeoutSignal | ComparisonSearchResponse;
+            return analyzeQueryDecomposition(sanitizedQuery);
           } finally {
-            // Always clear the timeout handle — prevents timer leak when
-            // decomposedSearchPromise rejects before the timeout fires.
-            if (timeoutHandle !== undefined) {
-              clearTimeout(timeoutHandle);
-            }
-            // Abort any in-flight sub-search work (network requests, sub-use-case
-            // execution) so it does not continue running after we have moved on.
-            // Calling abort() on an already-aborted or completed controller is a no-op.
-            abortController.abort();
+            ctx.stageTimer?.end('pre_route.decomposition.detect');
           }
-          if (decomposedResponse === timeoutSignal) {
+        })();
+        if (isValidDecomposition(decomposition.outcome)) {
+          const decomposedSearchTimeoutMs = resolveDecomposedSearchTimeoutMs(
+            ctx.request,
+            ctx.startTime,
+          );
+          if (decomposedSearchTimeoutMs <= 0) {
             pipelineDebug(
               {
                 step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
                 decomposition_strategy: decomposition.hint.strategy,
-                timed_out: true,
+                skipped_due_to_budget: true,
               },
-              'pipeline pre_route decomposed search timed out — continuing without decomposition',
+              'pipeline pre_route decomposed search skipped due to exhausted request budget',
             );
-          } else if (typeof decomposedResponse !== 'symbol') {
-            const response = decomposedResponse;
-            logSearchEvent({
-              runtime_correlation_ref: ctx.requestId,
-              decomposition_strategy: decomposition.hint.strategy,
+          } else {
+            const timeoutSignal = Symbol('timeout');
+            const abortController = new AbortController();
+            const decomposedAbortSignal =
+              plannerAbortSignal !== undefined
+                ? AbortSignal.any([plannerAbortSignal, abortController.signal])
+                : abortController.signal;
+            let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+            const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
+              timeoutHandle = setTimeout(() => {
+                abortController.abort();
+                resolve(timeoutSignal);
+              }, decomposedSearchTimeoutMs);
             });
-            pipelineDebug(
+            ctx.stageTimer?.start('pre_route.decomposition.execute');
+            const decomposedSearchPromise = ctx.decomposedSearch.execute(
+              decomposition.outcome.subQueries,
+              decomposition.outcome.comparisonLegs,
+              decomposition.outcome.comparisonIntent,
+              sanitizedQuery,
+              ctx.requestId,
+              ctx.startTime,
               {
-                step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
-                decomposition_strategy: decomposition.hint.strategy,
+                ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
+                ...(ctx.request.sessionContext !== undefined
+                  ? { sessionContext: ctx.request.sessionContext }
+                  : {}),
+                ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+                ...(ctx.request.filters !== undefined && ctx.request.filters.length > 0
+                  ? { filters: ctx.request.filters }
+                  : {}),
+                ...(ctx.request.preferences !== undefined && ctx.request.preferences.length > 0
+                  ? { preferences: ctx.request.preferences }
+                  : {}),
+                // Forward explain so a comparison-route caller (options.explain=true)
+                // gets counterfactuals on both sub-search legs.
+                ...(ctx.request.options?.explain === true ? { explain: true } : {}),
               },
-              'pipeline pre_route comparison branch',
-            );
-            return { outcome: 'return', response };
+              {
+                abortSignal: decomposedAbortSignal,
+                ...(ctx.executionPrincipal !== undefined
+                  ? { executionPrincipal: ctx.executionPrincipal }
+                  : {}),
+              },
+            ).catch((err: unknown) => {
+              // After timeout fires we abort the controller. Any subsequent rejection
+              // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
+              // would otherwise become an unhandledRejection because nothing is
+              // awaiting the inner promise post-race. Swallow ALL errors after abort.
+              if (abortController.signal.aborted) {
+                return timeoutSignal;
+              }
+              throw err;
+            }).finally(() => {
+              ctx.stageTimer?.end('pre_route.decomposition.execute');
+            });
+            let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
+            try {
+              decomposedResponse = await Promise.race([
+                decomposedSearchPromise,
+                timeoutPromise,
+              ]) as typeof timeoutSignal | ComparisonSearchResponse;
+            } finally {
+              // Always clear the timeout handle — prevents timer leak when
+              // decomposedSearchPromise rejects before the timeout fires.
+              if (timeoutHandle !== undefined) {
+                clearTimeout(timeoutHandle);
+              }
+              // Abort any in-flight sub-search work (network requests, sub-use-case
+              // execution) so it does not continue running after we have moved on.
+              // Calling abort() on an already-aborted or completed controller is a no-op.
+              abortController.abort();
+            }
+            if (decomposedResponse === timeoutSignal) {
+              pipelineDebug(
+                {
+                  step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
+                  decomposition_strategy: decomposition.hint.strategy,
+                  timed_out: true,
+                },
+                'pipeline pre_route decomposed search timed out — continuing without decomposition',
+              );
+            } else if (typeof decomposedResponse !== 'symbol') {
+              const response = decomposedResponse;
+              logSearchEvent({
+                runtime_correlation_ref: ctx.requestId,
+                decomposition_strategy: decomposition.hint.strategy,
+              });
+              pipelineDebug(
+                {
+                  step: PipelineDebugStep.PRE_ROUTE_DECOMPOSED_COMPARISON,
+                  decomposition_strategy: decomposition.hint.strategy,
+                },
+                'pipeline pre_route comparison branch',
+              );
+              return { outcome: 'return', response };
+            }
           }
         }
       }
     }
 
-    // Use planWithCompiled when available (PlannerV1Adapter implements this).
-    // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
-    const plannerContext = buildPlannerContextFromSearchRequest(ctx.request, {
-      ...(plannerAbortSignal !== undefined ? { abortSignal: plannerAbortSignal } : {}),
-      ...(ctx.debugRequest === true ? { debugRequest: true } : {}),
-      ...(ctx.stageTimer !== undefined ? { stageTimer: ctx.stageTimer } : {}),
-      requestId: ctx.requestId,
-    });
     let plan: QueryPlanV1;
     let compiled: CompiledWineQuery;
-    ctx.stageTimer?.start('pre_route.planner');
-    if (ctx.queryPlanner.planWithCompiled !== undefined) {
-      const result = await ctx.queryPlanner.planWithCompiled(
+    if (callerControlledPrimitiveSearch) {
+      ({ plan, compiled } = buildCallerControlledPrimitivePlan(
+        ctx.request,
         sanitizedQuery,
-        plannerContext,
-      ).finally(() => {
-        ctx.stageTimer?.end('pre_route.planner');
-      });
-      plan = result.v1;
-      compiled = result.compiled;
-    } else if (ctx.allowCompiledFallback === true) {
-      plan = await ctx.queryPlanner.plan(
-        sanitizedQuery,
-        plannerContext,
-      ).finally(() => {
-        ctx.stageTimer?.end('pre_route.planner');
-      });
-      compiled = compileFromLegacyPlan(plan);
+      ));
     } else {
-      ctx.stageTimer?.end('pre_route.planner');
-      throw new Error(
-        'Search pre-route requires QueryPlanner.planWithCompiled(); ' +
-        'set allowCompiledFallback=true only for tests or explicit special seams.',
-      );
+      // Use planWithCompiled when available (PlannerV1Adapter implements this).
+      // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
+      const plannerContext = buildPlannerContextFromSearchRequest(ctx.request, {
+        ...(plannerAbortSignal !== undefined ? { abortSignal: plannerAbortSignal } : {}),
+        ...(ctx.debugRequest === true ? { debugRequest: true } : {}),
+        ...(ctx.stageTimer !== undefined ? { stageTimer: ctx.stageTimer } : {}),
+        requestId: ctx.requestId,
+      });
+      ctx.stageTimer?.start('pre_route.planner');
+      if (ctx.queryPlanner.planWithCompiled !== undefined) {
+        const result = await ctx.queryPlanner.planWithCompiled(
+          sanitizedQuery,
+          plannerContext,
+        ).finally(() => {
+          ctx.stageTimer?.end('pre_route.planner');
+        });
+        plan = result.v1;
+        compiled = result.compiled;
+      } else if (ctx.allowCompiledFallback === true) {
+        plan = await ctx.queryPlanner.plan(
+          sanitizedQuery,
+          plannerContext,
+        ).finally(() => {
+          ctx.stageTimer?.end('pre_route.planner');
+        });
+        compiled = compileFromLegacyPlan(plan);
+      } else {
+        ctx.stageTimer?.end('pre_route.planner');
+        throw new Error(
+          'Search pre-route requires QueryPlanner.planWithCompiled(); ' +
+          'set allowCompiledFallback=true only for tests or explicit special seams.',
+        );
+      }
     }
 
     // Merge caller-supplied structured filters (from agent tools / batch API)
@@ -594,7 +617,11 @@ export async function runSearchPreRoutePhase(
     //   replaces any NL-extracted exclude for the same attribute, but does NOT
     //   override a different attribute like wine_type.
     let structuredConstraintsMerged = false;
-    if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
+    if (
+      !callerControlledPrimitiveSearch
+      && ctx.request.filters !== undefined
+      && ctx.request.filters.length > 0
+    ) {
       // Attributes covered by structured agent filters (operator-aware override).
       // For 'exclude'/'not_in' operators, override only same-operator NL constraints.
       const agentCoveredKeys = new Set(
@@ -616,7 +643,11 @@ export async function runSearchPreRoutePhase(
       structuredConstraintsMerged = true;
     }
 
-    if (ctx.request.preferences !== undefined && ctx.request.preferences.length > 0) {
+    if (
+      !callerControlledPrimitiveSearch
+      && ctx.request.preferences !== undefined
+      && ctx.request.preferences.length > 0
+    ) {
       const preferenceCoveredKeys = new Set(
         ctx.request.preferences.map((f) => `${f.attribute}:${f.operator}`),
       );

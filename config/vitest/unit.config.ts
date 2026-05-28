@@ -40,6 +40,8 @@ export default defineConfig({
   test: {
     ...vitestMemorySchedulerOptions('cpu'),
     globals: true,
+    // R5 C1: pins fast-check seed for reproducible property-test runs.
+    setupFiles: ['./test/setup/fast-check-seed.ts'],
     include: [...testInclude],
     exclude: [
       ...heavyTestExclude,

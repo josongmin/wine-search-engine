@@ -261,14 +261,15 @@ describe('T-010/W2 readiness pointer-aware', () => {
   });
 
   it('readiness probe opts into pointer parity', async () => {
-    // The runtime-readiness probe + its `requirePointerParity` opt-in moved
-    // out of `src/config/readiness.ts` and into the infrastructure health
-    // module that now owns the search-snapshot probe. The opt-in invariant is
-    // preserved — just the file home moved.
+    // The pointer-parity opt-in moved out of `src/config/readiness.ts` and
+    // into the publish-search-snapshot ETL — that's now the production caller
+    // that flips `requirePointerParity: true` before invoking the readiness
+    // probe. The invariant being protected — at least one production caller
+    // opts into pointer parity — is unchanged; only the location moved.
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const src = readFileSync(
-      fileURLToPath(new URL('../../src/infrastructure/health/search-snapshot-readiness.ts', import.meta.url)),
+      fileURLToPath(new URL('../../scripts/etl/publish-search-snapshot.ts', import.meta.url)),
       'utf-8',
     );
     expect(src).toMatch(/requirePointerParity: true/);

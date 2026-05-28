@@ -73,7 +73,12 @@ type SearchRouteCapability =
   | 'ranked_post_route'
   | 'forced_hybrid_retrieval'
   | 'planner_only'
-  | 'resolver_only';
+  | 'resolver_only'
+  | 'analysis'
+  | 'deterministic_router'
+  | 'execution_runner'
+  | 'mini_loop'
+  | 'synthesis';
 
 const AGENT_METRICS_ALERTS_MAX = 20;
 /** Upper bound on probe `reason` text surfaced in /ready response (H13). */

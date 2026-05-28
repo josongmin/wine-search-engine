@@ -183,6 +183,11 @@ describe('WineToolExecutor', () => {
       expect(mockSearchUseCase.execute).toHaveBeenCalledOnce();
       const [request, requestId] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       expect(request.query).toBe('bordeaux');
+      expect(request.callerInterpretation).toEqual({
+        authority: 'caller',
+        intent: 'semantic_discovery',
+        queryClass: 'semantic_preference',
+      });
       expect(requestId).toBe('req-123');
       expect(result).toEqual(mockSearchResponse);
     });
@@ -204,6 +209,11 @@ describe('WineToolExecutor', () => {
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       // Default is applied during validation, not passed explicitly to request
       expect(request.query).toBe('test');
+      expect(request.callerInterpretation).toEqual({
+        authority: 'caller',
+        intent: 'semantic_discovery',
+        queryClass: 'semantic_preference',
+      });
     });
 
     it('should use specified retrieval_mode', async () => {
@@ -217,6 +227,7 @@ describe('WineToolExecutor', () => {
 
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       expect(request.options?.mode).toBe('mixed');
+      expect(request.callerInterpretation).toBeUndefined();
     });
 
     it('normalizes exact metadata Korean queries to a bare entity retrieval core', async () => {
@@ -965,6 +976,11 @@ describe('WineToolExecutor', () => {
       const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0]!;
       expect(request.query).toContain('wine pairing for grilled salmon');
       expect(request.options).toEqual({ mode: 'hybrid', explain: false, clarification: false });
+      expect(request.callerInterpretation).toEqual({
+        authority: 'caller',
+        intent: 'pairing_search',
+        queryClass: 'semantic_preference',
+      });
     });
 
     it('should keep color as a structured filter instead of lexical anchor when provided', async () => {

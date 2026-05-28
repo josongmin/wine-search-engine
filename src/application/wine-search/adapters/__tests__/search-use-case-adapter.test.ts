@@ -62,7 +62,14 @@ function asUseCase(stub: StubSearchUseCase): SearchUseCase {
 describe('mapSearchUseCaseInputToSearchRequest', () => {
   it('maps minimal input (query only)', () => {
     const input: SearchUseCaseInput = { query: '와인' };
-    expect(mapSearchUseCaseInputToSearchRequest(input)).toEqual({ query: '와인' });
+    expect(mapSearchUseCaseInputToSearchRequest(input)).toEqual({
+      query: '와인',
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'semantic_discovery',
+        queryClass: 'semantic_preference',
+      },
+    });
   });
 
   it('forwards filters / preferences when non-empty', () => {
@@ -107,6 +114,11 @@ describe('mapSearchUseCaseInputToSearchRequest', () => {
     const req = mapSearchUseCaseInputToSearchRequest(input);
     expect(req.options).toBeUndefined();
     expect(req.retrieval_mode).toBeUndefined();
+    expect(req.callerInterpretation).toEqual({
+      authority: 'caller',
+      intent: 'semantic_discovery',
+      queryClass: 'semantic_preference',
+    });
   });
 
   it('forwards limit and representativeConcept', () => {
@@ -119,6 +131,12 @@ describe('mapSearchUseCaseInputToSearchRequest', () => {
     expect(req.limit).toBe(10);
     expect(req.representativeConcept).toEqual({ field: 'country', value: 'France' });
   });
+
+  it('keeps entity-mode requests on the planner path', () => {
+    const input: SearchUseCaseInput = { query: 'Opus One 2018', mode: 'entity' };
+    const req = mapSearchUseCaseInputToSearchRequest(input);
+    expect(req.callerInterpretation).toBeUndefined();
+  });
 });
 
 describe('SearchUseCaseAdapter', () => {
@@ -130,7 +148,14 @@ describe('SearchUseCaseAdapter', () => {
 
     expect(stub.executeMock).toHaveBeenCalledTimes(1);
     const call = stub.executeMock.mock.calls[0] ?? [];
-    expect(call[0]).toEqual({ query: '와인' });
+    expect(call[0]).toEqual({
+      query: '와인',
+      callerInterpretation: {
+        authority: 'caller',
+        intent: 'semantic_discovery',
+        queryClass: 'semantic_preference',
+      },
+    });
     expect(call[1]).toBe(REQUEST_ID);
     const opts = call[2] as SearchExecutionOptions | undefined;
     expect(opts?.requestId).toBe(REQUEST_ID);

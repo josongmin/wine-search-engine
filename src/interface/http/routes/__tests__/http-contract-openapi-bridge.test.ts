@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { MAX_QUERY_LENGTH } from '../../../../domain/shared/constants.js';
 import { buildHttpRouteContractOpenApiBridge } from '../http-route-contract-openapi.js';
 import { CAN_RUN_TSX_SUBPROCESS } from '../../../../../test/helpers/runtime-capabilities.js';
 
@@ -38,7 +37,9 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
         properties: expect.objectContaining({
           query: expect.objectContaining({
             type: 'string',
-            maxLength: MAX_QUERY_LENGTH,
+          }),
+          options: expect.objectContaining({
+            type: 'object',
           }),
         }),
       }),

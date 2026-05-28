@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { GoldenQuery } from '../../../scripts/etl/types.js';
 import {
   applyResolvedLegacyEntityIdsToGoldenQueries,
+  buildEvalExecutionFailureDecision,
   buildEvalSearchRequestBody,
   collectLegacyEvalEntityIdRefs,
   resolveEvalRetrievalMode,
 } from '../../../scripts/eval/run-offline-eval.js';
+import { isEvalExecutionError } from '../../../scripts/eval/metrics.js';
 
 function makeGoldenQuery(
   overrides: Partial<GoldenQuery> = {},
@@ -40,13 +42,30 @@ function makeGoldenQuery(
 }
 
 describe('buildEvalSearchRequestBody', () => {
+  it('builds batch payload with deterministic request id and timeout', () => {
+    const body = buildEvalSearchRequestBody(makeGoldenQuery({
+      qid: 'custom-qid',
+      query: 'Bodega Norton',
+    }));
+
+    expect(body.requests).toEqual([
+      {
+        id: 'custom-qid',
+        query: 'Bodega Norton',
+        retrieval_mode: 'entity',
+        explain: false,
+      },
+    ]);
+    expect(body.options?.timeout_ms).toBe(30_000);
+  });
+
   it('routes exact entity eval rows through the entity family', () => {
     const body = buildEvalSearchRequestBody(makeGoldenQuery({
       retrieval_mode: 'entity_lookup',
     }));
 
-    expect(body.options.mode).toBe('entity');
-    expect(body.retrieval_mode).toBe('entity');
+    expect(body.requests).toHaveLength(1);
+    expect(body.requests[0]?.retrieval_mode).toBe('entity');
   });
 
   it('routes ambiguous entity eval rows through the entity family', () => {
@@ -56,8 +75,7 @@ describe('buildEvalSearchRequestBody', () => {
       scenario: 'B',
     }));
 
-    expect(body.options.mode).toBe('entity');
-    expect(body.retrieval_mode).toBe('entity');
+    expect(body.requests[0]?.retrieval_mode).toBe('entity');
   });
 
   it('routes similar-items eval rows through mixed search', () => {
@@ -67,8 +85,7 @@ describe('buildEvalSearchRequestBody', () => {
       scenario: 'F',
     }));
 
-    expect(body.options.mode).toBe('mixed');
-    expect(body.retrieval_mode).toBe('mixed');
+    expect(body.requests[0]?.retrieval_mode).toBe('mixed');
   });
 
   it('infers similar-items retrieval mode from similar_compare rows with no explicit label', () => {
@@ -80,7 +97,7 @@ describe('buildEvalSearchRequestBody', () => {
     });
 
     expect(resolveEvalRetrievalMode(query)).toBe('similar_items');
-    expect(buildEvalSearchRequestBody(query).retrieval_mode).toBe('mixed');
+    expect(buildEvalSearchRequestBody(query).requests[0]?.retrieval_mode).toBe('mixed');
   });
 
   it('keeps specialized exploratory retrieval modes on the hybrid family', () => {
@@ -90,8 +107,7 @@ describe('buildEvalSearchRequestBody', () => {
       scenario: 'G',
     }));
 
-    expect(body.options.mode).toBe('hybrid');
-    expect(body.retrieval_mode).toBe('hybrid');
+    expect(body.requests[0]?.retrieval_mode).toBe('hybrid');
   });
 
   it('defaults to hybrid when dataset row has no explicit retrieval label', () => {
@@ -101,8 +117,7 @@ describe('buildEvalSearchRequestBody', () => {
       scenario: 'C',
     }));
 
-    expect(body.options.mode).toBe('hybrid');
-    expect(body.retrieval_mode).toBe('hybrid');
+    expect(body.requests[0]?.retrieval_mode).toBe('hybrid');
   });
 
   it('infers entity family for exact-entity rows with no explicit retrieval label', () => {
@@ -114,7 +129,21 @@ describe('buildEvalSearchRequestBody', () => {
     });
 
     expect(resolveEvalRetrievalMode(query)).toBe('entity_lookup');
-    expect(buildEvalSearchRequestBody(query).retrieval_mode).toBe('entity');
+    expect(buildEvalSearchRequestBody(query).requests[0]?.retrieval_mode).toBe('entity');
+  });
+});
+
+describe('offline eval execution failure decision', () => {
+  it('marks transport/runtime failures as evaluation errors', () => {
+    const decision = buildEvalExecutionFailureDecision();
+
+    expect(decision).toEqual({
+      decision_status: 'failed',
+      top_entity_id: null,
+      decision_confidence: 0,
+      evaluation_error: true,
+    });
+    expect(isEvalExecutionError(decision)).toBe(true);
   });
 });
 

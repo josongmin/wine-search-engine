@@ -65,6 +65,8 @@ import {
   StubThresholdStore,
 } from './container-stubs.js';
 
+const ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS = 1_500;
+
 export interface CoreAdapterServices {
   readonly searchIndex: SearchIndexPort;
   readonly embeddingService: EmbeddingServicePort;
@@ -200,7 +202,9 @@ export async function buildCoreAdapterServices(
   });
 
   const isPgAliasOverlayAvailable = pool !== undefined && !config.killSwitch.aliasOverlay
-    ? await isAliasTableAvailable(pool)
+    ? await isAliasTableAvailable(pool, {
+      queryTimeoutMs: ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS,
+    })
     : false;
 
   let inMemoryAliasMatcher: SearchSnapshotAliasMatcher | undefined;
@@ -214,6 +218,9 @@ export async function buildCoreAdapterServices(
       inMemoryAliasMatcher = await SearchSnapshotAliasMatcher.loadFromPostgres(
         pool,
         runtimeHandles.searchSnapshotId,
+        {
+          queryTimeoutMs: ALIAS_OVERLAY_STARTUP_QUERY_TIMEOUT_MS,
+        },
       );
       inMemoryAliasMatcher ??= await loadSnapshotBoundAliasMatcher();
     } else {

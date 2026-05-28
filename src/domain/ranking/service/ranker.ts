@@ -1160,7 +1160,7 @@ export class Ranker {
             const rerankerFailureReason = classifyRerankerFailureReason(err);
             bootstrapLogger.warn(
               {
-                err: err instanceof Error ? err.message : String(err),
+                err,
                 queryClass: queryPlan.queryClass,
                 viableCount: viable.length,
                 rerankTopK: effectiveTopK,

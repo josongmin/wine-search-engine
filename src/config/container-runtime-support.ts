@@ -33,6 +33,7 @@ import {
 const CACHE_CIRCUIT_BREAKER_THRESHOLD_DEFAULT = 5;
 /** Milliseconds until circuit half-closes after open (matches CacheService default). */
 const CACHE_CIRCUIT_BREAKER_RESET_MS_DEFAULT = 60_000;
+const ACTIVE_SNAPSHOT_RESOLVE_QUERY_TIMEOUT_MS = 1_500;
 
 class RedisJudgmentCacheAdapter implements JudgmentCachePort {
   constructor(
@@ -295,7 +296,10 @@ export async function buildRuntimeSupportServices(
     const ltrRegistry = new PgLtrModelRegistry(pool);
     try {
       ltrRegistrySearchSnapshotId = runtime.searchSnapshotId
-        ?? (await resolveActiveSnapshot(pool, { bypassCache: true })).activeSnapshotId;
+        ?? (await resolveActiveSnapshot(pool, {
+          bypassCache: true,
+          queryTimeoutMs: ACTIVE_SNAPSHOT_RESOLVE_QUERY_TIMEOUT_MS,
+        })).activeSnapshotId;
     } catch (err) {
       ltrRegistryIssue = 'active_snapshot_unavailable';
       bootstrapLogger.warn(

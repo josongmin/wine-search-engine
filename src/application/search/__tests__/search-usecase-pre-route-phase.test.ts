@@ -81,6 +81,69 @@ function makeBaseContext(
 }
 
 describe('runSearchPreRoutePhase – fallback path (plan() only, no planWithCompiled)', () => {
+  it('builds a caller-controlled primitive plan without invoking the planner for general search', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan()),
+    };
+    const ctx = makeBaseContext({
+      request: {
+        query: 'smooth red wine',
+        options: {
+          mode: 'hybrid',
+          explain: false,
+          clarification: false,
+        },
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'semantic_discovery',
+          queryClass: 'semantic_preference',
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome !== 'continue') throw new Error('narrowing guard');
+    expect(plannerWithoutCompiled.plan).not.toHaveBeenCalled();
+    expect(result.plan.intent).toBe('semantic_discovery');
+    expect(result.plan.queryClass).toBe('semantic_preference');
+    expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
+    expect(result.compiled.execution.executionTopology).toBe('general_only');
+    expect(result.compiled.execution.routeSource).toBe('api_override');
+  });
+
+  it('keeps caller-controlled entity requests on the planner path', async () => {
+    const plannerWithoutCompiled = {
+      plan: vi.fn().mockResolvedValue(makeV1Plan({
+        route: 'entity',
+        retrievalMode: 'entity_lookup',
+      })),
+    };
+    const ctx = makeBaseContext({
+      request: {
+        query: 'Opus One 2018',
+        options: {
+          mode: 'entity',
+          explain: false,
+          clarification: false,
+        },
+        callerInterpretation: {
+          authority: 'caller',
+          intent: 'entity_exact',
+          queryClass: 'exact_entity',
+        },
+      },
+      queryPlanner: plannerWithoutCompiled,
+    });
+
+    const result = await runSearchPreRoutePhase(ctx);
+
+    expect(result.outcome).toBe('continue');
+    expect(plannerWithoutCompiled.plan).toHaveBeenCalledOnce();
+  });
+
   it('returns outcome=continue with a defined compiled when queryPlanner only has plan()', async () => {
     // Arrange: planner with only plan() — no planWithCompiled property
     const plannerWithoutCompiled = {

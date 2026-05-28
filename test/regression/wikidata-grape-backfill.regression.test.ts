@@ -638,8 +638,8 @@ describe('runBackfill end-to-end', () => {
 
     const outRaw = await fsp.readFile(output, 'utf8');
     const outLines = outRaw.split('\n').filter((l) => l.length > 0);
-    const augmented = JSON.parse(outLines[0]!) as SilverRecordLike;
-    const populated = JSON.parse(outLines[1]!) as SilverRecordLike;
+    const augmented = JSON.parse(outLines[0]!) as unknown as SilverRecordLike;
+    const populated = JSON.parse(outLines[1]!) as unknown as SilverRecordLike;
     expect(augmented.grapes).toEqual(['Cabernet Sauvignon', 'Merlot']);
     expect(augmented.grapePrimary).toBe('Cabernet Sauvignon');
     expect(populated.grapes).toEqual(['Shiraz']); // preserved
@@ -803,7 +803,7 @@ describe('runBackfill end-to-end', () => {
     const outLines = (await fsp.readFile(output, 'utf8'))
       .split('\n')
       .filter((l) => l.length > 0);
-    const after = JSON.parse(outLines[0]!) as SilverRecordLike;
+    const after = JSON.parse(outLines[0]!) as unknown as SilverRecordLike;
     expect(after.grapes).toEqual(['Sangiovese']);
     expect(after.grapePrimary).toBe('Sangiovese');
   });

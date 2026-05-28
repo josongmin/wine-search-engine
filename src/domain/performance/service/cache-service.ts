@@ -525,7 +525,7 @@ export class CacheService implements SearchResponseCachePort {
     this.consecutiveErrorCount += 1;
     log.warn(
       {
-        err: err instanceof Error ? err.message : String(err),
+        err,
         consecutiveErrorCount: this.consecutiveErrorCount,
         circuitBreakerThreshold: this.circuitBreakerThreshold,
       },

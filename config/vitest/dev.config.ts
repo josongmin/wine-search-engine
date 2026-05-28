@@ -22,6 +22,8 @@ export default defineConfig({
   test: {
     ...vitestMemorySchedulerOptions('cpu'),
     globals: true,
+    // R5 C1: pins fast-check seed for reproducible property-test runs.
+    setupFiles: ['./test/setup/fast-check-seed.ts'],
     include: [...devTestInclude],
     exclude: [
       'test/unit/eval/offline-eval-reporting.test.ts',
@@ -42,6 +44,14 @@ export default defineConfig({
         maxThreads: maxDevThreads,
         minThreads: 1,
         useAtomics: true,
+        // NOTE: tried `isolate: false` for an additional ~60% wall-clock cut
+        // (77s → 31s) but it surfaced cross-file state leakage in this lane
+        // — previously-skipped S4.2 gold-target retrieval tests started
+        // running (a Vespa-availability mock from a prior file leaked
+        // through) and a hung Promise produced an unhandled-rejection at
+        // teardown. The per-test fixes are out of scope for this round;
+        // keeping `isolate: true` until those leaks are individually
+        // addressed.
       },
     },
   },

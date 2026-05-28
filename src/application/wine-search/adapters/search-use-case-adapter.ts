@@ -10,9 +10,10 @@
  *  - it asserts the underlying response is a `SearchResponseV1` (the
  *    runner's port type) and surfaces a typed error otherwise.
  *
- * No business logic lives here — every behaviour either comes from
- * `SearchUseCaseInputSchema` (input validation already happened upstream)
- * or from {@link SearchUseCase} (the real pipeline).
+ * The only policy at this seam is authority propagation: non-entity/non-mixed
+ * agent searches are marked as caller-controlled so the downstream search
+ * pipeline executes them as retrieval primitives instead of re-running planner
+ * intent/routing.
  */
 
 import type { SearchExecutionOptions } from '../../search/port/search-executor.port.js';
@@ -26,6 +27,15 @@ import type {
 import type {
   SearchUseCasePort,
 } from '../execution-runner.js';
+
+const CALLER_CONTROLLED_SEARCH_INTENT = 'semantic_discovery' as const;
+const CALLER_CONTROLLED_SEARCH_QUERY_CLASS = 'semantic_preference' as const;
+
+function shouldBypassPlanner(
+  input: SearchUseCaseInput,
+): boolean {
+  return input.mode !== 'entity' && input.mode !== 'mixed';
+}
 
 /** Thrown when the underlying `SearchUseCase` returns a comparison response
  *  for what the runner expects to be a single-search call. */
@@ -93,6 +103,15 @@ export function mapSearchUseCaseInputToSearchRequest(
     ...(input.limit !== undefined ? { limit: input.limit } : {}),
     ...(input.representativeConcept !== undefined
       ? { representativeConcept: input.representativeConcept }
+      : {}),
+    ...(shouldBypassPlanner(input)
+      ? {
+          callerInterpretation: {
+            authority: 'caller' as const,
+            intent: CALLER_CONTROLLED_SEARCH_INTENT,
+            queryClass: CALLER_CONTROLLED_SEARCH_QUERY_CLASS,
+          },
+        }
       : {}),
   };
 }

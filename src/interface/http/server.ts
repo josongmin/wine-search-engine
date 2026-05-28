@@ -393,7 +393,10 @@ export async function createServer(
       : {}),
   });
   registerClaudeToolsRoute(app, deps);
-  registerSearchRoute(app, deps);
+  registerSearchRoute(app, {
+    ...deps,
+    wineSearchOrchestrator: deps.wineSearch?.wineSearchOrchestrator,
+  });
   registerInternalBenchmarkRoute(app, deps);
   registerLookupRoute(app, deps);
   registerBatchSearchRoute(app, deps);

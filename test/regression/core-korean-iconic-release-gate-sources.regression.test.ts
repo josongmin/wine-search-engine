@@ -109,7 +109,7 @@ async function loadGoldCatalog(): Promise<readonly GoldCatalogRow[]> {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as GoldCatalogRow);
+    .map((line) => JSON.parse(line) as unknown as GoldCatalogRow);
 }
 
 async function loadNoisyBenchmark(): Promise<readonly NoisyBenchmarkRow[]> {
@@ -118,7 +118,7 @@ async function loadNoisyBenchmark(): Promise<readonly NoisyBenchmarkRow[]> {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as NoisyBenchmarkRow);
+    .map((line) => JSON.parse(line) as unknown as NoisyBenchmarkRow);
 }
 
 function correctionSupportsQuery(query: string): boolean {

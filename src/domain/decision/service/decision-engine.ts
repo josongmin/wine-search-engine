@@ -1111,10 +1111,7 @@ export class DecisionEngine {
       profile = await this.thresholdStore.getProfile(profileId);
     } catch (err) {
       bootstrapLogger.warn(
-        {
-          err: err instanceof Error ? err.message : String(err),
-          profileId,
-        },
+        { err, profileId },
         '[DecisionEngine] Threshold profile load failed; falling back to default profile',
       );
     }

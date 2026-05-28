@@ -13,10 +13,14 @@ import type { EvalRunnerContract } from '../../../config/container-eval-contract
 import type { AdaptiveToolExecutorContract } from '../../../config/container-tool-contracts.js';
 import type { FeedbackStore } from '../../../domain/learning/port/feedback-store.port.js';
 import type { WineSearchContainerServices } from '../../../config/container.js';
+import type {
+  WineSearchOrchestratorContract as WineSearchOrchestrator,
+} from '../../../application/wine-search/wine-search-orchestrator.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
+  readonly wineSearchOrchestrator?: WineSearchOrchestrator | undefined;
 }
 
 export interface BatchSearchRouteDeps {

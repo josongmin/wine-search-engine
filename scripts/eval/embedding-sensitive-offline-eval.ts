@@ -32,6 +32,30 @@ export interface EmbeddingSensitiveRuntimeDescriptor {
   readonly queryEmbeddingModelVersion: string;
 }
 
+export interface EmbeddingSensitiveLiveAlignmentCase {
+  readonly qid: string;
+  readonly query: string;
+  readonly rankedEntityIds: readonly string[];
+  readonly relevantEntityIds: readonly string[];
+}
+
+export interface EmbeddingSensitiveLiveAlignmentSample {
+  readonly qid: string;
+  readonly query: string;
+  readonly overlapCount: number;
+  readonly relevantCount: number;
+  readonly resultCount: number;
+}
+
+export interface EmbeddingSensitiveLiveAlignmentSummary {
+  readonly queryCount: number;
+  readonly overlapQueryCount: number;
+  readonly zeroOverlapQueryCount: number;
+  readonly samples: readonly EmbeddingSensitiveLiveAlignmentSample[];
+}
+
+const EMBEDDING_SENSITIVE_LIVE_ALIGNMENT_SAMPLE_LIMIT = 5;
+
 export function isEmbeddingSensitiveQueryClass(queryClass: string): boolean {
   return EMBEDDING_SENSITIVE_QUERY_CLASS_SET.has(queryClass);
 }
@@ -110,6 +134,66 @@ export function assertEmbeddingSensitiveGovernance(
     );
   }
   return summary;
+}
+
+export function summarizeEmbeddingSensitiveLiveAlignment(
+  cases: readonly EmbeddingSensitiveLiveAlignmentCase[],
+): EmbeddingSensitiveLiveAlignmentSummary {
+  let overlapQueryCount = 0;
+  let zeroOverlapQueryCount = 0;
+  const samples: EmbeddingSensitiveLiveAlignmentSample[] = [];
+
+  for (const item of cases) {
+    const relevantIds = new Set(item.relevantEntityIds);
+    const overlapCount = item.rankedEntityIds.reduce(
+      (count, entityId) => count + (relevantIds.has(entityId) ? 1 : 0),
+      0,
+    );
+    if (overlapCount > 0) {
+      overlapQueryCount += 1;
+    } else {
+      zeroOverlapQueryCount += 1;
+    }
+    if (samples.length < EMBEDDING_SENSITIVE_LIVE_ALIGNMENT_SAMPLE_LIMIT) {
+      samples.push({
+        qid: item.qid,
+        query: item.query,
+        overlapCount,
+        relevantCount: item.relevantEntityIds.length,
+        resultCount: item.rankedEntityIds.length,
+      });
+    }
+  }
+
+  return {
+    queryCount: cases.length,
+    overlapQueryCount,
+    zeroOverlapQueryCount,
+    samples,
+  };
+}
+
+export function assertEmbeddingSensitiveLiveAlignment(
+  summary: EmbeddingSensitiveLiveAlignmentSummary,
+): void {
+  if (summary.queryCount === 0) {
+    throw new Error(
+      'embedding-sensitive live alignment validation requires at least one query result.',
+    );
+  }
+  if (summary.zeroOverlapQueryCount !== summary.queryCount) {
+    return;
+  }
+  const sampleSummary = summary.samples
+    .map((sample) => (
+      `${sample.qid}(overlap=${sample.overlapCount}, relevant=${sample.relevantCount}, results=${sample.resultCount})`
+    ))
+    .join(', ');
+  throw new Error(
+    'embedding-sensitive live eval canonical gold overlap collapsed to zero across the entire corpus. '
+    + 'Failing closed because the benchmark is not trustworthy for quality comparison. '
+    + `queries_with_overlap=0/${summary.queryCount}. Sample: ${sampleSummary}`,
+  );
 }
 
 export function buildEmbeddingSensitiveRuntimeDescriptor(

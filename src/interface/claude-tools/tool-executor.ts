@@ -63,6 +63,9 @@ const CLAUDE_TOOL_FILTER_MAPPING_VERSION = 'claude_tool_v1' as const;
 const CLAUDE_TOOL_DIVERSITY_MAPPING_VERSION = 'claude_tool_diversity_v1' as const;
 const FOOD_PAIRING_RETRIEVAL_MODE = 'hybrid' as const;
 const DEFAULT_SEARCH_LIMIT = 10;
+const CALLER_CONTROLLED_TOOL_QUERY_CLASS = 'semantic_preference' as const;
+const CALLER_CONTROLLED_SEARCH_INTENT = 'semantic_discovery' as const;
+const CALLER_CONTROLLED_FOOD_PAIRING_INTENT = 'pairing_search' as const;
 
 type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
 
@@ -121,6 +124,12 @@ function buildSearchToolQuery(input: SearchToolQueryInput): string {
   return appendStructuredQueryClauses(retrievalCoreQuery, clauses);
 }
 
+function shouldBypassPlannerForToolRetrievalMode(
+  retrievalMode: NonNullable<SearchToolInput['retrieval_mode']> | typeof FOOD_PAIRING_RETRIEVAL_MODE,
+): boolean {
+  return retrievalMode !== 'entity' && retrievalMode !== 'mixed';
+}
+
 function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
   const filters = buildSearchToolStructuredFilters(input);
   const preferences = buildSearchToolStructuredPreferences(input);
@@ -136,6 +145,15 @@ function buildSearchToolRequest(input: SearchToolInput): SearchRequest {
     },
     ...(filters.length > 0 ? { filters } : {}),
     ...(preferences.length > 0 ? { preferences } : {}),
+    ...(shouldBypassPlannerForToolRetrievalMode(retrievalMode)
+      ? {
+          callerInterpretation: {
+            authority: 'caller' as const,
+            intent: CALLER_CONTROLLED_SEARCH_INTENT,
+            queryClass: CALLER_CONTROLLED_TOOL_QUERY_CLASS,
+          },
+        }
+      : {}),
   };
 }
 
@@ -334,6 +352,15 @@ export class WineToolExecutor {
         : {}),
       ...(buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION).length > 0
         ? { preferences: buildFoodPairingPreferences(validated, CLAUDE_TOOL_FILTER_MAPPING_VERSION) }
+        : {}),
+      ...(shouldBypassPlannerForToolRetrievalMode(FOOD_PAIRING_RETRIEVAL_MODE)
+        ? {
+            callerInterpretation: {
+              authority: 'caller' as const,
+              intent: CALLER_CONTROLLED_FOOD_PAIRING_INTENT,
+              queryClass: CALLER_CONTROLLED_TOOL_QUERY_CLASS,
+            },
+          }
         : {}),
     };
     const response = await this.deps.searchUseCase.execute(request, requestId);

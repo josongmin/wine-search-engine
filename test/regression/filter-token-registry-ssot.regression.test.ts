@@ -116,12 +116,11 @@ describe('filter-token-registry SSoT — constraint-to-sparse-filter-tokens pari
     //     (e.g. Syrah/Shiraz, Pinot Gris/Grigio) — drives expandGrapeFilterValues
     //   - HARD_FILTERABLE_ATTRIBUTES / SOFT_PROMOTABLE_ATTRIBUTES: attribute
     //     allow-lists for the routing layer
-    //   - SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS: legacy trust list (kept for
-    //     reference even after the soft_promotion_authority canonicalization)
     // Any OTHER `new Map(` / `new Set(` declaring filter-token semantics is a
-    // SSoT violation.
+    // SSoT violation. (Note: `SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS` was the
+    // pre-canonicalization gate set — removed when the
+    // `soft_promotion_authority` field replaced version-based trust.)
     const allowedDeclarations = new Set([
-      'SOFT_PROMOTION_ALLOWED_MAPPING_VERSIONS',
       'SOFT_PROMOTION_TOKEN_SPEC',
       'STYLE_NORMALISATION_MAP',
       'PRICE_BAND_NORMALISATION_MAP',

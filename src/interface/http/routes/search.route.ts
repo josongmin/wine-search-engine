@@ -17,15 +17,14 @@ import { HTTP_STATUS_OK } from '../constants.js';
 import { createStageTimer } from '../../../domain/shared/stage-timer.js';
 
 /**
- * POST /v1/search — main search endpoint.
+ * POST /v1/search — main public search endpoint.
+ *
+ * This surface is the general hybrid search API. Agent-only intent analysis
+ * stays behind `/v1/wine-search` and tool-entry surfaces.
  *
  * Content negotiation (RFC 7231 §5.3.2):
- *   Accept: application/json                        → engine response (default)
- *   Accept: application/vnd.cuvee.human+json        → human-oriented summary
- *
- * Epic 14: Decomposition detection is handled inside SearchUseCase.execute().
- * If the query matches an "A vs B" pattern, it delegates to DecomposedSearchUseCase
- * and returns a ComparisonSearchResponse.
+ *   Accept: application/json                 → engine response (default)
+ *   Accept: application/vnd.cuvee.human+json → human-oriented summary
  */
 export function registerSearchRoute(
   app: FastifyInstance,
@@ -52,7 +51,6 @@ export function registerSearchRoute(
         'Search request aborted',
       );
 
-      // RFC 7234 §4.1: Vary must list headers that influence representation selection.
       void reply.header('Vary', 'Accept');
 
       if (wantsHumanResponse(request.headers.accept)) {

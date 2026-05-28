@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import { type Pool } from 'pg';
 import type { AliasMatcher, AliasMatchResult } from '../../domain/query/service/anchor-extractor.js';
 import type { AliasType } from '../../domain/alias/model/alias.js';
 import { parseAliasType } from '../../domain/alias/model/alias.js';
@@ -19,6 +19,7 @@ import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { doubleMetaphoneKeys } from '../../domain/alias/service/double-metaphone.js';
 import { bootstrapLogger } from '../../domain/shared/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
+import { runAbortablePgQuery } from '../db/abortable-pg-query.js';
 import {
   ACTIVE_SNAPSHOT_POINTER_CACHE_TTL_MS,
   isActiveSnapshotSubstrateBootstrapAllowed,
@@ -60,6 +61,7 @@ const MIN_CHAR_NGRAM_OVERLAP = 0.45;
 const MIN_BIGRAM_OVERLAP = 0.6;
 const MIN_WHOLE_TOKEN_LOOKUP_LENGTH = 4;
 const LATIN_VOWEL_RE = /[aeiouy]/g;
+const ALIAS_TABLE_CHECK_TIMEOUT_MESSAGE = 'PostgreSQL alias-table existence probe timed out';
 const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
   [/sch/g, 'ch'],
   [/sh/g, 'ch'],
@@ -87,20 +89,83 @@ interface AliasTablePresenceCacheEntry {
   readonly expiresAt: number;
 }
 
-const aliasTablePresenceByPool = new WeakMap<Pool, AliasTablePresenceCacheEntry>();
-const aliasesTableDisabledUntilByPool = new WeakMap<Pool, number>();
-const aliasesTableDisabledLogByPool = new WeakSet<Pool>();
+const aliasTablePresenceByPool: Map<Pool, AliasTablePresenceCacheEntry> = new Map();
+const aliasesTableDisabledUntilByPool: Map<Pool, number> = new Map();
+const aliasesTableDisabledLogByPool: Set<Pool> = new Set();
 
-export async function isAliasTableAvailable(pool: Pool): Promise<boolean> {
+function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(ALIAS_TABLE_CHECK_TIMEOUT_MESSAGE);
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
+export async function isAliasTableAvailable(
+  pool: Pool,
+  options?: { readonly queryTimeoutMs?: number },
+): Promise<boolean> {
   const now = Date.now();
   const cached = aliasTablePresenceByPool.get(pool);
   if (cached !== undefined && cached.expiresAt > now) {
     return cached.exists;
   }
 
-  const result = await pool.query<{ aliases_exists: boolean }>(
-    `SELECT to_regclass('aliases') IS NOT NULL AS aliases_exists`,
-  );
+  const queryTimeoutMs = options?.queryTimeoutMs;
+  const timed = queryTimeoutMs === undefined ? undefined : createTimeoutSignal(queryTimeoutMs);
+  let result: { rows: ReadonlyArray<{ aliases_exists: boolean }>; };
+  try {
+    if (timed === undefined) {
+      result = await pool.query<{ aliases_exists: boolean }>(
+        `SELECT to_regclass('aliases') IS NOT NULL AS aliases_exists`,
+      );
+    } else if (typeof pool['connect'] === 'function') {
+      result = await runAbortablePgQuery<{ aliases_exists: boolean }>(
+        pool,
+        timed.signal,
+        `SELECT to_regclass('aliases') IS NOT NULL AS aliases_exists`,
+      );
+    } else {
+      result = await pool.query<{ aliases_exists: boolean }>(
+        `SELECT to_regclass('aliases') IS NOT NULL AS aliases_exists`,
+      );
+    }
+  } catch (err: unknown) {
+    aliasTablePresenceByPool.set(pool, {
+      exists: false,
+      expiresAt: now + ALIASES_TABLE_MISSING_CACHE_TTL_MS,
+    });
+    const code = readPgSqlState(err);
+    if (code === '42P01' || code === undefined) {
+      if (!isActiveSnapshotSubstrateBootstrapAllowed()) {
+        if (code === '42P01') {
+          throw err;
+        }
+        bootstrapLogger.warn(
+          {
+            err,
+          },
+          '[PgAliasMatcher] failed to resolve alias-table existence; disabling alias overlay for startup probe TTL',
+        );
+        return false;
+      }
+      bootstrapLogger.info(
+        {
+          err,
+        },
+        '[PgAliasMatcher] alias table existence probe failed — skipping PostgreSQL alias overlay',
+      );
+      return false;
+    }
+    throw err;
+  } finally {
+    timed?.clear();
+  }
   const exists = result.rows[0]?.aliases_exists ?? false;
   aliasTablePresenceByPool.set(pool, {
     exists,

@@ -1,4 +1,6 @@
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
+import type { QueryIntent } from '../../domain/query/model/query-intent.js';
+import type { QueryClass } from '../../domain/shared/types/query-class.js';
 
 export interface SearchRequestContext {
   readonly locale: string;
@@ -25,6 +27,12 @@ export interface SearchOptions {
 export interface RepresentativeConceptSearchContext {
   readonly field: 'country' | 'region' | 'appellation' | 'grape_primary' | 'wine_type';
   readonly value: string;
+}
+
+export interface CallerSearchInterpretation {
+  readonly authority: 'caller';
+  readonly intent: QueryIntent;
+  readonly queryClass: QueryClass;
 }
 
 /**
@@ -60,4 +68,10 @@ export interface SearchRequest {
    * representative-set objective, not an exact hard gate.
    */
   readonly representativeConcept?: RepresentativeConceptSearchContext | undefined;
+  /**
+   * Explicit front-door authority override for agent/tool lanes that already
+   * decided the search should execute as a raw retrieval primitive rather than
+   * re-entering planner intent/routing.
+   */
+  readonly callerInterpretation?: CallerSearchInterpretation | undefined;
 }

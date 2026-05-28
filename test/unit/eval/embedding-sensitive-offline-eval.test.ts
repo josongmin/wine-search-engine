@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { GoldenQuery } from '../../../scripts/etl/types.js';
 import {
   assertEmbeddingSensitiveGovernance,
+  assertEmbeddingSensitiveLiveAlignment,
   assertEmbeddingSensitiveRuntime,
   buildEmbeddingSensitiveRuntimeDescriptor,
   filterEmbeddingSensitiveGoldenQueries,
+  summarizeEmbeddingSensitiveLiveAlignment,
 } from '../../../scripts/eval/embedding-sensitive-offline-eval.js';
 import {
   assertEmbeddingAblationTargets,
@@ -124,6 +126,49 @@ describe('embedding-sensitive offline eval helpers', () => {
         })),
       ]),
     ).toThrow(/weak_listwise_gold_count=/);
+  });
+
+  it('fails closed when live embedding-sensitive canonical gold never overlaps runtime results', () => {
+    const summary = summarizeEmbeddingSensitiveLiveAlignment([
+      {
+        qid: 'q-f-0000',
+        query: 'wines similar to 2013 Villa Poggio Salvi Brunello di Montalcino',
+        rankedEntityIds: ['wine-a', 'wine-b', 'wine-c'],
+        relevantEntityIds: ['wine-x', 'wine-y'],
+      },
+      {
+        qid: 'q-f-0001',
+        query: 'wines similar to 2009 Cos d\'Estournel Cos d\'Estournel',
+        rankedEntityIds: ['wine-d', 'wine-e'],
+        relevantEntityIds: ['wine-z'],
+      },
+    ]);
+
+    expect(summary.queryCount).toBe(2);
+    expect(summary.overlapQueryCount).toBe(0);
+    expect(summary.zeroOverlapQueryCount).toBe(2);
+    expect(() => assertEmbeddingSensitiveLiveAlignment(summary)).toThrow(/canonical gold overlap collapsed to zero/);
+  });
+
+  it('allows live embedding-sensitive alignment when at least one query overlaps', () => {
+    const summary = summarizeEmbeddingSensitiveLiveAlignment([
+      {
+        qid: 'q-f-0000',
+        query: 'wines similar to 2013 Villa Poggio Salvi Brunello di Montalcino',
+        rankedEntityIds: ['wine-a', 'wine-b', 'wine-c'],
+        relevantEntityIds: ['wine-x', 'wine-b'],
+      },
+      {
+        qid: 'q-f-0001',
+        query: 'wines similar to 2009 Cos d\'Estournel Cos d\'Estournel',
+        rankedEntityIds: ['wine-d', 'wine-e'],
+        relevantEntityIds: ['wine-z'],
+      },
+    ]);
+
+    expect(summary.overlapQueryCount).toBe(1);
+    expect(summary.zeroOverlapQueryCount).toBe(1);
+    expect(() => assertEmbeddingSensitiveLiveAlignment(summary)).not.toThrow();
   });
 
   it('fails closed for in-memory or dense-disabled runtime descriptors', () => {

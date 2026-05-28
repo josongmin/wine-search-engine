@@ -12,6 +12,7 @@
  * reads are bounded by TTL.
  */
 import type { Pool } from 'pg';
+import { runAbortablePgQuery } from './abortable-pg-query.js';
 
 interface ActiveSnapshot {
   readonly activeSnapshotId: string;
@@ -59,6 +60,27 @@ const cacheByPool = new WeakMap<Pool, CacheEntry>();
 
 const BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE_ENV = 'WINE_ENGINE_BOOTSTRAP_ACTIVE_SNAPSHOT_SUBSTRATE';
 
+interface ActiveSnapshotResolverOptions {
+  readonly bypassCache?: boolean;
+  readonly queryTimeoutMs?: number;
+}
+
+function createTimeoutSignal(timeoutMs: number): {
+  signal: AbortSignal;
+  clear: () => void;
+} {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
 /**
  * Explicit bootstrap seam for fresh dev/test environments.
  *
@@ -92,7 +114,7 @@ function buildMissingTableError(): Error & { readonly code: '42P01' } {
  */
 export async function resolveActiveSnapshot(
   pool: Pool,
-  opts: { readonly bypassCache?: boolean } = {},
+  opts: ActiveSnapshotResolverOptions = {},
 ): Promise<ActiveSnapshot> {
   const now = Date.now();
   if (!opts.bypassCache) {
@@ -111,21 +133,35 @@ export async function resolveActiveSnapshot(
     content_hash: string;
     promoted_at: Date;
   }> };
+
+  const timeout = opts.queryTimeoutMs;
+  const timed = timeout === undefined ? undefined : createTimeoutSignal(timeout);
   try {
-    // 42P01 ("relation does not exist") flows back to the caller unchanged.
-    // Adapter-level fallback is allowed only through the explicit bootstrap
-    // seam exported above; production/default read paths must surface the
-    // missing substrate instead of treating it as normal steady state.
-    res = await pool.query<{
-      active_snapshot_id: string;
-      previous_snapshot_id: string | null;
-      content_hash: string;
-      promoted_at: Date;
-    }>(
-      `SELECT active_snapshot_id, previous_snapshot_id, content_hash, promoted_at
+    if (timed === undefined || typeof (pool as { connect?: unknown }).connect !== 'function') {
+      res = await pool.query<{
+        active_snapshot_id: string;
+        previous_snapshot_id: string | null;
+        content_hash: string;
+        promoted_at: Date;
+      }>(
+        `SELECT active_snapshot_id, previous_snapshot_id, content_hash, promoted_at
          FROM active_search_snapshot
         WHERE id = 1`,
-    );
+      );
+    } else {
+      res = await runAbortablePgQuery<{
+        active_snapshot_id: string;
+        previous_snapshot_id: string | null;
+        content_hash: string;
+        promoted_at: Date;
+      }>(
+        pool,
+        timed.signal,
+        `SELECT active_snapshot_id, previous_snapshot_id, content_hash, promoted_at
+         FROM active_search_snapshot
+         WHERE id = 1`,
+      );
+    }
   } catch (err: unknown) {
     const code = typeof err === 'object' && err !== null && 'code' in err
       ? (err as { code?: string }).code
@@ -137,6 +173,8 @@ export async function resolveActiveSnapshot(
       throw err;
     }
     throw err;
+  } finally {
+    timed?.clear();
   }
   const row = res.rows[0];
   if (row === undefined) {

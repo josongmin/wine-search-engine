@@ -100,7 +100,7 @@ function makeBatchResponse(
 }
 
 function parseBody(response: { body: string }) {
-  return JSON.parse(response.body) as Record<string, any>;
+  return JSON.parse(response.body) as unknown as Record<string, unknown>;
 }
 
 function injectBatchSearch(app: FastifyInstance, payload: Record<string, unknown>) {

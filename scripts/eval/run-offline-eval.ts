@@ -88,9 +88,12 @@ import { collectLiveBenchmarkRuntimeMetadata } from './live-benchmark-preflight.
 import { validateReleaseCorpusGovernance } from './release-corpus-governance.js';
 import {
   assertEmbeddingSensitiveGovernance,
+  assertEmbeddingSensitiveLiveAlignment,
   assertEmbeddingSensitiveRuntime,
   buildEmbeddingSensitiveRuntimeDescriptor,
   filterEmbeddingSensitiveGoldenQueries,
+  summarizeEmbeddingSensitiveLiveAlignment,
+  type EmbeddingSensitiveLiveAlignmentCase,
 } from './embedding-sensitive-offline-eval.js';
 import { determineRetrievalMode } from '../etl/tag-queries-retrieval-mode.js';
 import { loadConfig } from '../../src/config/env.js';
@@ -586,18 +589,44 @@ export interface OfflinePerQueryMetrics {
 }
 
 interface EvalSearchRequestBody {
-  readonly query: string;
-  readonly options: {
-    readonly mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
+  readonly requests: readonly {
+    readonly id: string;
+    readonly query: string;
+    readonly retrieval_mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
     readonly explain: false;
-    readonly clarification: false;
+  }[];
+  readonly options?: {
+    readonly timeout_ms: number;
   };
-  readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
+}
+
+const DEFAULT_BATCH_SEARCH_TIMEOUT_MS = 30_000;
+
+function normalizeBatchSearchTimeout(rawTimeoutMs: number): number {
+  if (!Number.isFinite(rawTimeoutMs)) {
+    return DEFAULT_BATCH_SEARCH_TIMEOUT_MS;
+  }
+  if (rawTimeoutMs < 1_000) {
+    return 1_000;
+  }
+  if (rawTimeoutMs > DEFAULT_BATCH_SEARCH_TIMEOUT_MS) {
+    return DEFAULT_BATCH_SEARCH_TIMEOUT_MS;
+  }
+  return Math.round(rawTimeoutMs);
+}
+
+export function buildEvalExecutionFailureDecision(): DecisionOutcome {
+  return {
+    decision_status: 'failed',
+    top_entity_id: null,
+    decision_confidence: 0,
+    evaluation_error: true,
+  };
 }
 
 function mapEvalRetrievalModeToRouteFamily(
   retrievalMode: string,
-): EvalSearchRequestBody['options']['mode'] {
+): EvalSearchRequestBody['requests'][number]['retrieval_mode'] {
   if (retrievalMode === 'similar_items') {
     return 'mixed';
   }
@@ -621,18 +650,15 @@ export function buildEvalSearchRequestBody(query: GoldenQuery): EvalSearchReques
   const mode = mapEvalRetrievalModeToRouteFamily(retrievalMode);
 
   return {
-    query: query.query,
+    requests: [{
+      id: query.qid,
+      query: query.query,
+      retrieval_mode: mode,
+      explain: false,
+    }],
     options: {
-      mode,
-      explain: false as const,
-      clarification: false as const,
+      timeout_ms: DEFAULT_BATCH_SEARCH_TIMEOUT_MS,
     },
-    // Golden-query retrieval modes are internal evaluation labels, not a
-    // 1:1 match for the public API's top-level route override. The public
-    // eval harness executes the closest route family the search endpoint can
-    // express: exact/entity rows use `entity`, similar-items rows use
-    // `mixed`, and exploratory ranked-search rows use `hybrid`.
-    retrieval_mode: mode,
   };
 }
 
@@ -719,34 +745,54 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
   // Call the running search API
   const apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   const requestBody = buildEvalSearchRequestBody(goldenQuery);
+  const batchRequestBody = {
+    ...requestBody,
+    options: {
+      timeout_ms: normalizeBatchSearchTimeout(timeoutMs),
+    },
+  };
 
   try {
-    const response = await fetch(`${apiUrl}/v1/search`, {
+    const response = await fetch(`${apiUrl}/v1/batch-search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(batchRequestBody),
       signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
       return {
         ranked: [],
-        decision: {
-          decision_status: 'failed',
-          top_entity_id: null,
-          decision_confidence: 0,
-        },
+        decision: buildEvalExecutionFailureDecision(),
       };
     }
 
-    // Parse response — robust to both camelCase (internal/direct) and
-    // snake_case (HTTP API with preSerialization hook) field naming.
-    // Root cause: if the snake-case hook is misconfigured or the eval script
-    // is pointed at a different endpoint, entity_id silently becomes '' for
-    // every hit, collapsing Recall@100 to near-zero.
-    const raw = (await response.json()) as Record<string, unknown>;
+    const rawBatchResponse = (await response.json()) as Record<string, unknown>;
+    const results = (rawBatchResponse['results'] ?? []) as Record<string, unknown>[];
+    const queryResult = (
+      results.find(
+        (entry) =>
+          entry !== null
+          && typeof entry === 'object'
+          && (entry as Record<string, unknown>)['id'] === goldenQuery.qid
+      ) as Record<string, unknown> | undefined
+    ) ?? (results[0] as Record<string, unknown> | undefined);
 
-    // Accept both engine_decision (snake) and engineDecision (camel)
+    if (
+      queryResult === undefined
+      || queryResult['status'] !== 'succeeded'
+      || typeof queryResult['response'] !== 'object'
+      || queryResult['response'] === null
+    ) {
+      return {
+        ranked: [],
+        decision: buildEvalExecutionFailureDecision(),
+      };
+    }
+
+    // Parse response — robust to both snake_case (public API) and camelCase
+    // (legacy internal) field naming from transport adapters.
+    const raw = (queryResult['response'] as Record<string, unknown>);
     const engineDecision = (raw['engine_decision'] ?? raw['engineDecision'] ?? {}) as Record<string, unknown>;
     const meta = (raw['meta'] ?? {}) as Record<string, unknown>;
     const rawResults = (raw['results'] ?? []) as Record<string, unknown>[];
@@ -883,12 +929,7 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
   } catch {
     return {
       ranked: [],
-      decision: {
-        decision_status: 'failed',
-        top_entity_id: null,
-        decision_confidence: 0,
-        evaluation_error: true,
-      },
+      decision: buildEvalExecutionFailureDecision(),
     };
   }
 }
@@ -2340,6 +2381,10 @@ async function run(): Promise<void> {
   );
 
   const needsPerQueryMetrics = args.includeDiagnostics || args.baselineReport !== undefined;
+  const embeddingSensitiveLiveAlignmentCases: EmbeddingSensitiveLiveAlignmentCase[] =
+    args.embeddingSensitiveOnly && embeddingRuntimeForResolution.usesLiveApi
+      ? []
+      : [];
   const perQueryMetrics = needsPerQueryMetrics
     ? {
         ndcg_at_10: [] as number[],
@@ -2420,6 +2465,17 @@ async function run(): Promise<void> {
             ? { extracted_constraints: searchExtractedConstraints }
             : {}),
         };
+
+        if (args.embeddingSensitiveOnly && embeddingRuntimeForResolution.usesLiveApi) {
+          embeddingSensitiveLiveAlignmentCases.push({
+            qid: q.qid,
+            query: q.query,
+            rankedEntityIds: ranked.map((hit) => hit.entity_id),
+            relevantEntityIds: [...truth.relevant.judgments.entries()]
+              .filter(([, grade]) => grade >= 1)
+              .map(([entityId]) => entityId),
+          });
+        }
 
         const ndcgAt10 = ndcg(ranked, truth.relevant, 10);
         const mrrAt10 = reciprocalRank(ranked, truth.relevant, 10);
@@ -2553,6 +2609,18 @@ async function run(): Promise<void> {
     ),
     jobTimeoutPromise,
   ]);
+
+  if (args.embeddingSensitiveOnly && embeddingRuntimeForResolution.usesLiveApi) {
+    const liveAlignmentSummary = summarizeEmbeddingSensitiveLiveAlignment(
+      embeddingSensitiveLiveAlignmentCases,
+    );
+    console.log(
+      `  Embedding-sensitive live alignment: `
+      + `queries_with_overlap=${liveAlignmentSummary.overlapQueryCount}/${liveAlignmentSummary.queryCount}, `
+      + `zero_overlap=${liveAlignmentSummary.zeroOverlapQueryCount}/${liveAlignmentSummary.queryCount}`,
+    );
+    assertEmbeddingSensitiveLiveAlignment(liveAlignmentSummary);
+  }
 
   console.log('\nComputing metrics …');
   const queryCount = Math.max(1, evalQueries.length);

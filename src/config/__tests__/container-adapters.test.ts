@@ -261,8 +261,12 @@ describe('buildCoreAdapterServices', () => {
 
     try {
       await buildCoreAdapterServices(config, { pool: fakePool });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool);
-      expect(loadFromPostgresSpy).toHaveBeenCalledWith(fakePool, undefined);
+      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
+        queryTimeoutMs: 1500,
+      });
+      expect(loadFromPostgresSpy).toHaveBeenCalledWith(fakePool, undefined, {
+        queryTimeoutMs: 1500,
+      });
       expect(loadSpy).not.toHaveBeenCalled();
     } finally {
       aliasTableAvailableSpy.mockRestore();
@@ -298,10 +302,15 @@ describe('buildCoreAdapterServices', () => {
         searchSnapshotId: 'search-snapshot:v1:target',
         searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
       });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool);
+      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
+        queryTimeoutMs: 1500,
+      });
       expect(loadFromPostgresSpy).toHaveBeenCalledWith(
         fakePool,
         'search-snapshot:v1:target',
+        {
+          queryTimeoutMs: 1500,
+        },
       );
       expect(loadFromManifestSpy).not.toHaveBeenCalled();
     } finally {
@@ -351,10 +360,15 @@ describe('buildCoreAdapterServices', () => {
         searchSnapshotId: 'search-snapshot:v1:target',
         searchSnapshotManifestPath: '/tmp/search-snapshot:v1:target/manifest.json',
       });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool);
+      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
+        queryTimeoutMs: 1500,
+      });
       expect(loadFromPostgresSpy).toHaveBeenCalledWith(
         fakePool,
         'search-snapshot:v1:target',
+        {
+          queryTimeoutMs: 1500,
+        },
       );
       expect(loadFromManifestSpy).toHaveBeenCalledWith('/tmp/search-snapshot:v1:target/manifest.json');
       expect(await adapters.aliasMatcher.findMatches(exactQuery)).toEqual([exactMatch]);
@@ -400,7 +414,9 @@ describe('buildCoreAdapterServices', () => {
 
     try {
       const adapters = await buildCoreAdapterServices(config, { pool: fakePool });
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool);
+      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
+        queryTimeoutMs: 1500,
+      });
       expect(loadFromPostgresSpy).not.toHaveBeenCalled();
       expect(loadSpy).not.toHaveBeenCalled();
       expect(adapters.aliasMatcher).toBeInstanceOf(CachedAliasMatcher);
@@ -460,10 +476,15 @@ describe('buildCoreAdapterServices', () => {
         searchSnapshotId: 'search-snapshot:v1:target',
       });
       expect(adapters.fuzzyMatcher).toBeDefined();
-      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool);
+      expect(aliasTableAvailableSpy).toHaveBeenCalledWith(fakePool, {
+        queryTimeoutMs: 1500,
+      });
       expect(loadFromPostgresSpy).toHaveBeenCalledWith(
         fakePool,
         'search-snapshot:v1:target',
+        {
+          queryTimeoutMs: 1500,
+        },
       );
       expect(await adapters.aliasMatcher.findMatches(exactQuery)).toEqual([exactMatch]);
       expect(await adapters.aliasMatcher.findMatches('missing snapshot alias')).toEqual([]);

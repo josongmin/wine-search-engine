@@ -180,7 +180,7 @@ export class MixedSolver {
       rankingRuntimeSignal = rankOutput.metadata.runtimeSignal;
     } catch (err) {
       bootstrapLogger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
+        { err },
         '[MixedSolver] ranker.rank() failed; degrading gracefully',
       );
       throw new MixedRouteDegradationError(
@@ -202,7 +202,7 @@ export class MixedSolver {
       );
     } catch (err) {
       bootstrapLogger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
+        { err },
         '[MixedSolver] constraintOverlay.apply() failed; degrading gracefully',
       );
       throw new MixedRouteDegradationError(
